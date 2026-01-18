@@ -192,6 +192,18 @@
 - [ ] Define clear module boundaries
 - [ ] Consider async for solver parallelism
 
+### Base Solution Quality
+- [ ] **Optimal single-market clearing** - Currently greedy; should solve each market as LP
+  - For multi-outcome markets: ensure probabilities sum to 100%
+  - Find true equilibrium price per market
+  - Maximize single-market welfare before cross-market patches
+
+  **Note**: This won't hurt cross-market solvers because:
+  1. Patches can still adjust prices (via `price_adjustments`)
+  2. Cross-market value comes from correlations, not single-market mispricing
+  3. Better baseline = more accurate welfare delta calculations
+  4. Currently single-market may have arbitrage opportunities that patches "fix" wastefully
+
 ### Cleanup
 - [x] Remove unused composition module (-2.6k lines)
 - [x] Remove unused specialized/conditional solver

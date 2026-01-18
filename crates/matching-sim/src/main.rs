@@ -50,6 +50,7 @@ pub struct SimulationConfig {
     pub verbose: bool,
     pub solver: SolverChoice,
     pub milp_timeout: Option<f64>,
+    pub enable_jit: bool,
 }
 
 impl Default for SimulationConfig {
@@ -66,6 +67,7 @@ impl Default for SimulationConfig {
             verbose: false,
             solver: SolverChoice::Greedy,
             milp_timeout: None,
+            enable_jit: false,
         }
     }
 }
@@ -206,7 +208,7 @@ impl SimulationResults {
     }
 }
 
-fn create_solvers(choice: &SolverChoice, seed: u64, milp_timeout: Option<f64>) -> Vec<Box<dyn Solver>> {
+fn create_solvers(choice: &SolverChoice, seed: u64, milp_timeout: Option<f64>, enable_jit: bool) -> Vec<Box<dyn Solver>> {
     match choice {
         SolverChoice::Greedy => vec![Box::new(GreedySolver::new())],
         SolverChoice::Milp => {
@@ -223,11 +225,13 @@ fn create_solvers(choice: &SolverChoice, seed: u64, milp_timeout: Option<f64>) -
                     total_time_budget_ms: (timeout * 1000.0 / 0.6) as u64,
                     milp_time_fraction: 0.6,
                     seed,
+                    enable_jit,
                     ..Default::default()
                 }
             } else {
                 PlatformConfig {
                     seed,
+                    enable_jit,
                     ..Default::default()
                 }
             };
@@ -244,11 +248,13 @@ fn create_solvers(choice: &SolverChoice, seed: u64, milp_timeout: Option<f64>) -
                     total_time_budget_ms: (timeout * 1000.0 / 0.6) as u64,
                     milp_time_fraction: 0.6,
                     seed,
+                    enable_jit,
                     ..Default::default()
                 }
             } else {
                 PlatformConfig {
                     seed,
+                    enable_jit,
                     ..Default::default()
                 }
             };
@@ -298,7 +304,7 @@ pub fn run_simulation(config: SimulationConfig) -> SimulationResults {
 }
 
 fn run_scenario_all_solvers(config: &SimulationConfig, scenario_name: &str) -> SolverComparisonResult {
-    let solvers = create_solvers(&SolverChoice::All, config.seed, config.milp_timeout);
+    let solvers = create_solvers(&SolverChoice::All, config.seed, config.milp_timeout, config.enable_jit);
 
     let mut aggregates: Vec<SolverAggregateResult> = solvers
         .iter()
@@ -351,7 +357,7 @@ fn run_scenario_all_solvers(config: &SimulationConfig, scenario_name: &str) -> S
 }
 
 fn run_scenario(config: &SimulationConfig, scenario_name: &str) -> ScenarioComparison {
-    let solvers = create_solvers(&config.solver, config.seed, config.milp_timeout);
+    let solvers = create_solvers(&config.solver, config.seed, config.milp_timeout, config.enable_jit);
     let solver = &solvers[0];
 
     let mut comparison = ScenarioComparison::new(scenario_name);
@@ -475,6 +481,9 @@ fn main() {
             "--verbose" | "-v" => {
                 config.verbose = true;
             }
+            "--jit" => {
+                config.enable_jit = true;
+            }
             "--help" | "-h" => {
                 println!("Matching Simulation\n");
                 println!("Usage: matching-sim [OPTIONS]\n");
@@ -515,6 +524,7 @@ fn main() {
                 println!("                         platform (combines all solvers via MWIS)");
                 println!("                         all (compare all solvers)");
                 println!("  --milp-timeout <S>   MILP time limit in seconds (default: none)");
+                println!("  --jit                Enable JIT liquidity phase (platform solver only)");
                 println!("  --verbose, -v        Show detailed output");
                 println!("  --quick              Run a quick test");
                 println!("  --stress             Run platform stress test on mega scenario");
@@ -541,6 +551,9 @@ fn main() {
     println!("  Solver: {:?}", config.solver);
     if let Some(timeout) = config.milp_timeout {
         println!("  MILP timeout: {}s", timeout);
+    }
+    if config.enable_jit {
+        println!("  JIT liquidity: enabled");
     }
     println!();
 

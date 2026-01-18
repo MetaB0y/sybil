@@ -16,3 +16,10 @@
 ## Planning
 
 - **[next-steps.md](next-steps.md)** - Implementation roadmap and priorities
+
+## Explorations
+
+Design analysis and open questions:
+
+- **[explorations/jit-design-questions.md](explorations/jit-design-questions.md)** - JIT timing, competition, and taxation analysis
+- **[explorations/jit-competition-mechanisms.md](explorations/jit-competition-mechanisms.md)** - Deep analysis of auction vs MWIS vs price-priority

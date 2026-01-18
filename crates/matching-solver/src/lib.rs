@@ -32,6 +32,7 @@
 // Internal modules
 pub(crate) mod combiner;
 pub mod greedy;
+pub mod jit;
 pub mod platform;
 pub mod randomized;
 pub(crate) mod specialized;
