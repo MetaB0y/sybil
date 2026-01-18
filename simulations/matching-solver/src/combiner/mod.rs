@@ -32,8 +32,18 @@ use std::collections::HashMap;
 
 use matching_engine::{Fill, LiquidityPool, Order, Problem};
 
-use crate::composition::partial::SolutionConfidence;
 use crate::MatchingResult;
+
+/// Confidence level of a solution.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SolutionConfidence {
+    /// Solution is known to be optimal
+    Optimal,
+    /// Solution is within a bounded gap of optimal
+    BoundedGap { gap_percent: f64 },
+    /// Solution is a heuristic (no optimality guarantee)
+    Heuristic,
+}
 
 pub use conflict::{ConflictGraph, FillFootprint};
 pub use mwis::{MwisAlgorithm, MwisSolver};
@@ -53,6 +63,7 @@ pub struct SolverSolution {
 
 impl SolverSolution {
     /// Create a new solver solution.
+    #[cfg(test)]
     pub fn new(solver_name: impl Into<String>) -> Self {
         Self {
             solver_name: solver_name.into(),
@@ -91,19 +102,10 @@ impl SolverSolution {
     }
 
     /// Add a fill to this solution.
+    #[cfg(test)]
     pub fn add_fill(&mut self, order_idx: usize, fill: Fill, welfare_delta: i64) {
         self.fills.push((order_idx, fill));
         self.welfare += welfare_delta;
-    }
-
-    /// Set confidence level.
-    pub fn set_confidence(&mut self, confidence: SolutionConfidence) {
-        self.confidence = confidence;
-    }
-
-    /// Get number of fills.
-    pub fn num_fills(&self) -> usize {
-        self.fills.len()
     }
 }
 
@@ -185,11 +187,6 @@ impl SolutionCombiner {
         Self {
             config: CombinerConfig::default(),
         }
-    }
-
-    /// Create with custom configuration.
-    pub fn with_config(config: CombinerConfig) -> Self {
-        Self { config }
     }
 
     /// Combine multiple solver solutions into a single optimal result.

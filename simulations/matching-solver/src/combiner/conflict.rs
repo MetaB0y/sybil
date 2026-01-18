@@ -69,26 +69,12 @@ impl ConflictGraph {
     }
 
     /// Check if two nodes are connected (conflict).
+    #[cfg(test)]
     pub fn are_adjacent(&self, a: usize, b: usize) -> bool {
         if a < self.num_nodes {
             self.adjacency[a].contains(&b)
         } else {
             false
-        }
-    }
-
-    /// Get the maximum degree in the graph.
-    pub fn max_degree(&self) -> usize {
-        self.adjacency.iter().map(|adj| adj.len()).max().unwrap_or(0)
-    }
-
-    /// Get graph density (actual edges / possible edges).
-    pub fn density(&self) -> f64 {
-        if self.num_nodes < 2 {
-            0.0
-        } else {
-            let possible_edges = self.num_nodes * (self.num_nodes - 1) / 2;
-            self.num_edges as f64 / possible_edges as f64
         }
     }
 
@@ -98,6 +84,7 @@ impl ConflictGraph {
     }
 
     /// Get all nodes with no conflicts (can be freely selected).
+    #[cfg(test)]
     pub fn isolated_nodes(&self) -> Vec<usize> {
         (0..self.num_nodes)
             .filter(|&i| self.adjacency[i].is_empty())
@@ -108,8 +95,6 @@ impl ConflictGraph {
 /// Tracks what resources a fill consumes.
 #[derive(Clone, Debug)]
 pub struct FillFootprint {
-    /// The order ID
-    pub order_id: u64,
     /// Liquidity consumed: (market, outcome) -> quantity
     pub liquidity_consumed: HashMap<(MarketId, u8), Qty>,
 }
@@ -134,10 +119,7 @@ impl FillFootprint {
             liquidity_consumed.insert(key, fill.fill_qty);
         }
 
-        Self {
-            order_id: fill.order_id,
-            liquidity_consumed,
-        }
+        Self { liquidity_consumed }
     }
 
     /// Determine which outcome is being bought for a specific market.
@@ -199,6 +181,7 @@ impl FillFootprint {
     }
 
     /// Check if this footprint overlaps with another on any market/outcome.
+    #[cfg(test)]
     pub fn overlaps_with(&self, other: &FillFootprint) -> bool {
         for key in self.liquidity_consumed.keys() {
             if other.liquidity_consumed.contains_key(key) {
@@ -206,91 +189,6 @@ impl FillFootprint {
             }
         }
         false
-    }
-
-    /// Get total quantity consumed across all outcomes.
-    pub fn total_consumed(&self) -> Qty {
-        self.liquidity_consumed.values().sum()
-    }
-}
-
-/// Builder for creating conflict graphs from fills.
-pub struct ConflictGraphBuilder {
-    /// Maximum allowed combined consumption before conflict
-    consumption_threshold_factor: f64,
-}
-
-impl ConflictGraphBuilder {
-    /// Create a new builder with default settings.
-    pub fn new() -> Self {
-        Self {
-            consumption_threshold_factor: 1.0, // Strict: any over-consumption is conflict
-        }
-    }
-
-    /// Set the consumption threshold factor.
-    /// A factor of 1.0 means exact liquidity limits.
-    /// A factor of 0.9 would allow 10% over-consumption without conflict.
-    pub fn with_threshold(mut self, factor: f64) -> Self {
-        self.consumption_threshold_factor = factor;
-        self
-    }
-
-    /// Build a conflict graph from fills.
-    pub fn build(
-        &self,
-        footprints: &[FillFootprint],
-        available_liquidity: &HashMap<(MarketId, u8), Qty>,
-    ) -> ConflictGraph {
-        let n = footprints.len();
-        let mut graph = ConflictGraph::new(n);
-
-        for i in 0..n {
-            for j in (i + 1)..n {
-                if self.check_conflict(&footprints[i], &footprints[j], available_liquidity) {
-                    graph.add_edge(i, j);
-                }
-            }
-        }
-
-        graph
-    }
-
-    /// Check if two footprints conflict.
-    fn check_conflict(
-        &self,
-        a: &FillFootprint,
-        b: &FillFootprint,
-        available_liquidity: &HashMap<(MarketId, u8), Qty>,
-    ) -> bool {
-        // Same order conflict
-        if a.order_id == b.order_id {
-            return true;
-        }
-
-        // Liquidity conflict
-        for ((market, outcome), qty_a) in &a.liquidity_consumed {
-            if let Some(&qty_b) = b.liquidity_consumed.get(&(*market, *outcome)) {
-                let combined = qty_a + qty_b;
-                let available = available_liquidity
-                    .get(&(*market, *outcome))
-                    .copied()
-                    .unwrap_or(0);
-
-                let threshold = (available as f64 * self.consumption_threshold_factor) as Qty;
-                if combined > threshold {
-                    return true;
-                }
-            }
-        }
-
-        false
-    }
-}
-
-impl Default for ConflictGraphBuilder {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -333,19 +231,16 @@ mod tests {
         let market = MarketId::new(1);
 
         let mut footprint_a = FillFootprint {
-            order_id: 1,
             liquidity_consumed: HashMap::new(),
         };
         footprint_a.liquidity_consumed.insert((market, 0), 100);
 
         let mut footprint_b = FillFootprint {
-            order_id: 2,
             liquidity_consumed: HashMap::new(),
         };
         footprint_b.liquidity_consumed.insert((market, 0), 50);
 
         let mut footprint_c = FillFootprint {
-            order_id: 3,
             liquidity_consumed: HashMap::new(),
         };
         footprint_c.liquidity_consumed.insert((market, 1), 100);

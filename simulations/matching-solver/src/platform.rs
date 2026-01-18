@@ -37,9 +37,8 @@ use std::time::Instant;
 use matching_engine::Problem;
 
 use crate::combiner::{
-    CombineStats, SolutionCombiner, SolverContribution, SolverSolution,
+    CombineStats, SolutionCombiner, SolutionConfidence, SolverContribution, SolverSolution,
 };
-use crate::composition::SolutionConfidence;
 use crate::specialized::{ArbitrageDetector, BundleDecomposer, ChainFinder};
 use crate::{GreedySolver, MatchingResult, MultiHeuristicSolver, Solver};
 
@@ -197,14 +196,49 @@ impl PlatformResult {
         }
         println!();
 
-        println!("Contributions:");
+        let total_welfare = self.result.total_welfare;
+        let total_fills = self.result.orders_filled;
+
+        println!("Contributions to Final Solution:");
         for contrib in &self.contributions {
+            let welfare_pct = if total_welfare > 0 {
+                (contrib.welfare_contributed as f64 / total_welfare as f64) * 100.0
+            } else {
+                0.0
+            };
+            let fills_pct = if total_fills > 0 {
+                (contrib.fills_contributed as f64 / total_fills as f64) * 100.0
+            } else {
+                0.0
+            };
             println!(
-                "  {}: {} fills, {} welfare",
-                contrib.solver_name, contrib.fills_contributed, contrib.welfare_contributed
+                "  {}: {} fills ({:.1}%), {} welfare ({:.1}%)",
+                contrib.solver_name,
+                contrib.fills_contributed,
+                fills_pct,
+                contrib.welfare_contributed,
+                welfare_pct
             );
         }
         println!();
+
+        // Specialized solver summary
+        let specialized = ["Arbitrage", "BundleDecomposer", "ChainFinder"];
+        let specialized_welfare: i64 = self
+            .contributions
+            .iter()
+            .filter(|c| specialized.contains(&c.solver_name.as_str()))
+            .map(|c| c.welfare_contributed)
+            .sum();
+        let specialized_pct = if total_welfare > 0 {
+            (specialized_welfare as f64 / total_welfare as f64) * 100.0
+        } else {
+            0.0
+        };
+        println!(
+            "Specialized Solvers Total: {} welfare ({:.1}%)",
+            specialized_welfare, specialized_pct
+        );
 
         if self.combined_beats_individual() {
             println!(

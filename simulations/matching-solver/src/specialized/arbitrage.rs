@@ -11,21 +11,6 @@ use matching_engine::{
 
 use crate::{MatchingResult, Solver};
 
-/// Capabilities of a specialized solver.
-#[derive(Clone, Debug, Default)]
-pub struct SolverCapabilities {
-    /// Can handle single-market orders
-    pub simple_orders: bool,
-    /// Can handle multi-market bundles
-    pub bundles: bool,
-    /// Can handle conditional orders
-    pub conditionals: bool,
-    /// Can handle all-or-none orders
-    pub all_or_none: bool,
-    /// Can handle arbitrage opportunities
-    pub arbitrage: bool,
-}
-
 /// Detected arbitrage opportunity.
 #[derive(Clone, Debug)]
 pub struct ArbitrageOpportunity {
@@ -35,10 +20,6 @@ pub struct ArbitrageOpportunity {
     pub order_indices: Vec<usize>,
     /// Expected profit per unit
     pub profit_per_unit: Nanos,
-    /// Maximum quantity available
-    pub max_quantity: u64,
-    /// Confidence in the arbitrage (0.0 to 1.0)
-    pub confidence: f64,
 }
 
 /// Types of arbitrage opportunities.
@@ -48,16 +29,12 @@ pub enum ArbitrageKind {
     Constraint,
     /// Bundle underpricing: bundle cheaper than sum of legs
     BundleUnderpricing,
-    /// Cross-market: same exposure at different prices
-    CrossMarket,
 }
 
 /// Detects and exploits arbitrage opportunities.
 pub struct ArbitrageDetector {
     /// Minimum profit threshold (in nanos) to consider an opportunity
     min_profit_threshold: Nanos,
-    /// Capabilities of this solver
-    capabilities: SolverCapabilities,
 }
 
 impl ArbitrageDetector {
@@ -65,22 +42,7 @@ impl ArbitrageDetector {
     pub fn new() -> Self {
         Self {
             min_profit_threshold: 1_000_000, // 0.001 dollars
-            capabilities: SolverCapabilities {
-                arbitrage: true,
-                ..Default::default()
-            },
         }
-    }
-
-    /// Set the minimum profit threshold.
-    pub fn with_min_profit(mut self, threshold: Nanos) -> Self {
-        self.min_profit_threshold = threshold;
-        self
-    }
-
-    /// Get the capabilities of this solver.
-    pub fn capabilities(&self) -> &SolverCapabilities {
-        &self.capabilities
     }
 
     /// Detect all arbitrage opportunities in a problem.
@@ -122,14 +84,11 @@ impl ArbitrageDetector {
                     // we could potentially exploit this
                     if p_if < p_then {
                         let profit_per_unit = p_then - p_if;
-                        let max_qty = self.available_quantity(&problem.liquidity, if_true.0, if_true.1);
 
                         opportunities.push(ArbitrageOpportunity {
                             kind: ArbitrageKind::Constraint,
                             order_indices: Vec::new(), // No specific orders yet
                             profit_per_unit,
-                            max_quantity: max_qty,
-                            confidence: 0.9, // High confidence for constraint arbitrage
                         });
                     }
                 }
@@ -181,8 +140,6 @@ impl ArbitrageDetector {
                         kind: ArbitrageKind::BundleUnderpricing,
                         order_indices: vec![order_idx],
                         profit_per_unit,
-                        max_quantity: order.max_fill,
-                        confidence: 0.7, // Medium confidence (depends on execution)
                     });
                 }
             }
@@ -194,14 +151,6 @@ impl ArbitrageDetector {
     /// Get the best ask price for a (market, outcome) pair.
     fn best_ask_price(&self, liquidity: &LiquidityPool, market: MarketId, outcome: u8) -> Option<Nanos> {
         liquidity.book(market, outcome).and_then(|book| book.best_ask())
-    }
-
-    /// Get available quantity at a (market, outcome) pair.
-    fn available_quantity(&self, liquidity: &LiquidityPool, market: MarketId, outcome: u8) -> u64 {
-        liquidity
-            .book(market, outcome)
-            .map(|book| book.total_ask_qty())
-            .unwrap_or(0)
     }
 
     /// Determine which outcome is being bought for a market in a bundle order.
@@ -265,10 +214,6 @@ impl ArbitrageDetector {
                 }
                 ArbitrageKind::Constraint => {
                     self.exploit_constraint_arbitrage(opp, problem, result, &mut filled_orders);
-                }
-                ArbitrageKind::CrossMarket => {
-                    // Cross-market arbitrage is more complex and rarely pure profit
-                    // Skip for now
                 }
             }
         }

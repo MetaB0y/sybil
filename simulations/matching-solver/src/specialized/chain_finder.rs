@@ -21,10 +21,6 @@ use crate::{MatchingResult, Solver};
 pub struct ImplicationChain {
     /// Markets in the chain, from root to leaf
     pub chain: Vec<(MarketId, u8)>,
-    /// Price at the start (root) of the chain
-    pub root_price: Nanos,
-    /// Price at the end (leaf) of the chain
-    pub leaf_price: Nanos,
     /// Price advantage (leaf - root)
     pub advantage: i64,
 }
@@ -50,18 +46,6 @@ impl ChainFinder {
             min_advantage: 10_000_000, // 0.01 dollars
             max_chain_length: 10,
         }
-    }
-
-    /// Set minimum price advantage.
-    pub fn with_min_advantage(mut self, advantage: Nanos) -> Self {
-        self.min_advantage = advantage;
-        self
-    }
-
-    /// Set maximum chain length.
-    pub fn with_max_chain_length(mut self, length: usize) -> Self {
-        self.max_chain_length = length;
-        self
     }
 
     /// Build implication graph from constraints.
@@ -170,8 +154,6 @@ impl ChainFinder {
                 if advantage > self.min_advantage as i64 {
                     chains.push(ImplicationChain {
                         chain: current_chain.clone(),
-                        root_price: rp,
-                        leaf_price: lp,
                         advantage,
                     });
                 }

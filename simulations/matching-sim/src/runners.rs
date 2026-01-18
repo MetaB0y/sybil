@@ -11,7 +11,7 @@ use matching_scenarios::{
     RealisticConfig,
 };
 use matching_solver::{
-    CompositeSolver, GreedySolver, MilpSolver, PlatformConfig, RandomizedGreedySolver, Solver,
+    GreedySolver, MilpSolver, PlatformConfig, RandomizedGreedySolver, Solver,
     SolverPlatform,
 };
 
@@ -26,7 +26,6 @@ pub fn run_quick_test() {
         Box::new(GreedySolver::new()),
         Box::new(RandomizedGreedySolver::new()),
         Box::new(MilpSolver::new()),
-        Box::new(CompositeSolver::new()),
         Box::new(SolverPlatform::new()),
     ];
 

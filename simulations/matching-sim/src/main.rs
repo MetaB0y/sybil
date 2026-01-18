@@ -6,7 +6,7 @@ use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Cell, Color
 
 use matching_scenarios::Problem;
 use matching_solver::{
-    CompositeSolver, GreedySolver, MilpSolver, PlatformConfig, RandomizedGreedySolver, Solver,
+    GreedySolver, MilpSolver, PlatformConfig, RandomizedGreedySolver, Solver,
     SolverPlatform,
 };
 
@@ -24,7 +24,6 @@ pub enum SolverChoice {
     Greedy,
     Milp,
     Randomized,
-    Composite,
     Platform,
     All,
 }
@@ -35,7 +34,6 @@ impl SolverChoice {
             "greedy" => Some(Self::Greedy),
             "milp" => Some(Self::Milp),
             "randomized" | "random" => Some(Self::Randomized),
-            "composite" => Some(Self::Composite),
             "platform" => Some(Self::Platform),
             "all" => Some(Self::All),
             _ => None,
@@ -219,7 +217,6 @@ fn create_solvers(choice: &SolverChoice, seed: u64, milp_timeout: Option<f64>) -
             }
         }
         SolverChoice::Randomized => vec![Box::new(RandomizedGreedySolver::new())],
-        SolverChoice::Composite => vec![Box::new(CompositeSolver::new())],
         SolverChoice::Platform => {
             let config = if let Some(timeout) = milp_timeout {
                 PlatformConfig {
@@ -259,7 +256,6 @@ fn create_solvers(choice: &SolverChoice, seed: u64, milp_timeout: Option<f64>) -
                 milp,
                 Box::new(GreedySolver::new()),
                 Box::new(RandomizedGreedySolver::new()),
-                Box::new(CompositeSolver::new()),
                 Box::new(SolverPlatform::with_config(platform_config)),
             ]
         }
@@ -516,7 +512,6 @@ fn main() {
                 println!("                         greedy (default)");
                 println!("                         milp (optimal via MILP)");
                 println!("                         randomized (random order shuffling)");
-                println!("                         composite (decomposition + specialized)");
                 println!("                         platform (combines all solvers via MWIS)");
                 println!("                         all (compare all solvers)");
                 println!("  --milp-timeout <S>   MILP time limit in seconds (default: none)");

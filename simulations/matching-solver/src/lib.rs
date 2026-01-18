@@ -5,7 +5,6 @@
 //! - [`GreedySolver`]: Fast heuristic that processes orders by welfare potential
 //! - [`MultiHeuristicSolver`]: Tries multiple sorting strategies, returns best
 //! - [`MilpSolver`]: Optimal via MILP (requires `milp` feature)
-//! - [`CompositeSolver`]: Combines specialized solvers with problem decomposition
 //! - [`SolverPlatform`]: Production-ready platform combining all solvers
 //!
 //! # Quick Start
@@ -32,7 +31,6 @@
 
 // Internal modules
 pub(crate) mod combiner;
-pub(crate) mod composition;
 pub mod greedy;
 pub mod platform;
 pub mod randomized;
@@ -46,7 +44,6 @@ pub mod milp;
 // Core solvers
 pub use greedy::GreedySolver;
 pub use randomized::{MultiHeuristicSolver, RandomizedGreedySolver};
-pub use composition::CompositeSolver;
 pub use platform::{PlatformConfig, PlatformResult, SolverPlatform};
 
 #[cfg(feature = "milp")]

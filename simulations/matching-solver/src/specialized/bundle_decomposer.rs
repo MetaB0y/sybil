@@ -23,12 +23,6 @@ use crate::{MatchingResult, Solver};
 pub struct ComplementSet {
     /// Indices of orders that form this complement set
     pub order_indices: Vec<usize>,
-    /// Markets covered by this set
-    pub markets: Vec<MarketId>,
-    /// Combined payoff vector (should be uniform for perfect complement)
-    pub combined_payoffs: Vec<i8>,
-    /// Total limit price of all bundles
-    pub total_limit: Nanos,
     /// Complementarity score (1.0 = perfect, uniform payoff)
     pub score: f64,
 }
@@ -48,12 +42,6 @@ impl BundleDecomposer {
             min_score: 0.7,
             max_orders_per_combo: 100,
         }
-    }
-
-    /// Set minimum complementarity score.
-    pub fn with_min_score(mut self, score: f64) -> Self {
-        self.min_score = score;
-        self
     }
 
     /// Find all complement sets in the problem.
@@ -184,8 +172,8 @@ impl BundleDecomposer {
     fn find_subsets_with_uniform_sum(
         &self,
         payoff_table: &[(usize, Vec<i8>)],
-        orders: &[Order],
-        markets: &[MarketId],
+        _orders: &[Order],
+        _markets: &[MarketId],
         subset_size: usize,
         num_states: usize,
     ) -> Vec<ComplementSet> {
@@ -209,17 +197,8 @@ impl BundleDecomposer {
                 // Check uniformity
                 let score = self.compute_uniformity_score(&combined);
                 if score >= self.min_score {
-                    // Calculate total limit
-                    let total_limit: Nanos = indices
-                        .iter()
-                        .map(|&i| orders[i].limit_price)
-                        .sum();
-
                     sets.push(ComplementSet {
                         order_indices: indices,
-                        markets: markets.to_vec(),
-                        combined_payoffs: combined.iter().map(|&p| p as i8).collect(),
-                        total_limit,
                         score,
                     });
                 }
