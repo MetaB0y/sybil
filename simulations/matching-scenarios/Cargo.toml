@@ -1,0 +1,10 @@
+[package]
+name = "matching-scenarios"
+version = "0.1.0"
+edition = "2021"
+description = "Scenario generators for prediction market matching"
+
+[dependencies]
+matching-engine = { path = "../matching-engine" }
+rand = { workspace = true }
+rand_chacha = { workspace = true }

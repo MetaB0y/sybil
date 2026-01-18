@@ -661,18 +661,31 @@ fn compute_rebates(fee_results: &[JITFeeResult]) -> Vec<Rebate> {
 
 **See [jit-displacement-economics.md](./jit-displacement-economics.md) for full analysis.**
 
-### Key Points
+### Key Insight: "Rekt Passive LP" Is Not a Big Deal
+
+Earlier analysis worried about passive LPs getting picked off. This concern is overblown:
+
+- With excess demand, clearing price is pushed UP toward demand's limit
+- Passive LP with stale $0.50 quote gets filled at $0.95+ (the UCP)
+- UCP mechanics already protect passive LPs automatically
+
+### What JIT Actually Does
+
+1. **Adds volume** - fills more orders when there's demand/supply imbalance
+2. **Allows informed flow** - JIT providers participate in price discovery
+3. **For a cost** - JIT is taxed
+
+### V1 Design
 
 1. **JIT with displacement allowed** (not backrun-only)
-   - UCP protects passive LPs anyway (everyone gets clearing price)
-   - JIT anchors prices during violent PM flows
-   - Backrun-only would actually hurt LPs by excluding fair prices from price formation
+   - Displacement just affects WHO fills, not the price (UCP)
+   - Allows JIT to add liquidity freely
 
 2. **JIT is taxed** (exact formula TBD)
    - Displacement portion: taxed
    - Backrun portion: possibly not taxed
 
-3. **V1: Semi-private orderbook**
+3. **Semi-private orderbook**
    - Orderbook revealed anonymously to external JIT providers after batch pre-seals
    - JIT providers can see demand/supply imbalance
    - Privacy maintained until pre-seal

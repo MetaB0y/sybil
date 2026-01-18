@@ -1,0 +1,17 @@
+[package]
+name = "matching-solver"
+version = "0.1.0"
+edition = "2021"
+description = "Solvers for the prediction market matching problem"
+
+[dependencies]
+matching-engine = { path = "../matching-engine" }
+
+[dependencies.good_lp]
+version = "1.10"
+features = ["coin_cbc"]
+optional = true
+
+[features]
+default = []
+lp-validation = ["good_lp"]

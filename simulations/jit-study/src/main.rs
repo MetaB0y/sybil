@@ -417,10 +417,10 @@ fn run_jit_study() {
     println!("╚══════════════════════════════════════════════════════════════════╝\n");
 
     println!("Usage:");
-    println!("  cargo run                    # Run original JIT behavior study");
-    println!("  cargo run -- simulate        # Run tax simulation");
-    println!("  cargo run -- sweep           # Run parameter sweep");
-    println!("  cargo run -- compare-structures  # Compare CLOB vs FBA+JIT");
+    println!("  cargo run                         # Run original JIT behavior study");
+    println!("  cargo run -- simulate             # Run tax simulation");
+    println!("  cargo run -- sweep                # Run parameter sweep");
+    println!("  cargo run -- compare-structures   # Compare CLOB vs FBA+JIT");
     println!();
 
     // First verify correctness with a simple test

@@ -356,29 +356,36 @@ Why not EIP-1559?
 
 ## Final Design Decision (Updated)
 
-### Key Insight: UCP Changes Everything
+### Key Insight: UCP Already Protects Passive LPs
 
-The earlier analysis missed a crucial point about **Prediction Markets + Uniform Clearing Price (UCP)**:
+Earlier analysis worried about passive LPs getting "rekt" when news breaks. This concern is overblown.
 
-In PMs, when news breaks (e.g., "Biden drops out"), there's a **liquidity vacuum**:
-- Passive LPs have stale quotes (Sell @ $0.40)
-- True value is now $0.80
-- Informed traders pile in with bids at $0.85
+**Scenario:**
+- Passive LP: Sell 100 @ $0.50 (stale quote)
+- News breaks: true value shoots to $1.00
+- Informed traders: Buy 10,000 @ $0.95-$0.99
 
-**Without JIT in price formation (backrun-only):**
-- Clearing price determined by stale LP vs informed demand
-- Price might clear at $0.50-0.60
-- Passive LP sells at $0.60 when asset worth $0.80 → **rekt**
+**What actually happens (UCP mechanics):**
+- Supply: 100 units at any price ≥ $0.50
+- Demand: 10,000 units at any price ≤ $0.95
+- Excess demand at all prices → demand competes for scarce supply
+- Clearing price gets pushed UP toward demand's limit
+- **Result: Passive LP sells at $0.95-$0.99, not their stale $0.50!**
 
-**With JIT displacement allowed:**
-- JIT provides liquidity at fair price ($0.80)
-- Clearing price anchors at $0.80
-- Passive LP (who offered $0.40) gets filled at $0.80 → **saved!**
+The passive LP's limit price ($0.50) is just their *minimum* - they receive the UCP, which is determined by how aggressively informed traders bid.
 
-The "displacement" fear was backwards:
-- During news events: JIT can't displace passive LPs anyway (passive has cheaper price, fills first)
-- During normal trading: JIT displacement = price improvement for traders
-- With UCP: everyone gets same price, displacement just affects WHO fills, not AT WHAT PRICE
+**The "rekt passive LP" problem is not a big deal** because:
+1. UCP means everyone gets the same clearing price
+2. Excess demand pushes price UP (favoring the scarce supply side)
+3. Passive LPs automatically benefit from informed demand competition
+
+### What JIT Actually Does
+
+JIT doesn't "save" passive LPs (they're already protected by UCP). Instead:
+
+1. **Adds volume** - fills 10,000 orders instead of just 100
+2. **Allows informed flow** - JIT providers can participate in price discovery
+3. **For a cost** - JIT is taxed, which captures some of the informed flow value
 
 ### V1 Design: JIT with Displacement
 
@@ -411,6 +418,40 @@ This allows:
 - JIT to provide liquidity at fair prices
 - Price anchoring during news events
 - Privacy until pre-seal (users don't know what others submitted)
+
+---
+
+---
+
+## Batch Auction Clearing Price Rule
+
+When supply and demand curves don't cross at a unique point (they overlap over a range), we need a rule to pick the clearing price.
+
+**Volume-weighted interpolation:**
+
+```
+B = total buy volume (at or above clearing range)
+S = total sell volume (at or below clearing range)
+P_bid = best bid (highest buy price)
+P_ask = best ask (lowest sell price)
+
+weight = B / (B + S)
+Clearing price = P_ask + weight × (P_bid - P_ask)
+```
+
+**Properties:**
+- Continuous (not binary "favor one side")
+- Proportional to imbalance
+- If B >> S: price → P_bid (demand pulls price up)
+- If S >> B: price → P_ask (supply pulls price down)
+- If B = S: price = midpoint
+
+**Example:**
+- Sell 100 @ $0.50, Buy 10,000 @ $0.95
+- weight = 10,000 / 10,100 ≈ 0.99
+- price = $0.50 + 0.99 × $0.45 = $0.9455
+
+This ensures passive LPs with stale quotes get a price driven by the actual demand pressure.
 
 ---
 

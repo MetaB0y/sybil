@@ -1,0 +1,8 @@
+[package]
+name = "matching-engine"
+version = "0.1.0"
+edition = "2021"
+description = "Core matching types and logic for prediction market matching"
+
+[dependencies]
+# No external dependencies - just std

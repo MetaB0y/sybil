@@ -1,0 +1,15 @@
+[package]
+name = "matching-sim"
+version = "0.1.0"
+edition = "2021"
+description = "CLI simulation harness for prediction market matching"
+
+[[bin]]
+name = "matching-sim"
+path = "src/main.rs"
+
+[dependencies]
+matching-engine = { path = "../matching-engine" }
+matching-solver = { path = "../matching-solver" }
+matching-scenarios = { path = "../matching-scenarios" }
+clap = { version = "4.5", features = ["derive"] }
