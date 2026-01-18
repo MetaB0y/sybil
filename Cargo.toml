@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/matching-engine",
+    "crates/matching-solver",
+    "crates/matching-scenarios",
+    "crates/matching-sim",
+    "crates/jit-study",
+]
+
+[workspace.dependencies]
+rand = "0.8"
+rand_chacha = "0.3"
