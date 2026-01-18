@@ -205,7 +205,7 @@ fn create_solvers(choice: &SolverChoice, seed: u64, milp_timeout: Option<f64>) -
                 vec![Box::new(MilpSolver::new())]
             }
         }
-        SolverChoice::Randomized => vec![Box::new(RandomizedGreedySolver::new(100, seed))],
+        SolverChoice::Randomized => vec![Box::new(RandomizedGreedySolver::new())],
         SolverChoice::Composite => vec![Box::new(CompositeSolver::new())],
         SolverChoice::Platform => {
             let config = if let Some(timeout) = milp_timeout {
@@ -245,7 +245,7 @@ fn create_solvers(choice: &SolverChoice, seed: u64, milp_timeout: Option<f64>) -
             vec![
                 milp,
                 Box::new(GreedySolver::new()),
-                Box::new(RandomizedGreedySolver::new(100, seed)),
+                Box::new(RandomizedGreedySolver::new()),
                 Box::new(CompositeSolver::new()),
                 Box::new(SolverPlatform::with_config(platform_config)),
             ]
@@ -516,7 +516,7 @@ pub fn run_quick_test() {
 
     let solvers: Vec<Box<dyn Solver>> = vec![
         Box::new(GreedySolver::new()),
-        Box::new(RandomizedGreedySolver::new(50, 42)),
+        Box::new(RandomizedGreedySolver::new()),
         Box::new(MilpSolver::new()),
         Box::new(CompositeSolver::new()),
         Box::new(SolverPlatform::new()),

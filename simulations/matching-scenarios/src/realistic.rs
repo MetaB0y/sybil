@@ -1006,6 +1006,9 @@ fn plant_chain_arbitrages(
 ///
 /// Create 4 bundles covering all states of 2 markets where total price > $1.00
 /// (guaranteed profit opportunity).
+///
+/// Strategy: Concentrate complement sets on a smaller number of "hot" market pairs
+/// so the BundleDecomposer can find patterns more easily.
 fn plant_complement_sets(
     problem: &mut Problem,
     order_id: &mut u64,
@@ -1022,12 +1025,26 @@ fn plant_complement_sets(
         return;
     }
 
-    for _ in 0..config.planted_complement_sets {
+    // Select a smaller set of "complement hot" market pairs
+    // This concentrates complement sets so BundleDecomposer can find them
+    let num_hot_pairs = (config.planted_complement_sets / 3).max(5).min(20);
+    let mut hot_pairs: Vec<(MarketId, MarketId)> = Vec::new();
+
+    for _ in 0..num_hot_pairs {
         let mut selected: Vec<&MarketInfo> = binary_markets.clone();
         selected.shuffle(rng);
+        if selected.len() >= 2 {
+            hot_pairs.push((selected[0].id, selected[1].id));
+        }
+    }
 
-        let market_a = selected[0].id;
-        let market_b = selected[1].id;
+    for i in 0..config.planted_complement_sets {
+        // Cycle through hot pairs to concentrate complement sets
+        let (ma, mb) = hot_pairs[i % hot_pairs.len()];
+
+        // IMPORTANT: Sort market IDs so payoffs match BundleDecomposer's grouping
+        // (BundleDecomposer groups by sorted market keys)
+        let (market_a, market_b) = if ma.0 <= mb.0 { (ma, mb) } else { (mb, ma) };
 
         // Create 4 orders covering all states, pricing to create slight arbitrage
         // Total should be just over $1.00 (like $1.03)
@@ -1042,8 +1059,9 @@ fn plant_complement_sets(
             let id = *order_id;
             *order_id += 1;
 
-            let price = base_price * rng.gen_range(0.95..1.05);
-            let qty = rng.gen_range(20..40);
+            // Higher prices and quantities to make complement sets competitive
+            let price = base_price * rng.gen_range(1.0..1.15);  // More aggressive pricing
+            let qty = rng.gen_range(50..100);  // Larger quantities
 
             // Create order that pays 1 for specific state combination
             let order = OrderBuilder::new(&problem.markets, id)

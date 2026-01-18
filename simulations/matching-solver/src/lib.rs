@@ -3,7 +3,7 @@
 //! This crate provides multiple solver implementations:
 //!
 //! - [`GreedySolver`]: Fast heuristic that processes orders by welfare potential
-//! - [`RandomizedGreedySolver`]: Multiple shuffled greedy runs, returns best
+//! - [`MultiHeuristicSolver`]: Tries multiple sorting strategies, returns best
 //! - [`MilpSolver`]: Optimal via MILP (requires `milp` feature)
 //! - [`CompositeSolver`]: Combines specialized solvers with problem decomposition
 //!
@@ -37,7 +37,7 @@ pub mod specialized;
 pub mod milp;
 
 pub use greedy::GreedySolver;
-pub use randomized::RandomizedGreedySolver;
+pub use randomized::{MultiHeuristicSolver, RandomizedGreedySolver};
 
 #[cfg(feature = "milp")]
 pub use milp::{MilpConfig, MilpResult, MilpSolver, SolveStatus};

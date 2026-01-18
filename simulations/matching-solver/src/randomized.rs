@@ -1,69 +1,115 @@
-//! Randomized greedy solver for the matching problem.
+//! Multi-heuristic solver for the matching problem.
 //!
-//! Runs the greedy algorithm multiple times with different random order permutations
-//! and keeps the best result. This can find better solutions than deterministic greedy
-//! when there are ties in welfare potential or when the order of processing matters.
+//! Instead of random shuffling (which rarely beats sorted greedy),
+//! this solver tries different sorting heuristics and returns the best result.
 
-use matching_engine::Problem;
-use rand::prelude::*;
-use rand::SeedableRng;
+use matching_engine::{Order, Problem};
 
 use crate::{GreedySolver, MatchingResult, Solver};
 
-/// Randomized greedy solver that runs multiple iterations with shuffled orders.
-pub struct RandomizedGreedySolver {
-    /// Number of iterations to run
-    pub iterations: usize,
-    /// Random seed for reproducibility
-    pub seed: u64,
+/// Sorting strategy for order processing.
+#[derive(Clone, Copy, Debug)]
+pub enum SortStrategy {
+    /// Sort by welfare potential: limit_price × max_fill (descending)
+    Welfare,
+    /// Sort by price only (descending) - aggressive orders first
+    Price,
+    /// Sort by quantity (descending) - large orders first
+    Quantity,
+    /// Sort by welfare potential (ascending) - small orders first
+    InverseWelfare,
+    /// Sort by price/quantity ratio - best "value" orders first
+    PricePerUnit,
 }
 
-impl RandomizedGreedySolver {
-    pub fn new(iterations: usize, seed: u64) -> Self {
-        Self { iterations, seed }
+impl SortStrategy {
+    /// Sort order indices according to this strategy.
+    fn sort_indices(&self, orders: &[Order]) -> Vec<usize> {
+        let mut indices: Vec<usize> = (0..orders.len()).collect();
+
+        match self {
+            SortStrategy::Welfare => {
+                indices.sort_by(|&a, &b| {
+                    let wa = orders[a].limit_price as u128 * orders[a].max_fill as u128;
+                    let wb = orders[b].limit_price as u128 * orders[b].max_fill as u128;
+                    wb.cmp(&wa)
+                });
+            }
+            SortStrategy::Price => {
+                indices.sort_by(|&a, &b| {
+                    orders[b].limit_price.cmp(&orders[a].limit_price)
+                });
+            }
+            SortStrategy::Quantity => {
+                indices.sort_by(|&a, &b| {
+                    orders[b].max_fill.cmp(&orders[a].max_fill)
+                });
+            }
+            SortStrategy::InverseWelfare => {
+                indices.sort_by(|&a, &b| {
+                    let wa = orders[a].limit_price as u128 * orders[a].max_fill as u128;
+                    let wb = orders[b].limit_price as u128 * orders[b].max_fill as u128;
+                    wa.cmp(&wb)  // Ascending
+                });
+            }
+            SortStrategy::PricePerUnit => {
+                indices.sort_by(|&a, &b| {
+                    // Higher price per unit of risk (max_fill) first
+                    let ratio_a = orders[a].limit_price as f64 / orders[a].max_fill.max(1) as f64;
+                    let ratio_b = orders[b].limit_price as f64 / orders[b].max_fill.max(1) as f64;
+                    ratio_b.partial_cmp(&ratio_a).unwrap_or(std::cmp::Ordering::Equal)
+                });
+            }
+        }
+
+        indices
     }
 
-    /// Create with default parameters
-    pub fn default_params() -> Self {
-        Self {
-            iterations: 100,
-            seed: 42,
+    fn name(&self) -> &'static str {
+        match self {
+            SortStrategy::Welfare => "welfare",
+            SortStrategy::Price => "price",
+            SortStrategy::Quantity => "quantity",
+            SortStrategy::InverseWelfare => "inverse",
+            SortStrategy::PricePerUnit => "ratio",
         }
     }
 }
 
-impl Default for RandomizedGreedySolver {
-    fn default() -> Self {
-        Self::default_params()
+/// Multi-heuristic solver that tries different sorting strategies.
+pub struct MultiHeuristicSolver {
+    strategies: Vec<SortStrategy>,
+}
+
+impl MultiHeuristicSolver {
+    pub fn new() -> Self {
+        Self {
+            strategies: vec![
+                SortStrategy::Welfare,      // Standard greedy
+                SortStrategy::Price,        // Aggressive orders first
+                SortStrategy::Quantity,     // Large orders first
+                SortStrategy::InverseWelfare, // Small orders first (helps AON)
+                SortStrategy::PricePerUnit, // Best value first
+            ],
+        }
     }
 }
 
-impl Solver for RandomizedGreedySolver {
+impl Default for MultiHeuristicSolver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Solver for MultiHeuristicSolver {
     fn solve(&self, problem: &Problem) -> MatchingResult {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(self.seed);
         let mut best_result: Option<MatchingResult> = None;
         let mut best_welfare = i64::MIN;
 
-        // First run deterministic greedy (with sorting) as baseline
-        let sorting_greedy = GreedySolver::new();
-        let baseline = sorting_greedy.solve(problem);
-        if baseline.total_welfare > best_welfare {
-            best_welfare = baseline.total_welfare;
-            best_result = Some(baseline);
-        }
+        for strategy in &self.strategies {
+            let order_indices = strategy.sort_indices(&problem.orders);
+            let result = solve_with_order(&problem, &order_indices);
 
-        // For randomized iterations, use preserve_order so shuffling matters
-        let preserve_order_greedy = GreedySolver::preserve_order();
-
-        // Run randomized iterations
-        for _ in 0..self.iterations {
-            // Create a problem with shuffled orders
-            let shuffled_problem = shuffle_orders(problem, &mut rng);
-
-            // Solve with greedy that preserves input order (so shuffling matters!)
-            let result = preserve_order_greedy.solve(&shuffled_problem);
-
-            // Keep best result
             if result.total_welfare > best_welfare {
                 best_welfare = result.total_welfare;
                 best_result = Some(result);
@@ -74,39 +120,56 @@ impl Solver for RandomizedGreedySolver {
     }
 
     fn name(&self) -> &str {
-        "Randomized"
+        "MultiHeuristic"
     }
 }
 
-/// Create a new problem with shuffled order sequence.
-fn shuffle_orders(problem: &Problem, rng: &mut impl Rng) -> Problem {
-    let mut shuffled_orders = problem.orders.clone();
-    shuffled_orders.shuffle(rng);
+/// Solve using a specific order of processing.
+fn solve_with_order(problem: &Problem, order_indices: &[usize]) -> MatchingResult {
+    let mut liquidity = problem.liquidity.snapshot();
+    let mut result = MatchingResult::new(liquidity.clone());
 
-    Problem {
-        name: problem.name.clone(),
-        markets: problem.markets.clone(),
-        liquidity: problem.liquidity.clone(),
-        orders: shuffled_orders,
-        constraints: problem.constraints.clone(),
+    for &idx in order_indices {
+        let order = &problem.orders[idx];
+
+        if order.is_conditional() {
+            continue;
+        }
+
+        match GreedySolver::try_fill_order_static(order, &mut liquidity) {
+            Some(fill) => {
+                result.add_fill(fill, order);
+            }
+            None => {
+                if order.is_all_or_none() {
+                    result.orders_unfilled_aon += 1;
+                } else {
+                    result.orders_unfilled_liquidity += 1;
+                }
+            }
+        }
     }
+
+    result.remaining_liquidity = liquidity;
+    result
 }
+
+// Keep the old name as an alias for compatibility
+pub type RandomizedGreedySolver = MultiHeuristicSolver;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_randomized_solver_creation() {
-        let solver = RandomizedGreedySolver::new(50, 123);
-        assert_eq!(solver.iterations, 50);
-        assert_eq!(solver.seed, 123);
+    fn test_multi_heuristic_creation() {
+        let solver = MultiHeuristicSolver::new();
+        assert_eq!(solver.strategies.len(), 5);
     }
 
     #[test]
-    fn test_default_params() {
-        let solver = RandomizedGreedySolver::default_params();
-        assert_eq!(solver.iterations, 100);
-        assert_eq!(solver.seed, 42);
+    fn test_strategy_names() {
+        assert_eq!(SortStrategy::Welfare.name(), "welfare");
+        assert_eq!(SortStrategy::Price.name(), "price");
     }
 }

@@ -48,6 +48,15 @@ impl GreedySolver {
     }
 
     /// Try to fill a single order against available liquidity.
+    /// Public static version for use by other solvers.
+    pub fn try_fill_order_static(
+        order: &Order,
+        liquidity: &mut LiquidityPool,
+    ) -> Option<Fill> {
+        Self::try_fill_order(order, liquidity)
+    }
+
+    /// Try to fill a single order against available liquidity.
     fn try_fill_order(
         order: &Order,
         liquidity: &mut LiquidityPool,

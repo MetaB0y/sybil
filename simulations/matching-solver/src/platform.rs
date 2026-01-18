@@ -41,7 +41,7 @@ use crate::combiner::{
 };
 use crate::composition::SolutionConfidence;
 use crate::specialized::{ArbitrageDetector, BundleDecomposer, ChainFinder};
-use crate::{GreedySolver, MatchingResult, RandomizedGreedySolver, Solver};
+use crate::{GreedySolver, MatchingResult, MultiHeuristicSolver, Solver};
 
 #[cfg(feature = "milp")]
 use crate::milp::{MilpConfig, MilpSolver, SolveStatus};
@@ -265,7 +265,7 @@ impl SolverPlatform {
 
         // Run randomized greedy solver
         if self.config.include_randomized {
-            let (solution, info) = self.run_randomized_greedy(problem);
+            let (solution, info) = self.run_multi_heuristic(problem);
             solver_solutions.push(solution);
             solver_results.push(info);
         }
@@ -340,23 +340,22 @@ impl SolverPlatform {
         (solution, info)
     }
 
-    /// Run the randomized greedy solver.
-    fn run_randomized_greedy(&self, problem: &Problem) -> (SolverSolution, SolverResultInfo) {
+    /// Run the multi-heuristic solver.
+    fn run_multi_heuristic(&self, problem: &Problem) -> (SolverSolution, SolverResultInfo) {
         let start = Instant::now();
-        let solver =
-            RandomizedGreedySolver::new(self.config.randomized_iterations, self.config.seed);
+        let solver = MultiHeuristicSolver::new();
         let result = solver.solve(problem);
         let solve_time = start.elapsed().as_secs_f64();
 
         let solution = SolverSolution::from_result(
-            "Randomized",
+            "MultiHeuristic",
             &result,
             problem,
             SolutionConfidence::Heuristic,
         );
 
         let info = SolverResultInfo {
-            name: "Randomized".to_string(),
+            name: "MultiHeuristic".to_string(),
             welfare: result.total_welfare,
             fills: result.orders_filled,
             solve_time_secs: solve_time,

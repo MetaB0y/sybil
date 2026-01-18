@@ -301,7 +301,7 @@ impl BundleDecomposer {
     ) {
         let mut filled_orders: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
-        for set in sets.iter().take(10) {
+        for set in sets.iter().take(20) {
             // Check if all orders in set can still be filled
             let mut can_fill_all = true;
             let mut min_qty = Qty::MAX;
