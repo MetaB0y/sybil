@@ -270,6 +270,16 @@ impl LiquidityPool {
     pub fn iter(&self) -> impl Iterator<Item = (&(MarketId, u8), &LiquidityBook)> {
         self.books.iter()
     }
+
+    /// Set a book directly for a specific market outcome.
+    pub fn set(&mut self, market: MarketId, outcome_idx: u8, book: LiquidityBook) {
+        self.books.insert((market, outcome_idx), book);
+    }
+
+    /// Get a mutable reference to a book if it exists.
+    pub fn get_mut(&mut self, market: MarketId, outcome_idx: u8) -> Option<&mut LiquidityBook> {
+        self.books.get_mut(&(market, outcome_idx))
+    }
 }
 
 #[cfg(test)]

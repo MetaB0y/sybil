@@ -2,10 +2,15 @@
 
 use std::time::Instant;
 
-use matching_solver::{GreedySolver, MilpSolver, RandomizedGreedySolver, Solver};
+use matching_solver::{CompositeSolver, GreedySolver, MilpSolver, RandomizedGreedySolver, Solver};
 use matching_scenarios::{
+    generate_adversarial_scenario, generate_conditional_chain_scenario,
+    generate_deep_implication_scenario, generate_large_interconnected_scenario,
+    generate_liquidity_cliff_scenario, generate_nested_bundle_scenario,
     generate_presidential_scenario, generate_random_scenario, generate_tournament_scenario,
-    PresidentialConfig, Problem, RandomConfig, TournamentConfig,
+    AdversarialConfig, ConditionalChainConfig, DeepImplicationConfig, LargeInterconnectedConfig,
+    LiquidityCliffConfig, NestedBundleConfig, PresidentialConfig, Problem, RandomConfig,
+    TournamentConfig,
 };
 
 mod metrics;
@@ -17,6 +22,7 @@ pub enum SolverChoice {
     Greedy,
     Milp,
     Randomized,
+    Composite,
     All,
 }
 
@@ -26,6 +32,7 @@ impl SolverChoice {
             "greedy" => Some(Self::Greedy),
             "milp" => Some(Self::Milp),
             "randomized" | "random" => Some(Self::Randomized),
+            "composite" => Some(Self::Composite),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -179,10 +186,12 @@ fn create_solvers(choice: &SolverChoice, seed: u64) -> Vec<Box<dyn Solver>> {
         SolverChoice::Greedy => vec![Box::new(GreedySolver::new())],
         SolverChoice::Milp => vec![Box::new(MilpSolver::new())],
         SolverChoice::Randomized => vec![Box::new(RandomizedGreedySolver::new(100, seed))],
+        SolverChoice::Composite => vec![Box::new(CompositeSolver::new())],
         SolverChoice::All => vec![
             Box::new(MilpSolver::new()),
             Box::new(GreedySolver::new()),
             Box::new(RandomizedGreedySolver::new(100, seed)),
+            Box::new(CompositeSolver::new()),
         ],
     }
 }
@@ -334,6 +343,31 @@ fn create_problem(scenario_name: &str, seed: u64) -> Problem {
             seed,
             ..RandomConfig::hard()
         }),
+        // Complex scenarios
+        "nested-bundles" => generate_nested_bundle_scenario(NestedBundleConfig {
+            seed,
+            ..Default::default()
+        }),
+        "conditional-chains" => generate_conditional_chain_scenario(ConditionalChainConfig {
+            seed,
+            ..Default::default()
+        }),
+        "deep-implications" => generate_deep_implication_scenario(DeepImplicationConfig {
+            seed,
+            ..Default::default()
+        }),
+        "liquidity-cliffs" => generate_liquidity_cliff_scenario(LiquidityCliffConfig {
+            seed,
+            ..Default::default()
+        }),
+        "adversarial" => generate_adversarial_scenario(AdversarialConfig {
+            seed,
+            ..Default::default()
+        }),
+        "large-interconnected" => generate_large_interconnected_scenario(LargeInterconnectedConfig {
+            seed,
+            ..Default::default()
+        }),
         _ => {
             eprintln!("Unknown scenario: {}, using random-easy", scenario_name);
             generate_random_scenario(RandomConfig {
@@ -355,6 +389,7 @@ pub fn run_quick_test() {
         Box::new(GreedySolver::new()),
         Box::new(RandomizedGreedySolver::new(50, 42)),
         Box::new(MilpSolver::new()),
+        Box::new(CompositeSolver::new()),
     ];
 
     for solver in &solvers {
@@ -424,13 +459,22 @@ fn main() {
                 println!("  --batches <N>    Number of batches per scenario (default: 20)");
                 println!("  --seed <N>       Random seed (default: 42)");
                 println!("  --scenario <S>   Run specific scenario:");
-                println!("                     presidential, presidential-hard");
-                println!("                     tournament, tournament-large");
-                println!("                     random-easy, random-medium, random-hard");
+                println!("                     Standard scenarios:");
+                println!("                       presidential, presidential-hard");
+                println!("                       tournament, tournament-large");
+                println!("                       random-easy, random-medium, random-hard");
+                println!("                     Complex scenarios:");
+                println!("                       nested-bundles");
+                println!("                       conditional-chains");
+                println!("                       deep-implications");
+                println!("                       liquidity-cliffs");
+                println!("                       adversarial");
+                println!("                       large-interconnected");
                 println!("  --solver <S>     Solver to use:");
                 println!("                     greedy (default)");
                 println!("                     milp (optimal via MILP)");
                 println!("                     randomized (random order shuffling)");
+                println!("                     composite (decomposition + specialized)");
                 println!("                     all (compare all solvers)");
                 println!("  --verbose, -v    Show detailed output");
                 println!("  --quick          Run a quick test");

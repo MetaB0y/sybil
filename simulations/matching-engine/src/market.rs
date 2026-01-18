@@ -71,6 +71,19 @@ impl MarketSet {
         id
     }
 
+    /// Add a market directly (preserving its existing ID).
+    /// The market set will expand if needed to accommodate the ID.
+    pub fn add_market(&mut self, market: Market) {
+        let idx = market.id.0 as usize;
+        // Ensure we have enough capacity
+        while self.markets.len() <= idx {
+            // Add placeholder markets
+            let placeholder_id = MarketId::new(self.markets.len() as u32);
+            self.markets.push(Market::binary(placeholder_id, format!("_placeholder_{}", self.markets.len())));
+        }
+        self.markets[idx] = market;
+    }
+
     /// Get a market by ID.
     pub fn get(&self, id: MarketId) -> Option<&Market> {
         if id.is_none() {

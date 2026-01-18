@@ -1,7 +1,29 @@
 //! Solvers for the NP-hard matching problem.
+//!
+//! This crate provides multiple solver implementations:
+//!
+//! - [`GreedySolver`]: Fast heuristic that processes orders by welfare potential
+//! - [`RandomizedGreedySolver`]: Multiple shuffled greedy runs, returns best
+//! - [`MilpSolver`]: Optimal via MILP (requires `milp` feature)
+//! - [`CompositeSolver`]: Combines specialized solvers with problem decomposition
+//!
+//! # Solver Composition
+//!
+//! The [`composition`] module provides infrastructure for:
+//! - Problem analysis and decomposition into clusters
+//! - Partial solution merging with conflict resolution
+//! - Routing sub-problems to appropriate solvers
+//!
+//! # Specialized Solvers
+//!
+//! The [`specialized`] module provides:
+//! - [`ArbitrageDetector`]: Finds riskless profit opportunities
+//! - [`ConditionalEvaluator`]: Handles price-triggered orders
 
+pub mod composition;
 pub mod greedy;
 pub mod randomized;
+pub mod specialized;
 
 #[cfg(feature = "milp")]
 pub mod milp;
@@ -14,6 +36,15 @@ pub use randomized::RandomizedGreedySolver;
 
 #[cfg(feature = "milp")]
 pub use milp::MilpSolver;
+
+// Composition exports
+pub use composition::{
+    ClusterInfo, CompositeSolver, Decomposer, MarketGraph, PartialSolution, ProblemAnalysis,
+    SolutionConfidence, SolutionMerger, SolverBuilder, SubProblem,
+};
+
+// Specialized solver exports
+pub use specialized::{ArbitrageDetector, ConditionalEvaluator};
 
 use matching_engine::{LiquidityPool, Order, Fill, Problem};
 
