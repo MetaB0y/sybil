@@ -71,6 +71,10 @@ pub struct RealisticConfig {
     pub butterfly_fraction: f64,
     pub conditional_fraction: f64,
 
+    // Cross-cluster orders (fraction of bundles that span multiple clusters)
+    // These create "bridging" orders that complicate decomposition solvers
+    pub cross_cluster_bundle_fraction: f64,
+
     // Constraints
     pub aon_fraction: f64,
     pub liquidity_scarcity: f64,
@@ -102,6 +106,7 @@ impl RealisticConfig {
             spread_fraction: 0.10,
             butterfly_fraction: 0.05,
             conditional_fraction: 0.10,
+            cross_cluster_bundle_fraction: 0.30,  // 30% of bundles cross clusters
             aon_fraction: 0.15,
             liquidity_scarcity: 0.25,
             planted_bundle_arbitrages: 25,
@@ -124,6 +129,7 @@ impl RealisticConfig {
             spread_fraction: 0.10,
             butterfly_fraction: 0.05,
             conditional_fraction: 0.10,
+            cross_cluster_bundle_fraction: 0.30,
             aon_fraction: 0.15,
             liquidity_scarcity: 0.25,
             planted_bundle_arbitrages: 50,
@@ -146,6 +152,7 @@ impl RealisticConfig {
             spread_fraction: 0.10,
             butterfly_fraction: 0.05,
             conditional_fraction: 0.10,
+            cross_cluster_bundle_fraction: 0.30,
             aon_fraction: 0.15,
             liquidity_scarcity: 0.20,
             planted_bundle_arbitrages: 100,
@@ -155,11 +162,12 @@ impl RealisticConfig {
         }
     }
 
-    /// Cross-market demo: High bundle fraction to showcase cross-market value
+    /// Cross-market demo: High bundle fraction + high cross-cluster to showcase value
     pub fn cross_market_demo() -> Self {
         Self {
             bundle_fraction: 0.50,
             simple_fraction: 0.25,
+            cross_cluster_bundle_fraction: 0.50,  // Half of bundles cross clusters!
             planted_bundle_arbitrages: 100,
             planted_chain_arbitrages: 50,
             planted_complement_sets: 30,
@@ -181,6 +189,7 @@ impl RealisticConfig {
             spread_fraction: 0.10,
             butterfly_fraction: 0.05,
             conditional_fraction: 0.10,
+            cross_cluster_bundle_fraction: 0.30,
             aon_fraction: 0.15,
             liquidity_scarcity: 0.30,
             planted_bundle_arbitrages: 10,
@@ -236,7 +245,7 @@ pub fn generate_realistic_scenario(config: RealisticConfig) -> Problem {
         problem.orders.push(order);
     }
 
-    // Step 6: Generate bundle orders
+    // Step 6: Generate bundle orders (some cross-cluster)
     for _ in 0..num_bundles {
         let order = generate_bundle_order(
             &problem.markets,
@@ -244,6 +253,7 @@ pub fn generate_realistic_scenario(config: RealisticConfig) -> Problem {
             &mut order_id,
             &market_infos,
             config.aon_fraction,
+            config.cross_cluster_bundle_fraction,
         );
         problem.orders.push(order);
     }
@@ -654,12 +664,14 @@ fn generate_simple_order(
 }
 
 /// Generate a bundle order spanning 2-5 binary markets.
+/// With cross_cluster_fraction probability, deliberately picks markets from different clusters.
 fn generate_bundle_order(
     markets: &MarketSet,
     rng: &mut StdRng,
     order_id: &mut u64,
     market_infos: &[MarketInfo],
     aon_fraction: f64,
+    cross_cluster_fraction: f64,
 ) -> Order {
     let id = *order_id;
     *order_id += 1;
@@ -675,13 +687,26 @@ fn generate_bundle_order(
         return generate_simple_order(markets, rng, &mut (*order_id - 1), market_infos, aon_fraction);
     }
 
-    // Bundle 2-5 markets
-    let max_bundle = binary_markets.len().min(5);
-    let num_to_bundle = rng.gen_range(2..=max_bundle);
+    // Decide if this should be a cross-cluster bundle
+    let is_cross_cluster = rng.gen_bool(cross_cluster_fraction);
 
-    let mut selected: Vec<&MarketInfo> = binary_markets.clone();
-    selected.shuffle(rng);
-    selected.truncate(num_to_bundle);
+    let selected: Vec<&MarketInfo> = if is_cross_cluster {
+        // Deliberately pick markets from different clusters
+        generate_cross_cluster_selection(&binary_markets, rng)
+    } else {
+        // Random selection (may or may not cross clusters)
+        let max_bundle = binary_markets.len().min(5);
+        let num_to_bundle = rng.gen_range(2..=max_bundle);
+        let mut sel: Vec<&MarketInfo> = binary_markets.clone();
+        sel.shuffle(rng);
+        sel.truncate(num_to_bundle);
+        sel
+    };
+
+    if selected.len() < 2 {
+        // Fallback
+        return generate_simple_order(markets, rng, &mut (*order_id - 1), market_infos, aon_fraction);
+    }
 
     let bundle_market_ids: Vec<MarketId> = selected.iter().map(|m| m.id).collect();
     let combined_prob: f64 = selected.iter().map(|m| m.fair_prices[0]).product();
@@ -698,6 +723,52 @@ fn generate_bundle_order(
     }
 
     order
+}
+
+/// Select markets from different clusters for cross-cluster bundles.
+/// These "bridging" orders complicate decomposition-based solvers.
+fn generate_cross_cluster_selection<'a>(
+    binary_markets: &[&'a MarketInfo],
+    rng: &mut StdRng,
+) -> Vec<&'a MarketInfo> {
+    // Group markets by cluster
+    let mut by_cluster: std::collections::HashMap<Option<usize>, Vec<&MarketInfo>> =
+        std::collections::HashMap::new();
+    for m in binary_markets {
+        by_cluster.entry(m.cluster_id).or_default().push(*m);
+    }
+
+    // Need at least 2 clusters
+    if by_cluster.len() < 2 {
+        let mut all: Vec<&MarketInfo> = binary_markets.to_vec();
+        all.shuffle(rng);
+        all.truncate(rng.gen_range(2..=5.min(all.len())));
+        return all;
+    }
+
+    // Pick 2-4 different clusters
+    let mut cluster_ids: Vec<Option<usize>> = by_cluster.keys().cloned().collect();
+    cluster_ids.shuffle(rng);
+    let num_clusters = rng.gen_range(2..=4.min(cluster_ids.len()));
+    cluster_ids.truncate(num_clusters);
+
+    // Pick one market from each cluster
+    let mut selected = Vec::new();
+    for cluster_id in cluster_ids {
+        if let Some(cluster_markets) = by_cluster.get(&cluster_id) {
+            if !cluster_markets.is_empty() {
+                let idx = rng.gen_range(0..cluster_markets.len());
+                selected.push(cluster_markets[idx]);
+            }
+        }
+    }
+
+    // Limit to 5 markets max (32 states)
+    if selected.len() > 5 {
+        selected.truncate(5);
+    }
+
+    selected
 }
 
 /// Generate a spread order (A - B).
