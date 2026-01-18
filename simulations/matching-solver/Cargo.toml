@@ -7,13 +7,18 @@ description = "Solvers for the prediction market matching problem"
 [dependencies]
 matching-engine = { path = "../matching-engine" }
 rand = "0.8"
+rand_chacha = "0.3"
 
 [dependencies.good_lp]
 version = "1.10"
 features = ["highs"]
 optional = true
 
+[dependencies.highs]
+version = "1.7"
+optional = true
+
 [features]
 default = []
-milp = ["good_lp"]
+milp = ["good_lp", "highs"]
 lp-validation = ["good_lp"]

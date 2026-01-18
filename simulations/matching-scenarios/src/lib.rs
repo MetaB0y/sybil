@@ -16,10 +16,18 @@
 //! - Liquidity cliffs with price discontinuities
 //! - Adversarial competing orders
 //! - Large interconnected market networks
+//!
+//! # Stress Scenarios
+//!
+//! The [`stress`] module provides large-scale scenarios for solver testing:
+//!
+//! - Mega scenarios with 500-5000 orders
+//! - Combined scenarios merging multiple scenario types
 
 pub mod complex;
 pub mod presidential;
 pub mod random;
+pub mod stress;
 pub mod tournament;
 
 // Re-export Problem from matching-engine
@@ -38,3 +46,6 @@ pub use complex::{
     ConditionalChainConfig, DeepImplicationConfig, LargeInterconnectedConfig, LiquidityCliffConfig,
     NestedBundleConfig,
 };
+
+// Re-export stress scenarios
+pub use stress::{generate_mega_scenario, generate_combined_scenario, MegaScenarioConfig};

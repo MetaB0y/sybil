@@ -396,7 +396,7 @@ checksum = "776aa1ba88ac058e78408c17f4dbff826a51ae08ed6642f71ca0edd7fe9383f3"
 dependencies = [
  "coin_cbc",
  "fnv",
- "highs",
+ "highs 2.0.0",
 ]
 
 [[package]]
@@ -419,6 +419,16 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+
+[[package]]
+name = "highs"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "122a64dffa53f13578cffd62fdf1cb2f83ac8a71a989dce5d9232049331fff28"
+dependencies = [
+ "highs-sys",
+ "log",
+]
 
 [[package]]
 name = "highs"
@@ -554,8 +564,10 @@ name = "matching-solver"
 version = "0.1.0"
 dependencies = [
  "good_lp",
+ "highs 1.12.0",
  "matching-engine",
  "rand",
+ "rand_chacha",
 ]
 
 [[package]]

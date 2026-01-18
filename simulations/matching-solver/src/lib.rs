@@ -14,28 +14,33 @@
 //! - Partial solution merging with conflict resolution
 //! - Routing sub-problems to appropriate solvers
 //!
+//! # Solution Combining
+//!
+//! The [`combiner`] module provides platform-style solution combining:
+//! - Multiple independent solvers propose complete solutions
+//! - MWIS selects best non-conflicting fills
+//!
 //! # Specialized Solvers
 //!
 //! The [`specialized`] module provides:
 //! - [`ArbitrageDetector`]: Finds riskless profit opportunities
 //! - [`ConditionalEvaluator`]: Handles price-triggered orders
 
+pub mod combiner;
 pub mod composition;
 pub mod greedy;
+pub mod platform;
 pub mod randomized;
 pub mod specialized;
 
 #[cfg(feature = "milp")]
 pub mod milp;
 
-#[cfg(feature = "lp-validation")]
-pub mod upper_bound;
-
 pub use greedy::GreedySolver;
 pub use randomized::RandomizedGreedySolver;
 
 #[cfg(feature = "milp")]
-pub use milp::MilpSolver;
+pub use milp::{MilpConfig, MilpResult, MilpSolver, SolveStatus};
 
 // Composition exports
 pub use composition::{
@@ -45,6 +50,15 @@ pub use composition::{
 
 // Specialized solver exports
 pub use specialized::{ArbitrageDetector, ConditionalEvaluator};
+
+// Combiner exports
+pub use combiner::{
+    CombineStats, CombinerConfig, ConflictGraph, FillFootprint, MwisAlgorithm, MwisSolver,
+    SolutionCombiner, SolverContribution, SolverSolution,
+};
+
+// Platform exports
+pub use platform::{PlatformConfig, PlatformResult, SolverPlatform, SolverResultInfo};
 
 use matching_engine::{LiquidityPool, Order, Fill, Problem};
 
