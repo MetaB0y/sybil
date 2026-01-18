@@ -11,12 +11,23 @@ use crate::{MatchingResult, Solver};
 pub struct GreedySolver {
     /// Whether to randomize order of equal-welfare orders
     pub randomize_ties: bool,
+    /// If true, process orders in input order without sorting by welfare
+    pub preserve_order: bool,
 }
 
 impl GreedySolver {
     pub fn new() -> Self {
         Self {
             randomize_ties: false,
+            preserve_order: false,
+        }
+    }
+
+    /// Create a greedy solver that processes orders in input order (no sorting)
+    pub fn preserve_order() -> Self {
+        Self {
+            randomize_ties: false,
+            preserve_order: true,
         }
     }
 
@@ -152,7 +163,56 @@ impl GreedySolver {
     }
 
     /// Determine which outcome to buy for a specific market in a bundle.
-    fn determine_bundle_outcome(_order: &Order, _market_idx: usize) -> u8 {
+    ///
+    /// For bundle orders, we analyze the payoff vector to find which outcome
+    /// is being bought for a specific market. The payoff vector encodes payoffs
+    /// for each atomic state (Cartesian product of outcomes). We look for states
+    /// with positive payoffs and determine the common outcome for that market.
+    fn determine_bundle_outcome(order: &Order, market_idx: usize) -> u8 {
+        // Get the market sizes for state indexing
+        // For binary markets, size is 2
+        let num_markets = order.num_markets as usize;
+        if market_idx >= num_markets {
+            return 0;
+        }
+
+        // Assume binary markets (size 2) for all markets in the bundle
+        // This is a simplification - in a more general case, we'd need market metadata
+        let market_sizes: Vec<u8> = vec![2; num_markets];
+
+        // Find states where the payoff is positive
+        let mut outcome_votes: [i32; 4] = [0; 4]; // Support up to 4 outcomes per market
+
+        for state_idx in 0..order.num_states as usize {
+            let payoff = order.payoffs[state_idx];
+            if payoff > 0 {
+                // Decode this state to find the outcome for market_idx
+                let outcome = Self::extract_outcome(state_idx, market_idx, &market_sizes);
+                if (outcome as usize) < outcome_votes.len() {
+                    outcome_votes[outcome as usize] += payoff as i32;
+                }
+            }
+        }
+
+        // Return the outcome with the highest positive votes
+        outcome_votes
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, &v)| v)
+            .map(|(idx, _)| idx as u8)
+            .unwrap_or(0)
+    }
+
+    /// Extract the outcome for a specific market from a state index.
+    fn extract_outcome(state_idx: usize, market_idx: usize, market_sizes: &[u8]) -> u8 {
+        let mut remaining = state_idx;
+        for (i, &size) in market_sizes.iter().enumerate() {
+            let outcome = (remaining % size as usize) as u8;
+            if i == market_idx {
+                return outcome;
+            }
+            remaining /= size as usize;
+        }
         0
     }
 }
@@ -168,7 +228,12 @@ impl Solver for GreedySolver {
         let mut liquidity = problem.liquidity.snapshot();
         let mut result = MatchingResult::new(liquidity.clone());
 
-        let order_indices = Self::sort_by_welfare(&problem.orders);
+        // Either sort by welfare or preserve input order
+        let order_indices: Vec<usize> = if self.preserve_order {
+            (0..problem.orders.len()).collect()
+        } else {
+            Self::sort_by_welfare(&problem.orders)
+        };
 
         for &idx in &order_indices {
             let order = &problem.orders[idx];

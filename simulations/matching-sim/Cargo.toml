@@ -10,6 +10,9 @@ path = "src/main.rs"
 
 [dependencies]
 matching-engine = { path = "../matching-engine" }
-matching-solver = { path = "../matching-solver" }
+matching-solver = { path = "../matching-solver", features = ["milp"] }
 matching-scenarios = { path = "../matching-scenarios" }
 clap = { version = "4.5", features = ["derive"] }
+
+[features]
+default = []

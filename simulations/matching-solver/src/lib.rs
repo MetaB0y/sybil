@@ -1,11 +1,19 @@
 //! Solvers for the NP-hard matching problem.
 
 pub mod greedy;
+pub mod randomized;
+
+#[cfg(feature = "milp")]
+pub mod milp;
 
 #[cfg(feature = "lp-validation")]
 pub mod upper_bound;
 
 pub use greedy::GreedySolver;
+pub use randomized::RandomizedGreedySolver;
+
+#[cfg(feature = "milp")]
+pub use milp::MilpSolver;
 
 use matching_engine::{LiquidityPool, Order, Fill, Problem};
 

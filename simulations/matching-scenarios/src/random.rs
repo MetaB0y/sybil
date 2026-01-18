@@ -129,24 +129,37 @@ pub fn generate_random_scenario(config: RandomConfig) -> Problem {
     for (i, &market) in market_ids.iter().enumerate() {
         let mid_price = market_prices[i];
 
-        for level in 0..config.price_levels {
-            let offset = config.price_spread * (level as f64 + 1.0) / config.price_levels as f64;
+        // Add liquidity for ALL outcomes, not just outcome 0
+        for outcome in 0..config.outcomes_per_market {
+            // For binary markets: outcome 0 uses mid_price, outcome 1 uses 1-mid_price
+            // For multi-outcome: distribute remaining probability
+            let outcome_mid_price = if outcome == 0 {
+                mid_price
+            } else if config.outcomes_per_market == 2 {
+                1.0 - mid_price
+            } else {
+                (1.0 - mid_price) / (config.outcomes_per_market as f64 - 1.0)
+            };
 
-            let bid_price = (mid_price - offset).max(0.01);
-            problem.liquidity.add_bid(
-                market,
-                0,
-                price_to_nanos(bid_price),
-                supply_per_level.max(10),
-            );
+            for level in 0..config.price_levels {
+                let offset = config.price_spread * (level as f64 + 1.0) / config.price_levels as f64;
 
-            let ask_price = (mid_price + offset).min(0.99);
-            problem.liquidity.add_ask(
-                market,
-                0,
-                price_to_nanos(ask_price),
-                supply_per_level.max(10),
-            );
+                let bid_price = (outcome_mid_price - offset).max(0.01);
+                problem.liquidity.add_bid(
+                    market,
+                    outcome,
+                    price_to_nanos(bid_price),
+                    supply_per_level.max(10),
+                );
+
+                let ask_price = (outcome_mid_price + offset).min(0.99);
+                problem.liquidity.add_ask(
+                    market,
+                    outcome,
+                    price_to_nanos(ask_price),
+                    supply_per_level.max(10),
+                );
+            }
         }
     }
 

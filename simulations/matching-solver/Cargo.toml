@@ -6,12 +6,14 @@ description = "Solvers for the prediction market matching problem"
 
 [dependencies]
 matching-engine = { path = "../matching-engine" }
+rand = "0.8"
 
 [dependencies.good_lp]
 version = "1.10"
-features = ["coin_cbc"]
+features = ["highs"]
 optional = true
 
 [features]
 default = []
+milp = ["good_lp"]
 lp-validation = ["good_lp"]
