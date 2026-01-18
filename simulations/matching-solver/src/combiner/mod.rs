@@ -28,9 +28,9 @@
 pub mod conflict;
 pub mod mwis;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-use matching_engine::{Fill, LiquidityPool, MarketId, Order, Problem, Qty};
+use matching_engine::{Fill, LiquidityPool, Order, Problem};
 
 use crate::composition::partial::SolutionConfidence;
 use crate::MatchingResult;
@@ -213,11 +213,10 @@ impl SolutionCombiner {
 
         // Collect all fills with their metadata
         let mut all_fills: Vec<CandidateFill> = Vec::new();
-        for (sol_idx, solution) in solutions.iter().enumerate() {
+        for solution in solutions.iter() {
             for (order_idx, fill) in &solution.fills {
                 if let Some(order) = problem.orders.get(*order_idx) {
                     all_fills.push(CandidateFill {
-                        solution_idx: sol_idx,
                         order_idx: *order_idx,
                         fill: fill.clone(),
                         welfare: fill.welfare(order),
@@ -352,7 +351,7 @@ impl SolutionCombiner {
         &self,
         fills: &[CandidateFill],
         graph: &ConflictGraph,
-        num_conflicts: usize,
+        _num_conflicts: usize,
     ) -> Vec<usize> {
         let weights: Vec<i64> = fills.iter().map(|f| f.welfare).collect();
 
@@ -416,8 +415,6 @@ impl Default for SolutionCombiner {
 /// Internal representation of a candidate fill.
 #[derive(Clone, Debug)]
 struct CandidateFill {
-    /// Which solution this fill came from
-    solution_idx: usize,
     /// Order index in the problem
     order_idx: usize,
     /// The fill itself

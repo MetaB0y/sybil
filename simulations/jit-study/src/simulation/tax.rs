@@ -247,14 +247,10 @@ impl TaxCalculator for ProportionalHarmTax {
 
         // Harm = price difference * displaced volume
         // This is the profit passive LPs would have made
-        let price_diff = if solution.clearing_price > true_value {
-            solution.clearing_price - true_value
-        } else {
-            true_value - solution.clearing_price
-        };
+        let price_diff = solution.clearing_price.abs_diff(true_value);
 
         // harm = price_diff * displaced_qty (same units as profit)
-        let harm = (price_diff as u64).saturating_mul(total_displacement as u64);
+        let harm = price_diff.saturating_mul(total_displacement as u64);
 
         if harm == 0 {
             // Use a minimum harm based on displacement

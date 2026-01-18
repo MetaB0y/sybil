@@ -44,7 +44,7 @@ use crate::specialized::{ArbitrageDetector, BundleDecomposer, ChainFinder};
 use crate::{GreedySolver, MatchingResult, MultiHeuristicSolver, Solver};
 
 #[cfg(feature = "milp")]
-use crate::milp::{MilpConfig, MilpSolver, SolveStatus};
+use crate::milp::{MilpSolver, SolveStatus};
 
 /// Configuration for the solver platform.
 #[derive(Clone, Debug)]

@@ -1,7 +1,7 @@
 //! Market structure comparison framework
 //!
 //! Compares different market structures:
-//! - CLOB + Traditional MM: continuous trading, capital locked
+//! - Clob + Traditional MM: continuous trading, capital locked
 //! - Private FBA + JIT: batched, JIT fills unfilled demand
 //! - Private FBA + Taxed Displacement: JIT can displace with tax
 
@@ -15,7 +15,7 @@ use super::metrics::AggregateMetrics;
 pub enum MarketStructure {
     /// Traditional continuous limit order book
     /// Modeled as "instant FBA" with passive MMs only - no JIT
-    CLOB {
+    Clob {
         /// Spread MMs post around true value
         mm_spread_bps: Bps,
         /// Capital locked per MM (continuously)
@@ -36,9 +36,9 @@ pub enum MarketStructure {
 }
 
 impl MarketStructure {
-    /// Create a CLOB configuration
+    /// Create a Clob configuration
     pub fn clob(mm_spread_bps: Bps, mm_capital_per_market: u64) -> Self {
-        MarketStructure::CLOB {
+        MarketStructure::Clob {
             mm_spread_bps,
             mm_capital_per_market,
         }
@@ -67,8 +67,8 @@ impl MarketStructure {
     /// Get a descriptive name for this market structure
     pub fn name(&self) -> String {
         match self {
-            MarketStructure::CLOB { mm_spread_bps, .. } => {
-                format!("CLOB ({}bps spread)", mm_spread_bps)
+            MarketStructure::Clob { mm_spread_bps, .. } => {
+                format!("Clob ({}bps spread)", mm_spread_bps)
             }
             MarketStructure::PrivateFBA { jit_strategy, displacement_tax_bps, .. } => {
                 match jit_strategy {
@@ -82,11 +82,11 @@ impl MarketStructure {
     }
 
     /// Calculate capital efficiency factor
-    /// CLOB: capital locked 100% of time (factor = 1.0)
+    /// Clob: capital locked 100% of time (factor = 1.0)
     /// FBA+JIT: capital locked only during JIT window (factor = jit_window / batch_duration)
     pub fn jit_capital_efficiency_factor(&self) -> f64 {
         match self {
-            MarketStructure::CLOB { .. } => 1.0,
+            MarketStructure::Clob { .. } => 1.0,
             MarketStructure::PrivateFBA { batch_duration_ms, jit_window_ms, .. } => {
                 *jit_window_ms as f64 / *batch_duration_ms as f64
             }
@@ -146,7 +146,7 @@ pub fn run_market_structure(
         num_rounds: config.num_rounds,
         num_passive_lps: config.num_passive_mms,
         num_jit_mms: match structure {
-            MarketStructure::CLOB { .. } => 0,  // No JIT in CLOB
+            MarketStructure::Clob { .. } => 0,  // No JIT in Clob
             MarketStructure::PrivateFBA { .. } => 1,
         },
         num_noise_traders: config.num_noise_traders,
@@ -161,10 +161,10 @@ pub fn run_market_structure(
     };
 
     match structure {
-        MarketStructure::CLOB { mm_capital_per_market, .. } => {
+        MarketStructure::Clob { mm_capital_per_market, .. } => {
             // Run with NoTax (no JIT MMs anyway)
             let mut sim = Simulation::new(sim_config.clone(), NoTax);
-            // Override: no JIT MMs for CLOB
+            // Override: no JIT MMs for Clob
             sim.jit_mms.clear();
             sim.run();
 
@@ -173,7 +173,7 @@ pub fn run_market_structure(
 
             MarketStructureMetrics {
                 structure_name: structure.name(),
-                adjusted_jit_capital_efficiency: 0.0, // No JIT in CLOB
+                adjusted_jit_capital_efficiency: 0.0, // No JIT in Clob
                 metrics,
             }
         }
@@ -251,11 +251,11 @@ pub fn print_comparison_table(results: &[MarketStructureMetrics]) {
 
     for result in results {
         let batch_dur = match &result.structure_name {
-            n if n.starts_with("CLOB") => "0s (cont)".to_string(),
+            n if n.starts_with("Clob") => "0s (cont)".to_string(),
             _ => "60s".to_string(),
         };
         let jit_window = match &result.structure_name {
-            n if n.starts_with("CLOB") => "N/A".to_string(),
+            n if n.starts_with("Clob") => "N/A".to_string(),
             _ => "1s".to_string(),
         };
 
@@ -317,18 +317,18 @@ pub fn print_comparison_insights(results: &[MarketStructureMetrics]) {
     println!("Best for passive MMs: {}", best_passive_mm.structure_name);
 
     // Capital efficiency comparison
-    let clob_result = results.iter().find(|r| r.structure_name.starts_with("CLOB"));
+    let clob_result = results.iter().find(|r| r.structure_name.starts_with("Clob"));
     let fba_backrun = results.iter().find(|r| r.structure_name == "FBA+Backrun");
 
     if let (Some(clob), Some(fba)) = (clob_result, fba_backrun) {
         if clob.metrics.passive_mm_capital_efficiency > 0.0 && fba.adjusted_jit_capital_efficiency > 0.0 {
             let ratio = fba.adjusted_jit_capital_efficiency / clob.metrics.passive_mm_capital_efficiency;
-            println!("\nCapital efficiency ratio (FBA+JIT vs CLOB): {:.1}x", ratio);
+            println!("\nCapital efficiency ratio (FBA+JIT vs Clob): {:.1}x", ratio);
         }
     }
 
     println!("\n--- SUMMARY ---");
-    println!("- FBA batching typically reduces price impact vs CLOB (batch aggregation)");
+    println!("- FBA batching typically reduces price impact vs Clob (batch aggregation)");
     println!("- JIT MM capital efficiency is ~60x better (1s lock vs 60s continuous)");
     println!("- Backrun-only preserves passive MM profitability");
     println!("- Taxed displacement may increase fill rate but hurts passive MMs");
@@ -341,7 +341,7 @@ mod tests {
     #[test]
     fn test_market_structure_names() {
         let clob = MarketStructure::clob(100, 1000);
-        assert!(clob.name().contains("CLOB"));
+        assert!(clob.name().contains("Clob"));
 
         let fba_backrun = MarketStructure::fba_backrun(60000, 1000);
         assert_eq!(fba_backrun.name(), "FBA+Backrun");

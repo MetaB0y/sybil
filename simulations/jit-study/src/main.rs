@@ -715,7 +715,7 @@ fn print_summary_table(results: &[ScenarioResult]) {
     }
 
     println!("└────────────────────────────┴────────┴──────────┴──────────┴──────────┘");
-    println!("");
+    println!();
     println!("Passive MM P&L = if MM had passive orders, forced to fill");
     println!("JIT MM P&L = MM sees batch, skips if would lose");
     println!("JIT Value = JIT P&L - Passive P&L = value of option to skip");
@@ -740,17 +740,17 @@ fn print_insights(results: &[ScenarioResult]) {
     println!("1. BACKRUN OPPORTUNITY");
     println!("   - {}/{} scenarios have backrun opportunity", backrun_possible, total);
     println!("   - Markets that fully clear don't need JIT backrun");
-    println!("");
+    println!();
 
     println!("2. JIT VALUE FOR MM");
     println!("   - {}/{} scenarios: JIT has positive option value", jit_has_value, backrun_possible);
     println!("   - {}/{} scenarios: passive MM would lose", passive_loses, backrun_possible);
     println!("   - Total JIT option value: {:+.2}", total_jit_value);
     println!("   - Total passive MM losses avoided: {:+.2}", -total_passive_loss);
-    println!("");
+    println!();
     println!("   JIT lets MM skip batches where they would lose.");
     println!("   This is pure upside for MMs — no downside to having JIT.");
-    println!("");
+    println!();
 
     println!("3. BUT: CAN MM ACTUALLY DETECT TOXIC FLOW?");
     println!("   For JIT to have value, MM must KNOW which batches to skip.");
@@ -759,35 +759,35 @@ fn print_insights(results: &[ScenarioResult]) {
     println!("   - Price aggression: limit far from mid = maybe informed");
     println!("   - One-sided flow: all buys or all sells = maybe informed");
     println!("   - Historical patterns: this trader picked me off before");
-    println!("");
+    println!();
     println!("   With PRIVACY: MM can't see WHO is trading, harder to cherry-pick.");
     println!("   But they can still see: size, price, direction.");
-    println!("");
+    println!();
 
     println!("4. DISPLACEMENT");
     println!("   - {}/{} scenarios allow displacement", displacement_possible, total);
     println!("   - {}/{} displacements hurt total welfare", displacement_hurts, displacement_possible);
     println!("   - Displacement = taking fills from passive LPs");
     println!("   - Questionable value: steals from passive, may hurt welfare");
-    println!("");
+    println!();
 
     println!("5. JIT PRIMARY VALUE: CAPITAL EFFICIENCY");
     println!("   The above focuses on toxic flow avoidance.");
     println!("   But the MAIN value of JIT is CAPITAL EFFICIENCY:");
-    println!("");
+    println!();
     println!("   Without JIT (passive MM):");
     println!("   - Want to make markets on 1000 prediction markets");
     println!("   - Each market needs capital locked in passive orders");
     println!("   - Total capital needed: 1000 × per-market capital");
-    println!("");
+    println!();
     println!("   With JIT (flash liquidity):");
     println!("   - Keep capital in ONE pool");
     println!("   - See batch, decide to deploy");
     println!("   - Same capital serves ALL 1000 markets simultaneously");
     println!("   - Capital efficiency: potentially 1000x better!");
-    println!("");
+    println!();
     println!("   MM doesn't lock capital waiting — deploys only when needed.");
-    println!("");
+    println!();
 
     println!("6. DESIGN IMPLICATIONS");
     println!("   a) JIT backrun is unambiguously good (welfare +, MM capital efficient)");

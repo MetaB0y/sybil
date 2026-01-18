@@ -7,16 +7,14 @@
 //! 4. Solves each cluster with the appropriate solver
 //! 5. Merges results
 
-use std::collections::HashMap;
-
-use matching_engine::{Fill, Order, Problem};
+use matching_engine::{Fill, Problem};
 
 use crate::{GreedySolver, MatchingResult, Solver};
 
 #[cfg(feature = "milp")]
 use crate::MilpSolver;
 
-use super::analysis::{ProblemAnalysis, SolverRecommendation};
+use super::analysis::ProblemAnalysis;
 use super::cluster::{Decomposer, SubProblem};
 use super::merge::{ConflictStrategy, SolutionMerger};
 use super::partial::{PartialSolution, SolutionConfidence};
@@ -150,35 +148,6 @@ impl CompositeSolver {
         }
     }
 
-    /// Convert a sub-problem result to a partial solution.
-    fn to_partial_solution(
-        &self,
-        sub_problem: &SubProblem,
-        result: MatchingResult,
-        confidence: SolutionConfidence,
-    ) -> PartialSolution {
-        let mut partial = PartialSolution::new(sub_problem.cluster_id, "composite");
-
-        for fill in result.fills {
-            // Find the local order index that matches this fill's order_id
-            let local_idx = sub_problem
-                .problem
-                .orders
-                .iter()
-                .position(|o| o.id == fill.order_id);
-
-            if let Some(local_idx) = local_idx {
-                // Map local index to original order index
-                if let Some(&original_idx) = sub_problem.original_order_mapping.get(local_idx) {
-                    let welfare = result.total_welfare / result.orders_filled.max(1) as i64;
-                    partial.add_fill(original_idx, fill, welfare);
-                }
-            }
-        }
-
-        partial.set_confidence(confidence);
-        partial
-    }
 }
 
 impl Default for CompositeSolver {

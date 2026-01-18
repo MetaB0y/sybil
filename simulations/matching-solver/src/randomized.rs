@@ -65,15 +65,6 @@ impl SortStrategy {
         indices
     }
 
-    fn name(&self) -> &'static str {
-        match self {
-            SortStrategy::Welfare => "welfare",
-            SortStrategy::Price => "price",
-            SortStrategy::Quantity => "quantity",
-            SortStrategy::InverseWelfare => "inverse",
-            SortStrategy::PricePerUnit => "ratio",
-        }
-    }
 }
 
 /// Multi-heuristic solver that tries different sorting strategies.
@@ -108,7 +99,7 @@ impl Solver for MultiHeuristicSolver {
 
         for strategy in &self.strategies {
             let order_indices = strategy.sort_indices(&problem.orders);
-            let result = solve_with_order(&problem, &order_indices);
+            let result = solve_with_order(problem, &order_indices);
 
             if result.total_welfare > best_welfare {
                 best_welfare = result.total_welfare;
@@ -165,11 +156,5 @@ mod tests {
     fn test_multi_heuristic_creation() {
         let solver = MultiHeuristicSolver::new();
         assert_eq!(solver.strategies.len(), 5);
-    }
-
-    #[test]
-    fn test_strategy_names() {
-        assert_eq!(SortStrategy::Welfare.name(), "welfare");
-        assert_eq!(SortStrategy::Price.name(), "price");
     }
 }

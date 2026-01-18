@@ -190,7 +190,7 @@ impl<T: TaxCalculator> Simulation<T> {
     fn update_true_value(&mut self) {
         let vol = self.config.true_value_volatility as i64;
         let change: i64 = self.rng.gen_range(-vol..=vol);
-        let new_value = (self.current_true_value as i64 + change).max(1000).min(9000) as Bps;
+        let new_value = (self.current_true_value as i64 + change).clamp(1000, 9000) as Bps;
         self.current_true_value = new_value;
     }
 

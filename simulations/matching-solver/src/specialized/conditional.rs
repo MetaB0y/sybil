@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use matching_engine::{ConditionDir, Fill, LiquidityPool, MarketId, Nanos, Order, Problem};
+use matching_engine::{ConditionDir, LiquidityPool, MarketId, Nanos, Problem};
 
 use crate::{GreedySolver, MatchingResult, Solver};
 
@@ -181,11 +181,7 @@ impl ConditionalEvaluator {
     ) -> bool {
         for (market, &old_price) in old_prices {
             if let Some(&new_price) = new_prices.get(market) {
-                let diff = if old_price > new_price {
-                    old_price - new_price
-                } else {
-                    new_price - old_price
-                };
+                let diff = old_price.abs_diff(new_price);
                 if diff > self.convergence_threshold {
                     return false;
                 }

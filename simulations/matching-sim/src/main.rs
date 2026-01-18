@@ -2,25 +2,21 @@
 
 use std::time::Instant;
 
+use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Cell, Color, Table};
+
+use matching_scenarios::Problem;
 use matching_solver::{
-    CompositeSolver, GreedySolver, MilpConfig, MilpSolver, PlatformConfig, RandomizedGreedySolver,
-    Solver, SolverPlatform,
-};
-use matching_scenarios::{
-    generate_adversarial_scenario, generate_combined_scenario, generate_conditional_chain_scenario,
-    generate_deep_implication_scenario, generate_large_interconnected_scenario,
-    generate_liquidity_cliff_scenario, generate_mega_scenario, generate_milp_killer_scenario,
-    generate_nested_bundle_scenario, generate_planted_chain_scenario,
-    generate_planted_complement_scenario, generate_planted_exclusion_scenario,
-    generate_presidential_scenario, generate_random_scenario, generate_realistic_scenario,
-    generate_tournament_scenario, AdversarialConfig, ConditionalChainConfig, DeepImplicationConfig,
-    LargeInterconnectedConfig, LiquidityCliffConfig, MegaScenarioConfig, MilpKillerConfig,
-    NestedBundleConfig, PlantedChainConfig, PlantedComplementConfig, PlantedExclusionConfig,
-    PresidentialConfig, Problem, RandomConfig, RealisticConfig, TournamentConfig,
+    CompositeSolver, GreedySolver, MilpSolver, PlatformConfig, RandomizedGreedySolver, Solver,
+    SolverPlatform,
 };
 
 mod metrics;
+mod runners;
+mod scenarios;
+
 use metrics::{print_comparison_table, OptimalityMetrics, ScenarioComparison};
+use runners::{run_milp_killer_test, run_platform_stress_test, run_quick_test, run_realistic_test};
+use scenarios::create_problem;
 
 /// Which solver(s) to use
 #[derive(Clone, Debug, PartialEq)]
@@ -154,17 +150,20 @@ impl SimulationResults {
 
     fn print_solver_comparisons(&self) {
         for comparison in &self.solver_comparisons {
-            println!("Scenario: {}", comparison.scenario_name);
-            println!("+------------+------------+----------+----------+");
-            println!("| Solver     | Welfare    | Gap      | Fill %   |");
-            println!("+------------+------------+----------+----------+");
+            println!("\nScenario: {}", comparison.scenario_name);
+
+            let mut table = Table::new();
+            table
+                .load_preset(UTF8_FULL)
+                .apply_modifier(UTF8_ROUND_CORNERS)
+                .set_header(vec!["Solver", "Welfare", "Gap", "Fill %"]);
 
             // Find the best welfare for gap calculation (prefer MILP, then max)
             let best_welfare = comparison
                 .results
                 .iter()
                 .find(|r| r.solver_name == "MILP")
-                .or_else(|| comparison.results.iter().max_by_key(|r| r.total_welfare as i64))
+                .or_else(|| comparison.results.iter().max_by_key(|r| r.total_welfare))
                 .map(|r| r.mean_welfare())
                 .unwrap_or(0.0);
 
@@ -181,16 +180,30 @@ impl SimulationResults {
                     "-".to_string()
                 };
 
-                println!(
-                    "| {:<10} | {:>10.0} | {:>8} | {:>7.1}% |",
-                    result.solver_name,
-                    mean_welfare,
-                    gap,
-                    result.fill_rate() * 100.0,
-                );
+                let fill_rate = result.fill_rate() * 100.0;
+                let welfare_cell = Cell::new(format!("{:.0}", mean_welfare));
+                let gap_cell = if gap == "0.0%" {
+                    Cell::new(&gap).fg(Color::Green)
+                } else {
+                    Cell::new(&gap)
+                };
+                let fill_cell = if fill_rate >= 90.0 {
+                    Cell::new(format!("{:.1}%", fill_rate)).fg(Color::Green)
+                } else if fill_rate >= 70.0 {
+                    Cell::new(format!("{:.1}%", fill_rate)).fg(Color::Yellow)
+                } else {
+                    Cell::new(format!("{:.1}%", fill_rate)).fg(Color::Red)
+                };
+
+                table.add_row(vec![
+                    Cell::new(&result.solver_name),
+                    welfare_cell,
+                    gap_cell,
+                    fill_cell,
+                ]);
             }
 
-            println!("+------------+------------+----------+----------+\n");
+            println!("{table}");
         }
     }
 }
@@ -369,408 +382,6 @@ fn run_scenario(config: &SimulationConfig, scenario_name: &str) -> ScenarioCompa
     }
 
     comparison
-}
-
-fn create_problem(scenario_name: &str, seed: u64) -> Problem {
-    match scenario_name {
-        "presidential" => generate_presidential_scenario(PresidentialConfig {
-            seed,
-            ..Default::default()
-        }),
-        "presidential-hard" => generate_presidential_scenario(PresidentialConfig {
-            seed,
-            num_simple_orders: 50,
-            num_bundle_orders: 20,
-            num_conditional_orders: 10,
-            liquidity_multiplier: 0.3,
-            ..Default::default()
-        }),
-        "tournament" => generate_tournament_scenario(TournamentConfig {
-            seed,
-            ..Default::default()
-        }),
-        "tournament-large" => generate_tournament_scenario(TournamentConfig {
-            seed,
-            num_teams: 16,
-            orders_per_team: 8,
-            liquidity_multiplier: 0.3,
-        }),
-        "random-easy" => generate_random_scenario(RandomConfig {
-            seed,
-            ..RandomConfig::easy()
-        }),
-        "random-medium" => generate_random_scenario(RandomConfig {
-            seed,
-            ..RandomConfig::medium()
-        }),
-        "random-hard" => generate_random_scenario(RandomConfig {
-            seed,
-            ..RandomConfig::hard()
-        }),
-        // Complex scenarios
-        "nested-bundles" => generate_nested_bundle_scenario(NestedBundleConfig {
-            seed,
-            ..Default::default()
-        }),
-        "conditional-chains" => generate_conditional_chain_scenario(ConditionalChainConfig {
-            seed,
-            ..Default::default()
-        }),
-        "deep-implications" => generate_deep_implication_scenario(DeepImplicationConfig {
-            seed,
-            ..Default::default()
-        }),
-        "liquidity-cliffs" => generate_liquidity_cliff_scenario(LiquidityCliffConfig {
-            seed,
-            ..Default::default()
-        }),
-        "adversarial" => generate_adversarial_scenario(AdversarialConfig {
-            seed,
-            ..Default::default()
-        }),
-        "large-interconnected" => generate_large_interconnected_scenario(LargeInterconnectedConfig {
-            seed,
-            ..Default::default()
-        }),
-        // Stress scenarios
-        "mega" | "mega-medium" => generate_mega_scenario(MegaScenarioConfig {
-            seed,
-            ..MegaScenarioConfig::medium()
-        }),
-        "mega-small" => generate_mega_scenario(MegaScenarioConfig {
-            seed,
-            ..MegaScenarioConfig::small()
-        }),
-        "mega-large" => generate_mega_scenario(MegaScenarioConfig {
-            seed,
-            ..MegaScenarioConfig::large()
-        }),
-        "mega-extreme" => generate_mega_scenario(MegaScenarioConfig {
-            seed,
-            ..MegaScenarioConfig::extreme()
-        }),
-        "combined" => generate_combined_scenario(seed),
-        // MILP killer scenarios
-        "milp-killer" | "milp-killer-test" => generate_milp_killer_scenario(MilpKillerConfig {
-            seed,
-            ..MilpKillerConfig::test()
-        }),
-        "milp-killer-full" => generate_milp_killer_scenario(MilpKillerConfig {
-            seed,
-            ..MilpKillerConfig::timeout_guaranteed()
-        }),
-        "milp-killer-extreme" => generate_milp_killer_scenario(MilpKillerConfig {
-            seed,
-            ..MilpKillerConfig::extreme()
-        }),
-        // Planted pattern scenarios
-        "planted-chain" => generate_planted_chain_scenario(PlantedChainConfig {
-            seed,
-            ..Default::default()
-        }),
-        "planted-complement" => generate_planted_complement_scenario(PlantedComplementConfig {
-            seed,
-            ..Default::default()
-        }),
-        "planted-exclusion" => generate_planted_exclusion_scenario(PlantedExclusionConfig {
-            seed,
-            ..Default::default()
-        }),
-        // Realistic scenarios (cross-market value demonstration)
-        "realistic" | "realistic-standard" => generate_realistic_scenario(RealisticConfig {
-            seed,
-            ..RealisticConfig::standard()
-        }),
-        "realistic-test" => generate_realistic_scenario(RealisticConfig {
-            seed,
-            ..RealisticConfig::test()
-        }),
-        "realistic-small" => generate_realistic_scenario(RealisticConfig {
-            seed,
-            ..RealisticConfig::small()
-        }),
-        "realistic-extreme" => generate_realistic_scenario(RealisticConfig {
-            seed,
-            ..RealisticConfig::extreme()
-        }),
-        "realistic-cross-market" => generate_realistic_scenario(RealisticConfig {
-            seed,
-            ..RealisticConfig::cross_market_demo()
-        }),
-        _ => {
-            eprintln!("Unknown scenario: {}, using random-easy", scenario_name);
-            generate_random_scenario(RandomConfig {
-                seed,
-                ..RandomConfig::easy()
-            })
-        }
-    }
-}
-
-/// Run a quick test to verify the system works.
-pub fn run_quick_test() {
-    println!("Running quick matching test...\n");
-
-    let problem = generate_presidential_scenario(PresidentialConfig::default());
-    println!("{}", problem.summary());
-
-    let solvers: Vec<Box<dyn Solver>> = vec![
-        Box::new(GreedySolver::new()),
-        Box::new(RandomizedGreedySolver::new()),
-        Box::new(MilpSolver::new()),
-        Box::new(CompositeSolver::new()),
-        Box::new(SolverPlatform::new()),
-    ];
-
-    for solver in &solvers {
-        let start = Instant::now();
-        let result = solver.solve(&problem);
-        let elapsed = start.elapsed().as_secs_f64();
-
-        println!("\n{} solver results:", solver.name());
-        println!(
-            "  Orders filled: {} / {}",
-            result.orders_filled,
-            problem.num_orders()
-        );
-        println!("  Total welfare: {}", result.total_welfare);
-        println!("  Unfilled (liquidity): {}", result.orders_unfilled_liquidity);
-        println!("  Unfilled (AON): {}", result.orders_unfilled_aon);
-        println!("  Time: {:.3}s", elapsed);
-    }
-
-    println!("\nQuick test completed successfully!");
-}
-
-/// Run platform stress test.
-pub fn run_platform_stress_test(timeout_secs: f64) {
-    println!("Running platform stress test...\n");
-    println!("MILP timeout: {}s", timeout_secs);
-
-    let problem = generate_mega_scenario(MegaScenarioConfig::medium());
-    println!("\n{}", problem.summary());
-
-    println!("\n--- Running individual solvers ---\n");
-
-    // Run greedy
-    let start = Instant::now();
-    let greedy = GreedySolver::new();
-    let greedy_result = greedy.solve(&problem);
-    println!(
-        "Greedy: welfare={}, fills={}, time={:.3}s",
-        greedy_result.total_welfare,
-        greedy_result.orders_filled,
-        start.elapsed().as_secs_f64()
-    );
-
-    // Run MILP with timeout
-    let start = Instant::now();
-    let milp = MilpSolver::with_timeout(timeout_secs);
-    let milp_result = milp.solve_with_status(&problem);
-    println!(
-        "MILP: welfare={}, fills={}, status={:?}, time={:.3}s",
-        milp_result.result.total_welfare,
-        milp_result.result.orders_filled,
-        milp_result.status,
-        start.elapsed().as_secs_f64()
-    );
-
-    // Run platform
-    println!("\n--- Running platform ---\n");
-    let platform_config = PlatformConfig {
-        total_time_budget_ms: (timeout_secs * 1000.0 / 0.6) as u64,
-        milp_time_fraction: 0.6,
-        ..Default::default()
-    };
-    let platform = SolverPlatform::with_config(platform_config);
-    let platform_result = platform.solve(&problem);
-
-    platform_result.print_summary();
-}
-
-/// Run realistic scenario test - demonstrates cross-market matching value.
-pub fn run_realistic_test(timeout_secs: f64, config_name: &str) {
-    println!("Running realistic scenario test...\n");
-    println!("Config: {}", config_name);
-    println!("MILP timeout: {}s", timeout_secs);
-
-    let config = match config_name {
-        "extreme" => RealisticConfig::extreme(),
-        "standard" => RealisticConfig::standard(),
-        "cross-market" => RealisticConfig::cross_market_demo(),
-        "small" => RealisticConfig::small(),
-        _ => RealisticConfig::test(),
-    };
-
-    let problem = generate_realistic_scenario(config);
-    println!("\n{}", problem.summary());
-
-    println!("\n--- Running MILP with timeout ---\n");
-
-    let start = std::time::Instant::now();
-    let milp = MilpSolver::with_timeout(timeout_secs);
-    let (milp_result, dual_analysis) = milp.solve_with_duals(&problem);
-    let milp_time = start.elapsed().as_secs_f64();
-
-    println!(
-        "MILP: welfare={}, fills={}, status={:?}, time={:.3}s",
-        milp_result.result.total_welfare,
-        milp_result.result.orders_filled,
-        milp_result.status,
-        milp_time
-    );
-    println!("\n{}", dual_analysis.value_summary());
-
-    println!("\n--- Running greedy ---\n");
-
-    let start = std::time::Instant::now();
-    let greedy = GreedySolver::new();
-    let greedy_result = greedy.solve(&problem);
-    println!(
-        "Greedy: welfare={}, fills={}, time={:.3}s",
-        greedy_result.total_welfare,
-        greedy_result.orders_filled,
-        start.elapsed().as_secs_f64()
-    );
-
-    println!("\n--- Running platform with all solvers ---\n");
-
-    let platform_config = PlatformConfig {
-        total_time_budget_ms: (timeout_secs * 1000.0 / 0.6) as u64,
-        milp_time_fraction: 0.6,
-        include_arbitrage: true,
-        include_bundle_decomposer: true,
-        include_chain_finder: true,
-        ..Default::default()
-    };
-    let platform = SolverPlatform::with_config(platform_config);
-    let platform_result = platform.solve(&problem);
-
-    platform_result.print_summary();
-
-    // Print comparison
-    println!("\n========================================");
-    println!("         COMPARISON SUMMARY             ");
-    println!("========================================\n");
-
-    let milp_welfare = milp_result.result.total_welfare;
-    let greedy_welfare = greedy_result.total_welfare;
-    let platform_welfare = platform_result.result.total_welfare;
-
-    println!("Greedy welfare:   {:>15}", greedy_welfare);
-    println!("MILP welfare:     {:>15}", milp_welfare);
-    println!("Platform welfare: {:>15}", platform_welfare);
-
-    let milp_vs_greedy = if greedy_welfare > 0 {
-        ((milp_welfare as f64 - greedy_welfare as f64) / greedy_welfare as f64) * 100.0
-    } else {
-        0.0
-    };
-    let platform_vs_greedy = if greedy_welfare > 0 {
-        ((platform_welfare as f64 - greedy_welfare as f64) / greedy_welfare as f64) * 100.0
-    } else {
-        0.0
-    };
-    let platform_vs_milp = if milp_welfare > 0 {
-        ((platform_welfare as f64 - milp_welfare as f64) / milp_welfare as f64) * 100.0
-    } else {
-        0.0
-    };
-
-    println!("\nMILP vs Greedy:     {:+.1}%", milp_vs_greedy);
-    println!("Platform vs Greedy: {:+.1}%", platform_vs_greedy);
-    println!("Platform vs MILP:   {:+.1}%", platform_vs_milp);
-
-    if platform_welfare > milp_welfare {
-        println!("\n✓ Platform BEATS MILP-with-timeout!");
-    } else if platform_welfare == milp_welfare {
-        println!("\n= Platform EQUALS MILP-with-timeout");
-    } else {
-        println!("\n✗ MILP-with-timeout beats platform");
-    }
-}
-
-/// Run MILP killer test - designed to force MILP timeout.
-pub fn run_milp_killer_test(timeout_secs: f64, config_name: &str) {
-    println!("Running MILP killer test...\n");
-    println!("Config: {}", config_name);
-    println!("MILP timeout: {}s", timeout_secs);
-
-    let config = match config_name {
-        "extreme" => MilpKillerConfig::extreme(),
-        "full" => MilpKillerConfig::timeout_guaranteed(),
-        _ => MilpKillerConfig::test(),
-    };
-
-    let problem = generate_milp_killer_scenario(config);
-    println!("\n{}", problem.summary());
-
-    println!("\n--- Running MILP with timeout ---\n");
-
-    let start = Instant::now();
-    let milp = MilpSolver::with_timeout(timeout_secs);
-    let milp_result = milp.solve_with_status(&problem);
-    let milp_time = start.elapsed().as_secs_f64();
-
-    println!(
-        "MILP: welfare={}, fills={}, status={:?}, time={:.3}s",
-        milp_result.result.total_welfare,
-        milp_result.result.orders_filled,
-        milp_result.status,
-        milp_time
-    );
-
-    println!("\n--- Running greedy ---\n");
-
-    let start = Instant::now();
-    let greedy = GreedySolver::new();
-    let greedy_result = greedy.solve(&problem);
-    println!(
-        "Greedy: welfare={}, fills={}, time={:.3}s",
-        greedy_result.total_welfare,
-        greedy_result.orders_filled,
-        start.elapsed().as_secs_f64()
-    );
-
-    println!("\n--- Running platform with all solvers ---\n");
-
-    let platform_config = PlatformConfig {
-        total_time_budget_ms: (timeout_secs * 1000.0 / 0.6) as u64,
-        milp_time_fraction: 0.6,
-        include_arbitrage: true,
-        include_bundle_decomposer: true,
-        include_chain_finder: true,
-        ..Default::default()
-    };
-    let platform = SolverPlatform::with_config(platform_config);
-    let platform_result = platform.solve(&problem);
-
-    platform_result.print_summary();
-
-    // Print comparison
-    println!("\n========================================");
-    println!("         COMPARISON SUMMARY             ");
-    println!("========================================\n");
-
-    let milp_welfare = milp_result.result.total_welfare;
-    let platform_welfare = platform_result.result.total_welfare;
-    let improvement = if milp_welfare > 0 {
-        ((platform_welfare as f64 - milp_welfare as f64) / milp_welfare as f64) * 100.0
-    } else {
-        0.0
-    };
-
-    println!("MILP welfare:     {}", milp_welfare);
-    println!("Platform welfare: {}", platform_welfare);
-    println!("Improvement:      {:.2}%", improvement);
-
-    if platform_welfare > milp_welfare {
-        println!("\n✓ Platform BEATS MILP-with-timeout!");
-    } else if platform_welfare == milp_welfare {
-        println!("\n= Platform EQUALS MILP-with-timeout");
-    } else {
-        println!("\n✗ MILP-with-timeout beats platform");
-    }
 }
 
 fn main() {

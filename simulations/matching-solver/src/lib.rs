@@ -6,59 +6,51 @@
 //! - [`MultiHeuristicSolver`]: Tries multiple sorting strategies, returns best
 //! - [`MilpSolver`]: Optimal via MILP (requires `milp` feature)
 //! - [`CompositeSolver`]: Combines specialized solvers with problem decomposition
+//! - [`SolverPlatform`]: Production-ready platform combining all solvers
 //!
-//! # Solver Composition
+//! # Quick Start
 //!
-//! The [`composition`] module provides infrastructure for:
-//! - Problem analysis and decomposition into clusters
-//! - Partial solution merging with conflict resolution
-//! - Routing sub-problems to appropriate solvers
+//! ```ignore
+//! use matching_solver::{Solver, GreedySolver};
 //!
-//! # Solution Combining
+//! let solver = GreedySolver::new();
+//! let result = solver.solve(&problem);
+//! println!("Welfare: {}, Filled: {}", result.total_welfare, result.orders_filled);
+//! ```
 //!
-//! The [`combiner`] module provides platform-style solution combining:
-//! - Multiple independent solvers propose complete solutions
-//! - MWIS selects best non-conflicting fills
+//! For optimal solutions (with time budget):
 //!
-//! # Specialized Solvers
+//! ```ignore
+//! use matching_solver::{SolverPlatform, PlatformConfig};
 //!
-//! The [`specialized`] module provides:
-//! - [`ArbitrageDetector`]: Finds riskless profit opportunities
-//! - [`ConditionalEvaluator`]: Handles price-triggered orders
+//! let platform = SolverPlatform::with_config(PlatformConfig {
+//!     total_time_budget_ms: 5000,
+//!     ..Default::default()
+//! });
+//! let result = platform.solve(&problem);
+//! ```
 
-pub mod combiner;
-pub mod composition;
+// Internal modules
+pub(crate) mod combiner;
+pub(crate) mod composition;
 pub mod greedy;
 pub mod platform;
 pub mod randomized;
-pub mod specialized;
+pub(crate) mod specialized;
 
 #[cfg(feature = "milp")]
 pub mod milp;
 
+// === Public API ===
+
+// Core solvers
 pub use greedy::GreedySolver;
 pub use randomized::{MultiHeuristicSolver, RandomizedGreedySolver};
+pub use composition::CompositeSolver;
+pub use platform::{PlatformConfig, PlatformResult, SolverPlatform};
 
 #[cfg(feature = "milp")]
 pub use milp::{MilpConfig, MilpResult, MilpSolver, SolveStatus};
-
-// Composition exports
-pub use composition::{
-    ClusterInfo, CompositeSolver, Decomposer, MarketGraph, PartialSolution, ProblemAnalysis,
-    SolutionConfidence, SolutionMerger, SolverBuilder, SubProblem,
-};
-
-// Specialized solver exports
-pub use specialized::{ArbitrageDetector, BundleDecomposer, ChainFinder, ConditionalEvaluator};
-
-// Combiner exports
-pub use combiner::{
-    CombineStats, CombinerConfig, ConflictGraph, FillFootprint, MwisAlgorithm, MwisSolver,
-    SolutionCombiner, SolverContribution, SolverSolution,
-};
-
-// Platform exports
-pub use platform::{PlatformConfig, PlatformResult, SolverPlatform, SolverResultInfo};
 
 use matching_engine::{LiquidityPool, Order, Fill, Problem};
 

@@ -5,10 +5,10 @@
 
 use std::collections::HashMap;
 
-use matching_engine::{Fill, LiquidityPool, MarketId, Nanos, Qty};
+use matching_engine::{Fill, MarketId, Nanos, Qty};
 
 /// Confidence level for a solution.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum SolutionConfidence {
     /// Proven optimal (e.g., MILP with exact solution)
     Optimal,
@@ -18,6 +18,7 @@ pub enum SolutionConfidence {
         gap_percent: f64,
     },
     /// Heuristic solution with unknown gap
+    #[default]
     Heuristic,
 }
 
@@ -60,11 +61,6 @@ impl SolutionConfidence {
     }
 }
 
-impl Default for SolutionConfidence {
-    fn default() -> Self {
-        SolutionConfidence::Heuristic
-    }
-}
 
 impl std::fmt::Display for SolutionConfidence {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

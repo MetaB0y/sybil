@@ -13,9 +13,10 @@ use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
 /// Algorithm to use for MWIS.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum MwisAlgorithm {
     /// Automatically select based on problem size
+    #[default]
     Auto,
     /// Greedy: weight / (1 + degree) priority
     Greedy,
@@ -26,11 +27,6 @@ pub enum MwisAlgorithm {
     ExactIlp,
 }
 
-impl Default for MwisAlgorithm {
-    fn default() -> Self {
-        MwisAlgorithm::Auto
-    }
-}
 
 /// MWIS solver.
 pub struct MwisSolver {
@@ -74,7 +70,6 @@ impl MwisSolver {
         match self.algorithm {
             MwisAlgorithm::Auto => {
                 let n = graph.num_nodes();
-                let density = graph.density();
 
                 if n <= 50 {
                     // Small: use exact ILP if available

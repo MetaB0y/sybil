@@ -116,18 +116,18 @@ impl ConstraintSet {
             match constraint {
                 MarketConstraint::Implication { if_true, then_true } => {
                     // If antecedent is true, consequent must be true
-                    if get_outcome(if_true.0) == Some(if_true.1) {
-                        if get_outcome(then_true.0) != Some(then_true.1) {
-                            return false;
-                        }
+                    if get_outcome(if_true.0) == Some(if_true.1)
+                        && get_outcome(then_true.0) != Some(then_true.1)
+                    {
+                        return false;
                     }
                 }
                 MarketConstraint::Hierarchy { parent, child } => {
                     // Parent true implies child true
-                    if get_outcome(parent.0) == Some(parent.1) {
-                        if get_outcome(child.0) != Some(child.1) {
-                            return false;
-                        }
+                    if get_outcome(parent.0) == Some(parent.1)
+                        && get_outcome(child.0) != Some(child.1)
+                    {
+                        return false;
                     }
                 }
                 MarketConstraint::MutuallyExclusive { outcomes } => {

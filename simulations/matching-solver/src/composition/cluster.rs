@@ -4,9 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use matching_engine::{
-    ConstraintSet, LiquidityPool, Market, MarketId, MarketSet, Order, Problem, MAX_STATES,
-};
+use matching_engine::{MarketId, Problem, MAX_STATES};
 
 use super::analysis::{ClusterInfo, MarketGraph, ProblemAnalysis, SolverRecommendation};
 

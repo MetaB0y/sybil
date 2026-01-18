@@ -87,7 +87,6 @@ pub fn generate_nested_bundle_scenario(config: NestedBundleConfig) -> Problem {
         };
 
         // Create payoff vector for bundle (buying YES on all markets)
-        let num_states = 1 << bundle_markets.len();
 
         let limit_price = rng.gen_range(300_000_000..800_000_000);
         let max_fill = rng.gen_range(50..200);
@@ -232,8 +231,7 @@ pub fn generate_deep_implication_scenario(config: DeepImplicationConfig) -> Prob
 
     // Add orders for each market
     let mut order_id = 1u64;
-    for i in 0..config.chain_depth {
-        let market = market_ids[i];
+    for &market in market_ids.iter().take(config.chain_depth) {
 
         for _j in 0..config.orders_per_market {
             let limit_price = rng.gen_range(300_000_000..800_000_000);

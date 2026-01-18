@@ -5,8 +5,6 @@
 //! 2. Bundle underpricing: Sum of legs < bundle price
 //! 3. Cross-market mispricing: Same effective exposure at different prices
 
-use std::collections::HashMap;
-
 use matching_engine::{
     ConstraintSet, Fill, LiquidityPool, MarketConstraint, MarketId, Nanos, Order, Problem, Qty,
 };
@@ -309,7 +307,7 @@ impl ArbitrageDetector {
     /// Exploit constraint arbitrage by prioritizing orders early in implication chains.
     fn exploit_constraint_arbitrage(
         &self,
-        opp: &ArbitrageOpportunity,
+        _opp: &ArbitrageOpportunity,
         problem: &Problem,
         result: &mut MatchingResult,
         filled_orders: &mut std::collections::HashSet<u64>,

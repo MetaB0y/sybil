@@ -3,7 +3,7 @@
 //! Provides a fluent API for constructing composite solvers with
 //! custom configurations, routing rules, and specialized solvers.
 
-use super::composite::{CompositeConfig, CompositeSolver, SolverRouting, SolverType};
+use super::composite::{CompositeConfig, CompositeSolver, SolverRouting};
 use super::merge::ConflictStrategy;
 
 /// Builder for creating configured composite solvers.

@@ -3,18 +3,19 @@
 //! Merges partial solutions from multiple solvers/clusters while
 //! handling conflicts and validating liquidity constraints.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
-use matching_engine::{Fill, LiquidityPool, MarketId, Order, Problem, Qty};
+use matching_engine::{Fill, LiquidityPool, Order, Problem, Qty};
 
 use crate::MatchingResult;
 
 use super::partial::{MergeStats, PartialSolution, SolutionConfidence};
 
 /// Strategy for resolving conflicts when merging solutions.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ConflictStrategy {
     /// Prefer the solution with higher confidence
+    #[default]
     ByConfidence,
     /// Prefer the solution with higher welfare
     ByWelfare,
@@ -24,11 +25,6 @@ pub enum ConflictStrategy {
     Greedy,
 }
 
-impl Default for ConflictStrategy {
-    fn default() -> Self {
-        ConflictStrategy::ByConfidence
-    }
-}
 
 /// Merges partial solutions into a complete matching result.
 pub struct SolutionMerger {
@@ -108,7 +104,7 @@ impl SolutionMerger {
             // Skip if this order was already filled
             if self.filled_orders.contains(original_order_idx) {
                 self.stats.num_conflicts += 1;
-                if let Some(existing_fill) = result.fills.iter().find(|f| f.order_id == fill.order_id) {
+                if result.fills.iter().any(|f| f.order_id == fill.order_id) {
                     // Calculate welfare of the skipped fill
                     if let Some(order) = problem.orders.get(*original_order_idx) {
                         let skipped_welfare = fill.welfare(order);
@@ -227,7 +223,7 @@ impl Default for MergerBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matching_engine::{simple_yes_buy, simple_no_buy};
+    use matching_engine::{simple_yes_buy, simple_no_buy, MarketId};
 
     fn create_test_problem_and_liquidity() -> (Problem, LiquidityPool) {
         let mut problem = Problem::new("test");

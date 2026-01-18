@@ -224,7 +224,7 @@ impl SweepCollector {
         let mut wtr = csv::Writer::from_path(path)?;
 
         // Write header
-        wtr.write_record(&[
+        wtr.write_record([
             "parameter_name",
             "parameter_value",
             "tax_mechanism",

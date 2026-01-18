@@ -1027,7 +1027,7 @@ fn plant_complement_sets(
 
     // Select a smaller set of "complement hot" market pairs
     // This concentrates complement sets so BundleDecomposer can find them
-    let num_hot_pairs = (config.planted_complement_sets / 3).max(5).min(20);
+    let num_hot_pairs = (config.planted_complement_sets / 3).clamp(5, 20);
     let mut hot_pairs: Vec<(MarketId, MarketId)> = Vec::new();
 
     for _ in 0..num_hot_pairs {

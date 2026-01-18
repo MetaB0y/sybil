@@ -60,11 +60,11 @@ pub fn generate_planted_chain_scenario(config: PlantedChainConfig) -> Problem {
     ));
 
     // Create chain markets: Champion → Finalist → Semifinalist → ...
-    let level_names = vec!["Champion", "Finalist", "Semifinalist", "Quarterfinalist", "Participant"];
+    let level_names = ["Champion", "Finalist", "Semifinalist", "Quarterfinalist", "Participant"];
     let mut chain_markets: Vec<MarketId> = Vec::new();
 
-    for i in 0..config.chain_length.min(level_names.len()) {
-        let market = problem.markets.add(level_names[i], vec!["Team_A".to_string(), "Other".to_string()]);
+    for &name in level_names.iter().take(config.chain_length.min(level_names.len())) {
+        let market = problem.markets.add(name, vec!["Team_A".to_string(), "Other".to_string()]);
         chain_markets.push(market);
     }
 
@@ -189,6 +189,7 @@ impl Default for PlantedComplementConfig {
 /// - Bundle 2: YES/NO  (state 1) at $0.26
 /// - Bundle 3: NO/YES  (state 2) at $0.25
 /// - Bundle 4: NO/NO   (state 3) at $0.24
+///
 /// Total: $1.03 for guaranteed $1.00 payout
 ///
 /// BundleDecomposer should recognize: filling all 4 together = guaranteed profit!
@@ -228,7 +229,7 @@ pub fn generate_planted_complement_scenario(config: PlantedComplementConfig) -> 
     }
 
     // Add liquidity for individual outcomes
-    for (i, &market) in market_ids.iter().enumerate() {
+    for &market in market_ids.iter() {
         // Mid price around 0.5
         let mid = 0.4 + rng.gen_range(0.0..0.2);
         problem.liquidity.add_ask(market, 0, price_to_nanos(mid), 1000);
@@ -239,12 +240,9 @@ pub fn generate_planted_complement_scenario(config: PlantedComplementConfig) -> 
 
     // Create the complement bundle orders
     // For 2 markets, states are: 00, 01, 10, 11
-    for state_idx in 0..num_states {
-        let price = state_prices[state_idx];
-
+    for (state_idx, &price) in state_prices.iter().enumerate().take(num_states) {
         // Build the bundle for this state
         // State index encodes which outcome for each market
-        let bundle_markets: Vec<MarketId> = market_ids.clone();
 
         // Create payoff structure: pays 1 only in this state
         // For bundle_yes, we're buying YES on specific outcomes

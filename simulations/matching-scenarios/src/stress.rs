@@ -157,7 +157,7 @@ pub fn generate_mega_scenario(config: MegaScenarioConfig) -> Problem {
         let mut constraint_builder = ConstraintBuilder::new();
 
         // Create chains of implications
-        for chain in 0..config.implication_chains {
+        for _chain in 0..config.implication_chains {
             let chain_length = rng.gen_range(2..=4.min(market_ids.len()));
             let mut chain_markets: Vec<usize> = (0..market_ids.len()).collect();
             chain_markets.shuffle(&mut rng);
@@ -433,7 +433,7 @@ fn inject_stress_conflicts(problem: &mut Problem, rng: &mut StdRng, market_ids: 
     let conflict_count = problem.orders.len() / 4;
     if conflict_count > 1 && !market_ids.is_empty() {
         // Pick a few "hot" markets with extra demand
-        let num_hot_markets = (market_ids.len() / 5).max(2).min(5);
+        let num_hot_markets = (market_ids.len() / 5).clamp(2, 5);
         let mut hot_markets: Vec<MarketId> = market_ids.to_vec();
         hot_markets.shuffle(rng);
         hot_markets.truncate(num_hot_markets);
@@ -526,11 +526,11 @@ fn merge_subproblem(
 
     for market in sub.markets.iter() {
         let old_id = market.id;
-        let new_id = MarketId::new(*market_id_offset);
+        let _new_id = MarketId::new(*market_id_offset);
         *market_id_offset += 1;
 
         // Add market to main problem
-        let outcomes: Vec<String> = market.outcomes.iter().cloned().collect();
+        let outcomes: Vec<String> = market.outcomes.to_vec();
         let created_id = main.markets.add(&market.name, outcomes);
         market_mapping.insert(old_id, created_id);
     }
@@ -692,7 +692,7 @@ pub fn generate_milp_killer_scenario(config: MilpKillerConfig) -> Problem {
     // This creates complex constraint propagation for MILP
     let mut constraint_builder = ConstraintBuilder::new();
 
-    for chain in 0..config.implication_chains {
+    for _chain in 0..config.implication_chains {
         // Create a chain of length 5-10
         let chain_length = rng.gen_range(5..=10.min(config.num_markets));
         let mut chain_markets: Vec<usize> = (0..market_ids.len()).collect();

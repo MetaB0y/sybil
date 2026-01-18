@@ -7,6 +7,7 @@
 //! - Bundle 2: YES/NO  (state 1) at $0.26
 //! - Bundle 3: NO/YES  (state 2) at $0.25
 //! - Bundle 4: NO/NO   (state 3) at $0.24
+//!
 //! Total: $1.03 for guaranteed $1.00 payout
 //!
 //! Together = guaranteed profit if filled!
@@ -234,8 +235,8 @@ impl BundleDecomposer {
         let mut current = vec![0; k];
 
         // Initialize first subset
-        for i in 0..k {
-            current[i] = i;
+        for (i, slot) in current.iter_mut().enumerate().take(k) {
+            *slot = i;
         }
 
         loop {
