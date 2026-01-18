@@ -89,6 +89,56 @@ pub struct MilpResult {
     pub solve_time_secs: f64,
 }
 
+/// Analysis of dual prices from MILP solution.
+///
+/// Dual prices (shadow prices) indicate the marginal value of relaxing constraints:
+/// - High liquidity dual → Market is scarce, bundles sharing it create value
+/// - Binding constraint → Opportunity for cross-market optimization
+#[derive(Clone, Debug, Default)]
+pub struct DualAnalysis {
+    /// Shadow prices for liquidity constraints per (market_id, outcome).
+    /// High values indicate scarce, valuable liquidity.
+    pub liquidity_duals: HashMap<(MarketId, u8), f64>,
+    /// Number of binding liquidity constraints (at capacity)
+    pub binding_liquidity_constraints: usize,
+    /// Number of binding AON constraints
+    pub binding_aon_constraints: usize,
+    /// Total number of constraints in the model
+    pub total_constraints: usize,
+    /// Objective value (total welfare)
+    pub objective_value: f64,
+}
+
+impl DualAnalysis {
+    /// Get the most scarce markets (highest dual prices).
+    pub fn scarce_markets(&self, top_n: usize) -> Vec<((MarketId, u8), f64)> {
+        let mut pairs: Vec<_> = self.liquidity_duals.iter()
+            .map(|(&k, &v)| (k, v))
+            .collect();
+        pairs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        pairs.truncate(top_n);
+        pairs
+    }
+
+    /// Summary of where cross-market value comes from.
+    pub fn value_summary(&self) -> String {
+        let scarce = self.scarce_markets(5);
+        let binding_pct = if self.total_constraints > 0 {
+            (self.binding_liquidity_constraints as f64 / self.total_constraints as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        format!(
+            "Dual Analysis:\n  Binding liquidity: {} ({:.1}% of constraints)\n  Binding AON: {}\n  Top scarce markets: {:?}",
+            self.binding_liquidity_constraints,
+            binding_pct,
+            self.binding_aon_constraints,
+            scarce.iter().map(|((m, o), d)| format!("M{}O{}:{:.2}", m.0, o, d)).collect::<Vec<_>>()
+        )
+    }
+}
+
 /// MILP solver that finds the optimal matching solution.
 pub struct MilpSolver {
     config: MilpConfig,
@@ -111,6 +161,83 @@ impl MilpSolver {
         Self {
             config: MilpConfig::with_timeout(timeout_secs),
         }
+    }
+
+    /// Solve and extract dual prices to understand value sources.
+    ///
+    /// The dual analysis provides insight into:
+    /// - Which markets are scarce (high shadow price)
+    /// - Where cross-market value comes from
+    /// - Which constraints are binding
+    pub fn solve_with_duals(&self, problem: &Problem) -> (MilpResult, DualAnalysis) {
+        let result = self.solve_with_status(problem);
+
+        // Compute dual analysis by analyzing the solution
+        let analysis = self.compute_dual_analysis(problem, &result);
+
+        (result, analysis)
+    }
+
+    /// Compute dual analysis from the solution.
+    ///
+    /// Since HiGHS MIP doesn't provide true duals, we approximate by analyzing
+    /// which constraints are binding (at capacity).
+    fn compute_dual_analysis(&self, problem: &Problem, result: &MilpResult) -> DualAnalysis {
+        let mut analysis = DualAnalysis::default();
+
+        // Compute available liquidity
+        let available_liq = Self::compute_available_liquidity(problem);
+
+        // Compute consumed liquidity from fills
+        let mut consumed: HashMap<(MarketId, u8), u64> = HashMap::new();
+        for fill in &result.result.fills {
+            if let Some(order) = problem.orders.iter().find(|o| o.id == fill.order_id) {
+                let targets = Self::extract_order_targets(order);
+                for (market, outcome) in targets {
+                    *consumed.entry((market, outcome)).or_default() += fill.fill_qty;
+                }
+            }
+        }
+
+        // Identify binding constraints and estimate shadow prices
+        for ((market, outcome), available) in &available_liq {
+            let used = consumed.get(&(*market, *outcome)).copied().unwrap_or(0);
+            let utilization = if *available > 0 {
+                used as f64 / *available as f64
+            } else {
+                0.0
+            };
+
+            // Estimate shadow price based on utilization
+            // Binding constraints (>99% utilized) have high shadow price
+            let shadow_price = if utilization > 0.99 {
+                analysis.binding_liquidity_constraints += 1;
+                1.0  // Fully bound
+            } else if utilization > 0.9 {
+                0.5 + (utilization - 0.9) * 5.0  // Near-bound
+            } else {
+                utilization * 0.5  // Slack
+            };
+
+            analysis.liquidity_duals.insert((*market, *outcome), shadow_price);
+        }
+
+        // Count AON constraints (orders that couldn't be partially filled)
+        for order in &problem.orders {
+            if order.is_all_or_none() {
+                let filled = result.result.fills.iter()
+                    .any(|f| f.order_id == order.id);
+                if !filled {
+                    analysis.binding_aon_constraints += 1;
+                }
+            }
+        }
+
+        analysis.total_constraints = available_liq.len() +
+            problem.orders.iter().filter(|o| o.is_all_or_none()).count();
+        analysis.objective_value = result.result.total_welfare as f64;
+
+        analysis
     }
 
     /// Solve with full status reporting.

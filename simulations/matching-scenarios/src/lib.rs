@@ -25,8 +25,10 @@
 //! - Combined scenarios merging multiple scenario types
 
 pub mod complex;
+pub mod planted;
 pub mod presidential;
 pub mod random;
+pub mod realistic;
 pub mod stress;
 pub mod tournament;
 
@@ -48,4 +50,17 @@ pub use complex::{
 };
 
 // Re-export stress scenarios
-pub use stress::{generate_mega_scenario, generate_combined_scenario, MegaScenarioConfig};
+pub use stress::{
+    generate_mega_scenario, generate_combined_scenario, generate_milp_killer_scenario,
+    MegaScenarioConfig, MilpKillerConfig,
+};
+
+// Re-export planted scenarios
+pub use planted::{
+    generate_planted_chain_scenario, generate_planted_complement_scenario,
+    generate_planted_exclusion_scenario, PlantedChainConfig, PlantedComplementConfig,
+    PlantedExclusionConfig,
+};
+
+// Re-export realistic scenarios
+pub use realistic::{generate_realistic_scenario, RealisticConfig};

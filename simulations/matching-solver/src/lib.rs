@@ -49,7 +49,7 @@ pub use composition::{
 };
 
 // Specialized solver exports
-pub use specialized::{ArbitrageDetector, ConditionalEvaluator};
+pub use specialized::{ArbitrageDetector, BundleDecomposer, ChainFinder, ConditionalEvaluator};
 
 // Combiner exports
 pub use combiner::{

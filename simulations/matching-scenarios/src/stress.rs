@@ -572,6 +572,352 @@ fn merge_subproblem(
     // and may not make sense across different scenarios
 }
 
+/// Configuration for MILP-killer scenarios designed to force MILP timeout.
+///
+/// Key insight: MILP struggles with:
+/// - High all-or-none fraction (binary variables)
+/// - Hot markets with severe scarcity (creates competing solutions)
+/// - Deep constraint chains (complex branch-and-bound)
+#[derive(Clone, Debug)]
+pub struct MilpKillerConfig {
+    /// Random seed
+    pub seed: u64,
+    /// Number of markets (100-200)
+    pub num_markets: usize,
+    /// Number of orders (10000-50000)
+    pub num_orders: usize,
+    /// Fraction of all-or-none orders (0.4-0.6 creates more binary vars)
+    pub aon_fraction: f64,
+    /// Fraction of multi-market bundle orders (0.3-0.5)
+    pub bundle_fraction: f64,
+    /// Liquidity scarcity factor (0.15-0.25 is severe)
+    pub liquidity_scarcity: f64,
+    /// Fraction of markets that are "hot" (10% get 80% demand)
+    pub hot_market_fraction: f64,
+    /// Depth of implication chains (5-10 deep)
+    pub implication_chains: usize,
+    /// Number of mutual exclusion groups (20-50)
+    pub exclusion_groups: usize,
+}
+
+impl Default for MilpKillerConfig {
+    fn default() -> Self {
+        Self::timeout_guaranteed()
+    }
+}
+
+impl MilpKillerConfig {
+    /// Configuration guaranteed to cause MILP timeout on most systems.
+    /// 10k orders, 100 markets.
+    pub fn timeout_guaranteed() -> Self {
+        Self {
+            seed: 42,
+            num_markets: 100,
+            num_orders: 10000,
+            aon_fraction: 0.45,
+            bundle_fraction: 0.35,
+            liquidity_scarcity: 0.2,
+            hot_market_fraction: 0.1,
+            implication_chains: 8,
+            exclusion_groups: 30,
+        }
+    }
+
+    /// Extreme configuration: 50k orders, 200 markets.
+    pub fn extreme() -> Self {
+        Self {
+            seed: 42,
+            num_markets: 200,
+            num_orders: 50000,
+            aon_fraction: 0.5,
+            bundle_fraction: 0.4,
+            liquidity_scarcity: 0.15,
+            hot_market_fraction: 0.1,
+            implication_chains: 10,
+            exclusion_groups: 50,
+        }
+    }
+
+    /// Smaller config for faster testing (still hard for MILP).
+    pub fn test() -> Self {
+        Self {
+            seed: 42,
+            num_markets: 50,
+            num_orders: 3000,
+            aon_fraction: 0.4,
+            bundle_fraction: 0.3,
+            liquidity_scarcity: 0.25,
+            hot_market_fraction: 0.1,
+            implication_chains: 5,
+            exclusion_groups: 15,
+        }
+    }
+}
+
+/// Generate a MILP-killer scenario designed to force solver timeout.
+///
+/// This scenario maximizes problem complexity for MILP solvers:
+/// - High all-or-none fraction creates many binary variables
+/// - Severe liquidity scarcity creates competing solutions
+/// - Deep implication chains make branch-and-bound expensive
+/// - Hot markets concentrate demand, creating conflicts
+pub fn generate_milp_killer_scenario(config: MilpKillerConfig) -> Problem {
+    let mut rng = StdRng::seed_from_u64(config.seed);
+    let mut problem = Problem::new(format!(
+        "MilpKiller(markets={}, orders={}, aon={}%, bundles={}%, liq={}%)",
+        config.num_markets,
+        config.num_orders,
+        (config.aon_fraction * 100.0) as i32,
+        (config.bundle_fraction * 100.0) as i32,
+        (config.liquidity_scarcity * 100.0) as i32
+    ));
+
+    // Create markets (all binary for simplicity)
+    let mut market_ids: Vec<MarketId> = Vec::new();
+    let mut market_prices: Vec<f64> = Vec::new();
+
+    for i in 0..config.num_markets {
+        let market = problem.markets.add(format!("M{}", i), vec!["Yes".to_string(), "No".to_string()]);
+        market_ids.push(market);
+        market_prices.push(rng.gen_range(0.2..0.8));
+    }
+
+    // Identify "hot" markets (10% get 80% of demand)
+    let num_hot = (config.num_markets as f64 * config.hot_market_fraction).max(1.0) as usize;
+    let mut hot_markets: Vec<MarketId> = market_ids.clone();
+    hot_markets.shuffle(&mut rng);
+    hot_markets.truncate(num_hot);
+
+    // Add deep implication chains (A→B→C→D→E)
+    // This creates complex constraint propagation for MILP
+    let mut constraint_builder = ConstraintBuilder::new();
+
+    for chain in 0..config.implication_chains {
+        // Create a chain of length 5-10
+        let chain_length = rng.gen_range(5..=10.min(config.num_markets));
+        let mut chain_markets: Vec<usize> = (0..market_ids.len()).collect();
+        chain_markets.shuffle(&mut rng);
+        chain_markets.truncate(chain_length);
+
+        // Create implication chain: A→B→C→...
+        for i in 0..chain_markets.len() - 1 {
+            let m1 = market_ids[chain_markets[i]];
+            let m2 = market_ids[chain_markets[i + 1]];
+            constraint_builder = constraint_builder.implies(m1, 0, m2, 0);
+        }
+    }
+
+    // Add mutual exclusion groups
+    for _ in 0..config.exclusion_groups {
+        let group_size = rng.gen_range(2..=4);
+        let mut group_markets: Vec<usize> = (0..market_ids.len()).collect();
+        group_markets.shuffle(&mut rng);
+        group_markets.truncate(group_size);
+
+        let outcomes: Vec<(MarketId, u8)> = group_markets
+            .iter()
+            .map(|&i| (market_ids[i], 0))
+            .collect();
+        constraint_builder = constraint_builder.mutually_exclusive(outcomes);
+    }
+
+    problem.constraints = constraint_builder.build();
+
+    // Add liquidity with severe scarcity
+    let avg_order_qty = 50u64;
+    let total_demand_estimate = config.num_orders as u64 * avg_order_qty;
+    let total_supply = (total_demand_estimate as f64 * config.liquidity_scarcity) as Qty;
+    let supply_per_market = total_supply / config.num_markets as Qty;
+
+    // Hot markets get less liquidity (creates more competition)
+    for (i, &market) in market_ids.iter().enumerate() {
+        let mid_price = market_prices[i];
+        let is_hot = hot_markets.contains(&market);
+        let market_supply = if is_hot {
+            supply_per_market / 3 // Hot markets get 1/3 the supply
+        } else {
+            supply_per_market
+        };
+
+        for outcome in 0..2u8 {
+            let outcome_price = if outcome == 0 { mid_price } else { 1.0 - mid_price };
+
+            // Multiple price levels
+            for level in 0..4 {
+                let offset = 0.08 * (level as f64 + 1.0) / 4.0;
+                let level_supply = market_supply / 8;
+
+                let ask_price = (outcome_price + offset).min(0.98);
+                problem.liquidity.add_ask(
+                    market,
+                    outcome,
+                    price_to_nanos(ask_price),
+                    level_supply.max(5),
+                );
+
+                let bid_price = (outcome_price - offset).max(0.02);
+                problem.liquidity.add_bid(
+                    market,
+                    outcome,
+                    price_to_nanos(bid_price),
+                    level_supply.max(5),
+                );
+            }
+        }
+    }
+
+    // Generate orders
+    let num_bundles = (config.num_orders as f64 * config.bundle_fraction) as usize;
+    let num_aon_single = (config.num_orders as f64 * config.aon_fraction * 0.7) as usize;
+    let num_simple = config.num_orders - num_bundles - num_aon_single;
+
+    let mut order_id = 1u64;
+
+    // Simple orders (mix of regular and AON)
+    for _ in 0..num_simple {
+        let order = generate_milp_killer_simple_order(
+            &problem.markets,
+            &mut rng,
+            &mut order_id,
+            &market_ids,
+            &market_prices,
+            &hot_markets,
+            false, // not AON
+        );
+        problem.orders.push(order);
+    }
+
+    // All-or-none simple orders (creates binary variables)
+    for _ in 0..num_aon_single {
+        let order = generate_milp_killer_simple_order(
+            &problem.markets,
+            &mut rng,
+            &mut order_id,
+            &market_ids,
+            &market_prices,
+            &hot_markets,
+            true, // AON
+        );
+        problem.orders.push(order);
+    }
+
+    // Bundle orders (multi-market)
+    for _ in 0..num_bundles {
+        let order = generate_milp_killer_bundle_order(
+            &problem.markets,
+            &mut rng,
+            &mut order_id,
+            &market_ids,
+            &market_prices,
+            &hot_markets,
+        );
+        problem.orders.push(order);
+    }
+
+    // Shuffle to avoid order-dependent behavior
+    problem.orders.shuffle(&mut rng);
+
+    problem
+}
+
+fn generate_milp_killer_simple_order(
+    markets: &MarketSet,
+    rng: &mut StdRng,
+    order_id: &mut u64,
+    market_ids: &[MarketId],
+    market_prices: &[f64],
+    hot_markets: &[MarketId],
+    is_aon: bool,
+) -> Order {
+    let id = *order_id;
+    *order_id += 1;
+
+    // 70% chance to target hot markets
+    let market_idx = if rng.gen_bool(0.7) && !hot_markets.is_empty() {
+        let hot_idx = rng.gen_range(0..hot_markets.len());
+        market_ids.iter().position(|&m| m == hot_markets[hot_idx]).unwrap_or(0)
+    } else {
+        rng.gen_range(0..market_ids.len())
+    };
+
+    let market = market_ids[market_idx];
+    let outcome = rng.gen_range(0..2u8);
+    let base_price = if outcome == 0 {
+        market_prices[market_idx]
+    } else {
+        1.0 - market_prices[market_idx]
+    };
+
+    let aggressiveness = rng.gen_range(-0.05..0.2);
+    let limit = (base_price + aggressiveness).clamp(0.05, 0.95);
+
+    let qty: Qty = if is_aon {
+        // AON orders tend to be larger (harder to fill)
+        rng.gen_range(30..100)
+    } else {
+        rng.gen_range(10..60)
+    };
+
+    let mut order = outcome_buy(markets, id, market, outcome, price_to_nanos(limit), qty);
+    if is_aon {
+        order.min_fill = order.max_fill; // All-or-none
+    }
+    order
+}
+
+fn generate_milp_killer_bundle_order(
+    markets: &MarketSet,
+    rng: &mut StdRng,
+    order_id: &mut u64,
+    market_ids: &[MarketId],
+    market_prices: &[f64],
+    hot_markets: &[MarketId],
+) -> Order {
+    let id = *order_id;
+    *order_id += 1;
+
+    // Bundle 2-4 markets (limited to stay under 32 states)
+    let num_to_bundle = rng.gen_range(2..=4);
+    let mut selected: Vec<usize> = Vec::new();
+
+    // 60% chance each slot includes a hot market
+    for _ in 0..num_to_bundle {
+        let idx = if rng.gen_bool(0.6) && !hot_markets.is_empty() {
+            let hot_idx = rng.gen_range(0..hot_markets.len());
+            market_ids.iter().position(|&m| m == hot_markets[hot_idx]).unwrap_or(0)
+        } else {
+            rng.gen_range(0..market_ids.len())
+        };
+        if !selected.contains(&idx) {
+            selected.push(idx);
+        }
+    }
+
+    if selected.len() < 2 {
+        // Fallback to simple order
+        selected = vec![rng.gen_range(0..market_ids.len()), rng.gen_range(0..market_ids.len())];
+        selected.dedup();
+        if selected.len() < 2 {
+            selected.push((selected[0] + 1) % market_ids.len());
+        }
+    }
+
+    let bundle_markets: Vec<MarketId> = selected.iter().map(|&i| market_ids[i]).collect();
+    let combined_prob: f64 = selected.iter().map(|&i| market_prices[i]).product();
+
+    let limit = (combined_prob * rng.gen_range(0.8..1.4)).clamp(0.01, 0.95);
+    let qty: Qty = rng.gen_range(10..50);
+
+    let mut order = bundle_yes(markets, id, &bundle_markets, price_to_nanos(limit), qty);
+
+    // 50% of bundles are all-or-none
+    if rng.gen_bool(0.5) {
+        order.min_fill = order.max_fill;
+    }
+
+    order
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -609,5 +955,29 @@ mod tests {
         // Check that some orders are bundles (multi-market)
         let bundle_count = problem.orders.iter().filter(|o| o.num_markets > 1).count();
         assert!(bundle_count > 0);
+    }
+
+    #[test]
+    fn test_milp_killer_test_config() {
+        let problem = generate_milp_killer_scenario(MilpKillerConfig::test());
+        assert!(problem.markets.len() >= 50);
+        assert!(problem.orders.len() >= 3000);
+        // Should have significant AON orders
+        let aon_count = problem.orders.iter().filter(|o| o.is_all_or_none()).count();
+        assert!(aon_count > 1000, "Expected many AON orders for MILP complexity");
+        // Should have bundles
+        let bundle_count = problem.orders.iter().filter(|o| o.num_markets > 1).count();
+        assert!(bundle_count > 500, "Expected many bundle orders");
+        // Should have constraints
+        assert!(problem.constraints.len() > 0);
+    }
+
+    #[test]
+    fn test_milp_killer_has_hot_markets() {
+        let config = MilpKillerConfig::test();
+        let problem = generate_milp_killer_scenario(config);
+        // Problem should be generated with scarcity
+        let summary = problem.summary();
+        assert!(summary.aon_orders > 0);
     }
 }

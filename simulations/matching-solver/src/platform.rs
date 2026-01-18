@@ -40,6 +40,7 @@ use crate::combiner::{
     CombineStats, SolutionCombiner, SolverContribution, SolverSolution,
 };
 use crate::composition::SolutionConfidence;
+use crate::specialized::{ArbitrageDetector, BundleDecomposer, ChainFinder};
 use crate::{GreedySolver, MatchingResult, RandomizedGreedySolver, Solver};
 
 #[cfg(feature = "milp")]
@@ -64,6 +65,12 @@ pub struct PlatformConfig {
     pub include_randomized: bool,
     /// Whether to include MILP solver (if feature enabled)
     pub include_milp: bool,
+    /// Whether to include arbitrage detector
+    pub include_arbitrage: bool,
+    /// Whether to include bundle decomposer
+    pub include_bundle_decomposer: bool,
+    /// Whether to include chain finder
+    pub include_chain_finder: bool,
 }
 
 impl Default for PlatformConfig {
@@ -77,6 +84,9 @@ impl Default for PlatformConfig {
             include_greedy: true,
             include_randomized: true,
             include_milp: true,
+            include_arbitrage: true,
+            include_bundle_decomposer: true,
+            include_chain_finder: true,
         }
     }
 }
@@ -88,6 +98,9 @@ impl PlatformConfig {
             total_time_budget_ms: 500,
             milp_time_fraction: 0.4,
             randomized_iterations: 20,
+            include_arbitrage: false,
+            include_bundle_decomposer: false,
+            include_chain_finder: false,
             ..Default::default()
         }
     }
@@ -98,6 +111,25 @@ impl PlatformConfig {
             total_time_budget_ms: 5000,
             milp_time_fraction: 0.7,
             randomized_iterations: 200,
+            include_arbitrage: true,
+            include_bundle_decomposer: true,
+            include_chain_finder: true,
+            ..Default::default()
+        }
+    }
+
+    /// Create a configuration optimized for specialized solvers.
+    pub fn specialized() -> Self {
+        Self {
+            total_time_budget_ms: 3000,
+            milp_time_fraction: 0.5,
+            randomized_iterations: 50,
+            include_greedy: true,
+            include_randomized: true,
+            include_milp: true,
+            include_arbitrage: true,
+            include_bundle_decomposer: true,
+            include_chain_finder: true,
             ..Default::default()
         }
     }
@@ -246,6 +278,27 @@ impl SolverPlatform {
             solver_results.push(info);
         }
 
+        // Run arbitrage detector
+        if self.config.include_arbitrage {
+            let (solution, info) = self.run_arbitrage(problem);
+            solver_solutions.push(solution);
+            solver_results.push(info);
+        }
+
+        // Run bundle decomposer
+        if self.config.include_bundle_decomposer {
+            let (solution, info) = self.run_bundle_decomposer(problem);
+            solver_solutions.push(solution);
+            solver_results.push(info);
+        }
+
+        // Run chain finder
+        if self.config.include_chain_finder {
+            let (solution, info) = self.run_chain_finder(problem);
+            solver_solutions.push(solution);
+            solver_results.push(info);
+        }
+
         // Combine all solutions
         let combiner = SolutionCombiner::new();
         let (result, combine_stats, contributions) =
@@ -342,6 +395,81 @@ impl SolverPlatform {
             fills: milp_result.result.orders_filled,
             solve_time_secs: milp_result.solve_time_secs,
             confidence,
+        };
+
+        (solution, info)
+    }
+
+    /// Run the arbitrage detector.
+    fn run_arbitrage(&self, problem: &Problem) -> (SolverSolution, SolverResultInfo) {
+        let start = Instant::now();
+        let solver = ArbitrageDetector::new();
+        let result = solver.solve(problem);
+        let solve_time = start.elapsed().as_secs_f64();
+
+        let solution = SolverSolution::from_result(
+            "Arbitrage",
+            &result,
+            problem,
+            SolutionConfidence::Heuristic,
+        );
+
+        let info = SolverResultInfo {
+            name: "Arbitrage".to_string(),
+            welfare: result.total_welfare,
+            fills: result.orders_filled,
+            solve_time_secs: solve_time,
+            confidence: SolutionConfidence::Heuristic,
+        };
+
+        (solution, info)
+    }
+
+    /// Run the bundle decomposer.
+    fn run_bundle_decomposer(&self, problem: &Problem) -> (SolverSolution, SolverResultInfo) {
+        let start = Instant::now();
+        let solver = BundleDecomposer::new();
+        let result = solver.solve(problem);
+        let solve_time = start.elapsed().as_secs_f64();
+
+        let solution = SolverSolution::from_result(
+            "BundleDecomposer",
+            &result,
+            problem,
+            SolutionConfidence::Heuristic,
+        );
+
+        let info = SolverResultInfo {
+            name: "BundleDecomposer".to_string(),
+            welfare: result.total_welfare,
+            fills: result.orders_filled,
+            solve_time_secs: solve_time,
+            confidence: SolutionConfidence::Heuristic,
+        };
+
+        (solution, info)
+    }
+
+    /// Run the chain finder.
+    fn run_chain_finder(&self, problem: &Problem) -> (SolverSolution, SolverResultInfo) {
+        let start = Instant::now();
+        let solver = ChainFinder::new();
+        let result = solver.solve(problem);
+        let solve_time = start.elapsed().as_secs_f64();
+
+        let solution = SolverSolution::from_result(
+            "ChainFinder",
+            &result,
+            problem,
+            SolutionConfidence::Heuristic,
+        );
+
+        let info = SolverResultInfo {
+            name: "ChainFinder".to_string(),
+            welfare: result.total_welfare,
+            fills: result.orders_filled,
+            solve_time_secs: solve_time,
+            confidence: SolutionConfidence::Heuristic,
         };
 
         (solution, info)

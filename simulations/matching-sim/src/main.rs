@@ -9,11 +9,14 @@ use matching_solver::{
 use matching_scenarios::{
     generate_adversarial_scenario, generate_combined_scenario, generate_conditional_chain_scenario,
     generate_deep_implication_scenario, generate_large_interconnected_scenario,
-    generate_liquidity_cliff_scenario, generate_mega_scenario, generate_nested_bundle_scenario,
-    generate_presidential_scenario, generate_random_scenario, generate_tournament_scenario,
-    AdversarialConfig, ConditionalChainConfig, DeepImplicationConfig, LargeInterconnectedConfig,
-    LiquidityCliffConfig, MegaScenarioConfig, NestedBundleConfig, PresidentialConfig, Problem,
-    RandomConfig, TournamentConfig,
+    generate_liquidity_cliff_scenario, generate_mega_scenario, generate_milp_killer_scenario,
+    generate_nested_bundle_scenario, generate_planted_chain_scenario,
+    generate_planted_complement_scenario, generate_planted_exclusion_scenario,
+    generate_presidential_scenario, generate_random_scenario, generate_realistic_scenario,
+    generate_tournament_scenario, AdversarialConfig, ConditionalChainConfig, DeepImplicationConfig,
+    LargeInterconnectedConfig, LiquidityCliffConfig, MegaScenarioConfig, MilpKillerConfig,
+    NestedBundleConfig, PlantedChainConfig, PlantedComplementConfig, PlantedExclusionConfig,
+    PresidentialConfig, Problem, RandomConfig, RealisticConfig, TournamentConfig,
 };
 
 mod metrics;
@@ -447,6 +450,53 @@ fn create_problem(scenario_name: &str, seed: u64) -> Problem {
             ..MegaScenarioConfig::extreme()
         }),
         "combined" => generate_combined_scenario(seed),
+        // MILP killer scenarios
+        "milp-killer" | "milp-killer-test" => generate_milp_killer_scenario(MilpKillerConfig {
+            seed,
+            ..MilpKillerConfig::test()
+        }),
+        "milp-killer-full" => generate_milp_killer_scenario(MilpKillerConfig {
+            seed,
+            ..MilpKillerConfig::timeout_guaranteed()
+        }),
+        "milp-killer-extreme" => generate_milp_killer_scenario(MilpKillerConfig {
+            seed,
+            ..MilpKillerConfig::extreme()
+        }),
+        // Planted pattern scenarios
+        "planted-chain" => generate_planted_chain_scenario(PlantedChainConfig {
+            seed,
+            ..Default::default()
+        }),
+        "planted-complement" => generate_planted_complement_scenario(PlantedComplementConfig {
+            seed,
+            ..Default::default()
+        }),
+        "planted-exclusion" => generate_planted_exclusion_scenario(PlantedExclusionConfig {
+            seed,
+            ..Default::default()
+        }),
+        // Realistic scenarios (cross-market value demonstration)
+        "realistic" | "realistic-standard" => generate_realistic_scenario(RealisticConfig {
+            seed,
+            ..RealisticConfig::standard()
+        }),
+        "realistic-test" => generate_realistic_scenario(RealisticConfig {
+            seed,
+            ..RealisticConfig::test()
+        }),
+        "realistic-small" => generate_realistic_scenario(RealisticConfig {
+            seed,
+            ..RealisticConfig::small()
+        }),
+        "realistic-extreme" => generate_realistic_scenario(RealisticConfig {
+            seed,
+            ..RealisticConfig::extreme()
+        }),
+        "realistic-cross-market" => generate_realistic_scenario(RealisticConfig {
+            seed,
+            ..RealisticConfig::cross_market_demo()
+        }),
         _ => {
             eprintln!("Unknown scenario: {}, using random-easy", scenario_name);
             generate_random_scenario(RandomConfig {
@@ -538,6 +588,89 @@ pub fn run_platform_stress_test(timeout_secs: f64) {
     platform_result.print_summary();
 }
 
+/// Run MILP killer test - designed to force MILP timeout.
+pub fn run_milp_killer_test(timeout_secs: f64, config_name: &str) {
+    println!("Running MILP killer test...\n");
+    println!("Config: {}", config_name);
+    println!("MILP timeout: {}s", timeout_secs);
+
+    let config = match config_name {
+        "extreme" => MilpKillerConfig::extreme(),
+        "full" => MilpKillerConfig::timeout_guaranteed(),
+        _ => MilpKillerConfig::test(),
+    };
+
+    let problem = generate_milp_killer_scenario(config);
+    println!("\n{}", problem.summary());
+
+    println!("\n--- Running MILP with timeout ---\n");
+
+    let start = Instant::now();
+    let milp = MilpSolver::with_timeout(timeout_secs);
+    let milp_result = milp.solve_with_status(&problem);
+    let milp_time = start.elapsed().as_secs_f64();
+
+    println!(
+        "MILP: welfare={}, fills={}, status={:?}, time={:.3}s",
+        milp_result.result.total_welfare,
+        milp_result.result.orders_filled,
+        milp_result.status,
+        milp_time
+    );
+
+    println!("\n--- Running greedy ---\n");
+
+    let start = Instant::now();
+    let greedy = GreedySolver::new();
+    let greedy_result = greedy.solve(&problem);
+    println!(
+        "Greedy: welfare={}, fills={}, time={:.3}s",
+        greedy_result.total_welfare,
+        greedy_result.orders_filled,
+        start.elapsed().as_secs_f64()
+    );
+
+    println!("\n--- Running platform with all solvers ---\n");
+
+    let platform_config = PlatformConfig {
+        total_time_budget_ms: (timeout_secs * 1000.0 / 0.6) as u64,
+        milp_time_fraction: 0.6,
+        include_arbitrage: true,
+        include_bundle_decomposer: true,
+        include_chain_finder: true,
+        ..Default::default()
+    };
+    let platform = SolverPlatform::with_config(platform_config);
+    let platform_result = platform.solve(&problem);
+
+    platform_result.print_summary();
+
+    // Print comparison
+    println!("\n========================================");
+    println!("         COMPARISON SUMMARY             ");
+    println!("========================================\n");
+
+    let milp_welfare = milp_result.result.total_welfare;
+    let platform_welfare = platform_result.result.total_welfare;
+    let improvement = if milp_welfare > 0 {
+        ((platform_welfare as f64 - milp_welfare as f64) / milp_welfare as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    println!("MILP welfare:     {}", milp_welfare);
+    println!("Platform welfare: {}", platform_welfare);
+    println!("Improvement:      {:.2}%", improvement);
+
+    if platform_welfare > milp_welfare {
+        println!("\n✓ Platform BEATS MILP-with-timeout!");
+    } else if platform_welfare == milp_welfare {
+        println!("\n= Platform EQUALS MILP-with-timeout");
+    } else {
+        println!("\n✗ MILP-with-timeout beats platform");
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
@@ -554,6 +687,23 @@ fn main() {
             .and_then(|s| s.parse().ok())
             .unwrap_or(1.0);
         run_platform_stress_test(timeout);
+        return;
+    }
+
+    if args.len() > 1 && args[1] == "--milp-killer" {
+        let timeout = args
+            .iter()
+            .position(|a| a == "--milp-timeout")
+            .and_then(|i| args.get(i + 1))
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1.0);
+        let config = args
+            .iter()
+            .position(|a| a == "--config")
+            .and_then(|i| args.get(i + 1))
+            .map(|s| s.as_str())
+            .unwrap_or("test");
+        run_milp_killer_test(timeout, config);
         return;
     }
 
@@ -620,6 +770,18 @@ fn main() {
                 println!("                         Stress scenarios:");
                 println!("                           mega, mega-small, mega-large, mega-extreme");
                 println!("                           combined");
+                println!("                         MILP-killer scenarios:");
+                println!("                           milp-killer, milp-killer-full, milp-killer-extreme");
+                println!("                         Planted pattern scenarios:");
+                println!("                           planted-chain");
+                println!("                           planted-complement");
+                println!("                           planted-exclusion");
+                println!("                         Realistic scenarios (cross-market demo):");
+                println!("                           realistic, realistic-standard (50k orders)");
+                println!("                           realistic-test (10k orders)");
+                println!("                           realistic-small (3k orders)");
+                println!("                           realistic-extreme (100k orders)");
+                println!("                           realistic-cross-market (high bundle fraction)");
                 println!("  --solver <S>         Solver to use:");
                 println!("                         greedy (default)");
                 println!("                         milp (optimal via MILP)");
@@ -631,6 +793,8 @@ fn main() {
                 println!("  --verbose, -v        Show detailed output");
                 println!("  --quick              Run a quick test");
                 println!("  --stress             Run platform stress test on mega scenario");
+                println!("  --milp-killer        Run MILP killer test (forces MILP timeout)");
+                println!("                       Use with --config test|full|extreme");
                 println!("  --help, -h           Show this help message");
                 return;
             }
