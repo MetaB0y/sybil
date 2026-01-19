@@ -2,196 +2,84 @@
 
 ## Overview
 
-Sybil V2 is a prediction market exchange using Frequent Batch Auctions (FBA) with:
-- **LP-based order representation** - Orders are linear constraints, not simple limit orders
-- **Solver network** - Multiple solvers propose solutions, best combination selected
-- **Cross-market support** - Orders can span multiple correlated markets
-- **Uniform clearing price** - All fills in a market execute at the same price
+Sybil V2 is a prediction market matching engine using Frequent Batch Auctions (FBA) with:
+- **Linear constraint orders** - Orders are payoff vectors over market outcomes
+- **Two-phase solving** - Per-market clearing, then cross-market optimization
+- **Uniform clearing price (UCP)** - All fills in a market execute at the same price
+
+## Two-Phase Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ Phase 1: Per-Market Clearing                            │
+│                                                         │
+│   Input: Orders for each market                         │
+│   Method: Find clearing prices where Σp_i = 1           │
+│   Output: Prices + fills per market                     │
+│                                                         │
+│   Solver: LocalSolver (src/local_solver.rs)             │
+└─────────────────────────────────────────────────────────┘
+                          ↓
+              Clearing prices + initial fills
+                          ↓
+┌─────────────────────────────────────────────────────────┐
+│ Phase 2: Cross-Market Optimization                      │
+│                                                         │
+│   A. MM Budget Allocation                               │
+│      - Which MM orders to activate given budgets        │
+│      - Lagrangian relaxation + fixed-point iteration    │
+│      - Solver: MmAllocator (src/mm_allocator.rs)        │
+│                                                         │
+│   B. Cross-Market Patches (optional)                    │
+│      - Bundle orders, spreads, arbitrage                │
+│      - Combine via MWIS on conflict graph               │
+│      - Solver: Combiner (src/combiner/)                 │
+└─────────────────────────────────────────────────────────┘
+```
 
 ## Key Design Decisions
 
 ### 1. Linear Constraint Orders
 
-Orders are expressed as linear constraints over outcomes:
+Orders are expressed as payoff vectors over outcomes:
 ```rust
 struct Order {
     markets: [MarketId; MAX_MARKETS],
-    num_markets: u8,
     payoffs: [i8; MAX_STATES],    // Payoff per state
-    limit_price: Nanos,           // Max willing to pay per unit
+    limit_price: Nanos,           // Max willing to pay
     min_fill: Qty,
     max_fill: Qty,
 }
 ```
 
-This representation supports:
-- Simple limit orders (single market, binary payoff)
-- Spread trades (long A, short B)
-- Bundle orders (A AND B must both win)
-- Conditional orders (activated by price thresholds)
+This supports: simple limits, spreads, bundles, butterflies, conditionals.
 
-### 2. Patch-Based Solving
+### 2. Price Normalization
 
-The matching problem is solved in two phases:
+For multi-outcome markets, prices must satisfy Σp_i = 1 (no-arbitrage).
+Buying one share of each outcome costs exactly $1.
 
-**Phase 1: Base Solution**
-- Solve each market independently using FBA
-- O(n log n) per market, trivially parallelizable
+### 3. Uniform Clearing Price (UCP)
 
-**Phase 2: Cross-Market Patches**
-- Specialized solvers propose "patches" that fill cross-market orders
-- Patches specify: affected markets, fills, price adjustments, welfare delta
-- Non-conflicting patches selected via MWIS (Maximum Weight Independent Set)
+All fills in a market execute at the same price:
+- No front-running (batch ordering doesn't matter)
+- Price = supply/demand equilibrium
+- Welfare = Σ (limit - price) × quantity for buyers
 
-### 3. Solution Combination via MWIS
+### 4. MM Budget Constraints
 
-When multiple solvers propose solutions, they're combined using MWIS:
-- Build conflict graph: nodes = patches, edges = market overlaps
-- Select maximum-weight independent set
-- Greedy or randomized greedy algorithms work well in practice
-
-### 4. Uniform Clearing Price (UCP)
-
-All fills in a market execute at the same clearing price:
-- No front-running possible (batch ordering doesn't matter)
-- Price determined by supply/demand equilibrium
-- Welfare = sum of (value - price) for buyers + (price - cost) for sellers
-
-### 5. Integer Arithmetic
-
-All amounts use fixed-point integer arithmetic:
-```rust
-type Nanos = i64;  // Price in nanos (10^-9), e.g., 500_000_000 = $0.50
-type Qty = i64;    // Quantity in base units
+Market makers have capital budgets spanning multiple markets:
+```
+Capital needed = f(price, quantity, side)
+  - Selling YES: (1 - price) × qty
+  - Buying YES: price × qty
 ```
 
----
+The budget constraint Σ capital_i ≤ K is bilinear in (price, quantity).
 
-## Complexity Analysis
-
-### Sources of Complexity (Ranked)
-
-#### Critical: Cross-Market Coupling
-
-Several features create dependencies between markets:
-- **Budget constraints** - User's balance spans multiple markets
-- **Bundle orders** - "Buy A AND B" must fill both or neither
-- **Spread trades** - "Long A, Short B" links two markets
-
-**Impact**: Independent markets can be solved in parallel; coupled markets must be solved together.
-
-**Mitigation**:
-- Limit max markets per order (currently MAX_MARKETS_PER_ORDER = 4)
-- Most orders are single-market in practice
-- Cross-market orders create local coupling, not global
-
-#### Significant: MWIS is NP-Hard
-
-Selecting optimal non-conflicting patches is NP-hard in general.
-
-**Mitigations**:
-1. Conflict graph is sparse (patches affect few markets)
-2. Greedy gives good approximations
-3. Randomized parallel greedy explores many orderings
-4. Time budget enforces early termination
-
-#### Manageable: LP Solving
-
-For each market, solving the FBA is a small LP:
-- Variables: fill fractions, clearing price
-- Constraints: supply = demand, price limits
-- Well-understood, efficient solvers exist (HiGHS)
-
-### Scaling Limits
-
-| Resource | Practical Limit | Determined By |
-|----------|-----------------|---------------|
-| Orders per batch | ~10K | LP solver capacity |
-| Markets per batch | ~1K | State management |
-| Cross-market orders | ~100 | LP coupling complexity |
-| Solvers per batch | ~10 | Combination time |
-
----
-
-## Solver Architecture
-
-### Solver Types
-
-#### 1. Greedy Solver
-- Processes orders by welfare contribution
-- Fills orders when liquidity available
-- O(n log n) per market
-- Good baseline, fast execution
-
-#### 2. MILP Solver
-- Formulates full problem as Mixed Integer LP
-- Uses HiGHS for optimization
-- Near-optimal for single-market
-- Slower but higher quality
-
-#### 3. Randomized Greedy Solver
-- Runs multiple random orderings
-- Takes best result across iterations
-- Balances speed vs quality
-- Good for exploration
-
-#### 4. Solver Platform
-- Orchestrates multiple specialized solvers
-- Combines solutions via MWIS
-- Produces contribution statistics
-- Production solver choice
-
-### Specialized Solvers (within Platform)
-
-| Solver | Purpose | Strategy |
-|--------|---------|----------|
-| Greedy | Baseline | Sort by welfare, fill greedily |
-| MILP | Optimization | Full LP formulation |
-| Arbitrage | Price consistency | Find cross-market mispricings |
-| BundleDecomposer | Multi-market orders | Decompose bundles into fills |
-| ChainFinder | Implication chains | Follow market correlations |
-
-### Solver Economics
-
-Revenue sources:
-- Fee share from matched volume
-- JIT liquidity profits (future)
-- Arbitrage capture
-
-The platform currently combines solver outputs without external incentives.
-
----
-
-## Data Flow
-
-```
-Orders submitted
-       │
-       ▼
-┌──────────────┐
-│   Problem    │  (orders + liquidity + constraints)
-└──────┬───────┘
-       │
-       ▼
-┌──────────────────────────────────────────────────┐
-│                Solver Platform                    │
-│  ┌────────┐ ┌──────┐ ┌─────────┐ ┌───────────┐  │
-│  │ Greedy │ │ MILP │ │ Arb     │ │ Bundle    │  │
-│  └───┬────┘ └──┬───┘ └────┬────┘ └─────┬─────┘  │
-│      │         │          │            │         │
-│      └────────┬┴──────────┴────────────┘         │
-│               │                                   │
-│               ▼                                   │
-│        ┌────────────┐                            │
-│        │ Combiner   │  (MWIS on conflict graph)  │
-│        └─────┬──────┘                            │
-└──────────────┼───────────────────────────────────┘
-               │
-               ▼
-┌──────────────────────┐
-│   MatchingResult     │  (fills + prices + welfare)
-└──────────────────────┘
-```
+**Solution:** Two-phase with Lagrangian relaxation:
+1. Get prices from Phase 1
+2. Binary search on λ to find which orders to activate
 
 ---
 
@@ -200,54 +88,123 @@ Orders submitted
 ```
 crates/
 ├── matching-engine/     # Core types
-│   ├── src/
-│   │   ├── lib.rs
-│   │   ├── order.rs         # Order representation
-│   │   ├── fill.rs          # Fill execution
-│   │   ├── liquidity.rs     # Order book / pool
-│   │   ├── problem.rs       # Problem definition
-│   │   ├── market.rs        # Market definitions
-│   │   └── state.rs         # State space
+│   ├── order.rs         # Order representation
+│   ├── fill.rs          # Fill execution
+│   ├── liquidity.rs     # Liquidity pools
+│   ├── problem.rs       # Problem definition
+│   ├── market.rs        # Market definitions
+│   └── mm.rs            # MM constraints
 │
 ├── matching-solver/     # Solving algorithms
-│   ├── src/
-│   │   ├── lib.rs
-│   │   ├── greedy.rs        # Greedy solver
-│   │   ├── milp.rs          # MILP solver
-│   │   ├── randomized.rs    # Randomized greedy
-│   │   ├── platform.rs      # Multi-solver platform
-│   │   ├── combiner/        # Solution combination
-│   │   │   ├── mod.rs
-│   │   │   ├── conflict.rs  # Conflict graph
-│   │   │   └── mwis.rs      # MWIS algorithms
-│   │   └── specialized/     # Specialized solvers
+│   ├── local_solver.rs  # Per-market clearing
+│   ├── mm_allocator.rs  # MM budget allocation
+│   ├── combiner/        # Solution combination
+│   │   ├── conflict.rs  # Conflict graph
+│   │   └── mwis.rs      # MWIS algorithms
+│   └── specialized/     # Specialized solvers
 │
 ├── matching-scenarios/  # Test scenarios
-│   ├── src/
-│   │   ├── stress.rs        # Stress testing
-│   │   └── random.rs        # Random generation
+│   ├── mega.rs          # Mega scenario generator
+│   ├── random.rs        # Random generation
+│   └── stress.rs        # Stress testing
 │
 └── matching-sim/        # CLI tool
-    └── src/main.rs
+    └── main.rs
 ```
 
 ---
 
-## Future Considerations
+## Complexity Analysis
 
-### External Solvers
+| Resource | Practical Limit | Determined By |
+|----------|-----------------|---------------|
+| Orders per batch | ~50K | Solver capacity |
+| Markets per batch | ~1K | State management |
+| MMs per batch | ~10 | Fixed-point iterations |
 
-Current design runs solvers in-process. Future design:
-- External solvers submit solutions via API
-- TEE validates solutions
-- Solver staking/slashing for misbehavior
+---
 
-### ZK Proofs
+## Solver Types
 
-State transitions could be proven with ZK:
-- Batch execution proofs
-- Settlement finality
-- Trustless verification
+### LocalSolver (Per-Market)
+- Finds clearing prices for multi-outcome markets
+- Ensures Σp_i = 1 (normalization)
+- O(n × m) for n orders, m outcomes
+
+### MmAllocator (MM Constraints)
+- Binary search on λ per MM
+- Fixed-point iteration for multiple interacting MMs
+- Respects budget constraints at clearing prices
+
+### Specialized Solvers (Cross-Market)
+| Solver | Purpose |
+|--------|---------|
+| Arbitrage | Find cross-market mispricings |
+| BundleDecomposer | Fill bundle orders |
+| ChainFinder | Exploit implication chains |
+
+---
+
+## Welfare Calculation
+
+```
+Welfare = Σ (limit_price - clearing_price) × fill_qty
+```
+
+For buyers: value received - price paid
+For sellers: price received - cost
+
+---
+
+## Solver Ordering Analysis
+
+### The Problem
+
+MM orders can represent significant volume (potentially 10x retail orders). The question is whether MM volume should affect clearing prices.
+
+**Current approach (prices first, then MM)**:
+```
+1. LocalSolver on non-MM orders → prices
+2. MmAllocator uses those prices → activated MM orders
+3. Done
+```
+
+**Issue**: If MM provides 90% of liquidity, Phase 1 prices could be way off.
+
+### Three Options
+
+| Option | Description | Pros | Cons |
+|--------|-------------|------|------|
+| 1. After | Per-market clearing first, then MM allocation | Simple | Prices may be wrong if MM dominates |
+| 2. Include MM | Include MM orders in clearing | MM affects prices | Can't enforce budget (circular) |
+| 3. Iterative | Fixed-point between clearing and allocation | Correct | More complex, slower |
+
+### Recommendation: Option 3 (Iterative)
+
+```
+1. LocalSolver on non-MM orders → prices_1
+2. MmAllocator(prices_1) → activated_mm_1
+3. LocalSolver on (non-MM + activated_mm_1) → prices_2
+4. If prices_2 ≈ prices_1: done
+5. MmAllocator(prices_2) → activated_mm_2
+6. Repeat until convergence (typically 1-3 iterations)
+```
+
+**Why this works**:
+- Prices reflect actual supply (including activated MM orders)
+- MM budgets are respected at the prices that include their orders
+- Convergence is fast because price changes are dampened by MM budget limits
+
+**When to use Option 1 instead**:
+- MM volume is small (< 20% of total)
+- Speed is critical and accuracy can be sacrificed
+- Testing/debugging (simpler to reason about)
+
+### Implementation Status
+
+Current: **Option 1** (per-market first, then MM allocation)
+
+Next step: Implement Option 3 with convergence detection and benchmark the welfare difference.
 
 ---
 
@@ -255,4 +212,3 @@ State transitions could be proven with ZK:
 
 - [Frequent Batch Auctions (Budish et al.)](https://faculty.chicagobooth.edu/eric.budish/research/HFT-FrequentBatchAuctions.pdf)
 - [Maximum Weight Independent Set](https://en.wikipedia.org/wiki/Independent_set_(graph_theory))
-- [HiGHS LP Solver](https://highs.dev/)

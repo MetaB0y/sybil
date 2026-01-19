@@ -32,8 +32,33 @@ pub struct AllocationResult {
     pub mm_allocations: Vec<MmAllocation>,
     /// Total welfare from activated orders
     pub total_welfare: i64,
-    /// Number of iterations used
+    /// Number of fixed-point iterations used
     pub iterations: usize,
+    /// Allocation statistics
+    pub stats: AllocationStats,
+}
+
+/// Statistics about the allocation process.
+#[derive(Clone, Debug, Default)]
+pub struct AllocationStats {
+    /// Total budget across all MMs
+    pub total_budget: Nanos,
+    /// Total capital used across all MMs
+    pub total_capital_used: Nanos,
+    /// Overall utilization (capital_used / budget)
+    pub overall_utilization: f64,
+    /// Number of MM orders considered
+    pub mm_orders_considered: usize,
+    /// Number of MM orders activated
+    pub mm_orders_activated: usize,
+    /// Activation rate (activated / considered)
+    pub activation_rate: f64,
+    /// Whether MMs interact (share orders)
+    pub mms_interact: bool,
+    /// Greedy baseline welfare (for sanity check)
+    pub greedy_baseline_welfare: i64,
+    /// Improvement over greedy baseline
+    pub improvement_over_greedy: f64,
 }
 
 /// Allocation details for a single MM.
@@ -113,6 +138,7 @@ impl MmAllocator {
                 mm_allocations: Vec::new(),
                 total_welfare: welfare.values().sum(),
                 iterations: 0,
+                stats: AllocationStats::default(),
             };
         }
 
@@ -122,10 +148,107 @@ impl MmAllocator {
         // Check if MMs interact (share orders)
         let interacting = self.mms_interact(mm_constraints);
 
-        if interacting {
+        // Compute greedy baseline for sanity check
+        let greedy_baseline = self.compute_greedy_baseline(mm_constraints, prices, &order_map, welfare);
+
+        let mut result = if interacting {
             self.allocate_fixed_point(mm_constraints, prices, &order_map, welfare)
         } else {
             self.allocate_independent(mm_constraints, prices, &order_map, welfare)
+        };
+
+        // Compute stats
+        result.stats = self.compute_stats(&result, mm_constraints, greedy_baseline, interacting);
+
+        result
+    }
+
+    /// Compute greedy baseline: sort orders by welfare, add until budget full.
+    fn compute_greedy_baseline(
+        &self,
+        mm_constraints: &[MmConstraint],
+        prices: &HashMap<MarketId, Vec<Nanos>>,
+        order_map: &HashMap<u64, &Order>,
+        welfare: &HashMap<u64, i64>,
+    ) -> i64 {
+        let mut total_greedy_welfare: i64 = 0;
+
+        for mm in mm_constraints {
+            // Collect orders with their welfare and capital cost
+            let mut order_info: Vec<(u64, i64, Nanos)> = mm
+                .order_ids
+                .iter()
+                .filter_map(|&order_id| {
+                    let order = order_map.get(&order_id)?;
+                    let w = welfare.get(&order_id).copied().unwrap_or(0);
+                    let capital = self.estimate_order_capital(mm, order_id, order, prices);
+                    Some((order_id, w, capital))
+                })
+                .collect();
+
+            // Sort by welfare descending (greedy)
+            order_info.sort_by_key(|(_, w, _)| std::cmp::Reverse(*w));
+
+            // Greedily add until budget full
+            let mut budget_remaining = mm.max_capital;
+            let mut greedy_welfare: i64 = 0;
+
+            for (_, w, capital) in order_info {
+                if capital <= budget_remaining {
+                    greedy_welfare += w;
+                    budget_remaining -= capital;
+                }
+            }
+
+            total_greedy_welfare += greedy_welfare;
+        }
+
+        total_greedy_welfare
+    }
+
+    /// Compute allocation statistics.
+    fn compute_stats(
+        &self,
+        result: &AllocationResult,
+        mm_constraints: &[MmConstraint],
+        greedy_baseline: i64,
+        mms_interact: bool,
+    ) -> AllocationStats {
+        let total_budget: Nanos = result.mm_allocations.iter().map(|a| a.budget).sum();
+        let total_capital_used: Nanos = result.mm_allocations.iter().map(|a| a.capital_used).sum();
+        let mm_orders_considered: usize = mm_constraints.iter().map(|mm| mm.order_ids.len()).sum();
+        let mm_orders_activated: usize = result.mm_allocations.iter().map(|a| a.activated_orders.len()).sum();
+
+        let overall_utilization = if total_budget > 0 {
+            total_capital_used as f64 / total_budget as f64
+        } else {
+            0.0
+        };
+
+        let activation_rate = if mm_orders_considered > 0 {
+            mm_orders_activated as f64 / mm_orders_considered as f64
+        } else {
+            0.0
+        };
+
+        let improvement_over_greedy = if greedy_baseline > 0 {
+            (result.total_welfare as f64 - greedy_baseline as f64) / greedy_baseline as f64
+        } else if result.total_welfare > 0 {
+            1.0 // Infinite improvement (greedy got 0)
+        } else {
+            0.0
+        };
+
+        AllocationStats {
+            total_budget,
+            total_capital_used,
+            overall_utilization,
+            mm_orders_considered,
+            mm_orders_activated,
+            activation_rate,
+            mms_interact,
+            greedy_baseline_welfare: greedy_baseline,
+            improvement_over_greedy,
         }
     }
 
@@ -189,6 +312,7 @@ impl MmAllocator {
             mm_allocations,
             total_welfare,
             iterations: 1,
+            stats: AllocationStats::default(), // Will be filled by caller
         }
     }
 
@@ -273,6 +397,7 @@ impl MmAllocator {
             mm_allocations,
             total_welfare,
             iterations,
+            stats: AllocationStats::default(), // Will be filled by caller
         }
     }
 
@@ -731,5 +856,215 @@ mod tests {
                 large_budget, welfare_large, small_budget, welfare_small
             );
         }
+    }
+
+    #[test]
+    fn test_stats_reporting() {
+        let mut problem = Problem::new("stats_test");
+        let market = problem.markets.add_binary("m");
+
+        problem.liquidity.add_ask(market, 0, 500_000_000, 10000);
+
+        // Add 10 orders - use large quantity to ensure capital cost is significant
+        for i in 1..=10 {
+            problem.orders.push(simple_yes_buy(
+                &problem.markets,
+                i,
+                market,
+                600_000_000, // $0.60 limit price
+                1000,        // 1000 shares each
+            ));
+        }
+
+        // Each order costs $500 capital (1000 shares × $0.50 cost per share for SellYes)
+        // Budget of $2000 allows ~4 orders
+        let mm = MmConstraint::new(MmId(1), 2_000_000_000_000) // $2000
+            .with_order(1, MmSide::SellYes)
+            .with_order(2, MmSide::SellYes)
+            .with_order(3, MmSide::SellYes)
+            .with_order(4, MmSide::SellYes)
+            .with_order(5, MmSide::SellYes)
+            .with_order(6, MmSide::SellYes)
+            .with_order(7, MmSide::SellYes)
+            .with_order(8, MmSide::SellYes)
+            .with_order(9, MmSide::SellYes)
+            .with_order(10, MmSide::SellYes);
+
+        let allocator = MmAllocator::new();
+
+        let mut prices = HashMap::new();
+        prices.insert(market, vec![500_000_000, 500_000_000]); // 50 cents
+
+        // High welfare to ensure orders get activated
+        let mut welfare = HashMap::new();
+        for i in 1..=10 {
+            welfare.insert(i, 1_000_000_000_000i64); // $1000 welfare each
+        }
+
+        let result = allocator.allocate(&[mm], &prices, &problem.orders, &welfare);
+
+        // Check stats are populated
+        let stats = &result.stats;
+
+        println!("Stats: {:?}", stats);
+        println!("MM allocations: {:?}", result.mm_allocations);
+
+        assert_eq!(stats.total_budget, 2_000_000_000_000, "Total budget should be $2000");
+        assert_eq!(stats.mm_orders_considered, 10, "Should consider all 10 orders");
+        assert!(!stats.mms_interact, "Single MM should not interact");
+
+        // With high welfare, orders should be activated if within budget
+        if stats.mm_orders_activated > 0 {
+            assert!(stats.total_capital_used > 0, "Should use capital if orders activated");
+            assert!(stats.total_capital_used <= stats.total_budget, "Capital used should not exceed budget");
+            assert!(stats.activation_rate > 0.0 && stats.activation_rate <= 1.0, "Activation rate should be in [0, 1]");
+            assert!(stats.overall_utilization > 0.0, "Utilization should be positive if orders activated");
+        }
+    }
+
+    #[test]
+    fn test_overlapping_mms_fixed_point() {
+        let mut problem = Problem::new("overlapping_mms");
+        let market = problem.markets.add_binary("m");
+
+        problem.liquidity.add_ask(market, 0, 500_000_000, 10000);
+
+        // Add 6 orders
+        for i in 1..=6 {
+            problem.orders.push(simple_yes_buy(
+                &problem.markets,
+                i,
+                market,
+                600_000_000,
+                100,
+            ));
+        }
+
+        // MM1 owns orders 1, 2, 3, 4 - share orders 3, 4 with MM2
+        let mm1 = MmConstraint::new(MmId(1), 150_000_000_000) // $150
+            .with_order(1, MmSide::SellYes)
+            .with_order(2, MmSide::SellYes)
+            .with_order(3, MmSide::SellYes)
+            .with_order(4, MmSide::SellYes);
+
+        // MM2 owns orders 3, 4, 5, 6 - share orders 3, 4 with MM1
+        let mm2 = MmConstraint::new(MmId(2), 150_000_000_000) // $150
+            .with_order(3, MmSide::SellYes)
+            .with_order(4, MmSide::SellYes)
+            .with_order(5, MmSide::SellYes)
+            .with_order(6, MmSide::SellYes);
+
+        let allocator = MmAllocator::new();
+
+        let mut prices = HashMap::new();
+        prices.insert(market, vec![500_000_000, 500_000_000]);
+
+        let mut welfare = HashMap::new();
+        for i in 1..=6 {
+            welfare.insert(i, 10_000_000_000i64);
+        }
+
+        let result = allocator.allocate(&[mm1, mm2], &prices, &problem.orders, &welfare);
+
+        // Should detect interaction
+        assert!(result.stats.mms_interact, "Should detect MMs share orders 3 and 4");
+
+        // Both MMs should be within budget
+        for alloc in &result.mm_allocations {
+            assert!(
+                alloc.capital_used <= alloc.budget,
+                "MM {:?} budget violated: {} > {}",
+                alloc.mm_id,
+                alloc.capital_used,
+                alloc.budget
+            );
+        }
+
+        println!("Overlapping MMs result:");
+        println!("  Iterations: {}", result.iterations);
+        println!("  MM1: activated {:?}, capital used {}",
+            result.mm_allocations[0].activated_orders.len(),
+            result.mm_allocations[0].capital_used);
+        println!("  MM2: activated {:?}, capital used {}",
+            result.mm_allocations[1].activated_orders.len(),
+            result.mm_allocations[1].capital_used);
+    }
+
+    #[test]
+    fn test_sanity_check_vs_greedy() {
+        // Test that Lagrangian approach is at least as good as greedy
+        let mut problem = Problem::new("sanity_check");
+        let market = problem.markets.add_binary("m");
+
+        problem.liquidity.add_ask(market, 0, 500_000_000, 10000);
+
+        // Add orders with varying welfare
+        for i in 1..=10 {
+            problem.orders.push(simple_yes_buy(
+                &problem.markets,
+                i,
+                market,
+                600_000_000,
+                100,
+            ));
+        }
+
+        let mm = MmConstraint::new(MmId(1), 200_000_000_000) // $200 (can afford ~4 orders)
+            .with_order(1, MmSide::SellYes)
+            .with_order(2, MmSide::SellYes)
+            .with_order(3, MmSide::SellYes)
+            .with_order(4, MmSide::SellYes)
+            .with_order(5, MmSide::SellYes)
+            .with_order(6, MmSide::SellYes)
+            .with_order(7, MmSide::SellYes)
+            .with_order(8, MmSide::SellYes)
+            .with_order(9, MmSide::SellYes)
+            .with_order(10, MmSide::SellYes);
+
+        let allocator = MmAllocator::new();
+
+        let mut prices = HashMap::new();
+        prices.insert(market, vec![500_000_000, 500_000_000]);
+
+        // Varying welfare per order
+        let mut welfare = HashMap::new();
+        welfare.insert(1, 50_000_000_000i64);
+        welfare.insert(2, 40_000_000_000i64);
+        welfare.insert(3, 30_000_000_000i64);
+        welfare.insert(4, 25_000_000_000i64);
+        welfare.insert(5, 20_000_000_000i64);
+        welfare.insert(6, 15_000_000_000i64);
+        welfare.insert(7, 10_000_000_000i64);
+        welfare.insert(8, 8_000_000_000i64);
+        welfare.insert(9, 5_000_000_000i64);
+        welfare.insert(10, 3_000_000_000i64);
+
+        let result = allocator.allocate(&[mm], &prices, &problem.orders, &welfare);
+
+        // Actual welfare from activated orders
+        let actual_mm_welfare: i64 = result
+            .mm_allocations
+            .iter()
+            .flat_map(|a| &a.activated_orders)
+            .filter_map(|id| welfare.get(id))
+            .sum();
+
+        // Greedy baseline is computed by the allocator
+        let greedy_baseline = result.stats.greedy_baseline_welfare;
+
+        println!("Sanity check:");
+        println!("  Greedy baseline welfare: {}", greedy_baseline);
+        println!("  Actual MM welfare: {}", actual_mm_welfare);
+        println!("  Improvement: {:.2}%", result.stats.improvement_over_greedy * 100.0);
+
+        // Lagrangian should be at least as good as greedy
+        // (might be slightly different due to tie-breaking, but should be close)
+        // Allow 1% tolerance for rounding differences
+        assert!(
+            actual_mm_welfare >= (greedy_baseline as f64 * 0.99) as i64,
+            "Lagrangian ({}) should be at least as good as greedy ({})",
+            actual_mm_welfare,
+            greedy_baseline
+        );
     }
 }

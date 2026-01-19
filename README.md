@@ -4,9 +4,10 @@ A prediction market matching engine using Frequent Batch Auctions (FBA) with cro
 
 ## Features
 
-- **Linear constraint orders** - Orders expressed as LP constraints, supporting complex multi-market strategies
+- **Linear constraint orders** - Orders expressed as payoff vectors, supporting complex multi-market strategies
 - **Batch auction matching** - Uniform clearing price prevents front-running
-- **Multiple solvers** - Greedy, MILP, and randomized algorithms
+- **Two-phase solving** - Per-market clearing, then cross-market optimization
+- **MM budget constraints** - Market makers can quote across markets with budget constraints
 - **Cross-market orders** - Bundles, spreads, conditionals across correlated markets
 - **Solution combination** - MWIS-based combination of solver outputs
 
@@ -16,14 +17,11 @@ A prediction market matching engine using Frequent Batch Auctions (FBA) with cro
 # Run tests
 just test
 
-# Quick verification
-cargo run --release --bin matching-sim -- --quick
+# Run benchmarks
+cargo bench -p matching-solver
 
-# Compare all solvers on a scenario
-cargo run --release --bin matching-sim -- --scenario presidential --solver all
-
-# Run realistic scenario
-just realistic-small
+# Run validation tests
+cargo test -p matching-solver --test validation
 ```
 
 ## Project Structure
@@ -32,23 +30,20 @@ just realistic-small
 sybil/
 ├── crates/
 │   ├── matching-engine/     # Core types, orders, fills, liquidity
-│   ├── matching-solver/     # Solver algorithms (greedy, MILP, platform)
+│   ├── matching-solver/     # Solver algorithms (LocalSolver, MmAllocator, Combiner)
 │   ├── matching-scenarios/  # Test scenario generators
-│   ├── matching-sim/        # CLI simulation tool
-│   └── jit-study/           # JIT liquidity research
+│   └── matching-sim/        # CLI simulation tool
 ├── docs/                    # Documentation
 └── justfile                 # Build/test commands
 ```
 
 ## Documentation
 
-- [Architecture](docs/architecture.md) - System design and key decisions
+- [Architecture](docs/architecture.md) - System design and two-phase solving
 - [Matching Algorithm](docs/matching-algorithm.md) - Patch-based cross-market solving
 - [Order Types](docs/order-types.md) - Supported order types
-- [JIT Design](docs/jit-design.md) - Just-in-time liquidity mechanism
+- [MM Constraints](docs/MM_CAPITAL_CONSTRAINT_SOLVING.md) - Market maker budget constraints
 - [CLI Usage](docs/cli.md) - Command-line interface
-- [Scenarios](docs/scenarios.md) - Test scenarios
-- [Solvers](docs/solvers.md) - Solver implementations
 - [Next Steps](docs/next-steps.md) - Implementation roadmap
 
 ## Development
@@ -80,6 +75,19 @@ The solver maximizes total welfare:
 welfare = Σ (limit_price - clearing_price) × fill_qty
 ```
 across all filled orders.
+
+### Two-Phase Architecture
+
+```
+Phase 1: Per-Market Clearing
+  - Find clearing prices where Σp_i = 1
+  - Fast, O(n log n), parallelizable
+
+Phase 2: Cross-Market Optimization
+  - MM budget allocation via Lagrangian relaxation
+  - Bundle/spread orders via specialized solvers
+  - Combine via MWIS on conflict graph
+```
 
 ### Bundle Orders
 

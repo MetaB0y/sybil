@@ -2,24 +2,16 @@
 
 ## Design & Architecture
 
-- **[architecture.md](architecture.md)** - System design, key decisions, complexity analysis
+- **[architecture.md](architecture.md)** - System design, two-phase solving, key decisions
 - **[matching-algorithm.md](matching-algorithm.md)** - Patch-based cross-market solving algorithm
 - **[order-types.md](order-types.md)** - Order types and their LP representations
-- **[jit-design.md](jit-design.md)** - Just-In-Time liquidity mechanism
+- **[MARKET_STRUCTURE_SYNTHESIS.md](MARKET_STRUCTURE_SYNTHESIS.md)** - Comprehensive explanation of market design
+- **[MM_CAPITAL_CONSTRAINT_SOLVING.md](MM_CAPITAL_CONSTRAINT_SOLVING.md)** - MM budget constraints via Lagrangian relaxation
 
 ## Usage
 
 - **[cli.md](cli.md)** - Command-line interface guide
-- **[scenarios.md](scenarios.md)** - Available test scenarios
-- **[solvers.md](solvers.md)** - Solver algorithms and strategies
 
 ## Planning
 
 - **[next-steps.md](next-steps.md)** - Implementation roadmap and priorities
-
-## Explorations
-
-Design analysis and open questions:
-
-- **[explorations/jit-design-questions.md](explorations/jit-design-questions.md)** - JIT timing, competition, and taxation analysis
-- **[explorations/jit-competition-mechanisms.md](explorations/jit-competition-mechanisms.md)** - Deep analysis of auction vs MWIS vs price-priority

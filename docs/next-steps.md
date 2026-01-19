@@ -2,308 +2,126 @@
 
 ## Current State
 
-### What's Implemented
+### Implemented
 
 #### matching-engine (Core Types)
 - Order representation with linear constraints
 - Fill execution and welfare calculation
-- Liquidity pools (order books with bids/asks)
+- Liquidity pools (order books)
 - Market definitions (binary and multi-outcome)
-- State space enumeration for multi-market orders
-- Problem structure combining orders, markets, liquidity, constraints
+- MM constraints with budget tracking
 
 #### matching-solver (Solving Algorithms)
-- **GreedySolver** - O(n log n) baseline solver
-- **MilpSolver** - MILP formulation using HiGHS
-- **RandomizedGreedySolver** - Multi-iteration randomized greedy
-- **SolverPlatform** - Orchestrates multiple specialized solvers
-- **SolutionCombiner** - MWIS-based combination of solver outputs
+- **LocalSolver** - Per-market clearing with price normalization
+- **MmAllocator** - MM budget allocation via Lagrangian relaxation
+- **Combiner** - MWIS-based solution combination
 - **Specialized solvers**: Arbitrage, BundleDecomposer, ChainFinder
 
 #### matching-scenarios (Test Scenarios)
-- Presidential election scenario
-- Realistic multi-market scenarios (various sizes)
+- Mega scenario generator (configurable scale)
 - Stress test scenarios
-- Random order generation
 
-#### matching-sim (CLI Tool)
-- Runs scenarios with configurable solvers
-- Reports fill rates, welfare, timing
-- Supports all solver types
+### Not Yet Implemented
 
-#### jit-study (Research)
-- JIT welfare impact analysis
-- Experimental simulations
+1. **Full Pipeline Integration**
+   - LocalSolver → MmAllocator → Combiner in single flow
+   - MM orders affecting per-market clearing prices
 
-### What's NOT Implemented
+2. **Flash Liquidity**
+   - MM provides conditional liquidity
+   - Capital usage determined at clearing time
 
-1. **Batch Auction Protocol**
-   - No actual batching/timing
-   - No order accumulation period
-   - No sealed orderbook state machine
-
-2. **External Solver Interface**
-   - Solvers run in-process only
-   - No TLS/API for external submissions
-   - No WASM sandbox
-
-3. **JIT in Production**
-   - JIT mechanism designed but not integrated
-   - No fee collection
-   - No rebate distribution
-
-4. **User Balances/Collateral**
-   - No budget constraint enforcement
-   - No flash quoting
-   - No position tracking
-
-5. **Persistence**
-   - Everything in-memory
-   - No database/state storage
-
-6. **Network/Deployment**
-   - No TEE integration
-   - No sequencer
-   - No API server
+3. **External Solver Interface**
+   - API for external solver submissions
 
 ---
 
 ## Priority Roadmap
 
-### P0: Production-Ready Matching
+### P0: MM Constraint Integration
 
-**Goal**: Matching engine that can be deployed with real orders.
+1. **Verify MM Allocator Correctness**
+   - Test fixed-point iteration with overlapping MMs
+   - Add stats reporting (utilization, convergence)
+   - Sanity check against simple heuristics
 
-1. **Budget Constraint Enforcement**
-   - Add user balance tracking to Problem
-   - Enforce `sum(fills × prices) <= balance` in validation
-   - Handle partial fills due to budget exhaustion
+2. **Determine Solver Ordering**
+   - Current: Per-market first, then MM allocation
+   - Question: Should MM volume affect clearing prices?
+   - May need iteration between phases
 
-2. **Deterministic Execution**
-   - Ensure identical inputs produce identical outputs
-   - Remove any remaining randomness in production path
-   - Add comprehensive property tests
+3. **Improve Test Coverage**
+   - Multi-MM scenarios with overlap
+   - Tight budget scenarios
+   - Property tests for monotonicity
 
-3. **Performance Optimization**
-   - Profile hot paths
-   - Optimize LP construction
-   - Benchmark at target scale (10K orders)
+### P1: Cross-Market Patches
 
-4. **Error Handling**
-   - Graceful degradation on solver failures
-   - Fallback to greedy on timeouts
-   - Proper error types and propagation
+1. **Integrate Combiner with LocalSolver**
+   - Cross-market orders create patches
+   - MWIS selects non-conflicting improvements
 
-### P1: Batch Protocol
+2. **Bundle Order Support**
+   - Multi-market atomic orders
+   - Decomposition strategies
 
-**Goal**: Full FBA lifecycle with batching.
+### P2: Production-Ready
 
-1. **Batch State Machine**
-   ```
-   Accumulating -> Sealed -> Solving -> Executed
-   ```
-   - Define state transitions
-   - Handle timing
-   - Order lifecycle (submit, cancel, expire)
+1. **Deterministic Execution**
+   - Identical inputs → identical outputs
+   - No hidden randomness
 
-2. **Solver Interface**
-   - Define `SolverInput` / `ExecutionPlan` types
-   - Validation of solver outputs
-   - Timeout handling
+2. **Performance Optimization**
+   - Profile at 50K orders
+   - Parallel per-market solving
 
-3. **Solution Validation**
-   - All fills satisfy order constraints
-   - All prices satisfy market constraints
-   - No budget violations
-   - Deterministic validation
-
-### P2: JIT Integration
-
-**Goal**: Market makers can provide JIT liquidity.
-
-1. **JIT Submission Window**
-   - After batch seals, before solving completes
-   - Accept JIT order submissions
-
-2. **Welfare Requirement**
-   - JIT must improve total welfare
-   - Minimum improvement threshold
-
-3. **Fee Mechanism**
-   - EIP-1559 style dynamic fees
-   - Fee collection and distribution
-   - Rebates to affected users
-
-4. **Anti-Gaming**
-   - Asymmetric fees (JIT vs regular orders)
-   - Priority rules for ties
-
-### P3: External Solvers
-
-**Goal**: Third parties can run solvers.
-
-1. **API Design**
-   - Solver registration
-   - Solution submission
-   - Result notification
-
-2. **Solver Isolation**
-   - Solutions validated, not trusted
-   - Rate limiting
-   - (Optional) WASM sandbox
-
-3. **Incentive Mechanism**
-   - Fee sharing
-   - Staking/slashing
-   - Performance tracking
-
-### P4: Full Protocol
-
-**Goal**: Complete system deployment.
-
-1. **TEE Integration**
-   - Orderbook confidentiality
-   - Solver execution isolation
-   - Attestation
-
-2. **Persistence Layer**
-   - State storage
-   - Order history
-   - Audit trail
-
-3. **Network Protocol**
-   - Order submission API
-   - WebSocket for updates
-   - Block/batch publication
+3. **Error Handling**
+   - Graceful degradation
+   - Fallback strategies
 
 ---
 
 ## Technical Debt
 
-### Code Quality
-- [ ] Add more unit tests for edge cases
-- [ ] Property-based tests for solver correctness
+- [ ] Clean up unused solver code
+- [ ] Property-based tests for all solvers
 - [ ] Benchmark suite with regression tracking
 - [ ] Documentation for public APIs
-
-### Architecture
-- [ ] Separate validation from solving
-- [ ] Make solvers stateless
-- [ ] Define clear module boundaries
-- [ ] Consider async for solver parallelism
-
-### Base Solution Quality
-- [ ] **Optimal single-market clearing** - Currently greedy; should solve each market as LP
-  - For multi-outcome markets: ensure probabilities sum to 100%
-  - Find true equilibrium price per market
-  - Maximize single-market welfare before cross-market patches
-
-  **Note**: This won't hurt cross-market solvers because:
-  1. Patches can still adjust prices (via `price_adjustments`)
-  2. Cross-market value comes from correlations, not single-market mispricing
-  3. Better baseline = more accurate welfare delta calculations
-  4. Currently single-market may have arbitrage opportunities that patches "fix" wastefully
-
-### Cleanup
-- [x] Remove unused composition module (-2.6k lines)
-- [x] Remove unused specialized/conditional solver
-- [ ] Consolidate duplicate scenario configs
-- [ ] Clean up test helpers
 
 ---
 
 ## Research Questions
 
-### Matching Quality
-1. How far from optimal is patch-based solving?
-2. What's the welfare gain from specialized solvers?
-3. How does solution quality scale with order count?
+### MM Constraints
+1. How tight are budgets in practice?
+2. How often does fixed-point iterate >1 time?
+3. What's the welfare gain from MM participation?
 
-### JIT Economics
-1. What's the optimal JIT fee rate?
-2. How much JIT volume is "too much"?
-3. Do rebates make displaced users whole?
-
-### Scaling
-1. What's the practical limit on cross-market orders?
-2. How does MWIS scale with patch count?
-3. Can we shard by market cluster?
-
-### Comparison
-1. Batch auction vs CLOB: welfare comparison
-2. Fill rate comparison
-3. Price accuracy comparison
-
----
-
-## Experiment Priorities
-
-### Experiment 1: Cross-Market Value
-Measure how much welfare comes from cross-market matching.
-- Vary cross-market order percentage
-- Compare with single-market only
-
-### Experiment 2: Solver Specialization
-Measure individual solver contributions.
-- Run platform with/without each specialized solver
-- Track fills contributed by each
-
-### Experiment 3: JIT Impact
-Simulate JIT liquidity provision.
-- Welfare with/without JIT
-- Fill rate improvement
-- Price accuracy
-
-### Experiment 4: Scale Stress Test
-Find breaking points.
-- Orders per batch
-- Markets per batch
-- Cross-market order density
-
----
-
-## Milestones
-
-| Milestone | Description | Estimated Effort |
-|-----------|-------------|------------------|
-| M1 | Budget constraints + validation | 1-2 weeks |
-| M2 | Batch state machine | 1-2 weeks |
-| M3 | JIT integration | 2-3 weeks |
-| M4 | External solver API | 2-3 weeks |
-| M5 | Persistence layer | 1-2 weeks |
-| M6 | Network protocol | 2-3 weeks |
-| M7 | TEE integration | 3-4 weeks |
-
-Total to production-ready: ~3-4 months of focused work.
+### Cross-Market
+1. How much welfare comes from cross-market matching?
+2. How sparse is the conflict graph?
+3. Does MWIS outperform greedy significantly?
 
 ---
 
 ## Decision Points
 
-### Flash Quoting
-**Question**: Support bilinear budget constraints (budget at execution price)?
+### Solver Ordering
+**Question**: Should MM constraints be solved before or after per-market clearing?
 
 **Options**:
-1. Linear only (budget at limit price) - simpler
-2. Bilinear with iteration - more capital efficient, complex
+1. After: Use prices from clearing, allocate MM budgets
+2. Before: Let MM volume affect prices (needs iteration)
+3. Interleaved: Fixed-point between clearing and allocation
 
-**Recommendation**: Start linear, add bilinear as opt-in later.
+**Current**: Option 1 (after), with fixed-point for multi-MM.
 
-### Solver Model
-**Question**: Internal-only vs external solvers?
-
-**Options**:
-1. Internal only (trusted, in-process)
-2. External via API (validated outputs)
-3. External via WASM (sandboxed execution)
-
-**Recommendation**: Start internal, add external API, defer WASM.
-
-### Block Building
-**Question**: Winner-takes-all vs MWIS combination?
+### Flash Liquidity
+**Question**: How to handle MM liquidity that depends on clearing price?
 
 **Options**:
-1. Winner-takes-all (best single solution wins)
-2. MWIS combination (combine non-conflicting patches)
+1. Conservative: Use worst-case price for capital
+2. Iterative: Solve, check budgets, re-solve
+3. Dual: Lagrangian relaxation with price-dependent costs
 
-**Current**: MWIS is implemented. Monitor if combination adds value vs complexity.
+**Recommendation**: Start with option 1, add iteration if needed.
