@@ -15,7 +15,7 @@ mod runners;
 mod scenarios;
 
 use metrics::{print_comparison_table, OptimalityMetrics, ScenarioComparison};
-use runners::{run_milp_killer_test, run_platform_stress_test, run_quick_test, run_realistic_test};
+use runners::{run_milp_killer_test, run_platform_stress_test, run_quick_test};
 use scenarios::create_problem;
 
 /// Which solver(s) to use
@@ -50,7 +50,6 @@ pub struct SimulationConfig {
     pub verbose: bool,
     pub solver: SolverChoice,
     pub milp_timeout: Option<f64>,
-    pub enable_jit: bool,
 }
 
 impl Default for SimulationConfig {
@@ -59,15 +58,13 @@ impl Default for SimulationConfig {
             num_batches: 20,
             seed: 42,
             scenarios: vec![
-                "presidential".to_string(),
-                "tournament".to_string(),
                 "random-easy".to_string(),
+                "random-medium".to_string(),
                 "random-hard".to_string(),
             ],
             verbose: false,
             solver: SolverChoice::Greedy,
             milp_timeout: None,
-            enable_jit: false,
         }
     }
 }
@@ -208,7 +205,7 @@ impl SimulationResults {
     }
 }
 
-fn create_solvers(choice: &SolverChoice, seed: u64, milp_timeout: Option<f64>, enable_jit: bool) -> Vec<Box<dyn Solver>> {
+fn create_solvers(choice: &SolverChoice, seed: u64, milp_timeout: Option<f64>) -> Vec<Box<dyn Solver>> {
     match choice {
         SolverChoice::Greedy => vec![Box::new(GreedySolver::new())],
         SolverChoice::Milp => {
@@ -225,13 +222,11 @@ fn create_solvers(choice: &SolverChoice, seed: u64, milp_timeout: Option<f64>, e
                     total_time_budget_ms: (timeout * 1000.0 / 0.6) as u64,
                     milp_time_fraction: 0.6,
                     seed,
-                    enable_jit,
                     ..Default::default()
                 }
             } else {
                 PlatformConfig {
                     seed,
-                    enable_jit,
                     ..Default::default()
                 }
             };
@@ -248,13 +243,11 @@ fn create_solvers(choice: &SolverChoice, seed: u64, milp_timeout: Option<f64>, e
                     total_time_budget_ms: (timeout * 1000.0 / 0.6) as u64,
                     milp_time_fraction: 0.6,
                     seed,
-                    enable_jit,
                     ..Default::default()
                 }
             } else {
                 PlatformConfig {
                     seed,
-                    enable_jit,
                     ..Default::default()
                 }
             };
@@ -304,7 +297,7 @@ pub fn run_simulation(config: SimulationConfig) -> SimulationResults {
 }
 
 fn run_scenario_all_solvers(config: &SimulationConfig, scenario_name: &str) -> SolverComparisonResult {
-    let solvers = create_solvers(&SolverChoice::All, config.seed, config.milp_timeout, config.enable_jit);
+    let solvers = create_solvers(&SolverChoice::All, config.seed, config.milp_timeout);
 
     let mut aggregates: Vec<SolverAggregateResult> = solvers
         .iter()
@@ -357,7 +350,7 @@ fn run_scenario_all_solvers(config: &SimulationConfig, scenario_name: &str) -> S
 }
 
 fn run_scenario(config: &SimulationConfig, scenario_name: &str) -> ScenarioComparison {
-    let solvers = create_solvers(&config.solver, config.seed, config.milp_timeout, config.enable_jit);
+    let solvers = create_solvers(&config.solver, config.seed, config.milp_timeout);
     let solver = &solvers[0];
 
     let mut comparison = ScenarioComparison::new(scenario_name);
@@ -402,23 +395,6 @@ fn main() {
             .and_then(|s| s.parse().ok())
             .unwrap_or(1.0);
         run_platform_stress_test(timeout);
-        return;
-    }
-
-    if args.len() > 1 && args[1] == "--realistic" {
-        let timeout = args
-            .iter()
-            .position(|a| a == "--milp-timeout")
-            .and_then(|i| args.get(i + 1))
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(10.0);
-        let config = args
-            .iter()
-            .position(|a| a == "--config")
-            .and_then(|i| args.get(i + 1))
-            .map(|s| s.as_str())
-            .unwrap_or("test");
-        run_realistic_test(timeout, config);
         return;
     }
 
@@ -481,9 +457,6 @@ fn main() {
             "--verbose" | "-v" => {
                 config.verbose = true;
             }
-            "--jit" => {
-                config.enable_jit = true;
-            }
             "--help" | "-h" => {
                 println!("Matching Simulation\n");
                 println!("Usage: matching-sim [OPTIONS]\n");
@@ -491,32 +464,12 @@ fn main() {
                 println!("  --batches <N>        Number of batches per scenario (default: 20)");
                 println!("  --seed <N>           Random seed (default: 42)");
                 println!("  --scenario <S>       Run specific scenario:");
-                println!("                         Standard scenarios:");
-                println!("                           presidential, presidential-hard");
-                println!("                           tournament, tournament-large");
-                println!("                           random-easy, random-medium, random-hard");
-                println!("                         Complex scenarios:");
-                println!("                           nested-bundles");
-                println!("                           conditional-chains");
-                println!("                           deep-implications");
-                println!("                           liquidity-cliffs");
-                println!("                           adversarial");
-                println!("                           large-interconnected");
+                println!("                         random-easy, random-medium, random-hard");
                 println!("                         Stress scenarios:");
                 println!("                           mega, mega-small, mega-large, mega-extreme");
                 println!("                           combined");
                 println!("                         MILP-killer scenarios:");
                 println!("                           milp-killer, milp-killer-full, milp-killer-extreme");
-                println!("                         Planted pattern scenarios:");
-                println!("                           planted-chain");
-                println!("                           planted-complement");
-                println!("                           planted-exclusion");
-                println!("                         Realistic scenarios (cross-market demo):");
-                println!("                           realistic, realistic-standard (50k orders)");
-                println!("                           realistic-test (10k orders)");
-                println!("                           realistic-small (3k orders)");
-                println!("                           realistic-extreme (100k orders)");
-                println!("                           realistic-cross-market (high bundle fraction)");
                 println!("  --solver <S>         Solver to use:");
                 println!("                         greedy (default)");
                 println!("                         milp (optimal via MILP)");
@@ -524,14 +477,11 @@ fn main() {
                 println!("                         platform (combines all solvers via MWIS)");
                 println!("                         all (compare all solvers)");
                 println!("  --milp-timeout <S>   MILP time limit in seconds (default: none)");
-                println!("  --jit                Enable JIT liquidity phase (platform solver only)");
                 println!("  --verbose, -v        Show detailed output");
                 println!("  --quick              Run a quick test");
                 println!("  --stress             Run platform stress test on mega scenario");
                 println!("  --milp-killer        Run MILP killer test (forces MILP timeout)");
                 println!("                       Use with --config test|full|extreme");
-                println!("  --realistic          Run realistic scenario test (cross-market value demo)");
-                println!("                       Use with --config test|small|standard|extreme|cross-market");
                 println!("  --help, -h           Show this help message");
                 return;
             }
@@ -551,9 +501,6 @@ fn main() {
     println!("  Solver: {:?}", config.solver);
     if let Some(timeout) = config.milp_timeout {
         println!("  MILP timeout: {}s", timeout);
-    }
-    if config.enable_jit {
-        println!("  JIT liquidity: enabled");
     }
     println!();
 

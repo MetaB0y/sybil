@@ -21,6 +21,7 @@ pub mod book;
 pub mod constraints;
 pub mod state;
 pub mod problem;
+pub mod mm_constraint;
 
 // Re-exports for convenience
 pub use types::{MarketId, Nanos, Qty, Side, NANOS_PER_DOLLAR};
@@ -32,6 +33,7 @@ pub use book::{BookLevel, LiquidityBook, LiquidityPool};
 pub use constraints::{MarketConstraint, ConstraintSet, ConstraintBuilder};
 pub use state::{state_index, state_to_outcomes, StateSpace, StateProbabilities};
 pub use problem::{Problem, ProblemSummary};
+pub use mm_constraint::{MmId, MmSide, MmOrder, MmConstraint, MmValidationResult, MmConstraintStatus};
 
 // Re-export order_builder convenience functions
 pub use order_builder::{simple_yes_buy, simple_no_buy, spread, butterfly, bundle_yes, outcome_buy, ratio_spread, conditional_buy};

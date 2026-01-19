@@ -32,7 +32,8 @@
 // Internal modules
 pub(crate) mod combiner;
 pub mod greedy;
-pub mod jit;
+pub mod local_solver;
+pub mod mm_allocator;
 pub mod platform;
 pub mod randomized;
 pub(crate) mod specialized;
@@ -46,6 +47,10 @@ pub mod milp;
 pub use greedy::GreedySolver;
 pub use randomized::{MultiHeuristicSolver, RandomizedGreedySolver};
 pub use platform::{PlatformConfig, PlatformResult, SolverPlatform};
+
+// New architecture components
+pub use local_solver::{LocalSolver, LocalSolverConfig, MarketSolution, solve_all_markets_parallel};
+pub use mm_allocator::{MmAllocator, AllocatorConfig, AllocationResult, MmAllocation};
 
 #[cfg(feature = "milp")]
 pub use milp::{MilpConfig, MilpResult, MilpSolver, SolveStatus};

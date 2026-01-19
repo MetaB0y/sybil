@@ -70,10 +70,6 @@ pub struct PlatformConfig {
     pub include_bundle_decomposer: bool,
     /// Whether to include chain finder
     pub include_chain_finder: bool,
-    /// Whether to enable JIT liquidity phase
-    pub enable_jit: bool,
-    /// JIT configuration (if enabled)
-    pub jit_config: Option<crate::jit::JitConfig>,
 }
 
 impl Default for PlatformConfig {
@@ -90,8 +86,6 @@ impl Default for PlatformConfig {
             include_arbitrage: true,
             include_bundle_decomposer: true,
             include_chain_finder: true,
-            enable_jit: false,
-            jit_config: None,
         }
     }
 }
@@ -158,8 +152,6 @@ pub struct PlatformResult {
     pub combine_stats: CombineStats,
     /// Total time spent (seconds)
     pub total_time_secs: f64,
-    /// JIT phase result (if JIT was enabled)
-    pub jit_result: Option<crate::jit::JitPhaseResult>,
 }
 
 impl PlatformResult {
@@ -256,28 +248,6 @@ impl PlatformResult {
         } else {
             println!("Combined equals best individual solver");
         }
-
-        // JIT summary
-        if let Some(jit) = &self.jit_result {
-            println!();
-            println!("JIT Liquidity Phase:");
-            println!(
-                "  Providers submitted: {}",
-                jit.stats.providers_submitted
-            );
-            println!(
-                "  Orders: {} submitted, {} backrun, {} displacement",
-                jit.stats.orders_submitted,
-                jit.stats.backrun_orders_accepted,
-                jit.stats.displacement_orders_accepted
-            );
-            println!(
-                "  Volume: {} backrun, {} displacement",
-                jit.stats.backrun_volume, jit.stats.displacement_volume
-            );
-            println!("  Welfare improvement: {}", jit.welfare_improvement);
-            println!("  Tax collected: {}", jit.total_tax);
-        }
     }
 }
 
@@ -368,13 +338,6 @@ impl SolverPlatform {
         let (result, combine_stats, contributions) =
             combiner.combine(solver_solutions, problem);
 
-        // Optionally run JIT phase
-        let jit_result = if self.config.enable_jit {
-            Some(self.run_jit_phase(problem, &result))
-        } else {
-            None
-        };
-
         let total_time_secs = start.elapsed().as_secs_f64();
 
         PlatformResult {
@@ -383,30 +346,7 @@ impl SolverPlatform {
             contributions,
             combine_stats,
             total_time_secs,
-            jit_result,
         }
-    }
-
-    /// Run the JIT liquidity phase.
-    fn run_jit_phase(
-        &self,
-        problem: &Problem,
-        base_result: &MatchingResult,
-    ) -> crate::jit::JitPhaseResult {
-        use crate::jit::{BatchId, JitCoordinator, ProviderId, SimpleJitProvider};
-
-        // Create JIT coordinator with configuration
-        let jit_config = self.config.jit_config.clone().unwrap_or_default();
-        let mut coordinator = JitCoordinator::with_config(jit_config);
-
-        // Add default simple provider if none configured
-        // In production, providers would be configured externally
-        coordinator.add_provider(Box::new(SimpleJitProvider::new(ProviderId::new(1))));
-
-        // Run JIT phase
-        // Use a simple batch ID based on seed for now
-        let batch_id = BatchId::new(self.config.seed);
-        coordinator.run_jit_phase(batch_id, problem, base_result)
     }
 
     /// Run the greedy solver.

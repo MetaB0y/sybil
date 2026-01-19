@@ -18,6 +18,15 @@ optional = true
 version = "1.7"
 optional = true
 
+[dev-dependencies]
+proptest = "1.4"
+divan = "0.1"
+matching-scenarios = { path = "../matching-scenarios" }
+
+[[bench]]
+name = "solver_bench"
+harness = false
+
 [features]
 default = []
 milp = ["good_lp", "highs"]

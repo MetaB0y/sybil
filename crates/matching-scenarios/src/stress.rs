@@ -15,14 +15,7 @@ use matching_engine::{
 
 use matching_engine::Problem;
 
-use crate::{
-    generate_presidential_scenario, generate_tournament_scenario,
-    generate_random_scenario, PresidentialConfig, TournamentConfig, RandomConfig,
-};
-use crate::complex::{
-    generate_nested_bundle_scenario, generate_large_interconnected_scenario,
-    NestedBundleConfig, LargeInterconnectedConfig,
-};
+use crate::{generate_random_scenario, RandomConfig};
 
 /// Configuration for mega stress scenarios.
 #[derive(Clone, Debug)]
@@ -451,58 +444,55 @@ fn inject_stress_conflicts(problem: &mut Problem, rng: &mut StdRng, market_ids: 
     }
 }
 
-/// Generate a combined scenario from multiple existing scenarios.
+/// Generate a combined scenario from multiple random sub-scenarios.
 ///
-/// This merges several scenario types into one large problem by:
-/// - Generating each sub-scenario
+/// This merges several random scenarios into one large problem by:
+/// - Generating each sub-scenario with different configurations
 /// - Remapping market IDs to avoid collisions
 /// - Combining all orders and liquidity
 pub fn generate_combined_scenario(seed: u64) -> Problem {
-    let mut problem = Problem::new("Combined(presidential+tournament+random+nested)");
+    let mut problem = Problem::new("Combined(random_variants)");
 
     // Keep track of market ID offset
     let mut market_id_offset = 0u32;
     let mut order_id = 1u64;
 
-    // Generate presidential scenario
-    let presidential = generate_presidential_scenario(PresidentialConfig {
+    // Generate easy random scenario
+    let random_easy = generate_random_scenario(RandomConfig {
         seed,
-        ..Default::default()
+        num_markets: 10,
+        num_orders: 100,
+        ..RandomConfig::easy()
     });
-    merge_subproblem(&mut problem, presidential, &mut market_id_offset, &mut order_id);
+    merge_subproblem(&mut problem, random_easy, &mut market_id_offset, &mut order_id);
 
-    // Generate tournament scenario
-    let tournament = generate_tournament_scenario(TournamentConfig {
+    // Generate medium random scenario
+    let random_medium = generate_random_scenario(RandomConfig {
         seed: seed + 1,
-        num_teams: 8,
-        ..Default::default()
+        num_markets: 15,
+        num_orders: 200,
+        ..RandomConfig::medium()
     });
-    merge_subproblem(&mut problem, tournament, &mut market_id_offset, &mut order_id);
+    merge_subproblem(&mut problem, random_medium, &mut market_id_offset, &mut order_id);
 
-    // Generate random hard scenario
-    let random = generate_random_scenario(RandomConfig {
+    // Generate hard random scenario
+    let random_hard = generate_random_scenario(RandomConfig {
         seed: seed + 2,
         num_markets: 8,
-        num_orders: 100,
+        num_orders: 150,
         ..RandomConfig::hard()
     });
-    merge_subproblem(&mut problem, random, &mut market_id_offset, &mut order_id);
+    merge_subproblem(&mut problem, random_hard, &mut market_id_offset, &mut order_id);
 
-    // Generate nested bundles
-    let nested = generate_nested_bundle_scenario(NestedBundleConfig {
+    // Generate another hard variant with more bundles
+    let random_bundles = generate_random_scenario(RandomConfig {
         seed: seed + 3,
-        ..Default::default()
-    });
-    merge_subproblem(&mut problem, nested, &mut market_id_offset, &mut order_id);
-
-    // Generate large interconnected
-    let interconnected = generate_large_interconnected_scenario(LargeInterconnectedConfig {
-        seed: seed + 4,
         num_markets: 12,
-        num_orders: 80,
-        ..Default::default()
+        num_orders: 120,
+        bundle_fraction: 0.4,
+        ..RandomConfig::hard()
     });
-    merge_subproblem(&mut problem, interconnected, &mut market_id_offset, &mut order_id);
+    merge_subproblem(&mut problem, random_bundles, &mut market_id_offset, &mut order_id);
 
     // Update problem name with final stats
     problem.name = format!(

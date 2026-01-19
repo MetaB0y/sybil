@@ -14,14 +14,14 @@ cargo run --bin matching-sim -- --help
 cargo run --bin matching-sim -- --quick
 
 # Run specific scenario
-cargo run --bin matching-sim -- --scenario presidential
+cargo run --bin matching-sim -- --scenario random-easy
 ```
 
 ### Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--scenario <S>` | Scenario to run | presidential + others |
+| `--scenario <S>` | Scenario to run | random-* |
 | `--solver <S>` | Solver to use | greedy |
 | `--batches <N>` | Batches per scenario | 20 |
 | `--seed <N>` | Random seed | 42 |
@@ -33,7 +33,6 @@ cargo run --bin matching-sim -- --scenario presidential
 - `greedy` - Fast heuristic
 - `milp` - Optimal via MILP
 - `randomized` - Random order shuffling
-- `composite` - Problem decomposition
 - `platform` - All solvers combined
 - `all` - Compare all solvers
 
@@ -42,13 +41,13 @@ cargo run --bin matching-sim -- --scenario presidential
 ```bash
 # Compare all solvers on a scenario
 cargo run --bin matching-sim --release -- \
-    --scenario presidential \
+    --scenario random-hard \
     --solver all \
     --batches 5
 
 # Run MILP with timeout
 cargo run --bin matching-sim --release -- \
-    --scenario tournament \
+    --scenario mega-medium \
     --solver milp \
     --milp-timeout 10
 
@@ -60,7 +59,7 @@ cargo run --bin matching-sim --release -- \
 
 # Multiple batches for statistics
 cargo run --bin matching-sim --release -- \
-    --scenario adversarial \
+    --scenario milp-killer \
     --solver all \
     --batches 50
 ```
@@ -70,9 +69,6 @@ cargo run --bin matching-sim --release -- \
 ```bash
 # Platform stress test
 cargo run --bin matching-sim --release -- --stress --milp-timeout 5
-
-# Realistic scenario test
-cargo run --bin matching-sim --release -- --realistic --config standard
 
 # MILP killer test
 cargo run --bin matching-sim --release -- --milp-killer --config full
@@ -95,12 +91,6 @@ just lint
 # Format code
 just fmt
 
-# Quick realistic scenario
-just realistic-small
-
-# Full realistic scenario
-just realistic
-
 # Compare solvers
 just compare
 ```
@@ -110,7 +100,7 @@ just compare
 ### Solver Comparison Table
 
 ```
-Scenario: presidential
+Scenario: random-hard
 
 ╭────────────┬─────────────┬──────────┬──────────╮
 │ Solver     │ Welfare     │ Gap      │ Fill %   │
@@ -129,12 +119,12 @@ Scenario: presidential
 
 With `--verbose`:
 ```
-Running presidential batch 0 (seed 42)
-Problem: Presidential Election
-  Markets: 5, Orders: 40, Liquidity entries: 25
+Running random-hard batch 0 (seed 42)
+Problem: Random(hard)
+  Markets: 50, Orders: 500, Liquidity entries: 200
 
-  MILP: welfare=12345678, filled=38/40, time=0.234s
-  Greedy: welfare=11000000, filled=35/40, time=0.001s
+  MILP: welfare=12345678, filled=480/500, time=0.234s
+  Greedy: welfare=11000000, filled=450/500, time=0.001s
 ```
 
 ## Exit Codes

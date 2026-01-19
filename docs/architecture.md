@@ -198,7 +198,7 @@ Orders submitted
 ## Module Structure
 
 ```
-simulations/
+crates/
 ├── matching-engine/     # Core types
 │   ├── src/
 │   │   ├── lib.rs
@@ -224,8 +224,6 @@ simulations/
 │
 ├── matching-scenarios/  # Test scenarios
 │   ├── src/
-│   │   ├── presidential.rs  # Election markets
-│   │   ├── realistic.rs     # Multi-market scenarios
 │   │   ├── stress.rs        # Stress testing
 │   │   └── random.rs        # Random generation
 │
@@ -236,12 +234,6 @@ simulations/
 ---
 
 ## Future Considerations
-
-### JIT Liquidity
-
-See [jit-design.md](./jit-design.md) for the JIT mechanism design.
-
-Key idea: Market makers can provide liquidity AFTER seeing the sealed batch, paying a fee for this information advantage.
 
 ### External Solvers
 
