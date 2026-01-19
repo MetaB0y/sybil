@@ -1,6 +1,6 @@
 //! Problem definition for matching instances.
 
-use crate::{LiquidityPool, ConstraintSet, MarketSet, Order};
+use crate::{LiquidityPool, ConstraintSet, MarketSet, Order, MmConstraint};
 
 /// A complete problem instance for the matching system.
 #[derive(Clone, Debug)]
@@ -15,6 +15,8 @@ pub struct Problem {
     pub orders: Vec<Order>,
     /// Constraints between markets
     pub constraints: ConstraintSet,
+    /// Market maker capital constraints
+    pub mm_constraints: Vec<MmConstraint>,
 }
 
 impl Problem {
@@ -25,6 +27,7 @@ impl Problem {
             liquidity: LiquidityPool::new(),
             orders: Vec::new(),
             constraints: ConstraintSet::new(),
+            mm_constraints: Vec::new(),
         }
     }
 
@@ -50,6 +53,7 @@ impl Problem {
             num_markets: self.num_markets(),
             num_orders: self.num_orders(),
             num_constraints: self.constraints.len(),
+            num_mm_constraints: self.mm_constraints.len(),
             bundle_orders,
             aon_orders,
             conditional_orders,
@@ -65,6 +69,7 @@ pub struct ProblemSummary {
     pub num_markets: usize,
     pub num_orders: usize,
     pub num_constraints: usize,
+    pub num_mm_constraints: usize,
     pub bundle_orders: usize,
     pub aon_orders: usize,
     pub conditional_orders: usize,
@@ -78,6 +83,9 @@ impl std::fmt::Display for ProblemSummary {
         writeln!(f, "  Orders: {} (bundles: {}, AON: {}, conditional: {})",
             self.num_orders, self.bundle_orders, self.aon_orders, self.conditional_orders)?;
         writeln!(f, "  Constraints: {}", self.num_constraints)?;
+        if self.num_mm_constraints > 0 {
+            writeln!(f, "  MM Constraints: {}", self.num_mm_constraints)?;
+        }
         writeln!(f, "  Total demand: {} shares", self.total_demand)
     }
 }

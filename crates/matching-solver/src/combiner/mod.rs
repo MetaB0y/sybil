@@ -254,8 +254,8 @@ impl SolutionCombiner {
                 // Apply the fill
                 result.add_fill(candidate.fill.clone(), order);
 
-                // Update liquidity (simplified - proper implementation would track exact consumption)
-                self.consume_liquidity_for_fill(&mut liquidity, order, &candidate.fill);
+                // Update liquidity for all markets in the order
+                self.consume_liquidity_for_fill(&mut liquidity, order, &candidate.fill, problem);
 
                 // Track contribution
                 let entry = contributions
@@ -296,7 +296,7 @@ impl SolutionCombiner {
             .iter()
             .map(|f| {
                 let order = &problem.orders[f.order_idx];
-                FillFootprint::from_fill(order, &f.fill)
+                FillFootprint::from_fill(order, &f.fill, &problem.markets)
             })
             .collect();
 
@@ -374,30 +374,96 @@ impl SolutionCombiner {
         solver.solve(graph, &adjusted_weights)
     }
 
-    /// Consume liquidity for a fill (simplified).
+    /// Consume liquidity for a fill.
+    ///
+    /// For single-market orders, consumes from the appropriate outcome book.
+    /// For multi-market orders, consumes from each market's relevant outcome.
     fn consume_liquidity_for_fill(
         &self,
         liquidity: &mut LiquidityPool,
         order: &Order,
         fill: &Fill,
+        problem: &Problem,
     ) {
-        // For single-market orders
-        if order.num_markets == 1 {
-            let market = order.markets[0];
-            let outcome = self.determine_outcome(order);
+        // Get market sizes for proper outcome extraction
+        let market_sizes: Vec<u8> = (0..order.num_markets as usize)
+            .map(|i| {
+                let market_id = order.markets[i];
+                if market_id.is_none() {
+                    2
+                } else {
+                    problem.markets.num_outcomes(market_id).max(2)
+                }
+            })
+            .collect();
+
+        // For each market, determine which outcome is being bought and consume liquidity
+        for market_idx in 0..order.num_markets as usize {
+            let market = order.markets[market_idx];
+            if market.is_none() {
+                continue;
+            }
+
+            let outcome = self.determine_outcome_for_market(order, market_idx, &market_sizes);
             if let Some(book) = liquidity.get_mut(market, outcome) {
                 book.consume_asks(fill.fill_qty, fill.fill_price);
             }
         }
-        // Multi-market orders are more complex - would need proper tracking
     }
 
-    /// Determine which outcome an order is buying.
-    fn determine_outcome(&self, order: &Order) -> u8 {
-        for (i, &payoff) in order.payoffs.iter().take(order.num_states as usize).enumerate() {
-            if payoff > 0 {
-                return i as u8;
+    /// Determine which outcome an order is buying for a specific market.
+    fn determine_outcome_for_market(&self, order: &Order, market_idx: usize, market_sizes: &[u8]) -> u8 {
+        let num_markets = order.num_markets as usize;
+        if market_idx >= num_markets {
+            return 0;
+        }
+
+        // Simple case: single market order
+        if num_markets == 1 {
+            // Find the outcome with highest payoff
+            let mut best_outcome = 0u8;
+            let mut best_payoff = i8::MIN;
+
+            for (i, &payoff) in order.payoffs.iter().take(order.num_states as usize).enumerate() {
+                if payoff > best_payoff {
+                    best_payoff = payoff;
+                    best_outcome = i as u8;
+                }
             }
+            return best_outcome;
+        }
+
+        // Multi-market case: analyze payoff vector
+        let max_outcomes = market_sizes.iter().max().copied().unwrap_or(2) as usize;
+        let mut outcome_votes: Vec<i32> = vec![0; max_outcomes.max(4)];
+
+        for state_idx in 0..order.num_states as usize {
+            let payoff = order.payoffs[state_idx];
+            if payoff > 0 {
+                let outcome = self.extract_outcome_from_state(state_idx, market_idx, market_sizes);
+                if (outcome as usize) < outcome_votes.len() {
+                    outcome_votes[outcome as usize] += payoff as i32;
+                }
+            }
+        }
+
+        outcome_votes
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, &v)| v)
+            .map(|(idx, _)| idx as u8)
+            .unwrap_or(0)
+    }
+
+    /// Extract the outcome for a specific market from a state index.
+    fn extract_outcome_from_state(&self, state_idx: usize, market_idx: usize, market_sizes: &[u8]) -> u8 {
+        let mut remaining = state_idx;
+        for (i, &size) in market_sizes.iter().enumerate() {
+            let outcome = (remaining % size as usize) as u8;
+            if i == market_idx {
+                return outcome;
+            }
+            remaining /= size as usize;
         }
         0
     }

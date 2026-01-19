@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use matching_engine::{Fill, MarketId, Order, Qty};
+use matching_engine::{Fill, MarketId, MarketSet, Order, Qty};
 
 /// Conflict graph represented as adjacency lists.
 #[derive(Clone, Debug)]
@@ -101,8 +101,22 @@ pub struct FillFootprint {
 
 impl FillFootprint {
     /// Create a footprint from a fill and order.
-    pub fn from_fill(order: &Order, fill: &Fill) -> Self {
+    ///
+    /// `markets` provides the actual market definitions to get correct outcome counts.
+    pub fn from_fill(order: &Order, fill: &Fill, markets: &MarketSet) -> Self {
         let mut liquidity_consumed = HashMap::new();
+
+        // Get actual market sizes from MarketSet
+        let market_sizes: Vec<u8> = (0..order.num_markets as usize)
+            .map(|i| {
+                let market_id = order.markets[i];
+                if market_id.is_none() {
+                    2 // Default to binary if market not found
+                } else {
+                    markets.num_outcomes(market_id).max(2)
+                }
+            })
+            .collect();
 
         // For each market in the order, determine which outcome is being bought
         for market_idx in 0..order.num_markets as usize {
@@ -112,7 +126,7 @@ impl FillFootprint {
             }
 
             // Determine outcome being bought
-            let outcome = Self::determine_outcome_for_market(order, market_idx);
+            let outcome = Self::determine_outcome_for_market(order, market_idx, &market_sizes);
             let key = (market, outcome);
 
             // Add the fill quantity as liquidity consumed
@@ -122,8 +136,31 @@ impl FillFootprint {
         Self { liquidity_consumed }
     }
 
+    /// Create footprint without MarketSet (assumes binary markets).
+    ///
+    /// Use `from_fill` with MarketSet when possible for correct handling of
+    /// non-binary markets.
+    #[cfg(test)]
+    pub fn from_fill_binary(order: &Order, fill: &Fill) -> Self {
+        let mut liquidity_consumed = HashMap::new();
+        let market_sizes: Vec<u8> = vec![2; order.num_markets as usize];
+
+        for market_idx in 0..order.num_markets as usize {
+            let market = order.markets[market_idx];
+            if market.is_none() {
+                continue;
+            }
+
+            let outcome = Self::determine_outcome_for_market(order, market_idx, &market_sizes);
+            let key = (market, outcome);
+            liquidity_consumed.insert(key, fill.fill_qty);
+        }
+
+        Self { liquidity_consumed }
+    }
+
     /// Determine which outcome is being bought for a specific market.
-    fn determine_outcome_for_market(order: &Order, market_idx: usize) -> u8 {
+    fn determine_outcome_for_market(order: &Order, market_idx: usize, market_sizes: &[u8]) -> u8 {
         let num_markets = order.num_markets as usize;
         if market_idx >= num_markets {
             return 0;
@@ -144,15 +181,14 @@ impl FillFootprint {
             return best_outcome;
         }
 
-        // Multi-market case: analyze payoff vector
-        let market_sizes: Vec<u8> = vec![2; num_markets]; // Assume binary markets
-
-        let mut outcome_votes: [i32; 4] = [0; 4];
+        // Multi-market case: analyze payoff vector using actual market sizes
+        let max_outcomes = market_sizes.iter().max().copied().unwrap_or(2) as usize;
+        let mut outcome_votes: Vec<i32> = vec![0; max_outcomes.max(4)];
 
         for state_idx in 0..order.num_states as usize {
             let payoff = order.payoffs[state_idx];
             if payoff > 0 {
-                let outcome = Self::extract_outcome_from_state(state_idx, market_idx, &market_sizes);
+                let outcome = Self::extract_outcome_from_state(state_idx, market_idx, market_sizes);
                 if (outcome as usize) < outcome_votes.len() {
                     outcome_votes[outcome as usize] += payoff as i32;
                 }
