@@ -12,11 +12,9 @@ rand_chacha = "0.3"
 [dependencies.good_lp]
 version = "1.10"
 features = ["highs"]
-optional = true
 
 [dependencies.highs]
 version = "1.7"
-optional = true
 
 [dev-dependencies]
 proptest = "1.4"
@@ -29,5 +27,4 @@ harness = false
 
 [features]
 default = []
-milp = ["good_lp", "highs"]
-lp-validation = ["good_lp"]
+milp = []  # Legacy feature flag (good_lp/highs now always available)

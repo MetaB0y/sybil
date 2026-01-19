@@ -49,7 +49,7 @@ pub use randomized::{MultiHeuristicSolver, RandomizedGreedySolver};
 pub use platform::{PlatformConfig, PlatformResult, SolverPlatform};
 
 // New architecture components
-pub use local_solver::{LocalSolver, LocalSolverConfig, MarketSolution, solve_all_markets_parallel};
+pub use local_solver::{LocalSolver, LocalSolverConfig, MarketSolution, solve_all_markets_parallel, solve_market_lp};
 pub use mm_allocator::{MmAllocator, AllocatorConfig, AllocationResult, MmAllocation};
 
 #[cfg(feature = "milp")]

@@ -1,6 +1,16 @@
 //! Divan benchmarks for matching solver components.
 //!
-//! Scenarios align with the plan's 500-5000 order range:
+//! # ⚠️ Benchmark Caveats
+//!
+//! The local_solver is a HEURISTIC (O(n log n)), not an optimal solver (O(n³)).
+//! See local_solver.rs documentation for limitations.
+//!
+//! These benchmarks measure:
+//! 1. Speed of the heuristic (which is fast but not optimal)
+//! 2. MM allocation with Lagrangian relaxation
+//!
+//! # Scenarios
+//!
 //! - small: ~200-500 orders (quick validation)
 //! - medium: ~1,500-4,500 orders (plan target)
 //! - large: ~10,000-30,000 orders (stress testing)
@@ -198,7 +208,7 @@ fn bench_mega_scenario_generation_large() {
 // ============================================================================
 
 fn run_full_pipeline(problem: &Problem) {
-    // Phase 1: Per-market clearing
+    // Phase 1: Per-market clearing (heuristic)
     let solver = LocalSolver::new();
     let mut market_solutions: HashMap<_, _> = HashMap::new();
 
@@ -210,6 +220,35 @@ fn run_full_pipeline(problem: &Problem) {
             .cloned()
             .unwrap_or_else(|| matching_engine::LiquidityBook::new(market.id, 0));
         let solution = solver.solve_market(market.id, &problem.markets, &problem.orders, &book);
+        market_solutions.insert(market.id, solution);
+    }
+
+    // Phase 2: MM allocation
+    let mut prices = HashMap::new();
+    for (market_id, solution) in &market_solutions {
+        prices.insert(*market_id, solution.prices.clone());
+    }
+
+    let welfare: HashMap<u64, i64> = problem.orders.iter().map(|o| (o.id, 1i64)).collect();
+
+    let allocator = MmAllocator::new();
+    let _ = allocator.allocate(&problem.mm_constraints, &prices, &problem.orders, &welfare);
+}
+
+fn run_full_pipeline_lp(problem: &Problem) {
+    use matching_solver::solve_market_lp;
+
+    // Phase 1: Per-market clearing (LP-based with unified liquidity)
+    let mut market_solutions: HashMap<_, _> = HashMap::new();
+
+    for market in problem.markets.iter() {
+        let book = problem
+            .liquidity
+            .books
+            .get(&(market.id, 0))
+            .cloned()
+            .unwrap_or_else(|| matching_engine::LiquidityBook::new(market.id, 0));
+        let solution = solve_market_lp(market.id, &problem.markets, &problem.orders, &book);
         market_solutions.insert(market.id, solution);
     }
 
@@ -256,3 +295,24 @@ fn bench_full_pipeline_extreme() {
     let problem = generate_mega_scenario_v2(config);
     run_full_pipeline(&problem);
 }
+
+// ============================================================================
+// LP Pipeline Benchmarks (using solve_market_lp with unified liquidity)
+// ============================================================================
+
+#[divan::bench]
+fn bench_lp_pipeline_small() {
+    let config = MegaScenarioConfigV2::small();
+    let problem = generate_mega_scenario_v2(config);
+    run_full_pipeline_lp(&problem);
+}
+
+#[divan::bench]
+fn bench_lp_pipeline_medium() {
+    let config = MegaScenarioConfigV2::medium();
+    let problem = generate_mega_scenario_v2(config);
+    run_full_pipeline_lp(&problem);
+}
+
+// Validation tests moved to tests/validation.rs
+// Run with: cargo test -p matching-solver --test validation
