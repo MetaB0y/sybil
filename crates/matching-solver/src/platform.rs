@@ -349,6 +349,43 @@ impl SolverPlatform {
         }
     }
 
+    /// Solve using the new Pipeline architecture.
+    ///
+    /// This provides an alternative implementation that uses the Pipeline
+    /// internally while maintaining the same PlatformResult output.
+    pub fn solve_with_pipeline(&self, problem: &Problem) -> PlatformResult {
+        let start = Instant::now();
+
+        // Create pipeline from config
+        let pipeline = crate::pipeline::Pipeline::from_platform_config(&self.config);
+
+        // Run the pipeline
+        let pipeline_result = pipeline.solve(problem);
+
+        // Convert PipelineResult to PlatformResult
+        let solver_results = pipeline_result
+            .contributions
+            .iter()
+            .map(|c| SolverResultInfo {
+                name: c.solver_name.clone(),
+                welfare: c.welfare_contributed,
+                fills: c.fills_contributed,
+                solve_time_secs: 0.0, // Not tracked per-solver in pipeline
+                confidence: SolutionConfidence::Heuristic,
+            })
+            .collect();
+
+        let total_time_secs = start.elapsed().as_secs_f64();
+
+        PlatformResult {
+            result: pipeline_result.result,
+            solver_results,
+            contributions: pipeline_result.contributions,
+            combine_stats: pipeline_result.combine_stats.unwrap_or_default(),
+            total_time_secs,
+        }
+    }
+
     /// Run the greedy solver.
     fn run_greedy(&self, problem: &Problem) -> (SolverSolution, SolverResultInfo) {
         let start = Instant::now();

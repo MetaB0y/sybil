@@ -35,8 +35,12 @@ pub mod greedy;
 pub mod local_solver;
 pub mod mm_allocator;
 pub mod platform;
+pub mod price_projector;
 pub mod randomized;
 pub(crate) mod specialized;
+pub mod traits;
+pub mod pipeline;
+pub mod benchmark;
 
 #[cfg(feature = "milp")]
 pub mod milp;
@@ -50,7 +54,33 @@ pub use platform::{PlatformConfig, PlatformResult, SolverPlatform};
 
 // New architecture components
 pub use local_solver::{LocalSolver, LocalSolverConfig, MarketSolution, solve_all_markets_parallel, solve_market_lp};
-pub use mm_allocator::{MmAllocator, AllocatorConfig, AllocationResult, MmAllocation};
+pub use mm_allocator::{MmAllocator, AllocatorConfig, AllocationResult as MmAllocationResult, MmAllocation};
+
+// Experimentation platform traits
+pub use traits::{
+    PriceDiscoverer, PriceDiscoveryResult,
+    PriceProjector, PriceProjectionResult,
+    OrderAllocator, AllocationResult,
+    PartialSolver, PartialSolution,
+    LpContributor, LpBuilder, LpSolution,
+    matching_result_to_partial,
+};
+
+// Price projector implementation
+pub use price_projector::{
+    PriceProjector as PriceProjectorImpl,
+    ProjectorConfig,
+    ProjectionResult,
+    JointOutcome,
+    MarginalViolation,
+    recompute_fills,
+};
+
+// Pipeline system
+pub use pipeline::{Pipeline, PipelineBuilder, PipelineConfig, PipelineResult, PipelineTimings};
+
+// Benchmark harness
+pub use benchmark::{BenchmarkHarness, BenchmarkResults, BenchmarkRun, compare_to_baseline};
 
 #[cfg(feature = "milp")]
 pub use milp::{MilpConfig, MilpResult, MilpSolver, SolveStatus};

@@ -21,6 +21,7 @@ use matching_scenarios::{generate_mega_scenario_v2, MegaScenarioConfigV2};
 use matching_solver::{
     local_solver::{LocalSolver, MarketSolution},
     mm_allocator::MmAllocator,
+    Pipeline, BenchmarkHarness,
 };
 use std::collections::HashMap;
 
@@ -312,6 +313,72 @@ fn bench_lp_pipeline_medium() {
     let config = MegaScenarioConfigV2::medium();
     let problem = generate_mega_scenario_v2(config);
     run_full_pipeline_lp(&problem);
+}
+
+// ============================================================================
+// Pipeline Architecture Benchmarks
+// ============================================================================
+
+#[divan::bench]
+fn bench_pipeline_current_small() {
+    let config = MegaScenarioConfigV2::small();
+    let problem = generate_mega_scenario_v2(config);
+    let pipeline = Pipeline::current();
+    let _ = pipeline.solve(&problem);
+}
+
+#[divan::bench]
+fn bench_pipeline_current_medium() {
+    let config = MegaScenarioConfigV2::medium();
+    let problem = generate_mega_scenario_v2(config);
+    let pipeline = Pipeline::current();
+    let _ = pipeline.solve(&problem);
+}
+
+#[divan::bench]
+fn bench_pipeline_full_platform_small() {
+    let config = MegaScenarioConfigV2::small();
+    let problem = generate_mega_scenario_v2(config);
+    let pipeline = Pipeline::full_platform();
+    let _ = pipeline.solve(&problem);
+}
+
+#[divan::bench]
+fn bench_pipeline_full_platform_medium() {
+    let config = MegaScenarioConfigV2::medium();
+    let problem = generate_mega_scenario_v2(config);
+    let pipeline = Pipeline::full_platform();
+    let _ = pipeline.solve(&problem);
+}
+
+#[divan::bench]
+fn bench_pipeline_iterative_small() {
+    let config = MegaScenarioConfigV2::small();
+    let problem = generate_mega_scenario_v2(config);
+    let pipeline = Pipeline::iterative();
+    let _ = pipeline.solve(&problem);
+}
+
+// ============================================================================
+// BenchmarkHarness Demonstration
+// ============================================================================
+
+/// Demonstrates using the BenchmarkHarness for pipeline comparison.
+/// This is a one-shot comparison, not a repeated benchmark.
+#[divan::bench]
+fn bench_harness_comparison() {
+    let mut harness = BenchmarkHarness::new();
+
+    // Add scenarios
+    harness.add_scenario("small", generate_mega_scenario_v2(MegaScenarioConfigV2::small()));
+
+    // Add pipelines to compare
+    harness.add_pipeline("current", Pipeline::current());
+    harness.add_pipeline("full_platform", Pipeline::full_platform());
+
+    // Run comparison
+    let _results = harness.run();
+    // In real usage, you'd call harness.report(&results) to print the comparison
 }
 
 // Validation tests moved to tests/validation.rs

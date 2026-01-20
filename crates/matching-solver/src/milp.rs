@@ -604,6 +604,51 @@ impl Solver for MilpSolver {
     }
 }
 
+// ============================================================================
+// PartialSolver Trait Implementation
+// ============================================================================
+
+use crate::combiner::SolutionConfidence;
+use crate::traits::{PartialSolution, PartialSolver};
+
+impl PartialSolver for MilpSolver {
+    fn solve_partial(&self, problem: &Problem) -> PartialSolution {
+        let milp_result = self.solve_with_status(problem);
+
+        let confidence = match &milp_result.status {
+            SolveStatus::Optimal => SolutionConfidence::Optimal,
+            SolveStatus::TimeLimitReached { gap_percent } => SolutionConfidence::BoundedGap {
+                gap_percent: *gap_percent,
+            },
+            SolveStatus::Infeasible | SolveStatus::Error(_) => SolutionConfidence::Heuristic,
+        };
+
+        PartialSolution::with_fills(
+            self.name(),
+            milp_result.result.fills,
+            milp_result.result.total_welfare,
+            confidence,
+        )
+    }
+
+    fn name(&self) -> &str {
+        if self.config.timeout_secs.is_some() {
+            "MILP (time-limited)"
+        } else {
+            "MILP"
+        }
+    }
+
+    fn confidence(&self) -> SolutionConfidence {
+        // Default confidence - actual confidence depends on solve status
+        if self.config.timeout_secs.is_some() {
+            SolutionConfidence::Heuristic
+        } else {
+            SolutionConfidence::Optimal
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

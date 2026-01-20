@@ -493,6 +493,42 @@ impl Default for LocalSolver {
 }
 
 // ============================================================================
+// PriceDiscoverer Trait Implementation
+// ============================================================================
+
+use crate::traits::{PriceDiscoverer, PriceDiscoveryResult};
+
+impl PriceDiscoverer for LocalSolver {
+    fn discover_prices(&self, problem: &matching_engine::Problem) -> PriceDiscoveryResult {
+        let mut result = PriceDiscoveryResult::empty();
+
+        for market in problem.markets.iter() {
+            let book = problem
+                .liquidity
+                .books
+                .get(&(market.id, 0))
+                .cloned()
+                .unwrap_or_else(|| LiquidityBook::new(market.id, 0));
+
+            let solution = self.solve_market(
+                market.id,
+                &problem.markets,
+                &problem.orders,
+                &book,
+            );
+
+            result.add_market_solution(solution);
+        }
+
+        result
+    }
+
+    fn name(&self) -> &str {
+        "LocalSolver"
+    }
+}
+
+// ============================================================================
 // Correct Multi-Outcome Market Clearing with Unified Liquidity
 // ============================================================================
 

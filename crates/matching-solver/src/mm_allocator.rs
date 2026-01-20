@@ -587,6 +587,86 @@ impl Default for MmAllocator {
     }
 }
 
+// ============================================================================
+// OrderAllocator Trait Implementation
+// ============================================================================
+
+use crate::traits::{AllocationResult as TraitAllocationResult, OrderAllocator};
+
+impl OrderAllocator for MmAllocator {
+    fn allocate(
+        &self,
+        constraints: &[MmConstraint],
+        prices: &HashMap<MarketId, Vec<Nanos>>,
+        orders: &[Order],
+    ) -> TraitAllocationResult {
+        // Compute welfare for each order based on prices
+        let welfare = Self::compute_order_welfare(orders, prices);
+
+        // Use the existing allocate method
+        let result = MmAllocator::allocate(self, constraints, prices, orders, &welfare);
+
+        // Convert to trait AllocationResult
+        TraitAllocationResult {
+            activated_orders: result.activated_orders,
+            total_welfare: result.total_welfare,
+            iterations: result.iterations,
+            mm_allocations: result.mm_allocations,
+        }
+    }
+
+    fn name(&self) -> &str {
+        "MmAllocator"
+    }
+}
+
+impl MmAllocator {
+    /// Compute welfare for each order given clearing prices.
+    ///
+    /// Welfare = (limit_price - clearing_price) * quantity for buyers.
+    fn compute_order_welfare(
+        orders: &[Order],
+        prices: &HashMap<MarketId, Vec<Nanos>>,
+    ) -> HashMap<u64, i64> {
+        let mut welfare = HashMap::new();
+
+        for order in orders {
+            if order.num_markets == 0 {
+                welfare.insert(order.id, 0);
+                continue;
+            }
+
+            // Get the clearing price for the primary market/outcome
+            let market_id = order.markets[0];
+            let clearing_price = prices
+                .get(&market_id)
+                .and_then(|p| {
+                    // Find which outcome this order is buying
+                    let outcome = order
+                        .payoffs
+                        .iter()
+                        .take(order.num_states as usize)
+                        .position(|&p| p > 0)
+                        .unwrap_or(0);
+                    p.get(outcome).copied()
+                })
+                .unwrap_or(500_000_000); // Default to 50 cents
+
+            // Welfare = (limit - clearing) * max_fill
+            // Only positive welfare if limit >= clearing
+            let order_welfare = if order.limit_price >= clearing_price {
+                (order.limit_price as i64 - clearing_price as i64) * order.max_fill as i64
+            } else {
+                0
+            };
+
+            welfare.insert(order.id, order_welfare);
+        }
+
+        welfare
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

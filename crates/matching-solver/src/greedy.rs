@@ -273,3 +273,30 @@ impl Solver for GreedySolver {
         "Greedy"
     }
 }
+
+// ============================================================================
+// PartialSolver Trait Implementation
+// ============================================================================
+
+use crate::combiner::SolutionConfidence;
+use crate::traits::{PartialSolution, PartialSolver};
+
+impl PartialSolver for GreedySolver {
+    fn solve_partial(&self, problem: &Problem) -> PartialSolution {
+        let result = Solver::solve(self, problem);
+        PartialSolution::with_fills(
+            "Greedy",
+            result.fills,
+            result.total_welfare,
+            SolutionConfidence::Heuristic,
+        )
+    }
+
+    fn name(&self) -> &str {
+        "Greedy"
+    }
+
+    fn confidence(&self) -> SolutionConfidence {
+        SolutionConfidence::Heuristic
+    }
+}
