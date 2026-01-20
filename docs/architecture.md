@@ -204,7 +204,25 @@ MM orders can represent significant volume (potentially 10x retail orders). The 
 
 Current: **Option 1** (per-market first, then MM allocation)
 
-Next step: Implement Option 3 with convergence detection and benchmark the welfare difference.
+### Baseline Results (Large Scenario)
+
+Tested with 23,662 orders, 100 markets, 5 MMs:
+
+| Metric | Current Approach | Iterative Approach |
+|--------|------------------|-------------------|
+| Volume | 545,600 shares | 545,600 shares |
+| Clearing welfare | 100T | 100T |
+| MM orders activated | 182/820 (22%) | 182/820 (22%) |
+| MM utilization | 55.0% | 55.0% |
+| Iterations | 1 | 1 |
+| Max price change | - | $0.000000 |
+
+**Key Finding**: With realistic MM orders (placed near clearing prices as liquidity providers should), adding MM orders doesn't shift the equilibrium. The current simple approach works well.
+
+**When to consider iterative approach**:
+- MM volume >> retail volume (10x+)
+- MM limit prices far from equilibrium
+- Need highest accuracy in price discovery
 
 ---
 

@@ -20,7 +20,7 @@ use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
 use matching_engine::{
-    bundle_yes, outcome_buy, price_to_nanos, MarketId, MmConstraint, MmId, MmSide,
+    bundle_yes, outcome_buy, outcome_sell, price_to_nanos, MarketId, MmConstraint, MmId, MmSide,
     Nanos, Order, Problem, Qty, NANOS_PER_DOLLAR,
 };
 
@@ -182,7 +182,7 @@ pub fn generate_mega_scenario_v2(config: MegaScenarioConfigV2) -> Problem {
     ));
 
     // Generate markets with varying outcome counts
-    let mut market_info: Vec<(MarketId, u8, f64)> = Vec::new(); // (id, outcomes, fair_price_sum)
+    let mut market_info: Vec<(MarketId, u8, Vec<f64>)> = Vec::new(); // (id, outcomes, fair_prices)
 
     for i in 0..config.num_markets {
         let num_outcomes = rng.gen_range(config.outcomes_per_market.clone());
@@ -197,7 +197,6 @@ pub fn generate_mega_scenario_v2(config: MegaScenarioConfigV2) -> Problem {
 
         // Generate fair prices that sum to 1.0
         let fair_prices = generate_fair_prices(&mut rng, num_outcomes);
-        market_info.push((market_id, num_outcomes, fair_prices.iter().sum()));
 
         // Add liquidity around fair prices
         for (outcome_idx, &fair_price) in fair_prices.iter().enumerate() {
@@ -205,6 +204,8 @@ pub fn generate_mega_scenario_v2(config: MegaScenarioConfigV2) -> Problem {
             let ask_price = (fair_price * NANOS_PER_DOLLAR as f64 * 1.02) as Nanos;
             problem.liquidity.add_ask(market_id, outcome_idx as u8, ask_price, liquidity_qty);
         }
+
+        market_info.push((market_id, num_outcomes, fair_prices));
     }
 
     // Generate regular orders
@@ -264,7 +265,23 @@ pub fn generate_mega_scenario_v2(config: MegaScenarioConfigV2) -> Problem {
         }
     }
 
-    // Generate MM constraints
+    // Compute anchor prices from order flow before generating MM orders
+    // This simulates MMs observing the market before quoting
+    let anchor_prices = compute_anchor_prices(&problem, &market_info);
+
+    // Build market_info with anchor prices instead of initial fair prices
+    let market_info_with_anchors: Vec<(MarketId, u8, Vec<f64>)> = market_info
+        .iter()
+        .map(|(id, outcomes, _initial)| {
+            let anchors = anchor_prices.get(id).cloned().unwrap_or_else(|| {
+                // Fallback to uniform prices
+                vec![1.0 / *outcomes as f64; *outcomes as usize]
+            });
+            (*id, *outcomes, anchors)
+        })
+        .collect();
+
+    // Generate MM constraints using anchor prices
     for mm_idx in 0..config.num_mms {
         let strategy = if mm_idx < config.mm_strategies.len() {
             config.mm_strategies[mm_idx].clone()
@@ -281,7 +298,7 @@ pub fn generate_mega_scenario_v2(config: MegaScenarioConfigV2) -> Problem {
             budget_dollars,
             leverage,
             &strategy,
-            &market_info,
+            &market_info_with_anchors,  // Use anchor prices
             &market_orders,
             &mut order_id,
             &mut problem,
@@ -305,6 +322,86 @@ fn generate_fair_prices(rng: &mut ChaCha8Rng, num_outcomes: u8) -> Vec<f64> {
     }
 
     weights
+}
+
+/// Compute anchor prices by simulating price discovery from order flow.
+/// This estimates where clearing prices will be, so MMs can quote around them.
+fn compute_anchor_prices(
+    problem: &Problem,
+    market_info: &[(MarketId, u8, Vec<f64>)],
+) -> HashMap<MarketId, Vec<f64>> {
+    let mut anchor_prices: HashMap<MarketId, Vec<f64>> = HashMap::new();
+
+    for (market_id, num_outcomes, initial_fair_prices) in market_info {
+        let mut prices = vec![0.0f64; *num_outcomes as usize];
+
+        for outcome in 0..*num_outcomes {
+            // Collect buy orders for this outcome
+            let mut buy_prices: Vec<(Nanos, Qty)> = problem
+                .orders
+                .iter()
+                .filter(|o| {
+                    o.num_markets == 1
+                        && o.markets[0] == *market_id
+                        && o.payoffs[outcome as usize] > 0
+                })
+                .map(|o| (o.limit_price, o.max_fill))
+                .collect();
+
+            // Sort by price descending (most aggressive first)
+            buy_prices.sort_by(|a, b| b.0.cmp(&a.0));
+
+            // Get liquidity supply for this outcome
+            let liquidity_supply: Qty = problem
+                .liquidity
+                .books
+                .get(&(*market_id, outcome))
+                .map(|book| book.asks().iter().map(|l| l.available_qty).sum())
+                .unwrap_or(0);
+
+            let liquidity_price: Nanos = problem
+                .liquidity
+                .books
+                .get(&(*market_id, outcome))
+                .and_then(|book| book.asks().first().map(|l| l.price))
+                .unwrap_or((initial_fair_prices[outcome as usize] * NANOS_PER_DOLLAR as f64) as Nanos);
+
+            // Find clearing price: where cumulative demand meets supply
+            let mut cumulative_demand: Qty = 0;
+            let mut clearing_price = liquidity_price;
+
+            for (price, qty) in &buy_prices {
+                cumulative_demand += qty;
+                if cumulative_demand >= liquidity_supply {
+                    // Demand exceeds supply at this price
+                    clearing_price = *price;
+                    break;
+                }
+            }
+
+            // If demand never exceeded supply, use the lowest buy price or liquidity price
+            if cumulative_demand < liquidity_supply {
+                clearing_price = buy_prices.last().map(|(p, _)| *p).unwrap_or(liquidity_price);
+            }
+
+            prices[outcome as usize] = clearing_price as f64 / NANOS_PER_DOLLAR as f64;
+        }
+
+        // Normalize prices to sum to 1.0
+        let sum: f64 = prices.iter().sum();
+        if sum > 0.0 {
+            for p in &mut prices {
+                *p /= sum;
+            }
+        } else {
+            // Fallback to initial fair prices
+            prices = initial_fair_prices.clone();
+        }
+
+        anchor_prices.insert(*market_id, prices);
+    }
+
+    anchor_prices
 }
 
 /// Generate an order price based on distribution
@@ -354,7 +451,7 @@ fn create_mm_constraint(
     budget_dollars: u64,
     leverage: f64,
     strategy: &MmStrategy,
-    market_info: &[(MarketId, u8, f64)],
+    market_info: &[(MarketId, u8, Vec<f64>)],
     market_orders: &HashMap<MarketId, Vec<u64>>,
     order_id: &mut u64,
     problem: &mut Problem,
@@ -363,6 +460,12 @@ fn create_mm_constraint(
     let notional_budget = (budget_dollars as f64 * leverage) as u64;
 
     let mut constraint = MmConstraint::new(mm_id, budget_nanos);
+
+    // Build fair price lookup map
+    let fair_price_map: HashMap<MarketId, &Vec<f64>> = market_info
+        .iter()
+        .map(|(id, _, prices)| (*id, prices))
+        .collect();
 
     // Select markets based on strategy
     let selected_markets: Vec<(MarketId, u8)> = match strategy {
@@ -412,8 +515,12 @@ fn create_mm_constraint(
             _ => 50, // default spread
         };
 
-        // Create bid/ask pair for outcome 0 (YES)
-        let fair_price = 0.50; // Simplified - use 50% as default
+        // Look up actual fair price for outcome 0 (YES)
+        let fair_price = fair_price_map
+            .get(&market_id)
+            .and_then(|prices| prices.get(0))
+            .copied()
+            .unwrap_or(0.50);
         let spread_frac = spread_bps as f64 / 10000.0;
 
         let bid_price = fair_price - spread_frac / 2.0;
@@ -425,7 +532,8 @@ fn create_mm_constraint(
         }
 
         // MM sell order (provides liquidity at ask)
-        let sell_order = outcome_buy(
+        // Selling YES: receive premium upfront, owe $1 if outcome happens
+        let sell_order = outcome_sell(
             &problem.markets,
             *order_id,
             market_id,

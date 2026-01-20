@@ -191,56 +191,61 @@ impl LocalSolver {
         solution.welfare = 0;
         solution.unfilled.clear();
 
-        // Track remaining liquidity per outcome
-        // For simplicity, we use total ask liquidity from the book
-        // (In a more sophisticated implementation, we'd track per price level)
-        let total_liquidity: Qty = liquidity.asks().iter().map(|l| l.available_qty).sum();
-        let mut remaining_liquidity = total_liquidity;
-
-        // Collect eligible orders with their welfare contribution
-        let mut eligible: Vec<(&Order, usize, i64)> = Vec::new(); // (order, outcome, welfare_per_unit)
+        // Separate buyers and sellers
+        let mut buyers: Vec<(&Order, usize, i64)> = Vec::new(); // (order, outcome, welfare_per_unit)
+        let mut sellers: Vec<(&Order, usize, i64)> = Vec::new(); // (order, outcome, welfare_per_unit)
 
         for order in orders {
-            // Determine which outcome this order is buying (positive payoff)
-            let outcome_idx = order
-                .payoffs
-                .iter()
-                .take(order.num_states as usize)
-                .position(|&p| p > 0);
+            // Check each outcome for positive or negative payoff
+            for (outcome, &payoff) in order.payoffs.iter().take(order.num_states as usize).enumerate() {
+                let clearing_price = solution.prices.get(outcome).copied().unwrap_or(0);
 
-            let Some(outcome) = outcome_idx else {
-                solution.unfilled.push(order.id);
-                continue;
-            };
-
-            let clearing_price = solution.prices.get(outcome).copied().unwrap_or(0);
-
-            // Order can only fill if limit_price >= clearing_price
-            if order.limit_price >= clearing_price {
-                let welfare_per_unit = order.limit_price as i64 - clearing_price as i64;
-                eligible.push((order, outcome, welfare_per_unit));
-            } else {
-                solution.unfilled.push(order.id);
+                if payoff > 0 {
+                    // Buyer: can fill if limit_price >= clearing_price
+                    if order.limit_price >= clearing_price {
+                        let welfare_per_unit = order.limit_price as i64 - clearing_price as i64;
+                        buyers.push((order, outcome, welfare_per_unit));
+                    } else {
+                        solution.unfilled.push(order.id);
+                    }
+                } else if payoff < 0 {
+                    // Seller: can fill if clearing_price >= limit_price
+                    if clearing_price >= order.limit_price {
+                        let welfare_per_unit = clearing_price as i64 - order.limit_price as i64;
+                        sellers.push((order, outcome, welfare_per_unit));
+                    } else {
+                        solution.unfilled.push(order.id);
+                    }
+                }
             }
         }
 
-        // Sort by welfare contribution (descending) - greedy welfare maximization
-        eligible.sort_by(|a, b| b.2.cmp(&a.2));
+        // Sort buyers by welfare contribution (descending)
+        buyers.sort_by(|a, b| b.2.cmp(&a.2));
 
-        // Fill orders in welfare order, respecting liquidity
-        for (order, outcome, welfare_per_unit) in eligible {
-            if remaining_liquidity == 0 {
+        // Sort sellers by welfare contribution (descending)
+        sellers.sort_by(|a, b| b.2.cmp(&a.2));
+
+        // Calculate total supply: liquidity + seller capacity
+        let liquidity_supply: Qty = liquidity.asks().iter().map(|l| l.available_qty).sum();
+        let seller_supply: Qty = sellers.iter().map(|(o, _, _)| o.max_fill).sum();
+        let total_supply = liquidity_supply.saturating_add(seller_supply);
+
+        let mut remaining_supply = total_supply;
+        let mut remaining_liquidity = liquidity_supply; // Track how much liquidity is left
+        let mut seller_filled: Qty = 0;
+
+        // Fill buyers from combined supply
+        for (order, outcome, welfare_per_unit) in buyers {
+            if remaining_supply == 0 {
                 solution.unfilled.push(order.id);
                 continue;
             }
 
             let clearing_price = solution.prices[outcome];
-
-            // How much can we actually fill?
             let desired_qty = order.max_fill;
-            let fillable_qty = desired_qty.min(remaining_liquidity);
+            let fillable_qty = desired_qty.min(remaining_supply);
 
-            // Check min_fill constraint
             if fillable_qty >= order.min_fill {
                 let fill = Fill {
                     order_id: order.id,
@@ -250,9 +255,41 @@ impl LocalSolver {
 
                 solution.welfare += welfare_per_unit * fillable_qty as i64;
                 solution.fills.push(fill);
-                remaining_liquidity -= fillable_qty;
+                remaining_supply -= fillable_qty;
+
+                // Track how much we need from sellers (beyond liquidity)
+                let from_liquidity = fillable_qty.min(remaining_liquidity);
+                remaining_liquidity -= from_liquidity;
+                let from_sellers = fillable_qty - from_liquidity;
+                seller_filled += from_sellers;
             } else {
-                // Can't meet min_fill - unfilled
+                solution.unfilled.push(order.id);
+            }
+        }
+
+        // Fill sellers proportionally to what was consumed from them
+        // Sellers provide supply that buyers consume; their fill matches what was taken
+        let mut remaining_seller_fill = seller_filled;
+        for (order, outcome, welfare_per_unit) in sellers {
+            if remaining_seller_fill == 0 {
+                solution.unfilled.push(order.id);
+                continue;
+            }
+
+            let clearing_price = solution.prices[outcome];
+            let fill_qty = order.max_fill.min(remaining_seller_fill);
+
+            if fill_qty >= order.min_fill {
+                let fill = Fill {
+                    order_id: order.id,
+                    fill_qty,
+                    fill_price: clearing_price,
+                };
+
+                solution.welfare += welfare_per_unit * fill_qty as i64;
+                solution.fills.push(fill);
+                remaining_seller_fill -= fill_qty;
+            } else {
                 solution.unfilled.push(order.id);
             }
         }
@@ -328,16 +365,49 @@ impl LocalSolver {
             }
         }
 
+        // Fill sellers - they provide supply that buyers consume
+        // Sellers are filled if clearing_price >= their limit (they receive at least what they asked)
+        let mut seller_remaining = matched_qty;
+        for (order, max_qty) in &sellers {
+            if seller_remaining == 0 {
+                unfilled.push(order.id);
+                continue;
+            }
+
+            // Seller is willing if clearing_price >= their limit price
+            if clearing_price >= order.limit_price {
+                let fill_qty = (*max_qty).min(seller_remaining);
+                if fill_qty >= order.min_fill {
+                    let fill = Fill {
+                        order_id: order.id,
+                        fill_qty,
+                        fill_price: clearing_price,
+                    };
+
+                    // Seller welfare = clearing_price - limit_price (they receive more than minimum)
+                    welfare += (clearing_price as i64 - order.limit_price as i64) * fill_qty as i64;
+
+                    fills.push(fill);
+                    seller_remaining = seller_remaining.saturating_sub(fill_qty);
+                } else {
+                    unfilled.push(order.id);
+                }
+            } else {
+                unfilled.push(order.id);
+            }
+        }
+
         (clearing_price, fills, welfare, unfilled)
     }
 
     /// Find the clearing price for an outcome.
     ///
     /// Uses a simple supply-demand crossing algorithm.
+    /// Supply comes from both the liquidity book AND sell orders.
     fn find_clearing_price(
         &self,
         buyers: &[(&Order, Qty)],
-        _sellers: &[(&Order, Qty)],
+        sellers: &[(&Order, Qty)],
         market_id: MarketId,
         outcome: u8,
         liquidity: &LiquidityBook,
@@ -345,8 +415,10 @@ impl LocalSolver {
         // Get available liquidity asks for this outcome
         let asks = liquidity.asks();
 
-        if asks.is_empty() || buyers.is_empty() {
-            return (NANOS_PER_DOLLAR / 2, 0); // Default to 50 cents if no liquidity
+        // We can have supply from liquidity OR from sell orders
+        let has_supply = !asks.is_empty() || !sellers.is_empty();
+        if !has_supply || buyers.is_empty() {
+            return (NANOS_PER_DOLLAR / 2, 0); // Default to 50 cents if no supply or demand
         }
 
         // Build cumulative demand curve (price -> total qty demanded at or above price)
@@ -358,17 +430,37 @@ impl LocalSolver {
             demand_at_price.push((order.limit_price, cumulative_demand));
         }
 
-        // Build cumulative supply curve from liquidity
+        // Build cumulative supply curve from liquidity AND sell orders
+        let mut supply_points: Vec<(Nanos, Qty)> = Vec::new();
+
+        // Add liquidity book asks
+        for level in asks {
+            supply_points.push((level.price, level.available_qty));
+        }
+
+        // Add sell orders - their limit price is the minimum they'll accept
+        for (order, qty) in sellers {
+            supply_points.push((order.limit_price, *qty));
+        }
+
+        // Sort by price ascending (cheapest supply first)
+        supply_points.sort_by_key(|(price, _)| *price);
+
+        // Build cumulative supply curve
         let mut supply_at_price: Vec<(Nanos, Qty)> = Vec::new();
         let mut cumulative_supply: Qty = 0;
 
-        for level in asks {
-            cumulative_supply += level.available_qty;
-            supply_at_price.push((level.price, cumulative_supply));
+        for (price, qty) in supply_points {
+            cumulative_supply += qty;
+            supply_at_price.push((price, cumulative_supply));
+        }
+
+        if supply_at_price.is_empty() {
+            return (NANOS_PER_DOLLAR / 2, 0);
         }
 
         // Find crossing point
-        let mut clearing_price = asks[0].price;
+        let mut clearing_price = supply_at_price[0].0;
         let mut clearing_qty: Qty = 0;
 
         for (price, supply) in &supply_at_price {

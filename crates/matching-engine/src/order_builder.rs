@@ -244,6 +244,27 @@ pub fn outcome_buy(
     builder.build()
 }
 
+/// Create a multi-outcome position: Sell a specific outcome in a multi-outcome market.
+/// Selling YES means: receive premium upfront, owe $1 if outcome happens.
+pub fn outcome_sell(
+    markets: &MarketSet,
+    id: u64,
+    market: MarketId,
+    outcome_idx: u8,
+    limit_price: Nanos,
+    qty: Qty,
+) -> Order {
+    let mut builder = OrderBuilder::new(markets, id)
+        .spanning(&[market])
+        .limit(limit_price)
+        .quantity(0, qty);
+
+    // Payoff of -1 when the target outcome happens (seller owes $1)
+    builder = builder.payoff_at(outcome_idx as usize, -1);
+
+    builder.build()
+}
+
 /// Create a ratio spread: Buy N units of A YES, Sell M units of B YES.
 pub fn ratio_spread(
     markets: &MarketSet,

@@ -36,4 +36,4 @@ pub use problem::{Problem, ProblemSummary};
 pub use mm_constraint::{MmId, MmSide, MmOrder, MmConstraint, MmValidationResult, MmConstraintStatus};
 
 // Re-export order_builder convenience functions
-pub use order_builder::{simple_yes_buy, simple_no_buy, spread, butterfly, bundle_yes, outcome_buy, ratio_spread, conditional_buy};
+pub use order_builder::{simple_yes_buy, simple_no_buy, spread, butterfly, bundle_yes, outcome_buy, outcome_sell, ratio_spread, conditional_buy};
