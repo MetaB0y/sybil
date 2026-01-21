@@ -1,210 +1,197 @@
-//! CLI simulation harness for running matching simulations.
+//! CLI simulation harness for matching engine testing.
+//!
+//! # Usage
+//!
+//! ```bash
+//! # Run quick test
+//! matching-sim --preset quick
+//!
+//! # Run with specific solver
+//! matching-sim --preset medium --solver pipeline
+//!
+//! # Compare all solvers
+//! matching-sim --preset small --solver all
+//!
+//! # Custom configuration
+//! matching-sim --markets 50 --orders 5000 --bundles 0.2 --aon 0.3
+//!
+//! # MILP with timeout
+//! matching-sim --preset milp-killer --solver milp --milp-timeout 1.0
+//! ```
 
 use std::time::Instant;
 
 use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Cell, Color, Table};
 
-use matching_scenarios::Problem;
+use matching_scenarios::{generate_scenario, ScenarioConfig};
 use matching_solver::{GreedySolver, MilpSolver, Pipeline, Solver};
 
-mod metrics;
-mod runners;
-mod scenarios;
 
-use metrics::{print_comparison_table, OptimalityMetrics, ScenarioComparison};
-use runners::{run_milp_killer_test, run_platform_stress_test, run_quick_test};
-use scenarios::create_problem;
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
 
-/// Which solver(s) to use
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        print_help();
+        return;
+    }
+
+    let config = parse_scenario_config(&args);
+    let solver_choice = parse_solver_choice(&args);
+    let milp_timeout = parse_milp_timeout(&args);
+    let num_batches = parse_batches(&args);
+    let verbose = args.iter().any(|a| a == "--verbose" || a == "-v");
+
+    println!("========================================");
+    println!("       MATCHING SIMULATION              ");
+    println!("========================================\n");
+
+    println!("Configuration:");
+    println!("  Markets: {}", config.num_markets);
+    println!("  Orders: {}", config.num_orders);
+    println!("  Bundles: {:.0}%", config.bundle_fraction * 100.0);
+    println!("  AON: {:.0}%", config.aon_fraction * 100.0);
+    println!("  Solver: {:?}", solver_choice);
+    println!("  Batches: {}", num_batches);
+    if let Some(timeout) = milp_timeout {
+        println!("  MILP timeout: {}s", timeout);
+    }
+    println!();
+
+    let start = Instant::now();
+    let results = run_simulation(&config, &solver_choice, milp_timeout, num_batches, verbose);
+    let elapsed = start.elapsed().as_secs_f64();
+
+    print_results(&results, &solver_choice);
+    println!("\nTotal time: {:.2}s", elapsed);
+}
+
+fn print_help() {
+    println!("Matching Simulation\n");
+    println!("Usage: matching-sim [OPTIONS]\n");
+    println!("Presets:");
+    println!("  --preset <NAME>      Use a preset configuration:");
+    println!("                         quick      ~50 orders, fast");
+    println!("                         small      ~300 orders");
+    println!("                         medium     ~3000 orders");
+    println!("                         large      ~10000 orders");
+    println!("                         extreme    ~50000 orders");
+    println!("                         milp-killer Forces MILP timeout");
+    println!();
+    println!("Custom configuration:");
+    println!("  --markets <N>        Number of markets");
+    println!("  --orders <N>         Number of orders");
+    println!("  --bundles <F>        Bundle fraction (0.0-1.0)");
+    println!("  --spreads <F>        Spread fraction (0.0-1.0)");
+    println!("  --aon <F>            All-or-none fraction (0.0-1.0)");
+    println!("  --scarcity <F>       Liquidity scarcity (0.0-1.0, lower=scarcer)");
+    println!("  --mms <N>            Number of market makers");
+    println!();
+    println!("Solver options:");
+    println!("  --solver <S>         Solver to use:");
+    println!("                         greedy (default)");
+    println!("                         milp");
+    println!("                         pipeline");
+    println!("                         all (compare all)");
+    println!("  --milp-timeout <S>   MILP time limit in seconds");
+    println!();
+    println!("Other options:");
+    println!("  --batches <N>        Number of batches to run (default: 5)");
+    println!("  --seed <N>           Random seed (default: 42)");
+    println!("  --verbose, -v        Show detailed output");
+    println!("  --help, -h           Show this help message");
+}
+
+fn parse_scenario_config(args: &[String]) -> ScenarioConfig {
+    // Check for preset first
+    if let Some(preset) = get_arg_value(args, "--preset") {
+        let mut config = match preset.as_str() {
+            "quick" => ScenarioConfig::quick(),
+            "small" => ScenarioConfig::small(),
+            "medium" => ScenarioConfig::medium(),
+            "large" => ScenarioConfig::large(),
+            "extreme" => ScenarioConfig::extreme(),
+            "milp-killer" | "milp_killer" => ScenarioConfig::milp_killer(),
+            _ => {
+                eprintln!("Unknown preset: {}, using medium", preset);
+                ScenarioConfig::medium()
+            }
+        };
+
+        // Allow overriding preset values
+        if let Some(seed) = get_arg_value(args, "--seed") {
+            config.seed = seed.parse().unwrap_or(42);
+        }
+
+        return config;
+    }
+
+    // Build custom config
+    let mut config = ScenarioConfig::default();
+
+    if let Some(v) = get_arg_value(args, "--seed") {
+        config.seed = v.parse().unwrap_or(42);
+    }
+    if let Some(v) = get_arg_value(args, "--markets") {
+        config.num_markets = v.parse().unwrap_or(30);
+    }
+    if let Some(v) = get_arg_value(args, "--orders") {
+        config.num_orders = v.parse().unwrap_or(1000);
+    }
+    if let Some(v) = get_arg_value(args, "--bundles") {
+        config.bundle_fraction = v.parse().unwrap_or(0.15);
+    }
+    if let Some(v) = get_arg_value(args, "--spreads") {
+        config.spread_fraction = v.parse().unwrap_or(0.05);
+    }
+    if let Some(v) = get_arg_value(args, "--aon") {
+        config.aon_fraction = v.parse().unwrap_or(0.1);
+    }
+    if let Some(v) = get_arg_value(args, "--scarcity") {
+        config.liquidity_scarcity = v.parse().unwrap_or(0.5);
+    }
+    if let Some(v) = get_arg_value(args, "--mms") {
+        config.num_mms = v.parse().unwrap_or(2);
+    }
+
+    config
+}
+
 #[derive(Clone, Debug, PartialEq)]
-pub enum SolverChoice {
+enum SolverChoice {
     Greedy,
     Milp,
     Pipeline,
     All,
 }
 
-impl SolverChoice {
-    fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "greedy" => Some(Self::Greedy),
-            "milp" => Some(Self::Milp),
-            "pipeline" | "platform" => Some(Self::Pipeline),
-            "all" => Some(Self::All),
-            _ => None,
-        }
+fn parse_solver_choice(args: &[String]) -> SolverChoice {
+    match get_arg_value(args, "--solver").as_deref() {
+        Some("greedy") => SolverChoice::Greedy,
+        Some("milp") => SolverChoice::Milp,
+        Some("pipeline") => SolverChoice::Pipeline,
+        Some("all") => SolverChoice::All,
+        _ => SolverChoice::Greedy,
     }
 }
 
-/// Configuration for the hard matching simulation.
-#[derive(Clone, Debug)]
-pub struct SimulationConfig {
-    pub num_batches: usize,
-    pub seed: u64,
-    pub scenarios: Vec<String>,
-    pub verbose: bool,
-    pub solver: SolverChoice,
-    pub milp_timeout: Option<f64>,
+fn parse_milp_timeout(args: &[String]) -> Option<f64> {
+    get_arg_value(args, "--milp-timeout").and_then(|v| v.parse().ok())
 }
 
-impl Default for SimulationConfig {
-    fn default() -> Self {
-        Self {
-            num_batches: 20,
-            seed: 42,
-            scenarios: vec![
-                "random-easy".to_string(),
-                "random-medium".to_string(),
-                "random-hard".to_string(),
-            ],
-            verbose: false,
-            solver: SolverChoice::Greedy,
-            milp_timeout: None,
-        }
-    }
+fn parse_batches(args: &[String]) -> usize {
+    get_arg_value(args, "--batches")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5)
 }
 
-/// Results from running a solver on a batch.
-#[derive(Clone, Debug)]
-pub struct SolverResult {
-    pub solver_name: String,
-    pub welfare: i64,
-    pub orders_filled: usize,
-    pub total_orders: usize,
+fn get_arg_value(args: &[String], flag: &str) -> Option<String> {
+    args.iter()
+        .position(|a| a == flag)
+        .and_then(|i| args.get(i + 1))
+        .cloned()
 }
 
-/// Results from a simulation run.
-#[derive(Clone, Debug)]
-pub struct SimulationResults {
-    pub config: SimulationConfig,
-    pub scenarios: Vec<ScenarioComparison>,
-    pub solver_comparisons: Vec<SolverComparisonResult>,
-    pub elapsed_secs: f64,
-}
-
-/// Comparison results across solvers for a scenario.
-#[derive(Clone, Debug)]
-pub struct SolverComparisonResult {
-    pub scenario_name: String,
-    pub results: Vec<SolverAggregateResult>,
-}
-
-/// Aggregate results for a single solver across batches.
-#[derive(Clone, Debug, Default)]
-pub struct SolverAggregateResult {
-    pub solver_name: String,
-    pub total_welfare: i64,
-    pub total_filled: usize,
-    pub total_orders: usize,
-    pub batch_count: usize,
-}
-
-impl SolverAggregateResult {
-    pub fn mean_welfare(&self) -> f64 {
-        if self.batch_count > 0 {
-            self.total_welfare as f64 / self.batch_count as f64
-        } else {
-            0.0
-        }
-    }
-
-    pub fn fill_rate(&self) -> f64 {
-        if self.total_orders > 0 {
-            self.total_filled as f64 / self.total_orders as f64
-        } else {
-            0.0
-        }
-    }
-
-    pub fn add(&mut self, result: &SolverResult) {
-        self.total_welfare += result.welfare;
-        self.total_filled += result.orders_filled;
-        self.total_orders += result.total_orders;
-        self.batch_count += 1;
-    }
-}
-
-impl SimulationResults {
-    pub fn print(&self) {
-        println!("\n========================================");
-        println!("      MATCHING SIMULATION RESULTS       ");
-        println!("========================================\n");
-
-        if self.config.solver == SolverChoice::All && !self.solver_comparisons.is_empty() {
-            self.print_solver_comparisons();
-        } else {
-            print_comparison_table(&self.scenarios);
-        }
-
-        println!("\nTotal time: {:.2}s", self.elapsed_secs);
-        println!("Batches per scenario: {}", self.config.num_batches);
-    }
-
-    fn print_solver_comparisons(&self) {
-        for comparison in &self.solver_comparisons {
-            println!("\nScenario: {}", comparison.scenario_name);
-
-            let mut table = Table::new();
-            table
-                .load_preset(UTF8_FULL)
-                .apply_modifier(UTF8_ROUND_CORNERS)
-                .set_header(vec!["Solver", "Welfare", "Gap", "Fill %"]);
-
-            // Find the best welfare for gap calculation (prefer MILP, then max)
-            let best_welfare = comparison
-                .results
-                .iter()
-                .find(|r| r.solver_name == "MILP")
-                .or_else(|| comparison.results.iter().max_by_key(|r| r.total_welfare))
-                .map(|r| r.mean_welfare())
-                .unwrap_or(0.0);
-
-            for result in &comparison.results {
-                let mean_welfare = result.mean_welfare();
-                let gap = if best_welfare > 0.0 && mean_welfare < best_welfare {
-                    format!(
-                        "{:.1}%",
-                        (best_welfare - mean_welfare) / best_welfare * 100.0
-                    )
-                } else if mean_welfare >= best_welfare {
-                    "0.0%".to_string()
-                } else {
-                    "-".to_string()
-                };
-
-                let fill_rate = result.fill_rate() * 100.0;
-                let welfare_cell = Cell::new(format!("{:.0}", mean_welfare));
-                let gap_cell = if gap == "0.0%" {
-                    Cell::new(&gap).fg(Color::Green)
-                } else {
-                    Cell::new(&gap)
-                };
-                let fill_cell = if fill_rate >= 90.0 {
-                    Cell::new(format!("{:.1}%", fill_rate)).fg(Color::Green)
-                } else if fill_rate >= 70.0 {
-                    Cell::new(format!("{:.1}%", fill_rate)).fg(Color::Yellow)
-                } else {
-                    Cell::new(format!("{:.1}%", fill_rate)).fg(Color::Red)
-                };
-
-                table.add_row(vec![
-                    Cell::new(&result.solver_name),
-                    welfare_cell,
-                    gap_cell,
-                    fill_cell,
-                ]);
-            }
-
-            println!("{table}");
-        }
-    }
-}
-
-fn create_solvers(
-    choice: &SolverChoice,
-    _seed: u64,
-    milp_timeout: Option<f64>,
-) -> Vec<Box<dyn Solver>> {
+fn create_solvers(choice: &SolverChoice, milp_timeout: Option<f64>) -> Vec<Box<dyn Solver>> {
     match choice {
         SolverChoice::Greedy => vec![Box::new(GreedySolver::new())],
         SolverChoice::Milp => {
@@ -214,79 +201,85 @@ fn create_solvers(
                 vec![Box::new(MilpSolver::new())]
             }
         }
-        SolverChoice::Pipeline => {
-            vec![Box::new(Pipeline::full_platform())]
-        }
+        SolverChoice::Pipeline => vec![Box::new(Pipeline::current())],
         SolverChoice::All => {
             let milp: Box<dyn Solver> = if let Some(timeout) = milp_timeout {
                 Box::new(MilpSolver::with_timeout(timeout))
             } else {
-                Box::new(MilpSolver::new())
+                Box::new(MilpSolver::with_timeout(5.0)) // Default 5s for comparison
             };
             vec![
-                milp,
                 Box::new(GreedySolver::new()),
-                Box::new(Pipeline::full_platform()),
+                milp,
+                Box::new(Pipeline::current()),
             ]
         }
     }
 }
 
-fn calculate_optimality(problem: &Problem, solver: &dyn Solver) -> OptimalityMetrics {
-    let result = solver.solve(problem);
-
-    OptimalityMetrics::from_greedy_only(
-        result.total_welfare,
-        result.orders_filled,
-        result.orders_unfilled_liquidity,
-        result.orders_unfilled_aon,
-        problem.num_orders(),
-    )
+#[derive(Default)]
+struct SolverResults {
+    name: String,
+    total_welfare: i64,
+    total_filled: usize,
+    total_orders: usize,
+    total_time_secs: f64,
+    batches: usize,
 }
 
-pub fn run_simulation(config: SimulationConfig) -> SimulationResults {
-    let start = Instant::now();
-    let mut results = SimulationResults {
-        config: config.clone(),
-        scenarios: Vec::new(),
-        solver_comparisons: Vec::new(),
-        elapsed_secs: 0.0,
-    };
-
-    for scenario_name in &config.scenarios {
-        if config.solver == SolverChoice::All {
-            let comparison = run_scenario_all_solvers(&config, scenario_name);
-            results.solver_comparisons.push(comparison);
+impl SolverResults {
+    fn mean_welfare(&self) -> f64 {
+        if self.batches > 0 {
+            self.total_welfare as f64 / self.batches as f64
         } else {
-            let comparison = run_scenario(&config, scenario_name);
-            results.scenarios.push(comparison);
+            0.0
         }
     }
 
-    results.elapsed_secs = start.elapsed().as_secs_f64();
-    results
+    fn fill_rate(&self) -> f64 {
+        if self.total_orders > 0 {
+            self.total_filled as f64 / self.total_orders as f64 * 100.0
+        } else {
+            0.0
+        }
+    }
+
+    fn mean_time(&self) -> f64 {
+        if self.batches > 0 {
+            self.total_time_secs / self.batches as f64
+        } else {
+            0.0
+        }
+    }
 }
 
-fn run_scenario_all_solvers(
-    config: &SimulationConfig,
-    scenario_name: &str,
-) -> SolverComparisonResult {
-    let solvers = create_solvers(&SolverChoice::All, config.seed, config.milp_timeout);
+fn run_simulation(
+    base_config: &ScenarioConfig,
+    solver_choice: &SolverChoice,
+    milp_timeout: Option<f64>,
+    num_batches: usize,
+    verbose: bool,
+) -> Vec<SolverResults> {
+    let solvers = create_solvers(solver_choice, milp_timeout);
 
-    let mut aggregates: Vec<SolverAggregateResult> = solvers
+    let mut results: Vec<SolverResults> = solvers
         .iter()
-        .map(|s| SolverAggregateResult {
-            solver_name: s.name().to_string(),
+        .map(|s| SolverResults {
+            name: s.name().to_string(),
             ..Default::default()
         })
         .collect();
 
-    for batch in 0..config.num_batches {
-        let seed = config.seed + batch as u64;
-        let problem = create_problem(scenario_name, seed);
+    for batch in 0..num_batches {
+        let config = ScenarioConfig {
+            seed: base_config.seed + batch as u64,
+            ..base_config.clone()
+        };
 
-        if config.verbose {
-            println!("Running {} batch {} (seed {})", scenario_name, batch, seed);
+        let problem = generate_scenario(config);
+
+        if verbose {
+            println!("Batch {} (seed {})", batch, base_config.seed + batch as u64);
             println!("{}", problem.summary());
         }
 
@@ -295,16 +288,13 @@ fn run_scenario_all_solvers(
             let result = solver.solve(&problem);
             let elapsed = start.elapsed().as_secs_f64();
 
-            let solver_result = SolverResult {
-                solver_name: solver.name().to_string(),
-                welfare: result.total_welfare,
-                orders_filled: result.orders_filled,
-                total_orders: problem.num_orders(),
-            };
+            results[i].total_welfare += result.total_welfare;
+            results[i].total_filled += result.orders_filled;
+            results[i].total_orders += problem.num_orders();
+            results[i].total_time_secs += elapsed;
+            results[i].batches += 1;
 
-            aggregates[i].add(&solver_result);
-
-            if config.verbose {
+            if verbose {
                 println!(
                     "  {}: welfare={}, filled={}/{}, time={:.3}s",
                     solver.name(),
@@ -315,170 +305,85 @@ fn run_scenario_all_solvers(
                 );
             }
         }
+
+        if verbose {
+            println!();
+        }
     }
 
-    SolverComparisonResult {
-        scenario_name: scenario_name.to_string(),
-        results: aggregates,
-    }
+    results
 }
 
-fn run_scenario(config: &SimulationConfig, scenario_name: &str) -> ScenarioComparison {
-    let solvers = create_solvers(&config.solver, config.seed, config.milp_timeout);
-    let solver = &solvers[0];
-
-    let mut comparison = ScenarioComparison::new(scenario_name);
-
-    for batch in 0..config.num_batches {
-        let seed = config.seed + batch as u64;
-        let problem = create_problem(scenario_name, seed);
-
-        if config.verbose {
-            println!("Running {} batch {} (seed {})", scenario_name, batch, seed);
-            println!("{}", problem.summary());
-        }
-
-        let start = Instant::now();
-        let metrics = calculate_optimality(&problem, solver.as_ref());
-        let elapsed = start.elapsed().as_secs_f64();
-
-        comparison.add(&metrics);
-
-        if config.verbose {
-            println!("{}", metrics);
-            println!("  Time: {:.3}s", elapsed);
-        }
-    }
-
-    comparison
-}
-
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-
-    if args.len() > 1 && args[1] == "--quick" {
-        run_quick_test();
-        return;
-    }
-
-    if args.len() > 1 && args[1] == "--stress" {
-        let timeout = args
-            .iter()
-            .position(|a| a == "--milp-timeout")
-            .and_then(|i| args.get(i + 1))
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(1.0);
-        run_platform_stress_test(timeout);
-        return;
-    }
-
-    if args.len() > 1 && args[1] == "--milp-killer" {
-        let timeout = args
-            .iter()
-            .position(|a| a == "--milp-timeout")
-            .and_then(|i| args.get(i + 1))
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(1.0);
-        let config = args
-            .iter()
-            .position(|a| a == "--config")
-            .and_then(|i| args.get(i + 1))
-            .map(|s| s.as_str())
-            .unwrap_or("test");
-        run_milp_killer_test(timeout, config);
-        return;
-    }
-
-    let mut config = SimulationConfig::default();
-
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--batches" => {
-                if i + 1 < args.len() {
-                    config.num_batches = args[i + 1].parse().unwrap_or(20);
-                    i += 1;
-                }
-            }
-            "--seed" => {
-                if i + 1 < args.len() {
-                    config.seed = args[i + 1].parse().unwrap_or(42);
-                    i += 1;
-                }
-            }
-            "--scenario" => {
-                if i + 1 < args.len() {
-                    config.scenarios = vec![args[i + 1].clone()];
-                    i += 1;
-                }
-            }
-            "--solver" => {
-                if i + 1 < args.len() {
-                    if let Some(choice) = SolverChoice::from_str(&args[i + 1]) {
-                        config.solver = choice;
-                    } else {
-                        eprintln!("Unknown solver: {}. Using greedy.", args[i + 1]);
-                    }
-                    i += 1;
-                }
-            }
-            "--milp-timeout" => {
-                if i + 1 < args.len() {
-                    config.milp_timeout = args[i + 1].parse().ok();
-                    i += 1;
-                }
-            }
-            "--verbose" | "-v" => {
-                config.verbose = true;
-            }
-            "--help" | "-h" => {
-                println!("Matching Simulation\n");
-                println!("Usage: matching-sim [OPTIONS]\n");
-                println!("Options:");
-                println!("  --batches <N>        Number of batches per scenario (default: 20)");
-                println!("  --seed <N>           Random seed (default: 42)");
-                println!("  --scenario <S>       Run specific scenario:");
-                println!("                         random-easy, random-medium, random-hard");
-                println!("                         Stress scenarios:");
-                println!("                           mega, mega-small, mega-large, mega-extreme");
-                println!("                           combined");
-                println!("                         MILP-killer scenarios:");
-                println!(
-                    "                           milp-killer, milp-killer-full, milp-killer-extreme"
-                );
-                println!("  --solver <S>         Solver to use:");
-                println!("                         greedy (default)");
-                println!("                         milp (optimal via MILP)");
-                println!("                         pipeline (FBA pipeline)");
-                println!("                         all (compare all solvers)");
-                println!("  --milp-timeout <S>   MILP time limit in seconds (default: none)");
-                println!("  --verbose, -v        Show detailed output");
-                println!("  --quick              Run a quick test");
-                println!("  --stress             Run platform stress test on mega scenario");
-                println!("  --milp-killer        Run MILP killer test (forces MILP timeout)");
-                println!("                       Use with --config test|full|extreme");
-                println!("  --help, -h           Show this help message");
-                return;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-
-    println!("========================================");
-    println!("       MATCHING SIMULATION              ");
+fn print_results(results: &[SolverResults], choice: &SolverChoice) {
+    println!("\n========================================");
+    println!("              RESULTS                   ");
     println!("========================================\n");
 
-    println!("Configuration:");
-    println!("  Batches per scenario: {}", config.num_batches);
-    println!("  Seed: {}", config.seed);
-    println!("  Scenarios: {:?}", config.scenarios);
-    println!("  Solver: {:?}", config.solver);
-    if let Some(timeout) = config.milp_timeout {
-        println!("  MILP timeout: {}s", timeout);
-    }
-    println!();
+    let mut table = Table::new();
+    table
+        .load_preset(UTF8_FULL)
+        .apply_modifier(UTF8_ROUND_CORNERS)
+        .set_header(vec!["Solver", "Welfare", "Fill %", "Time (avg)"]);
 
-    let results = run_simulation(config);
-    results.print();
+    // Find best welfare for gap calculation
+    let best_welfare = results.iter().map(|r| r.mean_welfare()).fold(0.0, f64::max);
+
+    for result in results {
+        let welfare = result.mean_welfare();
+        let gap = if best_welfare > 0.0 {
+            (best_welfare - welfare) / best_welfare * 100.0
+        } else {
+            0.0
+        };
+
+        let welfare_str = if gap < 0.1 {
+            format!("{:.0}", welfare)
+        } else {
+            format!("{:.0} (-{:.1}%)", welfare, gap)
+        };
+
+        let welfare_cell = if gap < 0.1 {
+            Cell::new(&welfare_str).fg(Color::Green)
+        } else if gap < 5.0 {
+            Cell::new(&welfare_str).fg(Color::Yellow)
+        } else {
+            Cell::new(&welfare_str).fg(Color::Red)
+        };
+
+        let fill_rate = result.fill_rate();
+        let fill_cell = if fill_rate >= 90.0 {
+            Cell::new(format!("{:.1}%", fill_rate)).fg(Color::Green)
+        } else if fill_rate >= 70.0 {
+            Cell::new(format!("{:.1}%", fill_rate)).fg(Color::Yellow)
+        } else {
+            Cell::new(format!("{:.1}%", fill_rate)).fg(Color::Red)
+        };
+
+        table.add_row(vec![
+            Cell::new(&result.name),
+            welfare_cell,
+            fill_cell,
+            Cell::new(format!("{:.3}s", result.mean_time())),
+        ]);
+    }
+
+    println!("{table}");
+
+    if *choice == SolverChoice::All && results.len() >= 2 {
+        println!();
+        let greedy = results.iter().find(|r| r.name == "Greedy");
+        let pipeline = results.iter().find(|r| r.name.contains("Pipeline") || r.name.contains("Current"));
+
+        if let (Some(g), Some(p)) = (greedy, pipeline) {
+            let improvement = if g.mean_welfare() > 0.0 {
+                (p.mean_welfare() - g.mean_welfare()) / g.mean_welfare() * 100.0
+            } else {
+                0.0
+            };
+            println!(
+                "Pipeline vs Greedy: {:+.1}% welfare improvement",
+                improvement
+            );
+        }
+    }
 }

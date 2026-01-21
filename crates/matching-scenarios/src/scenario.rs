@@ -1,0 +1,543 @@
+//! Unified scenario generator for testing and benchmarking.
+//!
+//! This module provides a single comprehensive scenario generator with configurable
+//! parameters for all testing needs: quick tests, stress tests, MILP-killer scenarios, etc.
+
+use std::collections::HashMap;
+
+use rand::prelude::*;
+use rand_chacha::ChaCha8Rng;
+
+use matching_engine::{
+    bundle_yes, outcome_buy, outcome_sell, price_to_nanos, spread, MarketId, MmConstraint, MmId,
+    MmSide, Nanos, Order, Problem, Qty, NANOS_PER_DOLLAR,
+};
+
+/// Unified configuration for scenario generation.
+#[derive(Clone, Debug)]
+pub struct ScenarioConfig {
+    /// Random seed for reproducibility
+    pub seed: u64,
+
+    // Market configuration
+    /// Number of binary markets
+    pub num_markets: usize,
+
+    // Order configuration
+    /// Total number of orders to generate
+    pub num_orders: usize,
+    /// Fraction of orders that are bundles (multi-market)
+    pub bundle_fraction: f64,
+    /// Fraction of orders that are spreads (A - B)
+    pub spread_fraction: f64,
+    /// Fraction of orders that are all-or-none
+    pub aon_fraction: f64,
+    /// Order size range
+    pub order_size_min: Qty,
+    pub order_size_max: Qty,
+
+    // Liquidity configuration
+    /// Liquidity scarcity (0.0-1.0, lower = more scarcity, more competition)
+    pub liquidity_scarcity: f64,
+    /// Fraction of markets that are "hot" (get extra demand)
+    pub hot_market_fraction: f64,
+
+    // Market maker configuration
+    /// Number of market makers (0 = no MMs)
+    pub num_mms: usize,
+    /// MM budget range in dollars
+    pub mm_budget_min: u64,
+    pub mm_budget_max: u64,
+    /// MM spread in basis points
+    pub mm_spread_bps: u32,
+}
+
+impl Default for ScenarioConfig {
+    fn default() -> Self {
+        Self {
+            seed: 42,
+            num_markets: 30,
+            num_orders: 1000,
+            bundle_fraction: 0.15,
+            spread_fraction: 0.05,
+            aon_fraction: 0.1,
+            order_size_min: 10,
+            order_size_max: 200,
+            liquidity_scarcity: 0.5,
+            hot_market_fraction: 0.0,
+            num_mms: 2,
+            mm_budget_min: 10_000,
+            mm_budget_max: 50_000,
+            mm_spread_bps: 50,
+        }
+    }
+}
+
+impl ScenarioConfig {
+    /// Quick test scenario (~300 orders, fast to run)
+    pub fn quick() -> Self {
+        Self {
+            num_markets: 5,
+            num_orders: 50,
+            bundle_fraction: 0.1,
+            spread_fraction: 0.0,
+            aon_fraction: 0.0,
+            num_mms: 0,
+            liquidity_scarcity: 0.8,
+            ..Default::default()
+        }
+    }
+
+    /// Small scenario for unit tests (~500 orders)
+    pub fn small() -> Self {
+        Self {
+            num_markets: 10,
+            num_orders: 300,
+            bundle_fraction: 0.15,
+            spread_fraction: 0.05,
+            aon_fraction: 0.05,
+            num_mms: 1,
+            mm_budget_min: 5_000,
+            mm_budget_max: 20_000,
+            liquidity_scarcity: 0.6,
+            ..Default::default()
+        }
+    }
+
+    /// Medium scenario for integration tests (~3000 orders)
+    pub fn medium() -> Self {
+        Self {
+            num_markets: 30,
+            num_orders: 3000,
+            bundle_fraction: 0.15,
+            spread_fraction: 0.05,
+            aon_fraction: 0.1,
+            num_mms: 2,
+            liquidity_scarcity: 0.5,
+            ..Default::default()
+        }
+    }
+
+    /// Large scenario for stress testing (~10000 orders)
+    pub fn large() -> Self {
+        Self {
+            num_markets: 50,
+            num_orders: 10000,
+            bundle_fraction: 0.2,
+            spread_fraction: 0.05,
+            aon_fraction: 0.15,
+            num_mms: 3,
+            mm_budget_min: 20_000,
+            mm_budget_max: 100_000,
+            liquidity_scarcity: 0.4,
+            ..Default::default()
+        }
+    }
+
+    /// Extreme scenario for benchmarking limits (~50000 orders)
+    pub fn extreme() -> Self {
+        Self {
+            num_markets: 100,
+            num_orders: 50000,
+            bundle_fraction: 0.2,
+            spread_fraction: 0.05,
+            aon_fraction: 0.2,
+            num_mms: 5,
+            mm_budget_min: 50_000,
+            mm_budget_max: 200_000,
+            liquidity_scarcity: 0.3,
+            ..Default::default()
+        }
+    }
+
+    /// MILP-killer scenario designed to force MILP timeout
+    pub fn milp_killer() -> Self {
+        Self {
+            num_markets: 50,
+            num_orders: 5000,
+            bundle_fraction: 0.3,
+            spread_fraction: 0.0,
+            aon_fraction: 0.45, // High AON = many binary variables
+            order_size_min: 30,
+            order_size_max: 100,
+            num_mms: 0,
+            liquidity_scarcity: 0.2, // Severe scarcity = competing solutions
+            hot_market_fraction: 0.1, // Hot markets create conflicts
+            ..Default::default()
+        }
+    }
+
+    /// Set seed (builder pattern)
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = seed;
+        self
+    }
+}
+
+/// Generate a scenario from configuration.
+pub fn generate_scenario(config: ScenarioConfig) -> Problem {
+    let mut rng = ChaCha8Rng::seed_from_u64(config.seed);
+    let mut problem = Problem::new(format!(
+        "Scenario(m={},o={},b={:.0}%,s={:.0}%,aon={:.0}%)",
+        config.num_markets,
+        config.num_orders,
+        config.bundle_fraction * 100.0,
+        config.spread_fraction * 100.0,
+        config.aon_fraction * 100.0,
+    ));
+
+    // Generate binary markets with fair prices
+    let mut market_info: Vec<(MarketId, f64)> = Vec::new();
+    for i in 0..config.num_markets {
+        let market_id = problem.markets.add_binary(format!("M{}", i));
+        let fair_price = rng.gen_range(0.2..0.8);
+        market_info.push((market_id, fair_price));
+    }
+
+    // Identify hot markets
+    let num_hot = (config.num_markets as f64 * config.hot_market_fraction).ceil() as usize;
+    let mut hot_markets: Vec<MarketId> = market_info.iter().map(|(id, _)| *id).collect();
+    hot_markets.shuffle(&mut rng);
+    hot_markets.truncate(num_hot);
+
+    // Add liquidity based on scarcity
+    add_liquidity(&mut problem, &market_info, &hot_markets, &config, &mut rng);
+
+    // Generate orders
+    let mut order_id = 1u64;
+    let num_bundles = (config.num_orders as f64 * config.bundle_fraction) as usize;
+    let num_spreads = (config.num_orders as f64 * config.spread_fraction) as usize;
+    let num_simple = config.num_orders - num_bundles - num_spreads;
+
+    // Simple orders
+    for _ in 0..num_simple {
+        let order = generate_simple_order(
+            &problem.markets,
+            &mut rng,
+            &mut order_id,
+            &market_info,
+            &hot_markets,
+            &config,
+        );
+        problem.orders.push(order);
+    }
+
+    // Bundle orders
+    for _ in 0..num_bundles {
+        let order = generate_bundle_order(
+            &problem.markets,
+            &mut rng,
+            &mut order_id,
+            &market_info,
+            &config,
+        );
+        problem.orders.push(order);
+    }
+
+    // Spread orders
+    for _ in 0..num_spreads {
+        let order = generate_spread_order(
+            &problem.markets,
+            &mut rng,
+            &mut order_id,
+            &market_info,
+            &config,
+        );
+        problem.orders.push(order);
+    }
+
+    // Generate MM constraints
+    if config.num_mms > 0 {
+        generate_mm_constraints(&mut problem, &market_info, &config, &mut rng, &mut order_id);
+    }
+
+    // Shuffle orders to avoid order-dependent behavior
+    problem.orders.shuffle(&mut rng);
+
+    problem
+}
+
+fn add_liquidity(
+    problem: &mut Problem,
+    market_info: &[(MarketId, f64)],
+    hot_markets: &[MarketId],
+    config: &ScenarioConfig,
+    rng: &mut ChaCha8Rng,
+) {
+    let avg_order_qty = (config.order_size_min + config.order_size_max) / 2;
+    let total_demand_estimate = config.num_orders as u64 * avg_order_qty;
+    let total_supply = (total_demand_estimate as f64 * config.liquidity_scarcity) as Qty;
+    let supply_per_market = total_supply / config.num_markets as Qty;
+
+    for (market_id, fair_price) in market_info {
+        let is_hot = hot_markets.contains(market_id);
+        let market_supply = if is_hot {
+            supply_per_market / 3 // Hot markets get less liquidity
+        } else {
+            supply_per_market
+        };
+
+        // YES outcome
+        for level in 0..3 {
+            let offset = 0.05 * (level as f64 + 1.0);
+            let level_supply = market_supply / 6;
+
+            let ask_price = (*fair_price + offset).min(0.98);
+            problem.liquidity.add_ask(
+                *market_id,
+                0,
+                price_to_nanos(ask_price),
+                level_supply.max(10),
+            );
+
+            let bid_price = (*fair_price - offset).max(0.02);
+            problem.liquidity.add_bid(
+                *market_id,
+                0,
+                price_to_nanos(bid_price),
+                level_supply.max(10),
+            );
+        }
+
+        // NO outcome
+        let no_price = 1.0 - fair_price;
+        for level in 0..3 {
+            let offset = 0.05 * (level as f64 + 1.0);
+            let level_supply = market_supply / 6;
+
+            let ask_price = (no_price + offset).min(0.98);
+            problem.liquidity.add_ask(
+                *market_id,
+                1,
+                price_to_nanos(ask_price),
+                level_supply.max(10),
+            );
+
+            let bid_price = (no_price - offset).max(0.02);
+            problem.liquidity.add_bid(
+                *market_id,
+                1,
+                price_to_nanos(bid_price),
+                level_supply.max(10),
+            );
+        }
+    }
+}
+
+fn generate_simple_order(
+    markets: &matching_engine::MarketSet,
+    rng: &mut ChaCha8Rng,
+    order_id: &mut u64,
+    market_info: &[(MarketId, f64)],
+    hot_markets: &[MarketId],
+    config: &ScenarioConfig,
+) -> Order {
+    let id = *order_id;
+    *order_id += 1;
+
+    // Bias towards hot markets if any
+    let market_idx = if !hot_markets.is_empty() && rng.gen_bool(0.6) {
+        let hot_id = hot_markets[rng.gen_range(0..hot_markets.len())];
+        market_info.iter().position(|(id, _)| *id == hot_id).unwrap_or(0)
+    } else {
+        rng.gen_range(0..market_info.len())
+    };
+
+    let (market, fair_price) = market_info[market_idx];
+    let outcome = rng.gen_range(0..2u8);
+
+    let base_price = if outcome == 0 { fair_price } else { 1.0 - fair_price };
+    let aggressiveness = rng.gen_range(-0.05..0.15);
+    let limit = (base_price + aggressiveness).clamp(0.05, 0.95);
+
+    let qty = rng.gen_range(config.order_size_min..config.order_size_max);
+
+    let mut order = outcome_buy(markets, id, market, outcome, price_to_nanos(limit), qty);
+
+    // Apply AON based on config
+    if rng.gen_bool(config.aon_fraction) {
+        order.min_fill = order.max_fill;
+    }
+
+    order
+}
+
+fn generate_bundle_order(
+    markets: &matching_engine::MarketSet,
+    rng: &mut ChaCha8Rng,
+    order_id: &mut u64,
+    market_info: &[(MarketId, f64)],
+    config: &ScenarioConfig,
+) -> Order {
+    let id = *order_id;
+    *order_id += 1;
+
+    let max_bundle = market_info.len().min(4);
+    if max_bundle < 2 {
+        // Fallback to simple order
+        let (market, price) = market_info[0];
+        return outcome_buy(markets, id, market, 0, price_to_nanos(price), 50);
+    }
+
+    let num_to_bundle = rng.gen_range(2..=max_bundle);
+    let mut selected: Vec<usize> = (0..market_info.len()).collect();
+    selected.shuffle(rng);
+    selected.truncate(num_to_bundle);
+
+    let bundle_markets: Vec<MarketId> = selected.iter().map(|&i| market_info[i].0).collect();
+    let combined_prob: f64 = selected.iter().map(|&i| market_info[i].1).product();
+
+    let limit = (combined_prob * rng.gen_range(0.8..1.3)).clamp(0.01, 0.95);
+    let qty = rng.gen_range(config.order_size_min..config.order_size_max);
+
+    let mut order = bundle_yes(markets, id, &bundle_markets, price_to_nanos(limit), qty);
+
+    if rng.gen_bool(config.aon_fraction) {
+        order.min_fill = order.max_fill;
+    }
+
+    order
+}
+
+fn generate_spread_order(
+    markets: &matching_engine::MarketSet,
+    rng: &mut ChaCha8Rng,
+    order_id: &mut u64,
+    market_info: &[(MarketId, f64)],
+    config: &ScenarioConfig,
+) -> Order {
+    let id = *order_id;
+    *order_id += 1;
+
+    if market_info.len() < 2 {
+        let (market, price) = market_info[0];
+        return outcome_buy(markets, id, market, 0, price_to_nanos(price), 50);
+    }
+
+    let m1_idx = rng.gen_range(0..market_info.len());
+    let mut m2_idx = rng.gen_range(0..market_info.len());
+    while m2_idx == m1_idx {
+        m2_idx = rng.gen_range(0..market_info.len());
+    }
+
+    let (market_a, price_a) = market_info[m1_idx];
+    let (market_b, price_b) = market_info[m2_idx];
+
+    let price_diff = (price_a - price_b).abs();
+    let limit = (price_diff + rng.gen_range(-0.05..0.1)).clamp(0.01, 0.5);
+    let qty = rng.gen_range(config.order_size_min..config.order_size_max);
+
+    spread(markets, id, market_a, market_b, price_to_nanos(limit), qty)
+}
+
+fn generate_mm_constraints(
+    problem: &mut Problem,
+    market_info: &[(MarketId, f64)],
+    config: &ScenarioConfig,
+    rng: &mut ChaCha8Rng,
+    order_id: &mut u64,
+) {
+    let fair_prices: HashMap<MarketId, f64> = market_info.iter().cloned().collect();
+
+    for mm_idx in 0..config.num_mms {
+        let budget_dollars = rng.gen_range(config.mm_budget_min..config.mm_budget_max);
+        let budget_nanos = budget_dollars as Nanos * NANOS_PER_DOLLAR;
+
+        let mut constraint = MmConstraint::new(MmId::new(mm_idx as u64 + 1), budget_nanos);
+
+        // MM covers a subset of markets
+        let markets_to_cover = market_info.len().min(20);
+        let mut selected_markets: Vec<MarketId> = market_info.iter().map(|(id, _)| *id).collect();
+        selected_markets.shuffle(rng);
+        selected_markets.truncate(markets_to_cover);
+
+        let spread_frac = config.mm_spread_bps as f64 / 10000.0;
+        let qty_per_market = (budget_dollars / markets_to_cover as u64).max(100);
+
+        for market_id in selected_markets {
+            let fair_price = fair_prices.get(&market_id).copied().unwrap_or(0.5);
+
+            let bid_price = (fair_price - spread_frac / 2.0).max(0.01);
+            let ask_price = (fair_price + spread_frac / 2.0).min(0.99);
+
+            // MM sell order
+            let sell_order = outcome_sell(
+                &problem.markets,
+                *order_id,
+                market_id,
+                0,
+                price_to_nanos(ask_price),
+                qty_per_market,
+            );
+            constraint.add_order(*order_id, MmSide::SellYes);
+            problem.orders.push(sell_order);
+            *order_id += 1;
+
+            // MM buy order
+            let buy_order = outcome_buy(
+                &problem.markets,
+                *order_id,
+                market_id,
+                0,
+                price_to_nanos(bid_price),
+                qty_per_market,
+            );
+            constraint.add_order(*order_id, MmSide::BuyYes);
+            problem.orders.push(buy_order);
+            *order_id += 1;
+        }
+
+        problem.mm_constraints.push(constraint);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_quick_scenario() {
+        let problem = generate_scenario(ScenarioConfig::quick());
+        assert!(problem.num_markets() >= 5);
+        assert!(problem.num_orders() > 0);
+    }
+
+    #[test]
+    fn test_small_scenario() {
+        let problem = generate_scenario(ScenarioConfig::small());
+        assert!(problem.num_markets() >= 10);
+        assert!(problem.num_orders() >= 100);
+        assert!(!problem.mm_constraints.is_empty());
+    }
+
+    #[test]
+    fn test_medium_scenario() {
+        let problem = generate_scenario(ScenarioConfig::medium());
+        assert!(problem.num_markets() >= 30);
+        assert!(problem.num_orders() >= 1000);
+    }
+
+    #[test]
+    fn test_milp_killer_has_aon() {
+        let problem = generate_scenario(ScenarioConfig::milp_killer());
+        let aon_count = problem.orders.iter().filter(|o| o.is_all_or_none()).count();
+        assert!(aon_count > 1000, "MILP killer should have many AON orders");
+    }
+
+    #[test]
+    fn test_seed_reproducibility() {
+        let config = ScenarioConfig::small().with_seed(123);
+        let p1 = generate_scenario(config.clone());
+        let p2 = generate_scenario(config);
+        assert_eq!(p1.num_orders(), p2.num_orders());
+        assert_eq!(p1.orders[0].id, p2.orders[0].id);
+    }
+
+    #[test]
+    fn test_all_markets_binary() {
+        let problem = generate_scenario(ScenarioConfig::medium());
+        for market in problem.markets.iter() {
+            assert!(market.is_binary());
+        }
+    }
+}

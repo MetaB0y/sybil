@@ -20,21 +20,33 @@ fmt:
 fmt-check:
     cargo fmt --all -- --check
 
-# Run realistic scenario (small/test version)
-realistic-small:
-    cargo run --bin matching-sim --release -- --scenario realistic-test
+# Quick simulation (~50 orders)
+sim-quick:
+    cargo run --bin matching-sim --release -- --preset quick
 
-# Run realistic scenario (full)
-realistic:
-    cargo run --bin matching-sim --release -- --scenario realistic
+# Small simulation (~300 orders)
+sim-small:
+    cargo run --bin matching-sim --release -- --preset small
 
-# Run all solvers comparison
+# Medium simulation (~3000 orders)
+sim-medium:
+    cargo run --bin matching-sim --release -- --preset medium
+
+# Large simulation (~10000 orders)
+sim-large:
+    cargo run --bin matching-sim --release -- --preset large
+
+# Compare all solvers on medium scenario
 compare:
-    cargo run --bin matching-sim --release -- --scenario milp-killer --solver all
+    cargo run --bin matching-sim --release -- --preset medium --solver all
 
-# Run specific solver on a scenario
-run scenario solver="greedy":
-    cargo run --bin matching-sim --release -- --scenario {{scenario}} --solver {{solver}}
+# MILP-killer test (forces MILP timeout)
+milp-killer:
+    cargo run --bin matching-sim --release -- --preset milp-killer --solver all --milp-timeout 5.0
+
+# Run with specific preset and solver
+sim preset="medium" solver="greedy":
+    cargo run --bin matching-sim --release -- --preset {{preset}} --solver {{solver}}
 
 # Build release
 build:

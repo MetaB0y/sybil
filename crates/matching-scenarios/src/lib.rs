@@ -1,32 +1,28 @@
-//! Scenario generators for NP-hard matching.
+//! Scenario generators for matching engine testing.
 //!
-//! # Standard Scenarios
+//! # Unified Scenarios
 //!
-//! - [`random`]: Configurable random hard instances
-//! - [`mega`]: Comprehensive scenario with multi-outcome markets and MM constraints
+//! The [`scenario`] module provides a single configurable generator with presets:
 //!
-//! # Stress Scenarios
+//! - `ScenarioConfig::quick()` - Fast tests (~50 orders)
+//! - `ScenarioConfig::small()` - Unit tests (~300 orders)
+//! - `ScenarioConfig::medium()` - Integration tests (~3000 orders)
+//! - `ScenarioConfig::large()` - Stress tests (~10000 orders)
+//! - `ScenarioConfig::extreme()` - Benchmarking (~50000 orders)
+//! - `ScenarioConfig::milp_killer()` - Forces MILP timeout
 //!
-//! The [`stress`] module provides large-scale scenarios for solver testing:
+//! # Simple Random Scenarios
 //!
-//! - Mega scenarios with 500-5000 orders
-//! - Combined scenarios merging multiple scenario types
+//! The [`random`] module provides simpler random scenarios for basic testing.
 
-pub mod mega;
 pub mod random;
-pub mod stress;
+pub mod scenario;
 
 // Re-export Problem from matching-engine
 pub use matching_engine::{Problem, ProblemSummary};
 
-// Re-export scenario generators
+// Re-export unified scenario generator (primary API)
+pub use scenario::{generate_scenario, ScenarioConfig};
+
+// Re-export simple random generator
 pub use random::{generate_random_scenario, RandomConfig};
-
-// Re-export stress scenarios
-pub use stress::{
-    generate_combined_scenario, generate_mega_scenario, generate_milp_killer_scenario,
-    MegaScenarioConfig, MilpKillerConfig,
-};
-
-// Re-export new mega scenario
-pub use mega::{generate_mega_scenario_v2, MegaScenarioConfigV2, MmStrategy, PriceDistribution};
