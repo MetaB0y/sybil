@@ -149,7 +149,12 @@ impl FillFootprint {
             let mut best_outcome = 0u8;
             let mut best_payoff = i8::MIN;
 
-            for (i, &payoff) in order.payoffs.iter().take(order.num_states as usize).enumerate() {
+            for (i, &payoff) in order
+                .payoffs
+                .iter()
+                .take(order.num_states as usize)
+                .enumerate()
+            {
                 if payoff > best_payoff {
                     best_payoff = payoff;
                     best_outcome = i as u8;

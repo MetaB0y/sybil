@@ -4,10 +4,7 @@
 
 use matching_engine::{Order, NANOS_PER_DOLLAR};
 use matching_scenarios::{generate_mega_scenario_v2, MegaScenarioConfigV2};
-use matching_solver::{
-    local_solver::LocalSolver,
-    mm_allocator::MmAllocator,
-};
+use matching_solver::{local_solver::LocalSolver, mm_allocator::MmAllocator};
 use std::collections::HashMap;
 
 /// Validate that all market solutions have normalized prices (sum to $1).
@@ -45,7 +42,11 @@ fn validate_price_normalization() {
         }
     }
 
-    assert_eq!(violations, 0, "Found {} price normalization violations", violations);
+    assert_eq!(
+        violations, 0,
+        "Found {} price normalization violations",
+        violations
+    );
 }
 
 /// Validate that MM allocations respect budget constraints.
@@ -106,8 +107,7 @@ fn validate_fills_respect_limits() {
     let problem = generate_mega_scenario_v2(config);
 
     let solver = LocalSolver::new();
-    let order_map: HashMap<u64, &Order> =
-        problem.orders.iter().map(|o| (o.id, o)).collect();
+    let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
 
     let mut violations = 0;
 
@@ -123,7 +123,11 @@ fn validate_fills_respect_limits() {
         for fill in &solution.fills {
             if let Some(order) = order_map.get(&fill.order_id) {
                 // Determine if this is a buy or sell order based on payoffs
-                let is_seller = order.payoffs.iter().take(order.num_states as usize).any(|&p| p < 0);
+                let is_seller = order
+                    .payoffs
+                    .iter()
+                    .take(order.num_states as usize)
+                    .any(|&p| p < 0);
 
                 let is_violation = if is_seller {
                     // Sellers: fill_price must be >= limit (they receive at least what they asked)
@@ -239,9 +243,8 @@ fn validate_fills_respect_liquidity() {
             .orders
             .iter()
             .filter(|o| {
-                o.num_markets == 1
-                    && o.markets[0] == market.id
-                    && o.payoffs[0] < 0  // Sell order
+                o.num_markets == 1 && o.markets[0] == market.id && o.payoffs[0] < 0
+                // Sell order
             })
             .map(|o| o.max_fill)
             .sum();
@@ -320,10 +323,12 @@ fn compare_current_vs_iterative_approach() {
 
     // Print MM budget info
     for mm in &problem.mm_constraints {
-        println!("  MM {:?}: budget=${}, {} orders",
+        println!(
+            "  MM {:?}: budget=${}, {} orders",
             mm.mm_id,
             mm.max_capital / NANOS_PER_DOLLAR,
-            mm.order_ids.len());
+            mm.order_ids.len()
+        );
     }
 
     // --- CURRENT APPROACH: Per-market first (without MM), then MM allocation ---
@@ -351,42 +356,61 @@ fn compare_current_vs_iterative_approach() {
     // Compute welfare as economic surplus at clearing prices
     // welfare = (limit_price - clearing_price) * qty for buyers
     // This is what the order would gain if filled at the clearing price
-    let welfare_map: HashMap<u64, i64> = problem.orders.iter().map(|o| {
-        // Get clearing price for this order's market
-        let clearing_price = if o.num_markets > 0 {
-            current_prices
-                .get(&o.markets[0])
-                .and_then(|p| p.first().copied())
-                .unwrap_or(500_000_000) // default 50 cents
-        } else {
-            500_000_000
-        };
+    let welfare_map: HashMap<u64, i64> = problem
+        .orders
+        .iter()
+        .map(|o| {
+            // Get clearing price for this order's market
+            let clearing_price = if o.num_markets > 0 {
+                current_prices
+                    .get(&o.markets[0])
+                    .and_then(|p| p.first().copied())
+                    .unwrap_or(500_000_000) // default 50 cents
+            } else {
+                500_000_000
+            };
 
-        // Welfare = surplus if filled at clearing price
-        // For a buyer: limit - clearing (positive if limit > clearing)
-        let surplus_per_share = o.limit_price as i64 - clearing_price as i64;
-        let welfare = surplus_per_share * o.max_fill as i64;
+            // Welfare = surplus if filled at clearing price
+            // For a buyer: limit - clearing (positive if limit > clearing)
+            let surplus_per_share = o.limit_price as i64 - clearing_price as i64;
+            let welfare = surplus_per_share * o.max_fill as i64;
 
-        // Only positive welfare makes sense (order wouldn't fill if negative)
-        (o.id, welfare.max(0))
-    }).collect();
+            // Only positive welfare makes sense (order wouldn't fill if negative)
+            (o.id, welfare.max(0))
+        })
+        .collect();
 
     // Debug: check welfare distribution for MM orders
-    let mm_welfare_stats: Vec<i64> = mm_order_ids.iter()
+    let mm_welfare_stats: Vec<i64> = mm_order_ids
+        .iter()
         .filter_map(|id| welfare_map.get(id).copied())
         .collect();
     let mm_positive_welfare = mm_welfare_stats.iter().filter(|&&w| w > 0).count();
-    println!("MM welfare: {} orders with positive welfare out of {}",
-        mm_positive_welfare, mm_welfare_stats.len());
+    println!(
+        "MM welfare: {} orders with positive welfare out of {}",
+        mm_positive_welfare,
+        mm_welfare_stats.len()
+    );
 
-    let mm_result = allocator.allocate(&problem.mm_constraints, &current_prices, &problem.orders, &welfare_map);
+    let mm_result = allocator.allocate(
+        &problem.mm_constraints,
+        &current_prices,
+        &problem.orders,
+        &welfare_map,
+    );
 
     println!("Phase 1 (non-MM clearing):");
     println!("  Volume: {} shares", current_volume);
     println!("  Welfare: {}", current_welfare);
     println!("Phase 2 (MM allocation):");
-    println!("  MM orders activated: {}", mm_result.stats.mm_orders_activated);
-    println!("  MM utilization: {:.1}%", mm_result.stats.overall_utilization * 100.0);
+    println!(
+        "  MM orders activated: {}",
+        mm_result.stats.mm_orders_activated
+    );
+    println!(
+        "  MM utilization: {:.1}%",
+        mm_result.stats.overall_utilization * 100.0
+    );
     println!("  Total welfare (with MM): {}", mm_result.total_welfare);
 
     // --- ITERATIVE APPROACH: Fixed-point between clearing and MM allocation ---
@@ -416,11 +440,17 @@ fn compare_current_vs_iterative_approach() {
         iterations += 1;
 
         // MM allocation with current prices
-        let mm_result = allocator.allocate(&problem.mm_constraints, &iter_prices, &problem.orders, &welfare_map);
+        let mm_result = allocator.allocate(
+            &problem.mm_constraints,
+            &iter_prices,
+            &problem.orders,
+            &welfare_map,
+        );
         let new_activated: Vec<u64> = mm_result.activated_orders.clone();
 
         // Build order set: non-MM + activated MM orders
-        let activated_mm_set: std::collections::HashSet<u64> = new_activated.iter().copied().collect();
+        let activated_mm_set: std::collections::HashSet<u64> =
+            new_activated.iter().copied().collect();
         let combined_orders: Vec<_> = non_mm_orders
             .iter()
             .cloned()
@@ -428,7 +458,7 @@ fn compare_current_vs_iterative_approach() {
                 mm_orders
                     .iter()
                     .filter(|o| activated_mm_set.contains(&o.id))
-                    .cloned()
+                    .cloned(),
             )
             .collect();
 
@@ -444,7 +474,8 @@ fn compare_current_vs_iterative_approach() {
                 .get(&(market.id, 0))
                 .cloned()
                 .unwrap_or_else(|| matching_engine::LiquidityBook::new(market.id, 0));
-            let solution = solver.solve_market(market.id, &problem.markets, &combined_orders, &book);
+            let solution =
+                solver.solve_market(market.id, &problem.markets, &combined_orders, &book);
             new_prices.insert(market.id, solution.prices.clone());
             iter_volume += solution.fills.iter().map(|f| f.fill_qty).sum::<u64>();
             iter_welfare += solution.welfare;
@@ -455,14 +486,22 @@ fn compare_current_vs_iterative_approach() {
         for (market_id, new_price_vec) in &new_prices {
             if let Some(old_price_vec) = iter_prices.get(market_id) {
                 for (new_p, old_p) in new_price_vec.iter().zip(old_price_vec.iter()) {
-                    let diff = if *new_p > *old_p { *new_p - *old_p } else { *old_p - *new_p };
+                    let diff = if *new_p > *old_p {
+                        *new_p - *old_p
+                    } else {
+                        *old_p - *new_p
+                    };
                     max_price_change = max_price_change.max(diff);
                 }
             }
         }
 
-        println!("Iteration {}: max_price_change = ${:.6}, activated = {}",
-            iterations, max_price_change as f64 / NANOS_PER_DOLLAR as f64, new_activated.len());
+        println!(
+            "Iteration {}: max_price_change = ${:.6}, activated = {}",
+            iterations,
+            max_price_change as f64 / NANOS_PER_DOLLAR as f64,
+            new_activated.len()
+        );
 
         iter_prices = new_prices;
         _activated_mm_orders = new_activated;
@@ -473,14 +512,28 @@ fn compare_current_vs_iterative_approach() {
     }
 
     // Final MM allocation with converged prices
-    let final_mm_result = allocator.allocate(&problem.mm_constraints, &iter_prices, &problem.orders, &welfare_map);
+    let final_mm_result = allocator.allocate(
+        &problem.mm_constraints,
+        &iter_prices,
+        &problem.orders,
+        &welfare_map,
+    );
 
     println!("\nIterative result after {} iterations:", iterations);
     println!("  Volume: {} shares", iter_volume);
     println!("  Welfare: {}", iter_welfare);
-    println!("  MM orders activated: {}", final_mm_result.stats.mm_orders_activated);
-    println!("  MM utilization: {:.1}%", final_mm_result.stats.overall_utilization * 100.0);
-    println!("  Total welfare (with MM): {}", final_mm_result.total_welfare);
+    println!(
+        "  MM orders activated: {}",
+        final_mm_result.stats.mm_orders_activated
+    );
+    println!(
+        "  MM utilization: {:.1}%",
+        final_mm_result.stats.overall_utilization * 100.0
+    );
+    println!(
+        "  Total welfare (with MM): {}",
+        final_mm_result.total_welfare
+    );
 
     // --- COMPARISON ---
     println!("\n=== COMPARISON ===");
@@ -488,38 +541,77 @@ fn compare_current_vs_iterative_approach() {
     let welfare_diff = iter_welfare - current_welfare;
     let mm_welfare_diff = final_mm_result.total_welfare - mm_result.total_welfare;
 
-    println!("Volume change: {:+} shares ({:+.2}%)",
+    println!(
+        "Volume change: {:+} shares ({:+.2}%)",
         volume_diff,
-        if current_volume > 0 { volume_diff as f64 / current_volume as f64 * 100.0 } else { 0.0 });
-    println!("Welfare change (clearing): {:+} ({:+.2}%)",
+        if current_volume > 0 {
+            volume_diff as f64 / current_volume as f64 * 100.0
+        } else {
+            0.0
+        }
+    );
+    println!(
+        "Welfare change (clearing): {:+} ({:+.2}%)",
         welfare_diff,
-        if current_welfare > 0 { welfare_diff as f64 / current_welfare as f64 * 100.0 } else { 0.0 });
-    println!("Welfare change (total): {:+} ({:+.2}%)",
+        if current_welfare > 0 {
+            welfare_diff as f64 / current_welfare as f64 * 100.0
+        } else {
+            0.0
+        }
+    );
+    println!(
+        "Welfare change (total): {:+} ({:+.2}%)",
         mm_welfare_diff,
-        if mm_result.total_welfare > 0 { mm_welfare_diff as f64 / mm_result.total_welfare as f64 * 100.0 } else { 0.0 });
+        if mm_result.total_welfare > 0 {
+            mm_welfare_diff as f64 / mm_result.total_welfare as f64 * 100.0
+        } else {
+            0.0
+        }
+    );
 
     // Print price comparison for first few markets
     println!("\n=== PRICE ANALYSIS (first 5 markets) ===");
     for (i, market) in problem.markets.iter().take(5).enumerate() {
         let current_p = current_prices.get(&market.id).map(|p| p[0]).unwrap_or(0);
         let iter_p = iter_prices.get(&market.id).map(|p| p[0]).unwrap_or(0);
-        let diff = if iter_p > current_p { iter_p - current_p } else { current_p - iter_p };
-        println!("Market {}: current=${:.4}, iter=${:.4}, diff=${:.6}",
+        let diff = if iter_p > current_p {
+            iter_p - current_p
+        } else {
+            current_p - iter_p
+        };
+        println!(
+            "Market {}: current=${:.4}, iter=${:.4}, diff=${:.6}",
             i,
             current_p as f64 / NANOS_PER_DOLLAR as f64,
             iter_p as f64 / NANOS_PER_DOLLAR as f64,
-            diff as f64 / NANOS_PER_DOLLAR as f64);
+            diff as f64 / NANOS_PER_DOLLAR as f64
+        );
     }
 
     // Summary
     println!("\n=== BASELINE ESTABLISHED ===");
-    println!("Scenario: {} orders, {} markets, {} MMs", problem.orders.len(), problem.markets.iter().count(), problem.mm_constraints.len());
-    println!("Non-MM vs MM orders: {} vs {}", non_mm_orders.len(), mm_orders.len());
+    println!(
+        "Scenario: {} orders, {} markets, {} MMs",
+        problem.orders.len(),
+        problem.markets.iter().count(),
+        problem.mm_constraints.len()
+    );
+    println!(
+        "Non-MM vs MM orders: {} vs {}",
+        non_mm_orders.len(),
+        mm_orders.len()
+    );
     println!("Current approach:");
     println!("  - Volume: {} shares", current_volume);
     println!("  - Clearing welfare: {}", current_welfare);
-    println!("  - MM orders activated: {}/{}", mm_result.stats.mm_orders_activated, mm_result.stats.mm_orders_considered);
-    println!("  - MM utilization: {:.1}%", mm_result.stats.overall_utilization * 100.0);
+    println!(
+        "  - MM orders activated: {}/{}",
+        mm_result.stats.mm_orders_activated, mm_result.stats.mm_orders_considered
+    );
+    println!(
+        "  - MM utilization: {:.1}%",
+        mm_result.stats.overall_utilization * 100.0
+    );
     println!("Iterative converged in {} iterations", iterations);
     println!("Price impact of adding MM: max ${:.6}", 0.0); // Already computed above
 
@@ -528,7 +620,8 @@ fn compare_current_vs_iterative_approach() {
         assert!(
             alloc.capital_used <= alloc.budget,
             "Iterative approach violated MM budget: {} > {}",
-            alloc.capital_used, alloc.budget
+            alloc.capital_used,
+            alloc.budget
         );
     }
 }
@@ -560,7 +653,11 @@ fn validate_large_scenario() {
         let solution = solver.solve_market(market.id, &problem.markets, &problem.orders, &book);
 
         // Verify normalization
-        assert!(solution.is_normalized(), "Market {:?} not normalized", market.id);
+        assert!(
+            solution.is_normalized(),
+            "Market {:?} not normalized",
+            market.id
+        );
 
         prices.insert(market.id, solution.prices);
         total_fills += solution.fills.len();
@@ -577,7 +674,8 @@ fn validate_large_scenario() {
         assert!(
             alloc.capital_used <= alloc.budget,
             "MM budget violated: {} > {}",
-            alloc.capital_used, alloc.budget
+            alloc.capital_used,
+            alloc.budget
         );
     }
 

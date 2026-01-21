@@ -18,15 +18,15 @@
 //! ```
 
 // Internal modules
+pub mod benchmark;
 pub(crate) mod combiner;
 pub mod greedy;
 pub mod local_solver;
 pub mod mm_allocator;
+pub mod pipeline;
 pub mod price_projector;
 pub(crate) mod specialized;
 pub mod traits;
-pub mod pipeline;
-pub mod benchmark;
 
 #[cfg(feature = "milp")]
 pub mod milp;
@@ -37,38 +37,35 @@ pub mod milp;
 pub use greedy::GreedySolver;
 
 // New architecture components
-pub use local_solver::{LocalSolver, LocalSolverConfig, MarketSolution, solve_all_markets_parallel, solve_market_lp};
-pub use mm_allocator::{MmAllocator, AllocatorConfig, AllocationResult as MmAllocationResult, MmAllocation};
+pub use local_solver::{
+    solve_all_markets_parallel, solve_market_lp, LocalSolver, LocalSolverConfig, MarketSolution,
+};
+pub use mm_allocator::{
+    AllocationResult as MmAllocationResult, AllocatorConfig, MmAllocation, MmAllocator,
+};
 
 // Experimentation platform traits
 pub use traits::{
-    PriceDiscoverer, PriceDiscoveryResult,
-    PriceProjector, PriceProjectionResult,
-    OrderAllocator, AllocationResult,
-    PartialSolver, PartialSolution,
-    matching_result_to_partial,
+    matching_result_to_partial, AllocationResult, OrderAllocator, PartialSolution, PartialSolver,
+    PriceDiscoverer, PriceDiscoveryResult, PriceProjectionResult, PriceProjector,
 };
 
 // Price projector implementation
 pub use price_projector::{
-    PriceProjector as PriceProjectorImpl,
-    ProjectorConfig,
-    ProjectionResult,
-    JointOutcome,
-    MarginalViolation,
-    recompute_fills,
+    recompute_fills, JointOutcome, MarginalViolation, PriceProjector as PriceProjectorImpl,
+    ProjectionResult, ProjectorConfig,
 };
 
 // Pipeline system
 pub use pipeline::{Pipeline, PipelineBuilder, PipelineConfig, PipelineResult, PipelineTimings};
 
 // Benchmark harness
-pub use benchmark::{BenchmarkHarness, BenchmarkResults, BenchmarkRun, compare_to_baseline};
+pub use benchmark::{compare_to_baseline, BenchmarkHarness, BenchmarkResults, BenchmarkRun};
 
 #[cfg(feature = "milp")]
 pub use milp::{MilpConfig, MilpResult, MilpSolver, SolveStatus};
 
-use matching_engine::{LiquidityPool, Order, Fill, Problem};
+use matching_engine::{Fill, LiquidityPool, Order, Problem};
 
 /// Result of solving a matching problem.
 #[derive(Clone, Debug)]

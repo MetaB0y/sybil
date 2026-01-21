@@ -157,8 +157,14 @@ fn analyze_welfare_stages() {
         }
     }
 
-    println!("MM orders with positive welfare: {}", positive_welfare_count);
-    println!("MM orders with negative welfare: {}", negative_welfare_count);
+    println!(
+        "MM orders with positive welfare: {}",
+        positive_welfare_count
+    );
+    println!(
+        "MM orders with negative welfare: {}",
+        negative_welfare_count
+    );
     println!("MM orders with zero welfare: {}", zero_welfare_count);
 
     // Detailed breakdown by side
@@ -324,8 +330,7 @@ fn analyze_welfare_stages() {
     }
     println!(
         "1. MM orders filled: {} (out of {} activated)",
-        mm_fills,
-        result.stats.mm_orders_activated
+        mm_fills, result.stats.mm_orders_activated
     );
 
     // Check 2: How much liquidity is available?
@@ -489,25 +494,32 @@ fn test_mm_price_impact() {
     let all_orders = problem.orders.clone();
 
     let solver = LocalSolver::new();
-    let book = problem
-        .liquidity
-        .books
-        .get(&(market, 0))
-        .cloned()
-        .unwrap();
+    let book = problem.liquidity.books.get(&(market, 0)).cloned().unwrap();
 
     // Solve without MM
     let sol_without_mm = solver.solve_market(market, &problem.markets, &non_mm_orders, &book);
     println!("\nWithout MM orders:");
-    println!("  Clearing price: ${:.4}", sol_without_mm.prices[0] as f64 / NANOS_PER_DOLLAR as f64);
-    println!("  Volume: {} shares", sol_without_mm.fills.iter().map(|f| f.fill_qty).sum::<u64>());
+    println!(
+        "  Clearing price: ${:.4}",
+        sol_without_mm.prices[0] as f64 / NANOS_PER_DOLLAR as f64
+    );
+    println!(
+        "  Volume: {} shares",
+        sol_without_mm.fills.iter().map(|f| f.fill_qty).sum::<u64>()
+    );
     println!("  Fills: {}", sol_without_mm.fills.len());
 
     // Solve with MM
     let sol_with_mm = solver.solve_market(market, &problem.markets, &all_orders, &book);
     println!("\nWith MM orders:");
-    println!("  Clearing price: ${:.4}", sol_with_mm.prices[0] as f64 / NANOS_PER_DOLLAR as f64);
-    println!("  Volume: {} shares", sol_with_mm.fills.iter().map(|f| f.fill_qty).sum::<u64>());
+    println!(
+        "  Clearing price: ${:.4}",
+        sol_with_mm.prices[0] as f64 / NANOS_PER_DOLLAR as f64
+    );
+    println!(
+        "  Volume: {} shares",
+        sol_with_mm.fills.iter().map(|f| f.fill_qty).sum::<u64>()
+    );
     println!("  Fills: {}", sol_with_mm.fills.len());
 
     let price_diff = (sol_with_mm.prices[0] as i64 - sol_without_mm.prices[0] as i64).abs();

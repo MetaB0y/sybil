@@ -1,13 +1,13 @@
 //! Random hard instance generation.
 
-use rand::Rng;
 use rand::rngs::StdRng;
-use rand::SeedableRng;
 use rand::seq::SliceRandom;
+use rand::Rng;
+use rand::SeedableRng;
 
 use matching_engine::{
-    ConstraintBuilder, MarketSet, Order, MarketId, Qty,
-    price_to_nanos, outcome_buy, bundle_yes, spread,
+    bundle_yes, outcome_buy, price_to_nanos, spread, ConstraintBuilder, MarketId, MarketSet, Order,
+    Qty,
 };
 
 use matching_engine::Problem;
@@ -110,12 +110,8 @@ pub fn generate_random_scenario(config: RandomConfig) -> Problem {
                 m2_idx = rng.gen_range(0..market_ids.len());
             }
 
-            constraint_builder = constraint_builder.implies(
-                market_ids[m1_idx],
-                0,
-                market_ids[m2_idx],
-                0,
-            );
+            constraint_builder =
+                constraint_builder.implies(market_ids[m1_idx], 0, market_ids[m2_idx], 0);
         }
         problem.constraints = constraint_builder.build();
     }
@@ -142,7 +138,8 @@ pub fn generate_random_scenario(config: RandomConfig) -> Problem {
             };
 
             for level in 0..config.price_levels {
-                let offset = config.price_spread * (level as f64 + 1.0) / config.price_levels as f64;
+                let offset =
+                    config.price_spread * (level as f64 + 1.0) / config.price_levels as f64;
 
                 let bid_price = (outcome_mid_price - offset).max(0.01);
                 problem.liquidity.add_bid(
@@ -277,14 +274,7 @@ fn generate_spread_random_order(
     *order_id += 1;
 
     if market_ids.len() < 2 {
-        return outcome_buy(
-            markets,
-            id,
-            market_ids[0],
-            0,
-            price_to_nanos(0.5),
-            50,
-        );
+        return outcome_buy(markets, id, market_ids[0], 0, price_to_nanos(0.5), 50);
     }
 
     let m1_idx = rng.gen_range(0..market_ids.len());

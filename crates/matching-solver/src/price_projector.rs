@@ -25,7 +25,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use matching_engine::{state_to_outcomes, MarketId, Nanos, Order, Problem, NANOS_PER_DOLLAR, MAX_STATES};
+use matching_engine::{
+    state_to_outcomes, MarketId, Nanos, Order, Problem, MAX_STATES, NANOS_PER_DOLLAR,
+};
 
 use crate::traits::PriceDiscoveryResult;
 
@@ -100,7 +102,9 @@ impl JointOutcome {
 
     /// Check if this joint outcome contains a specific market-outcome pair.
     pub fn contains(&self, market: MarketId, outcome: u8) -> bool {
-        self.components.iter().any(|&(m, o)| m == market && o == outcome)
+        self.components
+            .iter()
+            .any(|&(m, o)| m == market && o == outcome)
     }
 
     /// Get the outcome for a specific market (if present).
@@ -479,7 +483,8 @@ impl PriceProjector {
 
             if max_change < self.config.tolerance as f64 / NANOS_PER_DOLLAR as f64 {
                 // Converged
-                let result = self.build_result(base_prices, &p, var_index, max_adjustment, iteration + 1);
+                let result =
+                    self.build_result(base_prices, &p, var_index, max_adjustment, iteration + 1);
                 return result;
             }
         }
@@ -661,8 +666,7 @@ pub fn recompute_fills(
         solution.prices = new_prices.clone();
 
         // Filter fills: keep only those where limit_price >= clearing_price
-        let order_map: HashMap<u64, &Order> =
-            problem.orders.iter().map(|o| (o.id, o)).collect();
+        let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
 
         let mut valid_fills = Vec::new();
         let mut new_welfare: i64 = 0;
@@ -684,8 +688,8 @@ pub fn recompute_fills(
 
                 if order.limit_price >= clearing_price {
                     // Order still has positive welfare
-                    let welfare = (order.limit_price as i64 - clearing_price as i64)
-                        * fill.fill_qty as i64;
+                    let welfare =
+                        (order.limit_price as i64 - clearing_price as i64) * fill.fill_qty as i64;
                     new_welfare += welfare;
 
                     // Update fill with new price
@@ -701,7 +705,11 @@ pub fn recompute_fills(
     }
 
     // Recompute totals
-    price_result.total_welfare = price_result.market_solutions.values().map(|s| s.welfare).sum();
+    price_result.total_welfare = price_result
+        .market_solutions
+        .values()
+        .map(|s| s.welfare)
+        .sum();
     price_result.total_fills = price_result
         .market_solutions
         .values()
@@ -815,10 +823,7 @@ mod tests {
 
     #[test]
     fn test_joint_outcome_creation() {
-        let jo = JointOutcome::new(vec![
-            (MarketId::new(1), 0),
-            (MarketId::new(0), 1),
-        ]);
+        let jo = JointOutcome::new(vec![(MarketId::new(1), 0), (MarketId::new(0), 1)]);
 
         // Should be sorted by market ID
         assert_eq!(jo.components[0].0, MarketId::new(0));

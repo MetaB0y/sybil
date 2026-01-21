@@ -149,8 +149,15 @@ impl ArbitrageDetector {
     }
 
     /// Get the best ask price for a (market, outcome) pair.
-    fn best_ask_price(&self, liquidity: &LiquidityPool, market: MarketId, outcome: u8) -> Option<Nanos> {
-        liquidity.book(market, outcome).and_then(|book| book.best_ask())
+    fn best_ask_price(
+        &self,
+        liquidity: &LiquidityPool,
+        market: MarketId,
+        outcome: u8,
+    ) -> Option<Nanos> {
+        liquidity
+            .book(market, outcome)
+            .and_then(|book| book.best_ask())
     }
 
     /// Determine which outcome is being bought for a market in a bundle order.
@@ -234,12 +241,18 @@ impl ArbitrageDetector {
                 }
 
                 // Try to fill the bundle order
-                if let Some(fill) = self.try_fill_bundle(order, &result.remaining_liquidity, problem) {
+                if let Some(fill) =
+                    self.try_fill_bundle(order, &result.remaining_liquidity, problem)
+                {
                     // Verify the fill is profitable
                     let welfare = fill.welfare(order);
                     if welfare > 0 {
                         // Consume liquidity for each leg
-                        if self.consume_bundle_liquidity(order, fill.fill_qty, &mut result.remaining_liquidity) {
+                        if self.consume_bundle_liquidity(
+                            order,
+                            fill.fill_qty,
+                            &mut result.remaining_liquidity,
+                        ) {
                             result.add_fill(fill, order);
                             filled_orders.insert(order.id);
                         }
@@ -278,8 +291,11 @@ impl ArbitrageDetector {
             if self.is_cheap_implicant(&problem.constraints, &problem.liquidity, market, outcome) {
                 if let Some(fill) = self.try_fill_simple(order, &result.remaining_liquidity) {
                     if fill.welfare(order) > 0 {
-                        if let Some(book) = result.remaining_liquidity.books.get_mut(&(market, outcome)) {
-                            let (filled, price) = book.consume_asks(fill.fill_qty, order.limit_price);
+                        if let Some(book) =
+                            result.remaining_liquidity.books.get_mut(&(market, outcome))
+                        {
+                            let (filled, price) =
+                                book.consume_asks(fill.fill_qty, order.limit_price);
                             if filled >= order.min_fill && filled > 0 {
                                 let actual_fill = Fill::new(order.id, filled, price);
                                 result.add_fill(actual_fill, order);
@@ -339,7 +355,12 @@ impl ArbitrageDetector {
     }
 
     /// Try to fill a bundle order.
-    fn try_fill_bundle(&self, order: &Order, liquidity: &LiquidityPool, _problem: &Problem) -> Option<Fill> {
+    fn try_fill_bundle(
+        &self,
+        order: &Order,
+        liquidity: &LiquidityPool,
+        _problem: &Problem,
+    ) -> Option<Fill> {
         if order.num_markets <= 1 {
             return None;
         }
@@ -379,7 +400,12 @@ impl ArbitrageDetector {
     }
 
     /// Consume liquidity for a bundle order.
-    fn consume_bundle_liquidity(&self, order: &Order, qty: Qty, liquidity: &mut LiquidityPool) -> bool {
+    fn consume_bundle_liquidity(
+        &self,
+        order: &Order,
+        qty: Qty,
+        liquidity: &mut LiquidityPool,
+    ) -> bool {
         // First verify all legs have sufficient liquidity
         for market_idx in 0..order.num_markets as usize {
             let market = order.markets[market_idx];
@@ -421,7 +447,12 @@ impl ArbitrageDetector {
         let mut best_outcome = 0u8;
         let mut best_payoff = i8::MIN;
 
-        for (i, &payoff) in order.payoffs.iter().take(order.num_states as usize).enumerate() {
+        for (i, &payoff) in order
+            .payoffs
+            .iter()
+            .take(order.num_states as usize)
+            .enumerate()
+        {
             if payoff > best_payoff {
                 best_payoff = payoff;
                 best_outcome = i as u8;
@@ -469,7 +500,9 @@ mod tests {
         let m2 = problem.markets.add_binary("A_advances");
 
         // A wins → A advances (implication)
-        problem.constraints.add(MarketConstraint::implies(m1, 0, m2, 0));
+        problem
+            .constraints
+            .add(MarketConstraint::implies(m1, 0, m2, 0));
 
         // Set up liquidity where buying "A wins" is cheaper than "A advances"
         problem.liquidity.add_ask(m1, 0, 400_000_000, 1000); // A wins at 0.40
@@ -490,7 +523,9 @@ mod tests {
         let m1 = problem.markets.add_binary("market_1");
         let m2 = problem.markets.add_binary("market_2");
 
-        problem.constraints.add(MarketConstraint::implies(m1, 0, m2, 0));
+        problem
+            .constraints
+            .add(MarketConstraint::implies(m1, 0, m2, 0));
 
         // Prices correctly ordered: A wins more expensive than A advances
         problem.liquidity.add_ask(m1, 0, 500_000_000, 1000);

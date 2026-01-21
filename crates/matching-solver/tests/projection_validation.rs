@@ -36,7 +36,10 @@ fn diagnose_projection_on_existing_scenarios() {
         let pipeline = Pipeline::consistent();
         let result = pipeline.solve(&problem);
 
-        let proj = result.price_projection.as_ref().expect("Should have projection result");
+        let proj = result
+            .price_projection
+            .as_ref()
+            .expect("Should have projection result");
 
         println!(
             "{}: {} orders ({} single-market, {} bundles, {:.0}% bundle fraction)",
@@ -79,7 +82,10 @@ fn diagnose_with_higher_bundle_fraction() {
         let pipeline = Pipeline::consistent();
         let result = pipeline.solve(&problem);
 
-        let proj = result.price_projection.as_ref().expect("Should have projection result");
+        let proj = result
+            .price_projection
+            .as_ref()
+            .expect("Should have projection result");
 
         println!(
             "bundle_fraction={:.0}%: {} orders ({} bundles)",
@@ -118,7 +124,12 @@ fn stress_test_bundle_fraction() {
         // Count unique joint outcomes (combinations of markets in bundles)
         let mut joint_outcomes = std::collections::HashSet::new();
         for order in problem.orders.iter().filter(|o| o.num_markets > 1) {
-            let mut markets: Vec<u32> = order.markets.iter().take(order.num_markets as usize).map(|m| m.0).collect();
+            let mut markets: Vec<u32> = order
+                .markets
+                .iter()
+                .take(order.num_markets as usize)
+                .map(|m| m.0)
+                .collect();
             markets.sort();
             joint_outcomes.insert(markets);
         }
@@ -126,7 +137,10 @@ fn stress_test_bundle_fraction() {
         let pipeline = Pipeline::consistent();
         let result = pipeline.solve(&problem);
 
-        let proj = result.price_projection.as_ref().expect("Should have projection result");
+        let proj = result
+            .price_projection
+            .as_ref()
+            .expect("Should have projection result");
 
         println!(
             "bundle_fraction={:.0}%: {} orders, {} bundles, {} unique joint outcomes",
@@ -175,7 +189,10 @@ fn stress_test_num_markets() {
         let pipeline = Pipeline::consistent();
         let result = pipeline.solve(&problem);
 
-        let proj = result.price_projection.as_ref().expect("Should have projection result");
+        let proj = result
+            .price_projection
+            .as_ref()
+            .expect("Should have projection result");
 
         println!(
             "markets={}: {} orders, {} bundles",
@@ -280,13 +297,19 @@ fn test_guaranteed_violation_scenario() {
         println!("Price Discovery Results:");
         for (&market_id, prices) in &pd.prices {
             let p0 = prices[0] as f64 / NANOS_PER_DOLLAR as f64;
-            let p1 = prices.get(1).map(|p| *p as f64 / NANOS_PER_DOLLAR as f64).unwrap_or(0.0);
+            let p1 = prices
+                .get(1)
+                .map(|p| *p as f64 / NANOS_PER_DOLLAR as f64)
+                .unwrap_or(0.0);
             println!("  Market {:?}: YES=${:.4}, NO=${:.4}", market_id, p0, p1);
         }
         println!();
     }
 
-    let proj = result.price_projection.as_ref().expect("Should have projection result");
+    let proj = result
+        .price_projection
+        .as_ref()
+        .expect("Should have projection result");
 
     println!("Projection Results:");
     println!("  violations_fixed={}", proj.violations_fixed);
@@ -381,12 +404,19 @@ fn test_multiple_violation_triangles() {
         }
     }
 
-    println!("Total: {} orders, {} markets", problem.orders.len(), num_triangles * 2);
+    println!(
+        "Total: {} orders, {} markets",
+        problem.orders.len(),
+        num_triangles * 2
+    );
 
     let pipeline = Pipeline::consistent();
     let result = pipeline.solve(&problem);
 
-    let proj = result.price_projection.as_ref().expect("Should have projection result");
+    let proj = result
+        .price_projection
+        .as_ref()
+        .expect("Should have projection result");
 
     println!("\nResults:");
     println!("  violations_fixed={}", proj.violations_fixed);
@@ -429,7 +459,8 @@ fn compare_current_vs_consistent() {
         let consistent_pipeline = Pipeline::consistent();
         let consistent_result = consistent_pipeline.solve(&problem);
 
-        let overhead_ms = (consistent_result.total_time_secs - current_result.total_time_secs) * 1000.0;
+        let overhead_ms =
+            (consistent_result.total_time_secs - current_result.total_time_secs) * 1000.0;
         let overhead_pct = if current_result.total_time_secs > 0.0 {
             (overhead_ms / (current_result.total_time_secs * 1000.0)) * 100.0
         } else {
@@ -446,11 +477,7 @@ fn compare_current_vs_consistent() {
             consistent_result.total_time_secs * 1000.0,
             consistent_result.phase_times.price_projection_secs * 1000.0
         );
-        println!(
-            "  overhead:   {:.3}ms ({:.1}%)",
-            overhead_ms,
-            overhead_pct
-        );
+        println!("  overhead:   {:.3}ms ({:.1}%)", overhead_ms, overhead_pct);
 
         if let Some(proj) = &consistent_result.price_projection {
             println!(

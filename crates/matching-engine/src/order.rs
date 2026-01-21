@@ -116,7 +116,12 @@ impl Order {
     /// probs should have length = num_states, values summing to 1.
     pub fn expected_value(&self, probs: &[f64]) -> f64 {
         let mut ev = 0.0;
-        for (i, &payoff) in self.payoffs.iter().take(self.num_states as usize).enumerate() {
+        for (i, &payoff) in self
+            .payoffs
+            .iter()
+            .take(self.num_states as usize)
+            .enumerate()
+        {
             if i < probs.len() {
                 ev += payoff as f64 * probs[i];
             }
@@ -154,7 +159,12 @@ impl Order {
 impl std::fmt::Display for Order {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let markets: Vec<_> = self.active_markets().map(|m| format!("{}", m)).collect();
-        let payoffs: Vec<_> = self.payoffs.iter().take(self.num_states as usize).copied().collect();
+        let payoffs: Vec<_> = self
+            .payoffs
+            .iter()
+            .take(self.num_states as usize)
+            .copied()
+            .collect();
         write!(
             f,
             "Order#{} markets=[{}] payoffs={:?} limit={} qty=[{},{}]",
@@ -216,8 +226,8 @@ mod tests {
     fn test_expected_value() {
         let mut order = Order::new(1);
         order.num_states = 2;
-        order.payoffs[0] = 0;  // NO outcome
-        order.payoffs[1] = 1;  // YES outcome
+        order.payoffs[0] = 0; // NO outcome
+        order.payoffs[1] = 1; // YES outcome
 
         // 50/50 probability
         let ev = order.expected_value(&[0.5, 0.5]);

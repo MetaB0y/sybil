@@ -21,7 +21,7 @@ use matching_scenarios::{generate_mega_scenario_v2, MegaScenarioConfigV2};
 use matching_solver::{
     local_solver::{LocalSolver, MarketSolution},
     mm_allocator::MmAllocator,
-    Pipeline, BenchmarkHarness,
+    BenchmarkHarness, Pipeline,
 };
 use std::collections::HashMap;
 
@@ -40,17 +40,25 @@ fn bench_local_solver_single_market(bencher: Bencher, order_count: usize) {
     let market_id = problem.markets.add_binary("test");
 
     // Add liquidity
-    problem.liquidity.add_ask(market_id, 0, 500_000_000, 100_000);
-    problem.liquidity.add_ask(market_id, 1, 500_000_000, 100_000);
+    problem
+        .liquidity
+        .add_ask(market_id, 0, 500_000_000, 100_000);
+    problem
+        .liquidity
+        .add_ask(market_id, 1, 500_000_000, 100_000);
 
     // Add orders: varying prices
     for i in 0..order_count {
         let price = ((400 + (i % 200)) as u64) * 1_000_000; // 0.40 to 0.60
         let qty = 10 + (i % 100) as u64;
 
-        problem
-            .orders
-            .push(simple_yes_buy(&problem.markets, i as u64, market_id, price, qty));
+        problem.orders.push(simple_yes_buy(
+            &problem.markets,
+            i as u64,
+            market_id,
+            price,
+            qty,
+        ));
     }
 
     let solver = LocalSolver::new();
@@ -61,9 +69,8 @@ fn bench_local_solver_single_market(bencher: Bencher, order_count: usize) {
         .cloned()
         .unwrap();
 
-    bencher.bench_local(|| {
-        solver.solve_market(market_id, &problem.markets, &problem.orders, &book)
-    });
+    bencher
+        .bench_local(|| solver.solve_market(market_id, &problem.markets, &problem.orders, &book));
 }
 
 /// Benchmark solving all markets with realistic order counts.
@@ -86,9 +93,13 @@ fn bench_solve_all_markets(bencher: Bencher, market_count: usize) {
             let price = ((400 + (i % 200)) as u64) * 1_000_000;
             let qty = 10 + (i % 100) as u64;
 
-            problem
-                .orders
-                .push(simple_yes_buy(&problem.markets, order_id, market_id, price, qty));
+            problem.orders.push(simple_yes_buy(
+                &problem.markets,
+                order_id,
+                market_id,
+                price,
+                qty,
+            ));
         }
     }
 
@@ -370,7 +381,10 @@ fn bench_harness_comparison() {
     let mut harness = BenchmarkHarness::new();
 
     // Add scenarios
-    harness.add_scenario("small", generate_mega_scenario_v2(MegaScenarioConfigV2::small()));
+    harness.add_scenario(
+        "small",
+        generate_mega_scenario_v2(MegaScenarioConfigV2::small()),
+    );
 
     // Add pipelines to compare
     harness.add_pipeline("current", Pipeline::current());

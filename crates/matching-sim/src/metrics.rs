@@ -94,11 +94,18 @@ impl fmt::Display for OptimalityMetrics {
             writeln!(f, "  Achievement ratio: {:.2}%", ratio * 100.0)?;
         }
 
-        writeln!(f, "  Fill rate: {:.2}% ({}/{})",
+        writeln!(
+            f,
+            "  Fill rate: {:.2}% ({}/{})",
             self.fill_rate() * 100.0,
             self.orders_filled,
-            self.total_orders)?;
-        writeln!(f, "  Unfilled (liquidity): {}", self.unfilled_due_to_liquidity)?;
+            self.total_orders
+        )?;
+        writeln!(
+            f,
+            "  Unfilled (liquidity): {}",
+            self.unfilled_due_to_liquidity
+        )?;
         writeln!(f, "  Unfilled (AON): {}", self.unfilled_due_to_aon)
     }
 }
@@ -195,8 +202,11 @@ impl fmt::Display for AggregateMetrics {
         }
 
         writeln!(f, "  Mean fill rate: {:.2}%", self.mean_fill_rate() * 100.0)?;
-        writeln!(f, "  Total orders: {} (filled: {})",
-            self.total_orders, self.total_filled)
+        writeln!(
+            f,
+            "  Total orders: {} (filled: {})",
+            self.total_orders, self.total_filled
+        )
     }
 }
 
@@ -227,11 +237,14 @@ pub fn print_comparison_table(scenarios: &[ScenarioComparison]) {
     println!("+------------------------+----------+----------+----------+----------+");
 
     for s in scenarios {
-        let gap_str = s.metrics.mean_gap()
+        let gap_str = s
+            .metrics
+            .mean_gap()
             .map(|g| format!("{:.1}%", g * 100.0))
             .unwrap_or("-".to_string());
 
-        println!("| {:<22} | {:>8.0} | {:>8} | {:>7.1}% | {:>8} |",
+        println!(
+            "| {:<22} | {:>8.0} | {:>8} | {:>7.1}% | {:>8} |",
             truncate(&s.name, 22),
             s.metrics.mean_welfare(),
             gap_str,

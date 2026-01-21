@@ -149,7 +149,8 @@ impl MmAllocator {
         let interacting = self.mms_interact(mm_constraints);
 
         // Compute greedy baseline for sanity check
-        let greedy_baseline = self.compute_greedy_baseline(mm_constraints, prices, &order_map, welfare);
+        let greedy_baseline =
+            self.compute_greedy_baseline(mm_constraints, prices, &order_map, welfare);
 
         let mut result = if interacting {
             self.allocate_fixed_point(mm_constraints, prices, &order_map, welfare)
@@ -217,7 +218,11 @@ impl MmAllocator {
         let total_budget: Nanos = result.mm_allocations.iter().map(|a| a.budget).sum();
         let total_capital_used: Nanos = result.mm_allocations.iter().map(|a| a.capital_used).sum();
         let mm_orders_considered: usize = mm_constraints.iter().map(|mm| mm.order_ids.len()).sum();
-        let mm_orders_activated: usize = result.mm_allocations.iter().map(|a| a.activated_orders.len()).sum();
+        let mm_orders_activated: usize = result
+            .mm_allocations
+            .iter()
+            .map(|a| a.activated_orders.len())
+            .sum();
 
         let overall_utilization = if total_budget > 0 {
             total_capital_used as f64 / total_budget as f64
@@ -294,8 +299,7 @@ impl MmAllocator {
 
         // Allocate each MM independently
         for mm in mm_constraints {
-            let allocation =
-                self.allocate_single_mm(mm, prices, order_map, welfare);
+            let allocation = self.allocate_single_mm(mm, prices, order_map, welfare);
 
             total_welfare += allocation
                 .activated_orders
@@ -335,14 +339,8 @@ impl MmAllocator {
 
             // Update each MM given current lambdas
             for (i, mm) in mm_constraints.iter().enumerate() {
-                let (new_lambda, activated) = self.binary_search_lambda(
-                    mm,
-                    prices,
-                    order_map,
-                    welfare,
-                    &lambdas,
-                    i,
-                );
+                let (new_lambda, activated) =
+                    self.binary_search_lambda(mm, prices, order_map, welfare, &lambdas, i);
                 lambdas[i] = new_lambda;
                 current_activated.extend(activated);
             }
@@ -374,13 +372,7 @@ impl MmAllocator {
 
         // MM orders
         for (i, mm) in mm_constraints.iter().enumerate() {
-            let allocation = self.compute_allocation(
-                mm,
-                lambdas[i],
-                prices,
-                order_map,
-                welfare,
-            );
+            let allocation = self.compute_allocation(mm, lambdas[i], prices, order_map, welfare);
 
             total_welfare += allocation
                 .activated_orders
@@ -409,14 +401,7 @@ impl MmAllocator {
         order_map: &HashMap<u64, &Order>,
         welfare: &HashMap<u64, i64>,
     ) -> MmAllocation {
-        let (lambda, _) = self.binary_search_lambda(
-            mm,
-            prices,
-            order_map,
-            welfare,
-            &[],
-            0,
-        );
+        let (lambda, _) = self.binary_search_lambda(mm, prices, order_map, welfare, &[], 0);
 
         self.compute_allocation(mm, lambda, prices, order_map, welfare)
     }
@@ -670,7 +655,7 @@ impl MmAllocator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matching_engine::{MmSide, Problem, simple_yes_buy};
+    use matching_engine::{simple_yes_buy, MmSide, Problem};
     use proptest::prelude::*;
 
     /// Creates a test problem with GENEROUS budget for happy-path testing.
@@ -697,7 +682,7 @@ mod tests {
                 i,
                 market,
                 (500 + i * 10) as u64 * 1_000_000, // limit prices: $0.51, $0.52, etc.
-                100, // 100 shares each
+                100,                               // 100 shares each
             ));
         }
 
@@ -989,16 +974,34 @@ mod tests {
         println!("Stats: {:?}", stats);
         println!("MM allocations: {:?}", result.mm_allocations);
 
-        assert_eq!(stats.total_budget, 2_000_000_000_000, "Total budget should be $2000");
-        assert_eq!(stats.mm_orders_considered, 10, "Should consider all 10 orders");
+        assert_eq!(
+            stats.total_budget, 2_000_000_000_000,
+            "Total budget should be $2000"
+        );
+        assert_eq!(
+            stats.mm_orders_considered, 10,
+            "Should consider all 10 orders"
+        );
         assert!(!stats.mms_interact, "Single MM should not interact");
 
         // With high welfare, orders should be activated if within budget
         if stats.mm_orders_activated > 0 {
-            assert!(stats.total_capital_used > 0, "Should use capital if orders activated");
-            assert!(stats.total_capital_used <= stats.total_budget, "Capital used should not exceed budget");
-            assert!(stats.activation_rate > 0.0 && stats.activation_rate <= 1.0, "Activation rate should be in [0, 1]");
-            assert!(stats.overall_utilization > 0.0, "Utilization should be positive if orders activated");
+            assert!(
+                stats.total_capital_used > 0,
+                "Should use capital if orders activated"
+            );
+            assert!(
+                stats.total_capital_used <= stats.total_budget,
+                "Capital used should not exceed budget"
+            );
+            assert!(
+                stats.activation_rate > 0.0 && stats.activation_rate <= 1.0,
+                "Activation rate should be in [0, 1]"
+            );
+            assert!(
+                stats.overall_utilization > 0.0,
+                "Utilization should be positive if orders activated"
+            );
         }
     }
 
@@ -1047,7 +1050,10 @@ mod tests {
         let result = allocator.allocate(&[mm1, mm2], &prices, &problem.orders, &welfare);
 
         // Should detect interaction
-        assert!(result.stats.mms_interact, "Should detect MMs share orders 3 and 4");
+        assert!(
+            result.stats.mms_interact,
+            "Should detect MMs share orders 3 and 4"
+        );
 
         // Both MMs should be within budget
         for alloc in &result.mm_allocations {
@@ -1062,12 +1068,16 @@ mod tests {
 
         println!("Overlapping MMs result:");
         println!("  Iterations: {}", result.iterations);
-        println!("  MM1: activated {:?}, capital used {}",
+        println!(
+            "  MM1: activated {:?}, capital used {}",
             result.mm_allocations[0].activated_orders.len(),
-            result.mm_allocations[0].capital_used);
-        println!("  MM2: activated {:?}, capital used {}",
+            result.mm_allocations[0].capital_used
+        );
+        println!(
+            "  MM2: activated {:?}, capital used {}",
             result.mm_allocations[1].activated_orders.len(),
-            result.mm_allocations[1].capital_used);
+            result.mm_allocations[1].capital_used
+        );
     }
 
     #[test]
@@ -1135,7 +1145,10 @@ mod tests {
         println!("Sanity check:");
         println!("  Greedy baseline welfare: {}", greedy_baseline);
         println!("  Actual MM welfare: {}", actual_mm_welfare);
-        println!("  Improvement: {:.2}%", result.stats.improvement_over_greedy * 100.0);
+        println!(
+            "  Improvement: {:.2}%",
+            result.stats.improvement_over_greedy * 100.0
+        );
 
         // Lagrangian should be at least as good as greedy
         // (might be slightly different due to tie-breaking, but should be close)

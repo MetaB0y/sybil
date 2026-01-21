@@ -5,8 +5,8 @@
 //! - Outcomes within a market are mutually exclusive
 //! - Hierarchies: "Champion" -> "Finalist" -> "Semifinalist"
 
-use crate::types::MarketId;
 use crate::state::StateSpace;
+use crate::types::MarketId;
 
 /// Types of constraints between markets or outcomes.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -14,7 +14,7 @@ pub enum MarketConstraint {
     /// A happening implies B happens.
     /// Example: Trump wins -> Republican wins
     Implication {
-        if_true: (MarketId, u8),   // (market, outcome)
+        if_true: (MarketId, u8), // (market, outcome)
         then_true: (MarketId, u8),
     },
 
@@ -31,15 +31,11 @@ pub enum MarketConstraint {
 
     /// Mutual exclusion: at most one of these outcomes can be true.
     /// Useful for cross-market exclusions.
-    MutuallyExclusive {
-        outcomes: Vec<(MarketId, u8)>,
-    },
+    MutuallyExclusive { outcomes: Vec<(MarketId, u8)> },
 
     /// Exactly one of these outcomes must be true.
     /// Like MutuallyExclusive but requires one to happen.
-    ExactlyOne {
-        outcomes: Vec<(MarketId, u8)>,
-    },
+    ExactlyOne { outcomes: Vec<(MarketId, u8)> },
 }
 
 impl MarketConstraint {
@@ -159,11 +155,7 @@ impl ConstraintSet {
 
     /// Get valid state indices from a state space given constraints.
     /// Returns indices of states that satisfy all constraints.
-    pub fn valid_states(
-        &self,
-        space: &StateSpace,
-        market_ids: &[MarketId],
-    ) -> Vec<usize> {
+    pub fn valid_states(&self, space: &StateSpace, market_ids: &[MarketId]) -> Vec<usize> {
         (0..space.total_states())
             .filter(|&idx| {
                 let outcomes = space.state_to_outcomes(idx);
@@ -199,7 +191,10 @@ impl ConstraintBuilder {
         then_outcome: u8,
     ) -> Self {
         self.constraints.add(MarketConstraint::implies(
-            if_market, if_outcome, then_market, then_outcome,
+            if_market,
+            if_outcome,
+            then_market,
+            then_outcome,
         ));
         self
     }
@@ -214,24 +209,32 @@ impl ConstraintBuilder {
     ) -> Self {
         // Champion -> Final
         self.constraints.add(MarketConstraint::hierarchy(
-            champion_market, team_outcome, final_market, team_outcome,
+            champion_market,
+            team_outcome,
+            final_market,
+            team_outcome,
         ));
         // Final -> Semi
         self.constraints.add(MarketConstraint::hierarchy(
-            final_market, team_outcome, semi_market, team_outcome,
+            final_market,
+            team_outcome,
+            semi_market,
+            team_outcome,
         ));
         self
     }
 
     /// Add mutual exclusion: at most one of these can be true.
     pub fn mutually_exclusive(mut self, outcomes: Vec<(MarketId, u8)>) -> Self {
-        self.constraints.add(MarketConstraint::mutually_exclusive(outcomes));
+        self.constraints
+            .add(MarketConstraint::mutually_exclusive(outcomes));
         self
     }
 
     /// Add exactly-one: exactly one of these must be true.
     pub fn exactly_one(mut self, outcomes: Vec<(MarketId, u8)>) -> Self {
-        self.constraints.add(MarketConstraint::exactly_one(outcomes));
+        self.constraints
+            .add(MarketConstraint::exactly_one(outcomes));
         self
     }
 
@@ -261,23 +264,35 @@ mod tests {
 
         // Valid: Trump wins AND Republican wins
         assert!(constraints.is_valid_state(|m| {
-            if m == m0 { Some(0) }
-            else if m == m1 { Some(0) }
-            else { None }
+            if m == m0 {
+                Some(0)
+            } else if m == m1 {
+                Some(0)
+            } else {
+                None
+            }
         }));
 
         // Valid: Trump loses (doesn't trigger implication)
         assert!(constraints.is_valid_state(|m| {
-            if m == m0 { Some(1) }
-            else if m == m1 { Some(1) }
-            else { None }
+            if m == m0 {
+                Some(1)
+            } else if m == m1 {
+                Some(1)
+            } else {
+                None
+            }
         }));
 
         // Invalid: Trump wins but Republican loses
         assert!(!constraints.is_valid_state(|m| {
-            if m == m0 { Some(0) }
-            else if m == m1 { Some(1) }
-            else { None }
+            if m == m0 {
+                Some(0)
+            } else if m == m1 {
+                Some(1)
+            } else {
+                None
+            }
         }));
     }
 
@@ -297,26 +312,51 @@ mod tests {
 
         // Valid: exactly one wins
         assert!(constraints.is_valid_state(|m| {
-            if m == m0 { Some(0) }  // Trump wins
-            else if m == m1 { Some(1) }  // Harris loses
-            else if m == m2 { Some(1) }  // Other loses
-            else { None }
+            if m == m0 {
+                Some(0)
+            }
+            // Trump wins
+            else if m == m1 {
+                Some(1)
+            }
+            // Harris loses
+            else if m == m2 {
+                Some(1)
+            }
+            // Other loses
+            else {
+                None
+            }
         }));
 
         // Valid: none win (mutual exclusion allows zero)
         assert!(constraints.is_valid_state(|m| {
-            if m == m0 { Some(1) }
-            else if m == m1 { Some(1) }
-            else if m == m2 { Some(1) }
-            else { None }
+            if m == m0 {
+                Some(1)
+            } else if m == m1 {
+                Some(1)
+            } else if m == m2 {
+                Some(1)
+            } else {
+                None
+            }
         }));
 
         // Invalid: two win
         assert!(!constraints.is_valid_state(|m| {
-            if m == m0 { Some(0) }  // Trump wins
-            else if m == m1 { Some(0) }  // Harris also wins??
-            else if m == m2 { Some(1) }
-            else { None }
+            if m == m0 {
+                Some(0)
+            }
+            // Trump wins
+            else if m == m1 {
+                Some(0)
+            }
+            // Harris also wins??
+            else if m == m2 {
+                Some(1)
+            } else {
+                None
+            }
         }));
     }
 
@@ -330,23 +370,35 @@ mod tests {
 
         // Valid: exactly one
         assert!(constraints.is_valid_state(|m| {
-            if m == m0 { Some(0) }
-            else if m == m1 { Some(1) }
-            else { None }
+            if m == m0 {
+                Some(0)
+            } else if m == m1 {
+                Some(1)
+            } else {
+                None
+            }
         }));
 
         // Invalid: none
         assert!(!constraints.is_valid_state(|m| {
-            if m == m0 { Some(1) }
-            else if m == m1 { Some(1) }
-            else { None }
+            if m == m0 {
+                Some(1)
+            } else if m == m1 {
+                Some(1)
+            } else {
+                None
+            }
         }));
 
         // Invalid: both
         assert!(!constraints.is_valid_state(|m| {
-            if m == m0 { Some(0) }
-            else if m == m1 { Some(0) }
-            else { None }
+            if m == m0 {
+                Some(0)
+            } else if m == m1 {
+                Some(0)
+            } else {
+                None
+            }
         }));
     }
 
@@ -358,9 +410,9 @@ mod tests {
         let dem = MarketId::new(3);
 
         let constraints = ConstraintBuilder::new()
-            .implies(trump, 0, rep, 0)   // Trump wins -> Republican wins
-            .implies(harris, 0, dem, 0)  // Harris wins -> Democrat wins
-            .mutually_exclusive(vec![(trump, 0), (harris, 0)])  // Only one can win
+            .implies(trump, 0, rep, 0) // Trump wins -> Republican wins
+            .implies(harris, 0, dem, 0) // Harris wins -> Democrat wins
+            .mutually_exclusive(vec![(trump, 0), (harris, 0)]) // Only one can win
             .build();
 
         assert_eq!(constraints.len(), 3);

@@ -3,7 +3,7 @@
 //! Processes orders in decreasing order of welfare potential (limit_price * max_fill).
 //! This is a reasonable heuristic but will fail to find optimal solutions on hard instances.
 
-use matching_engine::{LiquidityPool, Order, Fill, MarketId, Nanos, Qty, Problem};
+use matching_engine::{Fill, LiquidityPool, MarketId, Nanos, Order, Problem, Qty};
 
 use crate::{MatchingResult, Solver};
 
@@ -49,18 +49,12 @@ impl GreedySolver {
 
     /// Try to fill a single order against available liquidity.
     /// Public static version for use by other solvers.
-    pub fn try_fill_order_static(
-        order: &Order,
-        liquidity: &mut LiquidityPool,
-    ) -> Option<Fill> {
+    pub fn try_fill_order_static(order: &Order, liquidity: &mut LiquidityPool) -> Option<Fill> {
         Self::try_fill_order(order, liquidity)
     }
 
     /// Try to fill a single order against available liquidity.
-    fn try_fill_order(
-        order: &Order,
-        liquidity: &mut LiquidityPool,
-    ) -> Option<Fill> {
+    fn try_fill_order(order: &Order, liquidity: &mut LiquidityPool) -> Option<Fill> {
         if order.num_markets == 0 {
             return None;
         }
@@ -74,10 +68,7 @@ impl GreedySolver {
     }
 
     /// Fill a simple single-market order.
-    fn try_fill_simple_order(
-        order: &Order,
-        liquidity: &mut LiquidityPool,
-    ) -> Option<Fill> {
+    fn try_fill_simple_order(order: &Order, liquidity: &mut LiquidityPool) -> Option<Fill> {
         let market = order.markets[0];
 
         // Determine which outcome we're buying based on payoffs
@@ -102,7 +93,12 @@ impl GreedySolver {
         let mut best_outcome = 0u8;
         let mut best_payoff = i8::MIN;
 
-        for (i, &payoff) in order.payoffs.iter().take(order.num_states as usize).enumerate() {
+        for (i, &payoff) in order
+            .payoffs
+            .iter()
+            .take(order.num_states as usize)
+            .enumerate()
+        {
             if payoff > best_payoff {
                 best_payoff = payoff;
                 best_outcome = i as u8;
@@ -113,10 +109,7 @@ impl GreedySolver {
     }
 
     /// Fill a bundle order (all-or-none across multiple markets).
-    fn try_fill_bundle_order(
-        order: &Order,
-        liquidity: &mut LiquidityPool,
-    ) -> Option<Fill> {
+    fn try_fill_bundle_order(order: &Order, liquidity: &mut LiquidityPool) -> Option<Fill> {
         // First pass: check availability
         let mut required_fills: Vec<(MarketId, u8, Qty)> = Vec::new();
         let mut total_cost: u128 = 0;

@@ -117,7 +117,10 @@ impl StateSpace {
             return false;
         }
         let outcomes = self.state_to_outcomes(state_idx);
-        outcomes.get(market_idx).map(|&o| o == outcome).unwrap_or(false)
+        outcomes
+            .get(market_idx)
+            .map(|&o| o == outcome)
+            .unwrap_or(false)
     }
 }
 

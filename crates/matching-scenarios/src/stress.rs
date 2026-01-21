@@ -3,14 +3,14 @@
 //! These scenarios are designed to stress-test solvers, particularly MILP,
 //! with large numbers of orders and complex interdependencies.
 
-use rand::Rng;
 use rand::rngs::StdRng;
-use rand::SeedableRng;
 use rand::seq::SliceRandom;
+use rand::Rng;
+use rand::SeedableRng;
 
 use matching_engine::{
-    ConstraintBuilder, MarketSet, Order, MarketId, Qty,
-    price_to_nanos, outcome_buy, bundle_yes, spread,
+    bundle_yes, outcome_buy, price_to_nanos, spread, ConstraintBuilder, MarketId, MarketSet, Order,
+    Qty,
 };
 
 use matching_engine::Problem;
@@ -134,9 +134,7 @@ pub fn generate_mega_scenario(config: MegaScenarioConfig) -> Problem {
             rng.gen_range(3..=4) // 20% multi-outcome
         };
 
-        let outcome_names: Vec<String> = (0..outcomes)
-            .map(|j| format!("O{}", j))
-            .collect();
+        let outcome_names: Vec<String> = (0..outcomes).map(|j| format!("O{}", j)).collect();
         let market = problem.markets.add(format!("M{}", i), outcome_names);
         market_ids.push(market);
 
@@ -173,10 +171,8 @@ pub fn generate_mega_scenario(config: MegaScenarioConfig) -> Problem {
                 m2_idx = rng.gen_range(0..market_ids.len());
             }
 
-            constraint_builder = constraint_builder.mutually_exclusive(vec![
-                (market_ids[m1_idx], 0),
-                (market_ids[m2_idx], 0),
-            ]);
+            constraint_builder = constraint_builder
+                .mutually_exclusive(vec![(market_ids[m1_idx], 0), (market_ids[m2_idx], 0)]);
         }
 
         problem.constraints = constraint_builder.build();
@@ -333,14 +329,7 @@ fn generate_stress_bundle_order(
 
     if binary_markets.is_empty() {
         // Fallback to simple order if no binary markets
-        return outcome_buy(
-            markets,
-            id,
-            market_ids[0],
-            0,
-            price_to_nanos(0.5),
-            50,
-        );
+        return outcome_buy(markets, id, market_ids[0], 0, price_to_nanos(0.5), 50);
     }
 
     // Bundle 2-5 binary markets (max 5 to stay within 32 states)
@@ -388,14 +377,7 @@ fn generate_stress_spread_order(
     *order_id += 1;
 
     if market_ids.len() < 2 {
-        return outcome_buy(
-            markets,
-            id,
-            market_ids[0],
-            0,
-            price_to_nanos(0.5),
-            50,
-        );
+        return outcome_buy(markets, id, market_ids[0], 0, price_to_nanos(0.5), 50);
     }
 
     let m1_idx = rng.gen_range(0..market_ids.len());
@@ -464,7 +446,12 @@ pub fn generate_combined_scenario(seed: u64) -> Problem {
         num_orders: 100,
         ..RandomConfig::easy()
     });
-    merge_subproblem(&mut problem, random_easy, &mut market_id_offset, &mut order_id);
+    merge_subproblem(
+        &mut problem,
+        random_easy,
+        &mut market_id_offset,
+        &mut order_id,
+    );
 
     // Generate medium random scenario
     let random_medium = generate_random_scenario(RandomConfig {
@@ -473,7 +460,12 @@ pub fn generate_combined_scenario(seed: u64) -> Problem {
         num_orders: 200,
         ..RandomConfig::medium()
     });
-    merge_subproblem(&mut problem, random_medium, &mut market_id_offset, &mut order_id);
+    merge_subproblem(
+        &mut problem,
+        random_medium,
+        &mut market_id_offset,
+        &mut order_id,
+    );
 
     // Generate hard random scenario
     let random_hard = generate_random_scenario(RandomConfig {
@@ -482,7 +474,12 @@ pub fn generate_combined_scenario(seed: u64) -> Problem {
         num_orders: 150,
         ..RandomConfig::hard()
     });
-    merge_subproblem(&mut problem, random_hard, &mut market_id_offset, &mut order_id);
+    merge_subproblem(
+        &mut problem,
+        random_hard,
+        &mut market_id_offset,
+        &mut order_id,
+    );
 
     // Generate another hard variant with more bundles
     let random_bundles = generate_random_scenario(RandomConfig {
@@ -492,7 +489,12 @@ pub fn generate_combined_scenario(seed: u64) -> Problem {
         bundle_fraction: 0.4,
         ..RandomConfig::hard()
     });
-    merge_subproblem(&mut problem, random_bundles, &mut market_id_offset, &mut order_id);
+    merge_subproblem(
+        &mut problem,
+        random_bundles,
+        &mut market_id_offset,
+        &mut order_id,
+    );
 
     // Update problem name with final stats
     problem.name = format!(
@@ -529,10 +531,12 @@ fn merge_subproblem(
     for (&(old_market, outcome), book) in sub.liquidity.books.iter() {
         if let Some(&new_market) = market_mapping.get(&old_market) {
             for level in book.asks() {
-                main.liquidity.add_ask(new_market, outcome, level.price, level.available_qty);
+                main.liquidity
+                    .add_ask(new_market, outcome, level.price, level.available_qty);
             }
             for level in book.bids() {
-                main.liquidity.add_bid(new_market, outcome, level.price, level.available_qty);
+                main.liquidity
+                    .add_bid(new_market, outcome, level.price, level.available_qty);
             }
         }
     }
@@ -667,7 +671,9 @@ pub fn generate_milp_killer_scenario(config: MilpKillerConfig) -> Problem {
     let mut market_prices: Vec<f64> = Vec::new();
 
     for i in 0..config.num_markets {
-        let market = problem.markets.add(format!("M{}", i), vec!["Yes".to_string(), "No".to_string()]);
+        let market = problem
+            .markets
+            .add(format!("M{}", i), vec!["Yes".to_string(), "No".to_string()]);
         market_ids.push(market);
         market_prices.push(rng.gen_range(0.2..0.8));
     }
@@ -704,10 +710,8 @@ pub fn generate_milp_killer_scenario(config: MilpKillerConfig) -> Problem {
         group_markets.shuffle(&mut rng);
         group_markets.truncate(group_size);
 
-        let outcomes: Vec<(MarketId, u8)> = group_markets
-            .iter()
-            .map(|&i| (market_ids[i], 0))
-            .collect();
+        let outcomes: Vec<(MarketId, u8)> =
+            group_markets.iter().map(|&i| (market_ids[i], 0)).collect();
         constraint_builder = constraint_builder.mutually_exclusive(outcomes);
     }
 
@@ -730,7 +734,11 @@ pub fn generate_milp_killer_scenario(config: MilpKillerConfig) -> Problem {
         };
 
         for outcome in 0..2u8 {
-            let outcome_price = if outcome == 0 { mid_price } else { 1.0 - mid_price };
+            let outcome_price = if outcome == 0 {
+                mid_price
+            } else {
+                1.0 - mid_price
+            };
 
             // Multiple price levels
             for level in 0..4 {
@@ -825,7 +833,10 @@ fn generate_milp_killer_simple_order(
     // 70% chance to target hot markets
     let market_idx = if rng.gen_bool(0.7) && !hot_markets.is_empty() {
         let hot_idx = rng.gen_range(0..hot_markets.len());
-        market_ids.iter().position(|&m| m == hot_markets[hot_idx]).unwrap_or(0)
+        market_ids
+            .iter()
+            .position(|&m| m == hot_markets[hot_idx])
+            .unwrap_or(0)
     } else {
         rng.gen_range(0..market_ids.len())
     };
@@ -874,7 +885,10 @@ fn generate_milp_killer_bundle_order(
     for _ in 0..num_to_bundle {
         let idx = if rng.gen_bool(0.6) && !hot_markets.is_empty() {
             let hot_idx = rng.gen_range(0..hot_markets.len());
-            market_ids.iter().position(|&m| m == hot_markets[hot_idx]).unwrap_or(0)
+            market_ids
+                .iter()
+                .position(|&m| m == hot_markets[hot_idx])
+                .unwrap_or(0)
         } else {
             rng.gen_range(0..market_ids.len())
         };
@@ -885,7 +899,10 @@ fn generate_milp_killer_bundle_order(
 
     if selected.len() < 2 {
         // Fallback to simple order
-        selected = vec![rng.gen_range(0..market_ids.len()), rng.gen_range(0..market_ids.len())];
+        selected = vec![
+            rng.gen_range(0..market_ids.len()),
+            rng.gen_range(0..market_ids.len()),
+        ];
         selected.dedup();
         if selected.len() < 2 {
             selected.push((selected[0] + 1) % market_ids.len());
@@ -954,7 +971,10 @@ mod tests {
         assert!(problem.orders.len() >= 3000);
         // Should have significant AON orders
         let aon_count = problem.orders.iter().filter(|o| o.is_all_or_none()).count();
-        assert!(aon_count > 1000, "Expected many AON orders for MILP complexity");
+        assert!(
+            aon_count > 1000,
+            "Expected many AON orders for MILP complexity"
+        );
         // Should have bundles
         let bundle_count = problem.orders.iter().filter(|o| o.num_markets > 1).count();
         assert!(bundle_count > 500, "Expected many bundle orders");

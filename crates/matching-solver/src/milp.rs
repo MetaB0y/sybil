@@ -112,9 +112,7 @@ pub struct DualAnalysis {
 impl DualAnalysis {
     /// Get the most scarce markets (highest dual prices).
     pub fn scarce_markets(&self, top_n: usize) -> Vec<((MarketId, u8), f64)> {
-        let mut pairs: Vec<_> = self.liquidity_duals.iter()
-            .map(|(&k, &v)| (k, v))
-            .collect();
+        let mut pairs: Vec<_> = self.liquidity_duals.iter().map(|(&k, &v)| (k, v)).collect();
         pairs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         pairs.truncate(top_n);
         pairs
@@ -212,29 +210,30 @@ impl MilpSolver {
             // Binding constraints (>99% utilized) have high shadow price
             let shadow_price = if utilization > 0.99 {
                 analysis.binding_liquidity_constraints += 1;
-                1.0  // Fully bound
+                1.0 // Fully bound
             } else if utilization > 0.9 {
-                0.5 + (utilization - 0.9) * 5.0  // Near-bound
+                0.5 + (utilization - 0.9) * 5.0 // Near-bound
             } else {
-                utilization * 0.5  // Slack
+                utilization * 0.5 // Slack
             };
 
-            analysis.liquidity_duals.insert((*market, *outcome), shadow_price);
+            analysis
+                .liquidity_duals
+                .insert((*market, *outcome), shadow_price);
         }
 
         // Count AON constraints (orders that couldn't be partially filled)
         for order in &problem.orders {
             if order.is_all_or_none() {
-                let filled = result.result.fills.iter()
-                    .any(|f| f.order_id == order.id);
+                let filled = result.result.fills.iter().any(|f| f.order_id == order.id);
                 if !filled {
                     analysis.binding_aon_constraints += 1;
                 }
             }
         }
 
-        analysis.total_constraints = available_liq.len() +
-            problem.orders.iter().filter(|o| o.is_all_or_none()).count();
+        analysis.total_constraints =
+            available_liq.len() + problem.orders.iter().filter(|o| o.is_all_or_none()).count();
         analysis.objective_value = result.result.total_welfare as f64;
 
         analysis
@@ -297,8 +296,7 @@ impl MilpSolver {
 
                             if markets_filled == targets.len() && fill_qty > 0 {
                                 let avg_fill_price = if !targets.is_empty() {
-                                    (total_cost / (fill_qty as u128 * targets.len() as u128))
-                                        as u64
+                                    (total_cost / (fill_qty as u128 * targets.len() as u128)) as u64
                                 } else {
                                     0
                                 };
@@ -518,7 +516,12 @@ impl MilpSolver {
             let mut best_outcome = 0u8;
             let mut best_payoff = i8::MIN;
 
-            for (i, &payoff) in order.payoffs.iter().take(order.num_states as usize).enumerate() {
+            for (i, &payoff) in order
+                .payoffs
+                .iter()
+                .take(order.num_states as usize)
+                .enumerate()
+            {
                 if payoff > best_payoff {
                     best_payoff = payoff;
                     best_outcome = i as u8;
@@ -535,7 +538,8 @@ impl MilpSolver {
         for state_idx in 0..order.num_states as usize {
             let payoff = order.payoffs[state_idx];
             if payoff > 0 {
-                let outcome = Self::extract_outcome_from_state(state_idx, market_idx, &market_sizes);
+                let outcome =
+                    Self::extract_outcome_from_state(state_idx, market_idx, &market_sizes);
                 if (outcome as usize) < outcome_votes.len() {
                     outcome_votes[outcome as usize] += payoff as i32;
                 }

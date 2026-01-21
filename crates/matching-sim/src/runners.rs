@@ -89,9 +89,7 @@ pub fn run_platform_stress_test(timeout_secs: f64) {
 
     println!(
         "Pipeline: welfare={}, fills={}, time={:.3}s",
-        pipeline_result.result.total_welfare,
-        pipeline_result.result.orders_filled,
-        pipeline_time
+        pipeline_result.result.total_welfare, pipeline_result.result.orders_filled, pipeline_time
     );
 }
 
@@ -146,9 +144,7 @@ pub fn run_milp_killer_test(timeout_secs: f64, config_name: &str) {
 
     println!(
         "Pipeline: welfare={}, fills={}, time={:.3}s",
-        pipeline_result.result.total_welfare,
-        pipeline_result.result.orders_filled,
-        pipeline_time
+        pipeline_result.result.total_welfare, pipeline_result.result.orders_filled, pipeline_time
     );
 
     // Print comparison

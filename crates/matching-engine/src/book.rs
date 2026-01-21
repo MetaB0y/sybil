@@ -39,6 +39,7 @@ impl BookLevel {
 #[derive(Clone, Debug)]
 pub struct LiquidityBook {
     pub market: MarketId,
+    // FIXME: wtf is this? I thought all market are binary? Multioutcome ones are just multiple binaries? Or no? We need to think about both models
     /// Which outcome (0..num_outcomes)
     pub outcome_idx: u8,
     /// Price levels sorted by price (ascending for asks, descending for bids)
@@ -59,14 +60,22 @@ impl LiquidityBook {
     /// Add a bid level (sorted by price descending - best bid first).
     pub fn add_bid(&mut self, price: Nanos, qty: Qty) {
         let level = BookLevel::bid(price, qty);
-        let pos = self.bids.iter().position(|l| l.price < price).unwrap_or(self.bids.len());
+        let pos = self
+            .bids
+            .iter()
+            .position(|l| l.price < price)
+            .unwrap_or(self.bids.len());
         self.bids.insert(pos, level);
     }
 
     /// Add an ask level (sorted by price ascending - best ask first).
     pub fn add_ask(&mut self, price: Nanos, qty: Qty) {
         let level = BookLevel::ask(price, qty);
-        let pos = self.asks.iter().position(|l| l.price > price).unwrap_or(self.asks.len());
+        let pos = self
+            .asks
+            .iter()
+            .position(|l| l.price > price)
+            .unwrap_or(self.asks.len());
         self.asks.insert(pos, level);
     }
 

@@ -17,7 +17,10 @@ pub struct Market {
 impl Market {
     /// Create a new market with the given outcomes.
     pub fn new(id: MarketId, name: impl Into<String>, outcomes: Vec<String>) -> Self {
-        assert!(!outcomes.is_empty(), "Market must have at least one outcome");
+        assert!(
+            !outcomes.is_empty(),
+            "Market must have at least one outcome"
+        );
         Self {
             id,
             name: name.into(),
@@ -54,7 +57,9 @@ pub struct MarketSet {
 
 impl MarketSet {
     pub fn new() -> Self {
-        Self { markets: Vec::new() }
+        Self {
+            markets: Vec::new(),
+        }
     }
 
     /// Add a market to the set. Returns the assigned MarketId.
@@ -79,7 +84,10 @@ impl MarketSet {
         while self.markets.len() <= idx {
             // Add placeholder markets
             let placeholder_id = MarketId::new(self.markets.len() as u32);
-            self.markets.push(Market::binary(placeholder_id, format!("_placeholder_{}", self.markets.len())));
+            self.markets.push(Market::binary(
+                placeholder_id,
+                format!("_placeholder_{}", self.markets.len()),
+            ));
         }
         self.markets[idx] = market;
     }
@@ -143,7 +151,11 @@ mod tests {
         let m = Market::new(
             MarketId::new(0),
             "2024 President",
-            vec!["Trump".to_string(), "Harris".to_string(), "Other".to_string()],
+            vec![
+                "Trump".to_string(),
+                "Harris".to_string(),
+                "Other".to_string(),
+            ],
         );
         assert!(!m.is_binary());
         assert_eq!(m.num_outcomes(), 3);
@@ -156,7 +168,10 @@ mod tests {
     fn test_market_set() {
         let mut set = MarketSet::new();
         let m0 = set.add_binary("Market A");
-        let m1 = set.add("Market B", vec!["X".to_string(), "Y".to_string(), "Z".to_string()]);
+        let m1 = set.add(
+            "Market B",
+            vec!["X".to_string(), "Y".to_string(), "Z".to_string()],
+        );
 
         assert_eq!(set.len(), 2);
         assert_eq!(set.num_outcomes(m0), 2);

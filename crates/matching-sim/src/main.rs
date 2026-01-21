@@ -200,7 +200,11 @@ impl SimulationResults {
     }
 }
 
-fn create_solvers(choice: &SolverChoice, _seed: u64, milp_timeout: Option<f64>) -> Vec<Box<dyn Solver>> {
+fn create_solvers(
+    choice: &SolverChoice,
+    _seed: u64,
+    milp_timeout: Option<f64>,
+) -> Vec<Box<dyn Solver>> {
     match choice {
         SolverChoice::Greedy => vec![Box::new(GreedySolver::new())],
         SolverChoice::Milp => {
@@ -263,7 +267,10 @@ pub fn run_simulation(config: SimulationConfig) -> SimulationResults {
     results
 }
 
-fn run_scenario_all_solvers(config: &SimulationConfig, scenario_name: &str) -> SolverComparisonResult {
+fn run_scenario_all_solvers(
+    config: &SimulationConfig,
+    scenario_name: &str,
+) -> SolverComparisonResult {
     let solvers = create_solvers(&SolverChoice::All, config.seed, config.milp_timeout);
 
     let mut aggregates: Vec<SolverAggregateResult> = solvers
@@ -436,7 +443,9 @@ fn main() {
                 println!("                           mega, mega-small, mega-large, mega-extreme");
                 println!("                           combined");
                 println!("                         MILP-killer scenarios:");
-                println!("                           milp-killer, milp-killer-full, milp-killer-extreme");
+                println!(
+                    "                           milp-killer, milp-killer-full, milp-killer-extreme"
+                );
                 println!("  --solver <S>         Solver to use:");
                 println!("                         greedy (default)");
                 println!("                         milp (optimal via MILP)");

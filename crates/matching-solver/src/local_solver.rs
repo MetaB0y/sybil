@@ -14,7 +14,9 @@
 
 use std::collections::HashMap;
 
-use matching_engine::{Fill, LiquidityBook, MarketId, MarketSet, Nanos, Order, Qty, NANOS_PER_DOLLAR};
+use matching_engine::{
+    Fill, LiquidityBook, MarketId, MarketSet, Nanos, Order, Qty, NANOS_PER_DOLLAR,
+};
 
 /// Solution for a single market.
 #[derive(Clone, Debug)]
@@ -167,11 +169,7 @@ impl LocalSolver {
 
         // Step 3: Compute fills AT the normalized prices (economic consistency)
         // Now respects liquidity constraints!
-        self.compute_fills_at_normalized_prices(
-            &mut solution,
-            &market_orders,
-            liquidity,
-        );
+        self.compute_fills_at_normalized_prices(&mut solution, &market_orders, liquidity);
 
         solution
     }
@@ -197,7 +195,12 @@ impl LocalSolver {
 
         for order in orders {
             // Check each outcome for positive or negative payoff
-            for (outcome, &payoff) in order.payoffs.iter().take(order.num_states as usize).enumerate() {
+            for (outcome, &payoff) in order
+                .payoffs
+                .iter()
+                .take(order.num_states as usize)
+                .enumerate()
+            {
                 let clearing_price = solution.prices.get(outcome).copied().unwrap_or(0);
 
                 if payoff > 0 {
@@ -510,12 +513,7 @@ impl PriceDiscoverer for LocalSolver {
                 .cloned()
                 .unwrap_or_else(|| LiquidityBook::new(market.id, 0));
 
-            let solution = self.solve_market(
-                market.id,
-                &problem.markets,
-                &problem.orders,
-                &book,
-            );
+            let solution = self.solve_market(market.id, &problem.markets, &problem.orders, &book);
 
             result.add_market_solution(solution);
         }
@@ -608,18 +606,12 @@ pub fn solve_market_lp(
 
     // Find equilibrium prices using binary search on a "price scale" parameter
     // The idea: scale all prices by factor α such that Σ(α * raw_price_i) = 1
-    let clearing_prices = find_equilibrium_prices(
-        num_outcomes,
-        &orders_by_outcome,
-        total_liquidity,
-    );
+    let clearing_prices =
+        find_equilibrium_prices(num_outcomes, &orders_by_outcome, total_liquidity);
 
     // Compute fills at equilibrium prices
-    let (fills, welfare, unfilled) = compute_equilibrium_fills(
-        &order_info,
-        &clearing_prices,
-        total_liquidity,
-    );
+    let (fills, welfare, unfilled) =
+        compute_equilibrium_fills(&order_info, &clearing_prices, total_liquidity);
 
     MarketSolution {
         market_id,
@@ -702,7 +694,8 @@ fn find_equilibrium_prices(
                 if *demand > 0 {
                     let outcome_ratio = *demand as f64 / total_demand as f64;
                     let price_adjustment = 1.0 + (adjustment_factor - 1.0) * outcome_ratio * 2.0;
-                    prices[i] = ((prices[i] as f64 * price_adjustment) as Nanos).min(NANOS_PER_DOLLAR);
+                    prices[i] =
+                        ((prices[i] as f64 * price_adjustment) as Nanos).min(NANOS_PER_DOLLAR);
                 }
             }
         } else {
@@ -715,7 +708,8 @@ fn find_equilibrium_prices(
                     1.0 / num_outcomes as f64
                 };
                 // Decrease prices for outcomes with less demand more
-                let price_adjustment = adjustment_factor + (1.0 - adjustment_factor) * (1.0 - outcome_share);
+                let price_adjustment =
+                    adjustment_factor + (1.0 - adjustment_factor) * (1.0 - outcome_share);
                 prices[i] = ((prices[i] as f64 * price_adjustment) as Nanos).max(1);
             }
         }
@@ -815,7 +809,6 @@ fn ensure_exact_normalization(mut prices: Vec<Nanos>) -> Vec<Nanos> {
     prices
 }
 
-
 /// Solve all markets and return per-market solutions.
 ///
 /// This is the main entry point for market clearing.
@@ -881,12 +874,7 @@ mod tests {
             .cloned()
             .unwrap_or_else(|| LiquidityBook::new(market_id, 0));
 
-        let solution = solver.solve_market(
-            market_id,
-            &problem.markets,
-            &problem.orders,
-            &book,
-        );
+        let solution = solver.solve_market(market_id, &problem.markets, &problem.orders, &book);
 
         assert_eq!(solution.market_id, market_id);
         assert_eq!(solution.prices.len(), 2); // Binary market
@@ -909,7 +897,10 @@ mod tests {
     #[test]
     fn test_empty_market() {
         let mut problem = Problem::new("empty");
-        let market = problem.markets.add("three_way", vec!["A".to_string(), "B".to_string(), "C".to_string()]);
+        let market = problem.markets.add(
+            "three_way",
+            vec!["A".to_string(), "B".to_string(), "C".to_string()],
+        );
 
         let solver = LocalSolver::new();
         let book = LiquidityBook::new(market, 0);
@@ -940,23 +931,22 @@ mod tests {
             .cloned()
             .unwrap();
 
-        let solution = solver.solve_market(
-            market_id,
-            &problem.markets,
-            &problem.orders,
-            &book,
-        );
+        let solution = solver.solve_market(market_id, &problem.markets, &problem.orders, &book);
 
         // Build order lookup
         let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
 
         for fill in &solution.fills {
-            let order = order_map.get(&fill.order_id).expect("Fill for unknown order");
+            let order = order_map
+                .get(&fill.order_id)
+                .expect("Fill for unknown order");
             // For a buy order, fill price must not exceed limit
             assert!(
                 fill.fill_price <= order.limit_price,
                 "Fill price {} exceeds limit {} for order {}",
-                fill.fill_price, order.limit_price, order.id
+                fill.fill_price,
+                order.limit_price,
+                order.id
             );
         }
     }
@@ -982,10 +972,13 @@ mod tests {
         problem.liquidity.add_ask(market, 0, 400_000_000, 1000); // A at $0.40
         problem.liquidity.add_ask(market, 1, 350_000_000, 1000); // B at $0.35
         problem.liquidity.add_ask(market, 2, 300_000_000, 1000); // C at $0.30
-        // Sum = $1.05, but should be $1.00
+                                                                 // Sum = $1.05, but should be $1.00
 
         // Add buy orders for each outcome
-        for (i, price) in [(500_000_000u64), (450_000_000), (400_000_000)].iter().enumerate() {
+        for (i, price) in [(500_000_000u64), (450_000_000), (400_000_000)]
+            .iter()
+            .enumerate()
+        {
             problem.orders.push(matching_engine::outcome_buy(
                 &problem.markets,
                 i as u64 + 1,
@@ -1037,7 +1030,6 @@ mod tests {
     // LP SOLVER TESTS - Requires lp-clearing feature
     // =========================================================================
 
-    
     #[test]
     fn test_lp_solver_basic() {
         use super::solve_market_lp;
@@ -1068,7 +1060,6 @@ mod tests {
         assert!(solution.is_normalized());
     }
 
-    
     #[test]
     fn test_lp_solver_multi_outcome() {
         use super::solve_market_lp;
@@ -1085,7 +1076,10 @@ mod tests {
         problem.liquidity.add_ask(market, 2, 300_000_000, 1000);
 
         // Add buy orders
-        for (i, price) in [(500_000_000u64), (450_000_000), (400_000_000)].iter().enumerate() {
+        for (i, price) in [(500_000_000u64), (450_000_000), (400_000_000)]
+            .iter()
+            .enumerate()
+        {
             problem.orders.push(matching_engine::outcome_buy(
                 &problem.markets,
                 i as u64 + 1,
@@ -1138,13 +1132,13 @@ mod edge_case_tests {
 
         // Only outcome 0 has orders
         problem.liquidity.add_ask(market, 0, 500_000_000, 1000);
-        
+
         for i in 0..10 {
             problem.orders.push(outcome_buy(
                 &problem.markets,
                 i + 1,
                 market,
-                0,  // All on outcome 0
+                0, // All on outcome 0
                 (400 + i * 10) as u64 * 1_000_000,
                 100,
             ));
@@ -1158,7 +1152,7 @@ mod edge_case_tests {
         );
 
         assert!(solution.is_normalized(), "Prices must sum to $1");
-        
+
         // With no demand for outcomes 1 & 2, their prices should be ~0 or fair share
         // But outcome 0 should have high price (high demand)
         println!("Prices: {:?}", solution.prices);
@@ -1181,7 +1175,7 @@ mod edge_case_tests {
                 i + 1,
                 market,
                 0,
-                950_000_000,  // 95 cents
+                950_000_000, // 95 cents
                 100,
             ));
         }
@@ -1193,7 +1187,7 @@ mod edge_case_tests {
                 i + 1,
                 market,
                 1,
-                50_000_000,  // 5 cents
+                50_000_000, // 5 cents
                 100,
             ));
         }
@@ -1206,25 +1200,28 @@ mod edge_case_tests {
         );
 
         assert!(solution.is_normalized());
-        
+
         // With YES at 95c and NO at 5c, prices should be close to [0.95, 0.05]
         let yes_price = solution.prices[0] as f64 / NANOS_PER_DOLLAR as f64;
         let no_price = solution.prices[1] as f64 / NANOS_PER_DOLLAR as f64;
-        
+
         println!("YES price: {:.2}, NO price: {:.2}", yes_price, no_price);
-        
+
         // Sanity check: YES should be more expensive than NO
-        assert!(yes_price > no_price, "YES (high demand) should cost more than NO");
+        assert!(
+            yes_price > no_price,
+            "YES (high demand) should cost more than NO"
+        );
     }
 
     /// Edge case: Zero liquidity
-    #[test] 
+    #[test]
     fn test_zero_liquidity() {
         let mut problem = Problem::new("zero_liq");
         let market = problem.markets.add_binary("binary");
 
         // NO liquidity added!
-        
+
         for i in 0..5 {
             problem.orders.push(outcome_buy(
                 &problem.markets,
@@ -1259,7 +1256,7 @@ mod edge_case_tests {
                 i + 1,
                 market,
                 0,
-                800_000_000,  // 80 cents
+                800_000_000, // 80 cents
                 100,
             ));
         }
@@ -1271,7 +1268,7 @@ mod edge_case_tests {
                 i + 1,
                 market,
                 1,
-                800_000_000,  // 80 cents
+                800_000_000, // 80 cents
                 100,
             ));
         }
@@ -1283,14 +1280,17 @@ mod edge_case_tests {
             &problem.liquidity.books.get(&(market, 0)).cloned().unwrap(),
         );
 
-        assert!(solution.is_normalized(), "Must normalize to $1 even with conflict");
-        
+        assert!(
+            solution.is_normalized(),
+            "Must normalize to $1 even with conflict"
+        );
+
         // Both outcomes have equal demand, so prices should be ~50/50
         let yes_price = solution.prices[0] as f64 / NANOS_PER_DOLLAR as f64;
         let no_price = solution.prices[1] as f64 / NANOS_PER_DOLLAR as f64;
-        
+
         println!("Conflicting: YES={:.2}, NO={:.2}", yes_price, no_price);
-        
+
         // Both should be close to 0.50 due to equal demand
         assert!((yes_price - 0.5).abs() < 0.1, "YES should be ~50 cents");
         assert!((no_price - 0.5).abs() < 0.1, "NO should be ~50 cents");
@@ -1315,57 +1315,88 @@ mod deeper_validation {
         // Mix of high and low value buyers
         // High value: willing to pay 70 cents
         for i in 0..5 {
-            problem.orders.push(outcome_buy(&problem.markets, i + 1, market, 0, 700_000_000, 100));
+            problem.orders.push(outcome_buy(
+                &problem.markets,
+                i + 1,
+                market,
+                0,
+                700_000_000,
+                100,
+            ));
         }
         // Medium value: willing to pay 50 cents
         for i in 5..10 {
-            problem.orders.push(outcome_buy(&problem.markets, i + 1, market, 0, 500_000_000, 100));
+            problem.orders.push(outcome_buy(
+                &problem.markets,
+                i + 1,
+                market,
+                0,
+                500_000_000,
+                100,
+            ));
         }
         // Low value: willing to pay 30 cents
         for i in 10..15 {
-            problem.orders.push(outcome_buy(&problem.markets, i + 1, market, 0, 300_000_000, 100));
+            problem.orders.push(outcome_buy(
+                &problem.markets,
+                i + 1,
+                market,
+                0,
+                300_000_000,
+                100,
+            ));
         }
 
         let book = problem.liquidity.books.get(&(market, 0)).cloned().unwrap();
-        
+
         // Run tâtonnement solver
         let solution = solve_market_lp(market, &problem.markets, &problem.orders, &book);
-        
+
         println!("\n=== WELFARE COMPARISON ===");
-        println!("Prices: YES={}, NO={}", solution.prices[0], solution.prices[1]);
+        println!(
+            "Prices: YES={}, NO={}",
+            solution.prices[0], solution.prices[1]
+        );
         println!("Total fills: {}", solution.fills.len());
         println!("Welfare (tâtonnement): {}", solution.welfare);
-        
+
         // Calculate what welfare COULD be with optimal allocation
         // Optimal: fill highest-value orders first up to liquidity
         // At clearing price P, welfare = Σ (limit - P) * qty
-        
+
         let clearing_price = solution.prices[0];
-        let order_map: HashMap<u64, &matching_engine::Order> = 
+        let order_map: HashMap<u64, &matching_engine::Order> =
             problem.orders.iter().map(|o| (o.id, o)).collect();
-        
+
         // Verify fills are at clearing price
         for fill in &solution.fills {
-            assert_eq!(fill.fill_price, clearing_price, 
-                "Fill price {} != clearing price {}", fill.fill_price, clearing_price);
-            
+            assert_eq!(
+                fill.fill_price, clearing_price,
+                "Fill price {} != clearing price {}",
+                fill.fill_price, clearing_price
+            );
+
             let order = order_map.get(&fill.order_id).unwrap();
-            assert!(order.limit_price >= clearing_price,
-                "Order limit {} < clearing price {}", order.limit_price, clearing_price);
+            assert!(
+                order.limit_price >= clearing_price,
+                "Order limit {} < clearing price {}",
+                order.limit_price,
+                clearing_price
+            );
         }
-        
+
         // Check: are HIGH value orders filled before LOW value?
-        let filled_ids: std::collections::HashSet<u64> = 
+        let filled_ids: std::collections::HashSet<u64> =
             solution.fills.iter().map(|f| f.order_id).collect();
-        
+
         let high_value_filled = (1..=5).filter(|id| filled_ids.contains(id)).count();
         let med_value_filled = (6..=10).filter(|id| filled_ids.contains(id)).count();
         let low_value_filled = (11..=15).filter(|id| filled_ids.contains(id)).count();
-        
+
         println!("High value (70c) filled: {}/5", high_value_filled);
         println!("Medium value (50c) filled: {}/5", med_value_filled);
         println!("Low value (30c) filled: {}/5", low_value_filled);
-        
+
         // Welfare-maximizing should fill high value first
         // If liquidity is 1000 and each order is 100, we can fill 10 orders
         // Optimal: all 5 high + all 5 medium (total 1000 qty)
@@ -1379,8 +1410,13 @@ mod deeper_validation {
     fn test_convergence_behavior() {
         let mut problem = Problem::new("converge");
         let market = problem.markets.add(
-            "four_way", 
-            vec!["A".to_string(), "B".to_string(), "C".to_string(), "D".to_string()]
+            "four_way",
+            vec![
+                "A".to_string(),
+                "B".to_string(),
+                "C".to_string(),
+                "D".to_string(),
+            ],
         );
 
         problem.liquidity.add_ask(market, 0, 300_000_000, 500);
@@ -1388,15 +1424,36 @@ mod deeper_validation {
         // Very different demands across outcomes
         // A: high demand at 60 cents (10 orders)
         for i in 0..10 {
-            problem.orders.push(outcome_buy(&problem.markets, i + 1, market, 0, 600_000_000, 50));
+            problem.orders.push(outcome_buy(
+                &problem.markets,
+                i + 1,
+                market,
+                0,
+                600_000_000,
+                50,
+            ));
         }
         // B: medium demand at 30 cents (5 orders)
         for i in 10..15 {
-            problem.orders.push(outcome_buy(&problem.markets, i + 1, market, 1, 300_000_000, 50));
+            problem.orders.push(outcome_buy(
+                &problem.markets,
+                i + 1,
+                market,
+                1,
+                300_000_000,
+                50,
+            ));
         }
         // C: low demand at 10 cents (2 orders)
         for i in 15..17 {
-            problem.orders.push(outcome_buy(&problem.markets, i + 1, market, 2, 100_000_000, 50));
+            problem.orders.push(outcome_buy(
+                &problem.markets,
+                i + 1,
+                market,
+                2,
+                100_000_000,
+                50,
+            ));
         }
         // D: no demand
 
@@ -1404,20 +1461,30 @@ mod deeper_validation {
         let solution = solve_market_lp(market, &problem.markets, &problem.orders, &book);
 
         println!("\n=== FOUR-WAY CONVERGENCE ===");
-        let prices_pct: Vec<f64> = solution.prices.iter()
+        let prices_pct: Vec<f64> = solution
+            .prices
+            .iter()
             .map(|&p| p as f64 / NANOS_PER_DOLLAR as f64 * 100.0)
             .collect();
-        println!("Prices: A={:.1}%, B={:.1}%, C={:.1}%, D={:.1}%", 
-            prices_pct[0], prices_pct[1], prices_pct[2], prices_pct[3]);
-        
+        println!(
+            "Prices: A={:.1}%, B={:.1}%, C={:.1}%, D={:.1}%",
+            prices_pct[0], prices_pct[1], prices_pct[2], prices_pct[3]
+        );
+
         let sum: f64 = prices_pct.iter().sum();
         println!("Sum: {:.2}% (should be 100%)", sum);
-        
+
         assert!((sum - 100.0).abs() < 0.01, "Prices must sum to 100%");
-        
+
         // A should be most expensive (highest demand)
-        assert!(prices_pct[0] > prices_pct[1], "A (high demand) should cost more than B");
-        assert!(prices_pct[1] > prices_pct[2], "B (med demand) should cost more than C");
+        assert!(
+            prices_pct[0] > prices_pct[1],
+            "A (high demand) should cost more than B"
+        );
+        assert!(
+            prices_pct[1] > prices_pct[2],
+            "B (med demand) should cost more than C"
+        );
     }
 }
 
@@ -1449,7 +1516,9 @@ pub fn solve_market_duality(
     // Group orders by outcome
     let mut orders_by_outcome: Vec<Vec<(&Order, Nanos)>> = vec![Vec::new(); num_outcomes];
     for order in &market_orders {
-        let outcome = order.payoffs.iter()
+        let outcome = order
+            .payoffs
+            .iter()
             .take(order.num_states as usize)
             .position(|&p| p > 0);
         if let Some(o) = outcome {
@@ -1499,16 +1568,20 @@ pub fn solve_market_duality(
     }
 
     // Step 4: Compute fills
-    let order_info: Vec<(&Order, usize, Nanos)> = market_orders.iter()
+    let order_info: Vec<(&Order, usize, Nanos)> = market_orders
+        .iter()
         .filter_map(|o| {
-            let outcome = o.payoffs.iter()
+            let outcome = o
+                .payoffs
+                .iter()
                 .take(o.num_states as usize)
                 .position(|&p| p > 0)?;
             Some((*o, outcome, o.limit_price))
         })
         .collect();
 
-    let (fills, welfare, unfilled) = compute_equilibrium_fills(&order_info, &prices, total_liquidity);
+    let (fills, welfare, unfilled) =
+        compute_equilibrium_fills(&order_info, &prices, total_liquidity);
 
     MarketSolution {
         market_id,
@@ -1534,14 +1607,22 @@ mod duality_comparison {
         // 1000 orders
         for i in 0..500 {
             problem.orders.push(outcome_buy(
-                &problem.markets, i + 1, market, 0,
-                (400 + (i % 200)) as u64 * 1_000_000, 10 + (i % 50) as u64,
+                &problem.markets,
+                i + 1,
+                market,
+                0,
+                (400 + (i % 200)) as u64 * 1_000_000,
+                10 + (i % 50) as u64,
             ));
         }
         for i in 500..1000 {
             problem.orders.push(outcome_buy(
-                &problem.markets, i + 1, market, 1,
-                (400 + (i % 200)) as u64 * 1_000_000, 10 + (i % 50) as u64,
+                &problem.markets,
+                i + 1,
+                market,
+                1,
+                (400 + (i % 200)) as u64 * 1_000_000,
+                10 + (i % 50) as u64,
             ));
         }
 
@@ -1562,7 +1643,7 @@ mod duality_comparison {
         println!("  Prices: {:?}", solution_tat.prices);
         println!("  Welfare: {}", solution_tat.welfare);
         println!("  Fills: {}", solution_tat.fills.len());
-        
+
         println!("\nDuality (closed-form): {:?}", time_dual);
         println!("  Prices: {:?}", solution_dual.prices);
         println!("  Welfare: {}", solution_dual.welfare);
@@ -1571,8 +1652,11 @@ mod duality_comparison {
         // Both should be valid
         assert!(solution_tat.is_normalized());
         assert!(solution_dual.is_normalized());
-        
-        println!("\nSpeedup: {:.2}x", time_tat.as_nanos() as f64 / time_dual.as_nanos() as f64);
+
+        println!(
+            "\nSpeedup: {:.2}x",
+            time_tat.as_nanos() as f64 / time_dual.as_nanos() as f64
+        );
     }
 }
 
@@ -1586,31 +1670,41 @@ mod duality_validation {
     #[test]
     fn validate_duality_fill_prices_match() {
         use matching_scenarios::{generate_mega_scenario_v2, MegaScenarioConfigV2};
-        
+
         let config = MegaScenarioConfigV2::small();
         let problem = generate_mega_scenario_v2(config);
 
-        let order_map: HashMap<u64, &matching_engine::Order> = 
+        let order_map: HashMap<u64, &matching_engine::Order> =
             problem.orders.iter().map(|o| (o.id, o)).collect();
         let mut mismatches = 0;
         let mut total_fills = 0;
 
         for market in problem.markets.iter() {
-            let book = problem.liquidity.books.get(&(market.id, 0))
+            let book = problem
+                .liquidity
+                .books
+                .get(&(market.id, 0))
                 .cloned()
                 .unwrap_or_else(|| matching_engine::LiquidityBook::new(market.id, 0));
-            
-            let solution = solve_market_duality(market.id, &problem.markets, &problem.orders, &book);
+
+            let solution =
+                solve_market_duality(market.id, &problem.markets, &problem.orders, &book);
 
             for fill in &solution.fills {
                 total_fills += 1;
-                
-                let Some(order) = order_map.get(&fill.order_id) else { continue; };
-                let outcome_idx = order.payoffs.iter()
+
+                let Some(order) = order_map.get(&fill.order_id) else {
+                    continue;
+                };
+                let outcome_idx = order
+                    .payoffs
+                    .iter()
                     .take(order.num_states as usize)
                     .position(|&p| p > 0);
-                let Some(outcome) = outcome_idx else { continue; };
-                
+                let Some(outcome) = outcome_idx else {
+                    continue;
+                };
+
                 let clearing_price = solution.prices.get(outcome).copied().unwrap_or(0);
                 if fill.fill_price != clearing_price && fill.fill_price != 0 {
                     mismatches += 1;
@@ -1618,54 +1712,81 @@ mod duality_validation {
             }
         }
 
-        assert_eq!(mismatches, 0, "Duality solver: {}/{} fill price mismatches", mismatches, total_fills);
-        println!("Duality solver: {}/{} fills match clearing prices ✓", total_fills, total_fills);
+        assert_eq!(
+            mismatches, 0,
+            "Duality solver: {}/{} fill price mismatches",
+            mismatches, total_fills
+        );
+        println!(
+            "Duality solver: {}/{} fills match clearing prices ✓",
+            total_fills, total_fills
+        );
     }
 
     #[test]
     fn validate_duality_normalization() {
         use matching_scenarios::{generate_mega_scenario_v2, MegaScenarioConfigV2};
-        
+
         let config = MegaScenarioConfigV2::medium();
         let problem = generate_mega_scenario_v2(config);
         let mut violations = 0;
 
         for market in problem.markets.iter() {
-            let book = problem.liquidity.books.get(&(market.id, 0))
+            let book = problem
+                .liquidity
+                .books
+                .get(&(market.id, 0))
                 .cloned()
                 .unwrap_or_else(|| matching_engine::LiquidityBook::new(market.id, 0));
-            
-            let solution = solve_market_duality(market.id, &problem.markets, &problem.orders, &book);
-            
+
+            let solution =
+                solve_market_duality(market.id, &problem.markets, &problem.orders, &book);
+
             let sum: u64 = solution.prices.iter().sum();
-            let diff = if sum > NANOS_PER_DOLLAR { sum - NANOS_PER_DOLLAR } else { NANOS_PER_DOLLAR - sum };
-            
+            let diff = if sum > NANOS_PER_DOLLAR {
+                sum - NANOS_PER_DOLLAR
+            } else {
+                NANOS_PER_DOLLAR - sum
+            };
+
             if diff > 1 {
                 violations += 1;
             }
         }
 
-        assert_eq!(violations, 0, "Duality solver: {} normalization violations", violations);
+        assert_eq!(
+            violations, 0,
+            "Duality solver: {} normalization violations",
+            violations
+        );
     }
 
     #[test]
     fn validate_duality_respects_liquidity() {
         use matching_scenarios::{generate_mega_scenario_v2, MegaScenarioConfigV2};
-        
+
         let config = MegaScenarioConfigV2::small();
         let problem = generate_mega_scenario_v2(config);
 
         for market in problem.markets.iter() {
-            let book = problem.liquidity.books.get(&(market.id, 0))
+            let book = problem
+                .liquidity
+                .books
+                .get(&(market.id, 0))
                 .cloned()
                 .unwrap_or_else(|| matching_engine::LiquidityBook::new(market.id, 0));
-            
+
             let available: u64 = book.asks().iter().map(|l| l.available_qty).sum();
-            let solution = solve_market_duality(market.id, &problem.markets, &problem.orders, &book);
+            let solution =
+                solve_market_duality(market.id, &problem.markets, &problem.orders, &book);
             let total_filled: u64 = solution.fills.iter().map(|f| f.fill_qty).sum();
 
-            assert!(total_filled <= available, 
-                "Duality: filled {} but only {} available", total_filled, available);
+            assert!(
+                total_filled <= available,
+                "Duality: filled {} but only {} available",
+                total_filled,
+                available
+            );
         }
     }
 }
@@ -1684,14 +1805,20 @@ mod detailed_comparison {
         // 1000 orders with varying sizes and prices
         for i in 0..500 {
             problem.orders.push(outcome_buy(
-                &problem.markets, i + 1, market, 0,
+                &problem.markets,
+                i + 1,
+                market,
+                0,
                 (400 + (i % 200)) as u64 * 1_000_000,
-                10 + (i % 90) as u64,  // qty 10-99
+                10 + (i % 90) as u64, // qty 10-99
             ));
         }
         for i in 500..1000 {
             problem.orders.push(outcome_buy(
-                &problem.markets, i + 1, market, 1,
+                &problem.markets,
+                i + 1,
+                market,
+                1,
                 (400 + (i % 200)) as u64 * 1_000_000,
                 10 + (i % 90) as u64,
             ));
@@ -1707,27 +1834,41 @@ mod detailed_comparison {
 
         println!("\n=== DETAILED COMPARISON ===");
         println!("\nTâtonnement:");
-        println!("  Prices: YES={:.2}%, NO={:.2}%", 
+        println!(
+            "  Prices: YES={:.2}%, NO={:.2}%",
             tat.prices[0] as f64 / 10_000_000.0,
-            tat.prices[1] as f64 / 10_000_000.0);
+            tat.prices[1] as f64 / 10_000_000.0
+        );
         println!("  Orders filled: {}", tat.fills.len());
         println!("  Volume traded: {} shares", tat_volume);
         println!("  Welfare: {}", tat.welfare);
-        println!("  Welfare/share: {:.2}", tat.welfare as f64 / tat_volume as f64);
+        println!(
+            "  Welfare/share: {:.2}",
+            tat.welfare as f64 / tat_volume as f64
+        );
 
         println!("\nDuality (closed-form):");
-        println!("  Prices: YES={:.2}%, NO={:.2}%", 
+        println!(
+            "  Prices: YES={:.2}%, NO={:.2}%",
             dual.prices[0] as f64 / 10_000_000.0,
-            dual.prices[1] as f64 / 10_000_000.0);
+            dual.prices[1] as f64 / 10_000_000.0
+        );
         println!("  Orders filled: {}", dual.fills.len());
         println!("  Volume traded: {} shares", dual_volume);
         println!("  Welfare: {}", dual.welfare);
-        println!("  Welfare/share: {:.2}", dual.welfare as f64 / dual_volume as f64);
+        println!(
+            "  Welfare/share: {:.2}",
+            dual.welfare as f64 / dual_volume as f64
+        );
 
         println!("\nComparison:");
-        println!("  Volume difference: {:+.1}%", 
-            (dual_volume as f64 / tat_volume as f64 - 1.0) * 100.0);
-        println!("  Welfare difference: {:+.1}%", 
-            (dual.welfare as f64 / tat.welfare as f64 - 1.0) * 100.0);
+        println!(
+            "  Volume difference: {:+.1}%",
+            (dual_volume as f64 / tat_volume as f64 - 1.0) * 100.0
+        );
+        println!(
+            "  Welfare difference: {:+.1}%",
+            (dual.welfare as f64 / tat.welfare as f64 - 1.0) * 100.0
+        );
     }
 }

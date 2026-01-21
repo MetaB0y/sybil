@@ -202,7 +202,9 @@ pub fn generate_mega_scenario_v2(config: MegaScenarioConfigV2) -> Problem {
         for (outcome_idx, &fair_price) in fair_prices.iter().enumerate() {
             let liquidity_qty = rng.gen_range(1000..10000);
             let ask_price = (fair_price * NANOS_PER_DOLLAR as f64 * 1.02) as Nanos;
-            problem.liquidity.add_ask(market_id, outcome_idx as u8, ask_price, liquidity_qty);
+            problem
+                .liquidity
+                .add_ask(market_id, outcome_idx as u8, ask_price, liquidity_qty);
         }
 
         market_info.push((market_id, num_outcomes, fair_prices));
@@ -298,7 +300,7 @@ pub fn generate_mega_scenario_v2(config: MegaScenarioConfigV2) -> Problem {
             budget_dollars,
             leverage,
             &strategy,
-            &market_info_with_anchors,  // Use anchor prices
+            &market_info_with_anchors, // Use anchor prices
             &market_orders,
             &mut order_id,
             &mut problem,
@@ -364,7 +366,9 @@ fn compute_anchor_prices(
                 .books
                 .get(&(*market_id, outcome))
                 .and_then(|book| book.asks().first().map(|l| l.price))
-                .unwrap_or((initial_fair_prices[outcome as usize] * NANOS_PER_DOLLAR as f64) as Nanos);
+                .unwrap_or(
+                    (initial_fair_prices[outcome as usize] * NANOS_PER_DOLLAR as f64) as Nanos,
+                );
 
             // Find clearing price: where cumulative demand meets supply
             let mut cumulative_demand: Qty = 0;
@@ -381,7 +385,10 @@ fn compute_anchor_prices(
 
             // If demand never exceeded supply, use the lowest buy price or liquidity price
             if cumulative_demand < liquidity_supply {
-                clearing_price = buy_prices.last().map(|(p, _)| *p).unwrap_or(liquidity_price);
+                clearing_price = buy_prices
+                    .last()
+                    .map(|(p, _)| *p)
+                    .unwrap_or(liquidity_price);
             }
 
             prices[outcome as usize] = clearing_price as f64 / NANOS_PER_DOLLAR as f64;
@@ -417,14 +424,12 @@ fn generate_order_price(rng: &mut ChaCha8Rng, dist: &PriceDistribution) -> f64 {
             let offset = rng.gen::<f64>() * spread - spread / 2.0;
             (base + offset).clamp(0.05, 0.95)
         }
-        PriceDistribution::Bimodal { peaks } => {
-            if rng.gen::<bool>() {
-                peaks.0 + rng.gen::<f64>() * 0.1 - 0.05
-            } else {
-                peaks.1 + rng.gen::<f64>() * 0.1 - 0.05
-            }
-            .clamp(0.05, 0.95)
+        PriceDistribution::Bimodal { peaks } => if rng.gen::<bool>() {
+            peaks.0 + rng.gen::<f64>() * 0.1 - 0.05
+        } else {
+            peaks.1 + rng.gen::<f64>() * 0.1 - 0.05
         }
+        .clamp(0.05, 0.95),
     }
 }
 
@@ -492,7 +497,10 @@ fn create_mm_constraint(
                 .collect();
             by_order_count.sort_by(|a, b| b.2.cmp(&a.2));
             by_order_count.truncate(*top_n);
-            by_order_count.into_iter().map(|(id, o, _)| (id, o)).collect()
+            by_order_count
+                .into_iter()
+                .map(|(id, o, _)| (id, o))
+                .collect()
         }
         _ => {
             // TightSpreads, WideSpreads, Diversified - use all markets
@@ -601,7 +609,10 @@ mod tests {
             .filter(|m| m.outcomes.len() > 2)
             .count();
 
-        assert!(multi_outcome_markets > 0, "Should have multi-outcome markets");
+        assert!(
+            multi_outcome_markets > 0,
+            "Should have multi-outcome markets"
+        );
     }
 
     #[test]
@@ -610,11 +621,7 @@ mod tests {
         let problem = generate_mega_scenario_v2(config);
 
         for mm in &problem.mm_constraints {
-            assert!(
-                mm.num_orders() > 0,
-                "MM {} should have orders",
-                mm.mm_id.0
-            );
+            assert!(mm.num_orders() > 0, "MM {} should have orders", mm.mm_id.0);
         }
     }
 

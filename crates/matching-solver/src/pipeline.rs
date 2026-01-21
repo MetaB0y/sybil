@@ -17,7 +17,9 @@ use std::time::Instant;
 
 use matching_engine::Problem;
 
-use crate::combiner::{CombineStats, SolutionCombiner, SolutionConfidence, SolverContribution, SolverSolution};
+use crate::combiner::{
+    CombineStats, SolutionCombiner, SolutionConfidence, SolverContribution, SolverSolution,
+};
 use crate::greedy::GreedySolver;
 use crate::local_solver::LocalSolver;
 use crate::mm_allocator::MmAllocator;
@@ -271,20 +273,16 @@ impl Pipeline {
         };
 
         // Phase 3: Order Allocation (if we have prices and an allocator)
-        let allocation_result = if let (Some(ref allocator), Some(ref prices)) =
-            (&self.allocator, &price_result)
-        {
-            let alloc_start = Instant::now();
-            let alloc_result = allocator.allocate(
-                &problem.mm_constraints,
-                &prices.prices,
-                &problem.orders,
-            );
-            timings.allocation_secs = alloc_start.elapsed().as_secs_f64();
-            Some(alloc_result)
-        } else {
-            None
-        };
+        let allocation_result =
+            if let (Some(ref allocator), Some(ref prices)) = (&self.allocator, &price_result) {
+                let alloc_start = Instant::now();
+                let alloc_result =
+                    allocator.allocate(&problem.mm_constraints, &prices.prices, &problem.orders);
+                timings.allocation_secs = alloc_start.elapsed().as_secs_f64();
+                Some(alloc_result)
+            } else {
+                None
+            };
 
         // Phase 4: Run Partial Solvers
         let partial_start = Instant::now();
@@ -331,10 +329,7 @@ impl Pipeline {
         } else if let Some(ref pd_result) = price_result {
             result.result = self.build_result_from_prices(problem, pd_result, &allocation_result);
         } else if !partial_solutions.is_empty() {
-            let best = partial_solutions
-                .iter()
-                .max_by_key(|s| s.welfare)
-                .unwrap();
+            let best = partial_solutions.iter().max_by_key(|s| s.welfare).unwrap();
 
             result.result = self.build_result_from_partial(problem, best);
             result.contributions.push(SolverContribution {

@@ -104,8 +104,8 @@ pub mod conversions {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::conversions::*;
+    use super::*;
 
     #[test]
     fn test_market_id() {

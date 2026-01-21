@@ -24,11 +24,9 @@ pub use random::{generate_random_scenario, RandomConfig};
 
 // Re-export stress scenarios
 pub use stress::{
-    generate_mega_scenario, generate_combined_scenario, generate_milp_killer_scenario,
+    generate_combined_scenario, generate_mega_scenario, generate_milp_killer_scenario,
     MegaScenarioConfig, MilpKillerConfig,
 };
 
 // Re-export new mega scenario
-pub use mega::{
-    generate_mega_scenario_v2, MegaScenarioConfigV2, MmStrategy, PriceDistribution,
-};
+pub use mega::{generate_mega_scenario_v2, MegaScenarioConfigV2, MmStrategy, PriceDistribution};

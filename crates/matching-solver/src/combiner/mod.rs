@@ -252,11 +252,7 @@ impl SolutionCombiner {
     }
 
     /// Build the conflict graph for candidate fills.
-    fn build_conflict_graph(
-        &self,
-        fills: &[CandidateFill],
-        problem: &Problem,
-    ) -> ConflictGraph {
+    fn build_conflict_graph(&self, fills: &[CandidateFill], problem: &Problem) -> ConflictGraph {
         let mut graph = ConflictGraph::new(fills.len());
 
         // Two fills conflict if:
@@ -275,8 +271,13 @@ impl SolutionCombiner {
         // Check for conflicts between all pairs
         for i in 0..fills.len() {
             for j in (i + 1)..fills.len() {
-                if self.fills_conflict(&fills[i], &fills[j], &footprints[i], &footprints[j], problem)
-                {
+                if self.fills_conflict(
+                    &fills[i],
+                    &fills[j],
+                    &footprints[i],
+                    &footprints[j],
+                    problem,
+                ) {
                     graph.add_edge(i, j);
                 }
             }
@@ -384,7 +385,12 @@ impl SolutionCombiner {
     }
 
     /// Determine which outcome an order is buying for a specific market.
-    fn determine_outcome_for_market(&self, order: &Order, market_idx: usize, market_sizes: &[u8]) -> u8 {
+    fn determine_outcome_for_market(
+        &self,
+        order: &Order,
+        market_idx: usize,
+        market_sizes: &[u8],
+    ) -> u8 {
         let num_markets = order.num_markets as usize;
         if market_idx >= num_markets {
             return 0;
@@ -396,7 +402,12 @@ impl SolutionCombiner {
             let mut best_outcome = 0u8;
             let mut best_payoff = i8::MIN;
 
-            for (i, &payoff) in order.payoffs.iter().take(order.num_states as usize).enumerate() {
+            for (i, &payoff) in order
+                .payoffs
+                .iter()
+                .take(order.num_states as usize)
+                .enumerate()
+            {
                 if payoff > best_payoff {
                     best_payoff = payoff;
                     best_outcome = i as u8;
@@ -428,7 +439,12 @@ impl SolutionCombiner {
     }
 
     /// Extract the outcome for a specific market from a state index.
-    fn extract_outcome_from_state(&self, state_idx: usize, market_idx: usize, market_sizes: &[u8]) -> u8 {
+    fn extract_outcome_from_state(
+        &self,
+        state_idx: usize,
+        market_idx: usize,
+        market_sizes: &[u8],
+    ) -> u8 {
         let mut remaining = state_idx;
         for (i, &size) in market_sizes.iter().enumerate() {
             let outcome = (remaining % size as usize) as u8;

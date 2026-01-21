@@ -4,7 +4,7 @@
 //! payoff vectors without manually calculating state indices.
 
 use crate::market::MarketSet;
-use crate::order::{Order, PriceCondition, ConditionDir, MAX_MARKETS_PER_ORDER, MAX_STATES};
+use crate::order::{ConditionDir, Order, PriceCondition, MAX_MARKETS_PER_ORDER, MAX_STATES};
 use crate::state::StateSpace;
 use crate::types::{MarketId, Nanos, Qty};
 
@@ -27,7 +27,10 @@ impl<'a> OrderBuilder<'a> {
 
     /// Set the markets this order spans.
     pub fn spanning(mut self, market_ids: &[MarketId]) -> Self {
-        assert!(market_ids.len() <= MAX_MARKETS_PER_ORDER, "Too many markets");
+        assert!(
+            market_ids.len() <= MAX_MARKETS_PER_ORDER,
+            "Too many markets"
+        );
 
         // Copy market IDs
         for (i, &id) in market_ids.iter().enumerate() {
@@ -67,7 +70,12 @@ impl<'a> OrderBuilder<'a> {
     }
 
     /// Set a price condition for activation.
-    pub fn condition(mut self, market: MarketId, threshold: Nanos, direction: ConditionDir) -> Self {
+    pub fn condition(
+        mut self,
+        market: MarketId,
+        threshold: Nanos,
+        direction: ConditionDir,
+    ) -> Self {
         self.order.condition = Some(PriceCondition {
             market,
             threshold,
@@ -122,8 +130,8 @@ pub fn simple_yes_buy(
         .spanning(&[market])
         .limit(limit_price)
         .quantity(0, qty)
-        .payoff_at(0, 1)  // Win when outcome 0 (Yes) happens
-        .payoff_at(1, 0)  // Nothing when outcome 1 (No) happens
+        .payoff_at(0, 1) // Win when outcome 0 (Yes) happens
+        .payoff_at(1, 0) // Nothing when outcome 1 (No) happens
         .build()
 }
 
@@ -139,8 +147,8 @@ pub fn simple_no_buy(
         .spanning(&[market])
         .limit(limit_price)
         .quantity(0, qty)
-        .payoff_at(0, 0)  // Nothing when Yes
-        .payoff_at(1, 1)  // Win when No
+        .payoff_at(0, 0) // Nothing when Yes
+        .payoff_at(1, 1) // Win when No
         .build()
 }
 
@@ -165,10 +173,10 @@ pub fn spread(
         .spanning(&[market_a, market_b])
         .limit(limit_price)
         .quantity(0, qty)
-        .payoff_when(&[0, 0], 0)   // Both Yes: no net position
-        .payoff_when(&[1, 0], -1)  // A=No, B=Yes: short
-        .payoff_when(&[0, 1], 1)   // A=Yes, B=No: long
-        .payoff_when(&[1, 1], 0)   // Both No: no net position
+        .payoff_when(&[0, 0], 0) // Both Yes: no net position
+        .payoff_when(&[1, 0], -1) // A=No, B=Yes: short
+        .payoff_when(&[0, 1], 1) // A=Yes, B=No: long
+        .payoff_when(&[1, 1], 0) // Both No: no net position
         .build()
 }
 
@@ -284,10 +292,10 @@ pub fn ratio_spread(
         .spanning(&[market_a, market_b])
         .limit(limit_price)
         .quantity(0, qty)
-        .payoff_when(&[0, 0], ratio_a - ratio_b)  // Both Yes
-        .payoff_when(&[1, 0], -ratio_b)           // A=No, B=Yes
-        .payoff_when(&[0, 1], ratio_a)            // A=Yes, B=No
-        .payoff_when(&[1, 1], 0)                  // Both No
+        .payoff_when(&[0, 0], ratio_a - ratio_b) // Both Yes
+        .payoff_when(&[1, 0], -ratio_b) // A=No, B=Yes
+        .payoff_when(&[0, 1], ratio_a) // A=Yes, B=No
+        .payoff_when(&[1, 1], 0) // Both No
         .build()
 }
 
@@ -306,7 +314,7 @@ pub fn conditional_buy(
         .spanning(&[market])
         .limit(limit_price)
         .quantity(0, qty)
-        .payoff_at(0, 1)  // Win when Yes
+        .payoff_at(0, 1) // Win when Yes
         .condition(condition_market, threshold, direction)
         .build()
 }

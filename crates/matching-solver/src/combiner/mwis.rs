@@ -27,7 +27,6 @@ pub enum MwisAlgorithm {
     ExactIlp,
 }
 
-
 /// MWIS solver.
 pub struct MwisSolver {
     algorithm: MwisAlgorithm,
@@ -47,9 +46,7 @@ impl MwisSolver {
 
         // If no conflicts, select all positive-weight nodes
         if graph.is_empty() {
-            return (0..weights.len())
-                .filter(|&i| weights[i] > 0)
-                .collect();
+            return (0..weights.len()).filter(|&i| weights[i] > 0).collect();
         }
 
         let algorithm = self.select_algorithm(graph);
@@ -269,9 +266,7 @@ impl MwisSolver {
             | HighsModelStatus::ReachedTimeLimit => {
                 // Extract solution using Index trait
                 let sol = solved.get_solution();
-                (0..n)
-                    .filter(|&i| sol[x_cols[i]] > 0.5)
-                    .collect()
+                (0..n).filter(|&i| sol[x_cols[i]] > 0.5).collect()
             }
             _ => {
                 // Fall back to greedy

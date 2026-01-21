@@ -1,6 +1,6 @@
 //! Problem definition for matching instances.
 
-use crate::{LiquidityPool, ConstraintSet, MarketSet, Order, MmConstraint};
+use crate::{ConstraintSet, LiquidityPool, MarketSet, MmConstraint, Order};
 
 /// A complete problem instance for the matching system.
 #[derive(Clone, Debug)]
@@ -80,8 +80,11 @@ impl std::fmt::Display for ProblemSummary {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Problem: {}", self.name)?;
         writeln!(f, "  Markets: {}", self.num_markets)?;
-        writeln!(f, "  Orders: {} (bundles: {}, AON: {}, conditional: {})",
-            self.num_orders, self.bundle_orders, self.aon_orders, self.conditional_orders)?;
+        writeln!(
+            f,
+            "  Orders: {} (bundles: {}, AON: {}, conditional: {})",
+            self.num_orders, self.bundle_orders, self.aon_orders, self.conditional_orders
+        )?;
         writeln!(f, "  Constraints: {}", self.num_constraints)?;
         if self.num_mm_constraints > 0 {
             writeln!(f, "  MM Constraints: {}", self.num_mm_constraints)?;
