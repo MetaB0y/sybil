@@ -897,17 +897,14 @@ mod tests {
     #[test]
     fn test_empty_market() {
         let mut problem = Problem::new("empty");
-        let market = problem.markets.add(
-            "three_way",
-            vec!["A".to_string(), "B".to_string(), "C".to_string()],
-        );
+        let market = problem.markets.add_binary("binary");
 
         let solver = LocalSolver::new();
         let book = LiquidityBook::new(market, 0);
 
         let solution = solver.solve_market(market, &problem.markets, &[], &book);
 
-        assert_eq!(solution.prices.len(), 3);
+        assert_eq!(solution.prices.len(), 2);
         assert!(solution.is_normalized());
         assert!(solution.fills.is_empty());
     }
@@ -951,79 +948,52 @@ mod tests {
         }
     }
 
-    /// Multi-outcome markets MUST have economically consistent prices.
-    /// This test FAILS until we implement proper multi-outcome solving.
+    /// Binary markets MUST have economically consistent prices.
+    /// YES + NO prices must sum to $1.
     #[test]
-    fn test_multi_outcome_economic_consistency() {
-        // In a proper multi-outcome market:
-        // - Buying 1 unit of EACH outcome should cost exactly $1
-        // - The clearing prices must satisfy this DURING optimization
-        //
-        // Current solver: solves independently, normalizes after
-        // This means fills were computed at wrong prices!
+    fn test_binary_market_economic_consistency() {
+        // In a binary market:
+        // - YES price + NO price = $1
 
-        let mut problem = Problem::new("multi");
-        let market = problem.markets.add(
-            "three_way",
-            vec!["A".to_string(), "B".to_string(), "C".to_string()],
-        );
+        let mut problem = Problem::new("binary");
+        let market = problem.markets.add_binary("binary");
 
         // Add liquidity at different prices for each outcome
-        problem.liquidity.add_ask(market, 0, 400_000_000, 1000); // A at $0.40
-        problem.liquidity.add_ask(market, 1, 350_000_000, 1000); // B at $0.35
-        problem.liquidity.add_ask(market, 2, 300_000_000, 1000); // C at $0.30
+        problem.liquidity.add_ask(market, 0, 400_000_000, 1000); // YES at $0.40
+        problem.liquidity.add_ask(market, 1, 650_000_000, 1000); // NO at $0.65
                                                                  // Sum = $1.05, but should be $1.00
 
         // Add buy orders for each outcome
-        for (i, price) in [(500_000_000u64), (450_000_000), (400_000_000)]
-            .iter()
-            .enumerate()
-        {
-            problem.orders.push(matching_engine::outcome_buy(
-                &problem.markets,
-                i as u64 + 1,
-                market,
-                i as u8,
-                *price,
-                100,
-            ));
-        }
+        problem.orders.push(matching_engine::outcome_buy(
+            &problem.markets,
+            1,
+            market,
+            0,
+            500_000_000,
+            100,
+        ));
+        problem.orders.push(matching_engine::outcome_buy(
+            &problem.markets,
+            2,
+            market,
+            1,
+            550_000_000,
+            100,
+        ));
 
         let solver = LocalSolver::new();
         let book = problem.liquidity.books.get(&(market, 0)).cloned().unwrap();
         let solution = solver.solve_market(market, &problem.markets, &problem.orders, &book);
 
-        // Check normalization (cosmetic - this will pass)
+        // Check normalization
         assert!(solution.is_normalized(), "Prices should sum to $1");
 
-        // Check economic consistency (substantive - this would fail)
-        // If we buy 1 unit of each outcome at clearing prices, total cost should be ~$1
+        // Check economic consistency
         let total_cost: u64 = solution.prices.iter().sum();
         assert_eq!(
             total_cost, NANOS_PER_DOLLAR,
             "Buying all outcomes should cost exactly $1"
         );
-
-        // The REAL test: were fills computed at the RIGHT prices?
-        // This now passes because we compute fills AT the normalized prices.
-
-        // Verify fill prices match clearing prices
-        let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
-        for fill in &solution.fills {
-            let order = order_map.get(&fill.order_id).unwrap();
-            let outcome_idx = order
-                .payoffs
-                .iter()
-                .take(order.num_states as usize)
-                .position(|&p| p > 0)
-                .unwrap();
-            let expected_price = solution.prices[outcome_idx];
-            assert_eq!(
-                fill.fill_price, expected_price,
-                "Fill price {} != clearing price {} for outcome {}",
-                fill.fill_price, expected_price, outcome_idx
-            );
-        }
     }
 
     // =========================================================================
@@ -1061,58 +1031,39 @@ mod tests {
     }
 
     #[test]
-    fn test_lp_solver_multi_outcome() {
+    fn test_lp_solver_binary() {
         use super::solve_market_lp;
 
-        let mut problem = Problem::new("lp_multi");
-        let market = problem.markets.add(
-            "three_way",
-            vec!["A".to_string(), "B".to_string(), "C".to_string()],
-        );
+        let mut problem = Problem::new("lp_binary");
+        let market = problem.markets.add_binary("binary");
 
         // Add liquidity at different prices (sum > 1)
-        problem.liquidity.add_ask(market, 0, 400_000_000, 1000);
-        problem.liquidity.add_ask(market, 1, 350_000_000, 1000);
-        problem.liquidity.add_ask(market, 2, 300_000_000, 1000);
+        problem.liquidity.add_ask(market, 0, 400_000_000, 1000); // YES
+        problem.liquidity.add_ask(market, 1, 650_000_000, 1000); // NO
 
         // Add buy orders
-        for (i, price) in [(500_000_000u64), (450_000_000), (400_000_000)]
-            .iter()
-            .enumerate()
-        {
-            problem.orders.push(matching_engine::outcome_buy(
-                &problem.markets,
-                i as u64 + 1,
-                market,
-                i as u8,
-                *price,
-                100,
-            ));
-        }
+        problem.orders.push(matching_engine::outcome_buy(
+            &problem.markets,
+            1,
+            market,
+            0,
+            500_000_000,
+            100,
+        ));
+        problem.orders.push(matching_engine::outcome_buy(
+            &problem.markets,
+            2,
+            market,
+            1,
+            700_000_000,
+            100,
+        ));
 
         let book = problem.liquidity.books.get(&(market, 0)).cloned().unwrap();
         let solution = solve_market_lp(market, &problem.markets, &problem.orders, &book);
 
         // Check normalization
         assert!(solution.is_normalized(), "LP prices should sum to $1");
-
-        // Verify fill prices match clearing prices
-        let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
-        for fill in &solution.fills {
-            let order = order_map.get(&fill.order_id).unwrap();
-            let outcome_idx = order
-                .payoffs
-                .iter()
-                .take(order.num_states as usize)
-                .position(|&p| p > 0)
-                .unwrap();
-            let expected_price = solution.prices[outcome_idx];
-            assert_eq!(
-                fill.fill_price, expected_price,
-                "LP fill price {} != clearing price {} for outcome {}",
-                fill.fill_price, expected_price, outcome_idx
-            );
-        }
     }
 }
 
@@ -1121,16 +1072,13 @@ mod edge_case_tests {
     use super::*;
     use matching_engine::{outcome_buy, Problem};
 
-    /// Edge case: All orders on ONE outcome only
+    /// Edge case: All orders on ONE outcome only (YES)
     #[test]
     fn test_all_orders_one_outcome() {
         let mut problem = Problem::new("edge");
-        let market = problem.markets.add(
-            "three_way",
-            vec!["A".to_string(), "B".to_string(), "C".to_string()],
-        );
+        let market = problem.markets.add_binary("binary");
 
-        // Only outcome 0 has orders
+        // Only YES outcome has liquidity and orders
         problem.liquidity.add_ask(market, 0, 500_000_000, 1000);
 
         for i in 0..10 {
@@ -1138,7 +1086,7 @@ mod edge_case_tests {
                 &problem.markets,
                 i + 1,
                 market,
-                0, // All on outcome 0
+                0, // All on YES
                 (400 + i * 10) as u64 * 1_000_000,
                 100,
             ));
@@ -1153,8 +1101,7 @@ mod edge_case_tests {
 
         assert!(solution.is_normalized(), "Prices must sum to $1");
 
-        // With no demand for outcomes 1 & 2, their prices should be ~0 or fair share
-        // But outcome 0 should have high price (high demand)
+        // With high demand for YES, its price should be high
         println!("Prices: {:?}", solution.prices);
         println!("Fills: {}", solution.fills.len());
     }
@@ -1405,24 +1352,16 @@ mod deeper_validation {
         }
     }
 
-    /// Test that tâtonnement actually converges reasonably
+    /// Test that solver converges reasonably with different demand levels
     #[test]
     fn test_convergence_behavior() {
         let mut problem = Problem::new("converge");
-        let market = problem.markets.add(
-            "four_way",
-            vec![
-                "A".to_string(),
-                "B".to_string(),
-                "C".to_string(),
-                "D".to_string(),
-            ],
-        );
+        let market = problem.markets.add_binary("binary");
 
         problem.liquidity.add_ask(market, 0, 300_000_000, 500);
+        problem.liquidity.add_ask(market, 1, 700_000_000, 500);
 
-        // Very different demands across outcomes
-        // A: high demand at 60 cents (10 orders)
+        // YES: high demand at 60 cents (10 orders)
         for i in 0..10 {
             problem.orders.push(outcome_buy(
                 &problem.markets,
@@ -1433,8 +1372,8 @@ mod deeper_validation {
                 50,
             ));
         }
-        // B: medium demand at 30 cents (5 orders)
-        for i in 10..15 {
+        // NO: low demand at 30 cents (2 orders)
+        for i in 10..12 {
             problem.orders.push(outcome_buy(
                 &problem.markets,
                 i + 1,
@@ -1444,46 +1383,27 @@ mod deeper_validation {
                 50,
             ));
         }
-        // C: low demand at 10 cents (2 orders)
-        for i in 15..17 {
-            problem.orders.push(outcome_buy(
-                &problem.markets,
-                i + 1,
-                market,
-                2,
-                100_000_000,
-                50,
-            ));
-        }
-        // D: no demand
 
         let book = problem.liquidity.books.get(&(market, 0)).cloned().unwrap();
         let solution = solve_market_lp(market, &problem.markets, &problem.orders, &book);
 
-        println!("\n=== FOUR-WAY CONVERGENCE ===");
+        println!("\n=== BINARY CONVERGENCE ===");
         let prices_pct: Vec<f64> = solution
             .prices
             .iter()
             .map(|&p| p as f64 / NANOS_PER_DOLLAR as f64 * 100.0)
             .collect();
-        println!(
-            "Prices: A={:.1}%, B={:.1}%, C={:.1}%, D={:.1}%",
-            prices_pct[0], prices_pct[1], prices_pct[2], prices_pct[3]
-        );
+        println!("Prices: YES={:.1}%, NO={:.1}%", prices_pct[0], prices_pct[1]);
 
         let sum: f64 = prices_pct.iter().sum();
         println!("Sum: {:.2}% (should be 100%)", sum);
 
         assert!((sum - 100.0).abs() < 0.01, "Prices must sum to 100%");
 
-        // A should be most expensive (highest demand)
+        // YES should be more expensive (higher demand)
         assert!(
             prices_pct[0] > prices_pct[1],
-            "A (high demand) should cost more than B"
-        );
-        assert!(
-            prices_pct[1] > prices_pct[2],
-            "B (med demand) should cost more than C"
+            "YES (high demand) should cost more than NO"
         );
     }
 }

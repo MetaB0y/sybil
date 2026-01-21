@@ -1,10 +1,21 @@
-//! Finite liquidity order book.
+//! Liquidity order books for binary markets.
 //!
-//! Each outcome in each market has its own book with limited depth.
-//! Orders compete for this finite liquidity - filling one order may
-//! exhaust shares needed by another.
+//! Each binary market has two outcomes: YES (0) and NO (1).
+//! Each outcome has its own order book with bids and asks.
+
+use std::collections::HashMap;
 
 use crate::types::{MarketId, Nanos, Qty, Side};
+
+/// Outcome index for binary markets.
+/// - 0 = YES
+/// - 1 = NO
+pub type Outcome = u8;
+
+/// YES outcome index.
+pub const YES: Outcome = 0;
+/// NO outcome index.
+pub const NO: Outcome = 1;
 
 /// A single price level in the order book.
 #[derive(Clone, Debug)]
@@ -35,23 +46,24 @@ impl BookLevel {
     }
 }
 
-/// Order book for a single outcome in a market.
+/// Order book for one outcome (YES or NO) in a binary market.
 #[derive(Clone, Debug)]
 pub struct LiquidityBook {
     pub market: MarketId,
-    // FIXME: wtf is this? I thought all market are binary? Multioutcome ones are just multiple binaries? Or no? We need to think about both models
-    /// Which outcome (0..num_outcomes)
-    pub outcome_idx: u8,
-    /// Price levels sorted by price (ascending for asks, descending for bids)
+    /// Which outcome: YES (0) or NO (1)
+    pub outcome: Outcome,
+    /// Bids sorted by price descending (best bid first)
     bids: Vec<BookLevel>,
+    /// Asks sorted by price ascending (best ask first)
     asks: Vec<BookLevel>,
 }
 
 impl LiquidityBook {
-    pub fn new(market: MarketId, outcome_idx: u8) -> Self {
+    pub fn new(market: MarketId, outcome: Outcome) -> Self {
+        debug_assert!(outcome <= 1, "Binary markets only have outcomes 0 (YES) and 1 (NO)");
         Self {
             market,
-            outcome_idx,
+            outcome,
             bids: Vec::new(),
             asks: Vec::new(),
         }
@@ -128,7 +140,7 @@ impl LiquidityBook {
                 total_qty += level.available_qty;
                 total_cost += level.price as u128 * level.available_qty as u128;
             } else {
-                break; // Asks are sorted ascending, so we can stop
+                break;
             }
         }
 
@@ -152,7 +164,7 @@ impl LiquidityBook {
                 total_qty += level.available_qty;
                 total_cost += level.price as u128 * level.available_qty as u128;
             } else {
-                break; // Bids are sorted descending, so we can stop
+                break;
             }
         }
 
@@ -184,7 +196,6 @@ impl LiquidityBook {
             total_cost += level.price as u128 * fill_qty as u128;
         }
 
-        // Remove empty levels
         self.asks.retain(|l| l.available_qty > 0);
 
         let avg_price = if filled > 0 {
@@ -215,7 +226,6 @@ impl LiquidityBook {
             total_proceeds += level.price as u128 * fill_qty as u128;
         }
 
-        // Remove empty levels
         self.bids.retain(|l| l.available_qty > 0);
 
         let avg_price = if filled > 0 {
@@ -233,39 +243,44 @@ impl LiquidityBook {
     }
 }
 
-/// Collection of liquidity books for all outcomes across all markets.
+/// Collection of liquidity books for all markets.
+///
+/// For binary markets, each market has two books:
+/// - (market_id, 0) = YES outcome
+/// - (market_id, 1) = NO outcome
 #[derive(Clone, Debug, Default)]
 pub struct LiquidityPool {
-    /// Books indexed by (market_id, outcome_idx)
-    pub books: std::collections::HashMap<(MarketId, u8), LiquidityBook>,
+    /// Books indexed by (market_id, outcome)
+    pub books: HashMap<(MarketId, Outcome), LiquidityBook>,
 }
 
 impl LiquidityPool {
     pub fn new() -> Self {
         Self {
-            books: std::collections::HashMap::new(),
+            books: HashMap::new(),
         }
     }
 
     /// Get or create a book for a specific market outcome.
-    pub fn book_mut(&mut self, market: MarketId, outcome_idx: u8) -> &mut LiquidityBook {
+    pub fn book_mut(&mut self, market: MarketId, outcome: Outcome) -> &mut LiquidityBook {
         self.books
-            .entry((market, outcome_idx))
-            .or_insert_with(|| LiquidityBook::new(market, outcome_idx))
+            .entry((market, outcome))
+            .or_insert_with(|| LiquidityBook::new(market, outcome))
     }
 
     /// Get a book (immutable).
-    pub fn book(&self, market: MarketId, outcome_idx: u8) -> Option<&LiquidityBook> {
-        self.books.get(&(market, outcome_idx))
+    pub fn book(&self, market: MarketId, outcome: Outcome) -> Option<&LiquidityBook> {
+        self.books.get(&(market, outcome))
     }
 
-    /// Add liquidity to a specific market outcome.
-    pub fn add_bid(&mut self, market: MarketId, outcome_idx: u8, price: Nanos, qty: Qty) {
-        self.book_mut(market, outcome_idx).add_bid(price, qty);
+    /// Add a bid to a specific market outcome.
+    pub fn add_bid(&mut self, market: MarketId, outcome: Outcome, price: Nanos, qty: Qty) {
+        self.book_mut(market, outcome).add_bid(price, qty);
     }
 
-    pub fn add_ask(&mut self, market: MarketId, outcome_idx: u8, price: Nanos, qty: Qty) {
-        self.book_mut(market, outcome_idx).add_ask(price, qty);
+    /// Add an ask to a specific market outcome.
+    pub fn add_ask(&mut self, market: MarketId, outcome: Outcome, price: Nanos, qty: Qty) {
+        self.book_mut(market, outcome).add_ask(price, qty);
     }
 
     /// Create a snapshot of all books for simulation.
@@ -276,18 +291,18 @@ impl LiquidityPool {
     }
 
     /// Iterate over all books.
-    pub fn iter(&self) -> impl Iterator<Item = (&(MarketId, u8), &LiquidityBook)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&(MarketId, Outcome), &LiquidityBook)> {
         self.books.iter()
     }
 
     /// Set a book directly for a specific market outcome.
-    pub fn set(&mut self, market: MarketId, outcome_idx: u8, book: LiquidityBook) {
-        self.books.insert((market, outcome_idx), book);
+    pub fn set(&mut self, market: MarketId, outcome: Outcome, book: LiquidityBook) {
+        self.books.insert((market, outcome), book);
     }
 
     /// Get a mutable reference to a book if it exists.
-    pub fn get_mut(&mut self, market: MarketId, outcome_idx: u8) -> Option<&mut LiquidityBook> {
-        self.books.get_mut(&(market, outcome_idx))
+    pub fn get_mut(&mut self, market: MarketId, outcome: Outcome) -> Option<&mut LiquidityBook> {
+        self.books.get_mut(&(market, outcome))
     }
 }
 
@@ -309,7 +324,7 @@ mod tests {
 
     #[test]
     fn test_book_ordering() {
-        let mut book = LiquidityBook::new(MarketId::new(0), 0);
+        let mut book = LiquidityBook::new(MarketId::new(0), YES);
 
         // Add bids in random order
         book.add_bid(price_to_nanos(0.50), 100);
@@ -336,7 +351,7 @@ mod tests {
 
     #[test]
     fn test_consume_asks() {
-        let mut book = LiquidityBook::new(MarketId::new(0), 0);
+        let mut book = LiquidityBook::new(MarketId::new(0), YES);
         book.add_ask(price_to_nanos(0.53), 100);
         book.add_ask(price_to_nanos(0.54), 200);
 
@@ -350,7 +365,7 @@ mod tests {
 
     #[test]
     fn test_liquidity_competition() {
-        let mut book = LiquidityBook::new(MarketId::new(0), 0);
+        let mut book = LiquidityBook::new(MarketId::new(0), YES);
         book.add_ask(price_to_nanos(0.53), 150); // Only 150 available!
 
         // Order 1 wants 300, only gets 150
@@ -360,8 +375,18 @@ mod tests {
         // Order 2 wants 200, gets nothing
         let (filled2, _) = book.consume_asks(200, price_to_nanos(0.53));
         assert_eq!(filled2, 0);
+    }
 
-        // This demonstrates liquidity competition - both orders wanted
-        // 500 total shares but only 150 existed.
+    #[test]
+    fn test_yes_no_books() {
+        let mut pool = LiquidityPool::new();
+        let market = MarketId::new(0);
+
+        // Add liquidity for YES and NO
+        pool.add_ask(market, YES, price_to_nanos(0.60), 100);
+        pool.add_ask(market, NO, price_to_nanos(0.45), 100);
+
+        assert!(pool.book(market, YES).is_some());
+        assert!(pool.book(market, NO).is_some());
     }
 }

@@ -1,20 +1,26 @@
 //! Core matching types and logic for prediction market matching.
 //!
 //! This crate provides the fundamental types and data structures for
-//! the NP-hard prediction market matching system.
+//! the prediction market matching system.
+//!
+//! # Design Philosophy
+//!
+//! The engine is minimal and focused:
+//! - All markets are binary (YES/NO)
+//! - Multi-outcome concepts (e.g., 3-candidate elections) are handled
+//!   at the solver layer by grouping related binary markets
+//! - The engine doesn't know or care about market relationships
 //!
 //! # Module Structure
 //!
 //! - `types`: Core numeric types (Nanos, Qty, MarketId, Side)
-//! - `market`: Multi-outcome market definitions
+//! - `market`: Binary market definitions
 //! - `order`: Unified order representation using payoff vectors
 //! - `order_builder`: Convenient constructors for common order types
-//! - `book`: Finite liquidity order books
-//! - `constraints`: Market constraints (implications, exclusions, hierarchies)
+//! - `book`: Liquidity order books
 //! - `state`: State indexing and payoff evaluation
 
 pub mod book;
-pub mod constraints;
 pub mod market;
 pub mod mm_constraint;
 pub mod order;
@@ -24,8 +30,7 @@ pub mod state;
 pub mod types;
 
 // Re-exports for convenience
-pub use book::{BookLevel, LiquidityBook, LiquidityPool};
-pub use constraints::{ConstraintBuilder, ConstraintSet, MarketConstraint};
+pub use book::{BookLevel, LiquidityBook, LiquidityPool, Outcome, NO, YES};
 pub use market::{Market, MarketSet};
 pub use mm_constraint::{
     MmConstraint, MmConstraintStatus, MmId, MmOrder, MmSide, MmValidationResult,
@@ -39,6 +44,6 @@ pub use types::{MarketId, Nanos, Qty, Side, NANOS_PER_DOLLAR};
 
 // Re-export order_builder convenience functions
 pub use order_builder::{
-    bundle_yes, butterfly, conditional_buy, outcome_buy, outcome_sell, ratio_spread, simple_no_buy,
-    simple_yes_buy, spread,
+    bundle_yes, butterfly, conditional_buy, outcome_buy, outcome_sell, ratio_spread,
+    simple_no_buy, simple_yes_buy, spread,
 };

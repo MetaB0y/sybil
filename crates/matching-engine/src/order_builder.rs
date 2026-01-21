@@ -180,23 +180,48 @@ pub fn spread(
         .build()
 }
 
-/// Create a butterfly on a 3-outcome market: Buy low, Sell 2x mid, Buy high.
+/// Create a butterfly spread across 3 binary markets representing outcomes of the same event.
 /// Classic volatility trade: profit if middle outcome, lose if extremes.
+///
+/// For a 3-candidate election (A, B, C) represented as 3 binary markets:
+/// - market_a: "A wins?" (YES/NO)
+/// - market_b: "B wins?" (YES/NO)
+/// - market_c: "C wins?" (YES/NO)
+///
+/// Payoff: +1 if A wins, -2 if B wins, +1 if C wins
+/// (Profits when middle outcome B occurs)
 pub fn butterfly(
     markets: &MarketSet,
     id: u64,
-    market: MarketId,
+    market_a: MarketId,
+    market_b: MarketId,
+    market_c: MarketId,
     limit_price: Nanos,
     qty: Qty,
 ) -> Order {
-    // Payoffs: [+1, -2, +1] for outcomes [0, 1, 2]
+    // With 3 binary markets, we have 8 states (2^3)
+    // But only 3 are "valid" (exactly one wins): A, B, or C
+    // States where A=Yes: payoff +1
+    // States where B=Yes: payoff -2
+    // States where C=Yes: payoff +1
+    // States with multiple Yes or all No: payoff 0 (invalid/shouldn't happen)
+
     OrderBuilder::new(markets, id)
-        .spanning(&[market])
+        .spanning(&[market_a, market_b, market_c])
         .limit(limit_price)
         .quantity(0, qty)
-        .payoff_at(0, 1)
-        .payoff_at(1, -2)
-        .payoff_at(2, 1)
+        // State encoding: [market_a, market_b, market_c]
+        // 0: [0,0,0] = A=Yes, B=Yes, C=Yes -> invalid, 0
+        // 1: [1,0,0] = A=No,  B=Yes, C=Yes -> invalid, 0
+        // 2: [0,1,0] = A=Yes, B=No,  C=Yes -> invalid, 0
+        // 3: [1,1,0] = A=No,  B=No,  C=Yes -> C wins, +1
+        // 4: [0,0,1] = A=Yes, B=Yes, C=No  -> invalid, 0
+        // 5: [1,0,1] = A=No,  B=Yes, C=No  -> B wins, -2
+        // 6: [0,1,1] = A=Yes, B=No,  C=No  -> A wins, +1
+        // 7: [1,1,1] = A=No,  B=No,  C=No  -> invalid, 0
+        .payoff_when(&[1, 1, 0], 1)  // C wins: +1
+        .payoff_when(&[1, 0, 1], -2) // B wins: -2
+        .payoff_when(&[0, 1, 1], 1)  // A wins: +1
         .build()
 }
 
@@ -328,7 +353,7 @@ mod tests {
         let mut markets = MarketSet::new();
         markets.add_binary("Market A"); // M0
         markets.add_binary("Market B"); // M1
-        markets.add("Market C", vec!["X".into(), "Y".into(), "Z".into()]); // M2
+        markets.add_binary("Market C"); // M2
         markets
     }
 
@@ -363,14 +388,26 @@ mod tests {
     #[test]
     fn test_butterfly() {
         let markets = setup_markets();
-        let m2 = MarketId::new(2); // 3-outcome market
+        let m0 = MarketId::new(0); // Market A
+        let m1 = MarketId::new(1); // Market B
+        let m2 = MarketId::new(2); // Market C
 
-        let order = butterfly(&markets, 1, m2, price_to_nanos(0.05), 100);
+        let order = butterfly(&markets, 1, m0, m1, m2, price_to_nanos(0.05), 100);
 
-        assert_eq!(order.num_states, 3);
-        assert_eq!(order.payoffs[0], 1);
-        assert_eq!(order.payoffs[1], -2);
-        assert_eq!(order.payoffs[2], 1);
+        // 3 binary markets = 8 states
+        assert_eq!(order.num_states, 8);
+
+        // Check payoffs for valid states (exactly one wins):
+        // State 6: [0,1,1] = A=Yes, B=No, C=No -> A wins: +1
+        assert_eq!(order.payoffs[6], 1);
+        // State 5: [1,0,1] = A=No, B=Yes, C=No -> B wins: -2
+        assert_eq!(order.payoffs[5], -2);
+        // State 3: [1,1,0] = A=No, B=No, C=Yes -> C wins: +1
+        assert_eq!(order.payoffs[3], 1);
+
+        // Invalid states should have 0 payoff
+        assert_eq!(order.payoffs[0], 0); // All Yes
+        assert_eq!(order.payoffs[7], 0); // All No
     }
 
     #[test]

@@ -32,8 +32,7 @@ cargo run --bin matching-sim -- --scenario random-easy
 
 - `greedy` - Fast heuristic
 - `milp` - Optimal via MILP
-- `randomized` - Random order shuffling
-- `platform` - All solvers combined
+- `pipeline` - Full pipeline (price discovery + projection + MM allocation)
 - `all` - Compare all solvers
 
 ### Examples
@@ -54,7 +53,7 @@ cargo run --bin matching-sim --release -- \
 # Verbose output
 cargo run --bin matching-sim --release -- \
     --scenario random-hard \
-    --solver platform \
+    --solver pipeline \
     --verbose
 
 # Multiple batches for statistics
@@ -67,9 +66,6 @@ cargo run --bin matching-sim --release -- \
 ### Specialized Tests
 
 ```bash
-# Platform stress test
-cargo run --bin matching-sim --release -- --stress --milp-timeout 5
-
 # MILP killer test
 cargo run --bin matching-sim --release -- --milp-killer --config full
 ```
@@ -106,7 +102,7 @@ Scenario: random-hard
 │ Solver     │ Welfare     │ Gap      │ Fill %   │
 ├────────────┼─────────────┼──────────┼──────────┤
 │ MILP       │    12345678 │ 0.0%     │   95.2%  │
-│ Platform   │    12340000 │ 0.1%     │   94.8%  │
+│ Pipeline   │    12340000 │ 0.1%     │   94.8%  │
 │ Greedy     │    11000000 │ 10.9%    │   89.0%  │
 ╰────────────┴─────────────┴──────────┴──────────╯
 ```
@@ -148,10 +144,10 @@ None currently used. All configuration via CLI arguments.
    - Medium (100-1000): 5-30s
    - Large (> 1000): 30-120s or skip MILP
 
-3. **Use platform solver** for production:
+3. **Use pipeline solver** for production:
    ```bash
    cargo run --bin matching-sim --release -- \
-       --solver platform \
+       --solver pipeline \
        --milp-timeout 5
    ```
 

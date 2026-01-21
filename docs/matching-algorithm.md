@@ -231,25 +231,6 @@ fn generate_arb_patches(problem: &Problem, base: &Solution) -> Vec<Patch> {
 }
 ```
 
-### Strategy 3: Bundle Decomposition
-
-Break bundle orders into component fills:
-
-```rust
-fn generate_bundle_patches(problem: &Problem, base: &Solution) -> Vec<Patch> {
-    let mut patches = Vec::new();
-
-    for order in problem.orders.iter().filter(|o| o.is_bundle()) {
-        // Find complementary orders that together satisfy the bundle
-        if let Some(decomposition) = find_bundle_decomposition(order, base, problem) {
-            patches.push(decomposition.to_patch());
-        }
-    }
-
-    patches
-}
-```
-
 ---
 
 ## Applying Patches
@@ -332,4 +313,4 @@ The current implementation in `matching-solver/src/combiner/`:
 - `MwisSolver` - Greedy and randomized algorithms
 - `SolutionCombiner` - Full combination pipeline
 
-See `platform.rs` for the solver platform that orchestrates multiple solvers.
+See `pipeline.rs` for the pipeline that orchestrates the solving phases.

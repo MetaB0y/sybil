@@ -9,11 +9,8 @@ use rand::Rng;
 use rand::SeedableRng;
 
 use matching_engine::{
-    bundle_yes, outcome_buy, price_to_nanos, spread, ConstraintBuilder, MarketId, MarketSet, Order,
-    Qty,
+    bundle_yes, outcome_buy, price_to_nanos, spread, MarketId, MarketSet, Order, Problem, Qty,
 };
-
-use matching_engine::Problem;
 
 use crate::{generate_random_scenario, RandomConfig};
 
@@ -28,8 +25,6 @@ pub struct MegaScenarioConfig {
     pub num_orders: usize,
     /// Fraction of orders that are multi-market bundles (0.0-1.0)
     pub bundle_fraction: f64,
-    /// Number of implication chains to add complexity
-    pub implication_chains: usize,
     /// Liquidity scarcity (0.0-1.0, lower = more scarcity)
     pub liquidity_scarcity: f64,
     /// Fraction of spread orders
@@ -45,7 +40,6 @@ impl Default for MegaScenarioConfig {
             num_markets: 30,
             num_orders: 1000,
             bundle_fraction: 0.25,
-            implication_chains: 5,
             liquidity_scarcity: 0.4,
             spread_fraction: 0.1,
             price_spread: 0.08,
@@ -60,7 +54,6 @@ impl MegaScenarioConfig {
             num_markets: 20,
             num_orders: 500,
             bundle_fraction: 0.2,
-            implication_chains: 3,
             liquidity_scarcity: 0.5,
             ..Default::default()
         }
@@ -72,7 +65,6 @@ impl MegaScenarioConfig {
             num_markets: 30,
             num_orders: 1000,
             bundle_fraction: 0.25,
-            implication_chains: 5,
             liquidity_scarcity: 0.4,
             ..Default::default()
         }
@@ -84,7 +76,6 @@ impl MegaScenarioConfig {
             num_markets: 50,
             num_orders: 2000,
             bundle_fraction: 0.3,
-            implication_chains: 10,
             liquidity_scarcity: 0.3,
             ..Default::default()
         }
@@ -96,7 +87,6 @@ impl MegaScenarioConfig {
             num_markets: 75,
             num_orders: 5000,
             bundle_fraction: 0.35,
-            implication_chains: 15,
             liquidity_scarcity: 0.25,
             ..Default::default()
         }
@@ -108,7 +98,6 @@ impl MegaScenarioConfig {
 /// This scenario combines multiple complexity factors:
 /// - Large number of markets and orders
 /// - Multi-market bundles
-/// - Implication constraints
 /// - Liquidity scarcity
 /// - Conflicting high-value orders
 pub fn generate_mega_scenario(config: MegaScenarioConfig) -> Problem {
@@ -121,61 +110,14 @@ pub fn generate_mega_scenario(config: MegaScenarioConfig) -> Problem {
         config.liquidity_scarcity * 100.0
     ));
 
-    // Create markets with varying outcomes
+    // Create binary markets
     let mut market_ids: Vec<MarketId> = Vec::new();
     let mut market_prices: Vec<f64> = Vec::new();
-    let mut market_outcomes: Vec<u8> = Vec::new();
 
     for i in 0..config.num_markets {
-        // Mix of binary and multi-outcome markets
-        let outcomes = if rng.gen_bool(0.8) {
-            2 // 80% binary
-        } else {
-            rng.gen_range(3..=4) // 20% multi-outcome
-        };
-
-        let outcome_names: Vec<String> = (0..outcomes).map(|j| format!("O{}", j)).collect();
-        let market = problem.markets.add(format!("M{}", i), outcome_names);
+        let market = problem.markets.add_binary(format!("M{}", i));
         market_ids.push(market);
-
-        let mid_price = rng.gen_range(0.2..0.8);
-        market_prices.push(mid_price);
-        market_outcomes.push(outcomes as u8);
-    }
-
-    // Add implication constraints (creates constraint complexity)
-    if config.implication_chains > 0 && market_ids.len() >= 2 {
-        let mut constraint_builder = ConstraintBuilder::new();
-
-        // Create chains of implications
-        for _chain in 0..config.implication_chains {
-            let chain_length = rng.gen_range(2..=4.min(market_ids.len()));
-            let mut chain_markets: Vec<usize> = (0..market_ids.len()).collect();
-            chain_markets.shuffle(&mut rng);
-            chain_markets.truncate(chain_length);
-
-            // Create A → B → C chain
-            for i in 0..chain_markets.len() - 1 {
-                let m1 = market_ids[chain_markets[i]];
-                let m2 = market_ids[chain_markets[i + 1]];
-                constraint_builder = constraint_builder.implies(m1, 0, m2, 0);
-            }
-        }
-
-        // Add some exclusions
-        let num_exclusions = config.implication_chains / 2;
-        for _ in 0..num_exclusions {
-            let m1_idx = rng.gen_range(0..market_ids.len());
-            let mut m2_idx = rng.gen_range(0..market_ids.len());
-            while m2_idx == m1_idx {
-                m2_idx = rng.gen_range(0..market_ids.len());
-            }
-
-            constraint_builder = constraint_builder
-                .mutually_exclusive(vec![(market_ids[m1_idx], 0), (market_ids[m2_idx], 0)]);
-        }
-
-        problem.constraints = constraint_builder.build();
+        market_prices.push(rng.gen_range(0.2..0.8));
     }
 
     // Add liquidity with scarcity
@@ -186,40 +128,50 @@ pub fn generate_mega_scenario(config: MegaScenarioConfig) -> Problem {
 
     for (i, &market) in market_ids.iter().enumerate() {
         let mid_price = market_prices[i];
-        let outcomes = market_outcomes[i];
 
-        for outcome in 0..outcomes {
-            let outcome_mid_price = if outcome == 0 {
-                mid_price
-            } else if outcomes == 2 {
-                1.0 - mid_price
-            } else {
-                (1.0 - mid_price) / (outcomes as f64 - 1.0)
-            };
+        // YES outcome (0)
+        for level in 0..4 {
+            let offset = config.price_spread * (level as f64 + 1.0) / 4.0;
+            let level_supply = supply_per_market / 8;
 
-            // Multiple price levels
-            for level in 0..4 {
-                let offset = config.price_spread * (level as f64 + 1.0) / 4.0;
-                let level_supply = supply_per_market / (outcomes as Qty * 4);
+            let ask_price = (mid_price + offset).min(0.98);
+            problem.liquidity.add_ask(
+                market,
+                0,
+                price_to_nanos(ask_price),
+                level_supply.max(10),
+            );
 
-                // Asks (sellers)
-                let ask_price = (outcome_mid_price + offset).min(0.98);
-                problem.liquidity.add_ask(
-                    market,
-                    outcome,
-                    price_to_nanos(ask_price),
-                    level_supply.max(10),
-                );
+            let bid_price = (mid_price - offset).max(0.02);
+            problem.liquidity.add_bid(
+                market,
+                0,
+                price_to_nanos(bid_price),
+                level_supply.max(10),
+            );
+        }
 
-                // Bids (buyers)
-                let bid_price = (outcome_mid_price - offset).max(0.02);
-                problem.liquidity.add_bid(
-                    market,
-                    outcome,
-                    price_to_nanos(bid_price),
-                    level_supply.max(10),
-                );
-            }
+        // NO outcome (1)
+        let no_price = 1.0 - mid_price;
+        for level in 0..4 {
+            let offset = config.price_spread * (level as f64 + 1.0) / 4.0;
+            let level_supply = supply_per_market / 8;
+
+            let ask_price = (no_price + offset).min(0.98);
+            problem.liquidity.add_ask(
+                market,
+                1,
+                price_to_nanos(ask_price),
+                level_supply.max(10),
+            );
+
+            let bid_price = (no_price - offset).max(0.02);
+            problem.liquidity.add_bid(
+                market,
+                1,
+                price_to_nanos(bid_price),
+                level_supply.max(10),
+            );
         }
     }
 
@@ -238,7 +190,6 @@ pub fn generate_mega_scenario(config: MegaScenarioConfig) -> Problem {
             &mut order_id,
             &market_ids,
             &market_prices,
-            &market_outcomes,
         );
         problem.orders.push(order);
     }
@@ -279,22 +230,18 @@ fn generate_stress_simple_order(
     order_id: &mut u64,
     market_ids: &[MarketId],
     market_prices: &[f64],
-    market_outcomes: &[u8],
 ) -> Order {
     let id = *order_id;
     *order_id += 1;
 
     let market_idx = rng.gen_range(0..market_ids.len());
     let market = market_ids[market_idx];
-    let outcomes = market_outcomes[market_idx];
-    let outcome = rng.gen_range(0..outcomes);
+    let outcome = rng.gen_range(0..2u8);
 
     let base_price = if outcome == 0 {
         market_prices[market_idx]
-    } else if outcomes == 2 {
-        1.0 - market_prices[market_idx]
     } else {
-        (1.0 - market_prices[market_idx]) / (outcomes as f64 - 1.0)
+        1.0 - market_prices[market_idx]
     };
 
     // Varying aggressiveness
@@ -321,31 +268,19 @@ fn generate_stress_bundle_order(
     let id = *order_id;
     *order_id += 1;
 
-    // Only select binary markets for bundling to avoid exceeding MAX_STATES (32)
-    // With binary markets, we can bundle up to 5 markets (2^5 = 32 states)
-    let binary_markets: Vec<usize> = (0..market_ids.len())
-        .filter(|&i| markets.num_outcomes(market_ids[i]) == 2)
-        .collect();
-
-    if binary_markets.is_empty() {
-        // Fallback to simple order if no binary markets
-        return outcome_buy(markets, id, market_ids[0], 0, price_to_nanos(0.5), 50);
-    }
-
     // Bundle 2-5 binary markets (max 5 to stay within 32 states)
-    let max_bundle = binary_markets.len().min(5);
+    let max_bundle = market_ids.len().min(5);
     let num_to_bundle = if max_bundle >= 2 {
         rng.gen_range(2..=max_bundle)
     } else {
-        1
+        return outcome_buy(markets, id, market_ids[0], 0, price_to_nanos(0.5), 50);
     };
 
-    let mut selected = binary_markets.clone();
+    let mut selected: Vec<usize> = (0..market_ids.len()).collect();
     selected.shuffle(rng);
     selected.truncate(num_to_bundle);
 
     if selected.len() < 2 {
-        // Not enough binary markets, fallback to simple order
         let market_idx = selected.first().copied().unwrap_or(0);
         return outcome_buy(
             markets,
@@ -518,12 +453,10 @@ fn merge_subproblem(
 
     for market in sub.markets.iter() {
         let old_id = market.id;
-        let _new_id = MarketId::new(*market_id_offset);
         *market_id_offset += 1;
 
-        // Add market to main problem
-        let outcomes: Vec<String> = market.outcomes.to_vec();
-        let created_id = main.markets.add(&market.name, outcomes);
+        // Add market to main problem (all binary)
+        let created_id = main.markets.add_binary(&market.name);
         market_mapping.insert(old_id, created_id);
     }
 
@@ -561,9 +494,6 @@ fn merge_subproblem(
 
         main.orders.push(new_order);
     }
-
-    // Note: Constraints are not merged as they reference old market IDs
-    // and may not make sense across different scenarios
 }
 
 /// Configuration for MILP-killer scenarios designed to force MILP timeout.
@@ -571,7 +501,6 @@ fn merge_subproblem(
 /// Key insight: MILP struggles with:
 /// - High all-or-none fraction (binary variables)
 /// - Hot markets with severe scarcity (creates competing solutions)
-/// - Deep constraint chains (complex branch-and-bound)
 #[derive(Clone, Debug)]
 pub struct MilpKillerConfig {
     /// Random seed
@@ -588,10 +517,6 @@ pub struct MilpKillerConfig {
     pub liquidity_scarcity: f64,
     /// Fraction of markets that are "hot" (10% get 80% demand)
     pub hot_market_fraction: f64,
-    /// Depth of implication chains (5-10 deep)
-    pub implication_chains: usize,
-    /// Number of mutual exclusion groups (20-50)
-    pub exclusion_groups: usize,
 }
 
 impl Default for MilpKillerConfig {
@@ -612,8 +537,6 @@ impl MilpKillerConfig {
             bundle_fraction: 0.35,
             liquidity_scarcity: 0.2,
             hot_market_fraction: 0.1,
-            implication_chains: 8,
-            exclusion_groups: 30,
         }
     }
 
@@ -627,8 +550,6 @@ impl MilpKillerConfig {
             bundle_fraction: 0.4,
             liquidity_scarcity: 0.15,
             hot_market_fraction: 0.1,
-            implication_chains: 10,
-            exclusion_groups: 50,
         }
     }
 
@@ -642,8 +563,6 @@ impl MilpKillerConfig {
             bundle_fraction: 0.3,
             liquidity_scarcity: 0.25,
             hot_market_fraction: 0.1,
-            implication_chains: 5,
-            exclusion_groups: 15,
         }
     }
 }
@@ -653,7 +572,6 @@ impl MilpKillerConfig {
 /// This scenario maximizes problem complexity for MILP solvers:
 /// - High all-or-none fraction creates many binary variables
 /// - Severe liquidity scarcity creates competing solutions
-/// - Deep implication chains make branch-and-bound expensive
 /// - Hot markets concentrate demand, creating conflicts
 pub fn generate_milp_killer_scenario(config: MilpKillerConfig) -> Problem {
     let mut rng = StdRng::seed_from_u64(config.seed);
@@ -666,14 +584,12 @@ pub fn generate_milp_killer_scenario(config: MilpKillerConfig) -> Problem {
         (config.liquidity_scarcity * 100.0) as i32
     ));
 
-    // Create markets (all binary for simplicity)
+    // Create binary markets
     let mut market_ids: Vec<MarketId> = Vec::new();
     let mut market_prices: Vec<f64> = Vec::new();
 
     for i in 0..config.num_markets {
-        let market = problem
-            .markets
-            .add(format!("M{}", i), vec!["Yes".to_string(), "No".to_string()]);
+        let market = problem.markets.add_binary(format!("M{}", i));
         market_ids.push(market);
         market_prices.push(rng.gen_range(0.2..0.8));
     }
@@ -683,39 +599,6 @@ pub fn generate_milp_killer_scenario(config: MilpKillerConfig) -> Problem {
     let mut hot_markets: Vec<MarketId> = market_ids.clone();
     hot_markets.shuffle(&mut rng);
     hot_markets.truncate(num_hot);
-
-    // Add deep implication chains (A→B→C→D→E)
-    // This creates complex constraint propagation for MILP
-    let mut constraint_builder = ConstraintBuilder::new();
-
-    for _chain in 0..config.implication_chains {
-        // Create a chain of length 5-10
-        let chain_length = rng.gen_range(5..=10.min(config.num_markets));
-        let mut chain_markets: Vec<usize> = (0..market_ids.len()).collect();
-        chain_markets.shuffle(&mut rng);
-        chain_markets.truncate(chain_length);
-
-        // Create implication chain: A→B→C→...
-        for i in 0..chain_markets.len() - 1 {
-            let m1 = market_ids[chain_markets[i]];
-            let m2 = market_ids[chain_markets[i + 1]];
-            constraint_builder = constraint_builder.implies(m1, 0, m2, 0);
-        }
-    }
-
-    // Add mutual exclusion groups
-    for _ in 0..config.exclusion_groups {
-        let group_size = rng.gen_range(2..=4);
-        let mut group_markets: Vec<usize> = (0..market_ids.len()).collect();
-        group_markets.shuffle(&mut rng);
-        group_markets.truncate(group_size);
-
-        let outcomes: Vec<(MarketId, u8)> =
-            group_markets.iter().map(|&i| (market_ids[i], 0)).collect();
-        constraint_builder = constraint_builder.mutually_exclusive(outcomes);
-    }
-
-    problem.constraints = constraint_builder.build();
 
     // Add liquidity with severe scarcity
     let avg_order_qty = 50u64;
@@ -978,8 +861,6 @@ mod tests {
         // Should have bundles
         let bundle_count = problem.orders.iter().filter(|o| o.num_markets > 1).count();
         assert!(bundle_count > 500, "Expected many bundle orders");
-        // Should have constraints
-        assert!(problem.constraints.len() > 0);
     }
 
     #[test]

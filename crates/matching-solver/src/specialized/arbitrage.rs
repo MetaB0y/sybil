@@ -1,13 +1,12 @@
 //! Arbitrage detection and exploitation.
 //!
 //! Finds riskless profit opportunities from:
-//! 1. Constraint arbitrage: If A→B and price(A) > price(B), profit is possible
-//! 2. Bundle underpricing: Sum of legs < bundle price
-//! 3. Cross-market mispricing: Same effective exposure at different prices
+//! 1. Bundle underpricing: Sum of legs < bundle price
+//! 2. Cross-market mispricing: Same effective exposure at different prices
 
-use matching_engine::{
-    ConstraintSet, Fill, LiquidityPool, MarketConstraint, MarketId, Nanos, Order, Problem, Qty,
-};
+use std::collections::HashSet;
+
+use matching_engine::{Fill, LiquidityPool, MarketId, Nanos, Order, Problem, Qty};
 
 use crate::{MatchingResult, Solver};
 
@@ -25,8 +24,6 @@ pub struct ArbitrageOpportunity {
 /// Types of arbitrage opportunities.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ArbitrageKind {
-    /// Constraint-based: A→B with price(A) > price(B)
-    Constraint,
     /// Bundle underpricing: bundle cheaper than sum of legs
     BundleUnderpricing,
 }
@@ -49,11 +46,7 @@ impl ArbitrageDetector {
     pub fn detect_opportunities(&self, problem: &Problem) -> Vec<ArbitrageOpportunity> {
         let mut opportunities = Vec::new();
 
-        // 1. Constraint arbitrage
-        let constraint_arbs = self.detect_constraint_arbitrage(problem);
-        opportunities.extend(constraint_arbs);
-
-        // 2. Bundle underpricing
+        // Bundle underpricing
         let bundle_arbs = self.detect_bundle_arbitrage(problem);
         opportunities.extend(bundle_arbs);
 
@@ -62,38 +55,6 @@ impl ArbitrageDetector {
 
         // Sort by profit (highest first)
         opportunities.sort_by(|a, b| b.profit_per_unit.cmp(&a.profit_per_unit));
-
-        opportunities
-    }
-
-    /// Detect constraint-based arbitrage.
-    ///
-    /// If A→B (A implies B) and we can buy A cheaper than B,
-    /// buying A effectively gets us B exposure for less.
-    fn detect_constraint_arbitrage(&self, problem: &Problem) -> Vec<ArbitrageOpportunity> {
-        let mut opportunities = Vec::new();
-
-        for constraint in problem.constraints.iter() {
-            if let MarketConstraint::Implication { if_true, then_true } = constraint {
-                // Get best prices for buying each outcome
-                let price_if = self.best_ask_price(&problem.liquidity, if_true.0, if_true.1);
-                let price_then = self.best_ask_price(&problem.liquidity, then_true.0, then_true.1);
-
-                if let (Some(p_if), Some(p_then)) = (price_if, price_then) {
-                    // If we can buy A (which implies B) for less than B's price,
-                    // we could potentially exploit this
-                    if p_if < p_then {
-                        let profit_per_unit = p_then - p_if;
-
-                        opportunities.push(ArbitrageOpportunity {
-                            kind: ArbitrageKind::Constraint,
-                            order_indices: Vec::new(), // No specific orders yet
-                            profit_per_unit,
-                        });
-                    }
-                }
-            }
-        }
 
         opportunities
     }
@@ -167,7 +128,7 @@ impl ArbitrageDetector {
             return 0;
         }
 
-        let market_sizes: Vec<u8> = vec![2; num_markets]; // Assume binary
+        let market_sizes: Vec<u8> = vec![2; num_markets]; // Binary markets
         let mut outcome_votes: [i32; 4] = [0; 4];
 
         for state_idx in 0..order.num_states as usize {
@@ -202,27 +163,17 @@ impl ArbitrageDetector {
     }
 
     /// Exploit detected arbitrage opportunities.
-    ///
-    /// Fills orders that present arbitrage opportunities, prioritizing by profit.
     fn exploit_opportunities(
         &self,
         opportunities: &[ArbitrageOpportunity],
         problem: &Problem,
         result: &mut MatchingResult,
     ) {
-        // Track which orders we've already filled
-        let mut filled_orders: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        let mut filled_orders: HashSet<u64> = HashSet::new();
 
-        // Process opportunities by profit (already sorted)
         for opp in opportunities.iter().take(20) {
-            match opp.kind {
-                ArbitrageKind::BundleUnderpricing => {
-                    self.exploit_bundle_underpricing(opp, problem, result, &mut filled_orders);
-                }
-                ArbitrageKind::Constraint => {
-                    self.exploit_constraint_arbitrage(opp, problem, result, &mut filled_orders);
-                }
-            }
+            // Currently only BundleUnderpricing arbitrage is supported
+            self.exploit_bundle_underpricing(opp, problem, result, &mut filled_orders);
         }
     }
 
@@ -232,7 +183,7 @@ impl ArbitrageDetector {
         opp: &ArbitrageOpportunity,
         problem: &Problem,
         result: &mut MatchingResult,
-        filled_orders: &mut std::collections::HashSet<u64>,
+        filled_orders: &mut HashSet<u64>,
     ) {
         for &order_idx in &opp.order_indices {
             if let Some(order) = problem.orders.get(order_idx) {
@@ -240,14 +191,11 @@ impl ArbitrageDetector {
                     continue;
                 }
 
-                // Try to fill the bundle order
                 if let Some(fill) =
-                    self.try_fill_bundle(order, &result.remaining_liquidity, problem)
+                    self.try_fill_bundle(order, &result.remaining_liquidity)
                 {
-                    // Verify the fill is profitable
                     let welfare = fill.welfare(order);
                     if welfare > 0 {
-                        // Consume liquidity for each leg
                         if self.consume_bundle_liquidity(
                             order,
                             fill.fill_qty,
@@ -262,104 +210,11 @@ impl ArbitrageDetector {
         }
     }
 
-    /// Exploit constraint arbitrage by prioritizing orders early in implication chains.
-    fn exploit_constraint_arbitrage(
-        &self,
-        _opp: &ArbitrageOpportunity,
-        problem: &Problem,
-        result: &mut MatchingResult,
-        filled_orders: &mut std::collections::HashSet<u64>,
-    ) {
-        // For constraint arbitrage, we want to find orders buying the "if" side of implications
-        // where price(if) < price(then)
-
-        // Find all orders buying outcomes that are at the start of implication chains
-        for order in &problem.orders {
-            if filled_orders.contains(&order.id) {
-                continue;
-            }
-
-            if order.num_markets != 1 {
-                continue;
-            }
-
-            let market = order.markets[0];
-            let outcome = self.determine_buying_outcome(order);
-
-            // Check if this (market, outcome) is the "if" side of any implication
-            // with a price advantage
-            if self.is_cheap_implicant(&problem.constraints, &problem.liquidity, market, outcome) {
-                if let Some(fill) = self.try_fill_simple(order, &result.remaining_liquidity) {
-                    if fill.welfare(order) > 0 {
-                        if let Some(book) =
-                            result.remaining_liquidity.books.get_mut(&(market, outcome))
-                        {
-                            let (filled, price) =
-                                book.consume_asks(fill.fill_qty, order.limit_price);
-                            if filled >= order.min_fill && filled > 0 {
-                                let actual_fill = Fill::new(order.id, filled, price);
-                                result.add_fill(actual_fill, order);
-                                filled_orders.insert(order.id);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Check if (market, outcome) is the antecedent of an implication and is priced cheaper.
-    fn is_cheap_implicant(
-        &self,
-        constraints: &ConstraintSet,
-        liquidity: &LiquidityPool,
-        market: MarketId,
-        outcome: u8,
-    ) -> bool {
-        for constraint in constraints.iter() {
-            if let MarketConstraint::Implication { if_true, then_true } = constraint {
-                if if_true.0 == market && if_true.1 == outcome {
-                    // Check prices
-                    let price_if = self.best_ask_price(liquidity, if_true.0, if_true.1);
-                    let price_then = self.best_ask_price(liquidity, then_true.0, then_true.1);
-
-                    if let (Some(p_if), Some(p_then)) = (price_if, price_then) {
-                        if p_if < p_then {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        false
-    }
-
-    /// Try to fill a simple (single-market) order.
-    fn try_fill_simple(&self, order: &Order, liquidity: &LiquidityPool) -> Option<Fill> {
-        if order.num_markets != 1 {
-            return None;
-        }
-
-        let market = order.markets[0];
-        let outcome = self.determine_buying_outcome(order);
-
-        if let Some(book) = liquidity.book(market, outcome) {
-            let (avail, avg_price) = book.available_to_buy(order.limit_price);
-            if avail >= order.min_fill && avail > 0 {
-                let fill_qty = avail.min(order.max_fill);
-                return Some(Fill::new(order.id, fill_qty, avg_price));
-            }
-        }
-
-        None
-    }
-
     /// Try to fill a bundle order.
     fn try_fill_bundle(
         &self,
         order: &Order,
         liquidity: &LiquidityPool,
-        _problem: &Problem,
     ) -> Option<Fill> {
         if order.num_markets <= 1 {
             return None;
@@ -378,7 +233,6 @@ impl ArbitrageDetector {
             let outcome = self.determine_bundle_outcome(order, market_idx);
 
             if let Some(book) = liquidity.book(market, outcome) {
-                // Check how much we can buy at prices that fit the limit
                 let (avail, avg_price) = book.available_to_buy(order.limit_price);
                 if avail < order.min_fill {
                     return None;
@@ -441,26 +295,6 @@ impl ArbitrageDetector {
 
         true
     }
-
-    /// Determine which outcome is being bought for a simple order.
-    fn determine_buying_outcome(&self, order: &Order) -> u8 {
-        let mut best_outcome = 0u8;
-        let mut best_payoff = i8::MIN;
-
-        for (i, &payoff) in order
-            .payoffs
-            .iter()
-            .take(order.num_states as usize)
-            .enumerate()
-        {
-            if payoff > best_payoff {
-                best_payoff = payoff;
-                best_outcome = i as u8;
-            }
-        }
-
-        best_outcome
-    }
 }
 
 impl Default for ArbitrageDetector {
@@ -473,10 +307,7 @@ impl Solver for ArbitrageDetector {
     fn solve(&self, problem: &Problem) -> MatchingResult {
         let mut result = MatchingResult::new(problem.liquidity.snapshot());
 
-        // Detect opportunities
         let opportunities = self.detect_opportunities(problem);
-
-        // Try to exploit them
         self.exploit_opportunities(&opportunities, problem, &mut result);
 
         result
@@ -490,55 +321,21 @@ impl Solver for ArbitrageDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matching_engine::{BookLevel, LiquidityBook, Market, MarketConstraint, OrderBuilder, Side};
 
     #[test]
-    fn test_arbitrage_detection() {
-        let mut problem = Problem::new("test");
-
-        let m1 = problem.markets.add_binary("A_wins");
-        let m2 = problem.markets.add_binary("A_advances");
-
-        // A wins → A advances (implication)
-        problem
-            .constraints
-            .add(MarketConstraint::implies(m1, 0, m2, 0));
-
-        // Set up liquidity where buying "A wins" is cheaper than "A advances"
-        problem.liquidity.add_ask(m1, 0, 400_000_000, 1000); // A wins at 0.40
-        problem.liquidity.add_ask(m2, 0, 600_000_000, 1000); // A advances at 0.60
-
-        let detector = ArbitrageDetector::new();
-        let opportunities = detector.detect_opportunities(&problem);
-
-        // Should detect constraint arbitrage
-        assert!(!opportunities.is_empty());
-        assert_eq!(opportunities[0].kind, ArbitrageKind::Constraint);
-    }
-
-    #[test]
-    fn test_no_arbitrage_when_prices_correct() {
+    fn test_bundle_arbitrage_detection() {
         let mut problem = Problem::new("test");
 
         let m1 = problem.markets.add_binary("market_1");
         let m2 = problem.markets.add_binary("market_2");
 
-        problem
-            .constraints
-            .add(MarketConstraint::implies(m1, 0, m2, 0));
-
-        // Prices correctly ordered: A wins more expensive than A advances
-        problem.liquidity.add_ask(m1, 0, 500_000_000, 1000);
-        problem.liquidity.add_ask(m2, 0, 400_000_000, 1000);
+        // Set up liquidity
+        problem.liquidity.add_ask(m1, 0, 400_000_000, 1000);
+        problem.liquidity.add_ask(m2, 0, 300_000_000, 1000);
 
         let detector = ArbitrageDetector::new();
+        // With no bundle orders, should find no arbitrage
         let opportunities = detector.detect_opportunities(&problem);
-
-        // Should not detect constraint arbitrage when prices are correctly ordered
-        let constraint_arbs: Vec<_> = opportunities
-            .iter()
-            .filter(|o| o.kind == ArbitrageKind::Constraint)
-            .collect();
-        assert!(constraint_arbs.is_empty());
+        assert!(opportunities.is_empty());
     }
 }

@@ -14,8 +14,10 @@
 #### matching-solver (Solving Algorithms)
 - **LocalSolver** - Per-market clearing with price normalization
 - **MmAllocator** - MM budget allocation via Lagrangian relaxation
+- **PriceProjector** - Cross-market price consistency
 - **Combiner** - MWIS-based solution combination
-- **Specialized solvers**: Arbitrage, BundleDecomposer, ChainFinder
+- **Pipeline** - Orchestration of all solver phases
+- **Specialized solvers**: Arbitrage
 
 #### matching-scenarios (Test Scenarios)
 - Mega scenario generator (configurable scale)
@@ -23,15 +25,11 @@
 
 ### Not Yet Implemented
 
-1. **Full Pipeline Integration**
-   - LocalSolver → MmAllocator → Combiner in single flow
-   - MM orders affecting per-market clearing prices
-
-2. **Flash Liquidity**
+1. **Flash Liquidity**
    - MM provides conditional liquidity
    - Capital usage determined at clearing time
 
-3. **External Solver Interface**
+2. **External Solver Interface**
    - API for external solver submissions
 
 ---

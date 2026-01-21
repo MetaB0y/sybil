@@ -2,7 +2,7 @@
 //!
 //! This module provides a single comprehensive scenario generator that creates
 //! realistic test problems with:
-//! - Multiple markets with varying outcome counts (not just binary)
+//! - Multiple binary markets
 //! - Market maker constraints with different strategies
 //! - Configurable order distributions
 //!
@@ -69,10 +69,8 @@ impl Default for PriceDistribution {
 pub struct MegaScenarioConfigV2 {
     /// Random seed for reproducibility
     pub seed: u64,
-    /// Number of markets to generate
+    /// Number of markets to generate (all binary)
     pub num_markets: usize,
-    /// Range of outcomes per market (e.g., 2..6 for 2-5 outcomes)
-    pub outcomes_per_market: Range<u8>,
     /// Range of orders per market
     pub orders_per_market: Range<usize>,
     /// Fraction of orders that get matched (affects liquidity)
@@ -102,7 +100,6 @@ impl Default for MegaScenarioConfigV2 {
         Self {
             seed: 42,
             num_markets: 50,
-            outcomes_per_market: 2..5,
             orders_per_market: 50..200,
             matching_fraction: 0.3..0.7,
 
@@ -164,7 +161,6 @@ impl MegaScenarioConfigV2 {
     pub fn extreme() -> Self {
         Self {
             num_markets: 200,
-            outcomes_per_market: 2..6,
             orders_per_market: 200..500,
             num_mms: 8,
             bundle_fraction: 0.25,
@@ -173,7 +169,7 @@ impl MegaScenarioConfigV2 {
     }
 }
 
-/// Generate a comprehensive mega scenario.
+/// Generate a comprehensive mega scenario with binary markets.
 pub fn generate_mega_scenario_v2(config: MegaScenarioConfigV2) -> Problem {
     let mut rng = ChaCha8Rng::seed_from_u64(config.seed);
     let mut problem = Problem::new(format!(
@@ -181,44 +177,35 @@ pub fn generate_mega_scenario_v2(config: MegaScenarioConfigV2) -> Problem {
         config.num_markets, config.num_mms
     ));
 
-    // Generate markets with varying outcome counts
-    let mut market_info: Vec<(MarketId, u8, Vec<f64>)> = Vec::new(); // (id, outcomes, fair_prices)
+    // Generate binary markets with fair prices
+    let mut market_info: Vec<(MarketId, f64)> = Vec::new(); // (id, fair_price_yes)
 
     for i in 0..config.num_markets {
-        let num_outcomes = rng.gen_range(config.outcomes_per_market.clone());
-        let market_id = if num_outcomes == 2 {
-            problem.markets.add_binary(&format!("market_{}", i))
-        } else {
-            let outcomes: Vec<String> = (0..num_outcomes)
-                .map(|j| format!("outcome_{}", j))
-                .collect();
-            problem.markets.add(&format!("market_{}", i), outcomes)
-        };
+        let market_id = problem.markets.add_binary(&format!("market_{}", i));
 
-        // Generate fair prices that sum to 1.0
-        let fair_prices = generate_fair_prices(&mut rng, num_outcomes);
+        // Generate fair price for YES (NO is 1 - YES)
+        let fair_price_yes = rng.gen_range(0.2..0.8);
 
-        // Add liquidity around fair prices
-        for (outcome_idx, &fair_price) in fair_prices.iter().enumerate() {
-            let liquidity_qty = rng.gen_range(1000..10000);
-            let ask_price = (fair_price * NANOS_PER_DOLLAR as f64 * 1.02) as Nanos;
-            problem
-                .liquidity
-                .add_ask(market_id, outcome_idx as u8, ask_price, liquidity_qty);
-        }
+        // Add liquidity for YES and NO
+        let liquidity_qty = rng.gen_range(1000..10000);
+        let yes_ask_price = (fair_price_yes * NANOS_PER_DOLLAR as f64 * 1.02) as Nanos;
+        let no_ask_price = ((1.0 - fair_price_yes) * NANOS_PER_DOLLAR as f64 * 1.02) as Nanos;
 
-        market_info.push((market_id, num_outcomes, fair_prices));
+        problem.liquidity.add_ask(market_id, 0, yes_ask_price, liquidity_qty); // YES
+        problem.liquidity.add_ask(market_id, 1, no_ask_price, liquidity_qty); // NO
+
+        market_info.push((market_id, fair_price_yes));
     }
 
     // Generate regular orders
     let mut order_id: u64 = 1;
     let mut market_orders: HashMap<MarketId, Vec<u64>> = HashMap::new();
 
-    for (market_id, num_outcomes, _) in &market_info {
+    for (market_id, _) in &market_info {
         let num_orders = rng.gen_range(config.orders_per_market.clone());
 
         for _ in 0..num_orders {
-            let outcome = rng.gen_range(0..*num_outcomes);
+            let outcome = rng.gen_range(0..2u8); // YES or NO
             let size = rng.gen_range(config.order_size.clone());
             let price = generate_order_price(&mut rng, &config.price_distribution);
 
@@ -237,7 +224,7 @@ pub fn generate_mega_scenario_v2(config: MegaScenarioConfigV2) -> Problem {
         }
     }
 
-    // Generate bundle orders
+    // Generate bundle orders (across multiple binary markets)
     let num_bundles = (config.bundle_fraction * problem.orders.len() as f64) as usize;
     for _ in 0..num_bundles {
         if market_info.len() < 2 {
@@ -268,18 +255,14 @@ pub fn generate_mega_scenario_v2(config: MegaScenarioConfigV2) -> Problem {
     }
 
     // Compute anchor prices from order flow before generating MM orders
-    // This simulates MMs observing the market before quoting
     let anchor_prices = compute_anchor_prices(&problem, &market_info);
 
-    // Build market_info with anchor prices instead of initial fair prices
-    let market_info_with_anchors: Vec<(MarketId, u8, Vec<f64>)> = market_info
+    // Build market_info with anchor prices
+    let market_info_with_anchors: Vec<(MarketId, f64)> = market_info
         .iter()
-        .map(|(id, outcomes, _initial)| {
-            let anchors = anchor_prices.get(id).cloned().unwrap_or_else(|| {
-                // Fallback to uniform prices
-                vec![1.0 / *outcomes as f64; *outcomes as usize]
-            });
-            (*id, *outcomes, anchors)
+        .map(|(id, initial)| {
+            let anchor = anchor_prices.get(id).copied().unwrap_or(*initial);
+            (*id, anchor)
         })
         .collect();
 
@@ -300,7 +283,7 @@ pub fn generate_mega_scenario_v2(config: MegaScenarioConfigV2) -> Problem {
             budget_dollars,
             leverage,
             &strategy,
-            &market_info_with_anchors, // Use anchor prices
+            &market_info_with_anchors,
             &market_orders,
             &mut order_id,
             &mut problem,
@@ -312,100 +295,62 @@ pub fn generate_mega_scenario_v2(config: MegaScenarioConfigV2) -> Problem {
     problem
 }
 
-/// Generate fair prices for a market that sum to 1.0
-fn generate_fair_prices(rng: &mut ChaCha8Rng, num_outcomes: u8) -> Vec<f64> {
-    let mut weights: Vec<f64> = (0..num_outcomes)
-        .map(|_| rng.gen::<f64>() + 0.1) // +0.1 to avoid near-zero prices
-        .collect();
-
-    let sum: f64 = weights.iter().sum();
-    for w in &mut weights {
-        *w /= sum;
-    }
-
-    weights
-}
-
 /// Compute anchor prices by simulating price discovery from order flow.
-/// This estimates where clearing prices will be, so MMs can quote around them.
 fn compute_anchor_prices(
     problem: &Problem,
-    market_info: &[(MarketId, u8, Vec<f64>)],
-) -> HashMap<MarketId, Vec<f64>> {
-    let mut anchor_prices: HashMap<MarketId, Vec<f64>> = HashMap::new();
+    market_info: &[(MarketId, f64)],
+) -> HashMap<MarketId, f64> {
+    let mut anchor_prices: HashMap<MarketId, f64> = HashMap::new();
 
-    for (market_id, num_outcomes, initial_fair_prices) in market_info {
-        let mut prices = vec![0.0f64; *num_outcomes as usize];
+    for (market_id, initial_fair_price) in market_info {
+        // Collect buy orders for YES outcome
+        let mut buy_prices: Vec<(Nanos, Qty)> = problem
+            .orders
+            .iter()
+            .filter(|o| {
+                o.num_markets == 1
+                    && o.markets[0] == *market_id
+                    && o.payoffs[0] > 0 // YES outcome
+            })
+            .map(|o| (o.limit_price, o.max_fill))
+            .collect();
 
-        for outcome in 0..*num_outcomes {
-            // Collect buy orders for this outcome
-            let mut buy_prices: Vec<(Nanos, Qty)> = problem
-                .orders
-                .iter()
-                .filter(|o| {
-                    o.num_markets == 1
-                        && o.markets[0] == *market_id
-                        && o.payoffs[outcome as usize] > 0
-                })
-                .map(|o| (o.limit_price, o.max_fill))
-                .collect();
+        buy_prices.sort_by(|a, b| b.0.cmp(&a.0));
 
-            // Sort by price descending (most aggressive first)
-            buy_prices.sort_by(|a, b| b.0.cmp(&a.0));
+        let liquidity_supply: Qty = problem
+            .liquidity
+            .books
+            .get(&(*market_id, 0))
+            .map(|book| book.asks().iter().map(|l| l.available_qty).sum())
+            .unwrap_or(0);
 
-            // Get liquidity supply for this outcome
-            let liquidity_supply: Qty = problem
-                .liquidity
-                .books
-                .get(&(*market_id, outcome))
-                .map(|book| book.asks().iter().map(|l| l.available_qty).sum())
-                .unwrap_or(0);
+        let liquidity_price: Nanos = problem
+            .liquidity
+            .books
+            .get(&(*market_id, 0))
+            .and_then(|book| book.asks().first().map(|l| l.price))
+            .unwrap_or((*initial_fair_price * NANOS_PER_DOLLAR as f64) as Nanos);
 
-            let liquidity_price: Nanos = problem
-                .liquidity
-                .books
-                .get(&(*market_id, outcome))
-                .and_then(|book| book.asks().first().map(|l| l.price))
-                .unwrap_or(
-                    (initial_fair_prices[outcome as usize] * NANOS_PER_DOLLAR as f64) as Nanos,
-                );
+        let mut cumulative_demand: Qty = 0;
+        let mut clearing_price = liquidity_price;
 
-            // Find clearing price: where cumulative demand meets supply
-            let mut cumulative_demand: Qty = 0;
-            let mut clearing_price = liquidity_price;
-
-            for (price, qty) in &buy_prices {
-                cumulative_demand += qty;
-                if cumulative_demand >= liquidity_supply {
-                    // Demand exceeds supply at this price
-                    clearing_price = *price;
-                    break;
-                }
+        for (price, qty) in &buy_prices {
+            cumulative_demand += qty;
+            if cumulative_demand >= liquidity_supply {
+                clearing_price = *price;
+                break;
             }
-
-            // If demand never exceeded supply, use the lowest buy price or liquidity price
-            if cumulative_demand < liquidity_supply {
-                clearing_price = buy_prices
-                    .last()
-                    .map(|(p, _)| *p)
-                    .unwrap_or(liquidity_price);
-            }
-
-            prices[outcome as usize] = clearing_price as f64 / NANOS_PER_DOLLAR as f64;
         }
 
-        // Normalize prices to sum to 1.0
-        let sum: f64 = prices.iter().sum();
-        if sum > 0.0 {
-            for p in &mut prices {
-                *p /= sum;
-            }
-        } else {
-            // Fallback to initial fair prices
-            prices = initial_fair_prices.clone();
+        if cumulative_demand < liquidity_supply {
+            clearing_price = buy_prices
+                .last()
+                .map(|(p, _)| *p)
+                .unwrap_or(liquidity_price);
         }
 
-        anchor_prices.insert(*market_id, prices);
+        let price = (clearing_price as f64 / NANOS_PER_DOLLAR as f64).clamp(0.05, 0.95);
+        anchor_prices.insert(*market_id, price);
     }
 
     anchor_prices
@@ -444,8 +389,6 @@ fn create_bundle_order(
     if market_ids.len() < 2 {
         return None;
     }
-
-    // bundle_yes takes a slice of market IDs
     Some(bundle_yes(markets, id, market_ids, price, qty))
 }
 
@@ -456,7 +399,7 @@ fn create_mm_constraint(
     budget_dollars: u64,
     leverage: f64,
     strategy: &MmStrategy,
-    market_info: &[(MarketId, u8, Vec<f64>)],
+    market_info: &[(MarketId, f64)],
     market_orders: &HashMap<MarketId, Vec<u64>>,
     order_id: &mut u64,
     problem: &mut Problem,
@@ -466,69 +409,54 @@ fn create_mm_constraint(
 
     let mut constraint = MmConstraint::new(mm_id, budget_nanos);
 
-    // Build fair price lookup map
-    let fair_price_map: HashMap<MarketId, &Vec<f64>> = market_info
+    let fair_price_map: HashMap<MarketId, f64> = market_info
         .iter()
-        .map(|(id, _, prices)| (*id, prices))
+        .map(|(id, price)| (*id, *price))
         .collect();
 
     // Select markets based on strategy
-    let selected_markets: Vec<(MarketId, u8)> = match strategy {
+    let selected_markets: Vec<MarketId> = match strategy {
         MmStrategy::FewMarkets { count } => {
-            let mut markets: Vec<_> = market_info.iter().map(|(id, o, _)| (*id, *o)).collect();
+            let mut markets: Vec<_> = market_info.iter().map(|(id, _)| *id).collect();
             markets.shuffle(rng);
             markets.truncate(*count);
             markets
         }
         MmStrategy::ManyMarkets { count } => {
-            let mut markets: Vec<_> = market_info.iter().map(|(id, o, _)| (*id, *o)).collect();
+            let mut markets: Vec<_> = market_info.iter().map(|(id, _)| *id).collect();
             markets.shuffle(rng);
             markets.truncate(*count);
             markets
         }
         MmStrategy::Concentrated { top_n } => {
-            // Select top N by number of existing orders
             let mut by_order_count: Vec<_> = market_info
                 .iter()
-                .map(|(id, o, _)| {
+                .map(|(id, _)| {
                     let count = market_orders.get(id).map(|v| v.len()).unwrap_or(0);
-                    (*id, *o, count)
+                    (*id, count)
                 })
                 .collect();
-            by_order_count.sort_by(|a, b| b.2.cmp(&a.2));
+            by_order_count.sort_by(|a, b| b.1.cmp(&a.1));
             by_order_count.truncate(*top_n);
-            by_order_count
-                .into_iter()
-                .map(|(id, o, _)| (id, o))
-                .collect()
+            by_order_count.into_iter().map(|(id, _)| id).collect()
         }
-        _ => {
-            // TightSpreads, WideSpreads, Diversified - use all markets
-            market_info.iter().map(|(id, o, _)| (*id, *o)).collect()
-        }
+        _ => market_info.iter().map(|(id, _)| *id).collect(),
     };
 
-    // Calculate notional per market
     let notional_per_market = if selected_markets.is_empty() {
         0
     } else {
         notional_budget / selected_markets.len() as u64
     };
 
-    // Generate MM orders
-    for (market_id, _num_outcomes) in selected_markets {
+    for market_id in selected_markets {
         let spread_bps = match strategy {
             MmStrategy::TightSpreads { spread_bps } => *spread_bps,
             MmStrategy::WideSpreads { spread_bps } => *spread_bps,
-            _ => 50, // default spread
+            _ => 50,
         };
 
-        // Look up actual fair price for outcome 0 (YES)
-        let fair_price = fair_price_map
-            .get(&market_id)
-            .and_then(|prices| prices.get(0))
-            .copied()
-            .unwrap_or(0.50);
+        let fair_price = fair_price_map.get(&market_id).copied().unwrap_or(0.50);
         let spread_frac = spread_bps as f64 / 10000.0;
 
         let bid_price = fair_price - spread_frac / 2.0;
@@ -540,7 +468,6 @@ fn create_mm_constraint(
         }
 
         // MM sell order (provides liquidity at ask)
-        // Selling YES: receive premium upfront, owe $1 if outcome happens
         let sell_order = outcome_sell(
             &problem.markets,
             *order_id,
@@ -595,24 +522,15 @@ mod tests {
     }
 
     #[test]
-    fn test_mega_v2_has_multi_outcome_markets() {
-        let mut config = MegaScenarioConfigV2::default();
-        config.outcomes_per_market = 3..6; // Force multi-outcome
-        config.num_markets = 20;
-
+    fn test_mega_v2_all_binary() {
+        let config = MegaScenarioConfigV2::default();
         let problem = generate_mega_scenario_v2(config);
 
-        // At least some markets should have more than 2 outcomes
-        let multi_outcome_markets = problem
-            .markets
-            .iter()
-            .filter(|m| m.outcomes.len() > 2)
-            .count();
-
-        assert!(
-            multi_outcome_markets > 0,
-            "Should have multi-outcome markets"
-        );
+        // All markets should be binary
+        for market in problem.markets.iter() {
+            assert!(market.is_binary());
+            assert_eq!(market.num_outcomes(), 2);
+        }
     }
 
     #[test]
@@ -622,21 +540,6 @@ mod tests {
 
         for mm in &problem.mm_constraints {
             assert!(mm.num_orders() > 0, "MM {} should have orders", mm.mm_id.0);
-        }
-    }
-
-    #[test]
-    fn test_fair_prices_sum_to_one() {
-        let mut rng = ChaCha8Rng::seed_from_u64(42);
-
-        for num_outcomes in 2..=6 {
-            let prices = generate_fair_prices(&mut rng, num_outcomes);
-            let sum: f64 = prices.iter().sum();
-            assert!(
-                (sum - 1.0).abs() < 0.001,
-                "Prices should sum to 1.0, got {}",
-                sum
-            );
         }
     }
 }

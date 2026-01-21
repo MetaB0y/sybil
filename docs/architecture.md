@@ -101,7 +101,8 @@ crates/
 │   ├── combiner/        # Solution combination
 │   │   ├── conflict.rs  # Conflict graph
 │   │   └── mwis.rs      # MWIS algorithms
-│   └── specialized/     # Specialized solvers
+│   ├── specialized/     # Specialized solvers
+│   └── pipeline.rs      # Pipeline orchestration
 │
 ├── matching-scenarios/  # Test scenarios
 │   ├── mega.rs          # Mega scenario generator
@@ -140,8 +141,6 @@ crates/
 | Solver | Purpose |
 |--------|---------|
 | Arbitrage | Find cross-market mispricings |
-| BundleDecomposer | Fill bundle orders |
-| ChainFinder | Exploit implication chains |
 
 ---
 

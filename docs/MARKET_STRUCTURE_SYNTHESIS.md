@@ -120,21 +120,10 @@ If you can independently buy "Trump wins" at $0.60 and sell "Republican wins" at
 
 **Sybil's Solution: Specialized Solvers**
 
-Three specialized solvers find and fix these:
-
-1. **ArbitrageDetector**: Finds constraint-based arbitrage
-   - Detects when A→B but price(A) > price(B)
-   - Creates patches that exploit the mispricing
-   - Profits fund welfare improvements for users
-
-2. **BundleDecomposer**: Finds underpriced complement sets
-   - Example: 4 bundles covering all outcomes at $1.03 total
-   - Guaranteed $1.00 payout = $0.03 profit
-   - Fills all atomically to lock in the arbitrage
-
-3. **ChainFinder**: Exploits implication chains
-   - Follows A→B→C→D chains
-   - If you can buy the root cheaply, you get all exposures for less
+**ArbitrageDetector**: Finds constraint-based arbitrage
+- Detects when A→B but price(A) > price(B)
+- Creates patches that exploit the mispricing
+- Profits fund welfare improvements for users
 
 **Why This is Fair:**
 
@@ -206,10 +195,9 @@ Final Solution
 **Individual Solver Strengths:**
 
 - **LocalSolver**: Fast per-market clearing with normalization
+- **PriceProjector**: Cross-market price consistency
 - **MmAllocator**: MM budget allocation via Lagrangian relaxation
 - **Arbitrage**: Finds constraint-based mispricings
-- **BundleDecomposer**: Finds complementary bundles
-- **ChainFinder**: Exploits implication chains
 
 **MWIS Combination Benefit:**
 

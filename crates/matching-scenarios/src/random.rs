@@ -1,4 +1,4 @@
-//! Random hard instance generation.
+//! Random hard instance generation with binary markets.
 
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
@@ -6,23 +6,18 @@ use rand::Rng;
 use rand::SeedableRng;
 
 use matching_engine::{
-    bundle_yes, outcome_buy, price_to_nanos, spread, ConstraintBuilder, MarketId, MarketSet, Order,
-    Qty,
+    bundle_yes, outcome_buy, price_to_nanos, spread, MarketId, MarketSet, Order, Problem, Qty,
 };
-
-use matching_engine::Problem;
 
 /// Configuration for random hard instance generation
 #[derive(Clone, Debug)]
 pub struct RandomConfig {
     pub seed: u64,
     pub num_markets: usize,
-    pub outcomes_per_market: u8,
     pub num_orders: usize,
     pub bundle_fraction: f64,
     pub spread_fraction: f64,
     pub oversubscription: f64,
-    pub num_implications: usize,
     pub base_liquidity_depth: Qty,
     pub price_levels: usize,
     pub price_spread: f64,
@@ -33,12 +28,10 @@ impl Default for RandomConfig {
         Self {
             seed: 42,
             num_markets: 5,
-            outcomes_per_market: 2,
             num_orders: 50,
             bundle_fraction: 0.2,
             spread_fraction: 0.1,
             oversubscription: 2.0,
-            num_implications: 2,
             base_liquidity_depth: 100,
             price_levels: 3,
             price_spread: 0.05,
@@ -52,7 +45,6 @@ impl RandomConfig {
             oversubscription: 0.5,
             bundle_fraction: 0.0,
             spread_fraction: 0.0,
-            num_implications: 0,
             ..Default::default()
         }
     }
@@ -62,7 +54,6 @@ impl RandomConfig {
             oversubscription: 1.5,
             bundle_fraction: 0.1,
             spread_fraction: 0.1,
-            num_implications: 1,
             ..Default::default()
         }
     }
@@ -72,14 +63,13 @@ impl RandomConfig {
             oversubscription: 3.0,
             bundle_fraction: 0.3,
             spread_fraction: 0.2,
-            num_implications: 3,
             num_orders: 100,
             ..Default::default()
         }
     }
 }
 
-/// Generate a random hard instance.
+/// Generate a random hard instance with binary markets.
 pub fn generate_random_scenario(config: RandomConfig) -> Problem {
     let mut rng = StdRng::seed_from_u64(config.seed);
     let mut problem = Problem::new(format!(
@@ -88,78 +78,62 @@ pub fn generate_random_scenario(config: RandomConfig) -> Problem {
     ));
 
     let mut market_ids: Vec<MarketId> = Vec::new();
-    let mut market_prices: Vec<f64> = Vec::new();
+    let mut market_prices: Vec<f64> = Vec::new(); // YES price for each market
 
     for i in 0..config.num_markets {
-        let outcomes: Vec<String> = (0..config.outcomes_per_market)
-            .map(|j| format!("Outcome{}", j))
-            .collect();
-        let market = problem.markets.add(format!("Market{}", i), outcomes);
+        let market = problem.markets.add_binary(format!("Market{}", i));
         market_ids.push(market);
 
         let mid_price = rng.gen_range(0.3..0.7);
         market_prices.push(mid_price);
     }
 
-    if config.num_implications > 0 && market_ids.len() >= 2 {
-        let mut constraint_builder = ConstraintBuilder::new();
-        for _ in 0..config.num_implications {
-            let m1_idx = rng.gen_range(0..market_ids.len());
-            let mut m2_idx = rng.gen_range(0..market_ids.len());
-            while m2_idx == m1_idx {
-                m2_idx = rng.gen_range(0..market_ids.len());
-            }
-
-            constraint_builder =
-                constraint_builder.implies(market_ids[m1_idx], 0, market_ids[m2_idx], 0);
-        }
-        problem.constraints = constraint_builder.build();
-    }
-
+    // Calculate supply per market
     let avg_order_qty = 75u64;
     let total_demand_estimate = config.num_orders as u64 * avg_order_qty;
     let total_supply = (total_demand_estimate as f64 / config.oversubscription) as Qty;
     let supply_per_market = total_supply / config.num_markets as Qty;
     let supply_per_level = supply_per_market / (config.price_levels as Qty * 2);
 
+    // Add liquidity for each market (YES and NO)
     for (i, &market) in market_ids.iter().enumerate() {
-        let mid_price = market_prices[i];
+        let yes_price = market_prices[i];
+        let no_price = 1.0 - yes_price;
 
-        // Add liquidity for ALL outcomes, not just outcome 0
-        for outcome in 0..config.outcomes_per_market {
-            // For binary markets: outcome 0 uses mid_price, outcome 1 uses 1-mid_price
-            // For multi-outcome: distribute remaining probability
-            let outcome_mid_price = if outcome == 0 {
-                mid_price
-            } else if config.outcomes_per_market == 2 {
-                1.0 - mid_price
-            } else {
-                (1.0 - mid_price) / (config.outcomes_per_market as f64 - 1.0)
-            };
+        for level in 0..config.price_levels {
+            let offset = config.price_spread * (level as f64 + 1.0) / config.price_levels as f64;
 
-            for level in 0..config.price_levels {
-                let offset =
-                    config.price_spread * (level as f64 + 1.0) / config.price_levels as f64;
+            // YES liquidity
+            problem.liquidity.add_bid(
+                market,
+                0,
+                price_to_nanos((yes_price - offset).max(0.01)),
+                supply_per_level.max(10),
+            );
+            problem.liquidity.add_ask(
+                market,
+                0,
+                price_to_nanos((yes_price + offset).min(0.99)),
+                supply_per_level.max(10),
+            );
 
-                let bid_price = (outcome_mid_price - offset).max(0.01);
-                problem.liquidity.add_bid(
-                    market,
-                    outcome,
-                    price_to_nanos(bid_price),
-                    supply_per_level.max(10),
-                );
-
-                let ask_price = (outcome_mid_price + offset).min(0.99);
-                problem.liquidity.add_ask(
-                    market,
-                    outcome,
-                    price_to_nanos(ask_price),
-                    supply_per_level.max(10),
-                );
-            }
+            // NO liquidity
+            problem.liquidity.add_bid(
+                market,
+                1,
+                price_to_nanos((no_price - offset).max(0.01)),
+                supply_per_level.max(10),
+            );
+            problem.liquidity.add_ask(
+                market,
+                1,
+                price_to_nanos((no_price + offset).min(0.99)),
+                supply_per_level.max(10),
+            );
         }
     }
 
+    // Generate orders
     let num_bundles = (config.num_orders as f64 * config.bundle_fraction) as usize;
     let num_spreads = (config.num_orders as f64 * config.spread_fraction) as usize;
     let num_simple = config.num_orders - num_bundles - num_spreads;
@@ -173,7 +147,6 @@ pub fn generate_random_scenario(config: RandomConfig) -> Problem {
             &mut order_id,
             &market_ids,
             &market_prices,
-            &config,
         );
         problem.orders.push(order);
     }
@@ -185,7 +158,6 @@ pub fn generate_random_scenario(config: RandomConfig) -> Problem {
             &mut order_id,
             &market_ids,
             &market_prices,
-            &config,
         );
         problem.orders.push(order);
     }
@@ -197,7 +169,6 @@ pub fn generate_random_scenario(config: RandomConfig) -> Problem {
             &mut order_id,
             &market_ids,
             &market_prices,
-            &config,
         );
         problem.orders.push(order);
     }
@@ -213,19 +184,18 @@ fn generate_simple_random_order(
     order_id: &mut u64,
     market_ids: &[MarketId],
     market_prices: &[f64],
-    config: &RandomConfig,
 ) -> Order {
     let id = *order_id;
     *order_id += 1;
 
     let market_idx = rng.gen_range(0..market_ids.len());
     let market = market_ids[market_idx];
-    let outcome = rng.gen_range(0..config.outcomes_per_market);
+    let outcome = rng.gen_range(0..2u8); // YES or NO
 
     let base_price = if outcome == 0 {
         market_prices[market_idx]
     } else {
-        (1.0 - market_prices[market_idx]) / (config.outcomes_per_market as f64 - 1.0)
+        1.0 - market_prices[market_idx]
     };
 
     let aggressiveness = rng.gen_range(0.0..0.1);
@@ -242,7 +212,6 @@ fn generate_bundle_random_order(
     order_id: &mut u64,
     market_ids: &[MarketId],
     market_prices: &[f64],
-    _config: &RandomConfig,
 ) -> Order {
     let id = *order_id;
     *order_id += 1;
@@ -268,7 +237,6 @@ fn generate_spread_random_order(
     order_id: &mut u64,
     market_ids: &[MarketId],
     market_prices: &[f64],
-    _config: &RandomConfig,
 ) -> Order {
     let id = *order_id;
     *order_id += 1;

@@ -1,55 +1,45 @@
-//! Multi-outcome market definition.
+//! Binary market definition.
+//!
+//! All markets in the engine are binary (YES/NO). Multi-outcome concepts
+//! like "Who wins: Trump/Harris/Other" are represented as multiple binary
+//! markets grouped at the solver/UI layer.
 
 use crate::types::MarketId;
 
-/// A prediction market with multiple possible outcomes.
+/// A binary prediction market (YES/NO).
 ///
-/// For binary markets, outcomes are typically ["Yes", "No"] or equivalent.
-/// For multi-outcome markets (e.g., "Who wins the election?"), outcomes
-/// list all mutually exclusive possibilities.
+/// The engine only deals with binary markets. For multi-outcome scenarios
+/// (e.g., 3-candidate elections), create multiple binary markets and group
+/// them at the solver layer using `OutcomeGroup`.
 #[derive(Clone, Debug)]
 pub struct Market {
     pub id: MarketId,
     pub name: String,
-    pub outcomes: Vec<String>,
 }
 
 impl Market {
-    /// Create a new market with the given outcomes.
-    pub fn new(id: MarketId, name: impl Into<String>, outcomes: Vec<String>) -> Self {
-        assert!(
-            !outcomes.is_empty(),
-            "Market must have at least one outcome"
-        );
+    /// Create a new binary market.
+    pub fn new(id: MarketId, name: impl Into<String>) -> Self {
         Self {
             id,
             name: name.into(),
-            outcomes,
         }
     }
 
-    /// Create a binary market (YES/NO).
-    pub fn binary(id: MarketId, name: impl Into<String>) -> Self {
-        Self::new(id, name, vec!["Yes".to_string(), "No".to_string()])
-    }
-
-    /// Number of outcomes in this market.
+    /// Number of outcomes (always 2 for binary markets).
+    #[inline]
     pub fn num_outcomes(&self) -> u8 {
-        self.outcomes.len() as u8
+        2
     }
 
-    /// Check if this is a binary market.
+    /// Binary markets are always binary.
+    #[inline]
     pub fn is_binary(&self) -> bool {
-        self.outcomes.len() == 2
-    }
-
-    /// Get outcome name by index.
-    pub fn outcome_name(&self, idx: u8) -> Option<&str> {
-        self.outcomes.get(idx as usize).map(|s| s.as_str())
+        true
     }
 }
 
-/// A collection of markets that can be used together in cross-market orders.
+/// A collection of markets.
 #[derive(Clone, Debug, Default)]
 pub struct MarketSet {
     markets: Vec<Market>,
@@ -62,29 +52,19 @@ impl MarketSet {
         }
     }
 
-    /// Add a market to the set. Returns the assigned MarketId.
-    pub fn add(&mut self, name: impl Into<String>, outcomes: Vec<String>) -> MarketId {
-        let id = MarketId::new(self.markets.len() as u32);
-        self.markets.push(Market::new(id, name, outcomes));
-        id
-    }
-
     /// Add a binary market. Returns the assigned MarketId.
     pub fn add_binary(&mut self, name: impl Into<String>) -> MarketId {
         let id = MarketId::new(self.markets.len() as u32);
-        self.markets.push(Market::binary(id, name));
+        self.markets.push(Market::new(id, name));
         id
     }
 
     /// Add a market directly (preserving its existing ID).
-    /// The market set will expand if needed to accommodate the ID.
     pub fn add_market(&mut self, market: Market) {
         let idx = market.id.0 as usize;
-        // Ensure we have enough capacity
         while self.markets.len() <= idx {
-            // Add placeholder markets
             let placeholder_id = MarketId::new(self.markets.len() as u32);
-            self.markets.push(Market::binary(
+            self.markets.push(Market::new(
                 placeholder_id,
                 format!("_placeholder_{}", self.markets.len()),
             ));
@@ -101,9 +81,9 @@ impl MarketSet {
         }
     }
 
-    /// Get the number of outcomes for a market.
+    /// Number of outcomes for a market (always 2).
     pub fn num_outcomes(&self, id: MarketId) -> u8 {
-        self.get(id).map(|m| m.num_outcomes()).unwrap_or(0)
+        if self.get(id).is_some() { 2 } else { 0 }
     }
 
     /// Iterate over all markets.
@@ -123,13 +103,9 @@ impl MarketSet {
 
     /// Calculate total number of atomic states for a set of markets.
     /// For N binary markets, this is 2^N.
-    /// For multi-outcome markets, it's the product of outcome counts.
     pub fn total_states(&self, market_ids: &[MarketId]) -> usize {
-        market_ids
-            .iter()
-            .filter(|id| !id.is_none())
-            .map(|id| self.num_outcomes(*id) as usize)
-            .product()
+        let active_markets = market_ids.iter().filter(|id| !id.is_none()).count();
+        1usize << active_markets // 2^N
     }
 }
 
@@ -139,45 +115,22 @@ mod tests {
 
     #[test]
     fn test_binary_market() {
-        let m = Market::binary(MarketId::new(0), "Trump wins");
+        let m = Market::new(MarketId::new(0), "Trump wins");
         assert!(m.is_binary());
         assert_eq!(m.num_outcomes(), 2);
-        assert_eq!(m.outcome_name(0), Some("Yes"));
-        assert_eq!(m.outcome_name(1), Some("No"));
-    }
-
-    #[test]
-    fn test_multi_outcome_market() {
-        let m = Market::new(
-            MarketId::new(0),
-            "2024 President",
-            vec![
-                "Trump".to_string(),
-                "Harris".to_string(),
-                "Other".to_string(),
-            ],
-        );
-        assert!(!m.is_binary());
-        assert_eq!(m.num_outcomes(), 3);
-        assert_eq!(m.outcome_name(0), Some("Trump"));
-        assert_eq!(m.outcome_name(1), Some("Harris"));
-        assert_eq!(m.outcome_name(2), Some("Other"));
     }
 
     #[test]
     fn test_market_set() {
         let mut set = MarketSet::new();
         let m0 = set.add_binary("Market A");
-        let m1 = set.add(
-            "Market B",
-            vec!["X".to_string(), "Y".to_string(), "Z".to_string()],
-        );
+        let m1 = set.add_binary("Market B");
 
         assert_eq!(set.len(), 2);
         assert_eq!(set.num_outcomes(m0), 2);
-        assert_eq!(set.num_outcomes(m1), 3);
+        assert_eq!(set.num_outcomes(m1), 2);
 
-        // 2 outcomes * 3 outcomes = 6 total states
-        assert_eq!(set.total_states(&[m0, m1]), 6);
+        // 2 binary markets = 4 total states (2^2)
+        assert_eq!(set.total_states(&[m0, m1]), 4);
     }
 }
