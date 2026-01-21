@@ -73,34 +73,6 @@ impl SolverSolution {
         }
     }
 
-    /// Create from a matching result.
-    pub fn from_result(
-        solver_name: impl Into<String>,
-        result: &MatchingResult,
-        problem: &Problem,
-        confidence: SolutionConfidence,
-    ) -> Self {
-        // Map fills to order indices
-        let fills: Vec<_> = result
-            .fills
-            .iter()
-            .filter_map(|fill| {
-                problem
-                    .orders
-                    .iter()
-                    .position(|o| o.id == fill.order_id)
-                    .map(|idx| (idx, fill.clone()))
-            })
-            .collect();
-
-        Self {
-            solver_name: solver_name.into(),
-            fills,
-            welfare: result.total_welfare,
-            confidence,
-        }
-    }
-
     /// Add a fill to this solution.
     #[cfg(test)]
     pub fn add_fill(&mut self, order_idx: usize, fill: Fill, welfare_delta: i64) {

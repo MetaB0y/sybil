@@ -274,67 +274,6 @@ pub trait PartialSolver: Send + Sync {
 }
 
 // ============================================================================
-// LP Contribution (Future)
-// ============================================================================
-
-/// Builder for constructing a unified LP model.
-///
-/// This is a placeholder for the future unified LP architecture.
-/// Contributors add variables and constraints to the builder,
-/// then the LP is solved once with all constraints.
-pub struct LpBuilder {
-    // Placeholder - will be implemented when we add LP contribution
-    _marker: std::marker::PhantomData<()>,
-}
-
-impl LpBuilder {
-    /// Create a new LP builder.
-    pub fn new() -> Self {
-        Self {
-            _marker: std::marker::PhantomData,
-        }
-    }
-}
-
-impl Default for LpBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Solution from solving the unified LP.
-pub struct LpSolution {
-    // Placeholder - will contain variable assignments
-    _marker: std::marker::PhantomData<()>,
-}
-
-/// Contributes constraints to a unified LP.
-///
-/// This trait supports the future "Option D" architecture where
-/// all constraints are added to a single LP that is solved once.
-///
-/// # Future Implementation
-///
-/// ```ignore
-/// let pipeline = Pipeline::builder()
-///     .lp_contributor(ArbConstraintContributor::new())
-///     .lp_contributor(MmBudgetContributor::new())
-///     .lp_contributor(SyntheticMatchingContributor::new())
-///     .solve_unified_lp()
-///     .build();
-/// ```
-pub trait LpContributor: Send + Sync {
-    /// Contribute variables and constraints to the LP builder.
-    fn contribute(&self, builder: &mut LpBuilder, problem: &Problem);
-
-    /// Extract fills from the LP solution.
-    fn extract(&self, solution: &LpSolution) -> Vec<Fill>;
-
-    /// Name of this contributor.
-    fn name(&self) -> &str;
-}
-
-// ============================================================================
 // Adapter Utilities
 // ============================================================================
 
@@ -350,11 +289,6 @@ pub fn matching_result_to_partial(
         result.total_welfare,
         confidence,
     )
-}
-
-/// Convert a PriceDiscoveryResult to fills.
-pub fn price_discovery_to_fills(result: &PriceDiscoveryResult) -> Vec<Fill> {
-    result.all_fills()
 }
 
 #[cfg(test)]

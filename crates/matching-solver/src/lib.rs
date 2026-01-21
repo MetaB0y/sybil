@@ -46,7 +46,6 @@ pub use traits::{
     PriceProjector, PriceProjectionResult,
     OrderAllocator, AllocationResult,
     PartialSolver, PartialSolution,
-    LpContributor, LpBuilder, LpSolution,
     matching_result_to_partial,
 };
 

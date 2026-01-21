@@ -310,27 +310,6 @@ impl Default for BenchmarkHarness {
     }
 }
 
-// ============================================================================
-// Quick Benchmark Functions
-// ============================================================================
-
-/// Run a quick benchmark comparing pipelines on a single scenario.
-pub fn quick_benchmark(problem: &Problem, pipelines: &[(String, Pipeline)]) -> BenchmarkResults {
-    let mut harness = BenchmarkHarness::new();
-    harness.add_scenario("default", problem.clone());
-
-    for (name, pipeline) in pipelines {
-        // We need to clone the pipeline - but Pipeline doesn't implement Clone
-        // So for now, we'll just note this limitation
-        // In practice, users would create pipelines fresh
-        let _ = (name, pipeline);
-    }
-
-    // This is a simplified version - in practice you'd want to
-    // be able to pass pipelines directly
-    harness.run()
-}
-
 /// Compare a pipeline against the baseline (current approach).
 pub fn compare_to_baseline(problem: &Problem, pipeline: Pipeline, name: &str) -> BenchmarkResults {
     let mut harness = BenchmarkHarness::new();
