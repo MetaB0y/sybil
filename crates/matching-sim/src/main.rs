@@ -5,10 +5,7 @@ use std::time::Instant;
 use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Cell, Color, Table};
 
 use matching_scenarios::Problem;
-use matching_solver::{
-    GreedySolver, MilpSolver, PlatformConfig, RandomizedGreedySolver, Solver,
-    SolverPlatform,
-};
+use matching_solver::{GreedySolver, MilpSolver, Pipeline, Solver};
 
 mod metrics;
 mod runners;
@@ -23,8 +20,7 @@ use scenarios::create_problem;
 pub enum SolverChoice {
     Greedy,
     Milp,
-    Randomized,
-    Platform,
+    Pipeline,
     All,
 }
 
@@ -33,8 +29,7 @@ impl SolverChoice {
         match s.to_lowercase().as_str() {
             "greedy" => Some(Self::Greedy),
             "milp" => Some(Self::Milp),
-            "randomized" | "random" => Some(Self::Randomized),
-            "platform" => Some(Self::Platform),
+            "pipeline" | "platform" => Some(Self::Pipeline),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -205,7 +200,7 @@ impl SimulationResults {
     }
 }
 
-fn create_solvers(choice: &SolverChoice, seed: u64, milp_timeout: Option<f64>) -> Vec<Box<dyn Solver>> {
+fn create_solvers(choice: &SolverChoice, _seed: u64, milp_timeout: Option<f64>) -> Vec<Box<dyn Solver>> {
     match choice {
         SolverChoice::Greedy => vec![Box::new(GreedySolver::new())],
         SolverChoice::Milp => {
@@ -215,22 +210,8 @@ fn create_solvers(choice: &SolverChoice, seed: u64, milp_timeout: Option<f64>) -
                 vec![Box::new(MilpSolver::new())]
             }
         }
-        SolverChoice::Randomized => vec![Box::new(RandomizedGreedySolver::new())],
-        SolverChoice::Platform => {
-            let config = if let Some(timeout) = milp_timeout {
-                PlatformConfig {
-                    total_time_budget_ms: (timeout * 1000.0 / 0.6) as u64,
-                    milp_time_fraction: 0.6,
-                    seed,
-                    ..Default::default()
-                }
-            } else {
-                PlatformConfig {
-                    seed,
-                    ..Default::default()
-                }
-            };
-            vec![Box::new(SolverPlatform::with_config(config))]
+        SolverChoice::Pipeline => {
+            vec![Box::new(Pipeline::full_platform())]
         }
         SolverChoice::All => {
             let milp: Box<dyn Solver> = if let Some(timeout) = milp_timeout {
@@ -238,24 +219,10 @@ fn create_solvers(choice: &SolverChoice, seed: u64, milp_timeout: Option<f64>) -
             } else {
                 Box::new(MilpSolver::new())
             };
-            let platform_config = if let Some(timeout) = milp_timeout {
-                PlatformConfig {
-                    total_time_budget_ms: (timeout * 1000.0 / 0.6) as u64,
-                    milp_time_fraction: 0.6,
-                    seed,
-                    ..Default::default()
-                }
-            } else {
-                PlatformConfig {
-                    seed,
-                    ..Default::default()
-                }
-            };
             vec![
                 milp,
                 Box::new(GreedySolver::new()),
-                Box::new(RandomizedGreedySolver::new()),
-                Box::new(SolverPlatform::with_config(platform_config)),
+                Box::new(Pipeline::full_platform()),
             ]
         }
     }
@@ -473,8 +440,7 @@ fn main() {
                 println!("  --solver <S>         Solver to use:");
                 println!("                         greedy (default)");
                 println!("                         milp (optimal via MILP)");
-                println!("                         randomized (random order shuffling)");
-                println!("                         platform (combines all solvers via MWIS)");
+                println!("                         pipeline (FBA pipeline)");
                 println!("                         all (compare all solvers)");
                 println!("  --milp-timeout <S>   MILP time limit in seconds (default: none)");
                 println!("  --verbose, -v        Show detailed output");

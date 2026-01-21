@@ -381,5 +381,67 @@ fn bench_harness_comparison() {
     // In real usage, you'd call harness.report(&results) to print the comparison
 }
 
+// ============================================================================
+// Pipeline Consistent Benchmarks (with Price Projection)
+// ============================================================================
+
+#[divan::bench]
+fn bench_pipeline_consistent_small() {
+    let config = MegaScenarioConfigV2::small();
+    let problem = generate_mega_scenario_v2(config);
+    let pipeline = Pipeline::consistent();
+    let _ = pipeline.solve(&problem);
+}
+
+#[divan::bench]
+fn bench_pipeline_consistent_medium() {
+    let config = MegaScenarioConfigV2::medium();
+    let problem = generate_mega_scenario_v2(config);
+    let pipeline = Pipeline::consistent();
+    let _ = pipeline.solve(&problem);
+}
+
+#[divan::bench]
+fn bench_pipeline_consistent_large() {
+    let config = MegaScenarioConfigV2::large();
+    let problem = generate_mega_scenario_v2(config);
+    let pipeline = Pipeline::consistent();
+    let _ = pipeline.solve(&problem);
+}
+
+#[divan::bench]
+fn bench_pipeline_consistent_extreme() {
+    let config = MegaScenarioConfigV2::extreme();
+    let problem = generate_mega_scenario_v2(config);
+    let pipeline = Pipeline::consistent();
+    let _ = pipeline.solve(&problem);
+}
+
+// ============================================================================
+// Comparative Benchmark: Current vs Consistent
+// ============================================================================
+
+use std::sync::OnceLock;
+
+#[divan::bench(args = ["current", "consistent"])]
+fn bench_pipeline_comparison_medium(bencher: Bencher, pipeline_type: &str) {
+    // Generate scenario once and share across iterations
+    static PROBLEM: OnceLock<Problem> = OnceLock::new();
+    let problem = PROBLEM.get_or_init(|| {
+        let mut config = MegaScenarioConfigV2::medium();
+        config.bundle_fraction = 0.30; // Higher bundle fraction for more projection work
+        generate_mega_scenario_v2(config)
+    });
+
+    bencher.bench_local(|| {
+        let pipeline = match pipeline_type {
+            "current" => Pipeline::current(),
+            "consistent" => Pipeline::consistent(),
+            _ => Pipeline::current(),
+        };
+        pipeline.solve(problem)
+    });
+}
+
 // Validation tests moved to tests/validation.rs
 // Run with: cargo test -p matching-solver --test validation

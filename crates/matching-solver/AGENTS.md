@@ -1,0 +1,61 @@
+# matching-solver
+
+FBA (Frequent Batch Auction) solver for prediction markets.
+
+## Purpose
+
+Solves the matching problem: given orders and liquidity, find clearing prices and fills
+that maximize welfare while respecting constraints.
+
+## Architecture
+
+The solver operates in phases via the `Pipeline`:
+
+1. **Price Discovery** (`LocalSolver`): Find clearing prices per market
+2. **Price Projection** (`PriceProjector`): Ensure cross-market consistency
+3. **MM Allocation** (`MmAllocator`): Respect market maker budget constraints
+4. **Arbitrage Detection** (`ArbitrageDetector`): Find remaining opportunities
+
+## Key Components
+
+### LocalSolver (`local_solver.rs`)
+Per-market price discovery. Finds where supply/demand curves cross.
+This IS the FBA clearing logic for single markets.
+
+### PriceProjector (`price_projector.rs`)
+Ensures marginal consistency across markets when bundles exist.
+Projects raw prices onto constraint-feasible set.
+
+### MmAllocator (`mm_allocator.rs`)
+Handles market maker budget constraints. Uses Lagrangian relaxation
+to activate orders while respecting per-MM budgets.
+
+### ArbitrageDetector (`specialized/arbitrage.rs`)
+Finds arbitrage opportunities:
+- Constraint arbitrage (A→B with mispricing)
+- Bundle underpricing
+
+### GreedySolver (`greedy.rs`)
+Simple heuristic that fills orders by welfare potential.
+Used as fallback or for comparison.
+
+### Pipeline (`pipeline.rs`)
+Configurable pipeline combining the above components.
+Use `Pipeline::consistent()` for the recommended configuration.
+
+## Usage
+
+```rust
+use matching_solver::Pipeline;
+
+let pipeline = Pipeline::consistent();
+let result = pipeline.solve(&problem);
+```
+
+## Dependencies
+
+- `matching-engine`: Core types
+
+## Optional Features
+
+- `milp`: Enable MILP solver for optimal (but slow) solutions

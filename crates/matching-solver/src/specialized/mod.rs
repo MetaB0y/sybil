@@ -1,14 +1,7 @@
-//! Specialized solvers for specific problem types.
+//! Specialized solvers for specific problem patterns.
 //!
-//! This module contains solvers optimized for specific patterns:
-//! - Arbitrage detection and exploitation
-//! - Bundle decomposition (complementary bundle sets)
-//! - Chain finding (implication constraint arbitrage)
+//! Contains solvers optimized for detecting arbitrage opportunities.
 
 pub mod arbitrage;
-pub mod bundle_decomposer;
-pub mod chain_finder;
 
 pub use arbitrage::ArbitrageDetector;
-pub use bundle_decomposer::BundleDecomposer;
-pub use chain_finder::ChainFinder;

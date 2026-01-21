@@ -624,7 +624,7 @@ impl PartialSolver for MilpSolver {
         };
 
         PartialSolution::with_fills(
-            self.name(),
+            PartialSolver::name(self),
             milp_result.result.fills,
             milp_result.result.total_welfare,
             confidence,

@@ -1,32 +1,20 @@
-//! Solvers for the NP-hard matching problem.
+//! Matching solver for prediction market FBA (Frequent Batch Auction).
 //!
-//! This crate provides multiple solver implementations:
+//! # Architecture
 //!
-//! - [`GreedySolver`]: Fast heuristic that processes orders by welfare potential
-//! - [`MultiHeuristicSolver`]: Tries multiple sorting strategies, returns best
-//! - [`MilpSolver`]: Optimal via MILP (requires `milp` feature)
-//! - [`SolverPlatform`]: Production-ready platform combining all solvers
+//! The solver operates in phases:
+//! 1. **Price Discovery** (`LocalSolver`): Find clearing prices per market
+//! 2. **Price Projection** (`PriceProjector`): Ensure cross-market consistency
+//! 3. **MM Allocation** (`MmAllocator`): Respect market maker budget constraints
+//! 4. **Arbitrage Detection** (`ArbitrageDetector`): Find remaining opportunities
 //!
 //! # Quick Start
 //!
 //! ```ignore
-//! use matching_solver::{Solver, GreedySolver};
+//! use matching_solver::Pipeline;
 //!
-//! let solver = GreedySolver::new();
-//! let result = solver.solve(&problem);
-//! println!("Welfare: {}, Filled: {}", result.total_welfare, result.orders_filled);
-//! ```
-//!
-//! For optimal solutions (with time budget):
-//!
-//! ```ignore
-//! use matching_solver::{SolverPlatform, PlatformConfig};
-//!
-//! let platform = SolverPlatform::with_config(PlatformConfig {
-//!     total_time_budget_ms: 5000,
-//!     ..Default::default()
-//! });
-//! let result = platform.solve(&problem);
+//! let pipeline = Pipeline::consistent();
+//! let result = pipeline.solve(&problem);
 //! ```
 
 // Internal modules
@@ -34,9 +22,7 @@ pub(crate) mod combiner;
 pub mod greedy;
 pub mod local_solver;
 pub mod mm_allocator;
-pub mod platform;
 pub mod price_projector;
-pub mod randomized;
 pub(crate) mod specialized;
 pub mod traits;
 pub mod pipeline;
@@ -49,8 +35,6 @@ pub mod milp;
 
 // Core solvers
 pub use greedy::GreedySolver;
-pub use randomized::{MultiHeuristicSolver, RandomizedGreedySolver};
-pub use platform::{PlatformConfig, PlatformResult, SolverPlatform};
 
 // New architecture components
 pub use local_solver::{LocalSolver, LocalSolverConfig, MarketSolution, solve_all_markets_parallel, solve_market_lp};

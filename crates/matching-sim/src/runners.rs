@@ -9,10 +9,7 @@ use matching_scenarios::{
     generate_mega_scenario, generate_milp_killer_scenario, generate_random_scenario,
     MegaScenarioConfig, MilpKillerConfig, RandomConfig,
 };
-use matching_solver::{
-    GreedySolver, MilpSolver, PlatformConfig, RandomizedGreedySolver, Solver,
-    SolverPlatform,
-};
+use matching_solver::{GreedySolver, MilpSolver, Pipeline, Solver};
 
 /// Run a quick test to verify the system works.
 pub fn run_quick_test() {
@@ -23,9 +20,8 @@ pub fn run_quick_test() {
 
     let solvers: Vec<Box<dyn Solver>> = vec![
         Box::new(GreedySolver::new()),
-        Box::new(RandomizedGreedySolver::new()),
         Box::new(MilpSolver::new()),
-        Box::new(SolverPlatform::new()),
+        Box::new(Pipeline::full_platform()),
     ];
 
     for solver in &solvers {
@@ -53,7 +49,7 @@ pub fn run_quick_test() {
 
 /// Run platform stress test.
 pub fn run_platform_stress_test(timeout_secs: f64) {
-    println!("Running platform stress test...\n");
+    println!("Running pipeline stress test...\n");
     println!("MILP timeout: {}s", timeout_secs);
 
     let problem = generate_mega_scenario(MegaScenarioConfig::medium());
@@ -84,17 +80,19 @@ pub fn run_platform_stress_test(timeout_secs: f64) {
         start.elapsed().as_secs_f64()
     );
 
-    // Run platform
-    println!("\n--- Running platform ---\n");
-    let platform_config = PlatformConfig {
-        total_time_budget_ms: (timeout_secs * 1000.0 / 0.6) as u64,
-        milp_time_fraction: 0.6,
-        ..Default::default()
-    };
-    let platform = SolverPlatform::with_config(platform_config);
-    let platform_result = platform.solve(&problem);
+    // Run pipeline
+    println!("\n--- Running pipeline ---\n");
+    let pipeline = Pipeline::full_platform();
+    let start = Instant::now();
+    let pipeline_result = pipeline.solve(&problem);
+    let pipeline_time = start.elapsed().as_secs_f64();
 
-    platform_result.print_summary();
+    println!(
+        "Pipeline: welfare={}, fills={}, time={:.3}s",
+        pipeline_result.result.total_welfare,
+        pipeline_result.result.orders_filled,
+        pipeline_time
+    );
 }
 
 /// Run MILP killer test - designed to force MILP timeout.
@@ -139,26 +137,25 @@ pub fn run_milp_killer_test(timeout_secs: f64, config_name: &str) {
         start.elapsed().as_secs_f64()
     );
 
-    println!("\n--- Running platform with all solvers ---\n");
+    println!("\n--- Running pipeline ---\n");
 
-    let platform_config = PlatformConfig {
-        total_time_budget_ms: (timeout_secs * 1000.0 / 0.6) as u64,
-        milp_time_fraction: 0.6,
-        include_arbitrage: true,
-        include_bundle_decomposer: true,
-        include_chain_finder: true,
-        ..Default::default()
-    };
-    let platform = SolverPlatform::with_config(platform_config);
-    let platform_result = platform.solve(&problem);
+    let pipeline = Pipeline::full_platform();
+    let start = Instant::now();
+    let pipeline_result = pipeline.solve(&problem);
+    let pipeline_time = start.elapsed().as_secs_f64();
 
-    platform_result.print_summary();
+    println!(
+        "Pipeline: welfare={}, fills={}, time={:.3}s",
+        pipeline_result.result.total_welfare,
+        pipeline_result.result.orders_filled,
+        pipeline_time
+    );
 
-    // Print comparison (MILP vs Platform only)
+    // Print comparison
     let milp_welfare = milp_result.result.total_welfare;
-    let platform_welfare = platform_result.result.total_welfare;
+    let pipeline_welfare = pipeline_result.result.total_welfare;
     let improvement = if milp_welfare > 0 {
-        ((platform_welfare as f64 - milp_welfare as f64) / milp_welfare as f64) * 100.0
+        ((pipeline_welfare as f64 - milp_welfare as f64) / milp_welfare as f64) * 100.0
     } else {
         0.0
     };
@@ -168,14 +165,14 @@ pub fn run_milp_killer_test(timeout_secs: f64, config_name: &str) {
     println!("========================================\n");
 
     println!("MILP welfare:     {}", milp_welfare);
-    println!("Platform welfare: {}", platform_welfare);
+    println!("Pipeline welfare: {}", pipeline_welfare);
     println!("Improvement:      {:.2}%", improvement);
 
-    if platform_welfare > milp_welfare {
-        println!("\n Platform BEATS MILP-with-timeout!");
-    } else if platform_welfare == milp_welfare {
-        println!("\n= Platform EQUALS MILP-with-timeout");
+    if pipeline_welfare > milp_welfare {
+        println!("\nPipeline BEATS MILP-with-timeout!");
+    } else if pipeline_welfare == milp_welfare {
+        println!("\nPipeline EQUALS MILP-with-timeout");
     } else {
-        println!("\n MILP-with-timeout beats platform");
+        println!("\nMILP-with-timeout beats pipeline");
     }
 }

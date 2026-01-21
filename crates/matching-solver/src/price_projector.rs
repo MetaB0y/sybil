@@ -25,7 +25,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use matching_engine::{state_to_outcomes, MarketId, Nanos, Order, Problem, NANOS_PER_DOLLAR};
+use matching_engine::{state_to_outcomes, MarketId, Nanos, Order, Problem, NANOS_PER_DOLLAR, MAX_STATES};
 
 use crate::traits::PriceDiscoveryResult;
 
@@ -254,7 +254,9 @@ impl PriceProjector {
                 .collect();
 
             // For each state with positive payoff, add the joint outcome
-            for state_idx in 0..order.num_states as usize {
+            // Note: num_states can exceed MAX_STATES for non-binary markets, but payoffs array is fixed size
+            let num_valid_states = (order.num_states as usize).min(MAX_STATES);
+            for state_idx in 0..num_valid_states {
                 if order.payoffs[state_idx] != 0 {
                     let joint = JointOutcome::from_state(state_idx, &markets, &market_sizes);
                     outcomes.insert(joint);
