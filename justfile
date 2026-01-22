@@ -20,21 +20,25 @@ fmt:
 fmt-check:
     cargo fmt --all -- --check
 
-# Quick simulation (~50 orders)
+# Quick simulation with detailed output (~50 orders)
 sim-quick:
-    cargo run --bin matching-sim --release -- --preset quick
+    cargo run --bin matching-sim --release -- --preset quick -v
 
-# Small simulation (~300 orders)
+# Small simulation with detailed output (~300 orders)
 sim-small:
-    cargo run --bin matching-sim --release -- --preset small
+    cargo run --bin matching-sim --release -- --preset small -v
 
-# Medium simulation (~3000 orders)
+# Medium simulation with detailed output (~3000 orders)
 sim-medium:
-    cargo run --bin matching-sim --release -- --preset medium
+    cargo run --bin matching-sim --release -- --preset medium -v
 
-# Large simulation (~10000 orders)
+# Large simulation with detailed output (~10000 orders)
 sim-large:
-    cargo run --bin matching-sim --release -- --preset large
+    cargo run --bin matching-sim --release -- --preset large -v
+
+# Extreme simulation with detailed output (~100k orders)
+sim-extreme:
+    cargo run --bin matching-sim --release -- --preset extreme -v
 
 # Compare all solvers on medium scenario
 compare:
@@ -45,8 +49,8 @@ milp-killer:
     cargo run --bin matching-sim --release -- --preset milp-killer --solver all --milp-timeout 5.0
 
 # Run with specific preset and solver
-sim preset="medium" solver="greedy":
-    cargo run --bin matching-sim --release -- --preset {{preset}} --solver {{solver}}
+sim preset="medium" solver="pipeline" verbose="-v":
+    cargo run --bin matching-sim --release -- --preset {{preset}} --solver {{solver}} {{verbose}}
 
 # Build release
 build:

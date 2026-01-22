@@ -193,40 +193,131 @@ impl PriceProjector {
         Self { config }
     }
 
-    /// Project prices to satisfy marginal consistency.
+    /// Project prices to satisfy marginal consistency and market group constraints.
     ///
     /// # Arguments
     /// * `base_prices` - Raw prices from LocalSolver
-    /// * `problem` - The problem (used to extract joint outcomes from orders)
+    /// * `problem` - The problem (used to extract joint outcomes from orders and market groups)
     ///
     /// # Returns
-    /// Projected prices that satisfy marginal consistency constraints.
+    /// Projected prices that satisfy all consistency constraints.
     pub fn project(
         &self,
         base_prices: &HashMap<MarketId, Vec<Nanos>>,
         problem: &Problem,
     ) -> ProjectionResult {
-        // Step 1: Extract active joint outcomes from multi-market orders
+        // Step 1: Check and fix market group violations FIRST
+        // (multi-outcome markets where sum of P(YES) must equal 1)
+        let (prices, group_violations, group_max_adj) =
+            self.project_market_groups(base_prices, &problem.market_groups);
+
+        // Step 2: Extract active joint outcomes from multi-market orders
         let joint_outcomes = self.extract_joint_outcomes(problem);
 
-        if joint_outcomes.is_empty() {
-            // No cross-market orders, no projection needed
-            return ProjectionResult::identity(base_prices.clone());
+        if joint_outcomes.is_empty() && group_violations == 0 {
+            // No cross-market orders and no group violations
+            return ProjectionResult {
+                base_prices: prices,
+                joint_prices: HashMap::new(),
+                violations_fixed: group_violations,
+                max_adjustment: group_max_adj,
+                iterations: 1,
+                success: true,
+            };
         }
 
-        // Step 2: Check for violations
-        let violations = self.check_consistency_internal(base_prices, &joint_outcomes);
+        // Step 3: Check for marginal consistency violations
+        let violations = self.check_consistency_internal(&prices, &joint_outcomes);
 
         if violations.is_empty() {
-            return ProjectionResult::identity(base_prices.clone());
+            return ProjectionResult {
+                base_prices: prices,
+                joint_prices: HashMap::new(),
+                violations_fixed: group_violations,
+                max_adjustment: group_max_adj,
+                iterations: 1,
+                success: true,
+            };
         }
 
-        // Step 3: Project using QP or iterative method
-        if self.config.use_qp {
-            self.project_qp(base_prices, &joint_outcomes, &violations)
+        // Step 4: Project using QP or iterative method
+        let mut result = if self.config.use_qp {
+            self.project_qp(&prices, &joint_outcomes, &violations)
         } else {
-            self.project_iterative(base_prices, &joint_outcomes, &violations)
+            self.project_iterative(&prices, &joint_outcomes, &violations)
+        };
+
+        result.violations_fixed += group_violations;
+        result.max_adjustment = result.max_adjustment.max(group_max_adj);
+        result
+    }
+
+    /// Project prices to satisfy market group constraints.
+    ///
+    /// For each market group (mutually exclusive outcomes), ensure that
+    /// the sum of P(YES) across all markets in the group equals 1.
+    ///
+    /// Returns (adjusted_prices, violations_fixed, max_adjustment)
+    fn project_market_groups(
+        &self,
+        base_prices: &HashMap<MarketId, Vec<Nanos>>,
+        market_groups: &[matching_engine::MarketGroup],
+    ) -> (HashMap<MarketId, Vec<Nanos>>, usize, Nanos) {
+        let mut prices = base_prices.clone();
+        let mut violations_fixed = 0;
+        let mut max_adjustment: Nanos = 0;
+
+        for group in market_groups {
+            if group.markets.len() < 2 {
+                continue;
+            }
+
+            // Calculate current sum of P(YES) for markets in this group
+            let mut sum_yes: u128 = 0;
+            let mut valid_markets = Vec::new();
+
+            for &market_id in &group.markets {
+                if let Some(market_prices) = prices.get(&market_id) {
+                    if let Some(&yes_price) = market_prices.first() {
+                        sum_yes += yes_price as u128;
+                        valid_markets.push(market_id);
+                    }
+                }
+            }
+
+            if valid_markets.is_empty() {
+                continue;
+            }
+
+            // Check if sum deviates from 1.0 (NANOS_PER_DOLLAR)
+            let target = NANOS_PER_DOLLAR as u128;
+            let deviation = (sum_yes as i128 - target as i128).unsigned_abs();
+
+            if deviation > self.config.tolerance as u128 {
+                violations_fixed += 1;
+
+                // Scale all YES prices to sum to 1.0
+                let scale = target as f64 / sum_yes as f64;
+
+                for &market_id in &valid_markets {
+                    if let Some(market_prices) = prices.get_mut(&market_id) {
+                        if market_prices.len() >= 2 {
+                            let old_yes = market_prices[0];
+                            let new_yes = ((old_yes as f64 * scale) as u64).clamp(1, NANOS_PER_DOLLAR - 1);
+                            let new_no = NANOS_PER_DOLLAR - new_yes;
+
+                            let adj = (new_yes as i64 - old_yes as i64).unsigned_abs();
+                            max_adjustment = max_adjustment.max(adj);
+
+                            market_prices[0] = new_yes;
+                            market_prices[1] = new_no;
+                        }
+                    }
+                }
+            }
         }
+
+        (prices, violations_fixed, max_adjustment)
     }
 
     /// Check if prices satisfy marginal consistency.

@@ -57,7 +57,9 @@ pub use price_projector::{
 };
 
 // Pipeline system
-pub use pipeline::{Pipeline, PipelineBuilder, PipelineConfig, PipelineResult, PipelineTimings};
+pub use pipeline::{
+    IterationStats, Pipeline, PipelineBuilder, PipelineConfig, PipelineResult, PipelineTimings,
+};
 
 // Benchmark harness
 pub use benchmark::{compare_to_baseline, BenchmarkHarness, BenchmarkResults, BenchmarkRun};

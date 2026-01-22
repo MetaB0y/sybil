@@ -1,6 +1,48 @@
 //! Problem definition for matching instances.
 
-use crate::{LiquidityPool, MarketSet, MmConstraint, Order};
+use crate::{LiquidityPool, MarketId, MarketSet, MmConstraint, Order};
+
+/// A group of mutually exclusive markets (exactly one resolves YES).
+///
+/// Used to model multi-outcome events like elections where
+/// multiple binary markets represent different outcomes.
+///
+/// # Example
+///
+/// ```ignore
+/// // Election: exactly one candidate wins
+/// MarketGroup::new("2024 Election")
+///     .with_market(trump_wins)
+///     .with_market(biden_wins)
+///     .with_market(other_wins)
+/// ```
+///
+/// The solver enforces: sum of P(market_i YES) = 1 for each group.
+#[derive(Clone, Debug)]
+pub struct MarketGroup {
+    /// Name of this group (e.g., "2024 Election")
+    pub name: String,
+    /// Markets in this group (mutually exclusive)
+    pub markets: Vec<MarketId>,
+}
+
+impl MarketGroup {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            markets: Vec::new(),
+        }
+    }
+
+    pub fn with_market(mut self, market: MarketId) -> Self {
+        self.markets.push(market);
+        self
+    }
+
+    pub fn add_market(&mut self, market: MarketId) {
+        self.markets.push(market);
+    }
+}
 
 /// A complete problem instance for the matching system.
 #[derive(Clone, Debug)]
@@ -15,6 +57,8 @@ pub struct Problem {
     pub orders: Vec<Order>,
     /// Market maker capital constraints
     pub mm_constraints: Vec<MmConstraint>,
+    /// Multi-outcome market groups (mutually exclusive markets)
+    pub market_groups: Vec<MarketGroup>,
 }
 
 impl Problem {
@@ -25,7 +69,13 @@ impl Problem {
             liquidity: LiquidityPool::new(),
             orders: Vec::new(),
             mm_constraints: Vec::new(),
+            market_groups: Vec::new(),
         }
+    }
+
+    /// Add a multi-outcome market group.
+    pub fn add_market_group(&mut self, group: MarketGroup) {
+        self.market_groups.push(group);
     }
 
     pub fn num_markets(&self) -> usize {

@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use matching_engine::{Fill, LiquidityPool, MarketId, Nanos, Order, Problem, Qty};
+use matching_engine::{Fill, JointOutcome, LiquidityPool, MarketId, Nanos, Order, Problem, Qty};
 
 use crate::{MatchingResult, Solver};
 
@@ -210,7 +210,7 @@ impl ArbitrageDetector {
         }
     }
 
-    /// Try to fill a bundle order.
+    /// Try to fill a bundle order using joint liquidity.
     fn try_fill_bundle(
         &self,
         order: &Order,
@@ -220,6 +220,53 @@ impl ArbitrageDetector {
             return None;
         }
 
+        // Build the joint outcome for this bundle
+        let joint_outcome = self.build_joint_outcome(order)?;
+
+        // First try joint liquidity (the correct approach for bundles)
+        if let Some(joint_book) = liquidity.joint_book(&joint_outcome) {
+            let (avail, avg_price) = joint_book.available_to_buy(order.limit_price);
+            if avail >= order.min_fill {
+                let fill_qty = avail.min(order.max_fill);
+                return Some(Fill::new(order.id, fill_qty, avg_price));
+            }
+        }
+
+        // Fallback: try to match using individual leg liquidity
+        // This is less accurate but allows matching when joint liquidity isn't available
+        self.try_fill_bundle_via_legs(order, liquidity)
+    }
+
+    /// Build a JointOutcome from a bundle order.
+    fn build_joint_outcome(&self, order: &Order) -> Option<JointOutcome> {
+        if order.num_markets <= 1 {
+            return None;
+        }
+
+        let mut legs = Vec::new();
+        for market_idx in 0..order.num_markets as usize {
+            let market = order.markets[market_idx];
+            if market.is_none() {
+                continue;
+            }
+
+            let outcome = self.determine_bundle_outcome(order, market_idx);
+            legs.push((market, outcome));
+        }
+
+        if legs.len() >= 2 {
+            Some(JointOutcome::new(legs))
+        } else {
+            None
+        }
+    }
+
+    /// Fallback: try to fill bundle by matching individual legs.
+    fn try_fill_bundle_via_legs(
+        &self,
+        order: &Order,
+        liquidity: &LiquidityPool,
+    ) -> Option<Fill> {
         let mut min_available = order.max_fill;
         let mut total_cost: u128 = 0;
         let mut legs = 0;
@@ -260,6 +307,22 @@ impl ArbitrageDetector {
         qty: Qty,
         liquidity: &mut LiquidityPool,
     ) -> bool {
+        // Build joint outcome
+        let joint_outcome = match self.build_joint_outcome(order) {
+            Some(jo) => jo,
+            None => return false,
+        };
+
+        // First try to consume from joint liquidity
+        if let Some(joint_book) = liquidity.joint_book_get_mut(&joint_outcome) {
+            let (avail, _) = joint_book.available_to_buy(order.limit_price);
+            if avail >= qty {
+                joint_book.consume_asks(qty, order.limit_price);
+                return true;
+            }
+        }
+
+        // Fallback: consume from individual legs
         // First verify all legs have sufficient liquidity
         for market_idx in 0..order.num_markets as usize {
             let market = order.markets[market_idx];

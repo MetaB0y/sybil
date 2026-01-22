@@ -30,14 +30,16 @@ pub mod state;
 pub mod types;
 
 // Re-exports for convenience
-pub use book::{BookLevel, LiquidityBook, LiquidityPool, Outcome, NO, YES};
+pub use book::{
+    BookLevel, JointLiquidityBook, JointOutcome, LiquidityBook, LiquidityPool, Outcome, NO, YES,
+};
 pub use market::{Market, MarketSet};
 pub use mm_constraint::{
     MmConstraint, MmConstraintStatus, MmId, MmOrder, MmSide, MmValidationResult,
 };
 pub use order::{ConditionDir, Fill, Order, PriceCondition, MAX_MARKETS_PER_ORDER, MAX_STATES};
 pub use order_builder::OrderBuilder;
-pub use problem::{Problem, ProblemSummary};
+pub use problem::{MarketGroup, Problem, ProblemSummary};
 pub use state::{state_index, state_to_outcomes, StateProbabilities, StateSpace};
 pub use types::conversions::{dollars_to_nanos, nanos_to_dollars, nanos_to_price, price_to_nanos};
 pub use types::{MarketId, Nanos, Qty, Side, NANOS_PER_DOLLAR};

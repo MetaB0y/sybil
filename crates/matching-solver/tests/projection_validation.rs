@@ -6,7 +6,7 @@
 //! 3. Has acceptable performance at various bundle fractions
 
 use matching_engine::{bundle_yes, simple_yes_buy, NANOS_PER_DOLLAR};
-use matching_scenarios::{generate_mega_scenario_v2, MegaScenarioConfigV2};
+use matching_scenarios::{generate_scenario, ScenarioConfig};
 use matching_solver::Pipeline;
 
 // ============================================================================
@@ -17,17 +17,17 @@ use matching_solver::Pipeline;
 /// Prints what violations are found (if any) at each scale.
 #[test]
 fn diagnose_projection_on_existing_scenarios() {
-    let scenarios: Vec<(&str, MegaScenarioConfigV2)> = vec![
-        ("small", MegaScenarioConfigV2::small()),
-        ("medium", MegaScenarioConfigV2::medium()),
-        ("large", MegaScenarioConfigV2::large()),
+    let scenarios: Vec<(&str, ScenarioConfig)> = vec![
+        ("small", ScenarioConfig::small()),
+        ("medium", ScenarioConfig::medium()),
+        ("large", ScenarioConfig::large()),
     ];
 
     println!("\n=== PROJECTION DIAGNOSTIC ===\n");
 
     for (name, config) in scenarios {
         let bundle_fraction = config.bundle_fraction;
-        let problem = generate_mega_scenario_v2(config);
+        let problem = generate_scenario(config);
 
         // Count bundle orders (orders with num_markets > 1)
         let bundle_count = problem.orders.iter().filter(|o| o.num_markets > 1).count();
@@ -73,10 +73,10 @@ fn diagnose_with_higher_bundle_fraction() {
     println!("\n=== BUNDLE FRACTION IMPACT ON VIOLATIONS ===\n");
 
     for &bundle_fraction in &bundle_fractions {
-        let mut config = MegaScenarioConfigV2::medium();
+        let mut config = ScenarioConfig::medium();
         config.bundle_fraction = bundle_fraction;
 
-        let problem = generate_mega_scenario_v2(config);
+        let problem = generate_scenario(config);
         let bundle_count = problem.orders.iter().filter(|o| o.num_markets > 1).count();
 
         let pipeline = Pipeline::consistent();
@@ -115,10 +115,10 @@ fn stress_test_bundle_fraction() {
     println!("Using large scenario (~10-30k orders) with varying bundle fractions\n");
 
     for &bundle_fraction in &bundle_fractions {
-        let mut config = MegaScenarioConfigV2::large();
+        let mut config = ScenarioConfig::large();
         config.bundle_fraction = bundle_fraction;
 
-        let problem = generate_mega_scenario_v2(config);
+        let problem = generate_scenario(config);
         let bundle_count = problem.orders.iter().filter(|o| o.num_markets > 1).count();
 
         // Count unique joint outcomes (combinations of markets in bundles)
@@ -179,11 +179,11 @@ fn stress_test_num_markets() {
     println!("Using 30% bundle fraction with varying market counts\n");
 
     for &num_markets in &market_counts {
-        let mut config = MegaScenarioConfigV2::default();
+        let mut config = ScenarioConfig::default();
         config.num_markets = num_markets;
         config.bundle_fraction = 0.30;
 
-        let problem = generate_mega_scenario_v2(config);
+        let problem = generate_scenario(config);
         let bundle_count = problem.orders.iter().filter(|o| o.num_markets > 1).count();
 
         let pipeline = Pipeline::consistent();
@@ -442,14 +442,14 @@ fn test_multiple_violation_triangles() {
 #[test]
 fn compare_current_vs_consistent() {
     let configs = [
-        ("small", MegaScenarioConfigV2::small()),
-        ("medium", MegaScenarioConfigV2::medium()),
+        ("small", ScenarioConfig::small()),
+        ("medium", ScenarioConfig::medium()),
     ];
 
     println!("\n=== PIPELINE COMPARISON: current vs consistent ===\n");
 
     for (name, config) in configs {
-        let problem = generate_mega_scenario_v2(config);
+        let problem = generate_scenario(config);
 
         // Current pipeline (no price projection)
         let current_pipeline = Pipeline::current();

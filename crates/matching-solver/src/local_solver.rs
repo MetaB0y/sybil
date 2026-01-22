@@ -1589,10 +1589,10 @@ mod duality_validation {
     /// Same validation tests but for duality solver
     #[test]
     fn validate_duality_fill_prices_match() {
-        use matching_scenarios::{generate_mega_scenario_v2, MegaScenarioConfigV2};
+        use matching_scenarios::{generate_scenario, ScenarioConfig};
 
-        let config = MegaScenarioConfigV2::small();
-        let problem = generate_mega_scenario_v2(config);
+        let config = ScenarioConfig::small();
+        let problem = generate_scenario(config);
 
         let order_map: HashMap<u64, &matching_engine::Order> =
             problem.orders.iter().map(|o| (o.id, o)).collect();
@@ -1645,10 +1645,10 @@ mod duality_validation {
 
     #[test]
     fn validate_duality_normalization() {
-        use matching_scenarios::{generate_mega_scenario_v2, MegaScenarioConfigV2};
+        use matching_scenarios::{generate_scenario, ScenarioConfig};
 
-        let config = MegaScenarioConfigV2::medium();
-        let problem = generate_mega_scenario_v2(config);
+        let config = ScenarioConfig::medium();
+        let problem = generate_scenario(config);
         let mut violations = 0;
 
         for market in problem.markets.iter() {
@@ -1683,10 +1683,10 @@ mod duality_validation {
 
     #[test]
     fn validate_duality_respects_liquidity() {
-        use matching_scenarios::{generate_mega_scenario_v2, MegaScenarioConfigV2};
+        use matching_scenarios::{generate_scenario, ScenarioConfig};
 
-        let config = MegaScenarioConfigV2::small();
-        let problem = generate_mega_scenario_v2(config);
+        let config = ScenarioConfig::small();
+        let problem = generate_scenario(config);
 
         for market in problem.markets.iter() {
             let book = problem

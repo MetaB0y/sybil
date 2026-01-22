@@ -101,6 +101,9 @@ pub struct PipelineResult {
     /// Number of fixed-point iterations (if applicable).
     pub iterations: usize,
 
+    /// Per-iteration stats for convergence analysis.
+    pub iteration_stats: Vec<IterationStats>,
+
     /// Total time spent (seconds).
     pub total_time_secs: f64,
 
@@ -118,6 +121,29 @@ pub struct PipelineTimings {
     pub combining_secs: f64,
 }
 
+/// Stats for a single fixed-point iteration.
+#[derive(Clone, Debug, Default)]
+pub struct IterationStats {
+    /// Iteration number (1-indexed).
+    pub iteration: usize,
+    /// Total welfare after this iteration.
+    pub welfare: i64,
+    /// Total volume (shares) after this iteration.
+    pub volume: u64,
+    /// Total fills after this iteration.
+    pub fills: usize,
+    /// Welfare delta from previous iteration.
+    pub welfare_delta: i64,
+    /// Volume delta from previous iteration.
+    pub volume_delta: u64,
+    /// Fills delta from previous iteration.
+    pub fills_delta: usize,
+    /// Breakdown: fills from price discovery.
+    pub price_discovery_fills: usize,
+    /// Breakdown: fills from bundle matching.
+    pub bundle_fills: usize,
+}
+
 impl PipelineResult {
     /// Create an empty result.
     pub fn empty(liquidity: matching_engine::LiquidityPool) -> Self {
@@ -129,6 +155,7 @@ impl PipelineResult {
             contributions: Vec::new(),
             combine_stats: None,
             iterations: 0,
+            iteration_stats: Vec::new(),
             total_time_secs: 0.0,
             phase_times: PipelineTimings::default(),
         }
@@ -217,15 +244,25 @@ impl Pipeline {
             .build()
     }
 
-    /// Create a full pipeline with all components.
+    /// Create a full pipeline with all components (sequential, no MWIS).
+    ///
+    /// Runs solvers in sequence:
+    /// 1. LocalSolver for price discovery on single-market orders
+    /// 2. PriceProjector for multi-outcome consistency
+    /// 3. MmAllocator for MM budget constraints
+    /// 4. ArbitrageDetector for bundle matching
+    ///
+    /// Each phase consumes liquidity, subsequent phases work on remaining.
     pub fn full() -> Self {
         Self::builder()
             .price_discoverer(LocalSolver::new())
             .price_projector(PriceProjectorImpl::new())
             .allocator(MmAllocator::new())
-            .partial_solver(GreedySolver::new())
+            .partial_solver(ArbitrageDetector::new())
             .use_price_projection(true)
-            .combine_with_mwis(true)
+            .use_fixed_point(true)
+            .max_iterations(5)
+            .combine_with_mwis(false) // Sequential, not MWIS
             .build()
     }
 
@@ -236,6 +273,214 @@ impl Pipeline {
 
     /// Solve a matching problem using this pipeline.
     pub fn solve(&self, problem: &Problem) -> PipelineResult {
+        if self.config.use_fixed_point {
+            self.solve_sequential(problem)
+        } else {
+            self.solve_single_pass(problem)
+        }
+    }
+
+    /// Sequential solving with fixed-point iteration.
+    ///
+    /// Runs phases in order, each consuming liquidity:
+    /// 1. Price Discovery (LocalSolver) - fills single-market orders
+    /// 2. Price Projection - adjusts prices for consistency
+    /// 3. MM Allocation - activates MM orders within budget
+    /// 4. Partial Solvers (ArbitrageDetector) - fills bundles
+    /// Repeats until convergence or max iterations.
+    fn solve_sequential(&self, problem: &Problem) -> PipelineResult {
+        let start = Instant::now();
+        let mut result = PipelineResult::empty(problem.liquidity.snapshot());
+        let mut timings = PipelineTimings::default();
+
+        let mut prev_welfare = 0i64;
+        let mut prev_volume = 0u64;
+        let mut prev_fills = 0usize;
+        let mut iterations = 0;
+
+        // Create a mutable problem with remaining liquidity
+        let mut remaining_liquidity = problem.liquidity.snapshot();
+
+        // Track orders that have already been filled
+        let mut filled_order_ids: std::collections::HashSet<u64> = std::collections::HashSet::new();
+
+        for iter in 0..self.config.max_iterations {
+            iterations = iter + 1;
+
+            // Track fills for this iteration
+            let mut iter_price_discovery_fills = 0usize;
+            let mut iter_bundle_fills = 0usize;
+
+            // Filter out already-filled orders
+            let remaining_orders: Vec<_> = problem
+                .orders
+                .iter()
+                .filter(|o| !filled_order_ids.contains(&o.id))
+                .cloned()
+                .collect();
+
+            // Create problem view with remaining liquidity and unfilled orders
+            let iter_problem = Problem {
+                name: problem.name.clone(),
+                markets: problem.markets.clone(),
+                liquidity: remaining_liquidity.clone(),
+                orders: remaining_orders,
+                mm_constraints: problem.mm_constraints.clone(),
+                market_groups: problem.market_groups.clone(),
+            };
+
+            // Phase 1: Price Discovery
+            let price_result = if let Some(ref discoverer) = self.price_discoverer {
+                let pd_start = Instant::now();
+                let pd_result = discoverer.discover_prices(&iter_problem);
+                timings.price_discovery_secs += pd_start.elapsed().as_secs_f64();
+                Some(pd_result)
+            } else {
+                None
+            };
+
+            // Phase 2: Price Projection
+            let projection_result = if let (Some(ref projector), Some(ref prices)) =
+                (&self.price_projector, &price_result)
+            {
+                if self.config.use_price_projection {
+                    let proj_start = Instant::now();
+                    let proj_result = projector.project(&prices.prices, &iter_problem);
+                    timings.price_projection_secs += proj_start.elapsed().as_secs_f64();
+                    Some(proj_result)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            // Phase 3: MM Allocation
+            let allocation_result = if let (Some(ref allocator), Some(ref prices)) =
+                (&self.allocator, &price_result)
+            {
+                let alloc_start = Instant::now();
+                let alloc_result = allocator.allocate(
+                    &iter_problem.mm_constraints,
+                    &prices.prices,
+                    &iter_problem.orders,
+                );
+                timings.allocation_secs += alloc_start.elapsed().as_secs_f64();
+                Some(alloc_result)
+            } else {
+                None
+            };
+
+            // Build result from price discovery + allocation
+            if let Some(ref pd_result) = price_result {
+                let iter_result =
+                    self.build_result_from_prices(&iter_problem, pd_result, &allocation_result);
+
+                // Consume liquidity for filled orders and track filled order IDs
+                for fill in &iter_result.fills {
+                    if let Some(order) = problem.orders.iter().find(|o| o.id == fill.order_id) {
+                        self.consume_order_liquidity(order, fill.fill_qty, &mut remaining_liquidity);
+                        filled_order_ids.insert(fill.order_id);
+                        iter_price_discovery_fills += 1;
+                    }
+                }
+
+                // Merge into result
+                for fill in iter_result.fills {
+                    if let Some(order) = problem.orders.iter().find(|o| o.id == fill.order_id) {
+                        result.result.add_fill(fill, order);
+                    }
+                }
+            }
+
+            // Phase 4: Run Partial Solvers (e.g., ArbitrageDetector for bundles)
+            let partial_start = Instant::now();
+            for solver in &self.partial_solvers {
+                // Filter out already-filled orders for partial solvers too
+                let partial_orders: Vec<_> = problem
+                    .orders
+                    .iter()
+                    .filter(|o| !filled_order_ids.contains(&o.id))
+                    .cloned()
+                    .collect();
+
+                // Create problem with current remaining liquidity and unfilled orders
+                let partial_problem = Problem {
+                    name: problem.name.clone(),
+                    markets: problem.markets.clone(),
+                    liquidity: remaining_liquidity.clone(),
+                    orders: partial_orders,
+                    mm_constraints: problem.mm_constraints.clone(),
+                    market_groups: problem.market_groups.clone(),
+                };
+
+                let partial_result = solver.solve_partial(&partial_problem);
+
+                // Add fills, consume liquidity, and track filled order IDs
+                for fill in partial_result.fills {
+                    if let Some(order) = problem.orders.iter().find(|o| o.id == fill.order_id) {
+                        self.consume_order_liquidity(order, fill.fill_qty, &mut remaining_liquidity);
+                        filled_order_ids.insert(fill.order_id);
+                        result.result.add_fill(fill, order);
+                        iter_bundle_fills += 1;
+
+                        result.contributions.push(SolverContribution {
+                            solver_name: solver.name().to_string(),
+                            fills_contributed: 1,
+                            welfare_contributed: order.welfare_contribution(0, 1), // Approx
+                        });
+                    }
+                }
+            }
+            timings.partial_solving_secs += partial_start.elapsed().as_secs_f64();
+
+            // Store last iteration's metadata
+            result.price_discovery = price_result;
+            result.price_projection = projection_result;
+            result.allocation = allocation_result;
+
+            // Calculate current totals
+            let current_welfare = result.result.total_welfare;
+            let current_volume: u64 = result.result.fills.iter().map(|f| f.fill_qty).sum();
+            let current_fills = result.result.fills.len();
+
+            // Track iteration stats
+            result.iteration_stats.push(IterationStats {
+                iteration: iterations,
+                welfare: current_welfare,
+                volume: current_volume,
+                fills: current_fills,
+                welfare_delta: current_welfare - prev_welfare,
+                volume_delta: current_volume.saturating_sub(prev_volume),
+                fills_delta: current_fills.saturating_sub(prev_fills),
+                price_discovery_fills: iter_price_discovery_fills,
+                bundle_fills: iter_bundle_fills,
+            });
+
+            // Check convergence
+            let welfare_delta = current_welfare - prev_welfare;
+            let converged = welfare_delta.abs() as f64 / (prev_welfare.abs() as f64 + 1.0)
+                < self.config.convergence_threshold;
+
+            prev_welfare = current_welfare;
+            prev_volume = current_volume;
+            prev_fills = current_fills;
+
+            if converged && iter > 0 {
+                break;
+            }
+        }
+
+        result.result.remaining_liquidity = remaining_liquidity;
+        result.phase_times = timings;
+        result.total_time_secs = start.elapsed().as_secs_f64();
+        result.iterations = iterations;
+
+        result
+    }
+
+    /// Single-pass solving (original behavior).
+    fn solve_single_pass(&self, problem: &Problem) -> PipelineResult {
         let start = Instant::now();
         let mut result = PipelineResult::empty(problem.liquidity.snapshot());
         let mut timings = PipelineTimings::default();
@@ -250,7 +495,7 @@ impl Pipeline {
             None
         };
 
-        // Phase 2: Price Projection (if we have prices and a projector)
+        // Phase 2: Price Projection
         let projection_result = if let (Some(ref projector), Some(ref mut prices)) =
             (&self.price_projector, &mut price_result)
         {
@@ -259,7 +504,6 @@ impl Pipeline {
                 let proj_result = projector.project(&prices.prices, problem);
                 timings.price_projection_secs = proj_start.elapsed().as_secs_f64();
 
-                // Update prices with projected values
                 if proj_result.success {
                     crate::price_projector::recompute_fills(prices, &proj_result.prices, problem);
                 }
@@ -272,7 +516,7 @@ impl Pipeline {
             None
         };
 
-        // Phase 3: Order Allocation (if we have prices and an allocator)
+        // Phase 3: Order Allocation
         let allocation_result =
             if let (Some(ref allocator), Some(ref prices)) = (&self.allocator, &price_result) {
                 let alloc_start = Instant::now();
@@ -348,6 +592,49 @@ impl Pipeline {
         result.iterations = 1;
 
         result
+    }
+
+    /// Consume liquidity for an order fill.
+    fn consume_order_liquidity(
+        &self,
+        order: &matching_engine::Order,
+        qty: matching_engine::Qty,
+        liquidity: &mut matching_engine::LiquidityPool,
+    ) {
+        if order.num_markets == 1 {
+            // For single-market orders, consume from the appropriate book
+            let market = order.markets[0];
+            // Determine outcome from payoffs (simplified: assume outcome 0 if positive payoff at state 0)
+            let outcome = if order.payoffs[0] > 0 { 0 } else { 1 };
+            if let Some(book) = liquidity.books.get_mut(&(market, outcome)) {
+                book.consume_asks(qty, order.limit_price);
+            }
+        } else {
+            // For bundles, consume from joint liquidity
+            let joint_outcome = self.build_joint_outcome_for_order(order);
+            if let Some(joint_book) = liquidity.joint_book_get_mut(&joint_outcome) {
+                joint_book.consume_asks(qty, order.limit_price);
+            }
+        }
+    }
+
+    /// Build a JointOutcome from a bundle order.
+    fn build_joint_outcome_for_order(
+        &self,
+        order: &matching_engine::Order,
+    ) -> matching_engine::JointOutcome {
+        let mut legs = Vec::new();
+        for market_idx in 0..order.num_markets as usize {
+            let market = order.markets[market_idx];
+            if market.is_none() {
+                continue;
+            }
+            // Determine outcome from payoffs
+            // For bundle YES orders, state 0 (all YES) has positive payoff
+            let outcome = if order.payoffs[0] > 0 { 0 } else { 1 };
+            legs.push((market, outcome));
+        }
+        matching_engine::JointOutcome::new(legs)
     }
 
     /// Build a MatchingResult from price discovery and allocation.

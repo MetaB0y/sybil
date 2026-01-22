@@ -1,15 +1,15 @@
 //! Detailed welfare analysis to understand solver behavior.
 
 use matching_engine::{MarketId, MmSide, Nanos, NANOS_PER_DOLLAR};
-use matching_scenarios::{generate_mega_scenario_v2, MegaScenarioConfigV2};
+use matching_scenarios::{generate_scenario, ScenarioConfig};
 use matching_solver::{local_solver::LocalSolver, mm_allocator::MmAllocator};
 use std::collections::{HashMap, HashSet};
 
 /// Analyze welfare at each stage and understand why convergence is immediate.
 #[test]
 fn analyze_welfare_stages() {
-    let config = MegaScenarioConfigV2::medium();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::medium();
+    let problem = generate_scenario(config);
 
     println!("\n{:=^80}", " WELFARE ANALYSIS ");
 

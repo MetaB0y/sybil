@@ -3,15 +3,15 @@
 //! These tests verify ECONOMIC correctness, not just that code runs.
 
 use matching_engine::{Order, NANOS_PER_DOLLAR};
-use matching_scenarios::{generate_mega_scenario_v2, MegaScenarioConfigV2};
+use matching_scenarios::{generate_scenario, ScenarioConfig};
 use matching_solver::{local_solver::LocalSolver, mm_allocator::MmAllocator};
 use std::collections::HashMap;
 
 /// Validate that all market solutions have normalized prices (sum to $1).
 #[test]
 fn validate_price_normalization() {
-    let config = MegaScenarioConfigV2::medium();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::medium();
+    let problem = generate_scenario(config);
 
     let solver = LocalSolver::new();
     let mut violations = 0;
@@ -53,8 +53,8 @@ fn validate_price_normalization() {
 /// This is the CRITICAL property that must always hold.
 #[test]
 fn validate_mm_budget_constraints() {
-    let config = MegaScenarioConfigV2::medium();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::medium();
+    let problem = generate_scenario(config);
 
     // Run clearing to get prices
     let solver = LocalSolver::new();
@@ -103,8 +103,8 @@ fn validate_mm_budget_constraints() {
 /// - Sellers (negative payoff): fill_price >= limit_price (receive at least limit)
 #[test]
 fn validate_fills_respect_limits() {
-    let config = MegaScenarioConfigV2::medium();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::medium();
+    let problem = generate_scenario(config);
 
     let solver = LocalSolver::new();
     let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
@@ -158,8 +158,8 @@ fn validate_fills_respect_limits() {
 /// Each order buys a specific outcome, so its fill price must match that outcome's clearing price.
 #[test]
 fn validate_fill_prices_match_clearing_prices() {
-    let config = MegaScenarioConfigV2::small();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::small();
+    let problem = generate_scenario(config);
 
     let solver = LocalSolver::new();
     let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
@@ -221,8 +221,8 @@ fn validate_fill_prices_match_clearing_prices() {
 /// Supply comes from both the liquidity book AND sell orders.
 #[test]
 fn validate_fills_respect_liquidity() {
-    let config = MegaScenarioConfigV2::small();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::small();
+    let problem = generate_scenario(config);
 
     let solver = LocalSolver::new();
 
@@ -286,8 +286,8 @@ fn compare_current_vs_iterative_approach() {
     use matching_engine::{MarketId, Nanos};
 
     // Use large scenario for meaningful comparison
-    let config = MegaScenarioConfigV2::large();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::large();
+    let problem = generate_scenario(config);
 
     let solver = LocalSolver::new();
     let allocator = MmAllocator::new();
@@ -629,8 +629,8 @@ fn compare_current_vs_iterative_approach() {
 /// Test with large scenario to stress test validation.
 #[test]
 fn validate_large_scenario() {
-    let config = MegaScenarioConfigV2::large();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::large();
+    let problem = generate_scenario(config);
 
     println!(
         "Large scenario: {} markets, {} orders, {} MMs",

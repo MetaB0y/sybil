@@ -17,7 +17,7 @@
 
 use divan::Bencher;
 use matching_engine::{simple_yes_buy, MmConstraint, MmId, MmSide, Problem, NANOS_PER_DOLLAR};
-use matching_scenarios::{generate_mega_scenario_v2, MegaScenarioConfigV2};
+use matching_scenarios::{generate_scenario, ScenarioConfig};
 use matching_solver::{
     local_solver::{LocalSolver, MarketSolution},
     mm_allocator::MmAllocator,
@@ -197,22 +197,22 @@ fn bench_mm_allocation(bencher: Bencher, mm_count: usize) {
 #[divan::bench]
 fn bench_mega_scenario_generation_small() {
     // ~200-500 total orders
-    let config = MegaScenarioConfigV2::small();
-    let _ = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::small();
+    let _ = generate_scenario(config);
 }
 
 #[divan::bench]
 fn bench_mega_scenario_generation_medium() {
     // ~1,500-4,500 total orders (plan target)
-    let config = MegaScenarioConfigV2::medium();
-    let _ = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::medium();
+    let _ = generate_scenario(config);
 }
 
 #[divan::bench]
 fn bench_mega_scenario_generation_large() {
     // ~10,000-30,000 total orders (stress test)
-    let config = MegaScenarioConfigV2::large();
-    let _ = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::large();
+    let _ = generate_scenario(config);
 }
 
 // ============================================================================
@@ -279,32 +279,32 @@ fn run_full_pipeline_lp(problem: &Problem) {
 #[divan::bench]
 fn bench_full_pipeline_small() {
     // ~200-500 total orders
-    let config = MegaScenarioConfigV2::small();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::small();
+    let problem = generate_scenario(config);
     run_full_pipeline(&problem);
 }
 
 #[divan::bench]
 fn bench_full_pipeline_medium() {
     // ~1,500-4,500 total orders (plan target)
-    let config = MegaScenarioConfigV2::medium();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::medium();
+    let problem = generate_scenario(config);
     run_full_pipeline(&problem);
 }
 
 #[divan::bench]
 fn bench_full_pipeline_large() {
     // ~10,000-30,000 total orders (stress test)
-    let config = MegaScenarioConfigV2::large();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::large();
+    let problem = generate_scenario(config);
     run_full_pipeline(&problem);
 }
 
 #[divan::bench]
 fn bench_full_pipeline_extreme() {
     // ~40,000-100,000 total orders (extreme stress)
-    let config = MegaScenarioConfigV2::extreme();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::extreme();
+    let problem = generate_scenario(config);
     run_full_pipeline(&problem);
 }
 
@@ -314,15 +314,15 @@ fn bench_full_pipeline_extreme() {
 
 #[divan::bench]
 fn bench_lp_pipeline_small() {
-    let config = MegaScenarioConfigV2::small();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::small();
+    let problem = generate_scenario(config);
     run_full_pipeline_lp(&problem);
 }
 
 #[divan::bench]
 fn bench_lp_pipeline_medium() {
-    let config = MegaScenarioConfigV2::medium();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::medium();
+    let problem = generate_scenario(config);
     run_full_pipeline_lp(&problem);
 }
 
@@ -332,40 +332,40 @@ fn bench_lp_pipeline_medium() {
 
 #[divan::bench]
 fn bench_pipeline_current_small() {
-    let config = MegaScenarioConfigV2::small();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::small();
+    let problem = generate_scenario(config);
     let pipeline = Pipeline::current();
     let _ = pipeline.solve(&problem);
 }
 
 #[divan::bench]
 fn bench_pipeline_current_medium() {
-    let config = MegaScenarioConfigV2::medium();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::medium();
+    let problem = generate_scenario(config);
     let pipeline = Pipeline::current();
     let _ = pipeline.solve(&problem);
 }
 
 #[divan::bench]
 fn bench_pipeline_full_platform_small() {
-    let config = MegaScenarioConfigV2::small();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::small();
+    let problem = generate_scenario(config);
     let pipeline = Pipeline::full_platform();
     let _ = pipeline.solve(&problem);
 }
 
 #[divan::bench]
 fn bench_pipeline_full_platform_medium() {
-    let config = MegaScenarioConfigV2::medium();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::medium();
+    let problem = generate_scenario(config);
     let pipeline = Pipeline::full_platform();
     let _ = pipeline.solve(&problem);
 }
 
 #[divan::bench]
 fn bench_pipeline_iterative_small() {
-    let config = MegaScenarioConfigV2::small();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::small();
+    let problem = generate_scenario(config);
     let pipeline = Pipeline::iterative();
     let _ = pipeline.solve(&problem);
 }
@@ -383,7 +383,7 @@ fn bench_harness_comparison() {
     // Add scenarios
     harness.add_scenario(
         "small",
-        generate_mega_scenario_v2(MegaScenarioConfigV2::small()),
+        generate_scenario(ScenarioConfig::small()),
     );
 
     // Add pipelines to compare
@@ -401,32 +401,32 @@ fn bench_harness_comparison() {
 
 #[divan::bench]
 fn bench_pipeline_consistent_small() {
-    let config = MegaScenarioConfigV2::small();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::small();
+    let problem = generate_scenario(config);
     let pipeline = Pipeline::consistent();
     let _ = pipeline.solve(&problem);
 }
 
 #[divan::bench]
 fn bench_pipeline_consistent_medium() {
-    let config = MegaScenarioConfigV2::medium();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::medium();
+    let problem = generate_scenario(config);
     let pipeline = Pipeline::consistent();
     let _ = pipeline.solve(&problem);
 }
 
 #[divan::bench]
 fn bench_pipeline_consistent_large() {
-    let config = MegaScenarioConfigV2::large();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::large();
+    let problem = generate_scenario(config);
     let pipeline = Pipeline::consistent();
     let _ = pipeline.solve(&problem);
 }
 
 #[divan::bench]
 fn bench_pipeline_consistent_extreme() {
-    let config = MegaScenarioConfigV2::extreme();
-    let problem = generate_mega_scenario_v2(config);
+    let config = ScenarioConfig::extreme();
+    let problem = generate_scenario(config);
     let pipeline = Pipeline::consistent();
     let _ = pipeline.solve(&problem);
 }
@@ -442,9 +442,9 @@ fn bench_pipeline_comparison_medium(bencher: Bencher, pipeline_type: &str) {
     // Generate scenario once and share across iterations
     static PROBLEM: OnceLock<Problem> = OnceLock::new();
     let problem = PROBLEM.get_or_init(|| {
-        let mut config = MegaScenarioConfigV2::medium();
+        let mut config = ScenarioConfig::medium();
         config.bundle_fraction = 0.30; // Higher bundle fraction for more projection work
-        generate_mega_scenario_v2(config)
+        generate_scenario(config)
     });
 
     bencher.bench_local(|| {

@@ -9,8 +9,8 @@ use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
 use matching_engine::{
-    bundle_yes, outcome_buy, outcome_sell, price_to_nanos, spread, MarketId, MmConstraint, MmId,
-    MmSide, Nanos, Order, Problem, Qty, NANOS_PER_DOLLAR,
+    bundle_yes, outcome_buy, outcome_sell, price_to_nanos, spread, JointOutcome, MarketGroup,
+    MarketId, MmConstraint, MmId, MmSide, Nanos, Order, Problem, Qty, NANOS_PER_DOLLAR, YES,
 };
 
 /// Unified configuration for scenario generation.
@@ -134,15 +134,15 @@ impl ScenarioConfig {
         }
     }
 
-    /// Extreme scenario for benchmarking limits (~50000 orders)
+    /// Extreme scenario for benchmarking limits (~100k orders)
     pub fn extreme() -> Self {
         Self {
-            num_markets: 100,
-            num_orders: 50000,
+            num_markets: 200,
+            num_orders: 100_000,
             bundle_fraction: 0.2,
             spread_fraction: 0.05,
-            aon_fraction: 0.2,
-            num_mms: 5,
+            aon_fraction: 0.15,
+            num_mms: 10,
             mm_budget_min: 50_000,
             mm_budget_max: 200_000,
             liquidity_scarcity: 0.3,
@@ -186,12 +186,49 @@ pub fn generate_scenario(config: ScenarioConfig) -> Problem {
         config.aon_fraction * 100.0,
     ));
 
-    // Generate binary markets with fair prices
+    // Generate binary markets, some grouped into multi-outcome events
+    // About 60% of markets will be in groups of 3-4 (mutually exclusive outcomes)
     let mut market_info: Vec<(MarketId, f64)> = Vec::new();
-    for i in 0..config.num_markets {
-        let market_id = problem.markets.add_binary(format!("M{}", i));
-        let fair_price = rng.gen_range(0.2..0.8);
-        market_info.push((market_id, fair_price));
+    let mut market_idx = 0;
+    let mut group_id = 0;
+
+    while market_idx < config.num_markets {
+        // Decide if this should be a group or standalone market
+        let remaining = config.num_markets - market_idx;
+        let make_group = remaining >= 3 && rng.gen_bool(0.6);
+
+        if make_group {
+            // Create a group of 3-4 mutually exclusive markets
+            let group_size = if remaining >= 4 && rng.gen_bool(0.5) { 4 } else { 3 };
+            let group_size = group_size.min(remaining);
+
+            // Generate fair prices that sum to 1.0
+            let mut raw_prices: Vec<f64> = (0..group_size)
+                .map(|_| rng.gen_range(0.1..1.0))
+                .collect();
+            let sum: f64 = raw_prices.iter().sum();
+            for p in &mut raw_prices {
+                *p /= sum; // Normalize to sum to 1.0
+            }
+
+            let mut group = MarketGroup::new(format!("Group{}", group_id));
+
+            for (i, &fair_price) in raw_prices.iter().enumerate() {
+                let market_id = problem.markets.add_binary(format!("G{}M{}", group_id, i));
+                market_info.push((market_id, fair_price));
+                group.add_market(market_id);
+            }
+
+            problem.add_market_group(group);
+            market_idx += group_size;
+            group_id += 1;
+        } else {
+            // Standalone market
+            let market_id = problem.markets.add_binary(format!("M{}", market_idx));
+            let fair_price = rng.gen_range(0.2..0.8);
+            market_info.push((market_id, fair_price));
+            market_idx += 1;
+        }
     }
 
     // Identify hot markets
@@ -222,17 +259,25 @@ pub fn generate_scenario(config: ScenarioConfig) -> Problem {
         problem.orders.push(order);
     }
 
-    // Bundle orders
+    // Bundle orders - track joint outcomes for liquidity
+    let mut bundle_outcomes: HashMap<JointOutcome, (Qty, Nanos)> = HashMap::new();
     for _ in 0..num_bundles {
-        let order = generate_bundle_order(
+        let (order, joint_outcome, limit_price) = generate_bundle_order_with_outcome(
             &problem.markets,
             &mut rng,
             &mut order_id,
             &market_info,
             &config,
         );
+        // Track demand for this joint outcome
+        let entry = bundle_outcomes.entry(joint_outcome).or_insert((0, 0));
+        entry.0 += order.max_fill;
+        entry.1 = entry.1.max(limit_price);
         problem.orders.push(order);
     }
+
+    // Add joint liquidity for bundle outcomes
+    add_joint_liquidity(&mut problem, &bundle_outcomes, &config, &mut rng);
 
     // Spread orders
     for _ in 0..num_spreads {
@@ -262,7 +307,7 @@ fn add_liquidity(
     market_info: &[(MarketId, f64)],
     hot_markets: &[MarketId],
     config: &ScenarioConfig,
-    rng: &mut ChaCha8Rng,
+    _rng: &mut ChaCha8Rng,
 ) {
     let avg_order_qty = (config.order_size_min + config.order_size_max) / 2;
     let total_demand_estimate = config.num_orders as u64 * avg_order_qty;
@@ -362,13 +407,13 @@ fn generate_simple_order(
     order
 }
 
-fn generate_bundle_order(
+fn generate_bundle_order_with_outcome(
     markets: &matching_engine::MarketSet,
     rng: &mut ChaCha8Rng,
     order_id: &mut u64,
     market_info: &[(MarketId, f64)],
     config: &ScenarioConfig,
-) -> Order {
+) -> (Order, JointOutcome, Nanos) {
     let id = *order_id;
     *order_id += 1;
 
@@ -376,7 +421,10 @@ fn generate_bundle_order(
     if max_bundle < 2 {
         // Fallback to simple order
         let (market, price) = market_info[0];
-        return outcome_buy(markets, id, market, 0, price_to_nanos(price), 50);
+        let limit_nanos = price_to_nanos(price);
+        let order = outcome_buy(markets, id, market, 0, limit_nanos, 50);
+        let joint_outcome = JointOutcome::new(vec![(market, YES)]);
+        return (order, joint_outcome, limit_nanos);
     }
 
     let num_to_bundle = rng.gen_range(2..=max_bundle);
@@ -388,15 +436,52 @@ fn generate_bundle_order(
     let combined_prob: f64 = selected.iter().map(|&i| market_info[i].1).product();
 
     let limit = (combined_prob * rng.gen_range(0.8..1.3)).clamp(0.01, 0.95);
+    let limit_nanos = price_to_nanos(limit);
     let qty = rng.gen_range(config.order_size_min..config.order_size_max);
 
-    let mut order = bundle_yes(markets, id, &bundle_markets, price_to_nanos(limit), qty);
+    let mut order = bundle_yes(markets, id, &bundle_markets, limit_nanos, qty);
 
     if rng.gen_bool(config.aon_fraction) {
         order.min_fill = order.max_fill;
     }
 
-    order
+    // Create joint outcome for all YES
+    let joint_outcome = JointOutcome::new(bundle_markets.iter().map(|&m| (m, YES)).collect());
+
+    (order, joint_outcome, limit_nanos)
+}
+
+/// Add joint liquidity for bundle outcomes based on bundle order demand.
+fn add_joint_liquidity(
+    problem: &mut Problem,
+    bundle_outcomes: &HashMap<JointOutcome, (Qty, Nanos)>,
+    config: &ScenarioConfig,
+    rng: &mut ChaCha8Rng,
+) {
+    for (joint_outcome, (total_demand, max_limit)) in bundle_outcomes {
+        // Provide liquidity proportional to demand, adjusted by scarcity
+        let supply = (*total_demand as f64 * config.liquidity_scarcity * 1.5) as Qty;
+
+        // Add multiple levels of liquidity
+        let num_levels = 3;
+        let supply_per_level = supply / num_levels as Qty;
+
+        for level in 0..num_levels {
+            // Price starts BELOW max limit and increases with level
+            // Level 0: 70-80% of max_limit
+            // Level 1: 80-90% of max_limit
+            // Level 2: 90-100% of max_limit
+            let base_price = *max_limit as f64 / 1_000_000_000.0;
+            let price_factor = 0.7 + 0.1 * level as f64 + rng.gen_range(0.0..0.1);
+            let level_price = (base_price * price_factor).clamp(0.01, 0.98);
+
+            problem.liquidity.add_joint_ask(
+                joint_outcome.clone(),
+                price_to_nanos(level_price),
+                supply_per_level.max(10),
+            );
+        }
+    }
 }
 
 fn generate_spread_order(

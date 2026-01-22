@@ -243,21 +243,151 @@ impl LiquidityBook {
     }
 }
 
+/// A joint outcome across multiple markets (e.g., "A YES AND B YES").
+///
+/// Used for bundle liquidity - liquidity that's only available when
+/// multiple markets have specific outcomes.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct JointOutcome {
+    /// Markets and their outcomes, sorted by MarketId for consistent hashing
+    pub legs: Vec<(MarketId, Outcome)>,
+}
+
+impl JointOutcome {
+    /// Create a new joint outcome from market-outcome pairs.
+    /// Legs are sorted by MarketId for consistent hashing.
+    pub fn new(mut legs: Vec<(MarketId, Outcome)>) -> Self {
+        legs.sort_by_key(|(m, _)| *m);
+        Self { legs }
+    }
+
+    /// Create a joint outcome from two markets (both YES).
+    pub fn both_yes(m1: MarketId, m2: MarketId) -> Self {
+        Self::new(vec![(m1, YES), (m2, YES)])
+    }
+
+    /// Number of markets in this joint outcome.
+    pub fn num_markets(&self) -> usize {
+        self.legs.len()
+    }
+}
+
+/// Liquidity book for a joint outcome (bundle liquidity).
+#[derive(Clone, Debug)]
+pub struct JointLiquidityBook {
+    /// The joint outcome this book is for
+    pub outcome: JointOutcome,
+    /// Asks sorted by price ascending (best ask first)
+    asks: Vec<BookLevel>,
+}
+
+impl JointLiquidityBook {
+    pub fn new(outcome: JointOutcome) -> Self {
+        Self {
+            outcome,
+            asks: Vec::new(),
+        }
+    }
+
+    /// Add an ask level (sorted by price ascending - best ask first).
+    pub fn add_ask(&mut self, price: Nanos, qty: Qty) {
+        let level = BookLevel::ask(price, qty);
+        let pos = self
+            .asks
+            .iter()
+            .position(|l| l.price > price)
+            .unwrap_or(self.asks.len());
+        self.asks.insert(pos, level);
+    }
+
+    /// Get all ask levels (best first).
+    pub fn asks(&self) -> &[BookLevel] {
+        &self.asks
+    }
+
+    /// Best ask price (lowest), or None if no asks.
+    pub fn best_ask(&self) -> Option<Nanos> {
+        self.asks.first().map(|l| l.price)
+    }
+
+    /// Total ask quantity available.
+    pub fn total_ask_qty(&self) -> Qty {
+        self.asks.iter().map(|l| l.available_qty).sum()
+    }
+
+    /// Get available quantity at or better than a price for buying.
+    pub fn available_to_buy(&self, max_price: Nanos) -> (Qty, Nanos) {
+        let mut total_qty = 0u64;
+        let mut total_cost = 0u128;
+
+        for level in &self.asks {
+            if level.price <= max_price {
+                total_qty += level.available_qty;
+                total_cost += level.price as u128 * level.available_qty as u128;
+            } else {
+                break;
+            }
+        }
+
+        let avg_price = if total_qty > 0 {
+            (total_cost / total_qty as u128) as Nanos
+        } else {
+            0
+        };
+
+        (total_qty, avg_price)
+    }
+
+    /// Consume liquidity from asks.
+    pub fn consume_asks(&mut self, max_qty: Qty, max_price: Nanos) -> (Qty, Nanos) {
+        let mut remaining = max_qty;
+        let mut total_cost = 0u128;
+        let mut filled = 0u64;
+
+        for level in &mut self.asks {
+            if level.price > max_price || remaining == 0 {
+                break;
+            }
+
+            let fill_qty = remaining.min(level.available_qty);
+            level.available_qty -= fill_qty;
+            remaining -= fill_qty;
+            filled += fill_qty;
+            total_cost += level.price as u128 * fill_qty as u128;
+        }
+
+        self.asks.retain(|l| l.available_qty > 0);
+
+        let avg_price = if filled > 0 {
+            (total_cost / filled as u128) as Nanos
+        } else {
+            0
+        };
+
+        (filled, avg_price)
+    }
+}
+
 /// Collection of liquidity books for all markets.
 ///
 /// For binary markets, each market has two books:
 /// - (market_id, 0) = YES outcome
 /// - (market_id, 1) = NO outcome
+///
+/// Also supports joint liquidity for bundles (e.g., "A YES AND B YES").
 #[derive(Clone, Debug, Default)]
 pub struct LiquidityPool {
     /// Books indexed by (market_id, outcome)
     pub books: HashMap<(MarketId, Outcome), LiquidityBook>,
+    /// Joint liquidity books for bundle outcomes
+    pub joint_books: HashMap<JointOutcome, JointLiquidityBook>,
 }
 
 impl LiquidityPool {
     pub fn new() -> Self {
         Self {
             books: HashMap::new(),
+            joint_books: HashMap::new(),
         }
     }
 
@@ -287,7 +417,30 @@ impl LiquidityPool {
     pub fn snapshot(&self) -> Self {
         Self {
             books: self.books.clone(),
+            joint_books: self.joint_books.clone(),
         }
+    }
+
+    /// Get or create a joint liquidity book for a bundle outcome.
+    pub fn joint_book_mut(&mut self, outcome: JointOutcome) -> &mut JointLiquidityBook {
+        self.joint_books
+            .entry(outcome.clone())
+            .or_insert_with(|| JointLiquidityBook::new(outcome))
+    }
+
+    /// Get a joint liquidity book (immutable).
+    pub fn joint_book(&self, outcome: &JointOutcome) -> Option<&JointLiquidityBook> {
+        self.joint_books.get(outcome)
+    }
+
+    /// Add an ask to a joint outcome (bundle liquidity).
+    pub fn add_joint_ask(&mut self, outcome: JointOutcome, price: Nanos, qty: Qty) {
+        self.joint_book_mut(outcome).add_ask(price, qty);
+    }
+
+    /// Get mutable reference to a joint book if it exists.
+    pub fn joint_book_get_mut(&mut self, outcome: &JointOutcome) -> Option<&mut JointLiquidityBook> {
+        self.joint_books.get_mut(outcome)
     }
 
     /// Iterate over all books.

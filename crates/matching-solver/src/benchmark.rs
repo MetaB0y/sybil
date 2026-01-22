@@ -10,13 +10,13 @@
 //!
 //! ```ignore
 //! use matching_solver::{BenchmarkHarness, Pipeline};
-//! use matching_scenarios::{generate_mega_scenario_v2, MegaScenarioConfigV2};
+//! use matching_scenarios::{generate_scenario, ScenarioConfig};
 //!
 //! let mut harness = BenchmarkHarness::new();
 //!
 //! // Add scenarios
-//! harness.add_scenario("small", generate_mega_scenario_v2(MegaScenarioConfigV2::small()));
-//! harness.add_scenario("medium", generate_mega_scenario_v2(MegaScenarioConfigV2::medium()));
+//! harness.add_scenario("small", generate_scenario(ScenarioConfig::small()));
+//! harness.add_scenario("medium", generate_scenario(ScenarioConfig::medium()));
 //!
 //! // Add pipelines
 //! harness.add_pipeline("current", Pipeline::current());
