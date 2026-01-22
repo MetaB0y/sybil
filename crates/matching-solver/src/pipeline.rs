@@ -168,6 +168,9 @@ impl PipelineResult {
 
 /// A configured pipeline for solving matching problems.
 pub struct Pipeline {
+    /// Name for identification in benchmarks.
+    name: String,
+
     /// Price discovery component (optional).
     price_discoverer: Option<Box<dyn PriceDiscoverer>>,
 
@@ -193,6 +196,7 @@ impl Pipeline {
     /// Uses LocalSolver for price discovery and MmAllocator for allocation.
     pub fn current() -> Self {
         Self::builder()
+            .name("Current")
             .price_discoverer(LocalSolver::new())
             .allocator(MmAllocator::new())
             .build()
@@ -202,6 +206,7 @@ impl Pipeline {
     #[cfg(feature = "milp")]
     pub fn full_platform() -> Self {
         Self::builder()
+            .name("Full Platform")
             .partial_solver(GreedySolver::new())
             .partial_solver(MilpSolver::with_timeout(1.0))
             .partial_solver(ArbitrageDetector::new())
@@ -213,6 +218,7 @@ impl Pipeline {
     #[cfg(not(feature = "milp"))]
     pub fn full_platform() -> Self {
         Self::builder()
+            .name("Full Platform")
             .partial_solver(GreedySolver::new())
             .partial_solver(ArbitrageDetector::new())
             .combine_with_mwis(true)
@@ -224,6 +230,7 @@ impl Pipeline {
     /// Iterates between price discovery and allocation until convergence.
     pub fn iterative() -> Self {
         Self::builder()
+            .name("Iterative")
             .price_discoverer(LocalSolver::new())
             .allocator(MmAllocator::new())
             .use_fixed_point(true)
@@ -237,6 +244,7 @@ impl Pipeline {
     /// consistency, and MmAllocator for allocation.
     pub fn consistent() -> Self {
         Self::builder()
+            .name("Consistent")
             .price_discoverer(LocalSolver::new())
             .price_projector(PriceProjectorImpl::new())
             .allocator(MmAllocator::new())
@@ -255,6 +263,7 @@ impl Pipeline {
     /// Each phase consumes liquidity, subsequent phases work on remaining.
     pub fn full() -> Self {
         Self::builder()
+            .name("Full (iterative)")
             .price_discoverer(LocalSolver::new())
             .price_projector(PriceProjectorImpl::new())
             .allocator(MmAllocator::new())
@@ -751,7 +760,7 @@ impl Solver for Pipeline {
     }
 
     fn name(&self) -> &str {
-        "Pipeline"
+        &self.name
     }
 }
 
@@ -761,6 +770,7 @@ impl Solver for Pipeline {
 
 /// Builder for constructing pipelines.
 pub struct PipelineBuilder {
+    name: String,
     price_discoverer: Option<Box<dyn PriceDiscoverer>>,
     price_projector: Option<Box<dyn PriceProjector>>,
     allocator: Option<Box<dyn OrderAllocator>>,
@@ -772,12 +782,19 @@ impl PipelineBuilder {
     /// Create a new empty builder.
     pub fn new() -> Self {
         Self {
+            name: "Pipeline".to_string(),
             price_discoverer: None,
             price_projector: None,
             allocator: None,
             partial_solvers: Vec::new(),
             config: PipelineConfig::default(),
         }
+    }
+
+    /// Set the pipeline name.
+    pub fn name(mut self, name: &str) -> Self {
+        self.name = name.to_string();
+        self
     }
 
     /// Set the price discoverer.
@@ -843,6 +860,7 @@ impl PipelineBuilder {
     /// Build the pipeline.
     pub fn build(self) -> Pipeline {
         Pipeline {
+            name: self.name,
             price_discoverer: self.price_discoverer,
             price_projector: self.price_projector,
             allocator: self.allocator,

@@ -947,6 +947,7 @@ fn create_solvers(choice: &SolverChoice, milp_timeout: Option<f64>) -> Vec<Box<d
                 Box::new(GreedySolver::new()),
                 milp,
                 Box::new(Pipeline::current()),
+                Box::new(Pipeline::full()),
             ]
         }
     }
