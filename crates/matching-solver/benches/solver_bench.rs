@@ -180,13 +180,13 @@ fn bench_mm_allocation(bencher: Bencher, mm_count: usize) {
         prices.insert(market_id, vec![500_000_000u64, 500_000_000u64]);
     }
 
-    // Compute welfare for each order (simplified: just use 1 for each)
-    let welfare: HashMap<u64, i64> = problem.orders.iter().map(|o| (o.id, 1i64)).collect();
+    // Provide fills (price, qty) for each order
+    let fills: HashMap<u64, (u64, u64)> = problem.orders.iter().map(|o| (o.id, (500_000_000u64, o.max_fill))).collect();
 
     let allocator = MmAllocator::new();
 
     bencher.bench_local(|| {
-        allocator.allocate(&problem.mm_constraints, &prices, &problem.orders, &welfare)
+        allocator.allocate(&problem.mm_constraints, &prices, &problem.orders, &fills)
     });
 }
 
@@ -241,10 +241,10 @@ fn run_full_pipeline(problem: &Problem) {
         prices.insert(*market_id, solution.prices.clone());
     }
 
-    let welfare: HashMap<u64, i64> = problem.orders.iter().map(|o| (o.id, 1i64)).collect();
+    let fills: HashMap<u64, (u64, u64)> = problem.orders.iter().map(|o| (o.id, (500_000_000u64, o.max_fill))).collect();
 
     let allocator = MmAllocator::new();
-    let _ = allocator.allocate(&problem.mm_constraints, &prices, &problem.orders, &welfare);
+    let _ = allocator.allocate(&problem.mm_constraints, &prices, &problem.orders, &fills);
 }
 
 fn run_full_pipeline_lp(problem: &Problem) {
@@ -270,10 +270,10 @@ fn run_full_pipeline_lp(problem: &Problem) {
         prices.insert(*market_id, solution.prices.clone());
     }
 
-    let welfare: HashMap<u64, i64> = problem.orders.iter().map(|o| (o.id, 1i64)).collect();
+    let fills: HashMap<u64, (u64, u64)> = problem.orders.iter().map(|o| (o.id, (500_000_000u64, o.max_fill))).collect();
 
     let allocator = MmAllocator::new();
-    let _ = allocator.allocate(&problem.mm_constraints, &prices, &problem.orders, &welfare);
+    let _ = allocator.allocate(&problem.mm_constraints, &prices, &problem.orders, &fills);
 }
 
 #[divan::bench]

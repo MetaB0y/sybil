@@ -13,19 +13,10 @@ use crate::{MatchingResult, Solver};
 /// Detected arbitrage opportunity.
 #[derive(Clone, Debug)]
 pub struct ArbitrageOpportunity {
-    /// Type of arbitrage
-    pub kind: ArbitrageKind,
     /// Orders involved in this arbitrage
     pub order_indices: Vec<usize>,
     /// Expected profit per unit
     pub profit_per_unit: Nanos,
-}
-
-/// Types of arbitrage opportunities.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ArbitrageKind {
-    /// Bundle underpricing: bundle cheaper than sum of legs
-    BundleUnderpricing,
 }
 
 /// Detects and exploits arbitrage opportunities.
@@ -98,7 +89,6 @@ impl ArbitrageDetector {
                 if bundle_limit > avg_leg_cost {
                     let profit_per_unit = bundle_limit - avg_leg_cost;
                     opportunities.push(ArbitrageOpportunity {
-                        kind: ArbitrageKind::BundleUnderpricing,
                         order_indices: vec![order_idx],
                         profit_per_unit,
                     });

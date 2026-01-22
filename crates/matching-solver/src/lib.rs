@@ -27,6 +27,7 @@ pub mod pipeline;
 pub mod price_projector;
 pub(crate) mod specialized;
 pub mod traits;
+pub mod verifier;
 
 #[cfg(feature = "milp")]
 pub mod milp;
@@ -40,9 +41,7 @@ pub use greedy::GreedySolver;
 pub use local_solver::{
     solve_all_markets_parallel, solve_market_lp, LocalSolver, LocalSolverConfig, MarketSolution,
 };
-pub use mm_allocator::{
-    AllocationResult as MmAllocationResult, AllocatorConfig, MmAllocation, MmAllocator,
-};
+pub use mm_allocator::{AllocationResult as MmAllocationResult, MmAllocation, MmAllocator};
 
 // Experimentation platform traits
 pub use traits::{
@@ -63,6 +62,9 @@ pub use pipeline::{
 
 // Benchmark harness
 pub use benchmark::{compare_to_baseline, BenchmarkHarness, BenchmarkResults, BenchmarkRun};
+
+// Result verification (for ZK proof integration)
+pub use verifier::{verify, verify_strict, VerificationResult, Verifier, Violation, ViolationKind};
 
 #[cfg(feature = "milp")]
 pub use milp::{MilpConfig, MilpResult, MilpSolver, SolveStatus};

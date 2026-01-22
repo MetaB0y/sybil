@@ -70,12 +70,12 @@ fn validate_mm_budget_constraints() {
         prices.insert(market.id, solution.prices);
     }
 
-    // Compute welfare (simplified: 1 per order)
-    let welfare: HashMap<u64, i64> = problem.orders.iter().map(|o| (o.id, 1i64)).collect();
+    // Provide fills (price, qty) for each order
+    let fills: HashMap<u64, (u64, u64)> = problem.orders.iter().map(|o| (o.id, (500_000_000u64, o.max_fill))).collect();
 
     // Run MM allocation
     let allocator = MmAllocator::new();
-    let result = allocator.allocate(&problem.mm_constraints, &prices, &problem.orders, &welfare);
+    let result = allocator.allocate(&problem.mm_constraints, &prices, &problem.orders, &fills);
 
     // Validate: each MM's capital_used <= budget
     let mut violations = 0;
@@ -353,10 +353,8 @@ fn compare_current_vs_iterative_approach() {
         current_welfare += solution.welfare;
     }
 
-    // Compute welfare as economic surplus at clearing prices
-    // welfare = (limit_price - clearing_price) * qty for buyers
-    // This is what the order would gain if filled at the clearing price
-    let welfare_map: HashMap<u64, i64> = problem
+    // Build fills map: (clearing_price, max_fill) for each order
+    let fills_map: HashMap<u64, (u64, u64)> = problem
         .orders
         .iter()
         .map(|o| {
@@ -369,34 +367,15 @@ fn compare_current_vs_iterative_approach() {
             } else {
                 500_000_000
             };
-
-            // Welfare = surplus if filled at clearing price
-            // For a buyer: limit - clearing (positive if limit > clearing)
-            let surplus_per_share = o.limit_price as i64 - clearing_price as i64;
-            let welfare = surplus_per_share * o.max_fill as i64;
-
-            // Only positive welfare makes sense (order wouldn't fill if negative)
-            (o.id, welfare.max(0))
+            (o.id, (clearing_price, o.max_fill))
         })
         .collect();
-
-    // Debug: check welfare distribution for MM orders
-    let mm_welfare_stats: Vec<i64> = mm_order_ids
-        .iter()
-        .filter_map(|id| welfare_map.get(id).copied())
-        .collect();
-    let mm_positive_welfare = mm_welfare_stats.iter().filter(|&&w| w > 0).count();
-    println!(
-        "MM welfare: {} orders with positive welfare out of {}",
-        mm_positive_welfare,
-        mm_welfare_stats.len()
-    );
 
     let mm_result = allocator.allocate(
         &problem.mm_constraints,
         &current_prices,
         &problem.orders,
-        &welfare_map,
+        &fills_map,
     );
 
     println!("Phase 1 (non-MM clearing):");
@@ -439,12 +418,29 @@ fn compare_current_vs_iterative_approach() {
     loop {
         iterations += 1;
 
+        // Build fills from current iter_prices
+        let iter_fills: HashMap<u64, (u64, u64)> = problem
+            .orders
+            .iter()
+            .map(|o| {
+                let price = if o.num_markets > 0 {
+                    iter_prices
+                        .get(&o.markets[0])
+                        .and_then(|p| p.first().copied())
+                        .unwrap_or(500_000_000)
+                } else {
+                    500_000_000
+                };
+                (o.id, (price, o.max_fill))
+            })
+            .collect();
+
         // MM allocation with current prices
         let mm_result = allocator.allocate(
             &problem.mm_constraints,
             &iter_prices,
             &problem.orders,
-            &welfare_map,
+            &iter_fills,
         );
         let new_activated: Vec<u64> = mm_result.activated_orders.clone();
 
@@ -511,12 +507,29 @@ fn compare_current_vs_iterative_approach() {
         }
     }
 
+    // Build final fills from converged prices
+    let final_fills: HashMap<u64, (u64, u64)> = problem
+        .orders
+        .iter()
+        .map(|o| {
+            let price = if o.num_markets > 0 {
+                iter_prices
+                    .get(&o.markets[0])
+                    .and_then(|p| p.first().copied())
+                    .unwrap_or(500_000_000)
+            } else {
+                500_000_000
+            };
+            (o.id, (price, o.max_fill))
+        })
+        .collect();
+
     // Final MM allocation with converged prices
     let final_mm_result = allocator.allocate(
         &problem.mm_constraints,
         &iter_prices,
         &problem.orders,
-        &welfare_map,
+        &final_fills,
     );
 
     println!("\nIterative result after {} iterations:", iterations);
@@ -666,9 +679,9 @@ fn validate_large_scenario() {
     println!("Total fills generated: {}", total_fills);
 
     // Verify MM allocation
-    let welfare: HashMap<u64, i64> = problem.orders.iter().map(|o| (o.id, 1i64)).collect();
+    let fills: HashMap<u64, (u64, u64)> = problem.orders.iter().map(|o| (o.id, (500_000_000u64, o.max_fill))).collect();
     let allocator = MmAllocator::new();
-    let result = allocator.allocate(&problem.mm_constraints, &prices, &problem.orders, &welfare);
+    let result = allocator.allocate(&problem.mm_constraints, &prices, &problem.orders, &fills);
 
     for alloc in &result.mm_allocations {
         assert!(

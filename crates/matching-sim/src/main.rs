@@ -23,7 +23,10 @@ use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Cell, Color
 
 use matching_engine::{MarketId, Order, Problem};
 use matching_scenarios::{generate_scenario, ScenarioConfig};
-use matching_solver::{GreedySolver, IterationStats, MilpSolver, Pipeline, PipelineResult, Solver};
+use matching_solver::{
+    verify, GreedySolver, IterationStats, MilpSolver, Pipeline, PipelineResult, Solver,
+    VerificationResult,
+};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -459,7 +462,44 @@ fn run_detailed_pipeline(base_config: &ScenarioConfig, num_batches: usize) {
         let fill_stats = FillStats::compute(&problem, &result, &order_stats);
         print_fill_stats(&fill_stats, &order_stats, problem.markets.len());
 
+        // Verify the result
+        let verification = verify(&problem, &result.result);
+        print_verification_result(&verification);
+
         println!();
+    }
+}
+
+fn print_verification_result(result: &VerificationResult) {
+    println!();
+    println!("Result Verification (ZK-ready):");
+    println!("─────────────────────────────────────────");
+
+    if result.valid {
+        println!("  Status: {} VALID", "✓");
+        println!(
+            "  Fills verified: {}",
+            result.stats.fills_checked
+        );
+        println!(
+            "  MM constraints verified: {}",
+            result.stats.mm_constraints_checked
+        );
+        println!(
+            "  Welfare: computed={} reported={}",
+            format_welfare(result.stats.computed_welfare),
+            format_welfare(result.stats.reported_welfare)
+        );
+    } else {
+        println!("  Status: {} INVALID ({} violations)", "✗", result.violations.len());
+        println!();
+        println!("  Violations:");
+        for (i, violation) in result.violations.iter().enumerate().take(10) {
+            println!("    {}. {:?}: {}", i + 1, violation.kind, violation.details);
+        }
+        if result.violations.len() > 10 {
+            println!("    ... and {} more", result.violations.len() - 10);
+        }
     }
 }
 

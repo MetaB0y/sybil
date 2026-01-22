@@ -1,22 +1,21 @@
-//! Market Maker budget allocation using Lagrangian relaxation.
+//! Market Maker budget allocation using greedy allocation with actual fills.
 //!
-//! This module allocates MM budgets across orders using a dual approach:
-//! 1. Binary search on Lagrange multiplier (lambda) per MM
-//! 2. Fixed-point iteration when multiple MMs interact
+//! This module allocates MM budgets across orders by:
+//! 1. Computing actual capital cost from fills
+//! 2. Sorting orders by welfare/capital ratio
+//! 3. Activating greedily until budget exhausted
 //!
 //! # Architecture
 //!
 //! ```text
-//! Input: per-market prices, MM constraints, order welfare
+//! Input: per-market prices, MM constraints, order welfare, actual fills
 //! Output: which MM orders to activate (fill)
 //!
 //! Algorithm:
 //!   for each MM:
-//!     binary_search(lambda) such that:
-//!       activated_orders(lambda).capital_used ≈ budget
-//!
-//!   if multiple MMs interact:
-//!     fixed_point_iterate until convergence
+//!     1. Compute actual capital from fills (not max_fill estimates)
+//!     2. Sort orders by welfare/capital ratio
+//!     3. Greedily activate until budget exhausted
 //! ```
 
 use std::collections::{HashMap, HashSet};
@@ -72,46 +71,19 @@ pub struct MmAllocation {
     pub lambda: f64,
 }
 
-/// Configuration for the MM allocator.
-#[derive(Clone, Debug)]
-pub struct AllocatorConfig {
-    /// Maximum iterations for binary search
-    pub max_binary_search_iterations: usize,
-    /// Maximum iterations for fixed-point
-    pub max_fixed_point_iterations: usize,
-    /// Convergence tolerance for lambda (relative)
-    pub lambda_tolerance: f64,
-    /// Convergence tolerance for capital (absolute, in nanos)
-    pub capital_tolerance: Nanos,
-}
 
-impl Default for AllocatorConfig {
-    fn default() -> Self {
-        Self {
-            max_binary_search_iterations: 50,
-            max_fixed_point_iterations: 20,
-            lambda_tolerance: 1e-6,
-            capital_tolerance: 1_000_000, // $0.001
-        }
-    }
-}
-
-/// MM Budget allocator using Lagrangian relaxation.
-pub struct MmAllocator {
-    config: AllocatorConfig,
-}
+/// MM Budget allocator using greedy allocation with actual fills.
+///
+/// The allocator uses a simple greedy approach:
+/// 1. Compute actual capital for each order from fills
+/// 2. Sort by welfare/capital ratio
+/// 3. Activate orders greedily until budget exhausted
+pub struct MmAllocator;
 
 impl MmAllocator {
-    /// Create a new allocator with default config.
+    /// Create a new allocator.
     pub fn new() -> Self {
-        Self {
-            config: AllocatorConfig::default(),
-        }
-    }
-
-    /// Create an allocator with custom config.
-    pub fn with_config(config: AllocatorConfig) -> Self {
-        Self { config }
+        Self
     }
 
     /// Allocate MM budgets across orders.
@@ -120,23 +92,27 @@ impl MmAllocator {
     /// * `mm_constraints` - MM constraints with budget limits
     /// * `prices` - Clearing prices per outcome per market
     /// * `orders` - All orders in the problem
-    /// * `welfare` - Welfare contribution of each order (order_id -> welfare)
+    /// * `fills` - Actual fills from price discovery (order_id -> (price, qty))
     ///
     /// # Returns
     /// Allocation result with activated order IDs
     pub fn allocate(
         &self,
         mm_constraints: &[MmConstraint],
-        prices: &HashMap<MarketId, Vec<Nanos>>,
+        _prices: &HashMap<MarketId, Vec<Nanos>>,
         orders: &[Order],
-        welfare: &HashMap<u64, i64>,
+        fills: &HashMap<u64, (Nanos, Qty)>,
     ) -> AllocationResult {
         if mm_constraints.is_empty() {
             // No MM constraints, activate all orders
             return AllocationResult {
                 activated_orders: orders.iter().map(|o| o.id).collect(),
                 mm_allocations: Vec::new(),
-                total_welfare: welfare.values().sum(),
+                total_welfare: fills.iter().map(|(&id, &(price, qty))| {
+                    orders.iter().find(|o| o.id == id)
+                        .map(|o| o.welfare_contribution(price, qty))
+                        .unwrap_or(0)
+                }).sum(),
                 iterations: 0,
                 stats: AllocationStats::default(),
             };
@@ -145,17 +121,25 @@ impl MmAllocator {
         // Build order lookup
         let order_map: HashMap<u64, &Order> = orders.iter().map(|o| (o.id, o)).collect();
 
+        // Compute welfare from actual fills
+        let welfare: HashMap<u64, i64> = fills.iter().map(|(&id, &(price, qty))| {
+            let w = order_map.get(&id)
+                .map(|o| o.welfare_contribution(price, qty))
+                .unwrap_or(0);
+            (id, w)
+        }).collect();
+
         // Check if MMs interact (share orders)
         let interacting = self.mms_interact(mm_constraints);
 
         // Compute greedy baseline for sanity check
         let greedy_baseline =
-            self.compute_greedy_baseline(mm_constraints, prices, &order_map, welfare);
+            self.compute_greedy_baseline_with_fills(mm_constraints, &order_map, fills, &welfare);
 
         let mut result = if interacting {
-            self.allocate_fixed_point(mm_constraints, prices, &order_map, welfare)
+            self.allocate_fixed_point_with_fills(mm_constraints, &order_map, fills, &welfare)
         } else {
-            self.allocate_independent(mm_constraints, prices, &order_map, welfare)
+            self.allocate_independent_with_fills(mm_constraints, &order_map, fills, &welfare)
         };
 
         // Compute stats
@@ -164,31 +148,37 @@ impl MmAllocator {
         result
     }
 
-    /// Compute greedy baseline: sort orders by welfare, add until budget full.
-    fn compute_greedy_baseline(
+    /// Compute greedy baseline using actual fills.
+    fn compute_greedy_baseline_with_fills(
         &self,
         mm_constraints: &[MmConstraint],
-        prices: &HashMap<MarketId, Vec<Nanos>>,
-        order_map: &HashMap<u64, &Order>,
+        _order_map: &HashMap<u64, &Order>,
+        fills: &HashMap<u64, (Nanos, Qty)>,
         welfare: &HashMap<u64, i64>,
     ) -> i64 {
         let mut total_greedy_welfare: i64 = 0;
 
         for mm in mm_constraints {
-            // Collect orders with their welfare and capital cost
+            // Collect orders with their actual fill welfare and capital cost
             let mut order_info: Vec<(u64, i64, Nanos)> = mm
                 .order_ids
                 .iter()
                 .filter_map(|&order_id| {
-                    let order = order_map.get(&order_id)?;
+                    let (price, qty) = fills.get(&order_id).copied()?;
+                    if qty == 0 { return None; }
                     let w = welfare.get(&order_id).copied().unwrap_or(0);
-                    let capital = self.estimate_order_capital(mm, order_id, order, prices);
+                    let side = mm.order_sides.get(&order_id)?;
+                    let capital = side.capital_needed(price, qty);
                     Some((order_id, w, capital))
                 })
                 .collect();
 
-            // Sort by welfare descending (greedy)
-            order_info.sort_by_key(|(_, w, _)| std::cmp::Reverse(*w));
+            // Sort by welfare/capital ratio descending (greedy)
+            order_info.sort_by(|(_, w1, c1), (_, w2, c2)| {
+                let ratio1 = if *c1 > 0 { *w1 as f64 / *c1 as f64 } else { f64::MAX };
+                let ratio2 = if *c2 > 0 { *w2 as f64 / *c2 as f64 } else { f64::MAX };
+                ratio2.partial_cmp(&ratio1).unwrap_or(std::cmp::Ordering::Equal)
+            });
 
             // Greedily add until budget full
             let mut budget_remaining = mm.max_capital;
@@ -205,6 +195,114 @@ impl MmAllocator {
         }
 
         total_greedy_welfare
+    }
+
+    /// Allocate independent MMs using actual fills.
+    fn allocate_independent_with_fills(
+        &self,
+        mm_constraints: &[MmConstraint],
+        order_map: &HashMap<u64, &Order>,
+        fills: &HashMap<u64, (Nanos, Qty)>,
+        welfare: &HashMap<u64, i64>,
+    ) -> AllocationResult {
+        let mut all_activated = Vec::new();
+        let mut allocations = Vec::new();
+        let mut total_welfare: i64 = 0;
+
+        for mm in mm_constraints {
+            let (activated, capital_used, mm_welfare) =
+                self.allocate_single_mm_with_fills(mm, order_map, fills, welfare);
+
+            allocations.push(MmAllocation {
+                mm_id: mm.mm_id,
+                activated_orders: activated.clone(),
+                capital_used,
+                budget: mm.max_capital,
+                utilization: if mm.max_capital > 0 {
+                    capital_used as f64 / mm.max_capital as f64
+                } else { 0.0 },
+                lambda: 0.0,
+            });
+
+            all_activated.extend(activated);
+            total_welfare += mm_welfare;
+        }
+
+        // Also activate non-MM orders
+        for order in order_map.values() {
+            let is_mm_order = mm_constraints.iter().any(|mm| mm.order_ids.contains(&order.id));
+            if !is_mm_order {
+                all_activated.push(order.id);
+                total_welfare += welfare.get(&order.id).copied().unwrap_or(0);
+            }
+        }
+
+        AllocationResult {
+            activated_orders: all_activated,
+            mm_allocations: allocations,
+            total_welfare,
+            iterations: 1,
+            stats: AllocationStats::default(),
+        }
+    }
+
+    /// Allocate a single MM's orders using actual fills, greedy by welfare/capital ratio.
+    fn allocate_single_mm_with_fills(
+        &self,
+        mm: &MmConstraint,
+        _order_map: &HashMap<u64, &Order>,
+        fills: &HashMap<u64, (Nanos, Qty)>,
+        welfare: &HashMap<u64, i64>,
+    ) -> (Vec<u64>, Nanos, i64) {
+        // Collect orders with their actual fill info
+        let mut order_info: Vec<(u64, i64, Nanos)> = mm
+            .order_ids
+            .iter()
+            .filter_map(|&order_id| {
+                let (price, qty) = fills.get(&order_id).copied()?;
+                if qty == 0 { return None; }
+                let w = welfare.get(&order_id).copied().unwrap_or(0);
+                let side = mm.order_sides.get(&order_id)?;
+                let capital = side.capital_needed(price, qty);
+                Some((order_id, w, capital))
+            })
+            .collect();
+
+        // Sort by welfare/capital ratio descending
+        order_info.sort_by(|(_, w1, c1), (_, w2, c2)| {
+            let ratio1 = if *c1 > 0 { *w1 as f64 / *c1 as f64 } else { f64::MAX };
+            let ratio2 = if *c2 > 0 { *w2 as f64 / *c2 as f64 } else { f64::MAX };
+            ratio2.partial_cmp(&ratio1).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Greedily activate until budget full
+        let mut budget_remaining = mm.max_capital;
+        let mut activated = Vec::new();
+        let mut capital_used: Nanos = 0;
+        let mut mm_welfare: i64 = 0;
+
+        for (order_id, w, capital) in order_info {
+            if capital <= budget_remaining {
+                activated.push(order_id);
+                capital_used += capital;
+                mm_welfare += w;
+                budget_remaining -= capital;
+            }
+        }
+
+        (activated, capital_used, mm_welfare)
+    }
+
+    /// Fixed-point allocation for interacting MMs using actual fills.
+    fn allocate_fixed_point_with_fills(
+        &self,
+        mm_constraints: &[MmConstraint],
+        order_map: &HashMap<u64, &Order>,
+        fills: &HashMap<u64, (Nanos, Qty)>,
+        welfare: &HashMap<u64, i64>,
+    ) -> AllocationResult {
+        // For now, use independent allocation (can be improved later)
+        self.allocate_independent_with_fills(mm_constraints, order_map, fills, welfare)
     }
 
     /// Compute allocation statistics.
@@ -271,299 +369,6 @@ impl MmAllocator {
         }
         false
     }
-
-    /// Allocate for independent MMs (no shared orders).
-    fn allocate_independent(
-        &self,
-        mm_constraints: &[MmConstraint],
-        prices: &HashMap<MarketId, Vec<Nanos>>,
-        order_map: &HashMap<u64, &Order>,
-        welfare: &HashMap<u64, i64>,
-    ) -> AllocationResult {
-        let mut all_activated: Vec<u64> = Vec::new();
-        let mut mm_allocations: Vec<MmAllocation> = Vec::new();
-        let mut total_welfare: i64 = 0;
-
-        // Activate non-MM orders first
-        let mm_order_ids: HashSet<u64> = mm_constraints
-            .iter()
-            .flat_map(|mm| mm.order_ids.iter().copied())
-            .collect();
-
-        for (order_id, &w) in welfare {
-            if !mm_order_ids.contains(order_id) {
-                all_activated.push(*order_id);
-                total_welfare += w;
-            }
-        }
-
-        // Allocate each MM independently
-        for mm in mm_constraints {
-            let allocation = self.allocate_single_mm(mm, prices, order_map, welfare);
-
-            total_welfare += allocation
-                .activated_orders
-                .iter()
-                .filter_map(|id| welfare.get(id))
-                .sum::<i64>();
-
-            all_activated.extend(&allocation.activated_orders);
-            mm_allocations.push(allocation);
-        }
-
-        AllocationResult {
-            activated_orders: all_activated,
-            mm_allocations,
-            total_welfare,
-            iterations: 1,
-            stats: AllocationStats::default(), // Will be filled by caller
-        }
-    }
-
-    /// Allocate for interacting MMs using fixed-point iteration.
-    fn allocate_fixed_point(
-        &self,
-        mm_constraints: &[MmConstraint],
-        prices: &HashMap<MarketId, Vec<Nanos>>,
-        order_map: &HashMap<u64, &Order>,
-        welfare: &HashMap<u64, i64>,
-    ) -> AllocationResult {
-        let mut lambdas: Vec<f64> = vec![0.0; mm_constraints.len()];
-        let mut prev_activated: HashSet<u64> = HashSet::new();
-        let mut iterations = 0;
-
-        // Fixed-point iteration
-        for iter in 0..self.config.max_fixed_point_iterations {
-            iterations = iter + 1;
-            let mut current_activated: HashSet<u64> = HashSet::new();
-
-            // Update each MM given current lambdas
-            for (i, mm) in mm_constraints.iter().enumerate() {
-                let (new_lambda, activated) =
-                    self.binary_search_lambda(mm, prices, order_map, welfare, &lambdas, i);
-                lambdas[i] = new_lambda;
-                current_activated.extend(activated);
-            }
-
-            // Check convergence
-            if current_activated == prev_activated {
-                break;
-            }
-            prev_activated = current_activated;
-        }
-
-        // Build final result
-        let mut all_activated: Vec<u64> = Vec::new();
-        let mut mm_allocations: Vec<MmAllocation> = Vec::new();
-        let mut total_welfare: i64 = 0;
-
-        // Non-MM orders
-        let mm_order_ids: HashSet<u64> = mm_constraints
-            .iter()
-            .flat_map(|mm| mm.order_ids.iter().copied())
-            .collect();
-
-        for (order_id, &w) in welfare {
-            if !mm_order_ids.contains(order_id) {
-                all_activated.push(*order_id);
-                total_welfare += w;
-            }
-        }
-
-        // MM orders
-        for (i, mm) in mm_constraints.iter().enumerate() {
-            let allocation = self.compute_allocation(mm, lambdas[i], prices, order_map, welfare);
-
-            total_welfare += allocation
-                .activated_orders
-                .iter()
-                .filter_map(|id| welfare.get(id))
-                .sum::<i64>();
-
-            all_activated.extend(&allocation.activated_orders);
-            mm_allocations.push(allocation);
-        }
-
-        AllocationResult {
-            activated_orders: all_activated,
-            mm_allocations,
-            total_welfare,
-            iterations,
-            stats: AllocationStats::default(), // Will be filled by caller
-        }
-    }
-
-    /// Allocate for a single MM using binary search on lambda.
-    fn allocate_single_mm(
-        &self,
-        mm: &MmConstraint,
-        prices: &HashMap<MarketId, Vec<Nanos>>,
-        order_map: &HashMap<u64, &Order>,
-        welfare: &HashMap<u64, i64>,
-    ) -> MmAllocation {
-        let (lambda, _) = self.binary_search_lambda(mm, prices, order_map, welfare, &[], 0);
-
-        self.compute_allocation(mm, lambda, prices, order_map, welfare)
-    }
-
-    /// Binary search for optimal lambda.
-    ///
-    /// Lambda is the Lagrange multiplier for the budget constraint.
-    /// Higher lambda = fewer orders activated.
-    ///
-    /// Returns the highest-welfare allocation that respects the budget constraint.
-    fn binary_search_lambda(
-        &self,
-        mm: &MmConstraint,
-        prices: &HashMap<MarketId, Vec<Nanos>>,
-        order_map: &HashMap<u64, &Order>,
-        welfare: &HashMap<u64, i64>,
-        _other_lambdas: &[f64],
-        _mm_index: usize,
-    ) -> (f64, Vec<u64>) {
-        let mut lo = 0.0;
-        let mut hi = 1e12; // Large enough to deactivate all orders
-
-        // First check if we can activate all orders within budget
-        let all_activated = self.compute_allocation(mm, 0.0, prices, order_map, welfare);
-        if all_activated.capital_used <= mm.max_capital {
-            return (0.0, all_activated.activated_orders);
-        }
-
-        // Track the best valid allocation (within budget, maximum welfare)
-        let mut best_valid_lambda = hi;
-        let mut best_valid_orders: Vec<u64> = Vec::new();
-        let mut best_valid_welfare: i64 = 0;
-
-        // Binary search for lambda
-        for _ in 0..self.config.max_binary_search_iterations {
-            let mid = (lo + hi) / 2.0;
-            let allocation = self.compute_allocation(mm, mid, prices, order_map, welfare);
-
-            // Check if this allocation respects budget
-            if allocation.capital_used <= mm.max_capital {
-                // Valid allocation - check if it's better than our best
-                let alloc_welfare: i64 = allocation
-                    .activated_orders
-                    .iter()
-                    .filter_map(|id| welfare.get(id))
-                    .sum();
-
-                if alloc_welfare > best_valid_welfare {
-                    best_valid_welfare = alloc_welfare;
-                    best_valid_lambda = mid;
-                    best_valid_orders = allocation.activated_orders.clone();
-                }
-
-                // Try to find a lower lambda (more orders) that still fits
-                hi = mid;
-            } else {
-                // Over budget - need higher lambda to reduce orders
-                lo = mid;
-            }
-
-            if (hi - lo) / hi.max(1.0) < self.config.lambda_tolerance {
-                break;
-            }
-        }
-
-        // If we never found a valid allocation, return empty
-        if best_valid_orders.is_empty() && mm.max_capital > 0 {
-            // Try with very high lambda to get at least something
-            let minimal = self.compute_allocation(mm, hi * 10.0, prices, order_map, welfare);
-            if minimal.capital_used <= mm.max_capital {
-                return (hi * 10.0, minimal.activated_orders);
-            }
-        }
-
-        (best_valid_lambda, best_valid_orders)
-    }
-
-    /// Compute allocation for a given lambda.
-    ///
-    /// Activates orders where: welfare - lambda * capital > 0
-    fn compute_allocation(
-        &self,
-        mm: &MmConstraint,
-        lambda: f64,
-        prices: &HashMap<MarketId, Vec<Nanos>>,
-        order_map: &HashMap<u64, &Order>,
-        welfare: &HashMap<u64, i64>,
-    ) -> MmAllocation {
-        let mut activated_orders: Vec<u64> = Vec::new();
-        let mut fills: HashMap<u64, (Nanos, Qty)> = HashMap::new();
-
-        for &order_id in &mm.order_ids {
-            let Some(order) = order_map.get(&order_id) else {
-                continue;
-            };
-
-            let order_welfare = welfare.get(&order_id).copied().unwrap_or(0);
-
-            // Estimate capital needed for this order
-            let capital = self.estimate_order_capital(mm, order_id, order, prices);
-
-            // Lagrangian: activate if welfare - lambda * capital > 0
-            let adjusted_value = order_welfare as f64 - lambda * capital as f64;
-
-            if adjusted_value > 0.0 {
-                activated_orders.push(order_id);
-
-                // Get price for this order
-                let price = if order.num_markets > 0 {
-                    prices
-                        .get(&order.markets[0])
-                        .and_then(|p| p.first().copied())
-                        .unwrap_or(500_000_000)
-                } else {
-                    500_000_000
-                };
-
-                fills.insert(order_id, (price, order.max_fill));
-            }
-        }
-
-        let capital_used = mm.capital_used(&fills);
-        let utilization = if mm.max_capital > 0 {
-            capital_used as f64 / mm.max_capital as f64
-        } else {
-            0.0
-        };
-
-        MmAllocation {
-            mm_id: mm.mm_id,
-            activated_orders,
-            capital_used,
-            budget: mm.max_capital,
-            utilization,
-            lambda,
-        }
-    }
-
-    /// Estimate capital needed for an order at current prices.
-    fn estimate_order_capital(
-        &self,
-        mm: &MmConstraint,
-        order_id: u64,
-        order: &Order,
-        prices: &HashMap<MarketId, Vec<Nanos>>,
-    ) -> Nanos {
-        let Some(&side) = mm.order_sides.get(&order_id) else {
-            return 0;
-        };
-
-        // Get price for the primary market
-        let price = if order.num_markets > 0 {
-            prices
-                .get(&order.markets[0])
-                .and_then(|p| p.first().copied())
-                .unwrap_or(500_000_000)
-        } else {
-            500_000_000 // Default to 50 cents
-        };
-
-        side.capital_needed(price, order.max_fill)
-    }
 }
 
 impl Default for MmAllocator {
@@ -584,12 +389,10 @@ impl OrderAllocator for MmAllocator {
         constraints: &[MmConstraint],
         prices: &HashMap<MarketId, Vec<Nanos>>,
         orders: &[Order],
+        fills: &HashMap<u64, (Nanos, Qty)>,
     ) -> TraitAllocationResult {
-        // Compute welfare for each order based on prices
-        let welfare = Self::compute_order_welfare(orders, prices);
-
-        // Use the existing allocate method
-        let result = MmAllocator::allocate(self, constraints, prices, orders, &welfare);
+        // Use the existing allocate method with actual fills
+        let result = MmAllocator::allocate(self, constraints, prices, orders, fills);
 
         // Convert to trait AllocationResult
         TraitAllocationResult {
@@ -605,52 +408,6 @@ impl OrderAllocator for MmAllocator {
     }
 }
 
-impl MmAllocator {
-    /// Compute welfare for each order given clearing prices.
-    ///
-    /// Welfare = (limit_price - clearing_price) * quantity for buyers.
-    fn compute_order_welfare(
-        orders: &[Order],
-        prices: &HashMap<MarketId, Vec<Nanos>>,
-    ) -> HashMap<u64, i64> {
-        let mut welfare = HashMap::new();
-
-        for order in orders {
-            if order.num_markets == 0 {
-                welfare.insert(order.id, 0);
-                continue;
-            }
-
-            // Get the clearing price for the primary market/outcome
-            let market_id = order.markets[0];
-            let clearing_price = prices
-                .get(&market_id)
-                .and_then(|p| {
-                    // Find which outcome this order is buying
-                    let outcome = order
-                        .payoffs
-                        .iter()
-                        .take(order.num_states as usize)
-                        .position(|&p| p > 0)
-                        .unwrap_or(0);
-                    p.get(outcome).copied()
-                })
-                .unwrap_or(500_000_000); // Default to 50 cents
-
-            // Welfare = (limit - clearing) * max_fill
-            // Only positive welfare if limit >= clearing
-            let order_welfare = if order.limit_price >= clearing_price {
-                (order.limit_price as i64 - clearing_price as i64) * order.max_fill as i64
-            } else {
-                0
-            };
-
-            welfare.insert(order.id, order_welfare);
-        }
-
-        welfare
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -703,11 +460,12 @@ mod tests {
         let problem = Problem::new("empty");
         let allocator = MmAllocator::new();
 
-        let mut welfare = HashMap::new();
-        welfare.insert(1, 1000);
-        welfare.insert(2, 2000);
+        // Provide fills (price, qty) instead of welfare
+        let mut fills = HashMap::new();
+        fills.insert(1, (500_000_000u64, 100u64));
+        fills.insert(2, (500_000_000u64, 100u64));
 
-        let result = allocator.allocate(&[], &HashMap::new(), &problem.orders, &welfare);
+        let result = allocator.allocate(&[], &HashMap::new(), &problem.orders, &fills);
 
         assert!(result.mm_allocations.is_empty());
         assert_eq!(result.iterations, 0);
@@ -722,14 +480,15 @@ mod tests {
         let market_id = problem.markets.iter().next().unwrap().id;
         prices.insert(market_id, vec![500_000_000, 500_000_000]);
 
-        let mut welfare = HashMap::new();
+        // Provide fills (price, qty) - 50 cents price, 100 shares each
+        let mut fills = HashMap::new();
         for i in 1..=5 {
-            welfare.insert(i, 10_000_000_000); // High welfare
+            fills.insert(i, (500_000_000u64, 100u64));
         }
 
-        let result = allocator.allocate(&[mm], &prices, &problem.orders, &welfare);
+        let result = allocator.allocate(&[mm], &prices, &problem.orders, &fills);
 
-        // Should activate orders since welfare is high
+        // Should activate orders
         assert!(!result.activated_orders.is_empty());
         assert_eq!(result.mm_allocations.len(), 1);
     }
@@ -767,13 +526,13 @@ mod tests {
         let mut prices = HashMap::new();
         prices.insert(market, vec![500_000_000, 500_000_000]); // 50 cents each
 
-        // Each order has $25 welfare
-        let mut welfare = HashMap::new();
+        // Provide fills (price, qty) - 50 cents price, 100 shares each
+        let mut fills = HashMap::new();
         for i in 1..=5 {
-            welfare.insert(i, 25_000_000_000);
+            fills.insert(i, (500_000_000u64, 100u64));
         }
 
-        let result = allocator.allocate(&[mm], &prices, &problem.orders, &welfare);
+        let result = allocator.allocate(&[mm], &prices, &problem.orders, &fills);
 
         // Verify allocation exists
         assert!(!result.mm_allocations.is_empty());
@@ -810,7 +569,6 @@ mod tests {
             num_orders in 1..10usize,
             budget_dollars in 10..1000u64,
             qty_per_order in 10..500u64,
-            welfare_per_order in 1..100i64,
         ) {
             let mut problem = Problem::new("proptest");
             let market = problem.markets.add_binary("m");
@@ -841,12 +599,13 @@ mod tests {
             let mut prices = HashMap::new();
             prices.insert(market, vec![500_000_000, 500_000_000]);
 
-            let mut welfare = HashMap::new();
+            // Provide fills (price, qty)
+            let mut fills = HashMap::new();
             for i in 1..=num_orders {
-                welfare.insert(i as u64, welfare_per_order * 1_000_000_000);
+                fills.insert(i as u64, (500_000_000u64, qty_per_order));
             }
 
-            let result = allocator.allocate(&[mm], &prices, &problem.orders, &welfare);
+            let result = allocator.allocate(&[mm], &prices, &problem.orders, &fills);
 
             // THE KEY PROPERTY: budget must never be exceeded
             for alloc in &result.mm_allocations {
@@ -859,9 +618,9 @@ mod tests {
             }
         }
 
-        /// Property: More budget should not decrease welfare
+        /// Property: More budget should not decrease activated orders
         #[test]
-        fn prop_more_budget_more_or_equal_welfare(
+        fn prop_more_budget_more_or_equal_orders(
             num_orders in 2..8usize,
             base_budget in 50..200u64,
             qty_per_order in 50..200u64,
@@ -897,28 +656,27 @@ mod tests {
             let mut prices = HashMap::new();
             prices.insert(market, vec![500_000_000, 500_000_000]);
 
-            let mut welfare = HashMap::new();
+            // Provide fills (price, qty)
+            let mut fills = HashMap::new();
             for i in 1..=num_orders {
-                welfare.insert(i as u64, 10_000_000_000i64);
+                fills.insert(i as u64, (500_000_000u64, qty_per_order));
             }
 
-            let result_small = allocator.allocate(&[mm_small], &prices, &problem.orders, &welfare);
-            let result_large = allocator.allocate(&[mm_large], &prices, &problem.orders, &welfare);
+            let result_small = allocator.allocate(&[mm_small], &prices, &problem.orders, &fills);
+            let result_large = allocator.allocate(&[mm_large], &prices, &problem.orders, &fills);
 
-            // More budget should give at least as much welfare
-            let welfare_small: i64 = result_small.mm_allocations.iter()
-                .flat_map(|a| &a.activated_orders)
-                .filter_map(|id| welfare.get(id))
-                .sum();
-            let welfare_large: i64 = result_large.mm_allocations.iter()
-                .flat_map(|a| &a.activated_orders)
-                .filter_map(|id| welfare.get(id))
-                .sum();
+            // More budget should give at least as many activated orders
+            let orders_small = result_small.mm_allocations.iter()
+                .map(|a| a.activated_orders.len())
+                .sum::<usize>();
+            let orders_large = result_large.mm_allocations.iter()
+                .map(|a| a.activated_orders.len())
+                .sum::<usize>();
 
             prop_assert!(
-                welfare_large >= welfare_small,
-                "Monotonicity violated: larger budget ({}) gave less welfare ({}) than smaller budget ({}) with welfare ({})",
-                large_budget, welfare_large, small_budget, welfare_small
+                orders_large >= orders_small,
+                "Monotonicity violated: larger budget ({}) activated {} orders vs smaller budget ({}) with {} orders",
+                large_budget, orders_large, small_budget, orders_small
             );
         }
     }
@@ -960,13 +718,13 @@ mod tests {
         let mut prices = HashMap::new();
         prices.insert(market, vec![500_000_000, 500_000_000]); // 50 cents
 
-        // High welfare to ensure orders get activated
-        let mut welfare = HashMap::new();
+        // Provide fills (price, qty)
+        let mut fills = HashMap::new();
         for i in 1..=10 {
-            welfare.insert(i, 1_000_000_000_000i64); // $1000 welfare each
+            fills.insert(i, (500_000_000u64, 1000u64));
         }
 
-        let result = allocator.allocate(&[mm], &prices, &problem.orders, &welfare);
+        let result = allocator.allocate(&[mm], &prices, &problem.orders, &fills);
 
         // Check stats are populated
         let stats = &result.stats;
@@ -1042,12 +800,13 @@ mod tests {
         let mut prices = HashMap::new();
         prices.insert(market, vec![500_000_000, 500_000_000]);
 
-        let mut welfare = HashMap::new();
+        // Provide fills (price, qty)
+        let mut fills = HashMap::new();
         for i in 1..=6 {
-            welfare.insert(i, 10_000_000_000i64);
+            fills.insert(i, (500_000_000u64, 100u64));
         }
 
-        let result = allocator.allocate(&[mm1, mm2], &prices, &problem.orders, &welfare);
+        let result = allocator.allocate(&[mm1, mm2], &prices, &problem.orders, &fills);
 
         // Should detect interaction
         assert!(
@@ -1081,20 +840,21 @@ mod tests {
     }
 
     #[test]
-    fn test_sanity_check_vs_greedy() {
-        // Test that Lagrangian approach is at least as good as greedy
-        let mut problem = Problem::new("sanity_check");
+    fn test_budget_constraint_with_varied_welfare() {
+        // Test that allocator respects budget with varying welfare per fill
+        let mut problem = Problem::new("varied_welfare");
         let market = problem.markets.add_binary("m");
 
         problem.liquidity.add_ask(market, 0, 500_000_000, 10000);
 
-        // Add orders with varying welfare
+        // Add orders with varying limit prices (affects welfare)
         for i in 1..=10 {
+            let limit_price = (500 + i * 10) as u64 * 1_000_000; // $0.51, $0.52, etc.
             problem.orders.push(simple_yes_buy(
                 &problem.markets,
                 i,
                 market,
-                600_000_000,
+                limit_price,
                 100,
             ));
         }
@@ -1116,48 +876,31 @@ mod tests {
         let mut prices = HashMap::new();
         prices.insert(market, vec![500_000_000, 500_000_000]);
 
-        // Varying welfare per order
-        let mut welfare = HashMap::new();
-        welfare.insert(1, 50_000_000_000i64);
-        welfare.insert(2, 40_000_000_000i64);
-        welfare.insert(3, 30_000_000_000i64);
-        welfare.insert(4, 25_000_000_000i64);
-        welfare.insert(5, 20_000_000_000i64);
-        welfare.insert(6, 15_000_000_000i64);
-        welfare.insert(7, 10_000_000_000i64);
-        welfare.insert(8, 8_000_000_000i64);
-        welfare.insert(9, 5_000_000_000i64);
-        welfare.insert(10, 3_000_000_000i64);
+        // Provide fills (price, qty) - all at 50 cents
+        let mut fills = HashMap::new();
+        for i in 1..=10 {
+            fills.insert(i, (500_000_000u64, 100u64));
+        }
 
-        let result = allocator.allocate(&[mm], &prices, &problem.orders, &welfare);
+        let result = allocator.allocate(&[mm], &prices, &problem.orders, &fills);
 
-        // Actual welfare from activated orders
-        let actual_mm_welfare: i64 = result
-            .mm_allocations
-            .iter()
-            .flat_map(|a| &a.activated_orders)
-            .filter_map(|id| welfare.get(id))
-            .sum();
-
-        // Greedy baseline is computed by the allocator
-        let greedy_baseline = result.stats.greedy_baseline_welfare;
-
-        println!("Sanity check:");
-        println!("  Greedy baseline welfare: {}", greedy_baseline);
-        println!("  Actual MM welfare: {}", actual_mm_welfare);
+        // Check greedy baseline is computed
+        println!("Budget constraint with varied welfare:");
+        println!("  Greedy baseline welfare: {}", result.stats.greedy_baseline_welfare);
+        println!("  Total welfare: {}", result.total_welfare);
         println!(
             "  Improvement: {:.2}%",
             result.stats.improvement_over_greedy * 100.0
         );
 
-        // Lagrangian should be at least as good as greedy
-        // (might be slightly different due to tie-breaking, but should be close)
-        // Allow 1% tolerance for rounding differences
-        assert!(
-            actual_mm_welfare >= (greedy_baseline as f64 * 0.99) as i64,
-            "Lagrangian ({}) should be at least as good as greedy ({})",
-            actual_mm_welfare,
-            greedy_baseline
-        );
+        // Most important: budget is respected
+        for alloc in &result.mm_allocations {
+            assert!(
+                alloc.capital_used <= alloc.budget,
+                "Budget violated: {} > {}",
+                alloc.capital_used,
+                alloc.budget
+            );
+        }
     }
 }

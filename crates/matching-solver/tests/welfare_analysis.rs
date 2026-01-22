@@ -207,12 +207,25 @@ fn analyze_welfare_stages() {
 
     // Stage 3: MM Allocation
     println!("\n--- Stage 3: MM Allocation ---");
+    // Build fills map for allocator
+    let fills_map: HashMap<u64, (u64, u64)> = problem
+        .orders
+        .iter()
+        .map(|o| {
+            let price = stage1_prices
+                .get(&o.markets[0])
+                .and_then(|p| p.first().copied())
+                .unwrap_or(500_000_000);
+            (o.id, (price, o.max_fill))
+        })
+        .collect();
+
     let allocator = MmAllocator::new();
     let result = allocator.allocate(
         &problem.mm_constraints,
         &stage1_prices,
         &problem.orders,
-        &welfare_map,
+        &fills_map,
     );
 
     println!("MM orders activated: {}", result.stats.mm_orders_activated);

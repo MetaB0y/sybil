@@ -16,7 +16,7 @@
 
 use std::collections::HashMap;
 
-use matching_engine::{Fill, MarketId, MmConstraint, Nanos, Order, Problem};
+use matching_engine::{Fill, MarketId, MmConstraint, Nanos, Order, Problem, Qty};
 
 use crate::combiner::SolutionConfidence;
 use crate::local_solver::MarketSolution;
@@ -181,17 +181,19 @@ pub struct AllocationResult {
 ///
 /// - `MmAllocator`: Lagrangian relaxation for MM budget allocation
 pub trait OrderAllocator: Send + Sync {
-    /// Allocate orders given constraints and prices.
+    /// Allocate orders given constraints, prices, and actual fills.
     ///
     /// # Arguments
     /// * `constraints` - MM constraints with budget limits
     /// * `prices` - Clearing prices per outcome per market
     /// * `orders` - All orders in the problem
+    /// * `fills` - Actual fills from price discovery (order_id -> (price, qty))
     fn allocate(
         &self,
         constraints: &[MmConstraint],
         prices: &HashMap<MarketId, Vec<Nanos>>,
         orders: &[Order],
+        fills: &HashMap<u64, (Nanos, Qty)>,
     ) -> AllocationResult;
 
     /// Name of this allocator.

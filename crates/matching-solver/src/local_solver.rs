@@ -1583,7 +1583,7 @@ mod duality_comparison {
 #[cfg(test)]
 mod duality_validation {
     use super::*;
-    use matching_engine::{outcome_buy, Problem, NANOS_PER_DOLLAR};
+    use matching_engine::NANOS_PER_DOLLAR;
     use std::collections::HashMap;
 
     /// Same validation tests but for duality solver

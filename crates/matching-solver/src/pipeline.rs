@@ -304,6 +304,10 @@ impl Pipeline {
         // Track orders that have already been filled
         let mut filled_order_ids: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
+        // Track cumulative fills for MM budget tracking across iterations
+        let mut cumulative_mm_fills: std::collections::HashMap<u64, (matching_engine::Nanos, matching_engine::Qty)> =
+            std::collections::HashMap::new();
+
         for iter in 0..self.config.max_iterations {
             iterations = iter + 1;
 
@@ -360,10 +364,41 @@ impl Pipeline {
                 (&self.allocator, &price_result)
             {
                 let alloc_start = Instant::now();
+
+                // Build fills map from price discovery (current iteration only)
+                let current_fills: std::collections::HashMap<u64, (matching_engine::Nanos, matching_engine::Qty)> =
+                    prices.all_fills()
+                        .into_iter()
+                        .map(|f| (f.order_id, (f.fill_price, f.fill_qty)))
+                        .collect();
+
+                // Merge with cumulative fills for budget calculation
+                // Cumulative fills represent already-committed capital from previous iterations
+                let mut all_fills = cumulative_mm_fills.clone();
+                for (id, fill) in &current_fills {
+                    all_fills.entry(*id).or_insert(*fill);
+                }
+
+                // Create adjusted MM constraints with reduced budgets based on cumulative usage
+                let adjusted_constraints: Vec<matching_engine::MmConstraint> = problem.mm_constraints
+                    .iter()
+                    .map(|mm| {
+                        let used_capital = mm.capital_used(&cumulative_mm_fills);
+                        let remaining_budget = mm.max_capital.saturating_sub(used_capital);
+                        matching_engine::MmConstraint {
+                            mm_id: mm.mm_id,
+                            max_capital: remaining_budget,
+                            order_ids: mm.order_ids.clone(),
+                            order_sides: mm.order_sides.clone(),
+                        }
+                    })
+                    .collect();
+
                 let alloc_result = allocator.allocate(
-                    &iter_problem.mm_constraints,
+                    &adjusted_constraints,
                     &prices.prices,
                     &iter_problem.orders,
+                    &current_fills,
                 );
                 timings.allocation_secs += alloc_start.elapsed().as_secs_f64();
                 Some(alloc_result)
@@ -376,12 +411,23 @@ impl Pipeline {
                 let iter_result =
                     self.build_result_from_prices(&iter_problem, pd_result, &allocation_result);
 
+                // Build set of MM order IDs for tracking cumulative fills
+                let mm_order_ids: std::collections::HashSet<u64> = problem.mm_constraints
+                    .iter()
+                    .flat_map(|mm| mm.order_ids.iter().copied())
+                    .collect();
+
                 // Consume liquidity for filled orders and track filled order IDs
                 for fill in &iter_result.fills {
                     if let Some(order) = problem.orders.iter().find(|o| o.id == fill.order_id) {
                         self.consume_order_liquidity(order, fill.fill_qty, &mut remaining_liquidity);
                         filled_order_ids.insert(fill.order_id);
                         iter_price_discovery_fills += 1;
+
+                        // Track MM fills for cumulative budget calculation
+                        if mm_order_ids.contains(&fill.order_id) {
+                            cumulative_mm_fills.insert(fill.order_id, (fill.fill_price, fill.fill_qty));
+                        }
                     }
                 }
 
@@ -520,8 +566,16 @@ impl Pipeline {
         let allocation_result =
             if let (Some(ref allocator), Some(ref prices)) = (&self.allocator, &price_result) {
                 let alloc_start = Instant::now();
+
+                // Build fills map from price discovery
+                let fills: std::collections::HashMap<u64, (matching_engine::Nanos, matching_engine::Qty)> =
+                    prices.all_fills()
+                        .into_iter()
+                        .map(|f| (f.order_id, (f.fill_price, f.fill_qty)))
+                        .collect();
+
                 let alloc_result =
-                    allocator.allocate(&problem.mm_constraints, &prices.prices, &problem.orders);
+                    allocator.allocate(&problem.mm_constraints, &prices.prices, &problem.orders, &fills);
                 timings.allocation_secs = alloc_start.elapsed().as_secs_f64();
                 Some(alloc_result)
             } else {
@@ -659,7 +713,11 @@ impl Pipeline {
 
         for fill in all_fills {
             if let Some(order) = order_map.get(&fill.order_id) {
-                result.add_fill(fill, order);
+                // Only add fills that satisfy limit price constraint
+                // fill_price must not exceed limit_price for buy orders
+                if fill.fill_price <= order.limit_price && fill.fill_qty > 0 {
+                    result.add_fill(fill, order);
+                }
             }
         }
 
