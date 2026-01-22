@@ -171,7 +171,7 @@ impl ArbitrageDetector {
     ) {
         let mut filled_orders: HashSet<u64> = HashSet::new();
 
-        for opp in opportunities.iter().take(20) {
+        for opp in opportunities.iter() {
             // Currently only BundleUnderpricing arbitrage is supported
             self.exploit_bundle_underpricing(opp, problem, result, &mut filled_orders);
         }

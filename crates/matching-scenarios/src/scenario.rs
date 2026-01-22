@@ -48,7 +48,7 @@ pub struct ScenarioConfig {
     /// MM budget range in dollars
     pub mm_budget_min: u64,
     pub mm_budget_max: u64,
-    /// MM spread in basis points
+    /// MM spread in basis points (lower = tighter = more aggressive)
     pub mm_spread_bps: u32,
 }
 
@@ -68,7 +68,7 @@ impl Default for ScenarioConfig {
             num_mms: 2,
             mm_budget_min: 10_000,
             mm_budget_max: 50_000,
-            mm_spread_bps: 50,
+            mm_spread_bps: 50, // 0.5% spread
         }
     }
 }
@@ -223,9 +223,9 @@ pub fn generate_scenario(config: ScenarioConfig) -> Problem {
             market_idx += group_size;
             group_id += 1;
         } else {
-            // Standalone market
+            // Standalone market - use wider price range for more variety
             let market_id = problem.markets.add_binary(format!("M{}", market_idx));
-            let fair_price = rng.gen_range(0.2..0.8);
+            let fair_price = rng.gen_range(0.05..0.95);
             market_info.push((market_id, fair_price));
             market_idx += 1;
         }
@@ -536,40 +536,55 @@ fn generate_mm_constraints(
         selected_markets.shuffle(rng);
         selected_markets.truncate(markets_to_cover);
 
-        let spread_frac = config.mm_spread_bps as f64 / 10000.0;
-        let qty_per_market = (budget_dollars / markets_to_cover as u64).max(100);
+        // MMs use flash liquidity - they can post orders MUCH larger than their budget
+        // because buys and sells offset. Budget only constrains max net exposure.
+        // Use 10x budget as total order capacity across markets.
+        let total_capacity = budget_dollars * 10;
+        let qty_per_market = (total_capacity / markets_to_cover as u64).max(500);
 
         for market_id in selected_markets {
             let fair_price = fair_prices.get(&market_id).copied().unwrap_or(0.5);
 
-            let bid_price = (fair_price - spread_frac / 2.0).max(0.01);
-            let ask_price = (fair_price + spread_frac / 2.0).min(0.99);
+            // MMs are VERY AGGRESSIVE - they cross deep into the spread
+            // This simulates MMs that want to trade and are willing to take unfavorable prices
+            for level in 0..3 {
+                let level_qty = qty_per_market / 3;
 
-            // MM sell order
-            let sell_order = outcome_sell(
-                &problem.markets,
-                *order_id,
-                market_id,
-                0,
-                price_to_nanos(ask_price),
-                qty_per_market,
-            );
-            constraint.add_order(*order_id, MmSide::SellYes);
-            problem.orders.push(sell_order);
-            *order_id += 1;
+                // Aggressiveness increases with level - willing to cross further
+                let cross_amount = 0.02 + (level as f64 * 0.03); // 2%, 5%, 8% through fair
+                let (bid_price, ask_price) = (
+                    // Bid ABOVE fair value (willing to overpay to buy)
+                    (fair_price + cross_amount).min(0.95),
+                    // Ask BELOW fair value (willing to undersell)
+                    (fair_price - cross_amount).max(0.05),
+                );
 
-            // MM buy order
-            let buy_order = outcome_buy(
-                &problem.markets,
-                *order_id,
-                market_id,
-                0,
-                price_to_nanos(bid_price),
-                qty_per_market,
-            );
-            constraint.add_order(*order_id, MmSide::BuyYes);
-            problem.orders.push(buy_order);
-            *order_id += 1;
+                // MM sell order at this level (selling YES)
+                let sell_order = outcome_sell(
+                    &problem.markets,
+                    *order_id,
+                    market_id,
+                    0,
+                    price_to_nanos(ask_price),
+                    level_qty.max(10),
+                );
+                constraint.add_order(*order_id, MmSide::SellYes);
+                problem.orders.push(sell_order);
+                *order_id += 1;
+
+                // MM buy order at this level (buying YES)
+                let buy_order = outcome_buy(
+                    &problem.markets,
+                    *order_id,
+                    market_id,
+                    0,
+                    price_to_nanos(bid_price),
+                    level_qty.max(10),
+                );
+                constraint.add_order(*order_id, MmSide::BuyYes);
+                problem.orders.push(buy_order);
+                *order_id += 1;
+            }
         }
 
         problem.mm_constraints.push(constraint);
