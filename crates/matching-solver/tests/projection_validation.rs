@@ -438,6 +438,76 @@ fn test_multiple_violation_triangles() {
 // Pipeline Comparison Tests
 // ============================================================================
 
+/// Quick diagnostic for extreme scenario.
+/// Runs in release mode to get realistic timings.
+#[test]
+#[ignore] // Takes ~1 second, run explicitly
+fn diagnose_extreme_scenario() {
+    use std::time::Instant;
+
+    let config = ScenarioConfig::extreme();
+
+    println!("\n=== EXTREME SCENARIO DIAGNOSTIC ===\n");
+    println!(
+        "Config: {} orders, {} markets, {:.0}% bundles",
+        config.num_orders, config.num_markets, config.bundle_fraction * 100.0
+    );
+
+    let gen_start = Instant::now();
+    let problem = generate_scenario(config);
+    let gen_time = gen_start.elapsed();
+
+    let bundle_count = problem.orders.iter().filter(|o| o.num_markets > 1).count();
+    println!("Actual bundles: {}", bundle_count);
+    println!("Scenario generation: {:.3}ms", gen_time.as_secs_f64() * 1000.0);
+
+    // Check liquidity pool size
+    println!("Single-market books: {}", problem.liquidity.books.len());
+    println!("Joint books: {}", problem.liquidity.joint_books.len());
+
+    // Test snapshot speed
+    let snap_start = Instant::now();
+    let _snap = problem.liquidity.snapshot();
+    let snap_time = snap_start.elapsed();
+    println!("Liquidity snapshot time: {:.3}ms", snap_time.as_secs_f64() * 1000.0);
+
+    let solve_start = Instant::now();
+    let pipeline = Pipeline::consistent();
+    let result = pipeline.solve(&problem);
+    let solve_time = solve_start.elapsed();
+
+    let proj = result
+        .price_projection
+        .as_ref()
+        .expect("Should have projection result");
+
+    // Sum of tracked phases
+    let tracked_sum = result.phase_times.price_discovery_secs
+        + result.phase_times.price_projection_secs
+        + result.phase_times.allocation_secs
+        + result.phase_times.partial_solving_secs
+        + result.phase_times.combining_secs;
+    let untracked = result.total_time_secs - tracked_sum;
+
+    println!("\nPhase Timings:");
+    println!("  price_discovery:  {:.3}ms", result.phase_times.price_discovery_secs * 1000.0);
+    println!("  price_projection: {:.3}ms", result.phase_times.price_projection_secs * 1000.0);
+    println!("  allocation:       {:.3}ms", result.phase_times.allocation_secs * 1000.0);
+    println!("  partial_solving:  {:.3}ms", result.phase_times.partial_solving_secs * 1000.0);
+    println!("  combining:        {:.3}ms", result.phase_times.combining_secs * 1000.0);
+    println!("  -----------------");
+    println!("  Tracked sum:      {:.3}ms", tracked_sum * 1000.0);
+    println!("  UNTRACKED:        {:.3}ms", untracked * 1000.0);
+    println!("  Total (internal): {:.3}ms", result.total_time_secs * 1000.0);
+    println!("  Total (external): {:.3}ms", solve_time.as_secs_f64() * 1000.0);
+
+    println!("\nProjection Results:");
+    println!("  violations_fixed: {}", proj.violations_fixed);
+    println!("  max_adjustment:   ${:.6}", proj.max_adjustment as f64 / NANOS_PER_DOLLAR as f64);
+    println!("  iterations:       {}", proj.iterations);
+    println!("  success:          {}", proj.success);
+}
+
 /// Compare current pipeline vs consistent pipeline performance.
 #[test]
 fn compare_current_vs_consistent() {

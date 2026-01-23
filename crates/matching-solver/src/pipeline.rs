@@ -317,6 +317,16 @@ impl Pipeline {
         let mut cumulative_mm_fills: std::collections::HashMap<u64, (matching_engine::Nanos, matching_engine::Qty)> =
             std::collections::HashMap::new();
 
+        // Build order lookup map ONCE (not per iteration) - O(orders) instead of O(iterations × fills × orders)
+        let order_map: std::collections::HashMap<u64, &matching_engine::Order> =
+            problem.orders.iter().map(|o| (o.id, o)).collect();
+
+        // Build MM order IDs set ONCE
+        let mm_order_ids: std::collections::HashSet<u64> = problem.mm_constraints
+            .iter()
+            .flat_map(|mm| mm.order_ids.iter().copied())
+            .collect();
+
         for iter in 0..self.config.max_iterations {
             iterations = iter + 1;
 
@@ -420,15 +430,10 @@ impl Pipeline {
                 let iter_result =
                     self.build_result_from_prices(&iter_problem, pd_result, &allocation_result);
 
-                // Build set of MM order IDs for tracking cumulative fills
-                let mm_order_ids: std::collections::HashSet<u64> = problem.mm_constraints
-                    .iter()
-                    .flat_map(|mm| mm.order_ids.iter().copied())
-                    .collect();
-
                 // Consume liquidity for filled orders and track filled order IDs
+                // Use order_map for O(1) lookups instead of O(n) .find()
                 for fill in &iter_result.fills {
-                    if let Some(order) = problem.orders.iter().find(|o| o.id == fill.order_id) {
+                    if let Some(&order) = order_map.get(&fill.order_id) {
                         self.consume_order_liquidity(order, fill.fill_qty, &mut remaining_liquidity);
                         filled_order_ids.insert(fill.order_id);
                         iter_price_discovery_fills += 1;
@@ -442,7 +447,7 @@ impl Pipeline {
 
                 // Merge into result
                 for fill in iter_result.fills {
-                    if let Some(order) = problem.orders.iter().find(|o| o.id == fill.order_id) {
+                    if let Some(&order) = order_map.get(&fill.order_id) {
                         result.result.add_fill(fill, order);
                     }
                 }
@@ -472,11 +477,12 @@ impl Pipeline {
                 let partial_result = solver.solve_partial(&partial_problem);
 
                 // Add fills, consume liquidity, and track filled order IDs
+                // Use order_map for O(1) lookups instead of O(n) .find()
                 for fill in partial_result.fills {
-                    if let Some(order) = problem.orders.iter().find(|o| o.id == fill.order_id) {
+                    if let Some(&order) = order_map.get(&fill.order_id) {
                         self.consume_order_liquidity(order, fill.fill_qty, &mut remaining_liquidity);
                         filled_order_ids.insert(fill.order_id);
-                        result.result.add_fill(fill, order);
+                        result.result.add_fill(fill.clone(), order);
                         iter_bundle_fills += 1;
 
                         result.contributions.push(SolverContribution {
@@ -557,11 +563,12 @@ impl Pipeline {
             if self.config.use_price_projection {
                 let proj_start = Instant::now();
                 let proj_result = projector.project(&prices.prices, problem);
-                timings.price_projection_secs = proj_start.elapsed().as_secs_f64();
 
                 if proj_result.success {
+                    // Recompute fills at projected prices (included in projection timing)
                     crate::price_projector::recompute_fills(prices, &proj_result.prices, problem);
                 }
+                timings.price_projection_secs = proj_start.elapsed().as_secs_f64();
 
                 Some(proj_result)
             } else {

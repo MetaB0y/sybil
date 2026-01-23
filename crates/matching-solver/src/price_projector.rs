@@ -748,6 +748,9 @@ pub fn recompute_fills(
     // Update prices in the result
     price_result.prices = projected_prices.clone();
 
+    // Build order map ONCE, outside the loop (was O(markets * orders), now O(orders))
+    let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
+
     // For each market solution, recompute fills at new prices
     for solution in price_result.market_solutions.values_mut() {
         let Some(new_prices) = projected_prices.get(&solution.market_id) else {
@@ -757,8 +760,6 @@ pub fn recompute_fills(
         solution.prices = new_prices.clone();
 
         // Filter fills: keep only those where limit_price >= clearing_price
-        let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
-
         let mut valid_fills = Vec::new();
         let mut new_welfare: i64 = 0;
 
