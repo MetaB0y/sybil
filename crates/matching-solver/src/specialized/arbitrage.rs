@@ -1,12 +1,13 @@
-//! Arbitrage detection and exploitation.
+//! Bundle order matching against joint liquidity.
 //!
-//! Finds riskless profit opportunities from:
-//! 1. Bundle underpricing: Sum of legs < bundle price
-//! 2. Cross-market mispricing: Same effective exposure at different prices
+//! Matches bundle orders (multi-market orders) against joint liquidity books.
+//! Bundle orders have payoffs that depend on multiple market outcomes simultaneously
+//! (e.g., "A AND B" pays $1 only if both A and B happen). These cannot be replicated
+//! by buying individual leg positions, so they require dedicated joint liquidity.
 
 use std::collections::HashSet;
 
-use matching_engine::{Fill, JointOutcome, LiquidityPool, MarketId, Nanos, Order, Problem, Qty};
+use matching_engine::{Fill, JointOutcome, LiquidityPool, Nanos, Order, Problem, Qty};
 
 use crate::{MatchingResult, Solver};
 
@@ -50,10 +51,12 @@ impl ArbitrageDetector {
         opportunities
     }
 
-    /// Detect bundle underpricing arbitrage.
+    /// Identify bundle orders that can potentially be filled against joint liquidity.
     ///
-    /// If an order buys a bundle for less than the sum of individual leg costs,
-    /// that's potential arbitrage.
+    /// We check if joint liquidity exists at a price the order is willing to pay.
+    /// This is the only valid way to fill bundles - leg liquidity cannot replicate
+    /// bundle payoffs (e.g., "A AND B" pays only if both happen, unlike buying
+    /// A YES + B YES separately which pays if either happens).
     fn detect_bundle_arbitrage(&self, problem: &Problem) -> Vec<ArbitrageOpportunity> {
         let mut opportunities = Vec::new();
 
@@ -62,32 +65,18 @@ impl ArbitrageDetector {
                 continue;
             }
 
-            // Calculate the cost of buying each leg separately
-            let mut total_leg_cost: u128 = 0;
-            let mut can_price_all_legs = true;
+            // Build the joint outcome for this bundle
+            let joint_outcome = match self.build_joint_outcome(order) {
+                Some(jo) => jo,
+                None => continue,
+            };
 
-            for market_idx in 0..order.num_markets as usize {
-                let market = order.markets[market_idx];
-                if market.is_none() {
-                    continue;
-                }
-
-                let outcome = self.determine_bundle_outcome(order, market_idx);
-                if let Some(price) = self.best_ask_price(&problem.liquidity, market, outcome) {
-                    total_leg_cost += price as u128;
-                } else {
-                    can_price_all_legs = false;
-                    break;
-                }
-            }
-
-            if can_price_all_legs && order.num_markets > 1 {
-                let avg_leg_cost = (total_leg_cost / order.num_markets as u128) as Nanos;
-                let bundle_limit = order.limit_price;
-
-                // If bundle limit is higher than actual leg cost, there might be value
-                if bundle_limit > avg_leg_cost {
-                    let profit_per_unit = bundle_limit - avg_leg_cost;
+            // Check if there's joint liquidity available at a price the order accepts
+            if let Some(joint_book) = problem.liquidity.joint_book(&joint_outcome) {
+                let (avail, best_price) = joint_book.available_to_buy(order.limit_price);
+                if avail >= order.min_fill && best_price <= order.limit_price {
+                    // Profit = what order is willing to pay - what liquidity costs
+                    let profit_per_unit = order.limit_price.saturating_sub(best_price);
                     opportunities.push(ArbitrageOpportunity {
                         order_indices: vec![order_idx],
                         profit_per_unit,
@@ -97,18 +86,6 @@ impl ArbitrageDetector {
         }
 
         opportunities
-    }
-
-    /// Get the best ask price for a (market, outcome) pair.
-    fn best_ask_price(
-        &self,
-        liquidity: &LiquidityPool,
-        market: MarketId,
-        outcome: u8,
-    ) -> Option<Nanos> {
-        liquidity
-            .book(market, outcome)
-            .and_then(|book| book.best_ask())
     }
 
     /// Determine which outcome is being bought for a market in a bundle order.
@@ -201,6 +178,9 @@ impl ArbitrageDetector {
     }
 
     /// Try to fill a bundle order using joint liquidity.
+    ///
+    /// Bundle orders can ONLY be filled from joint liquidity books.
+    /// Leg liquidity has different payoff structure and cannot replicate bundles.
     fn try_fill_bundle(
         &self,
         order: &Order,
@@ -213,7 +193,7 @@ impl ArbitrageDetector {
         // Build the joint outcome for this bundle
         let joint_outcome = self.build_joint_outcome(order)?;
 
-        // First try joint liquidity (the correct approach for bundles)
+        // Try joint liquidity - the ONLY valid way to fill bundles
         if let Some(joint_book) = liquidity.joint_book(&joint_outcome) {
             let (avail, avg_price) = joint_book.available_to_buy(order.limit_price);
             if avail >= order.min_fill {
@@ -222,9 +202,8 @@ impl ArbitrageDetector {
             }
         }
 
-        // Fallback: try to match using individual leg liquidity
-        // This is less accurate but allows matching when joint liquidity isn't available
-        self.try_fill_bundle_via_legs(order, liquidity)
+        // No joint liquidity available - cannot fill this bundle
+        None
     }
 
     /// Build a JointOutcome from a bundle order.
@@ -251,46 +230,7 @@ impl ArbitrageDetector {
         }
     }
 
-    /// Fallback: try to fill bundle by matching individual legs.
-    fn try_fill_bundle_via_legs(
-        &self,
-        order: &Order,
-        liquidity: &LiquidityPool,
-    ) -> Option<Fill> {
-        let mut min_available = order.max_fill;
-        let mut total_cost: u128 = 0;
-        let mut legs = 0;
-
-        for market_idx in 0..order.num_markets as usize {
-            let market = order.markets[market_idx];
-            if market.is_none() {
-                continue;
-            }
-
-            let outcome = self.determine_bundle_outcome(order, market_idx);
-
-            if let Some(book) = liquidity.book(market, outcome) {
-                let (avail, avg_price) = book.available_to_buy(order.limit_price);
-                if avail < order.min_fill {
-                    return None;
-                }
-                min_available = min_available.min(avail);
-                total_cost += avg_price as u128;
-                legs += 1;
-            } else {
-                return None;
-            }
-        }
-
-        if min_available >= order.min_fill && legs > 0 {
-            let avg_price = (total_cost / legs as u128) as Nanos;
-            Some(Fill::new(order.id, min_available, avg_price))
-        } else {
-            None
-        }
-    }
-
-    /// Consume liquidity for a bundle order.
+    /// Consume liquidity for a bundle order from joint liquidity only.
     fn consume_bundle_liquidity(
         &self,
         order: &Order,
@@ -303,7 +243,7 @@ impl ArbitrageDetector {
             None => return false,
         };
 
-        // First try to consume from joint liquidity
+        // Consume from joint liquidity - the only valid source for bundles
         if let Some(joint_book) = liquidity.joint_book_get_mut(&joint_outcome) {
             let (avail, _) = joint_book.available_to_buy(order.limit_price);
             if avail >= qty {
@@ -312,41 +252,7 @@ impl ArbitrageDetector {
             }
         }
 
-        // Fallback: consume from individual legs
-        // First verify all legs have sufficient liquidity
-        for market_idx in 0..order.num_markets as usize {
-            let market = order.markets[market_idx];
-            if market.is_none() {
-                continue;
-            }
-
-            let outcome = self.determine_bundle_outcome(order, market_idx);
-
-            if let Some(book) = liquidity.book(market, outcome) {
-                let (avail, _) = book.available_to_buy(order.limit_price);
-                if avail < qty {
-                    return false;
-                }
-            } else {
-                return false;
-            }
-        }
-
-        // Now consume from all legs
-        for market_idx in 0..order.num_markets as usize {
-            let market = order.markets[market_idx];
-            if market.is_none() {
-                continue;
-            }
-
-            let outcome = self.determine_bundle_outcome(order, market_idx);
-
-            if let Some(book) = liquidity.books.get_mut(&(market, outcome)) {
-                book.consume_asks(qty, order.limit_price);
-            }
-        }
-
-        true
+        false
     }
 }
 
