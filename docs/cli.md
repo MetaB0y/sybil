@@ -4,156 +4,107 @@
 
 The main CLI tool for running matching simulations.
 
-### Basic Usage
+### Quick Start
 
 ```bash
 # Show help
-cargo run --bin matching-sim -- --help
+cargo run --bin matching-sim --release -- --help
 
-# Run quick test
-cargo run --bin matching-sim -- --quick
-
-# Run specific scenario
-cargo run --bin matching-sim -- --scenario random-easy
-```
-
-### Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--scenario <S>` | Scenario to run | random-* |
-| `--solver <S>` | Solver to use | greedy |
-| `--batches <N>` | Batches per scenario | 20 |
-| `--seed <N>` | Random seed | 42 |
-| `--milp-timeout <S>` | MILP time limit (seconds) | none |
-| `--verbose, -v` | Detailed output | false |
-
-### Solver Options
-
-- `greedy` - Fast heuristic
-- `milp` - Optimal via MILP
-- `pipeline` - Full pipeline (price discovery + projection + MM allocation)
-- `all` - Compare all solvers
-
-### Examples
-
-```bash
-# Compare all solvers on a scenario
-cargo run --bin matching-sim --release -- \
-    --scenario random-hard \
-    --solver all \
-    --batches 5
-
-# Run MILP with timeout
-cargo run --bin matching-sim --release -- \
-    --scenario mega-medium \
-    --solver milp \
-    --milp-timeout 10
-
-# Verbose output
-cargo run --bin matching-sim --release -- \
-    --scenario random-hard \
-    --solver pipeline \
-    --verbose
-
-# Multiple batches for statistics
-cargo run --bin matching-sim --release -- \
-    --scenario milp-killer \
-    --solver all \
-    --batches 50
-```
-
-### Specialized Tests
-
-```bash
-# MILP killer test
-cargo run --bin matching-sim --release -- --milp-killer --config full
-```
-
-## Justfile Commands
-
-The project includes a justfile for common operations:
-
-```bash
-# List all commands
-just
-
-# Run tests
-just test
-
-# Run clippy
-just lint
-
-# Format code
-just fmt
+# Run with preset
+just sim-quick     # ~50 orders
+just sim-small     # ~300 orders
+just sim-medium    # ~3000 orders
+just sim-large     # ~10000 orders
+just sim-extreme   # ~100k orders
 
 # Compare solvers
 just compare
 ```
 
-## Output Format
+### Presets
 
-### Solver Comparison Table
+| Preset | Orders | Use Case |
+|--------|--------|----------|
+| `quick` | ~50 | Fast iteration, debugging |
+| `small` | ~300 | Basic testing |
+| `medium` | ~3000 | Standard benchmark |
+| `large` | ~10000 | Performance testing |
+| `extreme` | ~100k | Stress testing |
+| `milp-killer` | Forces MILP timeout | Solver comparison |
+
+### Options
 
 ```
-Scenario: random-hard
+Presets:
+  --preset <NAME>      quick, small, medium, large, extreme, milp-killer
 
-╭────────────┬─────────────┬──────────┬──────────╮
-│ Solver     │ Welfare     │ Gap      │ Fill %   │
-├────────────┼─────────────┼──────────┼──────────┤
-│ MILP       │    12345678 │ 0.0%     │   95.2%  │
-│ Pipeline   │    12340000 │ 0.1%     │   94.8%  │
-│ Greedy     │    11000000 │ 10.9%    │   89.0%  │
-╰────────────┴─────────────┴──────────┴──────────╯
+Custom configuration:
+  --markets <N>        Number of markets
+  --orders <N>         Number of orders
+  --bundles <F>        Bundle fraction (0.0-1.0)
+  --spreads <F>        Spread fraction (0.0-1.0)
+  --aon <F>            All-or-none fraction (0.0-1.0)
+  --scarcity <F>       Liquidity scarcity (0.0-1.0, lower=scarcer)
+  --mms <N>            Number of market makers
+
+Solver options:
+  --solver <S>         pipeline (default), greedy, milp, all
+  --milp-timeout <S>   MILP time limit in seconds
+
+Other options:
+  --batches <N>        Number of batches to run (default: 1)
+  --seed <N>           Random seed (default: 42)
+  --verbose, -v        Show detailed step-by-step output
 ```
 
-- **Welfare**: Total welfare achieved
-- **Gap**: Percentage below best result
-- **Fill %**: Percentage of orders filled
+### Examples
 
-### Verbose Output
+```bash
+# Run medium scenario with detailed output
+cargo run --bin matching-sim --release -- --preset medium -v
 
-With `--verbose`:
+# Compare all solvers
+cargo run --bin matching-sim --release -- --preset medium --solver all
+
+# Custom configuration
+cargo run --bin matching-sim --release -- \
+    --markets 50 \
+    --orders 2000 \
+    --bundles 0.15 \
+    --mms 5 \
+    --solver pipeline \
+    -v
+
+# MILP with timeout
+cargo run --bin matching-sim --release -- \
+    --preset large \
+    --solver milp \
+    --milp-timeout 10
 ```
-Running random-hard batch 0 (seed 42)
-Problem: Random(hard)
-  Markets: 50, Orders: 500, Liquidity entries: 200
 
-  MILP: welfare=12345678, filled=480/500, time=0.234s
-  Greedy: welfare=11000000, filled=450/500, time=0.001s
+## Justfile Commands
+
+```bash
+just                 # List all commands
+
+# Simulation presets
+just sim-quick       # ~50 orders, verbose
+just sim-small       # ~300 orders, verbose
+just sim-medium      # ~3000 orders, verbose
+just sim-large       # ~10000 orders, verbose
+just sim-extreme     # ~100k orders, verbose
+
+# Comparison
+just compare         # Compare solvers on medium
+just milp-killer     # MILP stress test
+
+# Development
+just test            # Run all tests
+just lint            # Run clippy
+just fmt             # Format code
+just bench           # Run benchmarks
+just check-all       # fmt + lint + test
+
+# Custom
+just sim medium pipeline -v   # Preset + solver + verbose flag
 ```
-
-## Exit Codes
-
-- `0` - Success
-- `1` - Error (invalid arguments, scenario not found, etc.)
-
-## Environment Variables
-
-None currently used. All configuration via CLI arguments.
-
-## Performance Tips
-
-1. **Use release builds** for benchmarking:
-   ```bash
-   cargo run --bin matching-sim --release -- ...
-   ```
-
-2. **Adjust MILP timeout** based on problem size:
-   - Small (< 100 orders): 1-5s
-   - Medium (100-1000): 5-30s
-   - Large (> 1000): 30-120s or skip MILP
-
-3. **Use pipeline solver** for production:
-   ```bash
-   cargo run --bin matching-sim --release -- \
-       --solver pipeline \
-       --milp-timeout 5
-   ```
-
-4. **Increase batches** for statistical significance:
-   ```bash
-   cargo run --bin matching-sim --release -- \
-       --batches 100 \
-       --solver all
-   ```
