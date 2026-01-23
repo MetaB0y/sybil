@@ -385,11 +385,39 @@ impl Pipeline {
                 let alloc_start = Instant::now();
 
                 // Build fills map from price discovery (current iteration only)
-                let current_fills: std::collections::HashMap<u64, (matching_engine::Nanos, matching_engine::Qty)> =
+                let mut current_fills: std::collections::HashMap<u64, (matching_engine::Nanos, matching_engine::Qty)> =
                     prices.all_fills()
                         .into_iter()
                         .map(|f| (f.order_id, (f.fill_price, f.fill_qty)))
                         .collect();
+
+                // Add MM orders that weren't matched in price discovery with estimated fills
+                // This allows the allocator to consider them for budget allocation
+                for mm in &problem.mm_constraints {
+                    for &order_id in &mm.order_ids {
+                        if !current_fills.contains_key(&order_id) {
+                            // Find the order and estimate fill at clearing price
+                            if let Some(order) = order_map.get(&order_id) {
+                                if order.num_markets == 1 {
+                                    let market = order.markets[0];
+                                    if let Some(market_prices) = prices.prices.get(&market) {
+                                        // Determine which outcome this order is for
+                                        let outcome = order.payoffs.iter()
+                                            .take(order.num_states as usize)
+                                            .position(|&p| p > 0)
+                                            .unwrap_or(0);
+                                        let price = market_prices.get(outcome).copied()
+                                            .unwrap_or(500_000_000);
+                                        // Only include if order would be willing to trade at this price
+                                        if order.limit_price >= price {
+                                            current_fills.insert(order_id, (price, order.max_fill));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // Merge with cumulative fills for budget calculation
                 // Cumulative fills represent already-committed capital from previous iterations
@@ -584,11 +612,39 @@ impl Pipeline {
                 let alloc_start = Instant::now();
 
                 // Build fills map from price discovery
-                let fills: std::collections::HashMap<u64, (matching_engine::Nanos, matching_engine::Qty)> =
+                let mut fills: std::collections::HashMap<u64, (matching_engine::Nanos, matching_engine::Qty)> =
                     prices.all_fills()
                         .into_iter()
                         .map(|f| (f.order_id, (f.fill_price, f.fill_qty)))
                         .collect();
+
+                // Build order lookup for MM order estimation
+                let order_map: std::collections::HashMap<u64, &matching_engine::Order> =
+                    problem.orders.iter().map(|o| (o.id, o)).collect();
+
+                // Add MM orders that weren't matched in price discovery with estimated fills
+                for mm in &problem.mm_constraints {
+                    for &order_id in &mm.order_ids {
+                        if !fills.contains_key(&order_id) {
+                            if let Some(order) = order_map.get(&order_id) {
+                                if order.num_markets == 1 {
+                                    let market = order.markets[0];
+                                    if let Some(market_prices) = prices.prices.get(&market) {
+                                        let outcome = order.payoffs.iter()
+                                            .take(order.num_states as usize)
+                                            .position(|&p| p > 0)
+                                            .unwrap_or(0);
+                                        let price = market_prices.get(outcome).copied()
+                                            .unwrap_or(500_000_000);
+                                        if order.limit_price >= price {
+                                            fills.insert(order_id, (price, order.max_fill));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 let alloc_result =
                     allocator.allocate(&problem.mm_constraints, &prices.prices, &problem.orders, &fills);
