@@ -3,7 +3,7 @@
 //! Processes orders in decreasing order of welfare potential (limit_price * max_fill).
 //! This is a reasonable heuristic but will fail to find optimal solutions on hard instances.
 
-use matching_engine::{Fill, LiquidityPool, MarketId, Nanos, Order, Problem, Qty};
+use matching_engine::{Fill, JointOutcome, LiquidityPool, Order, Problem};
 
 use crate::{MatchingResult, Solver};
 
@@ -108,12 +108,35 @@ impl GreedySolver {
         best_outcome
     }
 
-    /// Fill a bundle order (all-or-none across multiple markets).
+    /// Fill a bundle order using joint liquidity only.
+    ///
+    /// Bundle orders can ONLY be filled from joint liquidity books.
+    /// Leg liquidity has different payoff structure and cannot replicate bundles.
     fn try_fill_bundle_order(order: &Order, liquidity: &mut LiquidityPool) -> Option<Fill> {
-        // First pass: check availability
-        let mut required_fills: Vec<(MarketId, u8, Qty)> = Vec::new();
-        let mut total_cost: u128 = 0;
+        // Build the joint outcome for this bundle
+        let joint_outcome = Self::build_joint_outcome(order)?;
 
+        // Try to fill from joint liquidity - the ONLY valid source for bundles
+        if let Some(joint_book) = liquidity.joint_book_get_mut(&joint_outcome) {
+            let (avail, best_price) = joint_book.available_to_buy(order.limit_price);
+            if avail >= order.min_fill && best_price <= order.limit_price {
+                let fill_qty = avail.min(order.max_fill);
+                joint_book.consume_asks(fill_qty, order.limit_price);
+                return Some(Fill::new(order.id, fill_qty, best_price));
+            }
+        }
+
+        // No joint liquidity available - cannot fill this bundle
+        None
+    }
+
+    /// Build a JointOutcome from a bundle order.
+    fn build_joint_outcome(order: &Order) -> Option<JointOutcome> {
+        if order.num_markets <= 1 {
+            return None;
+        }
+
+        let mut legs = Vec::new();
         for market_idx in 0..order.num_markets as usize {
             let market = order.markets[market_idx];
             if market.is_none() {
@@ -121,47 +144,14 @@ impl GreedySolver {
             }
 
             let outcome = Self::determine_bundle_outcome(order, market_idx);
-
-            if let Some(book) = liquidity.book(market, outcome) {
-                let (avail, avg_price) = book.available_to_buy(order.limit_price);
-                if avail < order.min_fill {
-                    return None;
-                }
-                required_fills.push((market, outcome, order.max_fill.min(avail)));
-                total_cost += avg_price as u128 * order.max_fill.min(avail) as u128;
-            } else {
-                return None;
-            }
+            legs.push((market, outcome));
         }
 
-        let _avg_cost = if !required_fills.is_empty() {
-            (total_cost / required_fills.len() as u128) as Nanos
+        if legs.len() >= 2 {
+            Some(JointOutcome::new(legs))
         } else {
-            return None;
-        };
-
-        let fill_qty = required_fills.iter().map(|(_, _, q)| *q).min().unwrap_or(0);
-
-        if fill_qty < order.min_fill {
-            return None;
+            None
         }
-
-        // Second pass: consume liquidity
-        let mut actual_cost: u128 = 0;
-        for (market, outcome, _) in required_fills {
-            if let Some(book) = liquidity.books.get_mut(&(market, outcome)) {
-                let (filled, price) = book.consume_asks(fill_qty, order.limit_price);
-                actual_cost += price as u128 * filled as u128;
-            }
-        }
-
-        let avg_fill_price = if fill_qty > 0 {
-            (actual_cost / fill_qty as u128) as Nanos
-        } else {
-            0
-        };
-
-        Some(Fill::new(order.id, fill_qty, avg_fill_price))
     }
 
     /// Determine which outcome to buy for a specific market in a bundle.
