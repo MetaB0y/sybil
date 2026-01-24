@@ -5,6 +5,8 @@
 
 use std::fmt;
 
+use serde::Serialize;
+
 /// 1 unit = 1 nanodollar = 1e-9 USD
 pub const NANOS_PER_DOLLAR: u64 = 1_000_000_000;
 
@@ -15,7 +17,7 @@ pub type Nanos = u64;
 pub type Qty = u64;
 
 /// Market identifier
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, Serialize)]
 pub struct MarketId(pub u32);
 
 impl MarketId {
@@ -42,7 +44,7 @@ impl fmt::Display for MarketId {
 }
 
 /// Order side
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, Serialize)]
 pub enum Side {
     Bid, // Buying
     Ask, // Selling

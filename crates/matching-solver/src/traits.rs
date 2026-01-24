@@ -16,6 +16,8 @@
 
 use std::collections::HashMap;
 
+use serde::Serialize;
+
 use matching_engine::{Fill, MarketId, MmConstraint, Nanos, Order, Problem, Qty};
 
 use crate::combiner::SolutionConfidence;
@@ -26,7 +28,7 @@ use crate::local_solver::MarketSolution;
 // ============================================================================
 
 /// Result of price discovery across markets.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct PriceDiscoveryResult {
     /// Clearing prices per outcome for each market.
     /// Maps MarketId -> Vec<Nanos> where index is outcome.
@@ -88,7 +90,7 @@ pub trait PriceDiscoverer: Send + Sync {
 // ============================================================================
 
 /// Result of price projection.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct PriceProjectionResult {
     /// Projected prices (constraint-consistent).
     pub prices: HashMap<MarketId, Vec<Nanos>>,
@@ -157,7 +159,7 @@ pub trait PriceProjector: Send + Sync {
 // ============================================================================
 
 /// Result of order allocation.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct AllocationResult {
     /// Order IDs that should be activated (filled).
     pub activated_orders: Vec<u64>,
@@ -205,7 +207,7 @@ pub trait OrderAllocator: Send + Sync {
 // ============================================================================
 
 /// A partial solution that can be combined with others via MWIS.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct PartialSolution {
     /// Name of the solver that produced this.
     pub solver_name: String,

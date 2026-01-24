@@ -91,3 +91,15 @@ deps:
 # Update dependencies
 update:
     cargo update
+
+# Export JSON snapshot
+export-json preset="medium" output="/tmp/snapshot.json":
+    cargo run --bin matching-sim --release -- --preset {{preset}} --export-json {{output}} -v
+
+# Show ASCII convergence charts
+sim-charts preset="small":
+    cargo run --bin matching-sim --release -- --preset {{preset}} --show-charts -v
+
+# Export JSON and show charts
+sim-viz preset="medium" output="/tmp/snapshot.json":
+    cargo run --bin matching-sim --release -- --preset {{preset}} --export-json {{output}} --show-charts -v

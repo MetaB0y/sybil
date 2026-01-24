@@ -28,6 +28,7 @@ pub mod price_projector;
 pub(crate) mod specialized;
 pub mod traits;
 pub mod verifier;
+pub mod viz;
 
 #[cfg(feature = "milp")]
 pub mod milp;
@@ -60,6 +61,9 @@ pub use pipeline::{
     IterationStats, Pipeline, PipelineBuilder, PipelineConfig, PipelineResult, PipelineTimings,
 };
 
+// Visualization
+pub use viz::VizSnapshot;
+
 // Benchmark harness
 pub use benchmark::{compare_to_baseline, BenchmarkHarness, BenchmarkResults, BenchmarkRun};
 
@@ -69,10 +73,12 @@ pub use verifier::{verify, verify_strict, VerificationResult, Verifier, Violatio
 #[cfg(feature = "milp")]
 pub use milp::{MilpConfig, MilpResult, MilpSolver, SolveStatus};
 
+use serde::Serialize;
+
 use matching_engine::{Fill, LiquidityPool, Order, Problem};
 
 /// Result of solving a matching problem.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct MatchingResult {
     /// Orders that were filled
     pub fills: Vec<Fill>,

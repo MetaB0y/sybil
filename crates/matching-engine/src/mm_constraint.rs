@@ -13,10 +13,12 @@
 //!     .with_order(order_id_3);
 //! ```
 
+use serde::Serialize;
+
 use crate::types::{Nanos, Qty};
 
 /// Unique identifier for a market maker.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 pub struct MmId(pub u64);
 
 impl MmId {

@@ -25,7 +25,7 @@ use matching_engine::{MarketId, Order, Problem};
 use matching_scenarios::{generate_scenario, ScenarioConfig};
 use matching_solver::{
     verify, GreedySolver, IterationStats, MilpSolver, Pipeline, PipelineResult, Solver,
-    VerificationResult,
+    VerificationResult, VizSnapshot,
 };
 
 fn main() {
@@ -41,6 +41,8 @@ fn main() {
     let milp_timeout = parse_milp_timeout(&args);
     let num_batches = parse_batches(&args);
     let verbose = args.iter().any(|a| a == "--verbose" || a == "-v");
+    let export_json = get_arg_value(&args, "--export-json");
+    let show_charts = args.iter().any(|a| a == "--show-charts");
 
     println!("========================================");
     println!("       MATCHING SIMULATION              ");
@@ -61,9 +63,10 @@ fn main() {
 
     let start = Instant::now();
 
-    if solver_choice == SolverChoice::Pipeline && verbose {
+    if solver_choice == SolverChoice::Pipeline && (verbose || export_json.is_some() || show_charts)
+    {
         // Detailed pipeline run with step-by-step output
-        run_detailed_pipeline(&config, num_batches);
+        run_detailed_pipeline(&config, num_batches, export_json.as_deref(), show_charts, verbose);
     } else {
         // Standard comparison run
         let results = run_simulation(&config, &solver_choice, milp_timeout, num_batches, verbose);
@@ -108,6 +111,10 @@ fn print_help() {
     println!("  --seed <N>           Random seed (default: 42)");
     println!("  --verbose, -v        Show detailed step-by-step output");
     println!("  --help, -h           Show this help message");
+    println!();
+    println!("Visualization options:");
+    println!("  --export-json <PATH> Export pipeline snapshot as JSON");
+    println!("  --show-charts        Show ASCII convergence charts after run");
 }
 
 // ============================================================================
@@ -427,22 +434,34 @@ fn print_market_details(
     println!("{table}");
 }
 
-fn run_detailed_pipeline(base_config: &ScenarioConfig, num_batches: usize) {
+fn run_detailed_pipeline(
+    base_config: &ScenarioConfig,
+    num_batches: usize,
+    export_json: Option<&str>,
+    show_charts: bool,
+    verbose: bool,
+) {
     for batch in 0..num_batches {
         let config = ScenarioConfig {
             seed: base_config.seed + batch as u64,
             ..base_config.clone()
         };
 
-        let problem = generate_scenario(config);
+        let problem = generate_scenario(config.clone());
         let order_stats = OrderStats::compute(&problem);
 
-        println!("========================================");
-        println!("  BATCH {} (seed {})", batch + 1, base_config.seed + batch as u64);
-        println!("========================================\n");
+        if verbose {
+            println!("========================================");
+            println!(
+                "  BATCH {} (seed {})",
+                batch + 1,
+                base_config.seed + batch as u64
+            );
+            println!("========================================\n");
 
-        // Print problem summary
-        print_problem_summary(&problem, &order_stats);
+            // Print problem summary
+            print_problem_summary(&problem, &order_stats);
+        }
 
         // Select sample markets for detailed output
         let sample_markets = select_sample_markets(&problem, 10);
@@ -452,21 +471,60 @@ fn run_detailed_pipeline(base_config: &ScenarioConfig, num_batches: usize) {
         let pipeline = Pipeline::full();
         let result = pipeline.solve(&problem);
 
-        // Print step-by-step results
-        print_pipeline_steps(&result, &problem);
+        if verbose {
+            // Print step-by-step results
+            print_pipeline_steps(&result, &problem);
 
-        // Print sample market details
-        print_market_details(&problem, &result, &sample_markets);
+            // Print sample market details
+            print_market_details(&problem, &result, &sample_markets);
 
-        // Print fill statistics
-        let fill_stats = FillStats::compute(&problem, &result, &order_stats);
-        print_fill_stats(&fill_stats, &order_stats, problem.markets.len());
+            // Print fill statistics
+            let fill_stats = FillStats::compute(&problem, &result, &order_stats);
+            print_fill_stats(&fill_stats, &order_stats, problem.markets.len());
 
-        // Verify the result
-        let verification = verify(&problem, &result.result);
-        print_verification_result(&verification);
+            // Verify the result
+            let verification = verify(&problem, &result.result);
+            print_verification_result(&verification);
+        }
 
-        println!();
+        // Export JSON if requested
+        if let Some(path) = export_json {
+            let scenario_name = format!(
+                "batch_{}_seed_{}",
+                batch + 1,
+                base_config.seed + batch as u64
+            );
+            let snapshot = VizSnapshot::from_pipeline_result(&result, &problem, scenario_name);
+            let json = snapshot.to_json();
+
+            // If multiple batches, append batch number to path
+            let output_path = if num_batches > 1 {
+                let path = std::path::Path::new(path);
+                let stem = path.file_stem().unwrap_or_default().to_str().unwrap_or("");
+                let ext = path.extension().unwrap_or_default().to_str().unwrap_or("json");
+                let parent = path.parent().unwrap_or(std::path::Path::new("."));
+                parent
+                    .join(format!("{}_{}.{}", stem, batch + 1, ext))
+                    .to_string_lossy()
+                    .to_string()
+            } else {
+                path.to_string()
+            };
+
+            match std::fs::write(&output_path, &json) {
+                Ok(_) => println!("Exported JSON snapshot to: {}", output_path),
+                Err(e) => eprintln!("Failed to export JSON to {}: {}", output_path, e),
+            }
+        }
+
+        // Show ASCII charts if requested
+        if show_charts {
+            println!("{}", matching_solver::viz::ascii::convergence_summary(&result.iteration_stats));
+        }
+
+        if verbose {
+            println!();
+        }
     }
 }
 

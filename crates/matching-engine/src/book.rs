@@ -5,6 +5,8 @@
 
 use std::collections::HashMap;
 
+use serde::Serialize;
+
 use crate::types::{MarketId, Nanos, Qty, Side};
 
 /// Outcome index for binary markets.
@@ -18,7 +20,7 @@ pub const YES: Outcome = 0;
 pub const NO: Outcome = 1;
 
 /// A single price level in the order book.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct BookLevel {
     /// Price per share in nanodollars
     pub price: Nanos,
@@ -47,7 +49,7 @@ impl BookLevel {
 }
 
 /// Order book for one outcome (YES or NO) in a binary market.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct LiquidityBook {
     pub market: MarketId,
     /// Which outcome: YES (0) or NO (1)
@@ -247,7 +249,7 @@ impl LiquidityBook {
 ///
 /// Used for bundle liquidity - liquidity that's only available when
 /// multiple markets have specific outcomes.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 pub struct JointOutcome {
     /// Markets and their outcomes, sorted by MarketId for consistent hashing
     pub legs: Vec<(MarketId, Outcome)>,
@@ -273,7 +275,7 @@ impl JointOutcome {
 }
 
 /// Liquidity book for a joint outcome (bundle liquidity).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct JointLiquidityBook {
     /// The joint outcome this book is for
     pub outcome: JointOutcome,
@@ -375,7 +377,7 @@ impl JointLiquidityBook {
 /// - (market_id, 1) = NO outcome
 ///
 /// Also supports joint liquidity for bundles (e.g., "A YES AND B YES").
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct LiquidityPool {
     /// Books indexed by (market_id, outcome)
     pub books: HashMap<(MarketId, Outcome), LiquidityBook>,

@@ -30,12 +30,14 @@ pub mod mwis;
 
 use std::collections::HashMap;
 
+use serde::Serialize;
+
 use matching_engine::{Fill, LiquidityPool, Order, Problem};
 
 use crate::MatchingResult;
 
 /// Confidence level of a solution.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub enum SolutionConfidence {
     /// Solution is known to be optimal
     Optimal,
@@ -82,7 +84,7 @@ impl SolverSolution {
 }
 
 /// Statistics from combining solutions.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct CombineStats {
     /// Number of solutions combined
     pub num_solutions: usize,
@@ -120,7 +122,7 @@ impl CombineStats {
 }
 
 /// Contribution tracking for a solver.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct SolverContribution {
     /// Name of the solver
     pub solver_name: String,

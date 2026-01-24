@@ -20,10 +20,12 @@
 
 use std::collections::{HashMap, HashSet};
 
+use serde::Serialize;
+
 use matching_engine::{MarketId, MmConstraint, MmId, Nanos, Order, Qty};
 
 /// Result of MM budget allocation.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct AllocationResult {
     /// Order IDs that should be activated (filled)
     pub activated_orders: Vec<u64>,
@@ -38,7 +40,7 @@ pub struct AllocationResult {
 }
 
 /// Statistics about the allocation process.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct AllocationStats {
     /// Total budget across all MMs
     pub total_budget: Nanos,
@@ -61,7 +63,7 @@ pub struct AllocationStats {
 }
 
 /// Allocation details for a single MM.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct MmAllocation {
     pub mm_id: MmId,
     pub activated_orders: Vec<u64>,

@@ -14,12 +14,14 @@
 
 use std::collections::HashMap;
 
+use serde::Serialize;
+
 use matching_engine::{
     Fill, LiquidityBook, MarketId, MarketSet, Nanos, Order, Qty, NANOS_PER_DOLLAR,
 };
 
 /// Solution for a single market.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct MarketSolution {
     /// Market ID this solution is for
     pub market_id: MarketId,

@@ -15,6 +15,8 @@
 
 use std::time::Instant;
 
+use serde::Serialize;
+
 use matching_engine::Problem;
 
 use crate::combiner::{
@@ -39,7 +41,7 @@ use crate::milp::MilpSolver;
 // ============================================================================
 
 /// Configuration options for the pipeline.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct PipelineConfig {
     /// Whether to use fixed-point iteration between pricing and allocation.
     pub use_fixed_point: bool,
@@ -78,7 +80,7 @@ impl Default for PipelineConfig {
 // ============================================================================
 
 /// Result from running a pipeline.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct PipelineResult {
     /// The final combined matching result.
     pub result: MatchingResult,
@@ -112,7 +114,7 @@ pub struct PipelineResult {
 }
 
 /// Timing breakdown for pipeline phases.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct PipelineTimings {
     pub price_discovery_secs: f64,
     pub price_projection_secs: f64,
@@ -122,7 +124,7 @@ pub struct PipelineTimings {
 }
 
 /// Stats for a single fixed-point iteration.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct IterationStats {
     /// Iteration number (1-indexed).
     pub iteration: usize,

@@ -4,6 +4,8 @@
 //! This unified representation handles: simple limits, spreads, butterflies,
 //! iron condors, ratio spreads, baskets, and any other derivative structure.
 
+use serde::Serialize;
+
 use crate::types::{MarketId, Nanos, Qty};
 
 /// Maximum number of markets a single order can span.
@@ -179,7 +181,7 @@ impl std::fmt::Display for Order {
 }
 
 /// Result of matching: how much of an order was filled.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Fill {
     pub order_id: u64,
     pub fill_qty: Qty,

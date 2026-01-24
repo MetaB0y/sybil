@@ -5,4 +5,4 @@ edition = "2021"
 description = "Core matching types and logic for prediction market matching"
 
 [dependencies]
-# No external dependencies - just std
+serde = { version = "1.0", features = ["derive"] }
