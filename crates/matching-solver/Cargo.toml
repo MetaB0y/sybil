@@ -30,3 +30,4 @@ harness = false
 [features]
 default = []
 milp = []  # Legacy feature flag (good_lp/highs now always available)
+viz = []   # Enable detailed phase snapshots and orderbook data

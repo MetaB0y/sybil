@@ -111,6 +111,11 @@ pub struct PipelineResult {
 
     /// Time breakdown by phase.
     pub phase_times: PipelineTimings,
+
+    /// Per-phase snapshots for detailed visualization (viz feature only).
+    #[cfg(feature = "viz")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub phase_snapshots: Vec<crate::viz::PhaseSnapshot>,
 }
 
 /// Timing breakdown for pipeline phases.
@@ -160,6 +165,8 @@ impl PipelineResult {
             iteration_stats: Vec::new(),
             total_time_secs: 0.0,
             phase_times: PipelineTimings::default(),
+            #[cfg(feature = "viz")]
+            phase_snapshots: Vec::new(),
         }
     }
 }
@@ -312,6 +319,29 @@ impl Pipeline {
         // Create a mutable problem with remaining liquidity
         let mut remaining_liquidity = problem.liquidity.snapshot();
 
+        // Build market_names map for phase snapshots (viz feature)
+        #[cfg(feature = "viz")]
+        let market_names: std::collections::HashMap<matching_engine::MarketId, String> = problem
+            .markets
+            .iter()
+            .map(|m| (m.id, m.name.clone()))
+            .collect();
+
+        #[cfg(feature = "viz")]
+        let mut phase_snapshots: Vec<crate::viz::PhaseSnapshot> = Vec::new();
+
+        // Capture initial phase snapshot
+        #[cfg(feature = "viz")]
+        phase_snapshots.push(crate::viz::PhaseSnapshot::capture(
+            crate::viz::PipelinePhase::Initial,
+            0,
+            &remaining_liquidity,
+            &market_names,
+            0,
+            0,
+            start.elapsed().as_secs_f64(),
+        ));
+
         // Track orders that have already been filled
         let mut filled_order_ids: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
@@ -364,6 +394,26 @@ impl Pipeline {
                 None
             };
 
+            // Capture after price discovery - with phase-specific fills
+            #[cfg(feature = "viz")]
+            {
+                let pd_fills = price_result.as_ref().map(|p| p.total_fills);
+                let pd_welfare = price_result.as_ref().map(|p| p.total_welfare);
+                let markets_priced = price_result.as_ref().map(|p| p.prices.len()).unwrap_or(0);
+                phase_snapshots.push(crate::viz::PhaseSnapshot::capture_with_phase_data(
+                    crate::viz::PipelinePhase::PriceDiscovery,
+                    iterations,
+                    &remaining_liquidity,
+                    &market_names,
+                    result.result.fills.len(),
+                    result.result.total_welfare,
+                    start.elapsed().as_secs_f64(),
+                    pd_fills,
+                    pd_welfare,
+                    Some(crate::viz::PhaseMetadata::PriceDiscovery { markets_priced }),
+                ));
+            }
+
             // Phase 2: Price Projection
             let projection_result = if let (Some(ref projector), Some(ref prices)) =
                 (&self.price_projector, &price_result)
@@ -379,6 +429,30 @@ impl Pipeline {
             } else {
                 None
             };
+
+            // Capture after price projection - with violations info
+            #[cfg(feature = "viz")]
+            {
+                let metadata = projection_result.as_ref().map(|p| {
+                    crate::viz::PhaseMetadata::PriceProjection {
+                        violations_fixed: p.violations_fixed,
+                        max_adjustment: p.max_adjustment as f64 / 1e9, // Convert to dollars
+                        iterations: p.iterations,
+                    }
+                });
+                phase_snapshots.push(crate::viz::PhaseSnapshot::capture_with_phase_data(
+                    crate::viz::PipelinePhase::PriceProjection,
+                    iterations,
+                    &remaining_liquidity,
+                    &market_names,
+                    result.result.fills.len(),
+                    result.result.total_welfare,
+                    start.elapsed().as_secs_f64(),
+                    None, // No fills from projection
+                    None,
+                    metadata,
+                ));
+            }
 
             // Phase 3: MM Allocation
             let allocation_result = if let (Some(ref allocator), Some(ref prices)) =
@@ -455,6 +529,32 @@ impl Pipeline {
                 None
             };
 
+            // Capture after MM allocation - with activated orders info
+            #[cfg(feature = "viz")]
+            {
+                let orders_activated = allocation_result.as_ref()
+                    .map(|a| a.activated_orders.len())
+                    .unwrap_or(0);
+                let mm_count = allocation_result.as_ref()
+                    .map(|a| a.mm_allocations.len())
+                    .unwrap_or(0);
+                phase_snapshots.push(crate::viz::PhaseSnapshot::capture_with_phase_data(
+                    crate::viz::PipelinePhase::MmAllocation,
+                    iterations,
+                    &remaining_liquidity,
+                    &market_names,
+                    result.result.fills.len(),
+                    result.result.total_welfare,
+                    start.elapsed().as_secs_f64(),
+                    Some(orders_activated), // Activated orders as "phase fills"
+                    None,
+                    Some(crate::viz::PhaseMetadata::MmAllocation {
+                        orders_activated,
+                        mm_count,
+                    }),
+                ));
+            }
+
             // Build result from price discovery + allocation
             if let Some(ref pd_result) = price_result {
                 let iter_result =
@@ -483,7 +583,24 @@ impl Pipeline {
                 }
             }
 
-            // Phase 4: Run Partial Solvers (e.g., ArbitrageDetector for bundles)
+            // Capture after single-market fills are merged
+            #[cfg(feature = "viz")]
+            phase_snapshots.push(crate::viz::PhaseSnapshot::capture_with_phase_data(
+                crate::viz::PipelinePhase::Merged,
+                iterations,
+                &remaining_liquidity,
+                &market_names,
+                result.result.fills.len(),
+                result.result.total_welfare,
+                start.elapsed().as_secs_f64(),
+                Some(iter_price_discovery_fills),
+                None,
+                Some(crate::viz::PhaseMetadata::Merged {
+                    single_market_fills: iter_price_discovery_fills,
+                }),
+            ));
+
+            // Phase 4: Run Bundle Matching (e.g., ArbitrageDetector)
             let partial_start = Instant::now();
             for solver in &self.partial_solvers {
                 // Filter out already-filled orders for partial solvers too
@@ -525,6 +642,31 @@ impl Pipeline {
             }
             timings.partial_solving_secs += partial_start.elapsed().as_secs_f64();
 
+            // Capture after bundle matching - with bundle fills info
+            #[cfg(feature = "viz")]
+            {
+                // Calculate welfare from bundle fills in this iteration
+                let bundle_welfare: i64 = result.contributions.iter()
+                    .rev()
+                    .take(iter_bundle_fills)
+                    .map(|c| c.welfare_contributed)
+                    .sum();
+                phase_snapshots.push(crate::viz::PhaseSnapshot::capture_with_phase_data(
+                    crate::viz::PipelinePhase::BundleMatching,
+                    iterations,
+                    &remaining_liquidity,
+                    &market_names,
+                    result.result.fills.len(),
+                    result.result.total_welfare,
+                    start.elapsed().as_secs_f64(),
+                    Some(iter_bundle_fills),
+                    Some(bundle_welfare),
+                    Some(crate::viz::PhaseMetadata::BundleMatching {
+                        solver_name: "Arbitrage".to_string(),
+                    }),
+                ));
+            }
+
             // Store last iteration's metadata
             result.price_discovery = price_result;
             result.price_projection = projection_result;
@@ -562,10 +704,28 @@ impl Pipeline {
             }
         }
 
+        // Capture final phase snapshot
+        #[cfg(feature = "viz")]
+        phase_snapshots.push(crate::viz::PhaseSnapshot::capture(
+            crate::viz::PipelinePhase::Final,
+            iterations,
+            &remaining_liquidity,
+            &market_names,
+            result.result.fills.len(),
+            result.result.total_welfare,
+            start.elapsed().as_secs_f64(),
+        ));
+
         result.result.remaining_liquidity = remaining_liquidity;
         result.phase_times = timings;
         result.total_time_secs = start.elapsed().as_secs_f64();
         result.iterations = iterations;
+
+        // Set phase snapshots
+        #[cfg(feature = "viz")]
+        {
+            result.phase_snapshots = phase_snapshots;
+        }
 
         result
     }

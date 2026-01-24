@@ -103,3 +103,16 @@ sim-charts preset="small":
 # Export JSON and show charts
 sim-viz preset="medium" output="/tmp/snapshot.json":
     cargo run --bin matching-sim --release -- --preset {{preset}} --export-json {{output}} --show-charts -v
+
+# Run visualization dashboard
+viz snapshot="/tmp/snapshot.json":
+    cd viz && uv run streamlit run app.py -- {{snapshot}}
+
+# Generate snapshot and launch visualization in one command
+viz-run preset="small":
+    cargo run --bin matching-sim --release --features viz -- --preset {{preset}} --export-json /tmp/snapshot.json
+    cd viz && uv run streamlit run app.py -- /tmp/snapshot.json
+
+# Install viz dependencies
+viz-install:
+    cd viz && uv sync

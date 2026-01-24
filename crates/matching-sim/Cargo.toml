@@ -17,3 +17,4 @@ comfy-table = "7"
 
 [features]
 default = []
+viz = ["matching-solver/viz"]

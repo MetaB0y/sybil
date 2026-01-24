@@ -466,6 +466,10 @@ fn run_detailed_pipeline(
         // Select sample markets for detailed output
         let sample_markets = select_sample_markets(&problem, 10);
 
+        // Capture initial liquidity for viz feature
+        #[cfg(feature = "viz")]
+        let initial_liquidity = problem.liquidity.snapshot();
+
         // Run pipeline and get detailed results
         // Use full() which includes ArbitrageDetector for bundle matching
         let pipeline = Pipeline::full();
@@ -494,7 +498,19 @@ fn run_detailed_pipeline(
                 batch + 1,
                 base_config.seed + batch as u64
             );
+
+            #[cfg(feature = "viz")]
+            let snapshot = VizSnapshot::from_pipeline_result_with_liquidity(
+                &result,
+                &problem,
+                scenario_name,
+                &initial_liquidity,
+                result.phase_snapshots.clone(),
+            );
+
+            #[cfg(not(feature = "viz"))]
             let snapshot = VizSnapshot::from_pipeline_result(&result, &problem, scenario_name);
+
             let json = snapshot.to_json();
 
             // If multiple batches, append batch number to path
