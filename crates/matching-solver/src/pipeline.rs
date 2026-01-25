@@ -421,8 +421,9 @@ impl Pipeline {
             };
 
             // Store negrisk result and add arbitrage orders/fills to the result
-            #[allow(unused_mut, unused_variables, unused_assignments)]
+            #[cfg(feature = "viz")]
             let mut negrisk_fills_added = 0usize;
+            #[cfg(feature = "viz")]
             let mut negrisk_welfare_added: i64 = 0;
             if let Some(ref negrisk) = negrisk_result {
                 // Add arbitrage fills and orders to the result
@@ -435,10 +436,16 @@ impl Pipeline {
                             .find(|o| o.id == fill.order_id)
                         {
                             result.result.add_fill(fill.clone(), order);
-                            negrisk_fills_added += 1;
+                            #[cfg(feature = "viz")]
+                            {
+                                negrisk_fills_added += 1;
+                            }
                         }
                     }
-                    negrisk_welfare_added += arb_fill.welfare;
+                    #[cfg(feature = "viz")]
+                    {
+                        negrisk_welfare_added += arb_fill.welfare;
+                    }
                 }
 
                 // Accumulate arbitrage orders from this iteration
@@ -796,7 +803,7 @@ impl Pipeline {
         let mut timings = PipelineTimings::default();
 
         // Phase 1: Price Discovery
-        let mut price_result = if let Some(ref discoverer) = self.price_discoverer {
+        let price_result = if let Some(ref discoverer) = self.price_discoverer {
             let pd_start = Instant::now();
             let pd_result = discoverer.discover_prices(problem);
             timings.price_discovery_secs = pd_start.elapsed().as_secs_f64();

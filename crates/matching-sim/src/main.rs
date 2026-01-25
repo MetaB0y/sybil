@@ -614,7 +614,7 @@ fn print_problem_summary(problem: &Problem, stats: &OrderStats) {
     println!();
 }
 
-fn print_pipeline_steps(result: &PipelineResult, problem: &Problem) {
+fn print_pipeline_steps(result: &PipelineResult, _problem: &Problem) {
     println!("Pipeline Steps (fixed-point, {} iterations):", result.iterations);
     println!("─────────────────────────────────────────");
 
