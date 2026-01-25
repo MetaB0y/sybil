@@ -26,7 +26,7 @@ use crate::greedy::GreedySolver;
 use crate::local_solver::LocalSolver;
 use crate::mm_allocator::MmAllocator;
 use crate::price_projector::PriceProjector as PriceProjectorImpl;
-use crate::specialized::ArbitrageDetector;
+use crate::specialized::{ArbitrageDetector, NegriskSolver};
 use crate::traits::{
     AllocationResult, OrderAllocator, PartialSolution, PartialSolver, PriceDiscoverer,
     PriceDiscoveryResult, PriceProjectionResult, PriceProjector,
@@ -60,6 +60,9 @@ pub struct PipelineConfig {
 
     /// Whether to use price projection for cross-market consistency.
     pub use_price_projection: bool,
+
+    /// Whether to use negrisk arbitrage (replaces price projection).
+    pub use_negrisk_arbitrage: bool,
 }
 
 impl Default for PipelineConfig {
@@ -71,6 +74,7 @@ impl Default for PipelineConfig {
             combine_with_mwis: false,
             milp_timeout_secs: 1.0,
             use_price_projection: false,
+            use_negrisk_arbitrage: false,
         }
     }
 }
@@ -90,6 +94,9 @@ pub struct PipelineResult {
 
     /// Price projection result (if applicable).
     pub price_projection: Option<PriceProjectionResult>,
+
+    /// Negrisk arbitrage result (if applicable).
+    pub negrisk: Option<crate::specialized::NegriskResult>,
 
     /// Allocation result (if applicable).
     pub allocation: Option<AllocationResult>,
@@ -123,6 +130,7 @@ pub struct PipelineResult {
 pub struct PipelineTimings {
     pub price_discovery_secs: f64,
     pub price_projection_secs: f64,
+    pub negrisk_secs: f64,
     pub allocation_secs: f64,
     pub partial_solving_secs: f64,
     pub combining_secs: f64,
@@ -158,6 +166,7 @@ impl PipelineResult {
             result: MatchingResult::new(liquidity),
             price_discovery: None,
             price_projection: None,
+            negrisk: None,
             allocation: None,
             contributions: Vec::new(),
             combine_stats: None,
@@ -185,6 +194,9 @@ pub struct Pipeline {
 
     /// Price projector for cross-market consistency (optional).
     price_projector: Option<Box<dyn PriceProjector>>,
+
+    /// Negrisk arbitrage solver (optional).
+    negrisk_solver: Option<NegriskSolver>,
 
     /// Order allocator (optional).
     allocator: Option<Box<dyn OrderAllocator>>,
@@ -258,6 +270,23 @@ impl Pipeline {
             .price_projector(PriceProjectorImpl::new())
             .allocator(MmAllocator::new())
             .use_price_projection(true)
+            .build()
+    }
+
+    /// Create a pipeline with negrisk arbitrage.
+    ///
+    /// Uses negrisk arbitrage instead of price projection to handle
+    /// mutually exclusive outcome pricing inconsistencies. Negrisk creates
+    /// welfare-adding arbitrage fills instead of adjusting prices.
+    pub fn with_negrisk() -> Self {
+        Self::builder()
+            .name("Negrisk")
+            .price_discoverer(LocalSolver::new())
+            .allocator(MmAllocator::new())
+            .partial_solver(ArbitrageDetector::new())
+            .use_negrisk_arbitrage(true)
+            .use_fixed_point(true)
+            .max_iterations(5)
             .build()
     }
 
@@ -366,7 +395,7 @@ impl Pipeline {
             let mut iter_price_discovery_fills = 0usize;
             let mut iter_bundle_fills = 0usize;
 
-            // Filter out already-filled orders
+            // Filter out already-filled orders (MM orders stay included for price discovery)
             let remaining_orders: Vec<_> = problem
                 .orders
                 .iter()
@@ -394,22 +423,25 @@ impl Pipeline {
                 None
             };
 
-            // Capture after price discovery - with phase-specific fills
+            // Capture after price discovery - with cumulative fills if stopped here
             #[cfg(feature = "viz")]
             {
-                let pd_fills = price_result.as_ref().map(|p| p.total_fills);
-                let pd_welfare = price_result.as_ref().map(|p| p.total_welfare);
+                let pd_fills = price_result.as_ref().map(|p| p.total_fills).unwrap_or(0);
+                let pd_welfare = price_result.as_ref().map(|p| p.total_welfare).unwrap_or(0);
                 let markets_priced = price_result.as_ref().map(|p| p.prices.len()).unwrap_or(0);
+                // Cumulative = confirmed from previous iterations + pending from this phase
+                let cumulative_fills = result.result.fills.len() + pd_fills;
+                let cumulative_welfare = result.result.total_welfare + pd_welfare;
                 phase_snapshots.push(crate::viz::PhaseSnapshot::capture_with_phase_data(
                     crate::viz::PipelinePhase::PriceDiscovery,
                     iterations,
                     &remaining_liquidity,
                     &market_names,
-                    result.result.fills.len(),
-                    result.result.total_welfare,
+                    cumulative_fills,
+                    cumulative_welfare,
                     start.elapsed().as_secs_f64(),
-                    pd_fills,
-                    pd_welfare,
+                    Some(pd_fills),  // Phase-specific fills
+                    Some(pd_welfare),  // Phase-specific welfare
                     Some(crate::viz::PhaseMetadata::PriceDiscovery { markets_priced }),
                 ));
             }
@@ -430,9 +462,15 @@ impl Pipeline {
                 None
             };
 
-            // Capture after price projection - with violations info
+            // Capture after price projection - with cumulative fills if stopped here
+            // In sequential mode, recompute_fills() is NOT called, so fills are same as PriceDiscovery
             #[cfg(feature = "viz")]
             {
+                let pd_fills = price_result.as_ref().map(|p| p.total_fills).unwrap_or(0);
+                let pd_welfare = price_result.as_ref().map(|p| p.total_welfare).unwrap_or(0);
+                // Cumulative same as PriceDiscovery (projection doesn't modify fills in sequential mode)
+                let cumulative_fills = result.result.fills.len() + pd_fills;
+                let cumulative_welfare = result.result.total_welfare + pd_welfare;
                 let metadata = projection_result.as_ref().map(|p| {
                     crate::viz::PhaseMetadata::PriceProjection {
                         violations_fixed: p.violations_fixed,
@@ -445,12 +483,55 @@ impl Pipeline {
                     iterations,
                     &remaining_liquidity,
                     &market_names,
-                    result.result.fills.len(),
-                    result.result.total_welfare,
+                    cumulative_fills,
+                    cumulative_welfare,
                     start.elapsed().as_secs_f64(),
-                    None, // No fills from projection
-                    None,
+                    Some(0),  // No additional fills from projection phase
+                    Some(0),  // No additional welfare from projection phase
                     metadata,
+                ));
+            }
+
+            // Phase 2b: Negrisk Arbitrage (alternative to price projection)
+            // Exploits price inconsistencies by creating arbitrage fills instead of adjusting prices
+            let negrisk_result = if let (Some(ref solver), Some(ref prices)) =
+                (&self.negrisk_solver, &price_result)
+            {
+                if self.config.use_negrisk_arbitrage {
+                    let negrisk_start = Instant::now();
+                    let arb_result = solver.find_arbitrage(&prices.prices, &iter_problem);
+                    timings.negrisk_secs += negrisk_start.elapsed().as_secs_f64();
+                    Some(arb_result)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            // Capture after negrisk arbitrage
+            #[cfg(feature = "viz")]
+            if let Some(ref negrisk) = negrisk_result {
+                let pd_fills = price_result.as_ref().map(|p| p.total_fills).unwrap_or(0);
+                let pd_welfare = price_result.as_ref().map(|p| p.total_welfare).unwrap_or(0);
+                // Negrisk adds welfare but uses synthetic fills (not counted in fills_count)
+                let cumulative_fills = result.result.fills.len() + pd_fills;
+                let cumulative_welfare = result.result.total_welfare + pd_welfare + negrisk.total_welfare;
+                phase_snapshots.push(crate::viz::PhaseSnapshot::capture_with_phase_data(
+                    crate::viz::PipelinePhase::NegriskArbitrage,
+                    iterations,
+                    &remaining_liquidity,
+                    &market_names,
+                    cumulative_fills,
+                    cumulative_welfare,
+                    start.elapsed().as_secs_f64(),
+                    Some(negrisk.fills.len()),  // Arbitrage opportunities exploited
+                    Some(negrisk.total_welfare),
+                    Some(crate::viz::PhaseMetadata::NegriskArbitrage {
+                        opportunities_found: negrisk.opportunities_found,
+                        total_shares: negrisk.total_shares,
+                        welfare_added: negrisk.total_welfare as f64 / 1e9,
+                    }),
                 ));
             }
 
@@ -517,10 +598,12 @@ impl Pipeline {
                     })
                     .collect();
 
+                // Pass full order list (including MM orders) to allocator
+                // iter_problem.orders excludes MM orders for price discovery, but allocator needs them
                 let alloc_result = allocator.allocate(
                     &adjusted_constraints,
                     &prices.prices,
-                    &iter_problem.orders,
+                    &problem.orders,
                     &current_fills,
                 );
                 timings.allocation_secs += alloc_start.elapsed().as_secs_f64();
@@ -529,25 +612,71 @@ impl Pipeline {
                 None
             };
 
-            // Capture after MM allocation - with activated orders info
+            // Capture after MM allocation - with cumulative fills if stopped here
+            // MmAllocation ADDS MM orders that fit within budget at discovered prices
             #[cfg(feature = "viz")]
             {
+                // PriceDiscovery fills (all non-MM orders)
+                let pd_fills = price_result.as_ref().map(|p| p.total_fills).unwrap_or(0);
+                let pd_welfare = price_result.as_ref().map(|p| p.total_welfare).unwrap_or(0);
+
+                // Count MM orders that would be activated
+                let (mm_fills, mm_welfare) = if let (Some(ref alloc), Some(ref pd)) = (&allocation_result, &price_result) {
+                    let activated_set: std::collections::HashSet<_> = alloc.activated_orders.iter().copied().collect();
+
+                    let mut fills = 0usize;
+                    let mut welfare = 0i64;
+
+                    for mm in &problem.mm_constraints {
+                        for &order_id in &mm.order_ids {
+                            if !activated_set.contains(&order_id) || filled_order_ids.contains(&order_id) {
+                                continue;
+                            }
+                            if let Some(&order) = order_map.get(&order_id) {
+                                if order.num_markets == 1 {
+                                    let market = order.markets[0];
+                                    if let Some(market_prices) = pd.prices.get(&market) {
+                                        let outcome = order.payoffs.iter()
+                                            .take(order.num_states as usize)
+                                            .position(|&p| p > 0)
+                                            .unwrap_or(0);
+                                        let price = market_prices.get(outcome).copied()
+                                            .unwrap_or(500_000_000);
+                                        if order.limit_price >= price {
+                                            fills += 1;
+                                            welfare += order.welfare_contribution(price, order.max_fill);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    (fills, welfare)
+                } else {
+                    (0, 0)
+                };
+
                 let orders_activated = allocation_result.as_ref()
                     .map(|a| a.activated_orders.len())
                     .unwrap_or(0);
                 let mm_count = allocation_result.as_ref()
                     .map(|a| a.mm_allocations.len())
                     .unwrap_or(0);
+
+                // Cumulative = confirmed + PriceDiscovery fills + MM fills
+                let cumulative_fills = result.result.fills.len() + pd_fills + mm_fills;
+                let cumulative_welfare = result.result.total_welfare + pd_welfare + mm_welfare;
+
                 phase_snapshots.push(crate::viz::PhaseSnapshot::capture_with_phase_data(
                     crate::viz::PipelinePhase::MmAllocation,
                     iterations,
                     &remaining_liquidity,
                     &market_names,
-                    result.result.fills.len(),
-                    result.result.total_welfare,
+                    cumulative_fills,
+                    cumulative_welfare,
                     start.elapsed().as_secs_f64(),
-                    Some(orders_activated), // Activated orders as "phase fills"
-                    None,
+                    Some(mm_fills),  // MM fills added by this phase
+                    Some(mm_welfare),
                     Some(crate::viz::PhaseMetadata::MmAllocation {
                         orders_activated,
                         mm_count,
@@ -582,23 +711,6 @@ impl Pipeline {
                     }
                 }
             }
-
-            // Capture after single-market fills are merged
-            #[cfg(feature = "viz")]
-            phase_snapshots.push(crate::viz::PhaseSnapshot::capture_with_phase_data(
-                crate::viz::PipelinePhase::Merged,
-                iterations,
-                &remaining_liquidity,
-                &market_names,
-                result.result.fills.len(),
-                result.result.total_welfare,
-                start.elapsed().as_secs_f64(),
-                Some(iter_price_discovery_fills),
-                None,
-                Some(crate::viz::PhaseMetadata::Merged {
-                    single_market_fills: iter_price_discovery_fills,
-                }),
-            ));
 
             // Phase 4: Run Bundle Matching (e.g., ArbitrageDetector)
             let partial_start = Instant::now();
@@ -998,6 +1110,7 @@ pub struct PipelineBuilder {
     name: String,
     price_discoverer: Option<Box<dyn PriceDiscoverer>>,
     price_projector: Option<Box<dyn PriceProjector>>,
+    negrisk_solver: Option<NegriskSolver>,
     allocator: Option<Box<dyn OrderAllocator>>,
     partial_solvers: Vec<Box<dyn PartialSolver>>,
     config: PipelineConfig,
@@ -1010,6 +1123,7 @@ impl PipelineBuilder {
             name: "Pipeline".to_string(),
             price_discoverer: None,
             price_projector: None,
+            negrisk_solver: None,
             allocator: None,
             partial_solvers: Vec::new(),
             config: PipelineConfig::default(),
@@ -1082,12 +1196,29 @@ impl PipelineBuilder {
         self
     }
 
+    /// Set whether to use negrisk arbitrage.
+    pub fn use_negrisk_arbitrage(mut self, use_it: bool) -> Self {
+        self.config.use_negrisk_arbitrage = use_it;
+        if use_it {
+            self.negrisk_solver = Some(NegriskSolver::new());
+        }
+        self
+    }
+
+    /// Set a custom negrisk solver.
+    pub fn negrisk_solver(mut self, solver: NegriskSolver) -> Self {
+        self.negrisk_solver = Some(solver);
+        self.config.use_negrisk_arbitrage = true;
+        self
+    }
+
     /// Build the pipeline.
     pub fn build(self) -> Pipeline {
         Pipeline {
             name: self.name,
             price_discoverer: self.price_discoverer,
             price_projector: self.price_projector,
+            negrisk_solver: self.negrisk_solver,
             allocator: self.allocator,
             partial_solvers: self.partial_solvers,
             combiner: SolutionCombiner::new(),

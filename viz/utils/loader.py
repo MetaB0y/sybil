@@ -313,6 +313,9 @@ class SnapshotData:
                 elif "PriceProjection" in metadata:
                     md = metadata["PriceProjection"]
                     metadata_str = f"{md.get('violations_fixed', 0)} violations, ${md.get('max_adjustment', 0):.2f} max adj"
+                elif "NegriskArbitrage" in metadata:
+                    md = metadata["NegriskArbitrage"]
+                    metadata_str = f"{md.get('opportunities_found', 0)} arbs, {md.get('total_shares', 0)} shares, +${md.get('welfare_added', 0):.2f}"
                 elif "MmAllocation" in metadata:
                     md = metadata["MmAllocation"]
                     metadata_str = f"{md.get('orders_activated', 0)} orders, {md.get('mm_count', 0)} MMs"

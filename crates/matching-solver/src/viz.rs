@@ -219,6 +219,8 @@ pub enum PipelinePhase {
     Initial,
     PriceDiscovery,
     PriceProjection,
+    /// Negrisk arbitrage phase (exploits price < $1 for mutually exclusive outcomes)
+    NegriskArbitrage,
     MmAllocation,
     /// After single-market fills are merged (confirmed single-market orders)
     Merged,
@@ -259,6 +261,12 @@ pub enum PhaseMetadata {
         violations_fixed: usize,
         max_adjustment: f64,
         iterations: usize,
+    },
+    /// Negrisk arbitrage (exploits price inconsistencies)
+    NegriskArbitrage {
+        opportunities_found: usize,
+        total_shares: u64,
+        welfare_added: f64,
     },
     MmAllocation {
         orders_activated: usize,

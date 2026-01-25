@@ -67,13 +67,15 @@ def main():
             st.divider()
 
             # Phase table with phase-specific data
+            # fills_count = cumulative fills if stopped at this phase
+            # phase_fills = fills added by this specific phase (delta)
             st.subheader("Phase Statistics")
             display_cols = ["phase", "iteration", "phase_fills", "fills_count", "phase_welfare_dollars", "metadata", "elapsed_secs"]
             display_df = phase_df[display_cols].copy()
-            display_df.columns = ["Phase", "Iter", "Phase Output", "Confirmed", "Phase Welfare ($)", "Details", "Time (s)"]
+            display_df.columns = ["Phase", "Iter", "Phase Δ", "Cumulative", "Phase Welfare ($)", "Details", "Time (s)"]
             # Format phase_fills: show "-" for None
-            display_df["Phase Output"] = display_df["Phase Output"].apply(lambda x: f"{x:,}" if x is not None else "-")
-            display_df["Confirmed"] = display_df["Confirmed"].apply(lambda x: f"{x:,}")
+            display_df["Phase Δ"] = display_df["Phase Δ"].apply(lambda x: f"+{x:,}" if x is not None and x > 0 else ("-" if x is None else f"{x:,}"))
+            display_df["Cumulative"] = display_df["Cumulative"].apply(lambda x: f"{x:,}")
             display_df["Phase Welfare ($)"] = display_df["Phase Welfare ($)"].apply(lambda x: f"${x:.2f}" if x else "-")
             st.dataframe(display_df, width="stretch", hide_index=True)
 
@@ -99,14 +101,14 @@ def main():
             st.plotly_chart(fig_welfare, width="stretch")
 
             # Fills progression chart
-            st.subheader("Fills by Phase")
+            st.subheader("Cumulative Fills by Phase")
             fig_fills = px.bar(
                 phase_df,
                 x="phase",
                 y="fills_count",
                 color="iteration",
-                labels={"phase": "Phase", "fills_count": "Total Fills", "iteration": "Iteration"},
-                hover_data=["welfare_dollars", "elapsed_secs"],
+                labels={"phase": "Phase", "fills_count": "Cumulative Fills", "iteration": "Iteration"},
+                hover_data=["welfare_dollars", "elapsed_secs", "phase_fills"],
             )
             st.plotly_chart(fig_fills, width="stretch")
 
