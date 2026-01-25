@@ -47,13 +47,32 @@ def main():
     if price_history.empty:
         st.info("No price history available for this market.")
     else:
-        # Create dual-axis chart for YES/NO prices
+        # Build continuous price series: point 0 = before iter 1, point N = after iter N
+        # This avoids redundant start/end lines (end of iter N = start of iter N+1)
+        has_end_prices = "yes_price_end" in price_history.columns
+
+        if has_end_prices and len(price_history) > 0:
+            # Build x-axis: 0, 1, 2, ..., N (N+1 points for N iterations)
+            x_points = [0]  # Point 0 = before any iteration
+            yes_points = [price_history.iloc[0]["yes_price"] * 100]
+            no_points = [price_history.iloc[0]["no_price"] * 100]
+
+            for _, row in price_history.iterrows():
+                x_points.append(int(row["iteration"]))
+                yes_points.append(row["yes_price_end"] * 100)
+                no_points.append(row["no_price_end"] * 100)
+        else:
+            # Fallback for old snapshots
+            x_points = price_history["iteration"].tolist()
+            yes_points = (price_history["yes_price"] * 100).tolist()
+            no_points = (price_history["no_price"] * 100).tolist()
+
         fig = go.Figure()
 
         fig.add_trace(
             go.Scatter(
-                x=price_history["iteration"],
-                y=price_history["yes_price"] * 100,
+                x=x_points,
+                y=yes_points,
                 mode="lines+markers",
                 name="YES Price",
                 line=dict(color="green"),
@@ -62,19 +81,20 @@ def main():
 
         fig.add_trace(
             go.Scatter(
-                x=price_history["iteration"],
-                y=price_history["no_price"] * 100,
+                x=x_points,
+                y=no_points,
                 mode="lines+markers",
                 name="NO Price",
                 line=dict(color="red"),
             )
         )
 
-        # Add a line showing price sum (should be ~100%)
+        # Add price sum line
+        sum_points = [y + n for y, n in zip(yes_points, no_points)]
         fig.add_trace(
             go.Scatter(
-                x=price_history["iteration"],
-                y=(price_history["yes_price"] + price_history["no_price"]) * 100,
+                x=x_points,
+                y=sum_points,
                 mode="lines",
                 name="Sum",
                 line=dict(color="gray", dash="dash"),
@@ -87,22 +107,26 @@ def main():
             yaxis_title="Price (%)",
             hovermode="x unified",
             yaxis=dict(range=[0, 110]),
+            xaxis=dict(tickmode="linear", tick0=0, dtick=1),  # Force integer ticks
         )
 
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
-    # Volume per iteration
+    # Volume per iteration (cumulative)
     if not price_history.empty and "volume" in price_history.columns:
-        st.subheader("Volume per Iteration")
+        st.subheader("Cumulative Volume")
 
         fig_volume = px.bar(
             price_history,
             x="iteration",
             y="volume",
-            title=f"Trading Volume for {selected_market}",
+            title=f"Cumulative Trading Volume for {selected_market}",
             labels={"iteration": "Iteration", "volume": "Volume (shares)"},
         )
-        st.plotly_chart(fig_volume, width="stretch")
+        fig_volume.update_layout(
+            xaxis=dict(tickmode="linear", tick0=1, dtick=1),  # Force integer ticks
+        )
+        st.plotly_chart(fig_volume, use_container_width=True)
 
     st.divider()
 

@@ -13,11 +13,12 @@
 //! let result = pipeline.solve(&problem);
 //! ```
 
+use std::collections::HashMap;
 use std::time::Instant;
 
 use serde::Serialize;
 
-use matching_engine::Problem;
+use matching_engine::{MarketId, Nanos, Problem};
 
 use crate::combiner::{
     CombineStats, SolutionCombiner, SolutionConfidence, SolverContribution, SolverSolution,
@@ -148,6 +149,13 @@ pub struct IterationStats {
     pub price_discovery_fills: usize,
     /// Breakdown: fills from bundle matching.
     pub bundle_fills: usize,
+    /// Index of first fill in this iteration (into PipelineResult.result.fills).
+    pub fill_start_idx: usize,
+    /// Index after last fill in this iteration.
+    pub fill_end_idx: usize,
+    /// Per-market clearing prices for this iteration.
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub market_prices: HashMap<MarketId, Vec<Nanos>>,
 }
 
 impl PipelineResult {
@@ -349,6 +357,7 @@ impl Pipeline {
             iterations = iter + 1;
 
             // Track fills for this iteration
+            let fill_start_idx = result.result.fills.len();
             let mut iter_price_discovery_fills = 0usize;
             let mut iter_bundle_fills = 0usize;
 
@@ -682,6 +691,12 @@ impl Pipeline {
                 ));
             }
 
+            // Get per-iteration market prices (before moving price_result)
+            let iter_market_prices = price_result
+                .as_ref()
+                .map(|pd| pd.prices.clone())
+                .unwrap_or_default();
+
             // Store last iteration's metadata
             result.price_discovery = price_result;
             result.allocation = allocation_result;
@@ -702,6 +717,9 @@ impl Pipeline {
                 fills_delta: current_fills.saturating_sub(prev_fills),
                 price_discovery_fills: iter_price_discovery_fills,
                 bundle_fills: iter_bundle_fills,
+                fill_start_idx,
+                fill_end_idx: current_fills,
+                market_prices: iter_market_prices,
             });
 
             // Check convergence

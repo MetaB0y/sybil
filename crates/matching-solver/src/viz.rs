@@ -24,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 
-use matching_engine::{MarketId, Problem, NANOS_PER_DOLLAR};
+use matching_engine::{MarketId, Nanos, Problem, NANOS_PER_DOLLAR};
 
 use crate::pipeline::{IterationStats, PipelineResult};
 
@@ -95,11 +95,15 @@ pub struct IterationSnapshot {
 /// Prices for a single market.
 #[derive(Clone, Debug, Serialize)]
 pub struct MarketPrices {
-    /// YES price as fraction (0.0-1.0)
+    /// YES price at START of iteration (before fills)
     pub yes_price: f64,
-    /// NO price as fraction (0.0-1.0)
+    /// NO price at START of iteration (before fills)
     pub no_price: f64,
-    /// Volume traded in this market
+    /// YES price at END of iteration (after fills) - equals next iteration's start price
+    pub yes_price_end: f64,
+    /// NO price at END of iteration (after fills) - equals next iteration's start price
+    pub no_price_end: f64,
+    /// Volume traded in this market (cumulative through this iteration)
     pub volume: u64,
     /// Welfare from this market
     pub welfare: i64,
@@ -443,46 +447,81 @@ impl VizSnapshot {
         let order_map: HashMap<u64, &matching_engine::Order> =
             problem.orders.iter().map(|o| (o.id, o)).collect();
 
-        // Build iteration snapshots
+        // Build iteration snapshots with per-iteration per-market data
+        let num_iterations = result.iteration_stats.len();
         let iterations: Vec<IterationSnapshot> = result
             .iteration_stats
             .iter()
-            .map(|stat| {
-                // Get market prices from price discovery if available
-                let market_prices = if let Some(ref pd) = result.price_discovery {
-                    pd.prices
-                        .iter()
-                        .filter_map(|(market_id, prices)| {
-                            let name = market_names.get(market_id)?.clone();
-                            let yes_price = prices.first().copied().unwrap_or(0) as f64
-                                / NANOS_PER_DOLLAR as f64;
-                            let no_price = prices.get(1).copied().unwrap_or(0) as f64
-                                / NANOS_PER_DOLLAR as f64;
+            .enumerate()
+            .map(|(idx, stat)| {
+                // Compute cumulative per-market volume/welfare up to this iteration
+                // Uses fill_end_idx to slice fills up to this point
+                let mut market_volumes: HashMap<MarketId, u64> = HashMap::new();
+                let mut market_welfare: HashMap<MarketId, i64> = HashMap::new();
 
-                            // Get volume/welfare from market solution if available
-                            let (volume, welfare) = pd
-                                .market_solutions
-                                .get(market_id)
-                                .map(|sol| {
-                                    let vol: u64 = sol.fills.iter().map(|f| f.fill_qty).sum();
-                                    (vol, sol.welfare)
-                                })
-                                .unwrap_or((0, 0));
+                for fill in result.result.fills.iter().take(stat.fill_end_idx) {
+                    if let Some(order) = order_map.get(&fill.order_id) {
+                        // Attribute volume to ALL markets in the order (including bundles)
+                        // This is standard practice: each leg of a bundle consumes liquidity
+                        // and represents shares changing hands in that market
+                        for &market_id in order.markets.iter().take(order.num_markets as usize) {
+                            *market_volumes.entry(market_id).or_insert(0) += fill.fill_qty;
+                        }
+                        // Welfare is attributed to first market only to avoid double-counting
+                        // (welfare is the total consumer surplus, not per-market)
+                        if order.num_markets >= 1 {
+                            let market_id = order.markets[0];
+                            *market_welfare.entry(market_id).or_insert(0) += fill.welfare(order);
+                        }
+                    }
+                }
 
-                            Some((
-                                name,
-                                MarketPrices {
-                                    yes_price,
-                                    no_price,
-                                    volume,
-                                    welfare,
-                                },
-                            ))
-                        })
-                        .collect()
+                // Get next iteration's prices for "end" prices (or same as current for final iteration)
+                let next_prices: &HashMap<MarketId, Vec<Nanos>> = if idx + 1 < num_iterations {
+                    &result.iteration_stats[idx + 1].market_prices
                 } else {
-                    HashMap::new()
+                    &stat.market_prices // Final iteration: end = start
                 };
+
+                // Get per-iteration market prices (start = this iteration, end = next iteration)
+                let market_prices: HashMap<String, MarketPrices> = stat
+                    .market_prices
+                    .iter()
+                    .filter_map(|(market_id, prices)| {
+                        let name = market_names.get(market_id)?.clone();
+                        let yes_price = prices.first().copied().unwrap_or(0) as f64
+                            / NANOS_PER_DOLLAR as f64;
+                        let no_price = prices.get(1).copied().unwrap_or(0) as f64
+                            / NANOS_PER_DOLLAR as f64;
+
+                        // End prices from next iteration (or same for final)
+                        let next_market_prices = next_prices.get(market_id);
+                        let yes_price_end = next_market_prices
+                            .and_then(|p| p.first().copied())
+                            .unwrap_or(0) as f64
+                            / NANOS_PER_DOLLAR as f64;
+                        let no_price_end = next_market_prices
+                            .and_then(|p| p.get(1).copied())
+                            .unwrap_or(0) as f64
+                            / NANOS_PER_DOLLAR as f64;
+
+                        // Use cumulative volume/welfare up to this iteration
+                        let volume = market_volumes.get(market_id).copied().unwrap_or(0);
+                        let welfare = market_welfare.get(market_id).copied().unwrap_or(0);
+
+                        Some((
+                            name,
+                            MarketPrices {
+                                yes_price,
+                                no_price,
+                                yes_price_end,
+                                no_price_end,
+                                volume,
+                                welfare,
+                            },
+                        ))
+                    })
+                    .collect();
 
                 // Get MM allocations
                 let mm_allocations = if let Some(ref alloc) = result.allocation {
@@ -519,9 +558,14 @@ impl VizSnapshot {
 
         // Build final result
         let total_volume: u64 = result.result.fills.iter().map(|f| f.fill_qty).sum();
-        let orders_filled = result.result.orders_filled;
-        let orders_unfilled =
-            result.result.orders_unfilled_liquidity + result.result.orders_unfilled_aon;
+
+        // Count unique filled orders (an order may appear in multiple fills)
+        let filled_order_ids: std::collections::HashSet<u64> =
+            result.result.fills.iter().map(|f| f.order_id).collect();
+        let orders_filled = filled_order_ids.len();
+
+        // Unfilled = total orders - filled (pipeline doesn't track unfilled explicitly)
+        let orders_unfilled = problem.orders.len().saturating_sub(orders_filled);
 
         let final_result = FinalSnapshot {
             total_welfare: result.result.total_welfare,

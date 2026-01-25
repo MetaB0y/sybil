@@ -171,6 +171,8 @@ class SnapshotData:
                         "iteration": iteration,
                         "yes_price": prices.get("yes_price", 0.0),
                         "no_price": prices.get("no_price", 0.0),
+                        "yes_price_end": prices.get("yes_price_end", 0.0),
+                        "no_price_end": prices.get("no_price_end", 0.0),
                         "volume": prices.get("volume", 0),
                         "welfare": prices.get("welfare", 0),
                     }
