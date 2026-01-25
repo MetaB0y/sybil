@@ -380,25 +380,24 @@ impl Pipeline {
                 None
             };
 
-            // Capture after price discovery - with cumulative fills if stopped here
+            // Capture after price discovery
+            // NOTE: At this point, fills aren't confirmed yet - we show POTENTIAL fills as phase_fills
+            // The main fills_count/welfare show confirmed state (from previous iterations)
             #[cfg(feature = "viz")]
             {
                 let pd_fills = price_result.as_ref().map(|p| p.total_fills).unwrap_or(0);
                 let pd_welfare = price_result.as_ref().map(|p| p.total_welfare).unwrap_or(0);
                 let markets_priced = price_result.as_ref().map(|p| p.prices.len()).unwrap_or(0);
-                // Cumulative = confirmed from previous iterations + pending from this phase
-                let cumulative_fills = result.result.fills.len() + pd_fills;
-                let cumulative_welfare = result.result.total_welfare + pd_welfare;
                 phase_snapshots.push(crate::viz::PhaseSnapshot::capture_with_phase_data(
                     crate::viz::PipelinePhase::PriceDiscovery,
                     iterations,
                     &remaining_liquidity,
                     &market_names,
-                    cumulative_fills,
-                    cumulative_welfare,
+                    result.result.fills.len(),  // Confirmed fills so far
+                    result.result.total_welfare,  // Confirmed welfare so far
                     start.elapsed().as_secs_f64(),
-                    Some(pd_fills),  // Phase-specific fills
-                    Some(pd_welfare),  // Phase-specific welfare
+                    Some(pd_fills),  // POTENTIAL fills from this phase (not yet confirmed)
+                    Some(pd_welfare),  // POTENTIAL welfare (not yet confirmed)
                     Some(crate::viz::PhaseMetadata::PriceDiscovery { markets_priced }),
                 ));
             }
@@ -456,22 +455,18 @@ impl Pipeline {
             }
 
             // Capture after negrisk arbitrage
+            // NOTE: Negrisk fills are already added to result.result above
             #[cfg(feature = "viz")]
             if let Some(ref negrisk) = negrisk_result {
-                let pd_fills = price_result.as_ref().map(|p| p.total_fills).unwrap_or(0);
-                let pd_welfare = price_result.as_ref().map(|p| p.total_welfare).unwrap_or(0);
-                // Negrisk adds welfare from arbitrage fills
-                let cumulative_fills = result.result.fills.len() + pd_fills + negrisk_fills_added;
-                let cumulative_welfare = result.result.total_welfare + pd_welfare;
                 phase_snapshots.push(crate::viz::PhaseSnapshot::capture_with_phase_data(
                     crate::viz::PipelinePhase::NegriskArbitrage,
                     iterations,
                     &remaining_liquidity,
                     &market_names,
-                    cumulative_fills,
-                    cumulative_welfare,
+                    result.result.fills.len(),  // Confirmed fills (includes negrisk)
+                    result.result.total_welfare,  // Confirmed welfare (includes negrisk)
                     start.elapsed().as_secs_f64(),
-                    Some(negrisk_fills_added),  // Arbitrage fills created
+                    Some(negrisk_fills_added),  // Arbitrage fills created this phase
                     Some(negrisk_welfare_added),
                     Some(crate::viz::PhaseMetadata::NegriskArbitrage {
                         opportunities_found: negrisk.opportunities_found,
@@ -558,78 +553,6 @@ impl Pipeline {
                 None
             };
 
-            // Capture after MM allocation - with cumulative fills if stopped here
-            // MmAllocation ADDS MM orders that fit within budget at discovered prices
-            #[cfg(feature = "viz")]
-            {
-                // PriceDiscovery fills (all non-MM orders)
-                let pd_fills = price_result.as_ref().map(|p| p.total_fills).unwrap_or(0);
-                let pd_welfare = price_result.as_ref().map(|p| p.total_welfare).unwrap_or(0);
-
-                // Count MM orders that would be activated
-                let (mm_fills, mm_welfare) = if let (Some(ref alloc), Some(ref pd)) = (&allocation_result, &price_result) {
-                    let activated_set: std::collections::HashSet<_> = alloc.activated_orders.iter().copied().collect();
-
-                    let mut fills = 0usize;
-                    let mut welfare = 0i64;
-
-                    for mm in &problem.mm_constraints {
-                        for &order_id in &mm.order_ids {
-                            if !activated_set.contains(&order_id) || filled_order_ids.contains(&order_id) {
-                                continue;
-                            }
-                            if let Some(&order) = order_map.get(&order_id) {
-                                if order.num_markets == 1 {
-                                    let market = order.markets[0];
-                                    if let Some(market_prices) = pd.prices.get(&market) {
-                                        let outcome = order.payoffs.iter()
-                                            .take(order.num_states as usize)
-                                            .position(|&p| p > 0)
-                                            .unwrap_or(0);
-                                        let price = market_prices.get(outcome).copied()
-                                            .unwrap_or(500_000_000);
-                                        if order.limit_price >= price {
-                                            fills += 1;
-                                            welfare += order.welfare_contribution(price, order.max_fill);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    (fills, welfare)
-                } else {
-                    (0, 0)
-                };
-
-                let orders_activated = allocation_result.as_ref()
-                    .map(|a| a.activated_orders.len())
-                    .unwrap_or(0);
-                let mm_count = allocation_result.as_ref()
-                    .map(|a| a.mm_allocations.len())
-                    .unwrap_or(0);
-
-                // Cumulative = confirmed + PriceDiscovery fills + MM fills
-                let cumulative_fills = result.result.fills.len() + pd_fills + mm_fills;
-                let cumulative_welfare = result.result.total_welfare + pd_welfare + mm_welfare;
-
-                phase_snapshots.push(crate::viz::PhaseSnapshot::capture_with_phase_data(
-                    crate::viz::PipelinePhase::MmAllocation,
-                    iterations,
-                    &remaining_liquidity,
-                    &market_names,
-                    cumulative_fills,
-                    cumulative_welfare,
-                    start.elapsed().as_secs_f64(),
-                    Some(mm_fills),  // MM fills added by this phase
-                    Some(mm_welfare),
-                    Some(crate::viz::PhaseMetadata::MmAllocation {
-                        orders_activated,
-                        mm_count,
-                    }),
-                ));
-            }
-
             // Build result from price discovery + allocation
             if let Some(ref pd_result) = price_result {
                 let iter_result =
@@ -656,6 +579,38 @@ impl Pipeline {
                         result.result.add_fill(fill, order);
                     }
                 }
+            }
+
+            // Capture after MM allocation - shows ACTUAL confirmed fills (not estimates)
+            #[cfg(feature = "viz")]
+            {
+                let orders_activated = allocation_result.as_ref()
+                    .map(|a| a.activated_orders.len())
+                    .unwrap_or(0);
+                let mm_count = allocation_result.as_ref()
+                    .map(|a| a.mm_allocations.len())
+                    .unwrap_or(0);
+
+                // Count how many fills in this iteration were from MM orders
+                let mm_fills_this_iter = result.result.fills.iter()
+                    .filter(|f| mm_order_ids.contains(&f.order_id))
+                    .count();
+
+                phase_snapshots.push(crate::viz::PhaseSnapshot::capture_with_phase_data(
+                    crate::viz::PipelinePhase::MmAllocation,
+                    iterations,
+                    &remaining_liquidity,
+                    &market_names,
+                    result.result.fills.len(),  // ACTUAL confirmed fills
+                    result.result.total_welfare,  // ACTUAL confirmed welfare
+                    start.elapsed().as_secs_f64(),
+                    Some(mm_fills_this_iter),
+                    Some(0),  // MM welfare is included in total, not separate
+                    Some(crate::viz::PhaseMetadata::MmAllocation {
+                        orders_activated,
+                        mm_count,
+                    }),
+                ));
             }
 
             // Phase 4: Run Bundle Matching (e.g., ArbitrageDetector)
@@ -701,6 +656,8 @@ impl Pipeline {
             timings.partial_solving_secs += partial_start.elapsed().as_secs_f64();
 
             // Capture after bundle matching - with bundle fills info
+            // NOTE: At this point, result.result contains ALL confirmed fills (PD + MM + bundles)
+            // This is the ACTUAL welfare, not an estimate
             #[cfg(feature = "viz")]
             {
                 // Calculate welfare from bundle fills in this iteration
@@ -714,8 +671,8 @@ impl Pipeline {
                     iterations,
                     &remaining_liquidity,
                     &market_names,
-                    result.result.fills.len(),
-                    result.result.total_welfare,
+                    result.result.fills.len(),  // ACTUAL confirmed fills
+                    result.result.total_welfare,  // ACTUAL confirmed welfare
                     start.elapsed().as_secs_f64(),
                     Some(iter_bundle_fills),
                     Some(bundle_welfare),
