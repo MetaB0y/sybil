@@ -52,6 +52,10 @@ milp-killer:
 sim preset="medium" solver="pipeline" verbose="-v":
     cargo run --bin matching-sim --release -- --preset {{preset}} --solver {{solver}} {{verbose}}
 
+# Run with negrisk arbitrage solver
+sim-negrisk preset="medium":
+    cargo run --bin matching-sim --release --features viz -- --preset {{preset}} --solver negrisk -v
+
 # Build release
 build:
     cargo build --release

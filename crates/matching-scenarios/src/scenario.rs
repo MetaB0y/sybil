@@ -202,13 +202,21 @@ pub fn generate_scenario(config: ScenarioConfig) -> Problem {
             let group_size = if remaining >= 4 && rng.gen_bool(0.5) { 4 } else { 3 };
             let group_size = group_size.min(remaining);
 
-            // Generate fair prices that sum to 1.0
+            // Generate fair prices that sum to ~1.0 (with some variance for negrisk opportunities)
+            // Use Box-Muller transform for normal distribution around 1.0 with stddev 0.1
+            let target_sum: f64 = {
+                // Box-Muller transform: convert uniform to normal
+                let u1: f64 = rng.gen_range(0.0001..1.0);  // Avoid log(0)
+                let u2: f64 = rng.gen();
+                let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+                (1.0 + 0.1 * z).clamp(0.85, 1.15)  // Normal(1.0, 0.1), clamped
+            };
             let mut raw_prices: Vec<f64> = (0..group_size)
                 .map(|_| rng.gen_range(0.1..1.0))
                 .collect();
             let sum: f64 = raw_prices.iter().sum();
             for p in &mut raw_prices {
-                *p /= sum; // Normalize to sum to 1.0
+                *p = (*p / sum) * target_sum; // Normalize to target_sum (may be != 1.0)
             }
 
             let mut group = MarketGroup::new(format!("Group{}", group_id));

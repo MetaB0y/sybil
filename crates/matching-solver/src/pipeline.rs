@@ -284,7 +284,7 @@ impl Pipeline {
             .price_discoverer(LocalSolver::new())
             .allocator(MmAllocator::new())
             .partial_solver(ArbitrageDetector::new())
-            .use_negrisk_arbitrage(true)
+            .negrisk_solver(NegriskSolver::new())
             .use_fixed_point(true)
             .max_iterations(5)
             .build()
@@ -347,6 +347,13 @@ impl Pipeline {
 
         // Create a mutable problem with remaining liquidity
         let mut remaining_liquidity = problem.liquidity.snapshot();
+
+        // Accumulate arbitrage orders across all iterations
+        let mut all_arbitrage_orders: Vec<matching_engine::Order> = Vec::new();
+
+        // Track next arbitrage order ID across iterations
+        let max_existing_id = problem.orders.iter().map(|o| o.id).max().unwrap_or(0);
+        let mut next_arb_order_id = max_existing_id + 1_000_000_000;
 
         // Build market_names map for phase snapshots (viz feature)
         #[cfg(feature = "viz")]
@@ -499,7 +506,7 @@ impl Pipeline {
             {
                 if self.config.use_negrisk_arbitrage {
                     let negrisk_start = Instant::now();
-                    let arb_result = solver.find_arbitrage(&prices.prices, &iter_problem);
+                    let arb_result = solver.find_arbitrage(&prices.prices, &iter_problem, &mut next_arb_order_id);
                     timings.negrisk_secs += negrisk_start.elapsed().as_secs_f64();
                     Some(arb_result)
                 } else {
@@ -509,14 +516,42 @@ impl Pipeline {
                 None
             };
 
+            // Store negrisk result and add arbitrage orders/fills to the result
+            #[allow(unused_mut, unused_variables, unused_assignments)]
+            let mut negrisk_fills_added = 0usize;
+            let mut negrisk_welfare_added: i64 = 0;
+            if let Some(ref negrisk) = negrisk_result {
+                // Add arbitrage fills and orders to the result
+                for arb_fill in &negrisk.fills {
+                    for fill in &arb_fill.market_fills {
+                        // Find the corresponding arbitrage order
+                        if let Some(order) = negrisk
+                            .arbitrage_orders
+                            .iter()
+                            .find(|o| o.id == fill.order_id)
+                        {
+                            result.result.add_fill(fill.clone(), order);
+                            negrisk_fills_added += 1;
+                        }
+                    }
+                    negrisk_welfare_added += arb_fill.welfare;
+                }
+
+                // Accumulate arbitrage orders from this iteration
+                all_arbitrage_orders.extend(negrisk.arbitrage_orders.clone());
+
+                // Store latest negrisk result (we'll update arbitrage_orders at the end)
+                result.negrisk = Some(negrisk.clone());
+            }
+
             // Capture after negrisk arbitrage
             #[cfg(feature = "viz")]
             if let Some(ref negrisk) = negrisk_result {
                 let pd_fills = price_result.as_ref().map(|p| p.total_fills).unwrap_or(0);
                 let pd_welfare = price_result.as_ref().map(|p| p.total_welfare).unwrap_or(0);
-                // Negrisk adds welfare but uses synthetic fills (not counted in fills_count)
-                let cumulative_fills = result.result.fills.len() + pd_fills;
-                let cumulative_welfare = result.result.total_welfare + pd_welfare + negrisk.total_welfare;
+                // Negrisk adds welfare from arbitrage fills
+                let cumulative_fills = result.result.fills.len() + pd_fills + negrisk_fills_added;
+                let cumulative_welfare = result.result.total_welfare + pd_welfare;
                 phase_snapshots.push(crate::viz::PhaseSnapshot::capture_with_phase_data(
                     crate::viz::PipelinePhase::NegriskArbitrage,
                     iterations,
@@ -525,12 +560,12 @@ impl Pipeline {
                     cumulative_fills,
                     cumulative_welfare,
                     start.elapsed().as_secs_f64(),
-                    Some(negrisk.fills.len()),  // Arbitrage opportunities exploited
-                    Some(negrisk.total_welfare),
+                    Some(negrisk_fills_added),  // Arbitrage fills created
+                    Some(negrisk_welfare_added),
                     Some(crate::viz::PhaseMetadata::NegriskArbitrage {
                         opportunities_found: negrisk.opportunities_found,
                         total_shares: negrisk.total_shares,
-                        welfare_added: negrisk.total_welfare as f64 / 1e9,
+                        welfare_added: negrisk_welfare_added as f64 / 1e9,
                     }),
                 ));
             }
@@ -816,6 +851,10 @@ impl Pipeline {
             }
         }
 
+        // Note: negrisk welfare comes from actual fills, not added separately
+        // Currently negrisk just identifies opportunities but doesn't create fills
+        // TODO: Create actual fills for arbitrage opportunities
+
         // Capture final phase snapshot
         #[cfg(feature = "viz")]
         phase_snapshots.push(crate::viz::PhaseSnapshot::capture(
@@ -832,6 +871,11 @@ impl Pipeline {
         result.phase_times = timings;
         result.total_time_secs = start.elapsed().as_secs_f64();
         result.iterations = iterations;
+
+        // Update negrisk result with all accumulated arbitrage orders from all iterations
+        if let Some(ref mut negrisk) = result.negrisk {
+            negrisk.arbitrage_orders = all_arbitrage_orders;
+        }
 
         // Set phase snapshots
         #[cfg(feature = "viz")]

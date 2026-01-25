@@ -63,10 +63,12 @@ fn main() {
 
     let start = Instant::now();
 
-    if solver_choice == SolverChoice::Pipeline && (verbose || export_json.is_some() || show_charts)
+    if (solver_choice == SolverChoice::Pipeline || solver_choice == SolverChoice::Negrisk)
+        && (verbose || export_json.is_some() || show_charts)
     {
         // Detailed pipeline run with step-by-step output
-        run_detailed_pipeline(&config, num_batches, export_json.as_deref(), show_charts, verbose);
+        let use_negrisk = solver_choice == SolverChoice::Negrisk;
+        run_detailed_pipeline(&config, num_batches, export_json.as_deref(), show_charts, verbose, use_negrisk);
     } else {
         // Standard comparison run
         let results = run_simulation(&config, &solver_choice, milp_timeout, num_batches, verbose);
@@ -440,6 +442,7 @@ fn run_detailed_pipeline(
     export_json: Option<&str>,
     show_charts: bool,
     verbose: bool,
+    use_negrisk: bool,
 ) {
     for batch in 0..num_batches {
         let config = ScenarioConfig {
@@ -472,7 +475,12 @@ fn run_detailed_pipeline(
 
         // Run pipeline and get detailed results
         // Use full() which includes ArbitrageDetector for bundle matching
-        let pipeline = Pipeline::full();
+        // Or use with_negrisk() for negrisk arbitrage instead of price projection
+        let pipeline = if use_negrisk {
+            Pipeline::with_negrisk()
+        } else {
+            Pipeline::full()
+        };
         let result = pipeline.solve(&problem);
 
         if verbose {
@@ -482,12 +490,20 @@ fn run_detailed_pipeline(
             // Print sample market details
             print_market_details(&problem, &result, &sample_markets);
 
+            // Add arbitrage orders to problem for stats and verification
+            let mut problem_with_arb = problem.clone();
+            if let Some(ref negrisk) = result.negrisk {
+                for order in &negrisk.arbitrage_orders {
+                    problem_with_arb.orders.push(order.clone());
+                }
+            }
+
             // Print fill statistics
-            let fill_stats = FillStats::compute(&problem, &result, &order_stats);
+            let fill_stats = FillStats::compute(&problem_with_arb, &result, &order_stats);
             print_fill_stats(&fill_stats, &order_stats, problem.markets.len());
 
             // Verify the result
-            let verification = verify(&problem, &result.result);
+            let verification = verify(&problem_with_arb, &result.result);
             print_verification_result(&verification);
         }
 
@@ -653,6 +669,33 @@ fn print_pipeline_steps(result: &PipelineResult, problem: &Problem) {
             }
         } else {
             println!("     └─ no violations (prices already consistent)");
+        }
+    }
+
+    // Phase 2b: Negrisk Arbitrage (alternative to price projection)
+    if let Some(ref negrisk) = result.negrisk {
+        println!(
+            "  2. Negrisk Arbitrage  {:>7.3}s",
+            result.phase_times.negrisk_secs
+        );
+        if negrisk.opportunities_found > 0 {
+            println!(
+                "     └─ {} opportunities, {} shares, ${:.2} welfare",
+                negrisk.opportunities_found,
+                negrisk.total_shares,
+                negrisk.total_welfare as f64 / 1e9
+            );
+            for fill in &negrisk.fills {
+                println!(
+                    "        {}: {} shares @ ${:.4} profit/share = ${:.2}",
+                    fill.group_name,
+                    fill.shares,
+                    fill.profit_per_share as f64 / 1e9,
+                    fill.welfare as f64 / 1e9
+                );
+            }
+        } else {
+            println!("     └─ no arbitrage opportunities found");
         }
     }
 
@@ -853,10 +896,8 @@ fn print_fill_stats(stats: &FillStats, order_stats: &OrderStats, num_markets: us
 
     // Market activity
     println!();
-    println!(
-        "  Total welfare: {}",
-        format_welfare(stats.user_welfare + stats.mm_welfare)
-    );
+    let total_welfare = stats.user_welfare + stats.mm_welfare;
+    println!("  Total welfare: {}", format_welfare(total_welfare));
     println!(
         "  Total volume: {}",
         format_qty(stats.user_volume + stats.mm_volume)
@@ -970,6 +1011,7 @@ enum SolverChoice {
     Greedy,
     Milp,
     Pipeline,
+    Negrisk,
     All,
 }
 
@@ -978,6 +1020,7 @@ fn parse_solver_choice(args: &[String]) -> SolverChoice {
         Some("greedy") => SolverChoice::Greedy,
         Some("milp") => SolverChoice::Milp,
         Some("pipeline") => SolverChoice::Pipeline,
+        Some("negrisk") => SolverChoice::Negrisk,
         Some("all") => SolverChoice::All,
         _ => SolverChoice::Pipeline, // Default to pipeline
     }
@@ -1011,6 +1054,7 @@ fn create_solvers(choice: &SolverChoice, milp_timeout: Option<f64>) -> Vec<Box<d
             }
         }
         SolverChoice::Pipeline => vec![Box::new(Pipeline::current())],
+        SolverChoice::Negrisk => vec![Box::new(Pipeline::with_negrisk())],
         SolverChoice::All => {
             let milp: Box<dyn Solver> = if let Some(timeout) = milp_timeout {
                 Box::new(MilpSolver::with_timeout(timeout))
