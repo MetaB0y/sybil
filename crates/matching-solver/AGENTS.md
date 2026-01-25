@@ -12,7 +12,7 @@ that maximize welfare while respecting constraints.
 The solver operates in phases via the `Pipeline`:
 
 1. **Price Discovery** (`LocalSolver`): Find clearing prices per market
-2. **Price Projection** (`PriceProjector`): Ensure cross-market consistency
+2. **Negrisk Arbitrage** (`NegriskSolver`): Exploit price inconsistencies
 3. **MM Allocation** (`MmAllocator`): Respect market maker budget constraints
 4. **Arbitrage Detection** (`ArbitrageDetector`): Find remaining opportunities
 
@@ -22,9 +22,9 @@ The solver operates in phases via the `Pipeline`:
 Per-market price discovery. Finds where supply/demand curves cross.
 This IS the FBA clearing logic for single markets.
 
-### PriceProjector (`price_projector.rs`)
-Ensures marginal consistency across markets when bundles exist.
-Projects raw prices onto constraint-feasible set.
+### NegriskSolver (`specialized/negrisk.rs`)
+Detects and exploits arbitrage when prices for mutually exclusive outcomes
+don't sum to exactly $1. Creates welfare-adding fills instead of adjusting prices.
 
 ### MmAllocator (`mm_allocator.rs`)
 Handles market maker budget constraints. Uses Lagrangian relaxation
@@ -41,14 +41,14 @@ Used as fallback or for comparison.
 
 ### Pipeline (`pipeline.rs`)
 Configurable pipeline combining the above components.
-Use `Pipeline::consistent()` for the recommended configuration.
+Use `Pipeline::with_negrisk()` for the recommended configuration.
 
 ## Usage
 
 ```rust
 use matching_solver::Pipeline;
 
-let pipeline = Pipeline::consistent();
+let pipeline = Pipeline::with_negrisk();
 let result = pipeline.solve(&problem);
 ```
 

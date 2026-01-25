@@ -16,12 +16,12 @@ The pipeline uses a **multi-phase architecture** where each solver handles speci
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
 │  ┌──────────────┐    ┌──────────────────┐    ┌─────────────────┐        │
-│  │ LocalSolver  │───▶│ PriceProjector   │───▶│  MmAllocator    │        │
+│  │ LocalSolver  │───▶│ NegriskSolver    │───▶│  MmAllocator    │        │
 │  │ (Phase 1)    │    │ (Phase 2)        │    │  (Phase 3)      │        │
 │  └──────────────┘    └──────────────────┘    └─────────────────┘        │
 │         │                    │                       │                   │
 │         ▼                    ▼                       ▼                   │
-│  Per-market prices    Consistent prices      Budget-feasible fills      │
+│  Per-market prices    Arbitrage fills        Budget-feasible fills      │
 │                                                                          │
 │  ┌──────────────────────────────────────────────────────────────┐       │
 │  │              Partial Solvers (Parallel)                       │       │
@@ -68,28 +68,30 @@ This is welfare maximization—the total surplus captured by traders.
 
 ---
 
-### Phase 2: PriceProjector (Cross-Market Consistency)
+### Phase 2: NegriskSolver (Arbitrage Exploitation)
 
-**File**: `crates/matching-solver/src/price_projector.rs`
+**File**: `crates/matching-solver/src/specialized/negrisk.rs`
 
-**Constraints**:
-- **Marginal consistency**: P(base_outcome) = Σ P(joint_outcomes)
-  - Example: If market M has "Rain" and joint market M×N has "Rain AND Cancel", then P(Rain) = P(Rain∧Cancel) + P(Rain∧¬Cancel)
-- **Market group constraints**: Sum of prices in mutually exclusive outcomes = $1.00
+**Purpose**: When prices for mutually exclusive outcomes don't sum to exactly $1, there's an arbitrage opportunity. Instead of artificially adjusting prices (which destroys welfare), we create arbitrage fills that exploit the mispricing.
 
-**Optimization Target**:
-```
-minimize ||p_raw - p||²
-subject to consistency constraints
-```
-This is a small QP (~1000-6000 variables) over prices only.
+**Two Cases**:
+- **Negrisk** (sum < $1): Buy all outcomes for less than $1, guaranteed $1 payout
+- **Posrisk** (sum > $1): Sell all outcomes for more than $1, only pay $1 to winner
 
-**Why This Solver Second**:
-- Raw prices from LocalSolver may violate cross-market constraints
-- Must fix consistency **before** allocating MM budgets (which depend on prices)
-- Projection is cheap (small QP) and preserves prices as much as possible
+**Example**:
+If an election has three candidates with YES prices:
+- Trump: 40¢, Biden: 35¢, Other: 15¢ → Total: 90¢
 
-**Output**: Adjusted prices satisfying all consistency constraints
+An arbitrageur can buy one share of each for 90¢, with guaranteed $1 payout.
+This is a 10¢ risk-free profit per share, which **adds welfare**.
+
+**Why This Approach**:
+- Previous approach (PriceProjector) adjusted prices, which could invalidate orders and **destroy welfare**
+- Negrisk creates real fills that pass verification
+- Models what actually happens in a market (arbitrageurs exploit inconsistencies)
+- Welfare is correctly attributed to the arbitrage fills
+
+**Output**: Arbitrage orders and fills with positive welfare contribution
 
 ---
 
@@ -190,15 +192,15 @@ The pipeline order follows **dependency resolution**:
 
 ```
 1. LocalSolver    →  Need prices before anything else
-2. PriceProjector →  Need consistent prices for MM capital calculation
+2. NegriskSolver  →  Exploit price inconsistencies with welfare-adding fills
 3. MmAllocator    →  Need MM allocation before final fills
 4. Partial Solvers → Explore alternatives with all constraints known
 5. Combiner       →  Select best non-conflicting fills
 ```
 
 **Key insight**: Each phase handles constraints that depend on previous phase outputs:
-- PriceProjector needs raw prices
-- MmAllocator needs consistent prices
+- NegriskSolver needs raw prices to detect arbitrage
+- MmAllocator needs stable prices for capital calculation
 - ArbitrageDetector needs to know remaining liquidity
 
 **Fixed-Point Iteration**: The pipeline can iterate until convergence:
@@ -216,7 +218,7 @@ This handles cases where MM allocation affects prices.
 | Solver | Objective | Complexity | Guarantee |
 |--------|-----------|------------|-----------|
 | LocalSolver | max welfare | O(n log n) | Optimal per-market |
-| PriceProjector | min price change | O(n²) QP | Optimal projection |
+| NegriskSolver | max arbitrage welfare | O(groups × markets) | Adds all exploitable arb |
 | MmAllocator | max welfare/budget | O(n log n) | Greedy approx |
 | GreedySolver | max welfare | O(n log n) | Heuristic |
 | MilpSolver | max welfare | Exponential | Optimal (with timeout) |
@@ -303,9 +305,8 @@ ScenarioConfig {
 
 ```rust
 Pipeline::current()       // LocalSolver → MmAllocator (fast)
-Pipeline::consistent()    // + PriceProjector (handles bundles)
 Pipeline::iterative()     // + Fixed-point iteration
-Pipeline::full()          // All components
+Pipeline::with_negrisk()  // + NegriskSolver for arbitrage (recommended)
 Pipeline::full_platform() // + MWIS combination
 ```
 
@@ -336,7 +337,7 @@ impl PartialSolver for MySolver {
 ```rust
 Pipeline::builder()
     .price_discoverer(LocalSolver::new())
-    .price_projector(PriceProjectorImpl::new())
+    .negrisk_solver(NegriskSolver::new())
     .allocator(MmAllocator::new())
     .partial_solver(GreedySolver::new())
     .partial_solver(MyCustomSolver::new())
@@ -359,7 +360,7 @@ Pipeline::builder()
 
 **API Entry Point**:
 ```rust
-let pipeline = Pipeline::full();
+let pipeline = Pipeline::with_negrisk();
 let result = pipeline.solve(&problem);
 // result.fills, result.prices, result.total_welfare
 ```
@@ -370,9 +371,9 @@ let result = pipeline.solve(&problem);
 
 | Component | File | Lines |
 |-----------|------|-------|
-| Pipeline orchestration | `matching-solver/src/pipeline.rs` | 1037 |
+| Pipeline orchestration | `matching-solver/src/pipeline.rs` | 1000+ |
 | Per-market clearing | `matching-solver/src/local_solver.rs` | 600+ |
-| Cross-market consistency | `matching-solver/src/price_projector.rs` | 400+ |
+| Negrisk arbitrage | `matching-solver/src/specialized/negrisk.rs` | 450+ |
 | Budget allocation | `matching-solver/src/mm_allocator.rs` | 400+ |
 | Greedy solver | `matching-solver/src/greedy.rs` | 150+ |
 | MILP solver | `matching-solver/src/milp.rs` | 400+ |
@@ -381,7 +382,7 @@ let result = pipeline.solve(&problem);
 | MWIS algorithms | `matching-solver/src/combiner/mwis.rs` | 250+ |
 | Result validation | `matching-solver/src/verifier.rs` | 400+ |
 | Scenario generation | `matching-scenarios/src/scenario.rs` | 643 |
-| CLI simulation | `matching-sim/src/main.rs` | 1130 |
+| CLI simulation | `matching-sim/src/main.rs` | 1100+ |
 
 ---
 

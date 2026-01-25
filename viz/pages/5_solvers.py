@@ -215,10 +215,10 @@ def main():
     phase_times = data.phase_times
     if phase_times:
         times_data = {
-            "Phase": ["Price Discovery", "Price Projection", "Allocation", "Partial Solving", "Combining"],
+            "Phase": ["Price Discovery", "Negrisk Arbitrage", "Allocation", "Partial Solving", "Combining"],
             "Time (s)": [
                 phase_times.get("price_discovery_secs", 0),
-                phase_times.get("price_projection_secs", 0),
+                phase_times.get("negrisk_secs", 0),
                 phase_times.get("allocation_secs", 0),
                 phase_times.get("partial_solving_secs", 0),
                 phase_times.get("combining_secs", 0),

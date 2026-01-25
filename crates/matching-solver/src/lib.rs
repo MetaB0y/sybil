@@ -4,7 +4,7 @@
 //!
 //! The solver operates in phases:
 //! 1. **Price Discovery** (`LocalSolver`): Find clearing prices per market
-//! 2. **Price Projection** (`PriceProjector`): Ensure cross-market consistency
+//! 2. **Negrisk Arbitrage** (`NegriskSolver`): Exploit price inconsistencies
 //! 3. **MM Allocation** (`MmAllocator`): Respect market maker budget constraints
 //! 4. **Arbitrage Detection** (`ArbitrageDetector`): Find remaining opportunities
 //!
@@ -13,7 +13,7 @@
 //! ```ignore
 //! use matching_solver::Pipeline;
 //!
-//! let pipeline = Pipeline::consistent();
+//! let pipeline = Pipeline::with_negrisk();
 //! let result = pipeline.solve(&problem);
 //! ```
 
@@ -24,7 +24,6 @@ pub mod greedy;
 pub mod local_solver;
 pub mod mm_allocator;
 pub mod pipeline;
-pub mod price_projector;
 pub(crate) mod specialized;
 pub mod traits;
 pub mod verifier;
@@ -47,13 +46,7 @@ pub use mm_allocator::{AllocationResult as MmAllocationResult, MmAllocation, MmA
 // Experimentation platform traits
 pub use traits::{
     matching_result_to_partial, AllocationResult, OrderAllocator, PartialSolution, PartialSolver,
-    PriceDiscoverer, PriceDiscoveryResult, PriceProjectionResult, PriceProjector,
-};
-
-// Price projector implementation
-pub use price_projector::{
-    recompute_fills, JointOutcome, MarginalViolation, PriceProjector as PriceProjectorImpl,
-    ProjectionResult, ProjectorConfig,
+    PriceDiscoverer, PriceDiscoveryResult,
 };
 
 // Pipeline system

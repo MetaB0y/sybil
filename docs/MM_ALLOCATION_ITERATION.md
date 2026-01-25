@@ -69,10 +69,10 @@ When MM budget is generous:
 
 ## Related: Negrisk Arbitrage
 
-The negrisk arbitrage phase (replacing PriceProjection) may help here:
+The negrisk arbitrage phase helps here:
 - If prices are inconsistent across related markets, arbitrage fills are created
-- This could help stabilize prices even with MM filtering
+- This helps stabilize prices even with MM filtering
 
 ## Status
 
-Deferred - implementing negrisk arbitrage first, then revisit this issue.
+Negrisk arbitrage is now implemented. This issue may be revisited if needed.

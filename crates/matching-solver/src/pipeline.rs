@@ -2,14 +2,14 @@
 //!
 //! The pipeline provides a flexible way to combine solver components:
 //! - Price discovery (LocalSolver)
-//! - Price projection (PriceProjector)
+//! - Negrisk arbitrage (NegriskSolver) - exploits price inconsistencies
 //! - Order allocation (MmAllocator)
 //! - Arbitrage detection (ArbitrageDetector)
 //!
 //! # Example
 //!
 //! ```ignore
-//! let pipeline = Pipeline::consistent();
+//! let pipeline = Pipeline::with_negrisk();
 //! let result = pipeline.solve(&problem);
 //! ```
 
@@ -25,11 +25,10 @@ use crate::combiner::{
 use crate::greedy::GreedySolver;
 use crate::local_solver::LocalSolver;
 use crate::mm_allocator::MmAllocator;
-use crate::price_projector::PriceProjector as PriceProjectorImpl;
 use crate::specialized::{ArbitrageDetector, NegriskSolver};
 use crate::traits::{
     AllocationResult, OrderAllocator, PartialSolution, PartialSolver, PriceDiscoverer,
-    PriceDiscoveryResult, PriceProjectionResult, PriceProjector,
+    PriceDiscoveryResult,
 };
 use crate::{MatchingResult, Solver};
 
@@ -58,10 +57,7 @@ pub struct PipelineConfig {
     /// Time budget for MILP solver (if included).
     pub milp_timeout_secs: f64,
 
-    /// Whether to use price projection for cross-market consistency.
-    pub use_price_projection: bool,
-
-    /// Whether to use negrisk arbitrage (replaces price projection).
+    /// Whether to use negrisk arbitrage for price inconsistencies.
     pub use_negrisk_arbitrage: bool,
 }
 
@@ -73,7 +69,6 @@ impl Default for PipelineConfig {
             convergence_threshold: 0.01,
             combine_with_mwis: false,
             milp_timeout_secs: 1.0,
-            use_price_projection: false,
             use_negrisk_arbitrage: false,
         }
     }
@@ -91,9 +86,6 @@ pub struct PipelineResult {
 
     /// Price discovery result (if applicable).
     pub price_discovery: Option<PriceDiscoveryResult>,
-
-    /// Price projection result (if applicable).
-    pub price_projection: Option<PriceProjectionResult>,
 
     /// Negrisk arbitrage result (if applicable).
     pub negrisk: Option<crate::specialized::NegriskResult>,
@@ -129,7 +121,6 @@ pub struct PipelineResult {
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PipelineTimings {
     pub price_discovery_secs: f64,
-    pub price_projection_secs: f64,
     pub negrisk_secs: f64,
     pub allocation_secs: f64,
     pub partial_solving_secs: f64,
@@ -165,7 +156,6 @@ impl PipelineResult {
         Self {
             result: MatchingResult::new(liquidity),
             price_discovery: None,
-            price_projection: None,
             negrisk: None,
             allocation: None,
             contributions: Vec::new(),
@@ -191,9 +181,6 @@ pub struct Pipeline {
 
     /// Price discovery component (optional).
     price_discoverer: Option<Box<dyn PriceDiscoverer>>,
-
-    /// Price projector for cross-market consistency (optional).
-    price_projector: Option<Box<dyn PriceProjector>>,
 
     /// Negrisk arbitrage solver (optional).
     negrisk_solver: Option<NegriskSolver>,
@@ -259,20 +246,6 @@ impl Pipeline {
             .build()
     }
 
-    /// Create a consistent pipeline with price projection.
-    ///
-    /// Uses LocalSolver for price discovery, PriceProjector for cross-market
-    /// consistency, and MmAllocator for allocation.
-    pub fn consistent() -> Self {
-        Self::builder()
-            .name("Consistent")
-            .price_discoverer(LocalSolver::new())
-            .price_projector(PriceProjectorImpl::new())
-            .allocator(MmAllocator::new())
-            .use_price_projection(true)
-            .build()
-    }
-
     /// Create a pipeline with negrisk arbitrage.
     ///
     /// Uses negrisk arbitrage instead of price projection to handle
@@ -287,29 +260,6 @@ impl Pipeline {
             .negrisk_solver(NegriskSolver::new())
             .use_fixed_point(true)
             .max_iterations(5)
-            .build()
-    }
-
-    /// Create a full pipeline with all components (sequential, no MWIS).
-    ///
-    /// Runs solvers in sequence:
-    /// 1. LocalSolver for price discovery on single-market orders
-    /// 2. PriceProjector for multi-outcome consistency
-    /// 3. MmAllocator for MM budget constraints
-    /// 4. ArbitrageDetector for bundle matching
-    ///
-    /// Each phase consumes liquidity, subsequent phases work on remaining.
-    pub fn full() -> Self {
-        Self::builder()
-            .name("Full (iterative)")
-            .price_discoverer(LocalSolver::new())
-            .price_projector(PriceProjectorImpl::new())
-            .allocator(MmAllocator::new())
-            .partial_solver(ArbitrageDetector::new())
-            .use_price_projection(true)
-            .use_fixed_point(true)
-            .max_iterations(5)
-            .combine_with_mwis(false) // Sequential, not MWIS
             .build()
     }
 
@@ -331,7 +281,7 @@ impl Pipeline {
     ///
     /// Runs phases in order, each consuming liquidity:
     /// 1. Price Discovery (LocalSolver) - fills single-market orders
-    /// 2. Price Projection - adjusts prices for consistency
+    /// 2. Negrisk Arbitrage - exploits price inconsistencies
     /// 3. MM Allocation - activates MM orders within budget
     /// 4. Partial Solvers (ArbitrageDetector) - fills bundles
     /// Repeats until convergence or max iterations.
@@ -453,53 +403,7 @@ impl Pipeline {
                 ));
             }
 
-            // Phase 2: Price Projection
-            let projection_result = if let (Some(ref projector), Some(ref prices)) =
-                (&self.price_projector, &price_result)
-            {
-                if self.config.use_price_projection {
-                    let proj_start = Instant::now();
-                    let proj_result = projector.project(&prices.prices, &iter_problem);
-                    timings.price_projection_secs += proj_start.elapsed().as_secs_f64();
-                    Some(proj_result)
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            // Capture after price projection - with cumulative fills if stopped here
-            // In sequential mode, recompute_fills() is NOT called, so fills are same as PriceDiscovery
-            #[cfg(feature = "viz")]
-            {
-                let pd_fills = price_result.as_ref().map(|p| p.total_fills).unwrap_or(0);
-                let pd_welfare = price_result.as_ref().map(|p| p.total_welfare).unwrap_or(0);
-                // Cumulative same as PriceDiscovery (projection doesn't modify fills in sequential mode)
-                let cumulative_fills = result.result.fills.len() + pd_fills;
-                let cumulative_welfare = result.result.total_welfare + pd_welfare;
-                let metadata = projection_result.as_ref().map(|p| {
-                    crate::viz::PhaseMetadata::PriceProjection {
-                        violations_fixed: p.violations_fixed,
-                        max_adjustment: p.max_adjustment as f64 / 1e9, // Convert to dollars
-                        iterations: p.iterations,
-                    }
-                });
-                phase_snapshots.push(crate::viz::PhaseSnapshot::capture_with_phase_data(
-                    crate::viz::PipelinePhase::PriceProjection,
-                    iterations,
-                    &remaining_liquidity,
-                    &market_names,
-                    cumulative_fills,
-                    cumulative_welfare,
-                    start.elapsed().as_secs_f64(),
-                    Some(0),  // No additional fills from projection phase
-                    Some(0),  // No additional welfare from projection phase
-                    metadata,
-                ));
-            }
-
-            // Phase 2b: Negrisk Arbitrage (alternative to price projection)
+            // Phase 2: Negrisk Arbitrage
             // Exploits price inconsistencies by creating arbitrage fills instead of adjusting prices
             let negrisk_result = if let (Some(ref solver), Some(ref prices)) =
                 (&self.negrisk_solver, &price_result)
@@ -816,7 +720,6 @@ impl Pipeline {
 
             // Store last iteration's metadata
             result.price_discovery = price_result;
-            result.price_projection = projection_result;
             result.allocation = allocation_result;
 
             // Calculate current totals
@@ -902,29 +805,7 @@ impl Pipeline {
             None
         };
 
-        // Phase 2: Price Projection
-        let projection_result = if let (Some(ref projector), Some(ref mut prices)) =
-            (&self.price_projector, &mut price_result)
-        {
-            if self.config.use_price_projection {
-                let proj_start = Instant::now();
-                let proj_result = projector.project(&prices.prices, problem);
-
-                if proj_result.success {
-                    // Recompute fills at projected prices (included in projection timing)
-                    crate::price_projector::recompute_fills(prices, &proj_result.prices, problem);
-                }
-                timings.price_projection_secs = proj_start.elapsed().as_secs_f64();
-
-                Some(proj_result)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        // Phase 3: Order Allocation
+        // Phase 2: Order Allocation
         let allocation_result =
             if let (Some(ref allocator), Some(ref prices)) = (&self.allocator, &price_result) {
                 let alloc_start = Instant::now();
@@ -1029,7 +910,6 @@ impl Pipeline {
         timings.combining_secs = combine_start.elapsed().as_secs_f64();
 
         result.price_discovery = price_result;
-        result.price_projection = projection_result;
         result.allocation = allocation_result;
         result.phase_times = timings;
         result.total_time_secs = start.elapsed().as_secs_f64();
@@ -1153,7 +1033,6 @@ impl Solver for Pipeline {
 pub struct PipelineBuilder {
     name: String,
     price_discoverer: Option<Box<dyn PriceDiscoverer>>,
-    price_projector: Option<Box<dyn PriceProjector>>,
     negrisk_solver: Option<NegriskSolver>,
     allocator: Option<Box<dyn OrderAllocator>>,
     partial_solvers: Vec<Box<dyn PartialSolver>>,
@@ -1166,7 +1045,6 @@ impl PipelineBuilder {
         Self {
             name: "Pipeline".to_string(),
             price_discoverer: None,
-            price_projector: None,
             negrisk_solver: None,
             allocator: None,
             partial_solvers: Vec::new(),
@@ -1183,12 +1061,6 @@ impl PipelineBuilder {
     /// Set the price discoverer.
     pub fn price_discoverer<P: PriceDiscoverer + 'static>(mut self, discoverer: P) -> Self {
         self.price_discoverer = Some(Box::new(discoverer));
-        self
-    }
-
-    /// Set the price projector for cross-market consistency.
-    pub fn price_projector<P: PriceProjector + 'static>(mut self, projector: P) -> Self {
-        self.price_projector = Some(Box::new(projector));
         self
     }
 
@@ -1234,12 +1106,6 @@ impl PipelineBuilder {
         self
     }
 
-    /// Set whether to use price projection for cross-market consistency.
-    pub fn use_price_projection(mut self, use_it: bool) -> Self {
-        self.config.use_price_projection = use_it;
-        self
-    }
-
     /// Set whether to use negrisk arbitrage.
     pub fn use_negrisk_arbitrage(mut self, use_it: bool) -> Self {
         self.config.use_negrisk_arbitrage = use_it;
@@ -1261,7 +1127,6 @@ impl PipelineBuilder {
         Pipeline {
             name: self.name,
             price_discoverer: self.price_discoverer,
-            price_projector: self.price_projector,
             negrisk_solver: self.negrisk_solver,
             allocator: self.allocator,
             partial_solvers: self.partial_solvers,
@@ -1368,69 +1233,12 @@ mod tests {
     }
 
     #[test]
-    fn test_pipeline_consistent() {
+    fn test_pipeline_with_negrisk() {
         let problem = create_test_problem();
-        let pipeline = Pipeline::consistent();
-        let result = pipeline.solve(&problem);
-
-        assert!(result.price_discovery.is_some());
-        if let Some(projection) = &result.price_projection {
-            assert!(projection.success);
-        }
-    }
-
-    #[test]
-    fn test_pipeline_full() {
-        let problem = create_test_problem();
-        let pipeline = Pipeline::full();
+        let pipeline = Pipeline::with_negrisk();
         let result = pipeline.solve(&problem);
 
         assert!(result.price_discovery.is_some());
         assert!(result.total_time_secs >= 0.0);
-    }
-
-    #[test]
-    fn test_pipeline_consistent_with_bundles() {
-        use matching_engine::bundle_yes;
-
-        let mut problem = Problem::new("cross_market");
-        let market_a = problem.markets.add_binary("market_a");
-        let market_b = problem.markets.add_binary("market_b");
-
-        problem.liquidity.add_ask(market_a, 0, 500_000_000, 1000);
-        problem.liquidity.add_ask(market_a, 1, 500_000_000, 1000);
-        problem.liquidity.add_ask(market_b, 0, 500_000_000, 1000);
-        problem.liquidity.add_ask(market_b, 1, 500_000_000, 1000);
-
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            1,
-            market_a,
-            600_000_000,
-            100,
-        ));
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            2,
-            market_b,
-            400_000_000,
-            100,
-        ));
-
-        problem.orders.push(bundle_yes(
-            &problem.markets,
-            3,
-            &[market_a, market_b],
-            300_000_000,
-            50,
-        ));
-
-        let pipeline = Pipeline::consistent();
-        let result = pipeline.solve(&problem);
-
-        assert!(result.price_discovery.is_some());
-        if let Some(projection) = &result.price_projection {
-            assert!(projection.success);
-        }
     }
 }

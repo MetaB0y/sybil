@@ -122,14 +122,14 @@ def main():
     timing_data = {
         "Phase": [
             "Price Discovery",
-            "Price Projection",
+            "Negrisk Arbitrage",
             "MM Allocation",
             "Bundle Matching",
             "Combining",
         ],
         "Time (s)": [
             phase_times.get("price_discovery_secs", 0),
-            phase_times.get("price_projection_secs", 0),
+            phase_times.get("negrisk_secs", 0),
             phase_times.get("allocation_secs", 0),
             phase_times.get("partial_solving_secs", 0),
             phase_times.get("combining_secs", 0),

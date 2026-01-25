@@ -479,7 +479,7 @@ fn run_detailed_pipeline(
         let pipeline = if use_negrisk {
             Pipeline::with_negrisk()
         } else {
-            Pipeline::full()
+            Pipeline::with_negrisk()
         };
         let result = pipeline.solve(&problem);
 
@@ -631,48 +631,7 @@ fn print_pipeline_steps(result: &PipelineResult, problem: &Problem) {
         );
     }
 
-    // Phase 2: Price Projection
-    if let Some(ref proj) = result.price_projection {
-        println!(
-            "  2. Price Projection   {:>7.3}s",
-            result.phase_times.price_projection_secs
-        );
-
-        if proj.violations_fixed > 0 {
-            println!(
-                "     └─ {} violations fixed, max_adj {}, {} iters",
-                proj.violations_fixed,
-                format_price(proj.max_adjustment),
-                proj.iterations
-            );
-
-            // Show group-level details
-            if !problem.market_groups.is_empty() {
-                println!("     Market group price sums (should be 100%):");
-                for group in problem.market_groups.iter().take(5) {
-                    let sum: u64 = group
-                        .markets
-                        .iter()
-                        .filter_map(|m| proj.prices.get(m))
-                        .filter_map(|p| p.first())
-                        .sum();
-                    let sum_pct = sum as f64 / 1e7;
-                    let status = if (sum_pct - 100.0).abs() < 0.1 { "✓" } else { "✗" };
-                    println!(
-                        "        {}: {:.1}% {}",
-                        group.name, sum_pct, status
-                    );
-                }
-                if problem.market_groups.len() > 5 {
-                    println!("        ... and {} more groups", problem.market_groups.len() - 5);
-                }
-            }
-        } else {
-            println!("     └─ no violations (prices already consistent)");
-        }
-    }
-
-    // Phase 2b: Negrisk Arbitrage (alternative to price projection)
+    // Phase 2: Negrisk Arbitrage
     if let Some(ref negrisk) = result.negrisk {
         println!(
             "  2. Negrisk Arbitrage  {:>7.3}s",
@@ -1065,7 +1024,7 @@ fn create_solvers(choice: &SolverChoice, milp_timeout: Option<f64>) -> Vec<Box<d
                 Box::new(GreedySolver::new()),
                 milp,
                 Box::new(Pipeline::current()),
-                Box::new(Pipeline::full()),
+                Box::new(Pipeline::with_negrisk()),
             ]
         }
     }

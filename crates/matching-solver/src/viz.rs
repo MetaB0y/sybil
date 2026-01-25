@@ -131,7 +131,7 @@ pub struct FinalSnapshot {
 #[derive(Clone, Debug, Serialize)]
 pub struct PipelineTimes {
     pub price_discovery_secs: f64,
-    pub price_projection_secs: f64,
+    pub negrisk_secs: f64,
     pub allocation_secs: f64,
     pub partial_solving_secs: f64,
     pub combining_secs: f64,
@@ -218,7 +218,6 @@ pub struct LiquiditySnapshot {
 pub enum PipelinePhase {
     Initial,
     PriceDiscovery,
-    PriceProjection,
     /// Negrisk arbitrage phase (exploits price < $1 for mutually exclusive outcomes)
     NegriskArbitrage,
     MmAllocation,
@@ -256,11 +255,6 @@ pub struct PhaseSnapshot {
 pub enum PhaseMetadata {
     PriceDiscovery {
         markets_priced: usize,
-    },
-    PriceProjection {
-        violations_fixed: usize,
-        max_adjustment: f64,
-        iterations: usize,
     },
     /// Negrisk arbitrage (exploits price inconsistencies)
     NegriskArbitrage {
@@ -636,7 +630,7 @@ impl VizSnapshot {
             final_result,
             phase_times: PipelineTimes {
                 price_discovery_secs: result.phase_times.price_discovery_secs,
-                price_projection_secs: result.phase_times.price_projection_secs,
+                negrisk_secs: result.phase_times.negrisk_secs,
                 allocation_secs: result.phase_times.allocation_secs,
                 partial_solving_secs: result.phase_times.partial_solving_secs,
                 combining_secs: result.phase_times.combining_secs,
@@ -793,7 +787,7 @@ mod tests {
             },
             phase_times: PipelineTimes {
                 price_discovery_secs: 0.1,
-                price_projection_secs: 0.05,
+                negrisk_secs: 0.05,
                 allocation_secs: 0.02,
                 partial_solving_secs: 0.03,
                 combining_secs: 0.01,
