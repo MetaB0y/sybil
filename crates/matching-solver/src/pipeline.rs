@@ -24,7 +24,6 @@ use crate::combiner::{
     CombineStats, SolutionCombiner, SolutionConfidence, SolverContribution, SolverSolution,
 };
 use crate::dual_master::{DualConfig, DualMaster};
-use crate::greedy::GreedySolver;
 use crate::local_solver::LocalSolver;
 use crate::mm_allocator::MmAllocator;
 use crate::specialized::{ArbitrageDetector, NegriskSolver};
@@ -229,7 +228,6 @@ impl Pipeline {
     pub fn full_platform() -> Self {
         Self::builder()
             .name("Full Platform")
-            .partial_solver(GreedySolver::new())
             .partial_solver(MilpSolver::with_timeout(1.0))
             .partial_solver(ArbitrageDetector::new())
             .combine_with_mwis(true)
@@ -241,7 +239,6 @@ impl Pipeline {
     pub fn full_platform() -> Self {
         Self::builder()
             .name("Full Platform")
-            .partial_solver(GreedySolver::new())
             .partial_solver(ArbitrageDetector::new())
             .combine_with_mwis(true)
             .build()
@@ -1450,8 +1447,7 @@ mod tests {
         let problem = create_test_problem();
 
         let pipeline = Pipeline::builder()
-            .partial_solver(GreedySolver::new())
-            .combine_with_mwis(true)
+            .price_discoverer(LocalSolver::new())
             .build();
 
         let result = pipeline.solve(&problem);

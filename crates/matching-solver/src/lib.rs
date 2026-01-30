@@ -21,7 +21,6 @@
 pub mod benchmark;
 pub(crate) mod combiner;
 pub mod dual_master;
-pub mod greedy;
 pub mod local_solver;
 pub mod mm_allocator;
 pub mod pipeline;
@@ -34,9 +33,6 @@ pub mod viz;
 pub mod milp;
 
 // === Public API ===
-
-// Core solvers
-pub use greedy::GreedySolver;
 
 // New architecture components
 pub use local_solver::{LocalSolver, MarketSolution};

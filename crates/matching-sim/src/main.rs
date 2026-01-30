@@ -24,8 +24,8 @@ use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Cell, Color
 use matching_engine::{MarketId, Order, Problem};
 use matching_scenarios::{generate_scenario, ScenarioConfig};
 use matching_solver::{
-    verify, GreedySolver, IterationStats, MilpSolver, Pipeline, PipelineResult, Solver,
-    VerificationResult, VizSnapshot,
+    verify, IterationStats, MilpSolver, Pipeline, PipelineResult, Solver, VerificationResult,
+    VizSnapshot,
 };
 
 fn main() {
@@ -104,7 +104,6 @@ fn print_help() {
     println!("                         pipeline (default)");
     println!("                         negrisk");
     println!("                         dual");
-    println!("                         greedy");
     println!("                         milp");
     println!("                         all (compare all)");
     println!("  --milp-timeout <S>   MILP time limit in seconds");
@@ -966,7 +965,6 @@ fn parse_scenario_config(args: &[String]) -> ScenarioConfig {
 
 #[derive(Clone, Debug, PartialEq)]
 enum SolverChoice {
-    Greedy,
     Milp,
     Pipeline,
     Negrisk,
@@ -976,7 +974,6 @@ enum SolverChoice {
 
 fn parse_solver_choice(args: &[String]) -> SolverChoice {
     match get_arg_value(args, "--solver").as_deref() {
-        Some("greedy") => SolverChoice::Greedy,
         Some("milp") => SolverChoice::Milp,
         Some("pipeline") => SolverChoice::Pipeline,
         Some("negrisk") => SolverChoice::Negrisk,
@@ -1005,7 +1002,6 @@ fn get_arg_value(args: &[String], flag: &str) -> Option<String> {
 
 fn create_solvers(choice: &SolverChoice, milp_timeout: Option<f64>) -> Vec<Box<dyn Solver>> {
     match choice {
-        SolverChoice::Greedy => vec![Box::new(GreedySolver::new())],
         SolverChoice::Milp => {
             if let Some(timeout) = milp_timeout {
                 vec![Box::new(MilpSolver::with_timeout(timeout))]
@@ -1023,7 +1019,6 @@ fn create_solvers(choice: &SolverChoice, milp_timeout: Option<f64>) -> Vec<Box<d
                 Box::new(MilpSolver::with_timeout(5.0))
             };
             vec![
-                Box::new(GreedySolver::new()),
                 milp,
                 Box::new(Pipeline::current()),
                 Box::new(Pipeline::with_negrisk()),
@@ -1189,22 +1184,14 @@ fn print_results(results: &[SolverResults], choice: &SolverChoice) {
     println!("{table}");
 
     if *choice == SolverChoice::All && results.len() >= 2 {
-        println!();
-        let greedy = results.iter().find(|r| r.name == "Greedy");
-        let pipeline = results
-            .iter()
-            .find(|r| r.name.contains("Pipeline") || r.name.contains("Current"));
-
-        if let (Some(g), Some(p)) = (greedy, pipeline) {
-            let improvement = if g.mean_welfare() > 0.0 {
-                (p.mean_welfare() - g.mean_welfare()) / g.mean_welfare() * 100.0
-            } else {
-                0.0
-            };
-            println!(
-                "Pipeline vs Greedy: {:+.1}% welfare improvement",
-                improvement
-            );
+        // Find best solver by welfare
+        if let Some(best) = results.iter().max_by(|a, b| {
+            a.mean_welfare()
+                .partial_cmp(&b.mean_welfare())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }) {
+            println!();
+            println!("Best solver: {} (${:.2}K welfare)", best.name, best.mean_welfare() / 1e9 / 1e3);
         }
     }
 }

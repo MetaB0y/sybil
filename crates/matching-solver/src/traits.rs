@@ -192,7 +192,7 @@ impl PartialSolution {
 ///
 /// # Implementors
 ///
-/// - `GreedySolver`: Fast O(n log n) heuristic
+/// - `ArbitrageDetector`: Bundle/spread matching
 /// - `MilpSolver`: Optimal (time-limited) MILP
 /// - Specialized solvers: Arbitrage, Bundle decomposition, etc.
 pub trait PartialSolver: Send + Sync {
