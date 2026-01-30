@@ -490,6 +490,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "matching-sequencer"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "comfy-table",
+ "matching-engine",
+ "matching-solver",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+]
+
+[[package]]
 name = "matching-sim"
 version = "0.1.0"
 dependencies = [

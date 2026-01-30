@@ -5,6 +5,7 @@ members = [
     "crates/matching-solver",
     "crates/matching-scenarios",
     "crates/matching-sim",
+    "crates/matching-sequencer",
 ]
 
 [workspace.dependencies]

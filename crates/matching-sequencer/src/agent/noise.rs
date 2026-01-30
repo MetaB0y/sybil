@@ -1,0 +1,92 @@
+use rand::Rng;
+
+use matching_engine::{outcome_buy, MarketSet, Nanos, NANOS_PER_DOLLAR};
+
+use crate::account::{Account, AccountId};
+use crate::agent::{Agent, AgentSubmission, MarketView};
+
+pub struct NoiseTrader {
+    name: String,
+    account_id: AccountId,
+    markets: MarketSet,
+    /// Probability of placing an order on any given market each batch
+    activity_rate: f64,
+    /// Max quantity per order
+    max_qty: u64,
+    /// Random noise range around the last price (in nanos)
+    price_noise: Nanos,
+    rng: Box<dyn rand::RngCore + Send>,
+}
+
+impl NoiseTrader {
+    pub fn new(
+        name: String,
+        account_id: AccountId,
+        markets: MarketSet,
+        activity_rate: f64,
+        max_qty: u64,
+        price_noise: Nanos,
+        rng: Box<dyn rand::RngCore + Send>,
+    ) -> Self {
+        Self {
+            name,
+            account_id,
+            markets,
+            activity_rate,
+            max_qty,
+            price_noise,
+            rng,
+        }
+    }
+}
+
+impl Agent for NoiseTrader {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn account_id(&self) -> AccountId {
+        self.account_id
+    }
+
+    fn submit_orders(&mut self, view: &MarketView, account: &Account) -> AgentSubmission {
+        let mut orders = Vec::new();
+        let mut temp_id = 0u64;
+
+        for &(market_id, _) in &view.markets {
+            if self.rng.gen::<f64>() > self.activity_rate {
+                continue;
+            }
+
+            // Don't place orders if we can't afford them
+            if account.balance <= 0 {
+                break;
+            }
+
+            // Random outcome: 0 = YES, 1 = NO
+            let outcome: u8 = self.rng.gen_range(0..2);
+
+            // Get last price or default to 0.50
+            let default_prices = vec![NANOS_PER_DOLLAR / 2, NANOS_PER_DOLLAR / 2];
+            let last_prices = view.last_prices.get(&market_id).unwrap_or(&default_prices);
+            let base_price = last_prices[outcome as usize];
+
+            // Add noise
+            let noise = self.rng.gen_range(0..=self.price_noise * 2) as i64
+                - self.price_noise as i64;
+            let price = (base_price as i64 + noise).clamp(
+                NANOS_PER_DOLLAR as i64 / 100,  // min 1 cent
+                NANOS_PER_DOLLAR as i64 * 99 / 100, // max 99 cents
+            ) as Nanos;
+
+            // Random quantity
+            let qty = self.rng.gen_range(1..=self.max_qty);
+
+            let order = outcome_buy(&self.markets, temp_id, market_id, outcome, price, qty);
+            orders.push(order);
+            temp_id += 1;
+        }
+
+        AgentSubmission::with_orders(orders)
+    }
+}

@@ -1,16 +1,15 @@
-//! Per-market clearing with multi-outcome normalization and unified liquidity.
+//! Per-market clearing with unified liquidity.
 //!
-//! # Multi-Outcome Market Clearing
+//! # Market Clearing
 //!
-//! In prediction markets with N mutually exclusive outcomes:
-//! - Prices must satisfy Σp_i = 1 (no-arbitrage / buying all outcomes = $1)
-//! - Liquidity is UNIFIED: market makers mint "complete sets" at $1
-//! - All trades for an outcome execute at the same clearing price (UCP)
+//! For each market, finds clearing prices by matching buy and sell orders.
+//! Each outcome is cleared independently. All trades for an outcome execute
+//! at the same clearing price (UCP).
 //!
 //! # Solvers
 //!
-//! - [`LocalSolver::solve_market`]: Heuristic with correct constraints
-//! - [`solve_market_lp`]: LP-based optimal solver with unified liquidity
+//! - [`LocalSolver::solve_market`]: Heuristic per-outcome clearing
+//! - [`solve_market_lp`]: LP-based solver with unified liquidity
 
 use std::collections::HashMap;
 
@@ -25,7 +24,7 @@ use matching_engine::{
 pub struct MarketSolution {
     /// Market ID this solution is for
     pub market_id: MarketId,
-    /// Clearing prices per outcome (normalized to sum to 1.0)
+    /// Clearing prices per outcome
     pub prices: Vec<Nanos>,
     /// Fills for orders in this market
     pub fills: Vec<Fill>,
@@ -87,53 +86,22 @@ impl MarketSolution {
     }
 }
 
-/// Configuration for the local solver.
-#[derive(Clone, Debug)]
-pub struct LocalSolverConfig {
-    /// Whether to enforce price normalization
-    pub normalize_prices: bool,
-    /// Maximum iterations for price discovery
-    pub max_iterations: usize,
-    /// Convergence threshold (in nanos)
-    pub convergence_threshold: Nanos,
-}
-
-impl Default for LocalSolverConfig {
-    fn default() -> Self {
-        Self {
-            normalize_prices: true,
-            max_iterations: 100,
-            convergence_threshold: 1_000, // 1 micro-dollar
-        }
-    }
-}
-
 /// Per-market clearing solver.
 ///
 /// Solves a single market by matching buy and sell orders at a clearing price.
-/// For multi-outcome markets, enforces that outcome prices sum to 1.0.
-pub struct LocalSolver {
-    config: LocalSolverConfig,
-}
+/// Each outcome is cleared independently.
+pub struct LocalSolver;
 
 impl LocalSolver {
-    /// Create a new local solver with default config.
+    /// Create a new local solver.
     pub fn new() -> Self {
-        Self {
-            config: LocalSolverConfig::default(),
-        }
-    }
-
-    /// Create a local solver with custom config.
-    pub fn with_config(config: LocalSolverConfig) -> Self {
-        Self { config }
+        Self
     }
 
     /// Solve a single market.
     ///
-    /// This finds clearing prices and fills for orders in the given market.
-    /// For multi-outcome markets, prices are normalized to sum to 1.0,
-    /// and fills are computed AT the normalized prices for economic consistency.
+    /// Finds clearing prices and fills for orders in the given market.
+    /// Each outcome is cleared independently.
     pub fn solve_market(
         &self,
         market_id: MarketId,
@@ -161,27 +129,21 @@ impl LocalSolver {
             raw_prices[outcome as usize] = price;
         }
 
-        // Step 2: Normalize prices to sum to NANOS_PER_DOLLAR
+        // Step 2: Compute fills at the clearing prices
         let mut solution = MarketSolution::empty(market_id, num_outcomes);
         solution.prices = raw_prices;
 
-        if self.config.normalize_prices && num_outcomes > 1 {
-            solution.normalize_prices();
-        }
-
-        // Step 3: Compute fills AT the normalized prices (economic consistency)
-        // Now respects liquidity constraints!
-        self.compute_fills_at_normalized_prices(&mut solution, &market_orders, liquidity);
+        self.compute_fills_at_prices(&mut solution, &market_orders, liquidity);
 
         solution
     }
 
-    /// Compute fills at the normalized clearing prices, respecting liquidity.
+    /// Compute fills at the clearing prices, respecting liquidity.
     /// This ensures:
     /// 1. Fill prices match the solution's clearing prices
     /// 2. Total fills don't exceed available liquidity
     /// 3. Orders are prioritized by welfare contribution (limit - clearing price)
-    fn compute_fills_at_normalized_prices(
+    fn compute_fills_at_prices(
         &self,
         solution: &mut MarketSolution,
         orders: &[&Order],
@@ -880,7 +842,6 @@ mod tests {
 
         assert_eq!(solution.market_id, market_id);
         assert_eq!(solution.prices.len(), 2); // Binary market
-        assert!(solution.is_normalized());
     }
 
     #[test]
@@ -907,7 +868,6 @@ mod tests {
         let solution = solver.solve_market(market, &problem.markets, &[], &book);
 
         assert_eq!(solution.prices.len(), 2);
-        assert!(solution.is_normalized());
         assert!(solution.fills.is_empty());
     }
 
@@ -950,20 +910,15 @@ mod tests {
         }
     }
 
-    /// Binary markets MUST have economically consistent prices.
-    /// YES + NO prices must sum to $1.
+    /// Binary markets: each outcome clears independently.
     #[test]
-    fn test_binary_market_economic_consistency() {
-        // In a binary market:
-        // - YES price + NO price = $1
-
+    fn test_binary_market_independent_clearing() {
         let mut problem = Problem::new("binary");
         let market = problem.markets.add_binary("binary");
 
         // Add liquidity at different prices for each outcome
         problem.liquidity.add_ask(market, 0, 400_000_000, 1000); // YES at $0.40
         problem.liquidity.add_ask(market, 1, 650_000_000, 1000); // NO at $0.65
-                                                                 // Sum = $1.05, but should be $1.00
 
         // Add buy orders for each outcome
         problem.orders.push(matching_engine::outcome_buy(
@@ -987,15 +942,11 @@ mod tests {
         let book = problem.liquidity.books.get(&(market, 0)).cloned().unwrap();
         let solution = solver.solve_market(market, &problem.markets, &problem.orders, &book);
 
-        // Check normalization
-        assert!(solution.is_normalized(), "Prices should sum to $1");
-
-        // Check economic consistency
-        let total_cost: u64 = solution.prices.iter().sum();
-        assert_eq!(
-            total_cost, NANOS_PER_DOLLAR,
-            "Buying all outcomes should cost exactly $1"
-        );
+        // Each outcome should have a clearing price
+        assert_eq!(solution.prices.len(), 2);
+        assert!(solution.prices[0] > 0, "YES price should be positive");
+        // YES buy at 0.50 should fill against ask at 0.40
+        assert!(!solution.fills.is_empty(), "Should have fills");
     }
 
     // =========================================================================
