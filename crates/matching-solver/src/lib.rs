@@ -38,9 +38,7 @@ pub mod milp;
 pub use greedy::GreedySolver;
 
 // New architecture components
-pub use local_solver::{
-    solve_all_markets_parallel, solve_market_lp, LocalSolver, MarketSolution,
-};
+pub use local_solver::{LocalSolver, MarketSolution};
 pub use mm_allocator::{AllocationResult as MmAllocationResult, MmAllocation, MmAllocator};
 
 // Experimentation platform traits

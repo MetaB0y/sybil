@@ -66,10 +66,22 @@ impl Agent for NoiseTrader {
             // Random outcome: 0 = YES, 1 = NO
             let outcome: u8 = self.rng.gen_range(0..2);
 
-            // Get last price or default to 0.50
-            let default_prices = vec![NANOS_PER_DOLLAR / 2, NANOS_PER_DOLLAR / 2];
-            let last_prices = view.last_prices.get(&market_id).unwrap_or(&default_prices);
-            let base_price = last_prices[outcome as usize];
+            // Use public beliefs as base price when available, otherwise last price
+            let base_price = if let Some(ref beliefs) = view.public_beliefs {
+                if let Some(&belief) = beliefs.get(&market_id) {
+                    // Convert belief probability to nanos price for the chosen outcome
+                    let p = if outcome == 0 { belief } else { 1.0 - belief };
+                    (p * NANOS_PER_DOLLAR as f64) as Nanos
+                } else {
+                    let default_prices = vec![NANOS_PER_DOLLAR / 2, NANOS_PER_DOLLAR / 2];
+                    let last_prices = view.last_prices.get(&market_id).unwrap_or(&default_prices);
+                    last_prices[outcome as usize]
+                }
+            } else {
+                let default_prices = vec![NANOS_PER_DOLLAR / 2, NANOS_PER_DOLLAR / 2];
+                let last_prices = view.last_prices.get(&market_id).unwrap_or(&default_prices);
+                last_prices[outcome as usize]
+            };
 
             // Add noise
             let noise = self.rng.gen_range(0..=self.price_noise * 2) as i64

@@ -14,6 +14,8 @@ pub struct MarketView {
     pub markets: Vec<(MarketId, String)>,
     pub last_prices: HashMap<MarketId, Vec<Nanos>>,
     pub market_groups: Vec<MarketGroup>,
+    /// Public probability beliefs (from news). None = use last_prices as base.
+    pub public_beliefs: Option<HashMap<MarketId, f64>>,
 }
 
 /// What an agent submits each batch.

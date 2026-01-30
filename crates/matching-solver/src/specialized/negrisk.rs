@@ -24,9 +24,7 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 
-use matching_engine::{Fill, MarketGroup, MarketId, Nanos, Order, Problem, NANOS_PER_DOLLAR};
-
-use crate::traits::PriceDiscoveryResult;
+use matching_engine::{Fill, MarketGroup, MarketId, Nanos, Order, NANOS_PER_DOLLAR};
 
 /// Configuration for the negrisk arbitrage solver.
 #[derive(Clone, Debug)]
@@ -116,25 +114,25 @@ impl NegriskSolver {
     ///
     /// # Arguments
     /// * `prices` - Current market prices from price discovery
-    /// * `problem` - The problem with market groups
+    /// * `market_groups` - Groups of mutually exclusive markets
     /// * `next_order_id` - Mutable counter for generating unique order IDs
-    ///
-    /// # Returns
-    /// Arbitrage fills, orders, and welfare added
+    /// * `available_volume` - Per-market volume available for arbitrage (e.g.
+    ///   fill volumes from price discovery, or liquidity book depth)
     pub fn find_arbitrage(
         &self,
         prices: &HashMap<MarketId, Vec<Nanos>>,
-        problem: &Problem,
+        market_groups: &[MarketGroup],
         next_order_id: &mut u64,
+        available_volume: &HashMap<MarketId, u64>,
     ) -> NegriskResult {
         let mut fills = Vec::new();
         let mut arbitrage_orders = Vec::new();
         let mut total_welfare: i64 = 0;
         let mut total_shares: u64 = 0;
 
-        for group in &problem.market_groups {
+        for group in market_groups {
             if let Some((arb_fill, orders)) =
-                self.check_group_with_orders(group, prices, problem, next_order_id)
+                self.check_group(group, prices, next_order_id, available_volume)
             {
                 total_welfare += arb_fill.welfare;
                 total_shares += arb_fill.shares;
@@ -153,12 +151,12 @@ impl NegriskSolver {
     }
 
     /// Check a single market group for arbitrage opportunity and create orders.
-    fn check_group_with_orders(
+    fn check_group(
         &self,
         group: &MarketGroup,
         prices: &HashMap<MarketId, Vec<Nanos>>,
-        problem: &Problem,
         next_order_id: &mut u64,
+        available_volume: &HashMap<MarketId, u64>,
     ) -> Option<(NegriskFill, Vec<Order>)> {
         if group.markets.len() < 2 {
             return None;
@@ -178,53 +176,31 @@ impl NegriskSolver {
         // Check for arbitrage opportunity
         let target = NANOS_PER_DOLLAR as u128;
 
-        // Two types of arbitrage:
-        // 1. Negrisk (sum < $1): Buy all outcomes for < $1, guaranteed $1 payout
-        // 2. Posrisk (sum > $1): Sell all outcomes for > $1, only pay $1
-
-        let (is_negrisk, profit_per_share) = if sum_yes < target {
-            // Negrisk: underpriced
-            (true, (target - sum_yes) as Nanos)
+        // Negrisk (sum < $1): Buy YES on all outcomes for < $1, guaranteed $1 payout
+        // Posrisk (sum > $1): Buy NO on all outcomes for < $1, guaranteed $1 payout
+        //
+        // Both are modeled as buy orders (welfare = limit - fill_price). For posrisk,
+        // buying NO increases NO demand → raises NO price → lowers YES price → sum drops.
+        let is_negrisk = sum_yes < target;
+        let profit_per_share = if is_negrisk {
+            (target - sum_yes) as Nanos
         } else if sum_yes > target {
-            // Posrisk: overpriced
-            (false, (sum_yes - target) as Nanos)
+            (sum_yes - target) as Nanos
         } else {
-            // Exactly $1, no arbitrage
             return None;
         };
 
         if profit_per_share < self.config.min_profit_threshold {
-            // Opportunity too small
             return None;
         }
 
-        // Determine how many shares we can arbitrage (limited by liquidity)
+        // Max shares = minimum available volume across all markets in the group
         let mut max_shares = u64::MAX;
-
-        for &(market_id, yes_price) in &market_yes_prices {
-            // Check liquidity available at this price
-            // For negrisk (buy all): need asks at or below clearing price
-            // For posrisk (sell all): need ANY bids (use min_price=0)
-            let outcome = 0; // YES outcome
-            if let Some(book) = problem.liquidity.books.get(&(market_id, outcome)) {
-                let available = if is_negrisk {
-                    // For negrisk, we need to BUY at the clearing price or better
-                    let (qty, _cost) = book.available_to_buy(yes_price);
-                    qty
-                } else {
-                    // For posrisk, we can sell at ANY price - just need bids
-                    // Use min_price=0 to get all available bids
-                    let (qty, _revenue) = book.available_to_sell(0);
-                    qty
-                };
-                max_shares = max_shares.min(available);
-            } else {
-                // No liquidity book, can't arbitrage
-                return None;
-            }
+        for &(market_id, _) in &market_yes_prices {
+            let &volume = available_volume.get(&market_id)?;
+            max_shares = max_shares.min(volume);
         }
 
-        // Apply config limit if set
         if let Some(limit) = self.config.max_shares_per_arb {
             max_shares = max_shares.min(limit);
         }
@@ -233,87 +209,74 @@ impl NegriskSolver {
             return None;
         }
 
-        // Create arbitrage orders and fills for each market
+        // Create arbitrage orders and fills for each market.
         //
-        // Key insight: The order model is buy-centric (welfare = limit - fill_price).
-        // To make verification work, we attribute ALL arbitrage profit to the FIRST order
-        // by giving it limit_price = fill_price + profit_per_share.
-        // Other orders have limit_price = fill_price (zero individual welfare).
+        // Welfare attribution: ALL profit goes to the FIRST order via its limit_price.
+        // Other orders have limit = fill_price (zero individual welfare).
         let mut orders = Vec::new();
         let mut market_fills = Vec::new();
-        let mut is_first = true;
 
         for &(market_id, yes_price) in &market_yes_prices {
             let order_id = *next_order_id;
             *next_order_id += 1;
 
+            let no_price = NANOS_PER_DOLLAR.saturating_sub(yes_price);
+
             let mut order = Order::new(order_id);
             order.markets[0] = market_id;
             order.num_markets = 1;
-            order.num_states = 2; // Binary market: NO (0) or YES (1)
+            order.num_states = 2;
 
-            // For both negrisk and posrisk, we model as buying YES
-            // (verification doesn't handle negative payoffs well for sells)
-            order.payoffs[0] = 0; // NO outcome
-            order.payoffs[1] = 1; // YES outcome
+            // Negrisk: buy YES (payoff when YES wins = state 0)
+            // Posrisk: buy NO (payoff when NO wins = state 1) — pushes YES prices down
+            let fill_price = if is_negrisk { yes_price } else { no_price };
 
-            // First order gets the full arbitrage profit in its limit
-            // Others get limit = fill_price (zero welfare)
-            if is_first {
-                order.limit_price = yes_price + profit_per_share;
-                is_first = false;
+            if is_negrisk {
+                order.payoffs[0] = 1; // YES state payoff
+                order.payoffs[1] = 0;
             } else {
-                order.limit_price = yes_price;
+                order.payoffs[0] = 0;
+                order.payoffs[1] = 1; // NO state payoff
             }
+
+            // Fair-share limit: scale current price proportionally so group sums to $1.
+            // This creates price pressure in unified clearing — arb orders are willing to
+            // pay up to the fair value, not just the current mispriced value.
+            let fair_yes = (yes_price as u128 * NANOS_PER_DOLLAR as u128 / sum_yes) as Nanos;
+            let fair_no = NANOS_PER_DOLLAR.saturating_sub(fair_yes);
+            order.limit_price = if is_negrisk { fair_yes } else { fair_no };
 
             order.min_fill = 1;
             order.max_fill = max_shares;
 
             orders.push(order);
-
-            // Create corresponding fill
             market_fills.push(Fill {
                 order_id,
-                fill_price: yes_price,
+                fill_price,
                 fill_qty: max_shares,
             });
         }
 
-        let total_cost = sum_yes as Nanos;
+        let total_cost = if is_negrisk {
+            sum_yes as Nanos
+        } else {
+            // Posrisk: cost is sum of NO prices
+            (group.markets.len() as u64 * NANOS_PER_DOLLAR - sum_yes as u64) as Nanos
+        };
         let welfare = (profit_per_share as i64) * (max_shares as i64);
 
-        let fill = NegriskFill {
-            group_name: group.name.clone(),
-            market_fills,
-            total_cost,
-            payout: NANOS_PER_DOLLAR,
-            profit_per_share,
-            shares: max_shares,
-            welfare,
-        };
-
-        Some((fill, orders))
-    }
-
-    /// Apply arbitrage fills to a price discovery result.
-    ///
-    /// This consumes liquidity and adds the arbitrage welfare.
-    pub fn apply_arbitrage(
-        &self,
-        arb_result: &NegriskResult,
-        price_result: &mut PriceDiscoveryResult,
-    ) {
-        // Add welfare from arbitrage
-        price_result.total_welfare += arb_result.total_welfare;
-
-        // Note: In a full implementation, we would also:
-        // 1. Consume liquidity from the order books
-        // 2. Add the arbitrage fills to the result
-        // 3. Track the arbitrage orders separately
-        //
-        // For now, we just add the welfare contribution.
-        // The fills are synthetic (not real user orders) so they don't
-        // go into the standard fills list.
+        Some((
+            NegriskFill {
+                group_name: group.name.clone(),
+                market_fills,
+                total_cost,
+                payout: NANOS_PER_DOLLAR,
+                profit_per_share,
+                shares: max_shares,
+                welfare,
+            },
+            orders,
+        ))
     }
 }
 
@@ -326,45 +289,36 @@ impl Default for NegriskSolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matching_engine::Problem;
+    use matching_engine::{MarketSet, Problem};
 
-    fn create_election_problem() -> Problem {
+    /// Set up 3-candidate election: markets, groups, and 1000 shares available per market.
+    fn create_election_setup() -> (MarketSet, Vec<MarketGroup>, HashMap<MarketId, u64>) {
         let mut problem = Problem::new("election");
-
-        // Three candidates - mutually exclusive
         let trump = problem.markets.add_binary("Trump wins");
         let biden = problem.markets.add_binary("Biden wins");
         let other = problem.markets.add_binary("Other wins");
 
-        // Add liquidity at various prices
-        // Asks (for negrisk - buying all outcomes)
-        problem.liquidity.add_ask(trump, 0, 400_000_000, 1000); // 40 cents
-        problem.liquidity.add_ask(biden, 0, 350_000_000, 1000); // 35 cents
-        problem.liquidity.add_ask(other, 0, 150_000_000, 1000); // 15 cents
-
-        // Bids (for posrisk - selling all outcomes)
-        problem.liquidity.add_bid(trump, 0, 500_000_000, 1000); // 50 cents
-        problem.liquidity.add_bid(biden, 0, 400_000_000, 1000); // 40 cents
-        problem.liquidity.add_bid(other, 0, 200_000_000, 1000); // 20 cents
-
-        // Create market group
-        let group = MarketGroup::new("2024 Election")
+        let groups = vec![MarketGroup::new("2024 Election")
             .with_market(trump)
             .with_market(biden)
-            .with_market(other);
-        problem.add_market_group(group);
+            .with_market(other)];
 
-        problem
+        let mut volumes = HashMap::new();
+        volumes.insert(trump, 1000);
+        volumes.insert(biden, 1000);
+        volumes.insert(other, 1000);
+
+        (problem.markets, groups, volumes)
     }
 
     #[test]
     fn test_negrisk_detection() {
-        let problem = create_election_problem();
+        let (markets, groups, volumes) = create_election_setup();
         let solver = NegriskSolver::new();
 
         // Prices that sum to 90 cents (10 cent arbitrage)
         let mut prices = HashMap::new();
-        for market in problem.markets.iter() {
+        for market in markets.iter() {
             match market.name.as_str() {
                 "Trump wins" => prices.insert(market.id, vec![400_000_000, 600_000_000]),
                 "Biden wins" => prices.insert(market.id, vec![350_000_000, 650_000_000]),
@@ -374,13 +328,11 @@ mod tests {
         }
 
         let mut next_order_id = 1_000_000_000u64;
-        let result = solver.find_arbitrage(&prices, &problem, &mut next_order_id);
+        let result = solver.find_arbitrage(&prices, &groups, &mut next_order_id, &volumes);
 
-        // Should find one arbitrage opportunity
         assert_eq!(result.opportunities_found, 1);
         assert!(result.total_welfare > 0);
 
-        // Check the fill details
         let fill = &result.fills[0];
         assert_eq!(fill.group_name, "2024 Election");
         assert_eq!(fill.profit_per_share, 100_000_000); // 10 cents
@@ -389,12 +341,11 @@ mod tests {
 
     #[test]
     fn test_no_arbitrage_when_prices_sum_to_one() {
-        let problem = create_election_problem();
+        let (markets, groups, volumes) = create_election_setup();
         let solver = NegriskSolver::new();
 
-        // Prices that sum to exactly $1
         let mut prices = HashMap::new();
-        for market in problem.markets.iter() {
+        for market in markets.iter() {
             match market.name.as_str() {
                 "Trump wins" => prices.insert(market.id, vec![400_000_000, 600_000_000]),
                 "Biden wins" => prices.insert(market.id, vec![400_000_000, 600_000_000]),
@@ -404,21 +355,19 @@ mod tests {
         }
 
         let mut next_order_id = 1_000_000_000u64;
-        let result = solver.find_arbitrage(&prices, &problem, &mut next_order_id);
+        let result = solver.find_arbitrage(&prices, &groups, &mut next_order_id, &volumes);
 
-        // No arbitrage when prices sum to $1
         assert_eq!(result.opportunities_found, 0);
         assert_eq!(result.total_welfare, 0);
     }
 
     #[test]
     fn test_posrisk_arbitrage_when_prices_exceed_one() {
-        let problem = create_election_problem();
+        let (markets, groups, volumes) = create_election_setup();
         let solver = NegriskSolver::new();
 
-        // Prices that sum to $1.10 (overpriced by 10 cents)
         let mut prices = HashMap::new();
-        for market in problem.markets.iter() {
+        for market in markets.iter() {
             match market.name.as_str() {
                 "Trump wins" => prices.insert(market.id, vec![500_000_000, 500_000_000]),
                 "Biden wins" => prices.insert(market.id, vec![400_000_000, 600_000_000]),
@@ -428,29 +377,24 @@ mod tests {
         }
 
         let mut next_order_id = 1_000_000_000u64;
-        let result = solver.find_arbitrage(&prices, &problem, &mut next_order_id);
+        let result = solver.find_arbitrage(&prices, &groups, &mut next_order_id, &volumes);
 
-        // Posrisk arbitrage: sell all outcomes for $1.10, only pay $1 winner
         assert_eq!(result.opportunities_found, 1);
         assert!(result.total_welfare > 0);
-
-        let fill = &result.fills[0];
-        assert_eq!(fill.profit_per_share, 100_000_000); // 10 cents
+        assert_eq!(result.fills[0].profit_per_share, 100_000_000);
     }
 
     #[test]
     fn test_min_profit_threshold() {
-        let problem = create_election_problem();
-
-        // High threshold - won't trigger on small opportunities
+        let (markets, groups, volumes) = create_election_setup();
         let solver = NegriskSolver::with_config(NegriskConfig {
             min_profit_threshold: 200_000_000, // 20 cents
             max_shares_per_arb: None,
         });
 
-        // Prices that sum to 95 cents (only 5 cent arbitrage)
+        // Prices sum to 95 cents (only 5 cent arbitrage — below 20 cent threshold)
         let mut prices = HashMap::new();
-        for market in problem.markets.iter() {
+        for market in markets.iter() {
             match market.name.as_str() {
                 "Trump wins" => prices.insert(market.id, vec![450_000_000, 550_000_000]),
                 "Biden wins" => prices.insert(market.id, vec![350_000_000, 650_000_000]),
@@ -460,9 +404,8 @@ mod tests {
         }
 
         let mut next_order_id = 1_000_000_000u64;
-        let result = solver.find_arbitrage(&prices, &problem, &mut next_order_id);
+        let result = solver.find_arbitrage(&prices, &groups, &mut next_order_id, &volumes);
 
-        // Should not find opportunity (5 cents < 20 cent threshold)
         assert_eq!(result.opportunities_found, 0);
     }
 }

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use matching_engine::{MarketGroup, MarketId, MarketSet, MmId, Nanos};
 use rand::SeedableRng;
@@ -9,8 +9,10 @@ use crate::agent::informed::InformedTrader;
 use crate::agent::market_maker::MarketMakerAgent;
 use crate::agent::noise::NoiseTrader;
 use crate::agent::{Agent, MarketView};
-use crate::config::SimulationConfig;
 use crate::metrics::{self, AgentPnL, BatchMetrics};
+use crate::scenario::{
+    EventMarketMap, NewsItem, NewsVisibility, PublicBeliefs, Scenario,
+};
 use crate::sequencer::{BatchSequencer, OrderSubmission};
 use crate::settlement;
 
@@ -23,6 +25,13 @@ pub struct SimulationRunner {
     true_probs: HashMap<MarketId, f64>,
     price_history: Vec<HashMap<MarketId, Vec<Nanos>>>,
     batch_metrics: Vec<BatchMetrics>,
+    event_map: EventMarketMap,
+    public_beliefs: PublicBeliefs,
+    pending_news: Vec<NewsItem>,
+    /// (batch, event_index, winner_index)
+    pending_resolutions: Vec<(usize, usize, usize)>,
+    resolved_markets: HashSet<MarketId>,
+    scenario: Scenario,
 }
 
 /// Results of the full simulation.
@@ -33,92 +42,124 @@ pub struct SimulationResult {
     pub final_price_error: f64,
     pub true_probs: HashMap<MarketId, f64>,
     pub price_history: Vec<HashMap<MarketId, Vec<Nanos>>>,
+    pub scenario: Scenario,
+    pub event_map: EventMarketMap,
 }
 
 impl SimulationRunner {
-    /// Create a simulation from configuration.
-    pub fn from_config(config: &SimulationConfig) -> Self {
-        let mut rng = ChaCha8Rng::seed_from_u64(config.seed);
+    /// Create a simulation from a scenario definition.
+    pub fn from_scenario(scenario: &Scenario) -> Self {
+        use rand::Rng;
+
+        let mut rng = ChaCha8Rng::seed_from_u64(scenario.seed);
         let mut accounts = AccountStore::new();
-
-        // Create markets
         let mut markets = MarketSet::new();
-        let mut market_ids = Vec::new();
-        for i in 0..config.num_markets {
-            let id = markets.add_binary(format!("Market {}", i));
-            market_ids.push(id);
+        let mut market_groups = Vec::new();
+        let mut true_probs = HashMap::new();
+        let mut event_map = EventMarketMap::new();
+
+        // Create markets for each event
+        for (event_idx, event) in scenario.events.iter().enumerate() {
+            let n = event.outcomes.len();
+            let mut event_market_ids = Vec::new();
+
+            if n == 2 {
+                // Binary event: 1 market, no MarketGroup
+                let name = format!("{}: {}?", event.name, event.outcomes[0].name);
+                let mid = markets.add_binary(name);
+                event_market_ids.push(mid);
+                // true_prob for YES (outcome 0)
+                true_probs.insert(mid, event.true_probs[0]);
+                event_map.market_to_event.insert(mid, (event_idx, 0));
+            } else {
+                // N-outcome event: N binary markets + 1 MarketGroup
+                let mut group = MarketGroup::new(&event.name);
+                for (outcome_idx, outcome) in event.outcomes.iter().enumerate() {
+                    let name = format!("{}: {}", event.name, outcome.name);
+                    let mid = markets.add_binary(name);
+                    event_market_ids.push(mid);
+                    true_probs.insert(mid, event.true_probs[outcome_idx]);
+                    event_map
+                        .market_to_event
+                        .insert(mid, (event_idx, outcome_idx));
+                    group.add_market(mid);
+                }
+                market_groups.push(group);
+            }
+
+            event_map.event_markets.push(event_market_ids);
         }
 
-        // Generate true probabilities
-        let mut true_probs = HashMap::new();
-        for &mid in &market_ids {
-            use rand::Rng;
-            let p: f64 = rng.gen_range(0.1..0.9);
-            true_probs.insert(mid, p);
+        // Initialize public beliefs at uniform priors
+        let public_beliefs = PublicBeliefs::from_events(&scenario.events, &event_map);
+
+        // Build pending resolutions from events
+        let mut pending_resolutions: Vec<(usize, usize, usize)> = Vec::new();
+        for (event_idx, event) in scenario.events.iter().enumerate() {
+            if let Some(batch) = event.resolve_at_batch {
+                pending_resolutions.push((batch, event_idx, event.winner));
+            }
         }
+        pending_resolutions.sort_by_key(|&(b, _, _)| b);
 
         let mut agents: Vec<Box<dyn Agent>> = Vec::new();
         let mut agent_info: Vec<(String, AccountId, i64)> = Vec::new();
 
-        // Create informed traders
-        for i in 0..config.num_informed {
-            let account_id = accounts.create_account(config.initial_balance);
+        // Create informed traders (they know the true probabilities)
+        for i in 0..scenario.num_informed {
+            let account_id = accounts.create_account(scenario.initial_balance);
             let name = format!("Informed-{}", i);
             let agent = InformedTrader::new(
                 name.clone(),
                 account_id,
                 markets.clone(),
                 true_probs.clone(),
-                config.informed_min_edge,
-                config.informed_max_qty,
-                config.informed_max_position,
+                scenario.informed_min_edge,
+                scenario.informed_max_qty,
+                scenario.informed_max_position,
             );
-            agent_info.push((name, account_id, config.initial_balance));
+            agent_info.push((name, account_id, scenario.initial_balance));
             agents.push(Box::new(agent));
         }
 
         // Create noise traders
-        for i in 0..config.num_noise {
-            let account_id = accounts.create_account(config.initial_balance);
+        for i in 0..scenario.num_noise {
+            let account_id = accounts.create_account(scenario.initial_balance);
             let name = format!("Noise-{}", i);
-            use rand::Rng;
             let seed: u64 = rng.gen();
             let agent_rng = Box::new(ChaCha8Rng::seed_from_u64(seed));
             let agent = NoiseTrader::new(
                 name.clone(),
                 account_id,
                 markets.clone(),
-                config.noise_activity_rate,
-                config.noise_max_qty,
-                config.noise_price_noise,
+                scenario.noise_activity_rate,
+                scenario.noise_max_qty,
+                scenario.noise_price_noise,
                 agent_rng,
             );
-            agent_info.push((name, account_id, config.initial_balance));
+            agent_info.push((name, account_id, scenario.initial_balance));
             agents.push(Box::new(agent));
         }
 
         // Create market makers
-        for i in 0..config.num_mm {
-            let account_id = accounts.create_account(config.initial_balance);
+        for i in 0..scenario.num_mm {
+            let account_id = accounts.create_account(scenario.initial_balance);
             let name = format!("MM-{}", i);
             let agent = MarketMakerAgent::new(
                 name.clone(),
                 account_id,
                 MmId::new(i as u64),
                 markets.clone(),
-                config.mm_half_spread,
-                config.mm_qty_per_side,
-                config.mm_budget,
-                config.mm_skew_factor,
+                scenario.mm_half_spread,
+                scenario.mm_qty_per_side,
+                scenario.mm_budget,
+                scenario.mm_skew_factor,
             );
-            agent_info.push((name, account_id, config.initial_balance));
+            agent_info.push((name, account_id, scenario.initial_balance));
             agents.push(Box::new(agent));
         }
 
         let sequencer = BatchSequencer::new(accounts);
-
-        // No market groups in basic binary market setup
-        let market_groups = Vec::new();
 
         Self {
             sequencer,
@@ -129,12 +170,85 @@ impl SimulationRunner {
             true_probs,
             price_history: Vec::new(),
             batch_metrics: Vec::new(),
+            event_map,
+            public_beliefs,
+            pending_news: scenario.news.clone(),
+            pending_resolutions,
+            resolved_markets: HashSet::new(),
+            scenario: scenario.clone(),
         }
+    }
+
+    /// Dispatch news items that arrive at the given batch.
+    /// Public news updates PublicBeliefs; InformedOnly news does not.
+    fn dispatch_news(&mut self, batch: usize) {
+        let event_map = self.event_map.clone();
+
+        let arriving: Vec<NewsItem> = self
+            .pending_news
+            .iter()
+            .filter(|n| n.batch == batch)
+            .cloned()
+            .collect();
+
+        for news in &arriving {
+            if news.visibility == NewsVisibility::Public {
+                self.public_beliefs.update(news.event_index, &news.updated_probs, &event_map);
+            }
+            // InformedOnly news: no public belief update.
+            // Informed traders already know true probs, so the information
+            // asymmetry is implicitly maintained.
+        }
+
+        self.pending_news.retain(|n| n.batch != batch);
+    }
+
+    /// Resolve events scheduled at the given batch.
+    /// Settles positions and removes resolved markets from active trading.
+    fn resolve_events_at(&mut self, batch: usize) {
+        let event_map = self.event_map.clone();
+
+        let to_resolve: Vec<(usize, usize)> = self
+            .pending_resolutions
+            .iter()
+            .filter(|&&(b, _, _)| b == batch)
+            .map(|&(_, event_idx, winner)| (event_idx, winner))
+            .collect();
+
+        for (event_idx, winner_outcome) in &to_resolve {
+            let market_ids = &event_map.event_markets[*event_idx];
+
+            for (outcome_idx, &mid) in market_ids.iter().enumerate() {
+                // The winning outcome's market resolves YES; others resolve NO
+                let winning = if market_ids.len() == 1 {
+                    // Binary event: winner 0 = YES wins, winner 1 = NO wins
+                    if *winner_outcome == 0 { 0u8 } else { 1u8 }
+                } else {
+                    // Multi-outcome: the market matching the winner resolves YES
+                    if outcome_idx == *winner_outcome { 0u8 } else { 1u8 }
+                };
+                settlement::resolve_market(&mut self.sequencer.accounts, mid, winning);
+                self.resolved_markets.insert(mid);
+            }
+
+            // Remove from public beliefs
+            self.public_beliefs.remove_markets(market_ids);
+
+            // Remove market group if this was a multi-outcome event
+            let market_set: HashSet<MarketId> = market_ids.iter().copied().collect();
+            self.market_groups
+                .retain(|g| !g.markets.iter().any(|m| market_set.contains(m)));
+        }
+
+        self.pending_resolutions.retain(|&(b, _, _)| b != batch);
     }
 
     /// Run the full simulation.
     pub fn run(&mut self, num_batches: usize) -> SimulationResult {
         for batch in 0..num_batches {
+            // Dispatch news and resolve events before running the batch
+            self.dispatch_news(batch);
+            self.resolve_events_at(batch);
             self.run_single_batch(batch);
         }
 
@@ -151,17 +265,41 @@ impl SimulationRunner {
             &last_prices,
         );
 
+        // Only compute price error for non-resolved markets
+        let active_true_probs: HashMap<MarketId, f64> = self
+            .true_probs
+            .iter()
+            .filter(|(mid, _)| !self.resolved_markets.contains(mid))
+            .map(|(&mid, &p)| (mid, p))
+            .collect();
+
         let final_price_error = if let Some(last) = self.price_history.last() {
-            metrics::price_convergence(last, &self.true_probs)
+            metrics::price_convergence(last, &active_true_probs)
         } else {
             1.0
         };
 
-        // Resolve markets: use true probability to determine winners
-        // (probability > 0.5 means YES wins, for simulation purposes)
-        for (&market_id, &prob) in &self.true_probs {
-            let winning_outcome = if prob >= 0.5 { 0u8 } else { 1u8 };
-            settlement::resolve_market(&mut self.sequencer.accounts, market_id, winning_outcome);
+        // Resolve remaining markets at end of simulation
+        let scenario = self.scenario.clone();
+        let event_map = self.event_map.clone();
+        for (event_idx, event) in scenario.events.iter().enumerate() {
+            let market_ids = &event_map.event_markets[event_idx];
+            // Skip already-resolved events
+            if market_ids.iter().any(|m| self.resolved_markets.contains(m)) {
+                continue;
+            }
+            for (outcome_idx, &mid) in market_ids.iter().enumerate() {
+                let winning = if market_ids.len() == 1 {
+                    if event.winner == 0 { 0u8 } else { 1u8 }
+                } else {
+                    if outcome_idx == event.winner { 0u8 } else { 1u8 }
+                };
+                settlement::resolve_market(
+                    &mut self.sequencer.accounts,
+                    mid,
+                    winning,
+                );
+            }
         }
 
         let resolved_pnl = metrics::compute_resolved_pnl(
@@ -176,26 +314,32 @@ impl SimulationRunner {
             final_price_error,
             true_probs: self.true_probs.clone(),
             price_history: self.price_history.clone(),
+            scenario: self.scenario.clone(),
+            event_map: self.event_map.clone(),
         }
     }
 
     fn run_single_batch(&mut self, batch: usize) {
-        // Build market view
+        // Build market view, filtering out resolved markets
         let last_prices = self
             .price_history
             .last()
             .cloned()
             .unwrap_or_default();
 
+        let active_markets: Vec<_> = self
+            .markets
+            .iter()
+            .filter(|m| !self.resolved_markets.contains(&m.id))
+            .map(|m| (m.id, m.name.clone()))
+            .collect();
+
         let market_view = MarketView {
             batch,
-            markets: self
-                .markets
-                .iter()
-                .map(|m| (m.id, m.name.clone()))
-                .collect(),
+            markets: active_markets,
             last_prices,
             market_groups: self.market_groups.clone(),
+            public_beliefs: Some(self.public_beliefs.as_map().clone()),
         };
 
         // Collect submissions from all agents

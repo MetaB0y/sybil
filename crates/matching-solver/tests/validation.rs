@@ -243,7 +243,18 @@ fn validate_fills_respect_liquidity() {
             .map(|o| o.max_fill)
             .sum();
 
-        let total_supply = book_liquidity + seller_supply;
+        // In unified binary clearing, NO buyers (payoff[1] > 0) also provide YES
+        // supply by acting as YES sellers at ($1 - their NO limit).
+        let no_buyer_supply: u64 = problem
+            .orders
+            .iter()
+            .filter(|o| {
+                o.num_markets == 1 && o.markets[0] == market.id && o.payoffs[1] > 0
+            })
+            .map(|o| o.max_fill)
+            .sum();
+
+        let total_supply = book_liquidity + seller_supply + no_buyer_supply;
 
         let solution = solver.solve_market(market.id, &problem.markets, &problem.orders, &book);
 

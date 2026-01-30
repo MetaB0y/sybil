@@ -309,6 +309,14 @@ impl Pipeline {
         // Accumulate arbitrage orders across all iterations
         let mut all_arbitrage_orders: Vec<matching_engine::Order> = Vec::new();
 
+        // Arb orders from previous negrisk iteration to include in next price discovery.
+        // This pushes clearing prices toward sum=$1 through market forces.
+        let mut pending_arb_orders: Vec<matching_engine::Order> = Vec::new();
+
+        // All arb orders for order lookup (owned, since they're not in problem.orders)
+        let mut arb_order_map: std::collections::HashMap<u64, matching_engine::Order> =
+            std::collections::HashMap::new();
+
         // Track next arbitrage order ID across iterations
         let max_existing_id = problem.orders.iter().map(|o| o.id).max().unwrap_or(0);
         let mut next_arb_order_id = max_existing_id + 1_000_000_000;
@@ -362,12 +370,20 @@ impl Pipeline {
             let mut iter_bundle_fills = 0usize;
 
             // Filter out already-filled orders (MM orders stay included for price discovery)
-            let remaining_orders: Vec<_> = problem
+            let mut remaining_orders: Vec<_> = problem
                 .orders
                 .iter()
                 .filter(|o| !filled_order_ids.contains(&o.id))
                 .cloned()
                 .collect();
+
+            // Include negrisk arb orders from previous iteration in price discovery.
+            // These orders add demand that pushes clearing prices toward sum=$1.
+            for arb_order in pending_arb_orders.drain(..) {
+                if !filled_order_ids.contains(&arb_order.id) {
+                    remaining_orders.push(arb_order);
+                }
+            }
 
             // Create problem view with remaining liquidity and unfilled orders
             let iter_problem = Problem {
@@ -418,7 +434,17 @@ impl Pipeline {
             {
                 if self.config.use_negrisk_arbitrage {
                     let negrisk_start = Instant::now();
-                    let arb_result = solver.find_arbitrage(&prices.prices, &iter_problem, &mut next_arb_order_id);
+                    let fill_volumes: HashMap<MarketId, u64> = prices
+                        .market_solutions
+                        .iter()
+                        .map(|(mid, sol)| (*mid, sol.fills.iter().map(|f| f.fill_qty).sum()))
+                        .collect();
+                    let arb_result = solver.find_arbitrage(
+                        &prices.prices,
+                        &iter_problem.market_groups,
+                        &mut next_arb_order_id,
+                        &fill_volumes,
+                    );
                     timings.negrisk_secs += negrisk_start.elapsed().as_secs_f64();
                     Some(arb_result)
                 } else {
@@ -434,26 +460,12 @@ impl Pipeline {
             #[cfg(feature = "viz")]
             let mut negrisk_welfare_added: i64 = 0;
             if let Some(ref negrisk) = negrisk_result {
-                // Add arbitrage fills and orders to the result
-                for arb_fill in &negrisk.fills {
-                    for fill in &arb_fill.market_fills {
-                        // Find the corresponding arbitrage order
-                        if let Some(order) = negrisk
-                            .arbitrage_orders
-                            .iter()
-                            .find(|o| o.id == fill.order_id)
-                        {
-                            result.result.add_fill(fill.clone(), order);
-                            #[cfg(feature = "viz")]
-                            {
-                                negrisk_fills_added += 1;
-                            }
-                        }
-                    }
-                    #[cfg(feature = "viz")]
-                    {
-                        negrisk_welfare_added += arb_fill.welfare;
-                    }
+                // Store arb orders for next iteration's price discovery.
+                // They'll participate in LocalSolver clearing, creating demand
+                // that pushes prices toward sum=$1 through market forces.
+                pending_arb_orders = negrisk.arbitrage_orders.clone();
+                for order in &negrisk.arbitrage_orders {
+                    arb_order_map.insert(order.id, order.clone());
                 }
 
                 // Accumulate arbitrage orders from this iteration
@@ -548,12 +560,11 @@ impl Pipeline {
                     })
                     .collect();
 
-                // Pass full order list (including MM orders) to allocator
-                // iter_problem.orders excludes MM orders for price discovery, but allocator needs them
+                // Pass iter_problem orders (includes arb orders) so allocator activates them
                 let alloc_result = allocator.allocate(
                     &adjusted_constraints,
                     &prices.prices,
-                    &problem.orders,
+                    &iter_problem.orders,
                     &current_fills,
                 );
                 timings.allocation_secs += alloc_start.elapsed().as_secs_f64();
@@ -568,9 +579,11 @@ impl Pipeline {
                     self.build_result_from_prices(&iter_problem, pd_result, &allocation_result);
 
                 // Consume liquidity for filled orders and track filled order IDs
-                // Use order_map for O(1) lookups instead of O(n) .find()
+                // Look up in both original orders and arb orders
                 for fill in &iter_result.fills {
-                    if let Some(&order) = order_map.get(&fill.order_id) {
+                    let order_ref = order_map.get(&fill.order_id).copied()
+                        .or_else(|| arb_order_map.get(&fill.order_id));
+                    if let Some(order) = order_ref {
                         self.consume_order_liquidity(order, fill.fill_qty, &mut remaining_liquidity);
                         filled_order_ids.insert(fill.order_id);
                         iter_price_discovery_fills += 1;
@@ -584,7 +597,9 @@ impl Pipeline {
 
                 // Merge into result
                 for fill in iter_result.fills {
-                    if let Some(&order) = order_map.get(&fill.order_id) {
+                    let order_ref = order_map.get(&fill.order_id).copied()
+                        .or_else(|| arb_order_map.get(&fill.order_id));
+                    if let Some(order) = order_ref {
                         result.result.add_fill(fill, order);
                     }
                 }
@@ -736,9 +751,21 @@ impl Pipeline {
             }
         }
 
-        // Note: negrisk welfare comes from actual fills, not added separately
-        // Currently negrisk just identifies opportunities but doesn't create fills
-        // TODO: Create actual fills for arbitrage opportunities
+        // Add synthetic fills for last iteration's arb orders.
+        // These didn't get a subsequent price discovery iteration to produce proper fills.
+        if !pending_arb_orders.is_empty() {
+            if let Some(ref negrisk) = result.negrisk {
+                for arb_fill in &negrisk.fills {
+                    for fill in &arb_fill.market_fills {
+                        if let Some(order) = arb_order_map.get(&fill.order_id) {
+                            if !filled_order_ids.contains(&fill.order_id) {
+                                result.result.add_fill(fill.clone(), order);
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // Capture final phase snapshot
         #[cfg(feature = "viz")]

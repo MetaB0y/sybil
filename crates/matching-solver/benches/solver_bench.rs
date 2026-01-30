@@ -247,35 +247,6 @@ fn run_full_pipeline(problem: &Problem) {
     let _ = allocator.allocate(&problem.mm_constraints, &prices, &problem.orders, &fills);
 }
 
-fn run_full_pipeline_lp(problem: &Problem) {
-    use matching_solver::solve_market_lp;
-
-    // Phase 1: Per-market clearing (LP-based with unified liquidity)
-    let mut market_solutions: HashMap<_, _> = HashMap::new();
-
-    for market in problem.markets.iter() {
-        let book = problem
-            .liquidity
-            .books
-            .get(&(market.id, 0))
-            .cloned()
-            .unwrap_or_else(|| matching_engine::LiquidityBook::new(market.id, 0));
-        let solution = solve_market_lp(market.id, &problem.markets, &problem.orders, &book);
-        market_solutions.insert(market.id, solution);
-    }
-
-    // Phase 2: MM allocation
-    let mut prices = HashMap::new();
-    for (market_id, solution) in &market_solutions {
-        prices.insert(*market_id, solution.prices.clone());
-    }
-
-    let fills: HashMap<u64, (u64, u64)> = problem.orders.iter().map(|o| (o.id, (500_000_000u64, o.max_fill))).collect();
-
-    let allocator = MmAllocator::new();
-    let _ = allocator.allocate(&problem.mm_constraints, &prices, &problem.orders, &fills);
-}
-
 #[divan::bench]
 fn bench_full_pipeline_small() {
     // ~200-500 total orders
@@ -306,24 +277,6 @@ fn bench_full_pipeline_extreme() {
     let config = ScenarioConfig::extreme();
     let problem = generate_scenario(config);
     run_full_pipeline(&problem);
-}
-
-// ============================================================================
-// LP Pipeline Benchmarks (using solve_market_lp with unified liquidity)
-// ============================================================================
-
-#[divan::bench]
-fn bench_lp_pipeline_small() {
-    let config = ScenarioConfig::small();
-    let problem = generate_scenario(config);
-    run_full_pipeline_lp(&problem);
-}
-
-#[divan::bench]
-fn bench_lp_pipeline_medium() {
-    let config = ScenarioConfig::medium();
-    let problem = generate_scenario(config);
-    run_full_pipeline_lp(&problem);
 }
 
 // ============================================================================
