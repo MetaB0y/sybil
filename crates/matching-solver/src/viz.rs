@@ -901,6 +901,9 @@ mod tests {
                 fills_delta: 5,
                 price_discovery_fills: 4,
                 bundle_fills: 1,
+                fill_start_idx: 0,
+                fill_end_idx: 5,
+                market_prices: HashMap::new(),
             },
             IterationStats {
                 iteration: 2,
@@ -912,6 +915,9 @@ mod tests {
                 fills_delta: 3,
                 price_discovery_fills: 2,
                 bundle_fills: 1,
+                fill_start_idx: 5,
+                fill_end_idx: 8,
+                market_prices: HashMap::new(),
             },
         ];
 
