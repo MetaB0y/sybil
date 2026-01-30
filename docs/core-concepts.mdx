@@ -1,0 +1,161 @@
+---
+title: Core Concepts
+description: Key terminology and concepts in Sybil
+---
+
+# Core Concepts
+
+## Markets
+
+Sybil markets are **binary prediction markets**. Each market has two outcomes: **YES** and **NO**.
+
+<Info>
+YES + NO always equals \$1.00. If you own 1 YES share and 1 NO share, you can merge them into \$1.00.
+</Info>
+
+### Example
+
+**Market**: "Will Bitcoin exceed \$100k by Dec 31, 2025?"
+
+| Outcome | Price | Implied Probability |
+|---------|-------|---------------------|
+| YES | \$0.65 | 65% |
+| NO | \$0.35 | 35% |
+
+If Bitcoin exceeds \$100k, YES shares pay \$1.00 each. NO shares pay \$0.00.
+
+### Multi-Outcome Events
+
+Events with more than two outcomes (e.g., "Who wins the election?") are represented as **multiple binary markets**:
+
+- "Candidate A wins?" YES/NO
+- "Candidate B wins?" YES/NO
+- "Candidate C wins?" YES/NO
+
+The matching engine ensures prices stay consistent across related markets.
+
+## Orders
+
+### Limit Orders
+
+The primary order type. Specifies the maximum price you'll pay (for buys) or minimum price you'll accept (for sells).
+
+```
+Buy 100 YES shares at max $0.55
+```
+
+This order will fill at \$0.55 or better (lower).
+
+### Multi-Market Orders
+
+Every order is a [payoff vector](/trading/order-types#the-payoff-vector). Multi-market orders specify payoffs across combinations of outcomes, enabling conditional bets, hedges, and spreads. Execute atomically — all or nothing.
+
+```
+Payoff vector: [0, 0, 0, 1]  →  "A wins AND B wins"
+```
+
+The engine uses boolean algebra on payoff vectors to detect and resolve arbitrage automatically.
+
+### All-or-Nothing (AON)
+
+Orders that must fill completely or not at all. No partial fills.
+
+```
+Buy 1000 YES shares AON at max $0.55
+```
+
+### Conditional Orders
+
+Orders that only activate if another market's price meets a condition.
+
+```
+Buy YES on Market B if Market A price > $0.70
+```
+
+## Batch Auctions
+
+Instead of continuous trading, Sybil collects orders over a **batch interval** (e.g., 12 seconds) and processes them simultaneously.
+
+### Clearing Price
+
+The single price at which all trades in a batch execute. Determined by the matching engine to maximize welfare.
+
+| Order | Side | Limit | Fills? |
+|-------|------|-------|--------|
+| Alice | Buy | 70% | Yes — pays 60% |
+| Bob | Buy | 65% | Yes — pays 60% |
+| Carol | Sell | 50% | Yes — receives 60% |
+| Dave | Sell | 55% | Yes — receives 60% |
+| Eve | Buy | 58% | No — below clearing |
+| Frank | Sell | 62% | No — above clearing |
+
+**Clearing price: 60%.** All buyers with limits ≥ 60% and all sellers with limits ≤ 60% get filled — at exactly 60%.
+
+### Why Batch Auctions?
+
+| Continuous Trading | Batch Auctions |
+|--------------------|----------------|
+| Speed wins (bots advantage) | Everyone equal |
+| Front-running possible | No front-running |
+| Price manipulation easier | Fair price discovery |
+| Wider spreads (defensive) | Tighter spreads |
+
+## Flash Quoting (Market Makers)
+
+Flash Quoting lets market makers submit orders **far exceeding their balance** — typically ~20x. The matching engine's solver ensures the MM's balance never goes negative, making this safe without per-order collateral locking. Only possible in a batch auction.
+
+Access is via **auctioned slots** (monthly, sealed-bid, second-price). See [Flash Quoting](/trading/flash-quoting) for details.
+
+## Welfare
+
+**Welfare** = total surplus created by trades.
+
+| Trader | Side | Limit | Clearing | Welfare |
+|--------|------|-------|----------|---------|
+| Alice | Buy | \$0.60 | \$0.55 | +\$0.05/share |
+| Bob | Sell | \$0.50 | \$0.55 | +\$0.05/share |
+
+Alice was willing to pay \$0.60 but only paid \$0.55. Bob was willing to sell at \$0.50 but received \$0.55. Both captured surplus. Sybil's matching engine finds the set of fills that **maximizes total welfare** — mathematically optimal. See [Matching Engine](/technical/matching-engine) for the full pipeline.
+
+## Collateral (sUSDS)
+
+All positions are collateralized in **sUSDS** — Sky's yield-bearing stablecoin.
+
+### Benefits
+
+- **Yield while locked**: Your collateral earns ~4% APY
+- **Single token**: Simplifies accounting and risk
+- **No rebasing**: Balance changes via rate, not share count
+
+
+## ZK Proofs
+
+Every batch generates a **zero-knowledge proof** that verifies:
+
+<Check>Matching was computed correctly</Check>
+<Check>All trades satisfy limit price constraints</Check>
+<Check>Balances are conserved (no money created/destroyed)</Check>
+<Check>State transition is valid</Check>
+
+The proof reveals **nothing** about individual trades. Anyone can verify on-chain. See [ZK Proofs](/technical/zk-proofs) for the technology.
+
+## Validium
+
+Sybil is a **validium** — a Layer 2 that:
+
+- Keeps data **off-chain** (cheaper, more private)
+- Posts **proofs on-chain** (security, verifiability)
+
+### Why Validium?
+
+| Approach | Data | Proofs | Cost | Privacy |
+|----------|------|--------|------|---------|
+| L1 | On-chain | N/A | $$$ | None |
+| Rollup | On-chain | On-chain | $$ | Low |
+| **Validium** | Off-chain | On-chain | $ | **High** |
+
+Posting 10k individual orders to Ethereum would be prohibitively expensive. Posting a single ZK proof covering 10k orders costs almost nothing.
+
+## Escape Hatch
+
+If the sequencer goes offline, you can still withdraw. Your encrypted balance is stored on L1 as events — decrypt it with your P256 key, generate a ZK proof, submit to the L1 contract. Funds released immediately — no challenge period, no off-chain data needed. See [Validium](/technical/validium#escape-hatch) for details.

@@ -1,0 +1,204 @@
+---
+title: API Overview
+description: Getting started with the Sybil API
+---
+
+# API Overview
+
+The Sybil API provides programmatic access to trading, account management, and market data.
+
+## Base URL
+
+```
+https://api.sybil.exchange/v1
+```
+
+## Authentication
+
+All authenticated endpoints require a signed request.
+
+### Signing Requests
+
+```typescript
+import { sign } from '@sybil/sdk';
+
+const signature = sign({
+  method: 'POST',
+  path: '/orders',
+  body: orderData,
+  timestamp: Date.now(),
+  privateKey: YOUR_PRIVATE_KEY
+});
+
+fetch('https://api.sybil.exchange/v1/orders', {
+  method: 'POST',
+  headers: {
+    'X-Signature': signature,
+    'X-Timestamp': timestamp,
+    'X-Address': YOUR_ADDRESS
+  },
+  body: JSON.stringify(orderData)
+});
+```
+
+### Signature Format
+
+```
+signature = ECDSA_sign(keccak256(timestamp + method + path + body_hash))
+```
+
+## Endpoints
+
+### Public (No Auth)
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /markets` | List all markets |
+| `GET /markets/{id}` | Get market details |
+| `GET /markets/{id}/orders` | Get open orders for a market |
+| `GET /batches` | List recent batches |
+| `GET /batches/{id}` | Get batch details |
+
+### Authenticated
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /orders` | Submit an order |
+| `DELETE /orders/{id}` | Cancel an order |
+| `GET /orders` | List your orders |
+| `GET /account` | Get your account info |
+| `GET /account/positions` | Get your positions |
+| `GET /account/history` | Get your trade history |
+
+## Request Format
+
+All requests use JSON:
+
+```json
+{
+  "market_id": "01HQXYZ...",
+  "side": "bid",
+  "price": 5500,
+  "amount": 100
+}
+```
+
+### Price Format
+
+Prices are in **basis points** (1/100th of a percent):
+
+| Price | Basis Points |
+|-------|--------------|
+| \$0.50 | 5000 |
+| \$0.55 | 5500 |
+| \$0.01 | 100 |
+
+### Amount Format
+
+Amounts are in **base units** (smallest tradeable quantity).
+
+## Response Format
+
+```json
+{
+  "success": true,
+  "data": { ... },
+  "error": null
+}
+```
+
+### Error Response
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "INSUFFICIENT_BALANCE",
+    "message": "Not enough funds to place this order"
+  }
+}
+```
+
+## Rate Limits
+
+| Tier | Requests/Second | Burst |
+|------|-----------------|-------|
+| Standard | 10 | 50 |
+| Pro | 50 | 200 |
+| MM | 100 | 500 |
+
+Rate limits are per API key.
+
+## WebSocket (Coming Soon)
+
+Real-time updates via WebSocket:
+
+```
+wss://ws.sybil.exchange/v1
+```
+
+Channels:
+- `market:{market_id}` — Market updates
+- `trades:{market_id}` — Trade feed
+- `account` — Your account updates
+
+## SDKs
+
+<CardGroup cols={3}>
+  <Card title="TypeScript" icon="js" href="https://github.com/sybil-exchange/sdk-ts">
+    `npm install @sybil/sdk`
+  </Card>
+  <Card title="Python" icon="python" href="https://github.com/sybil-exchange/sdk-py">
+    `pip install sybil-sdk`
+  </Card>
+  <Card title="Rust" icon="rust" href="https://github.com/sybil-exchange/sdk-rs">
+    `cargo add sybil-sdk`
+  </Card>
+</CardGroup>
+
+## Quick Start
+
+<CodeGroup>
+```typescript TypeScript
+import { SybilClient } from '@sybil/sdk';
+
+const client = new SybilClient({
+  privateKey: process.env.PRIVATE_KEY
+});
+
+// Get markets
+const markets = await client.getMarkets();
+
+// Place order
+const order = await client.placeOrder({
+  marketId: markets[0].id,
+  side: 'bid',
+  price: 5500,  // $0.55
+  amount: 100
+});
+
+// Check status
+const status = await client.getOrder(order.id);
+```
+
+```python Python
+from sybil import SybilClient
+
+client = SybilClient(private_key=os.environ['PRIVATE_KEY'])
+
+# Get markets
+markets = client.get_markets()
+
+# Place order
+order = client.place_order(
+    market_id=markets[0]['id'],
+    side='bid',
+    price=5500,  # $0.55
+    amount=100
+)
+
+# Check status
+status = client.get_order(order['id'])
+```
+</CodeGroup>

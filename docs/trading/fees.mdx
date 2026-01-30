@@ -1,0 +1,141 @@
+---
+title: Fees
+description: Understanding Sybil's fee structure
+---
+
+# Fees
+
+Sybil uses a simple, transparent fee structure.
+
+## Trading Fees
+
+| Order Type | Fee |
+|------------|-----|
+| Regular orders | **5 bps** (0.05%) |
+| Flash Quote orders | **5 bps** (0.05%) |
+| Multi-market orders | **5 bps** (0.05%) |
+
+<Info>
+Fees are charged on the notional value of filled orders. Unfilled orders and cancellations are free.
+</Info>
+
+### Example
+
+You buy 1000 YES shares at \$0.55:
+- Notional: 1000 × \$0.55 = \$550
+- Fee: \$550 × 0.05% = **\$0.275**
+
+## Flash Quote Slot Auctions
+
+Market makers who want Flash Quoting access must win a slot auction.
+
+| Component | Cost |
+|-----------|------|
+| Slot auction | Market-determined (monthly) |
+| Fill fees | Same as regular (5 bps) |
+
+### Auction Details
+
+- **Frequency**: Monthly
+- **Slots available**: 10
+- **Auction type**: Sealed-bid, second-price
+- **Price paid**: (N+1)th highest bid
+
+The slot auction is the cost of capital efficiency. Those who value it most will bid accordingly.
+
+## No Hidden Fees
+
+<CardGroup cols={2}>
+  <Card title="No Deposit Fees" icon="check">
+    Deposit sUSDS for free
+  </Card>
+  <Card title="No Withdrawal Fees" icon="check">
+    Withdraw anytime, no fee
+  </Card>
+  <Card title="No Cancellation Fees" icon="check">
+    Cancel orders for free
+  </Card>
+  <Card title="No Inactivity Fees" icon="check">
+    Your funds never get charged for sitting
+  </Card>
+</CardGroup>
+
+## Fee Distribution
+
+Collected fees are distributed as follows:
+
+```
+Trading Fees (100%)
+├── Protocol Treasury: 50%
+├── Liquidity Incentives: 30%
+└── Referrals & Partners: 20%
+```
+
+### Protocol Treasury
+
+Funds protocol development, audits, and operations.
+
+### Liquidity Incentives
+
+Rewards for liquidity providers and early adopters. May include token distributions.
+
+### Referrals & Partners
+
+Revenue sharing with integrators, affiliates, and ecosystem partners.
+
+## Comparison
+
+| Platform | Taker Fee | Maker Fee | MM Access |
+|----------|-----------|-----------|-----------|
+| Competitor A | 10 bps | 5 bps rebate | Negotiated |
+| Competitor B | 10 bps | 0 bps | Application |
+| **Sybil** | **5 bps** | **5 bps** | **Auctioned** |
+
+<Note>
+Sybil doesn't distinguish maker/taker in batch auctions — everyone pays the same flat fee. This is simpler and fairer.
+</Note>
+
+## Gas Costs
+
+Sybil is a validium. You don't pay gas for trading.
+
+| Action | Gas Cost |
+|--------|----------|
+| Trading | **\$0** (off-chain) |
+| Deposit | L1 gas (one-time) |
+| Withdraw | L1 gas (one-time) |
+
+Your trading activity happens off-chain. Only deposits and withdrawals touch L1.
+
+## Yield Offset
+
+Your collateral (sUSDS) earns yield while locked:
+
+| APY | Monthly on \$10k |
+|-----|-----------------|
+| 4% | ~\$33 |
+| 5% | ~\$42 |
+| 6% | ~\$50 |
+
+For active traders, yield often exceeds fees paid.
+
+<Frame caption="Net cost example">
+| Activity | Amount |
+|----------|--------|
+| Monthly trading volume | \$100,000 |
+| Fees paid (5 bps) | -\$50 |
+| Average locked collateral | \$10,000 |
+| Yield earned (5% APY) | +\$42 |
+| **Net cost** | **\$8** |
+</Frame>
+
+## Future Considerations
+
+The fee structure may evolve based on:
+
+- Market conditions
+- Competitive landscape
+- Community governance
+- Protocol sustainability needs
+
+Any changes will be announced in advance.

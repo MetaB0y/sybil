@@ -1,0 +1,92 @@
+---
+title: Introduction
+description: Private bets. Fair prices. Your alpha stays yours.
+---
+
+# What Is Sybil?
+
+Sybil is a prediction market with a different market structure.
+
+Instead of a continuous orderbook where speed wins, Sybil runs **private batched auctions**. Orders accumulate privately, then clear at a single fair price. No frontrunning. No snipers. No information leakage.
+
+Your collateral earns yield while locked in positions. Markets resolve quickly via automated oracles. Everything is ZK-proven — you verify, not trust.
+
+## The Problem
+
+Imagine you're the best prediction market trader in the world.
+
+You did the work. You read the primary sources. You hired local pollsters. You flew to Guatemala and talked to people on the ground. You built a model that synthesizes everything. The market says 66%. Your model says 90%.
+
+You have \$1M in conviction. You start buying.
+
+After your first \$100k, the price moves to 68%. Normal. But then it keeps moving — 72%, 78%, 85% — in seconds. You haven't bought anything else yet.
+
+**What happened?**
+
+You're #1 on the leaderboard. Everyone watches your wallet. The moment you touched the market, bots copied you. They front-ran your own thesis. Your \$1M position now costs \$1.4M, or you get a fraction of the size you wanted.
+
+**The edge you built with months of work got eaten in milliseconds by people who did nothing.**
+
+## How Sybil Fixes This
+
+<CardGroup cols={2}>
+  <Card title="Private Orders" icon="eye-slash">
+    Nobody sees your position until the batch clears. Nobody can copy you. Nobody can frontrun you.
+  </Card>
+  <Card title="Fair Execution" icon="scale-balanced">
+    Batch auctions eliminate speed advantage. Everyone in a batch gets the same price.
+  </Card>
+  <Card title="Verified Matching" icon="shield-check">
+    Every batch generates a ZK proof. The matching was fair. The price was optimal. Verify it yourself.
+  </Card>
+  <Card title="Yield on Collateral" icon="coins">
+    Your collateral earns yield while locked. Long-dated markets become rational to participate in.
+  </Card>
+</CardGroup>
+
+## Key Differentiators
+
+| Feature | Other Markets | Sybil |
+|---------|---------------|-------|
+| Order Privacy | Public (copyable) | **Private (TEE + ZK)** |
+| Execution | Speed-based (bots win) | **Batch auction (fair price)** |
+| Collateral | Dead capital (0% yield) | **Yield-bearing (sUSDS)** |
+| Verification | Trust the platform | **ZK-proven correctness** |
+| Reputation | Leak alpha to prove skill | **ZK proofs of track record** |
+
+## Who Is Sybil For?
+
+<Tabs>
+  <Tab title="Sophisticated Traders">
+    - Private order flow — your edge stays yours
+    - Batch execution — no adverse selection from speed disadvantage
+    - Yield on collateral — capital efficiency on long-dated positions
+    - ZK-proven settlement — verify everything, trust nothing
+    - Selective reputation — prove your track record without leaking positions
+  </Tab>
+  <Tab title="Market Makers">
+    - No toxic flow — batch auctions eliminate sniping
+    - Flash Quoting — cross-market portfolio margin for capital efficiency
+    - Tighter spreads — lower adverse selection enables better pricing
+    - Auctioned slots — fair access to MM privileges
+  </Tab>
+  <Tab title="Retail Users">
+    - Simple UX — bet on outcomes you care about
+    - Fair pricing — same clearing price as the whales
+    - No front-running — your order doesn't move the market against you
+  </Tab>
+</Tabs>
+
+## Quick Links
+
+<CardGroup cols={3}>
+  <Card title="How It Works" icon="gears" href="/how-it-works">
+    Understand the batch auction mechanism
+  </Card>
+  <Card title="Core Concepts" icon="book" href="/core-concepts">
+    Learn the key terminology
+  </Card>
+  <Card title="Start Trading" icon="rocket" href="https://app.sybil.exchange">
+    Launch the app
+  </Card>
+</CardGroup>

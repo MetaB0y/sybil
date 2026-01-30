@@ -1,0 +1,109 @@
+---
+title: Multi-Market Strategies
+description: Cross-market payoff vectors and built-in arbitrage
+---
+
+# Multi-Market Strategies
+
+Every order on Sybil is a [payoff vector](/trading/order-types#the-payoff-vector). When a payoff vector spans multiple markets, it becomes a powerful tool for expressing conditional beliefs, hedging, and arbitrage — all executed atomically.
+
+## Strategies
+
+### Conditional Predictions
+
+Express beliefs that depend on multiple outcomes:
+
+**Belief**: "If Democrats win the Senate, Policy X will pass"
+
+| State | Senate | Policy X | Payoff |
+|-------|--------|----------|--------|
+| 00 | GOP | Fails | \$0 |
+| 01 | GOP | Passes | \$0 |
+| 10 | Dem | Fails | \$0 |
+| 11 | Dem | Passes | **\$1** |
+
+```json
+{
+  "markets": ["senate", "policy_x"],
+  "payoffs": [0, 0, 0, 100],
+  "limit_price": 2000
+}
+```
+
+This is `Senate AND Policy_X` — cheaper than buying Policy X outright because you're only paying for the conditional probability.
+
+### Hedged Positions
+
+Bet on A while hedging with B:
+
+**Belief**: "Bitcoin goes up, but I want downside protection"
+
+```json
+{
+  "markets": ["btc_100k", "btc_80k"],
+  "payoffs": [0, 50, 100, 100],
+  "limit_price": 5000
+}
+```
+
+Full payout if BTC > \$100k, partial payout if BTC < \$80k, nothing in between.
+
+### Spread Trades
+
+Bet on the relationship between markets:
+
+**Belief**: "A is underpriced relative to B"
+
+| State | A | B | Payoff |
+|-------|---|---|--------|
+| 00 | NO | NO | \$0 |
+| 01 | NO | YES | \$0 |
+| 10 | YES | NO | **\$1** |
+| 11 | YES | YES | \$0 |
+
+This is `A AND (NOT B)` — you profit only if A wins and B doesn't. Pure relative value.
+
+### Correlation Trades
+
+Bet on whether outcomes are correlated:
+
+**Belief**: "A and B are more correlated than the market thinks"
+
+```json
+{
+  "markets": ["market_a", "market_b"],
+  "payoffs": [100, 0, 0, 100],
+  "limit_price": 5000
+}
+```
+
+This is `A XNOR B` — pays \$1 when both resolve the same way (both YES or both NO).
+
+## Built-In Arbitrage
+
+The engine evaluates all payoff vectors simultaneously. When it finds that a combination of fills creates a guaranteed surplus (e.g., mutually exclusive outcomes priced below 100%), it creates fills that close the gap — improving prices for existing orders instead of letting arb bots extract value.
+
+See [How It Works](/how-it-works#built-in-arbitrage) for a detailed example and [Order Types](/trading/order-types#built-in-arbitrage) for the boolean algebra behind it.
+
+## Pricing
+
+Multi-market orders participate in the same batch auction as single-market orders:
+
+1. Engine finds clearing prices for each market
+2. Evaluates each payoff vector's expected value at those prices
+3. Fills orders where expected value ≥ limit price
+4. Iterates to find the globally optimal allocation
+
+## Atomic Execution
+
+Multi-market orders are **all-or-nothing by design**. The payoff vector is a single unit — either the entire vector executes or nothing does.
+
+<Info>
+You never end up with half a hedge or one leg of a spread. Atomicity is inherent in the payoff vector model.
+</Info>
+
+## Limitations
+
+<Warning>
+Each market doubles the number of states (2^n). Orders can span up to **5 markets** (32 states).
+</Warning>
