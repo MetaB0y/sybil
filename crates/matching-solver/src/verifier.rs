@@ -165,13 +165,25 @@ impl Verifier {
                 });
             }
 
-            // Check price constraint
-            if fill.fill_price > order.limit_price {
+            // Check price constraint (seller-aware)
+            // Buyers: fill_price must be <= limit (pay no more than willing)
+            // Sellers: fill_price must be >= limit (receive at least minimum)
+            let price_violated = if order.is_seller() {
+                fill.fill_price < order.limit_price
+            } else {
+                fill.fill_price > order.limit_price
+            };
+            if price_violated {
+                let dir = if order.is_seller() { "<" } else { ">" };
                 violations.push(Violation {
                     kind: ViolationKind::PriceExceedsLimit,
                     details: format!(
-                        "Order {}: fill_price {} > limit_price {}",
-                        fill.order_id, fill.fill_price, order.limit_price
+                        "Order {} ({}): fill_price {} {} limit_price {}",
+                        fill.order_id,
+                        if order.is_seller() { "sell" } else { "buy" },
+                        fill.fill_price,
+                        dir,
+                        order.limit_price
                     ),
                 });
             }

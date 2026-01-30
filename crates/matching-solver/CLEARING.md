@@ -180,20 +180,19 @@ clearing, posrisk NO-buy arb orders become YES supply, pushing YES prices down.
 Negrisk YES-buy arb orders add YES demand, pushing YES prices up. Over
 iterations, prices converge toward sum=$1.
 
-#### Step 4: Last-iteration arb fills (HACK — known issue)
+#### Step 4: Arb fill filtering
 
-After the loop ends, the final iteration's arb orders never entered price
-discovery. The pipeline dumps their NegriskResult fills directly into the output.
+Arb orders participate in clearing (they consume liquidity and influence prices)
+but their fills are **filtered out of the final output**. Only real participant
+fills appear in the `MatchingResult`. This is correct because:
 
-**This is unsound.** These fills:
-- Were not market-cleared (no supply-demand crossing)
-- Have fill_price = current market price (not a clearing price)
-- May violate supply constraints
-- May break conservation
+- Arb orders have no real account behind them — settlement would skip them
+- Including them would inflate welfare, volume, and fill count metrics
+- Their purpose is price coordination, not actual trading
 
-This exists to avoid losing the arb welfare from the last iteration. A cleaner
-fix would be to run one extra price discovery pass after the final negrisk
-detection, or to simply drop these fills and accept the welfare loss.
+The last iteration's arb orders never enter a subsequent price discovery pass.
+These orders are simply dropped — no synthetic fills are injected. This accepts
+a small welfare loss in exchange for soundness.
 
 ### Concrete example: Election scenario
 
@@ -327,8 +326,10 @@ on all outcomes" strategy may partially execute, which doesn't correspond to a
 real hedged position. The fills are individually valid (each respects its
 market's clearing) but collectively they may not represent a coherent trade.
 
-**Last-iteration fills:** the final negrisk fills are not market-cleared.
-They are synthetic fills injected at the detected arb prices. This is a hack.
+**Last-iteration welfare loss:** the final iteration's arb orders never enter
+a subsequent price discovery pass, so their price-correction effect is lost.
+This is a small welfare loss accepted for soundness (no synthetic fills are
+injected).
 
 ### Comparison to the optimal approach
 
@@ -377,3 +378,109 @@ To write a paper with proofs:
 4. **Bound the welfare gap** between the iterative solution and the LP optimum
 5. **Address atomicity** by either making arb orders atomic (bundle orders) or
    proving that partial execution still moves prices in the right direction
+
+---
+
+## Mechanism 3: Dual Decomposition (New)
+
+**File:** `dual_master.rs` + `pipeline.rs` (via `Pipeline::with_dual_decomposition()`)
+
+### What it does
+
+Replaces the ad-hoc NegriskSolver + MmAllocator pipeline with a principled
+**Lagrangian dual decomposition** framework. Coupling constraints (sum=$1
+across MarketGroups, MM budget limits) are relaxed into penalty terms. Per-market
+subproblems are solved independently, and dual variables are updated via
+subgradient descent.
+
+### Why it exists
+
+The NegriskSolver approach (Mechanism 2) has no convergence guarantee and
+uses fair-share pricing as a heuristic approximation of dual variables.
+The MmAllocator does greedy post-hoc filtering instead of incorporating budget
+constraints into the clearing itself. Dual decomposition addresses both
+shortcomings.
+
+### Architecture
+
+```
+Pipeline::with_dual_decomposition().solve(&problem)
+  |
+  +-- DualMaster::solve()
+  |   |
+  |   +-- Initialize: λ=0 (price consistency), μ=0 (pacing)
+  |   |
+  |   +-- Iteration loop (max 20):
+  |   |   +-- 1. shade_orders(): adjust limits using λ, μ
+  |   |   +-- 2. LocalSolver: solve per-market with shaded orders
+  |   |   +-- 3. compute_primal_residuals(): constraint violations
+  |   |   +-- 4. update_duals(): subgradient step on λ, μ
+  |   |   +-- 5. check_convergence(): primal + dual tolerance
+  |   |
+  |   +-- Final pass: re-solve with converged shading, validate
+  |   |   against original limits and MM budgets
+  |   |
+  |   +-- Return fills, prices, convergence diagnostics
+  |
+  +-- ArbitrageDetector: bundle/spread matching on remaining liquidity
+  |
+  +-- Return combined PipelineResult
+```
+
+### Bid Shading Math
+
+The Lagrangian relaxes two constraint types:
+
+**Price Consistency (λ):** For MarketGroup g with constraint Σ P_YES_i = $1:
+- λ > 0 (sum > $1): YES buyers bid less, YES supply increases → prices drop
+- λ < 0 (sum < $1): YES buyers bid more, YES supply decreases → prices rise
+
+Shading formulas:
+- YES buyer:  `effective = limit - λ × $1`
+- NO buyer:   `effective = limit + λ × $1`
+- YES seller: `effective = limit - λ × $1`
+- NO seller:  `effective = limit + λ × $1`
+
+**Pacing (μ):** For MM k with budget constraint Σ capital ≤ B_k:
+- μ > 0 (over budget): MM bids less aggressively
+
+Shading formulas (MM orders only):
+- BuyYes/BuyNo:  `paced = limit / (1 + μ)`
+- SellYes/SellNo: `paced = (limit + μ × $1) / (1 + μ)`
+
+Both adjustments compose: pacing first, then price consistency.
+
+### Convergence
+
+- Step size: α_t = α_0 / √t (diminishing, standard for subgradient)
+- Primal tolerance: 2% of $1 for price sum, 2% for budget
+- Dual tolerance: 0.1% change in dual variables
+
+The subgradient method guarantees convergence to within ε of optimal for
+convex problems with diminishing step sizes. Our per-market subproblems
+are piecewise-linear (LP), so the Lagrangian dual is convex.
+
+### Comparison to Mechanism 2 (NegriskSolver)
+
+| Property | NegriskSolver | Dual Decomposition |
+|----------|--------------|-------------------|
+| Price consistency | Heuristic (fair-share) | Subgradient (principled) |
+| MM budgets | Post-hoc greedy | Bid shading (in-clearing) |
+| Convergence | No guarantee | Subgradient guarantee |
+| Implementation | Synthetic orders | Dual variables |
+| Multi-market orders | Same (ArbitrageDetector) | Same (ArbitrageDetector) |
+
+Both pipelines remain available for comparison:
+- `Pipeline::with_negrisk()` — existing approach
+- `Pipeline::with_dual_decomposition()` — new approach
+
+### Limitations
+
+**Multi-market orders** are still handled as a post-processing phase
+(ArbitrageDetector after dual convergence). Bundle/spread fills don't feed
+back into the dual decomposition, so their price impact is not captured in
+the equilibrium. This is standard in combinatorial auctions.
+
+**Duality gap**: the subgradient method finds the dual optimum, but the primal
+recovery (mapping dual variables to actual fills) may have a gap. The final
+pass validates all fills against original limits and MM budgets.

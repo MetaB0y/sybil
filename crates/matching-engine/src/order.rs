@@ -137,24 +137,36 @@ impl Order {
     }
 
     /// Calculate welfare contribution if this order fills at the given price.
-    /// Welfare = (limit_price - fill_price) * quantity for buyers
-    /// For payoff vectors, welfare is the difference between willingness to pay
-    /// and actual cost.
+    /// Welfare = (limit_price - fill_price) * quantity for buyers (happy when fill < limit)
+    /// Welfare = (fill_price - limit_price) * quantity for sellers (happy when fill > limit)
     pub fn welfare_contribution(&self, fill_price: Nanos, fill_qty: Qty) -> i64 {
         if fill_qty == 0 {
             return 0;
         }
-        // Welfare = (what they were willing to pay - what they paid) * qty
-        // For a buyer: limit_price >= fill_price, positive welfare
-        // For a seller (represented with negative payoffs): similar logic
-        let surplus_per_unit = self.limit_price as i64 - fill_price as i64;
+        let surplus_per_unit = if self.is_seller() {
+            fill_price as i64 - self.limit_price as i64
+        } else {
+            self.limit_price as i64 - fill_price as i64
+        };
         surplus_per_unit * fill_qty as i64
     }
 
-    /// Check if this order would be satisfied at a given expected value.
-    /// For a buyer (positive payoff expectation), satisfied if limit_price >= expected_cost.
+    /// Check if this order would be satisfied at a given price.
+    /// For a buyer: satisfied if price <= limit_price (pay no more than limit).
+    /// For a seller: satisfied if price >= limit_price (receive at least limit).
     pub fn is_satisfied_at_price(&self, price: Nanos) -> bool {
-        price <= self.limit_price
+        if self.is_seller() {
+            price >= self.limit_price
+        } else {
+            price <= self.limit_price
+        }
+    }
+
+    /// Returns true if this order has any negative payoffs (i.e., it's a seller).
+    pub fn is_seller(&self) -> bool {
+        self.payoffs[..self.num_states as usize]
+            .iter()
+            .any(|&p| p < 0)
     }
 }
 

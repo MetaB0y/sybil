@@ -23,6 +23,7 @@ use matching_engine::{MarketId, Nanos, Problem};
 use crate::combiner::{
     CombineStats, SolutionCombiner, SolutionConfidence, SolverContribution, SolverSolution,
 };
+use crate::dual_master::{DualConfig, DualMaster};
 use crate::greedy::GreedySolver;
 use crate::local_solver::LocalSolver;
 use crate::mm_allocator::MmAllocator;
@@ -196,6 +197,11 @@ pub struct Pipeline {
     /// Order allocator (optional).
     allocator: Option<Box<dyn OrderAllocator>>,
 
+    /// Dual decomposition master (optional).
+    /// When present, `solve` uses `solve_dual_decomposition` instead of
+    /// `solve_sequential` / `solve_single_pass`.
+    dual_master: Option<DualMaster>,
+
     /// Partial solvers for MWIS combination.
     partial_solvers: Vec<Box<dyn PartialSolver>>,
 
@@ -271,6 +277,30 @@ impl Pipeline {
             .build()
     }
 
+    /// Create a pipeline using dual decomposition.
+    ///
+    /// Uses Lagrangian relaxation with subgradient updates to handle
+    /// coupling constraints (price consistency across MarketGroups,
+    /// MM budget limits) in a principled way.
+    pub fn with_dual_decomposition() -> Self {
+        Self::builder()
+            .name("Dual Decomposition")
+            .price_discoverer(LocalSolver::new())
+            .dual_master(DualMaster::new())
+            .partial_solver(ArbitrageDetector::new())
+            .build()
+    }
+
+    /// Create a pipeline using dual decomposition with custom config.
+    pub fn with_dual_decomposition_config(config: DualConfig) -> Self {
+        Self::builder()
+            .name("Dual Decomposition")
+            .price_discoverer(LocalSolver::new())
+            .dual_master(DualMaster::with_config(config))
+            .partial_solver(ArbitrageDetector::new())
+            .build()
+    }
+
     /// Create a new pipeline builder.
     pub fn builder() -> PipelineBuilder {
         PipelineBuilder::new()
@@ -278,11 +308,112 @@ impl Pipeline {
 
     /// Solve a matching problem using this pipeline.
     pub fn solve(&self, problem: &Problem) -> PipelineResult {
-        if self.config.use_fixed_point {
+        if self.dual_master.is_some() {
+            self.solve_dual_decomposition(problem)
+        } else if self.config.use_fixed_point {
             self.solve_sequential(problem)
         } else {
             self.solve_single_pass(problem)
         }
+    }
+
+    /// Dual decomposition solving.
+    ///
+    /// Uses Lagrangian relaxation to handle coupling constraints:
+    /// 1. DualMaster iterates to find equilibrium prices
+    /// 2. ArbitrageDetector (partial solvers) handles multi-market orders
+    fn solve_dual_decomposition(&self, problem: &Problem) -> PipelineResult {
+        let start = Instant::now();
+        let mut result = PipelineResult::empty(problem.liquidity.snapshot());
+        let mut timings = PipelineTimings::default();
+
+        let dual_master = self.dual_master.as_ref().expect("dual_master must be set");
+
+        // Phase 1: Dual decomposition — handles single-market clearing with
+        // price consistency and budget constraints
+        let pd_start = Instant::now();
+        let dual_result = dual_master.solve(problem);
+        timings.price_discovery_secs = pd_start.elapsed().as_secs_f64();
+
+        // Transfer fills from dual decomposition
+        result.result = dual_result.matching_result;
+        result.price_discovery = Some(dual_result.prices.clone());
+
+        // Track filled orders for partial solvers
+        let filled_order_ids: std::collections::HashSet<u64> =
+            result.result.fills.iter().map(|f| f.order_id).collect();
+
+        // Consume liquidity for all fills
+        let order_map: std::collections::HashMap<u64, &matching_engine::Order> =
+            problem.orders.iter().map(|o| (o.id, o)).collect();
+        let mut remaining_liquidity = problem.liquidity.snapshot();
+        for fill in &result.result.fills {
+            if let Some(order) = order_map.get(&fill.order_id) {
+                self.consume_order_liquidity(order, fill.fill_qty, &mut remaining_liquidity);
+            }
+        }
+
+        // Phase 2: Bundle/Spread matching (ArbitrageDetector)
+        // Runs AFTER dual decomposition converges, using remaining liquidity
+        let partial_start = Instant::now();
+        for solver in &self.partial_solvers {
+            let partial_orders: Vec<_> = problem
+                .orders
+                .iter()
+                .filter(|o| !filled_order_ids.contains(&o.id))
+                .cloned()
+                .collect();
+
+            let partial_problem = Problem {
+                name: problem.name.clone(),
+                markets: problem.markets.clone(),
+                liquidity: remaining_liquidity.clone(),
+                orders: partial_orders,
+                mm_constraints: problem.mm_constraints.clone(),
+                market_groups: problem.market_groups.clone(),
+            };
+
+            let partial_result = solver.solve_partial(&partial_problem);
+
+            for fill in partial_result.fills {
+                if let Some(&order) = order_map.get(&fill.order_id) {
+                    self.consume_order_liquidity(order, fill.fill_qty, &mut remaining_liquidity);
+                    result.result.add_fill(fill.clone(), order);
+                    result.contributions.push(SolverContribution {
+                        solver_name: solver.name().to_string(),
+                        fills_contributed: 1,
+                        welfare_contributed: order.welfare_contribution(0, 1),
+                    });
+                }
+            }
+        }
+        timings.partial_solving_secs = partial_start.elapsed().as_secs_f64();
+
+        // Record iteration stats from dual decomposition
+        result.iteration_stats.push(IterationStats {
+            iteration: 1,
+            welfare: result.result.total_welfare,
+            volume: result.result.fills.iter().map(|f| f.fill_qty).sum(),
+            fills: result.result.fills.len(),
+            welfare_delta: result.result.total_welfare,
+            volume_delta: result.result.fills.iter().map(|f| f.fill_qty).sum(),
+            fills_delta: result.result.fills.len(),
+            price_discovery_fills: result.result.fills.len(),
+            bundle_fills: 0,
+            fill_start_idx: 0,
+            fill_end_idx: result.result.fills.len(),
+            market_prices: dual_result
+                .prices
+                .prices
+                .clone(),
+        });
+
+        result.result.remaining_liquidity = remaining_liquidity;
+        result.phase_times = timings;
+        result.total_time_secs = start.elapsed().as_secs_f64();
+        result.iterations = dual_result.iterations;
+
+        result
     }
 
     /// Sequential solving with fixed-point iteration.
@@ -510,25 +641,47 @@ impl Pipeline {
                         .map(|f| (f.order_id, (f.fill_price, f.fill_qty)))
                         .collect();
 
-                // Add MM orders that weren't matched in price discovery with estimated fills
-                // This allows the allocator to consider them for budget allocation
+                // Add MM orders that weren't matched in price discovery with estimated fills.
+                // This allows the allocator to consider them for budget allocation.
                 for mm in &problem.mm_constraints {
                     for &order_id in &mm.order_ids {
                         if !current_fills.contains_key(&order_id) {
-                            // Find the order and estimate fill at clearing price
                             if let Some(order) = order_map.get(&order_id) {
                                 if order.num_markets == 1 {
                                     let market = order.markets[0];
                                     if let Some(market_prices) = prices.prices.get(&market) {
-                                        // Determine which outcome this order is for
-                                        let outcome = order.payoffs.iter()
-                                            .take(order.num_states as usize)
-                                            .position(|&p| p > 0)
-                                            .unwrap_or(0);
-                                        let price = market_prices.get(outcome).copied()
-                                            .unwrap_or(500_000_000);
-                                        // Only include if order would be willing to trade at this price
-                                        if order.limit_price >= price {
+                                        let num_states = order.num_states as usize;
+                                        let is_buyer = order.payoffs[..num_states].iter().any(|&p| p > 0);
+                                        let is_seller = order.payoffs[..num_states].iter().any(|&p| p < 0);
+
+                                        // Determine the relevant outcome and clearing price
+                                        let (outcome, price) = if is_buyer {
+                                            let o = order.payoffs[..num_states].iter()
+                                                .position(|&p| p > 0).unwrap_or(0);
+                                            let p = market_prices.get(o).copied()
+                                                .unwrap_or(500_000_000);
+                                            (o, p)
+                                        } else if is_seller {
+                                            let o = order.payoffs[..num_states].iter()
+                                                .position(|&p| p < 0).unwrap_or(0);
+                                            let p = market_prices.get(o).copied()
+                                                .unwrap_or(500_000_000);
+                                            (o, p)
+                                        } else {
+                                            continue;
+                                        };
+
+                                        // Check willingness to trade at clearing price:
+                                        // Buyer: fill_price <= limit (willing to pay up to limit)
+                                        // Seller: fill_price >= limit (willing to sell at >= minimum)
+                                        let willing = if is_buyer {
+                                            order.limit_price >= price
+                                        } else {
+                                            order.limit_price <= price
+                                        };
+
+                                        if willing {
+                                            let _ = outcome; // used for price lookup above
                                             current_fills.insert(order_id, (price, order.max_fill));
                                         }
                                     }
@@ -578,15 +731,21 @@ impl Pipeline {
                 let iter_result =
                     self.build_result_from_prices(&iter_problem, pd_result, &allocation_result);
 
-                // Consume liquidity for filled orders and track filled order IDs
-                // Look up in both original orders and arb orders
+                // Consume liquidity for filled orders and track filled order IDs.
+                // Look up in both original orders and arb orders.
+                // Arb fills consume real liquidity (they were matched in clearing)
+                // but are NOT added to the output — they are synthetic price-pressure
+                // mechanisms with no real account behind them.
                 for fill in &iter_result.fills {
+                    let is_arb = arb_order_map.contains_key(&fill.order_id);
                     let order_ref = order_map.get(&fill.order_id).copied()
                         .or_else(|| arb_order_map.get(&fill.order_id));
                     if let Some(order) = order_ref {
                         self.consume_order_liquidity(order, fill.fill_qty, &mut remaining_liquidity);
                         filled_order_ids.insert(fill.order_id);
-                        iter_price_discovery_fills += 1;
+                        if !is_arb {
+                            iter_price_discovery_fills += 1;
+                        }
 
                         // Track MM fills for cumulative budget calculation
                         if mm_order_ids.contains(&fill.order_id) {
@@ -595,11 +754,14 @@ impl Pipeline {
                     }
                 }
 
-                // Merge into result
+                // Merge real (non-arb) fills into result.
+                // Arb fills influenced clearing prices but should not appear in output:
+                // no real account owns them, and settlement would skip them anyway.
                 for fill in iter_result.fills {
-                    let order_ref = order_map.get(&fill.order_id).copied()
-                        .or_else(|| arb_order_map.get(&fill.order_id));
-                    if let Some(order) = order_ref {
+                    if arb_order_map.contains_key(&fill.order_id) {
+                        continue;
+                    }
+                    if let Some(&order) = order_map.get(&fill.order_id) {
                         result.result.add_fill(fill, order);
                     }
                 }
@@ -751,21 +913,10 @@ impl Pipeline {
             }
         }
 
-        // Add synthetic fills for last iteration's arb orders.
-        // These didn't get a subsequent price discovery iteration to produce proper fills.
-        if !pending_arb_orders.is_empty() {
-            if let Some(ref negrisk) = result.negrisk {
-                for arb_fill in &negrisk.fills {
-                    for fill in &arb_fill.market_fills {
-                        if let Some(order) = arb_order_map.get(&fill.order_id) {
-                            if !filled_order_ids.contains(&fill.order_id) {
-                                result.result.add_fill(fill.clone(), order);
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // NOTE: We intentionally do NOT add synthetic fills for the last iteration's
+        // arb orders. Those orders never went through price discovery, so any fills
+        // would be non-market-cleared and unsound. The arb orders from earlier
+        // iterations already influenced prices through proper clearing.
 
         // Capture final phase snapshot
         #[cfg(feature = "viz")]
@@ -778,6 +929,57 @@ impl Pipeline {
             result.result.total_welfare,
             start.elapsed().as_secs_f64(),
         ));
+
+        // Rebuild allocation result with cumulative data (original budgets + total capital used)
+        // so the display shows accurate multi-iteration totals, not the last iteration's snapshot.
+        if !problem.mm_constraints.is_empty() {
+            let mut mm_allocations = Vec::new();
+            let mut all_activated: Vec<u64> = Vec::new();
+            let mut total_welfare: i64 = 0;
+
+            for mm in &problem.mm_constraints {
+                let capital_used = mm.capital_used(&cumulative_mm_fills);
+                let activated: Vec<u64> = mm.order_ids.iter()
+                    .filter(|id| cumulative_mm_fills.contains_key(id))
+                    .copied()
+                    .collect();
+                let mm_welfare: i64 = activated.iter()
+                    .filter_map(|id| {
+                        let (price, qty) = cumulative_mm_fills.get(id)?;
+                        order_map.get(id).map(|o| o.welfare_contribution(*price, *qty))
+                    })
+                    .sum();
+
+                all_activated.extend(&activated);
+                total_welfare += mm_welfare;
+
+                mm_allocations.push(crate::mm_allocator::MmAllocation {
+                    mm_id: mm.mm_id,
+                    activated_orders: activated,
+                    capital_used,
+                    budget: mm.max_capital,
+                    utilization: if mm.max_capital > 0 {
+                        capital_used as f64 / mm.max_capital as f64
+                    } else { 0.0 },
+                    lambda: 0.0,
+                });
+            }
+
+            // Add non-MM orders to activated list
+            for order in problem.orders.iter() {
+                let is_mm = problem.mm_constraints.iter().any(|mm| mm.order_ids.contains(&order.id));
+                if !is_mm && filled_order_ids.contains(&order.id) {
+                    all_activated.push(order.id);
+                }
+            }
+
+            result.allocation = Some(crate::traits::AllocationResult {
+                activated_orders: all_activated,
+                total_welfare,
+                iterations: iterations,
+                mm_allocations,
+            });
+        }
 
         result.result.remaining_liquidity = remaining_liquidity;
         result.phase_times = timings;
@@ -838,13 +1040,34 @@ impl Pipeline {
                                 if order.num_markets == 1 {
                                     let market = order.markets[0];
                                     if let Some(market_prices) = prices.prices.get(&market) {
-                                        let outcome = order.payoffs.iter()
-                                            .take(order.num_states as usize)
-                                            .position(|&p| p > 0)
-                                            .unwrap_or(0);
-                                        let price = market_prices.get(outcome).copied()
-                                            .unwrap_or(500_000_000);
-                                        if order.limit_price >= price {
+                                        let num_states = order.num_states as usize;
+                                        let is_buyer = order.payoffs[..num_states].iter().any(|&p| p > 0);
+                                        let is_seller = order.payoffs[..num_states].iter().any(|&p| p < 0);
+
+                                        let (outcome, price) = if is_buyer {
+                                            let o = order.payoffs[..num_states].iter()
+                                                .position(|&p| p > 0).unwrap_or(0);
+                                            let p = market_prices.get(o).copied()
+                                                .unwrap_or(500_000_000);
+                                            (o, p)
+                                        } else if is_seller {
+                                            let o = order.payoffs[..num_states].iter()
+                                                .position(|&p| p < 0).unwrap_or(0);
+                                            let p = market_prices.get(o).copied()
+                                                .unwrap_or(500_000_000);
+                                            (o, p)
+                                        } else {
+                                            continue;
+                                        };
+
+                                        let willing = if is_buyer {
+                                            order.limit_price >= price
+                                        } else {
+                                            order.limit_price <= price
+                                        };
+
+                                        if willing {
+                                            let _ = outcome;
                                             fills.insert(order_id, (price, order.max_fill));
                                         }
                                     }
@@ -992,9 +1215,12 @@ impl Pipeline {
 
         for fill in all_fills {
             if let Some(order) = order_map.get(&fill.order_id) {
-                // Only add fills that satisfy limit price constraint
-                // fill_price must not exceed limit_price for buy orders
-                if fill.fill_price <= order.limit_price && fill.fill_qty > 0 {
+                if fill.fill_qty > 0 {
+                    // LocalSolver already enforces limit prices during clearing.
+                    // No redundant check here — the old buy-side-only check
+                    // (fill_price <= limit_price) incorrectly rejected sell orders
+                    // where fill_price > limit_price is the DESIRED outcome
+                    // (seller receives more than their minimum).
                     result.add_fill(fill, order);
                 }
             }
@@ -1044,6 +1270,7 @@ pub struct PipelineBuilder {
     price_discoverer: Option<Box<dyn PriceDiscoverer>>,
     negrisk_solver: Option<NegriskSolver>,
     allocator: Option<Box<dyn OrderAllocator>>,
+    dual_master: Option<DualMaster>,
     partial_solvers: Vec<Box<dyn PartialSolver>>,
     config: PipelineConfig,
 }
@@ -1056,6 +1283,7 @@ impl PipelineBuilder {
             price_discoverer: None,
             negrisk_solver: None,
             allocator: None,
+            dual_master: None,
             partial_solvers: Vec::new(),
             config: PipelineConfig::default(),
         }
@@ -1076,6 +1304,12 @@ impl PipelineBuilder {
     /// Set the order allocator.
     pub fn allocator<A: OrderAllocator + 'static>(mut self, allocator: A) -> Self {
         self.allocator = Some(Box::new(allocator));
+        self
+    }
+
+    /// Set the dual decomposition master.
+    pub fn dual_master(mut self, master: DualMaster) -> Self {
+        self.dual_master = Some(master);
         self
     }
 
@@ -1138,6 +1372,7 @@ impl PipelineBuilder {
             price_discoverer: self.price_discoverer,
             negrisk_solver: self.negrisk_solver,
             allocator: self.allocator,
+            dual_master: self.dual_master,
             partial_solvers: self.partial_solvers,
             combiner: SolutionCombiner::new(),
             config: self.config,

@@ -20,6 +20,7 @@
 // Internal modules
 pub mod benchmark;
 pub(crate) mod combiner;
+pub mod dual_master;
 pub mod greedy;
 pub mod local_solver;
 pub mod mm_allocator;
@@ -46,6 +47,9 @@ pub use traits::{
     matching_result_to_partial, AllocationResult, OrderAllocator, PartialSolution, PartialSolver,
     PriceDiscoverer, PriceDiscoveryResult,
 };
+
+// Dual decomposition
+pub use dual_master::{DualConfig, DualMaster, DualResult, DualState, StepDecay};
 
 // Pipeline system
 pub use pipeline::{
