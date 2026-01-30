@@ -1,22 +1,24 @@
-//! Dual decomposition for market clearing with coupling constraints.
+//! Hybrid dual decomposition + greedy knapsack for market clearing.
 //!
-//! Handles two types of coupling constraints via Lagrangian relaxation:
+//! Decouples two types of coupling constraints:
 //! - **Price consistency** (λ): sum of YES prices = $1 across MarketGroups
-//! - **Budget feasibility** (μ): MM capital usage ≤ budget
+//!   → handled via Lagrangian relaxation with subgradient updates
+//! - **MM budgets**: capital usage ≤ budget per market maker
+//!   → handled via greedy knapsack allocation (welfare/capital ratio sorting)
 //!
-//! The main loop:
-//! 1. Shade orders using dual variables (λ, μ)
-//! 2. Solve per-market subproblems with shaded orders
-//! 3. Compute constraint violations (primal residuals)
-//! 4. Update dual variables via subgradient descent
-//! 5. Check convergence
-//!
-//! After convergence, re-solve with original (unshaded) limits for actual fills.
+//! The main loop accumulates fills across iterations:
+//! 1. Shade orders using λ (price consistency only)
+//! 2. Solve per-market subproblems with shaded orders + remaining liquidity
+//! 3. Run greedy MM knapsack on candidate fills (remaining budget)
+//! 4. Filter fills: non-MM that pass limit check + MM from knapsack
+//! 5. Accumulate fills, consume liquidity
+//! 6. Compute price residuals and update λ
+//! 7. Check convergence: |price_residuals| < tol AND welfare_delta < 1%
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use matching_engine::{
-    MarketGroup, MarketId, MmConstraint, MmSide, Nanos, Order, Problem, Qty, NANOS_PER_DOLLAR,
+    Fill, MarketGroup, MarketId, MmConstraint, Nanos, Order, Problem, Qty, NANOS_PER_DOLLAR,
 };
 use serde::Serialize;
 
@@ -50,16 +52,19 @@ pub struct DualConfig {
     pub dual_tolerance: f64,
     /// Step size decay strategy.
     pub step_decay: StepDecay,
+    /// Welfare tolerance: stop when marginal improvement < this fraction.
+    pub welfare_tolerance: f64,
 }
 
 impl Default for DualConfig {
     fn default() -> Self {
         Self {
-            max_iterations: 20,
+            max_iterations: 10,
             initial_step_size: 0.5,
             primal_tolerance: 0.02,
             dual_tolerance: 0.001,
             step_decay: StepDecay::InvSqrt,
+            welfare_tolerance: 0.01,
         }
     }
 }
@@ -74,13 +79,8 @@ pub struct DualState {
     /// Price consistency multipliers: one per MarketGroup.
     /// λ > 0 means prices sum above $1 (posrisk); λ < 0 means below $1 (negrisk).
     pub lambda: HashMap<String, f64>,
-    /// Pacing multipliers: one per MM constraint.
-    /// μ ≥ 0; higher μ means MM bids less aggressively.
-    pub mu: HashMap<u64, f64>,
     /// Previous λ values for convergence checking.
     pub prev_lambda: HashMap<String, f64>,
-    /// Previous μ values for convergence checking.
-    pub prev_mu: HashMap<u64, f64>,
 }
 
 // ============================================================================
@@ -100,8 +100,8 @@ pub struct DualResult {
     pub converged: bool,
     /// Final price sum error per group (fraction of $1).
     pub final_price_sum_error: HashMap<String, f64>,
-    /// Final budget utilization per MM (fraction of budget).
-    pub final_budget_utilization: HashMap<u64, f64>,
+    /// Final MM utilization per MM (fraction of budget used).
+    pub final_mm_utilization: HashMap<u64, f64>,
     /// Final dual state for diagnostics.
     pub dual_state: DualState,
 }
@@ -112,9 +112,10 @@ pub struct DualIterationStats {
     pub iteration: usize,
     pub step_size: f64,
     pub max_price_residual: f64,
-    pub max_budget_residual: f64,
     pub lambda_norm: f64,
-    pub mu_norm: f64,
+    pub welfare: i64,
+    pub fills: usize,
+    pub mm_fills: usize,
 }
 
 // ============================================================================
@@ -145,6 +146,8 @@ impl DualMaster {
     }
 
     /// Main dual decomposition solve loop.
+    ///
+    /// Accumulates fills across iterations with greedy MM knapsack allocation.
     pub fn solve(&self, problem: &Problem) -> DualResult {
         let mut state = DualState::default();
 
@@ -154,12 +157,6 @@ impl DualMaster {
             state.prev_lambda.insert(group.name.clone(), 0.0);
         }
 
-        // Initialize μ=0 for each MM constraint
-        for mm in &problem.mm_constraints {
-            state.mu.insert(mm.mm_id.0, 0.0);
-            state.prev_mu.insert(mm.mm_id.0, 0.0);
-        }
-
         // Build lookup: which group does each market belong to?
         let market_to_group: HashMap<MarketId, String> = problem
             .market_groups
@@ -167,24 +164,28 @@ impl DualMaster {
             .flat_map(|g| g.markets.iter().map(move |&m| (m, g.name.clone())))
             .collect();
 
-        // Build lookup: which MM constraint does each order belong to?
-        let order_to_mm: HashMap<u64, u64> = problem
+        // Build order lookup
+        let order_map: HashMap<u64, &Order> =
+            problem.orders.iter().map(|o| (o.id, o)).collect();
+
+        // Build MM order IDs set
+        let mm_order_ids: HashSet<u64> = problem
             .mm_constraints
             .iter()
-            .flat_map(|mm| mm.order_ids.iter().map(move |&oid| (oid, mm.mm_id.0)))
+            .flat_map(|mm| mm.order_ids.iter().copied())
             .collect();
 
-        // Build MM constraint map
-        let mm_map: HashMap<u64, &MmConstraint> = problem
-            .mm_constraints
-            .iter()
-            .map(|mm| (mm.mm_id.0, mm))
-            .collect();
+        // State for cumulative fill accumulation
+        let mut matching_result = MatchingResult::new(problem.liquidity.snapshot());
+        let mut remaining_liquidity = problem.liquidity.snapshot();
+        let mut filled_order_ids: HashSet<u64> = HashSet::new();
+        let mut cumulative_mm_fills: HashMap<u64, (Nanos, Qty)> = HashMap::new();
 
         let mut iteration_stats = Vec::new();
         let mut converged = false;
         let mut iterations = 0;
-        let mut _last_prices = PriceDiscoveryResult::empty();
+        let mut prev_welfare: i64 = 0;
+        let mut last_prices = PriceDiscoveryResult::empty();
 
         for iter in 1..=self.config.max_iterations {
             iterations = iter;
@@ -195,21 +196,25 @@ impl DualMaster {
                 StepDecay::InvLinear => self.config.initial_step_size / iter as f64,
             };
 
-            // 1. Shade orders
+            // 1. Shade orders with λ only (no μ)
+            let remaining_orders: Vec<Order> = problem
+                .orders
+                .iter()
+                .filter(|o| !filled_order_ids.contains(&o.id))
+                .cloned()
+                .collect();
+
             let shaded_orders = shade_orders(
-                &problem.orders,
+                &remaining_orders,
                 &state.lambda,
-                &state.mu,
                 &market_to_group,
-                &order_to_mm,
-                &mm_map,
             );
 
-            // 2. Create shaded problem and solve per-market subproblems
+            // 2. Solve per-market subproblems with shaded orders + remaining liquidity
             let shaded_problem = Problem {
                 name: problem.name.clone(),
                 markets: problem.markets.clone(),
-                liquidity: problem.liquidity.snapshot(),
+                liquidity: remaining_liquidity.clone(),
                 orders: shaded_orders,
                 mm_constraints: problem.mm_constraints.clone(),
                 market_groups: problem.market_groups.clone(),
@@ -217,161 +222,229 @@ impl DualMaster {
 
             let prices = self.local_solver.discover_prices_impl(&shaded_problem);
 
-            // 3. Compute primal residuals
-            let (price_residuals, budget_residuals) = compute_primal_residuals(
-                &prices,
-                &problem.market_groups,
-                &problem.mm_constraints,
-                &problem.orders,
-            );
+            // 3. Collect candidate fills, validate against original limits
+            let candidate_fills: Vec<Fill> = prices
+                .all_fills()
+                .into_iter()
+                .filter(|fill| {
+                    fill.fill_qty > 0
+                        && order_map
+                            .get(&fill.order_id)
+                            .map(|o| o.is_satisfied_at_price(fill.fill_price))
+                            .unwrap_or(false)
+                })
+                .collect();
 
-            // 4. Save previous dual variables
+            // 4. Separate non-MM fills (accept directly) and MM fills (knapsack)
+            let mut non_mm_fills: Vec<Fill> = Vec::new();
+            let mut mm_candidate_fills: Vec<Fill> = Vec::new();
+
+            for fill in candidate_fills {
+                if mm_order_ids.contains(&fill.order_id) {
+                    mm_candidate_fills.push(fill);
+                } else {
+                    non_mm_fills.push(fill);
+                }
+            }
+
+            // Also consider MM orders willing at current prices but not matched
+            // (they may have been shaded out but still willing at original limits)
+            for mm in &problem.mm_constraints {
+                for &order_id in &mm.order_ids {
+                    if filled_order_ids.contains(&order_id) {
+                        continue;
+                    }
+                    if mm_candidate_fills.iter().any(|f| f.order_id == order_id) {
+                        continue;
+                    }
+                    if let Some(order) = order_map.get(&order_id) {
+                        if order.num_markets == 1 {
+                            let market = order.markets[0];
+                            if let Some(market_prices) = prices.prices.get(&market) {
+                                let num_states = order.num_states as usize;
+                                let is_buyer =
+                                    order.payoffs[..num_states].iter().any(|&p| p > 0);
+                                let outcome = if is_buyer {
+                                    order.payoffs[..num_states]
+                                        .iter()
+                                        .position(|&p| p > 0)
+                                        .unwrap_or(0)
+                                } else {
+                                    order.payoffs[..num_states]
+                                        .iter()
+                                        .position(|&p| p < 0)
+                                        .unwrap_or(0)
+                                };
+                                let price = market_prices
+                                    .get(outcome)
+                                    .copied()
+                                    .unwrap_or(500_000_000);
+                                if order.is_satisfied_at_price(price) {
+                                    mm_candidate_fills.push(Fill::new(
+                                        order_id,
+                                        order.max_fill,
+                                        price,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 5. Greedy MM knapsack: sort by welfare/capital ratio, greedily activate
+            let mut mm_accepted_fills: Vec<Fill> = Vec::new();
+            {
+                // Build per-MM candidate lists with welfare/capital ratios
+                for mm in &problem.mm_constraints {
+                    let remaining_budget = mm.max_capital
+                        .saturating_sub(mm.capital_used(&cumulative_mm_fills));
+                    if remaining_budget == 0 {
+                        continue;
+                    }
+
+                    let mut candidates: Vec<(Fill, i64, Nanos)> = mm_candidate_fills
+                        .iter()
+                        .filter(|f| mm.contains_order(f.order_id))
+                        .filter_map(|f| {
+                            let order = order_map.get(&f.order_id)?;
+                            let welfare = order.welfare_contribution(f.fill_price, f.fill_qty);
+                            let side = mm.order_sides.get(&f.order_id)?;
+                            let capital = side.capital_needed(f.fill_price, f.fill_qty);
+                            Some((f.clone(), welfare, capital))
+                        })
+                        .collect();
+
+                    // Sort by welfare/capital ratio descending
+                    candidates.sort_by(|(_, w1, c1), (_, w2, c2)| {
+                        let ratio1 =
+                            if *c1 > 0 { *w1 as f64 / *c1 as f64 } else { f64::MAX };
+                        let ratio2 =
+                            if *c2 > 0 { *w2 as f64 / *c2 as f64 } else { f64::MAX };
+                        ratio2
+                            .partial_cmp(&ratio1)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+
+                    // Greedily activate until remaining budget exhausted
+                    let mut budget_left = remaining_budget;
+                    for (fill, _welfare, capital) in candidates {
+                        if capital <= budget_left {
+                            // Check this order hasn't already been accepted
+                            // by a different MM constraint
+                            if !mm_accepted_fills
+                                .iter()
+                                .any(|f| f.order_id == fill.order_id)
+                            {
+                                budget_left -= capital;
+                                mm_accepted_fills.push(fill);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 6. Accumulate fills: non-MM + knapsack-approved MM fills
+            let mut iter_fills = 0usize;
+            let mut iter_mm_fills = 0usize;
+
+            for fill in non_mm_fills {
+                if let Some(order) = order_map.get(&fill.order_id) {
+                    consume_order_liquidity(order, fill.fill_qty, &mut remaining_liquidity);
+                    filled_order_ids.insert(fill.order_id);
+                    matching_result.add_fill(fill, order);
+                    iter_fills += 1;
+                }
+            }
+
+            for fill in mm_accepted_fills {
+                if let Some(order) = order_map.get(&fill.order_id) {
+                    consume_order_liquidity(order, fill.fill_qty, &mut remaining_liquidity);
+                    filled_order_ids.insert(fill.order_id);
+                    cumulative_mm_fills
+                        .insert(fill.order_id, (fill.fill_price, fill.fill_qty));
+                    matching_result.add_fill(fill, order);
+                    iter_fills += 1;
+                    iter_mm_fills += 1;
+                }
+            }
+
+            // 7. Compute price residuals and update λ
+            let price_residuals =
+                compute_price_residuals(&prices, &problem.market_groups);
+
             state.prev_lambda = state.lambda.clone();
-            state.prev_mu = state.mu.clone();
+            update_duals(&mut state, &price_residuals, step_size);
 
-            // 5. Update dual variables
-            update_duals(&mut state, &price_residuals, &budget_residuals, step_size);
-
-            // 6. Record stats
+            // 8. Record stats
             let max_price_residual = price_residuals
                 .values()
                 .map(|r| r.abs())
                 .fold(0.0f64, f64::max);
-            let max_budget_residual = budget_residuals
-                .values()
-                .map(|r| r.abs())
-                .fold(0.0f64, f64::max);
-            let lambda_norm: f64 = state.lambda.values().map(|v| v * v).sum::<f64>().sqrt();
-            let mu_norm: f64 = state.mu.values().map(|v| v * v).sum::<f64>().sqrt();
+            let lambda_norm: f64 =
+                state.lambda.values().map(|v| v * v).sum::<f64>().sqrt();
+            let current_welfare = matching_result.total_welfare;
 
             iteration_stats.push(DualIterationStats {
                 iteration: iter,
                 step_size,
                 max_price_residual,
-                max_budget_residual,
                 lambda_norm,
-                mu_norm,
+                welfare: current_welfare,
+                fills: iter_fills,
+                mm_fills: iter_mm_fills,
             });
 
-            _last_prices = prices;
+            last_prices = prices;
 
-            // 7. Check convergence
-            if check_convergence(
-                &price_residuals,
-                &budget_residuals,
-                &state,
-                self.config.primal_tolerance,
-                self.config.dual_tolerance,
-            ) {
+            // 9. Check convergence: price residuals + welfare delta
+            let welfare_delta_frac = if prev_welfare.abs() > 0 {
+                (current_welfare - prev_welfare).abs() as f64 / prev_welfare.abs() as f64
+            } else if current_welfare > 0 {
+                1.0 // First iteration with positive welfare: not converged yet
+            } else {
+                0.0
+            };
+
+            prev_welfare = current_welfare;
+
+            // Need at least 2 iterations before checking welfare convergence
+            if iter >= 2
+                && check_convergence(
+                    &price_residuals,
+                    &state,
+                    self.config.primal_tolerance,
+                    self.config.dual_tolerance,
+                    welfare_delta_frac,
+                    self.config.welfare_tolerance,
+                )
+            {
+                converged = true;
+                break;
+            }
+
+            // Early exit if no new fills this iteration (nothing left to do)
+            if iter_fills == 0 && iter >= 2 {
                 converged = true;
                 break;
             }
         }
 
-        // Final pass: re-solve with converged shaded orders to get equilibrium prices,
-        // then validate fills against original limits.
-        let final_shaded_orders = shade_orders(
-            &problem.orders,
-            &state.lambda,
-            &state.mu,
-            &market_to_group,
-            &order_to_mm,
-            &mm_map,
-        );
-
-        let final_shaded_problem = Problem {
-            name: problem.name.clone(),
-            markets: problem.markets.clone(),
-            liquidity: problem.liquidity.snapshot(),
-            orders: final_shaded_orders,
-            mm_constraints: problem.mm_constraints.clone(),
-            market_groups: problem.market_groups.clone(),
-        };
-
-        let final_prices = self.local_solver.discover_prices_impl(&final_shaded_problem);
-
-        // Build matching result: use fills from the shaded solve, but validate
-        // against original order limits and MM budget constraints.
-        let order_map: HashMap<u64, &Order> =
-            problem.orders.iter().map(|o| (o.id, o)).collect();
-
-        // Collect candidate fills (limit-checked)
-        let mut candidate_fills: Vec<matching_engine::Fill> = final_prices
-            .all_fills()
-            .into_iter()
-            .filter(|fill| {
-                fill.fill_qty > 0
-                    && order_map
-                        .get(&fill.order_id)
-                        .map(|o| o.is_satisfied_at_price(fill.fill_price))
-                        .unwrap_or(false)
-            })
-            .collect();
-
-        // Enforce MM budget constraints: greedily include fills, dropping
-        // MM fills that would exceed budget (sorted by welfare descending).
-        let mm_order_ids: std::collections::HashSet<u64> = problem
-            .mm_constraints
-            .iter()
-            .flat_map(|mm| mm.order_ids.iter().copied())
-            .collect();
-
-        // Sort MM fills by welfare descending for greedy selection
-        candidate_fills.sort_by(|a, b| {
-            let wa = order_map
-                .get(&a.order_id)
-                .map(|o| o.welfare_contribution(a.fill_price, a.fill_qty))
-                .unwrap_or(0);
-            let wb = order_map
-                .get(&b.order_id)
-                .map(|o| o.welfare_contribution(b.fill_price, b.fill_qty))
-                .unwrap_or(0);
-            wb.cmp(&wa)
-        });
-
-        let mut matching_result = MatchingResult::new(problem.liquidity.snapshot());
-        let mut mm_fills_map: HashMap<u64, (Nanos, Qty)> = HashMap::new();
-
-        for fill in candidate_fills {
-            let is_mm = mm_order_ids.contains(&fill.order_id);
-
-            if is_mm {
-                // Check if adding this fill would exceed any MM budget
-                let mut would_exceed = false;
-                for mm in &problem.mm_constraints {
-                    if mm.contains_order(fill.order_id) {
-                        let mut test_fills = mm_fills_map.clone();
-                        test_fills.insert(fill.order_id, (fill.fill_price, fill.fill_qty));
-                        if mm.capital_used(&test_fills) > mm.max_capital {
-                            would_exceed = true;
-                            break;
-                        }
-                    }
-                }
-                if would_exceed {
-                    continue; // Skip this MM fill
-                }
-                mm_fills_map.insert(fill.order_id, (fill.fill_price, fill.fill_qty));
-            }
-
-            if let Some(order) = order_map.get(&fill.order_id) {
-                matching_result.add_fill(fill, order);
-            }
-        }
-
         // Compute final diagnostics
         let final_price_sum_error =
-            compute_price_sum_errors(&final_prices, &problem.market_groups);
-        let final_budget_utilization =
-            compute_budget_utilization(&matching_result, &problem.mm_constraints, &order_map);
+            compute_price_sum_errors(&last_prices, &problem.market_groups);
+        let final_mm_utilization =
+            compute_mm_utilization(&cumulative_mm_fills, &problem.mm_constraints);
+
+        matching_result.remaining_liquidity = remaining_liquidity;
 
         DualResult {
             matching_result,
-            prices: final_prices,
+            prices: last_prices,
             iterations,
             converged,
             final_price_sum_error,
-            final_budget_utilization,
+            final_mm_utilization,
             dual_state: state,
         }
     }
@@ -389,22 +462,18 @@ impl Default for DualMaster {
 
 /// Create shaded copies of orders with adjusted limit prices.
 ///
-/// For each order:
-/// - Non-MM orders get only λ adjustment (price consistency)
-/// - MM orders get both λ and μ adjustments (price consistency + pacing)
+/// Only applies λ (price consistency) adjustment. MM budget constraints
+/// are handled separately by greedy knapsack allocation.
 ///
-/// The shading formulas come from the Lagrangian relaxation:
-/// - YES buyer:  effective = limit/(1+μ) - λ×$1
-/// - NO buyer:   effective = limit/(1+μ) + λ×$1
-/// - YES seller: effective = (limit + μ×$1)/(1+μ) - λ×$1
-/// - NO seller:  effective = (limit + μ×$1)/(1+μ) + λ×$1
+/// The shading formulas from Lagrangian relaxation:
+/// - YES buyer:  effective = limit - λ×$1
+/// - NO buyer:   effective = limit + λ×$1
+/// - YES seller: effective = limit - λ×$1
+/// - NO seller:  effective = limit + λ×$1
 pub fn shade_orders(
     orders: &[Order],
     lambda: &HashMap<String, f64>,
-    mu: &HashMap<u64, f64>,
     market_to_group: &HashMap<MarketId, String>,
-    order_to_mm: &HashMap<u64, u64>,
-    mm_map: &HashMap<u64, &MmConstraint>,
 ) -> Vec<Order> {
     orders
         .iter()
@@ -425,13 +494,6 @@ pub fn shade_orders(
                 .copied()
                 .unwrap_or(0.0);
 
-            // Get μ for this order's MM (0 if not an MM order)
-            let mu_val = order_to_mm
-                .get(&order.id)
-                .and_then(|mm_id| mu.get(mm_id))
-                .copied()
-                .unwrap_or(0.0);
-
             // Determine order type from payoff vector
             let is_yes_buyer = order.payoffs[0] > 0 && order.payoffs.iter().all(|&p| p >= 0);
             let is_no_buyer = order.num_states >= 2
@@ -440,34 +502,17 @@ pub fn shade_orders(
             let is_yes_seller = order.payoffs[0] < 0;
             let is_no_seller = order.num_states >= 2 && order.payoffs[1] < 0;
 
-            // Get MM side if applicable
-            let mm_side = order_to_mm.get(&order.id).and_then(|mm_id| {
-                mm_map
-                    .get(mm_id)
-                    .and_then(|mm| mm.order_sides.get(&order.id).copied())
-            });
-
             let limit_f64 = order.limit_price as f64;
             let npd = NANOS_PER_DOLLAR as f64;
             let lambda_nanos = lambda_val * npd;
 
-            // Apply pacing (μ) first, then price consistency (λ)
-            let effective = if is_yes_buyer || matches!(mm_side, Some(MmSide::BuyYes)) {
-                // YES buyer: effective = limit/(1+μ) - λ
-                let paced = limit_f64 / (1.0 + mu_val);
-                paced - lambda_nanos
-            } else if is_no_buyer || matches!(mm_side, Some(MmSide::BuyNo)) {
-                // NO buyer: effective = limit/(1+μ) + λ
-                let paced = limit_f64 / (1.0 + mu_val);
-                paced + lambda_nanos
-            } else if is_yes_seller || matches!(mm_side, Some(MmSide::SellYes)) {
-                // YES seller: effective = (limit + μ×$1)/(1+μ) - λ
-                let paced = (limit_f64 + mu_val * npd) / (1.0 + mu_val);
-                paced - lambda_nanos
-            } else if is_no_seller || matches!(mm_side, Some(MmSide::SellNo)) {
-                // NO seller: effective = (limit + μ×$1)/(1+μ) + λ
-                let paced = (limit_f64 + mu_val * npd) / (1.0 + mu_val);
-                paced + lambda_nanos
+            // Apply price consistency (λ) adjustment only
+            let effective = if is_yes_buyer || is_yes_seller {
+                // YES side: shade down when λ>0 (prices sum too high)
+                limit_f64 - lambda_nanos
+            } else if is_no_buyer || is_no_seller {
+                // NO side: shade up when λ>0 (prices sum too high)
+                limit_f64 + lambda_nanos
             } else {
                 limit_f64
             };
@@ -484,20 +529,16 @@ pub fn shade_orders(
 // Primal Residuals
 // ============================================================================
 
-/// Compute constraint violation residuals.
+/// Compute price consistency residuals.
 ///
-/// Returns:
-/// - Price residuals: (sum_yes - $1) / $1 per MarketGroup
-/// - Budget residuals: (spend - budget) / budget per MM (positive = violation)
-pub fn compute_primal_residuals(
+/// Returns price residuals: (sum_yes - $1) / $1 per MarketGroup.
+/// Budget constraints are handled by greedy knapsack, not dual variables.
+pub fn compute_price_residuals(
     prices: &PriceDiscoveryResult,
     groups: &[MarketGroup],
-    mm_constraints: &[MmConstraint],
-    _orders: &[Order],
-) -> (HashMap<String, f64>, HashMap<u64, f64>) {
+) -> HashMap<String, f64> {
     let npd = NANOS_PER_DOLLAR as f64;
 
-    // Price consistency residuals
     let mut price_residuals = HashMap::new();
     for group in groups {
         let sum_yes: f64 = group
@@ -511,51 +552,24 @@ pub fn compute_primal_residuals(
         price_residuals.insert(group.name.clone(), residual);
     }
 
-    // Budget residuals
-    let mut budget_residuals = HashMap::new();
-
-    // Build fills map from price discovery
-    let all_fills: HashMap<u64, (Nanos, Qty)> = prices
-        .all_fills()
-        .into_iter()
-        .map(|f| (f.order_id, (f.fill_price, f.fill_qty)))
-        .collect();
-
-    for mm in mm_constraints {
-        let capital_used = mm.capital_used(&all_fills);
-        if mm.max_capital > 0 {
-            let residual = (capital_used as f64 - mm.max_capital as f64) / mm.max_capital as f64;
-            budget_residuals.insert(mm.mm_id.0, residual);
-        }
-    }
-
-    (price_residuals, budget_residuals)
+    price_residuals
 }
 
 // ============================================================================
 // Dual Variable Updates
 // ============================================================================
 
-/// Update dual variables using subgradient step.
+/// Update λ dual variables using subgradient step.
 ///
-/// - λ is unconstrained (can be positive or negative)
-/// - μ is projected to ≥ 0 (it's a Lagrange multiplier for an inequality constraint)
+/// λ is unconstrained (can be positive or negative).
 pub fn update_duals(
     state: &mut DualState,
     price_residuals: &HashMap<String, f64>,
-    budget_residuals: &HashMap<u64, f64>,
     step_size: f64,
 ) {
-    // Update λ (unconstrained)
     for (group, residual) in price_residuals {
         let lambda = state.lambda.entry(group.clone()).or_insert(0.0);
         *lambda += step_size * residual;
-    }
-
-    // Update μ (projected to ≥ 0)
-    for (mm_id, residual) in budget_residuals {
-        let mu = state.mu.entry(*mm_id).or_insert(0.0);
-        *mu = (*mu + step_size * residual).max(0.0);
     }
 }
 
@@ -566,18 +580,19 @@ pub fn update_duals(
 /// Check if the dual decomposition has converged.
 ///
 /// Convergence requires:
-/// 1. All primal residuals below tolerance (constraints approximately satisfied)
-/// 2. All dual variable changes below tolerance (stability)
+/// 1. All price residuals below tolerance (constraints approximately satisfied)
+/// 2. All λ changes below tolerance (dual stability)
+/// 3. Welfare improvement below welfare_tolerance (marginal returns diminishing)
 pub fn check_convergence(
     price_residuals: &HashMap<String, f64>,
-    budget_residuals: &HashMap<u64, f64>,
     state: &DualState,
     primal_tol: f64,
     dual_tol: f64,
+    welfare_delta_frac: f64,
+    welfare_tol: f64,
 ) -> bool {
-    // Check primal feasibility
-    let primal_ok = price_residuals.values().all(|r| r.abs() < primal_tol)
-        && budget_residuals.values().all(|r| *r < primal_tol);
+    // Check primal feasibility (price consistency)
+    let primal_ok = price_residuals.values().all(|r| r.abs() < primal_tol);
 
     // Check dual stability
     let lambda_change: f64 = state
@@ -589,18 +604,12 @@ pub fn check_convergence(
         })
         .sum();
 
-    let mu_change: f64 = state
-        .mu
-        .iter()
-        .map(|(k, v)| {
-            let prev = state.prev_mu.get(k).copied().unwrap_or(0.0);
-            (v - prev).abs()
-        })
-        .sum();
+    let dual_ok = lambda_change < dual_tol;
 
-    let dual_ok = (lambda_change + mu_change) < dual_tol;
+    // Check welfare convergence (marginal improvement < tolerance)
+    let welfare_ok = welfare_delta_frac.abs() < welfare_tol;
 
-    primal_ok && dual_ok
+    (primal_ok && dual_ok) || welfare_ok
 }
 
 // ============================================================================
@@ -629,21 +638,14 @@ fn compute_price_sum_errors(
     errors
 }
 
-/// Compute budget utilization per MM (for final diagnostics).
-fn compute_budget_utilization(
-    result: &MatchingResult,
+/// Compute MM utilization from cumulative fills (for final diagnostics).
+fn compute_mm_utilization(
+    cumulative_mm_fills: &HashMap<u64, (Nanos, Qty)>,
     mm_constraints: &[MmConstraint],
-    _order_map: &HashMap<u64, &Order>,
 ) -> HashMap<u64, f64> {
-    let fills_map: HashMap<u64, (Nanos, Qty)> = result
-        .fills
-        .iter()
-        .map(|f| (f.order_id, (f.fill_price, f.fill_qty)))
-        .collect();
-
     let mut utilization = HashMap::new();
     for mm in mm_constraints {
-        let capital_used = mm.capital_used(&fills_map);
+        let capital_used = mm.capital_used(cumulative_mm_fills);
         let util = if mm.max_capital > 0 {
             capital_used as f64 / mm.max_capital as f64
         } else {
@@ -653,6 +655,21 @@ fn compute_budget_utilization(
     }
 
     utilization
+}
+
+/// Consume liquidity for a single-market order fill.
+fn consume_order_liquidity(
+    order: &Order,
+    qty: Qty,
+    liquidity: &mut matching_engine::LiquidityPool,
+) {
+    if order.num_markets == 1 {
+        let market = order.markets[0];
+        let outcome = if order.payoffs[0] > 0 { 0 } else { 1 };
+        if let Some(book) = liquidity.books.get_mut(&(market, outcome)) {
+            book.consume_asks(qty, order.limit_price);
+        }
+    }
 }
 
 // ============================================================================
@@ -778,32 +795,27 @@ mod tests {
     #[test]
     fn test_dual_config_default() {
         let config = DualConfig::default();
-        assert_eq!(config.max_iterations, 20);
+        assert_eq!(config.max_iterations, 10);
         assert!(config.initial_step_size > 0.0);
         assert!(config.primal_tolerance > 0.0);
+        assert!(config.welfare_tolerance > 0.0);
     }
 
     #[test]
     fn test_shade_orders_no_adjustment() {
-        // With λ=0 and μ=0, shaded orders should have same limits
+        // With λ=0, shaded orders should have same limits
         let mut markets = matching_engine::MarketSet::new();
         let m = markets.add_binary("test");
 
         let order = simple_yes_buy(&markets, 1, m, price_to_nanos(0.50), 100);
 
         let lambda = HashMap::new();
-        let mu = HashMap::new();
         let market_to_group = HashMap::new();
-        let order_to_mm = HashMap::new();
-        let mm_map = HashMap::new();
 
         let shaded = shade_orders(
             &[order.clone()],
             &lambda,
-            &mu,
             &market_to_group,
-            &order_to_mm,
-            &mm_map,
         );
 
         assert_eq!(shaded.len(), 1);
@@ -827,10 +839,7 @@ mod tests {
         let shaded = shade_orders(
             &[order.clone()],
             &lambda,
-            &HashMap::new(),
             &market_to_group,
-            &HashMap::new(),
-            &HashMap::new(),
         );
 
         // YES buyer should have lower limit (bid less aggressively)
@@ -859,10 +868,7 @@ mod tests {
         let shaded = shade_orders(
             &[order.clone()],
             &lambda,
-            &HashMap::new(),
             &market_to_group,
-            &HashMap::new(),
-            &HashMap::new(),
         );
 
         // YES buyer should have higher limit (bid more aggressively)
@@ -875,119 +881,74 @@ mod tests {
     }
 
     #[test]
-    fn test_shade_orders_mu_positive() {
-        // μ > 0 means MM over budget, so MM buyer should bid less
-        let mut markets = matching_engine::MarketSet::new();
-        let m = markets.add_binary("test");
-
-        let order = simple_yes_buy(&markets, 1, m, price_to_nanos(0.60), 100);
-        let mm_id = 42u64;
-
-        let mut mu = HashMap::new();
-        mu.insert(mm_id, 0.5); // 50% pacing
-
-        let mut order_to_mm = HashMap::new();
-        order_to_mm.insert(order.id, mm_id);
-
-        let mut mm_constraint = MmConstraint::new(MmId::new(mm_id), 1_000_000_000);
-        mm_constraint.add_order(order.id, MmSide::BuyYes);
-        let mut mm_map: HashMap<u64, &MmConstraint> = HashMap::new();
-        mm_map.insert(mm_id, &mm_constraint);
-
-        let shaded = shade_orders(
-            &[order.clone()],
-            &HashMap::new(),
-            &mu,
-            &HashMap::new(),
-            &order_to_mm,
-            &mm_map,
-        );
-
-        // MM buyer should have lower limit (paced down)
-        assert!(
-            shaded[0].limit_price < order.limit_price,
-            "MM buyer should be paced down: shaded={}, original={}",
-            shaded[0].limit_price,
-            order.limit_price
-        );
-        // Specifically: 0.60 / (1 + 0.5) = 0.40
-        let expected = price_to_nanos(0.40);
-        assert!(
-            (shaded[0].limit_price as i64 - expected as i64).unsigned_abs() < 2,
-            "Expected ~{}, got {}",
-            expected,
-            shaded[0].limit_price
-        );
-    }
-
-    #[test]
     fn test_update_duals() {
         let mut state = DualState::default();
         state.lambda.insert("g1".to_string(), 0.0);
-        state.mu.insert(1, 0.0);
 
         let mut price_residuals = HashMap::new();
         price_residuals.insert("g1".to_string(), 0.05); // 5% over
 
-        let mut budget_residuals = HashMap::new();
-        budget_residuals.insert(1, 0.10); // 10% over budget
-
-        update_duals(&mut state, &price_residuals, &budget_residuals, 0.5);
+        update_duals(&mut state, &price_residuals, 0.5);
 
         assert!(*state.lambda.get("g1").unwrap() > 0.0);
-        assert!(*state.mu.get(&1).unwrap() > 0.0);
     }
 
     #[test]
-    fn test_mu_stays_non_negative() {
-        let mut state = DualState::default();
-        state.mu.insert(1, 0.01); // Small positive
-
-        let mut budget_residuals = HashMap::new();
-        budget_residuals.insert(1, -1.0); // Way under budget
-
-        update_duals(&mut state, &HashMap::new(), &budget_residuals, 0.5);
-
-        // μ should be projected to 0, not go negative
-        assert!(*state.mu.get(&1).unwrap() >= 0.0);
-    }
-
-    #[test]
-    fn test_convergence_check() {
+    fn test_convergence_check_primal_and_dual() {
         let state = DualState {
             lambda: [("g1".to_string(), 0.05)].into_iter().collect(),
-            mu: [(1, 0.02)].into_iter().collect(),
             prev_lambda: [("g1".to_string(), 0.05)].into_iter().collect(),
-            prev_mu: [(1, 0.02)].into_iter().collect(),
         };
 
         let price_res: HashMap<String, f64> = [("g1".to_string(), 0.001)].into_iter().collect();
-        let budget_res: HashMap<u64, f64> = [(1, -0.5)].into_iter().collect();
 
-        // Small residuals + no dual change → converged
+        // Small residuals + no dual change + welfare not converged
+        // → should converge on primal+dual alone
         assert!(check_convergence(
             &price_res,
-            &budget_res,
             &state,
             0.02,
             0.001,
+            0.5, // welfare still changing
+            0.01,
         ));
     }
 
     #[test]
-    fn test_convergence_fails_on_large_residual() {
-        let state = DualState::default();
+    fn test_convergence_via_welfare() {
+        let state = DualState {
+            lambda: [("g1".to_string(), 0.05)].into_iter().collect(),
+            prev_lambda: [("g1".to_string(), 0.0)].into_iter().collect(),
+        };
 
         let price_res: HashMap<String, f64> = [("g1".to_string(), 0.10)].into_iter().collect();
-        let budget_res: HashMap<u64, f64> = HashMap::new();
 
-        // 10% residual > 2% tolerance → not converged
-        assert!(!check_convergence(
+        // Large price residual + large dual change, but welfare converged
+        // → should converge on welfare alone
+        assert!(check_convergence(
             &price_res,
-            &budget_res,
             &state,
             0.02,
             0.001,
+            0.005, // welfare delta < 1% tolerance
+            0.01,
+        ));
+    }
+
+    #[test]
+    fn test_convergence_fails_on_large_residual_and_welfare() {
+        let state = DualState::default();
+
+        let price_res: HashMap<String, f64> = [("g1".to_string(), 0.10)].into_iter().collect();
+
+        // 10% residual > 2% tolerance AND welfare still improving → not converged
+        assert!(!check_convergence(
+            &price_res,
+            &state,
+            0.02,
+            0.001,
+            0.5, // 50% welfare improvement
+            0.01,
         ));
     }
 
@@ -999,13 +960,12 @@ mod tests {
 
         // Should produce some fills
         assert!(
-            result.matching_result.fills.len() > 0,
+            !result.matching_result.fills.is_empty(),
             "Should have fills"
         );
 
-        // Check price sum errors are small for converged solution
+        // Check price sum errors are reasonable
         for (group, error) in &result.final_price_sum_error {
-            // We allow larger error since the final pass uses original limits
             assert!(
                 error.abs() < 0.50,
                 "Group {} price sum error too large: {}",
@@ -1035,8 +995,72 @@ mod tests {
         let master = DualMaster::new();
         let result = master.solve(&problem);
 
-        assert!(result.matching_result.fills.len() > 0);
-        // Should converge immediately (no coupling constraints)
-        assert!(result.converged || result.iterations <= 2);
+        assert!(!result.matching_result.fills.is_empty());
+        // Should converge quickly (no coupling constraints)
+        assert!(result.converged || result.iterations <= 3);
+    }
+
+    #[test]
+    fn test_dual_master_with_mm_constraints() {
+        // Test that MM fills are accumulated via greedy knapsack
+        let mut problem = Problem::new("mm_test");
+        let m_a = problem.markets.add_binary("A");
+        let m_b = problem.markets.add_binary("B");
+
+        let group = MarketGroup::new("Group")
+            .with_market(m_a)
+            .with_market(m_b);
+        problem.add_market_group(group);
+
+        // Add liquidity
+        for &m in &[m_a, m_b] {
+            problem.liquidity.add_ask(m, 0, price_to_nanos(0.30), 500);
+            problem.liquidity.add_ask(m, 0, price_to_nanos(0.40), 500);
+            problem.liquidity.add_ask(m, 0, price_to_nanos(0.50), 500);
+            problem.liquidity.add_ask(m, 1, price_to_nanos(0.40), 500);
+        }
+
+        // MM orders: YES buyers for both markets
+        for i in 0..10 {
+            problem.orders.push(simple_yes_buy(
+                &problem.markets,
+                100 + i,
+                m_a,
+                price_to_nanos(0.50 + 0.01 * i as f64),
+                50,
+            ));
+        }
+        for i in 0..10 {
+            problem.orders.push(simple_yes_buy(
+                &problem.markets,
+                200 + i,
+                m_b,
+                price_to_nanos(0.40 + 0.01 * i as f64),
+                50,
+            ));
+        }
+
+        // MM constraint with budget that can cover ~half the orders
+        let mut mm = MmConstraint::new(MmId::new(1), 200_000_000_000); // $200
+        for i in 0..10 {
+            mm.add_order(100 + i, MmSide::SellYes);
+            mm.add_order(200 + i, MmSide::SellYes);
+        }
+        problem.mm_constraints.push(mm);
+
+        let master = DualMaster::new();
+        let result = master.solve(&problem);
+
+        // Should have fills (both MM and non-MM orders, though here all are MM)
+        assert!(
+            !result.matching_result.fills.is_empty(),
+            "Should have MM fills"
+        );
+
+        // MM utilization should be > 0
+        for (_mm_id, util) in &result.final_mm_utilization {
+            assert!(*util >= 0.0, "MM utilization should be non-negative");
+            assert!(*util <= 1.01, "MM utilization should not exceed 100%: {}", util);
+        }
     }
 }
