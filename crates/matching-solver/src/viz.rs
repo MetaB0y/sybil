@@ -150,6 +150,9 @@ pub struct OrderSnapshot {
     pub markets: Vec<String>,
     /// Order type: "single", "bundle", or "spread"
     pub order_type: String,
+    /// Side: "bid" (buying YES) or "ask" (selling YES / buying NO)
+    /// For bundles, this is based on the first market's payoff
+    pub side: String,
     /// Whether this is an all-or-none order
     pub is_aon: bool,
     /// Whether this is a market maker order
@@ -606,10 +609,20 @@ impl VizSnapshot {
                     "bundle".to_string()
                 };
 
+                // Determine side based on payoffs
+                // payoffs[0] > 0 means long first outcome (YES for single-market) = "bid"
+                // payoffs[0] < 0 or payoffs[1] > 0 means short first / long second = "ask"
+                let side = if order.num_states > 0 && order.payoffs[0] > 0 {
+                    "bid".to_string()
+                } else {
+                    "ask".to_string()
+                };
+
                 OrderSnapshot {
                     id: order.id,
                     markets: order_markets,
                     order_type,
+                    side,
                     is_aon: order.is_all_or_none(),
                     is_mm: mm_order_ids.contains(&order.id),
                     limit_price: order.limit_price as f64 / NANOS_PER_DOLLAR as f64,
@@ -841,6 +854,7 @@ mod tests {
                 id: 1,
                 markets: vec!["market_a".to_string()],
                 order_type: "single".to_string(),
+                side: "bid".to_string(),
                 is_aon: false,
                 is_mm: false,
                 limit_price: 0.60,

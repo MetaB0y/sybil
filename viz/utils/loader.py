@@ -93,6 +93,7 @@ class SnapshotData:
                     "id": order.get("id", 0),
                     "markets": ", ".join(order.get("markets", [])),
                     "order_type": order.get("order_type", "unknown"),
+                    "side": order.get("side", "bid"),  # "bid" or "ask"
                     "is_aon": order.get("is_aon", False),
                     "is_mm": order.get("is_mm", False),
                     "limit_price": order.get("limit_price", 0.0),
