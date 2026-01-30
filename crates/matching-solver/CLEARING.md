@@ -8,21 +8,30 @@ sense.
 We run a prediction market where each event (e.g. "2024 Election") has multiple
 mutually exclusive outcomes (Trump, Harris, Other). Each outcome is a separate
 binary market. These binary markets are linked by a `MarketGroup` that declares
-them mutually exclusive. This is the only multi-outcome representation — there
-are no "native" multi-outcome markets.
+them mutually exclusive. There are no "native" multi-outcome markets.
 
 A binary market has two states: YES (state 0) and NO (state 1).
 
-The fundamental constraint: across a MarketGroup, YES prices must sum to $1.
-If Trump=0.45, Harris=0.40, Other=0.15, then sum=1.00. If they don't sum to $1,
-there is free money on the table (arbitrage).
+**Coupling constraints** make this harder than independent per-market clearing:
 
-The solver has two mechanisms:
+1. **Price consistency:** across a MarketGroup, YES prices must sum to $1.
+   If Trump=0.45, Harris=0.40, Other=0.15, sum=1.00. Deviation = free money.
+2. **MM budget limits:** market makers post orders across many markets, but their
+   total capital exposure is capped. Fills must respect this joint budget.
 
-1. **Unified binary clearing** — within each binary market, a single clearing
-   price P is found. P_NO = $1 - P automatically. One market, one price.
-2. **Negrisk arbitrage feedback** — across a MarketGroup, synthetic arbitrage
-   orders push YES prices toward sum=$1 through market forces.
+The solver has three mechanisms, each addressing different constraints:
+
+| # | Mechanism | Constraint Handled | Approach |
+|---|-----------|-------------------|----------|
+| 1 | Unified binary clearing | P_YES + P_NO = $1 (per market) | Construction |
+| 2 | Negrisk arbitrage feedback | Σ P_YES = $1 (per group) | Heuristic iteration |
+| 3 | Dual decomposition | Σ P_YES = $1 + MM budgets | Lagrangian relaxation |
+
+Mechanisms 2 and 3 are alternative approaches to the cross-market problem. The
+system currently has two pipeline configurations that use them:
+
+- `Pipeline::with_negrisk()` — Mechanisms 1 + 2, with post-hoc MM allocation
+- `Pipeline::with_dual_decomposition()` — Mechanisms 1 + 3
 
 ---
 
@@ -36,28 +45,15 @@ Each binary market has one price. A YES share at price P implies a NO share at
 $1 - P. Unified clearing finds this single price by merging all order flow —
 YES buyers, NO buyers, sellers — into one supply/demand model.
 
-### Why it exists (the bug it fixes)
+### The key identity
 
-The old code (`solve_per_outcome`) ran two independent auctions per market:
+**Buying NO at price Q = selling YES at price ($1 - Q).**
 
-```rust
-for outcome in 0..num_outcomes {
-    let (price, fills, ..) = self.solve_outcome(market_id, outcome, ..);
-    prices[outcome] = price;
-}
-```
-
-Outcome 0 (YES) had its own supply-demand crossing. Outcome 1 (NO) had its own.
-Two separate auctions produced two unrelated prices — P_YES + P_NO could be
-anything. In a real exchange this can't happen: a YES bid IS a NO offer. But the
-batch solver had broken this linkage.
-
-This made negrisk feedback impossible: NO-buy arb orders (for posrisk) were
-invisible to the YES auction, so they had zero effect on YES prices.
+This means every NO buyer adds YES supply, and every NO seller adds YES demand.
+A single supply-demand crossing determines P_YES, and P_NO = $1 - P_YES follows
+automatically.
 
 ### How it works
-
-The key identity: **buying NO at price Q = selling YES at price ($1 - Q)**.
 
 1. **Classify orders** by payoff vector:
    - `payoffs[0] > 0` → YES buyer
@@ -76,22 +72,22 @@ The key identity: **buying NO at price Q = selling YES at price ($1 - Q)**.
    P_NO = $1 - P_YES. One market, one price, exact.
 
 4. **Generate fills:**
-   - YES buyers filled at P_YES
+   - YES buyers filled at P_YES (buyers pay ≤ limit)
    - NO buyers filled at P_NO = $1 - P_YES
-   - Sellers similarly
+   - Sellers filled at clearing price (sellers receive ≥ limit)
 
-### Example
+### What it guarantees
 
-Trump market:
-- 100 YES buyers at limit $0.60 (100 shares each)
-- 50 NO buyers at limit $0.70 (100 shares each) — from negrisk arb
+- P_YES + P_NO = $1 exactly, by construction
+- All fills respect limit prices (buyer-aware and seller-aware)
+- Per-market welfare is non-negative (each fill has non-negative surplus)
 
-NO buyers convert to YES supply at $1 - $0.70 = $0.30:
-- YES demand: 10,000 shares at $0.60
-- YES supply: 5,000 shares at $0.30
+### What it does NOT do
 
-Crossing: P_YES = $0.30, matched = 5,000 shares.
-P_NO = $0.70. The NO buyers pushed the YES price down to $0.30.
+It does not coordinate prices **across** markets. Three binary markets in an
+election group can independently clear at YES prices 0.50 + 0.40 + 0.40 = 1.30.
+Each is internally consistent (YES + NO = $1), but the group violates sum=$1.
+That's what Mechanisms 2 and 3 address.
 
 ---
 
@@ -105,26 +101,15 @@ When YES prices across a MarketGroup don't sum to $1, the NegriskSolver creates
 synthetic orders that enter the next iteration's price discovery, pushing
 clearing prices toward the correct sum through actual market forces.
 
-### Why it exists
-
-Unified clearing ensures P_YES + P_NO = $1 **within** each binary market. But
-the three separate markets in an election group can still have YES prices
-0.50 + 0.40 + 0.40 = 1.30 (too high). Each market is individually consistent
-(YES + NO = $1), but the group is not (YES prices don't sum to $1).
-
-Direct price normalization (scaling prices) was rejected: it changes prices
-without market justification and can make clearing prices violate order limits.
-
 ### How it works
 
-#### Step 1: Detect the opportunity (`negrisk.rs`)
+#### Step 1: Detect the opportunity
 
 For each MarketGroup, sum the YES prices:
 
 - **Negrisk** (sum < $1): buy YES on all → guaranteed $1 payout for < $1 cost.
 - **Posrisk** (sum > $1): buy NO on all → guaranteed $(N-1) payout for < $(N-1)
   cost (since sum_NO = N×$1 - sum_YES < N-1).
-- **No arb** (sum = $1): nothing to do.
 
 #### Step 2: Create orders with fair-share limits
 
@@ -133,36 +118,25 @@ For each market, create one single-market order:
 - **Negrisk**: buy YES (`payoffs[0] = 1`)
 - **Posrisk**: buy NO (`payoffs[1] = 1`)
 
-The limit price is set to the **fair-share value** — the current price scaled
-proportionally so the group would sum to exactly $1:
+The limit price is the **fair-share value** — the current price scaled
+proportionally so the group sums to exactly $1:
 
 ```
-fair_yes_i = current_yes_i * $1 / sum_yes
+fair_yes_i = current_yes_i × $1 / sum_yes
 ```
 
-For posrisk (buy NO):
-```
-limit_i = $1 - fair_yes_i = $1 - current_yes_i / sum_yes
-```
+**Why fair-share:** current-price limits create zero pressure (orders placed at
+existing clearing price → no demand/supply shift). Fair-share limits undercut
+existing prices, creating actual market force.
 
-**Why fair-share instead of current-price limits:** if arb orders use the
-current price as limit (e.g., Harris NO limit = $0.01 when Harris YES = $0.99),
-they convert to YES supply at $0.99 — the existing clearing price. Zero price
-pressure. With fair-share (Harris NO limit = $0.60), they convert to YES supply
-at $0.40, undercutting the $0.99 clearing and pushing the price down.
+**Is this optimal?** No. Fair-share is a heuristic that approximates the dual
+price signal of the sum=$1 constraint. It pushes prices in the right direction
+but does not guarantee global welfare optimality.
 
-**Is this equivalent to solving a dual LP?** No. The correct approach would be
-a joint LP maximizing welfare across all markets subject to sum=$1. Fair-share
-pricing is a heuristic that approximates the dual price signal. It creates
-pressure in the right direction but does not guarantee global welfare optimality.
-See [Formal Properties](#formal-properties) below.
+**Is this atomic?** No. The arb legs are independent single-market orders. Partial
+execution is possible. The orders are a coordination signal, not a real hedge.
 
-**Is this atomic?** No. The arb orders are individual single-market orders, not
-an atomic bundle. Trump NO can fill while Harris NO doesn't. The synthetic
-"arbitrageur" can lose money on individual legs. This is a known limitation —
-the orders are a coordination signal, not a real hedged position.
-
-#### Step 3: Iterate (`pipeline.rs`)
+#### Step 3: Iterate
 
 The pipeline runs a fixed-point loop (max 5 iterations):
 
@@ -175,231 +149,38 @@ for each iteration:
     check convergence (welfare delta < threshold)
 ```
 
-Arb orders from iteration N enter iteration N+1's LocalSolver. In unified
-clearing, posrisk NO-buy arb orders become YES supply, pushing YES prices down.
-Negrisk YES-buy arb orders add YES demand, pushing YES prices up. Over
-iterations, prices converge toward sum=$1.
-
 #### Step 4: Arb fill filtering
 
-Arb orders participate in clearing (they consume liquidity and influence prices)
-but their fills are **filtered out of the final output**. Only real participant
-fills appear in the `MatchingResult`. This is correct because:
+Arb orders participate in clearing (consume liquidity, influence prices) but
+their fills are filtered out of the final output. Only real participant fills
+appear in the MatchingResult. The last iteration's arb orders never clear — a
+small welfare loss accepted for soundness.
 
-- Arb orders have no real account behind them — settlement would skip them
-- Including them would inflate welfare, volume, and fill count metrics
-- Their purpose is price coordination, not actual trading
+### What it guarantees
 
-The last iteration's arb orders never enter a subsequent price discovery pass.
-These orders are simply dropped — no synthetic fills are injected. This accepts
-a small welfare loss in exchange for soundness.
+- Price sum error decreases over iterations (empirically converges to ~2%)
+- All output fills are real (no synthetic fills in result)
+- Individual market clearing remains exact (P_YES + P_NO = $1)
 
-### Concrete example: Election scenario
+### What it does NOT guarantee
 
-Initial state (batch 0, first price discovery):
-- Trump YES: 0.50, Harris YES: 0.99, Other YES: 0.99
-- Sum = 2.48 (posrisk, profit = $1.48/share)
-
-NegriskSolver creates posrisk arb orders (buy NO):
-- Trump: NO limit = $1 - 0.50/2.48 = $0.80 → YES supply at $0.20
-- Harris: NO limit = $1 - 0.99/2.48 = $0.60 → YES supply at $0.40
-- Other: NO limit = $1 - 0.99/2.48 = $0.60 → YES supply at $0.40
-
-Next iteration, unified clearing sees this new YES supply. Harris YES supply at
-$0.40 undercuts the previous $0.99 clearing, pulling Harris YES down.
-
-After 5 iterations, final prices:
-- Trump: 0.47, Harris: 0.41, Other: 0.13
-- Sum = 1.02 (from 2.48)
+- **Convergence**: runs for a fixed number of iterations, no formal proof
+- **Atomicity**: arb legs can partially execute
+- **Welfare optimality**: heuristic decomposition, not joint optimization
+- **MM budget integration**: budgets handled separately by MmAllocator (post-hoc)
 
 ---
 
-## Architecture: What happens per batch
-
-```
-Sequencer receives orders for batch N
-    |
-    v
-Pipeline::with_negrisk().solve(&problem)
-    |
-    +-- Iteration 1:
-    |   +-- LocalSolver::discover_prices()
-    |   |   `-- For each binary market: solve_binary_market_unified()
-    |   |       +-- Classify YES/NO buyers and sellers
-    |   |       +-- Convert NO buyers -> YES supply at ($1 - limit)
-    |   |       +-- Find unified clearing price P_YES
-    |   |       `-- P_NO = $1 - P_YES
-    |   +-- NegriskSolver::find_arbitrage()
-    |   |   +-- Sum YES prices per MarketGroup
-    |   |   +-- Create arb orders with fair-share limits
-    |   |   `-- Store for next iteration
-    |   +-- MmAllocator::allocate()
-    |   |   `-- Filter fills to MM budget constraints
-    |   `-- ArbitrageDetector (bundle matching)
-    |
-    +-- Iteration 2..5:
-    |   +-- LocalSolver sees arb orders from previous iteration
-    |   |   `-- Arb NO-buy orders become YES supply -> prices adjust
-    |   +-- NegriskSolver recalculates with updated prices
-    |   `-- ...converging toward sum=$1
-    |
-    `-- Return fills, prices, welfare
-```
-
----
-
-## Bugs that were fixed
-
-### 1. Negrisk payoff swap
-
-**Before:** `order.payoffs[0] = payoff_no; order.payoffs[1] = payoff_yes;`
-
-State 0 = YES, state 1 = NO (consistent with `simple_yes_buy()` which sets
-`payoff_at(0, 1)` for YES). The assignment put YES payoff in the NO slot and
-vice versa. Posrisk "buy NO" actually created YES-buy orders. Negrisk "buy YES"
-actually created NO-buy orders.
-
-This was invisible with per-outcome clearing (arb orders had no cross-outcome
-effect anyway). With unified clearing it would push prices the wrong way.
-
-**After:** `order.payoffs[0] = yes_payoff; order.payoffs[1] = no_payoff;`
-
-### 2. Current-price limits
-
-**Before:** `limit_price = current_market_price` (first order got inflated limit
-for welfare attribution; others had zero-welfare limits).
-
-Arb orders at current prices convert to supply/demand AT the existing clearing
-price. Zero price pressure. Prices don't move.
-
-**After:** `limit_price = fair_share_price` (proportional scaling to sum=$1).
-Each order is willing to pay up to the fair value. In unified clearing, this
-creates supply below or demand above the current clearing, moving prices.
-
-### 3. Per-outcome clearing
-
-**Before:** YES and NO cleared in separate independent auctions. A NO buyer was
-invisible to YES clearing. Negrisk NO-buy arb orders had zero effect on YES
-prices.
-
-**After:** One auction per binary market. NO buyers convert to YES supply. The
-clearing sees all participants and finds a single price.
-
----
-
-## Formal Properties
-
-An honest assessment of what this approach guarantees and what it doesn't.
-
-### What IS guaranteed
-
-**Within each binary market:**
-- P_YES + P_NO = $1 (exact, by construction)
-- Clearing maximizes matched volume for a given supply-demand structure
-- All fills respect limit prices (buyers pay <= limit, sellers receive >= limit)
-- Per-market welfare is non-negative (each fill has non-negative surplus)
-
-**Negrisk detection:**
-- Correctly identifies when sum(YES) != $1
-- Profit calculation is correct: $1 - sum for negrisk, sum - $1 for posrisk
-- Fair-share limits sum to exactly $1 across the group
-
-### What is NOT guaranteed
-
-**Global welfare optimality:** each market is cleared independently. The joint
-clearing across all markets in a group is not solved as one optimization. A
-joint LP would find a better or equal solution. The iterative approach is a
-heuristic decomposition.
-
-**Convergence:** the fixed-point iteration is not proven to converge. It runs
-for a fixed 5 iterations and stops. Empirically it converges to within ~2% of
-sum=$1, but there is no formal proof that it always does, or that it converges
-monotonically.
-
-**Atomicity of arb orders:** the arb legs are independent single-market orders.
-If only some legs fill, the synthetic arbitrageur has an exposed position. This
-doesn't affect real participants (the arb is internal to the solver), but it
-means the arb welfare accounting may be inaccurate.
-
-**Conservation across arb legs:** since arb orders are not atomic, the "buy NO
-on all outcomes" strategy may partially execute, which doesn't correspond to a
-real hedged position. The fills are individually valid (each respects its
-market's clearing) but collectively they may not represent a coherent trade.
-
-**Last-iteration welfare loss:** the final iteration's arb orders never enter
-a subsequent price discovery pass, so their price-correction effect is lost.
-This is a small welfare loss accepted for soundness (no synthetic fills are
-injected).
-
-### Comparison to the optimal approach
-
-The theoretically correct approach is a single constrained optimization:
-
-```
-maximize   sum_i  welfare(fill_i)
-subject to:
-  for each market m:
-    sum(buy_qty_m) = sum(sell_qty_m)          [supply-demand balance]
-    clearing_price_m >= seller_limit           [seller constraint]
-    clearing_price_m <= buyer_limit            [buyer constraint]
-  for each MarketGroup g:
-    sum_{m in g} clearing_price_YES_m = $1     [price consistency]
-  for each MM constraint:
-    sum(capital_used) <= budget                 [MM budget]
-```
-
-This is a linear program. It finds the jointly optimal fills and prices.
-
-Our iterative approach decomposes this into:
-- Per-market subproblems (LocalSolver) — handles supply-demand balance and
-  limit constraints
-- Cross-market coordination (NegriskSolver) — approximates the price consistency
-  constraint through synthetic demand/supply
-- MM coordination (MmAllocator) — handles budget constraints
-
-This resembles **dual decomposition** or **Dantzig-Wolfe decomposition** in
-operations research, where a hard problem is split into easy subproblems
-coordinated through price signals (Lagrange multipliers).
-
-The fair-share limit prices act as approximate dual variables for the sum=$1
-constraint. In a proper dual decomposition, you'd update these multipliers using
-subgradient information. Our approach uses proportional scaling instead, which is
-a specific (and not necessarily optimal) update rule.
-
-### What a formal analysis would require
-
-To write a paper with proofs:
-
-1. **Formulate the joint LP** and its dual
-2. **Show the iterative scheme** as a specific decomposition of the LP
-3. **Prove convergence** under conditions on the order book (e.g., sufficient
-   liquidity, bounded price ranges). Likely requires showing the fair-share
-   update is a contraction mapping or satisfies sufficient decrease conditions.
-4. **Bound the welfare gap** between the iterative solution and the LP optimum
-5. **Address atomicity** by either making arb orders atomic (bundle orders) or
-   proving that partial execution still moves prices in the right direction
-
----
-
-## Mechanism 3: Dual Decomposition (New)
+## Mechanism 3: Dual Decomposition
 
 **File:** `dual_master.rs` + `pipeline.rs` (via `Pipeline::with_dual_decomposition()`)
 
 ### What it does
 
-Replaces the ad-hoc NegriskSolver + MmAllocator pipeline with a principled
-**Lagrangian dual decomposition** framework. Coupling constraints (sum=$1
-across MarketGroups, MM budget limits) are relaxed into penalty terms. Per-market
-subproblems are solved independently, and dual variables are updated via
-subgradient descent.
-
-### Why it exists
-
-The NegriskSolver approach (Mechanism 2) has no convergence guarantee and
-uses fair-share pricing as a heuristic approximation of dual variables.
-The MmAllocator does greedy post-hoc filtering instead of incorporating budget
-constraints into the clearing itself. Dual decomposition addresses both
-shortcomings.
+Handles both coupling constraints (price consistency AND MM budgets) through
+**Lagrangian dual decomposition**. Instead of synthetic orders, it adjusts order
+limit prices using dual variables (Lagrange multipliers) so that per-market
+clearing naturally tends toward the coupled constraints.
 
 ### Architecture
 
@@ -413,9 +194,9 @@ Pipeline::with_dual_decomposition().solve(&problem)
   |   +-- Iteration loop (max 20):
   |   |   +-- 1. shade_orders(): adjust limits using λ, μ
   |   |   +-- 2. LocalSolver: solve per-market with shaded orders
-  |   |   +-- 3. compute_primal_residuals(): constraint violations
+  |   |   +-- 3. compute_primal_residuals(): measure constraint violations
   |   |   +-- 4. update_duals(): subgradient step on λ, μ
-  |   |   +-- 5. check_convergence(): primal + dual tolerance
+  |   |   +-- 5. check_convergence(): primal feasibility + dual stability
   |   |
   |   +-- Final pass: re-solve with converged shading, validate
   |   |   against original limits and MM budgets
@@ -424,63 +205,338 @@ Pipeline::with_dual_decomposition().solve(&problem)
   |
   +-- ArbitrageDetector: bundle/spread matching on remaining liquidity
   |
-  +-- Return combined PipelineResult
+  +-- Return PipelineResult
 ```
 
-### Bid Shading Math
+### Bid Shading
 
-The Lagrangian relaxes two constraint types:
+The Lagrangian relaxes coupling constraints into penalty terms that modify each
+order's effective limit price.
 
-**Price Consistency (λ):** For MarketGroup g with constraint Σ P_YES_i = $1:
-- λ > 0 (sum > $1): YES buyers bid less, YES supply increases → prices drop
-- λ < 0 (sum < $1): YES buyers bid more, YES supply decreases → prices rise
+**Price Consistency (λ per MarketGroup):**
 
-Shading formulas:
-- YES buyer:  `effective = limit - λ × $1`
-- NO buyer:   `effective = limit + λ × $1`
-- YES seller: `effective = limit - λ × $1`
-- NO seller:  `effective = limit + λ × $1`
+For group g with constraint Σ P_YES_i = $1:
 
-**Pacing (μ):** For MM k with budget constraint Σ capital ≤ B_k:
-- μ > 0 (over budget): MM bids less aggressively
+| Order type | Effective limit |
+|------------|----------------|
+| YES buyer | `limit - λ × $1` |
+| NO buyer | `limit + λ × $1` |
+| YES seller | `limit - λ × $1` |
+| NO seller | `limit + λ × $1` |
 
-Shading formulas (MM orders only):
-- BuyYes/BuyNo:  `paced = limit / (1 + μ)`
-- SellYes/SellNo: `paced = (limit + μ × $1) / (1 + μ)`
+When λ > 0 (posrisk, sum > $1): YES buyers bid less, YES supply increases → YES
+prices drop. When λ < 0 (negrisk): the reverse.
 
-Both adjustments compose: pacing first, then price consistency.
+**Pacing (μ per MM):**
 
-### Convergence
+For MM k with constraint Σ capital ≤ B_k:
 
-- Step size: α_t = α_0 / √t (diminishing, standard for subgradient)
-- Primal tolerance: 2% of $1 for price sum, 2% for budget
-- Dual tolerance: 0.1% change in dual variables
+| Order type | Paced limit |
+|------------|-------------|
+| Buy (YES/NO) | `limit / (1 + μ)` |
+| Sell (YES/NO) | `(limit + μ × $1) / (1 + μ)` |
 
-The subgradient method guarantees convergence to within ε of optimal for
-convex problems with diminishing step sizes. Our per-market subproblems
-are piecewise-linear (LP), so the Lagrangian dual is convex.
+When μ > 0 (over budget): MM bids less aggressively, gets fewer fills, uses less
+capital. Both adjustments compose: pacing first, then price consistency.
 
-### Comparison to Mechanism 2 (NegriskSolver)
+### Subgradient Updates
 
-| Property | NegriskSolver | Dual Decomposition |
-|----------|--------------|-------------------|
-| Price consistency | Heuristic (fair-share) | Subgradient (principled) |
+After each iteration, measure constraint violations (primal residuals):
+
+- Price residual: `r_λ = (Σ P_YES - $1) / $1` per group
+- Budget residual: `r_μ = (capital_used - budget) / budget` per MM
+
+Update dual variables:
+
+- `λ += α_t × r_λ` (unconstrained — can be positive or negative)
+- `μ = max(0, μ + α_t × r_μ)` (projected — must be non-negative)
+
+Step size: `α_t = α_0 / √t` (diminishing, standard for subgradient methods).
+Default: α_0 = 0.5.
+
+### Final Pass
+
+After convergence, re-solve with the converged shading to get the final fills.
+Then validate:
+
+1. **Limit check**: each fill must satisfy `order.is_satisfied_at_price(fill_price)`.
+   Fills that violate original limits (possible due to shading) are dropped.
+2. **MM budget enforcement**: greedily include MM fills sorted by welfare
+   descending, skipping any that would exceed the budget.
+
+### Convergence Properties
+
+The subgradient method guarantees convergence to within ε of the dual optimum
+for convex problems with diminishing step sizes. Per-market subproblems are
+piecewise-linear (LP), so the Lagrangian dual is convex.
+
+In practice, convergence is checked on two criteria:
+- **Primal feasibility**: all residuals < 2% tolerance
+- **Dual stability**: multiplier changes < 0.1% tolerance
+
+### Comparison to Mechanism 2
+
+| Property | Negrisk (Mech 2) | Dual Decomposition (Mech 3) |
+|----------|-----------------|---------------------------|
+| Price consistency | Fair-share heuristic | Subgradient (principled) |
 | MM budgets | Post-hoc greedy | Bid shading (in-clearing) |
-| Convergence | No guarantee | Subgradient guarantee |
-| Implementation | Synthetic orders | Dual variables |
-| Multi-market orders | Same (ArbitrageDetector) | Same (ArbitrageDetector) |
-
-Both pipelines remain available for comparison:
-- `Pipeline::with_negrisk()` — existing approach
-- `Pipeline::with_dual_decomposition()` — new approach
+| Convergence | No formal guarantee | Subgradient guarantee (convex dual) |
+| Implementation | Synthetic orders | Dual variable adjustment |
+| Multi-market orders | ArbitrageDetector | ArbitrageDetector |
+| Maturity | Battle-tested on sims | Newer, passes all tests |
 
 ### Limitations
 
-**Multi-market orders** are still handled as a post-processing phase
-(ArbitrageDetector after dual convergence). Bundle/spread fills don't feed
-back into the dual decomposition, so their price impact is not captured in
-the equilibrium. This is standard in combinatorial auctions.
+**Multi-market orders** are handled as a post-processing phase (ArbitrageDetector
+after dual convergence). Bundle/spread fills don't feed back into the dual
+decomposition. This is standard in combinatorial auctions but means bundle price
+impact isn't captured in the equilibrium.
 
-**Duality gap**: the subgradient method finds the dual optimum, but the primal
-recovery (mapping dual variables to actual fills) may have a gap. The final
-pass validates all fills against original limits and MM budgets.
+**Duality gap**: the subgradient method finds the dual optimum, but primal
+recovery (mapping dual variables to fills) may have a gap. The final pass
+validates and enforces hard constraints.
+
+**Mixed orders**: `is_seller()` checks if any payoff is negative. For complex
+derivatives (spreads with both positive and negative payoffs), the buyer/seller
+classification may be ambiguous. This affects welfare computation and bid
+shading direction.
+
+---
+
+## MM Budget Allocation
+
+**File:** `mm_allocator.rs`
+
+Used by the negrisk pipeline (Mechanism 2). Dual decomposition (Mechanism 3)
+handles MM budgets directly through pacing multipliers.
+
+### How it works
+
+1. Receive fills from price discovery (which orders matched and at what price)
+2. For unfilled MM orders, estimate fills at clearing prices with max quantity
+3. Compute welfare and capital cost for each MM order:
+   - Welfare: `order.welfare_contribution(fill_price, fill_qty)`
+   - Capital: `side.capital_needed(price, qty)` — BuyYes costs `price × qty`,
+     SellYes costs `(1 - price) × qty`
+4. Sort by welfare/capital ratio (descending)
+5. Greedily activate until budget exhausted
+
+### Budget tracking across iterations
+
+In the fixed-point pipeline, MM fills accumulate across iterations. Each
+iteration's allocator sees a reduced budget (original minus capital already
+committed). The final reported allocation shows cumulative totals with the
+original budget.
+
+---
+
+## Order Representation
+
+**File:** `matching-engine/src/order.rs`
+
+Orders use a payoff vector representation that supports arbitrary derivatives:
+
+```rust
+struct Order {
+    payoffs: [i8; 32],     // per-state payoffs (positive=long, negative=short)
+    limit_price: Nanos,    // max willingness to pay (buyer) / min to receive (seller)
+    min_fill, max_fill: Qty,
+    // ...
+}
+```
+
+### Buyer vs. Seller Detection
+
+```rust
+fn is_seller(&self) -> bool {
+    self.payoffs[..num_states].iter().any(|&p| p < 0)
+}
+```
+
+An order is a seller if it has any negative payoff (short exposure). This drives:
+
+- **welfare_contribution**: `(limit - price) × qty` for buyers,
+  `(price - limit) × qty` for sellers
+- **is_satisfied_at_price**: buyer wants `price ≤ limit`, seller wants
+  `price ≥ limit`
+- **Verifier checks**: PriceExceedsLimit is buyer/seller-aware
+
+**Limitation**: for complex derivatives with mixed payoffs (e.g., a spread that
+is long one outcome and short another), `is_seller()` returns true even though
+the order is not purely a seller. Welfare calculation in this case may not
+perfectly reflect economic surplus.
+
+---
+
+## Result Verification
+
+**File:** `verifier.rs`
+
+The verifier checks every invariant that a ZK circuit would enforce:
+
+| Check | What it validates |
+|-------|-------------------|
+| OrderNotFound | Fill references an order in the problem |
+| QuantityExceedsMax | fill_qty ≤ order.max_fill |
+| QuantityBelowMin | fill_qty ≥ order.min_fill (or fill_qty = 0) |
+| PriceExceedsLimit | Buyer: fill_price ≤ limit. Seller: fill_price ≥ limit |
+| DuplicateFill | Each order filled at most once |
+| NegativeWelfare | Each fill has welfare ≥ 0 |
+| WelfareMismatch | Computed total = reported total (± tolerance) |
+| MmBudgetExceeded | MM capital_used ≤ max_capital |
+| ZeroQuantityFill | No zero-qty fills (strict mode only) |
+
+Two modes:
+- **Lenient** (default): allows zero fills, 1000 nanos welfare tolerance
+- **Strict** (ZK): no zero fills, zero tolerance
+
+---
+
+## Architecture: What happens per batch
+
+### Negrisk Pipeline
+
+```
+Pipeline::with_negrisk().solve(&problem)
+  |
+  +-- Iteration 1..5:
+  |   +-- LocalSolver (unified binary clearing per market)
+  |   +-- NegriskSolver (detect price sum deviations, create arb orders)
+  |   +-- MmAllocator (greedy budget-constrained activation)
+  |   +-- ArbitrageDetector (bundle/spread matching)
+  |   +-- Check convergence (welfare delta)
+  |
+  +-- Filter arb fills from output
+  +-- Report cumulative MM allocation stats
+  +-- Return fills, prices, welfare
+```
+
+### Dual Decomposition Pipeline
+
+```
+Pipeline::with_dual_decomposition().solve(&problem)
+  |
+  +-- DualMaster (λ/μ iteration → shaded clearing → convergence)
+  |   +-- Final pass: validate limits + enforce MM budgets
+  |
+  +-- ArbitrageDetector (bundle/spread matching on remaining liquidity)
+  +-- Return fills, prices, welfare
+```
+
+---
+
+## How We Know It Works
+
+### Test Coverage
+
+**Unit tests (70 in matching-solver):**
+- Per-market clearing correctness (supply/demand crossing, price consistency)
+- Seller-aware welfare computation and price satisfaction
+- MM budget allocation with tight budgets, overlapping MMs, varied welfare
+- Dual decomposition convergence, shading math, residual computation
+- Verifier catches all violation types
+- Property-based tests: budget constraint ALWAYS respected (proptest)
+
+**Integration tests (17):**
+- `tests/validation.rs`: price ranges, MM budgets, fill limits on realistic problems
+- `tests/dual_decomposition.rs`: price sum convergence, MM budget respected,
+  non-negative welfare, limit satisfaction, dual vs. negrisk comparison,
+  two-outcome convergence, no-coupling-constraint fast convergence
+- `tests/welfare_analysis.rs`: stage-by-stage welfare audit
+
+**Simulation (`matching-sim`):**
+- Presets: small (10 markets), medium, large, extreme (200 markets, 100K orders, 10 MMs)
+- Extreme scenario: 100K+ orders, 200 markets, 10 MMs with $50K-$200K budgets
+- All presets pass ZK verification (status: VALID)
+
+### Key Metrics (Extreme scenario)
+
+| Metric | Value | Interpretation |
+|--------|-------|----------------|
+| Fill rate | 64K/101K (63%) | Healthy — limited by liquidity scarcity |
+| MM fill rate | 291/1200 (24%) | Budget-constrained, as designed |
+| MM utilization | 99-100% per MM | Budgets fully used |
+| Welfare | $800K | Positive, non-negative per fill |
+| Verification | VALID | All ZK invariants pass |
+| Negrisk convergence | 26 groups corrected | Sum→$1 via arb feedback |
+
+### What We Don't Yet Measure
+
+- **Welfare gap vs. joint LP optimal**: we don't solve the joint LP to compare.
+  This is the most important missing benchmark.
+- **Price sum error distribution**: we know convergence happens but don't
+  systematically track residual error across scenarios.
+- **Dual decomposition vs. negrisk welfare comparison**: both run on the same
+  problems but we haven't built regression benchmarks.
+
+---
+
+## Known Limitations and Potential Improvements
+
+### Current Limitations
+
+1. **No global welfare optimality guarantee**. Each market is cleared
+   independently. A joint LP would find a better or equal solution. Both
+   negrisk and dual decomposition are decomposition heuristics.
+
+2. **Multi-market orders are second-class**. Bundles and spreads are matched
+   after single-market clearing. They don't influence equilibrium prices.
+   In combinatorial auctions this is standard, but it means bundle welfare
+   is left on the table.
+
+3. **Mixed-payoff order ambiguity**. `is_seller()` checks for any negative
+   payoff. Complex derivatives (spreads, straddles) may be misclassified,
+   leading to incorrect welfare calculation or bid shading direction.
+
+4. **Negrisk arb orders are non-atomic**. Individual legs can fill while
+   others don't. The synthetic arbitrageur has exposed risk. This is
+   internal to the solver (doesn't affect real participants) but makes arb
+   welfare accounting inaccurate.
+
+5. **No adaptive step size in dual decomposition**. Fixed α_0/√t schedule.
+   If convergence stalls, there's no recovery mechanism (e.g., Polyak step
+   or restart).
+
+### Potential Improvements (Ordered by Impact)
+
+**1. Welfare benchmarking against joint LP.**
+Solve the joint LP (even just for small problems or random samples) to measure
+the welfare gap. This tells us how much the decomposition costs in practice.
+Without this, we're flying blind on optimality.
+
+**2. Tighten dual decomposition tolerances.**
+The 2% primal tolerance means price sums can be 0.98 or 1.02. For prediction
+markets where prices ARE probabilities, this is loose. Reducing to 0.5% would
+require more iterations but produce more consistent prices. Investigate
+Polyak step size (uses function value bound) for faster convergence.
+
+**3. Integrate MM budgets into negrisk pipeline.**
+Currently negrisk uses post-hoc MM allocation (MmAllocator). The dual
+decomposition's pacing approach (bid shading for budget constraints) could
+be backported to the negrisk pipeline for better budget-aware clearing.
+
+**4. Mixed-payoff order handling.**
+Replace `is_seller()` with a more nuanced classification for multi-outcome
+orders. For spreads (long one outcome, short another), welfare should consider
+both legs. This matters for correctness of welfare computation and verifier.
+
+**5. Adaptive step size for dual decomposition.**
+Implement Polyak step size: `α_t = (f* - f_t) / ||g_t||²` where f* is a
+target (e.g., best known dual value). This adapts to problem difficulty and
+avoids the slow tail convergence of 1/√t.
+
+**6. Bundle integration into dual decomposition.**
+Add coupling constraints for multi-market orders (one Lagrange multiplier per
+bundle's atomicity constraint). This increases the dual space significantly
+but produces more coherent bundle pricing. Only worth it if bundle volume is
+high.
+
+### What Would NOT Help
+
+- **Direct price normalization** (scaling prices to sum=$1): breaks limit price
+  guarantees. Rejected for good reason.
+- **More negrisk iterations** (beyond 5): diminishing returns. The fundamental
+  issue is that fair-share is a heuristic, not that we iterate too few times.
+- **MILP for the full problem**: intractable for 100K+ orders. The
+  decomposition approach is the right architecture; the question is how good
+  the decomposition is.

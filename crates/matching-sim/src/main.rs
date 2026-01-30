@@ -63,12 +63,11 @@ fn main() {
 
     let start = Instant::now();
 
-    if (solver_choice == SolverChoice::Pipeline || solver_choice == SolverChoice::Negrisk)
+    if (solver_choice == SolverChoice::Pipeline || solver_choice == SolverChoice::Negrisk || solver_choice == SolverChoice::Dual)
         && (verbose || export_json.is_some() || show_charts)
     {
         // Detailed pipeline run with step-by-step output
-        let use_negrisk = solver_choice == SolverChoice::Negrisk;
-        run_detailed_pipeline(&config, num_batches, export_json.as_deref(), show_charts, verbose, use_negrisk);
+        run_detailed_pipeline(&config, num_batches, export_json.as_deref(), show_charts, verbose, &solver_choice);
     } else {
         // Standard comparison run
         let results = run_simulation(&config, &solver_choice, milp_timeout, num_batches, verbose);
@@ -103,6 +102,8 @@ fn print_help() {
     println!("Solver options:");
     println!("  --solver <S>         Solver to use:");
     println!("                         pipeline (default)");
+    println!("                         negrisk");
+    println!("                         dual");
     println!("                         greedy");
     println!("                         milp");
     println!("                         all (compare all)");
@@ -442,7 +443,7 @@ fn run_detailed_pipeline(
     export_json: Option<&str>,
     show_charts: bool,
     verbose: bool,
-    use_negrisk: bool,
+    solver_choice: &SolverChoice,
 ) {
     for batch in 0..num_batches {
         let config = ScenarioConfig {
@@ -474,12 +475,10 @@ fn run_detailed_pipeline(
         let initial_liquidity = problem.liquidity.snapshot();
 
         // Run pipeline and get detailed results
-        // Use full() which includes ArbitrageDetector for bundle matching
-        // Or use with_negrisk() for negrisk arbitrage instead of price projection
-        let pipeline = if use_negrisk {
-            Pipeline::with_negrisk()
-        } else {
-            Pipeline::with_negrisk()
+        let pipeline = match solver_choice {
+            SolverChoice::Dual => Pipeline::with_dual_decomposition(),
+            SolverChoice::Negrisk => Pipeline::with_negrisk(),
+            _ => Pipeline::with_negrisk(),
         };
         let result = pipeline.solve(&problem);
 
@@ -971,6 +970,7 @@ enum SolverChoice {
     Milp,
     Pipeline,
     Negrisk,
+    Dual,
     All,
 }
 
@@ -980,6 +980,7 @@ fn parse_solver_choice(args: &[String]) -> SolverChoice {
         Some("milp") => SolverChoice::Milp,
         Some("pipeline") => SolverChoice::Pipeline,
         Some("negrisk") => SolverChoice::Negrisk,
+        Some("dual") => SolverChoice::Dual,
         Some("all") => SolverChoice::All,
         _ => SolverChoice::Pipeline, // Default to pipeline
     }
@@ -1014,6 +1015,7 @@ fn create_solvers(choice: &SolverChoice, milp_timeout: Option<f64>) -> Vec<Box<d
         }
         SolverChoice::Pipeline => vec![Box::new(Pipeline::current())],
         SolverChoice::Negrisk => vec![Box::new(Pipeline::with_negrisk())],
+        SolverChoice::Dual => vec![Box::new(Pipeline::with_dual_decomposition())],
         SolverChoice::All => {
             let milp: Box<dyn Solver> = if let Some(timeout) = milp_timeout {
                 Box::new(MilpSolver::with_timeout(timeout))
@@ -1025,6 +1027,7 @@ fn create_solvers(choice: &SolverChoice, milp_timeout: Option<f64>) -> Vec<Box<d
                 milp,
                 Box::new(Pipeline::current()),
                 Box::new(Pipeline::with_negrisk()),
+                Box::new(Pipeline::with_dual_decomposition()),
             ]
         }
     }
