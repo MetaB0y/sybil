@@ -59,10 +59,20 @@ impl Agent for MarketMakerAgent {
         let mut temp_id = 0u64;
 
         for &(market_id, _) in &view.markets {
-            // Get current mid price (default 0.50)
-            let default_prices = vec![NANOS_PER_DOLLAR / 2, NANOS_PER_DOLLAR / 2];
-            let last_prices = view.last_prices.get(&market_id).unwrap_or(&default_prices);
-            let yes_price = last_prices[0];
+            // Use public beliefs as mid price when available, fall back to last prices
+            let yes_price = if let Some(ref beliefs) = view.public_beliefs {
+                if let Some(&belief) = beliefs.get(&market_id) {
+                    (belief * NANOS_PER_DOLLAR as f64) as Nanos
+                } else {
+                    let default_prices = vec![NANOS_PER_DOLLAR / 2, NANOS_PER_DOLLAR / 2];
+                    let last_prices = view.last_prices.get(&market_id).unwrap_or(&default_prices);
+                    last_prices[0]
+                }
+            } else {
+                let default_prices = vec![NANOS_PER_DOLLAR / 2, NANOS_PER_DOLLAR / 2];
+                let last_prices = view.last_prices.get(&market_id).unwrap_or(&default_prices);
+                last_prices[0]
+            };
 
             // Inventory skew: if we're long YES, lower our bid and raise our ask
             let yes_pos = account.position(market_id, 0);

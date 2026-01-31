@@ -1,6 +1,6 @@
 //! Problem definition for matching instances.
 
-use crate::{LiquidityPool, MarketId, MarketSet, MmConstraint, Order};
+use crate::{MarketId, MarketSet, MmConstraint, Order};
 
 /// A group of mutually exclusive markets (exactly one resolves YES).
 ///
@@ -51,8 +51,6 @@ pub struct Problem {
     pub name: String,
     /// Markets in this problem (all binary)
     pub markets: MarketSet,
-    /// Liquidity available
-    pub liquidity: LiquidityPool,
     /// Orders to match
     pub orders: Vec<Order>,
     /// Market maker capital constraints
@@ -66,7 +64,6 @@ impl Problem {
         Self {
             name: name.into(),
             markets: MarketSet::new(),
-            liquidity: LiquidityPool::new(),
             orders: Vec::new(),
             mm_constraints: Vec::new(),
             market_groups: Vec::new(),

@@ -95,7 +95,8 @@ impl ConflictGraph {
 /// Tracks what resources a fill consumes.
 #[derive(Clone, Debug)]
 pub struct FillFootprint {
-    /// Liquidity consumed: (market, outcome) -> quantity
+    /// Resources consumed: (market, outcome) -> quantity
+    #[allow(dead_code)]
     pub liquidity_consumed: HashMap<(MarketId, u8), Qty>,
 }
 

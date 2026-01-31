@@ -66,7 +66,7 @@ pub use milp::{MilpConfig, MilpResult, MilpSolver, SolveStatus};
 
 use serde::Serialize;
 
-use matching_engine::{Fill, LiquidityPool, Order, Problem};
+use matching_engine::{Fill, Order, Problem};
 
 /// Result of solving a matching problem.
 #[derive(Clone, Debug, Serialize)]
@@ -83,12 +83,10 @@ pub struct MatchingResult {
     pub orders_unfilled_aon: usize,
     /// Total quantity filled across all orders
     pub total_quantity_filled: u64,
-    /// Remaining liquidity after matching
-    pub remaining_liquidity: LiquidityPool,
 }
 
 impl MatchingResult {
-    pub fn new(remaining_liquidity: LiquidityPool) -> Self {
+    pub fn new() -> Self {
         Self {
             fills: Vec::new(),
             total_welfare: 0,
@@ -96,7 +94,6 @@ impl MatchingResult {
             orders_unfilled_liquidity: 0,
             orders_unfilled_aon: 0,
             total_quantity_filled: 0,
-            remaining_liquidity,
         }
     }
 

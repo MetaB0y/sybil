@@ -31,14 +31,15 @@ fn election_3way() -> Problem {
         .with_market(m_c);
     problem.add_market_group(group);
 
-    // Stepped liquidity for realistic price discovery
+    // Sell orders for realistic price discovery (replacing platform liquidity)
+    let mut liq_id = 9000u64;
     for &m in &[m_a, m_b, m_c] {
-        problem.liquidity.add_ask(m, 0, price_to_nanos(0.15), 200);
-        problem.liquidity.add_ask(m, 0, price_to_nanos(0.25), 200);
-        problem.liquidity.add_ask(m, 0, price_to_nanos(0.35), 200);
-        problem.liquidity.add_ask(m, 0, price_to_nanos(0.45), 200);
-        problem.liquidity.add_ask(m, 0, price_to_nanos(0.55), 200);
-        problem.liquidity.add_ask(m, 1, price_to_nanos(0.25), 500);
+        for &price in &[0.15, 0.25, 0.35, 0.45, 0.55] {
+            problem.orders.push(outcome_sell(&problem.markets, liq_id, m, 0, price_to_nanos(price), 200));
+            liq_id += 1;
+        }
+        problem.orders.push(outcome_sell(&problem.markets, liq_id, m, 1, price_to_nanos(0.25), 500));
+        liq_id += 1;
     }
 
     // YES buyers: A ~50%, B ~30%, C ~20%
@@ -98,11 +99,11 @@ fn mm_budget_problem() -> Problem {
     let mut problem = Problem::new("mm_budget");
     let m = problem.markets.add_binary("Market");
 
-    // Liquidity
-    problem.liquidity.add_ask(m, 0, price_to_nanos(0.30), 500);
-    problem.liquidity.add_ask(m, 0, price_to_nanos(0.40), 500);
-    problem.liquidity.add_ask(m, 0, price_to_nanos(0.50), 500);
-    problem.liquidity.add_ask(m, 1, price_to_nanos(0.30), 500);
+    // Sell orders as supply
+    problem.orders.push(outcome_sell(&problem.markets, 9000, m, 0, price_to_nanos(0.30), 500));
+    problem.orders.push(outcome_sell(&problem.markets, 9001, m, 0, price_to_nanos(0.40), 500));
+    problem.orders.push(outcome_sell(&problem.markets, 9002, m, 0, price_to_nanos(0.50), 500));
+    problem.orders.push(outcome_sell(&problem.markets, 9003, m, 1, price_to_nanos(0.30), 500));
 
     // Regular traders
     for i in 0..5 {
@@ -346,12 +347,15 @@ fn test_simple_two_outcome_convergence() {
         .with_market(m_b);
     problem.add_market_group(group);
 
-    // Balanced liquidity
+    // Sell orders as supply
+    let mut liq_id = 9000u64;
     for &m in &[m_a, m_b] {
-        problem.liquidity.add_ask(m, 0, price_to_nanos(0.20), 300);
-        problem.liquidity.add_ask(m, 0, price_to_nanos(0.40), 300);
-        problem.liquidity.add_ask(m, 0, price_to_nanos(0.60), 300);
-        problem.liquidity.add_ask(m, 1, price_to_nanos(0.30), 300);
+        for &price in &[0.20, 0.40, 0.60] {
+            problem.orders.push(outcome_sell(&problem.markets, liq_id, m, 0, price_to_nanos(price), 300));
+            liq_id += 1;
+        }
+        problem.orders.push(outcome_sell(&problem.markets, liq_id, m, 1, price_to_nanos(0.30), 300));
+        liq_id += 1;
     }
 
     // Buyers: A at ~60%, B at ~40%
@@ -406,8 +410,8 @@ fn test_no_coupling_constraints() {
     let mut problem = Problem::new("basic");
     let m = problem.markets.add_binary("Market");
 
-    problem.liquidity.add_ask(m, 0, price_to_nanos(0.30), 1000);
-    problem.liquidity.add_ask(m, 1, price_to_nanos(0.30), 1000);
+    problem.orders.push(outcome_sell(&problem.markets, 9000, m, 0, price_to_nanos(0.30), 1000));
+    problem.orders.push(outcome_sell(&problem.markets, 9001, m, 1, price_to_nanos(0.30), 1000));
 
     for i in 0..10 {
         problem.orders.push(simple_yes_buy(

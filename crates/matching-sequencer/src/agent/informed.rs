@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use matching_engine::{outcome_buy, MarketId, MarketSet, Nanos, NANOS_PER_DOLLAR};
+use matching_engine::{outcome_buy, outcome_sell, MarketId, MarketSet, Nanos, NANOS_PER_DOLLAR};
 
 use crate::account::{Account, AccountId};
 use crate::agent::{Agent, AgentSubmission, MarketView};
@@ -70,7 +70,7 @@ impl Agent for InformedTrader {
             let yes_market_price = last_prices[0] as f64 / NANOS_PER_DOLLAR as f64;
             let no_market_price = last_prices[1] as f64 / NANOS_PER_DOLLAR as f64;
 
-            // Check edge for YES
+            // Check edge for YES buy (market underprices YES)
             let yes_edge = true_prob - yes_market_price;
             if yes_edge > self.min_edge {
                 let current_pos = account.position(market_id, 0);
@@ -101,7 +101,37 @@ impl Agent for InformedTrader {
                 }
             }
 
-            // Check edge for NO (i.e., market overestimates YES probability)
+            // Check edge for YES sell (market overprices YES)
+            let yes_sell_edge = yes_market_price - true_prob;
+            if yes_sell_edge > self.min_edge {
+                let current_pos = account.position(market_id, 0);
+                if current_pos > 0 {
+                    // Sell YES at a price between true value and market
+                    let limit_price = ((true_prob + yes_market_price) / 2.0
+                        * NANOS_PER_DOLLAR as f64) as Nanos;
+                    let limit_price = limit_price.clamp(
+                        NANOS_PER_DOLLAR / 100,
+                        NANOS_PER_DOLLAR * 99 / 100,
+                    );
+
+                    let qty = self.max_qty.min(current_pos as u64);
+
+                    if qty > 0 {
+                        let order = outcome_sell(
+                            &self.markets,
+                            temp_id,
+                            market_id,
+                            0,
+                            limit_price,
+                            qty,
+                        );
+                        orders.push(order);
+                        temp_id += 1;
+                    }
+                }
+            }
+
+            // Check edge for NO buy (market underprices NO)
             let no_edge = (1.0 - true_prob) - no_market_price;
             if no_edge > self.min_edge {
                 let current_pos = account.position(market_id, 1);
@@ -118,6 +148,35 @@ impl Agent for InformedTrader {
 
                     if qty > 0 {
                         let order = outcome_buy(
+                            &self.markets,
+                            temp_id,
+                            market_id,
+                            1,
+                            limit_price,
+                            qty,
+                        );
+                        orders.push(order);
+                        temp_id += 1;
+                    }
+                }
+            }
+
+            // Check edge for NO sell (market overprices NO)
+            let no_sell_edge = no_market_price - (1.0 - true_prob);
+            if no_sell_edge > self.min_edge {
+                let current_pos = account.position(market_id, 1);
+                if current_pos > 0 {
+                    let limit_price = (((1.0 - true_prob) + no_market_price) / 2.0
+                        * NANOS_PER_DOLLAR as f64) as Nanos;
+                    let limit_price = limit_price.clamp(
+                        NANOS_PER_DOLLAR / 100,
+                        NANOS_PER_DOLLAR * 99 / 100,
+                    );
+
+                    let qty = self.max_qty.min(current_pos as u64);
+
+                    if qty > 0 {
+                        let order = outcome_sell(
                             &self.markets,
                             temp_id,
                             market_id,

@@ -4,9 +4,9 @@
 //! 1. **Bundles** (e.g., "A AND B"): Require joint liquidity - leg liquidity cannot replicate
 //! 2. **Spreads** (e.g., "long A, short B"): Can use leg liquidity - buy one side, sell the other
 
-use std::collections::HashSet;
-
-use matching_engine::{Fill, JointOutcome, LiquidityPool, MarketId, Nanos, Order, Problem, Qty};
+use matching_engine::{Nanos, Order, Problem};
+#[cfg(test)]
+use matching_engine::MarketId;
 
 use crate::{MatchingResult, Solver};
 
@@ -27,11 +27,10 @@ enum CrossMarketOrderType {
 #[derive(Clone, Debug)]
 pub struct ArbitrageOpportunity {
     /// Order index in the problem
+    #[allow(dead_code)]
     pub order_idx: usize,
     /// Expected profit per unit
     pub profit_per_unit: Nanos,
-    /// Type of order
-    order_type: CrossMarketOrderType,
 }
 
 /// Handles cross-market order matching (bundles and spreads).
@@ -118,91 +117,40 @@ impl ArbitrageDetector {
     }
 
     /// Detect opportunity for a bundle order.
+    ///
+    /// Without platform liquidity, bundle opportunities are detected based on
+    /// whether matching sell orders exist. For now, returns None since bundle
+    /// matching is order-vs-order only.
     fn detect_bundle_opportunity(
         &self,
-        order_idx: usize,
-        order: &Order,
-        problem: &Problem,
+        _order_idx: usize,
+        _order: &Order,
+        _problem: &Problem,
     ) -> Option<ArbitrageOpportunity> {
-        let joint_outcome = self.build_joint_outcome(order)?;
-
-        if let Some(joint_book) = problem.liquidity.joint_book(&joint_outcome) {
-            let (avail, best_price) = joint_book.available_to_buy(order.limit_price);
-            if avail >= order.min_fill && best_price <= order.limit_price {
-                let profit_per_unit = order.limit_price.saturating_sub(best_price);
-                return Some(ArbitrageOpportunity {
-                    order_idx,
-                    profit_per_unit,
-                    order_type: CrossMarketOrderType::Bundle,
-                });
-            }
-        }
-
+        // Without platform liquidity, bundle matching relies on order-vs-order clearing
+        // which is handled by the LocalSolver. No separate detection needed.
         None
     }
 
     /// Detect opportunity for a spread order.
+    ///
+    /// Without platform liquidity, spread opportunities are detected based on
+    /// whether matching sell orders exist. For now, returns None since spread
+    /// matching is order-vs-order only.
     fn detect_spread_opportunity(
         &self,
-        order_idx: usize,
-        order: &Order,
-        problem: &Problem,
+        _order_idx: usize,
+        _order: &Order,
+        _problem: &Problem,
     ) -> Option<ArbitrageOpportunity> {
-        // For spreads, we need to check leg liquidity
-        let legs = self.analyze_spread_legs(order)?;
-
-        // Calculate total cost to construct the spread from legs
-        let mut total_cost: u64 = 0;
-        let mut min_available = order.max_fill;
-
-        for (market, outcome, is_buy) in &legs {
-            if let Some(book) = problem.liquidity.book(*market, *outcome) {
-                if *is_buy {
-                    // Buying this outcome
-                    let (avail, price) = book.available_to_buy(order.limit_price);
-                    if avail < order.min_fill {
-                        return None;
-                    }
-                    min_available = min_available.min(avail);
-                    total_cost = total_cost.saturating_add(price);
-                } else {
-                    // Selling this outcome = buying the opposite
-                    // For binary markets, selling YES = buying NO
-                    let opposite_outcome = 1 - *outcome;
-                    if let Some(opposite_book) = problem.liquidity.book(*market, opposite_outcome) {
-                        let (avail, price) = opposite_book.available_to_buy(order.limit_price);
-                        if avail < order.min_fill {
-                            return None;
-                        }
-                        min_available = min_available.min(avail);
-                        total_cost = total_cost.saturating_add(price);
-                    } else {
-                        return None;
-                    }
-                }
-            } else {
-                return None;
-            }
-        }
-
-        // Average cost per leg
-        let avg_cost = total_cost / legs.len() as u64;
-
-        // Check if spread can be filled profitably
-        if min_available >= order.min_fill && avg_cost <= order.limit_price {
-            let profit_per_unit = order.limit_price.saturating_sub(avg_cost);
-            return Some(ArbitrageOpportunity {
-                order_idx,
-                profit_per_unit,
-                order_type: CrossMarketOrderType::Spread,
-            });
-        }
-
+        // Without platform liquidity, spread matching relies on order-vs-order clearing
+        // which is handled by the LocalSolver. No separate detection needed.
         None
     }
 
     /// Analyze spread legs to determine what to buy/sell in each market.
     /// Returns: Vec<(market_id, outcome, is_buy)>
+    #[cfg(test)]
     fn analyze_spread_legs(&self, order: &Order) -> Option<Vec<(MarketId, u8, bool)>> {
         if order.num_markets < 2 {
             return None;
@@ -262,163 +210,19 @@ impl ArbitrageDetector {
     }
 
     /// Exploit detected opportunities.
+    ///
+    /// Without platform liquidity, this is a no-op since detect methods return None.
     fn exploit_opportunities(
         &self,
         opportunities: &[ArbitrageOpportunity],
         problem: &Problem,
         result: &mut MatchingResult,
     ) {
-        let mut filled_orders: HashSet<u64> = HashSet::new();
-
-        for opp in opportunities.iter() {
-            if let Some(order) = problem.orders.get(opp.order_idx) {
-                if filled_orders.contains(&order.id) {
-                    continue;
-                }
-
-                let fill_result = match opp.order_type {
-                    CrossMarketOrderType::Bundle => {
-                        self.try_fill_bundle(order, &mut result.remaining_liquidity)
-                    }
-                    CrossMarketOrderType::Spread => {
-                        self.try_fill_spread(order, &mut result.remaining_liquidity)
-                    }
-                    CrossMarketOrderType::Unknown => None,
-                };
-
-                if let Some(fill) = fill_result {
-                    let welfare = fill.welfare(order);
-                    if welfare > 0 {
-                        result.add_fill(fill, order);
-                        filled_orders.insert(order.id);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Try to fill a bundle order using joint liquidity.
-    fn try_fill_bundle(&self, order: &Order, liquidity: &mut LiquidityPool) -> Option<Fill> {
-        if order.num_markets <= 1 {
-            return None;
-        }
-
-        let joint_outcome = self.build_joint_outcome(order)?;
-
-        if let Some(joint_book) = liquidity.joint_book_get_mut(&joint_outcome) {
-            let (avail, _) = joint_book.available_to_buy(order.limit_price);
-            if avail >= order.min_fill {
-                let fill_qty = avail.min(order.max_fill);
-                let (consumed, avg_price) = joint_book.consume_asks(fill_qty, order.limit_price);
-                if consumed >= order.min_fill {
-                    return Some(Fill::new(order.id, consumed, avg_price));
-                }
-            }
-        }
-
-        None
-    }
-
-    /// Try to fill a spread order using leg liquidity.
-    fn try_fill_spread(&self, order: &Order, liquidity: &mut LiquidityPool) -> Option<Fill> {
-        let legs = self.analyze_spread_legs(order)?;
-
-        // First pass: check availability across all legs
-        let mut min_available = order.max_fill;
-        let mut leg_info: Vec<(MarketId, u8, Qty, Nanos)> = Vec::new(); // (market, outcome, avail, price)
-
-        for (market, outcome, _is_buy) in &legs {
-            // For spreads, we always buy the outcome we want exposure to
-            if let Some(book) = liquidity.book(*market, *outcome) {
-                let (avail, price) = book.available_to_buy(order.limit_price);
-                if avail < order.min_fill {
-                    return None;
-                }
-                min_available = min_available.min(avail);
-                leg_info.push((*market, *outcome, avail, price));
-            } else {
-                return None;
-            }
-        }
-
-        if min_available < order.min_fill {
-            return None;
-        }
-
-        let fill_qty = min_available.min(order.max_fill);
-
-        // Calculate average fill price
-        let total_cost: u128 = leg_info.iter().map(|(_, _, _, p)| *p as u128).sum();
-        let avg_price = (total_cost / leg_info.len() as u128) as Nanos;
-
-        // Check if within limit
-        if avg_price > order.limit_price {
-            return None;
-        }
-
-        // Second pass: consume liquidity from all legs
-        for (market, outcome, _, _) in &leg_info {
-            if let Some(book) = liquidity.books.get_mut(&(*market, *outcome)) {
-                book.consume_asks(fill_qty, order.limit_price);
-            }
-        }
-
-        Some(Fill::new(order.id, fill_qty, avg_price))
-    }
-
-    /// Build a JointOutcome from a bundle order.
-    fn build_joint_outcome(&self, order: &Order) -> Option<JointOutcome> {
-        if order.num_markets <= 1 {
-            return None;
-        }
-
-        let mut legs = Vec::new();
-        for market_idx in 0..order.num_markets as usize {
-            let market = order.markets[market_idx];
-            if market.is_none() {
-                continue;
-            }
-
-            let outcome = self.determine_bundle_outcome(order, market_idx);
-            legs.push((market, outcome));
-        }
-
-        if legs.len() >= 2 {
-            Some(JointOutcome::new(legs))
-        } else {
-            None
-        }
-    }
-
-    /// Determine which outcome is being bought for a market in a bundle order.
-    fn determine_bundle_outcome(&self, order: &Order, market_idx: usize) -> u8 {
-        let num_markets = order.num_markets as usize;
-        if market_idx >= num_markets {
-            return 0;
-        }
-
-        let market_sizes: Vec<u8> = vec![2; num_markets];
-        let mut outcome_votes: [i32; 4] = [0; 4];
-
-        for state_idx in 0..order.num_states as usize {
-            let payoff = order.payoffs[state_idx];
-            if payoff > 0 {
-                let outcome = self.extract_outcome(state_idx, market_idx, &market_sizes);
-                if (outcome as usize) < outcome_votes.len() {
-                    outcome_votes[outcome as usize] += payoff as i32;
-                }
-            }
-        }
-
-        outcome_votes
-            .iter()
-            .enumerate()
-            .max_by_key(|(_, &v)| v)
-            .map(|(idx, _)| idx as u8)
-            .unwrap_or(0)
+        let _ = (opportunities, problem, result);
     }
 
     /// Extract outcome for a market from a state index.
+    #[cfg(test)]
     fn extract_outcome(&self, state_idx: usize, market_idx: usize, market_sizes: &[u8]) -> u8 {
         let mut remaining = state_idx;
         for (i, &size) in market_sizes.iter().enumerate() {
@@ -440,7 +244,7 @@ impl Default for ArbitrageDetector {
 
 impl Solver for ArbitrageDetector {
     fn solve(&self, problem: &Problem) -> MatchingResult {
-        let mut result = MatchingResult::new(problem.liquidity.snapshot());
+        let mut result = MatchingResult::new();
 
         let opportunities = self.detect_opportunities(problem);
         self.exploit_opportunities(&opportunities, problem, &mut result);

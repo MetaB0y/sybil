@@ -176,8 +176,7 @@ impl DualMaster {
             .collect();
 
         // State for cumulative fill accumulation
-        let mut matching_result = MatchingResult::new(problem.liquidity.snapshot());
-        let mut remaining_liquidity = problem.liquidity.snapshot();
+        let mut matching_result = MatchingResult::new();
         let mut filled_order_ids: HashSet<u64> = HashSet::new();
         let mut cumulative_mm_fills: HashMap<u64, (Nanos, Qty)> = HashMap::new();
 
@@ -210,11 +209,10 @@ impl DualMaster {
                 &market_to_group,
             );
 
-            // 2. Solve per-market subproblems with shaded orders + remaining liquidity
+            // 2. Solve per-market subproblems with shaded orders
             let shaded_problem = Problem {
                 name: problem.name.clone(),
                 markets: problem.markets.clone(),
-                liquidity: remaining_liquidity.clone(),
                 orders: shaded_orders,
                 mm_constraints: problem.mm_constraints.clone(),
                 market_groups: problem.market_groups.clone(),
@@ -350,7 +348,6 @@ impl DualMaster {
 
             for fill in non_mm_fills {
                 if let Some(order) = order_map.get(&fill.order_id) {
-                    consume_order_liquidity(order, fill.fill_qty, &mut remaining_liquidity);
                     filled_order_ids.insert(fill.order_id);
                     matching_result.add_fill(fill, order);
                     iter_fills += 1;
@@ -359,7 +356,6 @@ impl DualMaster {
 
             for fill in mm_accepted_fills {
                 if let Some(order) = order_map.get(&fill.order_id) {
-                    consume_order_liquidity(order, fill.fill_qty, &mut remaining_liquidity);
                     filled_order_ids.insert(fill.order_id);
                     cumulative_mm_fills
                         .insert(fill.order_id, (fill.fill_price, fill.fill_qty));
@@ -435,8 +431,6 @@ impl DualMaster {
             compute_price_sum_errors(&last_prices, &problem.market_groups);
         let final_mm_utilization =
             compute_mm_utilization(&cumulative_mm_fills, &problem.mm_constraints);
-
-        matching_result.remaining_liquidity = remaining_liquidity;
 
         DualResult {
             matching_result,
@@ -657,21 +651,6 @@ fn compute_mm_utilization(
     utilization
 }
 
-/// Consume liquidity for a single-market order fill.
-fn consume_order_liquidity(
-    order: &Order,
-    qty: Qty,
-    liquidity: &mut matching_engine::LiquidityPool,
-) {
-    if order.num_markets == 1 {
-        let market = order.markets[0];
-        let outcome = if order.payoffs[0] > 0 { 0 } else { 1 };
-        if let Some(book) = liquidity.books.get_mut(&(market, outcome)) {
-            book.consume_asks(qty, order.limit_price);
-        }
-    }
-}
-
 // ============================================================================
 // LocalSolver extension
 // ============================================================================
@@ -692,14 +671,13 @@ impl LocalSolver {
 mod tests {
     use super::*;
     use matching_engine::{
-        price_to_nanos, simple_no_buy, simple_yes_buy, MarketGroup, MmId, MmSide,
+        outcome_sell, price_to_nanos, simple_no_buy, simple_yes_buy, MarketGroup, MmId, MmSide,
     };
 
     /// Helper: create a 3-outcome election problem with market group.
     ///
-    /// Uses stepped supply curves so clearing prices are set by demand,
-    /// not just cheap flat asks. This is needed for dual decomposition
-    /// to influence prices via bid shading.
+    /// Uses stepped sell order supply curves so clearing prices are set by demand.
+    /// This is needed for dual decomposition to influence prices via bid shading.
     fn election_problem() -> Problem {
         let mut problem = Problem::new("election");
         let m_a = problem.markets.add_binary("Candidate A");
@@ -713,29 +691,17 @@ mod tests {
             .with_market(m_c);
         problem.add_market_group(group);
 
-        // Stepped liquidity: supply at various price levels
-        // This ensures clearing price responds to demand level
+        // Stepped sell orders provide supply at various price levels
+        let mut sell_id = 10000u64;
         for &m in &[m_a, m_b, m_c] {
-            // YES asks: stepped supply
-            problem
-                .liquidity
-                .add_ask(m, 0, price_to_nanos(0.20), 200);
-            problem
-                .liquidity
-                .add_ask(m, 0, price_to_nanos(0.30), 200);
-            problem
-                .liquidity
-                .add_ask(m, 0, price_to_nanos(0.40), 200);
-            problem
-                .liquidity
-                .add_ask(m, 0, price_to_nanos(0.50), 200);
-            problem
-                .liquidity
-                .add_ask(m, 0, price_to_nanos(0.60), 200);
-            // NO asks
-            problem
-                .liquidity
-                .add_ask(m, 1, price_to_nanos(0.30), 500);
+            // YES sell orders: stepped supply
+            for &price in &[0.20, 0.30, 0.40, 0.50, 0.60] {
+                problem.orders.push(outcome_sell(&problem.markets, sell_id, m, 0, price_to_nanos(price), 200));
+                sell_id += 1;
+            }
+            // NO sell orders
+            problem.orders.push(outcome_sell(&problem.markets, sell_id, m, 1, price_to_nanos(0.30), 500));
+            sell_id += 1;
         }
 
         // YES buyers for market A (strong demand ~50% implied)
@@ -980,7 +946,7 @@ mod tests {
         // Simple problem with no coupling constraints — should just solve normally
         let mut problem = Problem::new("simple");
         let m = problem.markets.add_binary("test");
-        problem.liquidity.add_ask(m, 0, price_to_nanos(0.30), 1000);
+        problem.orders.push(outcome_sell(&problem.markets, 9999, m, 0, price_to_nanos(0.30), 1000));
 
         for i in 0..5 {
             problem.orders.push(simple_yes_buy(
@@ -1012,12 +978,15 @@ mod tests {
             .with_market(m_b);
         problem.add_market_group(group);
 
-        // Add liquidity
+        // Sell orders provide supply
+        let mut sell_id = 9000u64;
         for &m in &[m_a, m_b] {
-            problem.liquidity.add_ask(m, 0, price_to_nanos(0.30), 500);
-            problem.liquidity.add_ask(m, 0, price_to_nanos(0.40), 500);
-            problem.liquidity.add_ask(m, 0, price_to_nanos(0.50), 500);
-            problem.liquidity.add_ask(m, 1, price_to_nanos(0.40), 500);
+            for &price in &[0.30, 0.40, 0.50] {
+                problem.orders.push(outcome_sell(&problem.markets, sell_id, m, 0, price_to_nanos(price), 500));
+                sell_id += 1;
+            }
+            problem.orders.push(outcome_sell(&problem.markets, sell_id, m, 1, price_to_nanos(0.40), 500));
+            sell_id += 1;
         }
 
         // MM orders: YES buyers for both markets

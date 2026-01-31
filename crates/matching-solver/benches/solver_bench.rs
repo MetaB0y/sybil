@@ -16,7 +16,7 @@
 //! - large: ~10,000-30,000 orders (stress testing)
 
 use divan::Bencher;
-use matching_engine::{simple_yes_buy, MmConstraint, MmId, MmSide, Problem, NANOS_PER_DOLLAR};
+use matching_engine::{outcome_sell, simple_yes_buy, MmConstraint, MmId, MmSide, Problem, NANOS_PER_DOLLAR};
 use matching_scenarios::{generate_scenario, ScenarioConfig};
 use matching_solver::{
     local_solver::{LocalSolver, MarketSolution},
@@ -39,13 +39,9 @@ fn bench_local_solver_single_market(bencher: Bencher, order_count: usize) {
     let mut problem = Problem::new("bench");
     let market_id = problem.markets.add_binary("test");
 
-    // Add liquidity
-    problem
-        .liquidity
-        .add_ask(market_id, 0, 500_000_000, 100_000);
-    problem
-        .liquidity
-        .add_ask(market_id, 1, 500_000_000, 100_000);
+    // Add sell orders as supply
+    problem.orders.push(outcome_sell(&problem.markets, 9_000_000, market_id, 0, 500_000_000, 100_000));
+    problem.orders.push(outcome_sell(&problem.markets, 9_000_001, market_id, 1, 500_000_000, 100_000));
 
     // Add orders: varying prices
     for i in 0..order_count {
@@ -62,15 +58,9 @@ fn bench_local_solver_single_market(bencher: Bencher, order_count: usize) {
     }
 
     let solver = LocalSolver::new();
-    let book = problem
-        .liquidity
-        .books
-        .get(&(market_id, 0))
-        .cloned()
-        .unwrap();
 
     bencher
-        .bench_local(|| solver.solve_market(market_id, &problem.markets, &problem.orders, &book));
+        .bench_local(|| solver.solve_market(market_id, &problem.markets, &problem.orders));
 }
 
 /// Benchmark solving all markets with realistic order counts.
@@ -79,13 +69,16 @@ fn bench_local_solver_single_market(bencher: Bencher, order_count: usize) {
 fn bench_solve_all_markets(bencher: Bencher, market_count: usize) {
     let mut problem = Problem::new("bench");
     let orders_per_market = 150; // Middle of plan's 100-200 range
+    let mut liq_id = 9_000_000u64;
 
     for m in 0..market_count {
         let market_id = problem.markets.add_binary(&format!("market_{}", m));
 
-        // Add liquidity
-        problem.liquidity.add_ask(market_id, 0, 500_000_000, 50_000);
-        problem.liquidity.add_ask(market_id, 1, 500_000_000, 50_000);
+        // Add sell orders as supply
+        problem.orders.push(outcome_sell(&problem.markets, liq_id, market_id, 0, 500_000_000, 50_000));
+        liq_id += 1;
+        problem.orders.push(outcome_sell(&problem.markets, liq_id, market_id, 1, 500_000_000, 50_000));
+        liq_id += 1;
 
         // Add orders
         for i in 0..orders_per_market {
@@ -114,13 +107,7 @@ fn bench_solve_all_markets(bencher: Bencher, market_count: usize) {
     bencher.bench_local(|| {
         let mut results: HashMap<_, MarketSolution> = HashMap::new();
         for market in problem.markets.iter() {
-            let book = problem
-                .liquidity
-                .books
-                .get(&(market.id, 0))
-                .cloned()
-                .unwrap();
-            let solution = solver.solve_market(market.id, &problem.markets, &problem.orders, &book);
+            let solution = solver.solve_market(market.id, &problem.markets, &problem.orders);
             results.insert(market.id, solution);
         }
         results
@@ -225,13 +212,7 @@ fn run_full_pipeline(problem: &Problem) {
     let mut market_solutions: HashMap<_, _> = HashMap::new();
 
     for market in problem.markets.iter() {
-        let book = problem
-            .liquidity
-            .books
-            .get(&(market.id, 0))
-            .cloned()
-            .unwrap_or_else(|| matching_engine::LiquidityBook::new(market.id, 0));
-        let solution = solver.solve_market(market.id, &problem.markets, &problem.orders, &book);
+        let solution = solver.solve_market(market.id, &problem.markets, &problem.orders);
         market_solutions.insert(market.id, solution);
     }
 

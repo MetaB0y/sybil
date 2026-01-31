@@ -13,7 +13,7 @@
 use serde::Serialize;
 
 use matching_engine::{
-    Fill, LiquidityBook, MarketId, MarketSet, Nanos, Order, Qty, NANOS_PER_DOLLAR,
+    Fill, MarketId, MarketSet, Nanos, Order, Qty, NANOS_PER_DOLLAR,
 };
 
 /// Solution for a single market.
@@ -107,7 +107,6 @@ impl LocalSolver {
         market_id: MarketId,
         markets: &MarketSet,
         orders: &[Order],
-        liquidity: &LiquidityBook,
     ) -> MarketSolution {
         let num_outcomes = markets.num_outcomes(market_id) as usize;
 
@@ -123,12 +122,12 @@ impl LocalSolver {
 
         if num_outcomes == 2 {
             // Binary market: unified clearing ensures YES + NO = $1
-            self.solve_binary_market_unified(market_id, &market_orders, liquidity)
+            self.solve_binary_market_unified(market_id, &market_orders)
         } else {
             // All markets in our architecture are binary (multi-outcome events
             // are represented as a MarketGroup of binary markets). This fallback
             // exists only for safety — it should never be reached.
-            self.solve_per_outcome(market_id, num_outcomes, &market_orders, liquidity)
+            self.solve_per_outcome(market_id, num_outcomes, &market_orders)
         }
     }
 
@@ -138,7 +137,6 @@ impl LocalSolver {
         market_id: MarketId,
         num_outcomes: usize,
         market_orders: &[&Order],
-        liquidity: &LiquidityBook,
     ) -> MarketSolution {
         let mut prices = vec![0u64; num_outcomes];
         let mut all_fills = Vec::new();
@@ -147,7 +145,7 @@ impl LocalSolver {
 
         for outcome in 0..num_outcomes as u8 {
             let (price, fills, welfare, unfilled) =
-                self.solve_outcome(market_id, outcome, market_orders, liquidity);
+                self.solve_outcome(market_id, outcome, market_orders);
             prices[outcome as usize] = price;
             all_fills.extend(fills);
             total_welfare += welfare;
@@ -185,7 +183,6 @@ impl LocalSolver {
         &self,
         market_id: MarketId,
         orders: &[&Order],
-        liquidity: &LiquidityBook,
     ) -> MarketSolution {
         // Classify orders by outcome exposure
         let mut yes_buyers: Vec<(&Order, Qty)> = Vec::new(); // payoff[0] > 0
@@ -221,11 +218,8 @@ impl LocalSolver {
         demand_points.sort_by(|a, b| b.0.cmp(&a.0));
 
         // Build unified YES supply curve (price, qty) sorted by price asc.
-        // YES supply = liquidity asks + direct YES sellers + NO buyers (buying NO ≡ selling YES at $1-limit)
+        // YES supply = direct YES sellers + NO buyers (buying NO ≡ selling YES at $1-limit)
         let mut supply_points: Vec<(Nanos, Qty)> = Vec::new();
-        for level in liquidity.asks() {
-            supply_points.push((level.price, level.available_qty));
-        }
         for (order, qty) in &yes_sellers {
             supply_points.push((order.limit_price, *qty));
         }
@@ -304,13 +298,6 @@ impl LocalSolver {
 
         // Fill supply side: track how much supply comes from each source
         let mut supply_remaining = matched_qty;
-
-        // Liquidity book supply consumed first (cheapest)
-        for level in liquidity.asks() {
-            if level.price <= clearing_price_yes && supply_remaining > 0 {
-                supply_remaining = supply_remaining.saturating_sub(level.available_qty);
-            }
-        }
 
         // Direct YES sellers
         let mut yes_sellers_sorted = yes_sellers.clone();
@@ -441,7 +428,6 @@ impl LocalSolver {
         market_id: MarketId,
         outcome: u8,
         orders: &[&Order],
-        liquidity: &LiquidityBook,
     ) -> (Nanos, Vec<Fill>, i64, Vec<u64>) {
         // Separate buyers and sellers for this outcome
         let mut buyers: Vec<(&Order, Qty)> = Vec::new();
@@ -470,7 +456,7 @@ impl LocalSolver {
 
         // Find clearing price by matching supply and demand
         let (clearing_price, matched_qty) =
-            self.find_clearing_price(&buyers, &sellers, market_id, outcome, liquidity);
+            self.find_clearing_price(&buyers, &sellers, market_id, outcome);
 
         // Generate fills at clearing price
         let mut fills = Vec::new();
@@ -548,14 +534,9 @@ impl LocalSolver {
         sellers: &[(&Order, Qty)],
         market_id: MarketId,
         outcome: u8,
-        liquidity: &LiquidityBook,
     ) -> (Nanos, Qty) {
-        // Get available liquidity asks for this outcome
-        let asks = liquidity.asks();
-
-        // We can have supply from liquidity OR from sell orders
-        let has_supply = !asks.is_empty() || !sellers.is_empty();
-        if !has_supply || buyers.is_empty() {
+        // Supply comes from sell orders only
+        if sellers.is_empty() || buyers.is_empty() {
             return (NANOS_PER_DOLLAR / 2, 0); // Default to 50 cents if no supply or demand
         }
 
@@ -568,13 +549,8 @@ impl LocalSolver {
             demand_at_price.push((order.limit_price, cumulative_demand));
         }
 
-        // Build cumulative supply curve from liquidity AND sell orders
+        // Build cumulative supply curve from sell orders
         let mut supply_points: Vec<(Nanos, Qty)> = Vec::new();
-
-        // Add liquidity book asks
-        for level in asks {
-            supply_points.push((level.price, level.available_qty));
-        }
 
         // Add sell orders - their limit price is the minimum they'll accept
         for (order, qty) in sellers {
@@ -641,14 +617,7 @@ impl PriceDiscoverer for LocalSolver {
         let mut result = PriceDiscoveryResult::empty();
 
         for market in problem.markets.iter() {
-            let book = problem
-                .liquidity
-                .books
-                .get(&(market.id, 0))
-                .cloned()
-                .unwrap_or_else(|| LiquidityBook::new(market.id, 0));
-
-            let solution = self.solve_market(market.id, &problem.markets, &problem.orders, &book);
+            let solution = self.solve_market(market.id, &problem.markets, &problem.orders);
 
             result.add_market_solution(solution);
         }
@@ -665,15 +634,29 @@ impl PriceDiscoverer for LocalSolver {
 mod tests {
     use super::*;
     use std::collections::HashMap;
-    use matching_engine::{simple_yes_buy, Problem};
+    use matching_engine::{outcome_sell, simple_yes_buy, Problem};
 
     fn create_test_problem() -> Problem {
         let mut problem = Problem::new("test");
         let market = problem.markets.add_binary("test_market");
 
-        // Add liquidity
-        problem.liquidity.add_ask(market, 0, 500_000_000, 1000);
-        problem.liquidity.add_ask(market, 1, 500_000_000, 1000);
+        // Add sell orders (replacing liquidity)
+        problem.orders.push(outcome_sell(
+            &problem.markets,
+            100,
+            market,
+            0,
+            500_000_000,
+            1000,
+        ));
+        problem.orders.push(outcome_sell(
+            &problem.markets,
+            101,
+            market,
+            1,
+            500_000_000,
+            1000,
+        ));
 
         // Add some buy orders
         for i in 0..5 {
@@ -695,14 +678,7 @@ mod tests {
         let market_id = problem.markets.iter().next().unwrap().id;
 
         let solver = LocalSolver::new();
-        let book = problem
-            .liquidity
-            .books
-            .get(&(market_id, 0))
-            .cloned()
-            .unwrap_or_else(|| LiquidityBook::new(market_id, 0));
-
-        let solution = solver.solve_market(market_id, &problem.markets, &problem.orders, &book);
+        let solution = solver.solve_market(market_id, &problem.markets, &problem.orders);
 
         assert_eq!(solution.market_id, market_id);
         assert_eq!(solution.prices.len(), 2); // Binary market
@@ -724,12 +700,10 @@ mod tests {
     #[test]
     fn test_empty_market() {
         let mut problem = Problem::new("empty");
-        let market = problem.markets.add_binary("binary");
+        let _market = problem.markets.add_binary("binary");
 
         let solver = LocalSolver::new();
-        let book = LiquidityBook::new(market, 0);
-
-        let solution = solver.solve_market(market, &problem.markets, &[], &book);
+        let solution = solver.solve_market(_market, &problem.markets, &[]);
 
         assert_eq!(solution.prices.len(), 2);
         assert!(solution.fills.is_empty());
@@ -743,14 +717,7 @@ mod tests {
         let market_id = problem.markets.iter().next().unwrap().id;
 
         let solver = LocalSolver::new();
-        let book = problem
-            .liquidity
-            .books
-            .get(&(market_id, 0))
-            .cloned()
-            .unwrap();
-
-        let solution = solver.solve_market(market_id, &problem.markets, &problem.orders, &book);
+        let solution = solver.solve_market(market_id, &problem.markets, &problem.orders);
 
         // Build order lookup
         let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
@@ -760,27 +727,35 @@ mod tests {
                 .get(&fill.order_id)
                 .expect("Fill for unknown order");
             // For a buy order, fill price must not exceed limit
-            assert!(
-                fill.fill_price <= order.limit_price,
-                "Fill price {} exceeds limit {} for order {}",
-                fill.fill_price,
-                order.limit_price,
-                order.id
-            );
+            if !order.is_seller() {
+                assert!(
+                    fill.fill_price <= order.limit_price,
+                    "Fill price {} exceeds limit {} for order {}",
+                    fill.fill_price,
+                    order.limit_price,
+                    order.id
+                );
+            }
         }
     }
 
-    /// Binary markets: each outcome clears independently.
+    /// Binary markets: YES buyers match against YES sellers and NO buyers.
     #[test]
-    fn test_binary_market_independent_clearing() {
+    fn test_binary_market_clearing() {
         let mut problem = Problem::new("binary");
         let market = problem.markets.add_binary("binary");
 
-        // Add liquidity at different prices for each outcome
-        problem.liquidity.add_ask(market, 0, 400_000_000, 1000); // YES at $0.40
-        problem.liquidity.add_ask(market, 1, 650_000_000, 1000); // NO at $0.65
+        // Add sell orders (replacing liquidity)
+        problem.orders.push(outcome_sell(
+            &problem.markets,
+            100,
+            market,
+            0,
+            400_000_000,
+            1000,
+        )); // YES sell at $0.40
 
-        // Add buy orders for each outcome
+        // Add buy orders
         problem.orders.push(matching_engine::outcome_buy(
             &problem.markets,
             1,
@@ -789,23 +764,13 @@ mod tests {
             500_000_000,
             100,
         ));
-        problem.orders.push(matching_engine::outcome_buy(
-            &problem.markets,
-            2,
-            market,
-            1,
-            550_000_000,
-            100,
-        ));
 
         let solver = LocalSolver::new();
-        let book = problem.liquidity.books.get(&(market, 0)).cloned().unwrap();
-        let solution = solver.solve_market(market, &problem.markets, &problem.orders, &book);
+        let solution = solver.solve_market(market, &problem.markets, &problem.orders);
 
         // Each outcome should have a clearing price
         assert_eq!(solution.prices.len(), 2);
         assert!(solution.prices[0] > 0, "YES price should be positive");
-        // YES buy at 0.50 should fill against ask at 0.40
         assert!(!solution.fills.is_empty(), "Should have fills");
     }
 }

@@ -378,8 +378,7 @@ impl PhaseSnapshot {
     pub fn capture(
         phase: PipelinePhase,
         iteration: usize,
-        liquidity: &matching_engine::LiquidityPool,
-        market_names: &HashMap<MarketId, String>,
+        _market_names: &HashMap<MarketId, String>,
         fills_count: usize,
         welfare: i64,
         elapsed_secs: f64,
@@ -387,7 +386,7 @@ impl PhaseSnapshot {
         PhaseSnapshot {
             phase,
             iteration,
-            liquidity: LiquiditySnapshot::from_liquidity_pool(liquidity, market_names),
+            liquidity: LiquiditySnapshot { books: Vec::new() },
             fills_count,
             welfare,
             elapsed_secs,
@@ -402,8 +401,7 @@ impl PhaseSnapshot {
     pub fn capture_with_phase_data(
         phase: PipelinePhase,
         iteration: usize,
-        liquidity: &matching_engine::LiquidityPool,
-        market_names: &HashMap<MarketId, String>,
+        _market_names: &HashMap<MarketId, String>,
         fills_count: usize,
         welfare: i64,
         elapsed_secs: f64,
@@ -414,7 +412,7 @@ impl PhaseSnapshot {
         PhaseSnapshot {
             phase,
             iteration,
-            liquidity: LiquiditySnapshot::from_liquidity_pool(liquidity, market_names),
+            liquidity: LiquiditySnapshot { books: Vec::new() },
             fills_count,
             welfare,
             elapsed_secs,
@@ -701,34 +699,16 @@ impl VizSnapshot {
         }
     }
 
-    /// Create a snapshot with liquidity data (for viz feature).
+    /// Create a snapshot with phase data (for viz feature).
     #[cfg(feature = "viz")]
-    pub fn from_pipeline_result_with_liquidity(
+    pub fn from_pipeline_result_with_phases(
         result: &PipelineResult,
         problem: &Problem,
         scenario_name: impl Into<String>,
-        initial_liquidity: &matching_engine::LiquidityPool,
         phase_snapshots: Vec<PhaseSnapshot>,
     ) -> Self {
         let mut snapshot = Self::from_pipeline_result(result, problem, scenario_name);
-
-        // Build market name lookup
-        let market_names: HashMap<MarketId, String> = problem
-            .markets
-            .iter()
-            .map(|m| (m.id, m.name.clone()))
-            .collect();
-
-        snapshot.initial_liquidity = Some(LiquiditySnapshot::from_liquidity_pool(
-            initial_liquidity,
-            &market_names,
-        ));
-        snapshot.final_liquidity = Some(LiquiditySnapshot::from_liquidity_pool(
-            &result.result.remaining_liquidity,
-            &market_names,
-        ));
         snapshot.phase_snapshots = phase_snapshots;
-
         snapshot
     }
 

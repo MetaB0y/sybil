@@ -6,7 +6,7 @@ use rand::Rng;
 use rand::SeedableRng;
 
 use matching_engine::{
-    bundle_yes, outcome_buy, price_to_nanos, spread, MarketId, MarketSet, Order, Problem, Qty,
+    bundle_yes, outcome_buy, outcome_sell, price_to_nanos, spread, MarketId, MarketSet, Order, Problem, Qty,
 };
 
 /// Configuration for random hard instance generation
@@ -95,7 +95,8 @@ pub fn generate_random_scenario(config: RandomConfig) -> Problem {
     let supply_per_market = total_supply / config.num_markets as Qty;
     let supply_per_level = supply_per_market / (config.price_levels as Qty * 2);
 
-    // Add liquidity for each market (YES and NO)
+    // Add supply/demand orders for each market (YES and NO)
+    let mut liq_order_id = 5_000_000u64;
     for (i, &market) in market_ids.iter().enumerate() {
         let yes_price = market_prices[i];
         let no_price = 1.0 - yes_price;
@@ -103,33 +104,47 @@ pub fn generate_random_scenario(config: RandomConfig) -> Problem {
         for level in 0..config.price_levels {
             let offset = config.price_spread * (level as f64 + 1.0) / config.price_levels as f64;
 
-            // YES liquidity
-            problem.liquidity.add_bid(
+            // YES buy orders (bids)
+            problem.orders.push(outcome_buy(
+                &problem.markets,
+                liq_order_id,
                 market,
                 0,
                 price_to_nanos((yes_price - offset).max(0.01)),
                 supply_per_level.max(10),
-            );
-            problem.liquidity.add_ask(
+            ));
+            liq_order_id += 1;
+            // YES sell orders (asks)
+            problem.orders.push(outcome_sell(
+                &problem.markets,
+                liq_order_id,
                 market,
                 0,
                 price_to_nanos((yes_price + offset).min(0.99)),
                 supply_per_level.max(10),
-            );
+            ));
+            liq_order_id += 1;
 
-            // NO liquidity
-            problem.liquidity.add_bid(
+            // NO buy orders (bids)
+            problem.orders.push(outcome_buy(
+                &problem.markets,
+                liq_order_id,
                 market,
                 1,
                 price_to_nanos((no_price - offset).max(0.01)),
                 supply_per_level.max(10),
-            );
-            problem.liquidity.add_ask(
+            ));
+            liq_order_id += 1;
+            // NO sell orders (asks)
+            problem.orders.push(outcome_sell(
+                &problem.markets,
+                liq_order_id,
                 market,
                 1,
                 price_to_nanos((no_price + offset).min(0.99)),
                 supply_per_level.max(10),
-            );
+            ));
+            liq_order_id += 1;
         }
     }
 

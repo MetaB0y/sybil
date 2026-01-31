@@ -332,9 +332,6 @@ mod tests {
         let mut problem = Problem::new(name);
         let market = problem.markets.add_binary("market");
 
-        problem.liquidity.add_ask(market, 0, 500_000_000, 10000);
-        problem.liquidity.add_ask(market, 1, 500_000_000, 10000);
-
         for i in 0..num_orders {
             problem.orders.push(simple_yes_buy(
                 &problem.markets,

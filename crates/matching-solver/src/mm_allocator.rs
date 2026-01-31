@@ -430,9 +430,6 @@ mod tests {
         let mut problem = Problem::new("mm_test");
         let market = problem.markets.add_binary("test_market");
 
-        // Add liquidity at 50 cents
-        problem.liquidity.add_ask(market, 0, 500_000_000, 10000);
-
         // Add 5 orders, each 100 shares
         // Capital cost per order (SellYes at 50 cents): (1 - 0.50) × 100 = $50
         for i in 1..=5 {
@@ -501,7 +498,6 @@ mod tests {
         let market = problem.markets.add_binary("m");
 
         // Add liquidity
-        problem.liquidity.add_ask(market, 0, 500_000_000, 10000);
 
         // Add 5 orders, each costing $50 to fill (selling YES at 50 cents, 100 shares)
         for i in 1..=5 {
@@ -575,9 +571,6 @@ mod tests {
             let mut problem = Problem::new("proptest");
             let market = problem.markets.add_binary("m");
 
-            // Add liquidity
-            problem.liquidity.add_ask(market, 0, 500_000_000, 100000);
-
             // Add orders
             for i in 1..=num_orders {
                 problem.orders.push(simple_yes_buy(
@@ -629,8 +622,6 @@ mod tests {
         ) {
             let mut problem = Problem::new("proptest_monotonic");
             let market = problem.markets.add_binary("m");
-
-            problem.liquidity.add_ask(market, 0, 500_000_000, 100000);
 
             for i in 1..=num_orders {
                 problem.orders.push(simple_yes_buy(
@@ -688,7 +679,6 @@ mod tests {
         let mut problem = Problem::new("stats_test");
         let market = problem.markets.add_binary("m");
 
-        problem.liquidity.add_ask(market, 0, 500_000_000, 10000);
 
         // Add 10 orders - use large quantity to ensure capital cost is significant
         for i in 1..=10 {
@@ -770,7 +760,6 @@ mod tests {
         let mut problem = Problem::new("overlapping_mms");
         let market = problem.markets.add_binary("m");
 
-        problem.liquidity.add_ask(market, 0, 500_000_000, 10000);
 
         // Add 6 orders
         for i in 1..=6 {
@@ -847,7 +836,6 @@ mod tests {
         let mut problem = Problem::new("varied_welfare");
         let market = problem.markets.add_binary("m");
 
-        problem.liquidity.add_ask(market, 0, 500_000_000, 10000);
 
         // Add orders with varying limit prices (affects welfare)
         for i in 1..=10 {

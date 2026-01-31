@@ -322,34 +322,44 @@ fn add_liquidity(
     let total_supply = (total_demand_estimate as f64 * config.liquidity_scarcity) as Qty;
     let supply_per_market = total_supply / config.num_markets as Qty;
 
+    // Use high order IDs for supply sell orders to avoid collisions
+    let mut sell_order_id = 5_000_000u64;
+
     for (market_id, fair_price) in market_info {
         let is_hot = hot_markets.contains(market_id);
         let market_supply = if is_hot {
-            supply_per_market / 3 // Hot markets get less liquidity
+            supply_per_market / 3 // Hot markets get less supply
         } else {
             supply_per_market
         };
 
-        // YES outcome
+        // YES outcome — sell orders provide supply (asks)
         for level in 0..3 {
             let offset = 0.05 * (level as f64 + 1.0);
             let level_supply = market_supply / 6;
 
             let ask_price = (*fair_price + offset).min(0.98);
-            problem.liquidity.add_ask(
+            problem.orders.push(outcome_sell(
+                &problem.markets,
+                sell_order_id,
                 *market_id,
                 0,
                 price_to_nanos(ask_price),
                 level_supply.max(10),
-            );
+            ));
+            sell_order_id += 1;
 
+            // Buy orders at bid prices (buying YES)
             let bid_price = (*fair_price - offset).max(0.02);
-            problem.liquidity.add_bid(
+            problem.orders.push(outcome_buy(
+                &problem.markets,
+                sell_order_id,
                 *market_id,
                 0,
                 price_to_nanos(bid_price),
                 level_supply.max(10),
-            );
+            ));
+            sell_order_id += 1;
         }
 
         // NO outcome
@@ -359,20 +369,27 @@ fn add_liquidity(
             let level_supply = market_supply / 6;
 
             let ask_price = (no_price + offset).min(0.98);
-            problem.liquidity.add_ask(
+            problem.orders.push(outcome_sell(
+                &problem.markets,
+                sell_order_id,
                 *market_id,
                 1,
                 price_to_nanos(ask_price),
                 level_supply.max(10),
-            );
+            ));
+            sell_order_id += 1;
 
+            // Buy orders at bid prices (buying NO)
             let bid_price = (no_price - offset).max(0.02);
-            problem.liquidity.add_bid(
+            problem.orders.push(outcome_buy(
+                &problem.markets,
+                sell_order_id,
                 *market_id,
                 1,
                 price_to_nanos(bid_price),
                 level_supply.max(10),
-            );
+            ));
+            sell_order_id += 1;
         }
     }
 }
@@ -459,37 +476,16 @@ fn generate_bundle_order_with_outcome(
     (order, joint_outcome, limit_nanos)
 }
 
-/// Add joint liquidity for bundle outcomes based on bundle order demand.
+/// Joint liquidity for bundles is no longer supported.
+/// Bundle matching is order-vs-order only.
 fn add_joint_liquidity(
-    problem: &mut Problem,
-    bundle_outcomes: &HashMap<JointOutcome, (Qty, Nanos)>,
-    config: &ScenarioConfig,
-    rng: &mut ChaCha8Rng,
+    _problem: &mut Problem,
+    _bundle_outcomes: &HashMap<JointOutcome, (Qty, Nanos)>,
+    _config: &ScenarioConfig,
+    _rng: &mut ChaCha8Rng,
 ) {
-    for (joint_outcome, (total_demand, max_limit)) in bundle_outcomes {
-        // Provide liquidity proportional to demand, adjusted by scarcity
-        let supply = (*total_demand as f64 * config.liquidity_scarcity * 1.5) as Qty;
-
-        // Add multiple levels of liquidity
-        let num_levels = 3;
-        let supply_per_level = supply / num_levels as Qty;
-
-        for level in 0..num_levels {
-            // Price starts BELOW max limit and increases with level
-            // Level 0: 70-80% of max_limit
-            // Level 1: 80-90% of max_limit
-            // Level 2: 90-100% of max_limit
-            let base_price = *max_limit as f64 / 1_000_000_000.0;
-            let price_factor = 0.7 + 0.1 * level as f64 + rng.gen_range(0.0..0.1);
-            let level_price = (base_price * price_factor).clamp(0.01, 0.98);
-
-            problem.liquidity.add_joint_ask(
-                joint_outcome.clone(),
-                price_to_nanos(level_price),
-                supply_per_level.max(10),
-            );
-        }
-    }
+    // No-op: platform joint liquidity has been removed.
+    // Bundle orders are matched against each other through the solver.
 }
 
 fn generate_spread_order(

@@ -1,6 +1,6 @@
 use rand::Rng;
 
-use matching_engine::{outcome_buy, MarketSet, Nanos, NANOS_PER_DOLLAR};
+use matching_engine::{outcome_buy, outcome_sell, MarketSet, Nanos, NANOS_PER_DOLLAR};
 
 use crate::account::{Account, AccountId};
 use crate::agent::{Agent, AgentSubmission, MarketView};
@@ -66,6 +66,14 @@ impl Agent for NoiseTrader {
             // Random outcome: 0 = YES, 1 = NO
             let outcome: u8 = self.rng.gen_range(0..2);
 
+            // 30% chance to sell if we have a position
+            let yes_pos = account.position(market_id, 0);
+            let no_pos = account.position(market_id, 1);
+            let sell_chance: f64 = self.rng.gen();
+            let has_position = (outcome == 0 && yes_pos > 0) || (outcome == 1 && no_pos > 0);
+
+            let is_sell = sell_chance < 0.3 && has_position;
+
             // Use public beliefs as base price when available, otherwise last price
             let base_price = if let Some(ref beliefs) = view.public_beliefs {
                 if let Some(&belief) = beliefs.get(&market_id) {
@@ -91,12 +99,22 @@ impl Agent for NoiseTrader {
                 NANOS_PER_DOLLAR as i64 * 99 / 100, // max 99 cents
             ) as Nanos;
 
-            // Random quantity
-            let qty = self.rng.gen_range(1..=self.max_qty);
-
-            let order = outcome_buy(&self.markets, temp_id, market_id, outcome, price, qty);
-            orders.push(order);
-            temp_id += 1;
+            if is_sell {
+                // Sell existing position
+                let available = if outcome == 0 { yes_pos } else { no_pos };
+                let qty = self.rng.gen_range(1..=self.max_qty).min(available as u64);
+                if qty > 0 {
+                    let order = outcome_sell(&self.markets, temp_id, market_id, outcome, price, qty);
+                    orders.push(order);
+                    temp_id += 1;
+                }
+            } else {
+                // Buy
+                let qty = self.rng.gen_range(1..=self.max_qty);
+                let order = outcome_buy(&self.markets, temp_id, market_id, outcome, price, qty);
+                orders.push(order);
+                temp_id += 1;
+            }
         }
 
         AgentSubmission::with_orders(orders)

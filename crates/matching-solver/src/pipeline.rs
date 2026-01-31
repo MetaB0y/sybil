@@ -160,9 +160,9 @@ pub struct IterationStats {
 
 impl PipelineResult {
     /// Create an empty result.
-    pub fn empty(liquidity: matching_engine::LiquidityPool) -> Self {
+    pub fn empty() -> Self {
         Self {
-            result: MatchingResult::new(liquidity),
+            result: MatchingResult::new(),
             price_discovery: None,
             negrisk: None,
             allocation: None,
@@ -321,7 +321,7 @@ impl Pipeline {
     /// 2. ArbitrageDetector (partial solvers) handles multi-market orders
     fn solve_dual_decomposition(&self, problem: &Problem) -> PipelineResult {
         let start = Instant::now();
-        let mut result = PipelineResult::empty(problem.liquidity.snapshot());
+        let mut result = PipelineResult::empty();
         let mut timings = PipelineTimings::default();
 
         let dual_master = self.dual_master.as_ref().expect("dual_master must be set");
@@ -340,18 +340,10 @@ impl Pipeline {
         let filled_order_ids: std::collections::HashSet<u64> =
             result.result.fills.iter().map(|f| f.order_id).collect();
 
-        // Consume liquidity for all fills
         let order_map: std::collections::HashMap<u64, &matching_engine::Order> =
             problem.orders.iter().map(|o| (o.id, o)).collect();
-        let mut remaining_liquidity = problem.liquidity.snapshot();
-        for fill in &result.result.fills {
-            if let Some(order) = order_map.get(&fill.order_id) {
-                self.consume_order_liquidity(order, fill.fill_qty, &mut remaining_liquidity);
-            }
-        }
 
         // Phase 2: Bundle/Spread matching (ArbitrageDetector)
-        // Runs AFTER dual decomposition converges, using remaining liquidity
         let partial_start = Instant::now();
         for solver in &self.partial_solvers {
             let partial_orders: Vec<_> = problem
@@ -364,7 +356,6 @@ impl Pipeline {
             let partial_problem = Problem {
                 name: problem.name.clone(),
                 markets: problem.markets.clone(),
-                liquidity: remaining_liquidity.clone(),
                 orders: partial_orders,
                 mm_constraints: problem.mm_constraints.clone(),
                 market_groups: problem.market_groups.clone(),
@@ -374,7 +365,6 @@ impl Pipeline {
 
             for fill in partial_result.fills {
                 if let Some(&order) = order_map.get(&fill.order_id) {
-                    self.consume_order_liquidity(order, fill.fill_qty, &mut remaining_liquidity);
                     result.result.add_fill(fill.clone(), order);
                     result.contributions.push(SolverContribution {
                         solver_name: solver.name().to_string(),
@@ -405,7 +395,6 @@ impl Pipeline {
                 .clone(),
         });
 
-        result.result.remaining_liquidity = remaining_liquidity;
         result.phase_times = timings;
         result.total_time_secs = start.elapsed().as_secs_f64();
         result.iterations = dual_result.iterations;
@@ -423,16 +412,13 @@ impl Pipeline {
     /// Repeats until convergence or max iterations.
     fn solve_sequential(&self, problem: &Problem) -> PipelineResult {
         let start = Instant::now();
-        let mut result = PipelineResult::empty(problem.liquidity.snapshot());
+        let mut result = PipelineResult::empty();
         let mut timings = PipelineTimings::default();
 
         let mut prev_welfare = 0i64;
         let mut prev_volume = 0u64;
         let mut prev_fills = 0usize;
         let mut iterations = 0;
-
-        // Create a mutable problem with remaining liquidity
-        let mut remaining_liquidity = problem.liquidity.snapshot();
 
         // Accumulate arbitrage orders across all iterations
         let mut all_arbitrage_orders: Vec<matching_engine::Order> = Vec::new();
@@ -465,7 +451,6 @@ impl Pipeline {
         phase_snapshots.push(crate::viz::PhaseSnapshot::capture(
             crate::viz::PipelinePhase::Initial,
             0,
-            &remaining_liquidity,
             &market_names,
             0,
             0,
@@ -513,11 +498,10 @@ impl Pipeline {
                 }
             }
 
-            // Create problem view with remaining liquidity and unfilled orders
+            // Create problem view with unfilled orders
             let iter_problem = Problem {
                 name: problem.name.clone(),
                 markets: problem.markets.clone(),
-                liquidity: remaining_liquidity.clone(),
                 orders: remaining_orders,
                 mm_constraints: problem.mm_constraints.clone(),
                 market_groups: problem.market_groups.clone(),
@@ -544,7 +528,6 @@ impl Pipeline {
                 phase_snapshots.push(crate::viz::PhaseSnapshot::capture_with_phase_data(
                     crate::viz::PipelinePhase::PriceDiscovery,
                     iterations,
-                    &remaining_liquidity,
                     &market_names,
                     result.result.fills.len(),  // Confirmed fills so far
                     result.result.total_welfare,  // Confirmed welfare so far
@@ -610,7 +593,6 @@ impl Pipeline {
                 phase_snapshots.push(crate::viz::PhaseSnapshot::capture_with_phase_data(
                     crate::viz::PipelinePhase::NegriskArbitrage,
                     iterations,
-                    &remaining_liquidity,
                     &market_names,
                     result.result.fills.len(),  // Confirmed fills (includes negrisk)
                     result.result.total_welfare,  // Confirmed welfare (includes negrisk)
@@ -728,17 +710,15 @@ impl Pipeline {
                 let iter_result =
                     self.build_result_from_prices(&iter_problem, pd_result, &allocation_result);
 
-                // Consume liquidity for filled orders and track filled order IDs.
+                // Track filled order IDs.
                 // Look up in both original orders and arb orders.
-                // Arb fills consume real liquidity (they were matched in clearing)
-                // but are NOT added to the output — they are synthetic price-pressure
+                // Arb fills are NOT added to the output — they are synthetic price-pressure
                 // mechanisms with no real account behind them.
                 for fill in &iter_result.fills {
                     let is_arb = arb_order_map.contains_key(&fill.order_id);
                     let order_ref = order_map.get(&fill.order_id).copied()
                         .or_else(|| arb_order_map.get(&fill.order_id));
-                    if let Some(order) = order_ref {
-                        self.consume_order_liquidity(order, fill.fill_qty, &mut remaining_liquidity);
+                    if let Some(_order) = order_ref {
                         filled_order_ids.insert(fill.order_id);
                         if !is_arb {
                             iter_price_discovery_fills += 1;
@@ -782,7 +762,6 @@ impl Pipeline {
                 phase_snapshots.push(crate::viz::PhaseSnapshot::capture_with_phase_data(
                     crate::viz::PipelinePhase::MmAllocation,
                     iterations,
-                    &remaining_liquidity,
                     &market_names,
                     result.result.fills.len(),  // ACTUAL confirmed fills
                     result.result.total_welfare,  // ACTUAL confirmed welfare
@@ -807,11 +786,10 @@ impl Pipeline {
                     .cloned()
                     .collect();
 
-                // Create problem with current remaining liquidity and unfilled orders
+                // Create problem with unfilled orders
                 let partial_problem = Problem {
                     name: problem.name.clone(),
                     markets: problem.markets.clone(),
-                    liquidity: remaining_liquidity.clone(),
                     orders: partial_orders,
                     mm_constraints: problem.mm_constraints.clone(),
                     market_groups: problem.market_groups.clone(),
@@ -819,11 +797,10 @@ impl Pipeline {
 
                 let partial_result = solver.solve_partial(&partial_problem);
 
-                // Add fills, consume liquidity, and track filled order IDs
+                // Add fills and track filled order IDs
                 // Use order_map for O(1) lookups instead of O(n) .find()
                 for fill in partial_result.fills {
                     if let Some(&order) = order_map.get(&fill.order_id) {
-                        self.consume_order_liquidity(order, fill.fill_qty, &mut remaining_liquidity);
                         filled_order_ids.insert(fill.order_id);
                         result.result.add_fill(fill.clone(), order);
                         iter_bundle_fills += 1;
@@ -852,7 +829,6 @@ impl Pipeline {
                 phase_snapshots.push(crate::viz::PhaseSnapshot::capture_with_phase_data(
                     crate::viz::PipelinePhase::BundleMatching,
                     iterations,
-                    &remaining_liquidity,
                     &market_names,
                     result.result.fills.len(),  // ACTUAL confirmed fills
                     result.result.total_welfare,  // ACTUAL confirmed welfare
@@ -920,7 +896,6 @@ impl Pipeline {
         phase_snapshots.push(crate::viz::PhaseSnapshot::capture(
             crate::viz::PipelinePhase::Final,
             iterations,
-            &remaining_liquidity,
             &market_names,
             result.result.fills.len(),
             result.result.total_welfare,
@@ -978,7 +953,6 @@ impl Pipeline {
             });
         }
 
-        result.result.remaining_liquidity = remaining_liquidity;
         result.phase_times = timings;
         result.total_time_secs = start.elapsed().as_secs_f64();
         result.iterations = iterations;
@@ -1000,7 +974,7 @@ impl Pipeline {
     /// Single-pass solving (original behavior).
     fn solve_single_pass(&self, problem: &Problem) -> PipelineResult {
         let start = Instant::now();
-        let mut result = PipelineResult::empty(problem.liquidity.snapshot());
+        let mut result = PipelineResult::empty();
         let mut timings = PipelineTimings::default();
 
         // Phase 1: Price Discovery
@@ -1147,49 +1121,6 @@ impl Pipeline {
         result
     }
 
-    /// Consume liquidity for an order fill.
-    fn consume_order_liquidity(
-        &self,
-        order: &matching_engine::Order,
-        qty: matching_engine::Qty,
-        liquidity: &mut matching_engine::LiquidityPool,
-    ) {
-        if order.num_markets == 1 {
-            // For single-market orders, consume from the appropriate book
-            let market = order.markets[0];
-            // Determine outcome from payoffs (simplified: assume outcome 0 if positive payoff at state 0)
-            let outcome = if order.payoffs[0] > 0 { 0 } else { 1 };
-            if let Some(book) = liquidity.books.get_mut(&(market, outcome)) {
-                book.consume_asks(qty, order.limit_price);
-            }
-        } else {
-            // For bundles, consume from joint liquidity
-            let joint_outcome = self.build_joint_outcome_for_order(order);
-            if let Some(joint_book) = liquidity.joint_book_get_mut(&joint_outcome) {
-                joint_book.consume_asks(qty, order.limit_price);
-            }
-        }
-    }
-
-    /// Build a JointOutcome from a bundle order.
-    fn build_joint_outcome_for_order(
-        &self,
-        order: &matching_engine::Order,
-    ) -> matching_engine::JointOutcome {
-        let mut legs = Vec::new();
-        for market_idx in 0..order.num_markets as usize {
-            let market = order.markets[market_idx];
-            if market.is_none() {
-                continue;
-            }
-            // Determine outcome from payoffs
-            // For bundle YES orders, state 0 (all YES) has positive payoff
-            let outcome = if order.payoffs[0] > 0 { 0 } else { 1 };
-            legs.push((market, outcome));
-        }
-        matching_engine::JointOutcome::new(legs)
-    }
-
     /// Build a MatchingResult from price discovery and allocation.
     fn build_result_from_prices(
         &self,
@@ -1197,7 +1128,7 @@ impl Pipeline {
         prices: &PriceDiscoveryResult,
         allocation: &Option<AllocationResult>,
     ) -> MatchingResult {
-        let mut result = MatchingResult::new(problem.liquidity.snapshot());
+        let mut result = MatchingResult::new();
 
         let mut all_fills = prices.all_fills();
 
@@ -1232,7 +1163,7 @@ impl Pipeline {
         problem: &Problem,
         partial: &PartialSolution,
     ) -> MatchingResult {
-        let mut result = MatchingResult::new(problem.liquidity.snapshot());
+        let mut result = MatchingResult::new();
 
         let order_map: std::collections::HashMap<_, _> =
             problem.orders.iter().map(|o| (o.id, o)).collect();
@@ -1410,14 +1341,29 @@ impl PartialSolver for ArbitrageDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matching_engine::simple_yes_buy;
+    use matching_engine::{outcome_sell, simple_yes_buy};
 
     fn create_test_problem() -> Problem {
         let mut problem = Problem::new("test");
         let market = problem.markets.add_binary("market");
 
-        problem.liquidity.add_ask(market, 0, 500_000_000, 1000);
-        problem.liquidity.add_ask(market, 1, 500_000_000, 1000);
+        // Sell orders provide supply instead of liquidity pool
+        problem.orders.push(outcome_sell(
+            &problem.markets,
+            100,
+            market,
+            0,
+            500_000_000,
+            1000,
+        ));
+        problem.orders.push(outcome_sell(
+            &problem.markets,
+            101,
+            market,
+            1,
+            500_000_000,
+            1000,
+        ));
 
         for i in 0..10 {
             problem.orders.push(simple_yes_buy(

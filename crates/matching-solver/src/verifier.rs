@@ -292,8 +292,6 @@ mod tests {
         let mut problem = Problem::new("test");
         let market = problem.markets.add_binary("m");
 
-        problem.liquidity.add_ask(market, 0, 500_000_000, 1000);
-
         // Add some orders
         for i in 1..=5 {
             problem.orders.push(simple_yes_buy(
@@ -312,7 +310,7 @@ mod tests {
     fn test_valid_result() {
         let problem = create_test_problem();
 
-        let mut result = MatchingResult::new(problem.liquidity.snapshot());
+        let mut result = MatchingResult::new();
         result.fills.push(Fill::new(1, 50, 500_000_000));
         result.fills.push(Fill::new(2, 100, 550_000_000));
 
@@ -329,7 +327,7 @@ mod tests {
     fn test_quantity_exceeds_max() {
         let problem = create_test_problem();
 
-        let mut result = MatchingResult::new(problem.liquidity.snapshot());
+        let mut result = MatchingResult::new();
         result.fills.push(Fill::new(1, 200, 500_000_000)); // max_fill is 100
         result.total_welfare = 0;
 
@@ -345,7 +343,7 @@ mod tests {
     fn test_price_exceeds_limit() {
         let problem = create_test_problem();
 
-        let mut result = MatchingResult::new(problem.liquidity.snapshot());
+        let mut result = MatchingResult::new();
         result.fills.push(Fill::new(1, 50, 700_000_000)); // limit is 600_000_000
         result.total_welfare = 0;
 
@@ -361,7 +359,7 @@ mod tests {
     fn test_duplicate_fill() {
         let problem = create_test_problem();
 
-        let mut result = MatchingResult::new(problem.liquidity.snapshot());
+        let mut result = MatchingResult::new();
         result.fills.push(Fill::new(1, 50, 500_000_000));
         result.fills.push(Fill::new(1, 30, 500_000_000)); // Duplicate
         result.total_welfare = 0;
@@ -378,7 +376,7 @@ mod tests {
     fn test_order_not_found() {
         let problem = create_test_problem();
 
-        let mut result = MatchingResult::new(problem.liquidity.snapshot());
+        let mut result = MatchingResult::new();
         result.fills.push(Fill::new(999, 50, 500_000_000)); // Order doesn't exist
         result.total_welfare = 0;
 
@@ -397,7 +395,7 @@ mod tests {
         // Make order 1 all-or-none
         problem.orders[0].min_fill = 100;
 
-        let mut result = MatchingResult::new(problem.liquidity.snapshot());
+        let mut result = MatchingResult::new();
         result.fills.push(Fill::new(1, 50, 500_000_000)); // Partial fill of AON
         result.total_welfare = 0;
 
@@ -419,7 +417,7 @@ mod tests {
             .with_order(2, MmSide::SellYes);
         problem.mm_constraints.push(mm);
 
-        let mut result = MatchingResult::new(problem.liquidity.snapshot());
+        let mut result = MatchingResult::new();
         // Fill both orders - each costs ~$50 capital (100 shares * $0.50)
         result.fills.push(Fill::new(1, 100, 500_000_000));
         result.fills.push(Fill::new(2, 100, 500_000_000));
@@ -440,7 +438,7 @@ mod tests {
     fn test_welfare_mismatch() {
         let problem = create_test_problem();
 
-        let mut result = MatchingResult::new(problem.liquidity.snapshot());
+        let mut result = MatchingResult::new();
         result.fills.push(Fill::new(1, 50, 500_000_000));
         result.total_welfare = 999_999_999_999; // Wrong welfare
 

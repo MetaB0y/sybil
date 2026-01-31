@@ -406,19 +406,9 @@ fn print_market_details(
             }
         }
 
-        // Get remaining liquidity
-        let liq_yes = result
-            .result
-            .remaining_liquidity
-            .book(market_id, 0)
-            .map(|b| b.total_ask_qty())
-            .unwrap_or(0);
-        let liq_no = result
-            .result
-            .remaining_liquidity
-            .book(market_id, 1)
-            .map(|b| b.total_ask_qty())
-            .unwrap_or(0);
+        // Liquidity pool has been removed; show N/A
+        let liq_yes: u64 = 0;
+        let liq_no: u64 = 0;
 
         let group_name = market_to_group.get(&market_id).copied().unwrap_or("-");
 
@@ -477,9 +467,7 @@ fn run_detailed_pipeline(
         // Select sample markets for detailed output
         let sample_markets = select_sample_markets(&problem, 10);
 
-        // Capture initial liquidity for viz feature
-        #[cfg(feature = "viz")]
-        let initial_liquidity = problem.liquidity.snapshot();
+        // No initial liquidity capture needed (liquidity pool removed)
 
         // Run pipeline and get detailed results
         let pipeline = match solver_choice {
@@ -522,11 +510,10 @@ fn run_detailed_pipeline(
             );
 
             #[cfg(feature = "viz")]
-            let snapshot = VizSnapshot::from_pipeline_result_with_liquidity(
+            let snapshot = VizSnapshot::from_pipeline_result_with_phases(
                 &result,
                 &problem,
                 scenario_name,
-                &initial_liquidity,
                 result.phase_snapshots.clone(),
             );
 

@@ -242,8 +242,7 @@ impl MilpSolver {
     /// Solve with full status reporting.
     pub fn solve_with_status(&self, problem: &Problem) -> MilpResult {
         let start = std::time::Instant::now();
-        let mut liquidity = problem.liquidity.snapshot();
-        let mut result = MatchingResult::new(liquidity.clone());
+        let mut result = MatchingResult::new();
 
         // Filter out conditional orders
         let active_orders: Vec<_> = problem
@@ -277,39 +276,10 @@ impl MilpSolver {
                         let fill_qty = q_val.round() as u64;
 
                         if fill_qty >= order.min_fill {
-                            let targets = Self::extract_order_targets(order);
-
-                            // Compute average fill price by consuming from the books
-                            let mut total_cost: u128 = 0;
-                            let mut markets_filled = 0;
-
-                            for (market, outcome) in &targets {
-                                if let Some(book) = liquidity.books.get_mut(&(*market, *outcome)) {
-                                    let (filled, avg_price) =
-                                        book.consume_asks(fill_qty, order.limit_price);
-                                    if filled >= fill_qty.min(order.min_fill) {
-                                        total_cost += avg_price as u128 * filled as u128;
-                                        markets_filled += 1;
-                                    }
-                                }
-                            }
-
-                            if markets_filled == targets.len() && fill_qty > 0 {
-                                let avg_fill_price = if !targets.is_empty() {
-                                    (total_cost / (fill_qty as u128 * targets.len() as u128)) as u64
-                                } else {
-                                    0
-                                };
-
-                                let fill = Fill::new(order.id, fill_qty, avg_fill_price);
-                                result.add_fill(fill, order);
-                            } else {
-                                if order.is_all_or_none() {
-                                    result.orders_unfilled_aon += 1;
-                                } else {
-                                    result.orders_unfilled_liquidity += 1;
-                                }
-                            }
+                            // Use limit price as fill price estimate
+                            // (MILP determines feasibility, actual price comes from clearing)
+                            let fill = Fill::new(order.id, fill_qty, order.limit_price);
+                            result.add_fill(fill, order);
                         }
                     } else {
                         if order.is_all_or_none() {
@@ -319,8 +289,6 @@ impl MilpSolver {
                         }
                     }
                 }
-
-                result.remaining_liquidity = liquidity;
 
                 MilpResult {
                     result,
@@ -567,14 +535,26 @@ impl MilpSolver {
         0
     }
 
-    /// Compute available liquidity for each (market, outcome) pair from the asks.
+    /// Compute available supply for each (market, outcome) pair from sell orders.
     fn compute_available_liquidity(problem: &Problem) -> HashMap<(MarketId, u8), u64> {
-        let mut available = HashMap::new();
+        let mut available: HashMap<(MarketId, u8), u64> = HashMap::new();
 
-        for (&(market, outcome), book) in problem.liquidity.books.iter() {
-            let total_ask_qty = book.total_ask_qty();
-            if total_ask_qty > 0 {
-                available.insert((market, outcome), total_ask_qty);
+        for order in &problem.orders {
+            if order.num_markets != 1 {
+                continue;
+            }
+            let num_states = order.num_states as usize;
+            // Sell orders have negative payoffs
+            let is_seller = order.payoffs[..num_states].iter().any(|&p| p < 0);
+            if is_seller {
+                let market = order.markets[0];
+                // Find which outcome is being sold (negative payoff)
+                for s in 0..num_states {
+                    if order.payoffs[s] < 0 {
+                        let outcome = s as u8;
+                        *available.entry((market, outcome)).or_default() += order.max_fill;
+                    }
+                }
             }
         }
 
@@ -662,11 +642,25 @@ mod tests {
         let mut problem = Problem::new("test");
         let market = problem.markets.add_binary("market");
 
-        // Add liquidity
-        problem.liquidity.add_ask(market, 0, 500_000_000, 1000);
-        problem.liquidity.add_ask(market, 1, 500_000_000, 1000);
+        // Sell orders provide supply
+        problem.orders.push(matching_engine::outcome_sell(
+            &problem.markets,
+            100,
+            market,
+            0,
+            500_000_000,
+            1000,
+        ));
+        problem.orders.push(matching_engine::outcome_sell(
+            &problem.markets,
+            101,
+            market,
+            1,
+            500_000_000,
+            1000,
+        ));
 
-        // Add orders
+        // Add buy orders
         problem.orders.push(simple_yes_buy(
             &problem.markets,
             1,

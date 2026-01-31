@@ -4,6 +4,8 @@ use matching_engine::{MarketId, MmSide, Nanos, NANOS_PER_DOLLAR};
 use matching_scenarios::{generate_scenario, ScenarioConfig};
 use matching_solver::{local_solver::LocalSolver, mm_allocator::MmAllocator};
 use std::collections::{HashMap, HashSet};
+#[allow(unused_imports)]
+use matching_engine::outcome_sell;
 
 /// Analyze welfare at each stage and understand why convergence is immediate.
 #[test]
@@ -72,13 +74,7 @@ fn analyze_welfare_stages() {
     let mut stage1_fills: usize = 0;
 
     for market in problem.markets.iter() {
-        let book = problem
-            .liquidity
-            .books
-            .get(&(market.id, 0))
-            .cloned()
-            .unwrap_or_else(|| matching_engine::LiquidityBook::new(market.id, 0));
-        let solution = solver.solve_market(market.id, &problem.markets, &non_mm_orders, &book);
+        let solution = solver.solve_market(market.id, &problem.markets, &non_mm_orders);
         stage1_prices.insert(market.id, solution.prices);
         stage1_volume += solution.fills.iter().map(|f| f.fill_qty).sum::<u64>();
         stage1_fills += solution.fills.len();
@@ -278,13 +274,7 @@ fn analyze_welfare_stages() {
     let mut stage4_fills: usize = 0;
 
     for market in problem.markets.iter() {
-        let book = problem
-            .liquidity
-            .books
-            .get(&(market.id, 0))
-            .cloned()
-            .unwrap_or_else(|| matching_engine::LiquidityBook::new(market.id, 0));
-        let solution = solver.solve_market(market.id, &problem.markets, &combined_orders, &book);
+        let solution = solver.solve_market(market.id, &problem.markets, &combined_orders);
         stage4_prices.insert(market.id, solution.prices);
         stage4_volume += solution.fills.iter().map(|f| f.fill_qty).sum::<u64>();
         stage4_fills += solution.fills.len();
@@ -328,13 +318,7 @@ fn analyze_welfare_stages() {
     // Check 1: Are MM orders getting filled?
     let mut mm_fills = 0;
     for market in problem.markets.iter() {
-        let book = problem
-            .liquidity
-            .books
-            .get(&(market.id, 0))
-            .cloned()
-            .unwrap_or_else(|| matching_engine::LiquidityBook::new(market.id, 0));
-        let solution = solver.solve_market(market.id, &problem.markets, &combined_orders, &book);
+        let solution = solver.solve_market(market.id, &problem.markets, &combined_orders);
         for fill in &solution.fills {
             if activated_set.contains(&fill.order_id) {
                 mm_fills += 1;
@@ -346,15 +330,14 @@ fn analyze_welfare_stages() {
         mm_fills, result.stats.mm_orders_activated
     );
 
-    // Check 2: How much liquidity is available?
-    let total_liquidity: u64 = problem
-        .liquidity
-        .books
-        .values()
-        .flat_map(|b| b.asks())
-        .map(|l| l.available_qty)
+    // Check 2: How many sell orders provide supply?
+    let total_sell_supply: u64 = problem
+        .orders
+        .iter()
+        .filter(|o| o.is_seller())
+        .map(|o| o.max_fill)
         .sum();
-    println!("2. Total liquidity available: {} shares", total_liquidity);
+    println!("2. Total sell order supply: {} shares", total_sell_supply);
 
     // Check 3: Are MM order prices competitive?
     let mut mm_competitive = 0;
@@ -443,9 +426,9 @@ fn test_mm_price_impact() {
     // Create a single market
     let market = problem.markets.add_binary("test_market");
 
-    // Add limited liquidity at 50 cents
+    // Add limited sell order supply at 50 cents
     // Only 1000 shares available - this is key!
-    problem.liquidity.add_ask(market, 0, 500_000_000, 1000);
+    problem.orders.push(outcome_sell(&problem.markets, 9000, market, 0, 500_000_000, 1000));
 
     // Add non-MM orders that want to buy at high prices
     // These should drive price up
@@ -507,10 +490,13 @@ fn test_mm_price_impact() {
     let all_orders = problem.orders.clone();
 
     let solver = LocalSolver::new();
-    let book = problem.liquidity.books.get(&(market, 0)).cloned().unwrap();
 
-    // Solve without MM
-    let sol_without_mm = solver.solve_market(market, &problem.markets, &non_mm_orders, &book);
+    // Solve without MM (include the sell order supply)
+    let non_mm_with_supply: Vec<_> = problem.orders.iter()
+        .filter(|o| !mm_order_ids.contains(&o.id) || o.id == 9000)
+        .cloned()
+        .collect();
+    let sol_without_mm = solver.solve_market(market, &problem.markets, &non_mm_with_supply);
     println!("\nWithout MM orders:");
     println!(
         "  Clearing price: ${:.4}",
@@ -523,7 +509,7 @@ fn test_mm_price_impact() {
     println!("  Fills: {}", sol_without_mm.fills.len());
 
     // Solve with MM
-    let sol_with_mm = solver.solve_market(market, &problem.markets, &all_orders, &book);
+    let sol_with_mm = solver.solve_market(market, &problem.markets, &all_orders);
     println!("\nWith MM orders:");
     println!(
         "  Clearing price: ${:.4}",

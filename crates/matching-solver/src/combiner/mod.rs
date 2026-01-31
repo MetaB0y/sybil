@@ -32,7 +32,7 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 
-use matching_engine::{Fill, LiquidityPool, Order, Problem};
+use matching_engine::{Fill, Problem};
 
 use crate::MatchingResult;
 
@@ -178,7 +178,7 @@ impl SolutionCombiner {
         };
 
         if solutions.is_empty() {
-            let result = MatchingResult::new(problem.liquidity.snapshot());
+            let result = MatchingResult::new();
             return (result, stats, Vec::new());
         }
 
@@ -201,7 +201,7 @@ impl SolutionCombiner {
         stats.total_fills_input = all_fills.len();
 
         if all_fills.is_empty() {
-            let result = MatchingResult::new(problem.liquidity.snapshot());
+            let result = MatchingResult::new();
             return (result, stats, Vec::new());
         }
 
@@ -218,8 +218,7 @@ impl SolutionCombiner {
         stats.mwis_time_secs = mwis_start.elapsed().as_secs_f64();
 
         // Build result from selected fills
-        let mut liquidity = problem.liquidity.snapshot();
-        let mut result = MatchingResult::new(liquidity.clone());
+        let mut result = MatchingResult::new();
         let mut contributions: HashMap<String, SolverContribution> = HashMap::new();
 
         for idx in selected_indices {
@@ -227,9 +226,6 @@ impl SolutionCombiner {
             if let Some(order) = problem.orders.get(candidate.order_idx) {
                 // Apply the fill
                 result.add_fill(candidate.fill.clone(), order);
-
-                // Update liquidity for all markets in the order
-                self.consume_liquidity_for_fill(&mut liquidity, order, &candidate.fill, problem);
 
                 // Track contribution
                 let entry = contributions
@@ -244,7 +240,6 @@ impl SolutionCombiner {
             }
         }
 
-        result.remaining_liquidity = liquidity;
         stats.fills_selected = result.fills.len();
         stats.output_welfare = result.total_welfare;
 
@@ -293,28 +288,17 @@ impl SolutionCombiner {
         &self,
         fill_a: &CandidateFill,
         fill_b: &CandidateFill,
-        footprint_a: &FillFootprint,
-        footprint_b: &FillFootprint,
-        problem: &Problem,
+        _footprint_a: &FillFootprint,
+        _footprint_b: &FillFootprint,
+        _problem: &Problem,
     ) -> bool {
         // Same order conflict: can only fill an order once
         if fill_a.order_idx == fill_b.order_idx {
             return true;
         }
 
-        // Liquidity conflict: check if combined consumption exceeds available
-        for ((market, outcome), qty_a) in &footprint_a.liquidity_consumed {
-            if let Some(&qty_b) = footprint_b.liquidity_consumed.get(&(*market, *outcome)) {
-                // Check if combined consumption exceeds available
-                if let Some(book) = problem.liquidity.book(*market, *outcome) {
-                    let available = book.total_ask_qty();
-                    if qty_a + qty_b > available {
-                        return true;
-                    }
-                }
-            }
-        }
-
+        // Without platform liquidity, supply comes from sell orders which are
+        // tracked as regular orders. Conflicts are handled by the solver.
         false
     }
 
@@ -349,114 +333,6 @@ impl SolutionCombiner {
         solver.solve(graph, &adjusted_weights)
     }
 
-    /// Consume liquidity for a fill.
-    ///
-    /// For single-market orders, consumes from the appropriate outcome book.
-    /// For multi-market orders, consumes from each market's relevant outcome.
-    fn consume_liquidity_for_fill(
-        &self,
-        liquidity: &mut LiquidityPool,
-        order: &Order,
-        fill: &Fill,
-        problem: &Problem,
-    ) {
-        // Get market sizes for proper outcome extraction
-        let market_sizes: Vec<u8> = (0..order.num_markets as usize)
-            .map(|i| {
-                let market_id = order.markets[i];
-                if market_id.is_none() {
-                    2
-                } else {
-                    problem.markets.num_outcomes(market_id).max(2)
-                }
-            })
-            .collect();
-
-        // For each market, determine which outcome is being bought and consume liquidity
-        for market_idx in 0..order.num_markets as usize {
-            let market = order.markets[market_idx];
-            if market.is_none() {
-                continue;
-            }
-
-            let outcome = self.determine_outcome_for_market(order, market_idx, &market_sizes);
-            if let Some(book) = liquidity.get_mut(market, outcome) {
-                book.consume_asks(fill.fill_qty, fill.fill_price);
-            }
-        }
-    }
-
-    /// Determine which outcome an order is buying for a specific market.
-    fn determine_outcome_for_market(
-        &self,
-        order: &Order,
-        market_idx: usize,
-        market_sizes: &[u8],
-    ) -> u8 {
-        let num_markets = order.num_markets as usize;
-        if market_idx >= num_markets {
-            return 0;
-        }
-
-        // Simple case: single market order
-        if num_markets == 1 {
-            // Find the outcome with highest payoff
-            let mut best_outcome = 0u8;
-            let mut best_payoff = i8::MIN;
-
-            for (i, &payoff) in order
-                .payoffs
-                .iter()
-                .take(order.num_states as usize)
-                .enumerate()
-            {
-                if payoff > best_payoff {
-                    best_payoff = payoff;
-                    best_outcome = i as u8;
-                }
-            }
-            return best_outcome;
-        }
-
-        // Multi-market case: analyze payoff vector
-        let max_outcomes = market_sizes.iter().max().copied().unwrap_or(2) as usize;
-        let mut outcome_votes: Vec<i32> = vec![0; max_outcomes.max(4)];
-
-        for state_idx in 0..order.num_states as usize {
-            let payoff = order.payoffs[state_idx];
-            if payoff > 0 {
-                let outcome = self.extract_outcome_from_state(state_idx, market_idx, market_sizes);
-                if (outcome as usize) < outcome_votes.len() {
-                    outcome_votes[outcome as usize] += payoff as i32;
-                }
-            }
-        }
-
-        outcome_votes
-            .iter()
-            .enumerate()
-            .max_by_key(|(_, &v)| v)
-            .map(|(idx, _)| idx as u8)
-            .unwrap_or(0)
-    }
-
-    /// Extract the outcome for a specific market from a state index.
-    fn extract_outcome_from_state(
-        &self,
-        state_idx: usize,
-        market_idx: usize,
-        market_sizes: &[u8],
-    ) -> u8 {
-        let mut remaining = state_idx;
-        for (i, &size) in market_sizes.iter().enumerate() {
-            let outcome = (remaining % size as usize) as u8;
-            if i == market_idx {
-                return outcome;
-            }
-            remaining /= size as usize;
-        }
-        0
-    }
 }
 
 impl Default for SolutionCombiner {
@@ -489,11 +365,25 @@ mod tests {
         let mut problem = Problem::new("test");
         let market = problem.markets.add_binary("market");
 
-        // Add liquidity
-        problem.liquidity.add_ask(market, 0, 500_000_000, 1000);
-        problem.liquidity.add_ask(market, 1, 500_000_000, 1000);
+        // Sell orders provide supply
+        problem.orders.push(matching_engine::outcome_sell(
+            &problem.markets,
+            100,
+            market,
+            0,
+            500_000_000,
+            1000,
+        ));
+        problem.orders.push(matching_engine::outcome_sell(
+            &problem.markets,
+            101,
+            market,
+            1,
+            500_000_000,
+            1000,
+        ));
 
-        // Add orders
+        // Add buy orders
         problem.orders.push(simple_yes_buy(
             &problem.markets,
             1,
@@ -517,8 +407,9 @@ mod tests {
         let problem = create_test_problem();
         let combiner = SolutionCombiner::new();
 
+        // Buy order with id=1 is at index 2 (after 2 sell orders)
         let mut solution = SolverSolution::new("test_solver");
-        solution.add_fill(0, Fill::new(1, 100, 500_000_000), 10_000_000_000);
+        solution.add_fill(2, Fill::new(1, 100, 500_000_000), 10_000_000_000);
 
         let (result, stats, _contributions) = combiner.combine(vec![solution], &problem);
 
@@ -532,12 +423,12 @@ mod tests {
         let problem = create_test_problem();
         let combiner = SolutionCombiner::new();
 
-        // Two solutions filling different orders
+        // Buy order with id=1 is at index 2, id=2 is at index 3
         let mut sol_a = SolverSolution::new("solver_a");
-        sol_a.add_fill(0, Fill::new(1, 100, 500_000_000), 10_000_000_000);
+        sol_a.add_fill(2, Fill::new(1, 100, 500_000_000), 10_000_000_000);
 
         let mut sol_b = SolverSolution::new("solver_b");
-        sol_b.add_fill(1, Fill::new(2, 200, 500_000_000), 10_000_000_000);
+        sol_b.add_fill(3, Fill::new(2, 200, 500_000_000), 10_000_000_000);
 
         let (result, stats, _) = combiner.combine(vec![sol_a, sol_b], &problem);
 
@@ -551,12 +442,12 @@ mod tests {
         let problem = create_test_problem();
         let combiner = SolutionCombiner::new();
 
-        // Two solutions filling the same order
+        // Two solutions filling the same order (id=1 at index 2)
         let mut sol_a = SolverSolution::new("solver_a");
-        sol_a.add_fill(0, Fill::new(1, 50, 500_000_000), 5_000_000_000);
+        sol_a.add_fill(2, Fill::new(1, 50, 500_000_000), 5_000_000_000);
 
         let mut sol_b = SolverSolution::new("solver_b");
-        sol_b.add_fill(0, Fill::new(1, 100, 500_000_000), 10_000_000_000);
+        sol_b.add_fill(2, Fill::new(1, 100, 500_000_000), 10_000_000_000);
 
         let (result, stats, _) = combiner.combine(vec![sol_a, sol_b], &problem);
 

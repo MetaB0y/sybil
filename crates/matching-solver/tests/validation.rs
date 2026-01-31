@@ -17,13 +17,7 @@ fn validate_price_ranges() {
     let mut violations = 0;
 
     for market in problem.markets.iter() {
-        let book = problem
-            .liquidity
-            .books
-            .get(&(market.id, 0))
-            .cloned()
-            .unwrap_or_else(|| matching_engine::LiquidityBook::new(market.id, 0));
-        let solution = solver.solve_market(market.id, &problem.markets, &problem.orders, &book);
+        let solution = solver.solve_market(market.id, &problem.markets, &problem.orders);
 
         for (i, &price) in solution.prices.iter().enumerate() {
             if price > NANOS_PER_DOLLAR {
@@ -54,13 +48,7 @@ fn validate_mm_budget_constraints() {
     let solver = LocalSolver::new();
     let mut prices = HashMap::new();
     for market in problem.markets.iter() {
-        let book = problem
-            .liquidity
-            .books
-            .get(&(market.id, 0))
-            .cloned()
-            .unwrap_or_else(|| matching_engine::LiquidityBook::new(market.id, 0));
-        let solution = solver.solve_market(market.id, &problem.markets, &problem.orders, &book);
+        let solution = solver.solve_market(market.id, &problem.markets, &problem.orders);
         prices.insert(market.id, solution.prices);
     }
 
@@ -106,13 +94,7 @@ fn validate_fills_respect_limits() {
     let mut violations = 0;
 
     for market in problem.markets.iter() {
-        let book = problem
-            .liquidity
-            .books
-            .get(&(market.id, 0))
-            .cloned()
-            .unwrap_or_else(|| matching_engine::LiquidityBook::new(market.id, 0));
-        let solution = solver.solve_market(market.id, &problem.markets, &problem.orders, &book);
+        let solution = solver.solve_market(market.id, &problem.markets, &problem.orders);
 
         for fill in &solution.fills {
             if let Some(order) = order_map.get(&fill.order_id) {
@@ -161,13 +143,7 @@ fn validate_fill_prices_match_clearing_prices() {
     let mut total_fills = 0;
 
     for market in problem.markets.iter() {
-        let book = problem
-            .liquidity
-            .books
-            .get(&(market.id, 0))
-            .cloned()
-            .unwrap_or_else(|| matching_engine::LiquidityBook::new(market.id, 0));
-        let solution = solver.solve_market(market.id, &problem.markets, &problem.orders, &book);
+        let solution = solver.solve_market(market.id, &problem.markets, &problem.orders);
 
         for fill in &solution.fills {
             total_fills += 1;
@@ -210,27 +186,17 @@ fn validate_fill_prices_match_clearing_prices() {
     );
 }
 
-/// CRITICAL: Fills must not exceed available liquidity.
+/// CRITICAL: Fills must not exceed available supply.
 /// This test checks that we don't create impossible fills.
-/// Supply comes from both the liquidity book AND sell orders.
+/// Supply comes from sell orders.
 #[test]
-fn validate_fills_respect_liquidity() {
+fn validate_fills_respect_supply() {
     let config = ScenarioConfig::small();
     let problem = generate_scenario(config);
 
     let solver = LocalSolver::new();
 
     for market in problem.markets.iter() {
-        let book = problem
-            .liquidity
-            .books
-            .get(&(market.id, 0))
-            .cloned()
-            .unwrap_or_else(|| matching_engine::LiquidityBook::new(market.id, 0));
-
-        // Get available liquidity from book
-        let book_liquidity: u64 = book.asks().iter().map(|l| l.available_qty).sum();
-
         // Get available supply from sell orders (negative payoffs)
         // Sell orders for this market have payoff < 0 for outcome 0
         let seller_supply: u64 = problem
@@ -254,9 +220,9 @@ fn validate_fills_respect_liquidity() {
             .map(|o| o.max_fill)
             .sum();
 
-        let total_supply = book_liquidity + seller_supply + no_buyer_supply;
+        let total_supply = seller_supply + no_buyer_supply;
 
-        let solution = solver.solve_market(market.id, &problem.markets, &problem.orders, &book);
+        let solution = solver.solve_market(market.id, &problem.markets, &problem.orders);
 
         // Sum up total buyer fills for this market (positive payoff fills)
         let total_buyer_fills: u64 = solution
@@ -276,8 +242,8 @@ fn validate_fills_respect_liquidity() {
         // CRITICAL CHECK: buyer fills cannot exceed total supply!
         if total_buyer_fills > total_supply {
             panic!(
-                "Market {:?}: buyers filled {} but only {} supply available (book: {}, sellers: {})! Overfill by {}",
-                market.id, total_buyer_fills, total_supply, book_liquidity, seller_supply,
+                "Market {:?}: buyers filled {} but only {} supply available (sellers: {}, no_buyers: {})! Overfill by {}",
+                market.id, total_buyer_fills, total_supply, seller_supply, no_buyer_supply,
                 total_buyer_fills - total_supply
             );
         }
@@ -344,15 +310,8 @@ fn compare_current_vs_iterative_approach() {
     let mut current_welfare: i64 = 0;
 
     for market in problem.markets.iter() {
-        let book = problem
-            .liquidity
-            .books
-            .get(&(market.id, 0))
-            .cloned()
-            .unwrap_or_else(|| matching_engine::LiquidityBook::new(market.id, 0));
-
         // Solve with non-MM orders only
-        let solution = solver.solve_market(market.id, &problem.markets, &non_mm_orders, &book);
+        let solution = solver.solve_market(market.id, &problem.markets, &non_mm_orders);
         current_prices.insert(market.id, solution.prices);
         current_volume += solution.fills.iter().map(|f| f.fill_qty).sum::<u64>();
         current_welfare += solution.welfare;
@@ -410,13 +369,7 @@ fn compare_current_vs_iterative_approach() {
 
     // Initial solve with non-MM orders
     for market in problem.markets.iter() {
-        let book = problem
-            .liquidity
-            .books
-            .get(&(market.id, 0))
-            .cloned()
-            .unwrap_or_else(|| matching_engine::LiquidityBook::new(market.id, 0));
-        let solution = solver.solve_market(market.id, &problem.markets, &non_mm_orders, &book);
+        let solution = solver.solve_market(market.id, &problem.markets, &non_mm_orders);
         iter_prices.insert(market.id, solution.prices);
     }
 
@@ -469,14 +422,8 @@ fn compare_current_vs_iterative_approach() {
         iter_welfare = 0;
 
         for market in problem.markets.iter() {
-            let book = problem
-                .liquidity
-                .books
-                .get(&(market.id, 0))
-                .cloned()
-                .unwrap_or_else(|| matching_engine::LiquidityBook::new(market.id, 0));
             let solution =
-                solver.solve_market(market.id, &problem.markets, &combined_orders, &book);
+                solver.solve_market(market.id, &problem.markets, &combined_orders);
             new_prices.insert(market.id, solution.prices.clone());
             iter_volume += solution.fills.iter().map(|f| f.fill_qty).sum::<u64>();
             iter_welfare += solution.welfare;
@@ -662,13 +609,7 @@ fn validate_large_scenario() {
     let mut total_fills = 0;
 
     for market in problem.markets.iter() {
-        let book = problem
-            .liquidity
-            .books
-            .get(&(market.id, 0))
-            .cloned()
-            .unwrap_or_else(|| matching_engine::LiquidityBook::new(market.id, 0));
-        let solution = solver.solve_market(market.id, &problem.markets, &problem.orders, &book);
+        let solution = solver.solve_market(market.id, &problem.markets, &problem.orders);
 
         prices.insert(market.id, solution.prices);
         total_fills += solution.fills.len();
