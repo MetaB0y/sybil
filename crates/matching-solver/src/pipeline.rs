@@ -4,7 +4,7 @@
 //! - Price discovery (LocalSolver)
 //! - Negrisk arbitrage (NegriskSolver) - exploits price inconsistencies
 //! - Order allocation (MmAllocator)
-//! - Arbitrage detection (ArbitrageDetector)
+//! - Partial solvers (MILP, etc.) for alternative solutions
 //!
 //! # Example
 //!
@@ -21,12 +21,12 @@ use serde::Serialize;
 use matching_engine::{MarketId, Nanos, Problem};
 
 use crate::combiner::{
-    CombineStats, SolutionCombiner, SolutionConfidence, SolverContribution, SolverSolution,
+    CombineStats, SolutionCombiner, SolverContribution, SolverSolution,
 };
 use crate::dual_master::{DualConfig, DualMaster};
 use crate::local_solver::LocalSolver;
 use crate::mm_allocator::MmAllocator;
-use crate::specialized::{ArbitrageDetector, NegriskSolver};
+use crate::specialized::NegriskSolver;
 use crate::traits::{
     AllocationResult, OrderAllocator, PartialSolution, PartialSolver, PriceDiscoverer,
     PriceDiscoveryResult,
@@ -229,7 +229,6 @@ impl Pipeline {
         Self::builder()
             .name("Full Platform")
             .partial_solver(MilpSolver::with_timeout(1.0))
-            .partial_solver(ArbitrageDetector::new())
             .combine_with_mwis(true)
             .build()
     }
@@ -239,8 +238,6 @@ impl Pipeline {
     pub fn full_platform() -> Self {
         Self::builder()
             .name("Full Platform")
-            .partial_solver(ArbitrageDetector::new())
-            .combine_with_mwis(true)
             .build()
     }
 
@@ -267,7 +264,6 @@ impl Pipeline {
             .name("Negrisk")
             .price_discoverer(LocalSolver::new())
             .allocator(MmAllocator::new())
-            .partial_solver(ArbitrageDetector::new())
             .negrisk_solver(NegriskSolver::new())
             .use_fixed_point(true)
             .max_iterations(5)
@@ -284,7 +280,6 @@ impl Pipeline {
             .name("Dual Decomposition")
             .price_discoverer(LocalSolver::new())
             .dual_master(DualMaster::new())
-            .partial_solver(ArbitrageDetector::new())
             .build()
     }
 
@@ -294,7 +289,6 @@ impl Pipeline {
             .name("Dual Decomposition")
             .price_discoverer(LocalSolver::new())
             .dual_master(DualMaster::with_config(config))
-            .partial_solver(ArbitrageDetector::new())
             .build()
     }
 
@@ -318,7 +312,7 @@ impl Pipeline {
     ///
     /// Uses Lagrangian relaxation to handle coupling constraints:
     /// 1. DualMaster iterates to find equilibrium prices
-    /// 2. ArbitrageDetector (partial solvers) handles multi-market orders
+    /// 2. Partial solvers handle multi-market orders
     fn solve_dual_decomposition(&self, problem: &Problem) -> PipelineResult {
         let start = Instant::now();
         let mut result = PipelineResult::empty();
@@ -343,7 +337,7 @@ impl Pipeline {
         let order_map: std::collections::HashMap<u64, &matching_engine::Order> =
             problem.orders.iter().map(|o| (o.id, o)).collect();
 
-        // Phase 2: Bundle/Spread matching (ArbitrageDetector)
+        // Phase 2: Bundle/Spread matching (partial solvers)
         let partial_start = Instant::now();
         for solver in &self.partial_solvers {
             let partial_orders: Vec<_> = problem
@@ -408,7 +402,7 @@ impl Pipeline {
     /// 1. Price Discovery (LocalSolver) - fills single-market orders
     /// 2. Negrisk Arbitrage - exploits price inconsistencies
     /// 3. MM Allocation - activates MM orders within budget
-    /// 4. Partial Solvers (ArbitrageDetector) - fills bundles
+    /// 4. Partial Solvers - fills bundles/spreads
     /// Repeats until convergence or max iterations.
     fn solve_sequential(&self, problem: &Problem) -> PipelineResult {
         let start = Instant::now();
@@ -775,7 +769,7 @@ impl Pipeline {
                 ));
             }
 
-            // Phase 4: Run Bundle Matching (e.g., ArbitrageDetector)
+            // Phase 4: Run partial solvers (e.g., MILP)
             let partial_start = Instant::now();
             for solver in &self.partial_solvers {
                 // Filter out already-filled orders for partial solvers too
@@ -1318,21 +1312,6 @@ impl Default for PipelineBuilder {
 // Adapter Implementations for Solvers
 // ============================================================================
 
-impl PartialSolver for ArbitrageDetector {
-    fn solve_partial(&self, problem: &Problem) -> PartialSolution {
-        let result = self.solve(problem);
-        PartialSolution::with_fills(
-            "Arbitrage",
-            result.fills,
-            result.total_welfare,
-            SolutionConfidence::Heuristic,
-        )
-    }
-
-    fn name(&self) -> &str {
-        "Arbitrage"
-    }
-}
 
 // ============================================================================
 // Tests

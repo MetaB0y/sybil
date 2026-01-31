@@ -72,7 +72,7 @@ The pipeline runs in phases, orchestrated by `pipeline.rs`:
 1. **LocalSolver** (`local_solver.rs`): Per-market price discovery. O(n log n), handles ~80% of single-market orders. Finds clearing prices where outcome prices sum to $1.
 2. **NegriskSolver** (`specialized/negrisk.rs`): Exploits price inconsistencies across related markets (arbitrage). Creates synthetic fills when prices don't perfectly sum to $1.
 3. **MmAllocator** (`mm_allocator.rs`): Allocates market maker fills respecting budget constraints via Lagrangian relaxation. Greedy allocation by welfare/capital ratio with fixed-point iteration for interacting MMs.
-4. **Partial Solvers** (run in parallel): `MilpSolver` (ILP, optimal with timeout; feature-gated behind `milp`), `ArbitrageDetector` (`specialized/arbitrage.rs`).
+4. **Partial Solvers** (run in parallel): `MilpSolver` (ILP, optimal with timeout; feature-gated behind `milp`).
 5. **Solution Combination** (`combiner/`): Selects best non-conflicting fills from all partial solutions via Maximum Weight Independent Set (MWIS) on a conflict graph.
 
 The pipeline can iterate via fixed-point loop until convergence.

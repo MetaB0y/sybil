@@ -26,7 +26,7 @@ The pipeline uses a **multi-phase architecture** where each solver handles speci
 │  ┌──────────────────────────────────────────────────────────────┐       │
 │  │              Partial Solvers (Parallel)                       │       │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌───────────────────┐     │       │
-│  │  │GreedySolver │  │ MilpSolver  │  │ ArbitrageDetector │     │       │
+│  │  │GreedySolver │  │ MilpSolver  │                           │       │
 │  │  └─────────────┘  └─────────────┘  └───────────────────┘     │       │
 │  └──────────────────────────────────────────────────────────────┘       │
 │                              │                                           │
@@ -150,16 +150,12 @@ These solvers run **in parallel** to explore alternative solutions:
 
 **Why Include**: Gold standard for comparison, catches cases heuristics miss
 
-#### ArbitrageDetector
-**File**: `crates/matching-solver/src/specialized/arbitrage.rs`
+#### (Multi-market solver — TODO)
 
-**Constraint**: Profit threshold ≥ 1 micro-dollar
-
-**Detection Logic**:
-- Bundle underpricing: If bundle limit > sum of leg prices
-- Exploits riskless profit opportunities
-
-**Why Include**: Specialized solver for cross-market inefficiencies
+No scalable multi-market clearing solver is currently implemented. Bundle and
+spread orders are only matched if they clear within per-market price discovery.
+A naive Arrow-Debreu LP has O(2^k) solvency constraints, which is impractical
+when bundle orders chain many markets into one connected component.
 
 ---
 
@@ -201,7 +197,7 @@ The pipeline order follows **dependency resolution**:
 **Key insight**: Each phase handles constraints that depend on previous phase outputs:
 - NegriskSolver needs raw prices to detect arbitrage
 - MmAllocator needs stable prices for capital calculation
-- ArbitrageDetector needs to know remaining liquidity
+- Partial solvers explore alternatives with all constraints known
 
 **Fixed-Point Iteration**: The pipeline can iterate until convergence:
 ```
@@ -377,7 +373,7 @@ let result = pipeline.solve(&problem);
 | Budget allocation | `matching-solver/src/mm_allocator.rs` | 400+ |
 | Greedy solver | `matching-solver/src/greedy.rs` | 150+ |
 | MILP solver | `matching-solver/src/milp.rs` | 400+ |
-| Arbitrage detection | `matching-solver/src/specialized/arbitrage.rs` | 200+ |
+| MILP solver | `matching-solver/src/milp.rs` | 400+ |
 | Solution combination | `matching-solver/src/combiner/mod.rs` | 250+ |
 | MWIS algorithms | `matching-solver/src/combiner/mwis.rs` | 250+ |
 | Result validation | `matching-solver/src/verifier.rs` | 400+ |

@@ -6,7 +6,6 @@
 //! 1. **Price Discovery** (`LocalSolver`): Find clearing prices per market
 //! 2. **Negrisk Arbitrage** (`NegriskSolver`): Exploit price inconsistencies
 //! 3. **MM Allocation** (`MmAllocator`): Respect market maker budget constraints
-//! 4. **Arbitrage Detection** (`ArbitrageDetector`): Find remaining opportunities
 //!
 //! # Quick Start
 //!

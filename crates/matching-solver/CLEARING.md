@@ -27,10 +27,10 @@ The solver has three mechanisms, each addressing different constraints:
 | 2 | Negrisk arbitrage feedback | Σ P_YES = $1 (per group) | Heuristic iteration |
 | 3 | Dual decomposition | Σ P_YES = $1 + MM budgets | Lagrangian relaxation |
 
-Mechanisms 2 and 3 are alternative approaches to the cross-market problem. The
-system currently has two pipeline configurations that use them:
+Mechanisms 2 and 3 are alternative approaches to the cross-market problem.
+The system has several pipeline configurations:
 
-- `Pipeline::with_negrisk()` — Mechanisms 1 + 2, with post-hoc MM allocation
+- `Pipeline::with_negrisk()` — Mechanisms 1 + 2, with MM allocation
 - `Pipeline::with_dual_decomposition()` — Mechanisms 1 + 3
 
 ---
@@ -145,7 +145,6 @@ for each iteration:
     1. Price Discovery (LocalSolver) — includes arb orders from previous iteration
     2. Negrisk detection — creates new arb orders for next iteration
     3. MM Allocation — activates orders within budget
-    4. Partial solvers (ArbitrageDetector) — bundle matching
     check convergence (welfare delta < threshold)
 ```
 
@@ -202,8 +201,6 @@ Pipeline::with_dual_decomposition().solve(&problem)
   |   |   against original limits and MM budgets
   |   |
   |   +-- Return fills, prices, convergence diagnostics
-  |
-  +-- ArbitrageDetector: bundle/spread matching on remaining liquidity
   |
   +-- Return PipelineResult
 ```
@@ -282,15 +279,14 @@ In practice, convergence is checked on two criteria:
 | MM budgets | Post-hoc greedy | Bid shading (in-clearing) |
 | Convergence | No formal guarantee | Subgradient guarantee (convex dual) |
 | Implementation | Synthetic orders | Dual variable adjustment |
-| Multi-market orders | ArbitrageDetector | ArbitrageDetector |
+| Multi-market orders | Not handled | Not handled |
 | Maturity | Battle-tested on sims | Newer, passes all tests |
 
 ### Limitations
 
-**Multi-market orders** are handled as a post-processing phase (ArbitrageDetector
-after dual convergence). Bundle/spread fills don't feed back into the dual
-decomposition. This is standard in combinatorial auctions but means bundle price
-impact isn't captured in the equilibrium.
+**Multi-market orders** (bundles, spreads) are not handled by either pipeline.
+They are matched only if they happen to clear within a single market's
+price discovery. A scalable multi-market clearing mechanism is needed.
 
 **Duality gap**: the subgradient method finds the dual optimum, but primal
 recovery (mapping dual variables to fills) may have a gap. The final pass
@@ -403,7 +399,6 @@ Pipeline::with_negrisk().solve(&problem)
   |   +-- LocalSolver (unified binary clearing per market)
   |   +-- NegriskSolver (detect price sum deviations, create arb orders)
   |   +-- MmAllocator (greedy budget-constrained activation)
-  |   +-- ArbitrageDetector (bundle/spread matching)
   |   +-- Check convergence (welfare delta)
   |
   +-- Filter arb fills from output
@@ -419,7 +414,6 @@ Pipeline::with_dual_decomposition().solve(&problem)
   +-- DualMaster (λ/μ iteration → shaded clearing → convergence)
   |   +-- Final pass: validate limits + enforce MM budgets
   |
-  +-- ArbitrageDetector (bundle/spread matching on remaining liquidity)
   +-- Return fills, prices, welfare
 ```
 
@@ -463,7 +457,9 @@ Pipeline::with_dual_decomposition().solve(&problem)
 ### What We Don't Yet Measure
 
 - **Welfare gap vs. joint LP optimal**: we don't solve the joint LP to compare.
-  This is the most important missing benchmark.
+  This is the most important missing benchmark. (Note: a naive Arrow-Debreu LP
+  has O(2^k) solvency constraints for k markets, making it impractical when
+  bundle orders chain many markets into one connected component.)
 - **Price sum error distribution**: we know convergence happens but don't
   systematically track residual error across scenarios.
 - **Dual decomposition vs. negrisk welfare comparison**: both run on the same
@@ -479,10 +475,10 @@ Pipeline::with_dual_decomposition().solve(&problem)
    independently. A joint LP would find a better or equal solution. Both
    negrisk and dual decomposition are decomposition heuristics.
 
-2. **Multi-market orders are second-class**. Bundles and spreads are matched
-   after single-market clearing. They don't influence equilibrium prices.
-   In combinatorial auctions this is standard, but it means bundle welfare
-   is left on the table.
+2. **Multi-market orders are second-class**. Bundles and spreads are not
+   matched by any solver. They only fill if they happen to clear within
+   per-market price discovery. A scalable multi-market clearing mechanism
+   is needed.
 
 3. **Mixed-payoff order ambiguity**. `is_seller()` checks for any negative
    payoff. Complex derivatives (spreads, straddles) may be misclassified,
@@ -502,7 +498,9 @@ Pipeline::with_dual_decomposition().solve(&problem)
 **1. Welfare benchmarking against joint LP.**
 Solve the joint LP (even just for small problems or random samples) to measure
 the welfare gap. This tells us how much the decomposition costs in practice.
-Without this, we're flying blind on optimality.
+Note: a naive Arrow-Debreu LP has O(2^k) solvency constraints and doesn't
+scale when bundle orders chain markets into large components. Constraint
+generation (lazy solvency checking) or Benders decomposition may be needed.
 
 **2. Tighten dual decomposition tolerances.**
 The 2% primal tolerance means price sums can be 0.98 or 1.02. For prediction

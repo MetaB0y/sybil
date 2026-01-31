@@ -63,7 +63,7 @@ fn main() {
 
     let start = Instant::now();
 
-    if (solver_choice == SolverChoice::Pipeline || solver_choice == SolverChoice::Negrisk || solver_choice == SolverChoice::Dual)
+    if matches!(solver_choice, SolverChoice::Pipeline | SolverChoice::Negrisk | SolverChoice::Dual)
         && (verbose || export_json.is_some() || show_charts)
     {
         // Detailed pipeline run with step-by-step output
@@ -681,7 +681,7 @@ fn print_pipeline_steps(result: &PipelineResult, _problem: &Problem) {
         }
     }
 
-    // Show bundle matching (ArbitrageDetector) results
+    // Show partial solver results
     if result.phase_times.partial_solving_secs > 0.0 || !result.contributions.is_empty() {
         println!(
             "  4. Bundle Matching    {:>7.3}s",

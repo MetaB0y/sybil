@@ -178,31 +178,13 @@ Actually: C gets activated because ratio sort puts it last but budget allows it
 
 **Verdict**: The MM allocator explicitly prioritizes welfare/capital ratio. Zero-surplus trades can still happen if budget allows after high-ratio orders.
 
-### 4. ArbitrageDetector (Bundle Matching)
+### 4. Multi-market Orders (Bundles/Spreads)
 
-**File**: `arbitrage.rs`
+No dedicated multi-market solver is currently implemented. Bundle and spread
+orders are only matched if they clear within per-market price discovery.
 
-**How it works**:
-1. Detects cross-market opportunities
-2. Sorts by **profit per unit** (line 79-80)
-3. Only adds fills with **welfare > 0** (line 291-294)
-
-```rust
-// Lines 291-294
-if let Some(fill) = fill_result {
-    let welfare = fill.welfare(order);
-    if welfare > 0 {  // ← Explicit welfare requirement!
-        result.add_fill(fill, order);
-        filled_orders.insert(order.id);
-    }
-}
-```
-
-**Welfare vs Volume behavior**:
-- **Explicitly rejects zero-welfare fills** (line 291)
-- This is the only component that hard-rejects zero-surplus trades
-
-**Verdict**: ArbitrageDetector will never fill a bundle order at exactly its limit price. This sacrifices volume for welfare guarantees.
+**Welfare vs Volume behavior**: N/A — multi-market orders that don't match
+within single-market clearing are simply left unfilled.
 
 ---
 
@@ -217,7 +199,7 @@ Based on the code analysis:
 | LocalSolver | Lowest priority, may not fill | Medium |
 | GreedySolver | Processed last by welfare sort | Medium |
 | MmAllocator | Lowest priority by ratio | Low |
-| ArbitrageDetector | **Explicitly rejected** | High |
+| Multi-market | Not handled | N/A |
 
 ### Specific Scenarios
 
@@ -360,6 +342,9 @@ The current implementation strongly favors welfare over volume. This is a delibe
 1. **Benefits**: Ensures allocative efficiency, rewards informed traders
 2. **Costs**: May leave volume on the table, frustrate marginal traders
 
-The most significant issue is in `ArbitrageDetector` which **explicitly rejects** zero-welfare bundle fills. This could be relaxed to allow zero-surplus fills when there's no competing higher-surplus order.
+Multi-market orders (bundles, spreads) are currently not handled by any
+dedicated solver, so they only fill opportunistically within per-market clearing.
 
-For most prediction market use cases, welfare maximization is appropriate. If volume maximization becomes important (e.g., for fee revenue or liquidity depth), consider implementing a hybrid mode or relaxing the zero-welfare rejection in ArbitrageDetector.
+For most prediction market use cases, welfare maximization is appropriate. If
+volume maximization becomes important (e.g., for fee revenue or liquidity
+depth), consider implementing a hybrid mode.

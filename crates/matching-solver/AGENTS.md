@@ -14,7 +14,7 @@ The solver operates in phases via the `Pipeline`:
 1. **Price Discovery** (`LocalSolver`): Find clearing prices per market
 2. **Negrisk Arbitrage** (`NegriskSolver`): Exploit price inconsistencies
 3. **MM Allocation** (`MmAllocator`): Respect market maker budget constraints
-4. **Arbitrage Detection** (`ArbitrageDetector`): Find remaining opportunities
+4. **Partial Solvers**: MILP and other optional solvers for alternative solutions
 
 ## Key Components
 
@@ -30,10 +30,10 @@ don't sum to exactly $1. Creates welfare-adding fills instead of adjusting price
 Handles market maker budget constraints. Uses Lagrangian relaxation
 to activate orders while respecting per-MM budgets.
 
-### ArbitrageDetector (`specialized/arbitrage.rs`)
-Finds arbitrage opportunities:
-- Constraint arbitrage (A→B with mispricing)
-- Bundle underpricing
+### MilpSolver (`milp.rs`, feature-gated)
+Optimal ILP formulation of the matching problem:
+- Provably optimal welfare (given time budget)
+- Feature-gated behind `milp` (requires HiGHS)
 
 ### GreedySolver (`greedy.rs`)
 Simple heuristic that fills orders by welfare potential.

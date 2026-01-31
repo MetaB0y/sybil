@@ -192,9 +192,8 @@ impl PartialSolution {
 ///
 /// # Implementors
 ///
-/// - `ArbitrageDetector`: Bundle/spread matching
 /// - `MilpSolver`: Optimal (time-limited) MILP
-/// - Specialized solvers: Arbitrage, Bundle decomposition, etc.
+/// - Custom solvers implementing this trait
 pub trait PartialSolver: Send + Sync {
     /// Solve the problem and return a partial solution.
     fn solve_partial(&self, problem: &Problem) -> PartialSolution;

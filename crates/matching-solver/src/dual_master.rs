@@ -474,7 +474,7 @@ pub fn shade_orders(
         .map(|order| {
             let mut shaded = order.clone();
 
-            // Skip multi-market orders (handled by ArbitrageDetector)
+            // Skip multi-market orders (not handled by per-market clearing)
             if order.num_markets != 1 {
                 return shaded;
             }
