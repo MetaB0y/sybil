@@ -190,6 +190,10 @@ pub struct Pipeline {
     /// Price discovery component (optional).
     price_discoverer: Option<Box<dyn PriceDiscoverer>>,
 
+    /// Multi-market repricing solver (optional).
+    /// Runs after price discovery to handle bundles/spreads via direct price-shifting.
+    multi_market_solver: Option<MultiMarketSolver>,
+
     /// Negrisk arbitrage solver (optional).
     negrisk_solver: Option<NegriskSolver>,
 
@@ -249,7 +253,7 @@ impl Pipeline {
             .name("Iterative")
             .price_discoverer(LocalSolver::new())
             .allocator(MmAllocator::new())
-            .partial_solver(MultiMarketSolver::new())
+            .multi_market_solver(MultiMarketSolver::new())
             .use_fixed_point(true)
             .max_iterations(5)
             .build()
@@ -266,7 +270,7 @@ impl Pipeline {
             .price_discoverer(LocalSolver::new())
             .allocator(MmAllocator::new())
             .negrisk_solver(NegriskSolver::new())
-            .partial_solver(MultiMarketSolver::new())
+            .multi_market_solver(MultiMarketSolver::new())
             .use_fixed_point(true)
             .max_iterations(5)
             .build()
@@ -282,7 +286,7 @@ impl Pipeline {
             .name("Dual Decomposition")
             .price_discoverer(LocalSolver::new())
             .dual_master(DualMaster::new())
-            .partial_solver(MultiMarketSolver::new())
+            .multi_market_solver(MultiMarketSolver::new())
             .build()
     }
 
@@ -292,7 +296,7 @@ impl Pipeline {
             .name("Dual Decomposition")
             .price_discoverer(LocalSolver::new())
             .dual_master(DualMaster::with_config(config))
-            .partial_solver(MultiMarketSolver::new())
+            .multi_market_solver(MultiMarketSolver::new())
             .build()
     }
 
@@ -341,10 +345,29 @@ impl Pipeline {
         let order_map: std::collections::HashMap<u64, &matching_engine::Order> =
             problem.orders.iter().map(|o| (o.id, o)).collect();
 
-        // Phase 2: Bundle/Spread matching (partial solvers)
+        // Phase 2: Multi-Market Repricing
+        let mut bundle_fills = 0usize;
+        if let (Some(ref mm_solver), Some(ref pd_result)) =
+            (&self.multi_market_solver, &result.price_discovery)
+        {
+            let repricing_result = mm_solver.solve_with_repricing(problem, pd_result);
+            for fill in repricing_result.bundle_fills {
+                if let Some(&order) = order_map.get(&fill.order_id) {
+                    filled_order_ids.insert(fill.order_id);
+                    result.result.add_fill(fill.clone(), order);
+                    bundle_fills += 1;
+                    result.contributions.push(SolverContribution {
+                        solver_name: "MultiMarket-Repricing".to_string(),
+                        fills_contributed: 1,
+                        welfare_contributed: order.welfare_contribution(fill.fill_price, fill.fill_qty),
+                    });
+                }
+            }
+        }
+
+        // Phase 3: Bundle/Spread matching (partial solvers)
         let partial_start = Instant::now();
         let pd_fills = result.result.fills.len();
-        let mut bundle_fills = 0usize;
         for solver in &self.partial_solvers {
             let partial_orders: Vec<_> = problem
                 .orders
@@ -540,7 +563,37 @@ impl Pipeline {
                 ));
             }
 
-            // Phase 2: Negrisk Arbitrage
+            // Phase 2: Multi-Market Repricing
+            // Injects bundle leg demand into per-market curves and re-clears.
+            // Updates price_result in place for affected markets.
+            let mut price_result = price_result;
+            let mut repricing_bundle_fills: Vec<matching_engine::Fill> = Vec::new();
+            if let (Some(ref mm_solver), Some(ref pd_result)) =
+                (&self.multi_market_solver, &price_result)
+            {
+                let repricing_result = mm_solver.solve_with_repricing(&iter_problem, pd_result);
+
+                if repricing_result.bundles_matched > 0 {
+                    // Update price_result with repriced market solutions
+                    if let Some(ref mut pd) = price_result {
+                        for (mid, sol) in &repricing_result.repriced_solutions {
+                            // Update welfare: subtract old, add new
+                            if let Some(old_sol) = pd.market_solutions.get(mid) {
+                                pd.total_welfare -= old_sol.welfare;
+                                pd.total_fills -= old_sol.fills.len();
+                            }
+                            pd.total_welfare += sol.welfare;
+                            pd.total_fills += sol.fills.len();
+                            pd.prices.insert(*mid, sol.prices.clone());
+                            pd.market_solutions.insert(*mid, sol.clone());
+                        }
+                    }
+
+                    repricing_bundle_fills = repricing_result.bundle_fills;
+                }
+            }
+
+            // Phase 3: Negrisk Arbitrage
             // Exploits price inconsistencies by creating arbitrage fills instead of adjusting prices
             let negrisk_result = if let (Some(ref solver), Some(ref prices)) =
                 (&self.negrisk_solver, &price_result)
@@ -743,6 +796,15 @@ impl Pipeline {
                     if let Some(&order) = order_map.get(&fill.order_id) {
                         result.result.add_fill(fill, order);
                     }
+                }
+            }
+
+            // Add bundle fills from repricing (Phase 2)
+            for fill in repricing_bundle_fills {
+                if let Some(&order) = order_map.get(&fill.order_id) {
+                    filled_order_ids.insert(fill.order_id);
+                    result.result.add_fill(fill, order);
+                    iter_bundle_fills += 1;
                 }
             }
 
@@ -980,7 +1042,7 @@ impl Pipeline {
         let mut timings = PipelineTimings::default();
 
         // Phase 1: Price Discovery
-        let price_result = if let Some(ref discoverer) = self.price_discoverer {
+        let mut price_result = if let Some(ref discoverer) = self.price_discoverer {
             let pd_start = Instant::now();
             let pd_result = discoverer.discover_prices(problem);
             timings.price_discovery_secs = pd_start.elapsed().as_secs_f64();
@@ -989,7 +1051,30 @@ impl Pipeline {
             None
         };
 
-        // Phase 2: Order Allocation
+        // Phase 2: Multi-Market Repricing
+        let mut repricing_bundle_fills: Vec<matching_engine::Fill> = Vec::new();
+        if let (Some(ref mm_solver), Some(ref pd_result)) =
+            (&self.multi_market_solver, &price_result)
+        {
+            let repricing_result = mm_solver.solve_with_repricing(problem, pd_result);
+            if repricing_result.bundles_matched > 0 {
+                if let Some(ref mut pd) = price_result {
+                    for (mid, sol) in &repricing_result.repriced_solutions {
+                        if let Some(old_sol) = pd.market_solutions.get(mid) {
+                            pd.total_welfare -= old_sol.welfare;
+                            pd.total_fills -= old_sol.fills.len();
+                        }
+                        pd.total_welfare += sol.welfare;
+                        pd.total_fills += sol.fills.len();
+                        pd.prices.insert(*mid, sol.prices.clone());
+                        pd.market_solutions.insert(*mid, sol.clone());
+                    }
+                }
+                repricing_bundle_fills = repricing_result.bundle_fills;
+            }
+        }
+
+        // Phase 3: Order Allocation
         let allocation_result =
             if let (Some(ref allocator), Some(ref prices)) = (&self.allocator, &price_result) {
                 let alloc_start = Instant::now();
@@ -1114,6 +1199,15 @@ impl Pipeline {
         }
         timings.combining_secs = combine_start.elapsed().as_secs_f64();
 
+        // Add bundle fills from repricing
+        let order_map_single: std::collections::HashMap<u64, &matching_engine::Order> =
+            problem.orders.iter().map(|o| (o.id, o)).collect();
+        for fill in repricing_bundle_fills {
+            if let Some(&order) = order_map_single.get(&fill.order_id) {
+                result.result.add_fill(fill, order);
+            }
+        }
+
         result.price_discovery = price_result;
         result.allocation = allocation_result;
         result.phase_times = timings;
@@ -1198,6 +1292,7 @@ impl Solver for Pipeline {
 pub struct PipelineBuilder {
     name: String,
     price_discoverer: Option<Box<dyn PriceDiscoverer>>,
+    multi_market_solver: Option<MultiMarketSolver>,
     negrisk_solver: Option<NegriskSolver>,
     allocator: Option<Box<dyn OrderAllocator>>,
     dual_master: Option<DualMaster>,
@@ -1211,6 +1306,7 @@ impl PipelineBuilder {
         Self {
             name: "Pipeline".to_string(),
             price_discoverer: None,
+            multi_market_solver: None,
             negrisk_solver: None,
             allocator: None,
             dual_master: None,
@@ -1228,6 +1324,12 @@ impl PipelineBuilder {
     /// Set the price discoverer.
     pub fn price_discoverer<P: PriceDiscoverer + 'static>(mut self, discoverer: P) -> Self {
         self.price_discoverer = Some(Box::new(discoverer));
+        self
+    }
+
+    /// Set the multi-market repricing solver.
+    pub fn multi_market_solver(mut self, solver: MultiMarketSolver) -> Self {
+        self.multi_market_solver = Some(solver);
         self
     }
 
@@ -1300,6 +1402,7 @@ impl PipelineBuilder {
         Pipeline {
             name: self.name,
             price_discoverer: self.price_discoverer,
+            multi_market_solver: self.multi_market_solver,
             negrisk_solver: self.negrisk_solver,
             allocator: self.allocator,
             dual_master: self.dual_master,

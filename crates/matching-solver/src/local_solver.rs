@@ -184,6 +184,27 @@ impl LocalSolver {
         market_id: MarketId,
         orders: &[&Order],
     ) -> MarketSolution {
+        self.solve_binary_market_with_extra(market_id, orders, 0, 0)
+    }
+
+    /// Solve a binary market with extra demand/supply injected into the curves.
+    ///
+    /// This is the core method for unified binary clearing. Both the standard
+    /// `solve_binary_market_unified` and `solve_market_with_extra_demand` call this.
+    ///
+    /// `extra_unified_demand` adds demand at price=$1 (highest priority YES buyer).
+    /// `extra_unified_supply` adds supply at price=$0 (cheapest YES supplier).
+    ///
+    /// The extra demand/supply reserves capacity in the matched quantity —
+    /// real orders fill only the remainder. The returned MarketSolution contains
+    /// only real-order fills at the new clearing price.
+    fn solve_binary_market_with_extra(
+        &self,
+        market_id: MarketId,
+        orders: &[&Order],
+        extra_unified_demand: Qty,
+        extra_unified_supply: Qty,
+    ) -> MarketSolution {
         // Classify orders by outcome exposure
         let mut yes_buyers: Vec<(&Order, Qty)> = Vec::new(); // payoff[0] > 0
         let mut no_buyers: Vec<(&Order, Qty)> = Vec::new();  // payoff[1] > 0
@@ -215,6 +236,10 @@ impl LocalSolver {
             let converted_limit = NANOS_PER_DOLLAR.saturating_sub(order.limit_price);
             demand_points.push((converted_limit, *qty));
         }
+        // Inject extra demand at price=$1 (highest priority)
+        if extra_unified_demand > 0 {
+            demand_points.push((NANOS_PER_DOLLAR, extra_unified_demand));
+        }
         demand_points.sort_by(|a, b| b.0.cmp(&a.0));
 
         // Build unified YES supply curve (price, qty) sorted by price asc.
@@ -227,12 +252,20 @@ impl LocalSolver {
             let converted_limit = NANOS_PER_DOLLAR.saturating_sub(order.limit_price);
             supply_points.push((converted_limit, *qty));
         }
+        // Inject extra supply at price=$0 (cheapest)
+        if extra_unified_supply > 0 {
+            supply_points.push((0, extra_unified_supply));
+        }
         supply_points.sort_by_key(|(price, _)| *price);
 
         // Find clearing price via supply-demand crossing
         let (clearing_price_yes, matched_qty) =
             Self::find_crossing(&demand_points, &supply_points);
         let clearing_price_no = NANOS_PER_DOLLAR.saturating_sub(clearing_price_yes);
+
+        // Reserve capacity for extra demand/supply — real orders fill only the remainder.
+        let demand_real_capacity = matched_qty.saturating_sub(extra_unified_demand);
+        let supply_real_capacity = matched_qty.saturating_sub(extra_unified_supply);
 
         // Generate fills
         let mut fills = Vec::new();
@@ -243,7 +276,7 @@ impl LocalSolver {
         let mut yes_buyers_sorted = yes_buyers.clone();
         yes_buyers_sorted.sort_by(|a, b| b.0.limit_price.cmp(&a.0.limit_price));
 
-        let mut demand_remaining = matched_qty;
+        let mut demand_remaining = demand_real_capacity;
         for (order, max_qty) in &yes_buyers_sorted {
             if demand_remaining == 0 || order.limit_price < clearing_price_yes {
                 unfilled.push(order.id);
@@ -297,7 +330,7 @@ impl LocalSolver {
         }
 
         // Fill supply side: track how much supply comes from each source
-        let mut supply_remaining = matched_qty;
+        let mut supply_remaining = supply_real_capacity;
 
         // Direct YES sellers
         let mut yes_sellers_sorted = yes_sellers.clone();
@@ -368,6 +401,50 @@ impl LocalSolver {
             welfare,
             unfilled,
         }
+    }
+
+    /// Solve a single market with extra demand/supply from bundle orders.
+    ///
+    /// Instead of creating synthetic Order objects, this method injects bundle
+    /// leg demand as numbers directly into the supply/demand curves. The returned
+    /// MarketSolution contains only real-order fills at the new clearing price.
+    ///
+    /// # Outcome-to-unified mapping (used by caller):
+    /// - Buy outcome 0 (YES) -> extra_unified_demand
+    /// - Buy outcome 1 (NO)  -> extra_unified_supply (buying NO = supplying YES)
+    /// - Sell outcome 0 (YES) -> extra_unified_supply
+    /// - Sell outcome 1 (NO)  -> extra_unified_demand (selling NO = demanding YES)
+    pub fn solve_market_with_extra_demand(
+        &self,
+        market_id: MarketId,
+        markets: &MarketSet,
+        orders: &[Order],
+        extra_unified_demand: Qty,
+        extra_unified_supply: Qty,
+    ) -> Option<MarketSolution> {
+        let num_outcomes = markets.num_outcomes(market_id) as usize;
+        if num_outcomes != 2 {
+            return None; // Only binary markets supported
+        }
+
+        // Filter to single-market orders for this market
+        let market_orders: Vec<&Order> = orders
+            .iter()
+            .filter(|o| o.num_markets == 1 && o.markets[0] == market_id)
+            .collect();
+
+        if market_orders.is_empty() && extra_unified_demand == 0 && extra_unified_supply == 0 {
+            return Some(MarketSolution::empty(market_id, num_outcomes));
+        }
+
+        let solution = self.solve_binary_market_with_extra(
+            market_id,
+            &market_orders,
+            extra_unified_demand,
+            extra_unified_supply,
+        );
+
+        Some(solution)
     }
 
     /// Find supply-demand crossing point.

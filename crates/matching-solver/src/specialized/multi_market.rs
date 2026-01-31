@@ -5,15 +5,17 @@
 //! 1. **Complement Matching**: Orders with identical markets and negated payoffs
 //!    cancel perfectly (e.g., bundle_yes + bundle_sell). Standard bid >= ask matching.
 //!
-//! 2. **Leg Decomposition**: Decomposes multi-market orders into per-market legs
-//!    and matches each leg against single-market counterparties.
+//! 2. **Direct Price-Shifting (Repricing)**: Injects bundle leg demand into
+//!    per-market supply/demand curves and re-clears. No synthetic orders —
+//!    bundle demand is passed as numbers. Maintains UCP.
 
 use std::collections::HashMap;
 
-use matching_engine::{Fill, MarketId, Order, Problem, Qty, Nanos};
+use matching_engine::{Fill, MarketId, Order, Problem, Qty};
 
 use crate::combiner::SolutionConfidence;
-use crate::traits::{PartialSolution, PartialSolver};
+use crate::local_solver::{LocalSolver, MarketSolution};
+use crate::traits::{PartialSolution, PartialSolver, PriceDiscoveryResult};
 
 /// Key for grouping orders with compatible payoff structures.
 /// Orders with the same PayoffKey but opposite signs can be complement-matched.
@@ -36,52 +38,24 @@ struct Leg {
     shares_denom: u64,
 }
 
-/// Entry in the counterparty pool.
-#[derive(Clone, Debug)]
-struct PoolEntry {
-    order_id: u64,
-    /// Price per unit of this outcome
-    price: Nanos,
-    /// Available quantity (decremented as consumed)
-    available_qty: Qty,
-    /// Original min_fill for AON checking
-    min_fill: Qty,
-    /// Original max_fill
-    max_fill: Qty,
+/// Tracking state for a market during repricing iterations.
+struct MarketClearingState {
+    current_solution: MarketSolution,
+    base_orders: Vec<Order>,
+    cumulative_extra_demand: Qty,
+    cumulative_extra_supply: Qty,
 }
 
-/// Pool of available single-market orders indexed by (market, outcome).
-struct CounterpartyPool {
-    /// Sellers of (market, outcome), sorted by price ascending (cheapest first)
-    sellers: HashMap<(MarketId, u8), Vec<PoolEntry>>,
-    /// Buyers of (market, outcome), sorted by price descending (best bid first)
-    buyers: HashMap<(MarketId, u8), Vec<PoolEntry>>,
-}
-
-impl CounterpartyPool {
-    fn new() -> Self {
-        Self {
-            sellers: HashMap::new(),
-            buyers: HashMap::new(),
-        }
-    }
-
-    fn add_seller(&mut self, market: MarketId, outcome: u8, entry: PoolEntry) {
-        self.sellers.entry((market, outcome)).or_default().push(entry);
-    }
-
-    fn add_buyer(&mut self, market: MarketId, outcome: u8, entry: PoolEntry) {
-        self.buyers.entry((market, outcome)).or_default().push(entry);
-    }
-
-    fn sort(&mut self) {
-        for entries in self.sellers.values_mut() {
-            entries.sort_by_key(|e| e.price);
-        }
-        for entries in self.buyers.values_mut() {
-            entries.sort_by(|a, b| b.price.cmp(&a.price));
-        }
-    }
+/// Result of repricing multi-market orders.
+pub struct RepricingResult {
+    /// Fills for bundle/spread orders that were matched via repricing.
+    pub bundle_fills: Vec<Fill>,
+    /// Updated market solutions after repricing (only for affected markets).
+    pub repriced_solutions: HashMap<MarketId, MarketSolution>,
+    /// Total welfare from repriced solutions + bundle fills.
+    pub welfare: i64,
+    /// Number of bundles matched.
+    pub bundles_matched: usize,
 }
 
 #[derive(Default)]
@@ -91,6 +65,300 @@ impl MultiMarketSolver {
     pub fn new() -> Self {
         Self
     }
+
+    /// Solve multi-market orders via direct price-shifting (repricing).
+    ///
+    /// Takes the base price discovery result and injects bundle leg demand
+    /// into per-market curves. Returns bundle fills and repriced market solutions.
+    pub fn solve_with_repricing(
+        &self,
+        problem: &Problem,
+        base_price_result: &PriceDiscoveryResult,
+    ) -> RepricingResult {
+        let solver = LocalSolver::new();
+
+        // Build set of MM order IDs to exclude
+        let mm_order_ids: std::collections::HashSet<u64> = problem
+            .mm_constraints
+            .iter()
+            .flat_map(|mm| mm.order_ids.iter().copied())
+            .collect();
+
+        // Collect multi-market orders
+        let multi_market_orders: Vec<&Order> = problem
+            .orders
+            .iter()
+            .filter(|o| o.num_markets > 1)
+            .collect();
+
+        if multi_market_orders.is_empty() {
+            return RepricingResult {
+                bundle_fills: Vec::new(),
+                repriced_solutions: HashMap::new(),
+                welfare: 0,
+                bundles_matched: 0,
+            };
+        }
+
+        // Track filled multi-market orders (complement matching handled elsewhere)
+        let mut filled: std::collections::HashSet<u64> = std::collections::HashSet::new();
+
+        // Build MarketClearingState for each market
+        let mut market_states: HashMap<MarketId, MarketClearingState> = HashMap::new();
+        for market in problem.markets.iter() {
+            let base_orders: Vec<Order> = problem
+                .orders
+                .iter()
+                .filter(|o| {
+                    o.num_markets == 1
+                        && o.markets[0] == market.id
+                        && !mm_order_ids.contains(&o.id)
+                })
+                .cloned()
+                .collect();
+
+            let solution = base_price_result
+                .market_solutions
+                .get(&market.id)
+                .cloned()
+                .unwrap_or_else(|| MarketSolution::empty(market.id, 2));
+
+            market_states.insert(
+                market.id,
+                MarketClearingState {
+                    current_solution: solution,
+                    base_orders,
+                    cumulative_extra_demand: 0,
+                    cumulative_extra_supply: 0,
+                },
+            );
+        }
+
+        // Sort multi-market orders by welfare potential descending
+        let mut sorted_bundles: Vec<&Order> = multi_market_orders
+            .iter()
+            .filter(|o| !filled.contains(&o.id))
+            .copied()
+            .collect();
+        sorted_bundles.sort_by(|a, b| {
+            let wa = a.limit_price as i128 * a.max_fill as i128;
+            let wb = b.limit_price as i128 * b.max_fill as i128;
+            wb.cmp(&wa)
+        });
+
+        let mut bundle_fills: Vec<Fill> = Vec::new();
+        let mut bundles_matched = 0usize;
+
+        for bundle in &sorted_bundles {
+            if filled.contains(&bundle.id) {
+                continue;
+            }
+
+            let market_sizes: Vec<u8> = bundle
+                .markets
+                .iter()
+                .take(bundle.num_markets as usize)
+                .map(|id| problem.markets.num_outcomes(*id))
+                .collect();
+
+            let legs = compute_legs(bundle, &market_sizes);
+            if legs.is_empty() {
+                continue;
+            }
+
+            let fill_qty = bundle.max_fill;
+            if fill_qty == 0 {
+                continue;
+            }
+
+            // Convert each leg to per-market (extra_demand, extra_supply) in unified YES space.
+            //
+            // Outcome-to-unified mapping:
+            // - Buy outcome 0 (YES)  -> extra_unified_demand
+            // - Buy outcome 1 (NO)   -> extra_unified_supply (buying NO = supplying YES)
+            // - Sell outcome 0 (YES) -> extra_unified_supply
+            // - Sell outcome 1 (NO)  -> extra_unified_demand (selling NO = demanding YES)
+            let mut per_market_extras: HashMap<MarketId, (Qty, Qty)> = HashMap::new();
+
+            for leg in &legs {
+                let shares = (leg.shares_numer.unsigned_abs() * fill_qty) / leg.shares_denom;
+                if shares == 0 {
+                    continue;
+                }
+
+                let entry = per_market_extras.entry(leg.market).or_insert((0, 0));
+                if leg.shares_numer > 0 {
+                    // Buying this outcome
+                    if leg.outcome == 0 {
+                        entry.0 += shares; // demand
+                    } else {
+                        entry.1 += shares; // supply (buying NO = supplying YES)
+                    }
+                } else {
+                    // Selling this outcome
+                    if leg.outcome == 0 {
+                        entry.1 += shares; // supply (selling YES)
+                    } else {
+                        entry.0 += shares; // demand (selling NO = demanding YES)
+                    }
+                }
+            }
+
+            // Collect affected markets
+            let affected_markets: Vec<MarketId> = per_market_extras.keys().copied().collect();
+
+            // Try re-clearing each affected market with cumulative + new extras
+            let mut new_solutions: HashMap<MarketId, MarketSolution> = HashMap::new();
+            let mut all_markets_feasible = true;
+
+            for &mid in &affected_markets {
+                let (leg_demand, leg_supply) = per_market_extras[&mid];
+                let state = match market_states.get(&mid) {
+                    Some(s) => s,
+                    None => {
+                        all_markets_feasible = false;
+                        break;
+                    }
+                };
+
+                let new_demand = state.cumulative_extra_demand + leg_demand;
+                let new_supply = state.cumulative_extra_supply + leg_supply;
+
+                match solver.solve_market_with_extra_demand(
+                    mid,
+                    &problem.markets,
+                    &state.base_orders,
+                    new_demand,
+                    new_supply,
+                ) {
+                    Some(sol) => {
+                        new_solutions.insert(mid, sol);
+                    }
+                    None => {
+                        all_markets_feasible = false;
+                        break;
+                    }
+                }
+            }
+
+            if !all_markets_feasible {
+                continue;
+            }
+
+            // Compute bundle cost at new clearing prices
+            let mut bundle_cost_per_unit: i128 = 0;
+            for leg in &legs {
+                let shares_per_unit =
+                    leg.shares_numer.unsigned_abs() as i128 * 1000 / leg.shares_denom as i128;
+                let sol = new_solutions
+                    .get(&leg.market)
+                    .or_else(|| {
+                        market_states
+                            .get(&leg.market)
+                            .map(|s| &s.current_solution)
+                    });
+                let price = match sol {
+                    Some(s) => s.prices.get(leg.outcome as usize).copied().unwrap_or(0),
+                    None => continue,
+                };
+
+                if leg.shares_numer > 0 {
+                    // Buying: cost += price * shares
+                    bundle_cost_per_unit += price as i128 * shares_per_unit;
+                } else {
+                    // Selling: revenue (negative cost)
+                    bundle_cost_per_unit -= price as i128 * shares_per_unit;
+                }
+            }
+            // Normalize by 1000 (the multiplier we used above)
+            bundle_cost_per_unit /= 1000;
+
+            // Check limit price constraint
+            let limit_ok = if bundle.is_seller() {
+                // Seller: revenue per unit >= limit_price
+                // revenue = -cost, so -bundle_cost_per_unit >= limit_price
+                -bundle_cost_per_unit >= bundle.limit_price as i128
+            } else {
+                // Buyer: cost per unit <= limit_price
+                bundle_cost_per_unit <= bundle.limit_price as i128
+            };
+
+            if !limit_ok {
+                continue;
+            }
+
+            // Net welfare check: accept only if total welfare doesn't regress
+            let old_welfare: i64 = affected_markets
+                .iter()
+                .filter_map(|mid| market_states.get(mid).map(|s| s.current_solution.welfare))
+                .sum();
+            let new_welfare: i64 = affected_markets
+                .iter()
+                .filter_map(|mid| new_solutions.get(mid).map(|s| s.welfare))
+                .sum();
+
+            let bundle_welfare = if bundle.is_seller() {
+                (-bundle_cost_per_unit - bundle.limit_price as i128) * fill_qty as i128
+            } else {
+                (bundle.limit_price as i128 - bundle_cost_per_unit) * fill_qty as i128
+            };
+
+            if new_welfare + bundle_welfare as i64 <= old_welfare {
+                continue;
+            }
+
+            // Commit: update market states with new solutions and cumulative extras
+            for &mid in &affected_markets {
+                if let Some(sol) = new_solutions.remove(&mid) {
+                    let (leg_demand, leg_supply) = per_market_extras[&mid];
+                    if let Some(state) = market_states.get_mut(&mid) {
+                        state.current_solution = sol;
+                        state.cumulative_extra_demand += leg_demand;
+                        state.cumulative_extra_supply += leg_supply;
+                    }
+                }
+            }
+
+            // Record fill for the bundle
+            let fill_price = if bundle.is_seller() {
+                (-bundle_cost_per_unit).max(0) as u64
+            } else {
+                bundle_cost_per_unit.max(0) as u64
+            };
+
+            bundle_fills.push(Fill::new(bundle.id, fill_qty, fill_price));
+            filled.insert(bundle.id);
+            bundles_matched += 1;
+        }
+
+        // Collect repriced solutions (only markets that were actually modified)
+        let mut repriced_solutions: HashMap<MarketId, MarketSolution> = HashMap::new();
+        for (mid, state) in market_states {
+            if state.cumulative_extra_demand > 0 || state.cumulative_extra_supply > 0 {
+                repriced_solutions.insert(mid, state.current_solution);
+            }
+        }
+
+        let welfare: i64 = repriced_solutions.values().map(|s| s.welfare).sum::<i64>()
+            + bundle_fills
+                .iter()
+                .zip(sorted_bundles.iter())
+                .filter_map(|(f, b)| {
+                    if f.order_id == b.id {
+                        Some(b.welfare_contribution(f.fill_price, f.fill_qty))
+                    } else {
+                        None
+                    }
+                })
+                .sum::<i64>();
+
+        RepricingResult {
+            bundle_fills,
+            repriced_solutions,
+            welfare,
+            bundles_matched,
+        }
+    }
 }
 
 impl PartialSolver for MultiMarketSolver {
@@ -98,24 +366,13 @@ impl PartialSolver for MultiMarketSolver {
         let mut solution = PartialSolution::new("MultiMarket");
         solution.confidence = SolutionConfidence::Heuristic;
 
-        // Build set of MM order IDs to exclude from counterparty pool
-        let mm_order_ids: std::collections::HashSet<u64> = problem
-            .mm_constraints
+        // Separate multi-market orders
+        let multi_market_orders: Vec<(usize, &Order)> = problem
+            .orders
             .iter()
-            .flat_map(|mm| mm.order_ids.iter().copied())
+            .enumerate()
+            .filter(|(_, o)| o.num_markets > 1)
             .collect();
-
-        // Separate multi-market and single-market orders
-        let mut multi_market_orders: Vec<(usize, &Order)> = Vec::new();
-        let mut single_market_orders: Vec<(usize, &Order)> = Vec::new();
-
-        for (idx, order) in problem.orders.iter().enumerate() {
-            if order.num_markets > 1 {
-                multi_market_orders.push((idx, order));
-            } else if order.num_markets == 1 && !mm_order_ids.contains(&order.id) {
-                single_market_orders.push((idx, order));
-            }
-        }
 
         if multi_market_orders.is_empty() {
             return solution;
@@ -124,63 +381,8 @@ impl PartialSolver for MultiMarketSolver {
         // Track which orders have been filled
         let mut filled: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
-        // ================================================================
-        // Strategy 1: Complement Matching
-        // ================================================================
+        // Complement Matching (only strategy in solve_partial; repricing runs in pipeline)
         complement_match(&multi_market_orders, &mut filled, &mut solution, problem);
-
-        // ================================================================
-        // Strategy 2: Leg Decomposition
-        // ================================================================
-        // Build counterparty pool from unfilled single-market orders
-        let mut pool = CounterpartyPool::new();
-        for &(_idx, order) in &single_market_orders {
-            if filled.contains(&order.id) {
-                continue;
-            }
-            let market = order.markets[0];
-            let num_states = order.num_states as usize;
-
-            for outcome in 0..num_states {
-                let payoff = order.payoffs[outcome];
-                if payoff > 0 {
-                    // This is a buyer of this outcome
-                    pool.add_buyer(
-                        market,
-                        outcome as u8,
-                        PoolEntry {
-                            order_id: order.id,
-                            price: order.limit_price,
-                            available_qty: order.max_fill,
-                            min_fill: order.min_fill,
-                            max_fill: order.max_fill,
-                        },
-                    );
-                } else if payoff < 0 {
-                    // This is a seller of this outcome
-                    pool.add_seller(
-                        market,
-                        outcome as u8,
-                        PoolEntry {
-                            order_id: order.id,
-                            price: order.limit_price,
-                            available_qty: order.max_fill,
-                            min_fill: order.min_fill,
-                            max_fill: order.max_fill,
-                        },
-                    );
-                }
-            }
-        }
-        pool.sort();
-
-        leg_decomposition_match(
-            &multi_market_orders,
-            &mut pool,
-            &mut filled,
-            &mut solution,
-            problem,
-        );
 
         // Calculate total welfare
         let order_map: HashMap<u64, &Order> =
@@ -424,250 +626,10 @@ fn compute_legs(order: &Order, market_sizes: &[u8]) -> Vec<Leg> {
     legs
 }
 
-/// Strategy 2: Match multi-market orders by decomposing into per-market legs.
-fn leg_decomposition_match(
-    multi_orders: &[(usize, &Order)],
-    pool: &mut CounterpartyPool,
-    filled: &mut std::collections::HashSet<u64>,
-    solution: &mut PartialSolution,
-    problem: &Problem,
-) {
-    // Sort multi-market orders by welfare potential (limit_price * max_fill) descending
-    let mut sorted_orders: Vec<(usize, &Order)> = multi_orders
-        .iter()
-        .filter(|(_, o)| !filled.contains(&o.id))
-        .copied()
-        .collect();
-    sorted_orders.sort_by(|a, b| {
-        let welfare_a = a.1.limit_price as i128 * a.1.max_fill as i128;
-        let welfare_b = b.1.limit_price as i128 * b.1.max_fill as i128;
-        welfare_b.cmp(&welfare_a)
-    });
-
-    // Accumulate counterparty fills: order_id -> (total_qty, total_cost_or_revenue)
-    // to avoid emitting duplicate Fill records for the same order.
-    let mut counterparty_fills: HashMap<u64, (Qty, i128)> = HashMap::new();
-
-    // Build order lookup for counterparty price/AON info
-    let order_map: HashMap<u64, &Order> =
-        problem.orders.iter().map(|o| (o.id, o)).collect();
-
-    for &(_idx, order) in &sorted_orders {
-        if filled.contains(&order.id) {
-            continue;
-        }
-
-        // Compute market sizes for this order
-        let market_sizes: Vec<u8> = order
-            .markets
-            .iter()
-            .take(order.num_markets as usize)
-            .map(|id| problem.markets.num_outcomes(*id))
-            .collect();
-
-        let legs = compute_legs(order, &market_sizes);
-        if legs.is_empty() {
-            continue;
-        }
-
-        let fill_qty = order.max_fill;
-        if fill_qty == 0 {
-            continue;
-        }
-
-        // For each leg, determine needed quantity and find counterparties.
-        // A leg with shares_numer > 0 means we need to BUY that outcome (find sellers).
-        // A leg with shares_numer < 0 means we need to SELL that outcome (find buyers).
-        //
-        // total_cost: positive = net outflow (buying), negative = net inflow (selling)
-        let mut leg_consumptions: Vec<(u64, Qty, Nanos)> = Vec::new();
-        let mut total_cost: i128 = 0;
-        let mut feasible = true;
-
-        for leg in &legs {
-            let abs_shares = leg.shares_numer.unsigned_abs() * fill_qty;
-            let needed_shares = abs_shares / leg.shares_denom;
-            if needed_shares == 0 {
-                continue;
-            }
-
-            if leg.shares_numer > 0 {
-                // Need to buy this outcome -> find sellers
-                let Some(sellers) = pool.sellers.get(&(leg.market, leg.outcome)) else {
-                    feasible = false;
-                    break;
-                };
-
-                let mut remaining = needed_shares;
-                let mut leg_cost: i128 = 0;
-                let mut matched: Vec<(u64, Qty, Nanos)> = Vec::new();
-
-                for entry in sellers {
-                    if remaining == 0 {
-                        break;
-                    }
-                    if entry.available_qty == 0 {
-                        continue;
-                    }
-                    // Skip AON orders where we can't fill their minimum
-                    if entry.min_fill > 0 && entry.min_fill == entry.max_fill {
-                        if remaining < entry.min_fill {
-                            continue;
-                        }
-                    }
-                    let take = remaining.min(entry.available_qty);
-                    leg_cost += entry.price as i128 * take as i128;
-                    matched.push((entry.order_id, take, entry.price));
-                    remaining -= take;
-                }
-
-                if remaining > 0 {
-                    feasible = false;
-                    break;
-                }
-
-                total_cost += leg_cost;
-                leg_consumptions.extend(matched);
-            } else {
-                // Need to sell this outcome -> find buyers
-                let Some(buyers) = pool.buyers.get(&(leg.market, leg.outcome)) else {
-                    feasible = false;
-                    break;
-                };
-
-                let mut remaining = needed_shares;
-                let mut leg_revenue: i128 = 0;
-                let mut matched: Vec<(u64, Qty, Nanos)> = Vec::new();
-
-                for entry in buyers {
-                    if remaining == 0 {
-                        break;
-                    }
-                    if entry.available_qty == 0 {
-                        continue;
-                    }
-                    if entry.min_fill > 0 && entry.min_fill == entry.max_fill {
-                        if remaining < entry.min_fill {
-                            continue;
-                        }
-                    }
-                    let take = remaining.min(entry.available_qty);
-                    leg_revenue += entry.price as i128 * take as i128;
-                    matched.push((entry.order_id, take, entry.price));
-                    remaining -= take;
-                }
-
-                if remaining > 0 {
-                    feasible = false;
-                    break;
-                }
-
-                total_cost -= leg_revenue;
-                leg_consumptions.extend(matched);
-            }
-        }
-
-        if !feasible {
-            continue;
-        }
-
-        // Check cost/revenue constraint based on order type.
-        //
-        // For buyers (is_seller=false): total_cost <= limit * qty
-        //   (they pay no more than their limit)
-        //
-        // For sellers (is_seller=true): revenue >= limit * qty
-        //   i.e. -total_cost >= limit * qty  (they receive at least their limit)
-        let limit_value = order.limit_price as i128 * fill_qty as i128;
-        if order.is_seller() {
-            // Seller needs sufficient revenue: -total_cost >= limit * qty
-            if -total_cost < limit_value {
-                continue;
-            }
-        } else {
-            // Buyer: total_cost <= limit * qty
-            if total_cost > limit_value {
-                continue;
-            }
-        }
-
-        // Check AON constraint on the multi-market order
-        if order.is_all_or_none() && fill_qty < order.min_fill {
-            continue;
-        }
-
-        // Commit: emit fill for the multi-market order
-        let fill_price = if fill_qty > 0 {
-            if order.is_seller() {
-                // Seller receives revenue. fill_price = revenue / qty
-                ((-total_cost) as u64) / fill_qty
-            } else {
-                // Buyer pays cost. fill_price = cost / qty
-                (total_cost.max(0) as u64) / fill_qty
-            }
-        } else {
-            0
-        };
-
-        solution.fills.push(Fill::new(order.id, fill_qty, fill_price));
-        filled.insert(order.id);
-
-        // Accumulate counterparty consumptions and reduce pool liquidity
-        for (oid, qty, price) in &leg_consumptions {
-            let entry = counterparty_fills.entry(*oid).or_insert((0, 0));
-            entry.0 += qty;
-            entry.1 += *price as i128 * *qty as i128;
-
-            // Consume from pool
-            for entries in pool.sellers.values_mut().chain(pool.buyers.values_mut()) {
-                for pool_entry in entries.iter_mut() {
-                    if pool_entry.order_id == *oid {
-                        pool_entry.available_qty =
-                            pool_entry.available_qty.saturating_sub(*qty);
-                    }
-                }
-            }
-        }
-    }
-
-    // Emit aggregated counterparty fills (one Fill per order_id)
-    for (oid, (total_qty, total_cost)) in &counterparty_fills {
-        if *total_qty == 0 {
-            continue;
-        }
-
-        // Check counterparty AON constraint
-        if let Some(cp_order) = order_map.get(oid) {
-            if cp_order.is_all_or_none() && *total_qty < cp_order.min_fill {
-                continue; // Can't partially fill an AON order
-            }
-            // Don't exceed max_fill
-            let capped_qty = (*total_qty).min(cp_order.max_fill);
-            if capped_qty == 0 {
-                continue;
-            }
-
-            // Weighted average price
-            let avg_price = (*total_cost as u64) / capped_qty;
-
-            // Verify fill respects the counterparty's limit
-            if cp_order.is_seller() {
-                if avg_price < cp_order.limit_price {
-                    continue; // Seller wouldn't accept this price
-                }
-            } else if avg_price > cp_order.limit_price {
-                continue; // Buyer wouldn't pay this much
-            }
-
-            solution.fills.push(Fill::new(*oid, capped_qty, avg_price));
-            filled.insert(*oid);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::traits::PriceDiscoverer;
     use matching_engine::{
         bundle_sell, bundle_yes, outcome_buy, outcome_sell, price_to_nanos, spread, spread_sell,
         Problem,
@@ -786,7 +748,7 @@ mod tests {
     }
 
     #[test]
-    fn test_leg_decomposition() {
+    fn test_repricing_basic() {
         let (mut problem, m0, m1) = setup_markets();
 
         // Bundle buyer willing to pay 40 cents for both YES
@@ -799,7 +761,6 @@ mod tests {
         ));
 
         // Individual sellers providing liquidity
-        // Seller of A-YES at 15 cents
         problem.orders.push(outcome_sell(
             &problem.markets,
             10,
@@ -808,8 +769,6 @@ mod tests {
             price_to_nanos(0.15),
             200,
         ));
-
-        // Seller of B-YES at 15 cents
         problem.orders.push(outcome_sell(
             &problem.markets,
             11,
@@ -819,19 +778,24 @@ mod tests {
             200,
         ));
 
-        let solver = MultiMarketSolver::new();
-        let result = solver.solve_partial(&problem);
+        // Run price discovery first
+        let solver = LocalSolver::new();
+        let pd_result = solver.discover_prices(&problem);
 
-        // Should match: bundle buyer gets fills via decomposed legs
-        let bundle_fill = result.fills.iter().find(|f| f.order_id == 1);
+        // Run repricing
+        let mm_solver = MultiMarketSolver::new();
+        let result = mm_solver.solve_with_repricing(&problem, &pd_result);
+
+        let bundle_fill = result.bundle_fills.iter().find(|f| f.order_id == 1);
         assert!(
             bundle_fill.is_some(),
-            "Bundle order should be filled via leg decomposition"
+            "Bundle order should be filled via repricing"
         );
+        assert_eq!(bundle_fill.unwrap().fill_qty, 100);
     }
 
     #[test]
-    fn test_leg_decomposition_too_expensive() {
+    fn test_repricing_too_expensive() {
         let (mut problem, m0, m1) = setup_markets();
 
         // Bundle buyer willing to pay only 20 cents
@@ -843,7 +807,7 @@ mod tests {
             100,
         ));
 
-        // Individual sellers too expensive (30 cents each = 60 cents total)
+        // Individual sellers too expensive (30 cents each = 60 cents total for bundle)
         problem.orders.push(outcome_sell(
             &problem.markets,
             10,
@@ -861,10 +825,13 @@ mod tests {
             200,
         ));
 
-        let solver = MultiMarketSolver::new();
-        let result = solver.solve_partial(&problem);
+        let solver = LocalSolver::new();
+        let pd_result = solver.discover_prices(&problem);
 
-        let bundle_fill = result.fills.iter().find(|f| f.order_id == 1);
+        let mm_solver = MultiMarketSolver::new();
+        let result = mm_solver.solve_with_repricing(&problem, &pd_result);
+
+        let bundle_fill = result.bundle_fills.iter().find(|f| f.order_id == 1);
         assert!(
             bundle_fill.is_none(),
             "Bundle order should NOT be filled when legs are too expensive"
@@ -872,46 +839,142 @@ mod tests {
     }
 
     #[test]
-    fn test_aon_insufficient_qty() {
+    fn test_repricing_net_welfare_check() {
         let (mut problem, m0, m1) = setup_markets();
 
-        // Bundle buyer AON wanting 100 units
+        // Bundle buyer at a marginal price — should only fill if net welfare positive
         problem.orders.push(bundle_yes(
             &problem.markets,
             1,
             &[m0, m1],
-            price_to_nanos(0.40),
+            price_to_nanos(0.30),
             100,
         ));
 
-        // Sellers only have 50 units each
+        // Sellers
         problem.orders.push(outcome_sell(
             &problem.markets,
             10,
             m0,
             0,
-            price_to_nanos(0.15),
-            50,
+            price_to_nanos(0.10),
+            200,
         ));
         problem.orders.push(outcome_sell(
             &problem.markets,
             11,
             m1,
             0,
-            price_to_nanos(0.15),
+            price_to_nanos(0.10),
+            200,
+        ));
+
+        let solver = LocalSolver::new();
+        let pd_result = solver.discover_prices(&problem);
+
+        let mm_solver = MultiMarketSolver::new();
+        let result = mm_solver.solve_with_repricing(&problem, &pd_result);
+
+        // If filled, welfare must be non-negative
+        if !result.bundle_fills.is_empty() {
+            assert!(result.welfare >= 0, "Welfare must be non-negative after repricing");
+        }
+    }
+
+    #[test]
+    fn test_repricing_multiple_bundles() {
+        let (mut problem, m0, m1) = setup_markets();
+
+        // Two bundle buyers
+        problem.orders.push(bundle_yes(
+            &problem.markets,
+            1,
+            &[m0, m1],
+            price_to_nanos(0.40),
+            50,
+        ));
+        problem.orders.push(bundle_yes(
+            &problem.markets,
+            2,
+            &[m0, m1],
+            price_to_nanos(0.35),
             50,
         ));
 
-        let solver = MultiMarketSolver::new();
-        let result = solver.solve_partial(&problem);
+        // Sellers with enough capacity for both
+        problem.orders.push(outcome_sell(
+            &problem.markets,
+            10,
+            m0,
+            0,
+            price_to_nanos(0.10),
+            200,
+        ));
+        problem.orders.push(outcome_sell(
+            &problem.markets,
+            11,
+            m1,
+            0,
+            price_to_nanos(0.10),
+            200,
+        ));
 
-        // bundle_yes creates AON orders, so with only 50 units available per leg
-        // but needing 50 per leg (100 * 1/2 = 50), it should still fill
-        let bundle_fill = result.fills.iter().find(|f| f.order_id == 1);
+        let solver = LocalSolver::new();
+        let pd_result = solver.discover_prices(&problem);
+
+        let mm_solver = MultiMarketSolver::new();
+        let result = mm_solver.solve_with_repricing(&problem, &pd_result);
+
+        // At least one bundle should fill
         assert!(
-            bundle_fill.is_some(),
-            "Bundle should fill when leg qty is sufficient"
+            !result.bundle_fills.is_empty(),
+            "At least one bundle should fill"
         );
+    }
+
+    #[test]
+    fn test_repricing_spread() {
+        let (mut problem, m0, m1) = setup_markets();
+
+        // Spread: long A, short B
+        problem.orders.push(spread(
+            &problem.markets,
+            1,
+            m0,
+            m1,
+            price_to_nanos(0.20),
+            50,
+        ));
+
+        // Sellers for market A (spread needs to buy A-YES)
+        problem.orders.push(outcome_sell(
+            &problem.markets,
+            10,
+            m0,
+            0,
+            price_to_nanos(0.10),
+            200,
+        ));
+
+        // Buyers for market B (spread needs to sell B-YES, i.e., find B-YES buyers)
+        problem.orders.push(outcome_buy(
+            &problem.markets,
+            11,
+            m1,
+            0,
+            price_to_nanos(0.80),
+            200,
+        ));
+
+        let solver = LocalSolver::new();
+        let pd_result = solver.discover_prices(&problem);
+
+        let mm_solver = MultiMarketSolver::new();
+        let result = mm_solver.solve_with_repricing(&problem, &pd_result);
+
+        // Spread should match if cost < limit
+        // This test primarily verifies no panics with spread orders
+        let _ = result;
     }
 
     #[test]
@@ -941,94 +1004,6 @@ mod tests {
             result.welfare >= 0,
             "Total welfare should be non-negative"
         );
-    }
-
-    #[test]
-    fn test_counterparty_stacking() {
-        let (mut problem, m0, m1) = setup_markets();
-
-        // Bundle buyer wanting 100 units
-        problem.orders.push(bundle_yes(
-            &problem.markets,
-            1,
-            &[m0, m1],
-            price_to_nanos(0.40),
-            100,
-        ));
-
-        // Multiple small sellers for A-YES
-        for i in 0..5 {
-            problem.orders.push(outcome_sell(
-                &problem.markets,
-                10 + i,
-                m0,
-                0,
-                price_to_nanos(0.15),
-                20, // 5 * 20 = 100 total, need 50
-            ));
-        }
-
-        // Single seller for B-YES
-        problem.orders.push(outcome_sell(
-            &problem.markets,
-            20,
-            m1,
-            0,
-            price_to_nanos(0.15),
-            200,
-        ));
-
-        let solver = MultiMarketSolver::new();
-        let result = solver.solve_partial(&problem);
-
-        let bundle_fill = result.fills.iter().find(|f| f.order_id == 1);
-        assert!(
-            bundle_fill.is_some(),
-            "Bundle should fill using stacked counterparties"
-        );
-    }
-
-    #[test]
-    fn test_per_market_netting() {
-        let (mut problem, m0, m1) = setup_markets();
-
-        // Bundle buyer at generous price
-        problem.orders.push(bundle_yes(
-            &problem.markets,
-            1,
-            &[m0, m1],
-            price_to_nanos(0.50),
-            100,
-        ));
-
-        // Sellers
-        problem.orders.push(outcome_sell(
-            &problem.markets,
-            10,
-            m0,
-            0,
-            price_to_nanos(0.10),
-            200,
-        ));
-        problem.orders.push(outcome_sell(
-            &problem.markets,
-            11,
-            m1,
-            0,
-            price_to_nanos(0.10),
-            200,
-        ));
-
-        let solver = MultiMarketSolver::new();
-        let result = solver.solve_partial(&problem);
-
-        // Verify fills exist
-        assert!(!result.fills.is_empty(), "Should have fills");
-
-        // Per-market netting: for each market and outcome, total long = total short
-        // The bundle buyer has +1 at state 0 (both YES), which decomposes to
-        // +1/2 A-YES and +1/2 B-YES per unit. Sellers provide -1 A-YES and -1 B-YES.
-        // Net per market should be zero.
     }
 
     #[test]
