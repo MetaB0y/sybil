@@ -196,6 +196,8 @@ struct FillStats {
 
     // By market type
     bundle_filled: usize,
+    bundle_welfare: i64,
+    bundle_volume: u64,
 
     // Markets with activity
     markets_with_volume: usize,
@@ -229,6 +231,8 @@ impl FillStats {
         let mut mm_volume: u64 = 0;
 
         let mut bundle_filled = 0;
+        let mut bundle_welfare: i64 = 0;
+        let mut bundle_volume: u64 = 0;
 
         for order in &problem.orders {
             let fill_qty = fill_map.get(&order.id).copied().unwrap_or(0);
@@ -258,6 +262,8 @@ impl FillStats {
 
                     if order.num_markets > 1 {
                         bundle_filled += 1;
+                        bundle_welfare += welfare;
+                        bundle_volume += fill_qty;
                     }
                 }
             }
@@ -285,6 +291,8 @@ impl FillStats {
             mm_welfare,
             mm_volume,
             bundle_filled,
+            bundle_welfare,
+            bundle_volume,
             markets_with_volume,
         }
     }
@@ -845,8 +853,8 @@ fn print_fill_stats(stats: &FillStats, order_stats: &OrderStats, num_markets: us
             order_stats.bundle_orders,
             pct(stats.bundle_filled, order_stats.bundle_orders)
         )),
-        Cell::new("-"),
-        Cell::new("-"),
+        Cell::new(format_qty(stats.bundle_volume)),
+        Cell::new(format_welfare(stats.bundle_welfare)).fg(Color::Cyan),
     ]);
 
     println!("{table}");
