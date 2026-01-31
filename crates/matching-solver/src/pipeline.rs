@@ -343,6 +343,8 @@ impl Pipeline {
 
         // Phase 2: Bundle/Spread matching (partial solvers)
         let partial_start = Instant::now();
+        let pd_fills = result.result.fills.len();
+        let mut bundle_fills = 0usize;
         for solver in &self.partial_solvers {
             let partial_orders: Vec<_> = problem
                 .orders
@@ -365,6 +367,7 @@ impl Pipeline {
                 if let Some(&order) = order_map.get(&fill.order_id) {
                     filled_order_ids.insert(fill.order_id);
                     result.result.add_fill(fill.clone(), order);
+                    bundle_fills += 1;
                     result.contributions.push(SolverContribution {
                         solver_name: solver.name().to_string(),
                         fills_contributed: 1,
@@ -384,8 +387,8 @@ impl Pipeline {
             welfare_delta: result.result.total_welfare,
             volume_delta: result.result.fills.iter().map(|f| f.fill_qty).sum(),
             fills_delta: result.result.fills.len(),
-            price_discovery_fills: result.result.fills.len(),
-            bundle_fills: 0,
+            price_discovery_fills: pd_fills,
+            bundle_fills,
             fill_start_idx: 0,
             fill_end_idx: result.result.fills.len(),
             market_prices: dual_result

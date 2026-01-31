@@ -19,19 +19,21 @@ A binary market has two states: YES (state 0) and NO (state 1).
 2. **MM budget limits:** market makers post orders across many markets, but their
    total capital exposure is capped. Fills must respect this joint budget.
 
-The solver has three mechanisms, each addressing different constraints:
+The solver has four mechanisms, each addressing different constraints:
 
 | # | Mechanism | Constraint Handled | Approach |
 |---|-----------|-------------------|----------|
 | 1 | Unified binary clearing | P_YES + P_NO = $1 (per market) | Construction |
 | 2 | Negrisk arbitrage feedback | Σ P_YES = $1 (per group) | Heuristic iteration |
 | 3 | Dual decomposition | Σ P_YES = $1 + MM budgets | Lagrangian relaxation |
+| 4 | Multi-market matching | Bundle/spread fill atomicity | Complement + leg decomposition |
 
 Mechanisms 2 and 3 are alternative approaches to the cross-market problem.
+Mechanism 4 runs as a partial solver in any pipeline configuration.
 The system has several pipeline configurations:
 
-- `Pipeline::with_negrisk()` — Mechanisms 1 + 2, with MM allocation
-- `Pipeline::with_dual_decomposition()` — Mechanisms 1 + 3
+- `Pipeline::with_negrisk()` — Mechanisms 1 + 2 + 4, with MM allocation
+- `Pipeline::with_dual_decomposition()` — Mechanisms 1 + 3 + 4
 
 ---
 
@@ -279,14 +281,16 @@ In practice, convergence is checked on two criteria:
 | MM budgets | Post-hoc greedy | Bid shading (in-clearing) |
 | Convergence | No formal guarantee | Subgradient guarantee (convex dual) |
 | Implementation | Synthetic orders | Dual variable adjustment |
-| Multi-market orders | Not handled | Not handled |
+| Multi-market orders | Via MultiMarketSolver (partial solver) | Via MultiMarketSolver (partial solver) |
 | Maturity | Battle-tested on sims | Newer, passes all tests |
 
 ### Limitations
 
-**Multi-market orders** (bundles, spreads) are not handled by either pipeline.
-They are matched only if they happen to clear within a single market's
-price discovery. A scalable multi-market clearing mechanism is needed.
+**Multi-market orders** (bundles, spreads) are handled by the MultiMarketSolver
+(Mechanism 4), which runs as a partial solver after dual decomposition.
+However, it operates independently — dual variable information is not used to
+guide multi-market matching, and multi-market fills do not feed back into the
+dual iteration.
 
 **Duality gap**: the subgradient method finds the dual optimum, but primal
 recovery (mapping dual variables to fills) may have a gap. The final pass
@@ -296,6 +300,106 @@ validates and enforces hard constraints.
 derivatives (spreads with both positive and negative payoffs), the buyer/seller
 classification may be ambiguous. This affects welfare computation and bid
 shading direction.
+
+---
+
+## Mechanism 4: Multi-Market Matching
+
+**File:** `specialized/multi_market.rs` (MultiMarketSolver)
+
+### What it does
+
+Matches multi-market orders (bundles, spreads) that span multiple binary markets.
+These orders cannot be filled by per-market price discovery alone because their
+payoff depends on the joint outcome of several markets. The solver uses two
+complementary strategies, run in sequence.
+
+### Strategy 1: Complement Matching
+
+Orders with identical markets and negated payoffs cancel perfectly:
+
+- `bundle_yes({A,B})` payoff `[+1, 0, 0, 0]` + `bundle_sell({A,B})` payoff `[-1, 0, 0, 0]`
+- `spread(A,B)` payoff `[0, -1, +1, 0]` + `spread_sell(A,B)` payoff `[0, +1, -1, 0]`
+
+No decomposition needed. Standard bid/ask matching within each group.
+
+#### How it works
+
+1. **Group** multi-market orders by `PayoffKey = (sorted_markets, |payoffs|)`.
+2. **Split** each group into two sides by the sign of the first non-zero payoff.
+3. **Match** greedily: compute the valid fill_price range for each order
+   (buyer: `F ∈ [0, limit]`, seller: `F ∈ [limit, ∞)`), intersect the ranges,
+   and fill at the midpoint if the intersection is non-empty.
+4. Fill quantity = `min(a.max_fill, b.max_fill)`, respecting AON constraints.
+
+### Strategy 2: Leg Decomposition
+
+Decomposes a multi-market order into per-market legs using marginal payoff
+averaging (the same decomposition used by settlement), then matches each leg
+against single-market counterparties.
+
+#### The decomposition
+
+For each market in the order, average the payoff over states where that market
+has each outcome:
+
+```
+For market M, outcome o:
+  leg_shares = Σ(payoff[s] for s where M has outcome o) / count(such states)
+```
+
+**Examples:**
+- `bundle_yes({A,B})` `[+1, 0, 0, 0]` → +1/2 A-YES, +1/2 B-YES per unit
+- `spread(A,B)` `[0, -1, +1, 0]` → +1/2 A-YES, -1/2 A-NO, -1/2 B-YES, +1/2 B-NO
+
+#### How it works
+
+1. **Build a counterparty pool** from unfilled single-market orders (excluding
+   MM-constrained orders), indexed by `(market, outcome)`. Sellers sorted by
+   price ascending, buyers by price descending.
+2. **For each unfilled multi-market order** (sorted by welfare potential desc):
+   a. Compute legs via `compute_legs()`.
+   b. For each positive leg (need to buy): consume cheapest sellers from pool.
+   c. For each negative leg (need to sell): consume best-priced buyers from pool.
+   d. Compute `total_cost = Σ(buy costs) - Σ(sell revenues)`.
+   e. **Buyer constraint**: `total_cost ≤ limit × qty`.
+      **Seller constraint**: `-total_cost ≥ limit × qty` (sufficient revenue).
+   f. If feasible: emit fill for the multi-market order and consume pool liquidity.
+3. **Aggregate counterparty fills**: accumulate per-order_id to avoid duplicate
+   Fill records. Emit one Fill per counterparty with weighted average price.
+   Verify each counterparty fill respects AON and limit price constraints.
+
+#### Fill price calculation
+
+- **Buyer orders**: `fill_price = total_cost / fill_qty`
+- **Seller orders**: `fill_price = (-total_cost) / fill_qty` (revenue per unit)
+
+This ensures welfare is always non-negative for both sides.
+
+### What it guarantees
+
+- **Per-market netting**: for each (market, outcome), every long position has a
+  corresponding short position. The platform has zero residual exposure.
+- **Limit respect**: all fills satisfy buyer/seller limit constraints.
+- **AON respect**: all-or-none constraints checked on both multi-market orders
+  and counterparties.
+- **No duplicate fills**: each counterparty order emits at most one Fill.
+- **Non-negative welfare**: every fill has welfare ≥ 0.
+
+### What it does NOT guarantee
+
+- **Welfare optimality**: greedy matching by welfare potential. Orders are
+  processed sequentially; a different ordering could yield higher total welfare.
+- **Liquidity efficiency**: once a counterparty is consumed by one multi-market
+  order, it's unavailable for others that might have produced more welfare.
+- **Partial fills for multi-market orders**: currently fills at max_fill or not
+  at all. Partial fill support would require more complex leg quantity scaling.
+
+### Integration
+
+MultiMarketSolver implements `PartialSolver` and runs as a pipeline step in both
+`with_negrisk()` and `with_dual_decomposition()` configurations. Its fills are
+combined with other partial solver fills via the MWIS combiner on a conflict graph.
 
 ---
 
@@ -399,9 +503,11 @@ Pipeline::with_negrisk().solve(&problem)
   |   +-- LocalSolver (unified binary clearing per market)
   |   +-- NegriskSolver (detect price sum deviations, create arb orders)
   |   +-- MmAllocator (greedy budget-constrained activation)
+  |   +-- MultiMarketSolver (complement match + leg decomposition)
   |   +-- Check convergence (welfare delta)
   |
   +-- Filter arb fills from output
+  +-- Combine partial solutions (MWIS on conflict graph)
   +-- Report cumulative MM allocation stats
   +-- Return fills, prices, welfare
 ```
@@ -414,6 +520,8 @@ Pipeline::with_dual_decomposition().solve(&problem)
   +-- DualMaster (λ/μ iteration → shaded clearing → convergence)
   |   +-- Final pass: validate limits + enforce MM budgets
   |
+  +-- MultiMarketSolver (complement match + leg decomposition)
+  +-- Combine partial solutions (MWIS on conflict graph)
   +-- Return fills, prices, welfare
 ```
 
@@ -423,11 +531,13 @@ Pipeline::with_dual_decomposition().solve(&problem)
 
 ### Test Coverage
 
-**Unit tests (70 in matching-solver):**
+**Unit tests (78 in matching-solver):**
 - Per-market clearing correctness (supply/demand crossing, price consistency)
 - Seller-aware welfare computation and price satisfaction
 - MM budget allocation with tight budgets, overlapping MMs, varied welfare
 - Dual decomposition convergence, shading math, residual computation
+- Multi-market solver: complement matching (bundles, spreads), leg decomposition,
+  AON, counterparty stacking, welfare positivity, per-market netting
 - Verifier catches all violation types
 - Property-based tests: budget constraint ALWAYS respected (proptest)
 
@@ -443,16 +553,16 @@ Pipeline::with_dual_decomposition().solve(&problem)
 - Extreme scenario: 100K+ orders, 200 markets, 10 MMs with $50K-$200K budgets
 - All presets pass ZK verification (status: VALID)
 
-### Key Metrics (Extreme scenario)
+### Key Metrics (Extreme scenario, dual solver)
 
 | Metric | Value | Interpretation |
 |--------|-------|----------------|
-| Fill rate | 64K/101K (63%) | Healthy — limited by liquidity scarcity |
-| MM fill rate | 291/1200 (24%) | Budget-constrained, as designed |
-| MM utilization | 99-100% per MM | Budgets fully used |
-| Welfare | $800K | Positive, non-negative per fill |
+| Fill rate | 72K/103K (70%) | Healthy — limited by liquidity scarcity |
+| MM fill rate | 278/1200 (23%) | Budget-constrained, as designed |
+| Bundle fill rate | 8.2K/25K (33%) | Multi-market matching active |
+| Bundle welfare | $151K | Positive, via complement + leg decomposition |
+| Total welfare | $1.01M | Positive, non-negative per fill |
 | Verification | VALID | All ZK invariants pass |
-| Negrisk convergence | 26 groups corrected | Sum→$1 via arb feedback |
 
 ### What We Don't Yet Measure
 
@@ -475,10 +585,11 @@ Pipeline::with_dual_decomposition().solve(&problem)
    independently. A joint LP would find a better or equal solution. Both
    negrisk and dual decomposition are decomposition heuristics.
 
-2. **Multi-market orders are second-class**. Bundles and spreads are not
-   matched by any solver. They only fill if they happen to clear within
-   per-market price discovery. A scalable multi-market clearing mechanism
-   is needed.
+2. **Multi-market matching is greedy**. The MultiMarketSolver handles bundles
+   and spreads via complement matching and leg decomposition, but the greedy
+   ordering (by welfare potential) may miss globally better combinations.
+   Integration with the dual decomposition's price signals could improve
+   multi-market fill rates and welfare.
 
 3. **Mixed-payoff order ambiguity**. `is_seller()` checks for any negative
    payoff. Complex derivatives (spreads, straddles) may be misclassified,
@@ -523,11 +634,18 @@ Implement Polyak step size: `α_t = (f* - f_t) / ||g_t||²` where f* is a
 target (e.g., best known dual value). This adapts to problem difficulty and
 avoids the slow tail convergence of 1/√t.
 
-**6. Bundle integration into dual decomposition.**
-Add coupling constraints for multi-market orders (one Lagrange multiplier per
-bundle's atomicity constraint). This increases the dual space significantly
-but produces more coherent bundle pricing. Only worth it if bundle volume is
-high.
+**6. Deeper bundle integration into dual decomposition.**
+The MultiMarketSolver currently runs independently of the dual iteration.
+Adding coupling constraints for multi-market orders (one Lagrange multiplier
+per bundle's atomicity constraint) would let dual decomposition guide
+multi-market pricing. This increases the dual space significantly but produces
+more coherent bundle pricing.
+
+**7. Partial fills for multi-market orders.**
+The MultiMarketSolver currently fills at max_fill or not at all. Supporting
+partial fills would require scaling leg quantities proportionally and
+re-checking cost constraints, but would increase fill rates on
+liquidity-constrained legs.
 
 ### What Would NOT Help
 
