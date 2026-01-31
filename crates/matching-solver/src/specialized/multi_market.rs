@@ -11,10 +11,10 @@
 
 use std::collections::HashMap;
 
-use matching_engine::{Fill, MarketId, Order, Problem, Qty};
+use matching_engine::{Fill, MarketId, Nanos, Order, Problem, Qty, NANOS_PER_DOLLAR};
 
 use crate::combiner::SolutionConfidence;
-use crate::local_solver::{LocalSolver, MarketSolution};
+use crate::local_solver::{LocalSolver, MarketSolution, PrecomputedMarket};
 use crate::traits::{PartialSolution, PartialSolver, PriceDiscoveryResult};
 
 /// Key for grouping orders with compatible payoff structures.
@@ -44,6 +44,8 @@ struct MarketClearingState {
     base_orders: Vec<Order>,
     cumulative_extra_demand: Qty,
     cumulative_extra_supply: Qty,
+    /// Precomputed curves for fast trial crossings (avoids full re-solve).
+    precomputed: PrecomputedMarket,
 }
 
 /// Result of repricing multi-market orders.
@@ -123,6 +125,7 @@ impl MultiMarketSolver {
                 .cloned()
                 .unwrap_or_else(|| MarketSolution::empty(market.id, 2));
 
+            let precomputed = PrecomputedMarket::from_orders(&base_orders);
             market_states.insert(
                 market.id,
                 MarketClearingState {
@@ -130,6 +133,7 @@ impl MultiMarketSolver {
                     base_orders,
                     cumulative_extra_demand: 0,
                     cumulative_extra_supply: 0,
+                    precomputed,
                 },
             );
         }
@@ -207,8 +211,11 @@ impl MultiMarketSolver {
             // Collect affected markets
             let affected_markets: Vec<MarketId> = per_market_extras.keys().copied().collect();
 
-            // Try re-clearing each affected market with cumulative + new extras
-            let mut new_solutions: HashMap<MarketId, MarketSolution> = HashMap::new();
+            // === FAST TRIAL PHASE (O(S) per market using precomputed curves) ===
+            // Compute new clearing prices and welfare without full re-solve.
+
+            // Per-market trial results: (clearing_price_yes, matched_qty, estimated_welfare)
+            let mut trial_results: Vec<(MarketId, Nanos, Qty, i64)> = Vec::new();
             let mut all_markets_feasible = true;
 
             for &mid in &affected_markets {
@@ -224,62 +231,68 @@ impl MultiMarketSolver {
                 let new_demand = state.cumulative_extra_demand + leg_demand;
                 let new_supply = state.cumulative_extra_supply + leg_supply;
 
-                match solver.solve_market_with_extra_demand(
-                    mid,
-                    &problem.markets,
-                    &state.base_orders,
+                let (clearing_price, matched_qty) =
+                    state.precomputed.crossing_with_extras(new_demand, new_supply);
+
+                if matched_qty == 0 {
+                    all_markets_feasible = false;
+                    break;
+                }
+
+                let welfare = state.precomputed.estimate_welfare(
+                    clearing_price,
+                    matched_qty,
                     new_demand,
                     new_supply,
-                ) {
-                    Some(sol) => {
-                        new_solutions.insert(mid, sol);
-                    }
-                    None => {
-                        all_markets_feasible = false;
-                        break;
-                    }
-                }
+                );
+
+                trial_results.push((mid, clearing_price, matched_qty, welfare));
             }
 
             if !all_markets_feasible {
                 continue;
             }
 
-            // Compute bundle cost at new clearing prices
+            // Compute bundle cost at trial clearing prices
             let mut bundle_cost_per_unit: i128 = 0;
             for leg in &legs {
                 let shares_per_unit =
                     leg.shares_numer.unsigned_abs() as i128 * 1000 / leg.shares_denom as i128;
-                let sol = new_solutions
-                    .get(&leg.market)
+
+                // Find clearing price for this market from trial results
+                let clearing_price_yes = trial_results
+                    .iter()
+                    .find(|(mid, _, _, _)| *mid == leg.market)
+                    .map(|(_, p, _, _)| *p)
                     .or_else(|| {
                         market_states
                             .get(&leg.market)
-                            .map(|s| &s.current_solution)
+                            .map(|s| s.current_solution.prices[0])
                     });
-                let price = match sol {
-                    Some(s) => s.prices.get(leg.outcome as usize).copied().unwrap_or(0),
+
+                let price = match clearing_price_yes {
+                    Some(p_yes) => {
+                        if leg.outcome == 0 {
+                            p_yes
+                        } else {
+                            NANOS_PER_DOLLAR.saturating_sub(p_yes)
+                        }
+                    }
                     None => continue,
                 };
 
                 if leg.shares_numer > 0 {
-                    // Buying: cost += price * shares
                     bundle_cost_per_unit += price as i128 * shares_per_unit;
                 } else {
-                    // Selling: revenue (negative cost)
                     bundle_cost_per_unit -= price as i128 * shares_per_unit;
                 }
             }
-            // Normalize by 1000 (the multiplier we used above)
             bundle_cost_per_unit /= 1000;
 
             // Check limit price constraint
             let limit_ok = if bundle.is_seller() {
-                // Seller: revenue per unit >= limit_price
-                // revenue = -cost, so -bundle_cost_per_unit >= limit_price
                 -bundle_cost_per_unit >= bundle.limit_price as i128
             } else {
-                // Buyer: cost per unit <= limit_price
                 bundle_cost_per_unit <= bundle.limit_price as i128
             };
 
@@ -287,15 +300,12 @@ impl MultiMarketSolver {
                 continue;
             }
 
-            // Net welfare check: accept only if total welfare doesn't regress
+            // Net welfare check using estimated welfare
             let old_welfare: i64 = affected_markets
                 .iter()
                 .filter_map(|mid| market_states.get(mid).map(|s| s.current_solution.welfare))
                 .sum();
-            let new_welfare: i64 = affected_markets
-                .iter()
-                .filter_map(|mid| new_solutions.get(mid).map(|s| s.welfare))
-                .sum();
+            let new_welfare: i64 = trial_results.iter().map(|(_, _, _, w)| w).sum();
 
             let bundle_welfare = if bundle.is_seller() {
                 (-bundle_cost_per_unit - bundle.limit_price as i128) * fill_qty as i128
@@ -307,7 +317,50 @@ impl MultiMarketSolver {
                 continue;
             }
 
-            // Commit: update market states with new solutions and cumulative extras
+            // === COMMIT PHASE (full re-solve only for accepted bundles) ===
+            // Run exact solve to get real MarketSolution with fills.
+
+            let mut new_solutions: HashMap<MarketId, MarketSolution> = HashMap::new();
+            let mut commit_feasible = true;
+
+            for &mid in &affected_markets {
+                let (leg_demand, leg_supply) = per_market_extras[&mid];
+                let state = &market_states[&mid];
+                let new_demand = state.cumulative_extra_demand + leg_demand;
+                let new_supply = state.cumulative_extra_supply + leg_supply;
+
+                match solver.solve_market_with_extra_demand(
+                    mid,
+                    &problem.markets,
+                    &state.base_orders,
+                    new_demand,
+                    new_supply,
+                ) {
+                    Some(sol) => {
+                        new_solutions.insert(mid, sol);
+                    }
+                    None => {
+                        commit_feasible = false;
+                        break;
+                    }
+                }
+            }
+
+            if !commit_feasible {
+                continue;
+            }
+
+            // Final welfare check with exact values
+            let exact_new_welfare: i64 = affected_markets
+                .iter()
+                .filter_map(|mid| new_solutions.get(mid).map(|s| s.welfare))
+                .sum();
+
+            if exact_new_welfare + bundle_welfare as i64 <= old_welfare {
+                continue;
+            }
+
+            // Update market states with new solutions and cumulative extras
             for &mid in &affected_markets {
                 if let Some(sol) = new_solutions.remove(&mid) {
                     let (leg_demand, leg_supply) = per_market_extras[&mid];

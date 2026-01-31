@@ -684,6 +684,188 @@ impl Default for LocalSolver {
 }
 
 // ============================================================================
+// PrecomputedMarket — fast crossing for repricing trials
+// ============================================================================
+
+/// Precomputed market data for fast crossing queries.
+///
+/// Built once from base orders per market. Supports O(S) clearing price
+/// computation with arbitrary extra demand/supply, where S = number of supply
+/// points. Avoids per-trial order classification, sorting, and fill generation.
+pub(crate) struct PrecomputedMarket {
+    /// Demand curve: (price, qty) sorted by price descending.
+    demand_points: Vec<(Nanos, Qty)>,
+    /// Prefix sums of demand qty: length = demand_points.len() + 1, starts with 0.
+    demand_cum_qty: Vec<Qty>,
+    /// Supply curve: (price, qty) sorted by price ascending.
+    supply_points: Vec<(Nanos, Qty)>,
+    /// Prefix sums of supply qty: length = supply_points.len() + 1, starts with 0.
+    supply_cum_qty: Vec<Qty>,
+    /// For each supply point i, total demand qty from points with price >= supply_points[i].price.
+    demand_at_supply_price: Vec<Qty>,
+}
+
+impl PrecomputedMarket {
+    /// Build precomputed market from single-market orders (binary market only).
+    pub fn from_orders(orders: &[Order]) -> Self {
+        let mut demand_points: Vec<(Nanos, Qty)> = Vec::new();
+        let mut supply_points: Vec<(Nanos, Qty)> = Vec::new();
+
+        for order in orders {
+            // YES buyers → unified demand
+            if order.payoffs[0] > 0 {
+                demand_points.push((order.limit_price, order.max_fill));
+            }
+            // NO sellers → unified demand (selling NO ≡ buying YES at $1-limit)
+            if order.payoffs[1] < 0 {
+                let converted = NANOS_PER_DOLLAR.saturating_sub(order.limit_price);
+                demand_points.push((converted, order.max_fill));
+            }
+            // YES sellers → unified supply
+            if order.payoffs[0] < 0 {
+                supply_points.push((order.limit_price, order.max_fill));
+            }
+            // NO buyers → unified supply (buying NO ≡ selling YES at $1-limit)
+            if order.payoffs[1] > 0 {
+                let converted = NANOS_PER_DOLLAR.saturating_sub(order.limit_price);
+                supply_points.push((converted, order.max_fill));
+            }
+        }
+
+        demand_points.sort_by(|a, b| b.0.cmp(&a.0));
+        supply_points.sort_by_key(|(p, _)| *p);
+
+        // Build prefix sums
+        let demand_cum_qty = {
+            let mut v = Vec::with_capacity(demand_points.len() + 1);
+            v.push(0u64);
+            let mut cum = 0u64;
+            for &(_, q) in &demand_points {
+                cum += q;
+                v.push(cum);
+            }
+            v
+        };
+        let supply_cum_qty = {
+            let mut v = Vec::with_capacity(supply_points.len() + 1);
+            v.push(0u64);
+            let mut cum = 0u64;
+            for &(_, q) in &supply_points {
+                cum += q;
+                v.push(cum);
+            }
+            v
+        };
+
+        // Precompute demand at each supply price: for supply point i,
+        // demand_at_supply_price[i] = total demand with price >= supply_points[i].price.
+        // demand_points is sorted desc, so partition_point(|p| p >= target) gives count.
+        let demand_at_supply_price: Vec<Qty> = supply_points
+            .iter()
+            .map(|&(sp, _)| {
+                let j = demand_points.partition_point(|&(dp, _)| dp >= sp);
+                demand_cum_qty[j]
+            })
+            .collect();
+
+        Self {
+            demand_points,
+            demand_cum_qty,
+            supply_points,
+            supply_cum_qty,
+            demand_at_supply_price,
+        }
+    }
+
+    /// Find clearing price and matched quantity with extra demand/supply.
+    ///
+    /// Extra demand at price=$1, extra supply at price=$0.
+    /// Returns (clearing_price, matched_qty). O(S) where S = supply points.
+    pub fn crossing_with_extras(&self, extra_demand: Qty, extra_supply: Qty) -> (Nanos, Qty) {
+        if self.supply_points.is_empty() && extra_supply == 0 {
+            return (NANOS_PER_DOLLAR / 2, 0);
+        }
+        if self.demand_points.is_empty() && extra_demand == 0 {
+            return (NANOS_PER_DOLLAR / 2, 0);
+        }
+
+        let mut best_price: Nanos = if self.supply_points.is_empty() {
+            0
+        } else {
+            self.supply_points[0].0
+        };
+        let mut best_qty: Qty = 0;
+
+        // Check each natural supply price point
+        for (i, &(price, _)) in self.supply_points.iter().enumerate() {
+            let cum_supply = self.supply_cum_qty[i + 1] + extra_supply;
+            let demand = self.demand_at_supply_price[i] + extra_demand;
+            let matched = cum_supply.min(demand);
+            if matched > best_qty {
+                best_qty = matched;
+                best_price = price;
+            }
+        }
+
+        // Check virtual supply point at price=0 (from extra_supply)
+        if extra_supply > 0
+            && (self.supply_points.is_empty() || self.supply_points[0].0 > 0)
+        {
+            let total_demand =
+                self.demand_cum_qty.last().copied().unwrap_or(0) + extra_demand;
+            let matched = extra_supply.min(total_demand);
+            if matched > best_qty {
+                best_qty = matched;
+                best_price = 0;
+            }
+        }
+
+        (best_price, best_qty)
+    }
+
+    /// Estimate welfare of real orders at given clearing price.
+    ///
+    /// Approximates the welfare by filling demand/supply curves greedily.
+    /// Ignores min_fill constraints (slight overestimate in rare cases).
+    pub fn estimate_welfare(
+        &self,
+        clearing_price: Nanos,
+        matched_qty: Qty,
+        extra_demand: Qty,
+        extra_supply: Qty,
+    ) -> i64 {
+        let demand_real_cap = matched_qty.saturating_sub(extra_demand);
+        let supply_real_cap = matched_qty.saturating_sub(extra_supply);
+
+        let mut welfare: i64 = 0;
+
+        // Demand side: fill from highest price down, up to capacity
+        let mut remaining = demand_real_cap;
+        for &(price, qty) in &self.demand_points {
+            if remaining == 0 || price < clearing_price {
+                break;
+            }
+            let fill = qty.min(remaining);
+            welfare += (price as i64 - clearing_price as i64) * fill as i64;
+            remaining -= fill;
+        }
+
+        // Supply side: fill from lowest price up, up to capacity
+        remaining = supply_real_cap;
+        for &(price, qty) in &self.supply_points {
+            if remaining == 0 || price > clearing_price {
+                break;
+            }
+            let fill = qty.min(remaining);
+            welfare += (clearing_price as i64 - price as i64) * fill as i64;
+            remaining -= fill;
+        }
+
+        welfare
+    }
+}
+
+// ============================================================================
 // PriceDiscoverer Trait Implementation
 // ============================================================================
 
