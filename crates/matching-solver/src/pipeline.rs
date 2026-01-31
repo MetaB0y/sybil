@@ -26,7 +26,7 @@ use crate::combiner::{
 use crate::dual_master::{DualConfig, DualMaster};
 use crate::local_solver::LocalSolver;
 use crate::mm_allocator::MmAllocator;
-use crate::specialized::NegriskSolver;
+use crate::specialized::{MultiMarketSolver, NegriskSolver};
 use crate::traits::{
     AllocationResult, OrderAllocator, PartialSolution, PartialSolver, PriceDiscoverer,
     PriceDiscoveryResult,
@@ -249,6 +249,7 @@ impl Pipeline {
             .name("Iterative")
             .price_discoverer(LocalSolver::new())
             .allocator(MmAllocator::new())
+            .partial_solver(MultiMarketSolver::new())
             .use_fixed_point(true)
             .max_iterations(5)
             .build()
@@ -265,6 +266,7 @@ impl Pipeline {
             .price_discoverer(LocalSolver::new())
             .allocator(MmAllocator::new())
             .negrisk_solver(NegriskSolver::new())
+            .partial_solver(MultiMarketSolver::new())
             .use_fixed_point(true)
             .max_iterations(5)
             .build()
@@ -280,6 +282,7 @@ impl Pipeline {
             .name("Dual Decomposition")
             .price_discoverer(LocalSolver::new())
             .dual_master(DualMaster::new())
+            .partial_solver(MultiMarketSolver::new())
             .build()
     }
 
@@ -289,6 +292,7 @@ impl Pipeline {
             .name("Dual Decomposition")
             .price_discoverer(LocalSolver::new())
             .dual_master(DualMaster::with_config(config))
+            .partial_solver(MultiMarketSolver::new())
             .build()
     }
 
@@ -330,8 +334,8 @@ impl Pipeline {
         result.result = dual_result.matching_result;
         result.price_discovery = Some(dual_result.prices.clone());
 
-        // Track filled orders for partial solvers
-        let filled_order_ids: std::collections::HashSet<u64> =
+        // Track filled orders for partial solvers (mutable — updated as solvers run)
+        let mut filled_order_ids: std::collections::HashSet<u64> =
             result.result.fills.iter().map(|f| f.order_id).collect();
 
         let order_map: std::collections::HashMap<u64, &matching_engine::Order> =
@@ -359,11 +363,12 @@ impl Pipeline {
 
             for fill in partial_result.fills {
                 if let Some(&order) = order_map.get(&fill.order_id) {
+                    filled_order_ids.insert(fill.order_id);
                     result.result.add_fill(fill.clone(), order);
                     result.contributions.push(SolverContribution {
                         solver_name: solver.name().to_string(),
                         fills_contributed: 1,
-                        welfare_contributed: order.welfare_contribution(0, 1),
+                        welfare_contributed: order.welfare_contribution(fill.fill_price, fill.fill_qty),
                     });
                 }
             }

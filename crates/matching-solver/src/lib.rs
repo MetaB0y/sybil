@@ -43,6 +43,9 @@ pub use traits::{
     PriceDiscoverer, PriceDiscoveryResult,
 };
 
+// Specialized solvers
+pub use specialized::MultiMarketSolver;
+
 // Dual decomposition
 pub use dual_master::{DualConfig, DualMaster, DualResult, DualState, StepDecay};
 

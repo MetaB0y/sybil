@@ -9,8 +9,9 @@ use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
 use matching_engine::{
-    bundle_yes, outcome_buy, outcome_sell, price_to_nanos, spread, JointOutcome, MarketGroup,
-    MarketId, MmConstraint, MmId, MmSide, Nanos, Order, Problem, Qty, NANOS_PER_DOLLAR, YES,
+    bundle_sell, bundle_yes, outcome_buy, outcome_sell, price_to_nanos, spread, spread_sell,
+    JointOutcome, MarketGroup, MarketId, MmConstraint, MmId, MmSide, Nanos, Order, Problem, Qty,
+    NANOS_PER_DOLLAR, YES,
 };
 
 /// Unified configuration for scenario generation.
@@ -30,6 +31,10 @@ pub struct ScenarioConfig {
     pub bundle_fraction: f64,
     /// Fraction of orders that are spreads (A - B)
     pub spread_fraction: f64,
+    /// Fraction of bundle orders that are sells (counterparties to bundle_yes)
+    pub bundle_sell_fraction: f64,
+    /// Fraction of spread orders that are sells (counterparties to spread)
+    pub spread_sell_fraction: f64,
     /// Fraction of orders that are all-or-none
     pub aon_fraction: f64,
     /// Order size range
@@ -60,6 +65,8 @@ impl Default for ScenarioConfig {
             num_orders: 1000,
             bundle_fraction: 0.15,
             spread_fraction: 0.05,
+            bundle_sell_fraction: 0.4,
+            spread_sell_fraction: 0.4,
             aon_fraction: 0.1,
             order_size_min: 10,
             order_size_max: 200,
@@ -251,7 +258,11 @@ pub fn generate_scenario(config: ScenarioConfig) -> Problem {
     // Generate orders
     let mut order_id = 1u64;
     let num_bundles = (config.num_orders as f64 * config.bundle_fraction) as usize;
+    let num_bundle_sells = (num_bundles as f64 * config.bundle_sell_fraction) as usize;
+    let num_bundle_buys = num_bundles - num_bundle_sells;
     let num_spreads = (config.num_orders as f64 * config.spread_fraction) as usize;
+    let num_spread_sells = (num_spreads as f64 * config.spread_sell_fraction) as usize;
+    let num_spread_buys = num_spreads - num_spread_sells;
     let num_simple = config.num_orders - num_bundles - num_spreads;
 
     // Simple orders
@@ -267,9 +278,9 @@ pub fn generate_scenario(config: ScenarioConfig) -> Problem {
         problem.orders.push(order);
     }
 
-    // Bundle orders - track joint outcomes for liquidity
+    // Bundle buy orders - track joint outcomes for liquidity
     let mut bundle_outcomes: HashMap<JointOutcome, (Qty, Nanos)> = HashMap::new();
-    for _ in 0..num_bundles {
+    for _ in 0..num_bundle_buys {
         let (order, joint_outcome, limit_price) = generate_bundle_order_with_outcome(
             &problem.markets,
             &mut rng,
@@ -284,12 +295,36 @@ pub fn generate_scenario(config: ScenarioConfig) -> Problem {
         problem.orders.push(order);
     }
 
+    // Bundle sell orders
+    for _ in 0..num_bundle_sells {
+        let order = generate_bundle_sell_order(
+            &problem.markets,
+            &mut rng,
+            &mut order_id,
+            &market_info,
+            &config,
+        );
+        problem.orders.push(order);
+    }
+
     // Add joint liquidity for bundle outcomes
     add_joint_liquidity(&mut problem, &bundle_outcomes, &config, &mut rng);
 
-    // Spread orders
-    for _ in 0..num_spreads {
+    // Spread buy orders
+    for _ in 0..num_spread_buys {
         let order = generate_spread_order(
+            &problem.markets,
+            &mut rng,
+            &mut order_id,
+            &market_info,
+            &config,
+        );
+        problem.orders.push(order);
+    }
+
+    // Spread sell orders
+    for _ in 0..num_spread_sells {
+        let order = generate_spread_sell_order(
             &problem.markets,
             &mut rng,
             &mut order_id,
@@ -517,6 +552,75 @@ fn generate_spread_order(
     let qty = rng.gen_range(config.order_size_min..config.order_size_max);
 
     spread(markets, id, market_a, market_b, price_to_nanos(limit), qty)
+}
+
+fn generate_bundle_sell_order(
+    markets: &matching_engine::MarketSet,
+    rng: &mut ChaCha8Rng,
+    order_id: &mut u64,
+    market_info: &[(MarketId, f64)],
+    config: &ScenarioConfig,
+) -> Order {
+    let id = *order_id;
+    *order_id += 1;
+
+    let max_bundle = market_info.len().min(4);
+    if max_bundle < 2 {
+        let (market, price) = market_info[0];
+        return outcome_sell(markets, id, market, 0, price_to_nanos(price), 50);
+    }
+
+    let num_to_bundle = rng.gen_range(2..=max_bundle);
+    let mut selected: Vec<usize> = (0..market_info.len()).collect();
+    selected.shuffle(rng);
+    selected.truncate(num_to_bundle);
+
+    let bundle_markets: Vec<MarketId> = selected.iter().map(|&i| market_info[i].0).collect();
+    let combined_prob: f64 = selected.iter().map(|&i| market_info[i].1).product();
+
+    // Seller wants to receive at least this much (lower limit = more aggressive seller)
+    let limit = (combined_prob * rng.gen_range(0.7..1.1)).clamp(0.01, 0.95);
+    let limit_nanos = price_to_nanos(limit);
+    let qty = rng.gen_range(config.order_size_min..config.order_size_max);
+
+    let mut order = bundle_sell(markets, id, &bundle_markets, limit_nanos, qty);
+
+    if rng.gen_bool(config.aon_fraction) {
+        order.min_fill = order.max_fill;
+    }
+
+    order
+}
+
+fn generate_spread_sell_order(
+    markets: &matching_engine::MarketSet,
+    rng: &mut ChaCha8Rng,
+    order_id: &mut u64,
+    market_info: &[(MarketId, f64)],
+    config: &ScenarioConfig,
+) -> Order {
+    let id = *order_id;
+    *order_id += 1;
+
+    if market_info.len() < 2 {
+        let (market, price) = market_info[0];
+        return outcome_sell(markets, id, market, 0, price_to_nanos(price), 50);
+    }
+
+    let m1_idx = rng.gen_range(0..market_info.len());
+    let mut m2_idx = rng.gen_range(0..market_info.len());
+    while m2_idx == m1_idx {
+        m2_idx = rng.gen_range(0..market_info.len());
+    }
+
+    let (market_a, price_a) = market_info[m1_idx];
+    let (market_b, price_b) = market_info[m2_idx];
+
+    let price_diff = (price_a - price_b).abs();
+    let limit = (price_diff + rng.gen_range(-0.05..0.1)).clamp(0.01, 0.5);
+    let qty = rng.gen_range(config.order_size_min..config.order_size_max);
+
+    spread_sell(markets, id, market_a, market_b, price_to_nanos(limit), qty)
 }
 
 fn generate_mm_constraints(

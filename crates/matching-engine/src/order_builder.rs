@@ -257,6 +257,62 @@ pub fn bundle_yes(
     builder.build()
 }
 
+/// Create a bundle sell order: Sell YES on multiple markets (all must win).
+/// This is the counterparty to bundle_yes — pays out -1 when all markets are YES.
+pub fn bundle_sell(
+    markets: &MarketSet,
+    id: u64,
+    market_ids: &[MarketId],
+    limit_price: Nanos,
+    qty: Qty,
+) -> Order {
+    let num_markets = market_ids.len();
+    let all_yes: Vec<u8> = vec![0; num_markets];
+
+    let mut builder = OrderBuilder::new(markets, id)
+        .spanning(market_ids)
+        .limit(limit_price)
+        .all_or_none(qty);
+
+    let sizes: Vec<u8> = market_ids
+        .iter()
+        .map(|id| markets.num_outcomes(*id))
+        .collect();
+    let state_space = StateSpace::new(&sizes);
+    let winning_state = state_space.state_index(&all_yes);
+
+    // Seller: payoff -1 at the all-yes state
+    builder = builder.payoff_at(winning_state, -1);
+
+    builder.build()
+}
+
+/// Create a spread sell order: Sell A YES, Buy B YES (net: B - A).
+/// This is the counterparty to spread — negated payoffs.
+pub fn spread_sell(
+    markets: &MarketSet,
+    id: u64,
+    market_a: MarketId,
+    market_b: MarketId,
+    limit_price: Nanos,
+    qty: Qty,
+) -> Order {
+    // Negated payoffs of spread:
+    // 0: A=Yes, B=Yes -> 0
+    // 1: A=No,  B=Yes -> +1 (B wins, A loses — seller profits)
+    // 2: A=Yes, B=No  -> -1 (A wins, B loses — seller loses)
+    // 3: A=No,  B=No  -> 0
+    OrderBuilder::new(markets, id)
+        .spanning(&[market_a, market_b])
+        .limit(limit_price)
+        .quantity(0, qty)
+        .payoff_when(&[0, 0], 0)
+        .payoff_when(&[1, 0], 1)
+        .payoff_when(&[0, 1], -1)
+        .payoff_when(&[1, 1], 0)
+        .build()
+}
+
 /// Create a multi-outcome position: Buy a specific outcome in a multi-outcome market.
 pub fn outcome_buy(
     markets: &MarketSet,

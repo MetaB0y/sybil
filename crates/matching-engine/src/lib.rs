@@ -46,6 +46,6 @@ pub use types::{MarketId, Nanos, Qty, Side, NANOS_PER_DOLLAR};
 
 // Re-export order_builder convenience functions
 pub use order_builder::{
-    bundle_yes, butterfly, conditional_buy, outcome_buy, outcome_sell, ratio_spread,
-    simple_no_buy, simple_yes_buy, spread,
+    bundle_sell, bundle_yes, butterfly, conditional_buy, outcome_buy, outcome_sell, ratio_spread,
+    simple_no_buy, simple_yes_buy, spread, spread_sell,
 };
