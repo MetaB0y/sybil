@@ -5,6 +5,7 @@ use matching_engine::MarketId;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct AccountId(pub u64);
 
+#[derive(Clone)]
 pub struct Account {
     pub id: AccountId,
     /// Balance in nanos, signed (can go negative during settlement if needed)

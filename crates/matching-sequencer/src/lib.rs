@@ -1,12 +1,20 @@
 pub mod account;
+pub mod actor;
 pub mod agent;
+pub mod block;
+pub mod crypto;
+pub mod error;
+pub mod mempool;
 pub mod metrics;
 pub mod scenario;
 pub mod sequencer;
 pub mod settlement;
 pub mod simulation;
+pub mod state;
+pub mod validation;
 
 pub use account::{Account, AccountId, AccountStore};
+pub use error::{Rejection, RejectionReason, SequencerError};
 pub use scenario::Scenario;
-pub use sequencer::{BatchResult, BatchSequencer, OrderSubmission};
+pub use sequencer::{BatchResult, BatchSequencer, BlockSequencer, OrderSubmission};
 pub use simulation::{SimulationResult, SimulationRunner};

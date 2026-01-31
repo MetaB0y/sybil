@@ -13,15 +13,13 @@ use crate::metrics::{self, AgentPnL, BatchMetrics};
 use crate::scenario::{
     EventMarketMap, NewsItem, NewsVisibility, PublicBeliefs, Scenario,
 };
-use crate::sequencer::{BatchSequencer, OrderSubmission};
+use crate::sequencer::{batch_result_from_block, BlockSequencer, OrderSubmission};
 use crate::settlement;
 
 pub struct SimulationRunner {
-    sequencer: BatchSequencer,
+    sequencer: BlockSequencer,
     agents: Vec<Box<dyn Agent>>,
     agent_info: Vec<(String, AccountId, i64)>, // (name, account_id, initial_balance)
-    markets: MarketSet,
-    market_groups: Vec<MarketGroup>,
     true_probs: HashMap<MarketId, f64>,
     price_history: Vec<HashMap<MarketId, Vec<Nanos>>>,
     batch_metrics: Vec<BatchMetrics>,
@@ -159,14 +157,12 @@ impl SimulationRunner {
             agents.push(Box::new(agent));
         }
 
-        let sequencer = BatchSequencer::new(accounts);
+        let sequencer = BlockSequencer::new(accounts, markets, market_groups);
 
         Self {
             sequencer,
             agents,
             agent_info,
-            markets,
-            market_groups,
             true_probs,
             price_history: Vec::new(),
             batch_metrics: Vec::new(),
@@ -236,7 +232,7 @@ impl SimulationRunner {
 
             // Remove market group if this was a multi-outcome event
             let market_set: HashSet<MarketId> = market_ids.iter().copied().collect();
-            self.market_groups
+            self.sequencer.market_groups_mut()
                 .retain(|g| !g.markets.iter().any(|m| market_set.contains(m)));
         }
 
@@ -328,7 +324,8 @@ impl SimulationRunner {
             .unwrap_or_default();
 
         let active_markets: Vec<_> = self
-            .markets
+            .sequencer
+            .markets()
             .iter()
             .filter(|m| !self.resolved_markets.contains(&m.id))
             .map(|m| (m.id, m.name.clone()))
@@ -338,7 +335,7 @@ impl SimulationRunner {
             batch,
             markets: active_markets,
             last_prices,
-            market_groups: self.market_groups.clone(),
+            market_groups: self.sequencer.market_groups().to_vec(),
             public_beliefs: Some(self.public_beliefs.as_map().clone()),
         };
 
@@ -357,10 +354,9 @@ impl SimulationRunner {
             });
         }
 
-        // Run the batch
-        let result = self
-            .sequencer
-            .run_batch(submissions, &self.markets, &self.market_groups);
+        // Produce the block
+        let (block, pipeline_result) = self.sequencer.produce_block(submissions, 0);
+        let result = batch_result_from_block(&block, pipeline_result);
 
         // Record metrics
         let batch_metrics = BatchMetrics {
