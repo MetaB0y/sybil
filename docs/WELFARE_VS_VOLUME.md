@@ -84,59 +84,19 @@ Alternative (FIFO): 100 shares, $10-15 welfare (depending on order arrival)
 
 **Verdict**: Order C (zero-surplus) could trade at the clearing price, but doesn't get filled because higher-welfare orders consume all liquidity. **This sacrifices 50 shares of potential volume to maximize welfare.**
 
-### 2. GreedySolver
+### 2. MultiMarketSolver (Bundle & Spread Matching)
 
-**File**: `greedy.rs`
+**File**: `specialized/multi_market.rs`
 
 **How it works**:
-Processes orders in decreasing order of **welfare potential**:
-
-```rust
-// Lines 39-48
-fn sort_by_welfare(orders: &[Order]) -> Vec<usize> {
-    let mut indices: Vec<usize> = (0..orders.len()).collect();
-    indices.sort_by(|&a, &b| {
-        let welfare_a = orders[a].limit_price as u128 * orders[a].max_fill as u128;
-        welfare_b.cmp(&welfare_a)  // Descending
-    });
-    indices
-}
-```
+Matches multi-market orders via complement matching (paired opposite-payoff orders) and repricing (injecting bundle leg demand into per-market supply/demand curves).
 
 **Welfare vs Volume behavior**:
-- Orders are processed strictly by `limit_price × max_fill`
-- An order with high limit but small quantity goes before a low-limit high-quantity order
-- This can leave substantial volume unfilled
+- Repricing only commits to a full re-solve when the fast trial shows positive net welfare
+- Complement matching uses standard bid >= ask, which inherently favors welfare
+- Bundle orders that would reduce total welfare are left unfilled even if they increase volume
 
-**Example**:
-```
-Liquidity: 100 shares at 50¢
-Orders:
-  A: limit 90¢, wants 10 shares (potential = $9)
-  B: limit 51¢, wants 100 shares (potential = $51)
-
-Processing order (by potential):
-  1. B: fills 100 shares at 50¢ (welfare = $1)
-  2. A: no liquidity left, unfilled
-
-Result: 100 shares, $1 welfare
-```
-
-In this case, the greedy welfare sort actually helps volume because the high-volume order happens to have higher total potential. But if:
-
-```
-Orders:
-  A: limit 90¢, wants 100 shares (potential = $90)
-  B: limit 51¢, wants 10 shares (potential = $5.10)
-
-Processing:
-  1. A: fills 100 shares (welfare = $40)
-  2. B: unfilled
-
-Result: 100 shares, $40 welfare
-```
-
-**Verdict**: The greedy approach maximizes total welfare potential, which often correlates with volume but not always.
+**Verdict**: Welfare-first, consistent with the rest of the pipeline. Bundles that are marginal (near-zero surplus) may not fill.
 
 ### 3. MmAllocator (Market Maker Budget Allocation)
 
@@ -178,13 +138,19 @@ Actually: C gets activated because ratio sort puts it last but budget allows it
 
 **Verdict**: The MM allocator explicitly prioritizes welfare/capital ratio. Zero-surplus trades can still happen if budget allows after high-ratio orders.
 
-### 4. Multi-market Orders (Bundles/Spreads)
+### 4. DualMaster (Dual Decomposition)
 
-No dedicated multi-market solver is currently implemented. Bundle and spread
-orders are only matched if they clear within per-market price discovery.
+**File**: `dual_master.rs`
 
-**Welfare vs Volume behavior**: N/A — multi-market orders that don't match
-within single-market clearing are simply left unfilled.
+**How it works**:
+Uses Lagrangian relaxation to handle price consistency (sum = $1) and MM budgets jointly. Shades order prices via dual variables and solves per-market subproblems iteratively.
+
+**Welfare vs Volume behavior**:
+- Fills are validated against original (unshaded) limit prices — only positive-welfare fills survive
+- MM fills are allocated via greedy knapsack sorted by welfare/capital ratio
+- Zero-surplus fills can survive validation but get lowest MM knapsack priority
+
+**Verdict**: Strongly welfare-first. The dual approach handles coupling constraints more principally but has the same welfare bias as the sequential pipeline.
 
 ---
 
@@ -197,9 +163,9 @@ Based on the code analysis:
 | Component | Zero-surplus handling | Tradeoff severity |
 |-----------|----------------------|-------------------|
 | LocalSolver | Lowest priority, may not fill | Medium |
-| GreedySolver | Processed last by welfare sort | Medium |
+| MultiMarketSolver | Only fills with positive net welfare | Medium |
 | MmAllocator | Lowest priority by ratio | Low |
-| Multi-market | Not handled | N/A |
+| DualMaster | Validated against original limits | Medium |
 
 ### Specific Scenarios
 
@@ -342,8 +308,9 @@ The current implementation strongly favors welfare over volume. This is a delibe
 1. **Benefits**: Ensures allocative efficiency, rewards informed traders
 2. **Costs**: May leave volume on the table, frustrate marginal traders
 
-Multi-market orders (bundles, spreads) are currently not handled by any
-dedicated solver, so they only fill opportunistically within per-market clearing.
+Multi-market orders (bundles, spreads) are handled by the MultiMarketSolver
+via complement matching and repricing, and by the DualMaster via bid shading.
+Both approaches maintain the welfare-first bias.
 
 For most prediction market use cases, welfare maximization is appropriate. If
 volume maximization becomes important (e.g., for fee revenue or liquidity

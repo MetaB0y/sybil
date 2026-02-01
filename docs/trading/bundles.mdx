@@ -87,12 +87,11 @@ See [How It Works](/how-it-works#built-in-arbitrage) for a detailed example and 
 
 ## Pricing
 
-Multi-market orders participate in the same batch auction as single-market orders:
+Multi-market orders participate in the same batch auction as single-market orders. The [MultiMarketSolver](/technical/matching-engine#phase-2-multimarketsolver-bundle-matching) handles them via two strategies:
 
-1. Engine finds clearing prices for each market
-2. Evaluates each payoff vector's expected value at those prices
-3. Fills orders where expected value ≥ limit price
-4. Iterates to find the globally optimal allocation
+1. **Complement matching**: Paired orders with opposite payoffs are matched directly
+2. **Repricing**: Bundle leg demand is injected into per-market supply/demand curves, shifting clearing prices to unlock fills that wouldn't be possible treating markets independently
+3. The engine iterates until the globally optimal allocation converges
 
 ## Atomic Execution
 

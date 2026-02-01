@@ -5,7 +5,7 @@ description: Solver-enforced portfolio margin for market makers
 
 # Flash Quoting
 
-Flash Quoting lets market makers submit orders **far exceeding their balance** — typically ~20x. The matching engine's linear solver ensures the MM's balance never goes negative, making this safe without per-order collateral locking.
+Flash Quoting lets market makers submit orders **far exceeding their balance** — typically ~20x. The matching engine enforces the MM's balance constraint during solving — a greedy knapsack allocator activates orders by welfare/capital ratio until the budget is exhausted, making this safe without per-order collateral locking.
 
 ## The Problem
 
@@ -22,7 +22,7 @@ A normal user with \$100 can place \$100 of bids and \$100 of asks — **\$200 t
 
 ## The Solution
 
-Flash Quote MMs don't lock collateral per order. Instead, the matching engine adds a single constraint to its linear solver:
+Flash Quote MMs don't lock collateral per order. Instead, the matching engine enforces a single constraint during allocation:
 
 ```
 MM balance after all fills ≥ 0

@@ -21,7 +21,7 @@ Sybil uses **welfare maximization**: Find the combination of fills that creates 
 Welfare measures the surplus created by trades:
 
 ```
-Trade Welfare = (Limit Price - Clearing Price) × Quantity
+Trade Welfare = (Limit Price - Clearing Price) x Quantity
 ```
 
 | Trader | Role | Limit | Clearing | Qty | Welfare |
@@ -36,14 +36,25 @@ The matching engine maximizes this total.
 
 ## Pipeline Architecture
 
-The engine runs a multi-phase pipeline where each solver handles specific constraints and passes results downstream:
+The engine runs a multi-phase pipeline. The core components can be combined in different configurations depending on the problem:
 
 ```mermaid
 graph LR
-    LS["LocalSolver<br/>Price Discovery"] --> NS["NegriskSolver<br/>Arbitrage Fills"]
+    LS["LocalSolver<br/>Price Discovery"] --> MMS["MultiMarketSolver<br/>Bundle Repricing"]
+    MMS --> NS["NegriskSolver<br/>Arbitrage"]
     NS --> MA["MmAllocator<br/>Budget Allocation"]
-    MA --> V[Verifier]
+    MA --> PS["Partial Solvers<br/>(MILP)"]
+    PS --> C["Combiner<br/>(MWIS)"]
+    C --> V["Verifier"]
 ```
+
+Three solving modes are available:
+
+| Mode | When | How |
+|------|------|-----|
+| **Single-pass** | Simple problems | Run each phase once sequentially |
+| **Sequential (fixed-point)** | Cross-market pricing matters | Iterate phases until welfare converges |
+| **Dual decomposition** | Price consistency + MM budgets | Lagrangian relaxation with subgradient updates |
 
 ### Phase 1: LocalSolver (Price Discovery)
 
@@ -59,22 +70,35 @@ Single-market orders (~80% of volume) are fully handled here. Runs in O(n log n)
 
 **Output**: Clearing prices per market + fills for regular orders.
 
-### Phase 2: NegriskSolver (Arbitrage)
+### Phase 2: MultiMarketSolver (Bundle Matching)
 
-When prices for mutually exclusive outcomes don't sum to exactly \$1, there's an arbitrage opportunity. Instead of artificially adjusting prices (which destroys welfare), the NegriskSolver creates **real arbitrage fills**.
+Handles multi-market orders (bundles, spreads, conditionals) via two strategies:
+
+1. **Complement matching**: Orders with identical markets and negated payoffs cancel directly (e.g., a bundle buy and bundle sell). Standard bid >= ask matching.
+2. **Repricing**: Injects bundle leg demand into per-market supply/demand curves and re-clears affected markets. Uses precomputed market curves for fast trial crossings — only commits to a full re-solve when the trial shows positive net welfare.
+
+This allows bundle orders to influence per-market clearing prices, creating fills that wouldn't be possible by treating markets independently.
+
+**Output**: Bundle fills + adjusted clearing prices for affected markets.
+
+### Phase 3: NegriskSolver (Arbitrage)
+
+When prices for mutually exclusive outcomes don't sum to exactly \$1, there's an arbitrage opportunity. Instead of artificially adjusting prices (which destroys welfare), the NegriskSolver creates **synthetic arbitrage orders** that influence prices through market forces.
 
 | Case | Condition | Action |
 |------|-----------|--------|
 | **Negrisk** | Prices sum < \$1 | Buy all outcomes — guaranteed \$1 payout |
 | **Posrisk** | Prices sum > \$1 | Sell all outcomes — only pay \$1 to winner |
 
+In the sequential pipeline, arb orders participate in the next iteration's LocalSolver clearing to push prices toward sum = \$1. The arb fills themselves are filtered out of the final result — they serve as price pressure, not as output.
+
 <Info>
-Naively adjusting prices to force consistency can invalidate orders and **destroy welfare**. NegriskSolver instead creates real fills that **add welfare** — modeling what an arbitrageur would do, but keeping the surplus for users.
+Naively adjusting prices to force consistency can invalidate orders and **destroy welfare**. The NegriskSolver instead creates real market forces that **add welfare** — modeling what an arbitrageur would do, but keeping the surplus for users.
 </Info>
 
-**Output**: Arbitrage orders and fills with positive welfare contribution.
+**Output**: Synthetic arb orders that drive prices toward consistency.
 
-### Phase 3: MmAllocator (Budget Allocation)
+### Phase 4: MmAllocator (Budget Allocation)
 
 Handles Flash Quote market makers with [solver-enforced balance constraints](/trading/flash-quoting).
 
@@ -88,19 +112,52 @@ For interacting MMs (overlapping markets), uses fixed-point iteration to converg
 
 **Output**: Which MM orders to activate.
 
+### Partial Solvers & Combination
+
+Additional solvers can run in parallel on unfilled orders:
+
+- **MilpSolver** (optional, feature-gated): Full integer linear program formulation. Provably optimal given a time budget. Uses HiGHS via `good_lp`.
+
+When multiple solvers produce partial solutions, they may conflict. The **MWIS combiner** (Maximum Weight Independent Set) selects the best non-conflicting subset by building a conflict graph and solving for maximum welfare.
+
+## Dual Decomposition
+
+The dual decomposition solver (`Pipeline::with_dual_decomposition()`) handles two coupling constraints in a principled way using Lagrangian relaxation:
+
+- **Price consistency**: YES prices across a MarketGroup must sum to \$1
+- **MM budgets**: Capital usage must not exceed per-MM budget
+
+### Algorithm
+
+1. Initialize dual variables (lambda) to zero for each MarketGroup
+2. For each iteration:
+   - **Shade orders** using lambda — adjust limit prices to reflect price consistency pressure
+   - **Solve per-market subproblems** with shaded orders via LocalSolver
+   - **Validate candidate fills** against original (unshaded) limit prices
+   - **Greedy MM knapsack**: Sort MM candidates by welfare/capital ratio, activate within remaining budget
+   - **Accumulate fills** (permanent once accepted)
+   - **Update lambda** via subgradient step: `lambda += step_size * residual`
+   - **Check convergence**: price residuals < 2%, dual stability, welfare improvement < 1%
+
+Step size decays as `alpha_0 / sqrt(t)` to ensure convergence.
+
+After the dual solver converges, the pipeline runs MultiMarketSolver repricing for bundle orders and any partial solvers for remaining unfilled orders.
+
+<Info>
+The dual solver replaces the NegriskSolver's role — instead of creating synthetic arb orders, it uses bid shading (adjusting limit prices via lambda) to drive prices toward consistency. Both approaches achieve the same goal; dual decomposition is more principled while the sequential pipeline with NegriskSolver can be faster to converge in practice.
+</Info>
+
 ## Iteration & Convergence
 
-The pipeline iterates until convergence:
+The sequential pipeline iterates until convergence:
 
 ```
 for iter in 0..max_iterations:
-    LocalSolver → NegriskSolver → MmAllocator
+    LocalSolver -> MultiMarketSolver -> NegriskSolver -> MmAllocator
     if welfare_delta < threshold: break
 ```
 
-Each phase depends on the previous: NegriskSolver needs raw prices, MmAllocator needs stable prices.
-
-Typically converges in 2-5 iterations.
+Each phase depends on the previous: MultiMarketSolver needs per-market prices, NegriskSolver needs cross-market prices, MmAllocator needs stable prices. Typically converges in 2-5 iterations.
 
 ## Optimization Goals
 
@@ -124,8 +181,11 @@ Typically converges in 2-5 iterations.
 | Solver | Objective | Complexity | Guarantee |
 |--------|-----------|------------|-----------|
 | LocalSolver | Max welfare | O(n log n) | Optimal per-market |
-| NegriskSolver | Max arb welfare | O(groups × markets) | All exploitable arb |
+| MultiMarketSolver | Max bundle welfare | O(n log n) per affected market | Heuristic (repricing) |
+| NegriskSolver | Max arb welfare | O(groups x markets) | All exploitable arb |
 | MmAllocator | Max welfare/budget | O(n log n) | Greedy approx |
+| DualMaster | Max welfare (joint) | O(iterations x n log n) | Convergent |
+| MilpSolver | Max welfare (exact) | Exponential | Optimal (with timeout) |
 
 The engine is designed for **real-time** operation:
 - Target: < 1 second for 10,000 orders
@@ -136,7 +196,7 @@ The engine is designed for **real-time** operation:
 <Check>**No trade at worse price**: Fills never exceed limit prices</Check>
 <Check>**Conservation**: Total bought = total sold per market</Check>
 <Check>**Atomicity**: Multi-market payoff vectors execute together or not at all</Check>
-<Check>**Consistency**: Prices don't allow risk-free arbitrage (NegriskSolver resolves these)</Check>
+<Check>**Consistency**: Prices don't allow risk-free arbitrage (resolved by NegriskSolver or dual decomposition)</Check>
 
 These are verified by the [ZK proof](/technical/zk-proofs) — you don't have to trust the implementation.
 
