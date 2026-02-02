@@ -173,6 +173,10 @@ impl NegriskSolver {
             market_yes_prices.push((market_id, yes_price));
         }
 
+        if sum_yes == 0 {
+            return None;
+        }
+
         // Check for arbitrage opportunity
         let target = NANOS_PER_DOLLAR as u128;
 
