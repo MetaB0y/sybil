@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use clap::Parser;
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
 use matching_engine::MarketSet;
-use matching_sequencer::{AccountStore, BlockSequencer, MempoolConfig, SequencerHandle};
+use matching_sequencer::{AccountStore, AdminOracle, BlockSequencer, MempoolConfig, SequencerHandle};
 
 use sybil_api::app::create_router;
 use sybil_api::config::ApiConfig;
@@ -45,7 +47,8 @@ async fn main() {
 
     // Initialize sequencer
     let accounts = AccountStore::new();
-    let sequencer = BlockSequencer::new(accounts, markets, vec![]);
+    let oracle = Arc::new(AdminOracle::new());
+    let sequencer = BlockSequencer::new(accounts, markets, vec![], oracle);
     let handle = SequencerHandle::spawn(sequencer, MempoolConfig::default());
 
     tracing::info!(num_markets, "Sequencer started with seed markets");

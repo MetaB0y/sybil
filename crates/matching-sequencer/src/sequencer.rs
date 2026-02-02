@@ -1,13 +1,15 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use matching_engine::{
     Fill, MarketGroup, MarketId, MarketSet, MmConstraint, Nanos, Order, Problem,
 };
 use matching_solver::{Pipeline, PipelineResult};
+use sybil_oracle::{MarketStatus, Oracle, ResolutionAction, ResolutionRecord};
 
 use crate::account::{AccountId, AccountStore};
 use crate::block::{compute_state_root, hash_header, Block, BlockHeader};
-use crate::error::{Rejection, RejectionReason};
+use crate::error::{Rejection, RejectionReason, SequencerError};
 use crate::settlement;
 use crate::validation::{validate_order, validate_order_with_reservation};
 
@@ -61,6 +63,10 @@ pub struct BlockSequencer {
     market_groups: Vec<MarketGroup>,
     /// Last block header for hash chaining.
     last_header: Option<BlockHeader>,
+    /// Oracle-managed lifecycle status per market.
+    market_statuses: HashMap<MarketId, MarketStatus>,
+    /// Pluggable oracle for resolution decisions.
+    oracle: Arc<dyn Oracle>,
 }
 
 impl BlockSequencer {
@@ -68,6 +74,7 @@ impl BlockSequencer {
         accounts: AccountStore,
         markets: MarketSet,
         market_groups: Vec<MarketGroup>,
+        oracle: Arc<dyn Oracle>,
     ) -> Self {
         Self {
             accounts,
@@ -80,6 +87,8 @@ impl BlockSequencer {
             markets,
             market_groups,
             last_header: None,
+            market_statuses: HashMap::new(),
+            oracle,
         }
     }
 
@@ -107,6 +116,87 @@ impl BlockSequencer {
         self.last_header.as_ref()
     }
 
+    /// Get the oracle-tracked status for a market. Returns `Active` if not explicitly set.
+    pub fn market_status(&self, id: MarketId) -> MarketStatus {
+        self.market_statuses
+            .get(&id)
+            .cloned()
+            .unwrap_or(MarketStatus::Active)
+    }
+
+    /// Get all explicitly tracked market statuses.
+    pub fn market_statuses(&self) -> &HashMap<MarketId, MarketStatus> {
+        &self.market_statuses
+    }
+
+    /// Resolve a market through the oracle.
+    ///
+    /// On `SettleNow`: calls settlement, removes from market groups, updates status.
+    /// On `Propose`: stores the pending proposal (future L0 path).
+    pub fn resolve_market(
+        &mut self,
+        market_id: MarketId,
+        winning_outcome: u8,
+        timestamp_ms: u64,
+    ) -> Result<ResolutionRecord, SequencerError> {
+        // Verify market exists
+        if self.markets.get(market_id).is_none() {
+            return Err(SequencerError::MarketNotFound);
+        }
+
+        let current_status = self.market_status(market_id);
+        let action = self
+            .oracle
+            .resolve(market_id, winning_outcome, &current_status, timestamp_ms)
+            .map_err(|e| SequencerError::OracleError(e.to_string()))?;
+
+        match action {
+            ResolutionAction::SettleNow {
+                market_id,
+                winning_outcome,
+                record,
+            } => {
+                // Settle positions
+                settlement::resolve_market(&mut self.accounts, market_id, winning_outcome);
+
+                // Remove from market groups
+                self.market_groups
+                    .retain(|g| !g.markets.contains(&market_id));
+
+                // Update status
+                self.market_statuses.insert(
+                    market_id,
+                    MarketStatus::Resolved {
+                        record: record.clone(),
+                    },
+                );
+
+                Ok(record)
+            }
+            ResolutionAction::Propose {
+                proposal,
+                challenge_window_ms,
+            } => {
+                let deadline = timestamp_ms + challenge_window_ms;
+                self.market_statuses.insert(
+                    market_id,
+                    MarketStatus::Proposed {
+                        proposal,
+                        challenge_deadline_ms: deadline,
+                    },
+                );
+                // For now, return an error since we don't have the full record yet.
+                // Future: the sequencer would return a "pending" response.
+                Err(SequencerError::OracleError(
+                    "resolution proposed but not yet settled".to_string(),
+                ))
+            }
+            ResolutionAction::Reject { reason } => {
+                Err(SequencerError::OracleError(reason))
+            }
+        }
+    }
+
     /// Core sync method: produce one block from the given submissions.
     ///
     /// Same logic as the old `run_batch()`: validate → merge pending → build
@@ -122,8 +212,13 @@ impl BlockSequencer {
         let mut all_mm_constraints: Vec<MmConstraint> = Vec::new();
         let mut rejections: Vec<Rejection> = Vec::new();
 
-        // Collect active market IDs for filtering expired orders on resolved markets
-        let active_markets: HashSet<MarketId> = self.markets.iter().map(|m| m.id).collect();
+        // Collect tradeable market IDs (active markets that aren't in a non-tradeable state)
+        let active_markets: HashSet<MarketId> = self
+            .markets
+            .iter()
+            .filter(|m| self.market_status(m.id).is_tradeable())
+            .map(|m| m.id)
+            .collect();
 
         // Phase 1: Re-validate and include pending orders
         let pending = std::mem::take(&mut self.pending_orders);
@@ -360,6 +455,7 @@ mod tests {
     use crate::error::RejectionReason;
     use crate::validation::{validate_order, validate_order_with_reservation};
     use matching_engine::{outcome_buy, outcome_sell, MarketId, MarketSet, MmId, NANOS_PER_DOLLAR};
+    use sybil_oracle::AdminOracle;
 
     fn setup() -> (MarketSet, MarketId) {
         let mut markets = MarketSet::new();
@@ -371,7 +467,8 @@ mod tests {
         let mut accounts = AccountStore::new();
         let aid = accounts.create_account(balance);
         let markets = MarketSet::new();
-        (BlockSequencer::new(accounts, markets, vec![]), aid)
+        let oracle = Arc::new(AdminOracle::new());
+        (BlockSequencer::new(accounts, markets, vec![], oracle), aid)
     }
 
     /// Helper: run a batch through the block sequencer, returning BatchResult.
@@ -751,7 +848,7 @@ mod tests {
             .positions
             .insert((m0, 0), 50);
 
-        let mut seq = BlockSequencer::new(accounts, MarketSet::new(), vec![]);
+        let mut seq = BlockSequencer::new(accounts, MarketSet::new(), vec![], Arc::new(AdminOracle::new()));
 
         let buy_sub = OrderSubmission {
             account_id: buyer_id,
@@ -798,7 +895,7 @@ mod tests {
     fn test_produce_block_returns_valid_header() {
         let (markets, _) = setup();
         let accounts = AccountStore::new();
-        let mut seq = BlockSequencer::new(accounts, markets.clone(), vec![]);
+        let mut seq = BlockSequencer::new(accounts, markets.clone(), vec![], Arc::new(AdminOracle::new()));
 
         let (block, _) = seq.produce_block(vec![], 1000);
         assert_eq!(block.header.height, 1);
@@ -810,7 +907,7 @@ mod tests {
     fn test_block_chain_parent_hash() {
         let (markets, _) = setup();
         let accounts = AccountStore::new();
-        let mut seq = BlockSequencer::new(accounts, markets.clone(), vec![]);
+        let mut seq = BlockSequencer::new(accounts, markets.clone(), vec![], Arc::new(AdminOracle::new()));
 
         let (block1, _) = seq.produce_block(vec![], 1000);
         let expected_parent = hash_header(&block1.header);
@@ -825,7 +922,7 @@ mod tests {
         let (markets, m0) = setup();
         let mut accounts = AccountStore::new();
         let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-        let mut seq = BlockSequencer::new(accounts, markets.clone(), vec![]);
+        let mut seq = BlockSequencer::new(accounts, markets.clone(), vec![], Arc::new(AdminOracle::new()));
 
         let (block1, _) = seq.produce_block(vec![], 0);
         let root1 = block1.header.state_root;

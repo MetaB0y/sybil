@@ -23,6 +23,11 @@ pub struct MarketResponse {
     pub name: String,
     pub yes_price: Option<f64>,
     pub no_price: Option<f64>,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub winning_outcome: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub challenge_deadline_ms: Option<u64>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -92,6 +97,9 @@ pub struct StateRootResponse {
 pub struct ResolveMarketResponse {
     pub market_id: u32,
     pub winning_outcome: u8,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub challenge_deadline_ms: Option<u64>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]

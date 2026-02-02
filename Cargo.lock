@@ -958,6 +958,7 @@ dependencies = [
  "p256",
  "rand",
  "rand_chacha",
+ "sybil-oracle",
  "thiserror",
  "tokio",
 ]
@@ -1578,12 +1579,21 @@ dependencies = [
  "p256",
  "serde",
  "serde_json",
+ "sybil-oracle",
  "tokio",
  "tokio-stream",
  "tower-http",
  "tracing",
  "tracing-subscriber",
  "utoipa",
+]
+
+[[package]]
+name = "sybil-oracle"
+version = "0.1.0"
+dependencies = [
+ "matching-engine",
+ "thiserror",
 ]
 
 [[package]]

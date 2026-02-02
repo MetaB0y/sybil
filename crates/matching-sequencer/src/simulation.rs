@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use matching_engine::{MarketGroup, MarketId, MarketSet, MmId, Nanos};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
+use sybil_oracle::AdminOracle;
 
 use crate::account::{AccountId, AccountStore};
 use crate::agent::informed::InformedTrader;
@@ -157,7 +159,8 @@ impl SimulationRunner {
             agents.push(Box::new(agent));
         }
 
-        let sequencer = BlockSequencer::new(accounts, markets, market_groups);
+        let oracle = Arc::new(AdminOracle::new());
+        let sequencer = BlockSequencer::new(accounts, markets, market_groups, oracle);
 
         Self {
             sequencer,

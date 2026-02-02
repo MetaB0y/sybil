@@ -22,11 +22,16 @@ pub async fn list_markets(
 ) -> Result<Json<Vec<MarketResponse>>, AppError> {
     let markets = state.sequencer.list_markets().await?;
     let prices = state.sequencer.get_market_prices().await?;
+    let statuses = state.sequencer.get_all_market_statuses().await?;
 
     let response: Vec<MarketResponse> = markets
         .iter()
         .map(|m| {
             let market_prices = prices.get(&m.id);
+            let status = statuses
+                .get(&m.id)
+                .cloned()
+                .unwrap_or(matching_sequencer::MarketStatus::Active);
             MarketResponse {
                 market_id: m.id.0,
                 name: m.name.clone(),
@@ -36,6 +41,9 @@ pub async fn list_markets(
                 no_price: market_prices
                     .and_then(|p| p.get(1))
                     .map(|&p| p as f64 / matching_engine::NANOS_PER_DOLLAR as f64),
+                status: status.as_str().to_string(),
+                winning_outcome: status.winning_outcome(),
+                challenge_deadline_ms: status.challenge_deadline_ms(),
             }
         })
         .collect();
@@ -65,6 +73,7 @@ pub async fn get_market(
 
     let prices = state.sequencer.get_market_prices().await?;
     let market_prices = prices.get(&mid);
+    let status = state.sequencer.get_market_status(mid).await?;
 
     Ok(Json(MarketResponse {
         market_id: market.id.0,
@@ -75,6 +84,9 @@ pub async fn get_market(
         no_price: market_prices
             .and_then(|p| p.get(1))
             .map(|&p| p as f64 / matching_engine::NANOS_PER_DOLLAR as f64),
+        status: status.as_str().to_string(),
+        winning_outcome: status.winning_outcome(),
+        challenge_deadline_ms: status.challenge_deadline_ms(),
     }))
 }
 
@@ -192,13 +204,17 @@ pub async fn resolve_market(
     }
 
     let mid = MarketId::new(id);
-    state
+    let _record = state
         .sequencer
         .resolve_market(mid, req.winning_outcome)
         .await?;
 
+    let status = state.sequencer.get_market_status(mid).await?;
+
     Ok(Json(ResolveMarketResponse {
         market_id: id,
         winning_outcome: req.winning_outcome,
+        status: status.as_str().to_string(),
+        challenge_deadline_ms: status.challenge_deadline_ms(),
     }))
 }

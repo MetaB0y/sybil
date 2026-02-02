@@ -1,0 +1,9 @@
+[package]
+name = "sybil-oracle"
+version = "0.1.0"
+edition = "2021"
+description = "Pluggable oracle/resolution system for Sybil prediction markets"
+
+[dependencies]
+matching-engine = { path = "../matching-engine" }
+thiserror = { workspace = true }

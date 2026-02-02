@@ -118,6 +118,9 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::BlockNotFound => {
                 AppError::not_found("Block not found")
             }
+            matching_sequencer::SequencerError::OracleError(ref msg) => {
+                AppError::bad_request(format!("Oracle error: {}", msg))
+            }
         }
     }
 }

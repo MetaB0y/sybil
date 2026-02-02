@@ -22,3 +22,6 @@ pub use mempool::MempoolConfig;
 pub use scenario::Scenario;
 pub use sequencer::{BatchResult, BatchSequencer, BlockSequencer, OrderSubmission};
 pub use simulation::{SimulationResult, SimulationRunner};
+
+// Re-export oracle types needed by consumers (e.g. sybil-api)
+pub use sybil_oracle::{AdminOracle, MarketStatus, Oracle, ResolutionRecord};

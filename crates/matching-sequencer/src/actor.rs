@@ -5,6 +5,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::{interval_at, Instant};
 
 use matching_engine::{MarketGroup, MarketId, MarketSet, Nanos};
+use sybil_oracle::{MarketStatus, ResolutionRecord};
 
 use crate::account::{Account, AccountId};
 use crate::block::Block;
@@ -12,7 +13,6 @@ use crate::crypto::{verify_signed_order, PublicKey, SignedOrder};
 use crate::error::SequencerError;
 use crate::mempool::{Mempool, MempoolConfig};
 use crate::sequencer::{BlockSequencer, OrderSubmission};
-use crate::settlement;
 
 /// Messages sent from handles to the actor.
 pub enum Message {
@@ -71,7 +71,14 @@ pub enum Message {
     ResolveMarket {
         market_id: MarketId,
         winning_outcome: u8,
-        respond_to: oneshot::Sender<Result<(), SequencerError>>,
+        respond_to: oneshot::Sender<Result<ResolutionRecord, SequencerError>>,
+    },
+    GetMarketStatus {
+        market_id: MarketId,
+        respond_to: oneshot::Sender<MarketStatus>,
+    },
+    GetAllMarketStatuses {
+        respond_to: oneshot::Sender<HashMap<MarketId, MarketStatus>>,
     },
     GetBlock {
         height: u64,
@@ -236,8 +243,20 @@ impl SequencerActor {
                 let _ = respond_to.send(self.sequencer.market_groups().to_vec());
             }
             Message::ResolveMarket { market_id, winning_outcome, respond_to } => {
-                let result = self.handle_resolve_market(market_id, winning_outcome);
+                let timestamp_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                let result = self.sequencer.resolve_market(market_id, winning_outcome, timestamp_ms);
                 let _ = respond_to.send(result);
+            }
+            Message::GetMarketStatus { market_id, respond_to } => {
+                let status = self.sequencer.market_status(market_id);
+                let _ = respond_to.send(status);
+            }
+            Message::GetAllMarketStatuses { respond_to } => {
+                let statuses = self.sequencer.market_statuses().clone();
+                let _ = respond_to.send(statuses);
             }
             Message::GetBlock { height, respond_to } => {
                 let block = self.block_history.iter().find(|b| b.header.height == height).cloned();
@@ -298,26 +317,6 @@ impl SequencerActor {
         Ok(())
     }
 
-    fn handle_resolve_market(
-        &mut self,
-        market_id: MarketId,
-        winning_outcome: u8,
-    ) -> Result<(), SequencerError> {
-        // Verify market exists
-        if self.sequencer.markets().get(market_id).is_none() {
-            return Err(SequencerError::MarketNotFound);
-        }
-
-        // Settle positions
-        settlement::resolve_market(&mut self.sequencer.accounts, market_id, winning_outcome);
-
-        // Remove from any market group that contains this market
-        self.sequencer.market_groups_mut().retain(|g| {
-            !g.markets.contains(&market_id)
-        });
-
-        Ok(())
-    }
 }
 
 /// Cloneable handle to the sequencer actor.
@@ -507,7 +506,7 @@ impl SequencerHandle {
         &self,
         market_id: MarketId,
         winning_outcome: u8,
-    ) -> Result<(), SequencerError> {
+    ) -> Result<ResolutionRecord, SequencerError> {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(Message::ResolveMarket {
@@ -518,6 +517,34 @@ impl SequencerHandle {
             .await
             .map_err(|_| SequencerError::ActorGone)?;
         rx.await.map_err(|_| SequencerError::ActorGone)?
+    }
+
+    /// Get the oracle-tracked status for a market.
+    pub async fn get_market_status(
+        &self,
+        market_id: MarketId,
+    ) -> Result<MarketStatus, SequencerError> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(Message::GetMarketStatus {
+                market_id,
+                respond_to: tx,
+            })
+            .await
+            .map_err(|_| SequencerError::ActorGone)?;
+        rx.await.map_err(|_| SequencerError::ActorGone)
+    }
+
+    /// Get all explicitly tracked market statuses.
+    pub async fn get_all_market_statuses(
+        &self,
+    ) -> Result<HashMap<MarketId, MarketStatus>, SequencerError> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(Message::GetAllMarketStatuses { respond_to: tx })
+            .await
+            .map_err(|_| SequencerError::ActorGone)?;
+        rx.await.map_err(|_| SequencerError::ActorGone)
     }
 
     /// Get a block by height.
@@ -557,15 +584,18 @@ impl SequencerHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use crate::account::AccountStore;
     use matching_engine::{outcome_buy, MarketSet, NANOS_PER_DOLLAR};
+    use sybil_oracle::AdminOracle;
 
     fn make_test_sequencer() -> (BlockSequencer, AccountId) {
         let mut accounts = AccountStore::new();
         let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
         let mut markets = MarketSet::new();
         markets.add_binary("Test");
-        (BlockSequencer::new(accounts, markets, vec![]), aid)
+        let oracle = Arc::new(AdminOracle::new());
+        (BlockSequencer::new(accounts, markets, vec![], oracle), aid)
     }
 
     #[tokio::test]
@@ -680,7 +710,7 @@ mod tests {
         // Give seller a position
         accounts.get_mut(seller).unwrap().positions.insert((m0, 0), 100);
 
-        let seq = BlockSequencer::new(accounts, markets.clone(), vec![]);
+        let seq = BlockSequencer::new(accounts, markets.clone(), vec![], Arc::new(AdminOracle::new()));
         let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
 
         let root_before = handle.get_state_root().await.unwrap();
@@ -821,7 +851,9 @@ mod tests {
         let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
 
         let m0 = MarketId::new(0);
-        handle.resolve_market(m0, 0).await.unwrap();
+        let record = handle.resolve_market(m0, 0).await.unwrap();
+        assert_eq!(record.winning_outcome, 0);
+        assert_eq!(record.market_id, m0);
     }
 
     #[tokio::test]

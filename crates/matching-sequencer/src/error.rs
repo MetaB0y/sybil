@@ -53,4 +53,7 @@ pub enum SequencerError {
     /// The requested block was not found.
     #[error("block not found")]
     BlockNotFound,
+    /// Oracle error during resolution.
+    #[error("oracle error: {0}")]
+    OracleError(String),
 }
