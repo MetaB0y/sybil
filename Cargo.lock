@@ -973,6 +973,7 @@ dependencies = [
  "matching-engine",
  "matching-scenarios",
  "matching-solver",
+ "sybil-verifier",
 ]
 
 [[package]]

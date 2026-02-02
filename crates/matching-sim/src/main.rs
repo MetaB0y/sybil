@@ -24,8 +24,11 @@ use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Cell, Color
 use matching_engine::{MarketId, Order, Problem};
 use matching_scenarios::{generate_scenario, ScenarioConfig};
 use matching_solver::{
-    verify, IterationStats, MilpSolver, Pipeline, PipelineResult, Solver, VerificationResult,
+    IterationStats, MilpSolver, Pipeline, PipelineResult, Solver,
     VizSnapshot,
+};
+use sybil_verifier::{
+    verify_match, BlockWitness, VerificationResult, WitnessBlockHeader, WitnessOrder,
 };
 
 fn main() {
@@ -496,8 +499,9 @@ fn run_detailed_pipeline(
             let fill_stats = FillStats::compute(&problem_with_arb, &result, &order_stats);
             print_fill_stats(&fill_stats, &order_stats, problem.markets.len());
 
-            // Verify the result
-            let verification = verify(&problem_with_arb, &result.result);
+            // Verify the result using the new comprehensive verifier
+            let witness = witness_from_problem(&problem_with_arb, &result);
+            let verification = verify_match(&witness, true);
             print_verification_result(&verification);
         }
 
@@ -553,6 +557,53 @@ fn run_detailed_pipeline(
     }
 }
 
+/// Build a BlockWitness from a Problem + PipelineResult for standalone verification.
+///
+/// The sim doesn't have accounts or settlement, so only Layer 1 (match verification)
+/// is meaningful. Layers 2–4 (settlement, block, orders) require a full sequencer.
+fn witness_from_problem(problem: &Problem, result: &PipelineResult) -> BlockWitness {
+    let clearing_prices = result
+        .price_discovery
+        .as_ref()
+        .map(|pd| pd.prices.clone())
+        .unwrap_or_default();
+
+    let witness_orders: Vec<WitnessOrder> = problem
+        .orders
+        .iter()
+        .map(|o| WitnessOrder {
+            order: o.clone(),
+            account_id: 0, // not meaningful in sim
+            is_mm: problem
+                .mm_constraints
+                .iter()
+                .any(|mm| mm.order_ids.contains(&o.id)),
+        })
+        .collect();
+
+    BlockWitness {
+        header: WitnessBlockHeader {
+            height: 1,
+            parent_hash: [0u8; 32],
+            state_root: [0u8; 32],
+            order_count: problem.orders.len() as u32,
+            fill_count: result.result.fills.len() as u32,
+            timestamp_ms: 0,
+        },
+        previous_header: None,
+        orders: witness_orders,
+        rejections: vec![],
+        fills: result.result.fills.clone(),
+        clearing_prices,
+        total_welfare: result.result.total_welfare,
+        mm_constraints: problem.mm_constraints.clone(),
+        market_groups: problem.market_groups.clone(),
+        pre_state: vec![],
+        post_state: vec![],
+        resolved_markets: vec![],
+    }
+}
+
 fn print_verification_result(result: &VerificationResult) {
     println!();
     println!("Result Verification (ZK-ready):");
@@ -577,6 +628,17 @@ fn print_verification_result(result: &VerificationResult) {
         println!("  Status: \u{2717} INVALID ({} violations)", result.violations.len());
         println!();
         println!("  Violations:");
+        // Count by kind
+        let mut kind_counts: std::collections::HashMap<_, usize> = std::collections::HashMap::new();
+        for violation in &result.violations {
+            *kind_counts.entry(format!("{:?}", violation.kind)).or_default() += 1;
+        }
+        println!("  By type:");
+        for (kind, count) in &kind_counts {
+            println!("    {}: {}", kind, count);
+        }
+        println!();
+        println!("  First 10:");
         for (i, violation) in result.violations.iter().enumerate().take(10) {
             println!("    {}. {:?}: {}", i + 1, violation.kind, violation.details);
         }
