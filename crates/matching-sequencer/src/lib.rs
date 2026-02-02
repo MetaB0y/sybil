@@ -14,7 +14,11 @@ pub mod state;
 pub mod validation;
 
 pub use account::{Account, AccountId, AccountStore};
+pub use actor::SequencerHandle;
+pub use block::Block;
+pub use crypto::{PublicKey, SignedOrder};
 pub use error::{Rejection, RejectionReason, SequencerError};
+pub use mempool::MempoolConfig;
 pub use scenario::Scenario;
 pub use sequencer::{BatchResult, BatchSequencer, BlockSequencer, OrderSubmission};
 pub use simulation::{SimulationResult, SimulationRunner};

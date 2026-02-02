@@ -39,6 +39,12 @@ pub enum SequencerError {
     MempoolFull,
     /// All handles dropped; the actor has shut down.
     ActorGone,
+    /// A public key is already registered to an account.
+    AccountAlreadyRegistered,
+    /// The requested market was not found.
+    MarketNotFound,
+    /// The requested block was not found.
+    BlockNotFound,
 }
 
 impl std::fmt::Display for SequencerError {
@@ -49,6 +55,9 @@ impl std::fmt::Display for SequencerError {
             SequencerError::UnknownSigner => write!(f, "unknown signer public key"),
             SequencerError::MempoolFull => write!(f, "mempool full"),
             SequencerError::ActorGone => write!(f, "sequencer actor shut down"),
+            SequencerError::AccountAlreadyRegistered => write!(f, "public key already registered to an account"),
+            SequencerError::MarketNotFound => write!(f, "market not found"),
+            SequencerError::BlockNotFound => write!(f, "block not found"),
         }
     }
 }
