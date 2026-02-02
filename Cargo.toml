@@ -8,6 +8,7 @@ members = [
     "crates/matching-sequencer",
     "crates/sybil-oracle",
     "crates/sybil-api",
+    "crates/sybil-verifier",
 ]
 
 [workspace.dependencies]

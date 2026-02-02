@@ -6,6 +6,9 @@ use matching_engine::{
 };
 use matching_solver::{Pipeline, PipelineResult};
 use sybil_oracle::{MarketStatus, Oracle, ResolutionAction, ResolutionRecord};
+use sybil_verifier::{
+    AccountSnapshot, BlockWitness, WitnessBlockHeader, WitnessOrder, WitnessRejection,
+};
 
 use crate::account::{AccountId, AccountStore};
 use crate::block::{compute_state_root, hash_header, Block, BlockHeader};
@@ -38,6 +41,58 @@ struct PendingOrder {
     account_id: AccountId,
     /// Block height when this order was created.
     created_at: u64,
+}
+
+/// Snapshot participating accounts into verifier-compatible format.
+fn snapshot_accounts(
+    accounts: &AccountStore,
+    account_ids: &HashSet<AccountId>,
+) -> Vec<AccountSnapshot> {
+    let mut snapshots: Vec<AccountSnapshot> = account_ids
+        .iter()
+        .filter_map(|&aid| {
+            accounts.get(aid).map(|a| {
+                let mut positions: Vec<_> = a
+                    .positions
+                    .iter()
+                    .filter(|(_, &qty)| qty != 0)
+                    .map(|(&(m, o), &q)| (m, o, q))
+                    .collect();
+                positions.sort_by_key(|&(m, o, _)| (m.0, o));
+                AccountSnapshot {
+                    id: aid.0,
+                    balance: a.balance,
+                    positions,
+                }
+            })
+        })
+        .collect();
+    snapshots.sort_by_key(|s| s.id);
+    snapshots
+}
+
+/// Convert sequencer `RejectionReason` to verifier `RejectionReason`.
+fn convert_rejection_reason(r: &RejectionReason) -> sybil_verifier::RejectionReason {
+    match r {
+        RejectionReason::InsufficientBalance { required, available } => {
+            sybil_verifier::RejectionReason::InsufficientBalance {
+                required: *required,
+                available: *available,
+            }
+        }
+        RejectionReason::InsufficientPosition {
+            market,
+            outcome,
+            required,
+            available,
+        } => sybil_verifier::RejectionReason::InsufficientPosition {
+            market: *market,
+            outcome: *outcome,
+            required: *required,
+            available: *available,
+        },
+        RejectionReason::AccountNotFound => sybil_verifier::RejectionReason::AccountNotFound,
+    }
 }
 
 /// Block-producing sequencer. Core sync layer.
@@ -203,16 +258,23 @@ impl BlockSequencer {
     ///
     /// Same logic as the old `run_batch()`: validate → merge pending → build
     /// Problem → solve → settle → persist unfilled → compute state root → build Block.
+    ///
+    /// Returns the block, pipeline result, and a `BlockWitness` for verification.
     pub fn produce_block(
         &mut self,
         submissions: Vec<OrderSubmission>,
         timestamp_ms: u64,
-    ) -> (Block, PipelineResult) {
+    ) -> (Block, PipelineResult, BlockWitness) {
         self.height += 1;
 
         let mut all_orders: Vec<Order> = Vec::new();
         let mut all_mm_constraints: Vec<MmConstraint> = Vec::new();
         let mut rejections: Vec<Rejection> = Vec::new();
+
+        // Track witness data alongside normal processing
+        let mut witness_orders: Vec<WitnessOrder> = Vec::new();
+        let mut witness_rejections: Vec<WitnessRejection> = Vec::new();
+        let mut mm_order_ids_set: HashSet<u64> = HashSet::new();
 
         // Collect tradeable market IDs (active markets that aren't in a non-tradeable state)
         let active_markets: HashSet<MarketId> = self
@@ -220,6 +282,14 @@ impl BlockSequencer {
             .iter()
             .filter(|m| self.market_status(m.id).is_tradeable())
             .map(|m| m.id)
+            .collect();
+
+        // Collect resolved market IDs for witness
+        let resolved_markets: Vec<MarketId> = self
+            .market_statuses
+            .iter()
+            .filter(|(_, status)| matches!(status, MarketStatus::Resolved { .. }))
+            .map(|(&id, _)| id)
             .collect();
 
         // Phase 1: Re-validate and include pending orders
@@ -248,6 +318,11 @@ impl BlockSequencer {
             }
 
             if validate_order(&pending_order.order, account).is_ok() {
+                witness_orders.push(WitnessOrder {
+                    order: pending_order.order.clone(),
+                    account_id: pending_order.account_id.0,
+                    is_mm: false,
+                });
                 all_orders.push(pending_order.order);
             }
         }
@@ -260,6 +335,11 @@ impl BlockSequencer {
 
             let Some(account) = self.accounts.get(account_id) else {
                 for order in &sub.orders {
+                    witness_rejections.push(WitnessRejection {
+                        order: order.clone(),
+                        account_id: account_id.0,
+                        reason: sybil_verifier::RejectionReason::AccountNotFound,
+                    });
                     rejections.push(Rejection {
                         order_id: order.id,
                         account_id,
@@ -280,6 +360,12 @@ impl BlockSequencer {
                 if is_mm {
                     self.order_account_map.insert(order_id, account_id);
                     self.order_created_at.insert(order_id, self.height);
+                    mm_order_ids_set.insert(order_id);
+                    witness_orders.push(WitnessOrder {
+                        order: order.clone(),
+                        account_id: account_id.0,
+                        is_mm: true,
+                    });
                     accepted_orders.push(order);
                 } else {
                     let reserved = *reserved_balance.get(&account_id).unwrap_or(&0);
@@ -290,9 +376,19 @@ impl BlockSequencer {
                             if cost > 0 {
                                 *reserved_balance.entry(account_id).or_insert(0) += cost;
                             }
+                            witness_orders.push(WitnessOrder {
+                                order: order.clone(),
+                                account_id: account_id.0,
+                                is_mm: false,
+                            });
                             accepted_orders.push(order);
                         }
                         Err(reason) => {
+                            witness_rejections.push(WitnessRejection {
+                                order: order.clone(),
+                                account_id: account_id.0,
+                                reason: convert_rejection_reason(&reason),
+                            });
                             rejections.push(Rejection {
                                 order_id,
                                 account_id,
@@ -361,6 +457,14 @@ impl BlockSequencer {
         let total_volume = pipeline_result.result.total_quantity_filled;
         let orders_filled = pipeline_result.result.orders_filled;
 
+        // Snapshot pre-state (before settlement)
+        let participating_accounts: HashSet<AccountId> = self
+            .order_account_map
+            .values()
+            .copied()
+            .collect();
+        let pre_state = snapshot_accounts(&self.accounts, &participating_accounts);
+
         // Settle all fills
         settlement::settle_batch(
             &mut self.accounts,
@@ -368,6 +472,9 @@ impl BlockSequencer {
             &problem.orders,
             &self.order_account_map,
         );
+
+        // Snapshot post-state (after settlement)
+        let post_state = snapshot_accounts(&self.accounts, &participating_accounts);
 
         // Persist unfilled non-MM orders
         let filled_order_ids: HashSet<u64> = fills
@@ -416,6 +523,40 @@ impl BlockSequencer {
             timestamp_ms,
         };
 
+        // Build witness
+        let previous_header = self.last_header.as_ref().map(|h| WitnessBlockHeader {
+            height: h.height,
+            parent_hash: h.parent_hash,
+            state_root: h.state_root,
+            order_count: h.order_count,
+            fill_count: h.fill_count,
+            timestamp_ms: h.timestamp_ms,
+        });
+
+        let witness_header = WitnessBlockHeader {
+            height: header.height,
+            parent_hash: header.parent_hash,
+            state_root: header.state_root,
+            order_count: header.order_count,
+            fill_count: header.fill_count,
+            timestamp_ms: header.timestamp_ms,
+        };
+
+        let witness = BlockWitness {
+            header: witness_header,
+            previous_header,
+            orders: witness_orders,
+            rejections: witness_rejections,
+            fills: fills.clone(),
+            clearing_prices: clearing_prices.clone(),
+            total_welfare,
+            mm_constraints: problem.mm_constraints.clone(),
+            market_groups: problem.market_groups.clone(),
+            pre_state,
+            post_state,
+            resolved_markets,
+        };
+
         self.last_header = Some(header.clone());
 
         let block = Block {
@@ -429,7 +570,7 @@ impl BlockSequencer {
             orders_filled,
         };
 
-        (block, pipeline_result)
+        (block, pipeline_result, witness)
     }
 }
 
@@ -483,7 +624,7 @@ mod tests {
         // Temporarily swap markets/groups for this batch
         let old_markets = std::mem::replace(&mut seq.markets, markets.clone());
         let old_groups = std::mem::replace(&mut seq.market_groups, market_groups.to_vec());
-        let (block, pr) = seq.produce_block(submissions, 0);
+        let (block, pr, _witness) = seq.produce_block(submissions, 0);
         seq.markets = old_markets;
         seq.market_groups = old_groups;
         batch_result_from_block(&block, pr)
@@ -899,7 +1040,7 @@ mod tests {
         let accounts = AccountStore::new();
         let mut seq = BlockSequencer::new(accounts, markets.clone(), vec![], Arc::new(AdminOracle::new()));
 
-        let (block, _) = seq.produce_block(vec![], 1000);
+        let (block, _, _) = seq.produce_block(vec![], 1000);
         assert_eq!(block.header.height, 1);
         assert_eq!(block.header.parent_hash, [0u8; 32]); // genesis
         assert_eq!(block.header.timestamp_ms, 1000);
@@ -911,10 +1052,10 @@ mod tests {
         let accounts = AccountStore::new();
         let mut seq = BlockSequencer::new(accounts, markets.clone(), vec![], Arc::new(AdminOracle::new()));
 
-        let (block1, _) = seq.produce_block(vec![], 1000);
+        let (block1, _, _) = seq.produce_block(vec![], 1000);
         let expected_parent = hash_header(&block1.header);
 
-        let (block2, _) = seq.produce_block(vec![], 2000);
+        let (block2, _, _) = seq.produce_block(vec![], 2000);
         assert_eq!(block2.header.parent_hash, expected_parent);
         assert_eq!(block2.header.height, 2);
     }
@@ -926,7 +1067,7 @@ mod tests {
         let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
         let mut seq = BlockSequencer::new(accounts, markets.clone(), vec![], Arc::new(AdminOracle::new()));
 
-        let (block1, _) = seq.produce_block(vec![], 0);
+        let (block1, _, _) = seq.produce_block(vec![], 0);
         let root1 = block1.header.state_root;
 
         // Submit an order that will change state
@@ -935,7 +1076,7 @@ mod tests {
             orders: vec![outcome_buy(&markets, 0, m0, 0, 500_000_000, 1)],
             mm_constraint: None,
         };
-        let (block2, _) = seq.produce_block(vec![sub], 0);
+        let (block2, _, _) = seq.produce_block(vec![sub], 0);
 
         // State root should reflect the updated account state
         // (even if the order didn't fill, state root is computed after settlement)

@@ -360,7 +360,7 @@ impl SimulationRunner {
         }
 
         // Produce the block
-        let (block, pipeline_result) = self.sequencer.produce_block(submissions, 0);
+        let (block, pipeline_result, _witness) = self.sequencer.produce_block(submissions, 0);
         let result = batch_result_from_block(&block, pipeline_result);
 
         // Record metrics

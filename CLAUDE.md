@@ -88,3 +88,4 @@ The pipeline can iterate via fixed-point loop until convergence.
 - Use proptest for property-based/metamorphic tesets but only where it makes sense
 - Always think about boundaries and reducing accidental complexity -- avoid tight coupling unless necessary
 - Prefer actor model using this pattern https://ryhl.io/blog/actors-with-tokio/ to mutex etc.
+- We are in early dev phase. Elegance is always more important that backward compatibility

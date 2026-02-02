@@ -959,6 +959,7 @@ dependencies = [
  "rand",
  "rand_chacha",
  "sybil-oracle",
+ "sybil-verifier",
  "thiserror",
  "tokio",
 ]
@@ -1592,6 +1593,15 @@ dependencies = [
 name = "sybil-oracle"
 version = "0.1.0"
 dependencies = [
+ "matching-engine",
+ "thiserror",
+]
+
+[[package]]
+name = "sybil-verifier"
+version = "0.1.0"
+dependencies = [
+ "blake3",
  "matching-engine",
  "thiserror",
 ]

@@ -12,6 +12,7 @@ path = "src/bin/sybil_sim.rs"
 matching-engine = { path = "../matching-engine" }
 matching-solver = { path = "../matching-solver", features = ["milp"] }
 sybil-oracle = { path = "../sybil-oracle" }
+sybil-verifier = { path = "../sybil-verifier" }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 clap = { version = "4.5", features = ["derive"] }

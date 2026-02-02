@@ -1,0 +1,10 @@
+[package]
+name = "sybil-verifier"
+version = "0.1.0"
+edition = "2021"
+description = "Comprehensive block verification for prediction market matching — ZK-ready"
+
+[dependencies]
+matching-engine = { path = "../matching-engine" }
+blake3 = "1"
+thiserror = { workspace = true }
