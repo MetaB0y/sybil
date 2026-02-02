@@ -186,7 +186,7 @@ impl MwisSolver {
             .iter()
             .map(|&w| {
                 if w > 0 {
-                    w as f64 * (0.8 + 0.4 * rng.gen::<f64>()) // Random factor 0.8-1.2
+                    w as f64 * (0.8 + 0.4 * rng.random::<f64>()) // Random factor 0.8-1.2
                 } else {
                     f64::NEG_INFINITY
                 }

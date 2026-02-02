@@ -753,7 +753,7 @@ mod tests {
         let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
 
         // Generate a P256 key
-        let signing_key = p256::ecdsa::SigningKey::random(&mut rand::rngs::OsRng);
+        let signing_key = p256::ecdsa::SigningKey::random(&mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng));
         let pubkey = PublicKey(signing_key.verifying_key().clone());
 
         // Register the key
@@ -774,7 +774,7 @@ mod tests {
         let (seq, aid) = make_test_sequencer();
         let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
 
-        let signing_key = p256::ecdsa::SigningKey::random(&mut rand::rngs::OsRng);
+        let signing_key = p256::ecdsa::SigningKey::random(&mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng));
         let pubkey = PublicKey(signing_key.verifying_key().clone());
 
         handle.register_pubkey(aid, pubkey.clone()).await.unwrap();

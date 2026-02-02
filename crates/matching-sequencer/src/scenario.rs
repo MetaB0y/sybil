@@ -299,7 +299,7 @@ fn make_random_binary_events(n: usize, seed: u64) -> Vec<EventDef> {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     (0..n)
         .map(|i| {
-            let p: f64 = rng.gen_range(0.1..0.9);
+            let p: f64 = rng.random_range(0.1..0.9);
             let winner = if p >= 0.5 { 0 } else { 1 };
             EventDef {
                 name: format!("Event {}", i),

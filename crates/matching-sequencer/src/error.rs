@@ -27,39 +27,30 @@ pub struct Rejection {
 }
 
 /// Errors from the sequencer subsystem.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SequencerError {
     /// Order validation failure.
+    #[error("order {} rejected: {:?}", .0.order_id, .0.reason)]
     Rejected(Rejection),
     /// P256 signature check failed.
+    #[error("invalid P256 signature")]
     InvalidSignature,
     /// No account registered for this public key.
+    #[error("unknown signer public key")]
     UnknownSigner,
     /// Mempool capacity exceeded.
+    #[error("mempool full")]
     MempoolFull,
     /// All handles dropped; the actor has shut down.
+    #[error("sequencer actor shut down")]
     ActorGone,
     /// A public key is already registered to an account.
+    #[error("public key already registered to an account")]
     AccountAlreadyRegistered,
     /// The requested market was not found.
+    #[error("market not found")]
     MarketNotFound,
     /// The requested block was not found.
+    #[error("block not found")]
     BlockNotFound,
 }
-
-impl std::fmt::Display for SequencerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SequencerError::Rejected(r) => write!(f, "order {} rejected: {:?}", r.order_id, r.reason),
-            SequencerError::InvalidSignature => write!(f, "invalid P256 signature"),
-            SequencerError::UnknownSigner => write!(f, "unknown signer public key"),
-            SequencerError::MempoolFull => write!(f, "mempool full"),
-            SequencerError::ActorGone => write!(f, "sequencer actor shut down"),
-            SequencerError::AccountAlreadyRegistered => write!(f, "public key already registered to an account"),
-            SequencerError::MarketNotFound => write!(f, "market not found"),
-            SequencerError::BlockNotFound => write!(f, "block not found"),
-        }
-    }
-}
-
-impl std::error::Error for SequencerError {}

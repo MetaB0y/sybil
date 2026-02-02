@@ -54,7 +54,7 @@ impl Agent for NoiseTrader {
         let mut temp_id = 0u64;
 
         for &(market_id, _) in &view.markets {
-            if self.rng.gen::<f64>() > self.activity_rate {
+            if self.rng.random::<f64>() > self.activity_rate {
                 continue;
             }
 
@@ -64,12 +64,12 @@ impl Agent for NoiseTrader {
             }
 
             // Random outcome: 0 = YES, 1 = NO
-            let outcome: u8 = self.rng.gen_range(0..2);
+            let outcome: u8 = self.rng.random_range(0..2);
 
             // 30% chance to sell if we have a position
             let yes_pos = account.position(market_id, 0);
             let no_pos = account.position(market_id, 1);
-            let sell_chance: f64 = self.rng.gen();
+            let sell_chance: f64 = self.rng.random();
             let has_position = (outcome == 0 && yes_pos > 0) || (outcome == 1 && no_pos > 0);
 
             let is_sell = sell_chance < 0.3 && has_position;
@@ -92,7 +92,7 @@ impl Agent for NoiseTrader {
             };
 
             // Add noise
-            let noise = self.rng.gen_range(0..=self.price_noise * 2) as i64
+            let noise = self.rng.random_range(0..=self.price_noise * 2) as i64
                 - self.price_noise as i64;
             let price = (base_price as i64 + noise).clamp(
                 NANOS_PER_DOLLAR as i64 / 100,  // min 1 cent
@@ -102,7 +102,7 @@ impl Agent for NoiseTrader {
             if is_sell {
                 // Sell existing position
                 let available = if outcome == 0 { yes_pos } else { no_pos };
-                let qty = self.rng.gen_range(1..=self.max_qty).min(available as u64);
+                let qty = self.rng.random_range(1..=self.max_qty).min(available as u64);
                 if qty > 0 {
                     let order = outcome_sell(&self.markets, temp_id, market_id, outcome, price, qty);
                     orders.push(order);
@@ -110,7 +110,7 @@ impl Agent for NoiseTrader {
                 }
             } else {
                 // Buy
-                let qty = self.rng.gen_range(1..=self.max_qty);
+                let qty = self.rng.random_range(1..=self.max_qty);
                 let order = outcome_buy(&self.markets, temp_id, market_id, outcome, price, qty);
                 orders.push(order);
                 temp_id += 1;

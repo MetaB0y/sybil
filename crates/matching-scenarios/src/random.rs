@@ -84,7 +84,7 @@ pub fn generate_random_scenario(config: RandomConfig) -> Problem {
         let market = problem.markets.add_binary(format!("Market{}", i));
         market_ids.push(market);
 
-        let mid_price = rng.gen_range(0.3..0.7);
+        let mid_price = rng.random_range(0.3..0.7);
         market_prices.push(mid_price);
     }
 
@@ -203,9 +203,9 @@ fn generate_simple_random_order(
     let id = *order_id;
     *order_id += 1;
 
-    let market_idx = rng.gen_range(0..market_ids.len());
+    let market_idx = rng.random_range(0..market_ids.len());
     let market = market_ids[market_idx];
-    let outcome = rng.gen_range(0..2u8); // YES or NO
+    let outcome = rng.random_range(0..2u8); // YES or NO
 
     let base_price = if outcome == 0 {
         market_prices[market_idx]
@@ -213,10 +213,10 @@ fn generate_simple_random_order(
         1.0 - market_prices[market_idx]
     };
 
-    let aggressiveness = rng.gen_range(0.0..0.1);
+    let aggressiveness = rng.random_range(0.0..0.1);
     let limit = (base_price + aggressiveness).min(0.95);
 
-    let qty: Qty = rng.gen_range(30..120);
+    let qty: Qty = rng.random_range(30..120);
 
     outcome_buy(markets, id, market, outcome, price_to_nanos(limit), qty)
 }
@@ -231,7 +231,7 @@ fn generate_bundle_random_order(
     let id = *order_id;
     *order_id += 1;
 
-    let num_to_bundle = rng.gen_range(2..=market_ids.len().min(3));
+    let num_to_bundle = rng.random_range(2..=market_ids.len().min(3));
     let mut selected: Vec<usize> = (0..market_ids.len()).collect();
     selected.shuffle(rng);
     selected.truncate(num_to_bundle);
@@ -240,8 +240,8 @@ fn generate_bundle_random_order(
 
     let combined_prob: f64 = selected.iter().map(|&i| market_prices[i]).product();
 
-    let limit = (combined_prob * rng.gen_range(0.9..1.2)).clamp(0.01, 0.95);
-    let qty: Qty = rng.gen_range(20..80);
+    let limit = (combined_prob * rng.random_range(0.9..1.2)).clamp(0.01, 0.95);
+    let qty: Qty = rng.random_range(20..80);
 
     bundle_yes(markets, id, &bundle_markets, price_to_nanos(limit), qty)
 }
@@ -260,18 +260,18 @@ fn generate_spread_random_order(
         return outcome_buy(markets, id, market_ids[0], 0, price_to_nanos(0.5), 50);
     }
 
-    let m1_idx = rng.gen_range(0..market_ids.len());
-    let mut m2_idx = rng.gen_range(0..market_ids.len());
+    let m1_idx = rng.random_range(0..market_ids.len());
+    let mut m2_idx = rng.random_range(0..market_ids.len());
     while m2_idx == m1_idx {
-        m2_idx = rng.gen_range(0..market_ids.len());
+        m2_idx = rng.random_range(0..market_ids.len());
     }
 
     let market_a = market_ids[m1_idx];
     let market_b = market_ids[m2_idx];
 
     let price_diff = (market_prices[m1_idx] - market_prices[m2_idx]).abs();
-    let limit = (price_diff + rng.gen_range(-0.05..0.1)).clamp(0.01, 0.5);
-    let qty: Qty = rng.gen_range(30..100);
+    let limit = (price_diff + rng.random_range(-0.05..0.1)).clamp(0.01, 0.5);
+    let qty: Qty = rng.random_range(30..100);
 
     spread(markets, id, market_a, market_b, price_to_nanos(limit), qty)
 }
@@ -285,7 +285,7 @@ fn inject_conflicts(problem: &mut Problem, rng: &mut StdRng, market_ids: &[Marke
 
     let conflict_count = problem.orders.len() / 5;
     if conflict_count > 1 && !market_ids.is_empty() {
-        let conflict_market = market_ids[rng.gen_range(0..market_ids.len())];
+        let conflict_market = market_ids[rng.random_range(0..market_ids.len())];
 
         for order in problem.orders.iter_mut().take(conflict_count) {
             let touches_market = order.active_markets().any(|m| m == conflict_market);

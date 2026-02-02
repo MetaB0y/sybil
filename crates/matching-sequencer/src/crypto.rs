@@ -110,11 +110,16 @@ mod tests {
     use super::*;
     use matching_engine::{outcome_buy, MarketSet};
     use p256::ecdsa::SigningKey;
-    use rand::rngs::OsRng;
+    use getrandom::SysRng;
+    use p256::elliptic_curve::rand_core::UnwrapErr;
+
+    fn crypto_rng() -> UnwrapErr<SysRng> {
+        UnwrapErr(SysRng)
+    }
 
     #[test]
     fn test_sign_verify_roundtrip() {
-        let key = SigningKey::random(&mut OsRng);
+        let key = SigningKey::random(&mut crypto_rng());
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("Test");
 
@@ -126,8 +131,8 @@ mod tests {
 
     #[test]
     fn test_invalid_signature_rejected() {
-        let key1 = SigningKey::random(&mut OsRng);
-        let key2 = SigningKey::random(&mut OsRng);
+        let key1 = SigningKey::random(&mut crypto_rng());
+        let key2 = SigningKey::random(&mut crypto_rng());
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("Test");
 
@@ -151,7 +156,7 @@ mod tests {
 
     #[test]
     fn test_tampered_order_rejected() {
-        let key = SigningKey::random(&mut OsRng);
+        let key = SigningKey::random(&mut crypto_rng());
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("Test");
 

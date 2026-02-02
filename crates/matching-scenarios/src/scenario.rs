@@ -202,24 +202,24 @@ pub fn generate_scenario(config: ScenarioConfig) -> Problem {
     while market_idx < config.num_markets {
         // Decide if this should be a group or standalone market
         let remaining = config.num_markets - market_idx;
-        let make_group = remaining >= 3 && rng.gen_bool(0.6);
+        let make_group = remaining >= 3 && rng.random_bool(0.6);
 
         if make_group {
             // Create a group of 3-4 mutually exclusive markets
-            let group_size = if remaining >= 4 && rng.gen_bool(0.5) { 4 } else { 3 };
+            let group_size = if remaining >= 4 && rng.random_bool(0.5) { 4 } else { 3 };
             let group_size = group_size.min(remaining);
 
             // Generate fair prices that sum to ~1.0 (with some variance for negrisk opportunities)
             // Use Box-Muller transform for normal distribution around 1.0 with stddev 0.1
             let target_sum: f64 = {
                 // Box-Muller transform: convert uniform to normal
-                let u1: f64 = rng.gen_range(0.0001..1.0);  // Avoid log(0)
-                let u2: f64 = rng.gen();
+                let u1: f64 = rng.random_range(0.0001..1.0);  // Avoid log(0)
+                let u2: f64 = rng.random();
                 let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
                 (1.0 + 0.1 * z).clamp(0.85, 1.15)  // Normal(1.0, 0.1), clamped
             };
             let mut raw_prices: Vec<f64> = (0..group_size)
-                .map(|_| rng.gen_range(0.1..1.0))
+                .map(|_| rng.random_range(0.1..1.0))
                 .collect();
             let sum: f64 = raw_prices.iter().sum();
             for p in &mut raw_prices {
@@ -240,7 +240,7 @@ pub fn generate_scenario(config: ScenarioConfig) -> Problem {
         } else {
             // Standalone market - use wider price range for more variety
             let market_id = problem.markets.add_binary(format!("M{}", market_idx));
-            let fair_price = rng.gen_range(0.05..0.95);
+            let fair_price = rng.random_range(0.05..0.95);
             market_info.push((market_id, fair_price));
             market_idx += 1;
         }
@@ -441,26 +441,26 @@ fn generate_simple_order(
     *order_id += 1;
 
     // Bias towards hot markets if any
-    let market_idx = if !hot_markets.is_empty() && rng.gen_bool(0.6) {
-        let hot_id = hot_markets[rng.gen_range(0..hot_markets.len())];
+    let market_idx = if !hot_markets.is_empty() && rng.random_bool(0.6) {
+        let hot_id = hot_markets[rng.random_range(0..hot_markets.len())];
         market_info.iter().position(|(id, _)| *id == hot_id).unwrap_or(0)
     } else {
-        rng.gen_range(0..market_info.len())
+        rng.random_range(0..market_info.len())
     };
 
     let (market, fair_price) = market_info[market_idx];
-    let outcome = rng.gen_range(0..2u8);
+    let outcome = rng.random_range(0..2u8);
 
     let base_price = if outcome == 0 { fair_price } else { 1.0 - fair_price };
-    let aggressiveness = rng.gen_range(-0.05..0.15);
+    let aggressiveness = rng.random_range(-0.05..0.15);
     let limit = (base_price + aggressiveness).clamp(0.05, 0.95);
 
-    let qty = rng.gen_range(config.order_size_min..config.order_size_max);
+    let qty = rng.random_range(config.order_size_min..config.order_size_max);
 
     let mut order = outcome_buy(markets, id, market, outcome, price_to_nanos(limit), qty);
 
     // Apply AON based on config
-    if rng.gen_bool(config.aon_fraction) {
+    if rng.random_bool(config.aon_fraction) {
         order.min_fill = order.max_fill;
     }
 
@@ -487,7 +487,7 @@ fn generate_bundle_order_with_outcome(
         return (order, joint_outcome, limit_nanos);
     }
 
-    let num_to_bundle = rng.gen_range(2..=max_bundle);
+    let num_to_bundle = rng.random_range(2..=max_bundle);
     let mut selected: Vec<usize> = (0..market_info.len()).collect();
     selected.shuffle(rng);
     selected.truncate(num_to_bundle);
@@ -495,13 +495,13 @@ fn generate_bundle_order_with_outcome(
     let bundle_markets: Vec<MarketId> = selected.iter().map(|&i| market_info[i].0).collect();
     let combined_prob: f64 = selected.iter().map(|&i| market_info[i].1).product();
 
-    let limit = (combined_prob * rng.gen_range(0.8..1.3)).clamp(0.01, 0.95);
+    let limit = (combined_prob * rng.random_range(0.8..1.3)).clamp(0.01, 0.95);
     let limit_nanos = price_to_nanos(limit);
-    let qty = rng.gen_range(config.order_size_min..config.order_size_max);
+    let qty = rng.random_range(config.order_size_min..config.order_size_max);
 
     let mut order = bundle_yes(markets, id, &bundle_markets, limit_nanos, qty);
 
-    if rng.gen_bool(config.aon_fraction) {
+    if rng.random_bool(config.aon_fraction) {
         order.min_fill = order.max_fill;
     }
 
@@ -538,18 +538,18 @@ fn generate_spread_order(
         return outcome_buy(markets, id, market, 0, price_to_nanos(price), 50);
     }
 
-    let m1_idx = rng.gen_range(0..market_info.len());
-    let mut m2_idx = rng.gen_range(0..market_info.len());
+    let m1_idx = rng.random_range(0..market_info.len());
+    let mut m2_idx = rng.random_range(0..market_info.len());
     while m2_idx == m1_idx {
-        m2_idx = rng.gen_range(0..market_info.len());
+        m2_idx = rng.random_range(0..market_info.len());
     }
 
     let (market_a, price_a) = market_info[m1_idx];
     let (market_b, price_b) = market_info[m2_idx];
 
     let price_diff = (price_a - price_b).abs();
-    let limit = (price_diff + rng.gen_range(-0.05..0.1)).clamp(0.01, 0.5);
-    let qty = rng.gen_range(config.order_size_min..config.order_size_max);
+    let limit = (price_diff + rng.random_range(-0.05..0.1)).clamp(0.01, 0.5);
+    let qty = rng.random_range(config.order_size_min..config.order_size_max);
 
     spread(markets, id, market_a, market_b, price_to_nanos(limit), qty)
 }
@@ -570,7 +570,7 @@ fn generate_bundle_sell_order(
         return outcome_sell(markets, id, market, 0, price_to_nanos(price), 50);
     }
 
-    let num_to_bundle = rng.gen_range(2..=max_bundle);
+    let num_to_bundle = rng.random_range(2..=max_bundle);
     let mut selected: Vec<usize> = (0..market_info.len()).collect();
     selected.shuffle(rng);
     selected.truncate(num_to_bundle);
@@ -579,13 +579,13 @@ fn generate_bundle_sell_order(
     let combined_prob: f64 = selected.iter().map(|&i| market_info[i].1).product();
 
     // Seller wants to receive at least this much (lower limit = more aggressive seller)
-    let limit = (combined_prob * rng.gen_range(0.7..1.1)).clamp(0.01, 0.95);
+    let limit = (combined_prob * rng.random_range(0.7..1.1)).clamp(0.01, 0.95);
     let limit_nanos = price_to_nanos(limit);
-    let qty = rng.gen_range(config.order_size_min..config.order_size_max);
+    let qty = rng.random_range(config.order_size_min..config.order_size_max);
 
     let mut order = bundle_sell(markets, id, &bundle_markets, limit_nanos, qty);
 
-    if rng.gen_bool(config.aon_fraction) {
+    if rng.random_bool(config.aon_fraction) {
         order.min_fill = order.max_fill;
     }
 
@@ -607,18 +607,18 @@ fn generate_spread_sell_order(
         return outcome_sell(markets, id, market, 0, price_to_nanos(price), 50);
     }
 
-    let m1_idx = rng.gen_range(0..market_info.len());
-    let mut m2_idx = rng.gen_range(0..market_info.len());
+    let m1_idx = rng.random_range(0..market_info.len());
+    let mut m2_idx = rng.random_range(0..market_info.len());
     while m2_idx == m1_idx {
-        m2_idx = rng.gen_range(0..market_info.len());
+        m2_idx = rng.random_range(0..market_info.len());
     }
 
     let (market_a, price_a) = market_info[m1_idx];
     let (market_b, price_b) = market_info[m2_idx];
 
     let price_diff = (price_a - price_b).abs();
-    let limit = (price_diff + rng.gen_range(-0.05..0.1)).clamp(0.01, 0.5);
-    let qty = rng.gen_range(config.order_size_min..config.order_size_max);
+    let limit = (price_diff + rng.random_range(-0.05..0.1)).clamp(0.01, 0.5);
+    let qty = rng.random_range(config.order_size_min..config.order_size_max);
 
     spread_sell(markets, id, market_a, market_b, price_to_nanos(limit), qty)
 }
@@ -633,7 +633,7 @@ fn generate_mm_constraints(
     let fair_prices: HashMap<MarketId, f64> = market_info.iter().cloned().collect();
 
     for mm_idx in 0..config.num_mms {
-        let budget_dollars = rng.gen_range(config.mm_budget_min..config.mm_budget_max);
+        let budget_dollars = rng.random_range(config.mm_budget_min..config.mm_budget_max);
         let budget_nanos = budget_dollars as Nanos * NANOS_PER_DOLLAR;
 
         let mut constraint = MmConstraint::new(MmId::new(mm_idx as u64 + 1), budget_nanos);

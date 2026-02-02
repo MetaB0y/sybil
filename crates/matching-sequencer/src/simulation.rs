@@ -124,7 +124,7 @@ impl SimulationRunner {
         for i in 0..scenario.num_noise {
             let account_id = accounts.create_account(scenario.initial_balance);
             let name = format!("Noise-{}", i);
-            let seed: u64 = rng.gen();
+            let seed: u64 = rng.random();
             let agent_rng = Box::new(ChaCha8Rng::seed_from_u64(seed));
             let agent = NoiseTrader::new(
                 name.clone(),
