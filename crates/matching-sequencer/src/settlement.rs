@@ -1,4 +1,4 @@
-use matching_engine::{Fill, MarketId, Order, NANOS_PER_DOLLAR};
+use matching_engine::{Fill, MarketId, Nanos, Order, NANOS_PER_DOLLAR};
 
 use crate::account::{Account, AccountId, AccountStore};
 
@@ -164,29 +164,32 @@ pub fn settle_batch(
     }
 }
 
-/// Resolve a market: convert positions to balance based on the winning outcome.
-/// winning_outcome: 0 for YES, 1 for NO.
-pub fn resolve_market(accounts: &mut AccountStore, market: MarketId, winning_outcome: u8) {
+/// Resolve a market: convert positions to balance based on fractional payouts.
+///
+/// `yes_payout_nanos`: payout per YES share in nanos (0 to NANOS_PER_DOLLAR).
+/// NO shares receive `NANOS_PER_DOLLAR - yes_payout_nanos` per share.
+///
+/// Special cases:
+/// - `yes_payout_nanos = NANOS_PER_DOLLAR` → YES wins (traditional binary)
+/// - `yes_payout_nanos = 0` → NO wins (traditional binary)
+/// - `yes_payout_nanos = 700_000_000` → YES pays $0.70, NO pays $0.30
+pub fn resolve_market(accounts: &mut AccountStore, market: MarketId, yes_payout_nanos: Nanos) {
+    let no_payout_nanos = NANOS_PER_DOLLAR - yes_payout_nanos;
+
     // Collect account IDs first to avoid borrow issues
     let account_ids: Vec<AccountId> = accounts.iter().map(|(&id, _)| id).collect();
 
     for account_id in account_ids {
         let account = accounts.get_mut(account_id).unwrap();
 
-        // Winning positions pay out $1 per share
-        let winning_pos = account
-            .positions
-            .remove(&(market, winning_outcome))
-            .unwrap_or(0);
-        if winning_pos != 0 {
-            account.balance += winning_pos * NANOS_PER_DOLLAR as i64;
-        }
+        let yes_pos = account.positions.remove(&(market, 0)).unwrap_or(0);
+        let no_pos = account.positions.remove(&(market, 1)).unwrap_or(0);
 
-        // Losing positions are worthless - just remove them
-        for outcome in 0..2u8 {
-            if outcome != winning_outcome {
-                account.positions.remove(&(market, outcome));
-            }
+        if yes_pos != 0 {
+            account.balance += (yes_pos as i128 * yes_payout_nanos as i128) as i64;
+        }
+        if no_pos != 0 {
+            account.balance += (no_pos as i128 * no_payout_nanos as i128) as i64;
         }
     }
 }
@@ -248,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_market() {
+    fn test_resolve_market_yes_wins() {
         let (_, mut accounts) = setup();
         let m0 = MarketId::new(0);
         let aid = AccountId(0);
@@ -258,15 +261,63 @@ mod tests {
         account.positions.insert((m0, 1), 5); // 5 NO shares
         let initial_balance = account.balance;
 
-        resolve_market(&mut accounts, m0, 0); // YES wins
+        resolve_market(&mut accounts, m0, NANOS_PER_DOLLAR); // YES wins ($1 per YES share)
 
         let account = accounts.get(aid).unwrap();
-        // YES wins: 10 * $1 = $10 added
+        // YES pays $1: 10 * $1 = $10 added
+        // NO pays $0: 5 * $0 = $0 added
         assert_eq!(
             account.balance,
             initial_balance + 10 * NANOS_PER_DOLLAR as i64
         );
         // All positions for this market should be gone
+        assert_eq!(account.position(m0, 0), 0);
+        assert_eq!(account.position(m0, 1), 0);
+    }
+
+    #[test]
+    fn test_resolve_market_no_wins() {
+        let (_, mut accounts) = setup();
+        let m0 = MarketId::new(0);
+        let aid = AccountId(0);
+
+        let account = accounts.get_mut(aid).unwrap();
+        account.positions.insert((m0, 0), 10); // 10 YES shares
+        account.positions.insert((m0, 1), 5); // 5 NO shares
+        let initial_balance = account.balance;
+
+        resolve_market(&mut accounts, m0, 0); // NO wins ($0 per YES share)
+
+        let account = accounts.get(aid).unwrap();
+        // YES pays $0: 10 * $0 = $0
+        // NO pays $1: 5 * $1 = $5
+        assert_eq!(
+            account.balance,
+            initial_balance + 5 * NANOS_PER_DOLLAR as i64
+        );
+        assert_eq!(account.position(m0, 0), 0);
+        assert_eq!(account.position(m0, 1), 0);
+    }
+
+    #[test]
+    fn test_resolve_market_fractional() {
+        let (_, mut accounts) = setup();
+        let m0 = MarketId::new(0);
+        let aid = AccountId(0);
+
+        let account = accounts.get_mut(aid).unwrap();
+        account.positions.insert((m0, 0), 10); // 10 YES shares
+        account.positions.insert((m0, 1), 5); // 5 NO shares
+        let initial_balance = account.balance;
+
+        // Resolve at 70% — YES pays $0.70, NO pays $0.30
+        resolve_market(&mut accounts, m0, 700_000_000);
+
+        let account = accounts.get(aid).unwrap();
+        // YES: 10 * $0.70 = $7.00
+        // NO: 5 * $0.30 = $1.50
+        let expected = initial_balance + 10 * 700_000_000i64 + 5 * 300_000_000i64;
+        assert_eq!(account.balance, expected);
         assert_eq!(account.position(m0, 0), 0);
         assert_eq!(account.position(m0, 1), 0);
     }

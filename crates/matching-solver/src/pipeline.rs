@@ -434,7 +434,7 @@ impl Pipeline {
     /// 2. Negrisk Arbitrage - exploits price inconsistencies
     /// 3. MM Allocation - activates MM orders within budget
     /// 4. Partial Solvers - fills bundles/spreads
-    /// Repeats until convergence or max iterations.
+    ///    Repeats until convergence or max iterations.
     fn solve_sequential(&self, problem: &Problem) -> PipelineResult {
         let start = Instant::now();
         let mut result = PipelineResult::empty();
@@ -622,9 +622,9 @@ impl Pipeline {
 
             // Store negrisk result and add arbitrage orders/fills to the result
             #[cfg(feature = "viz")]
-            let mut negrisk_fills_added = 0usize;
+            let negrisk_fills_added = 0usize;
             #[cfg(feature = "viz")]
-            let mut negrisk_welfare_added: i64 = 0;
+            let negrisk_welfare_added: i64 = 0;
             if let Some(ref negrisk) = negrisk_result {
                 // Store arb orders for next iteration's price discovery.
                 // They'll participate in LocalSolver clearing, creating demand
@@ -677,6 +677,7 @@ impl Pipeline {
 
                 // Add MM orders that weren't matched in price discovery with estimated fills.
                 // This allows the allocator to consider them for budget allocation.
+                #[allow(clippy::map_entry)]
                 for mm in &problem.mm_constraints {
                     for &order_id in &mm.order_ids {
                         if !current_fills.contains_key(&order_id) {
@@ -1012,7 +1013,7 @@ impl Pipeline {
             result.allocation = Some(crate::traits::AllocationResult {
                 activated_orders: all_activated,
                 total_welfare,
-                iterations: iterations,
+                iterations,
                 mm_allocations,
             });
         }
@@ -1091,6 +1092,7 @@ impl Pipeline {
                     problem.orders.iter().map(|o| (o.id, o)).collect();
 
                 // Add MM orders that weren't matched in price discovery with estimated fills
+                #[allow(clippy::map_entry)]
                 for mm in &problem.mm_constraints {
                     for &order_id in &mm.order_ids {
                         if !fills.contains_key(&order_id) {

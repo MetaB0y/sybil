@@ -5,7 +5,6 @@ use matching_engine::{
     NANOS_PER_DOLLAR,
 };
 use matching_engine::order::{MAX_MARKETS_PER_ORDER, MAX_STATES};
-use matching_engine::types::conversions::{nanos_to_dollars, nanos_to_price, price_to_nanos};
 use matching_sequencer::block::Block;
 use matching_sequencer::error::Rejection;
 use matching_sequencer::Account;
@@ -13,7 +12,7 @@ use matching_sequencer::Account;
 use crate::types::request::{OrderSpec, SignedOrderData};
 use crate::types::response::*;
 
-/// Convert an Account to an AccountResponse with human-readable values.
+/// Convert an Account to an AccountResponse.
 pub fn account_to_response(account: &Account) -> AccountResponse {
     let positions: Vec<PositionResponse> = account
         .positions
@@ -32,12 +31,12 @@ pub fn account_to_response(account: &Account) -> AccountResponse {
 
     AccountResponse {
         account_id: account.id.0,
-        balance_dollars: account.balance as f64 / NANOS_PER_DOLLAR as f64,
+        balance_nanos: account.balance,
         positions,
     }
 }
 
-/// Convert a Block to a BlockResponse with human-readable values.
+/// Convert a Block to a BlockResponse.
 pub fn block_to_response(block: &Block) -> BlockResponse {
     let fills = block
         .fills
@@ -45,17 +44,17 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
         .map(|f| FillResponse {
             order_id: f.order_id,
             fill_qty: f.fill_qty,
-            fill_price: nanos_to_price(f.fill_price),
+            fill_price_nanos: f.fill_price,
         })
         .collect();
 
-    let clearing_prices: HashMap<String, Vec<f64>> = block
+    let clearing_prices_nanos: HashMap<String, Vec<u64>> = block
         .clearing_prices
         .iter()
         .map(|(mid, prices)| {
             (
                 mid.0.to_string(),
-                prices.iter().map(|&p| nanos_to_price(p)).collect(),
+                prices.to_vec(),
             )
         })
         .collect();
@@ -63,7 +62,7 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
     let rejections = block
         .rejections
         .iter()
-        .map(|r| rejection_to_response(r))
+        .map(rejection_to_response)
         .collect();
 
     BlockResponse {
@@ -74,10 +73,10 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
         fill_count: block.header.fill_count,
         timestamp_ms: block.header.timestamp_ms,
         fills,
-        clearing_prices,
+        clearing_prices_nanos,
         rejections,
-        total_welfare: nanos_to_dollars(block.total_welfare as u64),
-        total_volume: nanos_to_dollars(block.total_volume),
+        total_welfare_nanos: block.total_welfare,
+        total_volume_nanos: block.total_volume,
         orders_filled: block.orders_filled,
     }
 }
@@ -96,13 +95,13 @@ pub fn prices_to_response(
 ) -> MarketPricesResponse {
     let mut map = HashMap::new();
     for (mid, ps) in prices {
-        let yes_price = ps.first().copied().map(nanos_to_price).unwrap_or(0.5);
-        let no_price = ps.get(1).copied().map(nanos_to_price).unwrap_or(0.5);
+        let yes_price_nanos = ps.first().copied().unwrap_or(NANOS_PER_DOLLAR / 2);
+        let no_price_nanos = ps.get(1).copied().unwrap_or(NANOS_PER_DOLLAR / 2);
         map.insert(
             mid.0.to_string(),
             MarketPriceResponse {
-                yes_price,
-                no_price,
+                yes_price_nanos,
+                no_price_nanos,
             },
         );
     }
@@ -114,102 +113,102 @@ pub fn order_spec_to_order(spec: &OrderSpec, markets: &MarketSet) -> Result<Orde
     match spec {
         OrderSpec::BuyYes {
             market_id,
-            limit_price,
+            limit_price_nanos,
             quantity,
         } => {
             let mid = MarketId::new(*market_id);
             validate_market(mid, markets)?;
-            validate_price(*limit_price)?;
+            validate_price_nanos(*limit_price_nanos)?;
             Ok(outcome_buy(
                 markets,
                 0,
                 mid,
                 0,
-                price_to_nanos(*limit_price),
+                *limit_price_nanos,
                 *quantity,
             ))
         }
         OrderSpec::BuyNo {
             market_id,
-            limit_price,
+            limit_price_nanos,
             quantity,
         } => {
             let mid = MarketId::new(*market_id);
             validate_market(mid, markets)?;
-            validate_price(*limit_price)?;
+            validate_price_nanos(*limit_price_nanos)?;
             Ok(outcome_buy(
                 markets,
                 0,
                 mid,
                 1,
-                price_to_nanos(*limit_price),
+                *limit_price_nanos,
                 *quantity,
             ))
         }
         OrderSpec::SellYes {
             market_id,
-            limit_price,
+            limit_price_nanos,
             quantity,
         } => {
             let mid = MarketId::new(*market_id);
             validate_market(mid, markets)?;
-            validate_price(*limit_price)?;
+            validate_price_nanos(*limit_price_nanos)?;
             Ok(outcome_sell(
                 markets,
                 0,
                 mid,
                 0,
-                price_to_nanos(*limit_price),
+                *limit_price_nanos,
                 *quantity,
             ))
         }
         OrderSpec::SellNo {
             market_id,
-            limit_price,
+            limit_price_nanos,
             quantity,
         } => {
             let mid = MarketId::new(*market_id);
             validate_market(mid, markets)?;
-            validate_price(*limit_price)?;
+            validate_price_nanos(*limit_price_nanos)?;
             Ok(outcome_sell(
                 markets,
                 0,
                 mid,
                 1,
-                price_to_nanos(*limit_price),
+                *limit_price_nanos,
                 *quantity,
             ))
         }
         OrderSpec::Spread {
             market_a,
             market_b,
-            limit_price,
+            limit_price_nanos,
             quantity,
         } => {
             let ma = MarketId::new(*market_a);
             let mb = MarketId::new(*market_b);
             validate_market(ma, markets)?;
             validate_market(mb, markets)?;
-            validate_price(*limit_price)?;
+            validate_price_nanos(*limit_price_nanos)?;
             Ok(spread(
                 markets,
                 0,
                 ma,
                 mb,
-                price_to_nanos(*limit_price),
+                *limit_price_nanos,
                 *quantity,
             ))
         }
         OrderSpec::BundleYes {
             market_ids,
-            limit_price,
+            limit_price_nanos,
             quantity,
         } => {
             let mids: Vec<MarketId> = market_ids.iter().map(|&id| MarketId::new(id)).collect();
             for &mid in &mids {
                 validate_market(mid, markets)?;
             }
-            validate_price(*limit_price)?;
+            validate_price_nanos(*limit_price_nanos)?;
             if mids.len() > MAX_MARKETS_PER_ORDER {
                 return Err(format!(
                     "Bundle cannot span more than {} markets",
@@ -220,20 +219,20 @@ pub fn order_spec_to_order(spec: &OrderSpec, markets: &MarketSet) -> Result<Orde
                 markets,
                 0,
                 &mids,
-                price_to_nanos(*limit_price),
+                *limit_price_nanos,
                 *quantity,
             ))
         }
         OrderSpec::BundleSell {
             market_ids,
-            limit_price,
+            limit_price_nanos,
             quantity,
         } => {
             let mids: Vec<MarketId> = market_ids.iter().map(|&id| MarketId::new(id)).collect();
             for &mid in &mids {
                 validate_market(mid, markets)?;
             }
-            validate_price(*limit_price)?;
+            validate_price_nanos(*limit_price_nanos)?;
             if mids.len() > MAX_MARKETS_PER_ORDER {
                 return Err(format!(
                     "Bundle cannot span more than {} markets",
@@ -244,14 +243,14 @@ pub fn order_spec_to_order(spec: &OrderSpec, markets: &MarketSet) -> Result<Orde
                 markets,
                 0,
                 &mids,
-                price_to_nanos(*limit_price),
+                *limit_price_nanos,
                 *quantity,
             ))
         }
         OrderSpec::Custom {
             market_ids,
             payoffs,
-            limit_price,
+            limit_price_nanos,
             min_fill,
             max_fill,
         } => {
@@ -259,7 +258,7 @@ pub fn order_spec_to_order(spec: &OrderSpec, markets: &MarketSet) -> Result<Orde
             for &mid in &mids {
                 validate_market(mid, markets)?;
             }
-            validate_price(*limit_price)?;
+            validate_price_nanos(*limit_price_nanos)?;
             if mids.len() > MAX_MARKETS_PER_ORDER {
                 return Err(format!(
                     "Custom order cannot span more than {} markets",
@@ -287,7 +286,7 @@ pub fn order_spec_to_order(spec: &OrderSpec, markets: &MarketSet) -> Result<Orde
                 }
             }
 
-            order.limit_price = price_to_nanos(*limit_price);
+            order.limit_price = *limit_price_nanos;
             order.min_fill = *min_fill;
             order.max_fill = *max_fill;
 
@@ -310,7 +309,7 @@ pub fn signed_order_data_to_order(data: &SignedOrderData) -> Result<Order, Strin
             MAX_STATES
         ));
     }
-    validate_price(data.limit_price)?;
+    validate_price_nanos(data.limit_price_nanos)?;
 
     let mut order = Order::new(0);
     for (i, &mid) in data.market_ids.iter().enumerate() {
@@ -326,7 +325,7 @@ pub fn signed_order_data_to_order(data: &SignedOrderData) -> Result<Order, Strin
         }
     }
 
-    order.limit_price = price_to_nanos(data.limit_price);
+    order.limit_price = data.limit_price_nanos;
     order.min_fill = data.min_fill;
     order.max_fill = data.max_fill;
 
@@ -340,9 +339,12 @@ fn validate_market(mid: MarketId, markets: &MarketSet) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_price(price: f64) -> Result<(), String> {
-    if !(0.0..=1.0).contains(&price) {
-        return Err(format!("Price must be between 0 and 1, got {}", price));
+fn validate_price_nanos(price_nanos: u64) -> Result<(), String> {
+    if price_nanos > NANOS_PER_DOLLAR {
+        return Err(format!(
+            "Price must be between 0 and {} nanos, got {}",
+            NANOS_PER_DOLLAR, price_nanos
+        ));
     }
     Ok(())
 }
@@ -365,7 +367,7 @@ mod tests {
         let ms = make_markets();
         let spec = OrderSpec::BuyYes {
             market_id: 0,
-            limit_price: 0.55,
+            limit_price_nanos: 550_000_000,
             quantity: 10,
         };
         let order = order_spec_to_order(&spec, &ms).unwrap();
@@ -381,7 +383,7 @@ mod tests {
         let ms = make_markets();
         let spec = OrderSpec::SellYes {
             market_id: 0,
-            limit_price: 0.60,
+            limit_price_nanos: 600_000_000,
             quantity: 5,
         };
         let order = order_spec_to_order(&spec, &ms).unwrap();
@@ -395,7 +397,7 @@ mod tests {
         let spec = OrderSpec::Spread {
             market_a: 0,
             market_b: 1,
-            limit_price: 0.10,
+            limit_price_nanos: 100_000_000,
             quantity: 10,
         };
         let order = order_spec_to_order(&spec, &ms).unwrap();
@@ -408,7 +410,7 @@ mod tests {
         let ms = make_markets();
         let spec = OrderSpec::BuyYes {
             market_id: 99,
-            limit_price: 0.55,
+            limit_price_nanos: 550_000_000,
             quantity: 10,
         };
         assert!(order_spec_to_order(&spec, &ms).is_err());
@@ -419,7 +421,7 @@ mod tests {
         let ms = make_markets();
         let spec = OrderSpec::BuyYes {
             market_id: 0,
-            limit_price: 1.5,
+            limit_price_nanos: 1_500_000_000, // > NANOS_PER_DOLLAR
             quantity: 10,
         };
         assert!(order_spec_to_order(&spec, &ms).is_err());
@@ -432,7 +434,7 @@ mod tests {
 
         let resp = account_to_response(&account);
         assert_eq!(resp.account_id, 42);
-        assert!((resp.balance_dollars - 100.0).abs() < 0.01);
+        assert_eq!(resp.balance_nanos, 100 * NANOS_PER_DOLLAR as i64);
         assert_eq!(resp.positions.len(), 1);
     }
 
@@ -442,7 +444,7 @@ mod tests {
         let spec = OrderSpec::Custom {
             market_ids: vec![0, 1],
             payoffs: vec![1, 0, 0, 0],
-            limit_price: 0.20,
+            limit_price_nanos: 200_000_000,
             min_fill: 0,
             max_fill: 10,
         };

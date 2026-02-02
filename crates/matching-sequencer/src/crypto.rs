@@ -100,7 +100,7 @@ pub fn sign_order(order: &Order, key: &SigningKey) -> SignedOrder {
     let signature: Signature = key.sign(&msg);
     SignedOrder {
         order: order.clone(),
-        signer: PublicKey(key.verifying_key().clone()),
+        signer: PublicKey(*key.verifying_key()),
         signature,
     }
 }

@@ -1,4 +1,4 @@
-use matching_engine::MarketId;
+use matching_engine::{MarketId, Nanos, NANOS_PER_DOLLAR};
 
 use crate::error::OracleError;
 use crate::traits::{Oracle, ResolutionAction};
@@ -6,8 +6,8 @@ use crate::types::{MarketStatus, OracleSource, ResolutionRecord};
 
 /// Trivial admin oracle: resolves markets immediately with no challenge window.
 ///
-/// Validates that the outcome is 0 or 1 (binary) and that the market is not
-/// already resolved. Returns `SettleNow` on success.
+/// Validates that the payout is within [0, NANOS_PER_DOLLAR] and that the
+/// market is not already resolved. Returns `SettleNow` on success.
 pub struct AdminOracle;
 
 impl AdminOracle {
@@ -26,13 +26,13 @@ impl Oracle for AdminOracle {
     fn resolve(
         &self,
         market_id: MarketId,
-        winning_outcome: u8,
+        payout_nanos: Nanos,
         current_status: &MarketStatus,
         timestamp_ms: u64,
     ) -> Result<ResolutionAction, OracleError> {
-        // Validate outcome (binary markets only)
-        if winning_outcome > 1 {
-            return Err(OracleError::InvalidOutcome(winning_outcome));
+        // Validate payout range
+        if payout_nanos > NANOS_PER_DOLLAR {
+            return Err(OracleError::InvalidPayout(payout_nanos));
         }
 
         // Check current state
@@ -44,7 +44,7 @@ impl Oracle for AdminOracle {
 
         let record = ResolutionRecord {
             market_id,
-            winning_outcome,
+            payout_nanos,
             resolved_by: OracleSource::Admin,
             resolved_at_ms: timestamp_ms,
             proposal: None,
@@ -53,7 +53,7 @@ impl Oracle for AdminOracle {
 
         Ok(ResolutionAction::SettleNow {
             market_id,
-            winning_outcome,
+            payout_nanos,
             record,
         })
     }
@@ -69,21 +69,21 @@ mod tests {
     use matching_engine::MarketId;
 
     #[test]
-    fn test_admin_resolve_yes() {
+    fn test_admin_resolve_yes_wins() {
         let oracle = AdminOracle::new();
         let status = MarketStatus::Active;
         let action = oracle
-            .resolve(MarketId::new(0), 0, &status, 1000)
+            .resolve(MarketId::new(0), NANOS_PER_DOLLAR, &status, 1000)
             .unwrap();
 
         match action {
             ResolutionAction::SettleNow {
                 market_id,
-                winning_outcome,
+                payout_nanos,
                 record,
             } => {
                 assert_eq!(market_id, MarketId::new(0));
-                assert_eq!(winning_outcome, 0);
+                assert_eq!(payout_nanos, NANOS_PER_DOLLAR);
                 assert_eq!(record.resolved_at_ms, 1000);
                 assert!(matches!(record.resolved_by, OracleSource::Admin));
             }
@@ -92,29 +92,50 @@ mod tests {
     }
 
     #[test]
-    fn test_admin_resolve_no() {
+    fn test_admin_resolve_no_wins() {
         let oracle = AdminOracle::new();
         let status = MarketStatus::Active;
         let action = oracle
-            .resolve(MarketId::new(1), 1, &status, 2000)
+            .resolve(MarketId::new(1), 0, &status, 2000)
             .unwrap();
 
         match action {
-            ResolutionAction::SettleNow {
-                winning_outcome, ..
-            } => {
-                assert_eq!(winning_outcome, 1);
+            ResolutionAction::SettleNow { payout_nanos, .. } => {
+                assert_eq!(payout_nanos, 0);
             }
             other => panic!("Expected SettleNow, got {:?}", other),
         }
     }
 
     #[test]
-    fn test_admin_rejects_invalid_outcome() {
+    fn test_admin_resolve_fractional() {
         let oracle = AdminOracle::new();
         let status = MarketStatus::Active;
-        let err = oracle.resolve(MarketId::new(0), 2, &status, 1000).unwrap_err();
-        assert!(matches!(err, OracleError::InvalidOutcome(2)));
+        let action = oracle
+            .resolve(MarketId::new(0), 700_000_000, &status, 3000)
+            .unwrap();
+
+        match action {
+            ResolutionAction::SettleNow {
+                payout_nanos,
+                record,
+                ..
+            } => {
+                assert_eq!(payout_nanos, 700_000_000);
+                assert_eq!(record.payout_nanos, 700_000_000);
+            }
+            other => panic!("Expected SettleNow, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_admin_rejects_invalid_payout() {
+        let oracle = AdminOracle::new();
+        let status = MarketStatus::Active;
+        let err = oracle
+            .resolve(MarketId::new(0), NANOS_PER_DOLLAR + 1, &status, 1000)
+            .unwrap_err();
+        assert!(matches!(err, OracleError::InvalidPayout(_)));
     }
 
     #[test]
@@ -122,14 +143,16 @@ mod tests {
         let oracle = AdminOracle::new();
         let record = ResolutionRecord {
             market_id: MarketId::new(0),
-            winning_outcome: 0,
+            payout_nanos: NANOS_PER_DOLLAR,
             resolved_by: OracleSource::Admin,
             resolved_at_ms: 500,
             proposal: None,
             challenge: None,
         };
         let status = MarketStatus::Resolved { record };
-        let err = oracle.resolve(MarketId::new(0), 1, &status, 1000).unwrap_err();
+        let err = oracle
+            .resolve(MarketId::new(0), 0, &status, 1000)
+            .unwrap_err();
         assert!(matches!(err, OracleError::AlreadyResolved));
     }
 
@@ -138,7 +161,7 @@ mod tests {
         let oracle = AdminOracle::new();
         let status = MarketStatus::Active;
         let err = oracle
-            .challenge(MarketId::new(0), 1, &status, 100, 1000)
+            .challenge(MarketId::new(0), 0, &status, 100, 1000)
             .unwrap_err();
         assert!(matches!(err, OracleError::ChallengeNotSupported));
     }

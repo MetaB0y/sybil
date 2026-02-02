@@ -6,7 +6,7 @@ use utoipa::ToSchema;
 #[derive(Debug, Serialize, ToSchema)]
 pub struct AccountResponse {
     pub account_id: u64,
-    pub balance_dollars: f64,
+    pub balance_nanos: i64,
     pub positions: Vec<PositionResponse>,
 }
 
@@ -21,11 +21,11 @@ pub struct PositionResponse {
 pub struct MarketResponse {
     pub market_id: u32,
     pub name: String,
-    pub yes_price: Option<f64>,
-    pub no_price: Option<f64>,
+    pub yes_price_nanos: Option<u64>,
+    pub no_price_nanos: Option<u64>,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub winning_outcome: Option<u8>,
+    pub payout_nanos: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub challenge_deadline_ms: Option<u64>,
 }
@@ -43,8 +43,8 @@ pub struct MarketPricesResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct MarketPriceResponse {
-    pub yes_price: f64,
-    pub no_price: f64,
+    pub yes_price_nanos: u64,
+    pub no_price_nanos: u64,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -56,7 +56,7 @@ pub struct OrderAcceptedResponse {
 pub struct FillResponse {
     pub order_id: u64,
     pub fill_qty: u64,
-    pub fill_price: f64,
+    pub fill_price_nanos: u64,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -75,10 +75,10 @@ pub struct BlockResponse {
     pub fill_count: u32,
     pub timestamp_ms: u64,
     pub fills: Vec<FillResponse>,
-    pub clearing_prices: HashMap<String, Vec<f64>>,
+    pub clearing_prices_nanos: HashMap<String, Vec<u64>>,
     pub rejections: Vec<RejectionResponse>,
-    pub total_welfare: f64,
-    pub total_volume: f64,
+    pub total_welfare_nanos: i64,
+    pub total_volume_nanos: u64,
     pub orders_filled: usize,
 }
 
@@ -96,7 +96,7 @@ pub struct StateRootResponse {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ResolveMarketResponse {
     pub market_id: u32,
-    pub winning_outcome: u8,
+    pub payout_nanos: u64,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub challenge_deadline_ms: Option<u64>,

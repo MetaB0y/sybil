@@ -131,12 +131,14 @@ impl BlockSequencer {
 
     /// Resolve a market through the oracle.
     ///
+    /// `payout_nanos`: YES payout per share in nanos (0 to NANOS_PER_DOLLAR).
+    ///
     /// On `SettleNow`: calls settlement, removes from market groups, updates status.
     /// On `Propose`: stores the pending proposal (future L0 path).
     pub fn resolve_market(
         &mut self,
         market_id: MarketId,
-        winning_outcome: u8,
+        payout_nanos: Nanos,
         timestamp_ms: u64,
     ) -> Result<ResolutionRecord, SequencerError> {
         // Verify market exists
@@ -147,17 +149,17 @@ impl BlockSequencer {
         let current_status = self.market_status(market_id);
         let action = self
             .oracle
-            .resolve(market_id, winning_outcome, &current_status, timestamp_ms)
+            .resolve(market_id, payout_nanos, &current_status, timestamp_ms)
             .map_err(|e| SequencerError::OracleError(e.to_string()))?;
 
         match action {
             ResolutionAction::SettleNow {
                 market_id,
-                winning_outcome,
+                payout_nanos,
                 record,
             } => {
                 // Settle positions
-                settlement::resolve_market(&mut self.accounts, market_id, winning_outcome);
+                settlement::resolve_market(&mut self.accounts, market_id, payout_nanos);
 
                 // Remove from market groups
                 self.market_groups
@@ -402,7 +404,7 @@ impl BlockSequencer {
         // Compute state root and build header
         let state_root = compute_state_root(&self.accounts);
         let parent_hash = self.last_header.as_ref()
-            .map(|h| hash_header(h))
+            .map(hash_header)
             .unwrap_or([0u8; 32]);
 
         let header = BlockHeader {

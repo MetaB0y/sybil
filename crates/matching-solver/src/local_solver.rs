@@ -51,11 +51,7 @@ impl MarketSolution {
     pub fn is_normalized(&self) -> bool {
         let sum: Nanos = self.prices.iter().sum();
         // Allow small rounding error (within 1 nano)
-        let diff = if sum > NANOS_PER_DOLLAR as Nanos {
-            sum - NANOS_PER_DOLLAR as Nanos
-        } else {
-            NANOS_PER_DOLLAR as Nanos - sum
-        };
+        let diff = sum.abs_diff(NANOS_PER_DOLLAR as Nanos);
         diff <= 1
     }
 

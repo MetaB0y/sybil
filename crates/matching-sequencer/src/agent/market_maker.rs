@@ -21,6 +21,7 @@ pub struct MarketMakerAgent {
 }
 
 impl MarketMakerAgent {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: String,
         account_id: AccountId,

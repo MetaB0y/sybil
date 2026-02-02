@@ -9,8 +9,8 @@ pub enum OracleError {
     AlreadyResolved,
     #[error("invalid market state for this operation")]
     InvalidState,
-    #[error("invalid outcome: {0}")]
-    InvalidOutcome(u8),
+    #[error("invalid payout: {0} nanos (must be 0 to 1_000_000_000)")]
+    InvalidPayout(u64),
     #[error("challenge not supported by this oracle")]
     ChallengeNotSupported,
     #[error("insufficient bond: required {required}, got {provided}")]

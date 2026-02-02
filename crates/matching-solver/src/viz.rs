@@ -398,6 +398,7 @@ impl PhaseSnapshot {
 
     /// Capture with phase-specific data.
     #[cfg(feature = "viz")]
+    #[allow(clippy::too_many_arguments)]
     pub fn capture_with_phase_data(
         phase: PipelinePhase,
         iteration: usize,

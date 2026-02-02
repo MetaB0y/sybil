@@ -70,7 +70,7 @@ pub enum Message {
     },
     ResolveMarket {
         market_id: MarketId,
-        winning_outcome: u8,
+        payout_nanos: Nanos,
         respond_to: oneshot::Sender<Result<ResolutionRecord, SequencerError>>,
     },
     GetMarketStatus {
@@ -242,12 +242,12 @@ impl SequencerActor {
             Message::ListMarketGroups { respond_to } => {
                 let _ = respond_to.send(self.sequencer.market_groups().to_vec());
             }
-            Message::ResolveMarket { market_id, winning_outcome, respond_to } => {
+            Message::ResolveMarket { market_id, payout_nanos, respond_to } => {
                 let timestamp_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_millis() as u64;
-                let result = self.sequencer.resolve_market(market_id, winning_outcome, timestamp_ms);
+                let result = self.sequencer.resolve_market(market_id, payout_nanos, timestamp_ms);
                 let _ = respond_to.send(result);
             }
             Message::GetMarketStatus { market_id, respond_to } => {
@@ -501,17 +501,17 @@ impl SequencerHandle {
         rx.await.map_err(|_| SequencerError::ActorGone)
     }
 
-    /// Resolve a market with the given winning outcome.
+    /// Resolve a market with the given YES payout (0 to NANOS_PER_DOLLAR).
     pub async fn resolve_market(
         &self,
         market_id: MarketId,
-        winning_outcome: u8,
+        payout_nanos: Nanos,
     ) -> Result<ResolutionRecord, SequencerError> {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(Message::ResolveMarket {
                 market_id,
-                winning_outcome,
+                payout_nanos,
                 respond_to: tx,
             })
             .await
@@ -851,8 +851,8 @@ mod tests {
         let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
 
         let m0 = MarketId::new(0);
-        let record = handle.resolve_market(m0, 0).await.unwrap();
-        assert_eq!(record.winning_outcome, 0);
+        let record = handle.resolve_market(m0, NANOS_PER_DOLLAR).await.unwrap();
+        assert_eq!(record.payout_nanos, NANOS_PER_DOLLAR);
         assert_eq!(record.market_id, m0);
     }
 
@@ -861,7 +861,7 @@ mod tests {
         let (seq, _) = make_test_sequencer();
         let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
 
-        let result = handle.resolve_market(MarketId::new(999), 0).await;
+        let result = handle.resolve_market(MarketId::new(999), NANOS_PER_DOLLAR).await;
         assert!(matches!(result, Err(SequencerError::MarketNotFound)));
     }
 

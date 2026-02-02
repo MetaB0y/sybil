@@ -1,4 +1,4 @@
-use matching_engine::MarketId;
+use matching_engine::{MarketId, Nanos};
 
 use crate::error::OracleError;
 use crate::types::{MarketStatus, ResolutionProposal, ResolutionRecord};
@@ -9,7 +9,7 @@ pub enum ResolutionAction {
     /// Settle the market immediately (no challenge window).
     SettleNow {
         market_id: MarketId,
-        winning_outcome: u8,
+        payout_nanos: Nanos,
         record: ResolutionRecord,
     },
     /// Propose a resolution with a challenge window.
@@ -37,10 +37,12 @@ pub enum ChallengeAction {
 /// on the returned actions.
 pub trait Oracle: Send + Sync {
     /// Process a resolution request. Returns an action for the sequencer to execute.
+    ///
+    /// `payout_nanos`: the proposed YES payout per share in nanos (0 to NANOS_PER_DOLLAR).
     fn resolve(
         &self,
         market_id: MarketId,
-        winning_outcome: u8,
+        payout_nanos: Nanos,
         current_status: &MarketStatus,
         timestamp_ms: u64,
     ) -> Result<ResolutionAction, OracleError>;
@@ -51,7 +53,7 @@ pub trait Oracle: Send + Sync {
     fn challenge(
         &self,
         _market_id: MarketId,
-        _proposed_outcome: u8,
+        _proposed_payout_nanos: Nanos,
         _current_status: &MarketStatus,
         _bond_amount: u64,
         _timestamp_ms: u64,

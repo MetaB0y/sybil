@@ -60,10 +60,10 @@ impl MarketStatus {
         }
     }
 
-    /// Returns the winning outcome if the market is resolved.
-    pub fn winning_outcome(&self) -> Option<u8> {
+    /// Returns the YES payout in nanos if the market is resolved.
+    pub fn payout_nanos(&self) -> Option<Nanos> {
         match self {
-            MarketStatus::Resolved { record } => Some(record.winning_outcome),
+            MarketStatus::Resolved { record } => Some(record.payout_nanos),
             _ => None,
         }
     }
@@ -85,7 +85,8 @@ impl MarketStatus {
 pub struct ResolutionProposal {
     pub id: ProposalId,
     pub market_id: MarketId,
-    pub winning_outcome: u8,
+    /// Payout per YES share in nanos (0 to NANOS_PER_DOLLAR).
+    pub payout_nanos: Nanos,
     pub source: OracleSource,
     pub proposed_at_ms: u64,
     pub reason: Option<String>,
@@ -99,7 +100,8 @@ pub struct Challenge {
     pub challenger: u64,
     pub proposal_id: ProposalId,
     pub bond_amount: Nanos,
-    pub proposed_outcome: u8,
+    /// Challenger's proposed payout per YES share in nanos.
+    pub proposed_payout_nanos: Nanos,
     pub reason: String,
     pub challenged_at_ms: u64,
 }
@@ -108,7 +110,9 @@ pub struct Challenge {
 #[derive(Clone, Debug)]
 pub struct ResolutionRecord {
     pub market_id: MarketId,
-    pub winning_outcome: u8,
+    /// Payout per YES share in nanos (0 to NANOS_PER_DOLLAR).
+    /// NO shares receive `NANOS_PER_DOLLAR - payout_nanos`.
+    pub payout_nanos: Nanos,
     pub resolved_by: OracleSource,
     pub resolved_at_ms: u64,
     pub proposal: Option<ResolutionProposal>,

@@ -71,7 +71,7 @@ use serde::Serialize;
 use matching_engine::{Fill, Order, Problem};
 
 /// Result of solving a matching problem.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct MatchingResult {
     /// Orders that were filled
     pub fills: Vec<Fill>,

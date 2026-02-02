@@ -88,7 +88,7 @@ impl Mempool {
         let mut result = Vec::new();
 
         // Drain from each market pool
-        for (_market, pool) in &mut self.market_pools {
+        for pool in self.market_pools.values_mut() {
             let take = pool.len().min(self.per_market_limit);
             // Drain from the front (FIFO — oldest first)
             result.extend(pool.drain(..take));

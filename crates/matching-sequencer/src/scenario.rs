@@ -321,7 +321,7 @@ fn make_random_binary_events(n: usize, seed: u64) -> Vec<EventDef> {
 }
 
 /// Bidirectional mapping between events and markets.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct EventMarketMap {
     /// event_index -> list of MarketIds (one per outcome for N>2, one for binary)
     pub event_markets: Vec<Vec<MarketId>>,
@@ -331,10 +331,7 @@ pub struct EventMarketMap {
 
 impl EventMarketMap {
     pub fn new() -> Self {
-        Self {
-            event_markets: Vec::new(),
-            market_to_event: HashMap::new(),
-        }
+        Self::default()
     }
 }
 

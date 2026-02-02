@@ -82,3 +82,9 @@ The pipeline can iterate via fixed-point loop until convergence.
 - **Welfare maximization**: The objective is `sum((limit_price - clearing_price) * fill_qty)`, not volume.
 - **MILP is optional**: The `milp` feature (using HiGHS solver via `good_lp`) is feature-gated since it adds a large dependency.
 - **Verification** (`verifier.rs`): Validates solver output for correctness — designed for ZK proof integration.
+
+## Developemnt notes
+- Do not use floating point numbers, use u64 etc.
+- Use proptest for property-based/metamorphic tesets but only where it makes sense
+- Always think about boundaries and reducing accidental complexity -- avoid tight coupling unless necessary
+- Prefer actor model using this pattern https://ryhl.io/blog/actors-with-tokio/ to mutex etc.

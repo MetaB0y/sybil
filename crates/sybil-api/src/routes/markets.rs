@@ -1,7 +1,7 @@
 use axum::extract::{Path, State};
 use axum::Json;
 
-use matching_engine::MarketId;
+use matching_engine::{MarketId, NANOS_PER_DOLLAR};
 
 use crate::convert::prices_to_response;
 use crate::state::AppState;
@@ -35,14 +35,10 @@ pub async fn list_markets(
             MarketResponse {
                 market_id: m.id.0,
                 name: m.name.clone(),
-                yes_price: market_prices
-                    .and_then(|p| p.first())
-                    .map(|&p| p as f64 / matching_engine::NANOS_PER_DOLLAR as f64),
-                no_price: market_prices
-                    .and_then(|p| p.get(1))
-                    .map(|&p| p as f64 / matching_engine::NANOS_PER_DOLLAR as f64),
+                yes_price_nanos: market_prices.and_then(|p| p.first().copied()),
+                no_price_nanos: market_prices.and_then(|p| p.get(1).copied()),
                 status: status.as_str().to_string(),
-                winning_outcome: status.winning_outcome(),
+                payout_nanos: status.payout_nanos(),
                 challenge_deadline_ms: status.challenge_deadline_ms(),
             }
         })
@@ -78,14 +74,10 @@ pub async fn get_market(
     Ok(Json(MarketResponse {
         market_id: market.id.0,
         name: market.name.clone(),
-        yes_price: market_prices
-            .and_then(|p| p.first())
-            .map(|&p| p as f64 / matching_engine::NANOS_PER_DOLLAR as f64),
-        no_price: market_prices
-            .and_then(|p| p.get(1))
-            .map(|&p| p as f64 / matching_engine::NANOS_PER_DOLLAR as f64),
+        yes_price_nanos: market_prices.and_then(|p| p.first().copied()),
+        no_price_nanos: market_prices.and_then(|p| p.get(1).copied()),
         status: status.as_str().to_string(),
-        winning_outcome: status.winning_outcome(),
+        payout_nanos: status.payout_nanos(),
         challenge_deadline_ms: status.challenge_deadline_ms(),
     }))
 }
@@ -203,17 +195,24 @@ pub async fn resolve_market(
         return Err(AppError::dev_mode_required());
     }
 
+    if req.payout_nanos > NANOS_PER_DOLLAR {
+        return Err(AppError::bad_request(format!(
+            "Payout must be between 0 and {} nanos, got {}",
+            NANOS_PER_DOLLAR, req.payout_nanos
+        )));
+    }
+
     let mid = MarketId::new(id);
     let _record = state
         .sequencer
-        .resolve_market(mid, req.winning_outcome)
+        .resolve_market(mid, req.payout_nanos)
         .await?;
 
     let status = state.sequencer.get_market_status(mid).await?;
 
     Ok(Json(ResolveMarketResponse {
         market_id: id,
-        winning_outcome: req.winning_outcome,
+        payout_nanos: req.payout_nanos,
         status: status.as_str().to_string(),
         challenge_deadline_ms: status.challenge_deadline_ms(),
     }))

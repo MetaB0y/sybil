@@ -382,7 +382,7 @@ fn print_market_details(
         let (yes_price, no_price) = if let Some(ref pd) = result.price_discovery {
             if let Some(prices) = pd.prices.get(&market_id) {
                 (
-                    prices.get(0).copied().unwrap_or(0),
+                    prices.first().copied().unwrap_or(0),
                     prices.get(1).copied().unwrap_or(0),
                 )
             } else {
@@ -559,7 +559,7 @@ fn print_verification_result(result: &VerificationResult) {
     println!("─────────────────────────────────────────");
 
     if result.valid {
-        println!("  Status: {} VALID", "✓");
+        println!("  Status: \u{2713} VALID");
         println!(
             "  Fills verified: {}",
             result.stats.fills_checked
@@ -574,7 +574,7 @@ fn print_verification_result(result: &VerificationResult) {
             format_welfare(result.stats.reported_welfare)
         );
     } else {
-        println!("  Status: {} INVALID ({} violations)", "✗", result.violations.len());
+        println!("  Status: \u{2717} INVALID ({} violations)", result.violations.len());
         println!();
         println!("  Violations:");
         for (i, violation) in result.violations.iter().enumerate().take(10) {

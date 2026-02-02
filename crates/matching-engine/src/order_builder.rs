@@ -355,6 +355,7 @@ pub fn outcome_sell(
 }
 
 /// Create a ratio spread: Buy N units of A YES, Sell M units of B YES.
+#[allow(clippy::too_many_arguments)]
 pub fn ratio_spread(
     markets: &MarketSet,
     id: u64,
@@ -381,6 +382,7 @@ pub fn ratio_spread(
 }
 
 /// Create a conditional order that activates based on another market's price.
+#[allow(clippy::too_many_arguments)]
 pub fn conditional_buy(
     markets: &MarketSet,
     id: u64,

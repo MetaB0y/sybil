@@ -1,7 +1,6 @@
 use axum::extract::{Path, State};
 use axum::Json;
 
-use matching_engine::NANOS_PER_DOLLAR;
 use matching_sequencer::{AccountId, PublicKey};
 use p256::ecdsa::VerifyingKey;
 use p256::EncodedPoint;
@@ -30,7 +29,7 @@ pub async fn create_account(
         return Err(AppError::dev_mode_required());
     }
 
-    let balance_nanos = (req.initial_balance_dollars * NANOS_PER_DOLLAR as f64) as i64;
+    let balance_nanos = req.initial_balance_nanos as i64;
     let account = state.sequencer.create_account(balance_nanos).await?;
     Ok(Json(account_to_response(&account)))
 }
@@ -56,7 +55,7 @@ pub async fn fund_account(
         return Err(AppError::dev_mode_required());
     }
 
-    let amount_nanos = (req.amount_dollars * NANOS_PER_DOLLAR as f64) as i64;
+    let amount_nanos = req.amount_nanos as i64;
     let account = state
         .sequencer
         .fund_account(AccountId(id), amount_nanos)

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use matching_engine::{MarketGroup, MarketId, MarketSet, MmId, Nanos};
+use matching_engine::{MarketGroup, MarketId, MarketSet, MmId, Nanos, NANOS_PER_DOLLAR};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use sybil_oracle::AdminOracle;
@@ -218,15 +218,15 @@ impl SimulationRunner {
             let market_ids = &event_map.event_markets[*event_idx];
 
             for (outcome_idx, &mid) in market_ids.iter().enumerate() {
-                // The winning outcome's market resolves YES; others resolve NO
-                let winning = if market_ids.len() == 1 {
+                // The winning outcome's market resolves YES ($1); others resolve NO ($0)
+                let payout = if market_ids.len() == 1 {
                     // Binary event: winner 0 = YES wins, winner 1 = NO wins
-                    if *winner_outcome == 0 { 0u8 } else { 1u8 }
+                    if *winner_outcome == 0 { NANOS_PER_DOLLAR } else { 0 }
                 } else {
                     // Multi-outcome: the market matching the winner resolves YES
-                    if outcome_idx == *winner_outcome { 0u8 } else { 1u8 }
+                    if outcome_idx == *winner_outcome { NANOS_PER_DOLLAR } else { 0 }
                 };
-                settlement::resolve_market(&mut self.sequencer.accounts, mid, winning);
+                settlement::resolve_market(&mut self.sequencer.accounts, mid, payout);
                 self.resolved_markets.insert(mid);
             }
 
@@ -288,15 +288,17 @@ impl SimulationRunner {
                 continue;
             }
             for (outcome_idx, &mid) in market_ids.iter().enumerate() {
-                let winning = if market_ids.len() == 1 {
-                    if event.winner == 0 { 0u8 } else { 1u8 }
+                let payout = if market_ids.len() == 1 {
+                    if event.winner == 0 { NANOS_PER_DOLLAR } else { 0 }
+                } else if outcome_idx == event.winner {
+                    NANOS_PER_DOLLAR
                 } else {
-                    if outcome_idx == event.winner { 0u8 } else { 1u8 }
+                    0
                 };
                 settlement::resolve_market(
                     &mut self.sequencer.accounts,
                     mid,
-                    winning,
+                    payout,
                 );
             }
         }

@@ -28,6 +28,7 @@ impl Account {
     }
 }
 
+#[derive(Default)]
 pub struct AccountStore {
     accounts: HashMap<AccountId, Account>,
     next_id: u64,
@@ -35,10 +36,7 @@ pub struct AccountStore {
 
 impl AccountStore {
     pub fn new() -> Self {
-        Self {
-            accounts: HashMap::new(),
-            next_id: 0,
-        }
+        Self::default()
     }
 
     pub fn create_account(&mut self, balance: i64) -> AccountId {
