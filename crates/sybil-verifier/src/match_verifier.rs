@@ -47,28 +47,39 @@ pub fn verify_match(witness: &BlockWitness, strict: bool) -> VerificationResult 
     verify_resolved_markets(witness, &order_map, &mut violations);
     verify_conditional_activation(witness, &order_map, &mut violations);
 
+    // UCP: The solver enforces uniform clearing prices by re-pricing all
+    // single-market fills at the final clearing price after iteration completes.
+    verify_uniform_clearing_prices(witness, &order_map, &mut violations);
+
     // Strict-only checks:
     //
-    // UCP: The iterative pipeline produces fills at per-iteration clearing prices
-    // which may differ from the final clearing prices stored in the witness.
-    //
-    // Quantity balance & cash conservation: In prediction markets, matching a YES
-    // buyer against a NO buyer "mints" a complete set, creating net new positions.
-    // Multi-market bundles further complicate per-market accounting. These
-    // invariants are instead enforced by Layer 2 (settlement verification) which
-    // checks exact balance/position transitions.
-    //
-    // Market group constraint: With finite liquidity, the negrisk solver exploits
-    // arbitrage where YES prices sum > $1, but may not fully close the gap.
-    // The clearing prices reflect achievable equilibrium, not a theoretical ideal.
+    // Market group constraint: With finite liquidity, clearing prices in a market
+    // group may sum > $1 (or < $1). This represents unexploited arbitrage that
+    // the solver couldn't close due to insufficient liquidity, not a correctness
+    // bug. Use verify_match stats to check avg |sum - 1| instead.
     if strict {
-        verify_uniform_clearing_prices(witness, &order_map, &mut violations);
-        verify_quantity_balance(witness, &order_map, &mut violations);
-        verify_cash_conservation(witness, &order_map, &mut violations);
         verify_market_group_constraints(witness, &mut violations);
     }
 
     stats.reported_welfare = witness.total_welfare;
+
+    // Compute market group price quality metric: avg |sum_YES_prices - $1|
+    if !witness.market_groups.is_empty() {
+        let mut total_delta: u64 = 0;
+        for group in &witness.market_groups {
+            let mut sum: u64 = 0;
+            for &market in &group.markets {
+                if let Some(prices) = witness.clearing_prices.get(&market) {
+                    if let Some(&yes_price) = prices.first() {
+                        sum += yes_price;
+                    }
+                }
+            }
+            total_delta += (sum as i64 - NANOS_PER_DOLLAR as i64).unsigned_abs();
+        }
+        stats.market_group_avg_delta =
+            Some(total_delta / witness.market_groups.len() as u64);
+    }
 
     VerificationResult {
         valid: violations.is_empty(),
@@ -324,141 +335,15 @@ fn verify_price_complementarity(witness: &BlockWitness, violations: &mut Vec<Vio
     }
 }
 
-/// Check 12: Quantity balance — per market/outcome, total bought == total sold.
-fn verify_quantity_balance(
-    witness: &BlockWitness,
-    order_map: &HashMap<u64, &Order>,
-    violations: &mut Vec<Violation>,
-) {
-    // Track net position change per (market, outcome)
-    let mut net_positions: HashMap<(MarketId, u8), i64> = HashMap::new();
-
-    for fill in &witness.fills {
-        if fill.fill_qty == 0 {
-            continue;
-        }
-        let Some(order) = order_map.get(&fill.order_id) else {
-            continue;
-        };
-
-        let num_markets = order.num_markets as usize;
-        let num_states = order.num_states as usize;
-
-        if num_markets == 1 && num_states == 2 {
-            let market = order.markets[0];
-            let yes_payoff = order.payoffs[0] as i64;
-            let no_payoff = order.payoffs[1] as i64;
-
-            if yes_payoff != 0 {
-                *net_positions.entry((market, 0)).or_insert(0) +=
-                    yes_payoff * fill.fill_qty as i64;
-            }
-            if no_payoff != 0 {
-                *net_positions.entry((market, 1)).or_insert(0) +=
-                    no_payoff * fill.fill_qty as i64;
-            }
-        } else {
-            // Multi-market: compute marginal position per market per outcome
-            for m_idx in 0..num_markets {
-                let market = order.markets[m_idx];
-                let stride = 1usize << m_idx;
-
-                let mut yes_sum: i64 = 0;
-                let mut yes_count: usize = 0;
-                let mut no_sum: i64 = 0;
-                let mut no_count: usize = 0;
-
-                for s in 0..num_states {
-                    let outcome = (s / stride) % 2;
-                    let payoff = order.payoffs[s] as i64;
-                    if outcome == 0 {
-                        yes_sum += payoff;
-                        yes_count += 1;
-                    } else {
-                        no_sum += payoff;
-                        no_count += 1;
-                    }
-                }
-
-                if yes_count > 0 && yes_sum != 0 {
-                    *net_positions.entry((market, 0)).or_insert(0) +=
-                        yes_sum * fill.fill_qty as i64 / yes_count as i64;
-                }
-                if no_count > 0 && no_sum != 0 {
-                    *net_positions.entry((market, 1)).or_insert(0) +=
-                        no_sum * fill.fill_qty as i64 / no_count as i64;
-                }
-            }
-        }
-    }
-
-    for (&(market, outcome), &net) in &net_positions {
-        if net != 0 {
-            violations.push(Violation {
-                kind: ViolationKind::QuantityBalanceViolation,
-                details: format!(
-                    "Market {:?} outcome {}: net position change = {} (expected 0)",
-                    market, outcome, net
-                ),
-            });
-        }
-    }
-}
-
-/// Check 13: Cash conservation — net cash flow across all fills == 0.
-fn verify_cash_conservation(
-    witness: &BlockWitness,
-    order_map: &HashMap<u64, &Order>,
-    violations: &mut Vec<Violation>,
-) {
-    let mut net_cash: i128 = 0;
-
-    for fill in &witness.fills {
-        if fill.fill_qty == 0 {
-            continue;
-        }
-        let Some(order) = order_map.get(&fill.order_id) else {
-            continue;
-        };
-
-        // Each fill: buyer pays fill_price * fill_qty, seller receives it.
-        // Net cash change for this order = -fill_price * fill_qty for buyers,
-        // +fill_price * fill_qty for sellers.
-        // The total across all fills should be zero.
-        let cost = fill.fill_price as i128 * fill.fill_qty as i128;
-        if order.is_seller() {
-            // Seller receives (settle_fill adds to balance)
-            // Actually in settle_generic: balance -= fill_price * fill_qty for everyone
-            // So net is always negative. Let's think about this differently:
-            // In settlement, every order debits balance by fill_price * fill_qty.
-            // So the net cash is just the sum of all debits.
-            // But that's not zero — positions are what balance it.
-            //
-            // Cash conservation means: sum of (fill_price * fill_qty) for buys ==
-            // sum of (fill_price * fill_qty) for sells, when fills are matched.
-            //
-            // Actually, in the settlement model, EVERY fill debits fill_price * fill_qty
-            // and credits positions. The cash conservation is actually about the
-            // balance change being consistent. Let's skip this for now if the
-            // settlement verification handles it.
-        }
-
-        // Simpler formulation: net cash flow = sum over all fills of
-        // (fill_price * fill_qty) where buyer is negative and seller is positive.
-        if order.is_seller() {
-            net_cash += cost;
-        } else {
-            net_cash -= cost;
-        }
-    }
-
-    if net_cash != 0 {
-        violations.push(Violation {
-            kind: ViolationKind::CashConservationViolation,
-            details: format!("Net cash flow across all fills = {} (expected 0)", net_cash),
-        });
-    }
-}
+// NOTE: "Quantity balance" (net position change = 0 per outcome) and "cash conservation"
+// (net cash flow = 0) are standard exchange-market invariants that do NOT hold in
+// prediction markets. In prediction markets, matching a YES buyer with a NO buyer
+// "mints" a complete set: both positions increase, and cash flows into the exchange
+// (P_yes + P_no = $1 per set). Similarly, matching a YES seller with a NO seller
+// "burns" a set. Only same-outcome buyer-vs-seller matching has zero net effect.
+//
+// Settlement verification (Layer 2) correctly handles this by re-deriving exact
+// balance and position transitions per account.
 
 /// Check 14: Market group constraint — sum of YES clearing prices <= $1.
 fn verify_market_group_constraints(witness: &BlockWitness, violations: &mut Vec<Violation>) {

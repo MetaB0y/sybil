@@ -41,10 +41,6 @@ pub enum ViolationKind {
     UniformClearingPriceViolation,
     /// `clearing_price_YES + clearing_price_NO != NANOS_PER_DOLLAR`.
     PriceComplementarityViolation,
-    /// Per-market total bought != total sold.
-    QuantityBalanceViolation,
-    /// Net cash flow across all fills != 0.
-    CashConservationViolation,
     /// Sum of YES clearing prices in a group exceeds `NANOS_PER_DOLLAR`.
     MarketGroupConstraintViolation,
     /// Fill or order references a resolved/voided market.
@@ -131,6 +127,9 @@ pub struct VerificationStats {
     pub computed_welfare: i64,
     pub reported_welfare: i64,
     pub accounts_checked: usize,
+    /// Average |sum_of_YES_prices - $1| across market groups, in nanos.
+    /// Lower is better. 0 means perfect. Only meaningful when groups exist.
+    pub market_group_avg_delta: Option<u64>,
 }
 
 impl VerificationStats {
@@ -146,5 +145,8 @@ impl VerificationStats {
             self.reported_welfare = other.reported_welfare;
         }
         self.accounts_checked += other.accounts_checked;
+        if other.market_group_avg_delta.is_some() {
+            self.market_group_avg_delta = other.market_group_avg_delta;
+        }
     }
 }

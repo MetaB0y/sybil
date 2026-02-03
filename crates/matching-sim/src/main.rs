@@ -501,8 +501,9 @@ fn run_detailed_pipeline(
 
             // Verify the result using the new comprehensive verifier
             let witness = witness_from_problem(&problem_with_arb, &result);
-            let verification = verify_match(&witness, true);
+            let verification = verify_match(&witness, false);
             print_verification_result(&verification);
+
         }
 
         // Export JSON if requested
@@ -624,21 +625,14 @@ fn print_verification_result(result: &VerificationResult) {
             format_welfare(result.stats.computed_welfare),
             format_welfare(result.stats.reported_welfare)
         );
+        if let Some(delta) = result.stats.market_group_avg_delta {
+            let pct = delta as f64 / 1e7; // nanos to percentage points
+            println!("  Market group avg |sum-1|: {:.2}pp", pct);
+        }
     } else {
         println!("  Status: \u{2717} INVALID ({} violations)", result.violations.len());
         println!();
         println!("  Violations:");
-        // Count by kind
-        let mut kind_counts: std::collections::HashMap<_, usize> = std::collections::HashMap::new();
-        for violation in &result.violations {
-            *kind_counts.entry(format!("{:?}", violation.kind)).or_default() += 1;
-        }
-        println!("  By type:");
-        for (kind, count) in &kind_counts {
-            println!("    {}: {}", kind, count);
-        }
-        println!();
-        println!("  First 10:");
         for (i, violation) in result.violations.iter().enumerate().take(10) {
             println!("    {}. {:?}: {}", i + 1, violation.kind, violation.details);
         }
@@ -1157,7 +1151,20 @@ fn run_simulation(
 
         for (i, solver) in solvers.iter().enumerate() {
             let start = Instant::now();
-            let result = solver.solve(&problem);
+
+            // For MILP, use solve_with_status to get clearing prices for verification
+            let (result, milp_clearing_prices) = if solver.name().contains("MILP") {
+                let milp_solver = if let Some(timeout) = milp_timeout {
+                    MilpSolver::with_timeout(timeout)
+                } else {
+                    MilpSolver::with_timeout(5.0)
+                };
+                let milp_result = milp_solver.solve_with_status(&problem);
+                (milp_result.result, Some(milp_result.clearing_prices))
+            } else {
+                (solver.solve(&problem), None)
+            };
+
             let elapsed = start.elapsed().as_secs_f64();
 
             results[i].total_welfare += result.total_welfare;
@@ -1175,6 +1182,42 @@ fn run_simulation(
                     problem.num_orders(),
                     elapsed
                 );
+
+                // Run verification on MILP output
+                if let Some(ref prices) = milp_clearing_prices {
+                    let witness_orders: Vec<WitnessOrder> = problem
+                        .orders
+                        .iter()
+                        .map(|o| WitnessOrder {
+                            order: o.clone(),
+                            account_id: 0,
+                            is_mm: problem.mm_constraints.iter().any(|mm| mm.order_ids.contains(&o.id)),
+                        })
+                        .collect();
+                    let witness = BlockWitness {
+                        header: WitnessBlockHeader {
+                            height: 1,
+                            parent_hash: [0u8; 32],
+                            state_root: [0u8; 32],
+                            order_count: problem.orders.len() as u32,
+                            fill_count: result.fills.len() as u32,
+                            timestamp_ms: 0,
+                        },
+                        previous_header: None,
+                        orders: witness_orders,
+                        rejections: vec![],
+                        fills: result.fills.clone(),
+                        clearing_prices: prices.clone(),
+                        total_welfare: result.total_welfare,
+                        mm_constraints: problem.mm_constraints.clone(),
+                        market_groups: problem.market_groups.clone(),
+                        pre_state: vec![],
+                        post_state: vec![],
+                        resolved_markets: vec![],
+                    };
+                    let verification = verify_match(&witness, false);
+                    print_verification_result(&verification);
+                }
             }
         }
 

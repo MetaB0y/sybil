@@ -424,6 +424,9 @@ impl Pipeline {
         result.total_time_secs = start.elapsed().as_secs_f64();
         result.iterations = dual_result.iterations;
 
+        // Enforce UCP: re-price all single-market fills at the final clearing price.
+        Self::enforce_ucp(&mut result, &order_map);
+
         result
     }
 
@@ -956,6 +959,10 @@ impl Pipeline {
         // would be non-market-cleared and unsound. The arb orders from earlier
         // iterations already influenced prices through proper clearing.
 
+        // Enforce UCP: re-price all single-market fills at the final clearing price.
+        // Fills that would violate their order's limit at the new price are dropped.
+        Self::enforce_ucp(&mut result, &order_map);
+
         // Capture final phase snapshot
         #[cfg(feature = "viz")]
         phase_snapshots.push(crate::viz::PhaseSnapshot::capture(
@@ -1253,6 +1260,82 @@ impl Pipeline {
         }
 
         result
+    }
+
+    /// Enforce Uniform Clearing Price: re-price all single-market fills at the
+    /// final clearing price. Drops fills that would violate their order's limit
+    /// at the new price (these only existed due to transient intermediate prices).
+    /// Recomputes welfare from scratch.
+    fn enforce_ucp(result: &mut PipelineResult, order_map: &HashMap<u64, &matching_engine::Order>) {
+        let final_prices = match result.price_discovery {
+            Some(ref pd) => &pd.prices,
+            None => return,
+        };
+
+        let mut new_fills = Vec::with_capacity(result.result.fills.len());
+        let mut new_welfare: i64 = 0;
+        let mut new_volume: u64 = 0;
+        let mut orders_filled: usize = 0;
+
+        for fill in &result.result.fills {
+            if fill.fill_qty == 0 {
+                continue;
+            }
+
+            let Some(&order) = order_map.get(&fill.order_id) else {
+                // Keep fills we can't look up (shouldn't happen)
+                new_fills.push(fill.clone());
+                new_welfare += fill.fill_qty as i64; // can't compute welfare without order
+                new_volume += fill.fill_qty;
+                orders_filled += 1;
+                continue;
+            };
+
+            // Only re-price single-market binary orders
+            if order.num_markets == 1 && order.num_states == 2 {
+                let market = order.markets[0];
+                if let Some(prices) = final_prices.get(&market) {
+                    let yes_payoff = order.payoffs[0];
+                    let no_payoff = order.payoffs[1];
+
+                    let final_price = if (yes_payoff > 0 && no_payoff == 0)
+                        || (yes_payoff < 0 && no_payoff == 0)
+                    {
+                        prices.first().copied()
+                    } else if (yes_payoff == 0 && no_payoff > 0)
+                        || (yes_payoff == 0 && no_payoff < 0)
+                    {
+                        prices.get(1).copied()
+                    } else {
+                        None // mixed payoffs — keep original price
+                    };
+
+                    if let Some(fp) = final_price {
+                        if order.is_satisfied_at_price(fp) {
+                            let mut repriced = fill.clone();
+                            repriced.fill_price = fp;
+                            new_welfare += order.welfare_contribution(fp, fill.fill_qty);
+                            new_volume += fill.fill_qty;
+                            orders_filled += 1;
+                            new_fills.push(repriced);
+                        }
+                        // else: drop fill — limit violated at final price
+                        continue;
+                    }
+                }
+            }
+
+            // Multi-market or no clearing price: keep as-is
+            new_welfare += order.welfare_contribution(fill.fill_price, fill.fill_qty);
+            new_volume += fill.fill_qty;
+            orders_filled += 1;
+            new_fills.push(fill.clone());
+        }
+
+        result.result.fills = new_fills;
+        result.result.total_welfare = new_welfare;
+        result.result.total_quantity_filled = new_volume;
+        result.result.orders_filled = orders_filled;
     }
 
     /// Build a MatchingResult from a partial solution.
