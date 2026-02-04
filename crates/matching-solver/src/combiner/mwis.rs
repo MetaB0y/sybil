@@ -227,46 +227,53 @@ impl MwisSolver {
         selected
     }
 
-    /// Exact ILP solution using HiGHS.
+    /// Exact ILP solution using SCIP.
     #[cfg(feature = "milp")]
     fn solve_ilp(&self, graph: &ConflictGraph, weights: &[i64]) -> Vec<usize> {
-        use highs::{HighsModelStatus, RowProblem, Sense};
+        use russcip::prelude::*;
+        use russcip::Variable;
 
         let n = graph.num_nodes();
-        let mut pb = RowProblem::default();
 
-        // Binary variable x_i for each node (use add_integer_column for MIP)
-        let x_cols: Vec<_> = (0..n)
-            .map(|i| {
-                // Objective: maximize sum of weights * x_i
-                pb.add_integer_column(weights[i] as f64, 0.0..=1.0)
-            })
+        let mut model = Model::new()
+            .include_default_plugins()
+            .create_prob("mwis")
+            .maximize()
+            .hide_output()
+            .set_time_limit(5);
+
+        // Binary variable x_i for each node
+        let x_vars: Vec<Variable> = (0..n)
+            .map(|i| model.add(var().bin().obj(weights[i] as f64)))
             .collect();
 
         // Constraint: x_i + x_j <= 1 for each edge (i, j)
         for i in 0..n {
             for &j in graph.neighbors(i) {
                 if i < j {
-                    // Only add once per edge
-                    pb.add_row(..=1.0, [(x_cols[i], 1.0), (x_cols[j], 1.0)]);
+                    model.add(
+                        cons()
+                            .coef(&x_vars[i], 1.0)
+                            .coef(&x_vars[j], 1.0)
+                            .le(1.0),
+                    );
                 }
             }
         }
 
-        let mut model = pb.optimise(Sense::Maximise);
-
-        // Set time limit to avoid hanging on hard instances
-        model.set_option("time_limit", 5.0);
-
         let solved = model.solve();
 
         match solved.status() {
-            HighsModelStatus::Optimal
-            | HighsModelStatus::ObjectiveBound
-            | HighsModelStatus::ReachedTimeLimit => {
-                // Extract solution using Index trait
-                let sol = solved.get_solution();
-                (0..n).filter(|&i| sol[x_cols[i]] > 0.5).collect()
+            Status::Optimal
+            | Status::GapLimit
+            | Status::TimeLimit
+            | Status::SolutionLimit
+            | Status::BestSolutionLimit => {
+                if let Some(sol) = solved.best_sol() {
+                    (0..n).filter(|&i| sol.val(&x_vars[i]) > 0.5).collect()
+                } else {
+                    self.solve_greedy(graph, weights)
+                }
             }
             _ => {
                 // Fall back to greedy

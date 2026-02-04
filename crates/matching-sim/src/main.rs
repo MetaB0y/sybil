@@ -24,7 +24,7 @@ use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Cell, Color
 use matching_engine::{MarketId, Order, Problem};
 use matching_scenarios::{generate_scenario, ScenarioConfig};
 use matching_solver::{
-    IterationStats, MilpSolver, Pipeline, PipelineResult, Solver,
+    IterationStats, MilpConfig, MilpSolver, MmBudgetMode, Pipeline, PipelineResult, Solver,
     VizSnapshot,
 };
 use sybil_verifier::{
@@ -42,6 +42,7 @@ fn main() {
     let config = parse_scenario_config(&args);
     let solver_choice = parse_solver_choice(&args);
     let milp_timeout = parse_milp_timeout(&args);
+    let mm_mode = parse_mm_mode(&args);
     let num_batches = parse_batches(&args);
     let verbose = args.iter().any(|a| a == "--verbose" || a == "-v");
     let export_json = get_arg_value(&args, "--export-json");
@@ -73,7 +74,7 @@ fn main() {
         run_detailed_pipeline(&config, num_batches, export_json.as_deref(), show_charts, verbose, &solver_choice);
     } else {
         // Standard comparison run
-        let results = run_simulation(&config, &solver_choice, milp_timeout, num_batches, verbose);
+        let results = run_simulation(&config, &solver_choice, milp_timeout, mm_mode, num_batches, verbose);
         print_results(&results, &solver_choice);
     }
 
@@ -110,6 +111,10 @@ fn print_help() {
     println!("                         milp");
     println!("                         all (compare all)");
     println!("  --milp-timeout <S>   MILP time limit in seconds");
+    println!("  --mm-mode <M>        MM budget constraint mode:");
+    println!("                         exact (default) - bilinear MIQCQP");
+    println!("                         mccormick       - linear relaxation");
+    println!("                         ignore          - skip MM constraints");
     println!();
     println!("Other options:");
     println!("  --batches <N>        Number of batches to run (default: 1)");
@@ -1038,6 +1043,15 @@ fn parse_milp_timeout(args: &[String]) -> Option<f64> {
     get_arg_value(args, "--milp-timeout").and_then(|v| v.parse().ok())
 }
 
+fn parse_mm_mode(args: &[String]) -> MmBudgetMode {
+    match get_arg_value(args, "--mm-mode").as_deref() {
+        Some("exact") => MmBudgetMode::Exact,
+        Some("mccormick") => MmBudgetMode::McCormick,
+        Some("ignore") => MmBudgetMode::Ignore,
+        _ => MmBudgetMode::Exact, // Default: exact bilinear via SCIP MIQCQP
+    }
+}
+
 fn parse_batches(args: &[String]) -> usize {
     get_arg_value(args, "--batches")
         .and_then(|v| v.parse().ok())
@@ -1051,26 +1065,30 @@ fn get_arg_value(args: &[String], flag: &str) -> Option<String> {
         .cloned()
 }
 
-fn create_solvers(choice: &SolverChoice, milp_timeout: Option<f64>) -> Vec<Box<dyn Solver>> {
+fn create_milp_solver(milp_timeout: Option<f64>, mm_mode: MmBudgetMode) -> MilpSolver {
+    let timeout = milp_timeout.unwrap_or(5.0);
+    MilpSolver::with_config(MilpConfig {
+        timeout_secs: Some(timeout),
+        gap_tolerance: 0.0,
+        mm_budget_mode: mm_mode,
+    })
+}
+
+fn create_solvers(
+    choice: &SolverChoice,
+    milp_timeout: Option<f64>,
+    mm_mode: MmBudgetMode,
+) -> Vec<Box<dyn Solver>> {
     match choice {
         SolverChoice::Milp => {
-            if let Some(timeout) = milp_timeout {
-                vec![Box::new(MilpSolver::with_timeout(timeout))]
-            } else {
-                vec![Box::new(MilpSolver::new())]
-            }
+            vec![Box::new(create_milp_solver(milp_timeout, mm_mode))]
         }
         SolverChoice::Pipeline => vec![Box::new(Pipeline::current())],
         SolverChoice::Negrisk => vec![Box::new(Pipeline::with_negrisk())],
         SolverChoice::Dual => vec![Box::new(Pipeline::with_dual_decomposition())],
         SolverChoice::All => {
-            let milp: Box<dyn Solver> = if let Some(timeout) = milp_timeout {
-                Box::new(MilpSolver::with_timeout(timeout))
-            } else {
-                Box::new(MilpSolver::with_timeout(5.0))
-            };
             vec![
-                milp,
+                Box::new(create_milp_solver(milp_timeout, mm_mode)),
                 Box::new(Pipeline::current()),
                 Box::new(Pipeline::with_negrisk()),
                 Box::new(Pipeline::with_dual_decomposition()),
@@ -1085,6 +1103,7 @@ struct SolverResults {
     total_welfare: i64,
     total_filled: usize,
     total_orders: usize,
+    total_volume: u64,
     total_time_secs: f64,
     batches: usize,
 }
@@ -1119,10 +1138,11 @@ fn run_simulation(
     base_config: &ScenarioConfig,
     solver_choice: &SolverChoice,
     milp_timeout: Option<f64>,
+    mm_mode: MmBudgetMode,
     num_batches: usize,
     verbose: bool,
 ) -> Vec<SolverResults> {
-    let solvers = create_solvers(solver_choice, milp_timeout);
+    let solvers = create_solvers(solver_choice, milp_timeout, mm_mode);
 
     let mut results: Vec<SolverResults> = solvers
         .iter()
@@ -1154,11 +1174,7 @@ fn run_simulation(
 
             // For MILP, use solve_with_status to get clearing prices for verification
             let (result, milp_clearing_prices) = if solver.name().contains("MILP") {
-                let milp_solver = if let Some(timeout) = milp_timeout {
-                    MilpSolver::with_timeout(timeout)
-                } else {
-                    MilpSolver::with_timeout(5.0)
-                };
+                let milp_solver = create_milp_solver(milp_timeout, mm_mode);
                 let milp_result = milp_solver.solve_with_status(&problem);
                 (milp_result.result, Some(milp_result.clearing_prices))
             } else {
@@ -1170,6 +1186,7 @@ fn run_simulation(
             results[i].total_welfare += result.total_welfare;
             results[i].total_filled += result.orders_filled;
             results[i].total_orders += problem.num_orders();
+            results[i].total_volume += result.total_quantity_filled;
             results[i].total_time_secs += elapsed;
             results[i].batches += 1;
 
@@ -1238,7 +1255,7 @@ fn print_results(results: &[SolverResults], choice: &SolverChoice) {
     table
         .load_preset(UTF8_FULL)
         .apply_modifier(UTF8_ROUND_CORNERS)
-        .set_header(vec!["Solver", "Welfare", "Fill %", "Time (avg)"]);
+        .set_header(vec!["Solver", "Welfare", "Fill %", "Volume", "Time (avg)"]);
 
     let best_welfare = results.iter().map(|r| r.mean_welfare()).fold(0.0, f64::max);
 
@@ -1273,10 +1290,17 @@ fn print_results(results: &[SolverResults], choice: &SolverChoice) {
             Cell::new(format!("{:.1}%", fill_rate)).fg(Color::Red)
         };
 
+        let volume = if result.batches > 0 {
+            result.total_volume / result.batches as u64
+        } else {
+            0
+        };
+
         table.add_row(vec![
             Cell::new(&result.name),
             welfare_cell,
             fill_cell,
+            Cell::new(format_qty(volume)),
             Cell::new(format!("{:.3}s", result.mean_time())),
         ]);
     }

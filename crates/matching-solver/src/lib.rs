@@ -64,7 +64,7 @@ pub use benchmark::{compare_to_baseline, BenchmarkHarness, BenchmarkResults, Ben
 pub use verifier::{verify, verify_strict, VerificationResult, Verifier, Violation, ViolationKind};
 
 #[cfg(feature = "milp")]
-pub use milp::{MilpConfig, MilpResult, MilpSolver, SolveStatus};
+pub use milp::{MilpConfig, MilpResult, MilpSolver, MmBudgetMode, SolveStatus};
 
 use serde::Serialize;
 
