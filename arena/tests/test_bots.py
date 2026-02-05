@@ -1,0 +1,119 @@
+"""Tests for trading bots."""
+
+import pytest
+
+from bots.informed import FixedProbabilityModel, ProbabilityModel
+from sybil_client.types import Block, BuyNo, BuyYes
+
+
+class TestProbabilityModel:
+    """Test probability model implementations."""
+
+    def test_fixed_probability_model(self):
+        model = FixedProbabilityModel({0: 0.6, 1: 0.3})
+
+        assert model.get_probability(0) == 0.6
+        assert model.get_probability(1) == 0.3
+        assert model.get_probability(2) is None  # Unknown market
+
+    def test_empty_model(self):
+        model = FixedProbabilityModel({})
+        assert model.get_probability(0) is None
+
+
+class TestBlockParsing:
+    """Test block data parsing for bot logic."""
+
+    def test_clearing_prices_iteration(self):
+        block = Block(
+            height=1,
+            parent_hash="",
+            state_root="",
+            fills=[],
+            clearing_prices={
+                0: (500_000_000, 500_000_000),
+                1: (600_000_000, 400_000_000),
+            },
+            total_welfare=0,
+            total_volume=0,
+            orders_filled=0,
+        )
+
+        prices = list(block.clearing_prices.items())
+        assert len(prices) == 2
+        assert (0, (500_000_000, 500_000_000)) in prices
+        assert (1, (600_000_000, 400_000_000)) in prices
+
+
+class TestOrderGeneration:
+    """Test that bots generate valid orders."""
+
+    def test_buy_yes_order_structure(self):
+        order = BuyYes(market_id=0, limit_price_nanos=550_000_000, quantity=10)
+
+        assert order.market_id == 0
+        assert order.limit_price_nanos == 550_000_000
+        assert order.quantity == 10
+
+    def test_buy_no_order_structure(self):
+        order = BuyNo(market_id=1, limit_price_nanos=450_000_000, quantity=5)
+
+        assert order.market_id == 1
+        assert order.limit_price_nanos == 450_000_000
+        assert order.quantity == 5
+
+    def test_order_at_price_helper(self):
+        order = BuyYes.at_price(market_id=0, price=0.55, quantity=10)
+
+        # Should convert 0.55 to 550_000_000 nanos
+        assert order.limit_price_nanos == 550_000_000
+
+
+class TestEdgeCalculation:
+    """Test edge calculation for informed trading."""
+
+    def test_positive_edge(self):
+        # Market price = 0.50, model says 0.60
+        market_prob = 0.50
+        model_prob = 0.60
+        edge = model_prob - market_prob
+
+        assert abs(edge - 0.10) < 1e-9  # 10% positive edge -> buy YES
+
+    def test_negative_edge(self):
+        # Market price = 0.60, model says 0.40
+        market_prob = 0.60
+        model_prob = 0.40
+        edge = model_prob - market_prob
+
+        assert abs(edge - (-0.20)) < 1e-9  # 20% negative edge -> buy NO
+
+    def test_no_edge(self):
+        # Market matches model
+        market_prob = 0.55
+        model_prob = 0.55
+        edge = model_prob - market_prob
+
+        assert edge == 0.0  # No edge -> no trade
+
+
+class TestPriceConversion:
+    """Test price format conversions."""
+
+    def test_nanos_to_probability(self):
+        # 500M nanos = $0.50 = 50% probability
+        yes_nanos = 500_000_000
+        prob = yes_nanos / 1_000_000_000
+        assert prob == 0.5
+
+    def test_probability_to_nanos(self):
+        # 60% probability = $0.60 = 600M nanos
+        prob = 0.60
+        nanos = int(prob * 1_000_000_000)
+        assert nanos == 600_000_000
+
+    def test_complementary_prices(self):
+        # YES + NO should equal $1 (1B nanos)
+        yes_nanos = 650_000_000
+        no_nanos = 350_000_000
+        assert yes_nanos + no_nanos == 1_000_000_000

@@ -1,0 +1,42 @@
+[project]
+name = "sybil-arena"
+version = "0.1.0"
+description = "AI Agent Trading Competition for Sybil Prediction Markets"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27",          # Async HTTP client
+    "pydantic>=2.0",        # Data validation
+    "sseclient-py>=1.8",    # SSE streaming
+    "rich>=13.0",           # Pretty console output
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+]
+sports = [
+    "aiohttp>=3.9",         # For sports API
+]
+crypto = [
+    "websockets>=12.0",     # For Binance WS
+]
+llm = [
+    "anthropic>=0.25",      # For Claude-powered bots
+    "openai>=1.0",          # For GPT-powered bots
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["sybil_client", "bots", "feeds"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
