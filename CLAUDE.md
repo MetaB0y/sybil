@@ -44,6 +44,17 @@ just sim-small        # ~300 orders
 just sim-medium       # ~3000 orders
 just compare          # Compare all solvers on medium scenario
 just sim preset solver # Custom: just sim large negrisk
+just milp-killer      # MILP stress test (forces timeout)
+```
+
+### MILP Solver (feature-gated)
+
+```bash
+# Run with MILP solver (requires milp feature)
+cargo run --release -p matching-sim --features milp -- --preset quick --solver all
+
+# MILP with custom timeout and MM budget mode
+cargo run --release -p matching-sim --features milp -- --preset small --solver milp --milp-timeout 60 --mm-mode exact
 ```
 
 ### Visualization (Python/Streamlit)
@@ -80,12 +91,12 @@ The pipeline can iterate via fixed-point loop until convergence.
 
 - **Payoff vectors**: Orders are represented as payoff vectors over market states, enabling unified handling of simple orders, bundles, spreads, and conditionals.
 - **Welfare maximization**: The objective is `sum((limit_price - clearing_price) * fill_qty)`, not volume.
-- **MILP is optional**: The `milp` feature (using HiGHS solver via `good_lp`) is feature-gated since it adds a large dependency.
-- **Verification** (`verifier.rs`): Validates solver output for correctness — designed for ZK proof integration.
+- **MILP is optional**: The `milp` feature (using SCIP solver via `russcip`) is feature-gated since it adds a large dependency. The MILP solver supports group-level minting for optimal negrisk-style arbitrage.
+- **Verification** (`verifier.rs`): Validates solver output for correctness — designed for ZK proof integration. Use `--verify` flag in matching-sim to validate results.
 
-## Developemnt notes
+## Development Notes
 - Do not use floating point numbers, use u64 etc.
-- Use proptest for property-based/metamorphic tesets but only where it makes sense
+- Use proptest for property-based/metamorphic tests but only where it makes sense
 - Always think about boundaries and reducing accidental complexity -- avoid tight coupling unless necessary
 - Prefer actor model using this pattern https://ryhl.io/blog/actors-with-tokio/ to mutex etc.
 - We are in early dev phase. Elegance is always more important that backward compatibility
