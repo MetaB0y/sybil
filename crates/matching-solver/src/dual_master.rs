@@ -387,9 +387,13 @@ impl DualMaster {
             }
 
             // 6b. Add bundle fills from multi-market repricing
+            // Must validate against ORIGINAL order limits since MultiMarketSolver
+            // ran on shaded orders (limits adjusted by λ).
             for fill in bundle_fills_this_iter {
                 if let Some(order) = order_map.get(&fill.order_id) {
-                    if !filled_order_ids.contains(&fill.order_id) {
+                    if !filled_order_ids.contains(&fill.order_id)
+                        && order.is_satisfied_at_price(fill.fill_price)
+                    {
                         filled_order_ids.insert(fill.order_id);
                         matching_result.add_fill(fill, order);
                         iter_fills += 1;

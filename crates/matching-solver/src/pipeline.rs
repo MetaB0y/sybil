@@ -437,6 +437,9 @@ impl Pipeline {
 
             for fill in partial_result.fills {
                 if let Some(&order) = order_map.get(&fill.order_id) {
+                    if !order.is_satisfied_at_price(fill.fill_price) {
+                        continue;
+                    }
                     filled_order_ids.insert(fill.order_id);
                     result.result.add_fill(fill.clone(), order);
                     bundle_fills += 1;
@@ -811,6 +814,9 @@ impl Pipeline {
             // Add bundle fills from repricing (Phase 2)
             for fill in repricing_bundle_fills {
                 if let Some(&order) = order_map.get(&fill.order_id) {
+                    if !order.is_satisfied_at_price(fill.fill_price) {
+                        continue;
+                    }
                     filled_order_ids.insert(fill.order_id);
                     result.result.add_fill(fill, order);
                     iter_bundle_fills += 1;
@@ -874,6 +880,9 @@ impl Pipeline {
                 // Use order_map for O(1) lookups instead of O(n) .find()
                 for fill in partial_result.fills {
                     if let Some(&order) = order_map.get(&fill.order_id) {
+                        if !order.is_satisfied_at_price(fill.fill_price) {
+                            continue;
+                        }
                         filled_order_ids.insert(fill.order_id);
                         result.result.add_fill(fill.clone(), order);
                         iter_bundle_fills += 1;
@@ -1149,7 +1158,10 @@ impl Pipeline {
                 }
             }
 
-            // Multi-market or no clearing price: keep as-is
+            // Multi-market or no clearing price: keep as-is, but validate limit
+            if !order.is_satisfied_at_price(fill.fill_price) {
+                continue; // drop fill — limit violated
+            }
             new_welfare += order.welfare_contribution(fill.fill_price, fill.fill_qty);
             new_volume += fill.fill_qty;
             orders_filled += 1;
