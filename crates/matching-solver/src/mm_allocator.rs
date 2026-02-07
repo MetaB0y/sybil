@@ -59,6 +59,39 @@ pub struct MmAllocation {
 }
 
 
+/// Greedy knapsack: sort by welfare/capital ratio, greedily activate until budget exhausted.
+///
+/// Returns (activated_order_ids, capital_used, total_welfare).
+pub fn greedy_knapsack(
+    orders_with_fills: &[(u64, i64, Nanos)], // (order_id, welfare, capital)
+    budget: Nanos,
+) -> (Vec<u64>, Nanos, i64) {
+    let mut sorted: Vec<_> = orders_with_fills.to_vec();
+
+    // Sort by welfare/capital ratio descending
+    sorted.sort_by(|(_, w1, c1), (_, w2, c2)| {
+        let ratio1 = if *c1 > 0 { *w1 as f64 / *c1 as f64 } else { f64::MAX };
+        let ratio2 = if *c2 > 0 { *w2 as f64 / *c2 as f64 } else { f64::MAX };
+        ratio2.partial_cmp(&ratio1).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut budget_remaining = budget;
+    let mut activated = Vec::new();
+    let mut capital_used: Nanos = 0;
+    let mut total_welfare: i64 = 0;
+
+    for (order_id, w, capital) in sorted {
+        if capital <= budget_remaining {
+            activated.push(order_id);
+            capital_used += capital;
+            total_welfare += w;
+            budget_remaining -= capital;
+        }
+    }
+
+    (activated, capital_used, total_welfare)
+}
+
 /// MM Budget allocator using greedy allocation with actual fills.
 ///
 /// The allocator uses a simple greedy approach:
@@ -146,8 +179,7 @@ impl MmAllocator {
         let mut total_greedy_welfare: i64 = 0;
 
         for mm in mm_constraints {
-            // Collect orders with their actual fill welfare and capital cost
-            let mut order_info: Vec<(u64, i64, Nanos)> = mm
+            let order_info: Vec<(u64, i64, Nanos)> = mm
                 .order_ids
                 .iter()
                 .filter_map(|&order_id| {
@@ -160,25 +192,8 @@ impl MmAllocator {
                 })
                 .collect();
 
-            // Sort by welfare/capital ratio descending (greedy)
-            order_info.sort_by(|(_, w1, c1), (_, w2, c2)| {
-                let ratio1 = if *c1 > 0 { *w1 as f64 / *c1 as f64 } else { f64::MAX };
-                let ratio2 = if *c2 > 0 { *w2 as f64 / *c2 as f64 } else { f64::MAX };
-                ratio2.partial_cmp(&ratio1).unwrap_or(std::cmp::Ordering::Equal)
-            });
-
-            // Greedily add until budget full
-            let mut budget_remaining = mm.max_capital;
-            let mut greedy_welfare: i64 = 0;
-
-            for (_, w, capital) in order_info {
-                if capital <= budget_remaining {
-                    greedy_welfare += w;
-                    budget_remaining -= capital;
-                }
-            }
-
-            total_greedy_welfare += greedy_welfare;
+            let (_, _, mm_welfare) = greedy_knapsack(&order_info, mm.max_capital);
+            total_greedy_welfare += mm_welfare;
         }
 
         total_greedy_welfare
@@ -224,6 +239,10 @@ impl MmAllocator {
             }
         }
 
+        // Deduplicate activated orders (overlapping MMs may have activated the same order)
+        all_activated.sort_unstable();
+        all_activated.dedup();
+
         AllocationResult {
             activated_orders: all_activated,
             mm_allocations: allocations,
@@ -241,8 +260,7 @@ impl MmAllocator {
         fills: &HashMap<u64, (Nanos, Qty)>,
         welfare: &HashMap<u64, i64>,
     ) -> (Vec<u64>, Nanos, i64) {
-        // Collect orders with their actual fill info
-        let mut order_info: Vec<(u64, i64, Nanos)> = mm
+        let order_info: Vec<(u64, i64, Nanos)> = mm
             .order_ids
             .iter()
             .filter_map(|&order_id| {
@@ -255,32 +273,13 @@ impl MmAllocator {
             })
             .collect();
 
-        // Sort by welfare/capital ratio descending
-        order_info.sort_by(|(_, w1, c1), (_, w2, c2)| {
-            let ratio1 = if *c1 > 0 { *w1 as f64 / *c1 as f64 } else { f64::MAX };
-            let ratio2 = if *c2 > 0 { *w2 as f64 / *c2 as f64 } else { f64::MAX };
-            ratio2.partial_cmp(&ratio1).unwrap_or(std::cmp::Ordering::Equal)
-        });
-
-        // Greedily activate until budget full
-        let mut budget_remaining = mm.max_capital;
-        let mut activated = Vec::new();
-        let mut capital_used: Nanos = 0;
-        let mut mm_welfare: i64 = 0;
-
-        for (order_id, w, capital) in order_info {
-            if capital <= budget_remaining {
-                activated.push(order_id);
-                capital_used += capital;
-                mm_welfare += w;
-                budget_remaining -= capital;
-            }
-        }
-
-        (activated, capital_used, mm_welfare)
+        greedy_knapsack(&order_info, mm.max_capital)
     }
 
     /// Fixed-point allocation for interacting MMs using actual fills.
+    ///
+    /// Processes MMs in order, maintaining a global claimed set.
+    /// Each MM can only activate orders not yet claimed by a previous MM.
     fn allocate_fixed_point_with_fills(
         &self,
         mm_constraints: &[MmConstraint],
@@ -288,8 +287,62 @@ impl MmAllocator {
         fills: &HashMap<u64, (Nanos, Qty)>,
         welfare: &HashMap<u64, i64>,
     ) -> AllocationResult {
-        // For now, use independent allocation (can be improved later)
-        self.allocate_independent_with_fills(mm_constraints, order_map, fills, welfare)
+        let mut all_activated = Vec::new();
+        let mut allocations = Vec::new();
+        let mut total_welfare: i64 = 0;
+        let mut claimed: HashSet<u64> = HashSet::new();
+
+        for mm in mm_constraints {
+            // Filter out already-claimed orders before greedy allocation
+            let filtered_mm = MmConstraint {
+                mm_id: mm.mm_id,
+                max_capital: mm.max_capital,
+                order_ids: mm.order_ids.iter()
+                    .filter(|id| !claimed.contains(id))
+                    .copied()
+                    .collect(),
+                order_sides: mm.order_sides.clone(),
+            };
+
+            let (activated, capital_used, mm_welfare) =
+                self.allocate_single_mm_with_fills(&filtered_mm, order_map, fills, welfare);
+
+            // Add activated orders to claimed set
+            for &id in &activated {
+                claimed.insert(id);
+            }
+
+            allocations.push(MmAllocation {
+                mm_id: mm.mm_id,
+                activated_orders: activated.clone(),
+                capital_used,
+                budget: mm.max_capital,
+                utilization: if mm.max_capital > 0 {
+                    capital_used as f64 / mm.max_capital as f64
+                } else { 0.0 },
+                lambda: 0.0,
+            });
+
+            all_activated.extend(activated);
+            total_welfare += mm_welfare;
+        }
+
+        // Also activate non-MM orders
+        for order in order_map.values() {
+            let is_mm_order = mm_constraints.iter().any(|mm| mm.order_ids.contains(&order.id));
+            if !is_mm_order {
+                all_activated.push(order.id);
+                total_welfare += welfare.get(&order.id).copied().unwrap_or(0);
+            }
+        }
+
+        AllocationResult {
+            activated_orders: all_activated,
+            mm_allocations: allocations,
+            total_welfare,
+            iterations: 1,
+            stats: AllocationStats::default(),
+        }
     }
 
     /// Compute allocation statistics.

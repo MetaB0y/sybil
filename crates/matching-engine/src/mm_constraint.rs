@@ -69,15 +69,6 @@ impl MmSide {
     }
 }
 
-/// An order that is part of an MM's constrained order set.
-#[derive(Clone, Debug)]
-pub struct MmOrder {
-    /// The order ID this refers to
-    pub order_id: u64,
-    /// Side for capital calculation
-    pub side: MmSide,
-}
-
 /// A capital constraint for a market maker.
 ///
 /// The MM can submit orders across multiple markets, but the total capital
@@ -144,35 +135,10 @@ impl MmConstraint {
         self.capital_used(fills) <= self.max_capital
     }
 
-    /// Calculate how much more capital can be used.
-    pub fn remaining_capital(&self, fills: &std::collections::HashMap<u64, (Nanos, Qty)>) -> Nanos {
-        self.max_capital.saturating_sub(self.capital_used(fills))
-    }
-
     /// Number of orders in this constraint.
     pub fn num_orders(&self) -> usize {
         self.order_ids.len()
     }
-}
-
-/// Result of validating MM constraints.
-#[derive(Clone, Debug)]
-pub struct MmValidationResult {
-    /// Whether all constraints are satisfied
-    pub all_satisfied: bool,
-    /// Per-MM results
-    pub per_mm: Vec<MmConstraintStatus>,
-}
-
-/// Status of a single MM constraint.
-#[derive(Clone, Debug)]
-pub struct MmConstraintStatus {
-    pub mm_id: MmId,
-    pub capital_used: Nanos,
-    pub max_capital: Nanos,
-    pub is_satisfied: bool,
-    /// How much the constraint was exceeded (0 if satisfied)
-    pub excess: Nanos,
 }
 
 #[cfg(test)]

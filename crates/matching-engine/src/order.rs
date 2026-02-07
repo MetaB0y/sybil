@@ -8,19 +8,6 @@ use serde::Serialize;
 
 use crate::types::{MarketId, Nanos, Qty};
 
-/// Origin of an order — whether it was part of the original problem
-/// or synthesized during solving.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
-pub enum OrderOrigin {
-    /// Original order from the problem input.
-    #[default]
-    Original,
-    /// Order with shaded limit price (e.g., dual decomposition).
-    Shaded,
-    /// Synthetic order created by the solver (e.g., negrisk arbitrage).
-    Synthetic,
-}
-
 /// Maximum number of markets a single order can span.
 pub const MAX_MARKETS_PER_ORDER: usize = 5;
 
@@ -90,9 +77,6 @@ pub struct Order {
 
     /// Optional price-threshold condition for activation.
     pub condition: Option<PriceCondition>,
-
-    /// Origin of this order (original, shaded, or synthetic).
-    pub origin: OrderOrigin,
 }
 
 impl Order {
@@ -108,7 +92,6 @@ impl Order {
             min_fill: 0,
             max_fill: 0,
             condition: None,
-            origin: OrderOrigin::Original,
         }
     }
 
@@ -120,32 +103,6 @@ impl Order {
     /// Check if this is a conditional order.
     pub fn is_conditional(&self) -> bool {
         self.condition.is_some()
-    }
-
-    /// Calculate the expected payoff at a given state.
-    pub fn payoff_at_state(&self, state_idx: usize) -> i8 {
-        if state_idx < self.num_states as usize {
-            self.payoffs[state_idx]
-        } else {
-            0
-        }
-    }
-
-    /// Calculate the expected value of this order given state probabilities.
-    /// probs should have length = num_states, values summing to 1.
-    pub fn expected_value(&self, probs: &[f64]) -> f64 {
-        let mut ev = 0.0;
-        for (i, &payoff) in self
-            .payoffs
-            .iter()
-            .take(self.num_states as usize)
-            .enumerate()
-        {
-            if i < probs.len() {
-                ev += payoff as f64 * probs[i];
-            }
-        }
-        ev
     }
 
     /// Get the active markets (non-NONE) for this order.
@@ -251,22 +208,6 @@ mod tests {
         order.min_fill = 100;
         order.max_fill = 100;
         assert!(order.is_all_or_none());
-    }
-
-    #[test]
-    fn test_expected_value() {
-        let mut order = Order::new(1);
-        order.num_states = 2;
-        order.payoffs[0] = 0; // NO outcome
-        order.payoffs[1] = 1; // YES outcome
-
-        // 50/50 probability
-        let ev = order.expected_value(&[0.5, 0.5]);
-        assert!((ev - 0.5).abs() < 1e-9);
-
-        // 100% YES
-        let ev = order.expected_value(&[0.0, 1.0]);
-        assert!((ev - 1.0).abs() < 1e-9);
     }
 
     #[test]

@@ -324,7 +324,13 @@ impl DualMaster {
             // 5. Greedy MM knapsack: sort by welfare/capital ratio, greedily activate
             let mut mm_accepted_fills: Vec<Fill> = Vec::new();
             {
-                // Build per-MM candidate lists with welfare/capital ratios
+                // Build fill lookup for mapping knapsack results back to fills
+                let fill_by_id: HashMap<u64, &Fill> = mm_candidate_fills
+                    .iter()
+                    .map(|f| (f.order_id, f))
+                    .collect();
+                let mut already_accepted: HashSet<u64> = HashSet::new();
+
                 for mm in &problem.mm_constraints {
                     let remaining_budget = mm.max_capital
                         .saturating_sub(mm.capital_used(&cumulative_mm_fills));
@@ -332,42 +338,26 @@ impl DualMaster {
                         continue;
                     }
 
-                    let mut candidates: Vec<(Fill, i64, Nanos)> = mm_candidate_fills
+                    // Build knapsack input, excluding already-accepted orders
+                    let knapsack_input: Vec<(u64, i64, Nanos)> = mm_candidate_fills
                         .iter()
-                        .filter(|f| mm.contains_order(f.order_id))
+                        .filter(|f| mm.contains_order(f.order_id) && !already_accepted.contains(&f.order_id))
                         .filter_map(|f| {
                             let order = order_map.get(&f.order_id)?;
                             let welfare = order.welfare_contribution(f.fill_price, f.fill_qty);
                             let side = mm.order_sides.get(&f.order_id)?;
                             let capital = side.capital_needed(f.fill_price, f.fill_qty);
-                            Some((f.clone(), welfare, capital))
+                            Some((f.order_id, welfare, capital))
                         })
                         .collect();
 
-                    // Sort by welfare/capital ratio descending
-                    candidates.sort_by(|(_, w1, c1), (_, w2, c2)| {
-                        let ratio1 =
-                            if *c1 > 0 { *w1 as f64 / *c1 as f64 } else { f64::MAX };
-                        let ratio2 =
-                            if *c2 > 0 { *w2 as f64 / *c2 as f64 } else { f64::MAX };
-                        ratio2
-                            .partial_cmp(&ratio1)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    });
+                    let (activated_ids, _, _) =
+                        crate::mm_allocator::greedy_knapsack(&knapsack_input, remaining_budget);
 
-                    // Greedily activate until remaining budget exhausted
-                    let mut budget_left = remaining_budget;
-                    for (fill, _welfare, capital) in candidates {
-                        if capital <= budget_left {
-                            // Check this order hasn't already been accepted
-                            // by a different MM constraint
-                            if !mm_accepted_fills
-                                .iter()
-                                .any(|f| f.order_id == fill.order_id)
-                            {
-                                budget_left -= capital;
-                                mm_accepted_fills.push(fill);
-                            }
+                    for id in activated_ids {
+                        if let Some(&fill) = fill_by_id.get(&id) {
+                            already_accepted.insert(id);
+                            mm_accepted_fills.push(fill.clone());
                         }
                     }
                 }

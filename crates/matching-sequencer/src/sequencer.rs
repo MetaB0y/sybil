@@ -442,7 +442,7 @@ impl BlockSequencer {
         problem.market_groups = self.market_groups.clone();
 
         // Solve
-        let pipeline = Pipeline::with_negrisk();
+        let pipeline = Pipeline::current();
         let pipeline_result = pipeline.solve(&problem);
 
         // Extract clearing prices

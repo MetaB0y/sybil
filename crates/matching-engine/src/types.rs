@@ -75,7 +75,7 @@ pub mod conversions {
     /// Convert a decimal price (e.g., 0.53 for 53 cents) to nanos
     /// Price should be in [0, 1] for probability markets
     pub fn price_to_nanos(price: f64) -> Nanos {
-        (price * NANOS_PER_DOLLAR as f64) as Nanos
+        (price * NANOS_PER_DOLLAR as f64).round() as Nanos
     }
 
     /// Convert nanos back to a decimal price
@@ -85,7 +85,7 @@ pub mod conversions {
 
     /// Convert dollars to nanos
     pub fn dollars_to_nanos(dollars: f64) -> Nanos {
-        (dollars * NANOS_PER_DOLLAR as f64) as Nanos
+        (dollars * NANOS_PER_DOLLAR as f64).round() as Nanos
     }
 
     /// Convert nanos to dollars

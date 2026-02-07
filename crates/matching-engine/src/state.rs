@@ -129,62 +129,6 @@ impl StateSpace {
     }
 }
 
-/// State probability distribution.
-#[derive(Clone, Debug)]
-pub struct StateProbabilities {
-    probs: Vec<f64>,
-}
-
-impl StateProbabilities {
-    /// Create uniform probabilities over all states.
-    pub fn uniform(num_states: usize) -> Self {
-        let p = 1.0 / num_states as f64;
-        Self {
-            probs: vec![p; num_states],
-        }
-    }
-
-    /// Create from explicit probabilities (should sum to 1).
-    pub fn from_vec(probs: Vec<f64>) -> Self {
-        debug_assert!(
-            (probs.iter().sum::<f64>() - 1.0).abs() < 0.01,
-            "probabilities must sum to ~1.0, got {}",
-            probs.iter().sum::<f64>()
-        );
-        Self { probs }
-    }
-
-    /// Get probability of a specific state.
-    pub fn prob(&self, state_idx: usize) -> f64 {
-        self.probs.get(state_idx).copied().unwrap_or(0.0)
-    }
-
-    /// Get all probabilities.
-    pub fn as_slice(&self) -> &[f64] {
-        &self.probs
-    }
-
-    /// Calculate expected value of a payoff vector.
-    pub fn expected_value(&self, payoffs: &[i8]) -> f64 {
-        self.probs
-            .iter()
-            .zip(payoffs.iter())
-            .map(|(&p, &payoff)| p * payoff as f64)
-            .sum()
-    }
-
-    /// Calculate marginal probability that a specific market has a specific outcome.
-    pub fn marginal(&self, space: &StateSpace, market_idx: usize, outcome: u8) -> f64 {
-        let mut total = 0.0;
-        for (idx, p) in self.probs.iter().enumerate() {
-            if space.has_outcome(idx, market_idx, outcome) {
-                total += p;
-            }
-        }
-        total
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,29 +184,4 @@ mod tests {
         assert_eq!(states[5], (5, vec![1, 2]));
     }
 
-    #[test]
-    fn test_state_probabilities() {
-        let probs = StateProbabilities::uniform(4);
-        assert!((probs.prob(0) - 0.25).abs() < 1e-9);
-
-        let payoffs = [1, 0, 0, -1i8];
-        let ev = probs.expected_value(&payoffs);
-        assert!((ev - 0.0).abs() < 1e-9); // (0.25*1 + 0.25*0 + 0.25*0 + 0.25*-1) = 0
-    }
-
-    #[test]
-    fn test_marginal_probability() {
-        let space = StateSpace::new(&[2, 2]);
-        // States: 00, 10, 01, 11
-        // Probs:  0.1, 0.2, 0.3, 0.4
-        let probs = StateProbabilities::from_vec(vec![0.1, 0.2, 0.3, 0.4]);
-
-        // P(market 0 = 0) = P(state 0) + P(state 2) = 0.1 + 0.3 = 0.4
-        let m0_0 = probs.marginal(&space, 0, 0);
-        assert!((m0_0 - 0.4).abs() < 1e-9);
-
-        // P(market 0 = 1) = P(state 1) + P(state 3) = 0.2 + 0.4 = 0.6
-        let m0_1 = probs.marginal(&space, 0, 1);
-        assert!((m0_1 - 0.6).abs() < 1e-9);
-    }
 }

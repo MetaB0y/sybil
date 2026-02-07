@@ -331,12 +331,7 @@ impl MilpSolver {
         let start = std::time::Instant::now();
         let mut result = MatchingResult::new();
 
-        // Filter out conditional orders only — we now handle all market structures.
-        let active_orders: Vec<_> = problem
-            .orders
-            .iter()
-            .filter(|o| !o.is_conditional())
-            .collect();
+        let active_orders: Vec<_> = problem.orders.iter().collect();
 
         if active_orders.is_empty() {
             return MilpResult {
