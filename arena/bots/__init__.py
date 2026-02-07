@@ -14,3 +14,11 @@ __all__ = [
     "RandomTrader",
     "SimpleMarketMaker",
 ]
+
+
+def __getattr__(name):
+    """Lazy import for backtest-dependent bots to avoid circular imports."""
+    if name in ("NewsTrader", "ConservativeNewsTrader", "AggressiveNewsTrader"):
+        from .news_trader import AggressiveNewsTrader, ConservativeNewsTrader, NewsTrader
+        return {"NewsTrader": NewsTrader, "ConservativeNewsTrader": ConservativeNewsTrader, "AggressiveNewsTrader": AggressiveNewsTrader}[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
