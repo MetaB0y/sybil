@@ -1,5 +1,7 @@
 //! Problem definition for matching instances.
 
+use std::collections::HashSet;
+
 use crate::{MarketId, MarketSet, MmConstraint, Order};
 
 /// A group of mutually exclusive markets (exactly one resolves YES).
@@ -85,6 +87,68 @@ impl Problem {
 
     pub fn total_demand(&self) -> u64 {
         self.orders.iter().map(|o| o.max_fill).sum()
+    }
+
+    /// Validate problem invariants.
+    ///
+    /// Checks:
+    /// - No duplicate order IDs
+    /// - All orders reference existing markets
+    /// - All mm_constraint order IDs reference existing orders
+    /// - All market_group market IDs exist
+    pub fn validate(&self) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+
+        // Check for duplicate order IDs
+        let mut seen_ids = HashSet::new();
+        for order in &self.orders {
+            if !seen_ids.insert(order.id) {
+                errors.push(format!("duplicate order ID: {}", order.id));
+            }
+        }
+
+        // Check all orders reference existing markets
+        for order in &self.orders {
+            for &market in order.markets.iter().take(order.num_markets as usize) {
+                if !market.is_none() && self.markets.get(market).is_none() {
+                    errors.push(format!(
+                        "order {} references non-existent market {}",
+                        order.id, market
+                    ));
+                }
+            }
+        }
+
+        // Check all mm_constraint order IDs reference existing orders
+        let order_ids: HashSet<u64> = self.orders.iter().map(|o| o.id).collect();
+        for mm in &self.mm_constraints {
+            for &order_id in &mm.order_ids {
+                if !order_ids.contains(&order_id) {
+                    errors.push(format!(
+                        "MM constraint {:?} references non-existent order {}",
+                        mm.mm_id, order_id
+                    ));
+                }
+            }
+        }
+
+        // Check all market_group market IDs exist
+        for group in &self.market_groups {
+            for &market_id in &group.markets {
+                if self.markets.get(market_id).is_none() {
+                    errors.push(format!(
+                        "market group '{}' references non-existent market {}",
+                        group.name, market_id
+                    ));
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 
     pub fn summary(&self) -> ProblemSummary {

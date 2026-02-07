@@ -37,6 +37,11 @@ pub fn state_index(outcomes: &[u8], market_sizes: &[u8]) -> usize {
     let mut idx = 0;
     let mut multiplier = 1;
     for (i, &outcome) in outcomes.iter().enumerate() {
+        debug_assert!(
+            i < market_sizes.len() && outcome < market_sizes[i],
+            "outcome {outcome} out of bounds for market {i} with size {}",
+            if i < market_sizes.len() { market_sizes[i] } else { 0 }
+        );
         idx += outcome as usize * multiplier;
         if i < market_sizes.len() {
             multiplier *= market_sizes[i] as usize;
@@ -141,6 +146,11 @@ impl StateProbabilities {
 
     /// Create from explicit probabilities (should sum to 1).
     pub fn from_vec(probs: Vec<f64>) -> Self {
+        debug_assert!(
+            (probs.iter().sum::<f64>() - 1.0).abs() < 0.01,
+            "probabilities must sum to ~1.0, got {}",
+            probs.iter().sum::<f64>()
+        );
         Self { probs }
     }
 

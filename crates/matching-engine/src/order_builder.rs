@@ -152,6 +152,34 @@ pub fn simple_no_buy(
         .build()
 }
 
+/// Internal helper for spread orders (both buy and sell).
+fn spread_order(
+    markets: &MarketSet,
+    id: u64,
+    market_a: MarketId,
+    market_b: MarketId,
+    limit_price: Nanos,
+    qty: Qty,
+    sign: i8,
+) -> Order {
+    // For two binary markets A and B:
+    // States (using our indexing convention):
+    // 0: A=0 (Yes), B=0 (Yes) -> 0
+    // 1: A=1 (No),  B=0 (Yes) -> -sign (B wins, A loses)
+    // 2: A=0 (Yes), B=1 (No)  -> +sign (A wins, B loses)
+    // 3: A=1 (No),  B=1 (No)  -> 0
+
+    OrderBuilder::new(markets, id)
+        .spanning(&[market_a, market_b])
+        .limit(limit_price)
+        .quantity(0, qty)
+        .payoff_when(&[0, 0], 0)
+        .payoff_when(&[1, 0], -sign)
+        .payoff_when(&[0, 1], sign)
+        .payoff_when(&[1, 1], 0)
+        .build()
+}
+
 /// Create a spread order: Buy A YES, Sell B YES (net: A - B).
 /// Payoff: +1 if A wins and B loses, -1 if B wins and A loses, 0 if same.
 pub fn spread(
@@ -162,22 +190,7 @@ pub fn spread(
     limit_price: Nanos,
     qty: Qty,
 ) -> Order {
-    // For two binary markets A and B:
-    // States (using our indexing convention):
-    // 0: A=0 (Yes), B=0 (Yes) -> 0
-    // 1: A=1 (No),  B=0 (Yes) -> -1 (B wins, A loses)
-    // 2: A=0 (Yes), B=1 (No)  -> +1 (A wins, B loses)
-    // 3: A=1 (No),  B=1 (No)  -> 0
-
-    OrderBuilder::new(markets, id)
-        .spanning(&[market_a, market_b])
-        .limit(limit_price)
-        .quantity(0, qty)
-        .payoff_when(&[0, 0], 0) // Both Yes: no net position
-        .payoff_when(&[1, 0], -1) // A=No, B=Yes: short
-        .payoff_when(&[0, 1], 1) // A=Yes, B=No: long
-        .payoff_when(&[1, 1], 0) // Both No: no net position
-        .build()
+    spread_order(markets, id, market_a, market_b, limit_price, qty, 1)
 }
 
 /// Create a butterfly spread across 3 binary markets representing outcomes of the same event.
@@ -225,6 +238,34 @@ pub fn butterfly(
         .build()
 }
 
+/// Internal helper for bundle orders (both buy and sell).
+fn bundle_order(
+    markets: &MarketSet,
+    id: u64,
+    market_ids: &[MarketId],
+    limit_price: Nanos,
+    qty: Qty,
+    payoff_sign: i8,
+) -> Order {
+    let num_markets = market_ids.len();
+    let all_yes: Vec<u8> = vec![0; num_markets];
+
+    let mut builder = OrderBuilder::new(markets, id)
+        .spanning(market_ids)
+        .limit(limit_price)
+        .all_or_none(qty);
+
+    let sizes: Vec<u8> = market_ids
+        .iter()
+        .map(|id| markets.num_outcomes(*id))
+        .collect();
+    let state_space = StateSpace::new(&sizes);
+    let winning_state = state_space.state_index(&all_yes);
+
+    builder = builder.payoff_at(winning_state, payoff_sign);
+    builder.build()
+}
+
 /// Create a bundle order: Buy YES on multiple markets (all must win).
 /// This is an all-or-none atomic bundle.
 pub fn bundle_yes(
@@ -234,27 +275,7 @@ pub fn bundle_yes(
     limit_price: Nanos,
     qty: Qty,
 ) -> Order {
-    // The only winning state is when all markets have outcome 0 (Yes)
-    let num_markets = market_ids.len();
-    let all_yes: Vec<u8> = vec![0; num_markets];
-
-    let mut builder = OrderBuilder::new(markets, id)
-        .spanning(market_ids)
-        .limit(limit_price)
-        .all_or_none(qty);
-
-    // Calculate the state index for all-yes
-    let sizes: Vec<u8> = market_ids
-        .iter()
-        .map(|id| markets.num_outcomes(*id))
-        .collect();
-    let state_space = StateSpace::new(&sizes);
-    let winning_state = state_space.state_index(&all_yes);
-
-    // Set payoff only for the winning state
-    builder = builder.payoff_at(winning_state, 1);
-
-    builder.build()
+    bundle_order(markets, id, market_ids, limit_price, qty, 1)
 }
 
 /// Create a bundle sell order: Sell YES on multiple markets (all must win).
@@ -266,25 +287,7 @@ pub fn bundle_sell(
     limit_price: Nanos,
     qty: Qty,
 ) -> Order {
-    let num_markets = market_ids.len();
-    let all_yes: Vec<u8> = vec![0; num_markets];
-
-    let mut builder = OrderBuilder::new(markets, id)
-        .spanning(market_ids)
-        .limit(limit_price)
-        .all_or_none(qty);
-
-    let sizes: Vec<u8> = market_ids
-        .iter()
-        .map(|id| markets.num_outcomes(*id))
-        .collect();
-    let state_space = StateSpace::new(&sizes);
-    let winning_state = state_space.state_index(&all_yes);
-
-    // Seller: payoff -1 at the all-yes state
-    builder = builder.payoff_at(winning_state, -1);
-
-    builder.build()
+    bundle_order(markets, id, market_ids, limit_price, qty, -1)
 }
 
 /// Create a spread sell order: Sell A YES, Buy B YES (net: B - A).
@@ -297,20 +300,7 @@ pub fn spread_sell(
     limit_price: Nanos,
     qty: Qty,
 ) -> Order {
-    // Negated payoffs of spread:
-    // 0: A=Yes, B=Yes -> 0
-    // 1: A=No,  B=Yes -> +1 (B wins, A loses — seller profits)
-    // 2: A=Yes, B=No  -> -1 (A wins, B loses — seller loses)
-    // 3: A=No,  B=No  -> 0
-    OrderBuilder::new(markets, id)
-        .spanning(&[market_a, market_b])
-        .limit(limit_price)
-        .quantity(0, qty)
-        .payoff_when(&[0, 0], 0)
-        .payoff_when(&[1, 0], 1)
-        .payoff_when(&[0, 1], -1)
-        .payoff_when(&[1, 1], 0)
-        .build()
+    spread_order(markets, id, market_a, market_b, limit_price, qty, -1)
 }
 
 /// Create a multi-outcome position: Buy a specific outcome in a multi-outcome market.

@@ -8,6 +8,19 @@ use serde::Serialize;
 
 use crate::types::{MarketId, Nanos, Qty};
 
+/// Origin of an order — whether it was part of the original problem
+/// or synthesized during solving.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub enum OrderOrigin {
+    /// Original order from the problem input.
+    #[default]
+    Original,
+    /// Order with shaded limit price (e.g., dual decomposition).
+    Shaded,
+    /// Synthetic order created by the solver (e.g., negrisk arbitrage).
+    Synthetic,
+}
+
 /// Maximum number of markets a single order can span.
 pub const MAX_MARKETS_PER_ORDER: usize = 5;
 
@@ -77,6 +90,9 @@ pub struct Order {
 
     /// Optional price-threshold condition for activation.
     pub condition: Option<PriceCondition>,
+
+    /// Origin of this order (original, shaded, or synthetic).
+    pub origin: OrderOrigin,
 }
 
 impl Order {
@@ -92,6 +108,7 @@ impl Order {
             min_fill: 0,
             max_fill: 0,
             condition: None,
+            origin: OrderOrigin::Original,
         }
     }
 

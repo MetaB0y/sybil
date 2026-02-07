@@ -4,6 +4,8 @@
 //! like "Who wins: Trump/Harris/Other" are represented as multiple binary
 //! markets grouped at the solver/UI layer.
 
+use std::collections::HashMap;
+
 use crate::types::MarketId;
 
 /// A binary prediction market (YES/NO).
@@ -42,34 +44,33 @@ impl Market {
 /// A collection of markets.
 #[derive(Clone, Debug, Default)]
 pub struct MarketSet {
-    markets: Vec<Market>,
+    markets: HashMap<MarketId, Market>,
+    next_id: u32,
 }
 
 impl MarketSet {
     pub fn new() -> Self {
         Self {
-            markets: Vec::new(),
+            markets: HashMap::new(),
+            next_id: 0,
         }
     }
 
     /// Add a binary market. Returns the assigned MarketId.
     pub fn add_binary(&mut self, name: impl Into<String>) -> MarketId {
-        let id = MarketId::new(self.markets.len() as u32);
-        self.markets.push(Market::new(id, name));
+        let id = MarketId::new(self.next_id);
+        self.next_id += 1;
+        self.markets.insert(id, Market::new(id, name));
         id
     }
 
     /// Add a market directly (preserving its existing ID).
     pub fn add_market(&mut self, market: Market) {
-        let idx = market.id.0 as usize;
-        while self.markets.len() <= idx {
-            let placeholder_id = MarketId::new(self.markets.len() as u32);
-            self.markets.push(Market::new(
-                placeholder_id,
-                format!("_placeholder_{}", self.markets.len()),
-            ));
+        let id = market.id;
+        if id.0 >= self.next_id {
+            self.next_id = id.0 + 1;
         }
-        self.markets[idx] = market;
+        self.markets.insert(id, market);
     }
 
     /// Get a market by ID.
@@ -77,7 +78,7 @@ impl MarketSet {
         if id.is_none() {
             None
         } else {
-            self.markets.get(id.0 as usize)
+            self.markets.get(&id)
         }
     }
 
@@ -88,7 +89,7 @@ impl MarketSet {
 
     /// Iterate over all markets.
     pub fn iter(&self) -> impl Iterator<Item = &Market> {
-        self.markets.iter()
+        self.markets.values()
     }
 
     /// Number of markets in the set.

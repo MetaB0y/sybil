@@ -303,7 +303,7 @@ impl LiquiditySnapshot {
                 .iter()
                 .map(|level| BookLevelSnapshot {
                     price: level.price as f64 / NANOS_PER_DOLLAR as f64,
-                    qty: level.available_qty,
+                    qty: level.available_qty(),
                     cumulative_qty: 0, // Will be filled below
                 })
                 .collect();
@@ -321,7 +321,7 @@ impl LiquiditySnapshot {
                 .iter()
                 .map(|level| BookLevelSnapshot {
                     price: level.price as f64 / NANOS_PER_DOLLAR as f64,
-                    qty: level.available_qty,
+                    qty: level.available_qty(),
                     cumulative_qty: 0, // Will be filled below
                 })
                 .collect();

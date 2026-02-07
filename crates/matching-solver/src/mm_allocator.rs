@@ -24,21 +24,6 @@ use serde::Serialize;
 
 use matching_engine::{MarketId, MmConstraint, MmId, Nanos, Order, Qty};
 
-/// Result of MM budget allocation.
-#[derive(Clone, Debug, Serialize)]
-pub struct AllocationResult {
-    /// Order IDs that should be activated (filled)
-    pub activated_orders: Vec<u64>,
-    /// Per-MM allocation details
-    pub mm_allocations: Vec<MmAllocation>,
-    /// Total welfare from activated orders
-    pub total_welfare: i64,
-    /// Number of fixed-point iterations used
-    pub iterations: usize,
-    /// Allocation statistics
-    pub stats: AllocationStats,
-}
-
 /// Statistics about the allocation process.
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct AllocationStats {
@@ -383,7 +368,7 @@ impl Default for MmAllocator {
 // OrderAllocator Trait Implementation
 // ============================================================================
 
-use crate::traits::{AllocationResult as TraitAllocationResult, OrderAllocator};
+use crate::traits::{AllocationResult, OrderAllocator};
 
 impl OrderAllocator for MmAllocator {
     fn allocate(
@@ -392,17 +377,8 @@ impl OrderAllocator for MmAllocator {
         prices: &HashMap<MarketId, Vec<Nanos>>,
         orders: &[Order],
         fills: &HashMap<u64, (Nanos, Qty)>,
-    ) -> TraitAllocationResult {
-        // Use the existing allocate method with actual fills
-        let result = MmAllocator::allocate(self, constraints, prices, orders, fills);
-
-        // Convert to trait AllocationResult
-        TraitAllocationResult {
-            activated_orders: result.activated_orders,
-            total_welfare: result.total_welfare,
-            iterations: result.iterations,
-            mm_allocations: result.mm_allocations,
-        }
+    ) -> AllocationResult {
+        MmAllocator::allocate(self, constraints, prices, orders, fills)
     }
 
     fn name(&self) -> &str {

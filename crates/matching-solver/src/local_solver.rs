@@ -462,12 +462,13 @@ impl LocalSolver {
             cumulative_supply.push((price, cum_qty));
         }
 
-        // Build cumulative demand curve (sorted by price desc)
-        let mut cumulative_demand: Vec<(Nanos, Qty)> = Vec::new();
-        let mut cum_qty: Qty = 0;
-        for &(price, qty) in demand {
-            cum_qty += qty;
-            cumulative_demand.push((price, cum_qty));
+        // Build cumulative demand curve (sorted by price desc) with prefix sums
+        let mut demand_cum_qty: Vec<Qty> = Vec::with_capacity(demand.len() + 1);
+        demand_cum_qty.push(0);
+        let mut cum: Qty = 0;
+        for &(_, qty) in demand {
+            cum += qty;
+            demand_cum_qty.push(cum);
         }
 
         // Find the supply price that maximizes matched volume
@@ -475,13 +476,10 @@ impl LocalSolver {
         let mut best_qty: Qty = 0;
 
         for &(price, cum_supply) in &cumulative_supply {
-            // Demand at this price = total demand from buyers willing to pay >= price
-            let demand_at_price = cumulative_demand
-                .iter()
-                .filter(|(p, _)| *p >= price)
-                .map(|(_, q)| *q)
-                .max()
-                .unwrap_or(0);
+            // demand is sorted by price desc; find how many have price >= supply price
+            // partition_point finds first index where predicate is false
+            let j = demand.partition_point(|&(dp, _)| dp >= price);
+            let demand_at_price = demand_cum_qty[j];
 
             let matched = demand_at_price.min(cum_supply);
             if matched > best_qty {
@@ -646,18 +644,15 @@ impl LocalSolver {
             return (NANOS_PER_DOLLAR / 2, 0);
         }
 
-        // Find crossing point
+        // Find crossing point using binary search on demand curve
+        // demand_at_price is sorted by price descending (most aggressive first)
         let mut clearing_price = supply_at_price[0].0;
         let mut clearing_qty: Qty = 0;
 
         for (price, supply) in &supply_at_price {
-            // Find demand at this price
-            let demand = demand_at_price
-                .iter()
-                .filter(|(p, _)| *p >= *price)
-                .map(|(_, q)| *q)
-                .max()
-                .unwrap_or(0);
+            // demand_at_price sorted desc; partition_point finds first index where price < *price
+            let j = demand_at_price.partition_point(|&(dp, _)| dp >= *price);
+            let demand = if j > 0 { demand_at_price[j - 1].1 } else { 0 };
 
             let matched = demand.min(*supply);
             if matched > clearing_qty {

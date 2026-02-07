@@ -37,7 +37,9 @@ pub use market::{Market, MarketSet};
 pub use mm_constraint::{
     MmConstraint, MmConstraintStatus, MmId, MmOrder, MmSide, MmValidationResult,
 };
-pub use order::{ConditionDir, Fill, Order, PriceCondition, MAX_MARKETS_PER_ORDER, MAX_STATES};
+pub use order::{
+    ConditionDir, Fill, Order, OrderOrigin, PriceCondition, MAX_MARKETS_PER_ORDER, MAX_STATES,
+};
 pub use order_builder::OrderBuilder;
 pub use problem::{MarketGroup, Problem, ProblemSummary};
 pub use state::{state_index, state_to_outcomes, StateProbabilities, StateSpace};

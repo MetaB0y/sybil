@@ -103,6 +103,9 @@ pub struct AllocationResult {
 
     /// Per-MM allocation details (if applicable).
     pub mm_allocations: Vec<crate::mm_allocator::MmAllocation>,
+
+    /// Allocation statistics (optional, populated by MmAllocator).
+    pub stats: crate::mm_allocator::AllocationStats,
 }
 
 /// Allocates budget-constrained orders given prices.

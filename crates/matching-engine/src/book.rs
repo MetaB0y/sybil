@@ -25,7 +25,7 @@ pub struct BookLevel {
     /// Price per share in nanodollars
     pub price: Nanos,
     /// Available quantity at this price level
-    pub available_qty: Qty,
+    available_qty: Qty,
     /// Bid or Ask
     pub side: Side,
 }
@@ -37,6 +37,11 @@ impl BookLevel {
             available_qty,
             side,
         }
+    }
+
+    /// Get the available quantity at this price level.
+    pub fn available_qty(&self) -> Qty {
+        self.available_qty
     }
 
     pub fn bid(price: Nanos, qty: Qty) -> Self {
@@ -470,11 +475,11 @@ mod tests {
     fn test_book_level_creation() {
         let bid = BookLevel::bid(price_to_nanos(0.52), 100);
         assert_eq!(bid.side, Side::Bid);
-        assert_eq!(bid.available_qty, 100);
+        assert_eq!(bid.available_qty(), 100);
 
         let ask = BookLevel::ask(price_to_nanos(0.53), 150);
         assert_eq!(ask.side, Side::Ask);
-        assert_eq!(ask.available_qty, 150);
+        assert_eq!(ask.available_qty(), 150);
     }
 
     #[test]

@@ -46,21 +46,26 @@ impl MmSide {
     /// Prices are in nanos (1e9 = $1). Quantity is in shares.
     /// Returns capital needed in nanos.
     pub fn capital_needed(&self, price: Nanos, quantity: Qty) -> Nanos {
-        const NANOS_PER_DOLLAR: u64 = 1_000_000_000;
+        use crate::types::NANOS_PER_DOLLAR;
 
-        match self {
+        // Use u128 intermediate to avoid overflow when price is low and qty is large
+        // (e.g., 900M * 20B = 18e18, near u64::MAX)
+        let p = price as u128;
+        let q = quantity as u128;
+        let npd = NANOS_PER_DOLLAR as u128;
+
+        let result = match self {
             MmSide::SellYes | MmSide::BuyNo => {
                 // Net cost: (1 - price) per unit
-                // price is in nanos, so (1 - price_fraction) = (NANOS - price) / NANOS
-                // capital = (1 - price_fraction) * qty * NANOS = (NANOS - price) * qty
-                (NANOS_PER_DOLLAR - price) * quantity
+                (npd - p) * q
             }
             MmSide::BuyYes | MmSide::SellNo => {
                 // Net cost: price per unit
-                // capital = price_fraction * qty * NANOS = price * qty
-                price * quantity
+                p * q
             }
-        }
+        };
+
+        result.try_into().expect("capital overflow: result exceeds u64")
     }
 }
 
@@ -216,6 +221,16 @@ mod tests {
         assert_eq!(capital, 60_000_000_000); // $60 total
 
         assert!(constraint.is_satisfied(&fills)); // $60 < $100
+    }
+
+    #[test]
+    fn test_mm_side_capital_no_overflow() {
+        // Large price and quantity that would overflow u64 without u128 intermediate:
+        // (NANOS_PER_DOLLAR - price) * qty = (1e9 - 100_000_000) * 20_000_000_000
+        // = 900_000_000 * 20_000_000_000 = 18_000_000_000_000_000_000 (~18e18)
+        // u64::MAX = 18_446_744_073_709_551_615 (~18.4e18), so this just barely fits
+        let capital = MmSide::SellYes.capital_needed(100_000_000, 20_000_000_000);
+        assert_eq!(capital, 18_000_000_000_000_000_000);
     }
 
     #[test]

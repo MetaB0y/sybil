@@ -35,7 +35,7 @@ pub mod milp;
 
 // New architecture components
 pub use local_solver::{LocalSolver, MarketSolution};
-pub use mm_allocator::{AllocationResult as MmAllocationResult, MmAllocation, MmAllocator};
+pub use mm_allocator::{MmAllocation, MmAllocator};
 
 // Experimentation platform traits
 pub use traits::{

@@ -18,7 +18,7 @@ use std::time::Instant;
 
 use serde::Serialize;
 
-use matching_engine::{MarketId, Nanos, Problem};
+use matching_engine::{MarketId, MmConstraint, Nanos, Order, Problem, Qty};
 
 use crate::combiner::{
     CombineStats, SolutionCombiner, SolverContribution, SolverSolution,
@@ -35,6 +35,76 @@ use crate::{MatchingResult, Solver};
 
 #[cfg(feature = "milp")]
 use crate::milp::MilpSolver;
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/// Estimate fills for MM orders that weren't matched in price discovery.
+///
+/// For each MM order not already in `fills`, checks if it would be willing
+/// to trade at the clearing price and inserts an estimated fill if so.
+fn estimate_mm_fills(
+    mm_constraints: &[MmConstraint],
+    order_map: &HashMap<u64, &Order>,
+    prices: &PriceDiscoveryResult,
+    fills: &mut HashMap<u64, (Nanos, Qty)>,
+) {
+    #[allow(clippy::map_entry)]
+    for mm in mm_constraints {
+        for &order_id in &mm.order_ids {
+            if !fills.contains_key(&order_id) {
+                if let Some(order) = order_map.get(&order_id) {
+                    if order.num_markets == 1 {
+                        let market = order.markets[0];
+                        if let Some(market_prices) = prices.prices.get(&market) {
+                            let num_states = order.num_states as usize;
+                            let is_buyer =
+                                order.payoffs[..num_states].iter().any(|&p| p > 0);
+                            let is_seller =
+                                order.payoffs[..num_states].iter().any(|&p| p < 0);
+
+                            let (outcome, price) = if is_buyer {
+                                let o = order.payoffs[..num_states]
+                                    .iter()
+                                    .position(|&p| p > 0)
+                                    .unwrap_or(0);
+                                let p = market_prices
+                                    .get(o)
+                                    .copied()
+                                    .unwrap_or(500_000_000);
+                                (o, p)
+                            } else if is_seller {
+                                let o = order.payoffs[..num_states]
+                                    .iter()
+                                    .position(|&p| p < 0)
+                                    .unwrap_or(0);
+                                let p = market_prices
+                                    .get(o)
+                                    .copied()
+                                    .unwrap_or(500_000_000);
+                                (o, p)
+                            } else {
+                                continue;
+                            };
+
+                            let willing = if is_buyer {
+                                order.limit_price >= price
+                            } else {
+                                order.limit_price <= price
+                            };
+
+                            if willing {
+                                let _ = outcome;
+                                fills.insert(order_id, (price, order.max_fill));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 // ============================================================================
 // Pipeline Configuration
@@ -281,12 +351,17 @@ impl Pipeline {
     /// Uses Lagrangian relaxation with subgradient updates to handle
     /// coupling constraints (price consistency across MarketGroups,
     /// MM budget limits) in a principled way.
+    ///
+    /// MultiMarketSolver runs inside the dual loop for bundle repricing,
+    /// and negrisk arbitrage is disabled (dual handles via lambda).
     pub fn with_dual_decomposition() -> Self {
         Self::builder()
             .name("Dual Decomposition")
             .price_discoverer(LocalSolver::new())
-            .dual_master(DualMaster::new())
-            .multi_market_solver(MultiMarketSolver::new())
+            .dual_master(
+                DualMaster::new()
+                    .with_multi_market_solver(MultiMarketSolver::new())
+            )
             .build()
     }
 
@@ -295,8 +370,10 @@ impl Pipeline {
         Self::builder()
             .name("Dual Decomposition")
             .price_discoverer(LocalSolver::new())
-            .dual_master(DualMaster::with_config(config))
-            .multi_market_solver(MultiMarketSolver::new())
+            .dual_master(
+                DualMaster::with_config(config)
+                    .with_multi_market_solver(MultiMarketSolver::new())
+            )
             .build()
     }
 
@@ -307,6 +384,12 @@ impl Pipeline {
 
     /// Solve a matching problem using this pipeline.
     pub fn solve(&self, problem: &Problem) -> PipelineResult {
+        debug_assert!(
+            problem.validate().is_ok(),
+            "Problem validation failed: {:?}",
+            problem.validate().unwrap_err()
+        );
+
         if self.dual_master.is_some() {
             self.solve_dual_decomposition(problem)
         } else if self.config.use_fixed_point {
@@ -345,27 +428,9 @@ impl Pipeline {
         let order_map: std::collections::HashMap<u64, &matching_engine::Order> =
             problem.orders.iter().map(|o| (o.id, o)).collect();
 
-        // Phase 2: Multi-Market Repricing
+        // Phase 2: Bundle/Spread matching (partial solvers)
+        // Note: MultiMarketSolver now runs inside DualMaster's loop (2.2)
         let mut bundle_fills = 0usize;
-        if let (Some(ref mm_solver), Some(ref pd_result)) =
-            (&self.multi_market_solver, &result.price_discovery)
-        {
-            let repricing_result = mm_solver.solve_with_repricing(problem, pd_result);
-            for fill in repricing_result.bundle_fills {
-                if let Some(&order) = order_map.get(&fill.order_id) {
-                    filled_order_ids.insert(fill.order_id);
-                    result.result.add_fill(fill.clone(), order);
-                    bundle_fills += 1;
-                    result.contributions.push(SolverContribution {
-                        solver_name: "MultiMarket-Repricing".to_string(),
-                        fills_contributed: 1,
-                        welfare_contributed: order.welfare_contribution(fill.fill_price, fill.fill_qty),
-                    });
-                }
-            }
-        }
-
-        // Phase 3: Bundle/Spread matching (partial solvers)
         let partial_start = Instant::now();
         let pd_fills = result.result.fills.len();
         for solver in &self.partial_solvers {
@@ -426,6 +491,12 @@ impl Pipeline {
 
         // Enforce UCP: re-price all single-market fills at the final clearing price.
         Self::enforce_ucp(&mut result, &order_map);
+
+        // Gate: if total welfare is negative, return empty result.
+        // Negative welfare means fills are collectively value-destroying.
+        if result.result.total_welfare < 0 {
+            result.result = MatchingResult::new();
+        }
 
         result
     }
@@ -672,62 +743,14 @@ impl Pipeline {
                 let alloc_start = Instant::now();
 
                 // Build fills map from price discovery (current iteration only)
-                let mut current_fills: std::collections::HashMap<u64, (matching_engine::Nanos, matching_engine::Qty)> =
+                let mut current_fills: HashMap<u64, (Nanos, Qty)> =
                     prices.all_fills()
                         .into_iter()
                         .map(|f| (f.order_id, (f.fill_price, f.fill_qty)))
                         .collect();
 
                 // Add MM orders that weren't matched in price discovery with estimated fills.
-                // This allows the allocator to consider them for budget allocation.
-                #[allow(clippy::map_entry)]
-                for mm in &problem.mm_constraints {
-                    for &order_id in &mm.order_ids {
-                        if !current_fills.contains_key(&order_id) {
-                            if let Some(order) = order_map.get(&order_id) {
-                                if order.num_markets == 1 {
-                                    let market = order.markets[0];
-                                    if let Some(market_prices) = prices.prices.get(&market) {
-                                        let num_states = order.num_states as usize;
-                                        let is_buyer = order.payoffs[..num_states].iter().any(|&p| p > 0);
-                                        let is_seller = order.payoffs[..num_states].iter().any(|&p| p < 0);
-
-                                        // Determine the relevant outcome and clearing price
-                                        let (outcome, price) = if is_buyer {
-                                            let o = order.payoffs[..num_states].iter()
-                                                .position(|&p| p > 0).unwrap_or(0);
-                                            let p = market_prices.get(o).copied()
-                                                .unwrap_or(500_000_000);
-                                            (o, p)
-                                        } else if is_seller {
-                                            let o = order.payoffs[..num_states].iter()
-                                                .position(|&p| p < 0).unwrap_or(0);
-                                            let p = market_prices.get(o).copied()
-                                                .unwrap_or(500_000_000);
-                                            (o, p)
-                                        } else {
-                                            continue;
-                                        };
-
-                                        // Check willingness to trade at clearing price:
-                                        // Buyer: fill_price <= limit (willing to pay up to limit)
-                                        // Seller: fill_price >= limit (willing to sell at >= minimum)
-                                        let willing = if is_buyer {
-                                            order.limit_price >= price
-                                        } else {
-                                            order.limit_price <= price
-                                        };
-
-                                        if willing {
-                                            let _ = outcome; // used for price lookup above
-                                            current_fills.insert(order_id, (price, order.max_fill));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                estimate_mm_fills(&problem.mm_constraints, &order_map, prices, &mut current_fills);
 
                 // Merge with cumulative fills for budget calculation
                 // Cumulative fills represent already-committed capital from previous iterations
@@ -963,6 +986,11 @@ impl Pipeline {
         // Fills that would violate their order's limit at the new price are dropped.
         Self::enforce_ucp(&mut result, &order_map);
 
+        // Gate: if total welfare is negative, return empty result.
+        if result.result.total_welfare < 0 {
+            result.result = MatchingResult::new();
+        }
+
         // Capture final phase snapshot
         #[cfg(feature = "viz")]
         phase_snapshots.push(crate::viz::PhaseSnapshot::capture(
@@ -1022,6 +1050,7 @@ impl Pipeline {
                 total_welfare,
                 iterations,
                 mm_allocations,
+                stats: crate::mm_allocator::AllocationStats::default(),
             });
         }
 
@@ -1088,61 +1117,18 @@ impl Pipeline {
                 let alloc_start = Instant::now();
 
                 // Build fills map from price discovery
-                let mut fills: std::collections::HashMap<u64, (matching_engine::Nanos, matching_engine::Qty)> =
+                let mut fills: HashMap<u64, (Nanos, Qty)> =
                     prices.all_fills()
                         .into_iter()
                         .map(|f| (f.order_id, (f.fill_price, f.fill_qty)))
                         .collect();
 
                 // Build order lookup for MM order estimation
-                let order_map: std::collections::HashMap<u64, &matching_engine::Order> =
+                let order_map: HashMap<u64, &Order> =
                     problem.orders.iter().map(|o| (o.id, o)).collect();
 
                 // Add MM orders that weren't matched in price discovery with estimated fills
-                #[allow(clippy::map_entry)]
-                for mm in &problem.mm_constraints {
-                    for &order_id in &mm.order_ids {
-                        if !fills.contains_key(&order_id) {
-                            if let Some(order) = order_map.get(&order_id) {
-                                if order.num_markets == 1 {
-                                    let market = order.markets[0];
-                                    if let Some(market_prices) = prices.prices.get(&market) {
-                                        let num_states = order.num_states as usize;
-                                        let is_buyer = order.payoffs[..num_states].iter().any(|&p| p > 0);
-                                        let is_seller = order.payoffs[..num_states].iter().any(|&p| p < 0);
-
-                                        let (outcome, price) = if is_buyer {
-                                            let o = order.payoffs[..num_states].iter()
-                                                .position(|&p| p > 0).unwrap_or(0);
-                                            let p = market_prices.get(o).copied()
-                                                .unwrap_or(500_000_000);
-                                            (o, p)
-                                        } else if is_seller {
-                                            let o = order.payoffs[..num_states].iter()
-                                                .position(|&p| p < 0).unwrap_or(0);
-                                            let p = market_prices.get(o).copied()
-                                                .unwrap_or(500_000_000);
-                                            (o, p)
-                                        } else {
-                                            continue;
-                                        };
-
-                                        let willing = if is_buyer {
-                                            order.limit_price >= price
-                                        } else {
-                                            order.limit_price <= price
-                                        };
-
-                                        if willing {
-                                            let _ = outcome;
-                                            fills.insert(order_id, (price, order.max_fill));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                estimate_mm_fills(&problem.mm_constraints, &order_map, prices, &mut fills);
 
                 let alloc_result =
                     allocator.allocate(&problem.mm_constraints, &prices.prices, &problem.orders, &fills);

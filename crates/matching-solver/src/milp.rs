@@ -471,6 +471,15 @@ impl MilpSolver {
             }
         }
 
+        let num_markets = markets.len();
+        let num_states = 1usize << num_markets;
+        debug_assert!(
+            active_orders.iter().all(|o| o.num_states as usize <= num_states),
+            "MILP assumes binary markets: expected max {} states, found order with {} states",
+            num_states,
+            active_orders.iter().map(|o| o.num_states).max().unwrap_or(0)
+        );
+
         // ================================================================
         // Create SCIP model
         // ================================================================

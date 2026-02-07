@@ -23,6 +23,7 @@ use matching_engine::{
 use serde::Serialize;
 
 use crate::local_solver::LocalSolver;
+use crate::specialized::MultiMarketSolver;
 use crate::traits::PriceDiscoveryResult;
 use crate::MatchingResult;
 
@@ -59,12 +60,12 @@ pub struct DualConfig {
 impl Default for DualConfig {
     fn default() -> Self {
         Self {
-            max_iterations: 10,
-            initial_step_size: 0.5,
+            max_iterations: 20,
+            initial_step_size: 0.3,
             primal_tolerance: 0.02,
             dual_tolerance: 0.001,
             step_decay: StepDecay::InvSqrt,
-            welfare_tolerance: 0.01,
+            welfare_tolerance: 0.005,
         }
     }
 }
@@ -126,6 +127,7 @@ pub struct DualIterationStats {
 pub struct DualMaster {
     config: DualConfig,
     local_solver: LocalSolver,
+    multi_market_solver: Option<MultiMarketSolver>,
 }
 
 impl DualMaster {
@@ -134,6 +136,7 @@ impl DualMaster {
         Self {
             config: DualConfig::default(),
             local_solver: LocalSolver::new(),
+            multi_market_solver: None,
         }
     }
 
@@ -142,7 +145,14 @@ impl DualMaster {
         Self {
             config,
             local_solver: LocalSolver::new(),
+            multi_market_solver: None,
         }
+    }
+
+    /// Set the multi-market solver for bundle repricing inside the dual loop.
+    pub fn with_multi_market_solver(mut self, solver: MultiMarketSolver) -> Self {
+        self.multi_market_solver = Some(solver);
+        self
     }
 
     /// Main dual decomposition solve loop.
@@ -218,7 +228,28 @@ impl DualMaster {
                 market_groups: problem.market_groups.clone(),
             };
 
-            let prices = self.local_solver.discover_prices_impl(&shaded_problem);
+            let mut prices = self.local_solver.discover_prices_impl(&shaded_problem);
+
+            // 2b. Run multi-market repricing inside the dual loop
+            // This handles bundle/spread orders that span multiple markets
+            let mut bundle_fills_this_iter: Vec<Fill> = Vec::new();
+            if let Some(ref mm_solver) = self.multi_market_solver {
+                let repricing_result = mm_solver.solve_with_repricing(&shaded_problem, &prices);
+                if repricing_result.bundles_matched > 0 {
+                    // Update prices with repriced market solutions
+                    for (mid, sol) in &repricing_result.repriced_solutions {
+                        if let Some(old_sol) = prices.market_solutions.get(mid) {
+                            prices.total_welfare -= old_sol.welfare;
+                            prices.total_fills -= old_sol.fills.len();
+                        }
+                        prices.total_welfare += sol.welfare;
+                        prices.total_fills += sol.fills.len();
+                        prices.prices.insert(*mid, sol.prices.clone());
+                        prices.market_solutions.insert(*mid, sol.clone());
+                    }
+                    bundle_fills_this_iter = repricing_result.bundle_fills;
+                }
+            }
 
             // 3. Collect candidate fills, validate against original limits
             let candidate_fills: Vec<Fill> = prices
@@ -365,6 +396,17 @@ impl DualMaster {
                 }
             }
 
+            // 6b. Add bundle fills from multi-market repricing
+            for fill in bundle_fills_this_iter {
+                if let Some(order) = order_map.get(&fill.order_id) {
+                    if !filled_order_ids.contains(&fill.order_id) {
+                        filled_order_ids.insert(fill.order_id);
+                        matching_result.add_fill(fill, order);
+                        iter_fills += 1;
+                    }
+                }
+            }
+
             // 7. Compute price residuals and update λ
             let price_residuals =
                 compute_price_residuals(&prices, &problem.market_groups);
@@ -474,45 +516,93 @@ pub fn shade_orders(
         .map(|order| {
             let mut shaded = order.clone();
 
-            // Skip multi-market orders (not handled by per-market clearing)
-            if order.num_markets != 1 {
-                return shaded;
-            }
-
-            let market = order.markets[0];
-
-            // Get λ for this market's group
-            let lambda_val = market_to_group
-                .get(&market)
-                .and_then(|g| lambda.get(g))
-                .copied()
-                .unwrap_or(0.0);
-
-            // Determine order type from payoff vector
-            let is_yes_buyer = order.payoffs[0] > 0 && order.payoffs.iter().all(|&p| p >= 0);
-            let is_no_buyer = order.num_states >= 2
-                && order.payoffs[1] > 0
-                && order.payoffs.iter().all(|&p| p >= 0);
-            let is_yes_seller = order.payoffs[0] < 0;
-            let is_no_seller = order.num_states >= 2 && order.payoffs[1] < 0;
-
-            let limit_f64 = order.limit_price as f64;
             let npd = NANOS_PER_DOLLAR as f64;
-            let lambda_nanos = lambda_val * npd;
+            let limit_f64 = order.limit_price as f64;
 
-            // Apply price consistency (λ) adjustment only
-            let effective = if is_yes_buyer || is_yes_seller {
-                // YES side: shade down when λ>0 (prices sum too high)
-                limit_f64 - lambda_nanos
-            } else if is_no_buyer || is_no_seller {
-                // NO side: shade up when λ>0 (prices sum too high)
-                limit_f64 + lambda_nanos
+            if order.num_markets == 1 {
+                // Single-market order: shade based on YES/NO exposure
+                let market = order.markets[0];
+
+                let lambda_val = market_to_group
+                    .get(&market)
+                    .and_then(|g| lambda.get(g))
+                    .copied()
+                    .unwrap_or(0.0);
+
+                let is_yes_buyer = order.payoffs[0] > 0 && order.payoffs.iter().all(|&p| p >= 0);
+                let is_no_buyer = order.num_states >= 2
+                    && order.payoffs[1] > 0
+                    && order.payoffs.iter().all(|&p| p >= 0);
+                let is_yes_seller = order.payoffs[0] < 0;
+                let is_no_seller = order.num_states >= 2 && order.payoffs[1] < 0;
+
+                let lambda_nanos = lambda_val * npd;
+
+                let effective = if is_yes_buyer || is_yes_seller {
+                    limit_f64 - lambda_nanos
+                } else if is_no_buyer || is_no_seller {
+                    limit_f64 + lambda_nanos
+                } else {
+                    limit_f64
+                };
+
+                shaded.limit_price = effective.round().clamp(0.0, npd) as Nanos;
             } else {
-                limit_f64
-            };
+                // Multi-market (bundle/spread) order: compute net λ exposure
+                // For each market leg, determine if it contributes YES or NO exposure,
+                // then sum the λ contributions across all legs in the same group.
+                let num_states = order.num_states as usize;
+                let num_markets = order.num_markets as usize;
 
-            // Clamp to valid range [0, $1]
-            shaded.limit_price = effective.round().clamp(0.0, npd) as Nanos;
+                let mut total_lambda_adjustment = 0.0;
+
+                for m_idx in 0..num_markets {
+                    let market = order.markets[m_idx];
+                    if market.is_none() {
+                        continue;
+                    }
+
+                    let lambda_val = market_to_group
+                        .get(&market)
+                        .and_then(|g| lambda.get(g))
+                        .copied()
+                        .unwrap_or(0.0);
+
+                    if lambda_val.abs() < 1e-12 {
+                        continue;
+                    }
+
+                    // Compute net YES exposure for this market leg:
+                    // Average payoff when market m = YES minus average when m = NO
+                    let stride = 1usize << m_idx;
+                    let mut yes_sum = 0.0f64;
+                    let mut yes_count = 0usize;
+                    let mut no_sum = 0.0f64;
+                    let mut no_count = 0usize;
+
+                    for s in 0..num_states {
+                        let outcome = (s / stride) % 2;
+                        let payoff = order.payoffs[s] as f64;
+                        if outcome == 0 {
+                            yes_sum += payoff;
+                            yes_count += 1;
+                        } else {
+                            no_sum += payoff;
+                            no_count += 1;
+                        }
+                    }
+
+                    let c_yes = if yes_count > 0 { yes_sum / yes_count as f64 } else { 0.0 };
+                    let c_no = if no_count > 0 { no_sum / no_count as f64 } else { 0.0 };
+                    let net_exposure = c_yes - c_no; // positive = net YES, negative = net NO
+
+                    // YES exposure contributes -λ shading, NO exposure contributes +λ shading
+                    total_lambda_adjustment -= net_exposure * lambda_val * npd;
+                }
+
+                let effective = limit_f64 + total_lambda_adjustment;
+                shaded.limit_price = effective.round().clamp(0.0, npd) as Nanos;
+            }
 
             shaded
         })
@@ -573,7 +663,7 @@ pub fn update_duals(
 
 /// Check if the dual decomposition has converged.
 ///
-/// Convergence requires:
+/// Convergence requires ALL of:
 /// 1. All price residuals below tolerance (constraints approximately satisfied)
 /// 2. All λ changes below tolerance (dual stability)
 /// 3. Welfare improvement below welfare_tolerance (marginal returns diminishing)
@@ -603,7 +693,8 @@ pub fn check_convergence(
     // Check welfare convergence (marginal improvement < tolerance)
     let welfare_ok = welfare_delta_frac.abs() < welfare_tol;
 
-    (primal_ok && dual_ok) || welfare_ok
+    // Strict mode: require all criteria met
+    (primal_ok && dual_ok) && welfare_ok
 }
 
 // ============================================================================
@@ -761,10 +852,10 @@ mod tests {
     #[test]
     fn test_dual_config_default() {
         let config = DualConfig::default();
-        assert_eq!(config.max_iterations, 10);
-        assert!(config.initial_step_size > 0.0);
+        assert_eq!(config.max_iterations, 20);
+        assert!((config.initial_step_size - 0.3).abs() < 1e-9);
         assert!(config.primal_tolerance > 0.0);
-        assert!(config.welfare_tolerance > 0.0);
+        assert!((config.welfare_tolerance - 0.005).abs() < 1e-9);
     }
 
     #[test]
@@ -860,7 +951,7 @@ mod tests {
     }
 
     #[test]
-    fn test_convergence_check_primal_and_dual() {
+    fn test_convergence_check_all_criteria_met() {
         let state = DualState {
             lambda: [("g1".to_string(), 0.05)].into_iter().collect(),
             prev_lambda: [("g1".to_string(), 0.05)].into_iter().collect(),
@@ -868,35 +959,34 @@ mod tests {
 
         let price_res: HashMap<String, f64> = [("g1".to_string(), 0.001)].into_iter().collect();
 
-        // Small residuals + no dual change + welfare not converged
-        // → should converge on primal+dual alone
+        // Small residuals + no dual change + welfare converged → all criteria met
         assert!(check_convergence(
             &price_res,
             &state,
             0.02,
             0.001,
-            0.5, // welfare still changing
+            0.001, // welfare converged too
             0.01,
         ));
     }
 
     #[test]
-    fn test_convergence_via_welfare() {
+    fn test_convergence_fails_without_welfare() {
         let state = DualState {
             lambda: [("g1".to_string(), 0.05)].into_iter().collect(),
-            prev_lambda: [("g1".to_string(), 0.0)].into_iter().collect(),
+            prev_lambda: [("g1".to_string(), 0.05)].into_iter().collect(),
         };
 
-        let price_res: HashMap<String, f64> = [("g1".to_string(), 0.10)].into_iter().collect();
+        let price_res: HashMap<String, f64> = [("g1".to_string(), 0.001)].into_iter().collect();
 
-        // Large price residual + large dual change, but welfare converged
-        // → should converge on welfare alone
-        assert!(check_convergence(
+        // Small residuals + no dual change but welfare still improving
+        // → strict mode requires all criteria, so not converged
+        assert!(!check_convergence(
             &price_res,
             &state,
             0.02,
             0.001,
-            0.005, // welfare delta < 1% tolerance
+            0.5, // welfare still changing
             0.01,
         ));
     }
