@@ -137,12 +137,27 @@ class SybilClient:
 
     # === Orders ===
 
-    async def submit_orders(self, account_id: int, orders: list[OrderSpec]) -> bool:
-        """Submit orders for an account."""
+    async def submit_orders(
+        self,
+        account_id: int,
+        orders: list[OrderSpec],
+        mm_budget_nanos: int | None = None,
+    ) -> bool:
+        """Submit orders for an account.
+
+        Args:
+            account_id: Account submitting the orders.
+            orders: List of order specifications.
+            mm_budget_nanos: If set, treat as market maker orders with flash
+                liquidity. The value is the MM's total capital budget in nanos.
+                MM orders skip per-order balance validation; the solver enforces
+                the portfolio-level budget constraint at clearing time.
+        """
         order_specs = [self._order_to_json(o) for o in orders]
-        data = await self._request(
-            "POST", "/v1/orders", json={"account_id": account_id, "orders": order_specs}
-        )
+        payload: dict[str, Any] = {"account_id": account_id, "orders": order_specs}
+        if mm_budget_nanos is not None:
+            payload["mm_budget_nanos"] = mm_budget_nanos
+        data = await self._request("POST", "/v1/orders", json=payload)
         return data.get("accepted", False)
 
     async def buy_yes(

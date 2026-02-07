@@ -1,6 +1,7 @@
 """Trading bot implementations."""
 
 from .base import BaseAgent
+from .flash_mm import FlashMarketMaker, TightFlashMM, WideFlashMM
 from .informed import FixedProbabilityModel, InformedTrader, MomentumTrader, ProbabilityModel
 from .market_maker import SimpleMarketMaker
 from .random_trader import RandomTrader
@@ -8,11 +9,14 @@ from .random_trader import RandomTrader
 __all__ = [
     "BaseAgent",
     "FixedProbabilityModel",
+    "FlashMarketMaker",
     "InformedTrader",
     "MomentumTrader",
     "ProbabilityModel",
     "RandomTrader",
     "SimpleMarketMaker",
+    "TightFlashMM",
+    "WideFlashMM",
 ]
 
 

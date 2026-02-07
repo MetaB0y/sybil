@@ -1,6 +1,7 @@
 use axum::extract::State;
 use axum::Json;
 
+use matching_engine::mm_constraint::{MmConstraint, MmId, MmSide};
 use matching_sequencer::crypto::{PublicKey, SignedOrder};
 use matching_sequencer::{AccountId, OrderSubmission};
 use p256::ecdsa::{Signature, VerifyingKey};
@@ -9,8 +10,21 @@ use p256::EncodedPoint;
 use crate::convert::{order_spec_to_order, signed_order_data_to_order};
 use crate::state::AppState;
 use crate::types::error::AppError;
-use crate::types::request::{SubmitOrderRequest, SubmitSignedOrderRequest};
+use crate::types::request::{OrderSpec, SubmitOrderRequest, SubmitSignedOrderRequest};
 use crate::types::response::OrderAcceptedResponse;
+
+/// Derive the MmSide from an OrderSpec for capital calculation.
+fn mm_side_from_spec(spec: &OrderSpec) -> MmSide {
+    match spec {
+        OrderSpec::BuyYes { .. } => MmSide::BuyYes,
+        OrderSpec::BuyNo { .. } => MmSide::BuyNo,
+        OrderSpec::SellYes { .. } => MmSide::SellYes,
+        OrderSpec::SellNo { .. } => MmSide::SellNo,
+        // For complex order types, use BuyYes as a conservative default.
+        // Capital = price * qty, which is the max possible cost.
+        _ => MmSide::BuyYes,
+    }
+}
 
 /// POST /v1/orders
 #[utoipa::path(
@@ -36,10 +50,21 @@ pub async fn submit_orders(
         orders.push(order);
     }
 
+    // Build MmConstraint if mm_budget_nanos is provided
+    let mm_constraint = req.mm_budget_nanos.map(|budget| {
+        let mut constraint = MmConstraint::new(MmId(req.account_id), budget);
+        // Use temporary IDs (0, 1, 2...) matching order indices.
+        // The sequencer will remap these to real order IDs.
+        for (i, spec) in req.orders.iter().enumerate() {
+            constraint.add_order(i as u64, mm_side_from_spec(spec));
+        }
+        constraint
+    });
+
     let submission = OrderSubmission {
         account_id: AccountId(req.account_id),
         orders,
-        mm_constraint: None,
+        mm_constraint,
     };
 
     state.sequencer.submit_order(submission).await?;

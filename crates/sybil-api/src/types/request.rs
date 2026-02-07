@@ -52,6 +52,12 @@ pub struct SubmitOrderRequest {
     pub account_id: u64,
     /// Orders to submit.
     pub orders: Vec<OrderSpec>,
+    /// If set, treat these orders as market maker orders with flash liquidity.
+    /// The value is the MM's total capital budget in nanos.
+    /// MM orders skip per-order balance validation; instead the solver enforces
+    /// the portfolio-level budget constraint at clearing time.
+    #[serde(default)]
+    pub mm_budget_nanos: Option<u64>,
 }
 
 /// Tagged enum representing different order types.
