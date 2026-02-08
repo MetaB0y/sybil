@@ -120,3 +120,11 @@ viz-run preset="small":
 # Install viz dependencies
 viz-install:
     cd viz && uv sync
+
+# Run arena demo (starts server, syncs deps, runs backtest)
+arena-demo:
+    cd arena && uv sync --extra llm && uv run python demo.py --start-server
+
+# Run arena demo without starting server (server must already be running)
+arena-demo-quick:
+    cd arena && uv run python demo.py
