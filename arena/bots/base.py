@@ -22,6 +22,9 @@ class BaseAgent(ABC):
         self.positions: dict[tuple[int, str], int] = {}
         self.balance_history: list[float] = []
         self._running = False
+        # Order tracking for observability
+        self.last_orders: list[OrderSpec] = []
+        self.total_orders_submitted: int = 0
 
     @abstractmethod
     async def on_block(self, block: Block) -> list[OrderSpec]:

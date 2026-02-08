@@ -24,7 +24,7 @@ from backtest.runner import BacktestRunner
 console = Console()
 
 DATASET_DIR = Path(__file__).parent / "datasets"
-DEFAULT_DATASET = DATASET_DIR / "nba_full.json"
+DEFAULT_DATASET = DATASET_DIR / "nba_dec2025.json"
 FALLBACK_DATASET = DATASET_DIR / "nba_sample.json"
 
 
@@ -50,16 +50,38 @@ def load_dotenv(path: Path | None = None) -> None:
 
 
 def _score_watcher(markets: dict[str, "MarketView"]) -> dict[str, float]:
-    """Bet on whoever's winning. Simple score-ratio strategy."""
+    """Bet on whoever's winning, weighted by quarter progression.
+
+    Early leads are less predictive, late leads are more decisive.
+    """
     import re
 
     estimates = {}
     for name, view in markets.items():
         for news_line in view.news:
-            m = re.search(r"\[Q\d END\] (\d+) - (\d+)", news_line)
+            # Match quarter score updates
+            m = re.search(r"\[Q(\d) END\] (\d+) - (\d+)", news_line)
+            if m:
+                quarter = int(m.group(1))
+                home, away = int(m.group(2)), int(m.group(3))
+                total = home + away
+                if total == 0:
+                    break
+
+                # Raw score ratio
+                raw = home / total
+
+                # Weight toward 0.5 based on how early in the game
+                # Q1: 30% weight on score, Q4: 90% weight
+                score_weight = 0.2 + quarter * 0.175
+                estimates[name] = 0.5 * (1 - score_weight) + raw * score_weight
+                break
+
+            # Also handle FINAL
+            m = re.search(r"\[FINAL\] (\d+) - (\d+)", news_line)
             if m:
                 home, away = int(m.group(1)), int(m.group(2))
-                estimates[name] = home / (home + away)
+                estimates[name] = 0.95 if home > away else 0.05
                 break
     return estimates
 
@@ -67,20 +89,15 @@ def _score_watcher(markets: dict[str, "MarketView"]) -> dict[str, float]:
 def build_agent_configs() -> list[BacktestAgentConfig]:
     """Build bot lineup based on available API keys."""
     from bots.backtest_mm import BacktestTightMM, BacktestWideMM
-    from bots.news_trader import ConservativeNewsTrader, NewsTrader
     from bots.strategy_agent import StrategyAgent
 
     configs: list[BacktestAgentConfig] = []
 
-    # Always include market makers for liquidity
+    # Market makers for liquidity
     configs.append(BacktestAgentConfig(BacktestTightMM, "MM-Tight", {}))
     configs.append(BacktestAgentConfig(BacktestWideMM, "MM-Wide", {}))
 
-    # Always include rule-based bots as baselines
-    configs.append(BacktestAgentConfig(NewsTrader, "NewsBot", {}))
-    configs.append(BacktestAgentConfig(ConservativeNewsTrader, "NewsBot-Conservative", {}))
-
-    # StrategyAgent demo: simple score-watching bot
+    # Simple rule-based baseline
     configs.append(
         BacktestAgentConfig(
             StrategyAgent,

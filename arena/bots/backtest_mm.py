@@ -64,7 +64,7 @@ class BacktestFlashMM(BacktestAgent):
         for market_id, (yes_nanos, no_nanos) in self.filter_markets(block).items():
             yes_mid = yes_nanos / NANOS_PER_DOLLAR
             skew = self._compute_skew(market_id)
-            yes_mid = max(0.05, min(0.95, yes_mid + skew))
+            yes_mid = max(0.05, min(0.95, yes_mid - skew))
             no_mid = max(0.05, min(0.95, 1.0 - yes_mid))
 
             half_spread = self.half_spread_bps / 10000
@@ -78,6 +78,8 @@ class BacktestFlashMM(BacktestAgent):
                 orders.append(BuyNo.at_price(market_id, no_bid, self.quote_size))
 
         if orders:
+            self.last_orders = orders
+            self.total_orders_submitted += len(orders)
             try:
                 await self.client.submit_orders(
                     self.account_id,

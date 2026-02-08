@@ -115,9 +115,11 @@ class SybilClient:
     async def get_prices(self) -> dict[int, tuple[int, int]]:
         """Get clearing prices for all markets."""
         data = await self._request("GET", "/v1/markets/prices")
+        # Response is wrapped: {"prices": {"0": {...}, "1": {...}}}
+        prices_map = data.get("prices", data) if isinstance(data, dict) else data
         return {
             int(market_id): (p["yes_price_nanos"], p["no_price_nanos"])
-            for market_id, p in data.items()
+            for market_id, p in prices_map.items()
         }
 
     async def resolve_market(self, market_id: int, payout_nanos: int) -> None:

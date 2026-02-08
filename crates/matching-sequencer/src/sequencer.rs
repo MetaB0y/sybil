@@ -454,7 +454,10 @@ impl BlockSequencer {
 
         let fills = pipeline_result.result.fills.clone();
         let total_welfare = pipeline_result.result.total_welfare;
-        let total_volume = pipeline_result.result.total_quantity_filled;
+        let total_volume: u64 = fills
+            .iter()
+            .map(|f| f.fill_price.saturating_mul(f.fill_qty))
+            .fold(0u64, |acc, v| acc.saturating_add(v));
         let orders_filled = pipeline_result.result.orders_filled;
 
         // Snapshot pre-state (before settlement)

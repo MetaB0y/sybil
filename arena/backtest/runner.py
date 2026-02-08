@@ -112,6 +112,7 @@ class BacktestRunner:
     _agent_tasks: list[asyncio.Task] = field(default_factory=list, init=False)
     _latest_prices: dict[int, tuple[int, int]] = field(default_factory=dict, init=False)
     _market_display_names: dict[int, str] = field(default_factory=dict, init=False)
+    _last_block: Any = field(default=None, init=False)
 
     async def _setup_markets(self) -> None:
         """Create markets for all events in the dataset."""
@@ -189,6 +190,17 @@ class BacktestRunner:
             # Resolve the market
             await self._resolve_event(event)
 
+    async def _resolve_remaining_markets(self) -> None:
+        """Resolve any markets that weren't resolved by the scheduler."""
+        for event in self.dataset.events:
+            market_id = self._market_ids.get(event.event_id)
+            if market_id is None:
+                continue
+            try:
+                await self._resolve_event(event)
+            except Exception:
+                pass  # Already resolved
+
     def _build_news_panel(self) -> Panel:
         """Build the NEWS panel showing recent news items."""
         recent = self._news_scheduler.recent_news
@@ -198,8 +210,19 @@ class BacktestRunner:
             lines = []
             for news in recent:
                 ts = news.timestamp.strftime("%H:%M")
+                # Show which game this news is about
+                game_tag = ""
+                if news.event_id:
+                    market_id = self._market_ids.get(news.event_id)
+                    if market_id is not None:
+                        display = self._market_display_names.get(market_id, "")
+                        # Shorten: "Boston Celtics vs Detroit Pistons" -> "BOS vs DET"
+                        parts = display.split(" vs ")
+                        if len(parts) == 2:
+                            short = " vs ".join(p.split()[-1][:3].upper() for p in parts)
+                            game_tag = f"[dim]{short}[/dim] "
                 formatted = format_news_line(news)
-                lines.append(f" {ts}  {formatted}")
+                lines.append(f" {ts}  {game_tag}{formatted}")
             content = "\n".join(lines)
         return Panel(content, title="NEWS", border_style="cyan", height=min(12, 4 + len(self._news_scheduler.recent_news)))
 
@@ -286,8 +309,78 @@ class BacktestRunner:
 
         return Panel(table, title="LEADERBOARD", border_style="green")
 
+    def _build_orders_panel(self) -> Panel:
+        """Build the ORDERS panel showing what each bot submitted last block."""
+        from sybil_client import BuyYes, BuyNo, SellYes, SellNo
+
+        lines = []
+        for agent in self._agents:
+            orders = agent.last_orders
+            if not orders:
+                lines.append(f" [dim]{agent.name}: no orders[/dim]")
+                continue
+
+            # Summarize orders by type
+            buy_yes = [o for o in orders if isinstance(o, BuyYes)]
+            buy_no = [o for o in orders if isinstance(o, BuyNo)]
+            sell_yes = [o for o in orders if isinstance(o, SellYes)]
+            sell_no = [o for o in orders if isinstance(o, SellNo)]
+
+            parts = []
+            if buy_yes:
+                prices = [o.limit_price_nanos / NANOS_PER_DOLLAR for o in buy_yes]
+                qty = sum(o.quantity for o in buy_yes)
+                parts.append(f"[green]BY {qty}@{min(prices):.2f}-{max(prices):.2f}[/green]")
+            if buy_no:
+                prices = [o.limit_price_nanos / NANOS_PER_DOLLAR for o in buy_no]
+                qty = sum(o.quantity for o in buy_no)
+                parts.append(f"[red]BN {qty}@{min(prices):.2f}-{max(prices):.2f}[/red]")
+            if sell_yes:
+                parts.append(f"SY {len(sell_yes)}")
+            if sell_no:
+                parts.append(f"SN {len(sell_no)}")
+
+            lines.append(f" {agent.name}: {' | '.join(parts)}  ({agent.total_orders_submitted} total)")
+
+        # Show last block fills if available
+        if self._last_block:
+            b = self._last_block
+            lines.append("")
+            vol = b.total_volume / NANOS_PER_DOLLAR
+            vol_str = f", vol=${vol:.2f}" if vol > 0 else ""
+            lines.append(f" [bold]Block #{b.height}[/bold]: {b.orders_filled} fills{vol_str}")
+            our_market_ids = set(self._market_ids.values())
+            price_parts = []
+            for market_id in sorted(our_market_ids):
+                prices = b.clearing_prices.get(market_id)
+                if prices is None:
+                    continue
+                yes_p, _no_p = prices
+                yes_pct = yes_p / NANOS_PER_DOLLAR * 100
+                if abs(yes_pct - 50) < 0.5:
+                    continue  # Skip markets at default 50%
+                name = self._market_display_names.get(market_id, f"M{market_id}")
+                parts = name.split(" vs ")
+                short = " vs ".join(p.split()[-1][:3].upper() for p in parts) if len(parts) == 2 else name
+                price_parts.append(f"{short}={yes_pct:.0f}%")
+            if price_parts:
+                lines.append(f"   {', '.join(price_parts)}")
+
+        content = "\n".join(lines) if lines else "[dim]No orders yet[/dim]"
+        return Panel(content, title="ORDERS & LAST BATCH", border_style="magenta")
+
+    def _build_thoughts_panel(self) -> Panel:
+        """Build the AI THOUGHTS panel showing LLM reasoning."""
+        lines = []
+        for agent in self._agents:
+            reasoning = getattr(agent, "last_reasoning", "")
+            if reasoning:
+                lines.append(f" [bold]{agent.name}[/bold]: {reasoning}")
+        content = "\n".join(lines) if lines else "[dim]Waiting for LLM responses...[/dim]"
+        return Panel(content, title="AI THOUGHTS", border_style="blue")
+
     def _build_display(self) -> Group:
-        """Build the full 3-panel display."""
+        """Build the full 5-panel display."""
         sim_time = self._clock.now()
         elapsed_hrs = self._clock.elapsed_sim_time().total_seconds() / 3600
         news_count = self._news_scheduler.delivered_count
@@ -302,22 +395,35 @@ class BacktestRunner:
         return Group(
             self._build_news_panel(),
             self._build_markets_panel(),
+            self._build_orders_panel(),
+            self._build_thoughts_panel(),
             self._build_leaderboard_panel(),
             footer,
         )
 
-    async def _display_live_status(self, update_interval: float = 1.0) -> None:
-        """Display live 3-panel status during backtest."""
-        with Live(console=console, refresh_per_second=1) as live:
-            while any(not t.done() for t in self._agent_tasks):
-                # Poll latest prices
-                try:
-                    self._latest_prices = await self._client.get_prices()
-                except Exception:
-                    pass
+    async def _track_blocks(self) -> None:
+        """Background task to track blocks from SSE for display."""
+        try:
+            our_market_ids = set(self._market_ids.values())
+            async for block in self._client.stream_blocks():
+                self._last_block = block
+                # Update prices from block data (only our markets)
+                for market_id, prices in block.clearing_prices.items():
+                    if market_id in our_market_ids:
+                        self._latest_prices[market_id] = prices
+        except (asyncio.CancelledError, Exception):
+            pass
 
-                live.update(self._build_display())
-                await asyncio.sleep(update_interval)
+    async def _display_live_status(self, update_interval: float = 1.0) -> None:
+        """Display live 4-panel status during backtest."""
+        block_task = asyncio.create_task(self._track_blocks())
+        try:
+            with Live(console=console, refresh_per_second=1) as live:
+                while any(not t.done() for t in self._agent_tasks):
+                    live.update(self._build_display())
+                    await asyncio.sleep(update_interval)
+        finally:
+            block_task.cancel()
 
     async def run(self, show_live: bool = True) -> BacktestResult:
         """Run the backtest.
@@ -388,6 +494,17 @@ class BacktestRunner:
                     await asyncio.sleep(real_duration + 1)
             except asyncio.CancelledError:
                 pass
+
+            # Wait for resolution scheduler to finish (don't cancel it)
+            if not resolution_task.done():
+                console.print("[bold]Waiting for market resolution...[/bold]")
+                try:
+                    await asyncio.wait_for(resolution_task, timeout=5.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    pass
+
+            # Safety net: resolve any markets that weren't resolved
+            await self._resolve_remaining_markets()
 
             # Stop everything
             console.print("\n[bold]Stopping agents...[/bold]")

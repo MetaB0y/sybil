@@ -471,8 +471,10 @@ impl LocalSolver {
             demand_cum_qty.push(cum);
         }
 
-        // Find the supply price that maximizes matched volume
-        let mut best_price = supply[0].0;
+        // Find the supply price that maximizes matched volume.
+        // Default to mid-market (midpoint of best bid and best ask) so that
+        // non-crossing order books don't cause spurious price drift.
+        let mut best_price = (demand[0].0 + supply[0].0) / 2;
         let mut best_qty: Qty = 0;
 
         for &(price, cum_supply) in &cumulative_supply {

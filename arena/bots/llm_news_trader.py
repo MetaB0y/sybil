@@ -71,19 +71,53 @@ def _build_prompt(
     return "\n".join(lines)
 
 
+def _extract_reasoning(text: str) -> str:
+    """Extract reasoning text after the JSON block."""
+    start = text.find("{")
+    if start == -1:
+        return text.strip()
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                remainder = text[i + 1:].strip()
+                # Clean up markdown artifacts
+                remainder = re.sub(r"^\*\*", "", remainder)
+                return remainder[:300] if remainder else ""
+    return ""
+
+
 def _parse_llm_response(text: str, expected_keys: list[str]) -> dict[str, float] | None:
     """Parse LLM response JSON, handling markdown fences and edge cases.
 
     Returns None on parse failure.
     """
-    # Strip markdown code fences if present
+    # Extract the first JSON object from the response.
+    # Models may add commentary before/after the JSON.
     cleaned = text.strip()
-    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-    cleaned = re.sub(r"\s*```$", "", cleaned)
-    cleaned = cleaned.strip()
+
+    # Try to find a JSON object by matching braces
+    start = cleaned.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    end = start
+    for i in range(start, len(cleaned)):
+        if cleaned[i] == "{":
+            depth += 1
+        elif cleaned[i] == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    if depth != 0:
+        return None
 
     try:
-        data = json.loads(cleaned)
+        data = json.loads(cleaned[start:end])
     except json.JSONDecodeError:
         return None
 
@@ -157,6 +191,8 @@ class LLMNewsTrader(BacktestAgent):
         self._llm_client = None
         # Pending LLM task
         self._llm_task: asyncio.Task | None = None
+        # Last LLM reasoning (for display)
+        self.last_reasoning: str = ""
 
         # Build reverse maps: market_id <-> market_key
         self._market_id_to_key: dict[int, str] = {}
@@ -235,17 +271,21 @@ class LLMNewsTrader(BacktestAgent):
                         model=self.model_name,
                         max_tokens=200,
                         system=self.system_prompt,
-                        messages=[{"role": "user", "content": prompt}],
+                        messages=[
+                            {"role": "user", "content": prompt},
+                            {"role": "assistant", "content": "{"},
+                        ],
                     ),
                     timeout=10.0,
                 )
-                return response.content[0].text
+                return "{" + response.content[0].text
 
             elif self.provider == "openai":
                 response = await asyncio.wait_for(
                     llm_client.chat.completions.create(
                         model=self.model_name,
                         max_tokens=200,
+                        response_format={"type": "json_object"},
                         messages=[
                             {"role": "system", "content": self.system_prompt},
                             {"role": "user", "content": prompt},
@@ -270,6 +310,9 @@ class LLMNewsTrader(BacktestAgent):
         response_text = await self._call_llm(prompt)
         if response_text is None:
             return
+
+        # Extract reasoning (text after the JSON block)
+        self.last_reasoning = _extract_reasoning(response_text)
 
         parsed = _parse_llm_response(response_text, expected_keys)
         if parsed:

@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use matching_engine::{Fill, Order, Problem};
+use matching_engine::{Fill, MarketId, Order, Problem};
 
 use crate::MatchingResult;
 
@@ -33,6 +33,12 @@ pub struct VerificationStats {
     pub computed_welfare: i64,
     /// Reported total welfare
     pub reported_welfare: i64,
+    /// Number of markets checked for position balance
+    pub markets_checked: usize,
+    /// Computed total volume (sum of fill quantities)
+    pub computed_volume: u64,
+    /// Computed number of orders filled
+    pub computed_orders_filled: usize,
 }
 
 /// A specific violation found during verification.
@@ -63,6 +69,10 @@ pub enum ViolationKind {
     MmBudgetExceeded,
     /// Fill has zero quantity (wasteful)
     ZeroQuantityFill,
+    /// Net YES positions ≠ net NO positions for a market (money creation)
+    PositionImbalance,
+    /// Reported volume/count totals don't match computed values
+    VolumeCountMismatch,
 }
 
 impl std::fmt::Display for Violation {
@@ -221,6 +231,12 @@ impl Verifier {
         // Verify MM constraints
         self.verify_mm_constraints(problem, result, &order_map, &mut violations, &mut stats);
 
+        // Verify position balance (catches money creation)
+        self.verify_position_balance(problem, result, &order_map, &mut violations, &mut stats);
+
+        // Verify reported totals match computed values
+        self.verify_reported_totals(result, &mut violations, &mut stats);
+
         VerificationResult {
             valid: violations.is_empty(),
             violations,
@@ -271,6 +287,129 @@ impl Verifier {
             }
         }
     }
+
+    /// Verify position balance: for each binary market, net YES == net NO positions.
+    ///
+    /// Minting creates 1 YES + 1 NO share. If fills create an imbalance (e.g.,
+    /// BuyNo fill without a corresponding BuyYes), positions are created from
+    /// thin air — money at resolution.
+    fn verify_position_balance(
+        &self,
+        _problem: &Problem,
+        result: &MatchingResult,
+        order_map: &HashMap<u64, &Order>,
+        violations: &mut Vec<Violation>,
+        stats: &mut VerificationStats,
+    ) {
+        // For each market, accumulate the net marginal payoff across all fills.
+        // The marginal payoff of an order for market m_idx is:
+        //   Σ_s (payoff[s] * indicator[m_idx outcome=YES in s]) - Σ_s (payoff[s] * indicator[m_idx outcome=NO in s])
+        // divided by the number of states of all OTHER markets (to get per-share contribution).
+        //
+        // For a single-market binary order:
+        //   marginal = payoff[0] - payoff[1]  (state 0 = YES, state 1 = NO)
+        //   BuyYes [1,0] → +1, BuyNo [0,1] → -1
+        //
+        // The sum of marginal * fill_qty across all fills must be 0 for each market.
+        let mut net_position: HashMap<MarketId, i64> = HashMap::new();
+
+        for fill in &result.fills {
+            if fill.fill_qty == 0 {
+                continue;
+            }
+            let Some(order) = order_map.get(&fill.order_id) else {
+                continue; // Already flagged by OrderNotFound
+            };
+
+            let num_markets = order.num_markets as usize;
+            let num_states = order.num_states as usize;
+
+            for m_idx in 0..num_markets {
+                let market_id = order.markets[m_idx];
+                if market_id.is_none() {
+                    continue;
+                }
+
+                // Compute marginal payoff for this market:
+                // Sum payoffs over all states where this market = YES (outcome 0),
+                // minus sum over all states where this market = NO (outcome 1).
+                // For binary markets, stride = 1 << m_idx.
+                let stride = 1usize << m_idx;
+                let mut marginal: i64 = 0;
+
+                for s in 0..num_states {
+                    let outcome_for_m = (s / stride) % 2;
+                    let payoff = order.payoffs[s] as i64;
+                    if outcome_for_m == 0 {
+                        // YES state for this market
+                        marginal += payoff;
+                    } else {
+                        // NO state for this market
+                        marginal -= payoff;
+                    }
+                }
+
+                // marginal is scaled by the number of "other" states (2^(num_markets-1)),
+                // so normalize. All markets are binary, so other_states = num_states / 2.
+                // Actually we want the per-share marginal, which for binary markets
+                // with the stride decomposition above sums over all 2^(N-1) pairs,
+                // giving marginal * 2^(N-1). Divide to get per-share.
+                let other_states = (num_states / 2) as i64;
+                let normalized = marginal / other_states;
+
+                *net_position.entry(market_id).or_insert(0) += normalized * fill.fill_qty as i64;
+            }
+        }
+
+        stats.markets_checked = net_position.len();
+
+        for (market_id, net) in &net_position {
+            if *net != 0 {
+                violations.push(Violation {
+                    kind: ViolationKind::PositionImbalance,
+                    details: format!(
+                        "Market {}: net position delta = {} (expected 0). \
+                         Positions created from thin air.",
+                        market_id, net
+                    ),
+                });
+            }
+        }
+    }
+
+    /// Verify that reported aggregate totals match computed values.
+    fn verify_reported_totals(
+        &self,
+        result: &MatchingResult,
+        violations: &mut Vec<Violation>,
+        stats: &mut VerificationStats,
+    ) {
+        let computed_volume: u64 = result.fills.iter().map(|f| f.fill_qty).sum();
+        let computed_orders_filled = result.fills.iter().filter(|f| f.fill_qty > 0).count();
+
+        stats.computed_volume = computed_volume;
+        stats.computed_orders_filled = computed_orders_filled;
+
+        if computed_volume != result.total_quantity_filled {
+            violations.push(Violation {
+                kind: ViolationKind::VolumeCountMismatch,
+                details: format!(
+                    "total_quantity_filled: reported {} != computed {}",
+                    result.total_quantity_filled, computed_volume
+                ),
+            });
+        }
+
+        if computed_orders_filled != result.orders_filled {
+            violations.push(Violation {
+                kind: ViolationKind::VolumeCountMismatch,
+                details: format!(
+                    "orders_filled: reported {} != computed {}",
+                    result.orders_filled, computed_orders_filled
+                ),
+            });
+        }
+    }
 }
 
 /// Convenience function to verify a result.
@@ -286,13 +425,13 @@ pub fn verify_strict(problem: &Problem, result: &MatchingResult) -> Verification
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matching_engine::{simple_yes_buy, MmConstraint, MmId, MmSide};
+    use matching_engine::{simple_no_buy, simple_yes_buy, MmConstraint, MmId, MmSide};
 
     fn create_test_problem() -> Problem {
         let mut problem = Problem::new("test");
         let market = problem.markets.add_binary("m");
 
-        // Add some orders
+        // Add BuyYes orders (ids 1-5)
         for i in 1..=5 {
             problem.orders.push(simple_yes_buy(
                 &problem.markets,
@@ -303,21 +442,45 @@ mod tests {
             ));
         }
 
+        // Add BuyNo orders (ids 11-15) for position balance
+        for i in 11..=15 {
+            problem.orders.push(simple_no_buy(
+                &problem.markets,
+                i,
+                market,
+                500_000_000, // $0.50 limit
+                100,
+            ));
+        }
+
         problem
+    }
+
+    /// Helper to build a valid MatchingResult with correct totals.
+    fn build_result(fills: Vec<Fill>, problem: &Problem) -> MatchingResult {
+        let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
+        let mut result = MatchingResult::new();
+        for fill in fills {
+            let order = order_map[&fill.order_id];
+            result.add_fill(fill, order);
+        }
+        result
     }
 
     #[test]
     fn test_valid_result() {
         let problem = create_test_problem();
 
-        let mut result = MatchingResult::new();
-        result.fills.push(Fill::new(1, 50, 500_000_000));
-        result.fills.push(Fill::new(2, 100, 550_000_000));
-
-        // Compute welfare
-        let order1 = problem.orders.iter().find(|o| o.id == 1).unwrap();
-        let order2 = problem.orders.iter().find(|o| o.id == 2).unwrap();
-        result.total_welfare = result.fills[0].welfare(order1) + result.fills[1].welfare(order2);
+        // BuyYes + BuyNo at same qty → positions balance
+        let result = build_result(
+            vec![
+                Fill::new(1, 50, 500_000_000),   // BuyYes 50
+                Fill::new(2, 100, 550_000_000),   // BuyYes 100
+                Fill::new(11, 50, 500_000_000),   // BuyNo 50
+                Fill::new(12, 100, 500_000_000),  // BuyNo 100
+            ],
+            &problem,
+        );
 
         let verification = verify(&problem, &result);
         assert!(verification.valid, "Violations: {:?}", verification.violations);
@@ -448,5 +611,124 @@ mod tests {
             .violations
             .iter()
             .any(|v| v.kind == ViolationKind::WelfareMismatch));
+    }
+
+    // ========== Position balance tests ==========
+
+    #[test]
+    fn test_position_balance_valid() {
+        // Equal BuyYes + BuyNo fills → net zero → passes
+        let problem = create_test_problem();
+
+        let result = build_result(
+            vec![
+                Fill::new(1, 100, 500_000_000),  // BuyYes 100
+                Fill::new(11, 100, 500_000_000), // BuyNo 100
+            ],
+            &problem,
+        );
+
+        let verification = verify(&problem, &result);
+        assert!(verification.valid, "Violations: {:?}", verification.violations);
+        assert!(verification.stats.markets_checked > 0);
+    }
+
+    #[test]
+    fn test_position_imbalance() {
+        // BuyNo fill without corresponding BuyYes → position imbalance
+        let problem = create_test_problem();
+
+        let result = build_result(
+            vec![
+                Fill::new(11, 100, 500_000_000), // BuyNo only, no BuyYes
+            ],
+            &problem,
+        );
+
+        let verification = verify(&problem, &result);
+        assert!(!verification.valid);
+        assert!(
+            verification
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::PositionImbalance),
+            "Expected PositionImbalance, got: {:?}",
+            verification.violations
+        );
+    }
+
+    #[test]
+    fn test_position_imbalance_unequal_qty() {
+        // BuyYes(100) + BuyNo(50) → net imbalance of 50
+        let problem = create_test_problem();
+
+        let result = build_result(
+            vec![
+                Fill::new(1, 100, 500_000_000),  // BuyYes 100
+                Fill::new(11, 50, 500_000_000),  // BuyNo 50
+            ],
+            &problem,
+        );
+
+        let verification = verify(&problem, &result);
+        assert!(!verification.valid);
+        assert!(verification
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::PositionImbalance));
+    }
+
+    // ========== Volume/count consistency tests ==========
+
+    #[test]
+    fn test_volume_mismatch() {
+        let problem = create_test_problem();
+
+        let mut result = build_result(
+            vec![
+                Fill::new(1, 100, 500_000_000),
+                Fill::new(11, 100, 500_000_000),
+            ],
+            &problem,
+        );
+        // Corrupt the reported total
+        result.total_quantity_filled = 999;
+
+        let verification = verify(&problem, &result);
+        assert!(!verification.valid);
+        assert!(
+            verification
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::VolumeCountMismatch),
+            "Expected VolumeCountMismatch, got: {:?}",
+            verification.violations
+        );
+    }
+
+    #[test]
+    fn test_orders_filled_mismatch() {
+        let problem = create_test_problem();
+
+        let mut result = build_result(
+            vec![
+                Fill::new(1, 100, 500_000_000),
+                Fill::new(11, 100, 500_000_000),
+            ],
+            &problem,
+        );
+        // Corrupt the reported count
+        result.orders_filled = 999;
+
+        let verification = verify(&problem, &result);
+        assert!(!verification.valid);
+        assert!(
+            verification
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::VolumeCountMismatch),
+            "Expected VolumeCountMismatch, got: {:?}",
+            verification.violations
+        );
     }
 }

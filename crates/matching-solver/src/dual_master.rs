@@ -276,51 +276,6 @@ impl DualMaster {
                 }
             }
 
-            // Also consider MM orders willing at current prices but not matched
-            // (they may have been shaded out but still willing at original limits)
-            for mm in &problem.mm_constraints {
-                for &order_id in &mm.order_ids {
-                    if filled_order_ids.contains(&order_id) {
-                        continue;
-                    }
-                    if mm_candidate_fills.iter().any(|f| f.order_id == order_id) {
-                        continue;
-                    }
-                    if let Some(order) = order_map.get(&order_id) {
-                        if order.num_markets == 1 {
-                            let market = order.markets[0];
-                            if let Some(market_prices) = prices.prices.get(&market) {
-                                let num_states = order.num_states as usize;
-                                let is_buyer =
-                                    order.payoffs[..num_states].iter().any(|&p| p > 0);
-                                let outcome = if is_buyer {
-                                    order.payoffs[..num_states]
-                                        .iter()
-                                        .position(|&p| p > 0)
-                                        .unwrap_or(0)
-                                } else {
-                                    order.payoffs[..num_states]
-                                        .iter()
-                                        .position(|&p| p < 0)
-                                        .unwrap_or(0)
-                                };
-                                let price = market_prices
-                                    .get(outcome)
-                                    .copied()
-                                    .unwrap_or(500_000_000);
-                                if order.is_satisfied_at_price(price) {
-                                    mm_candidate_fills.push(Fill::new(
-                                        order_id,
-                                        order.max_fill,
-                                        price,
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
             // 5. Greedy MM knapsack: sort by welfare/capital ratio, greedily activate
             let mut mm_accepted_fills: Vec<Fill> = Vec::new();
             {

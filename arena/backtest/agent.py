@@ -166,12 +166,16 @@ class BacktestAgent(BaseAgent):
                 # Get orders from strategy
                 orders = await self.on_block(block)
 
-                # Submit orders if any
+                # Track orders (including MM orders submitted inside on_block)
                 if orders:
+                    self.last_orders = orders
+                    self.total_orders_submitted += len(orders)
                     try:
                         await self.client.submit_orders(self.account_id, orders)
                     except Exception as e:
                         print(f"[{self.name}] Order submission failed: {e}")
+                elif not self.last_orders:
+                    self.last_orders = []
 
         except Exception as e:
             print(f"[{self.name}] Error in run loop: {e}")
