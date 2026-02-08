@@ -9,6 +9,7 @@ from sybil_client import Block, BuyNo, BuyYes, OrderSpec
 
 from backtest.agent import BacktestAgent
 from backtest.dataset import NewsItem
+from bots.strategy_agent import format_news_line
 
 logger = logging.getLogger(__name__)
 
@@ -157,14 +158,16 @@ class LLMNewsTrader(BacktestAgent):
         # Pending LLM task
         self._llm_task: asyncio.Task | None = None
 
-        # Build reverse map: market_id -> market_key
+        # Build reverse maps: market_id <-> market_key
         self._market_id_to_key: dict[int, str] = {}
+        self._key_to_market_id: dict[str, int] = {}
         if event_market_map:
             for idx, (event_id, market_id) in enumerate(
                 sorted(event_market_map.items(), key=lambda x: x[1])
             ):
                 key = f"market_{idx}"
                 self._market_id_to_key[market_id] = key
+                self._key_to_market_id[key] = market_id
                 self._event_info[event_id] = {
                     "home_team": "",
                     "away_team": "",
@@ -191,22 +194,7 @@ class LLMNewsTrader(BacktestAgent):
 
     def _format_news_line(self, news: NewsItem) -> str:
         """Format a news item as a concise line for the LLM prompt."""
-        meta = news.metadata
-        if news.source == "in_game":
-            quarter = meta.get("quarter", "?")
-            home_score = meta.get("home_score", "?")
-            away_score = meta.get("away_score", "?")
-            if meta.get("final"):
-                return f"[FINAL] {home_score} - {away_score}"
-            return f"[Q{quarter} END] {home_score} - {away_score}"
-        elif news.source == "injury":
-            player = meta.get("player", "Unknown")
-            status = meta.get("status", meta.get("severity", "unknown"))
-            return f"[INJURY] {player} {status}"
-        elif news.source == "lineup":
-            return f"[LINEUP] {news.content[:80]}"
-        else:
-            return f"[{news.source.upper()}] {news.headline[:80]}"
+        return format_news_line(news)
 
     async def on_news(self, news: NewsItem) -> None:
         """Accumulate news and flag for LLM update."""
@@ -286,6 +274,11 @@ class LLMNewsTrader(BacktestAgent):
         parsed = _parse_llm_response(response_text, expected_keys)
         if parsed:
             self._cached_probs.update(parsed)
+            # Sync to beliefs so the display can read them
+            for key, prob in parsed.items():
+                market_id = self._key_to_market_id.get(key)
+                if market_id is not None:
+                    self.update_belief(market_id, prob)
             logger.info("[%s] LLM probs updated: %s", self.name, parsed)
         else:
             logger.warning("[%s] Failed to parse LLM response: %s", self.name, response_text)

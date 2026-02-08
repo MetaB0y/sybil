@@ -302,6 +302,27 @@ class TestNewsFormatting:
 
 # --- System Prompt Variants ---
 
+class TestBeliefsSyncing:
+    @pytest.mark.asyncio
+    async def test_beliefs_synced_after_llm_update(self, trader):
+        """After _update_probabilities, beliefs should reflect the LLM output."""
+        trader.clock.start()
+
+        # Mock _call_llm to return known probabilities
+        async def fake_call_llm(prompt):
+            return '{"market_0": 0.72, "market_1": 0.35}'
+
+        trader._call_llm = fake_call_llm
+
+        await trader._update_probabilities({"market_0": 0.5, "market_1": 0.5})
+
+        # Check beliefs are synced
+        assert 0 in trader.beliefs
+        assert 1 in trader.beliefs
+        assert abs(trader.beliefs[0].probability - 0.72) < 0.01
+        assert abs(trader.beliefs[1].probability - 0.35) < 0.01
+
+
 class TestPromptVariants:
     def test_default_prompt(self):
         assert "NBA analyst" in DEFAULT_SYSTEM_PROMPT

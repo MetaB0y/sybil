@@ -5,8 +5,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.live import Live
+from rich.panel import Panel
 from rich.table import Table
 
 from sybil_client import SybilClient
@@ -15,6 +16,8 @@ from .agent import BacktestAgent, BacktestAgentConfig
 from .clock import SimulatedClock
 from .dataset import Dataset, Event
 from .news import NewsScheduler
+
+from bots.strategy_agent import format_news_line
 
 console = Console()
 
@@ -107,6 +110,8 @@ class BacktestRunner:
     _agents: list[BacktestAgent] = field(default_factory=list, init=False)
     _market_ids: dict[str, int] = field(default_factory=dict, init=False)
     _agent_tasks: list[asyncio.Task] = field(default_factory=list, init=False)
+    _latest_prices: dict[int, tuple[int, int]] = field(default_factory=dict, init=False)
+    _market_display_names: dict[int, str] = field(default_factory=dict, init=False)
 
     async def _setup_markets(self) -> None:
         """Create markets for all events in the dataset."""
@@ -116,6 +121,7 @@ class BacktestRunner:
             market_name = event.moneyline_market_name
             market = await self._client.create_market(market_name)
             self._market_ids[event.event_id] = market.id
+            self._market_display_names[market.id] = f"{event.home_team} vs {event.away_team}"
             console.print(f"  Market #{market.id}: {market_name}")
 
     async def _setup_agents(self) -> None:
@@ -183,43 +189,134 @@ class BacktestRunner:
             # Resolve the market
             await self._resolve_event(event)
 
+    def _build_news_panel(self) -> Panel:
+        """Build the NEWS panel showing recent news items."""
+        recent = self._news_scheduler.recent_news
+        if not recent:
+            content = "[dim]Waiting for news...[/dim]"
+        else:
+            lines = []
+            for news in recent:
+                ts = news.timestamp.strftime("%H:%M")
+                formatted = format_news_line(news)
+                lines.append(f" {ts}  {formatted}")
+            content = "\n".join(lines)
+        return Panel(content, title="NEWS", border_style="cyan", height=min(12, 4 + len(self._news_scheduler.recent_news)))
+
+    def _build_markets_panel(self) -> Panel:
+        """Build the MARKETS & AI ESTIMATES panel."""
+        # Identify agents that have beliefs (directional bots, not MMs)
+        estimate_agents = [a for a in self._agents if a.beliefs]
+
+        table = Table(box=None, pad_edge=False, show_header=True, expand=True)
+        table.add_column("Game", style="cyan", ratio=3)
+        table.add_column("Price", justify="center", ratio=1)
+        for agent in estimate_agents:
+            table.add_column(agent.name, justify="center", ratio=1)
+
+        for market_id, display_name in sorted(self._market_display_names.items()):
+            prices = self._latest_prices.get(market_id)
+            if prices is None:
+                price_str = "[dim]--[/dim]"
+                market_prob = 0.5
+            else:
+                market_prob = prices[0] / NANOS_PER_DOLLAR
+                price_str = f"{market_prob * 100:.0f}%"
+
+            row = [display_name, price_str]
+
+            for agent in estimate_agents:
+                belief = agent.beliefs.get(market_id)
+                if belief is None:
+                    row.append("[dim]--[/dim]")
+                    continue
+                est = belief.probability
+                edge = est - market_prob
+                est_pct = f"{est * 100:.0f}%"
+                if edge > 0.03:
+                    row.append(f"[green]{est_pct}^[/green]")
+                elif edge < -0.03:
+                    row.append(f"[red]{est_pct}v[/red]")
+                else:
+                    row.append(f"[dim]{est_pct}[/dim]")
+
+            table.add_row(*row)
+
+        return Panel(table, title="MARKETS & AI ESTIMATES", border_style="yellow")
+
+    def _build_leaderboard_panel(self) -> Panel:
+        """Build the LEADERBOARD panel."""
+        # Sort agents by current balance
+        ranked = sorted(
+            self._agents,
+            key=lambda a: a.balance_history[-1] if a.balance_history else 0,
+            reverse=True,
+        )
+
+        table = Table(box=None, pad_edge=False, show_header=True, expand=True)
+        table.add_column("#", justify="center", width=3)
+        table.add_column("Agent", ratio=2)
+        table.add_column("Balance", justify="right", ratio=1)
+        table.add_column("PnL", justify="right", ratio=1)
+        table.add_column("Pos", justify="right", width=4)
+
+        for i, agent in enumerate(ranked, 1):
+            if agent.balance_history:
+                balance = agent.balance_history[-1]
+                pnl = balance - self.initial_balance
+                pnl_style = "green" if pnl >= 0 else "red"
+                pos_count = sum(
+                    1 for (_, outcome), qty in agent.positions.items()
+                    if outcome == "YES" and qty != 0
+                ) + sum(
+                    1 for (_, outcome), qty in agent.positions.items()
+                    if outcome == "NO" and qty != 0
+                )
+                rank_style = "bold yellow" if i == 1 else ("bold" if i <= 3 else "")
+                rank_str = f"[{rank_style}]{i}[/{rank_style}]" if rank_style else str(i)
+                table.add_row(
+                    rank_str,
+                    agent.name,
+                    f"${balance:.2f}",
+                    f"[{pnl_style}]${pnl:+.2f}[/{pnl_style}]",
+                    str(pos_count),
+                )
+            else:
+                table.add_row(str(i), agent.name, "...", "...", "...")
+
+        return Panel(table, title="LEADERBOARD", border_style="green")
+
+    def _build_display(self) -> Group:
+        """Build the full 3-panel display."""
+        sim_time = self._clock.now()
+        elapsed_hrs = self._clock.elapsed_sim_time().total_seconds() / 3600
+        news_count = self._news_scheduler.delivered_count
+        total_news = len(self.dataset.news)
+
+        footer = (
+            f" Sim: {sim_time.strftime('%H:%M')} | "
+            f"{elapsed_hrs:.1f} hrs | "
+            f"News: {news_count}/{total_news}"
+        )
+
+        return Group(
+            self._build_news_panel(),
+            self._build_markets_panel(),
+            self._build_leaderboard_panel(),
+            footer,
+        )
+
     async def _display_live_status(self, update_interval: float = 1.0) -> None:
-        """Display live status during backtest."""
+        """Display live 3-panel status during backtest."""
         with Live(console=console, refresh_per_second=1) as live:
             while any(not t.done() for t in self._agent_tasks):
-                # Build status table
-                table = Table(title="Backtest Status")
-                table.add_column("Agent", style="cyan")
-                table.add_column("Balance", justify="right")
-                table.add_column("PnL", justify="right")
-                table.add_column("Positions", justify="right")
+                # Poll latest prices
+                try:
+                    self._latest_prices = await self._client.get_prices()
+                except Exception:
+                    pass
 
-                sim_time = self._clock.now()
-                elapsed = self._clock.elapsed_sim_time()
-
-                for agent in self._agents:
-                    if agent.balance_history:
-                        balance = agent.balance_history[-1]
-                        pnl = balance - self.initial_balance
-                        pnl_style = "green" if pnl >= 0 else "red"
-                        pos_count = len(agent.positions)
-                        table.add_row(
-                            agent.name,
-                            f"${balance:.2f}",
-                            f"[{pnl_style}]${pnl:+.2f}[/{pnl_style}]",
-                            str(pos_count),
-                        )
-                    else:
-                        table.add_row(agent.name, "...", "...", "...")
-
-                # Add time info
-                table.caption = (
-                    f"Sim time: {sim_time.strftime('%H:%M:%S')} | "
-                    f"Elapsed: {elapsed.total_seconds()/60:.1f} sim minutes | "
-                    f"News delivered: {self._news_scheduler.delivered_count}/{len(self.dataset.news)}"
-                )
-
-                live.update(table)
+                live.update(self._build_display())
                 await asyncio.sleep(update_interval)
 
     async def run(self, show_live: bool = True) -> BacktestResult:

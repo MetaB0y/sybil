@@ -49,10 +49,26 @@ def load_dotenv(path: Path | None = None) -> None:
             os.environ.setdefault(key, value)
 
 
+def _score_watcher(markets: dict[str, "MarketView"]) -> dict[str, float]:
+    """Bet on whoever's winning. Simple score-ratio strategy."""
+    import re
+
+    estimates = {}
+    for name, view in markets.items():
+        for news_line in view.news:
+            m = re.search(r"\[Q\d END\] (\d+) - (\d+)", news_line)
+            if m:
+                home, away = int(m.group(1)), int(m.group(2))
+                estimates[name] = home / (home + away)
+                break
+    return estimates
+
+
 def build_agent_configs() -> list[BacktestAgentConfig]:
     """Build bot lineup based on available API keys."""
     from bots.backtest_mm import BacktestTightMM, BacktestWideMM
     from bots.news_trader import ConservativeNewsTrader, NewsTrader
+    from bots.strategy_agent import StrategyAgent
 
     configs: list[BacktestAgentConfig] = []
 
@@ -64,17 +80,26 @@ def build_agent_configs() -> list[BacktestAgentConfig]:
     configs.append(BacktestAgentConfig(NewsTrader, "NewsBot", {}))
     configs.append(BacktestAgentConfig(ConservativeNewsTrader, "NewsBot-Conservative", {}))
 
+    # StrategyAgent demo: simple score-watching bot
+    configs.append(
+        BacktestAgentConfig(
+            StrategyAgent,
+            "ScoreBot",
+            {"strategy_fn": _score_watcher, "edge_threshold": 0.04},
+        )
+    )
+
     # Add LLM bots based on available keys
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
 
     if anthropic_key:
-        from bots.llm_news_trader import CONTRARIAN_SYSTEM_PROMPT, LLMNewsTrader
+        from bots.llm_news_trader import LLMNewsTrader
 
         configs.append(
             BacktestAgentConfig(
                 LLMNewsTrader,
-                "Claude",
+                "Claude-Sonnet",
                 {
                     "provider": "anthropic",
                     "model_name": "claude-sonnet-4-5-20250929",
@@ -85,12 +110,11 @@ def build_agent_configs() -> list[BacktestAgentConfig]:
         configs.append(
             BacktestAgentConfig(
                 LLMNewsTrader,
-                "Claude-Contrarian",
+                "Claude-Haiku",
                 {
                     "provider": "anthropic",
-                    "model_name": "claude-sonnet-4-5-20250929",
+                    "model_name": "claude-haiku-4-5-20251001",
                     "api_key": anthropic_key,
-                    "system_prompt": CONTRARIAN_SYSTEM_PROMPT,
                 },
             )
         )

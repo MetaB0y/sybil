@@ -1,6 +1,7 @@
 """News delivery scheduler for backtesting."""
 
 import asyncio
+from collections import deque
 from dataclasses import dataclass, field
 
 from .clock import SimulatedClock
@@ -37,6 +38,7 @@ class NewsScheduler:
         # Sort news by timestamp
         self.news_items = sorted(self.news_items, key=lambda n: n.timestamp)
         self._delivered_count = 0
+        self._recent_news: deque[NewsItem] = deque(maxlen=10)
 
     def subscribe(self) -> asyncio.Queue[NewsItem]:
         """Subscribe to news delivery.
@@ -58,6 +60,7 @@ class NewsScheduler:
         for queue in self._subscribers:
             await queue.put(news)
         self._delivered_count += 1
+        self._recent_news.appendleft(news)
 
     async def run(self) -> None:
         """Run the news scheduler until all news is delivered.
@@ -117,6 +120,11 @@ class NewsScheduler:
     def remaining_count(self) -> int:
         """Number of news items remaining to deliver."""
         return len(self.news_items) - self._delivered_count
+
+    @property
+    def recent_news(self) -> list[NewsItem]:
+        """Most recently delivered news items (newest first, up to 10)."""
+        return list(self._recent_news)
 
     def get_upcoming(self, count: int = 5) -> list[NewsItem]:
         """Get the next N upcoming news items."""

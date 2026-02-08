@@ -31,4 +31,7 @@ def __getattr__(name):
     if name in ("BacktestFlashMM", "BacktestTightMM", "BacktestWideMM"):
         from .backtest_mm import BacktestFlashMM, BacktestTightMM, BacktestWideMM
         return {"BacktestFlashMM": BacktestFlashMM, "BacktestTightMM": BacktestTightMM, "BacktestWideMM": BacktestWideMM}[name]
+    if name in ("StrategyAgent", "MarketView"):
+        from .strategy_agent import MarketView, StrategyAgent
+        return {"StrategyAgent": StrategyAgent, "MarketView": MarketView}[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
