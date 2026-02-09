@@ -28,6 +28,19 @@ pub struct MarketResponse {
     pub payout_nanos: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub challenge_deadline_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolution_criteria: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expiry_timestamp_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at_ms: Option<u64>,
+    pub volume_nanos: u64,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -106,4 +119,62 @@ pub struct ResolveMarketResponse {
 pub struct CreateMarketResponse {
     pub market_id: u32,
     pub name: String,
+}
+
+// --- Portfolio ---
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PortfolioResponse {
+    pub account_id: u64,
+    pub balance_nanos: i64,
+    pub total_deposited_nanos: i64,
+    pub positions: Vec<PositionValueResponse>,
+    pub total_position_value_nanos: i64,
+    pub portfolio_value_nanos: i64,
+    pub pnl_nanos: i64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PositionValueResponse {
+    pub market_id: u32,
+    pub outcome: String,
+    pub quantity: i64,
+    pub current_price_nanos: u64,
+    pub value_nanos: i64,
+}
+
+// --- Price History ---
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PriceHistoryResponse {
+    pub market_id: u32,
+    pub points: Vec<PricePointResponse>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PricePointResponse {
+    pub height: u64,
+    pub timestamp_ms: u64,
+    pub yes_price_nanos: u64,
+    pub no_price_nanos: u64,
+    pub volume_nanos: u64,
+}
+
+// --- Account Fills ---
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AccountFillResponse {
+    pub order_id: u64,
+    pub fill_qty: u64,
+    pub fill_price_nanos: u64,
+    pub block_height: u64,
+    pub timestamp_ms: u64,
+    pub position_deltas: Vec<PositionDeltaResponse>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PositionDeltaResponse {
+    pub market_id: u32,
+    pub outcome: String,
+    pub delta: i64,
 }

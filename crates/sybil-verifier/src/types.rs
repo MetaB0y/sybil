@@ -72,8 +72,16 @@ pub struct WitnessRejection {
 /// Reason an order was rejected (mirrors sequencer's `RejectionReason`).
 #[derive(Clone, Debug)]
 pub enum RejectionReason {
-    InsufficientBalance { required: i64, available: i64 },
-    InsufficientPosition { market: MarketId, outcome: u8, required: i64, available: i64 },
+    InsufficientBalance {
+        required: i64,
+        available: i64,
+    },
+    InsufficientPosition {
+        market: MarketId,
+        outcome: u8,
+        required: i64,
+        available: i64,
+    },
     AccountNotFound,
 }
 

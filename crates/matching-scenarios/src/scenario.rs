@@ -168,7 +168,7 @@ impl ScenarioConfig {
             order_size_min: 30,
             order_size_max: 100,
             num_mms: 0,
-            liquidity_scarcity: 0.2, // Severe scarcity = competing solutions
+            liquidity_scarcity: 0.2,  // Severe scarcity = competing solutions
             hot_market_fraction: 0.1, // Hot markets create conflicts
             ..Default::default()
         }
@@ -206,17 +206,21 @@ pub fn generate_scenario(config: ScenarioConfig) -> Problem {
 
         if make_group {
             // Create a group of 3-4 mutually exclusive markets
-            let group_size = if remaining >= 4 && rng.random_bool(0.5) { 4 } else { 3 };
+            let group_size = if remaining >= 4 && rng.random_bool(0.5) {
+                4
+            } else {
+                3
+            };
             let group_size = group_size.min(remaining);
 
             // Generate fair prices that sum to ~1.0 (with some variance for negrisk opportunities)
             // Use Box-Muller transform for normal distribution around 1.0 with stddev 0.1
             let target_sum: f64 = {
                 // Box-Muller transform: convert uniform to normal
-                let u1: f64 = rng.random_range(0.0001..1.0);  // Avoid log(0)
+                let u1: f64 = rng.random_range(0.0001..1.0); // Avoid log(0)
                 let u2: f64 = rng.random();
                 let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
-                (1.0 + 0.1 * z).clamp(0.85, 1.15)  // Normal(1.0, 0.1), clamped
+                (1.0 + 0.1 * z).clamp(0.85, 1.15) // Normal(1.0, 0.1), clamped
             };
             let mut raw_prices: Vec<f64> = (0..group_size)
                 .map(|_| rng.random_range(0.1..1.0))
@@ -443,7 +447,10 @@ fn generate_simple_order(
     // Bias towards hot markets if any
     let market_idx = if !hot_markets.is_empty() && rng.random_bool(0.6) {
         let hot_id = hot_markets[rng.random_range(0..hot_markets.len())];
-        market_info.iter().position(|(id, _)| *id == hot_id).unwrap_or(0)
+        market_info
+            .iter()
+            .position(|(id, _)| *id == hot_id)
+            .unwrap_or(0)
     } else {
         rng.random_range(0..market_info.len())
     };
@@ -451,7 +458,11 @@ fn generate_simple_order(
     let (market, fair_price) = market_info[market_idx];
     let outcome = rng.random_range(0..2u8);
 
-    let base_price = if outcome == 0 { fair_price } else { 1.0 - fair_price };
+    let base_price = if outcome == 0 {
+        fair_price
+    } else {
+        1.0 - fair_price
+    };
     let aggressiveness = rng.random_range(-0.05..0.15);
     let limit = (base_price + aggressiveness).clamp(0.05, 0.95);
 

@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
+use matching_engine::order::{MAX_MARKETS_PER_ORDER, MAX_STATES};
 use matching_engine::{
     bundle_sell, bundle_yes, outcome_buy, outcome_sell, spread, MarketId, MarketSet, Nanos, Order,
     NANOS_PER_DOLLAR,
 };
-use matching_engine::order::{MAX_MARKETS_PER_ORDER, MAX_STATES};
 use matching_sequencer::block::Block;
 use matching_sequencer::error::Rejection;
 use matching_sequencer::Account;
@@ -51,19 +51,10 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
     let clearing_prices_nanos: HashMap<String, Vec<u64>> = block
         .clearing_prices
         .iter()
-        .map(|(mid, prices)| {
-            (
-                mid.0.to_string(),
-                prices.to_vec(),
-            )
-        })
+        .map(|(mid, prices)| (mid.0.to_string(), prices.to_vec()))
         .collect();
 
-    let rejections = block
-        .rejections
-        .iter()
-        .map(rejection_to_response)
-        .collect();
+    let rejections = block.rejections.iter().map(rejection_to_response).collect();
 
     BlockResponse {
         height: block.header.height,
@@ -90,9 +81,7 @@ fn rejection_to_response(r: &Rejection) -> RejectionResponse {
 }
 
 /// Convert market prices map to response format.
-pub fn prices_to_response(
-    prices: &HashMap<MarketId, Vec<Nanos>>,
-) -> MarketPricesResponse {
+pub fn prices_to_response(prices: &HashMap<MarketId, Vec<Nanos>>) -> MarketPricesResponse {
     let mut map = HashMap::new();
     for (mid, ps) in prices {
         let yes_price_nanos = ps.first().copied().unwrap_or(NANOS_PER_DOLLAR / 2);
@@ -190,14 +179,7 @@ pub fn order_spec_to_order(spec: &OrderSpec, markets: &MarketSet) -> Result<Orde
             validate_market(ma, markets)?;
             validate_market(mb, markets)?;
             validate_price_nanos(*limit_price_nanos)?;
-            Ok(spread(
-                markets,
-                0,
-                ma,
-                mb,
-                *limit_price_nanos,
-                *quantity,
-            ))
+            Ok(spread(markets, 0, ma, mb, *limit_price_nanos, *quantity))
         }
         OrderSpec::BundleYes {
             market_ids,
@@ -215,13 +197,7 @@ pub fn order_spec_to_order(spec: &OrderSpec, markets: &MarketSet) -> Result<Orde
                     MAX_MARKETS_PER_ORDER
                 ));
             }
-            Ok(bundle_yes(
-                markets,
-                0,
-                &mids,
-                *limit_price_nanos,
-                *quantity,
-            ))
+            Ok(bundle_yes(markets, 0, &mids, *limit_price_nanos, *quantity))
         }
         OrderSpec::BundleSell {
             market_ids,
@@ -266,10 +242,7 @@ pub fn order_spec_to_order(spec: &OrderSpec, markets: &MarketSet) -> Result<Orde
                 ));
             }
             if payoffs.len() > MAX_STATES {
-                return Err(format!(
-                    "Payoff vector cannot exceed {} states",
-                    MAX_STATES
-                ));
+                return Err(format!("Payoff vector cannot exceed {} states", MAX_STATES));
             }
 
             let mut order = Order::new(0);
@@ -304,10 +277,7 @@ pub fn signed_order_data_to_order(data: &SignedOrderData) -> Result<Order, Strin
         ));
     }
     if data.payoffs.len() > MAX_STATES {
-        return Err(format!(
-            "Payoff vector cannot exceed {} states",
-            MAX_STATES
-        ));
+        return Err(format!("Payoff vector cannot exceed {} states", MAX_STATES));
     }
     validate_price_nanos(data.limit_price_nanos)?;
 

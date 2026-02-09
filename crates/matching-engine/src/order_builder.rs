@@ -232,9 +232,9 @@ pub fn butterfly(
         // 5: [1,0,1] = A=No,  B=Yes, C=No  -> B wins, -2
         // 6: [0,1,1] = A=Yes, B=No,  C=No  -> A wins, +1
         // 7: [1,1,1] = A=No,  B=No,  C=No  -> invalid, 0
-        .payoff_when(&[1, 1, 0], 1)  // C wins: +1
+        .payoff_when(&[1, 1, 0], 1) // C wins: +1
         .payoff_when(&[1, 0, 1], -2) // B wins: -2
-        .payoff_when(&[0, 1, 1], 1)  // A wins: +1
+        .payoff_when(&[0, 1, 1], 1) // A wins: +1
         .build()
 }
 

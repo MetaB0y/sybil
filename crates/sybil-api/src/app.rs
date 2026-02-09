@@ -18,6 +18,8 @@ use crate::types::response::*;
         routes::accounts::fund_account,
         routes::accounts::get_account,
         routes::accounts::register_key,
+        routes::accounts::get_portfolio,
+        routes::accounts::get_account_fills,
         routes::markets::list_markets,
         routes::markets::get_market,
         routes::markets::create_market,
@@ -25,6 +27,8 @@ use crate::types::response::*;
         routes::markets::create_market_group,
         routes::markets::get_prices,
         routes::markets::resolve_market,
+        routes::markets::get_price_history,
+        routes::markets::search_markets,
         routes::orders::submit_orders,
         routes::orders::submit_signed_order,
         routes::blocks::get_latest_block,
@@ -42,6 +46,7 @@ use crate::types::response::*;
         SubmitSignedOrderRequest,
         SignedOrderData,
         OrderSpec,
+        MarketSearchParams,
         AccountResponse,
         PositionResponse,
         MarketResponse,
@@ -56,6 +61,12 @@ use crate::types::response::*;
         HealthResponse,
         StateRootResponse,
         ResolveMarketResponse,
+        PortfolioResponse,
+        PositionValueResponse,
+        PriceHistoryResponse,
+        PricePointResponse,
+        AccountFillResponse,
+        PositionDeltaResponse,
     )),
     info(
         title = "Sybil API",
@@ -96,11 +107,22 @@ pub fn create_router(state: AppState) -> Router {
             "/v1/accounts/{id}/keys",
             axum::routing::post(routes::accounts::register_key),
         )
-        // Markets
+        .route(
+            "/v1/accounts/{id}/portfolio",
+            axum::routing::get(routes::accounts::get_portfolio),
+        )
+        .route(
+            "/v1/accounts/{id}/fills",
+            axum::routing::get(routes::accounts::get_account_fills),
+        )
+        // Markets — search MUST come before {id} to avoid path param capture
+        .route(
+            "/v1/markets/search",
+            axum::routing::get(routes::markets::search_markets),
+        )
         .route(
             "/v1/markets",
-            axum::routing::get(routes::markets::list_markets)
-                .post(routes::markets::create_market),
+            axum::routing::get(routes::markets::list_markets).post(routes::markets::create_market),
         )
         .route(
             "/v1/markets/groups",
@@ -118,6 +140,10 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/v1/markets/{id}/resolve",
             axum::routing::post(routes::markets::resolve_market),
+        )
+        .route(
+            "/v1/markets/{id}/prices/history",
+            axum::routing::get(routes::markets::get_price_history),
         )
         // Orders
         .route(

@@ -59,7 +59,10 @@ pub fn compute_agent_pnl(
                 }
                 let default_prices = vec![NANOS_PER_DOLLAR / 2; 2];
                 let prices = last_prices.get(&market).unwrap_or(&default_prices);
-                let price = prices.get(outcome as usize).copied().unwrap_or(NANOS_PER_DOLLAR / 2);
+                let price = prices
+                    .get(outcome as usize)
+                    .copied()
+                    .unwrap_or(NANOS_PER_DOLLAR / 2);
                 position_value += qty * price as i64;
             }
 

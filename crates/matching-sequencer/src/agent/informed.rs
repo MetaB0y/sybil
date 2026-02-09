@@ -76,25 +76,17 @@ impl Agent for InformedTrader {
                 let current_pos = account.position(market_id, 0);
                 if current_pos < self.max_position {
                     // Buy YES at a price between market and true value
-                    let limit_price = ((yes_market_price + true_prob) / 2.0
-                        * NANOS_PER_DOLLAR as f64) as Nanos;
-                    let limit_price = limit_price.clamp(
-                        NANOS_PER_DOLLAR / 100,
-                        NANOS_PER_DOLLAR * 99 / 100,
-                    );
+                    let limit_price =
+                        ((yes_market_price + true_prob) / 2.0 * NANOS_PER_DOLLAR as f64) as Nanos;
+                    let limit_price =
+                        limit_price.clamp(NANOS_PER_DOLLAR / 100, NANOS_PER_DOLLAR * 99 / 100);
 
                     let remaining_capacity = (self.max_position - current_pos) as u64;
                     let qty = self.max_qty.min(remaining_capacity);
 
                     if qty > 0 {
-                        let order = outcome_buy(
-                            &self.markets,
-                            temp_id,
-                            market_id,
-                            0,
-                            limit_price,
-                            qty,
-                        );
+                        let order =
+                            outcome_buy(&self.markets, temp_id, market_id, 0, limit_price, qty);
                         orders.push(order);
                         temp_id += 1;
                     }
@@ -107,24 +99,16 @@ impl Agent for InformedTrader {
                 let current_pos = account.position(market_id, 0);
                 if current_pos > 0 {
                     // Sell YES at a price between true value and market
-                    let limit_price = ((true_prob + yes_market_price) / 2.0
-                        * NANOS_PER_DOLLAR as f64) as Nanos;
-                    let limit_price = limit_price.clamp(
-                        NANOS_PER_DOLLAR / 100,
-                        NANOS_PER_DOLLAR * 99 / 100,
-                    );
+                    let limit_price =
+                        ((true_prob + yes_market_price) / 2.0 * NANOS_PER_DOLLAR as f64) as Nanos;
+                    let limit_price =
+                        limit_price.clamp(NANOS_PER_DOLLAR / 100, NANOS_PER_DOLLAR * 99 / 100);
 
                     let qty = self.max_qty.min(current_pos as u64);
 
                     if qty > 0 {
-                        let order = outcome_sell(
-                            &self.markets,
-                            temp_id,
-                            market_id,
-                            0,
-                            limit_price,
-                            qty,
-                        );
+                        let order =
+                            outcome_sell(&self.markets, temp_id, market_id, 0, limit_price, qty);
                         orders.push(order);
                         temp_id += 1;
                     }
@@ -138,23 +122,15 @@ impl Agent for InformedTrader {
                 if current_pos < self.max_position {
                     let limit_price = ((no_market_price + (1.0 - true_prob)) / 2.0
                         * NANOS_PER_DOLLAR as f64) as Nanos;
-                    let limit_price = limit_price.clamp(
-                        NANOS_PER_DOLLAR / 100,
-                        NANOS_PER_DOLLAR * 99 / 100,
-                    );
+                    let limit_price =
+                        limit_price.clamp(NANOS_PER_DOLLAR / 100, NANOS_PER_DOLLAR * 99 / 100);
 
                     let remaining_capacity = (self.max_position - current_pos) as u64;
                     let qty = self.max_qty.min(remaining_capacity);
 
                     if qty > 0 {
-                        let order = outcome_buy(
-                            &self.markets,
-                            temp_id,
-                            market_id,
-                            1,
-                            limit_price,
-                            qty,
-                        );
+                        let order =
+                            outcome_buy(&self.markets, temp_id, market_id, 1, limit_price, qty);
                         orders.push(order);
                         temp_id += 1;
                     }
@@ -168,22 +144,14 @@ impl Agent for InformedTrader {
                 if current_pos > 0 {
                     let limit_price = (((1.0 - true_prob) + no_market_price) / 2.0
                         * NANOS_PER_DOLLAR as f64) as Nanos;
-                    let limit_price = limit_price.clamp(
-                        NANOS_PER_DOLLAR / 100,
-                        NANOS_PER_DOLLAR * 99 / 100,
-                    );
+                    let limit_price =
+                        limit_price.clamp(NANOS_PER_DOLLAR / 100, NANOS_PER_DOLLAR * 99 / 100);
 
                     let qty = self.max_qty.min(current_pos as u64);
 
                     if qty > 0 {
-                        let order = outcome_sell(
-                            &self.markets,
-                            temp_id,
-                            market_id,
-                            1,
-                            limit_price,
-                            qty,
-                        );
+                        let order =
+                            outcome_sell(&self.markets, temp_id, market_id, 1, limit_price, qty);
                         orders.push(order);
                         temp_id += 1;
                     }

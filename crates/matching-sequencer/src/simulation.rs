@@ -12,9 +12,7 @@ use crate::agent::market_maker::MarketMakerAgent;
 use crate::agent::noise::NoiseTrader;
 use crate::agent::{Agent, MarketView};
 use crate::metrics::{self, AgentPnL, BatchMetrics};
-use crate::scenario::{
-    EventMarketMap, NewsItem, NewsVisibility, PublicBeliefs, Scenario,
-};
+use crate::scenario::{EventMarketMap, NewsItem, NewsVisibility, PublicBeliefs, Scenario};
 use crate::sequencer::{batch_result_from_block, BlockSequencer, OrderSubmission};
 use crate::settlement;
 
@@ -192,7 +190,8 @@ impl SimulationRunner {
 
         for news in &arriving {
             if news.visibility == NewsVisibility::Public {
-                self.public_beliefs.update(news.event_index, &news.updated_probs, &event_map);
+                self.public_beliefs
+                    .update(news.event_index, &news.updated_probs, &event_map);
             }
             // InformedOnly news: no public belief update.
             // Informed traders already know true probs, so the information
@@ -221,10 +220,18 @@ impl SimulationRunner {
                 // The winning outcome's market resolves YES ($1); others resolve NO ($0)
                 let payout = if market_ids.len() == 1 {
                     // Binary event: winner 0 = YES wins, winner 1 = NO wins
-                    if *winner_outcome == 0 { NANOS_PER_DOLLAR } else { 0 }
+                    if *winner_outcome == 0 {
+                        NANOS_PER_DOLLAR
+                    } else {
+                        0
+                    }
                 } else {
                     // Multi-outcome: the market matching the winner resolves YES
-                    if outcome_idx == *winner_outcome { NANOS_PER_DOLLAR } else { 0 }
+                    if outcome_idx == *winner_outcome {
+                        NANOS_PER_DOLLAR
+                    } else {
+                        0
+                    }
                 };
                 settlement::resolve_market(&mut self.sequencer.accounts, mid, payout);
                 self.resolved_markets.insert(mid);
@@ -235,7 +242,8 @@ impl SimulationRunner {
 
             // Remove market group if this was a multi-outcome event
             let market_set: HashSet<MarketId> = market_ids.iter().copied().collect();
-            self.sequencer.market_groups_mut()
+            self.sequencer
+                .market_groups_mut()
                 .retain(|g| !g.markets.iter().any(|m| market_set.contains(m)));
         }
 
@@ -252,17 +260,10 @@ impl SimulationRunner {
         }
 
         // Compute pre-resolution PnL
-        let last_prices = self
-            .price_history
-            .last()
-            .cloned()
-            .unwrap_or_default();
+        let last_prices = self.price_history.last().cloned().unwrap_or_default();
 
-        let agent_pnl = metrics::compute_agent_pnl(
-            &self.agent_info,
-            &self.sequencer.accounts,
-            &last_prices,
-        );
+        let agent_pnl =
+            metrics::compute_agent_pnl(&self.agent_info, &self.sequencer.accounts, &last_prices);
 
         // Only compute price error for non-resolved markets
         let active_true_probs: HashMap<MarketId, f64> = self
@@ -289,24 +290,22 @@ impl SimulationRunner {
             }
             for (outcome_idx, &mid) in market_ids.iter().enumerate() {
                 let payout = if market_ids.len() == 1 {
-                    if event.winner == 0 { NANOS_PER_DOLLAR } else { 0 }
+                    if event.winner == 0 {
+                        NANOS_PER_DOLLAR
+                    } else {
+                        0
+                    }
                 } else if outcome_idx == event.winner {
                     NANOS_PER_DOLLAR
                 } else {
                     0
                 };
-                settlement::resolve_market(
-                    &mut self.sequencer.accounts,
-                    mid,
-                    payout,
-                );
+                settlement::resolve_market(&mut self.sequencer.accounts, mid, payout);
             }
         }
 
-        let resolved_pnl = metrics::compute_resolved_pnl(
-            &self.agent_info,
-            &self.sequencer.accounts,
-        );
+        let resolved_pnl =
+            metrics::compute_resolved_pnl(&self.agent_info, &self.sequencer.accounts);
 
         SimulationResult {
             batch_metrics: self.batch_metrics.clone(),
@@ -322,11 +321,7 @@ impl SimulationRunner {
 
     fn run_single_batch(&mut self, batch: usize) {
         // Build market view, filtering out resolved markets
-        let last_prices = self
-            .price_history
-            .last()
-            .cloned()
-            .unwrap_or_default();
+        let last_prices = self.price_history.last().cloned().unwrap_or_default();
 
         let active_markets: Vec<_> = self
             .sequencer

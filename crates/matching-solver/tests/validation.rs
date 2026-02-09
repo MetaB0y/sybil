@@ -30,11 +30,7 @@ fn validate_price_ranges() {
         }
     }
 
-    assert_eq!(
-        violations, 0,
-        "Found {} price range violations",
-        violations
-    );
+    assert_eq!(violations, 0, "Found {} price range violations", violations);
 }
 
 /// Validate that MM allocations respect budget constraints.
@@ -53,7 +49,11 @@ fn validate_mm_budget_constraints() {
     }
 
     // Provide fills (price, qty) for each order
-    let fills: HashMap<u64, (u64, u64)> = problem.orders.iter().map(|o| (o.id, (500_000_000u64, o.max_fill))).collect();
+    let fills: HashMap<u64, (u64, u64)> = problem
+        .orders
+        .iter()
+        .map(|o| (o.id, (500_000_000u64, o.max_fill)))
+        .collect();
 
     // Run MM allocation
     let allocator = MmAllocator::new();
@@ -214,9 +214,7 @@ fn validate_fills_respect_supply() {
         let no_buyer_supply: u64 = problem
             .orders
             .iter()
-            .filter(|o| {
-                o.num_markets == 1 && o.markets[0] == market.id && o.payoffs[1] > 0
-            })
+            .filter(|o| o.num_markets == 1 && o.markets[0] == market.id && o.payoffs[1] > 0)
             .map(|o| o.max_fill)
             .sum();
 
@@ -422,8 +420,7 @@ fn compare_current_vs_iterative_approach() {
         iter_welfare = 0;
 
         for market in problem.markets.iter() {
-            let solution =
-                solver.solve_market(market.id, &problem.markets, &combined_orders);
+            let solution = solver.solve_market(market.id, &problem.markets, &combined_orders);
             new_prices.insert(market.id, solution.prices.clone());
             iter_volume += solution.fills.iter().map(|f| f.fill_qty).sum::<u64>();
             iter_welfare += solution.welfare;
@@ -618,7 +615,11 @@ fn validate_large_scenario() {
     println!("Total fills generated: {}", total_fills);
 
     // Verify MM allocation
-    let fills: HashMap<u64, (u64, u64)> = problem.orders.iter().map(|o| (o.id, (500_000_000u64, o.max_fill))).collect();
+    let fills: HashMap<u64, (u64, u64)> = problem
+        .orders
+        .iter()
+        .map(|o| (o.id, (500_000_000u64, o.max_fill)))
+        .collect();
     let allocator = MmAllocator::new();
     let result = allocator.allocate(&problem.mm_constraints, &prices, &problem.orders, &fills);
 

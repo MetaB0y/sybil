@@ -35,10 +35,24 @@ fn election_3way() -> Problem {
     let mut liq_id = 9000u64;
     for &m in &[m_a, m_b, m_c] {
         for &price in &[0.15, 0.25, 0.35, 0.45, 0.55] {
-            problem.orders.push(outcome_sell(&problem.markets, liq_id, m, 0, price_to_nanos(price), 200));
+            problem.orders.push(outcome_sell(
+                &problem.markets,
+                liq_id,
+                m,
+                0,
+                price_to_nanos(price),
+                200,
+            ));
             liq_id += 1;
         }
-        problem.orders.push(outcome_sell(&problem.markets, liq_id, m, 1, price_to_nanos(0.25), 500));
+        problem.orders.push(outcome_sell(
+            &problem.markets,
+            liq_id,
+            m,
+            1,
+            price_to_nanos(0.25),
+            500,
+        ));
         liq_id += 1;
     }
 
@@ -100,10 +114,38 @@ fn mm_budget_problem() -> Problem {
     let m = problem.markets.add_binary("Market");
 
     // Sell orders as supply
-    problem.orders.push(outcome_sell(&problem.markets, 9000, m, 0, price_to_nanos(0.30), 500));
-    problem.orders.push(outcome_sell(&problem.markets, 9001, m, 0, price_to_nanos(0.40), 500));
-    problem.orders.push(outcome_sell(&problem.markets, 9002, m, 0, price_to_nanos(0.50), 500));
-    problem.orders.push(outcome_sell(&problem.markets, 9003, m, 1, price_to_nanos(0.30), 500));
+    problem.orders.push(outcome_sell(
+        &problem.markets,
+        9000,
+        m,
+        0,
+        price_to_nanos(0.30),
+        500,
+    ));
+    problem.orders.push(outcome_sell(
+        &problem.markets,
+        9001,
+        m,
+        0,
+        price_to_nanos(0.40),
+        500,
+    ));
+    problem.orders.push(outcome_sell(
+        &problem.markets,
+        9002,
+        m,
+        0,
+        price_to_nanos(0.50),
+        500,
+    ));
+    problem.orders.push(outcome_sell(
+        &problem.markets,
+        9003,
+        m,
+        1,
+        price_to_nanos(0.30),
+        500,
+    ));
 
     // Regular traders
     for i in 0..5 {
@@ -195,8 +237,14 @@ fn test_pipeline_dual_decomposition() {
     let pipeline = Pipeline::with_dual_decomposition();
     let result = pipeline.solve(&problem);
 
-    assert!(result.result.fills.len() > 0, "Pipeline should produce fills");
-    assert!(result.result.total_welfare >= 0, "Welfare should be non-negative");
+    assert!(
+        result.result.fills.len() > 0,
+        "Pipeline should produce fills"
+    );
+    assert!(
+        result.result.total_welfare >= 0,
+        "Welfare should be non-negative"
+    );
     assert!(result.iterations > 0, "Should report iterations");
 }
 
@@ -248,8 +296,7 @@ fn test_welfare_non_negative() {
     let master = DualMaster::new();
     let result = master.solve(&problem);
 
-    let order_map: HashMap<u64, &Order> =
-        problem.orders.iter().map(|o| (o.id, o)).collect();
+    let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
 
     for fill in &result.matching_result.fills {
         let order = order_map
@@ -275,8 +322,7 @@ fn test_fills_respect_limits() {
     let master = DualMaster::new();
     let result = master.solve(&problem);
 
-    let order_map: HashMap<u64, &Order> =
-        problem.orders.iter().map(|o| (o.id, o)).collect();
+    let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
 
     for fill in &result.matching_result.fills {
         let order = order_map
@@ -342,19 +388,31 @@ fn test_simple_two_outcome_convergence() {
     let m_a = problem.markets.add_binary("Outcome A");
     let m_b = problem.markets.add_binary("Outcome B");
 
-    let group = MarketGroup::new("Event")
-        .with_market(m_a)
-        .with_market(m_b);
+    let group = MarketGroup::new("Event").with_market(m_a).with_market(m_b);
     problem.add_market_group(group);
 
     // Sell orders as supply
     let mut liq_id = 9000u64;
     for &m in &[m_a, m_b] {
         for &price in &[0.20, 0.40, 0.60] {
-            problem.orders.push(outcome_sell(&problem.markets, liq_id, m, 0, price_to_nanos(price), 300));
+            problem.orders.push(outcome_sell(
+                &problem.markets,
+                liq_id,
+                m,
+                0,
+                price_to_nanos(price),
+                300,
+            ));
             liq_id += 1;
         }
-        problem.orders.push(outcome_sell(&problem.markets, liq_id, m, 1, price_to_nanos(0.30), 300));
+        problem.orders.push(outcome_sell(
+            &problem.markets,
+            liq_id,
+            m,
+            1,
+            price_to_nanos(0.30),
+            300,
+        ));
         liq_id += 1;
     }
 
@@ -401,7 +459,10 @@ fn test_simple_two_outcome_convergence() {
     let master = DualMaster::new();
     let result = master.solve(&problem);
 
-    assert!(!result.matching_result.fills.is_empty(), "Should have fills");
+    assert!(
+        !result.matching_result.fills.is_empty(),
+        "Should have fills"
+    );
 }
 
 /// Test with no market groups or MM constraints (basic clearing).
@@ -410,8 +471,22 @@ fn test_no_coupling_constraints() {
     let mut problem = Problem::new("basic");
     let m = problem.markets.add_binary("Market");
 
-    problem.orders.push(outcome_sell(&problem.markets, 9000, m, 0, price_to_nanos(0.30), 1000));
-    problem.orders.push(outcome_sell(&problem.markets, 9001, m, 1, price_to_nanos(0.30), 1000));
+    problem.orders.push(outcome_sell(
+        &problem.markets,
+        9000,
+        m,
+        0,
+        price_to_nanos(0.30),
+        1000,
+    ));
+    problem.orders.push(outcome_sell(
+        &problem.markets,
+        9001,
+        m,
+        1,
+        price_to_nanos(0.30),
+        1000,
+    ));
 
     for i in 0..10 {
         problem.orders.push(simple_yes_buy(
@@ -426,7 +501,10 @@ fn test_no_coupling_constraints() {
     let master = DualMaster::new();
     let result = master.solve(&problem);
 
-    assert!(!result.matching_result.fills.is_empty(), "Should have fills");
+    assert!(
+        !result.matching_result.fills.is_empty(),
+        "Should have fills"
+    );
     // Should converge immediately since there are no coupling constraints
     assert!(
         result.converged || result.iterations <= 2,

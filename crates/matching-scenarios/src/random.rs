@@ -6,7 +6,8 @@ use rand::Rng;
 use rand::SeedableRng;
 
 use matching_engine::{
-    bundle_yes, outcome_buy, outcome_sell, price_to_nanos, spread, MarketId, MarketSet, Order, Problem, Qty,
+    bundle_yes, outcome_buy, outcome_sell, price_to_nanos, spread, MarketId, MarketSet, Order,
+    Problem, Qty,
 };
 
 /// Configuration for random hard instance generation

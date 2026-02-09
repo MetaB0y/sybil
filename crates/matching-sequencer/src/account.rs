@@ -12,6 +12,9 @@ pub struct Account {
     pub balance: i64,
     /// Positions: (market, outcome_idx) -> signed quantity
     pub positions: HashMap<(MarketId, u8), i64>,
+    /// Total amount deposited (initial balance + all fund_account calls).
+    /// Used for PnL calculation: PnL = portfolio_value - total_deposited.
+    pub total_deposited: i64,
 }
 
 impl Account {
@@ -20,6 +23,7 @@ impl Account {
             id,
             balance,
             positions: HashMap::new(),
+            total_deposited: balance,
         }
     }
 

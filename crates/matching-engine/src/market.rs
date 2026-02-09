@@ -84,7 +84,11 @@ impl MarketSet {
 
     /// Number of outcomes for a market (always 2).
     pub fn num_outcomes(&self, id: MarketId) -> u8 {
-        if self.get(id).is_some() { 2 } else { 0 }
+        if self.get(id).is_some() {
+            2
+        } else {
+            0
+        }
     }
 
     /// Iterate over all markets.

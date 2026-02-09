@@ -1,6 +1,6 @@
 use axum::extract::{Path, State};
-use axum::Json;
 use axum::response::sse::{Event, Sse};
+use axum::Json;
 
 use crate::convert::block_to_response;
 use crate::state::AppState;
@@ -55,9 +55,7 @@ pub async fn get_block_by_height(
 )]
 pub async fn stream_blocks(
     State(state): State<AppState>,
-) -> Result<
-    Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>>,
-    AppError,
-> {
+) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>>, AppError>
+{
     crate::sse::block_stream(&state.sequencer).await
 }

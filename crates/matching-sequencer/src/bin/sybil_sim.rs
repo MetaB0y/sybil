@@ -78,12 +78,7 @@ fn main() {
     println!("=== Sybil Simulation (Scenario: {}) ===", scenario.name);
     for (i, event) in scenario.events.iter().enumerate() {
         let outcomes: Vec<&str> = event.outcomes.iter().map(|o| o.name.as_str()).collect();
-        println!(
-            "Event {}: {} [{}]",
-            i,
-            event.name,
-            outcomes.join(", ")
-        );
+        println!("Event {}: {} [{}]", i, event.name, outcomes.join(", "));
         if let Some(b) = event.resolve_at_batch {
             println!("  Resolves at batch {}", b);
         }
@@ -121,14 +116,19 @@ fn print_batch_table(result: &matching_sequencer::SimulationResult) {
     table.load_preset(UTF8_FULL);
     table.apply_modifier(UTF8_ROUND_CORNERS);
     table.set_header(vec![
-        "Batch", "Welfare", "Volume", "Orders", "Filled", "Fill%", "Rejections", "Price Error",
+        "Batch",
+        "Welfare",
+        "Volume",
+        "Orders",
+        "Filled",
+        "Fill%",
+        "Rejections",
+        "Price Error",
     ]);
 
     for bm in &result.batch_metrics {
-        let price_err = matching_sequencer::metrics::price_convergence(
-            &bm.clearing_prices,
-            &result.true_probs,
-        );
+        let price_err =
+            matching_sequencer::metrics::price_convergence(&bm.clearing_prices, &result.true_probs);
         table.add_row(vec![
             Cell::new(bm.batch),
             Cell::new(format_nanos_dollars(bm.total_welfare)),

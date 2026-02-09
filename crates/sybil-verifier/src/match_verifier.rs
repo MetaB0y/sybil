@@ -8,9 +8,7 @@ use std::collections::{HashMap, HashSet};
 use matching_engine::{Fill, MarketId, Order, NANOS_PER_DOLLAR};
 
 use crate::types::BlockWitness;
-use crate::violations::{
-    VerificationResult, VerificationStats, Violation, ViolationKind,
-};
+use crate::violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
 
 /// Verify all fill-level and market-level invariants.
 pub fn verify_match(witness: &BlockWitness, strict: bool) -> VerificationResult {
@@ -77,8 +75,7 @@ pub fn verify_match(witness: &BlockWitness, strict: bool) -> VerificationResult 
             }
             total_delta += (sum as i64 - NANOS_PER_DOLLAR as i64).unsigned_abs();
         }
-        stats.market_group_avg_delta =
-            Some(total_delta / witness.market_groups.len() as u64);
+        stats.market_group_avg_delta = Some(total_delta / witness.market_groups.len() as u64);
     }
 
     VerificationResult {
@@ -470,11 +467,15 @@ mod tests {
         let total_welfare = {
             let order_map: HashMap<u64, &Order> =
                 orders.iter().map(|wo| (wo.order.id, &wo.order)).collect();
-            fills.iter().map(|f| {
-                order_map.get(&f.order_id)
-                    .map(|o| f.welfare(o))
-                    .unwrap_or(0)
-            }).sum()
+            fills
+                .iter()
+                .map(|f| {
+                    order_map
+                        .get(&f.order_id)
+                        .map(|o| f.welfare(o))
+                        .unwrap_or(0)
+                })
+                .sum()
         };
 
         BlockWitness {
@@ -515,17 +516,13 @@ mod tests {
         let m0 = markets.add_binary("M0");
 
         // Balanced: buyer buys 50 YES, seller sells 50 YES at same price
-        let orders = vec![
-            buy_order(&markets, 1, m0),
-            sell_order(&markets, 2, m0),
-        ];
-        let fills = vec![
-            Fill::new(1, 50, 500_000_000),
-            Fill::new(2, 50, 500_000_000),
-        ];
+        let orders = vec![buy_order(&markets, 1, m0), sell_order(&markets, 2, m0)];
+        let fills = vec![Fill::new(1, 50, 500_000_000), Fill::new(2, 50, 500_000_000)];
 
         let mut witness = make_witness(orders, fills);
-        witness.clearing_prices.insert(m0, vec![500_000_000, 500_000_000]);
+        witness
+            .clearing_prices
+            .insert(m0, vec![500_000_000, 500_000_000]);
 
         let result = verify_match(&witness, false);
         assert!(result.valid, "Violations: {:?}", result.violations);
@@ -533,17 +530,17 @@ mod tests {
 
     #[test]
     fn test_order_not_found() {
-        let witness = make_witness(
-            vec![],
-            vec![Fill::new(999, 50, 500_000_000)],
-        );
+        let witness = make_witness(vec![], vec![Fill::new(999, 50, 500_000_000)]);
         // Fix welfare since no orders exist
         let mut witness = witness;
         witness.total_welfare = 0;
 
         let result = verify_match(&witness, false);
         assert!(!result.valid);
-        assert!(result.violations.iter().any(|v| v.kind == ViolationKind::OrderNotFound));
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::OrderNotFound));
     }
 
     #[test]
@@ -559,7 +556,10 @@ mod tests {
 
         let result = verify_match(&witness, false);
         assert!(!result.valid);
-        assert!(result.violations.iter().any(|v| v.kind == ViolationKind::QuantityExceedsMax));
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::QuantityExceedsMax));
     }
 
     #[test]
@@ -568,17 +568,17 @@ mod tests {
         let m0 = markets.add_binary("M0");
 
         let orders = vec![buy_order(&markets, 1, m0)];
-        let fills = vec![
-            Fill::new(1, 50, 500_000_000),
-            Fill::new(1, 30, 500_000_000),
-        ];
+        let fills = vec![Fill::new(1, 50, 500_000_000), Fill::new(1, 30, 500_000_000)];
 
         let mut witness = make_witness(orders, fills);
         witness.total_welfare = 0;
 
         let result = verify_match(&witness, false);
         assert!(!result.valid);
-        assert!(result.violations.iter().any(|v| v.kind == ViolationKind::DuplicateFill));
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::DuplicateFill));
     }
 
     #[test]
@@ -594,7 +594,10 @@ mod tests {
 
         let result = verify_match(&witness, false);
         assert!(!result.valid);
-        assert!(result.violations.iter().any(|v| v.kind == ViolationKind::PriceExceedsLimit));
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::PriceExceedsLimit));
     }
 
     #[test]
@@ -602,10 +605,7 @@ mod tests {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
 
-        let orders = vec![
-            buy_order(&markets, 1, m0),
-            buy_order(&markets, 2, m0),
-        ];
+        let orders = vec![buy_order(&markets, 1, m0), buy_order(&markets, 2, m0)];
         let fills = vec![
             Fill::new(1, 100, 500_000_000),
             Fill::new(2, 100, 500_000_000),
@@ -620,7 +620,10 @@ mod tests {
 
         let result = verify_match(&witness, false);
         assert!(!result.valid);
-        assert!(result.violations.iter().any(|v| v.kind == ViolationKind::MmBudgetExceeded));
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::MmBudgetExceeded));
     }
 
     #[test]
@@ -636,7 +639,10 @@ mod tests {
         let witness = make_witness(orders, vec![]);
         let result = verify_match(&witness, false);
         assert!(!result.valid);
-        assert!(result.violations.iter().any(|v| v.kind == ViolationKind::DuplicateOrderId));
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::DuplicateOrderId));
     }
 
     #[test]
@@ -645,7 +651,9 @@ mod tests {
         let m0 = markets.add_binary("M0");
 
         let mut witness = make_witness(vec![], vec![]);
-        witness.clearing_prices.insert(m0, vec![600_000_000, 400_000_000]);
+        witness
+            .clearing_prices
+            .insert(m0, vec![600_000_000, 400_000_000]);
 
         let result = verify_match(&witness, false);
         assert!(result.valid, "Violations: {:?}", result.violations);
@@ -657,11 +665,16 @@ mod tests {
         let m0 = markets.add_binary("M0");
 
         let mut witness = make_witness(vec![], vec![]);
-        witness.clearing_prices.insert(m0, vec![600_000_000, 500_000_000]); // sum > $1
+        witness
+            .clearing_prices
+            .insert(m0, vec![600_000_000, 500_000_000]); // sum > $1
 
         let result = verify_match(&witness, false);
         assert!(!result.valid);
-        assert!(result.violations.iter().any(|v| v.kind == ViolationKind::PriceComplementarityViolation));
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::PriceComplementarityViolation));
     }
 
     #[test]
@@ -680,6 +693,9 @@ mod tests {
 
         let strict = verify_match(&witness, true);
         assert!(!strict.valid);
-        assert!(strict.violations.iter().any(|v| v.kind == ViolationKind::ZeroQuantityFill));
+        assert!(strict
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::ZeroQuantityFill));
     }
 }

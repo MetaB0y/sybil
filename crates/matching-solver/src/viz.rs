@@ -491,10 +491,10 @@ impl VizSnapshot {
                     .iter()
                     .filter_map(|(market_id, prices)| {
                         let name = market_names.get(market_id)?.clone();
-                        let yes_price = prices.first().copied().unwrap_or(0) as f64
-                            / NANOS_PER_DOLLAR as f64;
-                        let no_price = prices.get(1).copied().unwrap_or(0) as f64
-                            / NANOS_PER_DOLLAR as f64;
+                        let yes_price =
+                            prices.first().copied().unwrap_or(0) as f64 / NANOS_PER_DOLLAR as f64;
+                        let no_price =
+                            prices.get(1).copied().unwrap_or(0) as f64 / NANOS_PER_DOLLAR as f64;
 
                         // End prices from next iteration (or same for final)
                         let next_market_prices = next_prices.get(market_id);
@@ -597,8 +597,16 @@ impl VizSnapshot {
                     "single".to_string()
                 } else if order.num_markets == 2 {
                     // Check if it's a spread (opposite payoffs) or bundle (same direction)
-                    let has_positive = order.payoffs.iter().take(order.num_states as usize).any(|&p| p > 0);
-                    let has_negative = order.payoffs.iter().take(order.num_states as usize).any(|&p| p < 0);
+                    let has_positive = order
+                        .payoffs
+                        .iter()
+                        .take(order.num_states as usize)
+                        .any(|&p| p > 0);
+                    let has_negative = order
+                        .payoffs
+                        .iter()
+                        .take(order.num_states as usize)
+                        .any(|&p| p < 0);
                     if has_positive && has_negative {
                         "spread".to_string()
                     } else {

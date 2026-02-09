@@ -27,7 +27,11 @@ pub struct SequencerState {
 }
 
 impl SequencerState {
-    pub fn new(accounts: AccountStore, markets: MarketSet, market_groups: Vec<MarketGroup>) -> Self {
+    pub fn new(
+        accounts: AccountStore,
+        markets: MarketSet,
+        market_groups: Vec<MarketGroup>,
+    ) -> Self {
         Self {
             accounts,
             markets,

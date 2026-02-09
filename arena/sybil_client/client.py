@@ -9,13 +9,18 @@ import httpx
 from .types import (
     NANOS_PER_DOLLAR,
     Account,
+    AccountFill,
     Block,
     BuyNo,
     BuyYes,
     Fill,
     Market,
     OrderSpec,
+    Portfolio,
     Position,
+    PositionDelta,
+    PositionValue,
+    PricePoint,
     SellNo,
     SellYes,
 )
@@ -89,6 +94,62 @@ class SybilClient:
         )
         return self._parse_account(data)
 
+    async def get_portfolio(self, account_id: int) -> Portfolio:
+        """Get portfolio summary with valued positions and PnL."""
+        data = await self._request("GET", f"/v1/accounts/{account_id}/portfolio")
+        positions = [
+            PositionValue(
+                market_id=p["market_id"],
+                outcome=p["outcome"],
+                quantity=p["quantity"],
+                current_price_nanos=p["current_price_nanos"],
+                value_nanos=p["value_nanos"],
+            )
+            for p in data.get("positions", [])
+        ]
+        return Portfolio(
+            account_id=data["account_id"],
+            balance_nanos=data["balance_nanos"],
+            total_deposited_nanos=data["total_deposited_nanos"],
+            positions=positions,
+            total_position_value_nanos=data["total_position_value_nanos"],
+            portfolio_value_nanos=data["portfolio_value_nanos"],
+            pnl_nanos=data["pnl_nanos"],
+        )
+
+    async def get_account_fills(
+        self,
+        account_id: int,
+        market_id: int | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[AccountFill]:
+        """Get fill history for an account."""
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if market_id is not None:
+            params["market_id"] = market_id
+        data = await self._request(
+            "GET", f"/v1/accounts/{account_id}/fills", params=params
+        )
+        return [
+            AccountFill(
+                order_id=f["order_id"],
+                fill_qty=f["fill_qty"],
+                fill_price_nanos=f["fill_price_nanos"],
+                block_height=f["block_height"],
+                timestamp_ms=f["timestamp_ms"],
+                position_deltas=[
+                    PositionDelta(
+                        market_id=d["market_id"],
+                        outcome=d["outcome"],
+                        delta=d["delta"],
+                    )
+                    for d in f.get("position_deltas", [])
+                ],
+            )
+            for f in data
+        ]
+
     def _parse_account(self, data: dict[str, Any]) -> Account:
         positions = [
             Position(p["market_id"], p["outcome"], p["quantity"]) for p in data.get("positions", [])
@@ -107,9 +168,29 @@ class SybilClient:
         data = await self._request("GET", f"/v1/markets/{market_id}")
         return self._parse_market(data)
 
-    async def create_market(self, name: str) -> Market:
+    async def create_market(
+        self,
+        name: str,
+        *,
+        description: str | None = None,
+        category: str | None = None,
+        tags: list[str] | None = None,
+        resolution_criteria: str | None = None,
+        expiry_timestamp_ms: int | None = None,
+    ) -> Market:
         """Create a new market (dev mode only)."""
-        data = await self._request("POST", "/v1/markets", json={"name": name})
+        payload: dict[str, Any] = {"name": name}
+        if description is not None:
+            payload["description"] = description
+        if category is not None:
+            payload["category"] = category
+        if tags is not None:
+            payload["tags"] = tags
+        if resolution_criteria is not None:
+            payload["resolution_criteria"] = resolution_criteria
+        if expiry_timestamp_ms is not None:
+            payload["expiry_timestamp_ms"] = expiry_timestamp_ms
+        data = await self._request("POST", "/v1/markets", json=payload)
         return self._parse_market(data)
 
     async def get_prices(self) -> dict[int, tuple[int, int]]:
@@ -122,6 +203,65 @@ class SybilClient:
             for market_id, p in prices_map.items()
         }
 
+    async def get_price_history(
+        self,
+        market_id: int,
+        from_ms: int | None = None,
+        to_ms: int | None = None,
+    ) -> list[PricePoint]:
+        """Get price history for a market."""
+        params: dict[str, Any] = {}
+        if from_ms is not None:
+            params["from_ms"] = from_ms
+        if to_ms is not None:
+            params["to_ms"] = to_ms
+        data = await self._request(
+            "GET", f"/v1/markets/{market_id}/prices/history", params=params
+        )
+        return [
+            PricePoint(
+                height=p["height"],
+                timestamp_ms=p["timestamp_ms"],
+                yes_price_nanos=p["yes_price_nanos"],
+                no_price_nanos=p["no_price_nanos"],
+                volume_nanos=p["volume_nanos"],
+            )
+            for p in data.get("points", [])
+        ]
+
+    async def search_markets(
+        self,
+        *,
+        q: str | None = None,
+        tags: list[str] | None = None,
+        category: str | None = None,
+        status: str | None = None,
+        min_volume: int | None = None,
+        sort: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> list[Market]:
+        """Search markets by various criteria."""
+        params: dict[str, Any] = {}
+        if q is not None:
+            params["q"] = q
+        if tags is not None:
+            params["tags"] = ",".join(tags)
+        if category is not None:
+            params["category"] = category
+        if status is not None:
+            params["status"] = status
+        if min_volume is not None:
+            params["min_volume"] = min_volume
+        if sort is not None:
+            params["sort"] = sort
+        if limit is not None:
+            params["limit"] = limit
+        if offset is not None:
+            params["offset"] = offset
+        data = await self._request("GET", "/v1/markets/search", params=params)
+        return [self._parse_market(m) for m in data]
+
     async def resolve_market(self, market_id: int, payout_nanos: int) -> None:
         """Resolve a market (dev mode only)."""
         await self._request(
@@ -130,11 +270,18 @@ class SybilClient:
 
     def _parse_market(self, data: dict[str, Any]) -> Market:
         return Market(
-            data["market_id"],
-            data["name"],
-            data.get("yes_price_nanos", 0),
-            data.get("no_price_nanos", 0),
-            data.get("status", "Active"),
+            id=data["market_id"],
+            name=data["name"],
+            yes_price_nanos=data.get("yes_price_nanos") or 0,
+            no_price_nanos=data.get("no_price_nanos") or 0,
+            status=data.get("status", "Active"),
+            description=data.get("description", ""),
+            category=data.get("category", ""),
+            tags=data.get("tags", []),
+            resolution_criteria=data.get("resolution_criteria", ""),
+            expiry_timestamp_ms=data.get("expiry_timestamp_ms", 0),
+            created_at_ms=data.get("created_at_ms", 0),
+            volume_nanos=data.get("volume_nanos", 0),
         )
 
     # === Orders ===

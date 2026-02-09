@@ -67,7 +67,10 @@ pub struct LiquidityBook {
 
 impl LiquidityBook {
     pub fn new(market: MarketId, outcome: Outcome) -> Self {
-        debug_assert!(outcome <= 1, "Binary markets only have outcomes 0 (YES) and 1 (NO)");
+        debug_assert!(
+            outcome <= 1,
+            "Binary markets only have outcomes 0 (YES) and 1 (NO)"
+        );
         Self {
             market,
             outcome,
@@ -446,7 +449,10 @@ impl LiquidityPool {
     }
 
     /// Get mutable reference to a joint book if it exists.
-    pub fn joint_book_get_mut(&mut self, outcome: &JointOutcome) -> Option<&mut JointLiquidityBook> {
+    pub fn joint_book_get_mut(
+        &mut self,
+        outcome: &JointOutcome,
+    ) -> Option<&mut JointLiquidityBook> {
         self.joint_books.get_mut(outcome)
     }
 

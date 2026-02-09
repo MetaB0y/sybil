@@ -121,7 +121,11 @@ mod tests {
     use crate::account::AccountId;
     use matching_engine::{outcome_buy, MarketId, MarketSet, MmConstraint, MmId, NANOS_PER_DOLLAR};
 
-    fn make_single_order_sub(markets: &MarketSet, market: MarketId, account: AccountId) -> OrderSubmission {
+    fn make_single_order_sub(
+        markets: &MarketSet,
+        market: MarketId,
+        account: AccountId,
+    ) -> OrderSubmission {
         OrderSubmission {
             account_id: account,
             orders: vec![outcome_buy(markets, 0, market, 0, 500_000_000, 1)],
@@ -147,8 +151,10 @@ mod tests {
         let aid = AccountId(0);
 
         let mut pool = Mempool::new(MempoolConfig::default());
-        pool.submit(make_single_order_sub(&markets, m0, aid)).unwrap();
-        pool.submit(make_single_order_sub(&markets, m0, aid)).unwrap();
+        pool.submit(make_single_order_sub(&markets, m0, aid))
+            .unwrap();
+        pool.submit(make_single_order_sub(&markets, m0, aid))
+            .unwrap();
 
         assert_eq!(pool.len(), 2);
         let drained = pool.drain();
@@ -169,7 +175,8 @@ mod tests {
         });
 
         for _ in 0..5 {
-            pool.submit(make_single_order_sub(&markets, m0, aid)).unwrap();
+            pool.submit(make_single_order_sub(&markets, m0, aid))
+                .unwrap();
         }
 
         assert_eq!(pool.len(), 5);
@@ -192,10 +199,12 @@ mod tests {
         });
 
         for _ in 0..3 {
-            pool.submit(make_single_order_sub(&markets, m0, aid)).unwrap();
+            pool.submit(make_single_order_sub(&markets, m0, aid))
+                .unwrap();
         }
         for _ in 0..3 {
-            pool.submit(make_single_order_sub(&markets, m1, aid)).unwrap();
+            pool.submit(make_single_order_sub(&markets, m1, aid))
+                .unwrap();
         }
 
         assert_eq!(pool.len(), 6);
@@ -239,9 +248,12 @@ mod tests {
             max_total: 3,
         });
 
-        pool.submit(make_single_order_sub(&markets, m0, aid)).unwrap();
-        pool.submit(make_single_order_sub(&markets, m0, aid)).unwrap();
-        pool.submit(make_single_order_sub(&markets, m0, aid)).unwrap();
+        pool.submit(make_single_order_sub(&markets, m0, aid))
+            .unwrap();
+        pool.submit(make_single_order_sub(&markets, m0, aid))
+            .unwrap();
+        pool.submit(make_single_order_sub(&markets, m0, aid))
+            .unwrap();
 
         let result = pool.submit(make_single_order_sub(&markets, m0, aid));
         assert!(matches!(result, Err(SequencerError::MempoolFull)));
@@ -272,7 +284,8 @@ mod tests {
                 account_id: AccountId(i),
                 orders: vec![outcome_buy(&markets, 0, m0, 0, 500_000_000, 1)],
                 mm_constraint: None,
-            }).unwrap();
+            })
+            .unwrap();
         }
 
         let drained = pool.drain();

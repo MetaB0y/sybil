@@ -40,7 +40,11 @@ pub fn state_index(outcomes: &[u8], market_sizes: &[u8]) -> usize {
         debug_assert!(
             i < market_sizes.len() && outcome < market_sizes[i],
             "outcome {outcome} out of bounds for market {i} with size {}",
-            if i < market_sizes.len() { market_sizes[i] } else { 0 }
+            if i < market_sizes.len() {
+                market_sizes[i]
+            } else {
+                0
+            }
         );
         idx += outcome as usize * multiplier;
         if i < market_sizes.len() {
@@ -183,5 +187,4 @@ mod tests {
         assert_eq!(states[0], (0, vec![0, 0]));
         assert_eq!(states[5], (5, vec![1, 2]));
     }
-
 }

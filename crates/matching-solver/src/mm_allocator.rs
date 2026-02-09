@@ -58,7 +58,6 @@ pub struct MmAllocation {
     pub lambda: f64,
 }
 
-
 /// Greedy knapsack: sort by welfare/capital ratio, greedily activate until budget exhausted.
 ///
 /// Returns (activated_order_ids, capital_used, total_welfare).
@@ -70,9 +69,19 @@ pub fn greedy_knapsack(
 
     // Sort by welfare/capital ratio descending
     sorted.sort_by(|(_, w1, c1), (_, w2, c2)| {
-        let ratio1 = if *c1 > 0 { *w1 as f64 / *c1 as f64 } else { f64::MAX };
-        let ratio2 = if *c2 > 0 { *w2 as f64 / *c2 as f64 } else { f64::MAX };
-        ratio2.partial_cmp(&ratio1).unwrap_or(std::cmp::Ordering::Equal)
+        let ratio1 = if *c1 > 0 {
+            *w1 as f64 / *c1 as f64
+        } else {
+            f64::MAX
+        };
+        let ratio2 = if *c2 > 0 {
+            *w2 as f64 / *c2 as f64
+        } else {
+            f64::MAX
+        };
+        ratio2
+            .partial_cmp(&ratio1)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     let mut budget_remaining = budget;
@@ -128,11 +137,16 @@ impl MmAllocator {
             return AllocationResult {
                 activated_orders: orders.iter().map(|o| o.id).collect(),
                 mm_allocations: Vec::new(),
-                total_welfare: fills.iter().map(|(&id, &(price, qty))| {
-                    orders.iter().find(|o| o.id == id)
-                        .map(|o| o.welfare_contribution(price, qty))
-                        .unwrap_or(0)
-                }).sum(),
+                total_welfare: fills
+                    .iter()
+                    .map(|(&id, &(price, qty))| {
+                        orders
+                            .iter()
+                            .find(|o| o.id == id)
+                            .map(|o| o.welfare_contribution(price, qty))
+                            .unwrap_or(0)
+                    })
+                    .sum(),
                 iterations: 0,
                 stats: AllocationStats::default(),
             };
@@ -142,12 +156,16 @@ impl MmAllocator {
         let order_map: HashMap<u64, &Order> = orders.iter().map(|o| (o.id, o)).collect();
 
         // Compute welfare from actual fills
-        let welfare: HashMap<u64, i64> = fills.iter().map(|(&id, &(price, qty))| {
-            let w = order_map.get(&id)
-                .map(|o| o.welfare_contribution(price, qty))
-                .unwrap_or(0);
-            (id, w)
-        }).collect();
+        let welfare: HashMap<u64, i64> = fills
+            .iter()
+            .map(|(&id, &(price, qty))| {
+                let w = order_map
+                    .get(&id)
+                    .map(|o| o.welfare_contribution(price, qty))
+                    .unwrap_or(0);
+                (id, w)
+            })
+            .collect();
 
         // Check if MMs interact (share orders)
         let interacting = self.mms_interact(mm_constraints);
@@ -184,7 +202,9 @@ impl MmAllocator {
                 .iter()
                 .filter_map(|&order_id| {
                     let (price, qty) = fills.get(&order_id).copied()?;
-                    if qty == 0 { return None; }
+                    if qty == 0 {
+                        return None;
+                    }
                     let w = welfare.get(&order_id).copied().unwrap_or(0);
                     let side = mm.order_sides.get(&order_id)?;
                     let capital = side.capital_needed(price, qty);
@@ -222,7 +242,9 @@ impl MmAllocator {
                 budget: mm.max_capital,
                 utilization: if mm.max_capital > 0 {
                     capital_used as f64 / mm.max_capital as f64
-                } else { 0.0 },
+                } else {
+                    0.0
+                },
                 lambda: 0.0,
             });
 
@@ -232,7 +254,9 @@ impl MmAllocator {
 
         // Also activate non-MM orders
         for order in order_map.values() {
-            let is_mm_order = mm_constraints.iter().any(|mm| mm.order_ids.contains(&order.id));
+            let is_mm_order = mm_constraints
+                .iter()
+                .any(|mm| mm.order_ids.contains(&order.id));
             if !is_mm_order {
                 all_activated.push(order.id);
                 total_welfare += welfare.get(&order.id).copied().unwrap_or(0);
@@ -265,7 +289,9 @@ impl MmAllocator {
             .iter()
             .filter_map(|&order_id| {
                 let (price, qty) = fills.get(&order_id).copied()?;
-                if qty == 0 { return None; }
+                if qty == 0 {
+                    return None;
+                }
                 let w = welfare.get(&order_id).copied().unwrap_or(0);
                 let side = mm.order_sides.get(&order_id)?;
                 let capital = side.capital_needed(price, qty);
@@ -297,7 +323,9 @@ impl MmAllocator {
             let filtered_mm = MmConstraint {
                 mm_id: mm.mm_id,
                 max_capital: mm.max_capital,
-                order_ids: mm.order_ids.iter()
+                order_ids: mm
+                    .order_ids
+                    .iter()
                     .filter(|id| !claimed.contains(id))
                     .copied()
                     .collect(),
@@ -319,7 +347,9 @@ impl MmAllocator {
                 budget: mm.max_capital,
                 utilization: if mm.max_capital > 0 {
                     capital_used as f64 / mm.max_capital as f64
-                } else { 0.0 },
+                } else {
+                    0.0
+                },
                 lambda: 0.0,
             });
 
@@ -329,7 +359,9 @@ impl MmAllocator {
 
         // Also activate non-MM orders
         for order in order_map.values() {
-            let is_mm_order = mm_constraints.iter().any(|mm| mm.order_ids.contains(&order.id));
+            let is_mm_order = mm_constraints
+                .iter()
+                .any(|mm| mm.order_ids.contains(&order.id));
             if !is_mm_order {
                 all_activated.push(order.id);
                 total_welfare += welfare.get(&order.id).copied().unwrap_or(0);
@@ -438,7 +470,6 @@ impl OrderAllocator for MmAllocator {
         "MmAllocator"
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -708,7 +739,6 @@ mod tests {
         let mut problem = Problem::new("stats_test");
         let market = problem.markets.add_binary("m");
 
-
         // Add 10 orders - use large quantity to ensure capital cost is significant
         for i in 1..=10 {
             problem.orders.push(simple_yes_buy(
@@ -789,7 +819,6 @@ mod tests {
         let mut problem = Problem::new("overlapping_mms");
         let market = problem.markets.add_binary("m");
 
-
         // Add 6 orders
         for i in 1..=6 {
             problem.orders.push(simple_yes_buy(
@@ -865,7 +894,6 @@ mod tests {
         let mut problem = Problem::new("varied_welfare");
         let market = problem.markets.add_binary("m");
 
-
         // Add orders with varying limit prices (affects welfare)
         for i in 1..=10 {
             let limit_price = (500 + i * 10) as u64 * 1_000_000; // $0.51, $0.52, etc.
@@ -905,7 +933,10 @@ mod tests {
 
         // Check greedy baseline is computed
         println!("Budget constraint with varied welfare:");
-        println!("  Greedy baseline welfare: {}", result.stats.greedy_baseline_welfare);
+        println!(
+            "  Greedy baseline welfare: {}",
+            result.stats.greedy_baseline_welfare
+        );
         println!("  Total welfare: {}", result.total_welfare);
         println!(
             "  Improvement: {:.2}%",

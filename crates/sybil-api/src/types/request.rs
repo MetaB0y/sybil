@@ -27,6 +27,21 @@ pub struct CreateMarketRequest {
     /// Name of the binary market.
     #[schema(example = "Will it rain tomorrow?")]
     pub name: String,
+    /// Optional description of the market.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Optional category (e.g., "sports", "politics", "crypto").
+    #[serde(default)]
+    pub category: Option<String>,
+    /// Optional tags for discovery.
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    /// Optional resolution criteria.
+    #[serde(default)]
+    pub resolution_criteria: Option<String>,
+    /// Optional expiry timestamp in ms (0 = no expiry).
+    #[serde(default)]
+    pub expiry_timestamp_ms: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -116,6 +131,39 @@ pub enum OrderSpec {
         min_fill: u64,
         max_fill: u64,
     },
+}
+
+/// Query parameters for market search.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct MarketSearchParams {
+    /// Text search (searches name + description).
+    #[serde(default)]
+    pub q: Option<String>,
+    /// Comma-separated tags to filter by.
+    #[serde(default)]
+    pub tags: Option<String>,
+    /// Exact category match.
+    #[serde(default)]
+    pub category: Option<String>,
+    /// Status filter ("active" or "resolved").
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Minimum YES price in nanos.
+    #[serde(default)]
+    pub min_yes_price: Option<u64>,
+    /// Maximum YES price in nanos.
+    #[serde(default)]
+    pub max_yes_price: Option<u64>,
+    /// Minimum cumulative volume in nanos.
+    #[serde(default)]
+    pub min_volume: Option<u64>,
+    /// Sort field: "volume", "created_at", "name", "price".
+    #[serde(default)]
+    pub sort: Option<String>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub offset: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

@@ -175,8 +175,7 @@ impl DualMaster {
             .collect();
 
         // Build order lookup
-        let order_map: HashMap<u64, &Order> =
-            problem.orders.iter().map(|o| (o.id, o)).collect();
+        let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
 
         // Build MM order IDs set
         let mm_order_ids: HashSet<u64> = problem
@@ -213,11 +212,7 @@ impl DualMaster {
                 .cloned()
                 .collect();
 
-            let shaded_orders = shade_orders(
-                &remaining_orders,
-                &state.lambda,
-                &market_to_group,
-            );
+            let shaded_orders = shade_orders(&remaining_orders, &state.lambda, &market_to_group);
 
             // 2. Solve per-market subproblems with shaded orders
             let shaded_problem = Problem {
@@ -280,14 +275,13 @@ impl DualMaster {
             let mut mm_accepted_fills: Vec<Fill> = Vec::new();
             {
                 // Build fill lookup for mapping knapsack results back to fills
-                let fill_by_id: HashMap<u64, &Fill> = mm_candidate_fills
-                    .iter()
-                    .map(|f| (f.order_id, f))
-                    .collect();
+                let fill_by_id: HashMap<u64, &Fill> =
+                    mm_candidate_fills.iter().map(|f| (f.order_id, f)).collect();
                 let mut already_accepted: HashSet<u64> = HashSet::new();
 
                 for mm in &problem.mm_constraints {
-                    let remaining_budget = mm.max_capital
+                    let remaining_budget = mm
+                        .max_capital
                         .saturating_sub(mm.capital_used(&cumulative_mm_fills));
                     if remaining_budget == 0 {
                         continue;
@@ -296,7 +290,9 @@ impl DualMaster {
                     // Build knapsack input, excluding already-accepted orders
                     let knapsack_input: Vec<(u64, i64, Nanos)> = mm_candidate_fills
                         .iter()
-                        .filter(|f| mm.contains_order(f.order_id) && !already_accepted.contains(&f.order_id))
+                        .filter(|f| {
+                            mm.contains_order(f.order_id) && !already_accepted.contains(&f.order_id)
+                        })
                         .filter_map(|f| {
                             let order = order_map.get(&f.order_id)?;
                             let welfare = order.welfare_contribution(f.fill_price, f.fill_qty);
@@ -333,8 +329,7 @@ impl DualMaster {
             for fill in mm_accepted_fills {
                 if let Some(order) = order_map.get(&fill.order_id) {
                     filled_order_ids.insert(fill.order_id);
-                    cumulative_mm_fills
-                        .insert(fill.order_id, (fill.fill_price, fill.fill_qty));
+                    cumulative_mm_fills.insert(fill.order_id, (fill.fill_price, fill.fill_qty));
                     matching_result.add_fill(fill, order);
                     iter_fills += 1;
                     iter_mm_fills += 1;
@@ -357,8 +352,7 @@ impl DualMaster {
             }
 
             // 7. Compute price residuals and update λ
-            let price_residuals =
-                compute_price_residuals(&prices, &problem.market_groups);
+            let price_residuals = compute_price_residuals(&prices, &problem.market_groups);
 
             state.prev_lambda = state.lambda.clone();
             update_duals(&mut state, &price_residuals, step_size);
@@ -368,8 +362,7 @@ impl DualMaster {
                 .values()
                 .map(|r| r.abs())
                 .fold(0.0f64, f64::max);
-            let lambda_norm: f64 =
-                state.lambda.values().map(|v| v * v).sum::<f64>().sqrt();
+            let lambda_norm: f64 = state.lambda.values().map(|v| v * v).sum::<f64>().sqrt();
             let current_welfare = matching_result.total_welfare;
 
             iteration_stats.push(DualIterationStats {
@@ -426,8 +419,7 @@ impl DualMaster {
         }
 
         // Compute final diagnostics
-        let final_price_sum_error =
-            compute_price_sum_errors(&last_prices, &problem.market_groups);
+        let final_price_sum_error = compute_price_sum_errors(&last_prices, &problem.market_groups);
         let final_mm_utilization =
             compute_mm_utilization(&cumulative_mm_fills, &problem.mm_constraints);
 
@@ -549,8 +541,16 @@ pub fn shade_orders(
                         }
                     }
 
-                    let c_yes = if yes_count > 0 { yes_sum / yes_count as f64 } else { 0.0 };
-                    let c_no = if no_count > 0 { no_sum / no_count as f64 } else { 0.0 };
+                    let c_yes = if yes_count > 0 {
+                        yes_sum / yes_count as f64
+                    } else {
+                        0.0
+                    };
+                    let c_no = if no_count > 0 {
+                        no_sum / no_count as f64
+                    } else {
+                        0.0
+                    };
                     let net_exposure = c_yes - c_no; // positive = net YES, negative = net NO
 
                     // YES exposure contributes -λ shading, NO exposure contributes +λ shading
@@ -603,11 +603,7 @@ pub fn compute_price_residuals(
 /// Update λ dual variables using subgradient step.
 ///
 /// λ is unconstrained (can be positive or negative).
-pub fn update_duals(
-    state: &mut DualState,
-    price_residuals: &HashMap<String, f64>,
-    step_size: f64,
-) {
+pub fn update_duals(state: &mut DualState, price_residuals: &HashMap<String, f64>, step_size: f64) {
     for (group, residual) in price_residuals {
         let lambda = state.lambda.entry(group.clone()).or_insert(0.0);
         *lambda += step_size * residual;
@@ -744,11 +740,25 @@ mod tests {
         for &m in &[m_a, m_b, m_c] {
             // YES sell orders: stepped supply
             for &price in &[0.20, 0.30, 0.40, 0.50, 0.60] {
-                problem.orders.push(outcome_sell(&problem.markets, sell_id, m, 0, price_to_nanos(price), 200));
+                problem.orders.push(outcome_sell(
+                    &problem.markets,
+                    sell_id,
+                    m,
+                    0,
+                    price_to_nanos(price),
+                    200,
+                ));
                 sell_id += 1;
             }
             // NO sell orders
-            problem.orders.push(outcome_sell(&problem.markets, sell_id, m, 1, price_to_nanos(0.30), 500));
+            problem.orders.push(outcome_sell(
+                &problem.markets,
+                sell_id,
+                m,
+                1,
+                price_to_nanos(0.30),
+                500,
+            ));
             sell_id += 1;
         }
 
@@ -826,11 +836,7 @@ mod tests {
         let lambda = HashMap::new();
         let market_to_group = HashMap::new();
 
-        let shaded = shade_orders(
-            &[order.clone()],
-            &lambda,
-            &market_to_group,
-        );
+        let shaded = shade_orders(&[order.clone()], &lambda, &market_to_group);
 
         assert_eq!(shaded.len(), 1);
         assert_eq!(shaded[0].limit_price, order.limit_price);
@@ -850,11 +856,7 @@ mod tests {
         let mut market_to_group = HashMap::new();
         market_to_group.insert(m, "group".to_string());
 
-        let shaded = shade_orders(
-            &[order.clone()],
-            &lambda,
-            &market_to_group,
-        );
+        let shaded = shade_orders(&[order.clone()], &lambda, &market_to_group);
 
         // YES buyer should have lower limit (bid less aggressively)
         assert!(
@@ -879,11 +881,7 @@ mod tests {
         let mut market_to_group = HashMap::new();
         market_to_group.insert(m, "group".to_string());
 
-        let shaded = shade_orders(
-            &[order.clone()],
-            &lambda,
-            &market_to_group,
-        );
+        let shaded = shade_orders(&[order.clone()], &lambda, &market_to_group);
 
         // YES buyer should have higher limit (bid more aggressively)
         assert!(
@@ -918,11 +916,7 @@ mod tests {
 
         // Small residuals + no dual change + welfare converged → all criteria met
         assert!(check_convergence(
-            &price_res,
-            &state,
-            0.02,
-            0.001,
-            0.001, // welfare converged too
+            &price_res, &state, 0.02, 0.001, 0.001, // welfare converged too
             0.01,
         ));
     }
@@ -939,11 +933,7 @@ mod tests {
         // Small residuals + no dual change but welfare still improving
         // → strict mode requires all criteria, so not converged
         assert!(!check_convergence(
-            &price_res,
-            &state,
-            0.02,
-            0.001,
-            0.5, // welfare still changing
+            &price_res, &state, 0.02, 0.001, 0.5, // welfare still changing
             0.01,
         ));
     }
@@ -956,11 +946,7 @@ mod tests {
 
         // 10% residual > 2% tolerance AND welfare still improving → not converged
         assert!(!check_convergence(
-            &price_res,
-            &state,
-            0.02,
-            0.001,
-            0.5, // 50% welfare improvement
+            &price_res, &state, 0.02, 0.001, 0.5, // 50% welfare improvement
             0.01,
         ));
     }
@@ -993,7 +979,14 @@ mod tests {
         // Simple problem with no coupling constraints — should just solve normally
         let mut problem = Problem::new("simple");
         let m = problem.markets.add_binary("test");
-        problem.orders.push(outcome_sell(&problem.markets, 9999, m, 0, price_to_nanos(0.30), 1000));
+        problem.orders.push(outcome_sell(
+            &problem.markets,
+            9999,
+            m,
+            0,
+            price_to_nanos(0.30),
+            1000,
+        ));
 
         for i in 0..5 {
             problem.orders.push(simple_yes_buy(
@@ -1020,19 +1013,31 @@ mod tests {
         let m_a = problem.markets.add_binary("A");
         let m_b = problem.markets.add_binary("B");
 
-        let group = MarketGroup::new("Group")
-            .with_market(m_a)
-            .with_market(m_b);
+        let group = MarketGroup::new("Group").with_market(m_a).with_market(m_b);
         problem.add_market_group(group);
 
         // Sell orders provide supply
         let mut sell_id = 9000u64;
         for &m in &[m_a, m_b] {
             for &price in &[0.30, 0.40, 0.50] {
-                problem.orders.push(outcome_sell(&problem.markets, sell_id, m, 0, price_to_nanos(price), 500));
+                problem.orders.push(outcome_sell(
+                    &problem.markets,
+                    sell_id,
+                    m,
+                    0,
+                    price_to_nanos(price),
+                    500,
+                ));
                 sell_id += 1;
             }
-            problem.orders.push(outcome_sell(&problem.markets, sell_id, m, 1, price_to_nanos(0.40), 500));
+            problem.orders.push(outcome_sell(
+                &problem.markets,
+                sell_id,
+                m,
+                1,
+                price_to_nanos(0.40),
+                500,
+            ));
             sell_id += 1;
         }
 
@@ -1076,7 +1081,11 @@ mod tests {
         // MM utilization should be > 0
         for (_mm_id, util) in &result.final_mm_utilization {
             assert!(*util >= 0.0, "MM utilization should be non-negative");
-            assert!(*util <= 1.01, "MM utilization should not exceed 100%: {}", util);
+            assert!(
+                *util <= 1.01,
+                "MM utilization should not exceed 100%: {}",
+                util
+            );
         }
     }
 }

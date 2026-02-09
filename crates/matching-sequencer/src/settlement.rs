@@ -76,12 +76,10 @@ fn settle_generic(account: &mut Account, order: &Order, fill: &Fill) {
         let no_payoff = order.payoffs[1] as i64;
 
         if yes_payoff != 0 {
-            *account.positions.entry((market, 0)).or_insert(0) +=
-                yes_payoff * fill.fill_qty as i64;
+            *account.positions.entry((market, 0)).or_insert(0) += yes_payoff * fill.fill_qty as i64;
         }
         if no_payoff != 0 {
-            *account.positions.entry((market, 1)).or_insert(0) +=
-                no_payoff * fill.fill_qty as i64;
+            *account.positions.entry((market, 1)).or_insert(0) += no_payoff * fill.fill_qty as i64;
         }
     } else {
         // Multi-market: compute marginal position per market per outcome.
@@ -190,8 +188,12 @@ pub fn resolve_market(accounts: &mut AccountStore, market: MarketId, yes_payout_
     }
     eprintln!(
         "RESOLVE market {:?}: YES_total={} NO_total={} diff={} payout_yes={} pre_balance={}",
-        market, total_yes, total_no, total_yes - total_no,
-        yes_payout_nanos, pre_total_balance
+        market,
+        total_yes,
+        total_no,
+        total_yes - total_no,
+        yes_payout_nanos,
+        pre_total_balance
     );
 
     for account_id in account_ids {
@@ -244,7 +246,10 @@ mod tests {
 
         // Should have paid 0.50 * 10 = 5 nanos * 10
         let expected_cost = 500_000_000i64 * 10;
-        assert_eq!(account.balance, 100 * NANOS_PER_DOLLAR as i64 - expected_cost);
+        assert_eq!(
+            account.balance,
+            100 * NANOS_PER_DOLLAR as i64 - expected_cost
+        );
         assert_eq!(account.position(m0, 0), 10); // 10 YES shares
     }
 

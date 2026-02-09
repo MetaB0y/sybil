@@ -92,19 +92,23 @@ impl Agent for NoiseTrader {
             };
 
             // Add noise
-            let noise = self.rng.random_range(0..=self.price_noise * 2) as i64
-                - self.price_noise as i64;
+            let noise =
+                self.rng.random_range(0..=self.price_noise * 2) as i64 - self.price_noise as i64;
             let price = (base_price as i64 + noise).clamp(
-                NANOS_PER_DOLLAR as i64 / 100,  // min 1 cent
+                NANOS_PER_DOLLAR as i64 / 100,      // min 1 cent
                 NANOS_PER_DOLLAR as i64 * 99 / 100, // max 99 cents
             ) as Nanos;
 
             if is_sell {
                 // Sell existing position
                 let available = if outcome == 0 { yes_pos } else { no_pos };
-                let qty = self.rng.random_range(1..=self.max_qty).min(available as u64);
+                let qty = self
+                    .rng
+                    .random_range(1..=self.max_qty)
+                    .min(available as u64);
                 if qty > 0 {
-                    let order = outcome_sell(&self.markets, temp_id, market_id, outcome, price, qty);
+                    let order =
+                        outcome_sell(&self.markets, temp_id, market_id, outcome, price, qty);
                     orders.push(order);
                     temp_id += 1;
                 }

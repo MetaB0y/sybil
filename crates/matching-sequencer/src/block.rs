@@ -135,7 +135,10 @@ mod tests {
         acc.positions.insert((m1, 0), 20);
         acc.positions.insert((m0, 0), 10);
 
-        assert_eq!(compute_state_root(&accounts1), compute_state_root(&accounts2));
+        assert_eq!(
+            compute_state_root(&accounts1),
+            compute_state_root(&accounts2)
+        );
     }
 
     #[test]

@@ -16,7 +16,9 @@
 //! - large: ~10,000-30,000 orders (stress testing)
 
 use divan::Bencher;
-use matching_engine::{outcome_sell, simple_yes_buy, MmConstraint, MmId, MmSide, Problem, NANOS_PER_DOLLAR};
+use matching_engine::{
+    outcome_sell, simple_yes_buy, MmConstraint, MmId, MmSide, Problem, NANOS_PER_DOLLAR,
+};
 use matching_scenarios::{generate_scenario, ScenarioConfig};
 use matching_solver::{
     local_solver::{LocalSolver, MarketSolution},
@@ -40,8 +42,22 @@ fn bench_local_solver_single_market(bencher: Bencher, order_count: usize) {
     let market_id = problem.markets.add_binary("test");
 
     // Add sell orders as supply
-    problem.orders.push(outcome_sell(&problem.markets, 9_000_000, market_id, 0, 500_000_000, 100_000));
-    problem.orders.push(outcome_sell(&problem.markets, 9_000_001, market_id, 1, 500_000_000, 100_000));
+    problem.orders.push(outcome_sell(
+        &problem.markets,
+        9_000_000,
+        market_id,
+        0,
+        500_000_000,
+        100_000,
+    ));
+    problem.orders.push(outcome_sell(
+        &problem.markets,
+        9_000_001,
+        market_id,
+        1,
+        500_000_000,
+        100_000,
+    ));
 
     // Add orders: varying prices
     for i in 0..order_count {
@@ -59,8 +75,7 @@ fn bench_local_solver_single_market(bencher: Bencher, order_count: usize) {
 
     let solver = LocalSolver::new();
 
-    bencher
-        .bench_local(|| solver.solve_market(market_id, &problem.markets, &problem.orders));
+    bencher.bench_local(|| solver.solve_market(market_id, &problem.markets, &problem.orders));
 }
 
 /// Benchmark solving all markets with realistic order counts.
@@ -75,9 +90,23 @@ fn bench_solve_all_markets(bencher: Bencher, market_count: usize) {
         let market_id = problem.markets.add_binary(&format!("market_{}", m));
 
         // Add sell orders as supply
-        problem.orders.push(outcome_sell(&problem.markets, liq_id, market_id, 0, 500_000_000, 50_000));
+        problem.orders.push(outcome_sell(
+            &problem.markets,
+            liq_id,
+            market_id,
+            0,
+            500_000_000,
+            50_000,
+        ));
         liq_id += 1;
-        problem.orders.push(outcome_sell(&problem.markets, liq_id, market_id, 1, 500_000_000, 50_000));
+        problem.orders.push(outcome_sell(
+            &problem.markets,
+            liq_id,
+            market_id,
+            1,
+            500_000_000,
+            50_000,
+        ));
         liq_id += 1;
 
         // Add orders
@@ -168,7 +197,11 @@ fn bench_mm_allocation(bencher: Bencher, mm_count: usize) {
     }
 
     // Provide fills (price, qty) for each order
-    let fills: HashMap<u64, (u64, u64)> = problem.orders.iter().map(|o| (o.id, (500_000_000u64, o.max_fill))).collect();
+    let fills: HashMap<u64, (u64, u64)> = problem
+        .orders
+        .iter()
+        .map(|o| (o.id, (500_000_000u64, o.max_fill)))
+        .collect();
 
     let allocator = MmAllocator::new();
 
@@ -222,7 +255,11 @@ fn run_full_pipeline(problem: &Problem) {
         prices.insert(*market_id, solution.prices.clone());
     }
 
-    let fills: HashMap<u64, (u64, u64)> = problem.orders.iter().map(|o| (o.id, (500_000_000u64, o.max_fill))).collect();
+    let fills: HashMap<u64, (u64, u64)> = problem
+        .orders
+        .iter()
+        .map(|o| (o.id, (500_000_000u64, o.max_fill)))
+        .collect();
 
     let allocator = MmAllocator::new();
     let _ = allocator.allocate(&problem.mm_constraints, &prices, &problem.orders, &fills);
@@ -315,10 +352,7 @@ fn bench_harness_comparison() {
     let mut harness = BenchmarkHarness::new();
 
     // Add scenarios
-    harness.add_scenario(
-        "small",
-        generate_scenario(ScenarioConfig::small()),
-    );
+    harness.add_scenario("small", generate_scenario(ScenarioConfig::small()));
 
     // Add pipelines to compare
     harness.add_pipeline("current", Pipeline::current());

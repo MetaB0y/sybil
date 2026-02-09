@@ -15,11 +15,8 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
     let stats = VerificationStats::default();
 
     // Build pre-state lookup
-    let pre_state: HashMap<u64, &AccountSnapshot> = witness
-        .pre_state
-        .iter()
-        .map(|s| (s.id, s))
-        .collect();
+    let pre_state: HashMap<u64, &AccountSnapshot> =
+        witness.pre_state.iter().map(|s| (s.id, s)).collect();
 
     // Track cumulative balance reservations per account (intra-batch)
     let mut reserved_balance: HashMap<u64, i64> = HashMap::new();
@@ -113,7 +110,10 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
         };
 
         match &rej.reason {
-            RejectionReason::InsufficientBalance { required, available: _ } => {
+            RejectionReason::InsufficientBalance {
+                required,
+                available: _,
+            } => {
                 // Verify the rejection is legitimate
                 let order = &rej.order;
                 let num_states = order.num_states as usize;
@@ -229,7 +229,11 @@ mod tests {
         }];
 
         let witness = make_witness_with_orders(
-            vec![WitnessOrder { order, account_id: 0, is_mm: false }],
+            vec![WitnessOrder {
+                order,
+                account_id: 0,
+                is_mm: false,
+            }],
             vec![],
             pre_state,
         );
@@ -252,14 +256,21 @@ mod tests {
         }];
 
         let witness = make_witness_with_orders(
-            vec![WitnessOrder { order, account_id: 0, is_mm: false }],
+            vec![WitnessOrder {
+                order,
+                account_id: 0,
+                is_mm: false,
+            }],
             vec![],
             pre_state,
         );
 
         let result = verify_orders(&witness);
         assert!(!result.valid);
-        assert!(result.violations.iter().any(|v| v.kind == ViolationKind::InsufficientBalance));
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::InsufficientBalance));
     }
 
     #[test]
@@ -280,8 +291,16 @@ mod tests {
 
         let witness = make_witness_with_orders(
             vec![
-                WitnessOrder { order: order1, account_id: 0, is_mm: false },
-                WitnessOrder { order: order2, account_id: 0, is_mm: false },
+                WitnessOrder {
+                    order: order1,
+                    account_id: 0,
+                    is_mm: false,
+                },
+                WitnessOrder {
+                    order: order2,
+                    account_id: 0,
+                    is_mm: false,
+                },
             ],
             vec![],
             pre_state,
@@ -290,7 +309,10 @@ mod tests {
         let result = verify_orders(&witness);
         assert!(!result.valid);
         // Second order should fail due to reservation
-        assert!(result.violations.iter().any(|v| v.kind == ViolationKind::InsufficientBalance));
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::InsufficientBalance));
     }
 
     #[test]
@@ -307,7 +329,11 @@ mod tests {
         }];
 
         let witness = make_witness_with_orders(
-            vec![WitnessOrder { order, account_id: 0, is_mm: true }],
+            vec![WitnessOrder {
+                order,
+                account_id: 0,
+                is_mm: true,
+            }],
             vec![],
             pre_state,
         );
@@ -330,14 +356,21 @@ mod tests {
         }];
 
         let witness = make_witness_with_orders(
-            vec![WitnessOrder { order, account_id: 0, is_mm: false }],
+            vec![WitnessOrder {
+                order,
+                account_id: 0,
+                is_mm: false,
+            }],
             vec![],
             pre_state,
         );
 
         let result = verify_orders(&witness);
         assert!(!result.valid);
-        assert!(result.violations.iter().any(|v| v.kind == ViolationKind::InsufficientPosition));
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::InsufficientPosition));
     }
 
     #[test]
@@ -364,6 +397,9 @@ mod tests {
 
         let result = verify_orders(&witness);
         assert!(!result.valid);
-        assert!(result.violations.iter().any(|v| v.kind == ViolationKind::FalseRejection));
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::FalseRejection));
     }
 }

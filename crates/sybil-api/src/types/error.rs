@@ -96,16 +96,14 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::UnknownSigner => {
                 AppError::not_found("No account registered for this public key")
             }
-            matching_sequencer::SequencerError::MempoolFull => {
-                Self {
-                    status: StatusCode::SERVICE_UNAVAILABLE,
-                    body: ErrorBody {
-                        error: "Mempool full".to_string(),
-                        code: "MEMPOOL_FULL".to_string(),
-                        details: None,
-                    },
-                }
-            }
+            matching_sequencer::SequencerError::MempoolFull => Self {
+                status: StatusCode::SERVICE_UNAVAILABLE,
+                body: ErrorBody {
+                    error: "Mempool full".to_string(),
+                    code: "MEMPOOL_FULL".to_string(),
+                    details: None,
+                },
+            },
             matching_sequencer::SequencerError::ActorGone => {
                 AppError::internal("Sequencer actor shut down")
             }

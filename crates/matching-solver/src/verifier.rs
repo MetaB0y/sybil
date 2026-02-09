@@ -205,7 +205,11 @@ impl Verifier {
                     kind: ViolationKind::NegativeWelfare,
                     details: format!(
                         "Order {}: negative welfare {} (limit={}, fill_price={}, qty={})",
-                        fill.order_id, fill_welfare, order.limit_price, fill.fill_price, fill.fill_qty
+                        fill.order_id,
+                        fill_welfare,
+                        order.limit_price,
+                        fill.fill_price,
+                        fill.fill_qty
                     ),
                 });
             }
@@ -254,8 +258,7 @@ impl Verifier {
         stats: &mut VerificationStats,
     ) {
         // Build fill lookup
-        let fill_map: HashMap<u64, &Fill> =
-            result.fills.iter().map(|f| (f.order_id, f)).collect();
+        let fill_map: HashMap<u64, &Fill> = result.fills.iter().map(|f| (f.order_id, f)).collect();
 
         for mm in &problem.mm_constraints {
             stats.mm_constraints_checked += 1;
@@ -475,15 +478,19 @@ mod tests {
         let result = build_result(
             vec![
                 Fill::new(1, 50, 500_000_000),   // BuyYes 50
-                Fill::new(2, 100, 550_000_000),   // BuyYes 100
-                Fill::new(11, 50, 500_000_000),   // BuyNo 50
-                Fill::new(12, 100, 500_000_000),  // BuyNo 100
+                Fill::new(2, 100, 550_000_000),  // BuyYes 100
+                Fill::new(11, 50, 500_000_000),  // BuyNo 50
+                Fill::new(12, 100, 500_000_000), // BuyNo 100
             ],
             &problem,
         );
 
         let verification = verify(&problem, &result);
-        assert!(verification.valid, "Violations: {:?}", verification.violations);
+        assert!(
+            verification.valid,
+            "Violations: {:?}",
+            verification.violations
+        );
     }
 
     #[test]
@@ -629,7 +636,11 @@ mod tests {
         );
 
         let verification = verify(&problem, &result);
-        assert!(verification.valid, "Violations: {:?}", verification.violations);
+        assert!(
+            verification.valid,
+            "Violations: {:?}",
+            verification.violations
+        );
         assert!(verification.stats.markets_checked > 0);
     }
 
@@ -664,8 +675,8 @@ mod tests {
 
         let result = build_result(
             vec![
-                Fill::new(1, 100, 500_000_000),  // BuyYes 100
-                Fill::new(11, 50, 500_000_000),  // BuyNo 50
+                Fill::new(1, 100, 500_000_000), // BuyYes 100
+                Fill::new(11, 50, 500_000_000), // BuyNo 50
             ],
             &problem,
         );

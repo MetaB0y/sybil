@@ -44,6 +44,13 @@ class Market:
     yes_price_nanos: int
     no_price_nanos: int
     status: str
+    description: str = ""
+    category: str = ""
+    tags: list[str] = field(default_factory=list)
+    resolution_criteria: str = ""
+    expiry_timestamp_ms: int = 0
+    created_at_ms: int = 0
+    volume_nanos: int = 0
 
     @property
     def yes_price(self) -> float:
@@ -52,6 +59,10 @@ class Market:
     @property
     def no_price(self) -> float:
         return self.no_price_nanos / NANOS_PER_DOLLAR
+
+    @property
+    def volume_dollars(self) -> float:
+        return self.volume_nanos / NANOS_PER_DOLLAR
 
 
 @dataclass
@@ -86,6 +97,90 @@ class Block:
             yes_nanos, no_nanos = self.clearing_prices[market_id]
             return yes_nanos / NANOS_PER_DOLLAR, no_nanos / NANOS_PER_DOLLAR
         return None
+
+
+@dataclass
+class PricePoint:
+    """A single price observation at a given block."""
+
+    height: int
+    timestamp_ms: int
+    yes_price_nanos: int
+    no_price_nanos: int
+    volume_nanos: int
+
+    @property
+    def yes_price(self) -> float:
+        return self.yes_price_nanos / NANOS_PER_DOLLAR
+
+    @property
+    def no_price(self) -> float:
+        return self.no_price_nanos / NANOS_PER_DOLLAR
+
+
+@dataclass
+class PositionDelta:
+    """A position change from a fill."""
+
+    market_id: int
+    outcome: str
+    delta: int
+
+
+@dataclass
+class AccountFill:
+    """Record of a fill attributed to an account."""
+
+    order_id: int
+    fill_qty: int
+    fill_price_nanos: int
+    block_height: int
+    timestamp_ms: int
+    position_deltas: list[PositionDelta] = field(default_factory=list)
+
+    @property
+    def fill_price(self) -> float:
+        return self.fill_price_nanos / NANOS_PER_DOLLAR
+
+
+@dataclass
+class PositionValue:
+    """A position valued at current market prices."""
+
+    market_id: int
+    outcome: str
+    quantity: int
+    current_price_nanos: int
+    value_nanos: int
+
+    @property
+    def value_dollars(self) -> float:
+        return self.value_nanos / NANOS_PER_DOLLAR
+
+
+@dataclass
+class Portfolio:
+    """Portfolio summary with valued positions and PnL."""
+
+    account_id: int
+    balance_nanos: int
+    total_deposited_nanos: int
+    positions: list[PositionValue]
+    total_position_value_nanos: int
+    portfolio_value_nanos: int
+    pnl_nanos: int
+
+    @property
+    def balance_dollars(self) -> float:
+        return self.balance_nanos / NANOS_PER_DOLLAR
+
+    @property
+    def pnl_dollars(self) -> float:
+        return self.pnl_nanos / NANOS_PER_DOLLAR
+
+    @property
+    def portfolio_value_dollars(self) -> float:
+        return self.portfolio_value_nanos / NANOS_PER_DOLLAR
 
 
 # Order specifications for submission

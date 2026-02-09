@@ -57,8 +57,7 @@ use crate::local_solver::LocalSolver;
 use crate::mm_allocator::MmAllocator;
 use crate::specialized::{MultiMarketSolver, NegriskSolver};
 use crate::traits::{
-    AllocationResult, OrderAllocator, PartialSolver, PriceDiscoverer,
-    PriceDiscoveryResult,
+    AllocationResult, OrderAllocator, PartialSolver, PriceDiscoverer, PriceDiscoveryResult,
 };
 use crate::{MatchingResult, Solver};
 
@@ -88,29 +87,21 @@ fn estimate_mm_fills(
                         let market = order.markets[0];
                         if let Some(market_prices) = prices.prices.get(&market) {
                             let num_states = order.num_states as usize;
-                            let is_buyer =
-                                order.payoffs[..num_states].iter().any(|&p| p > 0);
-                            let is_seller =
-                                order.payoffs[..num_states].iter().any(|&p| p < 0);
+                            let is_buyer = order.payoffs[..num_states].iter().any(|&p| p > 0);
+                            let is_seller = order.payoffs[..num_states].iter().any(|&p| p < 0);
 
                             let price = if is_buyer {
                                 let o = order.payoffs[..num_states]
                                     .iter()
                                     .position(|&p| p > 0)
                                     .unwrap_or(0);
-                                market_prices
-                                    .get(o)
-                                    .copied()
-                                    .unwrap_or(500_000_000)
+                                market_prices.get(o).copied().unwrap_or(500_000_000)
                             } else if is_seller {
                                 let o = order.payoffs[..num_states]
                                     .iter()
                                     .position(|&p| p < 0)
                                     .unwrap_or(0);
-                                market_prices
-                                    .get(o)
-                                    .copied()
-                                    .unwrap_or(500_000_000)
+                                market_prices.get(o).copied().unwrap_or(500_000_000)
                             } else {
                                 continue;
                             };
@@ -143,7 +134,6 @@ pub struct PipelineConfig {
 
     /// Convergence threshold for fixed-point (welfare change).
     pub convergence_threshold: f64,
-
 }
 
 impl Default for PipelineConfig {
@@ -371,10 +361,7 @@ impl Pipeline {
         Self::builder()
             .name("Dual Decomposition")
             .price_discoverer(LocalSolver::new())
-            .dual_master(
-                DualMaster::new()
-                    .with_multi_market_solver(MultiMarketSolver::new())
-            )
+            .dual_master(DualMaster::new().with_multi_market_solver(MultiMarketSolver::new()))
             .build()
     }
 
@@ -384,8 +371,7 @@ impl Pipeline {
             .name("Dual Decomposition")
             .price_discoverer(LocalSolver::new())
             .dual_master(
-                DualMaster::with_config(config)
-                    .with_multi_market_solver(MultiMarketSolver::new())
+                DualMaster::with_config(config).with_multi_market_solver(MultiMarketSolver::new()),
             )
             .build()
     }
@@ -473,7 +459,8 @@ impl Pipeline {
                     result.contributions.push(SolverContribution {
                         solver_name: solver.name().to_string(),
                         fills_contributed: 1,
-                        welfare_contributed: order.welfare_contribution(fill.fill_price, fill.fill_qty),
+                        welfare_contributed: order
+                            .welfare_contribution(fill.fill_price, fill.fill_qty),
                     });
                 }
             }
@@ -493,10 +480,7 @@ impl Pipeline {
             bundle_fills,
             fill_start_idx: 0,
             fill_end_idx: result.result.fills.len(),
-            market_prices: dual_result
-                .prices
-                .prices
-                .clone(),
+            market_prices: dual_result.prices.prices.clone(),
         });
 
         result.phase_times = timings;
@@ -574,15 +558,18 @@ impl Pipeline {
         let mut filled_order_ids: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
         // Track cumulative fills for MM budget tracking across iterations
-        let mut cumulative_mm_fills: std::collections::HashMap<u64, (matching_engine::Nanos, matching_engine::Qty)> =
-            std::collections::HashMap::new();
+        let mut cumulative_mm_fills: std::collections::HashMap<
+            u64,
+            (matching_engine::Nanos, matching_engine::Qty),
+        > = std::collections::HashMap::new();
 
         // Build order lookup map ONCE (not per iteration) - O(orders) instead of O(iterations × fills × orders)
         let order_map: std::collections::HashMap<u64, &matching_engine::Order> =
             problem.orders.iter().map(|o| (o.id, o)).collect();
 
         // Build MM order IDs set ONCE
-        let mm_order_ids: std::collections::HashSet<u64> = problem.mm_constraints
+        let mm_order_ids: std::collections::HashSet<u64> = problem
+            .mm_constraints
             .iter()
             .flat_map(|mm| mm.order_ids.iter().copied())
             .collect();
@@ -648,11 +635,11 @@ impl Pipeline {
                     crate::viz::PipelinePhase::PriceDiscovery,
                     iterations,
                     &market_names,
-                    result.result.fills.len(),  // Confirmed fills so far
-                    result.result.total_welfare,  // Confirmed welfare so far
+                    result.result.fills.len(),   // Confirmed fills so far
+                    result.result.total_welfare, // Confirmed welfare so far
                     start.elapsed().as_secs_f64(),
-                    Some(pd_fills),  // POTENTIAL fills from this phase (not yet confirmed)
-                    Some(pd_welfare),  // POTENTIAL welfare (not yet confirmed)
+                    Some(pd_fills), // POTENTIAL fills from this phase (not yet confirmed)
+                    Some(pd_welfare), // POTENTIAL welfare (not yet confirmed)
                     Some(crate::viz::PhaseMetadata::PriceDiscovery { markets_priced }),
                 ));
             }
@@ -749,55 +736,60 @@ impl Pipeline {
             }
 
             // Phase 3: MM Allocation
-            let allocation_result = if let (Some(ref allocator), Some(ref prices)) =
-                (&self.allocator, &price_result)
-            {
-                let alloc_start = Instant::now();
+            let allocation_result =
+                if let (Some(ref allocator), Some(ref prices)) = (&self.allocator, &price_result) {
+                    let alloc_start = Instant::now();
 
-                // Build fills map from price discovery (current iteration only)
-                let mut current_fills: HashMap<u64, (Nanos, Qty)> =
-                    prices.all_fills()
+                    // Build fills map from price discovery (current iteration only)
+                    let mut current_fills: HashMap<u64, (Nanos, Qty)> = prices
+                        .all_fills()
                         .into_iter()
                         .map(|f| (f.order_id, (f.fill_price, f.fill_qty)))
                         .collect();
 
-                // Add MM orders that weren't matched in price discovery with estimated fills.
-                estimate_mm_fills(&problem.mm_constraints, &order_map, prices, &mut current_fills);
+                    // Add MM orders that weren't matched in price discovery with estimated fills.
+                    estimate_mm_fills(
+                        &problem.mm_constraints,
+                        &order_map,
+                        prices,
+                        &mut current_fills,
+                    );
 
-                // Merge with cumulative fills for budget calculation
-                // Cumulative fills represent already-committed capital from previous iterations
-                let mut all_fills = cumulative_mm_fills.clone();
-                for (id, fill) in &current_fills {
-                    all_fills.entry(*id).or_insert(*fill);
-                }
+                    // Merge with cumulative fills for budget calculation
+                    // Cumulative fills represent already-committed capital from previous iterations
+                    let mut all_fills = cumulative_mm_fills.clone();
+                    for (id, fill) in &current_fills {
+                        all_fills.entry(*id).or_insert(*fill);
+                    }
 
-                // Create adjusted MM constraints with reduced budgets based on cumulative usage
-                let adjusted_constraints: Vec<matching_engine::MmConstraint> = problem.mm_constraints
-                    .iter()
-                    .map(|mm| {
-                        let used_capital = mm.capital_used(&cumulative_mm_fills);
-                        let remaining_budget = mm.max_capital.saturating_sub(used_capital);
-                        matching_engine::MmConstraint {
-                            mm_id: mm.mm_id,
-                            max_capital: remaining_budget,
-                            order_ids: mm.order_ids.clone(),
-                            order_sides: mm.order_sides.clone(),
-                        }
-                    })
-                    .collect();
+                    // Create adjusted MM constraints with reduced budgets based on cumulative usage
+                    let adjusted_constraints: Vec<matching_engine::MmConstraint> = problem
+                        .mm_constraints
+                        .iter()
+                        .map(|mm| {
+                            let used_capital = mm.capital_used(&cumulative_mm_fills);
+                            let remaining_budget = mm.max_capital.saturating_sub(used_capital);
+                            matching_engine::MmConstraint {
+                                mm_id: mm.mm_id,
+                                max_capital: remaining_budget,
+                                order_ids: mm.order_ids.clone(),
+                                order_sides: mm.order_sides.clone(),
+                            }
+                        })
+                        .collect();
 
-                // Pass iter_problem orders (includes arb orders) so allocator activates them
-                let alloc_result = allocator.allocate(
-                    &adjusted_constraints,
-                    &prices.prices,
-                    &iter_problem.orders,
-                    &current_fills,
-                );
-                timings.allocation_secs += alloc_start.elapsed().as_secs_f64();
-                Some(alloc_result)
-            } else {
-                None
-            };
+                    // Pass iter_problem orders (includes arb orders) so allocator activates them
+                    let alloc_result = allocator.allocate(
+                        &adjusted_constraints,
+                        &prices.prices,
+                        &iter_problem.orders,
+                        &current_fills,
+                    );
+                    timings.allocation_secs += alloc_start.elapsed().as_secs_f64();
+                    Some(alloc_result)
+                } else {
+                    None
+                };
 
             // Build result from price discovery + allocation
             if let Some(ref pd_result) = price_result {
@@ -810,7 +802,9 @@ impl Pipeline {
                 // mechanisms with no real account behind them.
                 for fill in &iter_result.fills {
                     let is_arb = arb_order_map.contains_key(&fill.order_id);
-                    let order_ref = order_map.get(&fill.order_id).copied()
+                    let order_ref = order_map
+                        .get(&fill.order_id)
+                        .copied()
                         .or_else(|| arb_order_map.get(&fill.order_id));
                     if let Some(_order) = order_ref {
                         filled_order_ids.insert(fill.order_id);
@@ -820,7 +814,8 @@ impl Pipeline {
 
                         // Track MM fills for cumulative budget calculation
                         if mm_order_ids.contains(&fill.order_id) {
-                            cumulative_mm_fills.insert(fill.order_id, (fill.fill_price, fill.fill_qty));
+                            cumulative_mm_fills
+                                .insert(fill.order_id, (fill.fill_price, fill.fill_qty));
                         }
                     }
                 }
@@ -853,15 +848,20 @@ impl Pipeline {
             // Capture after MM allocation - shows ACTUAL confirmed fills (not estimates)
             #[cfg(feature = "viz")]
             {
-                let orders_activated = allocation_result.as_ref()
+                let orders_activated = allocation_result
+                    .as_ref()
                     .map(|a| a.activated_orders.len())
                     .unwrap_or(0);
-                let mm_count = allocation_result.as_ref()
+                let mm_count = allocation_result
+                    .as_ref()
                     .map(|a| a.mm_allocations.len())
                     .unwrap_or(0);
 
                 // Count how many fills in this iteration were from MM orders
-                let mm_fills_this_iter = result.result.fills.iter()
+                let mm_fills_this_iter = result
+                    .result
+                    .fills
+                    .iter()
                     .filter(|f| mm_order_ids.contains(&f.order_id))
                     .count();
 
@@ -869,11 +869,11 @@ impl Pipeline {
                     crate::viz::PipelinePhase::MmAllocation,
                     iterations,
                     &market_names,
-                    result.result.fills.len(),  // ACTUAL confirmed fills
-                    result.result.total_welfare,  // ACTUAL confirmed welfare
+                    result.result.fills.len(),   // ACTUAL confirmed fills
+                    result.result.total_welfare, // ACTUAL confirmed welfare
                     start.elapsed().as_secs_f64(),
                     Some(mm_fills_this_iter),
-                    Some(0),  // MM welfare is included in total, not separate
+                    Some(0), // MM welfare is included in total, not separate
                     Some(crate::viz::PhaseMetadata::MmAllocation {
                         orders_activated,
                         mm_count,
@@ -930,7 +930,9 @@ impl Pipeline {
             #[cfg(feature = "viz")]
             {
                 // Calculate welfare from bundle fills in this iteration
-                let bundle_welfare: i64 = result.contributions.iter()
+                let bundle_welfare: i64 = result
+                    .contributions
+                    .iter()
                     .rev()
                     .take(iter_bundle_fills)
                     .map(|c| c.welfare_contributed)
@@ -939,8 +941,8 @@ impl Pipeline {
                     crate::viz::PipelinePhase::BundleMatching,
                     iterations,
                     &market_names,
-                    result.result.fills.len(),  // ACTUAL confirmed fills
-                    result.result.total_welfare,  // ACTUAL confirmed welfare
+                    result.result.fills.len(),   // ACTUAL confirmed fills
+                    result.result.total_welfare, // ACTUAL confirmed welfare
                     start.elapsed().as_secs_f64(),
                     Some(iter_bundle_fills),
                     Some(bundle_welfare),
@@ -1029,14 +1031,19 @@ impl Pipeline {
 
             for mm in &problem.mm_constraints {
                 let capital_used = mm.capital_used(&cumulative_mm_fills);
-                let activated: Vec<u64> = mm.order_ids.iter()
+                let activated: Vec<u64> = mm
+                    .order_ids
+                    .iter()
                     .filter(|id| cumulative_mm_fills.contains_key(id))
                     .copied()
                     .collect();
-                let mm_welfare: i64 = activated.iter()
+                let mm_welfare: i64 = activated
+                    .iter()
                     .filter_map(|id| {
                         let (price, qty) = cumulative_mm_fills.get(id)?;
-                        order_map.get(id).map(|o| o.welfare_contribution(*price, *qty))
+                        order_map
+                            .get(id)
+                            .map(|o| o.welfare_contribution(*price, *qty))
                     })
                     .sum();
 
@@ -1050,14 +1057,19 @@ impl Pipeline {
                     budget: mm.max_capital,
                     utilization: if mm.max_capital > 0 {
                         capital_used as f64 / mm.max_capital as f64
-                    } else { 0.0 },
+                    } else {
+                        0.0
+                    },
                     lambda: 0.0,
                 });
             }
 
             // Add non-MM orders to activated list
             for order in problem.orders.iter() {
-                let is_mm = problem.mm_constraints.iter().any(|mm| mm.order_ids.contains(&order.id));
+                let is_mm = problem
+                    .mm_constraints
+                    .iter()
+                    .any(|mm| mm.order_ids.contains(&order.id));
                 if !is_mm && filled_order_ids.contains(&order.id) {
                     all_activated.push(order.id);
                 }
@@ -1139,7 +1151,8 @@ impl Pipeline {
         };
 
         // Phase 1: Re-price and filter fills that violate limits
-        let mut candidate_fills: Vec<(matching_engine::Fill, i64)> = Vec::with_capacity(result.result.fills.len());
+        let mut candidate_fills: Vec<(matching_engine::Fill, i64)> =
+            Vec::with_capacity(result.result.fills.len());
 
         for fill in &result.result.fills {
             if fill.fill_qty == 0 {
@@ -1193,7 +1206,9 @@ impl Pipeline {
         let mut market_no_qty: HashMap<matching_engine::MarketId, u64> = HashMap::new();
 
         for (fill, _welfare) in &candidate_fills {
-            let Some(&order) = order_map.get(&fill.order_id) else { continue };
+            let Some(&order) = order_map.get(&fill.order_id) else {
+                continue;
+            };
             if order.num_markets == 1 && order.num_states == 2 {
                 let market = order.markets[0];
                 if order.payoffs[0] > 0 && order.payoffs[1] == 0 {
@@ -1213,8 +1228,11 @@ impl Pipeline {
         }
 
         // Find markets that are imbalanced
-        let all_markets: std::collections::HashSet<matching_engine::MarketId> =
-            market_yes_qty.keys().chain(market_no_qty.keys()).copied().collect();
+        let all_markets: std::collections::HashSet<matching_engine::MarketId> = market_yes_qty
+            .keys()
+            .chain(market_no_qty.keys())
+            .copied()
+            .collect();
 
         for market in all_markets {
             let yes_qty = *market_yes_qty.get(&market).unwrap_or(&0);
@@ -1234,16 +1252,22 @@ impl Pipeline {
             // Collect indices of fills on the excess side, sorted by welfare (ascending)
             let mut excess_indices: Vec<(usize, i64, u64)> = Vec::new();
             for (i, (fill, welfare)) in candidate_fills.iter().enumerate() {
-                let Some(&order) = order_map.get(&fill.order_id) else { continue };
-                if order.num_markets != 1 || order.num_states != 2 { continue }
-                if order.markets[0] != market { continue }
+                let Some(&order) = order_map.get(&fill.order_id) else {
+                    continue;
+                };
+                if order.num_markets != 1 || order.num_states != 2 {
+                    continue;
+                }
+                if order.markets[0] != market {
+                    continue;
+                }
 
                 let is_yes_side = if trim_side_is_yes {
-                    (order.payoffs[0] > 0 && order.payoffs[1] == 0) ||
-                    (order.payoffs[0] == 0 && order.payoffs[1] < 0)
+                    (order.payoffs[0] > 0 && order.payoffs[1] == 0)
+                        || (order.payoffs[0] == 0 && order.payoffs[1] < 0)
                 } else {
-                    (order.payoffs[0] == 0 && order.payoffs[1] > 0) ||
-                    (order.payoffs[0] < 0 && order.payoffs[1] == 0)
+                    (order.payoffs[0] == 0 && order.payoffs[1] > 0)
+                        || (order.payoffs[0] < 0 && order.payoffs[1] == 0)
                 };
 
                 if is_yes_side {
@@ -1257,10 +1281,13 @@ impl Pipeline {
             // Trim fills until balanced, respecting AON (min_fill) constraints
             let mut remaining_excess = excess;
             for (idx, _, _) in excess_indices {
-                if remaining_excess == 0 { break }
+                if remaining_excess == 0 {
+                    break;
+                }
 
                 let fill_qty = candidate_fills[idx].0.fill_qty;
-                let min_fill = order_map.get(&candidate_fills[idx].0.order_id)
+                let min_fill = order_map
+                    .get(&candidate_fills[idx].0.order_id)
                     .map(|o| o.min_fill)
                     .unwrap_or(0);
 
@@ -1300,7 +1327,9 @@ impl Pipeline {
         let mut orders_filled: usize = 0;
 
         for (fill, welfare) in candidate_fills {
-            if fill.fill_qty == 0 { continue }
+            if fill.fill_qty == 0 {
+                continue;
+            }
             // Recompute welfare for partially trimmed fills
             let w = if let Some(&order) = order_map.get(&fill.order_id) {
                 order.welfare_contribution(fill.fill_price, fill.fill_qty)
@@ -1318,7 +1347,6 @@ impl Pipeline {
         result.result.total_quantity_filled = new_volume;
         result.result.orders_filled = orders_filled;
     }
-
 }
 
 impl Solver for Pipeline {

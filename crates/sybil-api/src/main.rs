@@ -5,7 +5,9 @@ use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
 use matching_engine::MarketSet;
-use matching_sequencer::{AccountStore, AdminOracle, BlockSequencer, MempoolConfig, SequencerHandle};
+use matching_sequencer::{
+    AccountStore, AdminOracle, BlockSequencer, MempoolConfig, SequencerHandle,
+};
 
 use sybil_api::app::create_router;
 use sybil_api::config::ApiConfig;

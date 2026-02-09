@@ -29,7 +29,9 @@ pub async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse
         (status = 200, description = "Current state root", body = StateRootResponse)
     )
 )]
-pub async fn state_root(State(state): State<AppState>) -> Result<Json<StateRootResponse>, AppError> {
+pub async fn state_root(
+    State(state): State<AppState>,
+) -> Result<Json<StateRootResponse>, AppError> {
     let root = state.sequencer.get_state_root().await?;
     Ok(Json(StateRootResponse {
         state_root: hex::encode(root),

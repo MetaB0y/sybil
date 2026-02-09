@@ -4,10 +4,7 @@ use crate::account::Account;
 use crate::error::RejectionReason;
 
 /// Validate an order against account state (used for pending order re-validation).
-pub fn validate_order(
-    order: &Order,
-    account: &Account,
-) -> Result<(), RejectionReason> {
+pub fn validate_order(order: &Order, account: &Account) -> Result<(), RejectionReason> {
     validate_order_with_reservation(order, account, 0).map(|_| ())
 }
 

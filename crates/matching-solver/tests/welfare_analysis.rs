@@ -1,11 +1,11 @@
 //! Detailed welfare analysis to understand solver behavior.
 
+#[allow(unused_imports)]
+use matching_engine::outcome_sell;
 use matching_engine::{MarketId, MmSide, Nanos, NANOS_PER_DOLLAR};
 use matching_scenarios::{generate_scenario, ScenarioConfig};
 use matching_solver::{local_solver::LocalSolver, mm_allocator::MmAllocator};
 use std::collections::{HashMap, HashSet};
-#[allow(unused_imports)]
-use matching_engine::outcome_sell;
 
 /// Analyze welfare at each stage and understand why convergence is immediate.
 #[test]
@@ -428,7 +428,14 @@ fn test_mm_price_impact() {
 
     // Add limited sell order supply at 50 cents
     // Only 1000 shares available - this is key!
-    problem.orders.push(outcome_sell(&problem.markets, 9000, market, 0, 500_000_000, 1000));
+    problem.orders.push(outcome_sell(
+        &problem.markets,
+        9000,
+        market,
+        0,
+        500_000_000,
+        1000,
+    ));
 
     // Add non-MM orders that want to buy at high prices
     // These should drive price up
@@ -492,7 +499,9 @@ fn test_mm_price_impact() {
     let solver = LocalSolver::new();
 
     // Solve without MM (include the sell order supply)
-    let non_mm_with_supply: Vec<_> = problem.orders.iter()
+    let non_mm_with_supply: Vec<_> = problem
+        .orders
+        .iter()
         .filter(|o| !mm_order_ids.contains(&o.id) || o.id == 9000)
         .cloned()
         .collect();

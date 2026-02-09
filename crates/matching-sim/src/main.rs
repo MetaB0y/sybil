@@ -67,14 +67,30 @@ fn main() {
 
     let start = Instant::now();
 
-    if matches!(solver_choice, SolverChoice::Pipeline | SolverChoice::Negrisk | SolverChoice::Dual)
-        && (verbose || export_json.is_some() || show_charts)
+    if matches!(
+        solver_choice,
+        SolverChoice::Pipeline | SolverChoice::Negrisk | SolverChoice::Dual
+    ) && (verbose || export_json.is_some() || show_charts)
     {
         // Detailed pipeline run with step-by-step output
-        run_detailed_pipeline(&config, num_batches, export_json.as_deref(), show_charts, verbose, &solver_choice);
+        run_detailed_pipeline(
+            &config,
+            num_batches,
+            export_json.as_deref(),
+            show_charts,
+            verbose,
+            &solver_choice,
+        );
     } else {
         // Standard comparison run
-        let results = run_simulation(&config, &solver_choice, milp_timeout, mm_mode, num_batches, verbose);
+        let results = run_simulation(
+            &config,
+            &solver_choice,
+            milp_timeout,
+            mm_mode,
+            num_batches,
+            verbose,
+        );
         print_results(&results, &solver_choice);
     }
 
@@ -212,13 +228,8 @@ struct FillStats {
 }
 
 impl FillStats {
-    fn compute(
-        problem: &Problem,
-        result: &PipelineResult,
-        order_stats: &OrderStats,
-    ) -> Self {
-        let order_map: HashMap<u64, &Order> =
-            problem.orders.iter().map(|o| (o.id, o)).collect();
+    fn compute(problem: &Problem, result: &PipelineResult, order_stats: &OrderStats) -> Self {
+        let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
 
         let fill_map: HashMap<u64, u64> = result
             .result
@@ -352,22 +363,24 @@ fn select_sample_markets(problem: &Problem, max_markets: usize) -> Vec<MarketId>
 }
 
 /// Print detailed market stats table
-fn print_market_details(
-    problem: &Problem,
-    result: &PipelineResult,
-    sample_markets: &[MarketId],
-) {
+fn print_market_details(problem: &Problem, result: &PipelineResult, sample_markets: &[MarketId]) {
     if sample_markets.is_empty() {
         return;
     }
 
-    println!("\nSample Market Details ({} of {}):", sample_markets.len(), problem.markets.len());
+    println!(
+        "\nSample Market Details ({} of {}):",
+        sample_markets.len(),
+        problem.markets.len()
+    );
 
     let mut table = Table::new();
     table
         .load_preset(UTF8_FULL)
         .apply_modifier(UTF8_ROUND_CORNERS)
-        .set_header(vec!["Market", "Group", "P(YES)", "P(NO)", "Volume", "Welfare", "Liq Rem"]);
+        .set_header(vec![
+            "Market", "Group", "P(YES)", "P(NO)", "Volume", "Welfare", "Liq Rem",
+        ]);
 
     // Build order map for volume/welfare calculation
     let _order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
@@ -407,7 +420,8 @@ fn print_market_details(
             if order.num_markets == 1 && order.markets[0] == market_id {
                 if let Some(&fill_qty) = fill_map.get(&order.id) {
                     volume += fill_qty;
-                    if let Some(fill) = result.result.fills.iter().find(|f| f.order_id == order.id) {
+                    if let Some(fill) = result.result.fills.iter().find(|f| f.order_id == order.id)
+                    {
                         welfare += fill.welfare(order);
                     }
                 }
@@ -508,7 +522,6 @@ fn run_detailed_pipeline(
             let witness = witness_from_problem(&problem_with_arb, &result);
             let verification = verify_match(&witness, false);
             print_verification_result(&verification);
-
         }
 
         // Export JSON if requested
@@ -536,7 +549,11 @@ fn run_detailed_pipeline(
             let output_path = if num_batches > 1 {
                 let path = std::path::Path::new(path);
                 let stem = path.file_stem().unwrap_or_default().to_str().unwrap_or("");
-                let ext = path.extension().unwrap_or_default().to_str().unwrap_or("json");
+                let ext = path
+                    .extension()
+                    .unwrap_or_default()
+                    .to_str()
+                    .unwrap_or("json");
                 let parent = path.parent().unwrap_or(std::path::Path::new("."));
                 parent
                     .join(format!("{}_{}.{}", stem, batch + 1, ext))
@@ -554,7 +571,10 @@ fn run_detailed_pipeline(
 
         // Show ASCII charts if requested
         if show_charts {
-            println!("{}", matching_solver::viz::ascii::convergence_summary(&result.iteration_stats));
+            println!(
+                "{}",
+                matching_solver::viz::ascii::convergence_summary(&result.iteration_stats)
+            );
         }
 
         if verbose {
@@ -617,10 +637,7 @@ fn print_verification_result(result: &VerificationResult) {
 
     if result.valid {
         println!("  Status: \u{2713} VALID");
-        println!(
-            "  Fills verified: {}",
-            result.stats.fills_checked
-        );
+        println!("  Fills verified: {}", result.stats.fills_checked);
         println!(
             "  MM constraints verified: {}",
             result.stats.mm_constraints_checked
@@ -635,7 +652,10 @@ fn print_verification_result(result: &VerificationResult) {
             println!("  Market group avg |sum-1|: {:.2}pp", pct);
         }
     } else {
-        println!("  Status: \u{2717} INVALID ({} violations)", result.violations.len());
+        println!(
+            "  Status: \u{2717} INVALID ({} violations)",
+            result.violations.len()
+        );
         println!();
         println!("  Violations:");
         for (i, violation) in result.violations.iter().enumerate().take(10) {
@@ -669,7 +689,10 @@ fn print_problem_summary(problem: &Problem, stats: &OrderStats) {
 }
 
 fn print_pipeline_steps(result: &PipelineResult, _problem: &Problem) {
-    println!("Pipeline Steps (fixed-point, {} iterations):", result.iterations);
+    println!(
+        "Pipeline Steps (fixed-point, {} iterations):",
+        result.iterations
+    );
     println!("─────────────────────────────────────────");
 
     // Phase 1: Price Discovery (LocalSolver for single-market orders)
@@ -752,7 +775,9 @@ fn print_pipeline_steps(result: &PipelineResult, _problem: &Problem) {
         // Aggregate contributions by solver
         let mut solver_stats: HashMap<String, (usize, i64)> = HashMap::new();
         for contrib in &result.contributions {
-            let entry = solver_stats.entry(contrib.solver_name.clone()).or_insert((0, 0));
+            let entry = solver_stats
+                .entry(contrib.solver_name.clone())
+                .or_insert((0, 0));
             entry.0 += contrib.fills_contributed;
             entry.1 += contrib.welfare_contributed;
         }
@@ -772,10 +797,7 @@ fn print_pipeline_steps(result: &PipelineResult, _problem: &Problem) {
     }
 
     println!("─────────────────────────────────────────");
-    println!(
-        "  Total                 {:>7.3}s",
-        result.total_time_secs
-    );
+    println!("  Total                 {:>7.3}s", result.total_time_secs);
     println!();
 
     // Print iteration convergence stats
@@ -792,7 +814,14 @@ fn print_iteration_convergence(stats: &[IterationStats]) {
         .load_preset(UTF8_FULL)
         .apply_modifier(UTF8_ROUND_CORNERS)
         .set_header(vec![
-            "Iter", "Welfare", "Δ Welfare", "Volume", "Δ Volume", "Fills", "PD Fills", "Bundle",
+            "Iter",
+            "Welfare",
+            "Δ Welfare",
+            "Volume",
+            "Δ Volume",
+            "Fills",
+            "PD Fills",
+            "Bundle",
         ]);
 
     for stat in stats {
@@ -1208,7 +1237,10 @@ fn run_simulation(
                         .map(|o| WitnessOrder {
                             order: o.clone(),
                             account_id: 0,
-                            is_mm: problem.mm_constraints.iter().any(|mm| mm.order_ids.contains(&o.id)),
+                            is_mm: problem
+                                .mm_constraints
+                                .iter()
+                                .any(|mm| mm.order_ids.contains(&o.id)),
                         })
                         .collect();
                     let witness = BlockWitness {
@@ -1315,7 +1347,11 @@ fn print_results(results: &[SolverResults], choice: &SolverChoice) {
                 .unwrap_or(std::cmp::Ordering::Equal)
         }) {
             println!();
-            println!("Best solver: {} (${:.2}K welfare)", best.name, best.mean_welfare() / 1e9 / 1e3);
+            println!(
+                "Best solver: {} (${:.2}K welfare)",
+                best.name,
+                best.mean_welfare() / 1e9 / 1e3
+            );
         }
     }
 }

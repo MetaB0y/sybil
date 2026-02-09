@@ -12,9 +12,7 @@
 
 use serde::Serialize;
 
-use matching_engine::{
-    Fill, MarketId, MarketSet, Nanos, Order, Qty, NANOS_PER_DOLLAR,
-};
+use matching_engine::{Fill, MarketId, MarketSet, Nanos, Order, Qty, NANOS_PER_DOLLAR};
 
 /// Solution for a single market.
 #[derive(Clone, Debug, Serialize)]
@@ -203,9 +201,9 @@ impl LocalSolver {
     ) -> MarketSolution {
         // Classify orders by outcome exposure
         let mut yes_buyers: Vec<(&Order, Qty)> = Vec::new(); // payoff[0] > 0
-        let mut no_buyers: Vec<(&Order, Qty)> = Vec::new();  // payoff[1] > 0
+        let mut no_buyers: Vec<(&Order, Qty)> = Vec::new(); // payoff[1] > 0
         let mut yes_sellers: Vec<(&Order, Qty)> = Vec::new(); // payoff[0] < 0
-        let mut no_sellers: Vec<(&Order, Qty)> = Vec::new();  // payoff[1] < 0
+        let mut no_sellers: Vec<(&Order, Qty)> = Vec::new(); // payoff[1] < 0
 
         for &order in orders {
             if order.payoffs[0] > 0 {
@@ -255,8 +253,7 @@ impl LocalSolver {
         supply_points.sort_by_key(|(price, _)| *price);
 
         // Find clearing price via supply-demand crossing
-        let (clearing_price_yes, matched_qty) =
-            Self::find_crossing(&demand_points, &supply_points);
+        let (clearing_price_yes, matched_qty) = Self::find_crossing(&demand_points, &supply_points);
         let clearing_price_no = NANOS_PER_DOLLAR.saturating_sub(clearing_price_yes);
 
         // Reserve capacity for extra demand/supply — real orders fill only the remainder.
@@ -384,8 +381,7 @@ impl LocalSolver {
         }
 
         // Deduplicate unfilled
-        let filled_ids: std::collections::HashSet<u64> =
-            fills.iter().map(|f| f.order_id).collect();
+        let filled_ids: std::collections::HashSet<u64> = fills.iter().map(|f| f.order_id).collect();
         unfilled.sort();
         unfilled.dedup();
         unfilled.retain(|id| !filled_ids.contains(id));
@@ -446,10 +442,7 @@ impl LocalSolver {
     /// Find supply-demand crossing point.
     ///
     /// Returns (clearing_price, matched_quantity).
-    fn find_crossing(
-        demand: &[(Nanos, Qty)],
-        supply: &[(Nanos, Qty)],
-    ) -> (Nanos, Qty) {
+    fn find_crossing(demand: &[(Nanos, Qty)], supply: &[(Nanos, Qty)]) -> (Nanos, Qty) {
         if demand.is_empty() || supply.is_empty() {
             return (NANOS_PER_DOLLAR / 2, 0);
         }
@@ -801,11 +794,8 @@ impl PrecomputedMarket {
         }
 
         // Check virtual supply point at price=0 (from extra_supply)
-        if extra_supply > 0
-            && (self.supply_points.is_empty() || self.supply_points[0].0 > 0)
-        {
-            let total_demand =
-                self.demand_cum_qty.last().copied().unwrap_or(0) + extra_demand;
+        if extra_supply > 0 && (self.supply_points.is_empty() || self.supply_points[0].0 > 0) {
+            let total_demand = self.demand_cum_qty.last().copied().unwrap_or(0) + extra_demand;
             let matched = extra_supply.min(total_demand);
             if matched > best_qty {
                 best_qty = matched;
@@ -873,7 +863,9 @@ impl PriceDiscoverer for LocalSolver {
             // Markets with no orders would produce MarketSolution::empty()
             // with default 50/50 prices, which can overwrite real prices
             // in callers that merge results across iterations/blocks.
-            let has_orders = problem.orders.iter()
+            let has_orders = problem
+                .orders
+                .iter()
                 .any(|o| o.num_markets == 1 && o.markets[0] == market.id);
             if !has_orders {
                 continue;
@@ -894,8 +886,8 @@ impl PriceDiscoverer for LocalSolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use matching_engine::{outcome_sell, simple_yes_buy, Problem};
+    use std::collections::HashMap;
 
     fn create_test_problem() -> Problem {
         let mut problem = Problem::new("test");

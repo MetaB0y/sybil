@@ -65,7 +65,9 @@ impl MmSide {
             }
         };
 
-        result.try_into().expect("capital overflow: result exceeds u64")
+        result
+            .try_into()
+            .expect("capital overflow: result exceeds u64")
     }
 }
 

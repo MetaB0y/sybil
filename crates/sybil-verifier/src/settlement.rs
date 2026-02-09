@@ -60,21 +60,12 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
         balances.entry(account_id).or_insert(0);
         positions.entry(account_id).or_default();
 
-        settle_fill(
-            account_id,
-            order,
-            fill,
-            &mut balances,
-            &mut positions,
-        );
+        settle_fill(account_id, order, fill, &mut balances, &mut positions);
     }
 
     // Compare derived state against claimed post-state
-    let post_map: HashMap<u64, &AccountSnapshot> = witness
-        .post_state
-        .iter()
-        .map(|s| (s.id, s))
-        .collect();
+    let post_map: HashMap<u64, &AccountSnapshot> =
+        witness.post_state.iter().map(|s| (s.id, s)).collect();
 
     // Check every account that should be in the post-state
     let all_ids: std::collections::HashSet<u64> = balances
@@ -428,7 +419,10 @@ mod tests {
 
         let result = verify_settlement(&witness);
         assert!(!result.valid);
-        assert!(result.violations.iter().any(|v| v.kind == ViolationKind::SettlementBalanceMismatch));
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::SettlementBalanceMismatch));
     }
 
     #[test]

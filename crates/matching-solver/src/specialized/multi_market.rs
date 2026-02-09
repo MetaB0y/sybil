@@ -111,9 +111,7 @@ impl MultiMarketSolver {
                 .orders
                 .iter()
                 .filter(|o| {
-                    o.num_markets == 1
-                        && o.markets[0] == market.id
-                        && !mm_order_ids.contains(&o.id)
+                    o.num_markets == 1 && o.markets[0] == market.id && !mm_order_ids.contains(&o.id)
                 })
                 .cloned()
                 .collect();
@@ -230,8 +228,9 @@ impl MultiMarketSolver {
                 let new_demand = state.cumulative_extra_demand + leg_demand;
                 let new_supply = state.cumulative_extra_supply + leg_supply;
 
-                let (clearing_price, matched_qty) =
-                    state.precomputed.crossing_with_extras(new_demand, new_supply);
+                let (clearing_price, matched_qty) = state
+                    .precomputed
+                    .crossing_with_extras(new_demand, new_supply);
 
                 if matched_qty == 0 {
                     all_markets_feasible = false;
@@ -437,8 +436,7 @@ impl PartialSolver for MultiMarketSolver {
         complement_match(&multi_market_orders, &mut filled, &mut solution, problem);
 
         // Calculate total welfare
-        let order_map: HashMap<u64, &Order> =
-            problem.orders.iter().map(|o| (o.id, o)).collect();
+        let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
         solution.welfare = solution
             .fills
             .iter()
@@ -618,8 +616,12 @@ fn complement_match(
             let effective_hi = hi.min(2 * 1_000_000_000); // cap at $2 for midpoint calc
             let fill_price = ((lo + effective_hi) / 2) as u64;
 
-            solution.fills.push(Fill::new(a_order.id, max_qty, fill_price));
-            solution.fills.push(Fill::new(b_order.id, max_qty, fill_price));
+            solution
+                .fills
+                .push(Fill::new(a_order.id, max_qty, fill_price));
+            solution
+                .fills
+                .push(Fill::new(b_order.id, max_qty, fill_price));
 
             filled.insert(a_order.id);
             filled.insert(b_order.id);
@@ -929,7 +931,10 @@ mod tests {
 
         // If filled, welfare must be non-negative
         if !result.bundle_fills.is_empty() {
-            assert!(result.welfare >= 0, "Welfare must be non-negative after repricing");
+            assert!(
+                result.welfare >= 0,
+                "Welfare must be non-negative after repricing"
+            );
         }
     }
 
@@ -1052,10 +1057,7 @@ mod tests {
         let solver = MultiMarketSolver::new();
         let result = solver.solve_partial(&problem);
 
-        assert!(
-            result.welfare >= 0,
-            "Total welfare should be non-negative"
-        );
+        assert!(result.welfare >= 0, "Total welfare should be non-negative");
     }
 
     #[test]

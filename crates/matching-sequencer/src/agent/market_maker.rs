@@ -77,28 +77,41 @@ impl Agent for MarketMakerAgent {
 
             // Inventory skew: if we're long YES, lower our bid and raise our ask
             let yes_pos = account.position(market_id, 0);
-            let skew =
-                (yes_pos as f64 * self.skew_factor * NANOS_PER_DOLLAR as f64 / 100.0) as i64;
+            let skew = (yes_pos as f64 * self.skew_factor * NANOS_PER_DOLLAR as f64 / 100.0) as i64;
 
             // Compute bid and ask for YES
             let mid = yes_price as i64;
-            let bid_price = (mid - self.half_spread as i64 - skew)
-                .clamp(NANOS_PER_DOLLAR as i64 / 100, NANOS_PER_DOLLAR as i64 * 99 / 100)
-                as Nanos;
-            let ask_price = (mid + self.half_spread as i64 - skew)
-                .clamp(NANOS_PER_DOLLAR as i64 / 100, NANOS_PER_DOLLAR as i64 * 99 / 100)
-                as Nanos;
+            let bid_price = (mid - self.half_spread as i64 - skew).clamp(
+                NANOS_PER_DOLLAR as i64 / 100,
+                NANOS_PER_DOLLAR as i64 * 99 / 100,
+            ) as Nanos;
+            let ask_price = (mid + self.half_spread as i64 - skew).clamp(
+                NANOS_PER_DOLLAR as i64 / 100,
+                NANOS_PER_DOLLAR as i64 * 99 / 100,
+            ) as Nanos;
 
             // Bid: buy YES at bid_price
-            let bid_order =
-                outcome_buy(&self.markets, temp_id, market_id, 0, bid_price, self.qty_per_side);
+            let bid_order = outcome_buy(
+                &self.markets,
+                temp_id,
+                market_id,
+                0,
+                bid_price,
+                self.qty_per_side,
+            );
             constraint.add_order(temp_id, MmSide::BuyYes);
             orders.push(bid_order);
             temp_id += 1;
 
             // Ask: sell YES at ask_price (using outcome_sell)
-            let ask_order =
-                outcome_sell(&self.markets, temp_id, market_id, 0, ask_price, self.qty_per_side);
+            let ask_order = outcome_sell(
+                &self.markets,
+                temp_id,
+                market_id,
+                0,
+                ask_price,
+                self.qty_per_side,
+            );
             constraint.add_order(temp_id, MmSide::SellYes);
             orders.push(ask_order);
             temp_id += 1;
@@ -107,12 +120,14 @@ impl Agent for MarketMakerAgent {
             let no_price = NANOS_PER_DOLLAR - yes_price;
             let no_mid = no_price as i64;
 
-            let no_bid_price = (no_mid - self.half_spread as i64 + skew)
-                .clamp(NANOS_PER_DOLLAR as i64 / 100, NANOS_PER_DOLLAR as i64 * 99 / 100)
-                as Nanos;
-            let no_ask_price = (no_mid + self.half_spread as i64 + skew)
-                .clamp(NANOS_PER_DOLLAR as i64 / 100, NANOS_PER_DOLLAR as i64 * 99 / 100)
-                as Nanos;
+            let no_bid_price = (no_mid - self.half_spread as i64 + skew).clamp(
+                NANOS_PER_DOLLAR as i64 / 100,
+                NANOS_PER_DOLLAR as i64 * 99 / 100,
+            ) as Nanos;
+            let no_ask_price = (no_mid + self.half_spread as i64 + skew).clamp(
+                NANOS_PER_DOLLAR as i64 / 100,
+                NANOS_PER_DOLLAR as i64 * 99 / 100,
+            ) as Nanos;
 
             let no_bid_order = outcome_buy(
                 &self.markets,

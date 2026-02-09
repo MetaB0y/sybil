@@ -1,9 +1,9 @@
 use std::hash::{Hash, Hasher};
 
+use crate::error::SequencerError;
 use matching_engine::{ConditionDir, Order, MAX_MARKETS_PER_ORDER, MAX_STATES};
 use p256::ecdsa::signature::{Signer, Verifier};
 use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
-use crate::error::SequencerError;
 
 /// A P256 public key (secp256r1 / passkey-compatible).
 #[derive(Clone, Debug)]
@@ -108,9 +108,9 @@ pub fn sign_order(order: &Order, key: &SigningKey) -> SignedOrder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use getrandom::SysRng;
     use matching_engine::{outcome_buy, MarketSet};
     use p256::ecdsa::SigningKey;
-    use getrandom::SysRng;
     use p256::elliptic_curve::rand_core::UnwrapErr;
 
     fn crypto_rng() -> UnwrapErr<SysRng> {
@@ -192,7 +192,10 @@ mod tests {
         let order1 = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
         let order2 = outcome_buy(&markets, 2, m0, 0, 600_000_000, 10);
 
-        assert_ne!(canonical_order_bytes(&order1), canonical_order_bytes(&order2));
+        assert_ne!(
+            canonical_order_bytes(&order1),
+            canonical_order_bytes(&order2)
+        );
     }
 
     #[test]
@@ -206,6 +209,9 @@ mod tests {
         order2.id = 200;
 
         // Same order content but different IDs should produce same canonical bytes
-        assert_eq!(canonical_order_bytes(&order1), canonical_order_bytes(&order2));
+        assert_eq!(
+            canonical_order_bytes(&order1),
+            canonical_order_bytes(&order2)
+        );
     }
 }

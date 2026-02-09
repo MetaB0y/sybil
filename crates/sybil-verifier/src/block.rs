@@ -63,10 +63,7 @@ pub fn verify_block(witness: &BlockWitness) -> VerificationResult {
             if witness.header.height != 1 {
                 violations.push(Violation {
                     kind: ViolationKind::HeightNotConsecutive,
-                    details: format!(
-                        "Genesis block height {} != 1",
-                        witness.header.height
-                    ),
+                    details: format!("Genesis block height {} != 1", witness.header.height),
                 });
             }
         }
@@ -208,7 +205,10 @@ mod tests {
             positions: vec![],
         }];
 
-        assert_ne!(compute_state_root(&accounts1), compute_state_root(&accounts2));
+        assert_ne!(
+            compute_state_root(&accounts1),
+            compute_state_root(&accounts2)
+        );
     }
 
     #[test]
@@ -264,7 +264,10 @@ mod tests {
 
         let result = verify_block(&witness);
         assert!(!result.valid);
-        assert!(result.violations.iter().any(|v| v.kind == ViolationKind::StateRootMismatch));
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::StateRootMismatch));
     }
 
     #[test]
@@ -341,7 +344,10 @@ mod tests {
 
         let result = verify_block(&witness);
         assert!(!result.valid);
-        assert!(result.violations.iter().any(|v| v.kind == ViolationKind::HeightNotConsecutive));
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::HeightNotConsecutive));
     }
 
     #[test]

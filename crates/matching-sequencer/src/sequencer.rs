@@ -13,6 +13,7 @@ use sybil_verifier::{
 use crate::account::{AccountId, AccountStore};
 use crate::block::{compute_state_root, hash_header, Block, BlockHeader};
 use crate::error::{Rejection, RejectionReason, SequencerError};
+use crate::market_info::{AccountFillRecord, MarketMetadata, PricePoint};
 use crate::settlement;
 use crate::validation::{validate_order, validate_order_with_reservation};
 
@@ -74,12 +75,13 @@ fn snapshot_accounts(
 /// Convert sequencer `RejectionReason` to verifier `RejectionReason`.
 fn convert_rejection_reason(r: &RejectionReason) -> sybil_verifier::RejectionReason {
     match r {
-        RejectionReason::InsufficientBalance { required, available } => {
-            sybil_verifier::RejectionReason::InsufficientBalance {
-                required: *required,
-                available: *available,
-            }
-        }
+        RejectionReason::InsufficientBalance {
+            required,
+            available,
+        } => sybil_verifier::RejectionReason::InsufficientBalance {
+            required: *required,
+            available: *available,
+        },
         RejectionReason::InsufficientPosition {
             market,
             outcome,
@@ -124,6 +126,14 @@ pub struct BlockSequencer {
     oracle: Arc<dyn Oracle>,
     /// Persisted clearing prices across blocks (used as default when no trades happen).
     last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
+    /// Market metadata (sequencer-layer, not in matching-engine).
+    market_metadata: HashMap<MarketId, MarketMetadata>,
+    /// Price history per market.
+    price_history: HashMap<MarketId, Vec<PricePoint>>,
+    /// Cumulative per-market volume in nanos.
+    market_volumes: HashMap<MarketId, u64>,
+    /// Fill records per account.
+    account_fills: HashMap<AccountId, Vec<AccountFillRecord>>,
 }
 
 impl BlockSequencer {
@@ -147,6 +157,10 @@ impl BlockSequencer {
             market_statuses: HashMap::new(),
             oracle,
             last_clearing_prices: HashMap::new(),
+            market_metadata: HashMap::new(),
+            price_history: HashMap::new(),
+            market_volumes: HashMap::new(),
+            account_fills: HashMap::new(),
         }
     }
 
@@ -185,6 +199,63 @@ impl BlockSequencer {
     /// Get all explicitly tracked market statuses.
     pub fn market_statuses(&self) -> &HashMap<MarketId, MarketStatus> {
         &self.market_statuses
+    }
+
+    // --- Market metadata ---
+
+    pub fn set_market_metadata(&mut self, market_id: MarketId, metadata: MarketMetadata) {
+        self.market_metadata.insert(market_id, metadata);
+    }
+
+    pub fn market_metadata(&self, market_id: MarketId) -> Option<&MarketMetadata> {
+        self.market_metadata.get(&market_id)
+    }
+
+    // --- Price history ---
+
+    pub fn price_history(
+        &self,
+        market_id: MarketId,
+        from_ms: Option<u64>,
+        to_ms: Option<u64>,
+    ) -> Vec<PricePoint> {
+        let Some(history) = self.price_history.get(&market_id) else {
+            return Vec::new();
+        };
+        history
+            .iter()
+            .filter(|p| from_ms.is_none_or(|f| p.timestamp_ms >= f))
+            .filter(|p| to_ms.is_none_or(|t| p.timestamp_ms <= t))
+            .cloned()
+            .collect()
+    }
+
+    pub fn market_volume(&self, market_id: MarketId) -> u64 {
+        self.market_volumes.get(&market_id).copied().unwrap_or(0)
+    }
+
+    // --- Account fills ---
+
+    pub fn account_fills(
+        &self,
+        account_id: AccountId,
+        market_id_filter: Option<MarketId>,
+        limit: usize,
+        offset: usize,
+    ) -> Vec<AccountFillRecord> {
+        let Some(fills) = self.account_fills.get(&account_id) else {
+            return Vec::new();
+        };
+        fills
+            .iter()
+            .filter(|f| {
+                market_id_filter
+                    .is_none_or(|mid| f.position_deltas.iter().any(|(m, _, _)| *m == mid))
+            })
+            .skip(offset)
+            .take(limit)
+            .cloned()
+            .collect()
     }
 
     /// Resolve a market through the oracle.
@@ -251,9 +322,7 @@ impl BlockSequencer {
                     "resolution proposed but not yet settled".to_string(),
                 ))
             }
-            ResolutionAction::Reject { reason } => {
-                Err(SequencerError::OracleError(reason))
-            }
+            ResolutionAction::Reject { reason } => Err(SequencerError::OracleError(reason)),
         }
     }
 
@@ -304,7 +373,9 @@ impl BlockSequencer {
             }
 
             // Skip orders for resolved/removed markets
-            let order_markets_active = pending_order.order.active_markets()
+            let order_markets_active = pending_order
+                .order
+                .active_markets()
                 .all(|m| active_markets.contains(&m));
             if !order_markets_active {
                 continue;
@@ -357,8 +428,8 @@ impl BlockSequencer {
 
             for mut order in sub.orders {
                 // Skip orders for resolved/inactive markets
-                let order_markets_active = order.active_markets()
-                    .all(|m| active_markets.contains(&m));
+                let order_markets_active =
+                    order.active_markets().all(|m| active_markets.contains(&m));
                 if !order_markets_active {
                     continue;
                 }
@@ -417,9 +488,7 @@ impl BlockSequencer {
                 let old_to_new: HashMap<u64, u64> = old_order_ids
                     .iter()
                     .enumerate()
-                    .filter_map(|(i, &old_id)| {
-                        accepted_orders.get(i).map(|o| (old_id, o.id))
-                    })
+                    .filter_map(|(i, &old_id)| accepted_orders.get(i).map(|o| (old_id, o.id)))
                     .collect();
 
                 let mut new_constraint =
@@ -500,11 +569,8 @@ impl BlockSequencer {
         let orders_filled = pipeline_result.result.orders_filled;
 
         // Snapshot pre-state (before settlement)
-        let participating_accounts: HashSet<AccountId> = self
-            .order_account_map
-            .values()
-            .copied()
-            .collect();
+        let participating_accounts: HashSet<AccountId> =
+            self.order_account_map.values().copied().collect();
         let pre_state = snapshot_accounts(&self.accounts, &participating_accounts);
 
         // Snapshot total balance before settlement
@@ -518,6 +584,69 @@ impl BlockSequencer {
             &self.order_account_map,
         );
 
+        // --- Record price history + per-market volume ---
+        {
+            let order_map: HashMap<u64, &Order> =
+                problem.orders.iter().map(|o| (o.id, o)).collect();
+            // Compute per-market volume from fills
+            let mut per_market_volume: HashMap<MarketId, u64> = HashMap::new();
+            for fill in &fills {
+                if fill.fill_qty == 0 {
+                    continue;
+                }
+                if let Some(order) = order_map.get(&fill.order_id) {
+                    let vol = fill.fill_price.saturating_mul(fill.fill_qty);
+                    for mid in order.active_markets() {
+                        *per_market_volume.entry(mid).or_insert(0) += vol;
+                    }
+                }
+            }
+            // Append PricePoint for each market that had fills
+            for (&mid, &vol) in &per_market_volume {
+                if let Some(prices) = clearing_prices.get(&mid) {
+                    let yes_price = prices.first().copied().unwrap_or(0);
+                    let no_price = prices.get(1).copied().unwrap_or(0);
+                    self.price_history.entry(mid).or_default().push(PricePoint {
+                        height: self.height,
+                        timestamp_ms,
+                        yes_price,
+                        no_price,
+                        volume_nanos: vol,
+                    });
+                }
+                *self.market_volumes.entry(mid).or_insert(0) += vol;
+            }
+        }
+
+        // --- Record account fill records ---
+        {
+            let order_map: HashMap<u64, &Order> =
+                problem.orders.iter().map(|o| (o.id, o)).collect();
+            for fill in &fills {
+                if fill.fill_qty == 0 {
+                    continue;
+                }
+                let Some(&account_id) = self.order_account_map.get(&fill.order_id) else {
+                    continue;
+                };
+                let Some(order) = order_map.get(&fill.order_id) else {
+                    continue;
+                };
+                let position_deltas = compute_position_deltas(order, fill.fill_qty);
+                self.account_fills
+                    .entry(account_id)
+                    .or_default()
+                    .push(AccountFillRecord {
+                        order_id: fill.order_id,
+                        fill_qty: fill.fill_qty,
+                        fill_price: fill.fill_price,
+                        block_height: self.height,
+                        timestamp_ms,
+                        position_deltas,
+                    });
+            }
+        }
+
         // Verify position balance after settlement
         for market in self.markets.iter() {
             let mut total_yes: i64 = 0;
@@ -529,7 +658,11 @@ impl BlockSequencer {
             if total_yes != total_no {
                 eprintln!(
                     "POSITION IMBALANCE block #{} market {:?}: YES={} NO={} diff={}",
-                    self.height, market.id, total_yes, total_no, total_yes - total_no
+                    self.height,
+                    market.id,
+                    total_yes,
+                    total_no,
+                    total_yes - total_no
                 );
             }
         }
@@ -545,11 +678,22 @@ impl BlockSequencer {
             // Compute net position change per market to verify
             let mut net_position_value: i64 = 0;
             for fill in &fills {
-                if fill.fill_qty == 0 { continue; }
+                if fill.fill_qty == 0 {
+                    continue;
+                }
                 let cost = fill.fill_price as i128 * fill.fill_qty as i128;
-                if let Some(&order) = problem.orders.iter().find(|o| o.id == fill.order_id).as_ref() {
-                    let has_positive = order.payoffs[..order.num_states as usize].iter().any(|&p| p > 0);
-                    let has_negative = order.payoffs[..order.num_states as usize].iter().any(|&p| p < 0);
+                if let Some(&order) = problem
+                    .orders
+                    .iter()
+                    .find(|o| o.id == fill.order_id)
+                    .as_ref()
+                {
+                    let has_positive = order.payoffs[..order.num_states as usize]
+                        .iter()
+                        .any(|&p| p > 0);
+                    let has_negative = order.payoffs[..order.num_states as usize]
+                        .iter()
+                        .any(|&p| p < 0);
                     if has_positive && !has_negative {
                         // Buy: balance decreases
                         net_position_value -= cost as i64;
@@ -562,7 +706,9 @@ impl BlockSequencer {
             if balance_delta != net_position_value {
                 eprintln!(
                     "MONEY LEAK block #{}: balance_delta={} expected={} diff={}",
-                    self.height, balance_delta, net_position_value,
+                    self.height,
+                    balance_delta,
+                    net_position_value,
                     balance_delta - net_position_value
                 );
             }
@@ -592,8 +738,7 @@ impl BlockSequencer {
                 continue;
             }
             if let Some(&account_id) = self.order_account_map.get(&order.id) {
-                let created_at = *self.order_created_at.get(&order.id)
-                    .unwrap_or(&self.height);
+                let created_at = *self.order_created_at.get(&order.id).unwrap_or(&self.height);
 
                 self.pending_orders.push(PendingOrder {
                     order: order.clone(),
@@ -605,7 +750,9 @@ impl BlockSequencer {
 
         // Compute state root and build header
         let state_root = compute_state_root(&self.accounts);
-        let parent_hash = self.last_header.as_ref()
+        let parent_hash = self
+            .last_header
+            .as_ref()
             .map(hash_header)
             .unwrap_or([0u8; 32]);
 
@@ -667,6 +814,72 @@ impl BlockSequencer {
 
         (block, pipeline_result, witness)
     }
+}
+
+/// Compute position deltas for an order fill without mutating state.
+/// Reuses the same payoff logic as settlement but only returns the deltas.
+fn compute_position_deltas(order: &Order, fill_qty: u64) -> Vec<(MarketId, u8, i64)> {
+    let num_markets = order.num_markets as usize;
+    let num_states = order.num_states as usize;
+    let mut deltas = Vec::new();
+
+    if num_markets == 1 && num_states == 2 {
+        let market = order.markets[0];
+        let yes_payoff = order.payoffs[0];
+        let no_payoff = order.payoffs[1];
+
+        if yes_payoff > 0 && no_payoff == 0 {
+            deltas.push((market, 0, fill_qty as i64));
+        } else if yes_payoff == 0 && no_payoff > 0 {
+            deltas.push((market, 1, fill_qty as i64));
+        } else if yes_payoff < 0 && no_payoff == 0 {
+            deltas.push((market, 0, -(fill_qty as i64)));
+        } else if yes_payoff == 0 && no_payoff < 0 {
+            deltas.push((market, 1, -(fill_qty as i64)));
+        } else {
+            // General single-market case
+            if yes_payoff != 0 {
+                deltas.push((market, 0, yes_payoff as i64 * fill_qty as i64));
+            }
+            if no_payoff != 0 {
+                deltas.push((market, 1, no_payoff as i64 * fill_qty as i64));
+            }
+        }
+    } else {
+        // Multi-market: compute marginal position per market per outcome
+        for m_idx in 0..num_markets {
+            let market = order.markets[m_idx];
+            let stride = 1usize << m_idx;
+
+            let mut yes_sum: i64 = 0;
+            let mut yes_count: usize = 0;
+            let mut no_sum: i64 = 0;
+            let mut no_count: usize = 0;
+
+            for s in 0..num_states {
+                let outcome_for_market = (s / stride) % 2;
+                let payoff = order.payoffs[s] as i64;
+                if outcome_for_market == 0 {
+                    yes_sum += payoff;
+                    yes_count += 1;
+                } else {
+                    no_sum += payoff;
+                    no_count += 1;
+                }
+            }
+
+            if yes_count > 0 && yes_sum != 0 {
+                let delta = yes_sum * fill_qty as i64 / yes_count as i64;
+                deltas.push((market, 0, delta));
+            }
+            if no_count > 0 && no_sum != 0 {
+                let delta = no_sum * fill_qty as i64 / no_count as i64;
+                deltas.push((market, 1, delta));
+            }
+        }
+    }
+
+    deltas
 }
 
 /// Convert a Block + PipelineResult into a BatchResult for simulation compatibility.
@@ -749,7 +962,10 @@ mod tests {
         let result = validate_order(&order, account);
         assert!(result.is_err());
         match result.unwrap_err() {
-            RejectionReason::InsufficientBalance { required, available } => {
+            RejectionReason::InsufficientBalance {
+                required,
+                available,
+            } => {
                 assert_eq!(required, 5_000_000_000);
                 assert_eq!(available, 3_000_000_000);
             }
@@ -825,7 +1041,10 @@ mod tests {
         let result = validate_order_with_reservation(&order2, account, cost1);
         assert!(result.is_err());
         match result.unwrap_err() {
-            RejectionReason::InsufficientBalance { required, available } => {
+            RejectionReason::InsufficientBalance {
+                required,
+                available,
+            } => {
                 assert_eq!(required, 5_000_000_000);
                 assert_eq!(available, 3_000_000_000);
             }
@@ -1086,7 +1305,12 @@ mod tests {
             .positions
             .insert((m0, 0), 50);
 
-        let mut seq = BlockSequencer::new(accounts, MarketSet::new(), vec![], Arc::new(AdminOracle::new()));
+        let mut seq = BlockSequencer::new(
+            accounts,
+            MarketSet::new(),
+            vec![],
+            Arc::new(AdminOracle::new()),
+        );
 
         let buy_sub = OrderSubmission {
             account_id: buyer_id,
@@ -1133,7 +1357,12 @@ mod tests {
     fn test_produce_block_returns_valid_header() {
         let (markets, _) = setup();
         let accounts = AccountStore::new();
-        let mut seq = BlockSequencer::new(accounts, markets.clone(), vec![], Arc::new(AdminOracle::new()));
+        let mut seq = BlockSequencer::new(
+            accounts,
+            markets.clone(),
+            vec![],
+            Arc::new(AdminOracle::new()),
+        );
 
         let (block, _, _) = seq.produce_block(vec![], 1000);
         assert_eq!(block.header.height, 1);
@@ -1145,7 +1374,12 @@ mod tests {
     fn test_block_chain_parent_hash() {
         let (markets, _) = setup();
         let accounts = AccountStore::new();
-        let mut seq = BlockSequencer::new(accounts, markets.clone(), vec![], Arc::new(AdminOracle::new()));
+        let mut seq = BlockSequencer::new(
+            accounts,
+            markets.clone(),
+            vec![],
+            Arc::new(AdminOracle::new()),
+        );
 
         let (block1, _, _) = seq.produce_block(vec![], 1000);
         let expected_parent = hash_header(&block1.header);
@@ -1160,7 +1394,12 @@ mod tests {
         let (markets, m0) = setup();
         let mut accounts = AccountStore::new();
         let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-        let mut seq = BlockSequencer::new(accounts, markets.clone(), vec![], Arc::new(AdminOracle::new()));
+        let mut seq = BlockSequencer::new(
+            accounts,
+            markets.clone(),
+            vec![],
+            Arc::new(AdminOracle::new()),
+        );
 
         let (block1, _, _) = seq.produce_block(vec![], 0);
         let root1 = block1.header.state_root;

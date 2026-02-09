@@ -95,9 +95,7 @@ mod tests {
     fn test_admin_resolve_no_wins() {
         let oracle = AdminOracle::new();
         let status = MarketStatus::Active;
-        let action = oracle
-            .resolve(MarketId::new(1), 0, &status, 2000)
-            .unwrap();
+        let action = oracle.resolve(MarketId::new(1), 0, &status, 2000).unwrap();
 
         match action {
             ResolutionAction::SettleNow { payout_nanos, .. } => {

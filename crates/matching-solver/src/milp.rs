@@ -375,17 +375,10 @@ impl MilpSolver {
                             let eff_price: f64 = coeffs[i]
                                 .alpha
                                 .iter()
-                                .map(|(m, &a)| {
-                                    a * solution
-                                        .p_values
-                                        .get(m)
-                                        .copied()
-                                        .unwrap_or(0.0)
-                                })
+                                .map(|(m, &a)| a * solution.p_values.get(m).copied().unwrap_or(0.0))
                                 .sum::<f64>()
                                 + coeffs[i].beta;
-                            let fill_price =
-                                eff_price.abs().round().max(0.0) as Nanos;
+                            let fill_price = eff_price.abs().round().max(0.0) as Nanos;
 
                             let fill = Fill::new(order.id, fill_qty, fill_price);
                             result.add_fill(fill, order);
@@ -469,10 +462,16 @@ impl MilpSolver {
         let num_markets = markets.len();
         let num_states = 1usize << num_markets;
         debug_assert!(
-            active_orders.iter().all(|o| o.num_states as usize <= num_states),
+            active_orders
+                .iter()
+                .all(|o| o.num_states as usize <= num_states),
             "MILP assumes binary markets: expected max {} states, found order with {} states",
             num_states,
-            active_orders.iter().map(|o| o.num_states).max().unwrap_or(0)
+            active_orders
+                .iter()
+                .map(|o| o.num_states)
+                .max()
+                .unwrap_or(0)
         );
 
         // ================================================================
@@ -500,9 +499,7 @@ impl MilpSolver {
         // ================================================================
 
         // z_i (binary): is order i filled? (no objective contribution)
-        let z_vars: Vec<Variable> = (0..n)
-            .map(|_| model.add(var().bin().obj(0.0)))
-            .collect();
+        let z_vars: Vec<Variable> = (0..n).map(|_| model.add(var().bin().obj(0.0))).collect();
 
         // q_i (continuous): fill quantity for order i
         // Objective: sign_i * L_i (welfare contribution)
@@ -789,9 +786,7 @@ impl MilpSolver {
                             let p_ub = nanos_f;
 
                             // Create auxiliary variable w_i ∈ [0, P*Q]
-                            let w = model.add(
-                                var().cont(0.0..=(p_ub * q_ub)).obj(0.0),
-                            );
+                            let w = model.add(var().cont(0.0..=(p_ub * q_ub)).obj(0.0));
                             let w_idx = w_aux_vars.len();
                             w_aux_vars.push(w);
                             let w_ref = &w_aux_vars[w_idx];
@@ -806,19 +801,9 @@ impl MilpSolver {
                                     .ge(-p_ub * q_ub),
                             );
                             // Upper: w ≤ P*q
-                            model.add(
-                                cons()
-                                    .coef(w_ref, 1.0)
-                                    .coef(&q_vars[idx], -p_ub)
-                                    .le(0.0),
-                            );
+                            model.add(cons().coef(w_ref, 1.0).coef(&q_vars[idx], -p_ub).le(0.0));
                             // Upper: w ≤ Q*p
-                            model.add(
-                                cons()
-                                    .coef(w_ref, 1.0)
-                                    .coef(p_var, -q_ub)
-                                    .le(0.0),
-                            );
+                            model.add(cons().coef(w_ref, 1.0).coef(p_var, -q_ub).le(0.0));
 
                             use matching_engine::MmSide;
                             match side {
@@ -848,8 +833,7 @@ impl MilpSolver {
                                 budget_cons =
                                     budget_cons.coef(&w_aux_vars[term.w_idx], term.w_sign);
                                 if let Some(q_idx) = term.q_idx {
-                                    budget_cons =
-                                        budget_cons.coef(&q_vars[q_idx], nanos_f);
+                                    budget_cons = budget_cons.coef(&q_vars[q_idx], nanos_f);
                                 }
                             }
                             model.add(budget_cons.le(mm.max_capital as f64));
@@ -890,7 +874,9 @@ impl MilpSolver {
         let scip_status = solved.status();
 
         match scip_status {
-            Status::Optimal | Status::GapLimit | Status::SolutionLimit
+            Status::Optimal
+            | Status::GapLimit
+            | Status::SolutionLimit
             | Status::BestSolutionLimit => {
                 let sol = solved
                     .best_sol()
@@ -918,8 +904,12 @@ impl MilpSolver {
 
                 Ok((solution, status, solve_time))
             }
-            Status::TimeLimit | Status::NodeLimit | Status::TotalNodeLimit
-            | Status::StallNodeLimit | Status::MemoryLimit | Status::RestartLimit => {
+            Status::TimeLimit
+            | Status::NodeLimit
+            | Status::TotalNodeLimit
+            | Status::StallNodeLimit
+            | Status::MemoryLimit
+            | Status::RestartLimit => {
                 // Time/resource limit — return best solution if available
                 if let Some(sol) = solved.best_sol() {
                     let solution = ScipSolution {
@@ -948,9 +938,7 @@ impl MilpSolver {
                             q_values: vec![0.0; n],
                             p_values: HashMap::new(),
                         },
-                        SolveStatus::TimeLimitReached {
-                            gap_percent: 100.0,
-                        },
+                        SolveStatus::TimeLimitReached { gap_percent: 100.0 },
                         solve_time,
                     ))
                 }
@@ -965,7 +953,10 @@ impl MilpSolver {
                 solve_time,
             )),
             Status::Unbounded => Err("Problem is unbounded".to_string()),
-            _ => Err(format!("Solver returned unexpected status: {:?}", scip_status)),
+            _ => Err(format!(
+                "Solver returned unexpected status: {:?}",
+                scip_status
+            )),
         }
     }
 }
@@ -1194,18 +1185,40 @@ mod tests {
         // YES buyer: payoffs = [+1, 0] on single market
         let yes_buy = simple_yes_buy(&problem.markets, 1, market_a, 600_000_000, 100);
         let coeffs = precompute_coefficients(&yes_buy);
-        assert!((coeffs.c_yes[&market_a] - 1.0).abs() < 1e-9, "YES buyer c_YES should be 1.0");
-        assert!(coeffs.c_no[&market_a].abs() < 1e-9, "YES buyer c_NO should be 0.0");
-        assert!((coeffs.alpha[&market_a] - 1.0).abs() < 1e-9, "YES buyer alpha should be 1.0");
+        assert!(
+            (coeffs.c_yes[&market_a] - 1.0).abs() < 1e-9,
+            "YES buyer c_YES should be 1.0"
+        );
+        assert!(
+            coeffs.c_no[&market_a].abs() < 1e-9,
+            "YES buyer c_NO should be 0.0"
+        );
+        assert!(
+            (coeffs.alpha[&market_a] - 1.0).abs() < 1e-9,
+            "YES buyer alpha should be 1.0"
+        );
         assert!(coeffs.beta.abs() < 1e-9, "YES buyer beta should be 0.0");
 
         // NO buyer: payoffs = [0, +1] on single market
-        let no_buy = matching_engine::simple_no_buy(&problem.markets, 2, market_a, 500_000_000, 100);
+        let no_buy =
+            matching_engine::simple_no_buy(&problem.markets, 2, market_a, 500_000_000, 100);
         let coeffs = precompute_coefficients(&no_buy);
-        assert!(coeffs.c_yes[&market_a].abs() < 1e-9, "NO buyer c_YES should be 0.0");
-        assert!((coeffs.c_no[&market_a] - 1.0).abs() < 1e-9, "NO buyer c_NO should be 1.0");
-        assert!((coeffs.alpha[&market_a] - (-1.0)).abs() < 1e-9, "NO buyer alpha should be -1.0");
-        assert!((coeffs.beta - NANOS_PER_DOLLAR as f64).abs() < 1e-3, "NO buyer beta should be NANOS");
+        assert!(
+            coeffs.c_yes[&market_a].abs() < 1e-9,
+            "NO buyer c_YES should be 0.0"
+        );
+        assert!(
+            (coeffs.c_no[&market_a] - 1.0).abs() < 1e-9,
+            "NO buyer c_NO should be 1.0"
+        );
+        assert!(
+            (coeffs.alpha[&market_a] - (-1.0)).abs() < 1e-9,
+            "NO buyer alpha should be -1.0"
+        );
+        assert!(
+            (coeffs.beta - NANOS_PER_DOLLAR as f64).abs() < 1e-3,
+            "NO buyer beta should be NANOS"
+        );
 
         // Bundle YES-YES: payoffs = [+1, 0, 0, 0] on two markets
         let bundle = matching_engine::bundle_yes(
@@ -1234,14 +1247,7 @@ mod tests {
         );
 
         // Spread: payoffs = [0, -1, +1, 0] on two markets
-        let sp = matching_engine::spread(
-            &problem.markets,
-            4,
-            market_a,
-            market_b,
-            200_000_000,
-            100,
-        );
+        let sp = matching_engine::spread(&problem.markets, 4, market_a, market_b, 200_000_000, 100);
         let coeffs = precompute_coefficients(&sp);
         // c_YES_A = avg(payoffs where A=YES) = avg(state0=0, state2=+1) = 0.5
         // c_NO_A  = avg(payoffs where A=NO)  = avg(state1=-1, state3=0) = -0.5
@@ -1279,14 +1285,7 @@ mod tests {
         assert!(milp_sign(&yes_sell) < 0.0, "YES seller should be -1");
 
         // Spread: payoffs = [0, -1, +1, 0] -> has negative -> seller
-        let sp = matching_engine::spread(
-            &problem.markets,
-            3,
-            market_a,
-            market_b,
-            200_000_000,
-            100,
-        );
+        let sp = matching_engine::spread(&problem.markets, 3, market_a, market_b, 200_000_000, 100);
         assert!(milp_sign(&sp) < 0.0, "spread has negative payoff -> seller");
 
         // Bundle YES: payoffs = [+1, 0, 0, 0] -> no negative -> buyer
@@ -1344,10 +1343,7 @@ mod tests {
             "should find optimal solution, got {:?}",
             result.status
         );
-        assert!(
-            result.result.orders_filled > 0,
-            "should fill some orders"
-        );
+        assert!(result.result.orders_filled > 0, "should fill some orders");
         assert!(
             result.result.total_welfare > 0,
             "should produce positive welfare, got {}",
@@ -1430,27 +1426,15 @@ mod tests {
 
         // YES buyers at prices that sum to > $1 (profitable negrisk)
         // A at 40c, B at 35c, C at 30c → sum = $1.05
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            1,
-            m0,
-            400_000_000,
-            100,
-        ));
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            2,
-            m1,
-            350_000_000,
-            100,
-        ));
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            3,
-            m2,
-            300_000_000,
-            100,
-        ));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 1, m0, 400_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 2, m1, 350_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 3, m2, 300_000_000, 100));
 
         let solver = MilpSolver::new();
         let result = solver.solve_with_status(&problem);
