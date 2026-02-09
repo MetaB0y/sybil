@@ -40,6 +40,8 @@ def _build_prompt(
     event_news: dict[str, list[str]],
     event_info: dict[str, dict],
     market_prices: dict[str, float],
+    positions: dict[str, int] | None = None,
+    balance: float | None = None,
 ) -> str:
     """Build the user prompt with accumulated news for all events.
 
@@ -47,8 +49,14 @@ def _build_prompt(
         event_news: event_id -> list of formatted news lines (most recent first)
         event_info: event_id -> {"home_team": ..., "away_team": ..., "market_key": ...}
         market_prices: market_key -> current market probability
+        positions: market_key -> net position (positive=long YES, negative=long NO)
+        balance: current cash balance in dollars
     """
     lines = ["=== NBA Games in Progress ===\n"]
+
+    if balance is not None:
+        lines.append(f"Your cash balance: ${balance:.2f}")
+        lines.append("")
 
     for event_id, info in sorted(event_info.items(), key=lambda x: x[1]["market_key"]):
         market_key = info["market_key"]
@@ -61,12 +69,22 @@ def _build_prompt(
         news_lines = event_news.get(event_id, [])
         if news_lines:
             lines.append("  Live updates (most recent first):")
-            for nl in news_lines:
+            for nl in news_lines[-15:]:  # Cap to avoid huge prompts
                 lines.append(f"  - {nl}")
         else:
             lines.append("  No updates yet.")
 
         lines.append(f"  Current market price: {price * 100:.1f}% HOME wins")
+
+        if positions:
+            pos = positions.get(market_key, 0)
+            if pos > 0:
+                lines.append(f"  Your position: long {pos} YES shares")
+            elif pos < 0:
+                lines.append(f"  Your position: long {-pos} NO shares")
+            else:
+                lines.append(f"  Your position: flat")
+
         lines.append("")
 
     return "\n".join(lines)
@@ -181,7 +199,7 @@ class LLMNewsTrader(BacktestAgent):
         self.api_key = api_key
         self.system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
         self.edge_threshold = edge_threshold
-        self.order_size = order_size
+        self.base_order_size = order_size
         self.max_position = max_position
         self.min_blocks_between_calls = min_blocks_between_calls
 
@@ -193,7 +211,7 @@ class LLMNewsTrader(BacktestAgent):
         self._cached_probs: dict[str, float] = {}
         # Rate limiting
         self._blocks_since_last_call = 0
-        self._needs_llm_update = False
+        self._pending_news_count = 0  # news items since last LLM call
         # LLM client (lazy init)
         self._llm_client = None
         # Pending LLM task
@@ -265,7 +283,7 @@ class LLMNewsTrader(BacktestAgent):
             self._event_news[news.event_id] = []
         self._event_news[news.event_id].insert(0, formatted)
 
-        self._needs_llm_update = True
+        self._pending_news_count += 1
 
     async def _call_llm(self, prompt: str) -> str | None:
         """Call the LLM API with timeout. Returns response text or None."""
@@ -308,9 +326,23 @@ class LLMNewsTrader(BacktestAgent):
 
         return None
 
+    def _get_positions_by_key(self) -> dict[str, int]:
+        """Get net positions keyed by market_key."""
+        positions = {}
+        for market_id, key in self._market_id_to_key.items():
+            yes = self.get_position(market_id, "YES")
+            no = self.get_position(market_id, "NO")
+            positions[key] = yes - no
+        return positions
+
     async def _update_probabilities(self, market_prices: dict[str, float]) -> None:
         """Call LLM and update cached probabilities."""
-        prompt = _build_prompt(self._event_news, self._event_info, market_prices)
+        balance = self.balance_history[-1] if self.balance_history else None
+        prompt = _build_prompt(
+            self._event_news, self._event_info, market_prices,
+            positions=self._get_positions_by_key(),
+            balance=balance,
+        )
         expected_keys = [info["market_key"] for info in self._event_info.values()]
 
         response_text = await self._call_llm(prompt)
@@ -332,6 +364,23 @@ class LLMNewsTrader(BacktestAgent):
         else:
             logger.warning("[%s] Failed to parse LLM response: %s", self.name, response_text)
 
+    def _compute_order_size(self, edge: float, current_pos: int) -> int:
+        """Scale order size with edge magnitude, reduce near position limit."""
+        abs_edge = abs(edge)
+
+        # Scale with edge: 3% edge -> base/3, 10% -> base, 30%+ -> base*2
+        edge_mult = min(2.0, abs_edge / 0.10)
+        size = max(1, int(self.base_order_size * edge_mult))
+
+        # Reduce as position grows toward limit
+        remaining = self.max_position - current_pos
+        if remaining <= 0:
+            return 0
+        if remaining < size:
+            size = remaining
+
+        return size
+
     async def on_block(self, block: Block) -> list[OrderSpec]:
         """Trade based on LLM probability estimates vs market prices."""
         self._blocks_since_last_call += 1
@@ -343,20 +392,21 @@ class LLMNewsTrader(BacktestAgent):
             if key:
                 market_prices[key] = yes_nanos / NANOS_PER_DOLLAR
 
-        # Maybe call LLM (rate-limited, non-blocking)
-        if (
-            self._needs_llm_update
-            and self._blocks_since_last_call >= self.min_blocks_between_calls
+        # Call LLM when we have new news and enough time has passed.
+        # Call sooner if lots of news accumulated (urgency).
+        min_wait = max(1, self.min_blocks_between_calls - self._pending_news_count)
+        should_call = (
+            self._pending_news_count > 0
+            and self._blocks_since_last_call >= min_wait
             and (self._llm_task is None or self._llm_task.done())
-        ):
-            self._needs_llm_update = False
+        )
+        if should_call:
+            self._pending_news_count = 0
             self._blocks_since_last_call = 0
-            # Fire and forget - result updates _cached_probs
             self._llm_task = asyncio.create_task(self._update_probabilities(market_prices))
 
         # Check if pending LLM task completed
         if self._llm_task and self._llm_task.done():
-            # Retrieve any exception to avoid "Task exception was never retrieved"
             try:
                 self._llm_task.result()
             except Exception:
@@ -378,15 +428,16 @@ class LLMNewsTrader(BacktestAgent):
             no_pos = self.get_position(market_id, "NO")
 
             if edge > self.edge_threshold:
-                if yes_pos < self.max_position:
-                    # Bid halfway between market and our estimate (more aggressive with conviction)
+                size = self._compute_order_size(edge, yes_pos)
+                if size > 0:
                     bid_price = min(0.95, market_prob + edge * 0.5)
-                    orders.append(BuyYes.at_price(market_id, bid_price, self.order_size))
+                    orders.append(BuyYes.at_price(market_id, bid_price, size))
             elif edge < -self.edge_threshold:
-                if no_pos < self.max_position:
+                size = self._compute_order_size(edge, no_pos)
+                if size > 0:
                     no_price = 1 - market_prob
-                    no_edge = -edge  # positive magnitude
+                    no_edge = -edge
                     bid_price = min(0.95, no_price + no_edge * 0.5)
-                    orders.append(BuyNo.at_price(market_id, bid_price, self.order_size))
+                    orders.append(BuyNo.at_price(market_id, bid_price, size))
 
         return orders

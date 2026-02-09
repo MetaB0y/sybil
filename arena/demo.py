@@ -50,42 +50,81 @@ def load_dotenv(path: Path | None = None) -> None:
 
 
 def _score_watcher(markets: dict[str, "MarketView"]) -> dict[str, float]:
-    """Bet on whoever's winning, weighted by quarter progression.
+    """Estimate win probability from score margin, quarter, injuries, and momentum.
 
-    Early leads are less predictive, late leads are more decisive.
+    Uses a logistic model based on point margin scaled by game progress.
     """
+    import math
     import re
 
     estimates = {}
     for name, view in markets.items():
+        quarter = 0
+        home_score = 0
+        away_score = 0
+        has_score = False
+        injury_penalty = 0.0  # negative = hurts home, positive = hurts away
+        momentum = 0  # positive = home momentum
+
         for news_line in view.news:
             # Match FINAL
             m = re.search(r"\[FINAL\] (\d+)-(\d+)", news_line)
             if m:
-                home, away = int(m.group(1)), int(m.group(2))
-                estimates[name] = 0.95 if home > away else 0.05
+                home_score, away_score = int(m.group(1)), int(m.group(2))
+                estimates[name] = 0.95 if home_score > away_score else 0.05
+                has_score = True
                 break
 
-            # Match any line with [Q{n} ...] and a score like {home}-{away}
-            m = re.search(r"\[Q(\d)\s+(?:END\])?\s*(\d+)-(\d+)", news_line)
-            if not m:
-                # Also try old format with " - " separator
-                m = re.search(r"\[Q(\d) END\] (\d+) - (\d+)", news_line)
-            if m:
-                quarter = int(m.group(1))
-                home, away = int(m.group(2)), int(m.group(3))
-                total = home + away
-                if total == 0:
-                    break
+            # Match score lines: [Q{n} {home}-{away}] or [Q{n} END] {home}-{away}
+            if not has_score:
+                m = re.search(r"\[Q(\d)\s+(?:END\])?\s*(\d+)-(\d+)", news_line)
+                if not m:
+                    m = re.search(r"\[Q(\d) END\] (\d+) - (\d+)", news_line)
+                if m:
+                    quarter = int(m.group(1))
+                    home_score = int(m.group(2))
+                    away_score = int(m.group(3))
+                    has_score = True
 
-                # Raw score ratio
-                raw = home / total
+            # Track injuries
+            if "[INJURY]" in news_line:
+                # Rough heuristic: each injury shifts prob ~3%
+                # We don't know which team, but metadata has home/away info
+                # For now, just note we saw injuries
+                injury_penalty += 0.03
 
-                # Weight toward 0.5 based on how early in the game
-                # Q1: 30% weight on score, Q4: 90% weight
-                score_weight = 0.2 + quarter * 0.175
-                estimates[name] = 0.5 * (1 - score_weight) + raw * score_weight
-                break
+            # Track momentum (runs)
+            if "run" in news_line.lower():
+                # Home team run = positive momentum
+                if any(
+                    t in news_line for t in name.split(" vs ")[0:1]
+                ):
+                    momentum += 1
+                else:
+                    momentum -= 1
+
+        if has_score and name in estimates:
+            # FINAL already handled
+            continue
+
+        if has_score and quarter > 0:
+            margin = home_score - away_score
+
+            # Game progress: 0.0 (start) to 1.0 (end of Q4)
+            progress = min(1.0, quarter / 4.0)
+
+            # Logistic model: margin matters more as game progresses.
+            # A 10-point lead in Q4 ≈ 85% win prob.
+            # Scale factor increases with progress.
+            k = 0.08 + 0.12 * progress  # steepness: 0.08 early, 0.20 late
+            logit = k * margin
+            prob = 1.0 / (1.0 + math.exp(-logit))
+
+            # Small momentum adjustment (±2%)
+            prob += momentum * 0.02
+
+            estimates[name] = max(0.02, min(0.98, prob))
+
     return estimates
 
 
@@ -114,7 +153,7 @@ def build_agent_configs() -> list[BacktestAgentConfig]:
     openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
 
     if anthropic_key:
-        from bots.llm_news_trader import LLMNewsTrader
+        from bots.llm_news_trader import CONTRARIAN_SYSTEM_PROMPT, LLMNewsTrader
 
         configs.append(
             BacktestAgentConfig(
@@ -135,6 +174,7 @@ def build_agent_configs() -> list[BacktestAgentConfig]:
                     "provider": "anthropic",
                     "model_name": "claude-haiku-4-5-20251001",
                     "api_key": anthropic_key,
+                    "system_prompt": CONTRARIAN_SYSTEM_PROMPT,
                 },
             )
         )
