@@ -353,6 +353,13 @@ impl BlockSequencer {
             let mut accepted_orders: Vec<Order> = Vec::new();
 
             for mut order in sub.orders {
+                // Skip orders for resolved/inactive markets
+                let order_markets_active = order.active_markets()
+                    .all(|m| active_markets.contains(&m));
+                if !order_markets_active {
+                    continue;
+                }
+
                 let order_id = self.next_order_id;
                 self.next_order_id += 1;
                 order.id = order_id;
@@ -468,6 +475,9 @@ impl BlockSequencer {
             .collect();
         let pre_state = snapshot_accounts(&self.accounts, &participating_accounts);
 
+        // Snapshot total balance before settlement
+        let pre_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
+
         // Settle all fills
         settlement::settle_batch(
             &mut self.accounts,
@@ -475,6 +485,56 @@ impl BlockSequencer {
             &problem.orders,
             &self.order_account_map,
         );
+
+        // Verify position balance after settlement
+        for market in self.markets.iter() {
+            let mut total_yes: i64 = 0;
+            let mut total_no: i64 = 0;
+            for (_, account) in self.accounts.iter() {
+                total_yes += account.position(market.id, 0);
+                total_no += account.position(market.id, 1);
+            }
+            if total_yes != total_no {
+                eprintln!(
+                    "POSITION IMBALANCE block #{} market {:?}: YES={} NO={} diff={}",
+                    self.height, market.id, total_yes, total_no, total_yes - total_no
+                );
+            }
+        }
+
+        // Verify money conservation: balance change = net position change
+        let post_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
+        let balance_delta = post_total_balance - pre_total_balance;
+        // For each market, net new positions = new pairs minted - pairs burned
+        // Each new pair costs $1 (NANOS_PER_DOLLAR)
+        // balance_delta should be negative (money locked in positions)
+        // and equal to -(net new pairs) * NANOS_PER_DOLLAR
+        if balance_delta != 0 {
+            // Compute net position change per market to verify
+            let mut net_position_value: i64 = 0;
+            for fill in &fills {
+                if fill.fill_qty == 0 { continue; }
+                let cost = fill.fill_price as i128 * fill.fill_qty as i128;
+                if let Some(&order) = problem.orders.iter().find(|o| o.id == fill.order_id).as_ref() {
+                    let has_positive = order.payoffs[..order.num_states as usize].iter().any(|&p| p > 0);
+                    let has_negative = order.payoffs[..order.num_states as usize].iter().any(|&p| p < 0);
+                    if has_positive && !has_negative {
+                        // Buy: balance decreases
+                        net_position_value -= cost as i64;
+                    } else if has_negative && !has_positive {
+                        // Sell: balance increases
+                        net_position_value += cost as i64;
+                    }
+                }
+            }
+            if balance_delta != net_position_value {
+                eprintln!(
+                    "MONEY LEAK block #{}: balance_delta={} expected={} diff={}",
+                    self.height, balance_delta, net_position_value,
+                    balance_delta - net_position_value
+                );
+            }
+        }
 
         // Snapshot post-state (after settlement)
         let post_state = snapshot_accounts(&self.accounts, &participating_accounts);

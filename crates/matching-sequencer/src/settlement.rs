@@ -179,6 +179,21 @@ pub fn resolve_market(accounts: &mut AccountStore, market: MarketId, yes_payout_
     // Collect account IDs first to avoid borrow issues
     let account_ids: Vec<AccountId> = accounts.iter().map(|(&id, _)| id).collect();
 
+    // Check position balance and total balance before resolution
+    let mut total_yes: i64 = 0;
+    let mut total_no: i64 = 0;
+    let pre_total_balance: i64 = accounts.iter().map(|(_, a)| a.balance).sum();
+    for &account_id in &account_ids {
+        let account = accounts.get(account_id).unwrap();
+        total_yes += account.position(market, 0);
+        total_no += account.position(market, 1);
+    }
+    eprintln!(
+        "RESOLVE market {:?}: YES_total={} NO_total={} diff={} payout_yes={} pre_balance={}",
+        market, total_yes, total_no, total_yes - total_no,
+        yes_payout_nanos, pre_total_balance
+    );
+
     for account_id in account_ids {
         let account = accounts.get_mut(account_id).unwrap();
 
@@ -192,6 +207,13 @@ pub fn resolve_market(accounts: &mut AccountStore, market: MarketId, yes_payout_
             account.balance += (no_pos as i128 * no_payout_nanos as i128) as i64;
         }
     }
+
+    let post_total_balance: i64 = accounts.iter().map(|(_, a)| a.balance).sum();
+    let balance_delta = post_total_balance - pre_total_balance;
+    eprintln!(
+        "RESOLVE market {:?} DONE: post_balance={} delta={} total_final={}",
+        market, post_total_balance, balance_delta, post_total_balance
+    );
 }
 
 #[cfg(test)]

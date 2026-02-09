@@ -85,8 +85,14 @@ def _extract_reasoning(text: str) -> str:
             depth -= 1
             if depth == 0:
                 remainder = text[i + 1:].strip()
-                # Clean up markdown artifacts
-                remainder = re.sub(r"^\*\*", "", remainder)
+                # Strip markdown code fences
+                remainder = re.sub(r"^```\w*\s*", "", remainder)
+                remainder = re.sub(r"\s*```$", "", remainder)
+                # Strip markdown bold markers
+                remainder = remainder.replace("**", "")
+                # Strip leading "Reasoning:" or similar headers
+                remainder = re.sub(r"^Reasoning[^:]*:\s*", "", remainder, flags=re.IGNORECASE)
+                remainder = remainder.strip()
                 return remainder[:300] if remainder else ""
     return ""
 
