@@ -27,13 +27,18 @@ class AgentResult:
     name: str
     account_id: int
     initial_balance: float
-    final_balance: float
+    final_balance: float  # cash only
+    position_value: float  # mark-to-market position value
     positions: dict[tuple[int, str], int]
     news_processed: int
 
     @property
+    def total_value(self) -> float:
+        return self.final_balance + self.position_value
+
+    @property
     def pnl(self) -> float:
-        return self.final_balance - self.initial_balance
+        return self.total_value - self.initial_balance
 
     @property
     def pnl_pct(self) -> float:
@@ -62,8 +67,8 @@ class BacktestResult:
         return self.dataset.duration
 
     def leaderboard(self) -> list[AgentResult]:
-        """Return agent results sorted by PnL (descending)."""
-        return sorted(self.agent_results, key=lambda r: r.pnl, reverse=True)
+        """Return agent results sorted by total value (descending)."""
+        return sorted(self.agent_results, key=lambda r: r.total_value, reverse=True)
 
 
 @dataclass
@@ -308,20 +313,33 @@ class BacktestRunner:
                   f"final=${total_final_balance:.2f} "
                   f"diff=${total_final_balance - total_initial:.2f}")
 
-            # Collect results
+            # Collect results — value remaining positions at last known prices
             agent_results = []
             for agent in self._agents:
                 account = await client.get_account(agent.account_id)
+                pos_dict = {
+                    (p.market_id, p.outcome): p.quantity
+                    for p in account.positions
+                }
+                # Mark-to-market remaining positions using resolution payouts
+                # (after resolution, positions should be 0 — but value any stragglers)
+                pos_value = 0.0
+                for (mid, outcome), qty in pos_dict.items():
+                    if qty == 0:
+                        continue
+                    prices = self._latest_prices.get(mid)
+                    if prices:
+                        yes_n, no_n = prices
+                        price = yes_n if outcome == "YES" else no_n
+                        pos_value += qty * price / NANOS_PER_DOLLAR
                 agent_results.append(
                     AgentResult(
                         name=agent.name,
                         account_id=agent.account_id,
                         initial_balance=self.initial_balance,
                         final_balance=account.balance_dollars,
-                        positions={
-                            (p.market_id, p.outcome): p.quantity
-                            for p in account.positions
-                        },
+                        position_value=pos_value,
+                        positions=pos_dict,
                         news_processed=len(agent.beliefs),
                     )
                 )
@@ -366,7 +384,9 @@ def print_leaderboard(result: BacktestResult) -> None:
     table = Table(title="Leaderboard")
     table.add_column("Rank", style="cyan", justify="center")
     table.add_column("Agent", style="green")
-    table.add_column("Final Balance", justify="right")
+    table.add_column("Cash", justify="right")
+    table.add_column("Positions", justify="right")
+    table.add_column("Total", justify="right")
     table.add_column("PnL", justify="right")
     table.add_column("PnL %", justify="right")
 
@@ -374,10 +394,13 @@ def print_leaderboard(result: BacktestResult) -> None:
         pnl_style = "green" if agent.pnl >= 0 else "red"
         rank_style = "bold yellow" if i == 1 else ("bold" if i <= 3 else "")
 
+        pos_str = f"${agent.position_value:.2f}" if agent.position_value != 0 else "-"
         table.add_row(
             f"[{rank_style}]{i}[/{rank_style}]" if rank_style else str(i),
             agent.name,
             f"${agent.final_balance:.2f}",
+            pos_str,
+            f"${agent.total_value:.2f}",
             f"[{pnl_style}]${agent.pnl:+.2f}[/{pnl_style}]",
             f"[{pnl_style}]{agent.pnl_pct:+.1f}%[/{pnl_style}]",
         )

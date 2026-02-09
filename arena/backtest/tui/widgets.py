@@ -14,6 +14,26 @@ if TYPE_CHECKING:
 NANOS_PER_DOLLAR = 1_000_000_000
 
 
+def _position_value(agent: BacktestAgent, prices: dict[int, tuple[int, int]]) -> float:
+    """Mark-to-market value of an agent's positions in dollars.
+
+    YES shares valued at yes_price, NO shares at no_price (= 1 - yes_price).
+    """
+    total = 0.0
+    for (market_id, outcome), qty in agent.positions.items():
+        if qty == 0:
+            continue
+        market_prices = prices.get(market_id)
+        if market_prices is None:
+            continue
+        yes_nanos, no_nanos = market_prices
+        if outcome == "YES":
+            total += qty * yes_nanos / NANOS_PER_DOLLAR
+        else:
+            total += qty * no_nanos / NANOS_PER_DOLLAR
+    return total
+
+
 def _market_short_name(display_name: str) -> str:
     parts = display_name.split(" vs ")
     if len(parts) == 2:
@@ -184,11 +204,14 @@ class DetailArea(Static):
             return
 
         bal = agent.balance_history[-1] if agent.balance_history else 0.0
-        pnl = bal - runner.initial_balance
+        pos_val = _position_value(agent, runner._latest_prices)
+        total = bal + pos_val
+        pnl = total - runner.initial_balance
 
         lines = [
             f"[bold]{agent.name}[/bold]",
-            f"Balance: ${bal:.2f}  PnL: ${pnl:+.2f}",
+            f"Cash: ${bal:.2f}  Positions: ${pos_val:.2f}  Total: ${total:.2f}",
+            f"PnL: ${pnl:+.2f} ({pnl / runner.initial_balance * 100:+.1f}%)",
             f"Orders submitted: {agent.total_orders_submitted}",
         ]
 
@@ -389,34 +412,38 @@ class LeaderboardPanel(DataTable):
         if not self._columns_built:
             self.add_column("#", key="rank")
             self.add_column("Agent", key="agent")
-            self.add_column("Balance", key="balance")
+            self.add_column("Cash", key="cash")
+            self.add_column("Pos$", key="pos_value")
+            self.add_column("Total", key="total")
             self.add_column("PnL", key="pnl")
-            self.add_column("Pos", key="pos")
             self._columns_built = True
 
-        ranked = sorted(
-            runner._agents,
-            key=lambda a: a.balance_history[-1] if a.balance_history else 0,
-            reverse=True,
-        )
+        prices = runner._latest_prices
 
-        # Clear and re-add rows (simpler than tracking changes for a small table)
+        # Compute total value (cash + positions) for sorting
+        def _total(agent):
+            if not agent.balance_history:
+                return 0.0
+            cash = agent.balance_history[-1]
+            return cash + _position_value(agent, prices)
+
+        ranked = sorted(runner._agents, key=_total, reverse=True)
+
         self.clear()
         for i, agent in enumerate(ranked, 1):
             if agent.balance_history:
-                balance = agent.balance_history[-1]
-                pnl = balance - runner.initial_balance
-                pos_count = sum(
-                    1 for (_, outcome), qty in agent.positions.items()
-                    if qty != 0
-                )
+                cash = agent.balance_history[-1]
+                pos_val = _position_value(agent, prices)
+                total = cash + pos_val
+                pnl = total - runner.initial_balance
                 self.add_row(
                     str(i),
                     agent.name,
-                    f"${balance:.2f}",
-                    f"${pnl:+.2f}",
-                    str(pos_count),
+                    f"${cash:.0f}",
+                    f"${pos_val:.0f}",
+                    f"${total:.0f}",
+                    f"${pnl:+.0f}",
                     key=agent.name,
                 )
             else:
-                self.add_row(str(i), agent.name, "...", "...", "...", key=agent.name)
+                self.add_row(str(i), agent.name, *["..."] * 4, key=agent.name)
