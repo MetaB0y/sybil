@@ -131,7 +131,7 @@ class MarketsPanel(DataTable):
                 self._market_row_keys[market_id] = rk
 
 
-class DetailArea(Static):
+class DetailArea(Static, can_focus=True):
     """Context-dependent detail: market or agent info."""
 
     def __init__(self, content="", **kwargs) -> None:
@@ -315,7 +315,7 @@ class ThoughtsPanel(RichLog):
                 self.write(f"{sim_time} [red][bold]{agent.name}[/bold] ERROR: {escape(last_error)}[/red]")
 
 
-class OrdersPanel(Static):
+class OrdersPanel(Static, can_focus=True):
     """Per-agent orders + last block info."""
 
     def refresh_data(self, runner: BacktestRunner) -> None:

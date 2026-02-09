@@ -869,8 +869,17 @@ impl PriceDiscoverer for LocalSolver {
         let mut result = PriceDiscoveryResult::empty();
 
         for market in problem.markets.iter() {
-            let solution = self.solve_market(market.id, &problem.markets, &problem.orders);
+            // Only discover prices for markets that have orders.
+            // Markets with no orders would produce MarketSolution::empty()
+            // with default 50/50 prices, which can overwrite real prices
+            // in callers that merge results across iterations/blocks.
+            let has_orders = problem.orders.iter()
+                .any(|o| o.num_markets == 1 && o.markets[0] == market.id);
+            if !has_orders {
+                continue;
+            }
 
+            let solution = self.solve_market(market.id, &problem.markets, &problem.orders);
             result.add_market_solution(solution);
         }
 

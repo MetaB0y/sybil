@@ -122,6 +122,8 @@ pub struct BlockSequencer {
     market_statuses: HashMap<MarketId, MarketStatus>,
     /// Pluggable oracle for resolution decisions.
     oracle: Arc<dyn Oracle>,
+    /// Persisted clearing prices across blocks (used as default when no trades happen).
+    last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
 }
 
 impl BlockSequencer {
@@ -144,6 +146,7 @@ impl BlockSequencer {
             last_header: None,
             market_statuses: HashMap::new(),
             oracle,
+            last_clearing_prices: HashMap::new(),
         }
     }
 
@@ -452,12 +455,41 @@ impl BlockSequencer {
         let pipeline = Pipeline::current();
         let pipeline_result = pipeline.solve(&problem);
 
-        // Extract clearing prices
-        let clearing_prices = if let Some(ref pd) = pipeline_result.price_discovery {
-            pd.prices.clone()
-        } else {
-            HashMap::new()
+        // Extract clearing prices: use fresh prices from solver where trades happened,
+        // fall back to last known prices for markets with no activity this block.
+        // Collect markets that had fills this block (check the actual fills, not market_solutions).
+        let markets_with_fills: HashSet<MarketId> = {
+            let order_map: HashMap<u64, &Order> =
+                problem.orders.iter().map(|o| (o.id, o)).collect();
+            pipeline_result
+                .result
+                .fills
+                .iter()
+                .filter(|f| f.fill_qty > 0)
+                .filter_map(|f| order_map.get(&f.order_id))
+                .flat_map(|o| o.active_markets())
+                .collect()
         };
+
+        let mut clearing_prices = self.last_clearing_prices.clone();
+        if let Some(ref pd) = pipeline_result.price_discovery {
+            for (market_id, prices) in &pd.prices {
+                // Only update price if this market had actual fills
+                if markets_with_fills.contains(market_id) {
+                    clearing_prices.insert(*market_id, prices.clone());
+                } else if !clearing_prices.contains_key(market_id) {
+                    // First time seeing this market — use solver's default
+                    clearing_prices.insert(*market_id, prices.clone());
+                }
+            }
+        }
+        self.last_clearing_prices = clearing_prices.clone();
+
+        // Only include active (non-resolved) markets in the block response
+        let clearing_prices: HashMap<MarketId, Vec<Nanos>> = clearing_prices
+            .into_iter()
+            .filter(|(m, _)| active_markets.contains(m))
+            .collect();
 
         let fills = pipeline_result.result.fills.clone();
         let total_welfare = pipeline_result.result.total_welfare;

@@ -34,6 +34,8 @@ class SybilTUI(App):
         Binding("l", "focus_leaderboard", "Leaderboard"),
         Binding("n", "focus_news", "News"),
         Binding("t", "focus_thoughts", "Thoughts"),
+        Binding("o", "focus_orders", "Orders"),
+        Binding("d", "focus_detail", "Detail"),
         Binding("escape", "clear_detail", "Back"),
         Binding("c", "copy_panel", "Copy"),
     ]
@@ -140,6 +142,12 @@ class SybilTUI(App):
 
     def action_focus_thoughts(self) -> None:
         self.query_one("#thoughts-panel").focus()
+
+    def action_focus_orders(self) -> None:
+        self.query_one("#orders-panel").focus()
+
+    def action_focus_detail(self) -> None:
+        self.query_one("#detail-area").focus()
 
     def action_clear_detail(self) -> None:
         detail: DetailArea = self.query_one("#detail-area")

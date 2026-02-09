@@ -382,7 +382,15 @@ impl DualMaster {
                 mm_fills: iter_mm_fills,
             });
 
-            last_prices = prices;
+            // Merge prices: update only markets present in this iteration's result.
+            // discover_prices() only includes markets with orders, so markets
+            // where all orders were already filled will preserve their previous prices.
+            for (mid, new_prices) in &prices.prices {
+                last_prices.prices.insert(*mid, new_prices.clone());
+            }
+            for (mid, sol) in prices.market_solutions {
+                last_prices.market_solutions.insert(mid, sol);
+            }
 
             // 9. Check convergence: price residuals + welfare delta
             let welfare_delta_frac = if prev_welfare.abs() > 0 {
