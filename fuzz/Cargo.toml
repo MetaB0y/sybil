@@ -1,0 +1,31 @@
+[package]
+name = "sybil-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+matching-engine = { path = "../crates/matching-engine" }
+matching-sequencer = { path = "../crates/matching-sequencer" }
+sybil-api = { path = "../crates/sybil-api" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Pin crypto deps to match the main workspace
+p256 = { version = "0.14.0-rc.7", features = ["ecdsa"] }
+
+[[bin]]
+name = "fuzz_order_parse"
+path = "fuzz_targets/fuzz_order_parse.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_settlement"
+path = "fuzz_targets/fuzz_settlement.rs"
+doc = false

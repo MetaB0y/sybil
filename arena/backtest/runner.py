@@ -8,7 +8,7 @@ from typing import Any
 from rich.console import Console
 from rich.table import Table
 
-from sybil_client import SybilClient
+from sybil_client import Portfolio, SybilClient
 
 from .agent import BacktestAgentConfig
 from .clock import SimulatedClock
@@ -114,6 +114,7 @@ class BacktestRunner:
     _latest_prices: dict[int, tuple[int, int]] = field(default_factory=dict, init=False)
     _market_display_names: dict[int, str] = field(default_factory=dict, init=False)
     _last_block: Any = field(default=None, init=False)
+    _agent_portfolios: dict[int, Portfolio] = field(default_factory=dict, init=False)
 
     async def _setup_markets(self) -> None:
         """Create markets for all events in the dataset."""
@@ -121,7 +122,12 @@ class BacktestRunner:
 
         for event in self.dataset.events:
             market_name = event.moneyline_market_name
-            market = await self._client.create_market(market_name)
+            market = await self._client.create_market(
+                market_name,
+                description=f"{event.home_team} vs {event.away_team} moneyline",
+                category=self.dataset.sport,
+                expiry_timestamp_ms=int(event.end_time.timestamp() * 1000),
+            )
             self._market_ids[event.event_id] = market.id
             self._market_display_names[market.id] = f"{event.home_team} vs {event.away_team}"
             print(f"  Market #{market.id}: {market_name}")
@@ -201,6 +207,14 @@ class BacktestRunner:
                 for market_id, prices in block.clearing_prices.items():
                     if market_id in our_market_ids:
                         self._latest_prices[market_id] = prices
+                # Cache portfolios for TUI widgets
+                for agent in self._agents:
+                    try:
+                        self._agent_portfolios[agent.account_id] = (
+                            await self._client.get_portfolio(agent.account_id)
+                        )
+                    except Exception:
+                        pass
         except (asyncio.CancelledError, Exception):
             pass
 
@@ -295,54 +309,42 @@ class BacktestRunner:
                 return_exceptions=True,
             )
 
-            # Debug: check for remaining positions and total balance
-            total_final_balance = 0
+            # Collect results using server-side portfolio valuation
+            agent_results = []
+            total_final_balance = 0.0
             total_initial = len(self._agents) * self.initial_balance
             our_market_ids = set(self._market_ids.values())
             for agent in self._agents:
-                account = await client.get_account(agent.account_id)
-                total_final_balance += account.balance_dollars
-                if account.positions:
-                    for p in account.positions:
+                portfolio = await client.get_portfolio(agent.account_id)
+                total_final_balance += portfolio.balance_dollars
+
+                # Debug: remaining positions
+                for p in portfolio.positions:
+                    if p.quantity != 0:
                         tag = "OUR" if p.market_id in our_market_ids else "SEED"
                         print(
                             f"  REMAINING POS: {agent.name} market={p.market_id}({tag}) "
                             f"{p.outcome}={p.quantity}"
                         )
-            print(f"\nBALANCE CHECK: initial=${total_initial:.2f} "
-                  f"final=${total_final_balance:.2f} "
-                  f"diff=${total_final_balance - total_initial:.2f}")
 
-            # Collect results — value remaining positions at last known prices
-            agent_results = []
-            for agent in self._agents:
-                account = await client.get_account(agent.account_id)
                 pos_dict = {
                     (p.market_id, p.outcome): p.quantity
-                    for p in account.positions
+                    for p in portfolio.positions
                 }
-                # Mark-to-market remaining positions using resolution payouts
-                # (after resolution, positions should be 0 — but value any stragglers)
-                pos_value = 0.0
-                for (mid, outcome), qty in pos_dict.items():
-                    if qty == 0:
-                        continue
-                    prices = self._latest_prices.get(mid)
-                    if prices:
-                        yes_n, no_n = prices
-                        price = yes_n if outcome == "YES" else no_n
-                        pos_value += qty * price / NANOS_PER_DOLLAR
                 agent_results.append(
                     AgentResult(
                         name=agent.name,
                         account_id=agent.account_id,
                         initial_balance=self.initial_balance,
-                        final_balance=account.balance_dollars,
-                        position_value=pos_value,
+                        final_balance=portfolio.balance_dollars,
+                        position_value=portfolio.total_position_value_nanos / NANOS_PER_DOLLAR,
                         positions=pos_dict,
                         news_processed=len(agent.beliefs),
                     )
                 )
+            print(f"\nBALANCE CHECK: initial=${total_initial:.2f} "
+                  f"final=${total_final_balance:.2f} "
+                  f"diff=${total_final_balance - total_initial:.2f}")
 
             resolutions = {}
             for event in self.dataset.events:

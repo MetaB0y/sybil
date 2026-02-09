@@ -5,7 +5,7 @@ use matching_engine::mm_constraint::{MmConstraint, MmId, MmSide};
 use matching_sequencer::crypto::{PublicKey, SignedOrder};
 use matching_sequencer::{AccountId, OrderSubmission};
 use p256::ecdsa::{Signature, VerifyingKey};
-use p256::EncodedPoint;
+use p256::Sec1Point;
 
 use crate::convert::{order_spec_to_order, signed_order_data_to_order};
 use crate::state::AppState;
@@ -90,9 +90,9 @@ pub async fn submit_signed_order(
     // Parse public key
     let key_bytes = hex::decode(&req.signer_pubkey_hex)
         .map_err(|_| AppError::bad_request("Invalid hex encoding for public key"))?;
-    let encoded_point = EncodedPoint::from_bytes(&key_bytes)
+    let sec1_point = Sec1Point::from_bytes(&key_bytes)
         .map_err(|_| AppError::bad_request("Invalid P256 encoded point"))?;
-    let verifying_key = VerifyingKey::from_encoded_point(&encoded_point)
+    let verifying_key = VerifyingKey::from_sec1_point(&sec1_point)
         .map_err(|_| AppError::bad_request("Invalid P256 public key"))?;
 
     // Parse signature

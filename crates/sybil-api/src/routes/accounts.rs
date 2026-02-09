@@ -4,7 +4,7 @@ use axum::Json;
 use matching_engine::MarketId;
 use matching_sequencer::{AccountId, PublicKey};
 use p256::ecdsa::VerifyingKey;
-use p256::EncodedPoint;
+use p256::Sec1Point;
 
 use crate::convert::account_to_response;
 use crate::state::AppState;
@@ -106,10 +106,10 @@ pub async fn register_key(
     let key_bytes = hex::decode(&req.public_key_hex)
         .map_err(|_| AppError::bad_request("Invalid hex encoding"))?;
 
-    let encoded_point = EncodedPoint::from_bytes(&key_bytes)
+    let sec1_point = Sec1Point::from_bytes(&key_bytes)
         .map_err(|_| AppError::bad_request("Invalid P256 encoded point"))?;
 
-    let verifying_key = VerifyingKey::from_encoded_point(&encoded_point)
+    let verifying_key = VerifyingKey::from_sec1_point(&sec1_point)
         .map_err(|_| AppError::bad_request("Invalid P256 public key"))?;
 
     let pubkey = PublicKey(verifying_key);

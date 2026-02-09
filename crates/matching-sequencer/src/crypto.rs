@@ -11,7 +11,7 @@ pub struct PublicKey(pub VerifyingKey);
 
 impl PartialEq for PublicKey {
     fn eq(&self, other: &Self) -> bool {
-        self.0.to_encoded_point(true) == other.0.to_encoded_point(true)
+        self.0.to_sec1_point(true) == other.0.to_sec1_point(true)
     }
 }
 
@@ -19,7 +19,7 @@ impl Eq for PublicKey {}
 
 impl Hash for PublicKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.to_encoded_point(true).as_bytes().hash(state);
+        self.0.to_sec1_point(true).as_bytes().hash(state);
     }
 }
 

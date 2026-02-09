@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 
-from sybil_client import Account, Block, OrderSpec, SybilClient
+from sybil_client import Block, OrderSpec, SybilClient
 
 
 class BaseAgent(ABC):
@@ -25,6 +25,8 @@ class BaseAgent(ABC):
         # Order tracking for observability
         self.last_orders: list[OrderSpec] = []
         self.total_orders_submitted: int = 0
+        # Fill tracking via get_account_fills()
+        self._last_fill_count: int = 0
 
     @abstractmethod
     async def on_block(self, block: Block) -> list[OrderSpec]:
@@ -80,10 +82,13 @@ class BaseAgent(ABC):
             }
             self.balance_history.append(account.balance_dollars)
 
-            # Check for our fills
-            for fill in block.fills:
-                # Note: We'd need order tracking to know which fills are ours
+            # Fetch only this agent's new fills
+            new_fills = await self.client.get_account_fills(
+                self.account_id, limit=20, offset=self._last_fill_count
+            )
+            for fill in new_fills:
                 await self.on_fill(fill.order_id, fill.fill_qty, fill.fill_price)
+            self._last_fill_count += len(new_fills)
 
         except Exception as e:
             print(f"[{self.name}] Failed to update state: {e}")

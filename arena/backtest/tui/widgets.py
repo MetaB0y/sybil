@@ -14,26 +14,6 @@ if TYPE_CHECKING:
 NANOS_PER_DOLLAR = 1_000_000_000
 
 
-def _position_value(agent: BacktestAgent, prices: dict[int, tuple[int, int]]) -> float:
-    """Mark-to-market value of an agent's positions in dollars.
-
-    YES shares valued at yes_price, NO shares at no_price (= 1 - yes_price).
-    """
-    total = 0.0
-    for (market_id, outcome), qty in agent.positions.items():
-        if qty == 0:
-            continue
-        market_prices = prices.get(market_id)
-        if market_prices is None:
-            continue
-        yes_nanos, no_nanos = market_prices
-        if outcome == "YES":
-            total += qty * yes_nanos / NANOS_PER_DOLLAR
-        else:
-            total += qty * no_nanos / NANOS_PER_DOLLAR
-    return total
-
-
 def _market_short_name(display_name: str) -> str:
     parts = display_name.split(" vs ")
     if len(parts) == 2:
@@ -210,10 +190,17 @@ class DetailArea(RichLog):
             self._set_content(f"[red]Agent '{agent_name}' not found[/red]")
             return
 
-        bal = agent.balance_history[-1] if agent.balance_history else 0.0
-        pos_val = _position_value(agent, runner._latest_prices)
-        total = bal + pos_val
-        pnl = total - runner.initial_balance
+        portfolio = runner._agent_portfolios.get(agent.account_id)
+        if portfolio is not None:
+            bal = portfolio.balance_dollars
+            pos_val = portfolio.total_position_value_nanos / NANOS_PER_DOLLAR
+            total = portfolio.portfolio_value_dollars
+            pnl = portfolio.pnl_dollars
+        else:
+            bal = agent.balance_history[-1] if agent.balance_history else 0.0
+            pos_val = 0.0
+            total = bal
+            pnl = total - runner.initial_balance
 
         lines = [
             f"[bold]{agent.name}[/bold]",
@@ -451,24 +438,25 @@ class LeaderboardPanel(DataTable):
             self.add_column("PnL", key="pnl")
             self._columns_built = True
 
-        prices = runner._latest_prices
+        portfolios = runner._agent_portfolios
 
-        # Compute total value (cash + positions) for sorting
+        # Compute total value from cached portfolios for sorting
         def _total(agent):
-            if not agent.balance_history:
+            p = portfolios.get(agent.account_id)
+            if p is None:
                 return 0.0
-            cash = agent.balance_history[-1]
-            return cash + _position_value(agent, prices)
+            return p.portfolio_value_dollars
 
         ranked = sorted(runner._agents, key=_total, reverse=True)
 
         self.clear()
         for i, agent in enumerate(ranked, 1):
-            if agent.balance_history:
-                cash = agent.balance_history[-1]
-                pos_val = _position_value(agent, prices)
-                total = cash + pos_val
-                pnl = total - runner.initial_balance
+            p = portfolios.get(agent.account_id)
+            if p is not None:
+                cash = p.balance_dollars
+                pos_val = p.total_position_value_nanos / NANOS_PER_DOLLAR
+                total = p.portfolio_value_dollars
+                pnl = p.pnl_dollars
                 self.add_row(
                     str(i),
                     agent.name,

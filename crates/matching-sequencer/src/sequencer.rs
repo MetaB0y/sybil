@@ -18,6 +18,7 @@ use crate::settlement;
 use crate::validation::{validate_order, validate_order_with_reservation};
 
 /// An order submission from a participant.
+#[derive(Clone, Debug)]
 pub struct OrderSubmission {
     pub account_id: AccountId,
     pub orders: Vec<Order>,

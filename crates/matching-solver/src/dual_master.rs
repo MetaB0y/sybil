@@ -375,14 +375,18 @@ impl DualMaster {
                 mm_fills: iter_mm_fills,
             });
 
-            // Merge prices: update only markets present in this iteration's result.
-            // discover_prices() only includes markets with orders, so markets
-            // where all orders were already filled will preserve their previous prices.
-            for (mid, new_prices) in &prices.prices {
-                last_prices.prices.insert(*mid, new_prices.clone());
-            }
+            // Merge prices: only update markets that had fills this iteration.
+            // Markets where remaining orders didn't cross produce default (50/50)
+            // prices that would overwrite valid prices from earlier iterations.
             for (mid, sol) in prices.market_solutions {
-                last_prices.market_solutions.insert(mid, sol);
+                if !sol.fills.is_empty() {
+                    last_prices.prices.insert(mid, sol.prices.clone());
+                    last_prices.market_solutions.insert(mid, sol);
+                } else if !last_prices.market_solutions.contains_key(&mid) {
+                    // First time seeing this market — use solver's default
+                    last_prices.prices.insert(mid, sol.prices.clone());
+                    last_prices.market_solutions.insert(mid, sol);
+                }
             }
 
             // 9. Check convergence: price residuals + welfare delta
