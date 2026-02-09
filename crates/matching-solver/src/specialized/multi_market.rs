@@ -13,9 +13,8 @@ use std::collections::HashMap;
 
 use matching_engine::{Fill, MarketId, Nanos, Order, Problem, Qty, NANOS_PER_DOLLAR};
 
-use crate::combiner::SolutionConfidence;
 use crate::local_solver::{LocalSolver, MarketSolution, PrecomputedMarket};
-use crate::traits::{PartialSolution, PartialSolver, PriceDiscoveryResult};
+use crate::traits::{PartialSolution, PartialSolver, PriceDiscoveryResult, SolutionConfidence};
 
 /// Key for grouping orders with compatible payoff structures.
 /// Orders with the same PayoffKey but opposite signs can be complement-matched.

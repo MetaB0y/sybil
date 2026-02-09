@@ -18,7 +18,6 @@
 
 // Internal modules
 pub mod benchmark;
-pub(crate) mod combiner;
 pub mod dual_master;
 pub mod local_solver;
 pub mod mm_allocator;

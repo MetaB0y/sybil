@@ -20,8 +20,39 @@ use serde::Serialize;
 
 use matching_engine::{MarketId, MmConstraint, Nanos, Order, Problem, Qty};
 
-use crate::combiner::{CombineStats, SolverContribution};
 use crate::dual_master::{DualConfig, DualMaster};
+
+/// Statistics from combining solutions.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct CombineStats {
+    /// Number of solutions combined
+    pub num_solutions: usize,
+    /// Total fills across all solutions
+    pub total_fills_input: usize,
+    /// Fills selected in final result
+    pub fills_selected: usize,
+    /// Conflicts detected in graph
+    pub conflicts_detected: usize,
+    /// Welfare before combining
+    pub input_max_welfare: i64,
+    /// Final welfare after combining
+    pub output_welfare: i64,
+    /// Time spent building conflict graph (seconds)
+    pub conflict_graph_time_secs: f64,
+    /// Time spent solving MWIS (seconds)
+    pub mwis_time_secs: f64,
+}
+
+/// Contribution tracking for a solver.
+#[derive(Clone, Debug, Serialize)]
+pub struct SolverContribution {
+    /// Name of the solver
+    pub solver_name: String,
+    /// Number of fills contributed to final solution
+    pub fills_contributed: usize,
+    /// Welfare contributed by this solver's fills
+    pub welfare_contributed: i64,
+}
 use crate::local_solver::LocalSolver;
 use crate::mm_allocator::MmAllocator;
 use crate::specialized::{MultiMarketSolver, NegriskSolver};
@@ -113,8 +144,6 @@ pub struct PipelineConfig {
     /// Convergence threshold for fixed-point (welfare change).
     pub convergence_threshold: f64,
 
-    /// Whether to combine partial solutions with MWIS.
-    pub combine_with_mwis: bool,
 }
 
 impl Default for PipelineConfig {
@@ -123,7 +152,6 @@ impl Default for PipelineConfig {
             use_fixed_point: false,
             max_iterations: 5,
             convergence_threshold: 0.01,
-            combine_with_mwis: false,
         }
     }
 }
@@ -290,7 +318,6 @@ impl Pipeline {
         Self::builder()
             .name("Full Platform")
             .partial_solver(MilpSolver::with_timeout(1.0))
-            .combine_with_mwis(true)
             .build()
     }
 
@@ -1386,12 +1413,6 @@ impl PipelineBuilder {
     /// Set convergence threshold for fixed-point.
     pub fn convergence_threshold(mut self, threshold: f64) -> Self {
         self.config.convergence_threshold = threshold;
-        self
-    }
-
-    /// Set whether to combine with MWIS.
-    pub fn combine_with_mwis(mut self, combine: bool) -> Self {
-        self.config.combine_with_mwis = combine;
         self
     }
 

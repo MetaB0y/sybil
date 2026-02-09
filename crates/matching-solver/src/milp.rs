@@ -1001,8 +1001,7 @@ impl Solver for MilpSolver {
 // PartialSolver Trait Implementation
 // ============================================================================
 
-use crate::combiner::SolutionConfidence;
-use crate::traits::{PartialSolution, PartialSolver};
+use crate::traits::{PartialSolution, PartialSolver, SolutionConfidence};
 
 impl PartialSolver for MilpSolver {
     fn solve_partial(&self, problem: &Problem) -> PartialSolution {

@@ -20,8 +20,18 @@ use serde::Serialize;
 
 use matching_engine::{Fill, MarketId, MmConstraint, Nanos, Order, Problem, Qty};
 
-use crate::combiner::SolutionConfidence;
 use crate::local_solver::MarketSolution;
+
+/// Confidence level of a solution.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub enum SolutionConfidence {
+    /// Solution is known to be optimal
+    Optimal,
+    /// Solution is within a bounded gap of optimal
+    BoundedGap { gap_percent: f64 },
+    /// Solution is a heuristic (no optimality guarantee)
+    Heuristic,
+}
 
 // ============================================================================
 // Price Discovery
