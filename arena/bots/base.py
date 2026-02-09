@@ -105,11 +105,14 @@ class BaseAgent(ABC):
         return self.positions.get((market_id, outcome), 0)
 
     def filter_markets(self, block: Block) -> dict[int, tuple[int, int]]:
-        """Get clearing prices filtered to this bot's allowed markets."""
+        """Get clearing prices filtered to this bot's allowed markets.
+
+        Markets that haven't traded yet default to 50/50 (the bot's prior).
+        """
+        default_price = (500_000_000, 500_000_000)
         if self.market_ids is None:
             return block.clearing_prices
         return {
-            mid: prices
-            for mid, prices in block.clearing_prices.items()
-            if mid in self.market_ids
+            mid: block.clearing_prices.get(mid, default_price)
+            for mid in self.market_ids
         }

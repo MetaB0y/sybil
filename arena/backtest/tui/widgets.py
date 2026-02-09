@@ -131,13 +131,20 @@ class MarketsPanel(DataTable):
                 self._market_row_keys[market_id] = rk
 
 
-class DetailArea(Static, can_focus=True):
+class DetailArea(RichLog):
     """Context-dependent detail: market or agent info."""
 
     def __init__(self, content="", **kwargs) -> None:
-        super().__init__(content, **kwargs)
+        # RichLog doesn't take initial content; ignore it
+        kwargs.pop("markup", None)
+        super().__init__(markup=True, **kwargs)
         self._selected_market: int | None = None
         self._selected_agent: str | None = None
+
+    def _set_content(self, text: str) -> None:
+        """Replace all content with new markup text."""
+        self.clear()
+        self.write(text)
 
     def show_market(self, market_id: int, runner: BacktestRunner) -> None:
         self._selected_market = market_id
@@ -152,7 +159,7 @@ class DetailArea(Static, can_focus=True):
     def clear_selection(self) -> None:
         self._selected_market = None
         self._selected_agent = None
-        self.update("[dim]Select a market or agent for details[/dim]")
+        self._set_content("[dim]Select a market or agent for details[/dim]")
 
     def refresh_data(self, runner: BacktestRunner) -> None:
         if self._selected_market is not None:
@@ -191,7 +198,7 @@ class DetailArea(Static, can_focus=True):
                     f"(conf={belief.confidence:.2f})"
                 )
 
-        self.update("\n".join(lines))
+        self._set_content("\n".join(lines))
 
     def _render_agent(self, agent_name: str, runner: BacktestRunner) -> None:
         agent: BacktestAgent | None = None
@@ -200,7 +207,7 @@ class DetailArea(Static, can_focus=True):
                 agent = a
                 break
         if agent is None:
-            self.update(f"[red]Agent '{agent_name}' not found[/red]")
+            self._set_content(f"[red]Agent '{agent_name}' not found[/red]")
             return
 
         bal = agent.balance_history[-1] if agent.balance_history else 0.0
@@ -245,7 +252,7 @@ class DetailArea(Static, can_focus=True):
                 )
                 lines.append(f"  {short}: {belief.probability * 100:.1f}%")
 
-        self.update("\n".join(lines))
+        self._set_content("\n".join(lines))
 
 
 class NewsPanel(RichLog):
@@ -315,8 +322,12 @@ class ThoughtsPanel(RichLog):
                 self.write(f"{sim_time} [red][bold]{agent.name}[/bold] ERROR: {escape(last_error)}[/red]")
 
 
-class OrdersPanel(Static, can_focus=True):
+class OrdersPanel(RichLog):
     """Per-agent orders + last block info."""
+
+    def __init__(self, **kwargs) -> None:
+        kwargs.pop("markup", None)
+        super().__init__(markup=True, **kwargs)
 
     def refresh_data(self, runner: BacktestRunner) -> None:
         from sybil_client import BuyNo, BuyYes, SellNo, SellYes
@@ -355,17 +366,38 @@ class OrdersPanel(Static, can_focus=True):
 
             is_mm = "MM" in (agent.name or "")
             if is_mm:
-                buy_yes = [o for o in orders if isinstance(o, BuyYes)]
-                buy_no = [o for o in orders if isinstance(o, BuyNo)]
-                parts = []
-                if buy_yes:
-                    parts.append(f"[green]BY {sum(o.quantity for o in buy_yes)}[/green]")
-                if buy_no:
-                    parts.append(f"[red]BN {sum(o.quantity for o in buy_no)}[/red]")
                 lines.append(
-                    f"[bold]{agent.name}[/bold] {' '.join(parts)} "
-                    f"[dim]({agent.total_orders_submitted} tot)[/dim]"
+                    f"[bold]{agent.name}[/bold] "
+                    f"[dim]({len(orders)} orders this block)[/dim]"
                 )
+                # Group by market to show spread per market
+                mm_by_market: dict[int, tuple[list, list]] = {}
+                for o in orders:
+                    mid = o.market_id
+                    buys, sells = mm_by_market.setdefault(mid, ([], []))
+                    if isinstance(o, BuyYes):
+                        buys.append(o)
+                    elif isinstance(o, BuyNo):
+                        sells.append(o)
+                for mid, (buys, sells) in sorted(mm_by_market.items()):
+                    short = _market_short_name(
+                        runner._market_display_names.get(mid, f"M{mid}")
+                    )
+                    # Best bid/ask to show spread
+                    best_bid = max((o.limit_price_nanos for o in buys), default=0)
+                    best_ask_no = max((o.limit_price_nanos for o in sells), default=0)
+                    bid_pct = best_bid / NANOS_PER_DOLLAR * 100
+                    ask_pct = (1 - best_ask_no / NANOS_PER_DOLLAR) * 100
+                    by_qty = sum(o.quantity for o in buys)
+                    bn_qty = sum(o.quantity for o in sells)
+                    spread_bps = int((ask_pct - bid_pct) * 100)
+                    lines.append(
+                        f"  {short} "
+                        f"[green]{bid_pct:.0f}%[/green]/"
+                        f"[red]{ask_pct:.0f}%[/red] "
+                        f"({spread_bps}bps) "
+                        f"[dim]{by_qty}×{bn_qty}[/dim]"
+                    )
             else:
                 lines.append(f"[bold]{agent.name}[/bold]")
                 by_market: dict[int, list] = {}
@@ -386,7 +418,8 @@ class OrdersPanel(Static, can_focus=True):
                         elif isinstance(o, SellNo):
                             lines.append(f"  [yellow]SN[/yellow] {short} {o.quantity}@{price:.0%}")
 
-        self.update("\n".join(lines) if lines else "[dim]No orders yet[/dim]")
+        self.clear()
+        self.write("\n".join(lines) if lines else "[dim]No orders yet[/dim]")
 
 
 class LeaderboardPanel(DataTable):

@@ -23,8 +23,6 @@ Screen {
     height: 100%;
     border: solid $primary;
     border-title-color: cyan;
-    overflow-y: auto;
-    padding: 0 1;
 }
 
 #news-panel {
@@ -43,14 +41,16 @@ Screen {
     height: 100%;
     border: solid magenta;
     border-title-color: magenta;
-    overflow-y: auto;
-    padding: 0 1;
 }
 
 #leaderboard-panel {
     height: 100%;
     border: solid green;
     border-title-color: green;
+}
+
+*:focus {
+    border: heavy $accent;
 }
 
 Footer {

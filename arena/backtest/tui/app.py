@@ -48,7 +48,7 @@ class SybilTUI(App):
     def compose(self) -> ComposeResult:
         yield StatusBar(id="status-bar")
         yield MarketsPanel(id="markets-panel")
-        yield DetailArea("[dim]Select a market or agent for details[/dim]", id="detail-area")
+        yield DetailArea(id="detail-area")
         yield NewsPanel(id="news-panel")
         yield ThoughtsPanel(id="thoughts-panel")
         yield OrdersPanel(id="orders-panel")
@@ -58,7 +58,9 @@ class SybilTUI(App):
     def on_mount(self) -> None:
         # Set border titles
         self.query_one("#markets-panel").border_title = "MARKETS"
-        self.query_one("#detail-area").border_title = "DETAIL"
+        detail: DetailArea = self.query_one("#detail-area")
+        detail.border_title = "DETAIL"
+        detail._set_content("[dim]Select a market or agent for details[/dim]")
         self.query_one("#news-panel").border_title = "NEWS"
         self.query_one("#thoughts-panel").border_title = "THOUGHTS"
         self.query_one("#orders-panel").border_title = "ORDERS"
@@ -193,12 +195,9 @@ class SybilTUI(App):
         from textual.widgets import DataTable, RichLog, Static
 
         if isinstance(widget, Static):
-            # Static stores content as a renderable
-            content = widget.renderable
+            content = getattr(widget, "renderable", "") or getattr(widget, "_renderable", "")
             if isinstance(content, str):
-                # Strip Rich markup
-                t = Text.from_markup(content)
-                return t.plain
+                return Text.from_markup(content).plain
             return str(content)
 
         if isinstance(widget, RichLog):
