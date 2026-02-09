@@ -4,7 +4,7 @@ One-command demo: paste API keys into .env, run `just arena-demo`,
 watch Claude vs GPT compete as sports bettors processing live NBA game news.
 
 Usage:
-    uv run python demo.py [--start-server] [--compression 120] [--dataset PATH]
+    uv run python demo.py [--no-server] [--compression 120] [--dataset PATH]
 """
 
 import argparse
@@ -24,7 +24,7 @@ from backtest.runner import BacktestRunner
 console = Console()
 
 DATASET_DIR = Path(__file__).parent / "datasets"
-DEFAULT_DATASET = DATASET_DIR / "nba_dec2025.json"
+DEFAULT_DATASET = DATASET_DIR / "nba_20251215.json"
 FALLBACK_DATASET = DATASET_DIR / "nba_sample.json"
 
 
@@ -59,8 +59,18 @@ def _score_watcher(markets: dict[str, "MarketView"]) -> dict[str, float]:
     estimates = {}
     for name, view in markets.items():
         for news_line in view.news:
-            # Match quarter score updates
-            m = re.search(r"\[Q(\d) END\] (\d+) - (\d+)", news_line)
+            # Match FINAL
+            m = re.search(r"\[FINAL\] (\d+)-(\d+)", news_line)
+            if m:
+                home, away = int(m.group(1)), int(m.group(2))
+                estimates[name] = 0.95 if home > away else 0.05
+                break
+
+            # Match any line with [Q{n} ...] and a score like {home}-{away}
+            m = re.search(r"\[Q(\d)\s+(?:END\])?\s*(\d+)-(\d+)", news_line)
+            if not m:
+                # Also try old format with " - " separator
+                m = re.search(r"\[Q(\d) END\] (\d+) - (\d+)", news_line)
             if m:
                 quarter = int(m.group(1))
                 home, away = int(m.group(2)), int(m.group(3))
@@ -75,13 +85,6 @@ def _score_watcher(markets: dict[str, "MarketView"]) -> dict[str, float]:
                 # Q1: 30% weight on score, Q4: 90% weight
                 score_weight = 0.2 + quarter * 0.175
                 estimates[name] = 0.5 * (1 - score_weight) + raw * score_weight
-                break
-
-            # Also handle FINAL
-            m = re.search(r"\[FINAL\] (\d+) - (\d+)", news_line)
-            if m:
-                home, away = int(m.group(1)), int(m.group(2))
-                estimates[name] = 0.95 if home > away else 0.05
                 break
     return estimates
 
@@ -102,7 +105,7 @@ def build_agent_configs() -> list[BacktestAgentConfig]:
         BacktestAgentConfig(
             StrategyAgent,
             "ScoreBot",
-            {"strategy_fn": _score_watcher, "edge_threshold": 0.04},
+            {"strategy_fn": _score_watcher, "edge_threshold": 0.03},
         )
     )
 
@@ -183,8 +186,29 @@ async def wait_for_server(base_url: str, timeout: float = 30.0) -> bool:
     return False
 
 
+def _kill_existing_server(port: int) -> None:
+    """Kill any existing sybil-api process on the given port."""
+    try:
+        result = subprocess.run(
+            ["lsof", "-ti", f":{port}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        pids = result.stdout.strip().split()
+        for pid in pids:
+            if pid:
+                console.print(f"[yellow]Killing existing process on port {port} (pid {pid})[/yellow]")
+                os.kill(int(pid), signal.SIGTERM)
+        if pids and pids[0]:
+            import time
+            time.sleep(1)
+    except Exception:
+        pass
+
+
 def start_server(port: int = 3001) -> subprocess.Popen:
-    """Start sybil-api as a subprocess."""
+    """Start sybil-api as a subprocess, killing any existing server first."""
+    _kill_existing_server(port)
+
     project_root = Path(__file__).parent.parent
     cmd = [
         "cargo",
@@ -197,7 +221,7 @@ def start_server(port: int = 3001) -> subprocess.Popen:
         "--port",
         str(port),
     ]
-    console.print(f"[bold]Starting sybil-api on port {port}...[/bold]")
+    console.print(f"[bold]Building & starting sybil-api on port {port}...[/bold]")
     proc = subprocess.Popen(
         cmd,
         cwd=project_root,
@@ -249,9 +273,9 @@ async def run_demo(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Arena Demo: AI Sports Trading Tournament")
     parser.add_argument(
-        "--start-server",
+        "--no-server",
         action="store_true",
-        help="Start sybil-api automatically",
+        help="Don't start sybil-api (use existing server)",
     )
     parser.add_argument(
         "--compression",
@@ -285,7 +309,7 @@ def main() -> None:
     base_url = os.environ.get("SYBIL_API_URL", f"http://localhost:{args.port}")
 
     server_proc = None
-    if args.start_server:
+    if not args.no_server:
         server_proc = start_server(args.port)
 
     try:
@@ -293,8 +317,8 @@ def main() -> None:
         console.print(f"[bold]Waiting for sybil-api at {base_url}...[/bold]")
         if not asyncio.run(wait_for_server(base_url)):
             console.print("[red]Server failed to start! Is sybil-api running?[/red]")
-            if not args.start_server:
-                console.print("Try: just arena-demo  (starts server automatically)")
+            if args.no_server:
+                console.print("Try running without --no-server (default builds & starts server)")
                 console.print("Or:  cargo run --release -p sybil-api -- --dev-mode --port 3001")
             sys.exit(1)
         console.print("[green]Server is ready![/green]\n")

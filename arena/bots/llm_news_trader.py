@@ -19,8 +19,9 @@ DEFAULT_SYSTEM_PROMPT = (
     "You are an NBA analyst estimating real-time win probabilities.\n"
     "Given live game updates, estimate the probability that the HOME team wins.\n"
     "Consider: current score, quarter, momentum, injuries, matchups.\n"
-    "Respond with ONLY a JSON object mapping market keys to probabilities.\n"
+    "First output a JSON object mapping market keys to probabilities.\n"
     "Example: {\"market_0\": 0.65, \"market_1\": 0.30}\n"
+    "Then write 1-2 sentences of reasoning explaining your key factors.\n"
     "Use the full probability range. A 20-point lead in Q4 should be ~0.95."
 )
 
@@ -29,9 +30,9 @@ CONTRARIAN_SYSTEM_PROMPT = (
     "You tend to believe the market overreacts to recent news. A star injury doesn't\n"
     "doom a team - others step up. A big lead can evaporate. Recent momentum is noise.\n"
     "Given live game updates, estimate the probability that the HOME team wins.\n"
-    "Respond with ONLY a JSON object mapping market keys to probabilities.\n"
+    "First output a JSON object mapping market keys to probabilities.\n"
     "Example: {\"market_0\": 0.65, \"market_1\": 0.30}\n"
-    "Use the full probability range but lean against the crowd."
+    "Then write 1-2 sentences of reasoning. Use the full range but lean against the crowd."
 )
 
 
@@ -156,9 +157,9 @@ class LLMNewsTrader(BacktestAgent):
         model_name: str = "claude-sonnet-4-5-20250929",
         api_key: str = "",
         system_prompt: str | None = None,
-        edge_threshold: float = 0.04,
-        order_size: int = 8,
-        max_position: int = 50,
+        edge_threshold: float = 0.03,
+        order_size: int = 15,
+        max_position: int = 80,
         min_blocks_between_calls: int = 5,
     ):
         super().__init__(
@@ -269,22 +270,21 @@ class LLMNewsTrader(BacktestAgent):
                 response = await asyncio.wait_for(
                     llm_client.messages.create(
                         model=self.model_name,
-                        max_tokens=200,
+                        max_tokens=400,
                         system=self.system_prompt,
                         messages=[
                             {"role": "user", "content": prompt},
-                            {"role": "assistant", "content": "{"},
                         ],
                     ),
                     timeout=10.0,
                 )
-                return "{" + response.content[0].text
+                return response.content[0].text
 
             elif self.provider == "openai":
                 response = await asyncio.wait_for(
                     llm_client.chat.completions.create(
                         model=self.model_name,
-                        max_tokens=200,
+                        max_tokens=400,
                         response_format={"type": "json_object"},
                         messages=[
                             {"role": "system", "content": self.system_prompt},
@@ -373,12 +373,14 @@ class LLMNewsTrader(BacktestAgent):
 
             if edge > self.edge_threshold:
                 if yes_pos < self.max_position:
-                    bid_price = min(0.95, market_prob + 0.02)
+                    # Bid halfway between market and our estimate (more aggressive with conviction)
+                    bid_price = min(0.95, market_prob + edge * 0.5)
                     orders.append(BuyYes.at_price(market_id, bid_price, self.order_size))
             elif edge < -self.edge_threshold:
                 if no_pos < self.max_position:
                     no_price = 1 - market_prob
-                    bid_price = min(0.95, no_price + 0.02)
+                    no_edge = -edge  # positive magnitude
+                    bid_price = min(0.95, no_price + no_edge * 0.5)
                     orders.append(BuyNo.at_price(market_id, bid_price, self.order_size))
 
         return orders

@@ -114,9 +114,9 @@ class BacktestTightMM(BacktestFlashMM):
             event_market_map=event_market_map,
             budget_dollars=budget_dollars,
             half_spread_bps=50,
-            num_levels=4,
+            num_levels=3,
             level_spacing_bps=25,
-            quote_size=15,
+            quote_size=5,
             skew_factor=0.15,
         )
 
@@ -145,6 +145,6 @@ class BacktestWideMM(BacktestFlashMM):
             half_spread_bps=200,
             num_levels=2,
             level_spacing_bps=100,
-            quote_size=8,
+            quote_size=3,
             skew_factor=0.05,
         )

@@ -12,6 +12,8 @@ from rich.table import Table
 
 from sybil_client import SybilClient
 
+from collections import deque
+
 from .agent import BacktestAgent, BacktestAgentConfig
 from .clock import SimulatedClock
 from .dataset import Dataset, Event
@@ -113,6 +115,8 @@ class BacktestRunner:
     _latest_prices: dict[int, tuple[int, int]] = field(default_factory=dict, init=False)
     _market_display_names: dict[int, str] = field(default_factory=dict, init=False)
     _last_block: Any = field(default=None, init=False)
+    _thought_history: deque = field(default=None, init=False)
+    _seen_reasoning: dict[str, str] = field(default_factory=dict, init=False)
 
     async def _setup_markets(self) -> None:
         """Create markets for all events in the dataset."""
@@ -309,6 +313,14 @@ class BacktestRunner:
 
         return Panel(table, title="LEADERBOARD", border_style="green")
 
+    def _market_short_name(self, market_id: int) -> str:
+        """Get a short display name for a market (e.g. 'CEL vs PIS')."""
+        name = self._market_display_names.get(market_id, f"M{market_id}")
+        parts = name.split(" vs ")
+        if len(parts) == 2:
+            return " vs ".join(p.split()[-1][:3].upper() for p in parts)
+        return name[:10]
+
     def _build_orders_panel(self) -> Panel:
         """Build the ORDERS panel showing what each bot submitted last block."""
         from sybil_client import BuyYes, BuyNo, SellYes, SellNo
@@ -320,27 +332,40 @@ class BacktestRunner:
                 lines.append(f" [dim]{agent.name}: no orders[/dim]")
                 continue
 
-            # Summarize orders by type
-            buy_yes = [o for o in orders if isinstance(o, BuyYes)]
-            buy_no = [o for o in orders if isinstance(o, BuyNo)]
-            sell_yes = [o for o in orders if isinstance(o, SellYes)]
-            sell_no = [o for o in orders if isinstance(o, SellNo)]
-
-            parts = []
-            if buy_yes:
-                prices = [o.limit_price_nanos / NANOS_PER_DOLLAR for o in buy_yes]
-                qty = sum(o.quantity for o in buy_yes)
-                parts.append(f"[green]BY {qty}@{min(prices):.2f}-{max(prices):.2f}[/green]")
-            if buy_no:
-                prices = [o.limit_price_nanos / NANOS_PER_DOLLAR for o in buy_no]
-                qty = sum(o.quantity for o in buy_no)
-                parts.append(f"[red]BN {qty}@{min(prices):.2f}-{max(prices):.2f}[/red]")
-            if sell_yes:
-                parts.append(f"SY {len(sell_yes)}")
-            if sell_no:
-                parts.append(f"SN {len(sell_no)}")
-
-            lines.append(f" {agent.name}: {' | '.join(parts)}  ({agent.total_orders_submitted} total)")
+            # Group by market for directional bots (non-MM)
+            is_mm = "MM" in (agent.name or "")
+            if is_mm:
+                # MMs: just show aggregate
+                buy_yes = [o for o in orders if isinstance(o, BuyYes)]
+                buy_no = [o for o in orders if isinstance(o, BuyNo)]
+                parts = []
+                if buy_yes:
+                    qty = sum(o.quantity for o in buy_yes)
+                    parts.append(f"[green]BY {qty}[/green]")
+                if buy_no:
+                    qty = sum(o.quantity for o in buy_no)
+                    parts.append(f"[red]BN {qty}[/red]")
+                lines.append(f" {agent.name}: {' | '.join(parts)} ({agent.total_orders_submitted} total)")
+            else:
+                # Directional: show per-market
+                by_market: dict[int, list] = {}
+                for o in orders:
+                    mid = o.market_id
+                    by_market.setdefault(mid, []).append(o)
+                order_parts = []
+                for mid, morders in sorted(by_market.items()):
+                    short = self._market_short_name(mid)
+                    for o in morders:
+                        price = o.limit_price_nanos / NANOS_PER_DOLLAR
+                        if isinstance(o, BuyYes):
+                            order_parts.append(f"[green]{short} BY {o.quantity}@{price:.0%}[/green]")
+                        elif isinstance(o, BuyNo):
+                            order_parts.append(f"[red]{short} BN {o.quantity}@{price:.0%}[/red]")
+                        elif isinstance(o, SellYes):
+                            order_parts.append(f"{short} SY {o.quantity}@{price:.0%}")
+                        elif isinstance(o, SellNo):
+                            order_parts.append(f"{short} SN {o.quantity}@{price:.0%}")
+                lines.append(f" {agent.name}: {', '.join(order_parts)}")
 
         # Show last block fills if available
         if self._last_block:
@@ -369,15 +394,31 @@ class BacktestRunner:
         content = "\n".join(lines) if lines else "[dim]No orders yet[/dim]"
         return Panel(content, title="ORDERS & LAST BATCH", border_style="magenta")
 
-    def _build_thoughts_panel(self) -> Panel:
-        """Build the AI THOUGHTS panel showing LLM reasoning."""
-        lines = []
+    def _collect_new_thoughts(self) -> None:
+        """Check agents for new reasoning and add to history."""
+        if self._thought_history is None:
+            self._thought_history = deque(maxlen=12)
         for agent in self._agents:
             reasoning = getattr(agent, "last_reasoning", "")
-            if reasoning:
-                lines.append(f" [bold]{agent.name}[/bold]: {reasoning}")
-        content = "\n".join(lines) if lines else "[dim]Waiting for LLM responses...[/dim]"
-        return Panel(content, title="AI THOUGHTS", border_style="blue")
+            if reasoning and reasoning != self._seen_reasoning.get(agent.name):
+                self._seen_reasoning[agent.name] = reasoning
+                sim_time = self._clock.now().strftime("%H:%M")
+                self._thought_history.appendleft((sim_time, agent.name, reasoning))
+
+    def _build_thoughts_panel(self) -> Panel:
+        """Build the AI THOUGHTS panel showing LLM reasoning history."""
+        self._collect_new_thoughts()
+        if not self._thought_history:
+            content = "[dim]Waiting for LLM responses...[/dim]"
+        else:
+            lines = []
+            for sim_time, name, reasoning in self._thought_history:
+                # Truncate long reasoning to fit
+                text = reasoning[:200] + "..." if len(reasoning) > 200 else reasoning
+                lines.append(f" [dim]{sim_time}[/dim] [bold]{name}[/bold]: {text}")
+            content = "\n".join(lines)
+        height = min(16, 3 + len(self._thought_history or []))
+        return Panel(content, title="AI THOUGHTS", border_style="blue", height=height)
 
     def _build_display(self) -> Group:
         """Build the full 5-panel display."""

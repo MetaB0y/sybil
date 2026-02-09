@@ -34,9 +34,24 @@ def format_news_line(news: NewsItem) -> str:
         quarter = meta.get("quarter", "?")
         home_score = meta.get("home_score", "?")
         away_score = meta.get("away_score", "?")
+        score_tag = f"{home_score}-{away_score}"
         if meta.get("final"):
-            return f"[FINAL] {home_score} - {away_score}"
-        return f"[Q{quarter} END] {home_score} - {away_score}"
+            return f"[FINAL] {score_tag}"
+        if meta.get("halftime"):
+            return f"[HALFTIME] {score_tag} — {news.content[:60]}"
+        if meta.get("run_team"):
+            return f"[Q{quarter} {score_tag}] {meta['run_team']} on {meta.get('run_points', '?')}-0 run"
+        if "milestone" in news.headline.lower() or meta.get("player"):
+            player = meta.get("player", "")
+            pts = meta.get("points", "")
+            if player and pts:
+                return f"[Q{quarter} {score_tag}] {player} has {pts} pts"
+        if "lead change" in news.headline.lower():
+            return f"[Q{quarter} {score_tag}] Lead change! {news.headline.split(': ')[-1]}"
+        if "timeout" in news.headline.lower():
+            return f"[Q{quarter} {score_tag}] {news.headline}"
+        # Default: quarter end or generic in-game
+        return f"[Q{quarter} END] {score_tag}"
     elif news.source == "injury":
         player = meta.get("player", "Unknown")
         status = meta.get("status", meta.get("severity", "unknown"))
@@ -78,9 +93,9 @@ class StrategyAgent(BacktestAgent):
         event_market_map: dict[str, int] | None = None,
         *,
         strategy_fn=None,
-        edge_threshold: float = 0.05,
-        order_size: int = 5,
-        max_position: int = 50,
+        edge_threshold: float = 0.03,
+        order_size: int = 10,
+        max_position: int = 80,
     ):
         super().__init__(
             client=client,
@@ -207,12 +222,13 @@ class StrategyAgent(BacktestAgent):
 
             if edge > self.edge_threshold:
                 if yes_pos < self.max_position:
-                    bid_price = min(0.95, market_prob + 0.02)
+                    bid_price = min(0.95, market_prob + edge * 0.5)
                     orders.append(BuyYes.at_price(market_id, bid_price, self.order_size))
             elif edge < -self.edge_threshold:
                 if no_pos < self.max_position:
                     no_price = 1 - market_prob
-                    bid_price = min(0.95, no_price + 0.02)
+                    no_edge = -edge
+                    bid_price = min(0.95, no_price + no_edge * 0.5)
                     orders.append(BuyNo.at_price(market_id, bid_price, self.order_size))
 
         return orders
