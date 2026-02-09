@@ -196,8 +196,8 @@ impl SequencerActor {
             .as_millis() as u64;
 
         let submissions = self.mempool.drain();
-        let (block, _pipeline_result, _witness) =
-            self.sequencer.produce_block(submissions, timestamp_ms);
+        let bp = self.sequencer.produce_block(submissions, timestamp_ms);
+        let block = bp.block;
 
         // Update last known prices from this block
         for (market_id, prices) in &block.clearing_prices {

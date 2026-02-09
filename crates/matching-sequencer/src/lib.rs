@@ -17,7 +17,7 @@ pub mod validation;
 
 pub use account::{Account, AccountId, AccountStore};
 pub use actor::{MarketSearchResult, SequencerHandle};
-pub use block::Block;
+pub use block::{Block, BlockProduction};
 pub use crypto::{PublicKey, SignedOrder};
 pub use error::{Rejection, RejectionReason, SequencerError};
 pub use market_info::{

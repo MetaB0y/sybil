@@ -1,9 +1,18 @@
 use std::collections::HashMap;
 
 use matching_engine::{Fill, MarketId, Nanos};
+use matching_solver::PipelineResult;
+use sybil_verifier::BlockWitness;
 
 use crate::account::AccountStore;
 use crate::error::Rejection;
+
+/// Named result of [`BlockSequencer::produce_block`].
+pub struct BlockProduction {
+    pub block: Block,
+    pub pipeline: PipelineResult,
+    pub witness: BlockWitness,
+}
 
 /// Header of a sequencer block.
 #[derive(Clone, Debug)]

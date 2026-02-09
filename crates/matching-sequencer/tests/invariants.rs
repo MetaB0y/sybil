@@ -149,9 +149,9 @@ proptest! {
         submissions in arb_trading_batch(N_ACCOUNTS, N_MARKETS, make_markets()),
     ) {
         let (mut seq, markets) = make_sequencer();
-        let (block, _, _) = seq.produce_block(submissions, 1000);
+        let bp = seq.produce_block(submissions, 1000);
 
-        let n_fills = block.fills.iter().filter(|f| f.fill_qty > 0).count();
+        let n_fills = bp.block.fills.iter().filter(|f| f.fill_qty > 0).count();
         if n_fills > 0 {
             TRADES_SEEN.fetch_add(n_fills as u64, Ordering::Relaxed);
             CASES_WITH_TRADES.fetch_add(1, Ordering::Relaxed);
@@ -166,18 +166,18 @@ proptest! {
         let (mut seq, _) = make_sequencer();
 
         let pre_balance: i64 = seq.accounts.iter().map(|(_, a)| a.balance).sum();
-        let (block1, _, _) = seq.produce_block(vec![], 1000);
+        let bp1 = seq.produce_block(vec![], 1000);
         let post_balance: i64 = seq.accounts.iter().map(|(_, a)| a.balance).sum();
 
         assert_eq!(pre_balance, post_balance, "Empty block changed balances");
-        assert!(block1.fills.is_empty(), "Empty block produced fills");
-        assert_eq!(block1.total_welfare, 0);
+        assert!(bp1.block.fills.is_empty(), "Empty block produced fills");
+        assert_eq!(bp1.block.total_welfare, 0);
 
         // Second empty block should produce the same state root
-        let state_root_after_first = block1.header.state_root;
-        let (block2, _, _) = seq.produce_block(vec![], 2000);
+        let state_root_after_first = bp1.block.header.state_root;
+        let bp2 = seq.produce_block(vec![], 2000);
         assert_eq!(
-            state_root_after_first, block2.header.state_root,
+            state_root_after_first, bp2.block.header.state_root,
             "Empty blocks changed state root"
         );
     }
@@ -190,14 +190,14 @@ proptest! {
         let (mut seq, _) = make_sequencer();
 
         // Genesis block
-        let (block0, _, _) = seq.produce_block(vec![], 1000);
-        assert_eq!(block0.header.parent_hash, [0u8; 32], "Genesis parent != zeros");
+        let bp0 = seq.produce_block(vec![], 1000);
+        assert_eq!(bp0.block.header.parent_hash, [0u8; 32], "Genesis parent != zeros");
 
         // Second block with trades
-        let (block1, _, _) = seq.produce_block(submissions, 2000);
-        let expected_parent = matching_sequencer::block::hash_header(&block0.header);
+        let bp1 = seq.produce_block(submissions, 2000);
+        let expected_parent = matching_sequencer::block::hash_header(&bp0.block.header);
         assert_eq!(
-            block1.header.parent_hash, expected_parent,
+            bp1.block.header.parent_hash, expected_parent,
             "Block 1 parent hash doesn't match hash of block 0 header"
         );
     }
@@ -209,14 +209,14 @@ proptest! {
     ) {
         // Run 1
         let (mut seq1, _) = make_sequencer();
-        let (block1, _, _) = seq1.produce_block(submissions.clone(), 1000);
+        let bp1 = seq1.produce_block(submissions.clone(), 1000);
 
         // Run 2 (same scenario)
         let (mut seq2, _) = make_sequencer();
-        let (block2, _, _) = seq2.produce_block(submissions, 1000);
+        let bp2 = seq2.produce_block(submissions, 1000);
 
         assert_eq!(
-            block1.header.state_root, block2.header.state_root,
+            bp1.block.header.state_root, bp2.block.header.state_root,
             "Identical scenarios produced different state roots"
         );
     }
@@ -233,7 +233,7 @@ proptest! {
 
         // Run with original order
         let (mut seq1, _) = make_sequencer();
-        let (block1, _, _) = seq1.produce_block(submissions.clone(), 1000);
+        let bp1 = seq1.produce_block(submissions.clone(), 1000);
 
         // Run with shuffled order
         let mut shuffled = submissions;
@@ -241,14 +241,14 @@ proptest! {
         shuffled.shuffle(&mut rng);
 
         let (mut seq2, _) = make_sequencer();
-        let (block2, _, _) = seq2.produce_block(shuffled, 1000);
+        let bp2 = seq2.produce_block(shuffled, 1000);
 
         assert_eq!(
-            block1.clearing_prices, block2.clearing_prices,
+            bp1.block.clearing_prices, bp2.block.clearing_prices,
             "Shuffled submissions produced different clearing prices"
         );
         assert_eq!(
-            block1.total_welfare, block2.total_welfare,
+            bp1.block.total_welfare, bp2.block.total_welfare,
             "Shuffled submissions produced different welfare"
         );
     }
@@ -316,7 +316,7 @@ proptest! {
     ) {
         // Run with base quantities
         let (mut seq1, _) = make_sequencer();
-        let (block1, _, _) = seq1.produce_block(base_submissions.clone(), 1000);
+        let bp1 = seq1.produce_block(base_submissions.clone(), 1000);
 
         // Double all quantities
         let doubled: Vec<OrderSubmission> = base_submissions
@@ -339,26 +339,26 @@ proptest! {
             .collect();
 
         let (mut seq2, _) = make_sequencer();
-        let (block2, _, _) = seq2.produce_block(doubled, 1000);
+        let bp2 = seq2.produce_block(doubled, 1000);
 
         // Clearing prices should be the same
         assert_eq!(
-            block1.clearing_prices, block2.clearing_prices,
+            bp1.block.clearing_prices, bp2.block.clearing_prices,
             "Doubled quantities changed clearing prices"
         );
 
         // Welfare MUST double — no silent pass when welfare is 0.
         // With crossing pairs, we should always get trades.
         assert!(
-            block1.total_welfare > 0,
+            bp1.block.total_welfare > 0,
             "Base batch produced zero welfare — strategy isn't generating crossing orders"
         );
         assert_eq!(
-            block2.total_welfare,
-            block1.total_welfare * 2,
+            bp2.block.total_welfare,
+            bp1.block.total_welfare * 2,
             "Doubled quantities didn't double welfare: base={} doubled={}",
-            block1.total_welfare,
-            block2.total_welfare
+            bp1.block.total_welfare,
+            bp2.block.total_welfare
         );
     }
 }
@@ -382,23 +382,23 @@ proptest! {
 
         let pre_balance: i64 = seq.accounts.iter().map(|(_, a)| a.balance).sum();
 
-        let (b1, _, _) = seq.produce_block(batch1, 1000);
+        let bp1 = seq.produce_block(batch1, 1000);
         assert_position_balance(&seq, &markets);
 
-        let (b2, _, _) = seq.produce_block(batch2, 2000);
+        let bp2 = seq.produce_block(batch2, 2000);
         assert_position_balance(&seq, &markets);
 
         // Block chaining
         assert_eq!(
-            b2.header.parent_hash,
-            matching_sequencer::block::hash_header(&b1.header)
+            bp2.block.header.parent_hash,
+            matching_sequencer::block::hash_header(&bp1.block.header)
         );
 
-        let (b3, _, _) = seq.produce_block(batch3, 3000);
+        let bp3 = seq.produce_block(batch3, 3000);
         assert_position_balance(&seq, &markets);
         assert_eq!(
-            b3.header.parent_hash,
-            matching_sequencer::block::hash_header(&b2.header)
+            bp3.block.header.parent_hash,
+            matching_sequencer::block::hash_header(&bp2.block.header)
         );
 
         // Total balance can only change by the value locked in positions.
@@ -464,10 +464,10 @@ fn crossing_pair_with_solo_order_still_matches() {
         mm_constraint: None,
     };
 
-    let (block, _, _) = seq.produce_block(vec![buyer_yes, buyer_no, solo], 1000);
+    let bp = seq.produce_block(vec![buyer_yes, buyer_no, solo], 1000);
     assert!(
-        !block.fills.is_empty(),
+        !bp.block.fills.is_empty(),
         "Crossing pair must still match when an unfilled solo order is present"
     );
-    assert!(block.total_welfare > 0);
+    assert!(bp.block.total_welfare > 0);
 }

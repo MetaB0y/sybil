@@ -5,13 +5,14 @@ use matching_engine::{
     Fill, MarketGroup, MarketId, MarketSet, MmConstraint, Nanos, Order, Problem,
 };
 use matching_solver::{Pipeline, PipelineResult};
+use tracing::debug;
 use sybil_oracle::{MarketStatus, Oracle, ResolutionAction, ResolutionRecord};
 use sybil_verifier::{
     AccountSnapshot, BlockWitness, WitnessBlockHeader, WitnessOrder, WitnessRejection,
 };
 
 use crate::account::{AccountId, AccountStore};
-use crate::block::{compute_state_root, hash_header, Block, BlockHeader};
+use crate::block::{compute_state_root, hash_header, Block, BlockHeader, BlockProduction};
 use crate::error::{Rejection, RejectionReason, SequencerError};
 use crate::market_info::{AccountFillRecord, MarketMetadata, PricePoint};
 use crate::settlement;
@@ -333,12 +334,14 @@ impl BlockSequencer {
     /// Problem → solve → settle → persist unfilled → compute state root → build Block.
     ///
     /// Returns the block, pipeline result, and a `BlockWitness` for verification.
+    #[tracing::instrument(skip_all, fields(height))]
     pub fn produce_block(
         &mut self,
         submissions: Vec<OrderSubmission>,
         timestamp_ms: u64,
-    ) -> (Block, PipelineResult, BlockWitness) {
+    ) -> BlockProduction {
         self.height += 1;
+        tracing::Span::current().record("height", self.height);
 
         let mut all_orders: Vec<Order> = Vec::new();
         let mut all_mm_constraints: Vec<MmConstraint> = Vec::new();
@@ -802,6 +805,17 @@ impl BlockSequencer {
 
         self.last_header = Some(header.clone());
 
+        debug!(
+            orders_submitted,
+            accepted = order_ids.len(),
+            rejected = rejections.len(),
+            fills = fills.len(),
+            orders_filled,
+            total_welfare,
+            total_volume,
+            "block produced"
+        );
+
         let block = Block {
             header,
             order_ids,
@@ -813,7 +827,11 @@ impl BlockSequencer {
             orders_filled,
         };
 
-        (block, pipeline_result, witness)
+        BlockProduction {
+            block,
+            pipeline: pipeline_result,
+            witness,
+        }
     }
 }
 
@@ -933,10 +951,10 @@ mod tests {
         // Temporarily swap markets/groups for this batch
         let old_markets = std::mem::replace(&mut seq.markets, markets.clone());
         let old_groups = std::mem::replace(&mut seq.market_groups, market_groups.to_vec());
-        let (block, pr, _witness) = seq.produce_block(submissions, 0);
+        let bp = seq.produce_block(submissions, 0);
         seq.markets = old_markets;
         seq.market_groups = old_groups;
-        batch_result_from_block(&block, pr)
+        batch_result_from_block(&bp.block, bp.pipeline)
     }
 
     // --- Validation tests ---
@@ -1365,10 +1383,10 @@ mod tests {
             Arc::new(AdminOracle::new()),
         );
 
-        let (block, _, _) = seq.produce_block(vec![], 1000);
-        assert_eq!(block.header.height, 1);
-        assert_eq!(block.header.parent_hash, [0u8; 32]); // genesis
-        assert_eq!(block.header.timestamp_ms, 1000);
+        let bp = seq.produce_block(vec![], 1000);
+        assert_eq!(bp.block.header.height, 1);
+        assert_eq!(bp.block.header.parent_hash, [0u8; 32]); // genesis
+        assert_eq!(bp.block.header.timestamp_ms, 1000);
     }
 
     #[test]
@@ -1382,12 +1400,12 @@ mod tests {
             Arc::new(AdminOracle::new()),
         );
 
-        let (block1, _, _) = seq.produce_block(vec![], 1000);
-        let expected_parent = hash_header(&block1.header);
+        let bp1 = seq.produce_block(vec![], 1000);
+        let expected_parent = hash_header(&bp1.block.header);
 
-        let (block2, _, _) = seq.produce_block(vec![], 2000);
-        assert_eq!(block2.header.parent_hash, expected_parent);
-        assert_eq!(block2.header.height, 2);
+        let bp2 = seq.produce_block(vec![], 2000);
+        assert_eq!(bp2.block.header.parent_hash, expected_parent);
+        assert_eq!(bp2.block.header.height, 2);
     }
 
     #[test]
@@ -1402,8 +1420,8 @@ mod tests {
             Arc::new(AdminOracle::new()),
         );
 
-        let (block1, _, _) = seq.produce_block(vec![], 0);
-        let root1 = block1.header.state_root;
+        let bp1 = seq.produce_block(vec![], 0);
+        let root1 = bp1.block.header.state_root;
 
         // Submit an order that will change state
         let sub = OrderSubmission {
@@ -1411,13 +1429,13 @@ mod tests {
             orders: vec![outcome_buy(&markets, 0, m0, 0, 500_000_000, 1)],
             mm_constraint: None,
         };
-        let (block2, _, _) = seq.produce_block(vec![sub], 0);
+        let bp2 = seq.produce_block(vec![sub], 0);
 
         // State root should reflect the updated account state
         // (even if the order didn't fill, state root is computed after settlement)
-        assert_eq!(block2.header.state_root, compute_state_root(&seq.accounts));
+        assert_eq!(bp2.block.header.state_root, compute_state_root(&seq.accounts));
         // First and second blocks should have the same state root since no fills happened
         // (only pending orders changed, which aren't in the state root)
-        assert_eq!(root1, block2.header.state_root);
+        assert_eq!(root1, bp2.block.header.state_root);
     }
 }

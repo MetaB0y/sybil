@@ -11,6 +11,7 @@
 //! - [`LocalSolver::solve_market`]: Per-outcome clearing
 
 use serde::Serialize;
+use tracing::debug;
 
 use matching_engine::{Fill, MarketId, MarketSet, Nanos, Order, Qty, NANOS_PER_DOLLAR};
 
@@ -27,6 +28,9 @@ pub struct MarketSolution {
     pub welfare: i64,
     /// Orders that couldn't be filled
     pub unfilled: Vec<u64>,
+    /// Whether this solution represents real market activity (fills or price discovery).
+    /// False for default/empty solutions whose prices are synthetic.
+    pub has_activity: bool,
 }
 
 impl MarketSolution {
@@ -42,6 +46,7 @@ impl MarketSolution {
             fills: Vec::new(),
             welfare: 0,
             unfilled: Vec::new(),
+            has_activity: false,
         }
     }
 
@@ -153,12 +158,14 @@ impl LocalSolver {
         all_unfilled.dedup();
         all_unfilled.retain(|id| !filled_ids.contains(id));
 
+        let has_activity = !all_fills.is_empty();
         MarketSolution {
             market_id,
             prices,
             fills: all_fills,
             welfare: total_welfare,
             unfilled: all_unfilled,
+            has_activity,
         }
     }
 
@@ -255,6 +262,7 @@ impl LocalSolver {
         // Find clearing price via supply-demand crossing
         let (clearing_price_yes, matched_qty) = Self::find_crossing(&demand_points, &supply_points);
         let clearing_price_no = NANOS_PER_DOLLAR.saturating_sub(clearing_price_yes);
+        debug!(market = ?market_id, clearing_yes = clearing_price_yes, matched_qty);
 
         // Reserve capacity for extra demand/supply — real orders fill only the remainder.
         let demand_real_capacity = matched_qty.saturating_sub(extra_unified_demand);
@@ -386,12 +394,14 @@ impl LocalSolver {
         unfilled.dedup();
         unfilled.retain(|id| !filled_ids.contains(id));
 
+        let has_activity = !fills.is_empty();
         MarketSolution {
             market_id,
             prices: vec![clearing_price_yes, clearing_price_no],
             fills,
             welfare,
             unfilled,
+            has_activity,
         }
     }
 
@@ -874,6 +884,15 @@ impl PriceDiscoverer for LocalSolver {
             let solution = self.solve_market(market.id, &problem.markets, &problem.orders);
             result.add_market_solution(solution);
         }
+
+        let total_fills: usize = result.market_solutions.values().map(|s| s.fills.len()).sum();
+        let total_welfare: i64 = result.market_solutions.values().map(|s| s.welfare).sum();
+        debug!(
+            markets = result.market_solutions.len(),
+            total_fills,
+            total_welfare,
+            "price discovery complete"
+        );
 
         result
     }

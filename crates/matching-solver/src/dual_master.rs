@@ -21,6 +21,7 @@ use matching_engine::{
     Fill, MarketGroup, MarketId, MmConstraint, Nanos, Order, Problem, Qty, NANOS_PER_DOLLAR,
 };
 use serde::Serialize;
+use tracing::debug;
 
 use crate::local_solver::LocalSolver;
 use crate::specialized::MultiMarketSolver;
@@ -158,6 +159,7 @@ impl DualMaster {
     /// Main dual decomposition solve loop.
     ///
     /// Accumulates fills across iterations with greedy MM knapsack allocation.
+    #[tracing::instrument(skip_all, name = "dual_master")]
     pub fn solve(&self, problem: &Problem) -> DualResult {
         let mut state = DualState::default();
 
@@ -374,12 +376,20 @@ impl DualMaster {
                 fills: iter_fills,
                 mm_fills: iter_mm_fills,
             });
+            debug!(
+                iter,
+                fills = iter_fills,
+                mm_fills = iter_mm_fills,
+                welfare = current_welfare,
+                max_price_residual,
+                "iteration complete"
+            );
 
-            // Merge prices: only update markets that had fills this iteration.
-            // Markets where remaining orders didn't cross produce default (50/50)
-            // prices that would overwrite valid prices from earlier iterations.
+            // Merge prices: only update markets that had activity this iteration.
+            // Markets without activity produce synthetic default (50/50) prices
+            // that would overwrite valid prices from earlier iterations.
             for (mid, sol) in prices.market_solutions {
-                if !sol.fills.is_empty() {
+                if sol.has_activity {
                     last_prices.prices.insert(mid, sol.prices.clone());
                     last_prices.market_solutions.insert(mid, sol);
                 } else if !last_prices.market_solutions.contains_key(&mid) {

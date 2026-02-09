@@ -23,12 +23,28 @@ The **matching-solver** crate is the core optimization engine for welfare-maximi
 Pipelines are built via `PipelineBuilder` and run phases in sequence:
 
 ```
-Pipeline::current()         → LocalSolver → MmAllocator
+Pipeline::current()         → with_dual_decomposition()
 Pipeline::with_negrisk()    → Fixed-point: LocalSolver → NegriskSolver → MmAllocator
 Pipeline::with_dual_decomposition() → DualMaster → MultiMarketSolver
 ```
 
 The pipeline can iterate (fixed-point) until welfare converges.
+
+## Pipeline Flow (Dual Decomposition)
+
+`Pipeline::current()` = `with_dual_decomposition()`. This is the production path.
+
+1. **DualMaster** runs multiple iterations internally, shading orders with Lagrangian multipliers (λ) to enforce price consistency across market groups.
+2. Each iteration: LocalSolver clears each market → greedy MM knapsack allocates budget → fills accumulated, filled orders removed.
+3. Price merge: only markets with `has_activity == true` update prices. Markets without activity retain prices from earlier iterations (prevents 50/50 overwrite bug).
+4. After convergence (or max iterations), partial solvers (MILP if enabled) handle remaining multi-market orders.
+5. **`enforce_ucp`** runs AFTER the pipeline, re-pricing all single-market binary fills at the final clearing prices. Three sub-phases:
+   - `reprice_and_filter_fills`: re-price at final prices, drop limit-violating fills
+   - `trim_position_imbalance`: ensure YES qty == NO qty per market (trim lowest welfare first)
+   - `collect_final_fills`: filter zero-qty, recompute stats
+6. If total welfare is negative after UCP enforcement, the result is cleared (no fills).
+
+**Important**: `MarketSolution::empty()` has `has_activity: false` — never treat its prices as real market signals.
 
 ## Trait Hierarchy
 

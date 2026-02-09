@@ -1209,6 +1209,7 @@ dependencies = [
  "sybil-verifier",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1236,6 +1237,7 @@ dependencies = [
  "russcip",
  "serde",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
