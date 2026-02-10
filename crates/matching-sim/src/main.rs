@@ -24,8 +24,7 @@ use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Cell, Color
 use matching_engine::{MarketId, Order, Problem};
 use matching_scenarios::{generate_scenario, ScenarioConfig};
 use matching_solver::{
-    IterationStats, MilpConfig, MilpSolver, MmBudgetMode, Pipeline, PipelineResult, Solver,
-    VizSnapshot,
+    IterationStats, MilpConfig, MilpSolver, MmBudgetMode, Pipeline, PipelineResult, VizSnapshot,
 };
 use sybil_verifier::{
     verify_match, BlockWitness, VerificationResult, WitnessBlockHeader, WitnessOrder,
@@ -1201,27 +1200,6 @@ fn create_milp_solver(milp_timeout: Option<f64>, mm_mode: MmBudgetMode) -> MilpS
     })
 }
 
-fn create_solvers(
-    choice: &SolverChoice,
-    milp_timeout: Option<f64>,
-    mm_mode: MmBudgetMode,
-) -> Vec<Box<dyn Solver>> {
-    match choice {
-        SolverChoice::Milp => {
-            vec![Box::new(create_milp_solver(milp_timeout, mm_mode))]
-        }
-        SolverChoice::Pipeline => vec![Box::new(Pipeline::current())],
-        SolverChoice::Negrisk => vec![Box::new(Pipeline::with_negrisk())],
-        SolverChoice::Dual => vec![Box::new(Pipeline::with_dual_decomposition())],
-        SolverChoice::All => {
-            vec![
-                Box::new(create_milp_solver(milp_timeout, mm_mode)),
-                Box::new(Pipeline::with_negrisk()),
-                Box::new(Pipeline::with_dual_decomposition()),
-            ]
-        }
-    }
-}
 
 #[derive(Default)]
 struct SolverResults {
@@ -1232,6 +1210,7 @@ struct SolverResults {
     total_volume: u64,
     total_time_secs: f64,
     batches: usize,
+    verification: Option<VerificationResult>,
 }
 
 impl SolverResults {
@@ -1260,6 +1239,111 @@ impl SolverResults {
     }
 }
 
+/// Expand a solver choice into individual choices for comparison.
+fn expand_solver_choices(choice: &SolverChoice) -> Vec<SolverChoice> {
+    match choice {
+        SolverChoice::All => vec![SolverChoice::Milp, SolverChoice::Negrisk, SolverChoice::Dual],
+        other => vec![other.clone()],
+    }
+}
+
+/// Get the display name for a solver choice.
+fn solver_display_name(choice: &SolverChoice, milp_timeout: Option<f64>) -> String {
+    match choice {
+        SolverChoice::Milp => {
+            if milp_timeout.is_some() {
+                "MILP (time-limited)".to_string()
+            } else {
+                "MILP".to_string()
+            }
+        }
+        SolverChoice::Pipeline => "Pipeline".to_string(),
+        SolverChoice::Negrisk => "Negrisk".to_string(),
+        SolverChoice::Dual => "Dual Decomposition".to_string(),
+        SolverChoice::All => "All".to_string(),
+    }
+}
+
+/// Run a single solver choice on a problem and return (MatchingResult, witness for verification).
+fn run_solver_with_witness(
+    choice: &SolverChoice,
+    problem: &Problem,
+    milp_timeout: Option<f64>,
+    mm_mode: MmBudgetMode,
+) -> (matching_solver::MatchingResult, BlockWitness) {
+    match choice {
+        SolverChoice::Milp => {
+            let milp = create_milp_solver(milp_timeout, mm_mode);
+            let milp_result = milp.solve_with_status(problem);
+            let witness = witness_from_milp(problem, &milp_result);
+            (milp_result.result, witness)
+        }
+        SolverChoice::Pipeline | SolverChoice::Negrisk | SolverChoice::Dual => {
+            let pipeline = match choice {
+                SolverChoice::Negrisk => Pipeline::with_negrisk(),
+                SolverChoice::Dual => Pipeline::with_dual_decomposition(),
+                _ => Pipeline::current(),
+            };
+            let pipeline_result = pipeline.solve(problem);
+            let witness = witness_from_pipeline(problem, &pipeline_result);
+            (pipeline_result.result, witness)
+        }
+        SolverChoice::All => unreachable!("expand_solver_choices should be called first"),
+    }
+}
+
+/// Build a BlockWitness from a PipelineResult (includes arb orders for position balance).
+fn witness_from_pipeline(problem: &Problem, result: &PipelineResult) -> BlockWitness {
+    let mut problem_with_arb = problem.clone();
+    if let Some(ref negrisk) = result.negrisk {
+        for order in &negrisk.arbitrage_orders {
+            problem_with_arb.orders.push(order.clone());
+        }
+    }
+    witness_from_problem(&problem_with_arb, result)
+}
+
+/// Build a BlockWitness from a MilpResult.
+fn witness_from_milp(
+    problem: &Problem,
+    result: &matching_solver::MilpResult,
+) -> BlockWitness {
+    let witness_orders: Vec<WitnessOrder> = problem
+        .orders
+        .iter()
+        .map(|o| WitnessOrder {
+            order: o.clone(),
+            account_id: 0,
+            is_mm: problem
+                .mm_constraints
+                .iter()
+                .any(|mm| mm.order_ids.contains(&o.id)),
+        })
+        .collect();
+
+    BlockWitness {
+        header: WitnessBlockHeader {
+            height: 1,
+            parent_hash: [0u8; 32],
+            state_root: [0u8; 32],
+            order_count: problem.orders.len() as u32,
+            fill_count: result.result.fills.len() as u32,
+            timestamp_ms: 0,
+        },
+        previous_header: None,
+        orders: witness_orders,
+        rejections: vec![],
+        fills: result.result.fills.clone(),
+        clearing_prices: result.clearing_prices.clone(),
+        total_welfare: result.result.total_welfare,
+        mm_constraints: problem.mm_constraints.clone(),
+        market_groups: problem.market_groups.clone(),
+        pre_state: vec![],
+        post_state: vec![],
+        resolved_markets: vec![],
+    }
+}
+
 fn run_simulation(
     base_config: &ScenarioConfig,
     solver_choice: &SolverChoice,
@@ -1268,12 +1352,12 @@ fn run_simulation(
     num_batches: usize,
     verbose: bool,
 ) -> Vec<SolverResults> {
-    let solvers = create_solvers(solver_choice, milp_timeout, mm_mode);
+    let choices = expand_solver_choices(solver_choice);
 
-    let mut results: Vec<SolverResults> = solvers
+    let mut results: Vec<SolverResults> = choices
         .iter()
-        .map(|s| SolverResults {
-            name: s.name().to_string(),
+        .map(|c| SolverResults {
+            name: solver_display_name(c, milp_timeout),
             ..Default::default()
         })
         .collect();
@@ -1295,75 +1379,44 @@ fn run_simulation(
             println!("{}", problem.summary());
         }
 
-        for (i, solver) in solvers.iter().enumerate() {
+        for (i, choice) in choices.iter().enumerate() {
             let start = Instant::now();
 
-            // For MILP, use solve_with_status to get clearing prices for verification
-            let (result, milp_clearing_prices) = if solver.name().contains("MILP") {
-                let milp_solver = create_milp_solver(milp_timeout, mm_mode);
-                let milp_result = milp_solver.solve_with_status(&problem);
-                (milp_result.result, Some(milp_result.clearing_prices))
-            } else {
-                (solver.solve(&problem), None)
-            };
+            let (matching_result, witness) =
+                run_solver_with_witness(choice, &problem, milp_timeout, mm_mode);
 
             let elapsed = start.elapsed().as_secs_f64();
 
-            results[i].total_welfare += result.total_welfare;
-            results[i].total_filled += result.orders_filled;
+            results[i].total_welfare += matching_result.total_welfare;
+            results[i].total_filled += matching_result.orders_filled;
             results[i].total_orders += problem.num_orders();
-            results[i].total_volume += result.total_quantity_filled;
+            results[i].total_volume += matching_result.total_quantity_filled;
             results[i].total_time_secs += elapsed;
             results[i].batches += 1;
 
+            // Run verification
+            let verification = verify_match(&witness, false);
+
             if verbose {
                 println!(
-                    "  {}: welfare={}, filled={}/{}, time={:.3}s",
-                    solver.name(),
-                    format_welfare(result.total_welfare),
-                    result.orders_filled,
+                    "  {}: welfare={}, filled={}/{}, time={:.3}s  {}",
+                    results[i].name,
+                    format_welfare(matching_result.total_welfare),
+                    matching_result.orders_filled,
                     problem.num_orders(),
-                    elapsed
+                    elapsed,
+                    if verification.valid {
+                        "\u{2713} VALID".to_string()
+                    } else {
+                        format!("\u{2717} {} violations", verification.violations.len())
+                    }
                 );
+            }
 
-                // Run verification on MILP output
-                if let Some(ref prices) = milp_clearing_prices {
-                    let witness_orders: Vec<WitnessOrder> = problem
-                        .orders
-                        .iter()
-                        .map(|o| WitnessOrder {
-                            order: o.clone(),
-                            account_id: 0,
-                            is_mm: problem
-                                .mm_constraints
-                                .iter()
-                                .any(|mm| mm.order_ids.contains(&o.id)),
-                        })
-                        .collect();
-                    let witness = BlockWitness {
-                        header: WitnessBlockHeader {
-                            height: 1,
-                            parent_hash: [0u8; 32],
-                            state_root: [0u8; 32],
-                            order_count: problem.orders.len() as u32,
-                            fill_count: result.fills.len() as u32,
-                            timestamp_ms: 0,
-                        },
-                        previous_header: None,
-                        orders: witness_orders,
-                        rejections: vec![],
-                        fills: result.fills.clone(),
-                        clearing_prices: prices.clone(),
-                        total_welfare: result.total_welfare,
-                        mm_constraints: problem.mm_constraints.clone(),
-                        market_groups: problem.market_groups.clone(),
-                        pre_state: vec![],
-                        post_state: vec![],
-                        resolved_markets: vec![],
-                    };
-                    let verification = verify_match(&witness, false);
-                    print_verification_result(&verification);
-                }
+            // Merge verification (accumulate violations across batches)
+            match results[i].verification.as_mut() {
+                Some(existing) => existing.merge(verification),
+                None => results[i].verification = Some(verification),
             }
         }
 
@@ -1384,9 +1437,26 @@ fn print_results(results: &[SolverResults], choice: &SolverChoice) {
     table
         .load_preset(UTF8_FULL)
         .apply_modifier(UTF8_ROUND_CORNERS)
-        .set_header(vec!["Solver", "Welfare", "Fill %", "Volume", "Time (avg)"]);
+        .set_header(vec![
+            "Solver",
+            "Welfare",
+            "Fill %",
+            "Volume",
+            "Time (avg)",
+            "Verified",
+        ]);
 
-    let best_welfare = results.iter().map(|r| r.mean_welfare()).fold(0.0, f64::max);
+    // Best welfare among VALID solvers only (invalid results may have inflated welfare)
+    let best_valid_welfare = results
+        .iter()
+        .filter(|r| r.verification.as_ref().is_some_and(|v| v.valid))
+        .map(|r| r.mean_welfare())
+        .fold(0.0, f64::max);
+    let best_welfare = if best_valid_welfare > 0.0 {
+        best_valid_welfare
+    } else {
+        results.iter().map(|r| r.mean_welfare()).fold(0.0, f64::max)
+    };
 
     for result in results {
         let welfare = result.mean_welfare();
@@ -1402,7 +1472,10 @@ fn print_results(results: &[SolverResults], choice: &SolverChoice) {
             format!("{} (-{:.1}%)", format_welfare(welfare as i64), gap)
         };
 
-        let welfare_cell = if gap < 0.1 {
+        let is_valid = result.verification.as_ref().is_some_and(|v| v.valid);
+        let welfare_cell = if !is_valid {
+            Cell::new(&welfare_str).fg(Color::DarkRed)
+        } else if gap < 0.1 {
             Cell::new(&welfare_str).fg(Color::Green)
         } else if gap < 5.0 {
             Cell::new(&welfare_str).fg(Color::Yellow)
@@ -1425,27 +1498,62 @@ fn print_results(results: &[SolverResults], choice: &SolverChoice) {
             0
         };
 
+        let verified_cell = match &result.verification {
+            Some(v) if v.valid => Cell::new("\u{2713} VALID").fg(Color::Green),
+            Some(v) => {
+                let n = v.violations.len();
+                Cell::new(format!("\u{2717} {} violations", n)).fg(Color::Red)
+            }
+            None => Cell::new("-"),
+        };
+
         table.add_row(vec![
             Cell::new(&result.name),
             welfare_cell,
             fill_cell,
             Cell::new(format_qty(volume)),
             Cell::new(format!("{:.3}s", result.mean_time())),
+            verified_cell,
         ]);
     }
 
     println!("{table}");
 
+    // Print violation details for invalid solvers
+    for result in results {
+        if let Some(ref v) = result.verification {
+            if !v.valid {
+                println!();
+                println!(
+                    "{}: {} violations",
+                    result.name,
+                    v.violations.len()
+                );
+                for (i, violation) in v.violations.iter().enumerate().take(10) {
+                    println!("  {}. {:?}: {}", i + 1, violation.kind, violation.details);
+                }
+                if v.violations.len() > 10 {
+                    println!("  ... and {} more", v.violations.len() - 10);
+                }
+            }
+        }
+    }
+
     if *choice == SolverChoice::All && results.len() >= 2 {
-        // Find best solver by welfare
-        if let Some(best) = results.iter().max_by(|a, b| {
+        // Find best VALID solver by welfare
+        let valid_results: Vec<_> = results
+            .iter()
+            .filter(|r| r.verification.as_ref().is_some_and(|v| v.valid))
+            .collect();
+
+        if let Some(best) = valid_results.iter().max_by(|a, b| {
             a.mean_welfare()
                 .partial_cmp(&b.mean_welfare())
                 .unwrap_or(std::cmp::Ordering::Equal)
         }) {
             println!();
             println!(
-                "Best solver: {} (${:.2}K welfare)",
+                "Best valid solver: {} (${:.2}K welfare)",
                 best.name,
                 best.mean_welfare() / 1e9 / 1e3
             );
