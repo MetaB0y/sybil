@@ -33,8 +33,10 @@ pub enum ViolationKind {
     WelfareMismatch,
     /// Market maker capital used exceeds budget.
     MmBudgetExceeded,
-    /// Zero-quantity fill (strict mode only).
+    /// Zero-quantity fill (diagnostic only).
     ZeroQuantityFill,
+    /// Net position delta != 0 for a market (minting invariant broken).
+    PositionBalanceViolation,
 
     // === Layer 1: Match verification (market-level) ===
     /// A single-market fill's price does not match the clearing price.
@@ -51,6 +53,10 @@ pub enum ViolationKind {
     ConditionalActivationViolation,
 
     // === Layer 2: Settlement verification ===
+    /// Derived post-state balance is negative after settlement.
+    NegativeBalance,
+    /// Derived post-state position is negative after settlement.
+    NegativePosition,
     /// Derived post-state balance does not match claimed post-state.
     SettlementBalanceMismatch,
     /// Derived post-state position does not match claimed post-state.

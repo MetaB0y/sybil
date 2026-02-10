@@ -11,7 +11,10 @@ use crate::types::BlockWitness;
 use crate::violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
 
 /// Verify all fill-level and market-level invariants.
-pub fn verify_match(witness: &BlockWitness, strict: bool) -> VerificationResult {
+///
+/// Core checks (ZK invariants) always run. Diagnostic checks (quality metrics)
+/// only run when `diagnostics` is true.
+pub fn verify_match(witness: &BlockWitness, diagnostics: bool) -> VerificationResult {
     let mut violations = Vec::new();
     let mut stats = VerificationStats::default();
 
@@ -25,7 +28,7 @@ pub fn verify_match(witness: &BlockWitness, strict: bool) -> VerificationResult 
     verify_fills(
         &witness.fills,
         &order_map,
-        strict,
+        diagnostics,
         witness.total_welfare,
         &mut violations,
         &mut stats,
@@ -49,13 +52,16 @@ pub fn verify_match(witness: &BlockWitness, strict: bool) -> VerificationResult 
     // single-market fills at the final clearing price after iteration completes.
     verify_uniform_clearing_prices(witness, &order_map, &mut violations);
 
-    // Strict-only checks:
+    // Position balance: net position delta must be 0 for each market (minting invariant).
+    verify_position_balance(witness, &order_map, &mut violations);
+
+    // Diagnostic-only checks:
     //
     // Market group constraint: With finite liquidity, clearing prices in a market
     // group may sum > $1 (or < $1). This represents unexploited arbitrage that
     // the solver couldn't close due to insufficient liquidity, not a correctness
     // bug. Use verify_match stats to check avg |sum - 1| instead.
-    if strict {
+    if diagnostics {
         verify_market_group_constraints(witness, &mut violations);
     }
 
@@ -89,7 +95,7 @@ pub fn verify_match(witness: &BlockWitness, strict: bool) -> VerificationResult 
 fn verify_fills(
     fills: &[Fill],
     order_map: &HashMap<u64, &Order>,
-    strict: bool,
+    diagnostics: bool,
     reported_welfare: i64,
     violations: &mut Vec<Violation>,
     stats: &mut VerificationStats,
@@ -139,8 +145,8 @@ fn verify_fills(
             });
         }
 
-        // 4. Zero fill (strict mode)
-        if fill.fill_qty == 0 && strict {
+        // 4. Zero fill (diagnostic only)
+        if fill.fill_qty == 0 && diagnostics {
             violations.push(Violation {
                 kind: ViolationKind::ZeroQuantityFill,
                 details: format!("Order {}: zero quantity fill", fill.order_id),
@@ -185,10 +191,9 @@ fn verify_fills(
     stats.orders_checked = order_map.len();
     stats.computed_welfare = computed_welfare;
 
-    // 7. Welfare consistency
-    let welfare_tolerance: i64 = if strict { 0 } else { 1_000 };
+    // 7. Welfare consistency (core ZK invariant — exact match required)
     let welfare_diff = (computed_welfare - reported_welfare).abs();
-    if welfare_diff > welfare_tolerance {
+    if welfare_diff > 0 {
         violations.push(Violation {
             kind: ViolationKind::WelfareMismatch,
             details: format!(
@@ -342,6 +347,68 @@ fn verify_price_complementarity(witness: &BlockWitness, violations: &mut Vec<Vio
 // Settlement verification (Layer 2) correctly handles this by re-deriving exact
 // balance and position transitions per account.
 
+/// Position balance: net position delta must be 0 for each market.
+///
+/// Minting creates 1 YES + 1 NO share. If fills create a net imbalance
+/// (e.g., more YES bought than NO bought), positions are created from
+/// thin air — which would mean free money at resolution.
+fn verify_position_balance(
+    witness: &BlockWitness,
+    order_map: &HashMap<u64, &Order>,
+    violations: &mut Vec<Violation>,
+) {
+    let mut net_position: HashMap<MarketId, i64> = HashMap::new();
+
+    for fill in &witness.fills {
+        if fill.fill_qty == 0 {
+            continue;
+        }
+        let Some(order) = order_map.get(&fill.order_id) else {
+            continue;
+        };
+
+        let num_markets = order.num_markets as usize;
+        let num_states = order.num_states as usize;
+
+        for m_idx in 0..num_markets {
+            let market_id = order.markets[m_idx];
+            if market_id.is_none() {
+                continue;
+            }
+
+            let stride = 1usize << m_idx;
+            let mut marginal: i64 = 0;
+
+            for s in 0..num_states {
+                let outcome_for_m = (s / stride) % 2;
+                let payoff = order.payoffs[s] as i64;
+                if outcome_for_m == 0 {
+                    marginal += payoff;
+                } else {
+                    marginal -= payoff;
+                }
+            }
+
+            let other_states = (num_states / 2) as i64;
+            let normalized = marginal / other_states;
+
+            *net_position.entry(market_id).or_insert(0) += normalized * fill.fill_qty as i64;
+        }
+    }
+
+    for (market_id, net) in &net_position {
+        if *net != 0 {
+            violations.push(Violation {
+                kind: ViolationKind::PositionBalanceViolation,
+                details: format!(
+                    "Market {}: net position delta = {} (expected 0)",
+                    market_id, net
+                ),
+            });
+        }
+    }
+}
+
 /// Check 14: Market group constraint — sum of YES clearing prices <= $1.
 fn verify_market_group_constraints(witness: &BlockWitness, violations: &mut Vec<Violation>) {
     for group in &witness.market_groups {
@@ -450,7 +517,9 @@ fn verify_conditional_activation(
 mod tests {
     use super::*;
     use crate::types::{WitnessBlockHeader, WitnessOrder};
-    use matching_engine::{outcome_sell, simple_yes_buy, MarketSet, MmConstraint, MmId, MmSide};
+    use matching_engine::{
+        outcome_sell, simple_no_buy, simple_yes_buy, MarketSet, MmConstraint, MmId, MmSide,
+    };
 
     fn empty_header() -> WitnessBlockHeader {
         WitnessBlockHeader {
@@ -678,7 +747,7 @@ mod tests {
     }
 
     #[test]
-    fn test_zero_fill_strict_mode() {
+    fn test_zero_fill_diagnostic_mode() {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
 
@@ -688,14 +757,83 @@ mod tests {
         let mut witness = make_witness(orders, fills);
         witness.total_welfare = 0;
 
-        let lenient = verify_match(&witness, false);
-        assert!(lenient.valid);
+        let core_only = verify_match(&witness, false);
+        assert!(core_only.valid);
 
-        let strict = verify_match(&witness, true);
-        assert!(!strict.valid);
-        assert!(strict
+        let with_diagnostics = verify_match(&witness, true);
+        assert!(!with_diagnostics.valid);
+        assert!(with_diagnostics
             .violations
             .iter()
             .any(|v| v.kind == ViolationKind::ZeroQuantityFill));
+    }
+
+    #[test]
+    fn test_position_balance_valid() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("M0");
+
+        // Balanced: 50 YES bought + 50 YES sold = net 0
+        let orders = vec![buy_order(&markets, 1, m0), sell_order(&markets, 2, m0)];
+        let fills = vec![Fill::new(1, 50, 500_000_000), Fill::new(2, 50, 500_000_000)];
+
+        let mut witness = make_witness(orders, fills);
+        witness
+            .clearing_prices
+            .insert(m0, vec![500_000_000, 500_000_000]);
+
+        let result = verify_match(&witness, false);
+        assert!(result.valid, "Violations: {:?}", result.violations);
+    }
+
+    #[test]
+    fn test_position_balance_violated() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("M0");
+
+        // Unbalanced: 50 YES bought, nothing sold → net position = +50
+        let orders = vec![buy_order(&markets, 1, m0)];
+        let fills = vec![Fill::new(1, 50, 500_000_000)];
+
+        let mut witness = make_witness(orders, fills);
+        witness
+            .clearing_prices
+            .insert(m0, vec![500_000_000, 500_000_000]);
+
+        let result = verify_match(&witness, false);
+        assert!(!result.valid);
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::PositionBalanceViolation));
+    }
+
+    #[test]
+    fn test_position_balance_minting() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("M0");
+
+        // Minting: buyer buys YES, another buyer buys NO → balanced (creates a complete set)
+        let wo_yes = WitnessOrder {
+            order: simple_yes_buy(&markets, 1, m0, 600_000_000, 50),
+            account_id: 0,
+            is_mm: false,
+        };
+        let wo_no = WitnessOrder {
+            order: simple_no_buy(&markets, 2, m0, 600_000_000, 50),
+            account_id: 1,
+            is_mm: false,
+        };
+
+        let orders = vec![wo_yes, wo_no];
+        let fills = vec![Fill::new(1, 50, 500_000_000), Fill::new(2, 50, 500_000_000)];
+
+        let mut witness = make_witness(orders, fills);
+        witness
+            .clearing_prices
+            .insert(m0, vec![500_000_000, 500_000_000]);
+
+        let result = verify_match(&witness, false);
+        assert!(result.valid, "Violations: {:?}", result.violations);
     }
 }

@@ -15,7 +15,7 @@
 //! ```ignore
 //! use sybil_verifier::{verify_full, BlockWitness};
 //!
-//! let result = verify_full(&witness, /* strict */ true);
+//! let result = verify_full(&witness, /* diagnostics */ true);
 //! assert!(result.valid, "Violations: {:?}", result.violations);
 //! ```
 
@@ -34,8 +34,12 @@ pub use types::{
 pub use violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
 
 /// Verify fill-level and market-level invariants.
-pub fn verify_match(witness: &BlockWitness, strict: bool) -> VerificationResult {
-    match_verifier::verify_match(witness, strict)
+///
+/// Core checks (ZK invariants) always run. Diagnostic checks (quality metrics
+/// like zero-fill rejection and market group sum constraints) only run when
+/// `diagnostics` is true.
+pub fn verify_match(witness: &BlockWitness, diagnostics: bool) -> VerificationResult {
+    match_verifier::verify_match(witness, diagnostics)
 }
 
 /// Verify that `pre_state + fills → post_state`.
@@ -54,8 +58,8 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
 }
 
 /// Run all 4 verification layers and merge results.
-pub fn verify_full(witness: &BlockWitness, strict: bool) -> VerificationResult {
-    let mut result = verify_match(witness, strict);
+pub fn verify_full(witness: &BlockWitness, diagnostics: bool) -> VerificationResult {
+    let mut result = verify_match(witness, diagnostics);
     result.merge(verify_settlement(witness));
     result.merge(verify_block(witness));
     result.merge(verify_orders(witness));

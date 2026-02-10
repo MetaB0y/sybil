@@ -63,6 +63,32 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
         settle_fill(account_id, order, fill, &mut balances, &mut positions);
     }
 
+    // Non-negative balance/position assertions (ZK invariants)
+    for (&account_id, &balance) in &balances {
+        if balance < 0 {
+            violations.push(Violation {
+                kind: ViolationKind::NegativeBalance,
+                details: format!(
+                    "Account {}: derived balance {} < 0 after settlement",
+                    account_id, balance
+                ),
+            });
+        }
+    }
+    for (&account_id, pos_map) in &positions {
+        for (&(market, outcome), &qty) in pos_map {
+            if qty < 0 {
+                violations.push(Violation {
+                    kind: ViolationKind::NegativePosition,
+                    details: format!(
+                        "Account {} market {:?} outcome {}: derived position {} < 0 after settlement",
+                        account_id, market, outcome, qty
+                    ),
+                });
+            }
+        }
+    }
+
     // Compare derived state against claimed post-state
     let post_map: HashMap<u64, &AccountSnapshot> =
         witness.post_state.iter().map(|s| (s.id, s)).collect();
@@ -451,5 +477,107 @@ mod tests {
 
         let result = verify_settlement(&witness);
         assert!(result.valid, "Violations: {:?}", result.violations);
+    }
+
+    #[test]
+    fn test_negative_balance_detected() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("M0");
+
+        // Account starts with $1, buys 10 YES @ $0.50 → cost = $5 → balance = -$4
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
+        let fill = Fill::new(1, 10, 500_000_000);
+
+        let initial_balance = 1_000_000_000; // $1
+        let expected_balance = initial_balance - 500_000_000i64 * 10; // -$4
+
+        let pre_state = vec![AccountSnapshot {
+            id: 0,
+            balance: initial_balance,
+            positions: vec![],
+        }];
+
+        let post_state = vec![AccountSnapshot {
+            id: 0,
+            balance: expected_balance,
+            positions: vec![(m0, 0, 10)],
+        }];
+
+        let witness = BlockWitness {
+            header: empty_header(),
+            previous_header: None,
+            orders: vec![WitnessOrder {
+                order,
+                account_id: 0,
+                is_mm: false,
+            }],
+            rejections: vec![],
+            fills: vec![fill],
+            clearing_prices: HashMap::new(),
+            total_welfare: 0,
+            mm_constraints: vec![],
+            market_groups: vec![],
+            pre_state,
+            post_state,
+            resolved_markets: vec![],
+        };
+
+        let result = verify_settlement(&witness);
+        assert!(!result.valid);
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::NegativeBalance));
+    }
+
+    #[test]
+    fn test_negative_position_detected() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("M0");
+
+        // Account sells 5 YES without holding any → position = -5
+        let order = outcome_sell(&markets, 1, m0, 0, 500_000_000, 5);
+        let fill = Fill::new(1, 5, 500_000_000);
+
+        let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
+        let expected_revenue = 500_000_000i64 * 5;
+
+        let pre_state = vec![AccountSnapshot {
+            id: 0,
+            balance: initial_balance,
+            positions: vec![], // no YES position
+        }];
+
+        let post_state = vec![AccountSnapshot {
+            id: 0,
+            balance: initial_balance + expected_revenue,
+            positions: vec![(m0, 0, -5)],
+        }];
+
+        let witness = BlockWitness {
+            header: empty_header(),
+            previous_header: None,
+            orders: vec![WitnessOrder {
+                order,
+                account_id: 0,
+                is_mm: false,
+            }],
+            rejections: vec![],
+            fills: vec![fill],
+            clearing_prices: HashMap::new(),
+            total_welfare: 0,
+            mm_constraints: vec![],
+            market_groups: vec![],
+            pre_state,
+            post_state,
+            resolved_markets: vec![],
+        };
+
+        let result = verify_settlement(&witness);
+        assert!(!result.valid);
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::NegativePosition));
     }
 }

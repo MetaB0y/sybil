@@ -1216,7 +1216,6 @@ fn create_solvers(
         SolverChoice::All => {
             vec![
                 Box::new(create_milp_solver(milp_timeout, mm_mode)),
-                Box::new(Pipeline::current()),
                 Box::new(Pipeline::with_negrisk()),
                 Box::new(Pipeline::with_dual_decomposition()),
             ]
