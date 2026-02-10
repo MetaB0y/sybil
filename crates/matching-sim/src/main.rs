@@ -1304,15 +1304,18 @@ fn witness_from_pipeline(problem: &Problem, result: &PipelineResult) -> BlockWit
 }
 
 /// Build a BlockWitness from a MilpResult.
+/// Includes synthetic arb orders so verifier can validate position balance.
 fn witness_from_milp(
     problem: &Problem,
     result: &matching_solver::MilpResult,
 ) -> BlockWitness {
-    let witness_orders: Vec<WitnessOrder> = problem
-        .orders
+    let mut all_orders: Vec<&Order> = problem.orders.iter().collect();
+    all_orders.extend(result.arbitrage_orders.iter());
+
+    let witness_orders: Vec<WitnessOrder> = all_orders
         .iter()
         .map(|o| WitnessOrder {
-            order: o.clone(),
+            order: (*o).clone(),
             account_id: 0,
             is_mm: problem
                 .mm_constraints
@@ -1326,7 +1329,7 @@ fn witness_from_milp(
             height: 1,
             parent_hash: [0u8; 32],
             state_root: [0u8; 32],
-            order_count: problem.orders.len() as u32,
+            order_count: all_orders.len() as u32,
             fill_count: result.result.fills.len() as u32,
             timestamp_ms: 0,
         },

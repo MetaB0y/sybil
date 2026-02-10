@@ -127,10 +127,13 @@ pub struct MilpResult {
     /// Clearing prices derived by the MILP (YES price per market)
     pub clearing_prices: HashMap<MarketId, Vec<Nanos>>,
     /// True SCIP objective value (welfare with minting costs deducted).
-    /// This is the correct welfare — `result.total_welfare` is inflated because
-    /// fill-based welfare doesn't account for minting costs when group minting
-    /// creates positions without corresponding fills.
+    /// This equals real-fill welfare minus minting costs.
     pub objective_welfare: i64,
+    /// Synthetic orders that restore position balance by canceling the net
+    /// position imbalance from minting. These have `limit_price == fill_price`
+    /// so they contribute zero welfare. Include them in the witness for
+    /// verifier position balance checks.
+    pub arbitrage_orders: Vec<Order>,
 }
 
 /// Analysis of dual prices from MILP solution.
@@ -345,6 +348,7 @@ impl MilpSolver {
                 solve_time_secs: start.elapsed().as_secs_f64(),
                 clearing_prices: HashMap::new(),
                 objective_welfare: 0,
+                arbitrage_orders: vec![],
             };
         }
 
@@ -398,12 +402,100 @@ impl MilpSolver {
 
                 let objective_welfare = scip_objective.round() as i64;
 
+                // Generate synthetic arb fills to restore position balance.
+                //
+                // The MILP uses continuous mint_m and group_mint_g variables to
+                // allow minting/burning, but these aren't materialized as fills.
+                // Compute the exact per-market position imbalance from real fills
+                // and create synthetic orders+fills to cancel it.
+                //
+                // All arb fills use limit_price = fill_price → zero welfare.
+                let mut arbitrage_orders = Vec::new();
+                let max_order_id = active_orders.iter().map(|o| o.id).max().unwrap_or(0);
+                let mut next_arb_id = max_order_id + 1_000_000_000;
+
+                // Compute net position delta per market (same logic as verifier)
+                let mut net_position: HashMap<MarketId, i64> = HashMap::new();
+                for fill in &result.fills {
+                    if fill.fill_qty == 0 {
+                        continue;
+                    }
+                    let Some(order) = active_orders
+                        .iter()
+                        .find(|o| o.id == fill.order_id)
+                    else {
+                        continue;
+                    };
+
+                    let num_markets = order.num_markets as usize;
+                    let num_states = order.num_states as usize;
+
+                    for m_idx in 0..num_markets {
+                        let market_id = order.markets[m_idx];
+                        if market_id.is_none() {
+                            continue;
+                        }
+
+                        let stride = 1usize << m_idx;
+                        let mut marginal: i64 = 0;
+                        for s in 0..num_states {
+                            let outcome_for_m = (s / stride) % 2;
+                            let payoff = order.payoffs[s] as i64;
+                            if outcome_for_m == 0 {
+                                marginal += payoff;
+                            } else {
+                                marginal -= payoff;
+                            }
+                        }
+
+                        let other_states = (num_states / 2) as i64;
+                        let normalized = marginal / other_states;
+                        *net_position.entry(market_id).or_insert(0) +=
+                            normalized * fill.fill_qty as i64;
+                    }
+                }
+
+                // Create arb fills to cancel each market's imbalance
+                for (&market, &net) in &net_position {
+                    if net == 0 {
+                        continue;
+                    }
+                    let shares = net.unsigned_abs();
+                    let yes_price = clearing_prices
+                        .get(&market)
+                        .and_then(|p| p.first().copied())
+                        .unwrap_or(0);
+
+                    let mut order = Order::new(next_arb_id);
+                    order.markets[0] = market;
+                    order.num_markets = 1;
+                    order.num_states = 2;
+                    if net > 0 {
+                        // Too much YES demand → sell YES to supply it
+                        order.payoffs[0] = -1;
+                        order.payoffs[1] = 0;
+                    } else {
+                        // Too much NO demand (negative net) → buy YES to absorb
+                        order.payoffs[0] = 1;
+                        order.payoffs[1] = 0;
+                    }
+                    order.limit_price = yes_price;
+                    order.min_fill = 0;
+                    order.max_fill = shares;
+
+                    let fill = Fill::new(next_arb_id, shares, yes_price);
+                    result.add_fill(fill, &order);
+                    arbitrage_orders.push(order);
+                    next_arb_id += 1;
+                }
+
                 MilpResult {
                     result,
                     status,
                     solve_time_secs: solve_time,
                     clearing_prices,
                     objective_welfare,
+                    arbitrage_orders,
                 }
             }
             Err(err_msg) => {
@@ -421,6 +513,7 @@ impl MilpSolver {
                     solve_time_secs: start.elapsed().as_secs_f64(),
                     clearing_prices: HashMap::new(),
                     objective_welfare: 0,
+                    arbitrage_orders: vec![],
                 }
             }
         }
@@ -1019,10 +1112,34 @@ impl PartialSolver for MilpSolver {
             SolveStatus::Infeasible | SolveStatus::Error(_) => SolutionConfidence::Heuristic,
         };
 
+        // Strip arb fills — pipeline handles position balance via enforce_ucp
+        let arb_ids: HashSet<u64> = milp_result
+            .arbitrage_orders
+            .iter()
+            .map(|o| o.id)
+            .collect();
+        let real_fills: Vec<_> = milp_result
+            .result
+            .fills
+            .into_iter()
+            .filter(|f| !arb_ids.contains(&f.order_id))
+            .collect();
+        let real_welfare = real_fills
+            .iter()
+            .zip(problem.orders.iter())
+            .filter_map(|(f, _)| {
+                problem
+                    .orders
+                    .iter()
+                    .find(|o| o.id == f.order_id)
+                    .map(|o| f.welfare(o))
+            })
+            .sum::<i64>();
+
         PartialSolution::with_fills(
             PartialSolver::name(self),
-            milp_result.result.fills,
-            milp_result.result.total_welfare,
+            real_fills,
+            real_welfare,
             confidence,
         )
     }
