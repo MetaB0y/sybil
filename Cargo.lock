@@ -1221,6 +1221,7 @@ dependencies = [
  "matching-engine",
  "matching-scenarios",
  "matching-solver",
+ "serde_json",
  "sybil-verifier",
 ]
 
