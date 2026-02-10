@@ -132,6 +132,10 @@ pub struct VerificationStats {
     pub mm_constraints_checked: usize,
     pub computed_welfare: i64,
     pub reported_welfare: i64,
+    /// Upper-bound minting cost from position imbalance (nanos).
+    /// Each unit of positive net position delta requires minting at $1.
+    /// Net welfare = computed_welfare - minting_cost_nanos.
+    pub minting_cost_nanos: i64,
     pub accounts_checked: usize,
     /// Average |sum_of_YES_prices - $1| across market groups, in nanos.
     /// Lower is better. 0 means perfect. Only meaningful when groups exist.
@@ -149,6 +153,9 @@ impl VerificationStats {
         }
         if other.reported_welfare != 0 {
             self.reported_welfare = other.reported_welfare;
+        }
+        if other.minting_cost_nanos != 0 {
+            self.minting_cost_nanos = other.minting_cost_nanos;
         }
         self.accounts_checked += other.accounts_checked;
         if other.market_group_avg_delta.is_some() {

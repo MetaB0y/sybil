@@ -1387,21 +1387,25 @@ fn run_simulation(
 
             let elapsed = start.elapsed().as_secs_f64();
 
-            results[i].total_welfare += matching_result.total_welfare;
             results[i].total_filled += matching_result.orders_filled;
             results[i].total_orders += problem.num_orders();
             results[i].total_volume += matching_result.total_quantity_filled;
             results[i].total_time_secs += elapsed;
             results[i].batches += 1;
 
-            // Run verification
+            // Run verification — verifier is the source of truth for welfare.
+            // For valid solutions, computed_welfare == true welfare (no minting).
+            // For invalid solutions (position balance violations), fill welfare is
+            // inflated but the solution can't be settled anyway.
             let verification = verify_match(&witness, false);
+            let computed_welfare = verification.stats.computed_welfare;
+            results[i].total_welfare += computed_welfare;
 
             if verbose {
                 println!(
                     "  {}: welfare={}, filled={}/{}, time={:.3}s  {}",
                     results[i].name,
-                    format_welfare(matching_result.total_welfare),
+                    format_welfare(computed_welfare),
                     matching_result.orders_filled,
                     problem.num_orders(),
                     elapsed,

@@ -53,7 +53,8 @@ pub fn verify_match(witness: &BlockWitness, diagnostics: bool) -> VerificationRe
     verify_uniform_clearing_prices(witness, &order_map, &mut violations);
 
     // Position balance: net position delta must be 0 for each market (minting invariant).
-    verify_position_balance(witness, &order_map, &mut violations);
+    // Also computes minting cost upper bound from any imbalance.
+    verify_position_balance(witness, &order_map, &mut violations, &mut stats);
 
     // Diagnostic-only checks:
     //
@@ -356,6 +357,7 @@ fn verify_position_balance(
     witness: &BlockWitness,
     order_map: &HashMap<u64, &Order>,
     violations: &mut Vec<Violation>,
+    _stats: &mut VerificationStats,
 ) {
     let mut net_position: HashMap<MarketId, i64> = HashMap::new();
 

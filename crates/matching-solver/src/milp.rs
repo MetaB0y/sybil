@@ -126,6 +126,11 @@ pub struct MilpResult {
     pub solve_time_secs: f64,
     /// Clearing prices derived by the MILP (YES price per market)
     pub clearing_prices: HashMap<MarketId, Vec<Nanos>>,
+    /// True SCIP objective value (welfare with minting costs deducted).
+    /// This is the correct welfare — `result.total_welfare` is inflated because
+    /// fill-based welfare doesn't account for minting costs when group minting
+    /// creates positions without corresponding fills.
+    pub objective_welfare: i64,
 }
 
 /// Analysis of dual prices from MILP solution.
@@ -339,13 +344,14 @@ impl MilpSolver {
                 status: SolveStatus::Optimal,
                 solve_time_secs: start.elapsed().as_secs_f64(),
                 clearing_prices: HashMap::new(),
+                objective_welfare: 0,
             };
         }
 
         let solve_result = self.solve_with_scip(&active_orders, problem);
 
         match solve_result {
-            Ok((solution, status, solve_time)) => {
+            Ok((solution, status, solve_time, scip_objective)) => {
                 let mut clearing_prices: HashMap<MarketId, Vec<Nanos>> = HashMap::new();
 
                 // Build clearing prices from price variables
@@ -390,11 +396,14 @@ impl MilpSolver {
                     }
                 }
 
+                let objective_welfare = scip_objective.round() as i64;
+
                 MilpResult {
                     result,
                     status,
                     solve_time_secs: solve_time,
                     clearing_prices,
+                    objective_welfare,
                 }
             }
             Err(err_msg) => {
@@ -411,6 +420,7 @@ impl MilpSolver {
                     status: SolveStatus::Error(err_msg),
                     solve_time_secs: start.elapsed().as_secs_f64(),
                     clearing_prices: HashMap::new(),
+                    objective_welfare: 0,
                 }
             }
         }
@@ -423,11 +433,12 @@ impl MilpSolver {
     /// - Position balance via per-market c_YES/c_NO coefficients
     /// - MM budget constraints (exact bilinear price*qty via quadratic constraints)
     /// - Market group constraints (sum of YES prices <= $1)
+    /// Returns (solution, status, solve_time, objective_value).
     fn solve_with_scip(
         &self,
         active_orders: &[&Order],
         problem: &Problem,
-    ) -> Result<(ScipSolution, SolveStatus, f64), String> {
+    ) -> Result<(ScipSolution, SolveStatus, f64, f64), String> {
         let start = std::time::Instant::now();
         let n = active_orders.len();
         let nanos_f = NANOS_PER_DOLLAR as f64;
@@ -888,11 +899,10 @@ impl MilpSolver {
                     p_values: p_vars.iter().map(|(&m, v)| (m, sol.val(v))).collect(),
                 };
 
+                let obj = solved.obj_val();
                 let status = if scip_status == Status::Optimal {
                     SolveStatus::Optimal
                 } else {
-                    // Compute gap from SCIP
-                    let obj = solved.obj_val();
                     let bound = solved.best_bound();
                     let gap_percent = if obj.abs() > 1e-10 {
                         ((bound - obj) / obj.abs() * 100.0).abs()
@@ -902,7 +912,7 @@ impl MilpSolver {
                     SolveStatus::TimeLimitReached { gap_percent }
                 };
 
-                Ok((solution, status, solve_time))
+                Ok((solution, status, solve_time, obj))
             }
             Status::TimeLimit
             | Status::NodeLimit
@@ -930,6 +940,7 @@ impl MilpSolver {
                         solution,
                         SolveStatus::TimeLimitReached { gap_percent },
                         solve_time,
+                        obj,
                     ))
                 } else {
                     Ok((
@@ -940,6 +951,7 @@ impl MilpSolver {
                         },
                         SolveStatus::TimeLimitReached { gap_percent: 100.0 },
                         solve_time,
+                        0.0,
                     ))
                 }
             }
@@ -951,6 +963,7 @@ impl MilpSolver {
                 },
                 SolveStatus::Infeasible,
                 solve_time,
+                0.0,
             )),
             Status::Unbounded => Err("Problem is unbounded".to_string()),
             _ => Err(format!(
