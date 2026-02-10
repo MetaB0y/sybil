@@ -1153,6 +1153,7 @@ enum SolverChoice {
     Pipeline,
     Negrisk,
     Dual,
+    Smoothed,
     All,
 }
 
@@ -1162,6 +1163,7 @@ fn parse_solver_choice(args: &[String]) -> SolverChoice {
         Some("pipeline") => SolverChoice::Pipeline,
         Some("negrisk") => SolverChoice::Negrisk,
         Some("dual") => SolverChoice::Dual,
+        Some("smoothed") => SolverChoice::Smoothed,
         Some("all") => SolverChoice::All,
         _ => SolverChoice::Pipeline, // Default to pipeline
     }
@@ -1244,7 +1246,12 @@ impl SolverResults {
 /// Expand a solver choice into individual choices for comparison.
 fn expand_solver_choices(choice: &SolverChoice) -> Vec<SolverChoice> {
     match choice {
-        SolverChoice::All => vec![SolverChoice::Milp, SolverChoice::Negrisk, SolverChoice::Dual],
+        SolverChoice::All => vec![
+            SolverChoice::Milp,
+            SolverChoice::Negrisk,
+            SolverChoice::Dual,
+            SolverChoice::Smoothed,
+        ],
         other => vec![other.clone()],
     }
 }
@@ -1262,6 +1269,7 @@ fn solver_display_name(choice: &SolverChoice, milp_timeout: Option<f64>) -> Stri
         SolverChoice::Pipeline => "Pipeline".to_string(),
         SolverChoice::Negrisk => "Negrisk".to_string(),
         SolverChoice::Dual => "Dual Decomposition".to_string(),
+        SolverChoice::Smoothed => "Smoothed Gradient".to_string(),
         SolverChoice::All => "All".to_string(),
     }
 }
@@ -1279,6 +1287,12 @@ fn run_solver_with_witness(
             let milp_result = milp.solve_with_status(problem);
             let witness = witness_from_milp(problem, &milp_result);
             (milp_result.result, witness)
+        }
+        SolverChoice::Smoothed => {
+            let solver = matching_solver::SmoothedSolver::new();
+            let pipeline_result = solver.solve(problem);
+            let witness = witness_from_problem(problem, &pipeline_result);
+            (pipeline_result.result, witness)
         }
         SolverChoice::Pipeline | SolverChoice::Negrisk | SolverChoice::Dual => {
             let pipeline = match choice {

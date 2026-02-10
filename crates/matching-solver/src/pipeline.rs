@@ -1217,7 +1217,7 @@ impl Pipeline {
     /// Then enforces position balance: for each binary market, net YES qty must
     /// equal net NO qty (minting invariant). Excess fills are trimmed.
     /// Recomputes welfare from scratch.
-    fn enforce_ucp(
+    pub(crate) fn enforce_ucp(
         result: &mut PipelineResult,
         order_map: &HashMap<u64, &matching_engine::Order>,
     ) {
