@@ -24,6 +24,7 @@ use serde::Serialize;
 use tracing::debug;
 
 use crate::local_solver::LocalSolver;
+use crate::pipeline::Pipeline;
 use crate::specialized::MultiMarketSolver;
 use crate::traits::PriceDiscoveryResult;
 use crate::MatchingResult;
@@ -316,31 +317,31 @@ impl DualMaster {
                 }
             }
 
-            // 6. Accumulate fills: non-MM + knapsack-approved MM fills
+            // 6. Collect iteration candidate fills (non-MM + knapsack-approved MM)
+            let fill_start_idx = matching_result.fills.len();
             let mut iter_fills = 0usize;
             let mut iter_mm_fills = 0usize;
+            let mut iter_mm_ids: HashSet<u64> = HashSet::new();
 
-            for fill in non_mm_fills {
-                if let Some(order) = order_map.get(&fill.order_id) {
-                    filled_order_ids.insert(fill.order_id);
-                    matching_result.add_fill(fill, order);
-                    iter_fills += 1;
-                }
-            }
+            let all_candidate_fills: Vec<(Fill, bool)> = non_mm_fills
+                .into_iter()
+                .map(|f| (f, false))
+                .chain(mm_accepted_fills.into_iter().map(|f| (f, true)))
+                .collect();
 
-            for fill in mm_accepted_fills {
-                if let Some(order) = order_map.get(&fill.order_id) {
-                    filled_order_ids.insert(fill.order_id);
+            for (fill, is_mm) in all_candidate_fills {
+                let Some(order) = order_map.get(&fill.order_id) else {
+                    continue;
+                };
+                filled_order_ids.insert(fill.order_id);
+                if is_mm {
                     cumulative_mm_fills.insert(fill.order_id, (fill.fill_price, fill.fill_qty));
-                    matching_result.add_fill(fill, order);
-                    iter_fills += 1;
-                    iter_mm_fills += 1;
+                    iter_mm_ids.insert(fill.order_id);
                 }
+                matching_result.add_fill(fill, order);
             }
 
             // 6b. Add bundle fills from multi-market repricing
-            // Must validate against ORIGINAL order limits since MultiMarketSolver
-            // ran on shaded orders (limits adjusted by λ).
             for fill in bundle_fills_this_iter {
                 if let Some(order) = order_map.get(&fill.order_id) {
                     if !filled_order_ids.contains(&fill.order_id)
@@ -348,9 +349,69 @@ impl DualMaster {
                     {
                         filled_order_ids.insert(fill.order_id);
                         matching_result.add_fill(fill, order);
-                        iter_fills += 1;
                     }
                 }
+            }
+
+            // 6c. Per-iteration UCP enforcement: reprice at this iteration's
+            // clearing prices and trim position imbalance. This prevents
+            // price drift across iterations from causing massive welfare loss
+            // during the final enforce_ucp.
+            if fill_start_idx < matching_result.fills.len() {
+                let iter_fills_slice: Vec<Fill> =
+                    matching_result.fills[fill_start_idx..].to_vec();
+
+                let mut candidates = Pipeline::reprice_and_filter_fills(
+                    &iter_fills_slice,
+                    &prices.prices,
+                    &order_map,
+                );
+                Pipeline::trim_position_imbalance(&mut candidates, &order_map);
+
+                // Build set of surviving order IDs
+                let surviving_ids: HashSet<u64> = candidates
+                    .iter()
+                    .filter(|(f, _)| f.fill_qty > 0)
+                    .map(|(f, _)| f.order_id)
+                    .collect();
+
+                // Un-fill dropped orders so they can be re-matched in later iterations
+                for fill in &matching_result.fills[fill_start_idx..] {
+                    if !surviving_ids.contains(&fill.order_id) {
+                        filled_order_ids.remove(&fill.order_id);
+                        cumulative_mm_fills.remove(&fill.order_id);
+                    }
+                }
+
+                // Replace this iteration's fills with survivors and recompute totals
+                matching_result.fills.truncate(fill_start_idx);
+                let mut welfare = 0i64;
+                let mut volume = 0u64;
+                let mut filled = 0usize;
+                for fill in &matching_result.fills {
+                    if let Some(&order) = order_map.get(&fill.order_id) {
+                        welfare += order.welfare_contribution(fill.fill_price, fill.fill_qty);
+                    }
+                    volume += fill.fill_qty;
+                    filled += 1;
+                }
+                for (fill, _) in candidates {
+                    if fill.fill_qty > 0 {
+                        if let Some(&order) = order_map.get(&fill.order_id) {
+                            welfare += order.welfare_contribution(fill.fill_price, fill.fill_qty);
+                        }
+                        volume += fill.fill_qty;
+                        filled += 1;
+                        if iter_mm_ids.contains(&fill.order_id) {
+                            iter_mm_fills += 1;
+                        }
+                        iter_fills += 1;
+                        matching_result.fills.push(fill);
+                    }
+                }
+                matching_result.total_welfare = welfare;
+                matching_result.total_quantity_filled = volume;
+                matching_result.orders_filled = filled;
             }
 
             // 7. Compute price residuals and update λ

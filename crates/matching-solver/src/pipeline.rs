@@ -184,6 +184,9 @@ pub struct PipelineResult {
     /// Time breakdown by phase.
     pub phase_times: PipelineTimings,
 
+    /// Diagnostics from enforce_ucp (if it ran).
+    pub ucp_stats: Option<UcpStats>,
+
     /// Per-phase snapshots for detailed visualization (viz feature only).
     #[cfg(feature = "viz")]
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -198,6 +201,22 @@ pub struct PipelineTimings {
     pub allocation_secs: f64,
     pub partial_solving_secs: f64,
     pub combining_secs: f64,
+}
+
+/// Diagnostics from enforce_ucp (Uniform Clearing Price enforcement).
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct UcpStats {
+    pub input_fills: usize,
+    pub input_welfare: i64,
+    pub after_reprice_fills: usize,
+    pub dropped_by_reprice: usize,
+    pub after_trim_fills: usize,
+    pub dropped_by_trim: usize,
+    pub final_fills: usize,
+    pub final_welfare: i64,
+    pub welfare_retention_pct: f64,
+    /// Per-market position imbalance before trimming: (market_id, yes_qty, no_qty, excess)
+    pub market_imbalances: Vec<(MarketId, u64, u64, u64)>,
 }
 
 /// Stats for a single fixed-point iteration.
@@ -244,6 +263,7 @@ impl PipelineResult {
             iteration_stats: Vec::new(),
             total_time_secs: 0.0,
             phase_times: PipelineTimings::default(),
+            ucp_stats: None,
             #[cfg(feature = "viz")]
             phase_snapshots: Vec::new(),
         }
@@ -573,7 +593,7 @@ impl Pipeline {
             (matching_engine::Nanos, matching_engine::Qty),
         > = std::collections::HashMap::new();
 
-        // Build order lookup map ONCE (not per iteration) - O(orders) instead of O(iterations × fills × orders)
+        // Build order lookup map
         let order_map: std::collections::HashMap<u64, &matching_engine::Order> =
             problem.orders.iter().map(|o| (o.id, o)).collect();
 
@@ -830,14 +850,16 @@ impl Pipeline {
                     }
                 }
 
-                // Merge real (non-arb) fills into result.
-                // Arb fills influenced clearing prices but should not appear in output:
-                // no real account owns them, and settlement would skip them anyway.
+                // Merge ALL fills (including arb) into result.
+                // Arb fills are essential for position balance: they represent
+                // minting + arbitrage that ensures YES qty == NO qty per market.
+                // Settlement assigns arb fills to a system/house account.
                 for fill in iter_result.fills {
-                    if arb_order_map.contains_key(&fill.order_id) {
-                        continue;
-                    }
-                    if let Some(&order) = order_map.get(&fill.order_id) {
+                    let order_ref = order_map
+                        .get(&fill.order_id)
+                        .copied()
+                        .or_else(|| arb_order_map.get(&fill.order_id));
+                    if let Some(order) = order_ref {
                         result.result.add_fill(fill, order);
                     }
                 }
@@ -853,6 +875,24 @@ impl Pipeline {
                     result.result.add_fill(fill, order);
                     iter_bundle_fills += 1;
                 }
+            }
+
+            // Per-iteration UCP: reprice fills from THIS iteration at current prices.
+            // This ensures fills are always valid at the iteration's clearing price,
+            // reducing welfare destruction by the final enforce_ucp.
+            // Arb fills are treated like normal fills here — they participate in
+            // repricing and trimming to maintain per-iteration position balance.
+            if let Some(ref pd) = price_result {
+                let mut combined_map = order_map.clone();
+                for (id, order) in &arb_order_map {
+                    combined_map.insert(*id, order);
+                }
+                Self::enforce_ucp_iteration(
+                    &mut result,
+                    &combined_map,
+                    &pd.prices,
+                    fill_start_idx,
+                );
             }
 
             // Capture after MM allocation - shows ACTUAL confirmed fills (not estimates)
@@ -1012,8 +1052,31 @@ impl Pipeline {
         // would be non-market-cleared and unsound. The arb orders from earlier
         // iterations already influenced prices through proper clearing.
 
-        // Enforce UCP: re-price all single-market fills at the final clearing price.
-        // Fills that would violate their order's limit at the new price are dropped.
+        // Remove arb fills before final UCP enforcement.
+        // Arb orders are synthetic price-pressure mechanisms with no real account.
+        // They participated in price discovery and per-iteration UCP, but shouldn't
+        // be in the final result. The final enforce_ucp will trim real fills to
+        // restore position balance.
+        let arb_ids: std::collections::HashSet<u64> = arb_order_map.keys().copied().collect();
+        if !arb_ids.is_empty() {
+            result.result.fills.retain(|f| !arb_ids.contains(&f.order_id));
+            // Recompute totals after removing arb fills
+            let mut welfare: i64 = 0;
+            let mut volume: u64 = 0;
+            let mut filled: usize = 0;
+            for fill in &result.result.fills {
+                if let Some(&order) = order_map.get(&fill.order_id) {
+                    welfare += order.welfare_contribution(fill.fill_price, fill.fill_qty);
+                }
+                volume += fill.fill_qty;
+                filled += 1;
+            }
+            result.result.total_welfare = welfare;
+            result.result.total_quantity_filled = volume;
+            result.result.orders_filled = filled;
+        }
+
+        // Enforce UCP on real fills only
         Self::enforce_ucp(&mut result, &order_map);
 
         // Gate: if total welfare is negative, return empty result.
@@ -1154,21 +1217,54 @@ impl Pipeline {
     /// Then enforces position balance: for each binary market, net YES qty must
     /// equal net NO qty (minting invariant). Excess fills are trimmed.
     /// Recomputes welfare from scratch.
-    fn enforce_ucp(result: &mut PipelineResult, order_map: &HashMap<u64, &matching_engine::Order>) {
+    fn enforce_ucp(
+        result: &mut PipelineResult,
+        order_map: &HashMap<u64, &matching_engine::Order>,
+    ) {
         let final_prices = match result.price_discovery {
             Some(ref pd) => &pd.prices,
             None => return,
         };
 
         let input_fills = result.result.fills.len();
-        let mut candidates =
-            Self::reprice_and_filter_fills(&result.result.fills, final_prices, order_map);
-        debug!(input_fills, after_reprice = candidates.len(), "enforce_ucp: repriced");
+        let input_welfare = result.result.total_welfare;
+
+        let mut candidates = Self::reprice_and_filter_fills(
+            &result.result.fills,
+            final_prices,
+            order_map,
+        );
+        let after_reprice_fills = candidates.len();
+        debug!(input_fills, after_reprice = after_reprice_fills, "enforce_ucp: repriced");
+
+        // Collect per-market imbalance before trimming
+        let market_imbalances = Self::compute_market_imbalances(&candidates, order_map);
+
         Self::trim_position_imbalance(&mut candidates, order_map);
         let active_after_trim = candidates.iter().filter(|(f, _)| f.fill_qty > 0).count();
         debug!(after_trim = active_after_trim, "enforce_ucp: trimmed");
+
         let (fills, welfare, volume, filled) = Self::collect_final_fills(candidates, order_map);
         debug!(final_fills = filled, welfare, volume, "enforce_ucp: done");
+
+        let retention = if input_welfare != 0 {
+            welfare as f64 / input_welfare as f64 * 100.0
+        } else {
+            100.0
+        };
+
+        result.ucp_stats = Some(UcpStats {
+            input_fills,
+            input_welfare,
+            after_reprice_fills,
+            dropped_by_reprice: input_fills - after_reprice_fills,
+            after_trim_fills: active_after_trim,
+            dropped_by_trim: after_reprice_fills - active_after_trim,
+            final_fills: filled,
+            final_welfare: welfare,
+            welfare_retention_pct: retention,
+            market_imbalances,
+        });
 
         result.result.fills = fills;
         result.result.total_welfare = welfare;
@@ -1176,9 +1272,140 @@ impl Pipeline {
         result.result.orders_filled = filled;
     }
 
+    /// Lightweight per-iteration UCP enforcement.
+    ///
+    /// Reprices only the fills from the current iteration (starting at `fill_start_idx`)
+    /// at the current iteration's clearing prices. Drops fills that violate their order's
+    /// limit at the current price. Also trims position imbalances among the new fills.
+    ///
+    /// This ensures fills are always valid at the prices where they were matched,
+    /// so the final `enforce_ucp` has much less work to do.
+    fn enforce_ucp_iteration(
+        result: &mut PipelineResult,
+        order_map: &HashMap<u64, &matching_engine::Order>,
+        iter_prices: &HashMap<MarketId, Vec<Nanos>>,
+        fill_start_idx: usize,
+    ) {
+        if fill_start_idx >= result.result.fills.len() {
+            return;
+        }
+
+        let iter_fills: Vec<matching_engine::Fill> =
+            result.result.fills[fill_start_idx..].to_vec();
+
+        let mut candidates = Self::reprice_and_filter_fills(
+            &iter_fills,
+            iter_prices,
+            order_map,
+        );
+
+        Self::trim_position_imbalance(&mut candidates, order_map);
+
+        // Replace the iteration's fills with the filtered ones and recompute totals
+        result.result.fills.truncate(fill_start_idx);
+
+        // Recompute welfare/volume from the retained prefix
+        let mut welfare: i64 = 0;
+        let mut volume: u64 = 0;
+        let mut filled: usize = 0;
+        for fill in &result.result.fills {
+            if let Some(&order) = order_map.get(&fill.order_id) {
+                welfare += order.welfare_contribution(fill.fill_price, fill.fill_qty);
+            }
+            volume += fill.fill_qty;
+            filled += 1;
+        }
+
+        // Add back surviving iteration fills
+        for (fill, _welfare) in candidates {
+            if fill.fill_qty > 0 {
+                if let Some(&order) = order_map.get(&fill.order_id) {
+                    welfare += order.welfare_contribution(fill.fill_price, fill.fill_qty);
+                }
+                volume += fill.fill_qty;
+                filled += 1;
+                result.result.fills.push(fill);
+            }
+        }
+
+        result.result.total_welfare = welfare;
+        result.result.total_quantity_filled = volume;
+        result.result.orders_filled = filled;
+    }
+
+    /// Compute per-market position imbalance using full marginal payoff analysis.
+    /// Returns (market_id, yes_qty, no_qty, excess) for imbalanced markets.
+    fn compute_market_imbalances(
+        candidates: &[(matching_engine::Fill, i64)],
+        order_map: &HashMap<u64, &matching_engine::Order>,
+    ) -> Vec<(MarketId, u64, u64, u64)> {
+        // Use marginal payoff computation for accurate multi-market tracking
+        let mut net_position: HashMap<MarketId, i64> = HashMap::new();
+        let mut market_yes_qty: HashMap<MarketId, u64> = HashMap::new();
+        let mut market_no_qty: HashMap<MarketId, u64> = HashMap::new();
+
+        for (fill, _) in candidates {
+            if fill.fill_qty == 0 {
+                continue;
+            }
+            let Some(&order) = order_map.get(&fill.order_id) else {
+                continue;
+            };
+            let num_markets = order.num_markets as usize;
+            let num_states = order.num_states as usize;
+
+            for m_idx in 0..num_markets {
+                let market = order.markets[m_idx];
+                if market.is_none() {
+                    continue;
+                }
+                let stride = 1usize << m_idx;
+                let mut marginal: i64 = 0;
+                for s in 0..num_states {
+                    let outcome = (s / stride) % 2;
+                    let payoff = order.payoffs[s] as i64;
+                    if outcome == 0 {
+                        marginal += payoff;
+                    } else {
+                        marginal -= payoff;
+                    }
+                }
+                let other_states = (num_states / 2) as i64;
+                if other_states == 0 {
+                    continue;
+                }
+                let normalized = marginal / other_states;
+                let contribution = normalized * fill.fill_qty as i64;
+                *net_position.entry(market).or_insert(0) += contribution;
+
+                // Track YES/NO for display purposes
+                if contribution > 0 {
+                    *market_yes_qty.entry(market).or_insert(0) += contribution as u64;
+                } else if contribution < 0 {
+                    *market_no_qty.entry(market).or_insert(0) += (-contribution) as u64;
+                }
+            }
+        }
+
+        let mut imbalances: Vec<(MarketId, u64, u64, u64)> = net_position
+            .iter()
+            .filter_map(|(&market, &net)| {
+                if net == 0 {
+                    return None;
+                }
+                let yes = *market_yes_qty.get(&market).unwrap_or(&0);
+                let no = *market_no_qty.get(&market).unwrap_or(&0);
+                Some((market, yes, no, net.unsigned_abs()))
+            })
+            .collect();
+
+        imbalances.sort_by(|a, b| b.3.cmp(&a.3));
+        imbalances
+    }
+
     /// Phase 1: Re-price single-market binary fills at final clearing prices.
     /// Drops fills that violate limit prices.
-    fn reprice_and_filter_fills(
+    pub(crate) fn reprice_and_filter_fills(
         fills: &[matching_engine::Fill],
         final_prices: &HashMap<MarketId, Vec<Nanos>>,
         order_map: &HashMap<u64, &matching_engine::Order>,
@@ -1235,59 +1462,96 @@ impl Pipeline {
     }
 
     /// Phase 2: Enforce position balance per binary market.
-    /// For each market, ensures YES qty == NO qty by trimming the excess side
-    /// (lowest welfare first), respecting AON constraints.
-    fn trim_position_imbalance(
+    /// Uses full marginal payoff computation (handles multi-market/bundle fills).
+    /// Trims single-market fills only (safe — no cross-market side effects).
+    pub(crate) fn trim_position_imbalance(
         candidate_fills: &mut [(matching_engine::Fill, i64)],
         order_map: &HashMap<u64, &matching_engine::Order>,
     ) {
-        let mut market_yes_qty: HashMap<matching_engine::MarketId, u64> = HashMap::new();
-        let mut market_no_qty: HashMap<matching_engine::MarketId, u64> = HashMap::new();
+        // Step 1: Compute per-market net position from ALL fills using marginal payoffs.
+        // Positive = excess YES, negative = excess NO.
+        let mut net_position: HashMap<matching_engine::MarketId, i64> = HashMap::new();
+        // Track single-market YES/NO separately (only these can be trimmed)
+        let mut single_yes_qty: HashMap<matching_engine::MarketId, u64> = HashMap::new();
+        let mut single_no_qty: HashMap<matching_engine::MarketId, u64> = HashMap::new();
 
-        for (fill, _welfare) in candidate_fills.iter() {
+        for (fill, _) in candidate_fills.iter() {
+            if fill.fill_qty == 0 {
+                continue;
+            }
             let Some(&order) = order_map.get(&fill.order_id) else {
                 continue;
             };
-            if order.num_markets == 1 && order.num_states == 2 {
-                let market = order.markets[0];
-                // BuyYes or SellNo → YES side
-                if (order.payoffs[0] > 0 && order.payoffs[1] == 0)
-                    || (order.payoffs[0] == 0 && order.payoffs[1] < 0)
-                {
-                    *market_yes_qty.entry(market).or_insert(0) += fill.fill_qty;
+            let num_markets = order.num_markets as usize;
+            let num_states = order.num_states as usize;
+
+            for m_idx in 0..num_markets {
+                let market = order.markets[m_idx];
+                if market.is_none() {
+                    continue;
                 }
-                // BuyNo or SellYes → NO side
-                if (order.payoffs[0] == 0 && order.payoffs[1] > 0)
-                    || (order.payoffs[0] < 0 && order.payoffs[1] == 0)
-                {
-                    *market_no_qty.entry(market).or_insert(0) += fill.fill_qty;
+                let stride = 1usize << m_idx;
+                let mut marginal: i64 = 0;
+                for s in 0..num_states {
+                    let outcome = (s / stride) % 2;
+                    let payoff = order.payoffs[s] as i64;
+                    if outcome == 0 {
+                        marginal += payoff;
+                    } else {
+                        marginal -= payoff;
+                    }
+                }
+                let other_states = (num_states / 2) as i64;
+                if other_states == 0 {
+                    continue;
+                }
+                let normalized = marginal / other_states;
+                *net_position.entry(market).or_insert(0) +=
+                    normalized * fill.fill_qty as i64;
+            }
+
+            // Track single-market fills for trimming
+            if num_markets == 1 && num_states == 2 {
+                let market = order.markets[0];
+                let is_yes = (order.payoffs[0] > 0 && order.payoffs[1] == 0)
+                    || (order.payoffs[0] == 0 && order.payoffs[1] < 0);
+                let is_no = (order.payoffs[0] == 0 && order.payoffs[1] > 0)
+                    || (order.payoffs[0] < 0 && order.payoffs[1] == 0);
+                if is_yes {
+                    *single_yes_qty.entry(market).or_insert(0) += fill.fill_qty;
+                }
+                if is_no {
+                    *single_no_qty.entry(market).or_insert(0) += fill.fill_qty;
                 }
             }
         }
 
-        let all_markets: std::collections::HashSet<matching_engine::MarketId> = market_yes_qty
-            .keys()
-            .chain(market_no_qty.keys())
-            .copied()
-            .collect();
-
-        for market in all_markets {
-            let yes_qty = *market_yes_qty.get(&market).unwrap_or(&0);
-            let no_qty = *market_no_qty.get(&market).unwrap_or(&0);
-
-            if yes_qty == no_qty {
+        // Step 2: For each market with nonzero net position, trim single-market fills.
+        for (&market, &net) in &net_position {
+            if net == 0 {
                 continue;
             }
 
-            let (trim_side_is_yes, excess) = if yes_qty > no_qty {
-                (true, yes_qty - no_qty)
-            } else {
-                (false, no_qty - yes_qty)
-            };
+            // net > 0 means excess YES, trim YES side; net < 0 means excess NO
+            let trim_side_is_yes = net > 0;
+            let excess = net.unsigned_abs();
 
-            // Collect indices of fills on the excess side, sorted by welfare (ascending)
+            // Check that there are enough single-market fills to trim
+            let trimmable = if trim_side_is_yes {
+                *single_yes_qty.get(&market).unwrap_or(&0)
+            } else {
+                *single_no_qty.get(&market).unwrap_or(&0)
+            };
+            if trimmable == 0 {
+                continue;
+            }
+
+            // Collect indices of single-market fills on the excess side
             let mut excess_indices: Vec<(usize, i64, u64)> = Vec::new();
             for (i, (fill, welfare)) in candidate_fills.iter().enumerate() {
+                if fill.fill_qty == 0 {
+                    continue;
+                }
                 let Some(&order) = order_map.get(&fill.order_id) else {
                     continue;
                 };
@@ -1315,34 +1579,77 @@ impl Pipeline {
             excess_indices.sort_by_key(|&(_, w, _)| w);
 
             let mut remaining_excess = excess;
-            for (idx, _, _) in excess_indices {
+            for (idx, _, _) in &excess_indices {
                 if remaining_excess == 0 {
                     break;
                 }
 
-                let fill_qty = candidate_fills[idx].0.fill_qty;
+                let fill_qty = candidate_fills[*idx].0.fill_qty;
                 let min_fill = order_map
-                    .get(&candidate_fills[idx].0.order_id)
+                    .get(&candidate_fills[*idx].0.order_id)
                     .map(|o| o.min_fill)
                     .unwrap_or(0);
 
                 if remaining_excess >= fill_qty {
-                    candidate_fills[idx].0.fill_qty = 0;
+                    candidate_fills[*idx].0.fill_qty = 0;
                     remaining_excess -= fill_qty;
                 } else {
                     let new_qty = fill_qty - remaining_excess;
                     if new_qty >= min_fill {
-                        candidate_fills[idx].0.fill_qty = new_qty;
+                        candidate_fills[*idx].0.fill_qty = new_qty;
                         remaining_excess = 0;
                     } else if min_fill > 0 {
+                        // AON: can't partially trim enough. Trim to min_fill for now;
+                        // second pass below will drop entire AON fills if needed.
                         let safe_trim = fill_qty.saturating_sub(min_fill);
                         if safe_trim > 0 {
-                            candidate_fills[idx].0.fill_qty = min_fill;
+                            candidate_fills[*idx].0.fill_qty = min_fill;
                             remaining_excess -= safe_trim;
                         }
                     } else {
-                        candidate_fills[idx].0.fill_qty = new_qty;
+                        candidate_fills[*idx].0.fill_qty = new_qty;
                         remaining_excess = 0;
+                    }
+                }
+            }
+
+            // Second pass: if AON constraints prevented exact balance, drop entire
+            // AON fills to guarantee position balance. Find the smallest AON fill
+            // whose drop clears the remaining excess with minimal over-trim.
+            if remaining_excess > 0 {
+                // First, try to find an AON fill where dropping it exactly or
+                // slightly over-covers the remaining excess.
+                let mut best_drop: Option<(usize, u64)> = None; // (idx, over_trim)
+                for (idx, _, _) in &excess_indices {
+                    let fill_qty = candidate_fills[*idx].0.fill_qty;
+                    if fill_qty == 0 {
+                        continue;
+                    }
+                    if fill_qty >= remaining_excess {
+                        let over_trim = fill_qty - remaining_excess;
+                        if best_drop.is_none() || over_trim < best_drop.unwrap().1 {
+                            best_drop = Some((*idx, over_trim));
+                        }
+                    }
+                }
+
+                if let Some((idx, _)) = best_drop {
+                    candidate_fills[idx].0.fill_qty = 0;
+                    // remaining_excess cleared
+                } else {
+                    // No single fill covers the excess — drop multiple, smallest first
+                    let mut droppable: Vec<(usize, u64)> = excess_indices
+                        .iter()
+                        .filter(|(idx, _, _)| candidate_fills[*idx].0.fill_qty > 0)
+                        .map(|(idx, _, _)| (*idx, candidate_fills[*idx].0.fill_qty))
+                        .collect();
+                    droppable.sort_by_key(|&(_, qty)| qty);
+                    for (idx, qty) in droppable {
+                        if remaining_excess == 0 {
+                            break;
+                        }
+                        candidate_fills[idx].0.fill_qty = 0;
+                        remaining_excess = remaining_excess.saturating_sub(qty);
                     }
                 }
             }

@@ -522,6 +522,11 @@ fn run_detailed_pipeline(
             let witness = witness_from_problem(&problem_with_arb, &result);
             let verification = verify_match(&witness, false);
             print_verification_result(&verification);
+
+            // Also run matching-solver's verifier which checks position balance
+            let solver_verification =
+                matching_solver::verify(&problem_with_arb, &result.result);
+            print_solver_verification(&solver_verification);
         }
 
         // Export JSON if requested
@@ -667,6 +672,48 @@ fn print_verification_result(result: &VerificationResult) {
     }
 }
 
+fn print_solver_verification(result: &matching_solver::VerificationResult) {
+    if result.valid {
+        println!(
+            "  Position Balance: \u{2713} VALID ({} markets checked)",
+            result.stats.markets_checked
+        );
+    } else {
+        let pos_violations: Vec<_> = result
+            .violations
+            .iter()
+            .filter(|v| v.kind == matching_solver::ViolationKind::PositionImbalance)
+            .collect();
+        let other_violations: Vec<_> = result
+            .violations
+            .iter()
+            .filter(|v| v.kind != matching_solver::ViolationKind::PositionImbalance)
+            .collect();
+
+        if !pos_violations.is_empty() {
+            println!(
+                "  Position Balance: \u{2717} {} markets imbalanced",
+                pos_violations.len()
+            );
+            for v in pos_violations.iter().take(5) {
+                println!("    {}", v.details);
+            }
+            if pos_violations.len() > 5 {
+                println!("    ... and {} more", pos_violations.len() - 5);
+            }
+        }
+        if !other_violations.is_empty() {
+            println!(
+                "  Other violations: {} found",
+                other_violations.len()
+            );
+            for v in other_violations.iter().take(5) {
+                println!("    {:?}: {}", v.kind, v.details);
+            }
+        }
+    }
+}
+
 fn print_problem_summary(problem: &Problem, stats: &OrderStats) {
     println!("Problem Summary:");
     println!("  Markets: {}", problem.markets.len());
@@ -800,10 +847,61 @@ fn print_pipeline_steps(result: &PipelineResult, _problem: &Problem) {
     println!("  Total                 {:>7.3}s", result.total_time_secs);
     println!();
 
+    // Print UCP enforcement diagnostics
+    if let Some(ref ucp) = result.ucp_stats {
+        print_ucp_stats(ucp);
+    }
+
     // Print iteration convergence stats
     if !result.iteration_stats.is_empty() {
         print_iteration_convergence(&result.iteration_stats);
     }
+}
+
+fn print_ucp_stats(ucp: &matching_solver::UcpStats) {
+    println!("UCP Enforcement:");
+    println!("─────────────────────────────────────────");
+    println!(
+        "  Input:    {:>6} fills, {} welfare",
+        ucp.input_fills,
+        format_welfare(ucp.input_welfare)
+    );
+
+    let reprice_drop_pct = if ucp.input_fills > 0 {
+        ucp.dropped_by_reprice as f64 / ucp.input_fills as f64 * 100.0
+    } else {
+        0.0
+    };
+    println!(
+        "  Reprice:  {:>6} survived, {} dropped ({:.1}%)",
+        ucp.after_reprice_fills, ucp.dropped_by_reprice, reprice_drop_pct
+    );
+    println!(
+        "  Trim:     {:>6} survived, {} trimmed",
+        ucp.after_trim_fills, ucp.dropped_by_trim
+    );
+    println!(
+        "  Final:    {:>6} fills, {} welfare",
+        ucp.final_fills,
+        format_welfare(ucp.final_welfare)
+    );
+    println!("  Retention: {:.1}%", ucp.welfare_retention_pct);
+
+    if !ucp.market_imbalances.is_empty() {
+        let top_n = ucp.market_imbalances.len().min(5);
+        let top: Vec<String> = ucp.market_imbalances[..top_n]
+            .iter()
+            .map(|(mid, yes, no, excess)| {
+                format!(
+                    "M{} (YES={}, NO={}, excess={})",
+                    mid.0, yes, no, excess
+                )
+            })
+            .collect();
+        println!("  Top imbalanced: {}", top.join(", "));
+    }
+
+    println!();
 }
 
 fn print_iteration_convergence(stats: &[IterationStats]) {

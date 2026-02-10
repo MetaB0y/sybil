@@ -51,6 +51,7 @@ pub use dual_master::{DualConfig, DualMaster, DualResult, DualState, StepDecay};
 // Pipeline system
 pub use pipeline::{
     IterationStats, Pipeline, PipelineBuilder, PipelineConfig, PipelineResult, PipelineTimings,
+    UcpStats,
 };
 
 // Visualization
