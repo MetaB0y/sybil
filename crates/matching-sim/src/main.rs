@@ -21,7 +21,7 @@ use std::time::Instant;
 
 use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Cell, Color, Table};
 
-use matching_engine::{MarketId, Order, Problem};
+use matching_engine::{Fill, MarketId, Order, Problem};
 use matching_scenarios::{generate_scenario, ScenarioConfig};
 use matching_solver::{
     IterationStats, MilpConfig, MilpSolver, MmBudgetMode, Pipeline, PipelineResult, VizSnapshot,
@@ -83,7 +83,7 @@ fn main() {
         );
     } else {
         // Standard comparison run
-        let results = run_simulation(
+        let (results, gap_data) = run_simulation(
             &config,
             &solver_choice,
             milp_timeout,
@@ -93,6 +93,9 @@ fn main() {
             export_comparison.as_deref(),
         );
         print_results(&results, &solver_choice);
+        if let Some(ref data) = gap_data {
+            print_gap_analysis(data);
+        }
     }
 
     let elapsed = start.elapsed().as_secs_f64();
@@ -1243,6 +1246,20 @@ impl SolverResults {
     }
 }
 
+/// Per-solver data for gap analysis.
+struct SolverDetail {
+    name: String,
+    result: matching_solver::MatchingResult,
+    clearing_prices: HashMap<MarketId, Vec<u64>>,
+    is_valid: bool,
+}
+
+/// Data for gap analysis between solvers (collected when --solver all -v).
+struct GapAnalysisData {
+    problem: Problem,
+    solver_details: Vec<SolverDetail>,
+}
+
 /// Expand a solver choice into individual choices for comparison.
 fn expand_solver_choices(choice: &SolverChoice) -> Vec<SolverChoice> {
     match choice {
@@ -1371,8 +1388,9 @@ fn run_simulation(
     num_batches: usize,
     verbose: bool,
     export_comparison: Option<&str>,
-) -> Vec<SolverResults> {
+) -> (Vec<SolverResults>, Option<GapAnalysisData>) {
     let choices = expand_solver_choices(solver_choice);
+    let collect_gap = *solver_choice == SolverChoice::All && verbose;
 
     let mut results: Vec<SolverResults> = choices
         .iter()
@@ -1381,6 +1399,8 @@ fn run_simulation(
             ..Default::default()
         })
         .collect();
+
+    let mut gap_data: Option<GapAnalysisData> = None;
 
     for batch in 0..num_batches {
         let config = ScenarioConfig {
@@ -1399,8 +1419,9 @@ fn run_simulation(
             println!("{}", problem.summary());
         }
 
-        // Collect per-solver matching results for comparison export
+        // Collect per-solver matching results for comparison export and gap analysis
         let mut batch_matching_results = Vec::new();
+        let mut gap_batch_data: Vec<SolverDetail> = Vec::new();
 
         for (i, choice) in choices.iter().enumerate() {
             let start = Instant::now();
@@ -1419,6 +1440,7 @@ fn run_simulation(
             let verification = verify_match(&witness, false);
             let computed_welfare = verification.stats.computed_welfare;
             results[i].total_welfare += computed_welfare;
+            let is_valid = verification.valid;
 
             if verbose {
                 println!(
@@ -1428,12 +1450,21 @@ fn run_simulation(
                     matching_result.orders_filled,
                     problem.num_orders(),
                     elapsed,
-                    if verification.valid {
+                    if is_valid {
                         "\u{2713} VALID".to_string()
                     } else {
                         format!("\u{2717} {} violations", verification.violations.len())
                     }
                 );
+            }
+
+            if collect_gap {
+                gap_batch_data.push(SolverDetail {
+                    name: solver_display_name(choice, milp_timeout),
+                    result: matching_result.clone(),
+                    clearing_prices: witness.clearing_prices.clone(),
+                    is_valid,
+                });
             }
 
             if export_comparison.is_some() {
@@ -1448,6 +1479,14 @@ fn run_simulation(
                 Some(existing) => existing.merge(verification),
                 None => results[i].verification = Some(verification),
             }
+        }
+
+        // Collect gap analysis data (last batch wins)
+        if collect_gap {
+            gap_data = Some(GapAnalysisData {
+                problem: problem.clone(),
+                solver_details: std::mem::take(&mut gap_batch_data),
+            });
         }
 
         // Export detailed comparison JSON
@@ -1476,7 +1515,7 @@ fn run_simulation(
         }
     }
 
-    results
+    (results, gap_data)
 }
 
 fn print_results(results: &[SolverResults], choice: &SolverChoice) {
@@ -1609,6 +1648,364 @@ fn print_results(results: &[SolverResults], choice: &SolverChoice) {
                 best.mean_welfare() / 1e9 / 1e3
             );
         }
+    }
+}
+
+// ============================================================================
+// Gap Analysis
+// ============================================================================
+
+/// Print gap analysis comparing the best valid solver against each other valid solver.
+fn print_gap_analysis(data: &GapAnalysisData) {
+    // Find best valid solver by welfare
+    let best_idx = data
+        .solver_details
+        .iter()
+        .enumerate()
+        .filter(|(_, d)| d.is_valid)
+        .max_by_key(|(_, d)| d.result.total_welfare)
+        .map(|(i, _)| i);
+
+    let Some(best_idx) = best_idx else {
+        println!("\nNo valid solver results for gap analysis.");
+        return;
+    };
+
+    for (i, other) in data.solver_details.iter().enumerate() {
+        if i == best_idx {
+            continue;
+        }
+        if !other.is_valid {
+            continue; // skip invalid solvers
+        }
+        print_solver_diff(&data.problem, &data.solver_details[best_idx], other);
+    }
+}
+
+/// Print a detailed comparison between two solver results.
+fn print_solver_diff(problem: &Problem, best: &SolverDetail, other: &SolverDetail) {
+    let best_name = &best.name;
+    let other_name = &other.name;
+    let best_result = &best.result;
+    let other_result = &other.result;
+
+    let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
+    let mm_order_ids: HashSet<u64> = problem
+        .mm_constraints
+        .iter()
+        .flat_map(|c| c.order_ids.iter().copied())
+        .collect();
+    let market_names: HashMap<MarketId, &str> = problem
+        .markets
+        .iter()
+        .map(|m| (m.id, m.name.as_str()))
+        .collect();
+
+    // Compute welfare from fills (consistent with verifier)
+    let compute_welfare = |fills: &[Fill]| -> i64 {
+        fills
+            .iter()
+            .filter_map(|f| order_map.get(&f.order_id).map(|o| f.welfare(o)))
+            .sum()
+    };
+
+    let best_welfare = compute_welfare(&best_result.fills);
+    let other_welfare = compute_welfare(&other_result.fills);
+    let gap = best_welfare - other_welfare;
+    let gap_pct = if best_welfare > 0 {
+        gap as f64 / best_welfare as f64 * 100.0
+    } else {
+        0.0
+    };
+
+    // ── Header ──
+    println!();
+    println!(
+        "══════ Gap Analysis: {} ({}) vs {} ({}) ══════",
+        best_name,
+        format_welfare(best_welfare),
+        other_name,
+        format_welfare(other_welfare)
+    );
+    println!("Total gap: {} ({:.1}%)", format_welfare(gap), gap_pct);
+    println!();
+
+    // ── Welfare Breakdown ──
+    let breakdown = |fills: &[Fill]| -> (i64, i64, i64) {
+        let mut user_w: i64 = 0;
+        let mut mm_w: i64 = 0;
+        let mut bundle_w: i64 = 0;
+        for f in fills {
+            if let Some(order) = order_map.get(&f.order_id) {
+                let w = f.welfare(order);
+                if mm_order_ids.contains(&f.order_id) {
+                    mm_w += w;
+                } else {
+                    user_w += w;
+                }
+                if order.num_markets > 1 {
+                    bundle_w += w;
+                }
+            }
+        }
+        (user_w, mm_w, bundle_w)
+    };
+
+    let (best_user, best_mm, best_bundle) = breakdown(&best_result.fills);
+    let (other_user, other_mm, other_bundle) = breakdown(&other_result.fills);
+
+    println!("Welfare Breakdown:");
+    println!(
+        "  {:<18} {:>10} {:>10} {:>10}",
+        "", best_name, other_name, "Gap"
+    );
+    println!(
+        "  {:<18} {:>10} {:>10} {:>10}",
+        "User orders",
+        format_welfare(best_user),
+        format_welfare(other_user),
+        format_welfare(best_user - other_user)
+    );
+    println!(
+        "  {:<18} {:>10} {:>10} {:>10}",
+        "MM orders",
+        format_welfare(best_mm),
+        format_welfare(other_mm),
+        format_welfare(best_mm - other_mm)
+    );
+    println!(
+        "  {:<18} {:>10} {:>10} {:>10}",
+        "Bundles",
+        format_welfare(best_bundle),
+        format_welfare(other_bundle),
+        format_welfare(best_bundle - other_bundle)
+    );
+    println!();
+
+    // ── Per-Market Comparison ──
+    // Build per-market welfare maps (split bundle welfare evenly across markets)
+    let market_welfare = |fills: &[Fill]| -> HashMap<MarketId, i64> {
+        let mut map: HashMap<MarketId, i64> = HashMap::new();
+        for f in fills {
+            if let Some(order) = order_map.get(&f.order_id) {
+                let w = f.welfare(order);
+                if order.num_markets == 1 {
+                    *map.entry(order.markets[0]).or_default() += w;
+                } else {
+                    let n = order.num_markets as i64;
+                    for mid in order.active_markets() {
+                        *map.entry(mid).or_default() += w / n;
+                    }
+                }
+            }
+        }
+        map
+    };
+
+    let best_market_w = market_welfare(&best_result.fills);
+    let other_market_w = market_welfare(&other_result.fills);
+
+    let all_markets: HashSet<MarketId> = best_market_w
+        .keys()
+        .chain(other_market_w.keys())
+        .copied()
+        .collect();
+
+    let mut market_gaps: Vec<_> = all_markets
+        .iter()
+        .map(|&mid| {
+            let bw = best_market_w.get(&mid).copied().unwrap_or(0);
+            let ow = other_market_w.get(&mid).copied().unwrap_or(0);
+            (mid, bw, ow, bw - ow)
+        })
+        .collect();
+    market_gaps.sort_by(|a, b| b.3.abs().cmp(&a.3.abs()));
+
+    let best_price_yes = |mid: &MarketId| -> u64 {
+        best.clearing_prices
+            .get(mid)
+            .and_then(|p| p.first().copied())
+            .unwrap_or(0)
+    };
+    let other_price_yes = |mid: &MarketId| -> u64 {
+        other
+            .clearing_prices
+            .get(mid)
+            .and_then(|p| p.first().copied())
+            .unwrap_or(0)
+    };
+
+    println!("Per-Market Comparison (top 10 by gap):");
+    println!(
+        "  {:<8} │ {:>11} │ {:>12} │ {:>8} │ {:>9} │ {:>10} │ {:>8}",
+        "Market", "Best P(YES)", "Other P(YES)", "ΔPrice", "Best W$", "Other W$", "Gap$"
+    );
+    println!(
+        "  {:<8}─┼─{:─>11}─┼─{:─>12}─┼─{:─>8}─┼─{:─>9}─┼─{:─>10}─┼─{:─>8}",
+        "────────", "", "", "", "", "", ""
+    );
+
+    for (mid, bw, ow, gap_w) in market_gaps.iter().take(10) {
+        let name = market_names.get(mid).copied().unwrap_or("?");
+        let bp = best_price_yes(mid);
+        let op = other_price_yes(mid);
+        let dp_pp = (bp as f64 - op as f64) / 1e7;
+
+        println!(
+            "  {:<8} │ {:>10.1}% │ {:>11.1}% │ {:>+7.1}pp │ {:>9} │ {:>10} │ {:>8}",
+            name,
+            bp as f64 / 1e7,
+            op as f64 / 1e7,
+            dp_pp,
+            format_welfare(*bw),
+            format_welfare(*ow),
+            format_welfare(*gap_w)
+        );
+    }
+    println!();
+
+    // ── MM Budget ──
+    if !problem.mm_constraints.is_empty() {
+        println!("MM Budget:");
+
+        let mm_fills_map = |fills: &[Fill]| -> HashMap<u64, (u64, u64)> {
+            fills
+                .iter()
+                .filter(|f| mm_order_ids.contains(&f.order_id))
+                .map(|f| (f.order_id, (f.fill_price, f.fill_qty)))
+                .collect()
+        };
+
+        let best_mm_fills = mm_fills_map(&best_result.fills);
+        let other_mm_fills = mm_fills_map(&other_result.fills);
+
+        for mm in &problem.mm_constraints {
+            let best_cap = mm.capital_used(&best_mm_fills);
+            let other_cap = mm.capital_used(&other_mm_fills);
+            let budget = mm.max_capital;
+
+            let best_active: usize = mm
+                .order_ids
+                .iter()
+                .filter(|id| best_mm_fills.contains_key(id))
+                .count();
+            let other_active: usize = mm
+                .order_ids
+                .iter()
+                .filter(|id| other_mm_fills.contains_key(id))
+                .count();
+
+            let best_util = if budget > 0 {
+                best_cap as f64 / budget as f64 * 100.0
+            } else {
+                0.0
+            };
+            let other_util = if budget > 0 {
+                other_cap as f64 / budget as f64 * 100.0
+            } else {
+                0.0
+            };
+
+            println!(
+                "  {}: {} of {} ({:.1}%), {} orders filled",
+                best_name,
+                format_price(best_cap),
+                format_price(budget),
+                best_util,
+                best_active
+            );
+            println!(
+                "  {}: {} of {} ({:.1}%), {} orders filled",
+                other_name,
+                format_price(other_cap),
+                format_price(budget),
+                other_util,
+                other_active
+            );
+        }
+        println!();
+    }
+
+    // ── Differential Fills ──
+    let best_fill_ids: HashSet<u64> = best_result.fills.iter().map(|f| f.order_id).collect();
+    let other_fill_ids: HashSet<u64> = other_result.fills.iter().map(|f| f.order_id).collect();
+
+    // Fills in best but not in other, sorted by welfare
+    let mut best_only: Vec<(&Fill, &Order, i64, String, &str)> = best_result
+        .fills
+        .iter()
+        .filter(|f| !other_fill_ids.contains(&f.order_id))
+        .filter_map(|f| {
+            order_map.get(&f.order_id).map(|&order| {
+                let w = f.welfare(order);
+                let market_name = if order.num_markets == 1 {
+                    market_names
+                        .get(&order.markets[0])
+                        .unwrap_or(&"?")
+                        .to_string()
+                } else {
+                    format!("bundle({})", order.num_markets)
+                };
+                let order_type = if order.is_seller() { "sell" } else { "buy" };
+                (f, order, w, market_name, order_type)
+            })
+        })
+        .collect();
+    best_only.sort_by(|a, b| b.2.abs().cmp(&a.2.abs()));
+
+    if !best_only.is_empty() {
+        println!(
+            "Top Differential Fills (in {} only, by welfare):",
+            best_name
+        );
+        println!(
+            "  {:>3} │ {:>7} │ {:>8} │ {:>8} │ {:>7} │ {:>7} │ {:>5} │ {:>8}",
+            "#", "Order", "Type", "Market", "Limit", "Price", "Qty", "W$"
+        );
+        println!(
+            "  {:─>3}─┼─{:─>7}─┼─{:─>8}─┼─{:─>8}─┼─{:─>7}─┼─{:─>7}─┼─{:─>5}─┼─{:─>8}",
+            "", "", "", "", "", "", "", ""
+        );
+
+        for (i, (fill, order, welfare, market, order_type)) in
+            best_only.iter().take(15).enumerate()
+        {
+            println!(
+                "  {:>3} │ {:>7} │ {:>8} │ {:>8} │ {:>6.1}c │ {:>6.1}c │ {:>5} │ {:>8}",
+                i + 1,
+                fill.order_id,
+                order_type,
+                market,
+                order.limit_price as f64 / 1e7,
+                fill.fill_price as f64 / 1e7,
+                fill.fill_qty,
+                format_welfare(*welfare)
+            );
+        }
+        println!();
+    }
+
+    // Summary of fills unique to other
+    let other_only_welfare: i64 = other_result
+        .fills
+        .iter()
+        .filter(|f| !best_fill_ids.contains(&f.order_id))
+        .filter_map(|f| order_map.get(&f.order_id).map(|o| f.welfare(o)))
+        .sum();
+    let other_only_count = other_result
+        .fills
+        .iter()
+        .filter(|f| !best_fill_ids.contains(&f.order_id))
+        .count();
+
+    if other_only_count > 0 {
+        println!(
+            "Fills unique to {}: {} orders, {} welfare",
+            other_name,
+            other_only_count,
+            format_welfare(other_only_welfare)
+        );
+        println!();
     }
 }
 
