@@ -11,6 +11,7 @@ use matching_engine::{Fill, MarketId, MmSide, Nanos, Order, Problem, Qty};
 ///
 /// Encapsulates the per-constraint remaining budget and per-order MM metadata,
 /// replacing the ad-hoc closure pattern in individual solvers.
+#[derive(Clone)]
 pub struct MmBudgetTracker {
     remaining: Vec<u128>,
     order_map: HashMap<u64, (usize, MmSide)>,

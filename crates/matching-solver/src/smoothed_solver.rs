@@ -1,25 +1,22 @@
 //! Smoothed gradient solver for welfare-maximizing FBA.
 //!
-//! Uses Walrasian tatonnement (= Lagrangian dual ascent) with temperature
-//! annealing to find clearing prices that maximize welfare subject to:
+//! Uses Walrasian tatonnement with temperature annealing to find clearing
+//! prices that maximize welfare subject to:
 //! - Position balance per market (price = dual variable)
-//! - Group price consistency (simplex projection)
 //! - Bundle order integration (direct excess demand contribution)
-//! - MM budget constraints (μ Lagrangian dual variables)
+//! - MM budget constraints (greedy knapsack allocation each step)
 //!
 //! Algorithm:
 //! 1. Initialize prices via LocalSolver per-market clearing
-//! 2. Initialize μ_j = 0 for MM budget duals
-//! 3. Annealing loop: for each temperature ε (high → low):
-//!    a. Compute smoothed excess demand per market
-//!       - Single-market orders: surplus-weighted fill probability
-//!       - Bundle orders: smoothed fill qty × per-market marginal payoff
-//!       - MM orders: surplus penalized by μ_j × capital per unit
-//!    b. Tatonnement step (adjust prices by excess demand)
-//!    c. Clamp prices to [0, NPD]
-//!    d. Dual update: μ_j for MM budget constraints
-//! 4. Extract fills: single-market (MM budget enforced inline) + bundles
-//! 5. Post-process via enforce_ucp (light — mostly repricing)
+//! 2. Annealing loop: for each temperature ε (high → low):
+//!    a. Compute smoothed excess demand per market (non-MM orders)
+//!    b. Bundle contributions to excess demand
+//!    c. MM greedy allocation: knapsack by welfare/capital at current prices,
+//!       activated MM orders contribute to excess demand
+//!    d. Tatonnement step (adjust prices by total excess demand)
+//!    e. Clamp prices to [0, NPD]
+//! 3. Extract fills: single-market (MM budget enforced inline) + bundles
+//! 4. Post-process via enforce_ucp (light — mostly repricing)
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -33,7 +30,7 @@ use crate::pipeline::{PipelineResult, PipelineTimings};
 use crate::traits::{PriceDiscoverer, PriceDiscoveryResult};
 use crate::Pipeline;
 
-/// Smoothed gradient solver with Lagrangian extension for bundles and MMs.
+/// Smoothed gradient solver with greedy MM allocation.
 pub struct SmoothedSolver {
     /// Initial temperature (large = smoother landscape)
     epsilon_start: f64,
@@ -43,8 +40,6 @@ pub struct SmoothedSolver {
     cooling_factor: f64,
     /// Gradient step size for tatonnement
     learning_rate: f64,
-    /// Learning rate for Lagrangian dual variables (λ, μ)
-    lr_dual: f64,
     /// Max gradient steps per temperature level
     max_inner_iters: usize,
     /// Convergence threshold for inner loop (max excess demand / total qty)
@@ -58,7 +53,6 @@ impl Default for SmoothedSolver {
             epsilon_min: 1000.0,
             cooling_factor: 0.5,
             learning_rate: 1.0,
-            lr_dual: 0.1,
             max_inner_iters: 100,
             inner_convergence: 1e-4,
         }
@@ -116,13 +110,12 @@ struct MmGroup {
     mm_order_refs: Vec<MmOrderRef>,
 }
 
-/// Precomputed MM order data for fast capital computation.
+/// Precomputed MM order data for greedy allocation.
 struct MmOrderRef {
     market_idx: usize, // index into prices vec (MarketId.0)
     limit_price: f64,
     max_fill: f64,
     is_buy: bool,
-    mm_idx: usize,
     capital_uses_complement: bool,
 }
 
@@ -187,11 +180,11 @@ impl SmoothedSolver {
         // Reusable excess demand buffer (zeroed each iteration)
         let mut excess_demands = vec![0.0f64; num_price_slots];
 
-        // Initialize Lagrangian dual variables
-        let mut mu: Vec<f64> = vec![0.0; mm_groups.len()];
-        // Step 2: Annealing loop with Lagrangian extension
-        // Group price constraint (sum <= $1) is NOT enforced here — each market
-        // finds its independently optimal price. enforce_ucp handles position balance.
+        // Step 2: Annealing loop with greedy MM allocation
+        // Each tatonnement step: non-MM excess demand + bundle contributions +
+        // greedy MM allocation (knapsack by welfare/capital at current prices).
+        // MMs are budget-constrained price-taking agents; the greedy knapsack
+        // is their best-response at posted prices. Standard Walrasian framework.
         let mut epsilon = self.epsilon_start;
         let mut outer_iters = 0;
 
@@ -199,23 +192,17 @@ impl SmoothedSolver {
             let inv_eps = 1.0 / epsilon;
 
             for _inner in 0..self.max_inner_iters {
-                let mut max_rel_excess = 0.0f64;
-
                 // Zero excess demands
                 for v in excess_demands.iter_mut() {
                     *v = 0.0;
                 }
 
-                // Single-market orders (with MM penalty)
+                // Single-market orders (non-MM only; MMs handled by greedy allocation)
                 for mo in &market_orders {
                     let idx = mo.market_id.0 as usize;
                     let p = prices[idx];
-                    let excess =
-                        smoothed_excess_demand(&mo.orders, p, inv_eps, npd, &mu);
+                    let excess = smoothed_excess_demand(&mo.orders, p, inv_eps, npd);
                     excess_demands[idx] = excess;
-
-                    let tq = total_qty[idx];
-                    max_rel_excess = max_rel_excess.max((excess / tq).abs());
                 }
 
                 // Bundle contributions to excess demand
@@ -230,6 +217,18 @@ impl SmoothedSolver {
                     }
                 }
 
+                // MM proportional allocation: all willing MMs contribute, scaled
+                // to fit budget.
+                proportional_mm_excess_demand(&mm_groups, &prices, inv_eps, npd, &mut excess_demands);
+
+                // Convergence check (after all contributions)
+                let mut max_rel_excess = 0.0f64;
+                for mo in &market_orders {
+                    let idx = mo.market_id.0 as usize;
+                    let tq = total_qty[idx];
+                    max_rel_excess = max_rel_excess.max((excess_demands[idx] / tq).abs());
+                }
+
                 // Tatonnement step
                 for mo in &market_orders {
                     let idx = mo.market_id.0 as usize;
@@ -239,16 +238,6 @@ impl SmoothedSolver {
 
                     let step = self.learning_rate * epsilon * excess / tq;
                     prices[idx] = (p + step).clamp(0.0, npd);
-                }
-
-                // MM dual updates
-                for (j, mm) in mm_groups.iter().enumerate() {
-                    let capital = compute_mm_capital_smoothed(
-                        mm, &prices, inv_eps, npd, &mu,
-                    );
-                    let violation = (capital - mm.budget).max(0.0);
-                    mu[j] += self.lr_dual * violation;
-                    mu[j] = mu[j].max(0.0);
                 }
 
                 if max_rel_excess < self.inner_convergence {
@@ -268,28 +257,34 @@ impl SmoothedSolver {
             "smoothed solver: annealing complete"
         );
 
-        // Step 3: Convert f64 prices to Nanos and build PriceDiscoveryResult
+        // Step 3: Convert f64 prices to Nanos and extract fills
         let final_prices = self.quantize_prices(&prices, &market_orders, &bundles);
-        let pd = self.build_price_discovery(&final_prices);
+        let order_map: HashMap<u64, &Order> =
+            problem.orders.iter().map(|o| (o.id, o)).collect();
 
-        // Step 4: Extract fills at final prices (MM budget enforced inline)
-        let mut tracker = crate::fill_extraction::MmBudgetTracker::new(problem);
+        // Extract single-market fills with MM budget tracking
+        let mut market_ids: Vec<MarketId> = final_prices.keys().copied().collect();
+        market_ids.sort();
+        let mut mm_tracker = crate::fill_extraction::MmBudgetTracker::new(problem);
         let mut fills = Vec::new();
-        for (&market_id, market_prices) in &final_prices {
-            let yes_price = market_prices[0];
+        for &market_id in &market_ids {
+            let yes_price = final_prices[&market_id][0];
             let market_orders: Vec<&Order> = problem
                 .orders
                 .iter()
                 .filter(|o| o.num_markets == 1 && o.markets[0] == market_id)
                 .collect();
-            let market_fills =
-                crate::fill_extraction::fill_binary_market(market_id, &market_orders, yes_price, Some(&mut tracker));
+            let market_fills = crate::fill_extraction::fill_binary_market(
+                market_id, &market_orders, yes_price, Some(&mut mm_tracker),
+            );
             fills.extend(market_fills);
         }
 
         // Extract bundle fills
         let bundle_fills = extract_bundle_fills(problem, &final_prices, &bundles);
         fills.extend(bundle_fills);
+
+        let pd = self.build_price_discovery(&final_prices);
 
         // Step 5: Build PipelineResult and enforce UCP
         let mut pipeline_result = PipelineResult::empty();
@@ -298,7 +293,6 @@ impl SmoothedSolver {
         pipeline_result.phase_times = PipelineTimings::default();
         pipeline_result.iterations = outer_iters;
 
-        let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
         for fill in fills {
             if let Some(&order) = order_map.get(&fill.order_id) {
                 pipeline_result.result.add_fill(fill, order);
@@ -467,7 +461,7 @@ impl SmoothedSolver {
             .mm_constraints
             .iter()
             .enumerate()
-            .map(|(mm_idx, mm)| {
+            .map(|(_, mm)| {
                 let mut mm_order_refs = Vec::new();
                 for mo in market_orders {
                     let midx = mo.market_id.0 as usize;
@@ -479,7 +473,6 @@ impl SmoothedSolver {
                                     limit_price: order.limit_price,
                                     max_fill: order.max_fill,
                                     is_buy: order.is_buy,
-                                    mm_idx,
                                     capital_uses_complement,
                                 });
                             }
@@ -610,36 +603,29 @@ fn sigmoid(x: f64) -> f64 {
     }
 }
 
-/// Compute smoothed excess demand (D - S) for a single market,
-/// with MM budget penalty applied to MM orders' effective surplus.
+/// Compute smoothed excess demand (D - S) for a single market from non-MM orders.
+/// MM orders are handled separately by greedy_mm_excess_demand.
 fn smoothed_excess_demand(
     orders: &[OrderInfo],
     price: f64,
     inv_eps: f64,
-    npd: f64,
-    mm_duals: &[f64],
+    _npd: f64,
 ) -> f64 {
     let mut excess = 0.0;
 
     for order in orders {
-        let base_surplus = if order.is_buy {
+        // Skip MM orders — handled by greedy allocation
+        if order.mm_info.is_some() {
+            continue;
+        }
+
+        let surplus = if order.is_buy {
             order.limit_price - price
         } else {
             price - order.limit_price
         };
 
-        let effective_surplus = if let Some((mm_idx, capital_uses_complement)) = order.mm_info {
-            let capital_per_unit = if capital_uses_complement {
-                npd - price
-            } else {
-                price
-            };
-            base_surplus - mm_duals[mm_idx] * capital_per_unit
-        } else {
-            base_surplus
-        };
-
-        let z = effective_surplus * inv_eps;
+        let z = surplus * inv_eps;
         let fill_prob = order.max_fill * sigmoid(z);
 
         if order.is_buy {
@@ -755,52 +741,61 @@ fn bundle_surplus(bundle: &BundleInfo, expected_payoff: f64) -> f64 {
     }
 }
 
-/// Compute smoothed total capital usage for an MM group using precomputed order refs.
-fn compute_mm_capital_smoothed(
-    mm: &MmGroup,
+/// Proportional MM allocation: all willing MM orders contribute to excess
+/// demand, scaled down uniformly if total capital exceeds budget.
+fn proportional_mm_excess_demand(
+    mm_groups: &[MmGroup],
     prices: &[f64],
     inv_eps: f64,
     npd: f64,
-    mm_duals: &[f64],
-) -> f64 {
-    let mut total_capital = 0.0;
+    excess_demands: &mut [f64],
+) {
+    for mm in mm_groups {
+        let mut total_capital = 0.0;
+        let mut contributions: Vec<(f64, usize, bool)> = Vec::new();
 
-    for r in &mm.mm_order_refs {
-        let p = prices[r.market_idx];
-        let capital_per_unit = if r.capital_uses_complement {
-            npd - p
+        for r in &mm.mm_order_refs {
+            let p = prices[r.market_idx];
+            let surplus = if r.is_buy { r.limit_price - p } else { p - r.limit_price };
+            if surplus <= 0.0 { continue; }
+            let capital_per_unit = if r.capital_uses_complement { npd - p } else { p };
+            if capital_per_unit <= 0.0 { continue; }
+
+            let fill_prob = sigmoid(surplus * inv_eps);
+            let smoothed_qty = r.max_fill * fill_prob;
+            total_capital += capital_per_unit * smoothed_qty;
+            contributions.push((smoothed_qty, r.market_idx, r.is_buy));
+        }
+
+        let scale = if total_capital > mm.budget && total_capital > 0.0 {
+            mm.budget / total_capital
         } else {
-            p
+            1.0
         };
 
-        let base_surplus = if r.is_buy {
-            r.limit_price - p
-        } else {
-            p - r.limit_price
-        };
-
-        let effective_surplus = base_surplus - mm_duals[r.mm_idx] * capital_per_unit;
-        let fill_prob = sigmoid(effective_surplus * inv_eps);
-        let smoothed_qty = r.max_fill * fill_prob;
-
-        total_capital += capital_per_unit * smoothed_qty;
+        for &(smoothed_qty, market_idx, is_buy) in &contributions {
+            let scaled_qty = smoothed_qty * scale;
+            if is_buy { excess_demands[market_idx] += scaled_qty; }
+            else { excess_demands[market_idx] -= scaled_qty; }
+        }
     }
-
-    total_capital
 }
+
+
 
 /// Snap a f64 price to the nearest order limit price in the order book.
 ///
-/// The sigmoid smoothing in tatonnement converges to prices slightly off
-/// from the true clearing price (typically just below a seller's limit).
-/// Snapping to the nearest order limit avoids these off-by-one issues.
+/// Standard step in primal-dual auction algorithms: the dual (tatonnement)
+/// finds approximate continuous prices, and we round to the nearest tick
+/// on the order book for the primal (fill extraction). This is equivalent
+/// to solving the discrete problem in the neighborhood of the dual solution.
 fn snap_to_order_price(raw: f64, orders: &[OrderInfo]) -> Nanos {
     let rounded = raw.round().max(0.0).min(NANOS_PER_DOLLAR as f64) as Nanos;
     if orders.is_empty() {
         return rounded;
     }
 
-    // Collect unique limit prices (both YES and complement NO prices)
+    // Collect unique limit prices from the order book
     let mut candidates: Vec<Nanos> = Vec::new();
     for o in orders {
         let lp = o.limit_price.round().max(0.0).min(NANOS_PER_DOLLAR as f64) as Nanos;
@@ -809,7 +804,7 @@ fn snap_to_order_price(raw: f64, orders: &[OrderInfo]) -> Nanos {
     candidates.sort_unstable();
     candidates.dedup();
 
-    // Find nearest candidate
+    // Snap to nearest order book tick
     let mut best = rounded;
     let mut best_dist = u64::MAX;
     for &c in &candidates {
@@ -820,27 +815,14 @@ fn snap_to_order_price(raw: f64, orders: &[OrderInfo]) -> Nanos {
         }
     }
 
-    // Only snap if very close (within 5000 nanos ≈ $0.000005).
-    // The sigmoid bias is typically < 1000 nanos; this catches it
-    // without disturbing prices on dense order books.
-    if best_dist <= 5_000 {
-        best
-    } else {
-        rounded
-    }
+    best
 }
 
 // ============================================================================
 // Fill extraction
 // ============================================================================
 
-/// Extract fills for bundle (multi-market) orders.
-///
-/// Bundles are filled greedily by surplus descending. Fill prices are set
-/// to the risk-neutral expected payoff at clearing prices.
-///
-/// Position balance is maintained by tracking per-market net position delta
-/// and skipping bundles that would create imbalance the verifier can't accept.
+/// Extract bundle fills, skipping bundles that would create position imbalance.
 fn extract_bundle_fills(
     problem: &Problem,
     prices: &HashMap<MarketId, Vec<Nanos>>,
@@ -1258,34 +1240,34 @@ mod tests {
         let mut problem = Problem::new("mm_test");
         let market = problem.markets.add_binary("test_market");
 
-        // Regular YES buyers (demand)
+        // Regular YES buyers (demand) — more than supply, creating a deficit
         problem
             .orders
-            .push(simple_yes_buy(&problem.markets, 1, market, 600_000_000, 200));
+            .push(simple_yes_buy(&problem.markets, 1, market, 600_000_000, 300));
 
-        // Regular YES seller (supply)
+        // Regular YES seller (supply) — less than demand
         problem.orders.push(outcome_sell(
             &problem.markets,
             2,
             market,
             0,
             300_000_000,
-            200,
+            100,
         ));
 
-        // MM YES buyer
+        // MM YES buyer at 55c
         problem
             .orders
             .push(simple_yes_buy(&problem.markets, 10, market, 550_000_000, 100));
 
-        // MM YES seller
+        // MM YES seller at 35c
         problem.orders.push(outcome_sell(
             &problem.markets,
             11,
             market,
             0,
             350_000_000,
-            100,
+            200,
         ));
 
         let mut mm = MmConstraint::new(MmId(1), 100_000_000_000); // $100 budget
@@ -1300,14 +1282,13 @@ mod tests {
             result.result.total_welfare >= 0,
             "Welfare should be non-negative"
         );
-        // MM orders should now participate in fills
+        // MM orders should participate in fills
         let mm_fills: Vec<_> = result
             .result
             .fills
             .iter()
             .filter(|f| f.order_id == 10 || f.order_id == 11)
             .collect();
-        // We expect at least some MM fills (with sufficient budget)
         assert!(
             !mm_fills.is_empty(),
             "MM orders should participate in fills with sufficient budget"

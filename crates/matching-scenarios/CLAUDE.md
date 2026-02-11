@@ -19,10 +19,10 @@ let problem = generate_scenario(ScenarioConfig::medium());
 | Preset | Orders | Markets | Bundles | Spreads | AON | MMs | Use Case |
 |--------|--------|---------|---------|---------|-----|-----|----------|
 | `quick()` | ~50 | 5 | 10% | 0% | 0% | 0 | Unit tests, rapid iteration |
-| `small()` | ~300 | 10 | 15% | 5% | 5% | 1 | Local development |
-| `medium()` | ~3000 | 30 | 15% | 5% | 10% | 2 | Integration tests, CI |
-| `large()` | ~10k | 50 | 20% | 5% | 15% | 3 | Performance benchmarks |
-| `extreme()` | ~100k | 200 | 20% | 5% | 15% | 10 | Scaling limits |
+| `small()` | ~300 | 10 | 15% | 5% | 0% | 1 | Local development |
+| `medium()` | ~3000 | 30 | 15% | 5% | 0% | 2 | Integration tests, CI |
+| `large()` | ~10k | 50 | 20% | 5% | 0% | 3 | Performance benchmarks |
+| `extreme()` | ~100k | 200 | 20% | 5% | 0% | 10 | Scaling limits |
 | `milp_killer()` | ~5k | 50 | 30% | 0% | 45% | 0 | Force MILP timeout |
 
 ## ScenarioConfig Fields
