@@ -1,4 +1,4 @@
-# KKT Analysis: Welfare Maximization with MM Budget Constraints
+# KKT Analysis: Welfare Maximization in Prediction Markets
 
 ## The Optimization Problem
 
@@ -8,154 +8,191 @@ The matching engine solves a welfare-maximization problem over prices $p$ and fi
 max   W(p,q) = sum_i surplus_i(p) * q_i
 
 s.t.
-  (PB)  forall m: sum_{i in demand(m)} q_i = sum_{j in supply(m)} q_j     [position balance]
-  (UCP) forall i: q_i > 0  ==>  surplus_i(p) >= 0                        [uniform clearing price]
-  (QTY) forall i: 0 <= q_i <= max_fill_i                                  [quantity bounds]
-  (MM)  forall k: sum_{i in MM(k)} capital_i(p,q) <= B_k                  [MM budget]
-  (P)   forall m: 0 <= p_m <= 1                                           [price bounds]
+  (PB)  forall m: sum_{i in demand(m)} q_i = sum_{j in supply(m)} q_j + mint_m   [position balance]
+  (UCP) forall i: q_i > 0  ==>  surplus_i(p) >= 0                                [uniform clearing price]
+  (QTY) forall i: 0 <= q_i <= max_fill_i                                          [quantity bounds]
+  (MM)  forall k: sum_{i in MM(k)} capital_i(p,q) <= B_k                          [MM budget]
+  (GP)  forall g: sum_{m in g} p_m <= 1                                            [group price consistency]
+  (MG)  forall g: group_mint_g >= 0                                                [group minting non-negative]
+  (P)   forall m: 0 <= p_m <= 1                                                    [price bounds]
 ```
 
 Where:
-- `surplus_i(p) = limit_i - p_m(i)` for buyers (happy when clearing price is below their limit)
-- `surplus_i(p) = p_m(i) - limit_i` for sellers (happy when clearing price is above their limit)
-- `capital_i(p,q) = p * q` for BuyYes/SellNo orders
-- `capital_i(p,q) = (1-p) * q` for SellYes/BuyNo orders
+- `surplus_i(p) = limit_i - p_m(i)` for buyers, `p_m(i) - limit_i` for sellers
+- `capital_i(p,q) = p * q` for BuyYes/SellNo, `(1-p) * q` for SellYes/BuyNo
+- `mint_m` = per-market minting (YES+NO pair creation), cost = $1 per pair
+- `group_mint_g` = group-level minting (one YES per market), cost = $1 per set
 
-This is a mixed-integer bilinear program (welfare is linear in q for fixed p, but capital constraints couple p and q). MILP solves it directly; heuristic solvers approximate.
+## Minting Economics
 
-## Lagrangian
+### Per-Market Minting (mint_m)
 
-Relaxing position balance (PB) and MM budget (MM) constraints:
+Creates one YES share + one NO share for cost $1. Revenue at prices p:
+```
+revenue = p_YES * Q + p_NO * Q = (p_YES + p_NO) * Q = $1 * Q
+```
+
+**Always zero net cost** because p_YES + p_NO = $1 by complementarity. Per-market minting provides unlimited supply at any price without changing the objective. MILP exploits this to push prices to extremes (e.g., 0% YES) and fill all demand.
+
+### Group Minting (group_mint_g)
+
+Creates one YES share per market in a mutually exclusive group. Cost = $1 per set.
+
+**When Σp ≥ $1**: Revenue = Σ p_m ≥ $1. This is a profitable arbitrage (negrisk). No subsidy needed. The heuristic solver performs this.
+
+**When Σp < $1**: Revenue = Σ p_m < $1. **This requires a subsidy of $1 - Σp per set.** The protocol must absorb the loss. This is NOT sound for a trustless protocol. MILP does this implicitly (the cost appears in its objective as `minting_cost`), but it represents a real economic cost that somebody must pay.
+
+### Why Sub-$1 Group Minting Doesn't Help the Heuristic Anyway
+
+Investigation of the small preset revealed: **there are zero unfilled buy-YES orders with limit ≥ clearing price** on underperforming groups. The LocalSolver already filled ALL eligible demand — the remaining ~20 unfilled orders per market all have limits below the clearing price.
+
+The only way to unlock more welfare is to **change the prices themselves**, not just add supply at current prices.
+
+## Lagrangian (with Minting)
+
+Relaxing position balance (PB), MM budget (MM), and group price consistency (GP):
 
 ```
-L(p, q, lambda, mu) = W(p,q) + sum_m lambda_m * (D_m(p,q) - S_m(p,q)) + sum_k mu_k * (B_k - C_k(p,q))
+L = W(p,q) - sum_m nu_m * mint_m - sum_g rho_g * group_mint_g
+  + sum_m alpha_m * (D_m - S_m - mint_m - group_contribution_m)
+  + sum_k mu_k * (B_k - C_k(p,q))
+  + sum_g gamma_g * (1 - sum_{m in g} p_m)
 ```
 
 Where:
-- `lambda_m` is the dual variable for position balance on market m
-- `mu_k >= 0` is the dual variable for MM budget constraint k
-- `D_m - S_m` is excess demand on market m
-- `C_k(p,q) = sum_{i in MM(k)} capital_i(p,q)` is total capital used by MM k
+- `alpha_m` = position balance dual (shadow price of supply on market m)
+- `mu_k >= 0` = MM budget dual
+- `gamma_g >= 0` = group price consistency dual (active when Σp = $1)
+- `nu_m` = $1 (per-market minting cost)
+- `rho_g` = $1 (group minting cost)
+
+### KKT for per-market minting
+
+```
+dL/d(mint_m) = -$1 + alpha_m_YES + alpha_m_NO = 0
+```
+
+At optimum: `alpha_m_YES + alpha_m_NO = $1`. The shadow prices of YES and NO supply always sum to $1. This is why per-market minting is free — the value of creating supply equals the cost.
+
+### KKT for group minting
+
+```
+dL/d(group_mint_g) = -$1 + sum_{m in g} alpha_m_YES <= 0   (= 0 if group_mint_g > 0)
+```
+
+Group minting is active when `sum alpha_m_YES >= $1` — the total shadow price of YES supply across the group exceeds the minting cost.
 
 ## KKT Stationarity: dL/dp_m = 0
 
-Taking the derivative with respect to price p_m:
-
 ```
-dL/dp_m = dW/dp_m + lambda_m * d(D_m - S_m)/dp_m - sum_k mu_k * dC_k/dp_m = 0
+dL/dp_m = dW/dp_m + alpha_m * d(D-S)/dp_m - sum_k mu_k * dC_k/dp_m - gamma_g = 0
 ```
 
-### Term 1: dW/dp_m
+### Term 1: dW/dp_m = -(D_m - S_m) at fill quantities
 
-For buyers on market m: `d(surplus * q)/dp = -q_i` (higher price reduces buyer surplus)
-For sellers on market m: `d(surplus * q)/dp = +q_i` (higher price increases seller surplus)
+### Term 2: alpha_m * d(D-S)/dp_m — standard tatonnement force
 
-So: `dW/dp_m = -sum_{buyers} q_i + sum_{sellers} q_i = -(D_m - S_m)` at the fill quantities.
+### Term 3: -sum_k mu_k * dC_k/dp_m — MM budget bias
 
-### Term 2: lambda_m * d(D-S)/dp_m
+For BuyYes on market m: `dC_k/dp = q_i` (price increase costs more capital)
+For SellYes on market m: `dC_k/dp = -q_i` (price increase uses less capital)
 
-The excess demand response to price. As price increases, demand decreases and supply increases (more sellers willing to trade, fewer buyers). This is the standard tatonnement force.
+### Term 4: -gamma_g — group price consistency pressure
 
-### Term 3: -sum_k mu_k * dC_k/dp_m
+When gamma_g > 0 (Σp = $1 binding), this pushes all market prices in the group DOWN. Combined with position balance, this creates a force toward negrisk-optimal prices.
 
-For BuyYes orders on market m: `d(p*q)/dp = q_i`, so price increase costs more capital.
-For SellYes orders on market m: `d((1-p)*q)/dp = -q_i`, so price increase uses less capital.
+## Three Sources of Heuristic Suboptimality
 
-Combining:
+### 1. Missing MM Budget Term (mu_k)
 
-```
-dC_k/dp_m = sum_{BuyYes in MM(k), market m} q_i - sum_{SellYes in MM(k), market m} q_i
-```
-
-## What Tatonnement Computes
-
-Standard tatonnement uses the gradient step:
+Tatonnement finds D(p) = S(p), ignoring the capital constraint. The optimal prices should be shifted:
 
 ```
-p_m <- p_m + lr * excess_demand_m(p)
+Delta_p_m ~ -mu_k * (sum_{MM buys YES} q_i - sum_{MM sells YES} q_i)
 ```
 
-This converges to `D_m(p) = S_m(p)`, which is the market-clearing condition. In KKT terms, tatonnement finds a stationary point of:
+Markets where MMs buy YES → price shifts DOWN (cheaper capital per unit).
+Markets where MMs sell YES → price shifts UP.
+
+**Impact**: On small preset, MILP uses 95.5% of MM budget vs Dual's 22.1%. The greedy knapsack can only select fills that satisfy at the heuristic's clearing prices, which are wrong.
+
+### 2. Lambda Shading is Structurally Broken
+
+DualMaster uses lambda to enforce Σp = $1 by shading order limits. Investigation revealed this is **self-defeating**:
+
+1. Lambda shading inflates effective buyer limits → LocalSolver finds higher clearing price
+2. But fills are checked against **original** limits: `order.is_satisfied_at_price(fill_price)`
+3. The higher clearing price exceeds original limits → all new crossings rejected
+4. Zero fills → prices unchanged → lambda grows uselessly
+
+Tested with λ = -1.77 (177c shading!) over 50 iterations: **zero additional fills, G2 residual stuck at -13.0%**. The mechanism cannot close group price gaps.
+
+**Root cause**: Shading changes the demand/supply curves, but the resulting equilibrium price overshoots the original limits. The gap between shaded limit and original limit grows linearly with lambda, while the price adjustment needed is the same — so the overshoot gets worse with more shading.
+
+### 3. No Price Space Exploration
+
+The heuristic finds LOCAL equilibrium prices (where S=D per market). MILP can explore radically different price vectors:
+
+- Push some markets to 0% YES price (all buy orders fill, supply from minting)
+- Push group sums to exactly $1 for optimal minting
+- Jointly optimize prices and fill quantities
+
+On the small preset, MILP sets G0M2 and G1M1 to **0%** clearing price — a solution the heuristic can never find because there's zero natural supply at 0%.
+
+## Smoothed Gradient: A Better Platform?
+
+The smoothed gradient solver adjusts prices directly via excess demand gradient, without the original-limit filter problem. This makes it naturally suitable for:
+
+### Group Arb Pressure
+
+Add a penalty term to the price gradient:
 
 ```
-dL/dp_m = lambda_m * d(D-S)/dp_m = 0   (for mu_k = 0)
+gradient_m += K * ($1 - sum_{m' in group(m)} p_m')   for each m in a group
 ```
 
-This is correct when **there are no active MM budget constraints** (mu_k = 0 for all k).
+This pushes group sums toward $1 directly through price adjustment, avoiding the broken lambda-shading mechanism. The force is:
+- Positive (push price UP) when Σp < $1
+- Negative (push price DOWN) when Σp > $1
+- Zero at Σp = $1 (equilibrium)
 
-## What Tatonnement Misses
-
-When an MM budget is binding (mu_k > 0), the KKT optimality condition requires:
-
+Mathematically, this is equivalent to adding a quadratic penalty:
 ```
-dW/dp_m + lambda_m * d(D-S)/dp_m = sum_k mu_k * dC_k/dp_m
-```
-
-The right-hand side is **non-zero** when MM orders are active. The optimal prices are **shifted** relative to pure market-clearing prices.
-
-### Direction of the Price Shift
-
-At the optimum with an active MM budget (mu_k > 0):
-
-- **Markets where MMs buy YES**: `dC_k/dp_m > 0`, so the constraint pushes p_m **down** (reduces capital per unit, allows more fills within budget)
-- **Markets where MMs sell YES**: `dC_k/dp_m < 0`, so the constraint pushes p_m **up** (same effect: reduces 1-p capital)
-
-The price correction is:
-
-```
-Delta_p_m ~ -mu_k * (sum_{MM buys YES on m} q_i - sum_{MM sells YES on m} q_i)
+Penalty = -K/2 * sum_g (sum_{m in g} p_m - $1)^2
 ```
 
-This bias is proportional to:
-1. The shadow price mu_k of the binding budget constraint
-2. The net MM position on each market
+### MM Budget in Gradient
 
-## Practical Implications
-
-### Why MILP Beats Tatonnement by 4-5x
-
-Tatonnement finds prices where D(p) = S(p), then extracts fills at those prices. When MM budgets are tight:
-
-1. **Wrong prices**: Tatonnement prices don't account for the capital constraint bias. The optimal prices should be shifted to pack more welfare into the limited budget.
-
-2. **Wrong fill selection**: Given wrong prices, fill extraction picks suboptimal orders. A slightly lower price on a market where MMs buy YES would allow the MM to fill more orders total.
-
-3. **Cascading effect**: MM fills interact with user fills through position balance. Wrong MM prices cascade into wrong user fill decisions.
-
-### Proposed Fix: Budget-Aware Price Correction
-
-After tatonnement converges to market-clearing prices p*, apply a correction:
+Embed the MM budget dual directly:
 
 ```
-p_corrected_m = p*_m - lr_mu * sum_k mu_k * net_mm_demand_m(k)
+p_m <- p_m + lr * (excess_demand_m - sum_k mu_k * dC_k/dp_m + K * group_residual_m)
+mu_k <- max(0, mu_k + lr_mu * (C_k - B_k))
 ```
 
-Where mu_k can be estimated via bisection on the budget constraint:
-1. Start with mu_k = 0
-2. Compute fills at corrected prices
-3. If capital_used > B_k, increase mu_k
-4. Converge when capital_used ≈ B_k
+This is a primal-dual method that jointly handles:
+- Market clearing (excess demand = 0)
+- MM budget optimality (mu * dC/dp term)
+- Group price consistency (penalty term)
 
-This turns an O(n log n) tatonnement into O(n log n * log(1/epsilon)) with the outer bisection, but captures the key MM budget interaction that tatonnement currently misses.
+### Limitation
 
-### Alternative: Lagrangian Relaxation
-
-Instead of post-hoc correction, embed the MM budget dual directly in the tatonnement iteration:
-
-```
-p_m <- p_m + lr * (excess_demand_m - sum_k mu_k * d_capital_k/dp_m)
-mu_k <- max(0, mu_k + lr_mu * (C_k(p,q) - B_k))
-```
-
-This is a primal-dual method that jointly optimizes prices and budget duals. It converges to the KKT point directly, but requires tuning two learning rates and may oscillate.
+Even with these improvements, the smoothed solver still can't push prices to 0% (zero natural supply). That requires minting as a supply source, which changes the problem structure fundamentally. The smoothed solver could include per-market minting in its supply curves, but this makes the excess demand calculation degenerate (infinite supply → any price is an equilibrium).
 
 ## Summary
 
-| Property | Tatonnement | KKT Optimal |
-|----------|-------------|-------------|
-| Objective | D(p) = S(p) | dL/dp = 0 |
-| MM budget | Post-hoc enforcement | Built into prices |
-| Price bias | None (market-clearing) | Shifted by mu * dC/dp |
-| Welfare | Local optimum | Global (with MILP) |
+| Source of Gap | Magnitude (small) | Can Heuristic Fix? |
+|---------------|-------------------|-------------------|
+| Missing mu_k (MM budget) | ~$470 (46%) | Yes — embed in gradient |
+| Lambda shading broken | ~$350 (34%) | Yes — use gradient, not shading |
+| Price space (0% prices, minting) | ~$200 (20%) | Hard — requires global search |
 
-The gap between tatonnement and MILP is fundamentally due to the missing mu_k terms in the price gradient. The larger the MM budget utilization, the larger this gap will be.
+| Solver Property | Tatonnement | DualMaster | Smoothed+fixes | MILP |
+|-----------------|-------------|------------|----------------|------|
+| Price finding | D=S per market | D=S + broken λ | D=S + group penalty + μ | Global optimal |
+| MM budget | Post-hoc greedy | Post-hoc greedy | Built into gradient | Jointly optimal |
+| Group prices | Ignored | Lambda (broken) | Penalty term | Jointly optimal |
+| Minting | None | Group (Σp≥$1 only) | Group (Σp≥$1 only) | Per-market + group |
+| Soundness | Full | Full | Full | Needs minting_cost tracking |
+
+The gap between heuristic and MILP is smallest (~0%) on large problems where natural supply/demand depth dominates, and largest (~36%) on small problems where minting-based price exploration matters most.

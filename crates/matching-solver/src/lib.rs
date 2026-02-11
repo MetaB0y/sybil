@@ -26,6 +26,7 @@ pub mod pipeline;
 pub(crate) mod specialized;
 pub mod traits;
 pub mod verifier;
+pub mod group_minting;
 pub mod smoothed_solver;
 pub mod viz;
 
@@ -80,8 +81,14 @@ use matching_engine::{Fill, Order, Problem};
 pub struct MatchingResult {
     /// Orders that were filled
     pub fills: Vec<Fill>,
-    /// Total welfare achieved
+    /// Total welfare achieved (fill-level surplus minus minting cost).
     pub total_welfare: i64,
+    /// Cost of share creation (minting) not captured in fill-level welfare.
+    ///
+    /// For heuristic solvers this is 0 because arb order limits embed the cost.
+    /// For MILP this equals `fill_welfare - objective_welfare` (the gap from
+    /// group minting when Σp < $1 for some groups).
+    pub minting_cost: i64,
     /// Number of orders filled (at least partially)
     pub orders_filled: usize,
     /// Number of orders unfilled due to liquidity exhaustion
@@ -97,6 +104,7 @@ impl MatchingResult {
         Self {
             fills: Vec::new(),
             total_welfare: 0,
+            minting_cost: 0,
             orders_filled: 0,
             orders_unfilled_liquidity: 0,
             orders_unfilled_aon: 0,

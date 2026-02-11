@@ -796,6 +796,7 @@ impl BlockSequencer {
             fills: fills.clone(),
             clearing_prices: clearing_prices.clone(),
             total_welfare,
+            minting_cost: 0,
             mm_constraints: problem.mm_constraints.clone(),
             market_groups: problem.market_groups.clone(),
             pre_state,

@@ -187,6 +187,10 @@ pub struct PipelineResult {
     /// Diagnostics from enforce_ucp (if it ran).
     pub ucp_stats: Option<UcpStats>,
 
+    /// Synthetic arb orders from group minting (needed for witness/verification).
+    #[serde(skip)]
+    pub group_minting_arb_orders: Vec<matching_engine::Order>,
+
     /// Per-phase snapshots for detailed visualization (viz feature only).
     #[cfg(feature = "viz")]
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -264,6 +268,7 @@ impl PipelineResult {
             total_time_secs: 0.0,
             phase_times: PipelineTimings::default(),
             ucp_stats: None,
+            group_minting_arb_orders: Vec::new(),
             #[cfg(feature = "viz")]
             phase_snapshots: Vec::new(),
         }
@@ -516,8 +521,269 @@ impl Pipeline {
         result.total_time_secs = start.elapsed().as_secs_f64();
         result.iterations = dual_result.iterations;
 
+        // Phase 3: Group minting — fill residual buy-YES demand via group-level minting.
+        //
+        // Two stages:
+        // 3a. Water-filling at DualMaster's clearing prices — fills unfilled buyers
+        //     using virtual supply from group minting. Doesn't change prices.
+        // 3b. Simplex price search — finds better prices on the Σp = $1 surface.
+        //     Changes clearing prices. Only kept if post-UCP welfare improves.
+        let mut arb_orders: Vec<matching_engine::Order> = Vec::new();
+        if !problem.market_groups.is_empty() {
+            if let Some(ref pd) = result.price_discovery {
+                let max_real_id = problem.orders.iter().map(|o| o.id).max().unwrap_or(0);
+                let mut next_arb_id = max_real_id + 2_000_000_000;
+                let npd = matching_engine::NANOS_PER_DOLLAR;
+
+                // Stage 3a: Water-filling group minting at DualMaster prices
+                for group in &problem.market_groups {
+                    if group.markets.len() < 2 {
+                        continue;
+                    }
+
+                    let market_prices: Vec<(MarketId, Nanos)> = group
+                        .markets
+                        .iter()
+                        .filter_map(|&m| {
+                            pd.prices.get(&m).and_then(|p| p.first()).map(|&p| (m, p))
+                        })
+                        .collect();
+
+                    if market_prices.len() != group.markets.len() {
+                        continue;
+                    }
+
+                    let price_sum: u128 =
+                        market_prices.iter().map(|(_, p)| *p as u128).sum();
+                    if price_sum < npd as u128 {
+                        continue; // Not profitable: Σp < $1
+                    }
+
+                    // Collect unfilled buy-YES orders per market, sorted by limit desc
+                    let mut demand_per_market: Vec<(MarketId, Nanos, Vec<(u64, u64)>)> =
+                        Vec::new();
+
+                    for &(market, cp) in &market_prices {
+                        let mut eligible: Vec<(u64, u64)> = Vec::new();
+                        for (&oid, &order) in &order_map {
+                            if filled_order_ids.contains(&oid) {
+                                continue;
+                            }
+                            if order.num_markets != 1 || order.num_states != 2 {
+                                continue;
+                            }
+                            if order.markets[0] != market {
+                                continue;
+                            }
+                            if order.payoffs[0] <= 0 || order.payoffs[1] != 0 {
+                                continue;
+                            }
+                            if order.limit_price < cp {
+                                continue;
+                            }
+                            eligible.push((oid, order.max_fill));
+                        }
+                        eligible.sort_by(|a, b| {
+                            order_map[&b.0]
+                                .limit_price
+                                .cmp(&order_map[&a.0].limit_price)
+                        });
+                        demand_per_market.push((market, cp, eligible));
+                    }
+
+                    // Q* = min eligible demand across markets (linking constraint)
+                    let q_star = demand_per_market
+                        .iter()
+                        .map(|(_, _, orders)| orders.iter().map(|(_, q)| q).sum::<u64>())
+                        .min()
+                        .unwrap_or(0);
+
+                    if q_star == 0 {
+                        continue;
+                    }
+
+                    // Fill Q* units on each market + create arb sell-YES for position balance
+                    for &(market, cp, ref orders) in &demand_per_market {
+                        let mut remaining = q_star;
+                        for &(oid, max_fill) in orders {
+                            if remaining == 0 {
+                                break;
+                            }
+                            let fill_qty = remaining.min(max_fill);
+                            let order = order_map[&oid];
+                            filled_order_ids.insert(oid);
+                            result.result.add_fill(
+                                matching_engine::Fill {
+                                    order_id: oid,
+                                    fill_price: cp,
+                                    fill_qty,
+                                },
+                                order,
+                            );
+                            remaining -= fill_qty;
+                        }
+
+                        // Arb limit = proportional minting cost: $1 × p_m / Σp
+                        let arb_limit =
+                            ((npd as u128 * cp as u128) / price_sum) as Nanos;
+                        let arb_id = next_arb_id;
+                        next_arb_id += 1;
+
+                        let mut arb_order = matching_engine::Order::new(arb_id);
+                        arb_order.markets[0] = market;
+                        arb_order.num_markets = 1;
+                        arb_order.num_states = 2;
+                        arb_order.payoffs[0] = -1;
+                        arb_order.payoffs[1] = 0;
+                        arb_order.limit_price = arb_limit;
+                        arb_order.min_fill = 0;
+                        arb_order.max_fill = q_star;
+
+                        result.result.add_fill(
+                            matching_engine::Fill {
+                                order_id: arb_id,
+                                fill_price: cp,
+                                fill_qty: q_star,
+                            },
+                            &arb_order,
+                        );
+                        arb_orders.push(arb_order);
+                    }
+                }
+
+                // Stage 3b: Simplex price search — try to find better prices on Σp = $1.
+                // Snapshot baseline state, apply simplex, simulate enforce_ucp on both
+                // versions, and only keep simplex if post-UCP welfare strictly improves.
+                let mm_order_ids: std::collections::HashSet<u64> = problem
+                    .mm_constraints
+                    .iter()
+                    .flat_map(|mm| mm.order_ids.iter().copied())
+                    .collect();
+
+                let simplex_results = crate::group_minting::simplex_search(
+                    &problem.market_groups,
+                    &problem.orders,
+                    &problem.markets,
+                    &result.result.fills,
+                    &order_map,
+                    &mm_order_ids,
+                    &mut next_arb_id,
+                );
+
+                if !simplex_results.is_empty() {
+                    // Save baseline state before applying simplex
+                    let baseline_fills = result.result.fills.clone();
+                    let baseline_arb_orders = arb_orders.clone();
+                    let baseline_prices = result
+                        .price_discovery
+                        .as_ref()
+                        .map(|pd| pd.prices.clone())
+                        .unwrap_or_default();
+
+                    // Apply simplex results
+                    for sr in simplex_results {
+                        let replaced_set: std::collections::HashSet<u64> =
+                            sr.replaced_order_ids.iter().copied().collect();
+                        let replaced_markets: std::collections::HashSet<MarketId> =
+                            sr.clearing_prices.keys().copied().collect();
+
+                        // Remove replaced non-MM fills
+                        result
+                            .result
+                            .fills
+                            .retain(|f| !replaced_set.contains(&f.order_id));
+
+                        // Remove old arb fills/orders on replaced markets
+                        let old_arb_ids: std::collections::HashSet<u64> = arb_orders
+                            .iter()
+                            .filter(|o| replaced_markets.contains(&o.markets[0]))
+                            .map(|o| o.id)
+                            .collect();
+                        result
+                            .result
+                            .fills
+                            .retain(|f| !old_arb_ids.contains(&f.order_id));
+                        arb_orders
+                            .retain(|o| !replaced_markets.contains(&o.markets[0]));
+
+                        // Add simplex fills
+                        for fill in &sr.fills {
+                            if let Some(&order) = order_map.get(&fill.order_id) {
+                                result.result.add_fill(fill.clone(), order);
+                            }
+                        }
+                        for (arb_order, arb_fill) in
+                            sr.arb_orders.iter().zip(&sr.arb_fills)
+                        {
+                            result.result.add_fill(arb_fill.clone(), arb_order);
+                            arb_orders.push(arb_order.clone());
+                        }
+
+                        // Update clearing prices for simplex markets
+                        if let Some(ref mut pd) = result.price_discovery {
+                            for (&market, &price) in &sr.clearing_prices {
+                                let no_price = npd.saturating_sub(price);
+                                pd.prices.insert(market, vec![price, no_price]);
+                            }
+                        }
+                    }
+
+                    let simplex_prices = result
+                        .price_discovery
+                        .as_ref()
+                        .map(|pd| pd.prices.clone())
+                        .unwrap_or_default();
+
+                    // Simulate enforce_ucp on both versions to compare post-UCP welfare
+                    let baseline_welfare = Self::simulate_enforce_ucp(
+                        &baseline_fills,
+                        &baseline_prices,
+                        &order_map,
+                        &baseline_arb_orders,
+                    );
+
+                    let simplex_welfare = Self::simulate_enforce_ucp(
+                        &result.result.fills,
+                        &simplex_prices,
+                        &order_map,
+                        &arb_orders,
+                    );
+
+                    if simplex_welfare <= baseline_welfare {
+                        // Simplex didn't help after UCP — revert to baseline
+                        result.result.fills = baseline_fills;
+                        arb_orders = baseline_arb_orders;
+                        if let Some(ref mut pd) = result.price_discovery {
+                            pd.prices = baseline_prices;
+                        }
+                        debug!(
+                            simplex_welfare,
+                            baseline_welfare,
+                            "simplex reverted: post-UCP welfare did not improve"
+                        );
+                    } else {
+                        debug!(
+                            simplex_welfare,
+                            baseline_welfare,
+                            gain = simplex_welfare - baseline_welfare,
+                            "simplex accepted: post-UCP welfare improved"
+                        );
+                    }
+                }
+            }
+        }
+
+        // Build order map including arb orders for enforce_ucp lookups
+        let mut order_map_with_arbs = order_map;
+        for arb in &arb_orders {
+            order_map_with_arbs.insert(arb.id, arb);
+        }
+
         // Enforce UCP: re-price all single-market fills at the final clearing price.
-        Self::enforce_ucp(&mut result, &order_map);
+        Self::enforce_ucp(&mut result, &order_map_with_arbs);
+
+        // Store arb orders on result for witness/verification (after enforce_ucp)
+        result.group_minting_arb_orders = arb_orders;
 
         // Gate: if total welfare is negative, return empty result.
         // Negative welfare means fills are collectively value-destroying.
@@ -1270,6 +1536,28 @@ impl Pipeline {
         result.result.total_welfare = welfare;
         result.result.total_quantity_filled = volume;
         result.result.orders_filled = filled;
+    }
+
+    /// Simulate enforce_ucp without modifying any state. Returns the welfare
+    /// that would result from repricing + position balance trimming.
+    ///
+    /// Used by the simplex search to compare post-UCP welfare of different
+    /// fill/price combinations before committing.
+    fn simulate_enforce_ucp(
+        fills: &[matching_engine::Fill],
+        prices: &HashMap<MarketId, Vec<Nanos>>,
+        order_map: &HashMap<u64, &matching_engine::Order>,
+        arb_orders: &[matching_engine::Order],
+    ) -> i64 {
+        let mut combined_map = order_map.clone();
+        for arb in arb_orders {
+            combined_map.insert(arb.id, arb);
+        }
+
+        let mut candidates = Self::reprice_and_filter_fills(fills, prices, &combined_map);
+        Self::trim_position_imbalance(&mut candidates, &combined_map);
+        let (_, welfare, _, _) = Self::collect_final_fills(candidates, &combined_map);
+        welfare
     }
 
     /// Lightweight per-iteration UCP enforcement.

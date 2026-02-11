@@ -467,6 +467,16 @@ impl MilpSolver {
                     next_arb_id += 1;
                 }
 
+                // The MILP objective correctly deducts minting cost
+                // (per-market: $1/pair, group: $1/set). The fill-level welfare
+                // doesn't include this cost because arb orders have limit==fill_price
+                // (zero welfare). The discrepancy comes entirely from group minting
+                // when Σp < $1: gap = group_mint_g × ($1 - Σp) per group.
+                // Per-market minting has zero gap (p_YES + p_NO = $1).
+                let fill_welfare = result.total_welfare;
+                result.minting_cost = fill_welfare - objective_welfare;
+                result.total_welfare = objective_welfare;
+
                 MilpResult {
                     result,
                     status,
@@ -942,7 +952,10 @@ impl MilpSolver {
             }
 
             if has_terms {
-                model.add(c.le(nanos_f));
+                // Σp = $1: mutually exclusive markets must have prices summing
+                // to exactly $1. This ensures group minting is always zero-cost
+                // (sound) — no protocol subsidy needed.
+                model.add(c.eq(nanos_f));
             }
         }
 

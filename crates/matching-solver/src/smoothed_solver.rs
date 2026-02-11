@@ -525,7 +525,7 @@ impl SmoothedSolver {
         for mo in market_orders {
             let idx = mo.market_id.0 as usize;
             let raw = prices[idx];
-            let yes_price = snap_to_order_price(raw, &mo.orders);
+            let yes_price = round_price(raw, &mo.orders);
             let no_price = NANOS_PER_DOLLAR.saturating_sub(yes_price);
             result.insert(mo.market_id, vec![yes_price, no_price]);
         }
@@ -783,35 +783,29 @@ fn proportional_mm_excess_demand(
 
 
 
-/// Snap a f64 price to the nearest order limit price in the order book.
+
+/// Round f64 price to nanos, snapping to nearby order limits within a small epsilon.
 ///
-/// Standard step in primal-dual auction algorithms: the dual (tatonnement)
-/// finds approximate continuous prices, and we round to the nearest tick
-/// on the order book for the primal (fill extraction). This is equivalent
-/// to solving the discrete problem in the neighborhood of the dual solution.
-fn snap_to_order_price(raw: f64, orders: &[OrderInfo]) -> Nanos {
+/// Pure rounding can land 1 nanos below an order limit, causing an `is_satisfied_at_price`
+/// rejection. We snap to the nearest order limit only if it's within 1000 nanos (~$0.000001),
+/// which avoids edge rejections without forcing fill_price == limit_price for all orders
+/// (the old `snap_to_order_price` behaviour that gave MM orders zero welfare).
+fn round_price(raw: f64, orders: &[OrderInfo]) -> Nanos {
     let rounded = raw.round().max(0.0).min(NANOS_PER_DOLLAR as f64) as Nanos;
     if orders.is_empty() {
         return rounded;
     }
 
-    // Collect unique limit prices from the order book
-    let mut candidates: Vec<Nanos> = Vec::new();
-    for o in orders {
-        let lp = o.limit_price.round().max(0.0).min(NANOS_PER_DOLLAR as f64) as Nanos;
-        candidates.push(lp);
-    }
-    candidates.sort_unstable();
-    candidates.dedup();
-
-    // Snap to nearest order book tick
+    // Check if rounded price is within epsilon of any order limit
+    const EPSILON: u64 = 1_000; // 1000 nanos ≈ $0.000001
     let mut best = rounded;
     let mut best_dist = u64::MAX;
-    for &c in &candidates {
-        let dist = c.abs_diff(rounded);
-        if dist < best_dist {
+    for o in orders {
+        let lp = o.limit_price.round().max(0.0).min(NANOS_PER_DOLLAR as f64) as Nanos;
+        let dist = lp.abs_diff(rounded);
+        if dist <= EPSILON && dist < best_dist {
             best_dist = dist;
-            best = c;
+            best = lp;
         }
     }
 

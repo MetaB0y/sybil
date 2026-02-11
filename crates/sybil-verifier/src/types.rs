@@ -28,6 +28,8 @@ pub struct BlockWitness {
     /// Clearing prices per market: `market_id -> [price_outcome_0, price_outcome_1, ...]`.
     pub clearing_prices: HashMap<MarketId, Vec<Nanos>>,
     pub total_welfare: i64,
+    /// Minting cost not captured in fill-level welfare (MILP only, 0 for heuristics).
+    pub minting_cost: i64,
 
     // -- Constraints --
     pub mm_constraints: Vec<MmConstraint>,

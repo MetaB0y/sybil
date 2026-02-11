@@ -208,6 +208,7 @@ mod tests {
             fills: vec![],
             clearing_prices: HashMap::new(),
             total_welfare: 0,
+            minting_cost: 0,
             mm_constraints: vec![],
             market_groups: vec![],
             pre_state,

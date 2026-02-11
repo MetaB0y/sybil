@@ -773,6 +773,11 @@ impl PrecomputedMarket {
         }
     }
 
+    /// Total unified YES demand across all demand-side orders.
+    pub fn total_demand(&self) -> Qty {
+        self.demand_cum_qty.last().copied().unwrap_or(0)
+    }
+
     /// Find clearing price and matched quantity with extra demand/supply.
     ///
     /// Extra demand at price=$1, extra supply at price=$0.

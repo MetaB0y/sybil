@@ -631,6 +631,7 @@ fn witness_from_problem(problem: &Problem, result: &PipelineResult) -> BlockWitn
         fills: result.result.fills.clone(),
         clearing_prices,
         total_welfare: result.result.total_welfare,
+        minting_cost: result.result.minting_cost,
         mm_constraints: problem.mm_constraints.clone(),
         market_groups: problem.market_groups.clone(),
         pre_state: vec![],
@@ -1333,6 +1334,10 @@ fn witness_from_pipeline(problem: &Problem, result: &PipelineResult) -> BlockWit
             problem_with_arb.orders.push(order.clone());
         }
     }
+    // Include group minting arb orders
+    for order in &result.group_minting_arb_orders {
+        problem_with_arb.orders.push(order.clone());
+    }
     witness_from_problem(&problem_with_arb, result)
 }
 
@@ -1372,6 +1377,7 @@ fn witness_from_milp(
         fills: result.result.fills.clone(),
         clearing_prices: result.clearing_prices.clone(),
         total_welfare: result.result.total_welfare,
+        minting_cost: result.result.minting_cost,
         mm_constraints: problem.mm_constraints.clone(),
         market_groups: problem.market_groups.clone(),
         pre_state: vec![],
@@ -1701,16 +1707,9 @@ fn print_solver_diff(problem: &Problem, best: &SolverDetail, other: &SolverDetai
         .map(|m| (m.id, m.name.as_str()))
         .collect();
 
-    // Compute welfare from fills (consistent with verifier)
-    let compute_welfare = |fills: &[Fill]| -> i64 {
-        fills
-            .iter()
-            .filter_map(|f| order_map.get(&f.order_id).map(|o| f.welfare(o)))
-            .sum()
-    };
-
-    let best_welfare = compute_welfare(&best_result.fills);
-    let other_welfare = compute_welfare(&other_result.fills);
+    // Use total_welfare which accounts for minting cost
+    let best_welfare = best_result.total_welfare;
+    let other_welfare = other_result.total_welfare;
     let gap = best_welfare - other_welfare;
     let gap_pct = if best_welfare > 0 {
         gap as f64 / best_welfare as f64 * 100.0

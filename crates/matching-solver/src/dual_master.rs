@@ -208,14 +208,19 @@ impl DualMaster {
             };
 
             // 1. Shade orders with λ only (no μ)
-            let remaining_orders: Vec<Order> = problem
+            // Don't shade MM orders — their tight spreads make them sensitive to
+            // lambda drift, causing the original-limit check to reject fills when
+            // the shaded clearing price drops below the original sell limit.
+            let (mm_remaining, non_mm_remaining): (Vec<Order>, Vec<Order>) = problem
                 .orders
                 .iter()
                 .filter(|o| !filled_order_ids.contains(&o.id))
                 .cloned()
-                .collect();
+                .partition(|o| mm_order_ids.contains(&o.id));
 
-            let shaded_orders = shade_orders(&remaining_orders, &state.lambda, &market_to_group);
+            let mut shaded_orders =
+                shade_orders(&non_mm_remaining, &state.lambda, &market_to_group);
+            shaded_orders.extend(mm_remaining);
 
             // 2. Solve per-market subproblems with shaded orders
             let shaded_problem = Problem {
@@ -330,7 +335,7 @@ impl DualMaster {
                 .collect();
 
             for (fill, is_mm) in all_candidate_fills {
-                let Some(order) = order_map.get(&fill.order_id) else {
+                let Some(&order) = order_map.get(&fill.order_id) else {
                     continue;
                 };
                 filled_order_ids.insert(fill.order_id);

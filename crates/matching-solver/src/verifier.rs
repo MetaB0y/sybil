@@ -220,14 +220,16 @@ impl Verifier {
         stats.computed_welfare = computed_welfare;
         stats.reported_welfare = result.total_welfare;
 
-        // Check welfare consistency
-        let welfare_diff = (computed_welfare - result.total_welfare).abs();
+        // Check welfare consistency: total_welfare = fill_welfare - minting_cost
+        let expected_welfare = computed_welfare - result.minting_cost;
+        let welfare_diff = (expected_welfare - result.total_welfare).abs();
         if welfare_diff > self.welfare_tolerance {
             violations.push(Violation {
                 kind: ViolationKind::WelfareMismatch,
                 details: format!(
-                    "Computed welfare {} != reported welfare {} (diff={})",
-                    computed_welfare, result.total_welfare, welfare_diff
+                    "Computed welfare {} - minting_cost {} = {} != reported welfare {} (diff={})",
+                    computed_welfare, result.minting_cost, expected_welfare,
+                    result.total_welfare, welfare_diff
                 ),
             });
         }

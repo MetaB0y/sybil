@@ -30,6 +30,7 @@ pub fn verify_match(witness: &BlockWitness, diagnostics: bool) -> VerificationRe
         &order_map,
         diagnostics,
         witness.total_welfare,
+        witness.minting_cost,
         &mut violations,
         &mut stats,
     );
@@ -98,6 +99,7 @@ fn verify_fills(
     order_map: &HashMap<u64, &Order>,
     diagnostics: bool,
     reported_welfare: i64,
+    minting_cost: i64,
     violations: &mut Vec<Violation>,
     stats: &mut VerificationStats,
 ) {
@@ -190,16 +192,28 @@ fn verify_fills(
     }
 
     stats.orders_checked = order_map.len();
-    stats.computed_welfare = computed_welfare;
+    stats.computed_welfare = computed_welfare - minting_cost;
 
-    // 7. Welfare consistency (core ZK invariant — exact match required)
-    let welfare_diff = (computed_welfare - reported_welfare).abs();
+    // 7a. Minting cost must be non-negative (can only reduce welfare, never inflate it)
+    if minting_cost < 0 {
+        violations.push(Violation {
+            kind: ViolationKind::WelfareMismatch,
+            details: format!(
+                "Minting cost {} is negative — cannot inflate welfare beyond fill-level",
+                minting_cost
+            ),
+        });
+    }
+
+    // 7b. Welfare consistency: total_welfare = fill_welfare - minting_cost
+    let expected_welfare = computed_welfare - minting_cost;
+    let welfare_diff = (expected_welfare - reported_welfare).abs();
     if welfare_diff > 0 {
         violations.push(Violation {
             kind: ViolationKind::WelfareMismatch,
             details: format!(
-                "Computed welfare {} != reported welfare {} (diff={})",
-                computed_welfare, reported_welfare, welfare_diff
+                "Computed fill welfare {} - minting_cost {} = {} != reported welfare {} (diff={})",
+                computed_welfare, minting_cost, expected_welfare, reported_welfare, welfare_diff
             ),
         });
     }
@@ -533,6 +547,7 @@ mod tests {
             fills,
             clearing_prices: HashMap::new(),
             total_welfare,
+            minting_cost: 0,
             mm_constraints: vec![],
             market_groups: vec![],
             pre_state: vec![],
