@@ -305,14 +305,6 @@ impl Verifier {
         stats: &mut VerificationStats,
     ) {
         // For each market, accumulate the net marginal payoff across all fills.
-        // The marginal payoff of an order for market m_idx is:
-        //   Σ_s (payoff[s] * indicator[m_idx outcome=YES in s]) - Σ_s (payoff[s] * indicator[m_idx outcome=NO in s])
-        // divided by the number of states of all OTHER markets (to get per-share contribution).
-        //
-        // For a single-market binary order:
-        //   marginal = payoff[0] - payoff[1]  (state 0 = YES, state 1 = NO)
-        //   BuyYes [1,0] → +1, BuyNo [0,1] → -1
-        //
         // The sum of marginal * fill_qty across all fills must be 0 for each market.
         let mut net_position: HashMap<MarketId, i64> = HashMap::new();
 
@@ -324,43 +316,9 @@ impl Verifier {
                 continue; // Already flagged by OrderNotFound
             };
 
-            let num_markets = order.num_markets as usize;
-            let num_states = order.num_states as usize;
-
-            for m_idx in 0..num_markets {
-                let market_id = order.markets[m_idx];
-                if market_id.is_none() {
-                    continue;
-                }
-
-                // Compute marginal payoff for this market:
-                // Sum payoffs over all states where this market = YES (outcome 0),
-                // minus sum over all states where this market = NO (outcome 1).
-                // For binary markets, stride = 1 << m_idx.
-                let stride = 1usize << m_idx;
-                let mut marginal: i64 = 0;
-
-                for s in 0..num_states {
-                    let outcome_for_m = (s / stride) % 2;
-                    let payoff = order.payoffs[s] as i64;
-                    if outcome_for_m == 0 {
-                        // YES state for this market
-                        marginal += payoff;
-                    } else {
-                        // NO state for this market
-                        marginal -= payoff;
-                    }
-                }
-
-                // marginal is scaled by the number of "other" states (2^(num_markets-1)),
-                // so normalize. All markets are binary, so other_states = num_states / 2.
-                // Actually we want the per-share marginal, which for binary markets
-                // with the stride decomposition above sums over all 2^(N-1) pairs,
-                // giving marginal * 2^(N-1). Divide to get per-share.
-                let other_states = (num_states / 2) as i64;
-                let normalized = marginal / other_states;
-
-                *net_position.entry(market_id).or_insert(0) += normalized * fill.fill_qty as i64;
+            for (market_id, normalized) in order.marginal_payoffs_i64() {
+                *net_position.entry(market_id).or_insert(0) +=
+                    normalized * fill.fill_qty as i64;
             }
         }
 

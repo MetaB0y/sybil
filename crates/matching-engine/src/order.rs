@@ -8,6 +8,9 @@ use serde::Serialize;
 
 use crate::types::{MarketId, Nanos, Qty};
 
+/// A (MarketId, value) pair from marginal payoff computation.
+pub type MarginalPayoff<T> = (MarketId, T);
+
 /// Maximum number of markets a single order can span.
 pub const MAX_MARKETS_PER_ORDER: usize = 5;
 
@@ -141,6 +144,89 @@ impl Order {
         self.payoffs[..self.num_states as usize]
             .iter()
             .any(|&p| p < 0)
+    }
+
+    /// Per-market marginal payoff using stride-based decomposition (integer version).
+    ///
+    /// For each market, computes (sum of payoffs where market=YES) - (sum where market=NO),
+    /// normalized by 2^(N-1) (the number of "other" state pairs). Truncating integer division
+    /// matches verifier semantics.
+    ///
+    /// +1 = long 1 YES per fill, -1 = short 1 YES per fill.
+    /// Non-separable bundles truncate to 0 (e.g., `[1,0,0,0]` → marginal 1/2 → truncated to 0).
+    pub fn marginal_payoffs_i64(&self) -> Vec<MarginalPayoff<i64>> {
+        let num_markets = self.num_markets as usize;
+        let num_states = self.num_states as usize;
+        let mut result = Vec::new();
+
+        for m_idx in 0..num_markets {
+            let market = self.markets[m_idx];
+            if market.is_none() {
+                continue;
+            }
+            let stride = 1usize << m_idx;
+            let mut marginal: i64 = 0;
+
+            for s in 0..num_states {
+                let outcome = (s / stride) % 2;
+                let payoff = self.payoffs[s] as i64;
+                if outcome == 0 {
+                    marginal += payoff;
+                } else {
+                    marginal -= payoff;
+                }
+            }
+
+            let other_states = (num_states / 2) as i64;
+            if other_states > 0 {
+                let normalized = marginal / other_states;
+                if normalized != 0 {
+                    result.push((market, normalized));
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Per-market marginal payoff using stride-based decomposition (f64 version).
+    ///
+    /// Same as `marginal_payoffs_i64` but without truncation. Needed for non-separable
+    /// bundles where the marginal is fractional (e.g., `[1,0,0,0]` spanning 2 markets
+    /// gives marginal 0.5 per market).
+    pub fn marginal_payoffs_f64(&self) -> Vec<MarginalPayoff<f64>> {
+        let num_markets = self.num_markets as usize;
+        let num_states = self.num_states as usize;
+        let mut result = Vec::new();
+
+        for m_idx in 0..num_markets {
+            let market = self.markets[m_idx];
+            if market.is_none() {
+                continue;
+            }
+            let stride = 1usize << m_idx;
+            let mut marginal: i64 = 0;
+
+            for s in 0..num_states {
+                let outcome = (s / stride) % 2;
+                let payoff = self.payoffs[s] as i64;
+                if outcome == 0 {
+                    marginal += payoff;
+                } else {
+                    marginal -= payoff;
+                }
+            }
+
+            let other_states = (num_states / 2) as f64;
+            if other_states > 0.0 {
+                let normalized = marginal as f64 / other_states;
+                if normalized.abs() > 1e-12 {
+                    result.push((market, normalized));
+                }
+            }
+        }
+
+        result
     }
 }
 

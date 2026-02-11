@@ -369,31 +369,7 @@ fn verify_position_balance(
             continue;
         };
 
-        let num_markets = order.num_markets as usize;
-        let num_states = order.num_states as usize;
-
-        for m_idx in 0..num_markets {
-            let market_id = order.markets[m_idx];
-            if market_id.is_none() {
-                continue;
-            }
-
-            let stride = 1usize << m_idx;
-            let mut marginal: i64 = 0;
-
-            for s in 0..num_states {
-                let outcome_for_m = (s / stride) % 2;
-                let payoff = order.payoffs[s] as i64;
-                if outcome_for_m == 0 {
-                    marginal += payoff;
-                } else {
-                    marginal -= payoff;
-                }
-            }
-
-            let other_states = (num_states / 2) as i64;
-            let normalized = marginal / other_states;
-
+        for (market_id, normalized) in order.marginal_payoffs_i64() {
             *net_position.entry(market_id).or_insert(0) += normalized * fill.fill_qty as i64;
         }
     }

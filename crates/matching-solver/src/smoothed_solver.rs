@@ -282,7 +282,19 @@ impl SmoothedSolver {
         let pd = self.build_price_discovery(&final_prices);
 
         // Step 4: Extract fills at final prices (MM budget enforced inline)
-        let mut fills = extract_fills(problem, &final_prices, &mm_order_map);
+        let mut tracker = crate::fill_extraction::MmBudgetTracker::new(problem);
+        let mut fills = Vec::new();
+        for (&market_id, market_prices) in &final_prices {
+            let yes_price = market_prices[0];
+            let market_orders: Vec<&Order> = problem
+                .orders
+                .iter()
+                .filter(|o| o.num_markets == 1 && o.markets[0] == market_id)
+                .collect();
+            let market_fills =
+                crate::fill_extraction::fill_binary_market(market_id, &market_orders, yes_price, Some(&mut tracker));
+            fills.extend(market_fills);
+        }
 
         // Extract bundle fills
         let bundle_fills = extract_bundle_fills(problem, &final_prices, &bundles);
@@ -417,7 +429,7 @@ impl SmoothedSolver {
             let payoffs: Vec<i8> = order.payoffs[..num_states].to_vec();
 
             // Compute per-market marginal payoffs using stride decomposition
-            let marginal_payoffs = compute_marginal_payoffs(&markets, &payoffs, num_states);
+            let marginal_payoffs = order.marginal_payoffs_f64();
 
             // Precompute group membership for this bundle
             let market_group_indices: Vec<Option<usize>> = markets
@@ -778,47 +790,6 @@ fn bundle_surplus(bundle: &BundleInfo, expected_payoff: f64) -> f64 {
     }
 }
 
-/// Compute per-market marginal payoffs using stride-based decomposition.
-///
-/// For each market m, the marginal payoff is:
-///   (sum of payoffs in YES-states) - (sum of payoffs in NO-states)
-/// normalized by the number of "other" state pairs (2^(N-1)).
-///
-/// Uses f64 to avoid truncation for non-separable bundles (e.g., [1,0,0,0]
-/// spanning 2 markets gives marginal 0.5 per market, not 0).
-fn compute_marginal_payoffs(
-    markets: &[MarketId],
-    payoffs: &[i8],
-    num_states: usize,
-) -> Vec<(MarketId, f64)> {
-    let mut result = Vec::new();
-
-    for (m_idx, &market) in markets.iter().enumerate() {
-        let stride = 1usize << m_idx;
-        let mut marginal: i64 = 0;
-
-        for s in 0..num_states {
-            let outcome = (s / stride) % 2;
-            let payoff = payoffs[s] as i64;
-            if outcome == 0 {
-                marginal += payoff;
-            } else {
-                marginal -= payoff;
-            }
-        }
-
-        let other_states = (num_states / 2) as f64;
-        if other_states > 0.0 {
-            let normalized = marginal as f64 / other_states;
-            if normalized.abs() > 1e-12 {
-                result.push((market, normalized));
-            }
-        }
-    }
-
-    result
-}
-
 /// Compute smoothed total capital usage for an MM group using precomputed order refs.
 fn compute_mm_capital_smoothed(
     mm: &MmGroup,
@@ -887,237 +858,6 @@ fn project_simplex_group(prices: &mut [f64], group: &[usize]) {
 // Fill extraction
 // ============================================================================
 
-/// Extract single-market fills at final prices using hard complementary slackness.
-///
-/// MM budget constraints are enforced inline: MM orders are capped by remaining
-/// budget so that position balance (demand = supply) is maintained. This avoids
-/// the need to remove MM fills post-hoc (which would break position balance).
-fn extract_fills(
-    problem: &Problem,
-    prices: &HashMap<MarketId, Vec<Nanos>>,
-    mm_order_map: &HashMap<u64, (usize, MmSide)>,
-) -> Vec<Fill> {
-    // Track remaining budget per MM constraint
-    let mut mm_remaining_budget: Vec<u128> = problem
-        .mm_constraints
-        .iter()
-        .map(|mm| mm.max_capital as u128)
-        .collect();
-
-    let mut all_fills = Vec::new();
-
-    for (&market_id, market_prices) in prices {
-        let yes_price = market_prices[0];
-        let no_price = if market_prices.len() > 1 {
-            market_prices[1]
-        } else {
-            NANOS_PER_DOLLAR.saturating_sub(yes_price)
-        };
-
-        let mut yes_buyers: Vec<(&Order, Qty)> = Vec::new();
-        let mut no_sellers: Vec<(&Order, Qty)> = Vec::new();
-        let mut yes_sellers: Vec<(&Order, Qty)> = Vec::new();
-        let mut no_buyers: Vec<(&Order, Qty)> = Vec::new();
-
-        for order in &problem.orders {
-            if order.num_markets != 1 || order.markets[0] != market_id {
-                continue;
-            }
-            let ns = order.num_states as usize;
-            if ns > 0 && order.payoffs[0] > 0 {
-                yes_buyers.push((order, order.max_fill));
-            }
-            if ns > 1 && order.payoffs[1] > 0 {
-                no_buyers.push((order, order.max_fill));
-            }
-            if ns > 0 && order.payoffs[0] < 0 {
-                yes_sellers.push((order, order.max_fill));
-            }
-            if ns > 1 && order.payoffs[1] < 0 {
-                no_sellers.push((order, order.max_fill));
-            }
-        }
-
-        // Apply MM budget caps to willing quantities
-        let cap_mm_qty = |order: &Order, qty: Qty, fill_price: Nanos| -> Qty {
-            if let Some(&(mm_idx, side)) = mm_order_map.get(&order.id) {
-                let remaining = mm_remaining_budget[mm_idx];
-                if remaining == 0 {
-                    return 0;
-                }
-                let capital_per_unit = side.capital_needed(fill_price, 1) as u128;
-                if capital_per_unit == 0 {
-                    return qty;
-                }
-                let max_affordable = (remaining / capital_per_unit) as Qty;
-                qty.min(max_affordable)
-            } else {
-                qty
-            }
-        };
-
-        // Demand: YES buyers willing at yes_price + NO sellers willing at no_price
-        let mut demand: Qty = 0;
-        yes_buyers.sort_by(|a, b| b.0.limit_price.cmp(&a.0.limit_price));
-        let mut willing_yes_buyers: Vec<(&Order, Qty)> = Vec::new();
-        for &(order, qty) in &yes_buyers {
-            if order.limit_price >= yes_price {
-                let capped = cap_mm_qty(order, qty, yes_price);
-                if capped > 0 {
-                    willing_yes_buyers.push((order, capped));
-                    demand += capped;
-                }
-            }
-        }
-
-        no_sellers.sort_by_key(|(o, _)| o.limit_price);
-        let mut willing_no_sellers: Vec<(&Order, Qty)> = Vec::new();
-        for &(order, qty) in &no_sellers {
-            if order.limit_price <= no_price {
-                let capped = cap_mm_qty(order, qty, no_price);
-                if capped > 0 {
-                    willing_no_sellers.push((order, capped));
-                    demand += capped;
-                }
-            }
-        }
-
-        // Supply: YES sellers willing at yes_price + NO buyers willing at no_price
-        let mut supply: Qty = 0;
-        yes_sellers.sort_by_key(|(o, _)| o.limit_price);
-        let mut willing_yes_sellers: Vec<(&Order, Qty)> = Vec::new();
-        for &(order, qty) in &yes_sellers {
-            if order.limit_price <= yes_price {
-                let capped = cap_mm_qty(order, qty, yes_price);
-                if capped > 0 {
-                    willing_yes_sellers.push((order, capped));
-                    supply += capped;
-                }
-            }
-        }
-
-        no_buyers.sort_by(|a, b| b.0.limit_price.cmp(&a.0.limit_price));
-        let mut willing_no_buyers: Vec<(&Order, Qty)> = Vec::new();
-        for &(order, qty) in &no_buyers {
-            if order.limit_price >= no_price {
-                let capped = cap_mm_qty(order, qty, no_price);
-                if capped > 0 {
-                    willing_no_buyers.push((order, capped));
-                    supply += capped;
-                }
-            }
-        }
-
-        let matched = demand.min(supply);
-        if matched == 0 {
-            continue;
-        }
-
-        // Helper to create a fill and update MM budget.
-        // Re-checks MM budget at fill time (multiple MM orders share budget).
-        let mut make_fill =
-            |order: &Order, qty: Qty, price: Nanos, remaining: &mut Qty| -> Option<Fill> {
-                if *remaining == 0 {
-                    return None;
-                }
-                let mut fill_qty = qty.min(*remaining);
-
-                // Re-check and cap by MM budget at fill time
-                if let Some(&(mm_idx, side)) = mm_order_map.get(&order.id) {
-                    let budget = mm_remaining_budget[mm_idx];
-                    if budget == 0 {
-                        return None;
-                    }
-                    let cap_per_unit = side.capital_needed(price, 1) as u128;
-                    if cap_per_unit > 0 {
-                        let max_affordable = (budget / cap_per_unit) as Qty;
-                        fill_qty = fill_qty.min(max_affordable);
-                    }
-                    if fill_qty == 0 {
-                        return None;
-                    }
-                    let capital = side.capital_needed(price, fill_qty) as u128;
-                    mm_remaining_budget[mm_idx] =
-                        mm_remaining_budget[mm_idx].saturating_sub(capital);
-                }
-
-                if fill_qty < order.min_fill {
-                    return None;
-                }
-                *remaining -= fill_qty;
-                Some(Fill::new(order.id, fill_qty, price))
-            };
-
-        // Fill demand side
-        let mut demand_remaining = matched;
-        for &(order, qty) in &willing_yes_buyers {
-            if let Some(fill) = make_fill(order, qty, yes_price, &mut demand_remaining) {
-                all_fills.push(fill);
-            }
-        }
-        for &(order, qty) in &willing_no_sellers {
-            if let Some(fill) = make_fill(order, qty, no_price, &mut demand_remaining) {
-                all_fills.push(fill);
-            }
-        }
-
-        // Supply must match exactly how much demand was filled (position balance)
-        let demand_filled = matched - demand_remaining;
-
-        // Fill supply side (capped to actual demand filled)
-        let mut supply_remaining = demand_filled;
-        for &(order, qty) in &willing_yes_sellers {
-            if let Some(fill) = make_fill(order, qty, yes_price, &mut supply_remaining) {
-                all_fills.push(fill);
-            }
-        }
-        for &(order, qty) in &willing_no_buyers {
-            if let Some(fill) = make_fill(order, qty, no_price, &mut supply_remaining) {
-                all_fills.push(fill);
-            }
-        }
-    }
-
-    all_fills
-}
-
-/// Compute per-market integer marginal payoffs using the same stride decomposition
-/// as the verifier. This determines the actual position balance contribution.
-fn verifier_marginal_payoffs(order: &Order) -> Vec<(MarketId, i64)> {
-    let num_markets = order.num_markets as usize;
-    let num_states = order.num_states as usize;
-    let mut result = Vec::new();
-
-    for m_idx in 0..num_markets {
-        let market = order.markets[m_idx];
-        if market.is_none() {
-            continue;
-        }
-        let stride = 1usize << m_idx;
-        let mut marginal: i64 = 0;
-
-        for s in 0..num_states {
-            let outcome = (s / stride) % 2;
-            let payoff = order.payoffs[s] as i64;
-            if outcome == 0 {
-                marginal += payoff;
-            } else {
-                marginal -= payoff;
-            }
-        }
-
-        let other_states = (num_states / 2) as i64;
-        if other_states > 0 {
-            let normalized = marginal / other_states;
-            if normalized != 0 {
-                result.push((market, normalized));
-            }
-        }
-    }
-
-    result
-}
-
 /// Extract fills for bundle (multi-market) orders.
 ///
 /// Bundles are filled greedily by surplus descending. Fill prices are set
@@ -1185,14 +925,14 @@ fn extract_bundle_fills(
             continue;
         }
 
-        // Compute position delta using verifier's integer marginals
-        let verifier_marginals = verifier_marginal_payoffs(order);
+        // Compute position delta using integer marginals
+        let marginals = order.marginal_payoffs_i64();
 
         // Check if adding this bundle would create position imbalance
         // Only fill if all affected markets stay balanced (net_position stays at 0)
         // or if a matching counterparty has already been added.
         let mut would_imbalance = false;
-        for &(market, marginal) in &verifier_marginals {
+        for &(market, marginal) in &marginals {
             let current = *net_position.get(&market).unwrap_or(&0);
             let new_val = current + marginal * fill_qty as i64;
             // Allow if it reduces imbalance or stays zero
@@ -1209,7 +949,7 @@ fn extract_bundle_fills(
         }
 
         // Update net position
-        for &(market, marginal) in &verifier_marginals {
+        for &(market, marginal) in &marginals {
             *net_position.entry(market).or_insert(0) += marginal * fill_qty as i64;
         }
 
@@ -1511,23 +1251,45 @@ mod tests {
 
     #[test]
     fn test_marginal_payoffs() {
+        use matching_engine::Order;
+
         let m0 = MarketId::new(0);
         let m1 = MarketId::new(1);
 
         // Bundle YES [1, 0, 0, 0]: marginal = 0.5 per market (non-separable)
-        let mp = compute_marginal_payoffs(&[m0, m1], &[1, 0, 0, 0], 4);
+        let mut order = Order::new(1);
+        order.markets[0] = m0;
+        order.markets[1] = m1;
+        order.num_markets = 2;
+        order.payoffs[0] = 1;
+        order.num_states = 4;
+        let mp = order.marginal_payoffs_f64();
         assert_eq!(mp.len(), 2);
         assert!(mp.iter().any(|&(m, v)| m == m0 && (v - 0.5).abs() < 1e-10));
         assert!(mp.iter().any(|&(m, v)| m == m1 && (v - 0.5).abs() < 1e-10));
 
         // Spread [0, -1, 1, 0]: long A (+1), short B (-1)
-        let mp = compute_marginal_payoffs(&[m0, m1], &[0, -1, 1, 0], 4);
+        let mut order = Order::new(2);
+        order.markets[0] = m0;
+        order.markets[1] = m1;
+        order.num_markets = 2;
+        order.payoffs[0] = 0;
+        order.payoffs[1] = -1;
+        order.payoffs[2] = 1;
+        order.payoffs[3] = 0;
+        order.num_states = 4;
+        let mp = order.marginal_payoffs_f64();
         assert_eq!(mp.len(), 2);
         assert!(mp.iter().any(|&(m, v)| m == m0 && (v - 1.0).abs() < 1e-10));
         assert!(mp.iter().any(|&(m, v)| m == m1 && (v - (-1.0)).abs() < 1e-10));
 
         // Single market YES [1, 0]: marginal = 1.0
-        let mp = compute_marginal_payoffs(&[m0], &[1, 0], 2);
+        let mut order = Order::new(3);
+        order.markets[0] = m0;
+        order.num_markets = 1;
+        order.payoffs[0] = 1;
+        order.num_states = 2;
+        let mp = order.marginal_payoffs_f64();
         assert_eq!(mp.len(), 1);
         assert!(mp.iter().any(|&(m, v)| m == m0 && (v - 1.0).abs() < 1e-10));
     }

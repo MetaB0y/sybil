@@ -19,6 +19,7 @@
 // Internal modules
 pub mod benchmark;
 pub mod dual_master;
+pub mod fill_extraction;
 pub mod local_solver;
 pub mod mm_allocator;
 pub mod pipeline;

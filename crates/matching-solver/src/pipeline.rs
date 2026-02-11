@@ -1339,7 +1339,6 @@ impl Pipeline {
         candidates: &[(matching_engine::Fill, i64)],
         order_map: &HashMap<u64, &matching_engine::Order>,
     ) -> Vec<(MarketId, u64, u64, u64)> {
-        // Use marginal payoff computation for accurate multi-market tracking
         let mut net_position: HashMap<MarketId, i64> = HashMap::new();
         let mut market_yes_qty: HashMap<MarketId, u64> = HashMap::new();
         let mut market_no_qty: HashMap<MarketId, u64> = HashMap::new();
@@ -1351,34 +1350,11 @@ impl Pipeline {
             let Some(&order) = order_map.get(&fill.order_id) else {
                 continue;
             };
-            let num_markets = order.num_markets as usize;
-            let num_states = order.num_states as usize;
 
-            for m_idx in 0..num_markets {
-                let market = order.markets[m_idx];
-                if market.is_none() {
-                    continue;
-                }
-                let stride = 1usize << m_idx;
-                let mut marginal: i64 = 0;
-                for s in 0..num_states {
-                    let outcome = (s / stride) % 2;
-                    let payoff = order.payoffs[s] as i64;
-                    if outcome == 0 {
-                        marginal += payoff;
-                    } else {
-                        marginal -= payoff;
-                    }
-                }
-                let other_states = (num_states / 2) as i64;
-                if other_states == 0 {
-                    continue;
-                }
-                let normalized = marginal / other_states;
+            for (market, normalized) in order.marginal_payoffs_i64() {
                 let contribution = normalized * fill.fill_qty as i64;
                 *net_position.entry(market).or_insert(0) += contribution;
 
-                // Track YES/NO for display purposes
                 if contribution > 0 {
                     *market_yes_qty.entry(market).or_insert(0) += contribution as u64;
                 } else if contribution < 0 {
@@ -1482,35 +1458,15 @@ impl Pipeline {
             let Some(&order) = order_map.get(&fill.order_id) else {
                 continue;
             };
-            let num_markets = order.num_markets as usize;
-            let num_states = order.num_states as usize;
 
-            for m_idx in 0..num_markets {
-                let market = order.markets[m_idx];
-                if market.is_none() {
-                    continue;
-                }
-                let stride = 1usize << m_idx;
-                let mut marginal: i64 = 0;
-                for s in 0..num_states {
-                    let outcome = (s / stride) % 2;
-                    let payoff = order.payoffs[s] as i64;
-                    if outcome == 0 {
-                        marginal += payoff;
-                    } else {
-                        marginal -= payoff;
-                    }
-                }
-                let other_states = (num_states / 2) as i64;
-                if other_states == 0 {
-                    continue;
-                }
-                let normalized = marginal / other_states;
+            for (market, normalized) in order.marginal_payoffs_i64() {
                 *net_position.entry(market).or_insert(0) +=
                     normalized * fill.fill_qty as i64;
             }
 
             // Track single-market fills for trimming
+            let num_markets = order.num_markets as usize;
+            let num_states = order.num_states as usize;
             if num_markets == 1 && num_states == 2 {
                 let market = order.markets[0];
                 let is_yes = (order.payoffs[0] > 0 && order.payoffs[1] == 0)
