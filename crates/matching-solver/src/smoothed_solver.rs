@@ -16,7 +16,7 @@
 //!       - Bundle orders: smoothed fill qty × per-market marginal payoff
 //!       - MM orders: surplus penalized by μ_j × capital per unit
 //!    b. Tatonnement step (adjust prices by excess demand)
-//!    c. Simplex projection for groups
+//!    c. Clamp prices to [0, NPD]
 //!    d. Dual update: μ_j for MM budget constraints
 //! 4. Extract fills: single-market (MM budget enforced inline) + bundles
 //! 5. Post-process via enforce_ucp (light — mostly repricing)
@@ -144,8 +144,8 @@ impl SmoothedSolver {
         let mm_order_map = build_mm_order_map(problem);
         let market_orders = self.build_market_orders(problem, &mm_order_map);
 
-        // Build group membership: market_id → group_index
-        let (group_map, groups) = self.build_groups(problem);
+        // Build group membership: market_id → group_index (used by bundle pricing)
+        let (group_map, _groups) = self.build_groups(problem);
 
         // Build bundle and MM info (bundles need group_map for precomputation)
         let bundles = self.build_bundle_infos(problem, &group_map);
@@ -177,11 +177,6 @@ impl SmoothedSolver {
             prices[idx] = initial as f64;
         }
 
-        // Ensure group prices are on simplex from the start
-        for group in &groups {
-            project_simplex_group(&mut prices, group);
-        }
-
         // Precompute total quantity per market (Vec indexed by MarketId.0)
         let mut total_qty = vec![1.0f64; num_price_slots];
         for mo in &market_orders {
@@ -194,8 +189,9 @@ impl SmoothedSolver {
 
         // Initialize Lagrangian dual variables
         let mut mu: Vec<f64> = vec![0.0; mm_groups.len()];
-
         // Step 2: Annealing loop with Lagrangian extension
+        // Group price constraint (sum <= $1) is NOT enforced here — each market
+        // finds its independently optimal price. enforce_ucp handles position balance.
         let mut epsilon = self.epsilon_start;
         let mut outer_iters = 0;
 
@@ -245,11 +241,6 @@ impl SmoothedSolver {
                     prices[idx] = (p + step).clamp(0.0, npd);
                 }
 
-                // Simplex projection
-                for group in &groups {
-                    project_simplex_group(&mut prices, group);
-                }
-
                 // MM dual updates
                 for (j, mm) in mm_groups.iter().enumerate() {
                     let capital = compute_mm_capital_smoothed(
@@ -278,7 +269,7 @@ impl SmoothedSolver {
         );
 
         // Step 3: Convert f64 prices to Nanos and build PriceDiscoveryResult
-        let final_prices = self.quantize_prices(&prices, &groups, &market_orders, &bundles);
+        let final_prices = self.quantize_prices(&prices, &market_orders, &bundles);
         let pd = self.build_price_discovery(&final_prices);
 
         // Step 4: Extract fills at final prices (MM budget enforced inline)
@@ -504,7 +495,7 @@ impl SmoothedSolver {
     }
 
     /// Build group membership map and group lists.
-    /// Returns (group_map for BundleInfo precomputation, groups as Vec<Vec<usize>> for simplex projection).
+    /// Returns (group_map for BundleInfo precomputation, groups as Vec<Vec<usize>>).
     fn build_groups(
         &self,
         problem: &Problem,
@@ -526,20 +517,22 @@ impl SmoothedSolver {
         (group_map, groups)
     }
 
-    /// Convert f64 prices to quantized Nanos, ensuring group sums = $1.
+    /// Convert f64 prices to quantized Nanos by snapping to the nearest
+    /// order limit price. This matches real auction semantics: the clearing
+    /// price is always at a tick on the order book. Avoids off-by-one issues
+    /// from sigmoid smoothing convergence.
     fn quantize_prices(
         &self,
         prices: &[f64],
-        groups: &[Vec<usize>],
         market_orders: &[MarketOrders],
         bundles: &[BundleInfo],
     ) -> HashMap<MarketId, Vec<Nanos>> {
         let mut result: HashMap<MarketId, Vec<Nanos>> = HashMap::new();
 
-        // Collect all market IDs that have prices
         for mo in market_orders {
             let idx = mo.market_id.0 as usize;
-            let yes_price = prices[idx].round().max(0.0).min(NANOS_PER_DOLLAR as f64) as Nanos;
+            let raw = prices[idx];
+            let yes_price = snap_to_order_price(raw, &mo.orders);
             let no_price = NANOS_PER_DOLLAR.saturating_sub(yes_price);
             result.insert(mo.market_id, vec![yes_price, no_price]);
         }
@@ -552,34 +545,6 @@ impl SmoothedSolver {
                     let no_price = NANOS_PER_DOLLAR.saturating_sub(yes_price);
                     vec![yes_price, no_price]
                 });
-            }
-        }
-
-        // Fix group sums (adjust largest market to absorb rounding error)
-        for group in groups {
-            let sum: u64 = group
-                .iter()
-                .filter_map(|&i| result.get(&MarketId::new(i as u32)).map(|p| p[0]))
-                .sum();
-            if sum != NANOS_PER_DOLLAR && !group.is_empty() {
-                let largest_idx = *group
-                    .iter()
-                    .max_by_key(|&&i| {
-                        result
-                            .get(&MarketId::new(i as u32))
-                            .map(|p| p[0])
-                            .unwrap_or(0)
-                    })
-                    .unwrap();
-                let market = MarketId::new(largest_idx as u32);
-                if let Some(p) = result.get_mut(&market) {
-                    if sum > NANOS_PER_DOLLAR {
-                        p[0] = p[0].saturating_sub(sum - NANOS_PER_DOLLAR);
-                    } else {
-                        p[0] += NANOS_PER_DOLLAR - sum;
-                    }
-                    p[1] = NANOS_PER_DOLLAR.saturating_sub(p[0]);
-                }
             }
         }
 
@@ -824,33 +789,44 @@ fn compute_mm_capital_smoothed(
     total_capital
 }
 
-/// Project prices for a group of markets onto the simplex {p ≥ 0, Σp = $1}.
+/// Snap a f64 price to the nearest order limit price in the order book.
 ///
-/// Uses the standard simplex projection algorithm (Duchi et al. 2008).
-/// `group` contains MarketId.0 indices into the `prices` vec.
-fn project_simplex_group(prices: &mut [f64], group: &[usize]) {
-    let n = group.len();
-    if n == 0 {
-        return;
+/// The sigmoid smoothing in tatonnement converges to prices slightly off
+/// from the true clearing price (typically just below a seller's limit).
+/// Snapping to the nearest order limit avoids these off-by-one issues.
+fn snap_to_order_price(raw: f64, orders: &[OrderInfo]) -> Nanos {
+    let rounded = raw.round().max(0.0).min(NANOS_PER_DOLLAR as f64) as Nanos;
+    if orders.is_empty() {
+        return rounded;
     }
 
-    let target = NANOS_PER_DOLLAR as f64;
+    // Collect unique limit prices (both YES and complement NO prices)
+    let mut candidates: Vec<Nanos> = Vec::new();
+    for o in orders {
+        let lp = o.limit_price.round().max(0.0).min(NANOS_PER_DOLLAR as f64) as Nanos;
+        candidates.push(lp);
+    }
+    candidates.sort_unstable();
+    candidates.dedup();
 
-    let mut sorted: Vec<f64> = group.iter().map(|&i| prices[i]).collect();
-    sorted.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
-
-    let mut cumsum = 0.0;
-    let mut threshold = 0.0;
-    for (i, &v) in sorted.iter().enumerate() {
-        cumsum += v;
-        let t = (cumsum - target) / (i + 1) as f64;
-        if v - t > 0.0 {
-            threshold = t;
+    // Find nearest candidate
+    let mut best = rounded;
+    let mut best_dist = u64::MAX;
+    for &c in &candidates {
+        let dist = c.abs_diff(rounded);
+        if dist < best_dist {
+            best_dist = dist;
+            best = c;
         }
     }
 
-    for &i in group {
-        prices[i] = (prices[i] - threshold).max(0.0);
+    // Only snap if very close (within 5000 nanos ≈ $0.000005).
+    // The sigmoid bias is typically < 1000 nanos; this catches it
+    // without disturbing prices on dense order books.
+    if best_dist <= 5_000 {
+        best
+    } else {
+        rounded
     }
 }
 
@@ -974,25 +950,6 @@ mod tests {
     }
 
     #[test]
-    fn test_simplex_projection() {
-        let group = vec![0usize, 1, 2];
-
-        // Already on simplex
-        let third = NANOS_PER_DOLLAR as f64 / 3.0;
-        let mut prices = vec![third, third, third];
-        project_simplex_group(&mut prices, &group);
-        let sum: f64 = group.iter().map(|&i| prices[i]).sum();
-        assert!((sum - NANOS_PER_DOLLAR as f64).abs() < 1.0);
-
-        // Off simplex (sum too high)
-        prices = vec![500_000_000.0, 400_000_000.0, 300_000_000.0];
-        project_simplex_group(&mut prices, &group);
-        let sum: f64 = group.iter().map(|&i| prices[i]).sum();
-        assert!((sum - NANOS_PER_DOLLAR as f64).abs() < 1.0);
-        assert!(group.iter().all(|&i| prices[i] >= 0.0));
-    }
-
-    #[test]
     fn test_smoothed_solver_basic() {
         let mut problem = Problem::new("test");
         let market = problem.markets.add_binary("test_market");
@@ -1082,17 +1039,17 @@ mod tests {
         let result = solver.solve(&problem);
 
         assert!(result.price_discovery.is_some());
-        let pd = result.price_discovery.as_ref().unwrap();
 
-        // Check group consistency: YES prices should sum to $1
-        if let (Some(p1), Some(p2)) = (pd.prices.get(&m1), pd.prices.get(&m2)) {
-            let group_sum = p1[0] + p2[0];
-            assert!(
-                group_sum.abs_diff(NANOS_PER_DOLLAR) <= 1,
-                "Group prices should sum to $1, got {}",
-                group_sum
-            );
-        }
+        // Welfare should be positive (trades should happen)
+        assert!(
+            result.result.total_welfare > 0,
+            "Expected positive welfare, got {}",
+            result.result.total_welfare
+        );
+        assert!(
+            !result.result.fills.is_empty(),
+            "Expected some fills"
+        );
     }
 
     #[test]
