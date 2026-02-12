@@ -55,16 +55,8 @@ impl<'a> OrderBuilder<'a> {
         self
     }
 
-    /// Set the quantity constraints.
-    pub fn quantity(mut self, min: Qty, max: Qty) -> Self {
-        self.order.min_fill = min;
-        self.order.max_fill = max;
-        self
-    }
-
-    /// Set as all-or-none order.
-    pub fn all_or_none(mut self, qty: Qty) -> Self {
-        self.order.min_fill = qty;
+    /// Set the maximum fill quantity.
+    pub fn quantity(mut self, qty: Qty) -> Self {
         self.order.max_fill = qty;
         self
     }
@@ -129,7 +121,7 @@ pub fn simple_yes_buy(
     OrderBuilder::new(markets, id)
         .spanning(&[market])
         .limit(limit_price)
-        .quantity(0, qty)
+        .quantity(qty)
         .payoff_at(0, 1) // Win when outcome 0 (Yes) happens
         .payoff_at(1, 0) // Nothing when outcome 1 (No) happens
         .build()
@@ -146,7 +138,7 @@ pub fn simple_no_buy(
     OrderBuilder::new(markets, id)
         .spanning(&[market])
         .limit(limit_price)
-        .quantity(0, qty)
+        .quantity(qty)
         .payoff_at(0, 0) // Nothing when Yes
         .payoff_at(1, 1) // Win when No
         .build()
@@ -172,7 +164,7 @@ fn spread_order(
     OrderBuilder::new(markets, id)
         .spanning(&[market_a, market_b])
         .limit(limit_price)
-        .quantity(0, qty)
+        .quantity(qty)
         .payoff_when(&[0, 0], 0)
         .payoff_when(&[1, 0], -sign)
         .payoff_when(&[0, 1], sign)
@@ -222,7 +214,7 @@ pub fn butterfly(
     OrderBuilder::new(markets, id)
         .spanning(&[market_a, market_b, market_c])
         .limit(limit_price)
-        .quantity(0, qty)
+        .quantity(qty)
         // State encoding: [market_a, market_b, market_c]
         // 0: [0,0,0] = A=Yes, B=Yes, C=Yes -> invalid, 0
         // 1: [1,0,0] = A=No,  B=Yes, C=Yes -> invalid, 0
@@ -253,7 +245,7 @@ fn bundle_order(
     let mut builder = OrderBuilder::new(markets, id)
         .spanning(market_ids)
         .limit(limit_price)
-        .all_or_none(qty);
+        .quantity(qty);
 
     let sizes: Vec<u8> = market_ids
         .iter()
@@ -315,7 +307,7 @@ pub fn outcome_buy(
     let mut builder = OrderBuilder::new(markets, id)
         .spanning(&[market])
         .limit(limit_price)
-        .quantity(0, qty);
+        .quantity(qty);
 
     // Payoff of 1 only when the target outcome happens
     builder = builder.payoff_at(outcome_idx as usize, 1);
@@ -336,7 +328,7 @@ pub fn outcome_sell(
     let mut builder = OrderBuilder::new(markets, id)
         .spanning(&[market])
         .limit(limit_price)
-        .quantity(0, qty);
+        .quantity(qty);
 
     // Payoff of -1 when the target outcome happens (seller owes $1)
     builder = builder.payoff_at(outcome_idx as usize, -1);
@@ -363,7 +355,7 @@ pub fn ratio_spread(
     OrderBuilder::new(markets, id)
         .spanning(&[market_a, market_b])
         .limit(limit_price)
-        .quantity(0, qty)
+        .quantity(qty)
         .payoff_when(&[0, 0], ratio_a - ratio_b) // Both Yes
         .payoff_when(&[1, 0], -ratio_b) // A=No, B=Yes
         .payoff_when(&[0, 1], ratio_a) // A=Yes, B=No
@@ -386,7 +378,7 @@ pub fn conditional_buy(
     OrderBuilder::new(markets, id)
         .spanning(&[market])
         .limit(limit_price)
-        .quantity(0, qty)
+        .quantity(qty)
         .payoff_at(0, 1) // Win when Yes
         .condition(condition_market, threshold, direction)
         .build()
@@ -459,15 +451,13 @@ mod tests {
     }
 
     #[test]
-    fn test_bundle_all_or_none() {
+    fn test_bundle_order() {
         let markets = setup_markets();
         let m0 = MarketId::new(0);
         let m1 = MarketId::new(1);
 
         let order = bundle_yes(&markets, 1, &[m0, m1], price_to_nanos(0.80), 100);
 
-        assert!(order.is_all_or_none());
-        assert_eq!(order.min_fill, 100);
         assert_eq!(order.max_fill, 100);
 
         // Only state 0 (both Yes) should have payoff

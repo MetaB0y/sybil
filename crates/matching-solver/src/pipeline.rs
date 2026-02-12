@@ -636,7 +636,6 @@ impl Pipeline {
                         arb_order.payoffs[0] = -1;
                         arb_order.payoffs[1] = 0;
                         arb_order.limit_price = arb_limit;
-                        arb_order.min_fill = 0;
                         arb_order.max_fill = q_star;
 
                         result.result.add_fill(
@@ -1829,72 +1828,13 @@ impl Pipeline {
                 }
 
                 let fill_qty = candidate_fills[*idx].0.fill_qty;
-                let min_fill = order_map
-                    .get(&candidate_fills[*idx].0.order_id)
-                    .map(|o| o.min_fill)
-                    .unwrap_or(0);
 
                 if remaining_excess >= fill_qty {
                     candidate_fills[*idx].0.fill_qty = 0;
                     remaining_excess -= fill_qty;
                 } else {
-                    let new_qty = fill_qty - remaining_excess;
-                    if new_qty >= min_fill {
-                        candidate_fills[*idx].0.fill_qty = new_qty;
-                        remaining_excess = 0;
-                    } else if min_fill > 0 {
-                        // AON: can't partially trim enough. Trim to min_fill for now;
-                        // second pass below will drop entire AON fills if needed.
-                        let safe_trim = fill_qty.saturating_sub(min_fill);
-                        if safe_trim > 0 {
-                            candidate_fills[*idx].0.fill_qty = min_fill;
-                            remaining_excess -= safe_trim;
-                        }
-                    } else {
-                        candidate_fills[*idx].0.fill_qty = new_qty;
-                        remaining_excess = 0;
-                    }
-                }
-            }
-
-            // Second pass: if AON constraints prevented exact balance, drop entire
-            // AON fills to guarantee position balance. Find the smallest AON fill
-            // whose drop clears the remaining excess with minimal over-trim.
-            if remaining_excess > 0 {
-                // First, try to find an AON fill where dropping it exactly or
-                // slightly over-covers the remaining excess.
-                let mut best_drop: Option<(usize, u64)> = None; // (idx, over_trim)
-                for (idx, _, _) in &excess_indices {
-                    let fill_qty = candidate_fills[*idx].0.fill_qty;
-                    if fill_qty == 0 {
-                        continue;
-                    }
-                    if fill_qty >= remaining_excess {
-                        let over_trim = fill_qty - remaining_excess;
-                        if best_drop.is_none() || over_trim < best_drop.unwrap().1 {
-                            best_drop = Some((*idx, over_trim));
-                        }
-                    }
-                }
-
-                if let Some((idx, _)) = best_drop {
-                    candidate_fills[idx].0.fill_qty = 0;
-                    // remaining_excess cleared
-                } else {
-                    // No single fill covers the excess — drop multiple, smallest first
-                    let mut droppable: Vec<(usize, u64)> = excess_indices
-                        .iter()
-                        .filter(|(idx, _, _)| candidate_fills[*idx].0.fill_qty > 0)
-                        .map(|(idx, _, _)| (*idx, candidate_fills[*idx].0.fill_qty))
-                        .collect();
-                    droppable.sort_by_key(|&(_, qty)| qty);
-                    for (idx, qty) in droppable {
-                        if remaining_excess == 0 {
-                            break;
-                        }
-                        candidate_fills[idx].0.fill_qty = 0;
-                        remaining_excess = remaining_excess.saturating_sub(qty);
-                    }
+                    candidate_fills[*idx].0.fill_qty = fill_qty - remaining_excess;
+                    remaining_excess = 0;
                 }
             }
         }

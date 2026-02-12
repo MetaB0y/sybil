@@ -284,17 +284,13 @@ impl LocalSolver {
                 continue;
             }
             let fill_qty = (*max_qty).min(demand_remaining);
-            if fill_qty >= order.min_fill {
-                welfare += (order.limit_price as i64 - clearing_price_yes as i64) * fill_qty as i64;
-                fills.push(Fill {
-                    order_id: order.id,
-                    fill_qty,
-                    fill_price: clearing_price_yes,
-                });
-                demand_remaining = demand_remaining.saturating_sub(fill_qty);
-            } else {
-                unfilled.push(order.id);
-            }
+            welfare += (order.limit_price as i64 - clearing_price_yes as i64) * fill_qty as i64;
+            fills.push(Fill {
+                order_id: order.id,
+                fill_qty,
+                fill_price: clearing_price_yes,
+            });
+            demand_remaining = demand_remaining.saturating_sub(fill_qty);
         }
 
         // Fill converted NO sellers (selling NO ≡ buying YES) at P_YES
@@ -316,18 +312,14 @@ impl LocalSolver {
                 continue;
             }
             let fill_qty = (*max_qty).min(demand_remaining);
-            if fill_qty >= order.min_fill {
-                // NO seller welfare: clearing_NO - limit_NO (they receive more than their minimum)
-                welfare += (clearing_price_no as i64 - order.limit_price as i64) * fill_qty as i64;
-                fills.push(Fill {
-                    order_id: order.id,
-                    fill_qty,
-                    fill_price: clearing_price_no,
-                });
-                demand_remaining = demand_remaining.saturating_sub(fill_qty);
-            } else {
-                unfilled.push(order.id);
-            }
+            // NO seller welfare: clearing_NO - limit_NO (they receive more than their minimum)
+            welfare += (clearing_price_no as i64 - order.limit_price as i64) * fill_qty as i64;
+            fills.push(Fill {
+                order_id: order.id,
+                fill_qty,
+                fill_price: clearing_price_no,
+            });
+            demand_remaining = demand_remaining.saturating_sub(fill_qty);
         }
 
         // Fill supply side: track how much supply comes from each source
@@ -346,17 +338,13 @@ impl LocalSolver {
                 continue;
             }
             let fill_qty = (*max_qty).min(supply_remaining);
-            if fill_qty >= order.min_fill {
-                welfare += (clearing_price_yes as i64 - order.limit_price as i64) * fill_qty as i64;
-                fills.push(Fill {
-                    order_id: order.id,
-                    fill_qty,
-                    fill_price: clearing_price_yes,
-                });
-                supply_remaining = supply_remaining.saturating_sub(fill_qty);
-            } else {
-                unfilled.push(order.id);
-            }
+            welfare += (clearing_price_yes as i64 - order.limit_price as i64) * fill_qty as i64;
+            fills.push(Fill {
+                order_id: order.id,
+                fill_qty,
+                fill_price: clearing_price_yes,
+            });
+            supply_remaining = supply_remaining.saturating_sub(fill_qty);
         }
 
         // NO buyers acting as YES supply (buying NO ≡ selling YES at $1-limit)
@@ -374,18 +362,14 @@ impl LocalSolver {
                 continue;
             }
             let fill_qty = (*max_qty).min(supply_remaining);
-            if fill_qty >= order.min_fill {
-                // NO buyer welfare: limit - P_NO
-                welfare += (order.limit_price as i64 - clearing_price_no as i64) * fill_qty as i64;
-                fills.push(Fill {
-                    order_id: order.id,
-                    fill_qty,
-                    fill_price: clearing_price_no,
-                });
-                supply_remaining = supply_remaining.saturating_sub(fill_qty);
-            } else {
-                unfilled.push(order.id);
-            }
+            // NO buyer welfare: limit - P_NO
+            welfare += (order.limit_price as i64 - clearing_price_no as i64) * fill_qty as i64;
+            fills.push(Fill {
+                order_id: order.id,
+                fill_qty,
+                fill_price: clearing_price_no,
+            });
+            supply_remaining = supply_remaining.saturating_sub(fill_qty);
         }
 
         // Deduplicate unfilled
@@ -548,21 +532,17 @@ impl LocalSolver {
             }
 
             let fill_qty = (*max_qty).min(remaining);
-            if fill_qty >= order.min_fill {
-                let fill = Fill {
-                    order_id: order.id,
-                    fill_qty,
-                    fill_price: clearing_price,
-                };
+            let fill = Fill {
+                order_id: order.id,
+                fill_qty,
+                fill_price: clearing_price,
+            };
 
-                // Welfare = limit_price - clearing_price for buyers
-                welfare += (order.limit_price as i64 - clearing_price as i64) * fill_qty as i64;
+            // Welfare = limit_price - clearing_price for buyers
+            welfare += (order.limit_price as i64 - clearing_price as i64) * fill_qty as i64;
 
-                fills.push(fill);
-                remaining = remaining.saturating_sub(fill_qty);
-            } else {
-                unfilled.push(order.id);
-            }
+            fills.push(fill);
+            remaining = remaining.saturating_sub(fill_qty);
         }
 
         // Fill sellers - they provide supply that buyers consume
@@ -577,21 +557,17 @@ impl LocalSolver {
             // Seller is willing if clearing_price >= their limit price
             if clearing_price >= order.limit_price {
                 let fill_qty = (*max_qty).min(seller_remaining);
-                if fill_qty >= order.min_fill {
-                    let fill = Fill {
-                        order_id: order.id,
-                        fill_qty,
-                        fill_price: clearing_price,
-                    };
+                let fill = Fill {
+                    order_id: order.id,
+                    fill_qty,
+                    fill_price: clearing_price,
+                };
 
-                    // Seller welfare = clearing_price - limit_price (they receive more than minimum)
-                    welfare += (clearing_price as i64 - order.limit_price as i64) * fill_qty as i64;
+                // Seller welfare = clearing_price - limit_price (they receive more than minimum)
+                welfare += (clearing_price as i64 - order.limit_price as i64) * fill_qty as i64;
 
-                    fills.push(fill);
-                    seller_remaining = seller_remaining.saturating_sub(fill_qty);
-                } else {
-                    unfilled.push(order.id);
-                }
+                fills.push(fill);
+                seller_remaining = seller_remaining.saturating_sub(fill_qty);
             } else {
                 unfilled.push(order.id);
             }
@@ -824,7 +800,6 @@ impl PrecomputedMarket {
     /// Estimate welfare of real orders at given clearing price.
     ///
     /// Approximates the welfare by filling demand/supply curves greedily.
-    /// Ignores min_fill constraints (slight overestimate in rare cases).
     pub fn estimate_welfare(
         &self,
         clearing_price: Nanos,

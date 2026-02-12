@@ -29,7 +29,6 @@ cargo run -p matching-sim --release -- --markets 20 --orders 500 --bundles 0.2 -
 - `--orders N` — total orders
 - `--bundles F` — bundle fraction (0.0-1.0)
 - `--spreads F` — spread fraction
-- `--aon F` — all-or-none fraction
 - `--scarcity F` — liquidity scarcity (lower = scarcer)
 - `--mms N` — number of MM constraints
 - `--seed N` — random seed

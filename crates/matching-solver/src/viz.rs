@@ -153,8 +153,6 @@ pub struct OrderSnapshot {
     /// Side: "bid" (buying YES) or "ask" (selling YES / buying NO)
     /// For bundles, this is based on the first market's payoff
     pub side: String,
-    /// Whether this is an all-or-none order
-    pub is_aon: bool,
     /// Whether this is a market maker order
     pub is_mm: bool,
     /// Limit price in dollars
@@ -630,7 +628,6 @@ impl VizSnapshot {
                     markets: order_markets,
                     order_type,
                     side,
-                    is_aon: order.is_all_or_none(),
                     is_mm: mm_order_ids.contains(&order.id),
                     limit_price: order.limit_price as f64 / NANOS_PER_DOLLAR as f64,
                     max_qty: order.max_fill,
@@ -844,7 +841,6 @@ mod tests {
                 markets: vec!["market_a".to_string()],
                 order_type: "single".to_string(),
                 side: "bid".to_string(),
-                is_aon: false,
                 is_mm: false,
                 limit_price: 0.60,
                 max_qty: 100,

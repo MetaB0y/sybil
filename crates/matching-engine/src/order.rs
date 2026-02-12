@@ -71,10 +71,6 @@ pub struct Order {
     /// For a seller, use a negative payoff and this represents min acceptable.
     pub limit_price: Nanos,
 
-    /// Minimum fill quantity. 0 = partial OK.
-    /// Set equal to max_fill for all-or-none orders.
-    pub min_fill: Qty,
-
     /// Maximum fill quantity.
     pub max_fill: Qty,
 
@@ -92,15 +88,9 @@ impl Order {
             payoffs: [0; MAX_STATES],
             num_states: 0,
             limit_price: 0,
-            min_fill: 0,
             max_fill: 0,
             condition: None,
         }
-    }
-
-    /// Check if this is an all-or-none order.
-    pub fn is_all_or_none(&self) -> bool {
-        self.min_fill > 0 && self.min_fill == self.max_fill
     }
 
     /// Check if this is a conditional order.
@@ -241,12 +231,11 @@ impl std::fmt::Display for Order {
             .collect();
         write!(
             f,
-            "Order#{} markets=[{}] payoffs={:?} limit={} qty=[{},{}]",
+            "Order#{} markets=[{}] payoffs={:?} limit={} qty={}",
             self.id,
             markets.join(","),
             payoffs,
             self.limit_price,
-            self.min_fill,
             self.max_fill
         )
     }
@@ -284,16 +273,7 @@ mod tests {
         assert_eq!(order.id, 1);
         assert_eq!(order.num_markets, 0);
         assert_eq!(order.num_states, 0);
-        assert!(!order.is_all_or_none());
         assert!(!order.is_conditional());
-    }
-
-    #[test]
-    fn test_all_or_none() {
-        let mut order = Order::new(1);
-        order.min_fill = 100;
-        order.max_fill = 100;
-        assert!(order.is_all_or_none());
     }
 
     #[test]

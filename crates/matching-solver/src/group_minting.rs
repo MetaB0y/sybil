@@ -238,7 +238,6 @@ fn find_group_mint_single(
         order.payoffs[0] = -1; // Sell YES: owe $1 if YES
         order.payoffs[1] = 0;
         order.limit_price = price; // limit = fill_price → zero welfare
-        order.min_fill = 0; // Allow partial fills for trim_position_imbalance
         order.max_fill = q_star as u64;
 
         arb_fills.push(Fill {
@@ -469,7 +468,6 @@ fn simplex_search_for_group(
             arb_order.payoffs[0] = -1; // Sell YES
             arb_order.payoffs[1] = 0;
             arb_order.limit_price = arb_limit;
-            arb_order.min_fill = 0;
             arb_order.max_fill = arb_qty;
 
             let arb_welfare = arb_order.welfare_contribution(yes_price, arb_qty);

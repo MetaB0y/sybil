@@ -153,7 +153,6 @@ impl Problem {
 
     pub fn summary(&self) -> ProblemSummary {
         let bundle_orders = self.orders.iter().filter(|o| o.num_markets > 1).count();
-        let aon_orders = self.orders.iter().filter(|o| o.is_all_or_none()).count();
         let conditional_orders = self.orders.iter().filter(|o| o.is_conditional()).count();
 
         ProblemSummary {
@@ -162,7 +161,6 @@ impl Problem {
             num_orders: self.num_orders(),
             num_mm_constraints: self.mm_constraints.len(),
             bundle_orders,
-            aon_orders,
             conditional_orders,
             total_demand: self.total_demand(),
         }
@@ -177,7 +175,6 @@ pub struct ProblemSummary {
     pub num_orders: usize,
     pub num_mm_constraints: usize,
     pub bundle_orders: usize,
-    pub aon_orders: usize,
     pub conditional_orders: usize,
     pub total_demand: u64,
 }
@@ -188,8 +185,8 @@ impl std::fmt::Display for ProblemSummary {
         writeln!(f, "  Markets: {}", self.num_markets)?;
         writeln!(
             f,
-            "  Orders: {} (bundles: {}, AON: {}, conditional: {})",
-            self.num_orders, self.bundle_orders, self.aon_orders, self.conditional_orders
+            "  Orders: {} (bundles: {}, conditional: {})",
+            self.num_orders, self.bundle_orders, self.conditional_orders
         )?;
         if self.num_mm_constraints > 0 {
             writeln!(f, "  MM Constraints: {}", self.num_mm_constraints)?;

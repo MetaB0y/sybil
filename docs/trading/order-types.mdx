@@ -146,24 +146,6 @@ Number of units. Each unit pays out according to the payoff vector.
 - **Good until cancelled (GTC)**: Persist until filled or manually cancelled
 - **Good until batch N**: Automatically expire after a specific batch
 
-### All-or-Nothing (AON)
-
-Must fill completely or not at all. Set `min_fill == amount`:
-
-```json
-{
-  "markets": ["market_a"],
-  "payoffs": [0, 100],
-  "limit_price": 5500,
-  "amount": 1000,
-  "min_fill": 1000
-}
-```
-
-<Warning>
-AON orders may not fill even if there's partial liquidity available. Use only when you specifically need full execution.
-</Warning>
-
 ### Conditional Activation
 
 Orders that only activate when a price condition is met on another market:

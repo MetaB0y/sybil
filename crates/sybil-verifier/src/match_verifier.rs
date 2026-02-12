@@ -138,16 +138,6 @@ fn verify_fills(
             });
         }
 
-        if fill.fill_qty > 0 && fill.fill_qty < order.min_fill {
-            violations.push(Violation {
-                kind: ViolationKind::QuantityBelowMin,
-                details: format!(
-                    "Order {}: fill_qty {} < min_fill {} (AON violation)",
-                    fill.order_id, fill.fill_qty, order.min_fill
-                ),
-            });
-        }
-
         // 4. Zero fill (diagnostic only)
         if fill.fill_qty == 0 && diagnostics {
             violations.push(Violation {

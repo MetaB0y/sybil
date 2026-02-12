@@ -97,8 +97,6 @@ pub struct MatchingResult {
     pub orders_filled: usize,
     /// Number of orders unfilled due to liquidity exhaustion
     pub orders_unfilled_liquidity: usize,
-    /// Number of orders unfilled due to all-or-none constraints
-    pub orders_unfilled_aon: usize,
     /// Total quantity filled across all orders
     pub total_quantity_filled: u64,
 }
@@ -111,7 +109,6 @@ impl MatchingResult {
             minting_cost: 0,
             orders_filled: 0,
             orders_unfilled_liquidity: 0,
-            orders_unfilled_aon: 0,
             total_quantity_filled: 0,
         }
     }

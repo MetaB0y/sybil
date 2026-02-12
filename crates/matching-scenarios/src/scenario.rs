@@ -35,8 +35,6 @@ pub struct ScenarioConfig {
     pub bundle_sell_fraction: f64,
     /// Fraction of spread orders that are sells (counterparties to spread)
     pub spread_sell_fraction: f64,
-    /// Fraction of orders that are all-or-none
-    pub aon_fraction: f64,
     /// Order size range
     pub order_size_min: Qty,
     pub order_size_max: Qty,
@@ -67,7 +65,6 @@ impl Default for ScenarioConfig {
             spread_fraction: 0.05,
             bundle_sell_fraction: 0.4,
             spread_sell_fraction: 0.4,
-            aon_fraction: 0.0,
             order_size_min: 10,
             order_size_max: 200,
             liquidity_scarcity: 0.5,
@@ -88,7 +85,7 @@ impl ScenarioConfig {
             num_orders: 50,
             bundle_fraction: 0.1,
             spread_fraction: 0.0,
-            aon_fraction: 0.0,
+
             num_mms: 0,
             liquidity_scarcity: 0.8,
             ..Default::default()
@@ -102,7 +99,7 @@ impl ScenarioConfig {
             num_orders: 300,
             bundle_fraction: 0.15,
             spread_fraction: 0.05,
-            aon_fraction: 0.0,
+
             num_mms: 1,
             mm_budget_min: 5_000,
             mm_budget_max: 20_000,
@@ -118,7 +115,7 @@ impl ScenarioConfig {
             num_orders: 3000,
             bundle_fraction: 0.15,
             spread_fraction: 0.05,
-            aon_fraction: 0.0,
+
             num_mms: 2,
             liquidity_scarcity: 0.5,
             ..Default::default()
@@ -132,7 +129,7 @@ impl ScenarioConfig {
             num_orders: 10000,
             bundle_fraction: 0.2,
             spread_fraction: 0.05,
-            aon_fraction: 0.0,
+
             num_mms: 3,
             mm_budget_min: 20_000,
             mm_budget_max: 100_000,
@@ -148,7 +145,7 @@ impl ScenarioConfig {
             num_orders: 100_000,
             bundle_fraction: 0.2,
             spread_fraction: 0.05,
-            aon_fraction: 0.0,
+
             num_mms: 10,
             mm_budget_min: 50_000,
             mm_budget_max: 200_000,
@@ -162,9 +159,8 @@ impl ScenarioConfig {
         Self {
             num_markets: 50,
             num_orders: 5000,
-            bundle_fraction: 0.3,
+            bundle_fraction: 0.45, // High bundle fraction = many binary variables
             spread_fraction: 0.0,
-            aon_fraction: 0.45, // High AON = many binary variables
             order_size_min: 30,
             order_size_max: 100,
             num_mms: 0,
@@ -185,12 +181,11 @@ impl ScenarioConfig {
 pub fn generate_scenario(config: ScenarioConfig) -> Problem {
     let mut rng = ChaCha8Rng::seed_from_u64(config.seed);
     let mut problem = Problem::new(format!(
-        "Scenario(m={},o={},b={:.0}%,s={:.0}%,aon={:.0}%)",
+        "Scenario(m={},o={},b={:.0}%,s={:.0}%)",
         config.num_markets,
         config.num_orders,
         config.bundle_fraction * 100.0,
         config.spread_fraction * 100.0,
-        config.aon_fraction * 100.0,
     ));
 
     // Generate binary markets, some grouped into multi-outcome events
@@ -486,18 +481,11 @@ fn generate_simple_order(
 
     let qty = rng.random_range(config.order_size_min..config.order_size_max);
 
-    let mut order = if is_sell {
+    if is_sell {
         outcome_sell(markets, id, market, outcome, price_to_nanos(limit), qty)
     } else {
         outcome_buy(markets, id, market, outcome, price_to_nanos(limit), qty)
-    };
-
-    // Apply AON based on config
-    if rng.random_bool(config.aon_fraction) {
-        order.min_fill = order.max_fill;
     }
-
-    order
 }
 
 fn generate_bundle_order_with_outcome(
@@ -531,11 +519,7 @@ fn generate_bundle_order_with_outcome(
     let limit_nanos = price_to_nanos(limit);
     let qty = rng.random_range(config.order_size_min..config.order_size_max);
 
-    let mut order = bundle_yes(markets, id, &bundle_markets, limit_nanos, qty);
-
-    if rng.random_bool(config.aon_fraction) {
-        order.min_fill = order.max_fill;
-    }
+    let order = bundle_yes(markets, id, &bundle_markets, limit_nanos, qty);
 
     // Create joint outcome for all YES
     let joint_outcome = JointOutcome::new(bundle_markets.iter().map(|&m| (m, YES)).collect());
@@ -629,13 +613,7 @@ fn generate_bundle_sell_order(
     let limit_nanos = price_to_nanos(limit);
     let qty = rng.random_range(config.order_size_min..config.order_size_max);
 
-    let mut order = bundle_sell(markets, id, &bundle_markets, limit_nanos, qty);
-
-    if rng.random_bool(config.aon_fraction) {
-        order.min_fill = order.max_fill;
-    }
-
-    order
+    bundle_sell(markets, id, &bundle_markets, limit_nanos, qty)
 }
 
 fn generate_spread_sell_order(
@@ -825,13 +803,6 @@ mod tests {
         let problem = generate_scenario(ScenarioConfig::medium());
         assert!(problem.num_markets() >= 30);
         assert!(problem.num_orders() >= 1000);
-    }
-
-    #[test]
-    fn test_milp_killer_has_aon() {
-        let problem = generate_scenario(ScenarioConfig::milp_killer());
-        let aon_count = problem.orders.iter().filter(|o| o.is_all_or_none()).count();
-        assert!(aon_count > 1000, "MILP killer should have many AON orders");
     }
 
     #[test]

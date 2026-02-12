@@ -148,8 +148,6 @@ pub struct DualAnalysis {
     pub liquidity_duals: HashMap<(MarketId, u8), f64>,
     /// Number of binding liquidity constraints (at capacity)
     pub binding_liquidity_constraints: usize,
-    /// Number of binding AON constraints
-    pub binding_aon_constraints: usize,
     /// Total number of constraints in the model
     pub total_constraints: usize,
     /// Objective value (total welfare)
@@ -175,10 +173,9 @@ impl DualAnalysis {
         };
 
         format!(
-            "Dual Analysis:\n  Binding liquidity: {} ({:.1}% of constraints)\n  Binding AON: {}\n  Top scarce markets: {:?}",
+            "Dual Analysis:\n  Binding liquidity: {} ({:.1}% of constraints)\n  Top scarce markets: {:?}",
             self.binding_liquidity_constraints,
             binding_pct,
-            self.binding_aon_constraints,
             scarce.iter().map(|((m, o), d)| format!("M{}O{}:{:.2}", m.0, o, d)).collect::<Vec<_>>()
         )
     }
@@ -318,20 +315,11 @@ impl MilpSolver {
         (result, analysis)
     }
 
-    fn compute_dual_analysis(&self, problem: &Problem, result: &MilpResult) -> DualAnalysis {
-        let mut analysis = DualAnalysis::default();
-
-        for order in &problem.orders {
-            if order.is_all_or_none() {
-                let filled = result.result.fills.iter().any(|f| f.order_id == order.id);
-                if !filled {
-                    analysis.binding_aon_constraints += 1;
-                }
-            }
+    fn compute_dual_analysis(&self, _problem: &Problem, result: &MilpResult) -> DualAnalysis {
+        DualAnalysis {
+            objective_value: result.result.total_welfare as f64,
+            ..Default::default()
         }
-
-        analysis.objective_value = result.result.total_welfare as f64;
-        analysis
     }
 
     /// Solve with full status reporting.
@@ -379,22 +367,18 @@ impl MilpSolver {
                     if z_val > 0.5 && q_val > 0.5 {
                         let fill_qty = q_val.round() as u64;
 
-                        if fill_qty >= order.min_fill {
-                            // Compute fill_price using alpha/beta formula:
-                            // eff_price = |sum_m alpha_m * p_m + beta|
-                            let eff_price: f64 = coeffs[i]
-                                .alpha
-                                .iter()
-                                .map(|(m, &a)| a * solution.p_values.get(m).copied().unwrap_or(0.0))
-                                .sum::<f64>()
-                                + coeffs[i].beta;
-                            let fill_price = eff_price.abs().round().max(0.0) as Nanos;
+                        // Compute fill_price using alpha/beta formula:
+                        // eff_price = |sum_m alpha_m * p_m + beta|
+                        let eff_price: f64 = coeffs[i]
+                            .alpha
+                            .iter()
+                            .map(|(m, &a)| a * solution.p_values.get(m).copied().unwrap_or(0.0))
+                            .sum::<f64>()
+                            + coeffs[i].beta;
+                        let fill_price = eff_price.abs().round().max(0.0) as Nanos;
 
-                            let fill = Fill::new(order.id, fill_qty, fill_price);
-                            result.add_fill(fill, order);
-                        }
-                    } else if order.is_all_or_none() {
-                        result.orders_unfilled_aon += 1;
+                        let fill = Fill::new(order.id, fill_qty, fill_price);
+                        result.add_fill(fill, order);
                     } else {
                         result.orders_unfilled_liquidity += 1;
                     }
@@ -458,7 +442,6 @@ impl MilpSolver {
                         order.payoffs[1] = 0;
                     }
                     order.limit_price = yes_price;
-                    order.min_fill = 0;
                     order.max_fill = shares;
 
                     let fill = Fill::new(next_arb_id, shares, yes_price);
@@ -487,12 +470,8 @@ impl MilpSolver {
                 }
             }
             Err(err_msg) => {
-                for order in &active_orders {
-                    if order.is_all_or_none() {
-                        result.orders_unfilled_aon += 1;
-                    } else {
-                        result.orders_unfilled_liquidity += 1;
-                    }
+                for _order in &active_orders {
+                    result.orders_unfilled_liquidity += 1;
                 }
 
                 MilpResult {
@@ -649,32 +628,13 @@ impl MilpSolver {
         // ================================================================
 
         for (i, order) in active_orders.iter().enumerate() {
-            if order.is_all_or_none() {
-                // AON: q_i = z_i * max_fill  =>  q_i - max_fill * z_i = 0
-                model.add(
-                    cons()
-                        .coef(&q_vars[i], 1.0)
-                        .coef(&z_vars[i], -(order.max_fill as f64))
-                        .eq(0.0),
-                );
-            } else {
-                if order.min_fill > 0 {
-                    // q_i >= min_fill * z_i  =>  q_i - min_fill * z_i >= 0
-                    model.add(
-                        cons()
-                            .coef(&q_vars[i], 1.0)
-                            .coef(&z_vars[i], -(order.min_fill as f64))
-                            .ge(0.0),
-                    );
-                }
-                // q_i <= max_fill * z_i  =>  q_i - max_fill * z_i <= 0
-                model.add(
-                    cons()
-                        .coef(&q_vars[i], 1.0)
-                        .coef(&z_vars[i], -(order.max_fill as f64))
-                        .le(0.0),
-                );
-            }
+            // q_i <= max_fill * z_i  =>  q_i - max_fill * z_i <= 0
+            model.add(
+                cons()
+                    .coef(&q_vars[i], 1.0)
+                    .coef(&z_vars[i], -(order.max_fill as f64))
+                    .le(0.0),
+            );
         }
 
         // ================================================================

@@ -72,7 +72,7 @@ Sybil is a **prediction market matching engine** built on Frequent Batch Auction
 
 - **matching-engine**: Core types — orders, fills, markets, order books, payoff vectors, MM constraints. All markets are binary (YES/NO); multi-outcome events are modeled as groups of binary markets.
 - **matching-solver**: The solver pipeline and all matching algorithms (~7k lines). This is where most development happens.
-- **matching-scenarios**: Test scenario generators with configurable order mixes (bundles, spreads, AON, MM orders).
+- **matching-scenarios**: Test scenario generators with configurable order mixes (bundles, spreads, MM orders).
 - **matching-sim**: CLI tool for running simulations with presets and solver comparison.
 - **matching-sequencer**: Agent-based multi-batch sequential simulation.
 

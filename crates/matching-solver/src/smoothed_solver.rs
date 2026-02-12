@@ -100,7 +100,6 @@ struct BundleInfo {
     is_seller: bool,
     limit_price: f64,
     max_fill: f64,
-    min_fill: f64,
     num_states: usize,
     payoffs: Vec<i8>,
     /// Per-market normalized marginal payoff: +1.0 = long 1 YES, -0.5 = short 0.5 YES
@@ -579,7 +578,6 @@ impl SmoothedSolver {
                     arb.payoffs[0] = -1;
                     arb.payoffs[1] = 0;
                     arb.limit_price = arb_limit;
-                    arb.min_fill = 0;
                     arb.max_fill = arb_order.max_fill;
 
                     gm_fills.push(Fill::new(arb.id, arb_order.max_fill, yes_price));
@@ -779,7 +777,6 @@ impl SmoothedSolver {
                 is_seller: order.is_seller(),
                 limit_price: order.limit_price as f64,
                 max_fill: order.max_fill as f64,
-                min_fill: order.min_fill as f64,
                 num_states,
                 payoffs,
                 marginal_payoffs,
@@ -1232,7 +1229,7 @@ fn extract_bundle_fills(
         }
 
         let fill_qty = bundle.max_fill as Qty;
-        if fill_qty == 0 || fill_qty < bundle.min_fill as Qty {
+        if fill_qty == 0 {
             continue;
         }
 
@@ -1426,7 +1423,6 @@ mod tests {
             is_seller: false,
             limit_price: 200_000_000.0,
             max_fill: 100.0,
-            min_fill: 0.0,
             num_states: 4,
             payoffs: vec![1, 0, 0, 0],
             marginal_payoffs: vec![(m0, 0.5), (m1, 0.5)],
@@ -1461,7 +1457,6 @@ mod tests {
             is_seller: false,
             limit_price: 200_000_000.0,
             max_fill: 100.0,
-            min_fill: 0.0,
             num_states: 8,
             payoffs: vec![1, 0, 0, 0, 0, 0, 0, 0],
             marginal_payoffs: vec![],
@@ -1484,7 +1479,6 @@ mod tests {
             is_seller: false,
             limit_price: 100_000_000.0,
             max_fill: 100.0,
-            min_fill: 0.0,
             num_states: 4,
             payoffs: vec![1, 0, 0, 0],
             marginal_payoffs: vec![],
@@ -1512,7 +1506,6 @@ mod tests {
             is_seller: false,
             limit_price: 300_000_000.0,
             max_fill: 100.0,
-            min_fill: 0.0,
             num_states: 4,
             payoffs: vec![1, 0, 0, 0],
             marginal_payoffs: vec![(m0, 0.5), (m1, 0.5)],
@@ -1529,7 +1522,6 @@ mod tests {
             is_seller: true,
             limit_price: 200_000_000.0,
             max_fill: 100.0,
-            min_fill: 0.0,
             num_states: 4,
             payoffs: vec![-1, 0, 0, 0],
             marginal_payoffs: vec![(m0, -0.5), (m1, -0.5)],

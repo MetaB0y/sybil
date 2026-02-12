@@ -13,7 +13,7 @@
 //! matching-sim --preset small --solver all
 //!
 //! # Custom configuration
-//! matching-sim --markets 50 --orders 5000 --bundles 0.2 --aon 0.3
+//! matching-sim --markets 50 --orders 5000 --bundles 0.2
 //! ```
 
 use std::collections::{HashMap, HashSet};
@@ -56,7 +56,6 @@ fn main() {
     println!("  Markets: {}", config.num_markets);
     println!("  Orders: {}", config.num_orders);
     println!("  Bundles: {:.0}%", config.bundle_fraction * 100.0);
-    println!("  AON: {:.0}%", config.aon_fraction * 100.0);
     println!("  MMs: {}", config.num_mms);
     println!("  Solver: {:?}", solver_choice);
     println!("  Batches: {}", num_batches);
@@ -119,7 +118,6 @@ fn print_help() {
     println!("  --orders <N>         Number of orders");
     println!("  --bundles <F>        Bundle fraction (0.0-1.0)");
     println!("  --spreads <F>        Spread fraction (0.0-1.0)");
-    println!("  --aon <F>            All-or-none fraction (0.0-1.0)");
     println!("  --scarcity <F>       Liquidity scarcity (0.0-1.0, lower=scarcer)");
     println!("  --mms <N>            Number of market makers");
     println!();
@@ -156,7 +154,6 @@ struct OrderStats {
     total_orders: usize,
     single_market_orders: usize,
     bundle_orders: usize,
-    aon_orders: usize,
     mm_order_ids: HashSet<u64>,
     user_order_count: usize,
     mm_order_count: usize,
@@ -172,16 +169,12 @@ impl OrderStats {
 
         let mut single_market = 0;
         let mut bundle = 0;
-        let mut aon = 0;
 
         for order in &problem.orders {
             if order.num_markets > 1 {
                 bundle += 1;
             } else {
                 single_market += 1;
-            }
-            if order.is_all_or_none() {
-                aon += 1;
             }
         }
 
@@ -195,7 +188,6 @@ impl OrderStats {
             total_orders: problem.orders.len(),
             single_market_orders: single_market,
             bundle_orders: bundle,
-            aon_orders: aon,
             mm_order_ids,
             user_order_count: problem.orders.len() - mm_count,
             mm_order_count: mm_count,
@@ -738,7 +730,6 @@ fn print_problem_summary(problem: &Problem, stats: &OrderStats) {
     println!("    MM orders: {}", stats.mm_order_count);
     println!("    Single-market: {}", stats.single_market_orders);
     println!("    Bundles: {}", stats.bundle_orders);
-    println!("    AON: {}", stats.aon_orders);
     println!("  MM constraints: {}", problem.mm_constraints.len());
     println!();
 }
@@ -1140,9 +1131,6 @@ fn parse_scenario_config(args: &[String]) -> ScenarioConfig {
     }
     if let Some(v) = get_arg_value(args, "--spreads") {
         config.spread_fraction = v.parse().unwrap_or(0.05);
-    }
-    if let Some(v) = get_arg_value(args, "--aon") {
-        config.aon_fraction = v.parse().unwrap_or(0.1);
     }
     if let Some(v) = get_arg_value(args, "--scarcity") {
         config.liquidity_scarcity = v.parse().unwrap_or(0.5);
@@ -2040,10 +2028,8 @@ fn order_to_json(order: &Order) -> serde_json::Value {
         "payoffs": payoffs,
         "limit_price": order.limit_price,
         "limit_price_cents": order.limit_price as f64 / 1e7,
-        "min_fill": order.min_fill,
         "max_fill": order.max_fill,
         "is_seller": order.is_seller(),
-        "is_aon": order.is_all_or_none(),
         "num_markets": order.num_markets,
     })
 }
@@ -2193,7 +2179,6 @@ fn build_comparison_json(
                         "limit_price_cents": o.limit_price as f64 / 1e7,
                         "max_fill": o.max_fill,
                         "is_bundle": o.num_markets > 1,
-                        "is_aon": o.is_all_or_none(),
                         "is_mm": mm_order_ids.contains(&o.id),
                         "is_seller": o.is_seller(),
                         "markets": (0..o.num_markets as usize).map(|i| o.markets[i].0).collect::<Vec<_>>(),
@@ -2234,7 +2219,6 @@ fn build_comparison_json(
                 "total_welfare_dollars": result.total_welfare as f64 / 1e9,
                 "orders_filled": result.orders_filled,
                 "orders_unfilled_liquidity": result.orders_unfilled_liquidity,
-                "orders_unfilled_aon": result.orders_unfilled_aon,
                 "total_quantity_filled": result.total_quantity_filled,
                 "welfare_breakdown": {
                     "user_dollars": user_welfare as f64 / 1e9,

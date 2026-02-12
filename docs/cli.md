@@ -43,7 +43,6 @@ Custom configuration:
   --orders <N>         Number of orders
   --bundles <F>        Bundle fraction (0.0-1.0)
   --spreads <F>        Spread fraction (0.0-1.0)
-  --aon <F>            All-or-none fraction (0.0-1.0)
   --scarcity <F>       Liquidity scarcity (0.0-1.0, lower=scarcer)
   --mms <N>            Number of market makers
 

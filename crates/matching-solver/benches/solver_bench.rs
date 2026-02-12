@@ -364,63 +364,22 @@ fn bench_harness_comparison() {
 }
 
 // ============================================================================
-// Pipeline Consistent Benchmarks (with Price Projection)
-// ============================================================================
-
-#[divan::bench]
-fn bench_pipeline_consistent_small() {
-    let config = ScenarioConfig::small();
-    let problem = generate_scenario(config);
-    let pipeline = Pipeline::consistent();
-    let _ = pipeline.solve(&problem);
-}
-
-#[divan::bench]
-fn bench_pipeline_consistent_medium() {
-    let config = ScenarioConfig::medium();
-    let problem = generate_scenario(config);
-    let pipeline = Pipeline::consistent();
-    let _ = pipeline.solve(&problem);
-}
-
-#[divan::bench]
-fn bench_pipeline_consistent_large() {
-    let config = ScenarioConfig::large();
-    let problem = generate_scenario(config);
-    let pipeline = Pipeline::consistent();
-    let _ = pipeline.solve(&problem);
-}
-
-#[divan::bench]
-fn bench_pipeline_consistent_extreme() {
-    let config = ScenarioConfig::extreme();
-    let problem = generate_scenario(config);
-    let pipeline = Pipeline::consistent();
-    let _ = pipeline.solve(&problem);
-}
-
-// ============================================================================
-// Comparative Benchmark: Current vs Consistent
+// Comparative Benchmark: Pipeline on medium with high bundles
 // ============================================================================
 
 use std::sync::OnceLock;
 
-#[divan::bench(args = ["current", "consistent"])]
-fn bench_pipeline_comparison_medium(bencher: Bencher, pipeline_type: &str) {
-    // Generate scenario once and share across iterations
+#[divan::bench]
+fn bench_pipeline_medium_high_bundles(bencher: Bencher) {
     static PROBLEM: OnceLock<Problem> = OnceLock::new();
     let problem = PROBLEM.get_or_init(|| {
         let mut config = ScenarioConfig::medium();
-        config.bundle_fraction = 0.30; // Higher bundle fraction for more projection work
+        config.bundle_fraction = 0.30;
         generate_scenario(config)
     });
 
     bencher.bench_local(|| {
-        let pipeline = match pipeline_type {
-            "current" => Pipeline::current(),
-            "consistent" => Pipeline::consistent(),
-            _ => Pipeline::current(),
-        };
+        let pipeline = Pipeline::current();
         pipeline.solve(problem)
     });
 }

@@ -328,9 +328,6 @@ proptest! {
                     .into_iter()
                     .map(|mut o| {
                         o.max_fill = o.max_fill.saturating_mul(2);
-                        if o.min_fill > 0 {
-                            o.min_fill = o.min_fill.saturating_mul(2);
-                        }
                         o
                     })
                     .collect(),

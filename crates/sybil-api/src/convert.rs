@@ -227,7 +227,6 @@ pub fn order_spec_to_order(spec: &OrderSpec, markets: &MarketSet) -> Result<Orde
             market_ids,
             payoffs,
             limit_price_nanos,
-            min_fill,
             max_fill,
         } => {
             let mids: Vec<MarketId> = market_ids.iter().map(|&id| MarketId::new(id)).collect();
@@ -260,7 +259,6 @@ pub fn order_spec_to_order(spec: &OrderSpec, markets: &MarketSet) -> Result<Orde
             }
 
             order.limit_price = *limit_price_nanos;
-            order.min_fill = *min_fill;
             order.max_fill = *max_fill;
 
             Ok(order)
@@ -296,7 +294,6 @@ pub fn signed_order_data_to_order(data: &SignedOrderData) -> Result<Order, Strin
     }
 
     order.limit_price = data.limit_price_nanos;
-    order.min_fill = data.min_fill;
     order.max_fill = data.max_fill;
 
     Ok(order)
@@ -415,7 +412,6 @@ mod tests {
             market_ids: vec![0, 1],
             payoffs: vec![1, 0, 0, 0],
             limit_price_nanos: 200_000_000,
-            min_fill: 0,
             max_fill: 10,
         };
         let order = order_spec_to_order(&spec, &ms).unwrap();

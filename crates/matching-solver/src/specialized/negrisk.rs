@@ -250,7 +250,6 @@ impl NegriskSolver {
             let fair_no = NANOS_PER_DOLLAR.saturating_sub(fair_yes);
             order.limit_price = if is_negrisk { fair_yes } else { fair_no };
 
-            order.min_fill = 1;
             order.max_fill = max_shares;
 
             orders.push(order);

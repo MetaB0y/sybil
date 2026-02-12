@@ -55,8 +55,6 @@ pub enum ViolationKind {
     OrderNotFound,
     /// Fill quantity exceeds max_fill
     QuantityExceedsMax,
-    /// Fill quantity below min_fill (and not zero)
-    QuantityBelowMin,
     /// Fill price exceeds limit price
     PriceExceedsLimit,
     /// Same order filled multiple times
@@ -153,16 +151,6 @@ impl Verifier {
                     details: format!(
                         "Order {}: fill_qty {} > max_fill {}",
                         fill.order_id, fill.fill_qty, order.max_fill
-                    ),
-                });
-            }
-
-            if fill.fill_qty > 0 && fill.fill_qty < order.min_fill {
-                violations.push(Violation {
-                    kind: ViolationKind::QuantityBelowMin,
-                    details: format!(
-                        "Order {}: fill_qty {} < min_fill {} (AON violation)",
-                        fill.order_id, fill.fill_qty, order.min_fill
                     ),
                 });
             }
@@ -516,25 +504,6 @@ mod tests {
             .violations
             .iter()
             .any(|v| v.kind == ViolationKind::OrderNotFound));
-    }
-
-    #[test]
-    fn test_aon_violation() {
-        let mut problem = create_test_problem();
-
-        // Make order 1 all-or-none
-        problem.orders[0].min_fill = 100;
-
-        let mut result = MatchingResult::new();
-        result.fills.push(Fill::new(1, 50, 500_000_000)); // Partial fill of AON
-        result.total_welfare = 0;
-
-        let verification = verify(&problem, &result);
-        assert!(!verification.valid);
-        assert!(verification
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::QuantityBelowMin));
     }
 
     #[test]

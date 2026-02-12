@@ -597,17 +597,9 @@ fn complement_match(
                 continue;
             }
 
-            // Fill quantity = min of both sides, respecting AON
+            // Fill quantity = min of both sides
             let max_qty = a_order.max_fill.min(b_order.max_fill);
             if max_qty == 0 {
-                bi += 1;
-                continue;
-            }
-
-            if a_order.is_all_or_none() && max_qty < a_order.min_fill {
-                continue;
-            }
-            if b_order.is_all_or_none() && max_qty < b_order.min_fill {
                 bi += 1;
                 continue;
             }

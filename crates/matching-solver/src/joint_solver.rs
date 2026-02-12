@@ -361,12 +361,12 @@ impl JointGroupSolver {
                 }
 
                 let fill_qty = mm_tracker.cap_qty(order.id, order.max_fill, price);
-                if fill_qty == 0 || fill_qty < order.min_fill {
+                if fill_qty == 0 {
                     continue;
                 }
 
                 let actual_qty = mm_tracker.fill(order.id, fill_qty, price);
-                if actual_qty == 0 || actual_qty < order.min_fill {
+                if actual_qty == 0 {
                     continue;
                 }
 
@@ -465,7 +465,6 @@ impl JointGroupSolver {
                 arb_order.payoffs[0] = -1; // Sell YES
                 arb_order.payoffs[1] = 0;
                 arb_order.limit_price = arb_limit;
-                arb_order.min_fill = 0;
                 arb_order.max_fill = arb_qty;
 
                 group_fills.push(Fill {
@@ -524,7 +523,7 @@ impl JointGroupSolver {
 
         for (order, _surplus, fill_price) in &candidates {
             let fill_qty = order.max_fill;
-            if fill_qty == 0 || fill_qty < order.min_fill {
+            if fill_qty == 0 {
                 continue;
             }
 

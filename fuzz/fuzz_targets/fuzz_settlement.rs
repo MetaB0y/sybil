@@ -43,7 +43,6 @@ fuzz_target!(|input: SettlementInput| {
         order.payoffs[i] = input.payoffs_raw[i];
     }
     order.limit_price = limit_price;
-    order.min_fill = 0;
     order.max_fill = fill_qty;
 
     // Build account

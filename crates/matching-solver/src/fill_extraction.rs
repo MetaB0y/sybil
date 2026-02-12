@@ -244,9 +244,6 @@ fn make_fill(
         }
     }
 
-    if fill_qty < order.min_fill {
-        return None;
-    }
     *remaining -= fill_qty;
     Some(Fill::new(order.id, fill_qty, price))
 }

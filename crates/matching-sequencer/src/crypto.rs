@@ -38,7 +38,6 @@ pub struct SignedOrder {
 /// - payoffs: 32 × i8
 /// - num_states: u8
 /// - limit_price: u64
-/// - min_fill: u64
 /// - max_fill: u64
 /// - condition present: u8 (0 or 1)
 ///   if present:
@@ -64,7 +63,6 @@ pub fn canonical_order_bytes(order: &Order) -> Vec<u8> {
 
     // Price and fill
     buf.extend_from_slice(&order.limit_price.to_le_bytes());
-    buf.extend_from_slice(&order.min_fill.to_le_bytes());
     buf.extend_from_slice(&order.max_fill.to_le_bytes());
 
     // Condition

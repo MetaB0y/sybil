@@ -21,8 +21,6 @@ pub enum ViolationKind {
     OrderNotFound,
     /// `fill_qty > order.max_fill`.
     QuantityExceedsMax,
-    /// `0 < fill_qty < order.min_fill` (AON violation).
-    QuantityBelowMin,
     /// Fill price violates the order's limit price.
     PriceExceedsLimit,
     /// Same order filled multiple times.

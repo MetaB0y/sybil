@@ -128,7 +128,6 @@ pub enum OrderSpec {
         market_ids: Vec<u32>,
         payoffs: Vec<i8>,
         limit_price_nanos: u64,
-        min_fill: u64,
         max_fill: u64,
     },
 }
@@ -184,8 +183,6 @@ pub struct SignedOrderData {
     pub payoffs: Vec<i8>,
     /// Limit price in nanos (0 to 1_000_000_000).
     pub limit_price_nanos: u64,
-    /// Minimum fill quantity.
-    pub min_fill: u64,
     /// Maximum fill quantity.
     pub max_fill: u64,
 }

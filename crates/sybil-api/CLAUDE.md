@@ -47,7 +47,7 @@ enum OrderSpec {
     Spread { buy_market, sell_market, limit_price_nanos, qty },
     BundleYes { market_ids, limit_price_nanos, qty },
     BundleSell { market_ids, limit_price_nanos, qty },
-    Custom { market_ids, payoffs, limit_price_nanos, min_fill, max_fill },
+    Custom { market_ids, payoffs, limit_price_nanos, max_fill },
 }
 ```
 

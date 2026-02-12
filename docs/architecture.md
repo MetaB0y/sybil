@@ -99,8 +99,7 @@ The pipeline uses a **multi-phase architecture** with three solving modes. The m
 **Constraints**:
 - Price normalization: For N outcomes, prices must sum to $1.00 (NANOS_PER_DOLLAR)
 - Unified liquidity: Market makers mint "complete sets" at $1
-- Min/max fill constraints on orders
-- All-or-none (AON) constraints
+- Max fill constraints on orders
 
 **Optimization Target**:
 ```
@@ -328,7 +327,6 @@ ScenarioConfig {
     num_orders: 3000,
     bundle_fraction: 0.15,      // 15% multi-market orders
     spread_fraction: 0.05,      // 5% relative value trades
-    aon_fraction: 0.10,         // 10% all-or-none
     liquidity_scarcity: 0.7,    // Supply/demand ratio
     hot_market_fraction: 0.15,  // High-demand markets
     num_mms: 5,                 // Market makers
@@ -339,7 +337,7 @@ ScenarioConfig {
 
 **Order Types Generated**:
 1. **Simple orders** (70%): Single-market limit orders via `outcome_buy()`
-2. **Bundle orders** (15%): Multi-market all-or-none via `bundle_yes()`
+2. **Bundle orders** (15%): Multi-market orders via `bundle_yes()`
 3. **Spread orders** (5%): Two-market relative value via `spread()`
 4. **MM orders** (10%): Buy/sell pairs at aggressive prices
 
