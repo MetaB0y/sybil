@@ -517,6 +517,9 @@ fn run_detailed_pipeline(
                     problem_with_arb.orders.push(order.clone());
                 }
             }
+            for order in &result.group_minting_arb_orders {
+                problem_with_arb.orders.push(order.clone());
+            }
 
             // Print fill statistics
             let fill_stats = FillStats::compute(&problem_with_arb, &result, &order_stats);
@@ -1158,6 +1161,7 @@ enum SolverChoice {
     Negrisk,
     Dual,
     Smoothed,
+    Joint,
     All,
 }
 
@@ -1168,6 +1172,7 @@ fn parse_solver_choice(args: &[String]) -> SolverChoice {
         Some("negrisk") => SolverChoice::Negrisk,
         Some("dual") => SolverChoice::Dual,
         Some("smoothed") => SolverChoice::Smoothed,
+        Some("joint") => SolverChoice::Joint,
         Some("all") => SolverChoice::All,
         _ => SolverChoice::Pipeline, // Default to pipeline
     }
@@ -1269,6 +1274,7 @@ fn expand_solver_choices(choice: &SolverChoice) -> Vec<SolverChoice> {
             SolverChoice::Negrisk,
             SolverChoice::Dual,
             SolverChoice::Smoothed,
+            SolverChoice::Joint,
         ],
         other => vec![other.clone()],
     }
@@ -1288,6 +1294,7 @@ fn solver_display_name(choice: &SolverChoice, milp_timeout: Option<f64>) -> Stri
         SolverChoice::Negrisk => "Negrisk".to_string(),
         SolverChoice::Dual => "Dual Decomposition".to_string(),
         SolverChoice::Smoothed => "Smoothed Gradient".to_string(),
+        SolverChoice::Joint => "Joint Group".to_string(),
         SolverChoice::All => "All".to_string(),
     }
 }
@@ -1309,7 +1316,13 @@ fn run_solver_with_witness(
         SolverChoice::Smoothed => {
             let solver = matching_solver::SmoothedSolver::new();
             let pipeline_result = solver.solve(problem);
-            let witness = witness_from_problem(problem, &pipeline_result);
+            let witness = witness_from_pipeline(problem, &pipeline_result);
+            (pipeline_result.result, witness)
+        }
+        SolverChoice::Joint => {
+            let solver = matching_solver::JointGroupSolver::new();
+            let pipeline_result = solver.solve(problem);
+            let witness = witness_from_pipeline(problem, &pipeline_result);
             (pipeline_result.result, witness)
         }
         SolverChoice::Pipeline | SolverChoice::Negrisk | SolverChoice::Dual => {

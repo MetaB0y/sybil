@@ -1543,7 +1543,7 @@ impl Pipeline {
     ///
     /// Used by the simplex search to compare post-UCP welfare of different
     /// fill/price combinations before committing.
-    fn simulate_enforce_ucp(
+    pub fn simulate_enforce_ucp(
         fills: &[matching_engine::Fill],
         prices: &HashMap<MarketId, Vec<Nanos>>,
         order_map: &HashMap<u64, &matching_engine::Order>,

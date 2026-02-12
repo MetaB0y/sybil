@@ -139,60 +139,140 @@ The heuristic finds LOCAL equilibrium prices (where S=D per market). MILP can ex
 
 On the small preset, MILP sets G0M2 and G1M1 to **0%** clearing price — a solution the heuristic can never find because there's zero natural supply at 0%.
 
-## Smoothed Gradient: A Better Platform?
+## Decomposition Structure
 
-The smoothed gradient solver adjusts prices directly via excess demand gradient, without the original-limit filter problem. This makes it naturally suitable for:
+### The problem decomposes by group when MM budgets and bundles are relaxed
 
-### Group Arb Pressure
-
-Add a penalty term to the price gradient:
+Without MM constraints and without cross-group bundles, each market group is an independent subproblem:
 
 ```
-gradient_m += K * ($1 - sum_{m' in group(m)} p_m')   for each m in a group
+Per-group subproblem (K markets):
+  max  Σ_k W_k(p_k)  -  $1 × group_mint
+  s.t. Σ p_k + slack = $1   (slack ≥ 0)
+       position balance per market (demand = supply + mint_k + group_mint)
+       mint_k ≥ 0, group_mint ≥ 0
 ```
 
-This pushes group sums toward $1 directly through price adjustment, avoiding the broken lambda-shading mechanism. The force is:
-- Positive (push price UP) when Σp < $1
-- Negative (push price DOWN) when Σp > $1
-- Zero at Σp = $1 (equilibrium)
+Per-market minting (mint_k) is free (p + (1-p) = $1), so it just ensures position balance.
+Group minting provides supply to ALL markets simultaneously for $1.
 
-Mathematically, this is equivalent to adding a quadratic penalty:
+### Key mathematical insight: optimal group prices satisfy equal marginal welfare
+
+At optimum on the Σp = $1 simplex:
 ```
-Penalty = -K/2 * sum_g (sum_{m in g} p_m - $1)^2
-```
-
-### MM Budget in Gradient
-
-Embed the MM budget dual directly:
-
-```
-p_m <- p_m + lr * (excess_demand_m - sum_k mu_k * dC_k/dp_m + K * group_residual_m)
-mu_k <- max(0, mu_k + lr_mu * (C_k - B_k))
+dW_k/dp_k = -excess_demand_k(p_k) = λ   for all k in group
 ```
 
-This is a primal-dual method that jointly handles:
-- Market clearing (excess demand = 0)
-- MM budget optimality (mu * dC/dp term)
-- Group price consistency (penalty term)
+All markets in the group have the SAME excess demand. This means a single scalar λ determines all prices. Binary search on λ finds the solution:
 
-### Limitation
+1. For each candidate λ: p_k(λ) = price where excess_demand_k = λ (from order book)
+2. Check if Σ p_k(λ) = $1
+3. Binary search on λ
 
-Even with these improvements, the smoothed solver still can't push prices to 0% (zero natural supply). That requires minting as a supply source, which changes the problem structure fundamentally. The smoothed solver could include per-market minting in its supply curves, but this makes the excess demand calculation degenerate (infinite supply → any price is an equilibrium).
+This is O(K × N × log(N) × log(precision)) per group. Very fast.
+
+### Limitation of 1D parametric search
+
+The parametric search adds UNIFORM supply to all markets (same λ). But the optimal solution may require REDISTRIBUTING prices within the group (lower one market, raise another).
+
+Example: MILP sets one market to 0%, concentrating demand there while raising other markets' prices. The parametric search can't do this because it only moves all prices in the same direction.
+
+**Fix: coordinate descent on the simplex after parametric search.** For each pair of markets (i,j), try transferring price from i to j. O(K² × N × iters) per group — fast for K=5.
+
+### Coupling constraints require Lagrangian relaxation
+
+- **MM budgets** couple orders across different groups → relax via mu duals
+- **Bundle orders** span multiple markets/groups → relax via Lagrangian or handle post-hoc
+- **Outer loop**: update mu based on budget violations
+- **Inner loop**: per-group exact optimization with mu-adjusted surplus
+
+```
+Per-group subproblem (given mu):
+  max  Σ_k W_k(p_k, mu)  -  $1 × group_mint
+  where W_k includes mu-adjusted surplus for MM orders:
+    effective_surplus = surplus - mu_k × capital_per_unit
+```
+
+This is the standard Lagrangian decomposition: relax coupling constraints, solve independent subproblems, coordinate via dual updates.
+
+## Proposed Architecture: Joint Group Solver
+
+Replace the sequential pipeline (LocalSolver → DualMaster → MmAllocator → group_minting) with a single unified algorithm:
+
+```
+fn solve(problem) -> Result:
+  // 1. Build per-market order books (PrecomputedMarket)
+  // 2. Initialize mu = 0 for all MM constraints
+
+  for outer_iter in 0..max_outer:
+    // 3. Per-group joint optimization (the core)
+    for each group:
+      prices[group] = parametric_search(group, orders, mu)
+      prices[group] = coordinate_descent(group, orders, mu, prices[group])
+
+    // 4. Standalone markets: standard clearing (λ=0 case)
+    for each standalone market:
+      prices[m] = local_solver_clearing(m, orders)
+
+    // 5. Fill extraction at joint-optimal prices
+    fills = extract_fills(orders, prices, mm_tracker)
+
+    // 6. Bundle fills
+    bundle_fills = extract_bundle_fills(orders, prices)
+
+    // 7. MM dual update
+    for each mm_constraint k:
+      usage = compute_capital_usage(fills, k)
+      mu[k] = max(0, mu[k] + lr * (usage - budget) / budget)
+
+    // 8. Check convergence
+    if all MM budgets satisfied within tolerance:
+      break
+
+  // 9. enforce_ucp (light — prices already correct)
+  enforce_ucp(fills, prices)
+```
+
+### What this replaces
+
+| Current component | Replaced by |
+|---|---|
+| LocalSolver (per-market) | Parametric search with λ=0 for standalone markets |
+| DualMaster (lambda shading) | Parametric search on Σp=$1 simplex |
+| MmAllocator (greedy knapsack) | Lagrangian mu duals in price optimization |
+| group_minting (water-filling) | Built into parametric search (Q IS group minting) |
+| simplex_search (binary on Q) | IS the parametric search (promoted from post-processing to primary) |
+| simulate_enforce_ucp gate | Unnecessary — prices are correct by construction |
+
+### Complexity
+
+- Per group: O(K × N × log(N) × log(range)) for parametric search + O(K² × N² × cd_iters) for coordinate descent
+- Outer iterations: O(max_outer) ≈ 10-20 for MM convergence
+- Total: dominated by O(max_outer × G × K² × N²) where G = groups, K = markets/group, N = orders/market
+- For small preset (G=3, K=5, N=60): ~10 × 3 × 25 × 3600 = 2.7M ops. Sub-millisecond.
+
+### Why this should close the gap
+
+1. **Group price consistency**: built into price discovery (parametric search on Σp=$1), not post-hoc patching
+2. **MM budget optimization**: joint via mu duals affecting price discovery, not greedy post-hoc
+3. **Price space exploration**: coordinate descent can find non-obvious price redistributions within groups
+4. **Minting**: group minting = parametric search Q parameter; per-market minting = free (implicit)
+5. **Clean**: one algorithm with mathematical grounding (Lagrangian decomposition)
 
 ## Summary
 
-| Source of Gap | Magnitude (small) | Can Heuristic Fix? |
-|---------------|-------------------|-------------------|
-| Missing mu_k (MM budget) | ~$470 (46%) | Yes — embed in gradient |
-| Lambda shading broken | ~$350 (34%) | Yes — use gradient, not shading |
-| Price space (0% prices, minting) | ~$200 (20%) | Hard — requires global search |
+| Source of Gap | Magnitude (small) | Can Heuristic Fix? | Joint Solver Approach |
+|---------------|-------------------|-------------------|----------------------|
+| Missing mu_k (MM budget) | ~$470 (46%) | Yes | Lagrangian mu duals in price finding |
+| Lambda shading broken | ~$350 (34%) | Yes | Parametric search replaces shading |
+| Price space (0% prices, minting) | ~$200 (20%) | Partially | Coordinate descent on simplex |
 
-| Solver Property | Tatonnement | DualMaster | Smoothed+fixes | MILP |
-|-----------------|-------------|------------|----------------|------|
-| Price finding | D=S per market | D=S + broken λ | D=S + group penalty + μ | Global optimal |
-| MM budget | Post-hoc greedy | Post-hoc greedy | Built into gradient | Jointly optimal |
-| Group prices | Ignored | Lambda (broken) | Penalty term | Jointly optimal |
-| Minting | None | Group (Σp≥$1 only) | Group (Σp≥$1 only) | Per-market + group |
-| Soundness | Full | Full | Full | Needs minting_cost tracking |
-
-The gap between heuristic and MILP is smallest (~0%) on large problems where natural supply/demand depth dominates, and largest (~36%) on small problems where minting-based price exploration matters most.
+| Solver Property | Current Pipeline | Joint Group Solver | MILP |
+|-----------------|-----------------|-------------------|------|
+| Price finding | Per-market independent | Per-group joint (simplex) | Global optimal |
+| MM budget | Post-hoc greedy | Lagrangian mu duals | Jointly optimal |
+| Group prices | Lambda (broken) | Parametric search (exact) | Jointly optimal |
+| Minting | Post-hoc water-filling | Built into price search | Jointly optimal |
+| Bundles | Post-hoc | Lagrangian or post-hoc | Jointly optimal |
+| Speed | ~1ms | ~1ms (expected) | ~5s |
+| Soundness | Full | Full | Needs minting_cost tracking |
