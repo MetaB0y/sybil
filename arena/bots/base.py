@@ -22,6 +22,8 @@ class BaseAgent(ABC):
         self.positions: dict[tuple[int, str], int] = {}
         self.balance_history: list[float] = []
         self._running = False
+        # MM budget constraint (None = regular orders, set to enable flash liquidity)
+        self.mm_budget_nanos: int | None = None
         # Order tracking for observability
         self.last_orders: list[OrderSpec] = []
         self.total_orders_submitted: int = 0
@@ -60,8 +62,13 @@ class BaseAgent(ABC):
 
                 # Submit orders if any
                 if orders:
+                    self.last_orders = orders
+                    self.total_orders_submitted += len(orders)
                     try:
-                        await self.client.submit_orders(self.account_id, orders)
+                        await self.client.submit_orders(
+                            self.account_id, orders,
+                            mm_budget_nanos=self.mm_budget_nanos,
+                        )
                     except Exception as e:
                         print(f"[{self.name}] Order submission failed: {e}")
 
