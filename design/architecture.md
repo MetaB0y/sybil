@@ -190,6 +190,9 @@ subject to capital_used(MM) <= max_capital(MM) for all MMs
 - Greedy allocation is fast and gives good approximation
 - Fixed-point handles MM interactions when budgets overlap
 
+**Known Issue — Price/Allocation Circularity**:
+There's a circular dependency: price discovery assumes all MM orders trade, but allocation then filters some out due to budget. The prices were computed for a different set of orders than actually trade. This approximation works well when MM budget utilization is high. The pipeline's fixed-point iteration helps — each round re-discovers prices with the actual activated set. The negrisk arbitrage phase also stabilizes prices even with MM filtering.
+
 **Output**: `activated_orders: Vec<u64>` (which MM orders to fill)
 
 ---

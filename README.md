@@ -29,22 +29,27 @@ cargo test -p matching-solver --test validation
 ```
 sybil/
 ├── crates/
-│   ├── matching-engine/     # Core types, orders, fills, liquidity
-│   ├── matching-solver/     # Solver algorithms (LocalSolver, MmAllocator, Combiner)
+│   ├── matching-engine/     # Core types, orders, fills, markets, payoff vectors
+│   ├── matching-solver/     # Solver pipeline and algorithms
 │   ├── matching-scenarios/  # Test scenario generators
-│   └── matching-sim/        # CLI simulation tool
-├── docs/                    # Documentation
+│   ├── matching-sim/        # CLI simulation tool
+│   ├── matching-sequencer/  # Multi-batch sequential simulation
+│   ├── sybil-api/           # API server
+│   ├── sybil-oracle/        # Oracle service
+│   └── sybil-verifier/      # Verification service
+├── design/                  # Internal design notes and research
+├── docs/                    # Public documentation (Mintlify)
+├── arena/                   # Python client, backtesting, bots
+├── viz/                     # Streamlit visualization dashboard
 └── justfile                 # Build/test commands
 ```
 
 ## Documentation
 
-- [Architecture](docs/architecture.md) - System design and two-phase solving
-- [Matching Algorithm](docs/matching-algorithm.md) - Patch-based cross-market solving
-- [Order Types](docs/order-types.md) - Supported order types
-- [MM Constraints](docs/MM_CAPITAL_CONSTRAINT_SOLVING.md) - Market maker budget constraints
-- [CLI Usage](docs/cli.md) - Command-line interface
-- [Next Steps](docs/next-steps.md) - Implementation roadmap
+- [Architecture](design/architecture.md) - Pipeline design and solver phases
+- [Solver Research](design/solver-research.md) - MILP gap analysis and improvement approaches
+- [Welfare vs Volume](design/welfare-vs-volume.md) - Optimization objective tradeoffs
+- [Public Docs](docs/) - Mintlify documentation site
 
 ## Development
 
