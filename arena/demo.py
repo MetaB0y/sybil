@@ -200,11 +200,38 @@ def build_agent_configs() -> list[BacktestAgentConfig]:
     else:
         console.print("[yellow]No OPENAI_API_KEY - skipping GPT bot[/yellow]")
 
-    if not anthropic_key and not openai_key:
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+
+    if openrouter_key:
+        from bots.llm_news_trader import LLMNewsTrader
+
+        openrouter_models = [
+            ("MiniMax", "minimax/minimax-m2.5"),
+            ("GLM-5", "z-ai/glm-5"),
+            ("Kimi", "moonshotai/kimi-k2.5"),
+            ("Gemini-Flash", "google/gemini-3-flash-preview"),
+        ]
+        for bot_name, model_id in openrouter_models:
+            configs.append(
+                BacktestAgentConfig(
+                    LLMNewsTrader,
+                    bot_name,
+                    {
+                        "provider": "openrouter",
+                        "model_name": model_id,
+                        "api_key": openrouter_key,
+                    },
+                )
+            )
+        console.print(f"[green]OpenRouter API key found - adding {len(openrouter_models)} bots[/green]")
+    else:
+        console.print("[yellow]No OPENROUTER_API_KEY - skipping OpenRouter bots[/yellow]")
+
+    if not anthropic_key and not openai_key and not openrouter_key:
         console.print(
             "[bold yellow]No LLM API keys found. Running with rule-based bots only.[/bold yellow]"
         )
-        console.print("Set ANTHROPIC_API_KEY and/or OPENAI_API_KEY in .env for AI bots.\n")
+        console.print("Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or OPENROUTER_API_KEY in .env for AI bots.\n")
 
     return configs
 

@@ -248,6 +248,13 @@ class LLMNewsTrader(BacktestAgent):
             import openai
 
             self._llm_client = openai.AsyncOpenAI(api_key=self.api_key)
+        elif self.provider == "openrouter":
+            import openai
+
+            self._llm_client = openai.AsyncOpenAI(
+                api_key=self.api_key,
+                base_url="https://openrouter.ai/api/v1",
+            )
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
 
@@ -304,18 +311,21 @@ class LLMNewsTrader(BacktestAgent):
                 )
                 return response.content[0].text
 
-            elif self.provider == "openai":
+            elif self.provider in ("openai", "openrouter"):
+                kwargs = dict(
+                    model=self.model_name,
+                    max_tokens=400,
+                    messages=[
+                        {"role": "system", "content": self.system_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                )
+                # Only native OpenAI supports forced JSON mode reliably
+                if self.provider == "openai":
+                    kwargs["response_format"] = {"type": "json_object"}
                 response = await asyncio.wait_for(
-                    llm_client.chat.completions.create(
-                        model=self.model_name,
-                        max_tokens=400,
-                        response_format={"type": "json_object"},
-                        messages=[
-                            {"role": "system", "content": self.system_prompt},
-                            {"role": "user", "content": prompt},
-                        ],
-                    ),
-                    timeout=10.0,
+                    llm_client.chat.completions.create(**kwargs),
+                    timeout=15.0,
                 )
                 return response.choices[0].message.content
 
