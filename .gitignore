@@ -3,3 +3,7 @@
 docs/node_modules
 .env
 comparison*.json
+.DS_Store
+.venv/
+*.swp
+*.swo
