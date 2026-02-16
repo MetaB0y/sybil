@@ -2,4 +2,4 @@
 **/__pycache__
 docs/node_modules
 .env
-comparison.json
+comparison*.json
