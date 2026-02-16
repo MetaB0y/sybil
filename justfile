@@ -123,7 +123,7 @@ viz-install:
 
 # Run arena demo (starts server, syncs deps, runs backtest)
 arena-demo:
-    cd arena && uv sync --extra llm && uv run python demo.py --start-server
+    cd arena && uv sync --extra llm && uv run python demo.py
 
 # Run arena demo without starting server (server must already be running)
 arena-demo-quick:
