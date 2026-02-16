@@ -297,7 +297,7 @@ class ThoughtsPanel(RichLog):
             reasoning = getattr(agent, "last_reasoning", "")
             if reasoning and reasoning != self._seen.get(agent.name):
                 self._seen[agent.name] = reasoning
-                text = reasoning[:200] + "..." if len(reasoning) > 200 else reasoning
+                text = reasoning[:500] + "..." if len(reasoning) > 500 else reasoning
                 # Escape any Rich markup in the reasoning text itself
                 from rich.markup import escape
                 self.write(f"{sim_time} [bold]{agent.name}[/bold]: {escape(text)}")

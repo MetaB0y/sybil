@@ -169,24 +169,23 @@ class SybilTUI(App):
             self.notify("Nothing to copy", severity="warning")
             return
 
-        try:
-            subprocess.run(
-                ["pbcopy"], input=text.encode(), check=True, timeout=2,
-            )
-            panel_id = focused.id or focused.__class__.__name__
-            self.notify(f"Copied {panel_id} ({len(text)} chars)")
-        except FileNotFoundError:
-            # Not on macOS, try xclip
+        clipboard_cmds = [
+            ["xclip", "-selection", "clipboard"],
+            ["xsel", "--clipboard", "--input"],
+            ["wl-copy"],
+            ["pbcopy"],
+        ]
+        for cmd in clipboard_cmds:
             try:
-                subprocess.run(
-                    ["xclip", "-selection", "clipboard"],
-                    input=text.encode(), check=True, timeout=2,
-                )
+                subprocess.run(cmd, input=text.encode(), check=True, timeout=2)
                 self.notify(f"Copied ({len(text)} chars)")
-            except Exception:
-                self.notify("No clipboard tool found", severity="error")
-        except Exception as e:
-            self.notify(f"Copy failed: {e}", severity="error")
+                return
+            except FileNotFoundError:
+                continue
+            except Exception as e:
+                self.notify(f"Copy failed: {e}", severity="error")
+                return
+        self.notify("Install xclip, xsel, or wl-copy for clipboard", severity="error")
 
     def _extract_text(self, widget) -> str:
         """Extract plain text from a widget."""

@@ -149,6 +149,7 @@ def _parse_llm_response(text: str, expected_keys: list[str]) -> dict[str, float]
     if not isinstance(data, dict):
         return None
 
+    # Try exact key match first
     result = {}
     for key in expected_keys:
         val = data.get(key)
@@ -159,7 +160,26 @@ def _parse_llm_response(text: str, expected_keys: list[str]) -> dict[str, float]
             except (ValueError, TypeError):
                 continue
 
-    return result if result else None
+    if result:
+        return result
+
+    # Fallback: match by index — if response has numeric values, map them
+    # to expected keys in order. Handles models that use different key names.
+    float_vals = []
+    for v in data.values():
+        try:
+            prob = float(v)
+            if 0 <= prob <= 1:
+                float_vals.append(max(0.01, min(0.99, prob)))
+        except (ValueError, TypeError):
+            continue
+
+    if float_vals and len(float_vals) <= len(expected_keys):
+        for key, prob in zip(expected_keys, float_vals):
+            result[key] = prob
+        return result
+
+    return None
 
 
 class LLMNewsTrader(BacktestAgent):
@@ -218,6 +238,8 @@ class LLMNewsTrader(BacktestAgent):
         self._llm_task: asyncio.Task | None = None
         # Last LLM reasoning (for display)
         self.last_reasoning: str = ""
+        # Last error (surfaced in TUI thoughts panel)
+        self.last_error: str = ""
 
         # Build reverse maps: market_id <-> market_key
         self._market_id_to_key: dict[int, str] = {}
@@ -307,8 +329,9 @@ class LLMNewsTrader(BacktestAgent):
                             {"role": "user", "content": prompt},
                         ],
                     ),
-                    timeout=10.0,
+                    timeout=25.0,
                 )
+                self.last_error = ""
                 return response.content[0].text
 
             elif self.provider in ("openai", "openrouter"):
@@ -325,13 +348,16 @@ class LLMNewsTrader(BacktestAgent):
                     kwargs["response_format"] = {"type": "json_object"}
                 response = await asyncio.wait_for(
                     llm_client.chat.completions.create(**kwargs),
-                    timeout=15.0,
+                    timeout=30.0,
                 )
+                self.last_error = ""
                 return response.choices[0].message.content
 
         except asyncio.TimeoutError:
+            self.last_error = f"LLM call timed out ({self.model_name})"
             logger.warning("[%s] LLM call timed out", self.name)
         except Exception as e:
+            self.last_error = f"LLM call failed: {e}"
             logger.warning("[%s] LLM call failed: %s", self.name, e)
 
         return None
