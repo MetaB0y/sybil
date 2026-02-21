@@ -24,5 +24,9 @@ thiserror = { workspace = true }
 tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
 tracing = "0.1"
 
+[features]
+default = []
+milp = ["matching-solver/milp"]
+
 [dev-dependencies]
 proptest = "1.6"

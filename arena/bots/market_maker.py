@@ -149,11 +149,18 @@ class BalancedMarketMaker(BaseAgent):
         # mm_budget_nanos stays None — no flash liquidity
 
     def _compute_skew(self, market_id: int) -> float:
-        """Inventory skew: excess YES → shift mid DOWN to sell YES faster."""
+        """Inventory skew: excess YES → shift mid DOWN to sell YES faster.
+
+        Uses tanh to bound the skew to ±max_skew regardless of position size.
+        """
+        import math
         yes_pos = self.get_position(market_id, "YES")
         no_pos = self.get_position(market_id, "NO")
         imbalance = yes_pos - no_pos
-        return imbalance * self.skew_factor * 0.01
+        max_skew = 0.15
+        # Scale so ~500 imbalance produces ~half of max_skew
+        normalized = imbalance * self.skew_factor * 0.01 / max_skew
+        return max_skew * math.tanh(normalized)
 
     def _portfolio_value(self, market_id: int, mid: float) -> float:
         """cash + yes_pos * mid + no_pos * (1 - mid)"""

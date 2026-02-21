@@ -90,6 +90,15 @@ pub fn create_router(state: AppState) -> Router {
             "/v1/state-root",
             axum::routing::get(routes::system::state_root),
         )
+        // Simulation control
+        .route(
+            "/v1/simulation/pause",
+            axum::routing::post(routes::system::pause),
+        )
+        .route(
+            "/v1/simulation/resume",
+            axum::routing::post(routes::system::resume),
+        )
         // Accounts
         .route(
             "/v1/accounts",
