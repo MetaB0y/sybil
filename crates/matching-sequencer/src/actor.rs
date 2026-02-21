@@ -151,10 +151,17 @@ struct SequencerActor {
     block_broadcast: broadcast::Sender<Block>,
     /// Last known clearing prices across all markets.
     last_prices: HashMap<MarketId, Vec<Nanos>>,
+    /// Interval between block production ticks.
+    block_interval: Duration,
 }
 
 impl SequencerActor {
-    fn new(sequencer: BlockSequencer, mempool: Mempool, receiver: mpsc::Receiver<Message>) -> Self {
+    fn new(
+        sequencer: BlockSequencer,
+        mempool: Mempool,
+        receiver: mpsc::Receiver<Message>,
+        block_interval: Duration,
+    ) -> Self {
         let (block_broadcast, _) = broadcast::channel(64);
         Self {
             sequencer,
@@ -165,13 +172,14 @@ impl SequencerActor {
             block_history: Vec::new(),
             block_broadcast,
             last_prices: HashMap::new(),
+            block_interval,
         }
     }
 
     async fn run(mut self) {
         let mut ticker = interval_at(
-            Instant::now() + Duration::from_secs(1),
-            Duration::from_secs(1),
+            Instant::now() + self.block_interval,
+            self.block_interval,
         );
 
         loop {
@@ -575,9 +583,18 @@ pub struct SequencerHandle {
 impl SequencerHandle {
     /// Spawn a new sequencer actor and return a handle.
     pub fn spawn(sequencer: BlockSequencer, mempool_config: MempoolConfig) -> Self {
+        Self::spawn_with_interval(sequencer, mempool_config, Duration::from_secs(1))
+    }
+
+    /// Spawn with a custom block production interval.
+    pub fn spawn_with_interval(
+        sequencer: BlockSequencer,
+        mempool_config: MempoolConfig,
+        block_interval: Duration,
+    ) -> Self {
         let (sender, receiver) = mpsc::channel(256);
         let mempool = Mempool::new(mempool_config);
-        let actor = SequencerActor::new(sequencer, mempool, receiver);
+        let actor = SequencerActor::new(sequencer, mempool, receiver, block_interval);
         tokio::spawn(actor.run());
         Self { sender }
     }

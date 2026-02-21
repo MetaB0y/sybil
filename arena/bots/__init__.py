@@ -2,10 +2,11 @@
 
 from .base import BaseAgent
 from .informed import FixedProbabilityModel, InformedTrader, MomentumTrader, ProbabilityModel
-from .market_maker import FlashMarketMaker, SimpleMarketMaker, TightFlashMM, WideFlashMM
+from .market_maker import BalancedMarketMaker, FlashMarketMaker, SimpleMarketMaker, TightFlashMM, WideFlashMM
 from .random_trader import RandomTrader
 
 __all__ = [
+    "BalancedMarketMaker",
     "BaseAgent",
     "FixedProbabilityModel",
     "FlashMarketMaker",
@@ -17,20 +18,3 @@ __all__ = [
     "TightFlashMM",
     "WideFlashMM",
 ]
-
-
-def __getattr__(name):
-    """Lazy import for backtest-dependent bots to avoid circular imports."""
-    if name in ("NewsTrader", "ConservativeNewsTrader", "AggressiveNewsTrader"):
-        from .news_trader import AggressiveNewsTrader, ConservativeNewsTrader, NewsTrader
-        return {"NewsTrader": NewsTrader, "ConservativeNewsTrader": ConservativeNewsTrader, "AggressiveNewsTrader": AggressiveNewsTrader}[name]
-    if name == "LLMNewsTrader":
-        from .llm_news_trader import LLMNewsTrader
-        return LLMNewsTrader
-    if name in ("BacktestFlashMM", "BacktestTightMM", "BacktestWideMM"):
-        from .backtest_mm import BacktestFlashMM, BacktestTightMM, BacktestWideMM
-        return {"BacktestFlashMM": BacktestFlashMM, "BacktestTightMM": BacktestTightMM, "BacktestWideMM": BacktestWideMM}[name]
-    if name in ("StrategyAgent", "MarketView"):
-        from .strategy_agent import MarketView, StrategyAgent
-        return {"StrategyAgent": StrategyAgent, "MarketView": MarketView}[name]
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

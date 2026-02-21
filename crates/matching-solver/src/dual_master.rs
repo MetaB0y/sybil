@@ -255,17 +255,41 @@ impl DualMaster {
             }
 
             // 3. Collect candidate fills, validate against original limits
-            let candidate_fills: Vec<Fill> = prices
-                .all_fills()
+            let all_solver_fills = prices.all_fills();
+            let pre_validation_count = all_solver_fills.len();
+            let pre_validation_qty: u64 = all_solver_fills.iter().map(|f| f.fill_qty).sum();
+            let candidate_fills: Vec<Fill> = all_solver_fills
                 .into_iter()
                 .filter(|fill| {
-                    fill.fill_qty > 0
+                    let ok = fill.fill_qty > 0
                         && order_map
                             .get(&fill.order_id)
                             .map(|o| o.is_satisfied_at_price(fill.fill_price))
-                            .unwrap_or(false)
+                            .unwrap_or(false);
+                    if !ok && fill.fill_qty > 0 {
+                        if let Some(&order) = order_map.get(&fill.order_id) {
+                            debug!(
+                                iter,
+                                order_id = fill.order_id,
+                                fill_price = fill.fill_price,
+                                fill_qty = fill.fill_qty,
+                                limit_price = order.limit_price,
+                                "fill rejected by original limit check"
+                            );
+                        }
+                    }
+                    ok
                 })
                 .collect();
+            let post_validation_qty: u64 = candidate_fills.iter().map(|f| f.fill_qty).sum();
+            debug!(
+                iter,
+                pre_validation_count,
+                pre_validation_qty,
+                post_validation_count = candidate_fills.len(),
+                post_validation_qty,
+                "candidate fills after limit validation"
+            );
 
             // 4. Separate non-MM fills (accept directly) and MM fills (knapsack)
             let mut non_mm_fills: Vec<Fill> = Vec::new();
@@ -371,7 +395,19 @@ impl DualMaster {
                     &prices.prices,
                     &order_map,
                 );
+                let pre_trim_count = candidates.iter().filter(|(f, _)| f.fill_qty > 0).count();
+                let pre_trim_qty: u64 = candidates.iter().map(|(f, _)| f.fill_qty).sum();
                 Pipeline::trim_position_imbalance(&mut candidates, &order_map);
+                let post_trim_count = candidates.iter().filter(|(f, _)| f.fill_qty > 0).count();
+                let post_trim_qty: u64 = candidates.iter().map(|(f, _)| f.fill_qty).sum();
+                debug!(
+                    iter,
+                    pre_trim_count,
+                    pre_trim_qty,
+                    post_trim_count,
+                    post_trim_qty,
+                    "UCP enforcement: reprice + trim"
+                );
 
                 // Build set of surviving order IDs
                 let surviving_ids: HashSet<u64> = candidates
@@ -451,13 +487,20 @@ impl DualMaster {
                 "iteration complete"
             );
 
-            // Merge prices: only update markets that had activity this iteration.
-            // Markets without activity produce synthetic default (50/50) prices
-            // that would overwrite valid prices from earlier iterations.
+            // Merge prices: only update markets where this iteration's solution
+            // has higher welfare than the existing one. This prevents a later iteration
+            // with lower clearing price from invalidating supply fills accepted at a
+            // higher clearing price in an earlier iteration.
             for (mid, sol) in prices.market_solutions {
                 if sol.has_activity {
-                    last_prices.prices.insert(mid, sol.prices.clone());
-                    last_prices.market_solutions.insert(mid, sol);
+                    let should_update = match last_prices.market_solutions.get(&mid) {
+                        Some(existing) => sol.welfare > existing.welfare,
+                        None => true,
+                    };
+                    if should_update {
+                        last_prices.prices.insert(mid, sol.prices.clone());
+                        last_prices.market_solutions.insert(mid, sol);
+                    }
                 } else if !last_prices.market_solutions.contains_key(&mid) {
                     // First time seeing this market — use solver's default
                     last_prices.prices.insert(mid, sol.prices.clone());

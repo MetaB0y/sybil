@@ -68,21 +68,24 @@ class SimulatedClock:
     async def sleep_until(self, sim_time: datetime) -> None:
         """Sleep until the simulated time is reached.
 
-        Args:
-            sim_time: The target simulated datetime to wait for.
+        Loops to account for clock pauses that may occur during the sleep.
         """
         if self.real_start is None:
             self.start()
 
-        current_sim = self.now()
-        if sim_time <= current_sim:
-            return
+        while True:
+            current_sim = self.now()
+            if sim_time <= current_sim:
+                return
 
-        sim_delta = (sim_time - current_sim).total_seconds()
-        real_delta = self.sim_to_real_seconds(sim_delta)
+            sim_delta = (sim_time - current_sim).total_seconds()
+            real_delta = self.sim_to_real_seconds(sim_delta)
 
-        if real_delta > 0:
-            await asyncio.sleep(real_delta)
+            if real_delta <= 0:
+                return
+
+            # Sleep in chunks so we recheck after any pauses
+            await asyncio.sleep(min(real_delta, 1.0))
 
     async def sleep_sim(self, sim_seconds: float) -> None:
         """Sleep for a number of simulated seconds.

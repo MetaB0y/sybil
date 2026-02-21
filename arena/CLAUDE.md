@@ -33,11 +33,13 @@ Bots (Python)  →  sybil_client  →  HTTP/SSE  →  sybil-api (Rust)
 | Directory | Purpose |
 |-----------|---------|
 | `sybil_client/` | Async Python SDK for sybil-api |
-| `bots/` | Trading bot implementations |
-| `feeds/` | Data feed integrations (sports, synthetic) |
+| `bots/` | Trading bot implementations (generic) |
+| `feeds/` | Data feed integrations (synthetic) |
 | `scripts/` | Competition orchestration |
 | `examples/` | Example competition scripts |
 | `tests/` | Pytest test suite |
+| `iran/` | Iran strike market simulation (news data, bot logic, runner) |
+| `nba/` | Legacy NBA/sports code (preserved for reference) |
 
 ## Key Components
 
@@ -85,8 +87,6 @@ For `InformedTrader`, use `use_market_index=True` when the probability model use
 | Feed | Source |
 |------|--------|
 | `SyntheticFeed` | Random events for testing |
-| `SportsDataFeed` | the-odds-api.com (needs API key) |
-| `MockSportsDataFeed` | Fake sports data for testing |
 
 ### scripts
 

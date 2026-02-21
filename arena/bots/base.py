@@ -27,8 +27,11 @@ class BaseAgent(ABC):
         # Order tracking for observability
         self.last_orders: list[OrderSpec] = []
         self.total_orders_submitted: int = 0
+        # Per-block order log: (block_height, orders_submitted)
+        self.block_log: list[tuple[int, list[OrderSpec]]] = []
         # Fill tracking via get_account_fills()
         self._last_fill_count: int = 0
+        self._fill_history: list = []  # list[AccountFill], available to subclasses
 
     @abstractmethod
     async def on_block(self, block: Block) -> list[OrderSpec]:
@@ -60,7 +63,8 @@ class BaseAgent(ABC):
                 # Get orders from strategy
                 orders = await self.on_block(block)
 
-                # Submit orders if any
+                # Log and submit orders
+                self.block_log.append((block.height, orders))
                 if orders:
                     self.last_orders = orders
                     self.total_orders_submitted += len(orders)
@@ -93,6 +97,7 @@ class BaseAgent(ABC):
             new_fills = await self.client.get_account_fills(
                 self.account_id, limit=20, offset=self._last_fill_count
             )
+            self._fill_history.extend(new_fills)
             for fill in new_fills:
                 await self.on_fill(fill.order_id, fill.fill_qty, fill.fill_price)
             self._last_fill_count += len(new_fills)

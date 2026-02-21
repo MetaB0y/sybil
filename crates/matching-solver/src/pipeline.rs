@@ -1771,6 +1771,17 @@ impl Pipeline {
 
         // Step 2: For each market with nonzero net position, trim single-market fills.
         for (&market, &net) in &net_position {
+            let yes_qty = *single_yes_qty.get(&market).unwrap_or(&0);
+            let no_qty = *single_no_qty.get(&market).unwrap_or(&0);
+            if net != 0 {
+                tracing::debug!(
+                    ?market,
+                    net,
+                    yes_qty,
+                    no_qty,
+                    "trim_position_imbalance: nonzero net"
+                );
+            }
             if net == 0 {
                 continue;
             }

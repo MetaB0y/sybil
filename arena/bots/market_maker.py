@@ -80,30 +80,29 @@ class FlashMarketMaker(BaseAgent):
         client,
         account_id: int,
         budget_dollars: float = 1000.0,
-        half_spread_bps: int = 100,
         num_levels: int = 3,
-        level_spacing_bps: int = 50,
-        quote_size: int = 10,
+        level_spacing_cents: int = 3,
+        dollars_per_level: float = 500.0,
         skew_factor: float = 0.1,
         name: str | None = None,
         market_ids: list[int] | None = None,
     ):
         super().__init__(client, account_id, name, market_ids)
         self.mm_budget_nanos = int(budget_dollars * NANOS_PER_DOLLAR)
-        self.half_spread_bps = half_spread_bps
         self.num_levels = num_levels
-        self.level_spacing_bps = level_spacing_bps
-        self.quote_size = quote_size
+        self.level_spacing_cents = level_spacing_cents
+        self.dollars_per_level = dollars_per_level
         self.skew_factor = skew_factor
 
     def _compute_skew(self, market_id: int) -> float:
-        """Shift mid away from inventory. Positive = long YES, shift up."""
+        """Inventory skew: excess YES → shift mid DOWN to rebalance."""
         yes_pos = self.get_position(market_id, "YES")
         no_pos = self.get_position(market_id, "NO")
-        return (yes_pos - no_pos) * self.skew_factor * 0.01
+        return (no_pos - yes_pos) * self.skew_factor * 0.01
 
     async def on_block(self, block: Block) -> list[OrderSpec]:
         orders = []
+        spacing = self.level_spacing_cents / 100  # e.g. 3 cents = 0.03
 
         for market_id, (yes_nanos, no_nanos) in self.filter_markets(block).items():
             yes_mid = yes_nanos / NANOS_PER_DOLLAR
@@ -111,15 +110,123 @@ class FlashMarketMaker(BaseAgent):
             yes_mid = max(0.05, min(0.95, yes_mid + skew))
             no_mid = max(0.05, min(0.95, 1.0 - yes_mid))
 
-            half_spread = self.half_spread_bps / 10000
-            level_spacing = self.level_spacing_bps / 10000
-
-            for level in range(self.num_levels):
-                offset = half_spread + level * level_spacing
+            for level in range(1, self.num_levels + 1):
+                offset = level * spacing
                 yes_bid = max(0.01, yes_mid - offset)
                 no_bid = max(0.01, no_mid - offset)
-                orders.append(BuyYes.at_price(market_id, yes_bid, self.quote_size))
-                orders.append(BuyNo.at_price(market_id, no_bid, self.quote_size))
+                yes_qty = max(1, int(self.dollars_per_level / yes_bid))
+                no_qty = max(1, int(self.dollars_per_level / no_bid))
+                orders.append(BuyYes.at_price(market_id, yes_bid, yes_qty))
+                orders.append(BuyNo.at_price(market_id, no_bid, no_qty))
+
+        return orders
+
+
+class BalancedMarketMaker(BaseAgent):
+    """Two-sided market maker with inventory-aware quoting.
+
+    Quotes buy and sell on both YES and NO at multiple price levels.
+    Total notional capped at risk_fraction of portfolio value.
+    Uses regular balance checks (no flash liquidity).
+    """
+
+    def __init__(
+        self,
+        client,
+        account_id: int,
+        num_levels: int = 3,
+        level_spacing_cents: int = 3,
+        risk_fraction: float = 0.30,
+        skew_factor: float = 0.1,
+        name: str | None = None,
+        market_ids: list[int] | None = None,
+    ):
+        super().__init__(client, account_id, name, market_ids)
+        self.num_levels = num_levels
+        self.level_spacing_cents = level_spacing_cents
+        self.risk_fraction = risk_fraction
+        self.skew_factor = skew_factor
+        # mm_budget_nanos stays None — no flash liquidity
+
+    def _compute_skew(self, market_id: int) -> float:
+        """Inventory skew: excess YES → shift mid DOWN to sell YES faster."""
+        yes_pos = self.get_position(market_id, "YES")
+        no_pos = self.get_position(market_id, "NO")
+        imbalance = yes_pos - no_pos
+        return imbalance * self.skew_factor * 0.01
+
+    def _portfolio_value(self, market_id: int, mid: float) -> float:
+        """cash + yes_pos * mid + no_pos * (1 - mid)"""
+        cash = self.current_balance
+        yes_pos = self.get_position(market_id, "YES")
+        no_pos = self.get_position(market_id, "NO")
+        return cash + yes_pos * mid + no_pos * (1 - mid)
+
+    async def on_block(self, block: Block) -> list[OrderSpec]:
+        orders = []
+        spacing = self.level_spacing_cents / 100
+        remaining_cash = self.current_balance
+
+        for market_id, (yes_nanos, no_nanos) in self.filter_markets(block).items():
+            yes_mid = yes_nanos / NANOS_PER_DOLLAR
+            skew = self._compute_skew(market_id)
+            adjusted_mid = max(0.05, min(0.95, yes_mid - skew))
+            no_mid = 1.0 - adjusted_mid
+
+            portfolio_val = self._portfolio_value(market_id, adjusted_mid)
+            risk_budget = self.risk_fraction * portfolio_val
+            num_slots = self.num_levels * 4  # buy/sell × yes/no
+            dollars_per_slot = risk_budget / num_slots if num_slots > 0 else 0
+
+            remaining_yes = self.get_position(market_id, "YES")
+            remaining_no = self.get_position(market_id, "NO")
+
+            for level in range(1, self.num_levels + 1):
+                offset = level * spacing
+
+                # YES Bid (BuyYes)
+                yes_bid = adjusted_mid - offset
+                if yes_bid >= 0.01 and remaining_cash > 0:
+                    qty = min(
+                        int(dollars_per_slot / yes_bid),
+                        int(remaining_cash / yes_bid),
+                    )
+                    if qty > 0:
+                        orders.append(BuyYes.at_price(market_id, yes_bid, qty))
+                        remaining_cash -= qty * yes_bid
+
+                # YES Ask (SellYes)
+                yes_ask = adjusted_mid + offset
+                if yes_ask <= 0.99 and remaining_yes > 0:
+                    qty = min(
+                        int(dollars_per_slot / yes_ask),
+                        remaining_yes,
+                    )
+                    if qty > 0:
+                        orders.append(SellYes.at_price(market_id, yes_ask, qty))
+                        remaining_yes -= qty
+
+                # NO Bid (BuyNo)
+                no_bid = no_mid - offset
+                if no_bid >= 0.01 and remaining_cash > 0:
+                    qty = min(
+                        int(dollars_per_slot / no_bid),
+                        int(remaining_cash / no_bid),
+                    )
+                    if qty > 0:
+                        orders.append(BuyNo.at_price(market_id, no_bid, qty))
+                        remaining_cash -= qty * no_bid
+
+                # NO Ask (SellNo)
+                no_ask = no_mid + offset
+                if no_ask <= 0.99 and remaining_no > 0:
+                    qty = min(
+                        int(dollars_per_slot / no_ask),
+                        remaining_no,
+                    )
+                    if qty > 0:
+                        orders.append(SellNo.at_price(market_id, no_ask, qty))
+                        remaining_no -= qty
 
         return orders
 
@@ -131,8 +238,8 @@ class TightFlashMM(FlashMarketMaker):
                  market_ids: list[int] | None = None, budget_dollars: float = 1000.0):
         super().__init__(
             client=client, account_id=account_id, budget_dollars=budget_dollars,
-            half_spread_bps=50, num_levels=4, level_spacing_bps=25,
-            quote_size=15, skew_factor=0.15, name=name, market_ids=market_ids,
+            num_levels=4, level_spacing_cents=1, dollars_per_level=500.0,
+            skew_factor=0.15, name=name, market_ids=market_ids,
         )
 
 
@@ -143,6 +250,6 @@ class WideFlashMM(FlashMarketMaker):
                  market_ids: list[int] | None = None, budget_dollars: float = 1000.0):
         super().__init__(
             client=client, account_id=account_id, budget_dollars=budget_dollars,
-            half_spread_bps=200, num_levels=2, level_spacing_bps=100,
-            quote_size=8, skew_factor=0.05, name=name, market_ids=market_ids,
+            num_levels=3, level_spacing_cents=5, dollars_per_level=300.0,
+            skew_factor=0.05, name=name, market_ids=market_ids,
         )

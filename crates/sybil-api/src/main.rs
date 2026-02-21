@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use clap::Parser;
 use tokio::net::TcpListener;
@@ -51,9 +52,15 @@ async fn main() {
     let accounts = AccountStore::new();
     let oracle = Arc::new(AdminOracle::new());
     let sequencer = BlockSequencer::new(accounts, markets, vec![], oracle);
-    let handle = SequencerHandle::spawn(sequencer, MempoolConfig::default());
+    let block_interval = Duration::from_millis(config.block_interval_ms);
+    let handle =
+        SequencerHandle::spawn_with_interval(sequencer, MempoolConfig::default(), block_interval);
 
-    tracing::info!(num_markets, "Sequencer started with seed markets");
+    tracing::info!(
+        num_markets,
+        block_interval_ms = config.block_interval_ms,
+        "Sequencer started with seed markets"
+    );
 
     // Build app
     let state = AppState::new(handle, &config);

@@ -517,6 +517,40 @@ impl BlockSequencer {
         let order_ids: Vec<u64> = all_orders.iter().map(|o| o.id).collect();
         let orders_submitted = all_orders.len() + rejections.len();
 
+        // Debug: log order and rejection counts per block
+        if !all_orders.is_empty() || !rejections.is_empty() {
+            let mut buy_yes = 0u32;
+            let mut sell_yes = 0u32;
+            let mut buy_no = 0u32;
+            let mut sell_no = 0u32;
+            for o in &all_orders {
+                if o.num_markets == 1 && o.num_states == 2 {
+                    let is_buy = o.payoffs[0] > 0 || o.payoffs[1] > 0;
+                    let is_yes = o.payoffs[0] != 0;
+                    match (is_buy, is_yes) {
+                        (true, true) => buy_yes += 1,
+                        (true, false) => buy_no += 1,
+                        (false, true) => sell_yes += 1,
+                        (false, false) => sell_no += 1,
+                    }
+                }
+            }
+            debug!(
+                accepted = all_orders.len(),
+                rejected = rejections.len(),
+                buy_yes, sell_yes, buy_no, sell_no,
+                "block order summary"
+            );
+            for rej in &rejections {
+                debug!(
+                    order_id = rej.order_id,
+                    account = rej.account_id.0,
+                    reason = ?rej.reason,
+                    "order rejected"
+                );
+            }
+        }
+
         // Build Problem
         let mut problem = Problem::new("block");
         problem.markets = self.markets.clone();

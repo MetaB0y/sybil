@@ -9,6 +9,10 @@ dependencies = [
     "sseclient-py>=1.8",    # SSE streaming
     "textual>=1.0",         # TUI framework
     "rich>=13.0",           # Pretty console output (used by textual + final leaderboard)
+    "python-dotenv>=1.2.1",
+    "pandas>=2.3.3",
+    "streamlit>=1.54.0",
+    "altair>=6.0.0",
 ]
 
 [project.optional-dependencies]
