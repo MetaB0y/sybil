@@ -41,7 +41,7 @@ impl Default for LpConfig {
 }
 
 /// LP-based solver that handles the convex core exactly via HiGHS,
-/// then uses iterative limit shading for MM budget constraints.
+/// then uses SLP (sequential LP) for MM budget constraints.
 pub struct LpSolver {
     config: LpConfig,
 }
@@ -57,9 +57,7 @@ impl LpSolver {
         Self { config }
     }
 
-    /// Solve a matching problem using LP + iterative MM budget shading.
-    ///
-    /// Returns a `PipelineResult` compatible with `enforce_ucp` post-processing.
+    /// Solve a matching problem using LP + SLP for MM budgets.
     pub fn solve(&self, problem: &Problem) -> PipelineResult {
         let start = Instant::now();
 
@@ -97,8 +95,16 @@ impl LpSolver {
             })
             .collect();
 
-        // Order limits (unchanged — budget is enforced via LP rows, not limit shading)
-        let limits: Vec<Qty> = problem.orders.iter().map(|o| o.max_fill).collect();
+        // Pre-group MM orders by constraint for efficient iteration
+        let mm_constraint_orders: Vec<Vec<(usize, MmSide)>> = {
+            let mut by_mm = vec![Vec::new(); problem.mm_constraints.len()];
+            for (i, order) in problem.orders.iter().enumerate() {
+                if let Some(&(mm_idx, side)) = mm_order_info.get(&order.id) {
+                    by_mm[mm_idx].push((i, side));
+                }
+            }
+            by_mm
+        };
 
         // Sequential LP: solve without budgets, then add linearized budget
         // constraints and re-solve until budgets are satisfied.
@@ -112,7 +118,6 @@ impl LpSolver {
                 &markets,
                 &market_to_group,
                 problem.market_groups.len(),
-                &limits,
                 &budget_rows,
             );
 
@@ -131,7 +136,7 @@ impl LpSolver {
                 &sol,
                 &problem.orders,
                 &problem.mm_constraints,
-                &mm_order_info,
+                &mm_constraint_orders,
                 &prices,
             );
 
@@ -145,7 +150,7 @@ impl LpSolver {
             budget_rows = linearize_mm_budgets(
                 &problem.orders,
                 &problem.mm_constraints,
-                &mm_order_info,
+                &mm_constraint_orders,
                 &prices,
             );
 
@@ -228,7 +233,6 @@ impl LpSolver {
         markets: &[MarketId],
         market_to_group: &HashMap<MarketId, usize>,
         num_groups: usize,
-        effective_limits: &[Qty],
         budget_rows: &[(Vec<(usize, f64)>, f64)],
     ) -> Option<LpSolution> {
         let n = orders.len();
@@ -246,7 +250,7 @@ impl LpSolver {
             .map(|i| {
                 let sign = order_sign(&orders[i]);
                 let obj = sign * orders[i].limit_price as f64;
-                let ub = effective_limits[i] as f64;
+                let ub = orders[i].max_fill as f64;
                 pb.add_column(obj, 0.0..=ub)
             })
             .collect();
@@ -357,20 +361,7 @@ impl LpSolver {
         let primal = solution.columns();
         let dual_rows = solution.dual_rows();
 
-        // Extract primal values by column index.
-        // Columns are added in order: q_0..q_{n-1}, mint_m0..mint_mk, gmint_g0..gmint_gp
-        // so we can compute indices directly.
         let q_values: Vec<f64> = (0..n).map(|i| primal[i]).collect();
-
-        let mint_values: HashMap<MarketId, f64> = markets
-            .iter()
-            .enumerate()
-            .map(|(j, &m)| (m, primal[n + j]))
-            .collect();
-
-        let gmint_values: Vec<f64> = (0..num_groups)
-            .map(|g| primal[n + markets.len() + g])
-            .collect();
 
         // Extract dual values (prices)
         // The dual of the YES balance constraint gives the shadow price for YES shares
@@ -388,10 +379,7 @@ impl LpSolver {
         }
 
         Some(LpSolution {
-            objective: solved.objective_value(),
             q_values,
-            mint_values,
-            gmint_values,
             dual_yes,
             dual_no,
         })
@@ -404,13 +392,9 @@ impl Default for LpSolver {
     }
 }
 
-/// Raw solution from the LP solver.
-#[allow(dead_code)]
+/// Raw solution from the LP solver: primal fill quantities + dual prices.
 struct LpSolution {
-    objective: f64,
     q_values: Vec<f64>,
-    mint_values: HashMap<MarketId, f64>,
-    gmint_values: Vec<f64>,
     dual_yes: HashMap<MarketId, f64>,
     dual_no: HashMap<MarketId, f64>,
 }
@@ -451,17 +435,13 @@ fn normalized_yes_prices(
 
 /// Collect all unique markets from active orders.
 fn collect_markets(orders: &[Order]) -> Vec<MarketId> {
-    let mut markets = Vec::new();
     let mut seen = HashSet::new();
-    for order in orders {
-        for m_idx in 0..order.num_markets as usize {
-            let m = order.markets[m_idx];
-            if !m.is_none() && seen.insert(m) {
-                markets.push(m);
-            }
-        }
-    }
-    markets
+    orders
+        .iter()
+        .flat_map(|o| &o.markets[..o.num_markets as usize])
+        .filter(|m| !m.is_none() && seen.insert(**m))
+        .copied()
+        .collect()
 }
 
 /// Extract fills and clearing prices from the LP solution.
@@ -475,31 +455,14 @@ fn extract_result(
     coeffs: &[OrderCoefficients],
     markets: &[MarketId],
 ) -> (MatchingResult, HashMap<MarketId, Vec<Nanos>>) {
-    let nanos_f = NANOS_PER_DOLLAR as f64;
     let mut result = MatchingResult::new();
 
-    // Derive clearing prices from dual variables.
-    let mut clearing_prices: HashMap<MarketId, Vec<Nanos>> = HashMap::new();
-
-    for &market in markets {
-        let dual_y = solution.dual_yes.get(&market).copied().unwrap_or(0.0);
-        let dual_n = solution.dual_no.get(&market).copied().unwrap_or(0.0);
-
-        let p_yes = dual_y.abs().round().clamp(0.0, nanos_f) as Nanos;
-        let p_no = dual_n.abs().round().clamp(0.0, nanos_f) as Nanos;
-
-        let sum = p_yes + p_no;
-        let (final_yes, final_no) = if sum > 0 {
-            let scale = nanos_f / sum as f64;
-            let ny = (p_yes as f64 * scale).round() as Nanos;
-            let nn = NANOS_PER_DOLLAR.saturating_sub(ny);
-            (ny, nn)
-        } else {
-            (NANOS_PER_DOLLAR / 2, NANOS_PER_DOLLAR / 2)
-        };
-
-        clearing_prices.insert(market, vec![final_yes, final_no]);
-    }
+    // Derive clearing prices from LP duals (YES and NO per market)
+    let yes_prices = normalized_yes_prices(solution, markets);
+    let clearing_prices: HashMap<MarketId, Vec<Nanos>> = yes_prices
+        .iter()
+        .map(|(&m, &p_yes)| (m, vec![p_yes, NANOS_PER_DOLLAR.saturating_sub(p_yes)]))
+        .collect();
 
     // Extract fills from primal solution
     for (i, order) in orders.iter().enumerate() {
@@ -605,34 +568,24 @@ fn has_mm_budget_violations(
     solution: &LpSolution,
     orders: &[Order],
     mm_constraints: &[matching_engine::MmConstraint],
-    mm_order_info: &HashMap<u64, (usize, MmSide)>,
+    mm_constraint_orders: &[Vec<(usize, MmSide)>],
     prices: &HashMap<MarketId, Nanos>,
 ) -> bool {
     for (mm_idx, mm) in mm_constraints.iter().enumerate() {
-        let mut total_capital: u128 = 0;
-
-        for (i, order) in orders.iter().enumerate() {
-            let q_val = solution.q_values[i];
-            if q_val < 0.5 {
-                continue;
-            }
-            let fill_qty = q_val.round() as Qty;
-            if fill_qty == 0 {
-                continue;
-            }
-
-            let Some(&(oi_mm_idx, side)) = mm_order_info.get(&order.id) else {
-                continue;
-            };
-            if oi_mm_idx != mm_idx {
-                continue;
-            }
-
-            let market = order.markets[0];
-            let p_yes = prices.get(&market).copied().unwrap_or(NANOS_PER_DOLLAR / 2);
-            let capital = side.capital_needed(p_yes, fill_qty);
-            total_capital += capital as u128;
-        }
+        let total_capital: u128 = mm_constraint_orders[mm_idx]
+            .iter()
+            .map(|&(i, side)| {
+                let q = solution.q_values[i].round() as Qty;
+                if q == 0 {
+                    return 0;
+                }
+                let p_yes = prices
+                    .get(&orders[i].markets[0])
+                    .copied()
+                    .unwrap_or(NANOS_PER_DOLLAR / 2);
+                side.capital_needed(p_yes, q) as u128
+            })
+            .sum();
 
         if total_capital > mm.max_capital as u128 {
             return true;
@@ -650,35 +603,27 @@ fn has_mm_budget_violations(
 fn linearize_mm_budgets(
     orders: &[Order],
     mm_constraints: &[matching_engine::MmConstraint],
-    mm_order_info: &HashMap<u64, (usize, MmSide)>,
+    mm_constraint_orders: &[Vec<(usize, MmSide)>],
     prices: &HashMap<MarketId, Nanos>,
 ) -> Vec<(Vec<(usize, f64)>, f64)> {
-    let mut rows = Vec::new();
-
-    for (mm_idx, mm) in mm_constraints.iter().enumerate() {
-        let mut terms = Vec::new();
-
-        for (i, order) in orders.iter().enumerate() {
-            let Some(&(oi_mm_idx, side)) = mm_order_info.get(&order.id) else {
-                continue;
-            };
-            if oi_mm_idx != mm_idx {
-                continue;
-            }
-
-            let market = order.markets[0];
-            let p_yes = prices.get(&market).copied().unwrap_or(NANOS_PER_DOLLAR / 2);
-            let capital_per_unit = side.capital_needed(p_yes, 1) as f64;
-
-            if capital_per_unit > 0.0 {
-                terms.push((i, capital_per_unit));
-            }
-        }
-
-        rows.push((terms, mm.max_capital as f64));
-    }
-
-    rows
+    mm_constraints
+        .iter()
+        .enumerate()
+        .map(|(mm_idx, mm)| {
+            let terms: Vec<(usize, f64)> = mm_constraint_orders[mm_idx]
+                .iter()
+                .filter_map(|&(i, side)| {
+                    let p_yes = prices
+                        .get(&orders[i].markets[0])
+                        .copied()
+                        .unwrap_or(NANOS_PER_DOLLAR / 2);
+                    let cpu = side.capital_needed(p_yes, 1) as f64;
+                    (cpu > 0.0).then_some((i, cpu))
+                })
+                .collect();
+            (terms, mm.max_capital as f64)
+        })
+        .collect()
 }
 
 /// Trim MM fills to fix tiny budget overflows from integer rounding.
