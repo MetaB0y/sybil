@@ -68,7 +68,7 @@ fn main() {
 
     if matches!(
         solver_choice,
-        SolverChoice::Pipeline | SolverChoice::Negrisk | SolverChoice::Dual
+        SolverChoice::Pipeline | SolverChoice::Negrisk | SolverChoice::Dual | SolverChoice::Lp
     ) && (verbose || export_json.is_some() || show_charts)
     {
         // Detailed pipeline run with step-by-step output
@@ -488,17 +488,72 @@ fn run_detailed_pipeline(
 
         // No initial liquidity capture needed (liquidity pool removed)
 
-        // Run pipeline and get detailed results
-        let pipeline = match solver_choice {
-            SolverChoice::Dual => Pipeline::with_dual_decomposition(),
-            SolverChoice::Negrisk => Pipeline::with_negrisk(),
-            _ => Pipeline::with_negrisk(),
+        // Run solver and get detailed results
+        let result = match solver_choice {
+            SolverChoice::Lp => {
+                let solver = matching_solver::LpSolver::new();
+                solver.solve(&problem)
+            }
+            _ => {
+                let pipeline = match solver_choice {
+                    SolverChoice::Dual => Pipeline::with_dual_decomposition(),
+                    SolverChoice::Negrisk => Pipeline::with_negrisk(),
+                    _ => Pipeline::with_negrisk(),
+                };
+                pipeline.solve(&problem)
+            }
         };
-        let result = pipeline.solve(&problem);
 
         if verbose {
-            // Print step-by-step results
-            print_pipeline_steps(&result, &problem);
+            // Print step-by-step results (pipeline-specific, skip for LP)
+            if !matches!(solver_choice, SolverChoice::Lp) {
+                print_pipeline_steps(&result, &problem);
+            } else {
+                println!("LP Solver:");
+                println!("─────────────────────────────────────────");
+                println!("  Solve time:     {:.3}s", result.total_time_secs);
+                println!("  Fills:          {}", result.result.fills.len());
+                println!("  Welfare:        {}", format_welfare(result.result.total_welfare));
+                println!("  Volume:         {}", format_qty(result.result.total_quantity_filled));
+
+                if !problem.mm_constraints.is_empty() {
+                    let mm_fills: HashMap<u64, (u64, u64)> = result
+                        .result
+                        .fills
+                        .iter()
+                        .map(|f| (f.order_id, (f.fill_price, f.fill_qty)))
+                        .collect();
+                    let mm_filled: usize = problem
+                        .mm_constraints
+                        .iter()
+                        .flat_map(|mm| &mm.order_ids)
+                        .filter(|id| mm_fills.contains_key(id))
+                        .count();
+                    let mm_total: usize = problem
+                        .mm_constraints
+                        .iter()
+                        .map(|mm| mm.order_ids.len())
+                        .sum();
+                    println!("  MM orders:      {}/{} filled", mm_filled, mm_total);
+                    for mm in &problem.mm_constraints {
+                        let cap = mm.capital_used(&mm_fills);
+                        let budget = mm.max_capital;
+                        let util = if budget > 0 {
+                            cap as f64 / budget as f64 * 100.0
+                        } else {
+                            0.0
+                        };
+                        println!(
+                            "    MM{}: {}/{} ({:.0}% util)",
+                            mm.mm_id.0,
+                            format_price(cap),
+                            format_price(budget),
+                            util,
+                        );
+                    }
+                }
+                println!();
+            }
 
             // Print sample market details
             print_market_details(&problem, &result, &sample_markets);
@@ -1165,7 +1220,7 @@ fn parse_solver_choice(args: &[String]) -> SolverChoice {
         #[cfg(feature = "lp")]
         Some("lp") => SolverChoice::Lp,
         Some("all") => SolverChoice::All,
-        _ => SolverChoice::Pipeline, // Default to pipeline
+        _ => SolverChoice::Lp, // Default to LP solver
     }
 }
 

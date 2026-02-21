@@ -33,6 +33,8 @@ pub struct LpConfig {
     /// Factor by which to reduce over-budget MM order limits each iteration.
     /// 0.5 means halve the limit each round.
     pub shading_factor: f64,
+    /// Max iterations for re-expansion pass after shading converges.
+    pub max_expand_iterations: usize,
 }
 
 impl Default for LpConfig {
@@ -40,6 +42,7 @@ impl Default for LpConfig {
         Self {
             max_mm_iterations: 10,
             shading_factor: 0.5,
+            max_expand_iterations: 5,
         }
     }
 }
@@ -102,11 +105,13 @@ impl LpSolver {
             .collect();
 
         // Current max_fill limits (may be shaded for MM budget iteration)
-        let mut effective_limits: Vec<Qty> = problem.orders.iter().map(|o| o.max_fill).collect();
+        let original_limits: Vec<Qty> = problem.orders.iter().map(|o| o.max_fill).collect();
+        let mut effective_limits = original_limits.clone();
 
         // Iterative LP + MM budget shading
         let mut best_solution: Option<LpSolution> = None;
 
+        // Phase 1: Shade down until budgets are satisfied
         for mm_iter in 0..=self.config.max_mm_iterations {
             let solution = self.solve_lp(
                 &problem.orders,
@@ -127,11 +132,13 @@ impl LpSolver {
                 break;
             }
 
+            let prices = normalized_yes_prices(sol, &markets);
             let violations = check_mm_budgets(
                 sol,
                 &problem.orders,
                 &problem.mm_constraints,
                 &mm_order_info,
+                &prices,
             );
 
             if violations.is_empty() {
@@ -147,9 +154,32 @@ impl LpSolver {
                 &mm_order_info,
                 &mut effective_limits,
                 self.config.shading_factor,
+                &prices,
             );
 
             best_solution = solution;
+        }
+
+        // Phase 2: Re-expand shaded limits to recover MM liquidity.
+        // After shading converged, some MM orders may have been over-reduced.
+        // Try restoring them toward original limits (highest welfare/capital first).
+        if best_solution.is_some()
+            && !problem.mm_constraints.is_empty()
+            && self.config.max_expand_iterations > 0
+        {
+            expand_mm_limits(
+                &self,
+                &problem.orders,
+                &coeffs,
+                &markets,
+                &market_to_group,
+                problem.market_groups.len(),
+                &problem.mm_constraints,
+                &mm_order_info,
+                &original_limits,
+                &mut effective_limits,
+                &mut best_solution,
+            );
         }
 
         let Some(solution) = best_solution else {
@@ -391,6 +421,40 @@ struct LpSolution {
     dual_no: HashMap<MarketId, f64>,
 }
 
+/// Derive normalized YES clearing prices from LP dual variables.
+///
+/// For each market, takes |dual_yes| and |dual_no|, normalizes so they sum to $1.
+/// Returns p_YES per market (in nanos). p_NO = NANOS_PER_DOLLAR - p_YES.
+fn normalized_yes_prices(
+    solution: &LpSolution,
+    markets: &[MarketId],
+) -> HashMap<MarketId, Nanos> {
+    let nanos_f = NANOS_PER_DOLLAR as f64;
+    let mut prices = HashMap::new();
+
+    for &market in markets {
+        let dual_y = solution.dual_yes.get(&market).copied().unwrap_or(0.0);
+        let dual_n = solution.dual_no.get(&market).copied().unwrap_or(0.0);
+
+        let p_yes_raw = dual_y.abs().round().clamp(0.0, nanos_f) as Nanos;
+        let p_no_raw = dual_n.abs().round().clamp(0.0, nanos_f) as Nanos;
+
+        let sum = p_yes_raw + p_no_raw;
+        let p_yes = if sum > 0 {
+            let scale = nanos_f / sum as f64;
+            (p_yes_raw as f64 * scale).round() as Nanos
+        } else {
+            // No price signal — use 50/50 as neutral default.
+            // Only happens when no orders touch the market.
+            NANOS_PER_DOLLAR / 2
+        };
+
+        prices.insert(market, p_yes);
+    }
+
+    prices
+}
+
 /// Collect all unique markets from active orders.
 fn collect_markets(orders: &[Order]) -> Vec<MarketId> {
     let mut markets = Vec::new();
@@ -573,17 +637,16 @@ struct MmViolation {
 }
 
 /// Check which MM budget constraints are violated.
+///
+/// Uses normalized clearing prices (p_YES + p_NO = $1) for capital computation,
+/// consistent with how fills are priced in extract_result.
 fn check_mm_budgets(
     solution: &LpSolution,
     orders: &[Order],
     mm_constraints: &[matching_engine::MmConstraint],
     mm_order_info: &HashMap<u64, (usize, MmSide)>,
+    prices: &HashMap<MarketId, Nanos>,
 ) -> Vec<MmViolation> {
-    // Build fills map: order_id -> (fill_price, fill_qty)
-    // We need approximate prices for capital computation.
-    // Use dual-derived prices as approximation.
-    let nanos_f = NANOS_PER_DOLLAR as f64;
-
     let mut violations = Vec::new();
 
     for (mm_idx, mm) in mm_constraints.iter().enumerate() {
@@ -606,16 +669,9 @@ fn check_mm_budgets(
                 continue;
             }
 
-            // Get price for this order's market
+            // Use normalized clearing price for this order's market
             let market = order.markets[0];
-            let p_yes = solution
-                .dual_yes
-                .get(&market)
-                .copied()
-                .unwrap_or(0.0)
-                .abs()
-                .round()
-                .clamp(0.0, nanos_f) as Nanos;
+            let p_yes = prices.get(&market).copied().unwrap_or(NANOS_PER_DOLLAR / 2);
 
             let capital = side.capital_needed(p_yes, fill_qty);
             total_capital += capital as u128;
@@ -637,6 +693,7 @@ fn check_mm_budgets(
 ///
 /// Strategy: for each violated MM constraint, sort its orders by welfare/capital
 /// ratio (descending), and progressively reduce limits for low-ratio orders.
+/// Uses actual clearing prices for capital computation (not hardcoded 50c).
 fn shade_mm_limits(
     violations: &[MmViolation],
     orders: &[Order],
@@ -644,25 +701,28 @@ fn shade_mm_limits(
     mm_order_info: &HashMap<u64, (usize, MmSide)>,
     effective_limits: &mut [Qty],
     shading_factor: f64,
+    prices: &HashMap<MarketId, Nanos>,
 ) {
     for violation in violations {
         let overshoot = violation.capital_used as f64 / violation.budget as f64;
 
-        // Compute welfare/capital ratio for each MM order
+        // Compute welfare/capital ratio for each MM order using actual prices
         let mut order_ratios: Vec<(usize, f64)> = Vec::new();
 
         for (i, order) in orders.iter().enumerate() {
-            let Some(&(oi_mm_idx, _side)) = mm_order_info.get(&order.id) else {
+            let Some(&(oi_mm_idx, side)) = mm_order_info.get(&order.id) else {
                 continue;
             };
             if oi_mm_idx != violation.mm_idx {
                 continue;
             }
 
-            // Welfare per unit = |limit_price| (simplified)
             let welfare_per_unit = order.limit_price as f64;
-            // Capital per unit approximation (assume 50c price)
-            let capital_per_unit = (NANOS_PER_DOLLAR / 2) as f64;
+            // Use actual clearing price for capital computation
+            let market = order.markets[0];
+            let p_yes = prices.get(&market).copied().unwrap_or(NANOS_PER_DOLLAR / 2);
+            let capital_per_unit = side.capital_needed(p_yes, 1) as f64;
+
             let ratio = if capital_per_unit > 0.0 {
                 welfare_per_unit / capital_per_unit
             } else {
@@ -682,6 +742,108 @@ fn shade_mm_limits(
             let current = effective_limits[*idx];
             let new_limit = ((current as f64) * (1.0 - reduction)).round() as Qty;
             effective_limits[*idx] = new_limit.max(1); // Never reduce to 0
+        }
+    }
+}
+
+/// Re-expand previously shaded MM order limits to recover liquidity.
+///
+/// After shading converges (budgets satisfied), some MM orders may have been
+/// reduced more than necessary. This pass tries restoring them toward their
+/// original limits, highest welfare/capital ratio first. Each expansion is
+/// validated by re-solving the LP and checking budgets.
+fn expand_mm_limits(
+    solver: &LpSolver,
+    orders: &[Order],
+    coeffs: &[OrderCoefficients],
+    markets: &[MarketId],
+    market_to_group: &HashMap<MarketId, usize>,
+    num_groups: usize,
+    mm_constraints: &[matching_engine::MmConstraint],
+    mm_order_info: &HashMap<u64, (usize, MmSide)>,
+    original_limits: &[Qty],
+    effective_limits: &mut [Qty],
+    best_solution: &mut Option<LpSolution>,
+) {
+    // Compute prices from current best solution for welfare/capital ranking
+    let current_prices = best_solution
+        .as_ref()
+        .map(|sol| normalized_yes_prices(sol, markets))
+        .unwrap_or_default();
+
+    // Find MM orders that were shaded (effective < original)
+    let mut shaded_orders: Vec<(usize, f64)> = Vec::new();
+    for (i, order) in orders.iter().enumerate() {
+        let Some(&(_, side)) = mm_order_info.get(&order.id) else {
+            continue;
+        };
+        if effective_limits[i] >= original_limits[i] {
+            continue;
+        }
+        // Welfare/capital ratio using actual clearing prices
+        let market = order.markets[0];
+        let p_yes = current_prices.get(&market).copied().unwrap_or(NANOS_PER_DOLLAR / 2);
+        let capital_per_unit = side.capital_needed(p_yes, 1) as f64;
+        let ratio = if capital_per_unit > 0.0 {
+            order.limit_price as f64 / capital_per_unit
+        } else {
+            f64::INFINITY
+        };
+        shaded_orders.push((i, ratio));
+    }
+
+    if shaded_orders.is_empty() {
+        return;
+    }
+
+    // Sort by welfare/capital ratio descending — restore highest-value orders first
+    shaded_orders.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    for _expand_iter in 0..solver.config.max_expand_iterations {
+        let mut any_expanded = false;
+
+        for &(idx, _ratio) in &shaded_orders {
+            if effective_limits[idx] >= original_limits[idx] {
+                continue;
+            }
+
+            // Try restoring halfway toward original
+            let current = effective_limits[idx];
+            let original = original_limits[idx];
+            let candidate = current + (original - current + 1) / 2;
+
+            effective_limits[idx] = candidate;
+
+            // Re-solve and check budgets
+            let solution = solver.solve_lp(
+                orders,
+                coeffs,
+                markets,
+                market_to_group,
+                num_groups,
+                effective_limits,
+            );
+
+            let Some(ref sol) = solution else {
+                effective_limits[idx] = current; // revert
+                continue;
+            };
+
+            let prices = normalized_yes_prices(sol, markets);
+            let violations = check_mm_budgets(sol, orders, mm_constraints, mm_order_info, &prices);
+
+            if violations.is_empty() {
+                // Expansion is budget-feasible — keep it
+                *best_solution = solution;
+                any_expanded = true;
+            } else {
+                // Violated — revert this order's expansion
+                effective_limits[idx] = current;
+            }
+        }
+
+        if !any_expanded {
+            break;
         }
     }
 }

@@ -70,8 +70,8 @@ impl Default for ScenarioConfig {
             liquidity_scarcity: 0.5,
             hot_market_fraction: 0.0,
             num_mms: 2,
-            mm_budget_min: 10_000,
-            mm_budget_max: 50_000,
+            mm_budget_min: 2_500,
+            mm_budget_max: 12_500,
             mm_spread_bps: 50, // 0.5% spread
         }
     }
@@ -101,8 +101,8 @@ impl ScenarioConfig {
             spread_fraction: 0.05,
 
             num_mms: 1,
-            mm_budget_min: 5_000,
-            mm_budget_max: 20_000,
+            mm_budget_min: 1_250,
+            mm_budget_max: 5_000,
             liquidity_scarcity: 0.6,
             ..Default::default()
         }
@@ -131,8 +131,8 @@ impl ScenarioConfig {
             spread_fraction: 0.05,
 
             num_mms: 3,
-            mm_budget_min: 20_000,
-            mm_budget_max: 100_000,
+            mm_budget_min: 5_000,
+            mm_budget_max: 25_000,
             liquidity_scarcity: 0.4,
             ..Default::default()
         }
@@ -147,8 +147,8 @@ impl ScenarioConfig {
             spread_fraction: 0.05,
 
             num_mms: 10,
-            mm_budget_min: 50_000,
-            mm_budget_max: 200_000,
+            mm_budget_min: 12_500,
+            mm_budget_max: 50_000,
             liquidity_scarcity: 0.3,
             ..Default::default()
         }
