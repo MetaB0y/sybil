@@ -53,6 +53,12 @@ class TradeRecord:
     llm_response: str = ""  # raw LLM output for debugging
     block_height: int = -1  # block in which this trade was submitted
     llm_duration_s: float = 0.0  # wall-clock seconds the LLM call took
+    # Trader state at decision time
+    balance: float = 0.0
+    yes_pos: int = 0
+    no_pos: int = 0
+    risk_pct: float = 0.0
+    target_pos: int = 0  # target position on the chosen side
 
     def to_dict(self) -> dict:
         return {
@@ -68,6 +74,11 @@ class TradeRecord:
             "motivation": self.motivation,
             "orders": [_describe_order(o) for o in self.orders],
             "llm_response": self.llm_response,
+            "balance": self.balance,
+            "yes_pos": self.yes_pos,
+            "no_pos": self.no_pos,
+            "risk_pct": self.risk_pct,
+            "target_pos": self.target_pos,
         }
 
 
@@ -243,6 +254,7 @@ class IranNewsTrader(BaseAgent):
         try:
             llm = self._get_llm_client()
             t0 = time.monotonic()
+            await self.client.pause()
             self.clock.pause()
             try:
                 resp = await llm.chat.completions.create(
@@ -253,6 +265,7 @@ class IranNewsTrader(BaseAgent):
                 )
             finally:
                 self.clock.resume()
+                await self.client.resume()
             llm_duration_s = time.monotonic() - t0
             text = resp.choices[0].message.content or ""
             log.info("[%s] LLM response for '%s' (%.1fs):\n%s", self.name, article.title[:60], llm_duration_s, text)
@@ -297,6 +310,10 @@ class IranNewsTrader(BaseAgent):
         edge = abs(probability - last_price)
         thresholds = {"LOW": 0.05, "MEDIUM": 0.03, "HIGH": 0.02}
         if edge < thresholds[conviction]:
+            # Store state even on no-trade for diagnostics
+            current_yes = shadow_yes if shadow_yes is not None else self.get_position(market_id, "YES")
+            current_no = shadow_no if shadow_no is not None else self.get_position(market_id, "NO")
+            self._last_exec_state = (self.current_balance, current_yes, current_no, 0.0, 0)
             return []
 
         # Step 3: Risk budget
@@ -308,11 +325,17 @@ class IranNewsTrader(BaseAgent):
             + current_no * (1 - last_price)
         )
 
-        risk_pcts = {"LOW": 0.05, "MEDIUM": 0.15, "HIGH": 0.30}
-        risk_pct = risk_pcts[conviction]
-        if edge > 0.15:  # bump tier
-            bumped = {"LOW": 0.15, "MEDIUM": 0.30, "HIGH": 0.50}
-            risk_pct = bumped[conviction]
+        base_pcts = {"LOW": 0.05, "MEDIUM": 0.15, "HIGH": 0.30}
+        risk_pct = base_pcts[conviction]
+
+        # Count past confirming signals (same direction, meaningful conviction)
+        bullish = probability > last_price
+        confirming = sum(
+            1 for rec in self.trade_log
+            if rec.conviction in ("MEDIUM", "HIGH")
+            and (rec.probability > last_price) == bullish
+        )
+        risk_pct = min(risk_pct + confirming * 0.10, 0.80)
 
         risk_budget = risk_pct * total_capital
 
@@ -323,6 +346,9 @@ class IranNewsTrader(BaseAgent):
         else:
             target_yes = 0
             target_no = int(risk_budget / (1 - probability)) if probability < 1 else 0
+
+        target_pos = target_yes if probability > last_price else target_no
+        self._last_exec_state = (self.current_balance, current_yes, current_no, risk_pct, target_pos)
 
         # Step 4: Generate orders
         orders: list[OrderSpec] = []
@@ -363,7 +389,7 @@ class IranNewsTrader(BaseAgent):
         shadow_yes = self.get_position(market_id, "YES")
         shadow_no = self.get_position(market_id, "NO")
 
-        for article in arrived:
+        for i, article in enumerate(arrived):
             log.info(
                 "[%s] Processing article: %s (%s)",
                 self.name, article.title[:60], article.source,
@@ -379,14 +405,28 @@ class IranNewsTrader(BaseAgent):
                     orders=[],
                     sim_time=self.clock.now(),
                     block_height=block.height,
+                    balance=self.current_balance,
+                    yes_pos=shadow_yes,
+                    no_pos=shadow_no,
                 ))
                 continue
 
             probability, conviction, motivation, raw_response, llm_duration_s = result
-            orders = self._phase3_execute(
-                probability, conviction, block,
-                shadow_yes=shadow_yes, shadow_no=shadow_no,
-            )
+
+            # When multiple articles land in the same batch, only trade on the
+            # first (older) one — later articles are analyzed for context only.
+            if i == 0:
+                orders = self._phase3_execute(
+                    probability, conviction, block,
+                    shadow_yes=shadow_yes, shadow_no=shadow_no,
+                )
+            else:
+                log.info(
+                    "[%s] Skipping orders for article %d/%d (same batch)",
+                    self.name, i + 1, len(arrived),
+                )
+                self._last_exec_state = (self.current_balance, shadow_yes, shadow_no, 0.0, 0)
+                orders = []
 
             # Update shadow positions based on generated orders
             for order in orders:
@@ -399,6 +439,7 @@ class IranNewsTrader(BaseAgent):
                 elif isinstance(order, SellNo):
                     shadow_no -= order.quantity
 
+            bal, yp, np_, rp, tp = getattr(self, '_last_exec_state', (0, 0, 0, 0, 0))
             self.trade_log.append(TradeRecord(
                 article=article,
                 probability=probability,
@@ -409,6 +450,11 @@ class IranNewsTrader(BaseAgent):
                 llm_response=raw_response,
                 block_height=block.height,
                 llm_duration_s=llm_duration_s,
+                balance=bal,
+                yes_pos=yp,
+                no_pos=np_,
+                risk_pct=rp,
+                target_pos=tp,
             ))
 
             log.info(

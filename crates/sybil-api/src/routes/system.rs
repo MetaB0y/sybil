@@ -1,5 +1,6 @@
 use axum::extract::State;
 use axum::Json;
+use serde_json;
 
 use crate::state::AppState;
 use crate::types::error::AppError;
@@ -36,4 +37,16 @@ pub async fn state_root(
     Ok(Json(StateRootResponse {
         state_root: hex::encode(root),
     }))
+}
+
+/// POST /v1/simulation/pause
+pub async fn pause(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {
+    state.sequencer.pause_block_production().await?;
+    Ok(Json(serde_json::json!({"status": "paused"})))
+}
+
+/// POST /v1/simulation/resume
+pub async fn resume(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {
+    state.sequencer.resume_block_production().await?;
+    Ok(Json(serde_json::json!({"status": "resumed"})))
 }

@@ -262,103 +262,6 @@ def _format_duration(td: timedelta) -> str:
     return " ".join(parts) or "< 1m"
 
 
-def _reindex_blocks(blocks: list[dict], trade_log: list[dict]) -> None:
-    """Shift trader_orders and trader_llm from trigger block to order block (in-place).
-
-    Old run data has these keyed by trigger block (when on_block was called).
-    We detect this by checking if active_trader_orders is missing (pre-fix data)
-    and llm_duration_s is available in trade_log, then reindex.
-    """
-    # Already reindexed (new run data has active_trader_orders)?
-    if blocks and "active_trader_orders" in blocks[0]:
-        return
-
-    # Build trigger→offset map from trade_log
-    trigger_offsets: dict[int, int] = {}  # trigger_block -> offset in blocks
-    for t in trade_log:
-        bh = t.get("block_height", -1)
-        dur = t.get("llm_duration_s", 0)
-        if bh >= 0 and dur > 0:
-            trigger_offsets[bh] = round(dur)
-
-    if not trigger_offsets:
-        return  # no duration data, nothing to reindex
-
-    block_by_height = {b["height"]: b for b in blocks}
-
-    # Move trader_orders and trader_llm from trigger block to order block
-    for trigger_h, offset in trigger_offsets.items():
-        src = block_by_height.get(trigger_h)
-        if not src:
-            continue
-        order_h = trigger_h + offset
-        dst = block_by_height.get(order_h)
-
-        # Move trader_orders
-        if src["trader_orders"]:
-            if dst is None:
-                # order_block not in blocks list — create a stub
-                dst = {
-                    "height": order_h,
-                    "timestamp_ms": None,
-                    "sim_time": None,
-                    "yes_price": None,
-                    "volume_nanos": 0,
-                    "mm_orders": [],
-                    "noise_orders": [],
-                    "noise_order_count": 0,
-                    "trader_orders": [],
-                    "trader_fills": [],
-                    "trader_llm": None,
-                }
-                blocks.append(dst)
-                block_by_height[order_h] = dst
-            dst["trader_orders"] = dst["trader_orders"] + src["trader_orders"]
-            src["trader_orders"] = []
-
-        # Move trader_llm
-        if src.get("trader_llm"):
-            llm = src["trader_llm"]
-            llm["trigger_block"] = trigger_h
-            llm["order_block_height"] = order_h
-            if dst is not None:
-                dst["trader_llm"] = llm
-            src["trader_llm"] = None
-
-    # Re-sort if we added stub blocks
-    blocks.sort(key=lambda b: b["height"])
-
-    # Compute active_trader_orders with TTL carry-over
-    def _parse_qty(o_str: str) -> int:
-        parts = o_str.split()
-        if len(parts) >= 2:
-            try:
-                return int(parts[1])
-            except ValueError:
-                pass
-        return 0
-
-    active: list[dict] = []
-    for b in blocks:
-        h = b["height"]
-        active = [o for o in active if h - o["sub"] < 3]
-        for f in b.get("trader_fills", []):
-            rem = f["fill_qty"]
-            for o in active:
-                if rem <= 0:
-                    break
-                if o["qty"] > 0:
-                    taken = min(o["qty"], rem)
-                    o["qty"] -= taken
-                    rem -= taken
-        active = [o for o in active if o["qty"] > 0]
-        for o_str in b["trader_orders"]:
-            q = _parse_qty(o_str)
-            if q > 0:
-                active.append({"qty": q, "sub": h})
-        b["active_trader_orders"] = len(active)
-
-
 def render_simulation_tab():
     """Render the simulation replay tab."""
     runs = load_sim_runs()
@@ -376,12 +279,6 @@ def render_simulation_tab():
     leaderboard = run_data["leaderboard"]
     config = run_data["meta"]["config"]
 
-    # ── Reindex old runs: shift trader_orders/trader_llm from trigger block to order block ──
-    # Old runs have trader_orders keyed by trigger block (when on_block was called).
-    # Detect by checking if any block has both trader_llm and trader_orders — in new runs
-    # they're already at order_block. In old runs, they overlap at trigger block.
-    _reindex_blocks(blocks, trade_log)
-
     block_times = _build_block_times(blocks, trade_log)
 
     # ── Classify leaderboard entries ──
@@ -395,7 +292,8 @@ def render_simulation_tab():
 
     # General
     st.markdown("**General**")
-    total_vol = sum(b["volume_nanos"] for b in blocks)
+    # Server volume_nanos counts both sides of each fill; halve for single-counted volume
+    total_vol = sum(b["volume_nanos"] for b in blocks) // 2
     first_h = blocks[0]["height"] if blocks else 0
     last_h = blocks[-1]["height"] if blocks else 0
     t_first = block_times.get(first_h)
@@ -472,36 +370,50 @@ def render_simulation_tab():
         axis=1,
     )
 
-    # Trader events
+    # Trader events — use trade_log as source of truth (orders may land 1 block later)
     trader_events = []
-    for b in blocks:
-        if b["trader_llm"]:
-            llm = b["trader_llm"]
-            order_block = llm.get("order_block_height", b["height"])
-            t = block_times.get(b["height"])
-            time_str = t.strftime("%b %d %H:%M") if t else ""
-            orders_str = ", ".join(b["trader_orders"]) if b["trader_orders"] else "NO TRADE"
-            # Collect fills within TTL window (orders live for 3 blocks)
-            ttl_end = order_block + 2  # inclusive
-            nearby_fills = []
+    for tl in trade_log:
+        bh = tl.get("block_height", -1)
+        t = block_times.get(bh)
+        time_str = t.strftime("%b %d %H:%M") if t else ""
+        orders_str = ", ".join(tl["orders"]) if tl["orders"] else "NO TRADE"
+
+        # Find the actual block where orders appeared (may be bh or bh+1)
+        order_block = bh
+        if tl["orders"]:
             for bk in blocks:
-                if order_block <= bk["height"] <= ttl_end:
-                    nearby_fills.extend(bk.get("trader_fills", []))
-            if nearby_fills:
-                total_filled = sum(f["fill_qty"] for f in nearby_fills)
-                avg_price = sum(f["fill_price"] * f["fill_qty"] for f in nearby_fills) / total_filled if total_filled else 0
-                fill_str = f"{total_filled} filled @ {avg_price:.4f}"
-            else:
-                fill_str = "no fills" if b["trader_orders"] else ""
-            trader_events.append({
-                "block": order_block,
-                "time": time_str,
-                "yes_price": b["yes_price"] if b["yes_price"] is not None else 0,
-                "probability": llm["probability"],
-                "conviction": llm["conviction"],
-                "orders": orders_str,
-                "fills": fill_str,
-            })
+                if bh <= bk["height"] <= bh + 2 and bk["trader_orders"]:
+                    order_block = bk["height"]
+                    break
+
+        # Collect fills within TTL window from order submission
+        ttl_end = order_block + 2  # inclusive
+        nearby_fills = []
+        for bk in blocks:
+            if order_block <= bk["height"] <= ttl_end:
+                nearby_fills.extend(bk.get("trader_fills", []))
+        if nearby_fills:
+            total_filled = sum(f["fill_qty"] for f in nearby_fills)
+            avg_price = sum(f["fill_price"] * f["fill_qty"] for f in nearby_fills) / total_filled if total_filled else 0
+            fill_str = f"{total_filled} filled @ {avg_price:.4f}"
+        elif tl["orders"]:
+            fill_str = "no fills"
+        else:
+            fill_str = ""
+
+        # Use LLM block for chart position (that's when the decision was made)
+        llm_block_data = next((b for b in blocks if b["height"] == bh), None)
+        yes_price = llm_block_data["yes_price"] if llm_block_data and llm_block_data["yes_price"] is not None else 0
+
+        trader_events.append({
+            "block": bh,
+            "time": time_str,
+            "yes_price": yes_price,
+            "probability": tl["probability"],
+            "conviction": tl["conviction"],
+            "orders": orders_str,
+            "fills": fill_str,
+        })
     trader_df = pd.DataFrame(trader_events) if trader_events else None
 
     try:
@@ -634,18 +546,20 @@ def render_simulation_tab():
 
     for i, t in enumerate(trade_log, 1):
         bh = t.get("block_height", -1)
-        order_block = t.get("order_block_height", bh)  # falls back to trigger block for old runs
-        orders_str = ", ".join(t["orders"]) or "NO TRADE"
+        order_block = bh
+        orders_str = (", ".join(t["orders"]) or "NO TRADE").replace("$", "\\$")
         mkt_price = price_at_block.get(bh)
         mkt_str = f"mkt={mkt_price:.2f}" if mkt_price is not None else "mkt=?"
 
         # Collect per-fill data within TTL window (orders live for 3 blocks)
-        ttl_end = order_block + 2  # inclusive
+        # Only look for fills if this decision actually placed orders
         per_fill_items = []  # list of (fill_block, fill_qty, fill_price)
-        for bk in blocks:
-            if order_block <= bk["height"] <= ttl_end:
-                for f in bk.get("trader_fills", []):
-                    per_fill_items.append((bk["height"], f["fill_qty"], f["fill_price"]))
+        if t["orders"]:
+            ttl_end = order_block + 2  # inclusive
+            for bk in blocks:
+                if order_block <= bk["height"] <= ttl_end:
+                    for f in bk.get("trader_fills", []):
+                        per_fill_items.append((bk["height"], f["fill_qty"], f["fill_price"]))
 
         # Summary for header
         if per_fill_items:
@@ -668,6 +582,24 @@ def render_simulation_tab():
             # Timing info
             if order_block != bh:
                 st.markdown(f"**LLM call initiated:** block {bh}")
+
+            # Holdings at decision time (backward-compatible with older runs)
+            bal = t.get("balance", 0)
+            yp = t.get("yes_pos", 0)
+            np_ = t.get("no_pos", 0)
+            rp = t.get("risk_pct", 0)
+            tp = t.get("target_pos", 0)
+            if bal or yp or np_:
+                total_val = bal + yp * (mkt_price or 0) + np_ * (1 - (mkt_price or 0))
+                holdings = f"**Holdings:** ${bal:.2f} cash · YES {yp} · NO {np_} · total ~${total_val:.2f}"
+                if rp > 0:
+                    side = "YES" if t["probability"] > (mkt_price or 0) else "NO"
+                    current = yp if side == "YES" else np_
+                    gap = tp - current
+                    sign = "+" if gap > 0 else ""
+                    holdings += f" | risk={rp:.0%} → target {side} {tp} (current {current}, {sign}{gap})"
+                st.markdown(holdings)
+
             st.markdown(f"**Orders:** {orders_str}, block {order_block}" if t["orders"] else "**No trade** (edge too small or parse failure)")
 
             # Per-fill breakdown
@@ -700,15 +632,17 @@ def render_simulation_tab():
             "Block": b["height"],
             "Time": t.strftime("%H:%M:%S") if t else "",
             "Clearing Price": f"{b['yes_price']:.4f}" if b["yes_price"] is not None else "",
-            "Volume ($)": f"{b['volume_nanos'] / 1e9:.2f}",
+            "Volume ($)": f"{b['volume_nanos'] / 2e9:.2f}",
             "MM Orders": len(b["mm_orders"]),
             "Noise Orders": b["noise_order_count"],
             "Trader Orders": active_count,
             "LLM": "",
         }
-        if b["trader_llm"]:
-            llm = b["trader_llm"]
-            row["LLM"] = f"P={llm['probability']:.2f} {llm['conviction']}"
+        # trader_llm: list (new) or dict/None (old runs)
+        raw_llm = b["trader_llm"]
+        llm_list = raw_llm if isinstance(raw_llm, list) else ([raw_llm] if raw_llm else [])
+        if llm_list:
+            row["LLM"] = " | ".join(f"P={l['probability']:.2f} {l['conviction']}" for l in llm_list)
         block_table.append(row)
 
     block_df = pd.DataFrame(block_table)
@@ -763,18 +697,27 @@ def render_simulation_tab():
         # 1. Expire orders past TTL (submitted 3+ blocks ago)
         carry_over = [o for o in carry_over if h - o["submitted_block"] < 3]
 
-        # 2. Subtract fills that happened in this block
-        fills_this_block = b_iter.get("trader_fills", [])
-        for f in fills_this_block:
-            remaining_fill = f["fill_qty"]
-            for co in carry_over:
-                if remaining_fill <= 0:
-                    break
-                if co["qty"] > 0:
-                    taken = min(co["qty"], remaining_fill)
-                    co["qty"] -= taken
-                    co["filled"] += taken
-                    remaining_fill -= taken
+        # 2. Subtract fills from carry-over (side-aware)
+        def _delta_side(f):
+            for d in f.get("position_deltas", []):
+                if d["outcome"] == "YES" and d["delta"] > 0: return "BuyYes"
+                if d["outcome"] == "YES" and d["delta"] < 0: return "SellYes"
+                if d["outcome"] == "NO" and d["delta"] > 0: return "BuyNo"
+                if d["outcome"] == "NO" and d["delta"] < 0: return "SellNo"
+            return None
+
+        for fill_key in ("trader_fills", "noise_fills"):
+            for f in b_iter.get(fill_key, []):
+                fside = _delta_side(f)
+                remaining_fill = f["fill_qty"]
+                for co in carry_over:
+                    if remaining_fill <= 0:
+                        break
+                    if co["qty"] > 0 and co["side"] == fside:
+                        taken = min(co["qty"], remaining_fill)
+                        co["qty"] -= taken
+                        co["filled"] += taken
+                        remaining_fill -= taken
 
         # 3. Add new orders submitted this block
         new_trader = []
@@ -788,6 +731,7 @@ def render_simulation_tab():
                     "original_qty": qty, "filled": 0,
                 })
 
+        # MM re-submits every block via flash liquidity — no carry needed
         new_mm = []
         for o_str in b_iter["mm_orders"]:
             parsed = _parse_order(o_str)
@@ -814,9 +758,11 @@ def render_simulation_tab():
         all_active = [o.copy() for o in carry_over if o["qty"] > 0] + new_trader + new_mm + new_noise
         live_orders_by_block[h] = all_active
 
-        # Carry forward trader orders (MM and noise re-submit every block, so no carry)
-        carry_over = [o for o in carry_over if o["qty"] > 0 and o["source"] == "Trader"]
+        # Carry forward Trader + Noise orders (they have TTL=3 on server)
+        # MM re-submits every block, so no carry
+        carry_over = [o for o in carry_over if o["qty"] > 0 and o["source"] in ("Trader", "Noise")]
         carry_over.extend(new_trader)
+        carry_over.extend(new_noise)
 
     block_heights = [b["height"] for b in blocks]
     selected_block = st.selectbox("Select block", block_heights)
@@ -880,67 +826,95 @@ def render_simulation_tab():
     else:
         st.caption("No active orders in this block")
 
-    # ── Order lists with fill + carry-over info ──
-    # Split active orders by source
-    active_mm = [o for o in active_orders if o["source"] == "MM"]
-    active_noise = [o for o in active_orders if o["source"] == "Noise"]
-    active_trader = [o for o in active_orders if o["source"] == "Trader"]
+    # ── Batch Summary: orders → fills → clearing price ──
+    yes_price = b.get("yes_price")
+    clearing_str = f"YES={yes_price:.4f}  NO={1 - yes_price:.4f}" if yes_price is not None else "no clearing"
+    st.markdown(f"**Batch Summary** — clearing: {clearing_str}")
 
-    def _fmt_order(o: dict) -> str:
-        age = b["height"] - o["submitted_block"]
-        carry = f" [carry B+{age}]" if age > 0 else ""
-        if o["filled"] > 0:
-            fill_info = f" (filled {o['filled']}/{o['original_qty']})"
-        else:
-            fill_info = ""
-        return f"{o['side']} {o['qty']}@{o['price']:.2f}{carry}{fill_info}"
+    # Collect all fills indexed by source
+    all_fills: list[dict] = []
+    for key, source in [("trader_fills", "Trader"), ("mm_fills", "MM"), ("noise_fills", "Noise")]:
+        for f in b.get(key, []):
+            f.setdefault("source", source)
+            all_fills.append(f)
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown(f"**MM Orders** ({len(active_mm)})")
-        if active_mm:
-            for o in active_mm:
-                st.code(_fmt_order(o), language=None)
-        else:
-            st.caption("None")
-    with col2:
-        st.markdown(f"**Noise Orders** ({len(active_noise)})")
-        if active_noise:
-            for o in active_noise:
-                st.code(_fmt_order(o), language=None)
-        else:
-            st.caption("None")
-    with col3:
-        st.markdown(f"**Trader Orders** ({len(active_trader)})")
-        if active_trader:
-            for o in active_trader:
-                st.code(_fmt_order(o), language=None)
-        else:
-            st.caption("None")
+    # Group fills by source for summary counts
+    fills_by_source: dict[str, list[dict]] = {}
+    for f in all_fills:
+        fills_by_source.setdefault(f["source"], []).append(f)
 
-    # ── Batch fills ──
-    # Tag fills with source if missing (old run data)
-    t_fills = b.get("trader_fills", [])
-    for f in t_fills:
-        f.setdefault("source", "Trader")
-    m_fills = b.get("mm_fills", [])
-    for f in m_fills:
-        f.setdefault("source", "MM")
-    all_fills = t_fills + m_fills
-    if all_fills:
-        st.markdown("**Batch Fills**")
-        def _fmt_fill(f: dict) -> str:
-            source = f.get("source", "?")
-            deltas = ", ".join(
-                f"{d['outcome']} {d['delta']:+d}" for d in f.get("position_deltas", [])
-            )
-            line = f"[{source}] #{f['order_id']}: {f['fill_qty']} @ {f['fill_price']:.4f}"
-            if deltas:
-                line += f"  [{deltas}]"
-            return line
+    # Determine fill side from position deltas
+    def _fill_side(f):
+        for d in f.get("position_deltas", []):
+            if d["outcome"] == "YES" and d["delta"] > 0: return "BuyYes"
+            if d["outcome"] == "YES" and d["delta"] < 0: return "SellYes"
+            if d["outcome"] == "NO" and d["delta"] > 0: return "BuyNo"
+            if d["outcome"] == "NO" and d["delta"] < 0: return "SellNo"
+        return None
 
-        for f in sorted(all_fills, key=lambda x: x.get("order_id", 0)):
-            st.code(_fmt_fill(f), language=None)
+    # Per-source: combined orders + fills table
+    for source, label in [("Trader", "Trader"), ("MM", "MM"), ("Noise", "Noise")]:
+        orders = [o for o in active_orders if o["source"] == source]
+        fills = fills_by_source.get(source, [])
+        if not orders and not fills:
+            continue
+
+        # Group fills by side for matching to orders
+        side_fills: dict[str, list[dict]] = {}
+        for f in fills:
+            side_fills.setdefault(_fill_side(f), []).append(f)
+
+        # Build combined rows: each order paired with its fill (if any)
+        rows = []
+        for o in orders:
+            matched = side_fills.get(o["side"], [])
+            f = matched.pop(0) if matched else None
+            row = {"Side": o["side"], "Qty": o["qty"], "Limit": f"${o['price']:.2f}"}
+            if f:
+                deltas = ", ".join(
+                    f"{d['outcome']} {d['delta']:+d}" for d in f.get("position_deltas", [])
+                )
+                row["Filled"] = f["fill_qty"]
+                row["Fill $"] = f"${f['fill_price']:.4f}"
+                row["Δ Pos"] = deltas
+            else:
+                row["Filled"] = ""
+                row["Fill $"] = ""
+                row["Δ Pos"] = ""
+            rows.append(row)
+
+        # Leftover fills without a matched order
+        for side, remaining in side_fills.items():
+            for f in remaining:
+                deltas = ", ".join(
+                    f"{d['outcome']} {d['delta']:+d}" for d in f.get("position_deltas", [])
+                )
+                rows.append({
+                    "Side": side or "?", "Qty": "", "Limit": "",
+                    "Filled": f["fill_qty"],
+                    "Fill $": f"${f['fill_price']:.4f}",
+                    "Δ Pos": deltas,
+                })
+
+        # Sort: BuyYes → SellYes → BuyNo → SellNo, buys high→low, sells low→high
+        side_order = {"BuyYes": 0, "SellYes": 1, "BuyNo": 2, "SellNo": 3}
+
+        def _sort_key(r):
+            s = side_order.get(r["Side"], 99)
+            # Parse price for secondary sort
+            limit = r.get("Limit", "")
+            price = float(limit.lstrip("$")) if limit else 0
+            # Buys: highest price first (negate); Sells: lowest price first
+            is_buy = r["Side"].startswith("Buy")
+            return (s, -price if is_buy else price)
+
+        rows.sort(key=_sort_key)
+
+        with st.expander(f"**{label}**: {len(orders)} orders → {len(fills)} fills", expanded=(source == "Trader")):
+            if rows:
+                st.dataframe(rows, use_container_width=True, hide_index=True)
+            else:
+                st.caption("No activity")
 
 
 

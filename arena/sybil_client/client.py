@@ -373,6 +373,16 @@ class SybilClient:
         else:
             raise ValueError(f"Unknown order type: {type(order)}")
 
+    # === Simulation Control ===
+
+    async def pause(self) -> None:
+        """Pause server block production."""
+        await self._request("POST", "/v1/simulation/pause")
+
+    async def resume(self) -> None:
+        """Resume server block production."""
+        await self._request("POST", "/v1/simulation/resume")
+
     # === Blocks ===
 
     async def get_latest_block(self) -> Block:

@@ -7,7 +7,6 @@ Usage:
 
 import argparse
 import asyncio
-from bisect import bisect_left
 import json
 import logging
 import os
@@ -45,6 +44,8 @@ class SimulationConfig:
     texts_path: str = "iran/tmp/article_texts.json"
     api_key: str = ""
     model_name: str = "moonshotai/kimi-k2"
+    sim_start_hour: str = "10:00"  # HH:MM on the article date
+    sim_end_hour: str = "19:00"
 
 
 async def run_simulation(config: SimulationConfig) -> None:
@@ -79,9 +80,15 @@ async def run_simulation(config: SimulationConfig) -> None:
             print(f"Seed trade cleared in block {block.height}")
             break
 
-        # 5. Create clock
+        # 5. Create clock — use explicit start time, not first article
+        article_date = articles[0].timestamp.date()
+        h, m = (int(x) for x in config.sim_start_hour.split(":"))
+        sim_start = datetime(article_date.year, article_date.month, article_date.day, h, m)
+        h_end, m_end = (int(x) for x in config.sim_end_hour.split(":"))
+        sim_end = datetime(article_date.year, article_date.month, article_date.day, h_end, m_end)
+
         clock = SimulatedClock(
-            sim_start=articles[0].timestamp,
+            sim_start=sim_start,
             compression_ratio=config.compression_ratio,
         )
 
@@ -126,18 +133,17 @@ async def run_simulation(config: SimulationConfig) -> None:
         all_bots = [mm, *noise_bots, trader]
         tasks = [asyncio.create_task(bot.run()) for bot in all_bots]
 
-        sim_span = articles[-1].timestamp - articles[0].timestamp
+        sim_span = sim_end - sim_start
         real_span = sim_span.total_seconds() / config.compression_ratio
         print(
             f"\nSimulation started: {len(all_bots)} bots"
-            f"\n  Sim time: {articles[0].timestamp:%H:%M} → {articles[-1].timestamp:%H:%M}"
-            f" ({sim_span}) + 30min buffer"
-            f"\n  Real time: ~{real_span + 30*60/config.compression_ratio:.0f}s"
+            f"\n  Sim time: {sim_start:%H:%M} → {sim_end:%H:%M}"
+            f" ({sim_span})"
+            f"\n  Real time: ~{real_span:.0f}s"
             f" (compression={config.compression_ratio}x)"
         )
 
         # 10. Wait for sim end
-        sim_end = articles[-1].timestamp + timedelta(minutes=30)
         await clock.sleep_until(sim_end)
 
         # 11. Stop all bots
@@ -167,6 +173,7 @@ def build_block_records(
     all_bots, mm, noise_bots, trader, price_history: list[PricePoint],
     trader_fills: list | None = None,
     mm_fills: list | None = None,
+    noise_fills: list | None = None,
     sim_start: datetime | None = None,
     compression_ratio: float = 300.0,
 ) -> list[dict]:
@@ -182,16 +189,11 @@ def build_block_records(
     # 2. Index price history by block height
     price_by_height = {pt.height: pt for pt in price_history}
 
-    # 3. Index trader LLM data by order_block (when orders actually reach the server)
-    #    Also build a trigger→order_block mapping for reindexing block_log.
-    llm_by_block: dict[int, dict] = {}
-    trigger_to_order_block: dict[int, int] = {}
+    # 3. Index trader LLM data by block height (multiple LLM calls can land on same block)
+    llm_by_block: dict[int, list[dict]] = {}
     for rec in trader.trade_log:
         if rec.block_height >= 0:
-            order_block = rec.block_height + round(rec.llm_duration_s)
-            trigger_to_order_block[rec.block_height] = order_block
-            all_heights.add(order_block)  # ensure order block has a record
-            llm_by_block[order_block] = {
+            llm_by_block.setdefault(rec.block_height, []).append({
                 "article_title": rec.article.title,
                 "article_source": rec.article.source,
                 "probability": rec.probability,
@@ -199,9 +201,7 @@ def build_block_records(
                 "motivation": rec.motivation,
                 "llm_response": rec.llm_response,
                 "llm_duration_s": rec.llm_duration_s,
-                "trigger_block": rec.block_height,
-                "order_block_height": order_block,
-            }
+            })
 
     # 4. Index fills by block height (trader + MM)
     def _index_fills(raw_fills: list | None, source: str) -> dict[int, list[dict]]:
@@ -223,47 +223,32 @@ def build_block_records(
 
     trader_fills_by_height = _index_fills(trader_fills, "Trader")
     mm_fills_by_height = _index_fills(mm_fills, "MM")
+    noise_fills_by_height = _index_fills(noise_fills, "Noise")
 
-    # 5. Pre-index bot orders by block height
+    # 5. Pre-index bot orders by block height.
+    # Orders generated in on_block(N) go into the mempool and clear in block N+1,
+    # so we shift by +1 to align orders with the block where they actually execute.
     mm_by_height: dict[int, list] = {}
     for h, orders in mm.block_log:
-        mm_by_height.setdefault(h, []).extend(orders)
+        mm_by_height.setdefault(h + 1, []).extend(orders)
 
     noise_by_height: dict[int, list] = {}
     for nb in noise_bots:
         for h, orders in nb.block_log:
-            noise_by_height.setdefault(h, []).extend(orders)
+            noise_by_height.setdefault(h + 1, []).extend(orders)
 
-    # Reindex trader orders by order_block (estimated server arrival)
-    # block_log records at trigger block; shift to order_block using LLM duration.
     trader_by_height: dict[int, list] = {}
     for h, orders in trader.block_log:
-        dest = trigger_to_order_block.get(h, h)
-        trader_by_height.setdefault(dest, []).extend(orders)
+        trader_by_height.setdefault(h + 1, []).extend(orders)
 
-    # 5a. Compute sim_time from block height, accounting for clock pauses during LLM calls.
-    # The SimulatedClock pauses while the LLM is thinking, but the server keeps producing
-    # blocks. So blocks during an LLM call don't advance sim_time. We subtract those
-    # "pause blocks" to get an accurate sim_time mapping.
+    # 5a. Compute sim_time from block height (simple linear mapping since server
+    # pauses during LLM calls, so every block = one tick of simulated time).
     sim_time_by_height: dict[int, str] = {}
     if sim_start and all_heights:
         first_height = min(all_heights)
-
-        # Build set of block heights where the sim clock was paused (during LLM calls)
-        pause_blocks: set[int] = set()
-        for rec in trader.trade_log:
-            if rec.block_height >= 0 and rec.llm_duration_s > 0:
-                pause_len = round(rec.llm_duration_s)
-                for b in range(rec.block_height, rec.block_height + pause_len):
-                    pause_blocks.add(b)
-
-        # Pre-compute cumulative pause count for efficient lookup
-        sorted_pauses = sorted(pause_blocks)
-
         for h in all_heights:
-            paused_before = bisect_left(sorted_pauses, h)
-            effective_offset = (h - first_height) - paused_before
-            st = sim_start + timedelta(seconds=effective_offset * compression_ratio)
+            offset = (h - first_height) * compression_ratio
+            st = sim_start + timedelta(seconds=offset)
             sim_time_by_height[h] = st.isoformat()
 
     # 5b. Build records
@@ -286,7 +271,8 @@ def build_block_records(
             "trader_orders": [_describe_order(o) for o in trader_orders],
             "trader_fills": trader_fills_by_height.get(height, []),
             "mm_fills": mm_fills_by_height.get(height, []),
-            "trader_llm": llm_by_block.get(height),
+            "noise_fills": noise_fills_by_height.get(height, []),
+            "trader_llm": llm_by_block.get(height, []),
         }
         records.append(rec)
 
@@ -381,14 +367,22 @@ async def save_and_print_results(client, config, all_bots, trader, market_id):
     # Fetch fills for fill tracking
     trader_fills = await _fetch_all_fills(client, trader.account_id)
     mm_fills = await _fetch_all_fills(client, mm.account_id)
+    noise_fills = []
+    for nb in noise_bots:
+        noise_fills.extend(await _fetch_all_fills(client, nb.account_id))
 
     # Build per-block records
     price_history = await client.get_price_history(market_id)
-    sim_start = trader.articles[0].timestamp if trader.articles else None
+    article_date = trader.articles[0].timestamp.date() if trader.articles else None
+    if article_date:
+        h, m = (int(x) for x in config.sim_start_hour.split(":"))
+        rec_sim_start = datetime(article_date.year, article_date.month, article_date.day, h, m)
+    else:
+        rec_sim_start = None
     block_records = build_block_records(
         all_bots, mm, noise_bots, trader, price_history, trader_fills,
-        mm_fills=mm_fills,
-        sim_start=sim_start, compression_ratio=config.compression_ratio,
+        mm_fills=mm_fills, noise_fills=noise_fills,
+        sim_start=rec_sim_start, compression_ratio=config.compression_ratio,
     )
 
     # Block summary
@@ -399,8 +393,7 @@ async def save_and_print_results(client, config, all_bots, trader, market_id):
         noise_n = rec["noise_order_count"]
         trader_n = len(rec["trader_orders"])
         line = f"  Block {rec['height']:>3}: {price_str}  MM:{mm_n}  Noise:{noise_n}  Trader:{trader_n}"
-        if rec["trader_llm"]:
-            llm = rec["trader_llm"]
+        for llm in rec["trader_llm"]:
             line += f"  ← LLM P={llm['probability']:.2f} {llm['conviction']}"
         print(line)
 
@@ -416,10 +409,7 @@ async def save_and_print_results(client, config, all_bots, trader, market_id):
             "config": asdict(config),
         },
         "blocks": block_records,
-        "trade_log": [
-            {**rec.to_dict(), "order_block_height": rec.block_height + round(rec.llm_duration_s)}
-            for rec in trader.trade_log
-        ],
+        "trade_log": [rec.to_dict() for rec in trader.trade_log],
         "leaderboard": leaderboard,
     }
     run_path.write_text(json.dumps(run_data, indent=2))
@@ -441,6 +431,8 @@ def main():
     parser.add_argument("--api-key", default="")
     parser.add_argument("--phase1", default="iran/tmp/jan2_phase1_results.json")
     parser.add_argument("--texts", default="iran/tmp/article_texts.json")
+    parser.add_argument("--sim-start", default="10:00", help="Sim start HH:MM (default: 10:00)")
+    parser.add_argument("--sim-end", default="19:00", help="Sim end HH:MM (default: 19:00)")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -461,6 +453,8 @@ def main():
         api_key=args.api_key,
         phase1_path=args.phase1,
         texts_path=args.texts,
+        sim_start_hour=args.sim_start,
+        sim_end_hour=args.sim_end,
     )
 
     print("Iran Strike Market Simulation")
