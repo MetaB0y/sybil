@@ -17,6 +17,10 @@ version = "0.9"
 features = ["bundled"]
 optional = true
 
+[dependencies.highs]
+version = "1"
+optional = true
+
 [dev-dependencies]
 proptest = "1.9"
 divan = "0.1"
@@ -29,4 +33,5 @@ harness = false
 [features]
 default = []
 milp = ["dep:russcip"]  # MIQCQP solver via SCIP
+lp = ["dep:highs"]      # LP solver via HiGHS
 viz = []   # Enable detailed phase snapshots and orderbook data

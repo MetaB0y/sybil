@@ -127,6 +127,7 @@ fn print_help() {
     println!("                         negrisk");
     println!("                         dual");
     println!("                         milp");
+    println!("                         lp (LP + entropy smoothing, requires --features lp)");
     println!("                         all (compare all)");
     println!("  --milp-timeout <S>   MILP time limit in seconds");
     println!("  --mm-mode <M>        MM budget constraint mode:");
@@ -1150,6 +1151,8 @@ enum SolverChoice {
     Dual,
     Smoothed,
     Joint,
+    #[cfg(feature = "lp")]
+    Lp,
     All,
 }
 
@@ -1161,6 +1164,8 @@ fn parse_solver_choice(args: &[String]) -> SolverChoice {
         Some("dual") => SolverChoice::Dual,
         Some("smoothed") => SolverChoice::Smoothed,
         Some("joint") => SolverChoice::Joint,
+        #[cfg(feature = "lp")]
+        Some("lp") => SolverChoice::Lp,
         Some("all") => SolverChoice::All,
         _ => SolverChoice::Pipeline, // Default to pipeline
     }
@@ -1257,13 +1262,18 @@ struct GapAnalysisData {
 /// Expand a solver choice into individual choices for comparison.
 fn expand_solver_choices(choice: &SolverChoice) -> Vec<SolverChoice> {
     match choice {
-        SolverChoice::All => vec![
-            SolverChoice::Milp,
-            SolverChoice::Negrisk,
-            SolverChoice::Dual,
-            SolverChoice::Smoothed,
-            SolverChoice::Joint,
-        ],
+        SolverChoice::All => {
+            let mut choices = vec![
+                SolverChoice::Milp,
+                SolverChoice::Negrisk,
+                SolverChoice::Dual,
+                SolverChoice::Smoothed,
+                SolverChoice::Joint,
+            ];
+            #[cfg(feature = "lp")]
+            choices.push(SolverChoice::Lp);
+            choices
+        }
         other => vec![other.clone()],
     }
 }
@@ -1283,6 +1293,8 @@ fn solver_display_name(choice: &SolverChoice, milp_timeout: Option<f64>) -> Stri
         SolverChoice::Dual => "Dual Decomposition".to_string(),
         SolverChoice::Smoothed => "Smoothed Gradient".to_string(),
         SolverChoice::Joint => "Joint Group".to_string(),
+        #[cfg(feature = "lp")]
+        SolverChoice::Lp => "LP".to_string(),
         SolverChoice::All => "All".to_string(),
     }
 }
@@ -1309,6 +1321,13 @@ fn run_solver_with_witness(
         }
         SolverChoice::Joint => {
             let solver = matching_solver::JointGroupSolver::new();
+            let pipeline_result = solver.solve(problem);
+            let witness = witness_from_pipeline(problem, &pipeline_result);
+            (pipeline_result.result, witness)
+        }
+        #[cfg(feature = "lp")]
+        SolverChoice::Lp => {
+            let solver = matching_solver::LpSolver::new();
             let pipeline_result = solver.solve(problem);
             let witness = witness_from_pipeline(problem, &pipeline_result);
             (pipeline_result.result, witness)

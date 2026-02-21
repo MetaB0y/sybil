@@ -40,9 +40,9 @@ sim-large:
 sim-extreme:
     cargo run --bin matching-sim --release -- --preset extreme -v
 
-# Compare all solvers on medium scenario
-compare:
-    cargo run --bin matching-sim --release -- --preset medium --solver all
+# Compare all solvers on a scenario
+compare preset="medium":
+    cargo run --bin matching-sim --release --features lp -- --preset {{preset}} --solver all
 
 # MILP-killer test (forces MILP timeout)
 milp-killer:
@@ -51,6 +51,14 @@ milp-killer:
 # Run with specific preset and solver
 sim preset="medium" solver="pipeline" verbose="-v":
     cargo run --bin matching-sim --release -- --preset {{preset}} --solver {{solver}} {{verbose}}
+
+# Run with LP solver
+sim-lp preset="quick":
+    cargo run --bin matching-sim --release --features lp -- --preset {{preset}} --solver lp -v
+
+# Compare LP against all solvers
+compare-lp preset="medium":
+    cargo run --bin matching-sim --release --features lp -- --preset {{preset}} --solver all -v
 
 # Run with negrisk arbitrage solver
 sim-negrisk preset="medium":

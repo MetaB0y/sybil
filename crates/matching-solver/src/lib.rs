@@ -18,6 +18,7 @@
 
 // Internal modules
 pub mod benchmark;
+pub mod coefficients;
 pub mod dual_master;
 pub mod fill_extraction;
 pub mod local_solver;
@@ -33,6 +34,9 @@ pub mod viz;
 
 #[cfg(feature = "milp")]
 pub mod milp;
+
+#[cfg(feature = "lp")]
+pub mod lp_solver;
 
 // === Public API ===
 
@@ -75,6 +79,9 @@ pub use verifier::{verify, verify_strict, VerificationResult, Verifier, Violatio
 
 #[cfg(feature = "milp")]
 pub use milp::{MilpConfig, MilpResult, MilpSolver, MmBudgetMode, SolveStatus};
+
+#[cfg(feature = "lp")]
+pub use lp_solver::{LpConfig, LpSolver};
 
 use serde::Serialize;
 
