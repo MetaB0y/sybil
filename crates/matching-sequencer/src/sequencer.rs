@@ -4,7 +4,7 @@ use std::sync::Arc;
 use matching_engine::{
     Fill, MarketGroup, MarketId, MarketSet, MmConstraint, Nanos, Order, Problem,
 };
-use matching_solver::{Pipeline, PipelineResult};
+use matching_solver::{LpSolver, PipelineResult};
 use tracing::debug;
 use sybil_oracle::{MarketStatus, Oracle, ResolutionAction, ResolutionRecord};
 use sybil_verifier::{
@@ -559,8 +559,8 @@ impl BlockSequencer {
         problem.market_groups = self.market_groups.clone();
 
         // Solve
-        let pipeline = Pipeline::current();
-        let pipeline_result = pipeline.solve(&problem);
+        let solver = LpSolver::new();
+        let pipeline_result = solver.solve(&problem);
 
         // Extract clearing prices: use fresh prices from solver where trades happened,
         // fall back to last known prices for markets with no activity this block.
