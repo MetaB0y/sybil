@@ -111,9 +111,9 @@ The pipeline runs in phases, orchestrated by `pipeline.rs`:
 
 The default pipeline is `Pipeline::with_dual_decomposition()` which uses `DualMaster` for Lagrangian relaxation of price consistency + MM budgets.
 
-**Experimental solvers** (exported but not in default pipeline):
-- `smoothed_solver.rs`: Entropy-smoothed gradient descent + annealing approach
-- `joint_solver.rs`: Joint group optimization via parametric search on Σp=$1 simplex
+**Other solvers** (exported but not in default pipeline):
+- `lp_solver.rs`: LP via HiGHS + iterative MM budget shading. Feature-gated: `lp`. Best welfare across all presets.
+- `joint_solver.rs`: Joint group optimization via parametric search on Σp=$1 simplex (volume-oriented)
 
 ### Key Design Decisions
 

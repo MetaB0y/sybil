@@ -1149,7 +1149,6 @@ enum SolverChoice {
     Pipeline,
     Negrisk,
     Dual,
-    Smoothed,
     Joint,
     #[cfg(feature = "lp")]
     Lp,
@@ -1162,7 +1161,6 @@ fn parse_solver_choice(args: &[String]) -> SolverChoice {
         Some("pipeline") => SolverChoice::Pipeline,
         Some("negrisk") => SolverChoice::Negrisk,
         Some("dual") => SolverChoice::Dual,
-        Some("smoothed") => SolverChoice::Smoothed,
         Some("joint") => SolverChoice::Joint,
         #[cfg(feature = "lp")]
         Some("lp") => SolverChoice::Lp,
@@ -1267,7 +1265,6 @@ fn expand_solver_choices(choice: &SolverChoice) -> Vec<SolverChoice> {
                 SolverChoice::Milp,
                 SolverChoice::Negrisk,
                 SolverChoice::Dual,
-                SolverChoice::Smoothed,
                 SolverChoice::Joint,
             ];
             #[cfg(feature = "lp")]
@@ -1291,7 +1288,6 @@ fn solver_display_name(choice: &SolverChoice, milp_timeout: Option<f64>) -> Stri
         SolverChoice::Pipeline => "Pipeline".to_string(),
         SolverChoice::Negrisk => "Negrisk".to_string(),
         SolverChoice::Dual => "Dual Decomposition".to_string(),
-        SolverChoice::Smoothed => "Smoothed Gradient".to_string(),
         SolverChoice::Joint => "Joint Group".to_string(),
         #[cfg(feature = "lp")]
         SolverChoice::Lp => "LP".to_string(),
@@ -1312,12 +1308,6 @@ fn run_solver_with_witness(
             let milp_result = milp.solve_with_status(problem);
             let witness = witness_from_milp(problem, &milp_result);
             (milp_result.result, witness)
-        }
-        SolverChoice::Smoothed => {
-            let solver = matching_solver::SmoothedSolver::new();
-            let pipeline_result = solver.solve(problem);
-            let witness = witness_from_pipeline(problem, &pipeline_result);
-            (pipeline_result.result, witness)
         }
         SolverChoice::Joint => {
             let solver = matching_solver::JointGroupSolver::new();

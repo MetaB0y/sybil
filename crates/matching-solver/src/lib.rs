@@ -28,7 +28,6 @@ pub(crate) mod specialized;
 pub mod traits;
 pub mod verifier;
 pub mod group_minting;
-pub mod smoothed_solver;
 pub mod joint_solver;
 pub mod viz;
 
@@ -55,9 +54,6 @@ pub use specialized::MultiMarketSolver;
 
 // Dual decomposition
 pub use dual_master::{DualConfig, DualMaster, DualResult, DualState, StepDecay};
-
-// Smoothed gradient solver
-pub use smoothed_solver::SmoothedSolver;
 
 // Joint group solver
 pub use joint_solver::JointGroupSolver;
