@@ -339,47 +339,6 @@ fn test_fills_respect_limits() {
     }
 }
 
-// ============================================================================
-// Comparison Tests
-// ============================================================================
-
-/// Compare dual decomposition pipeline vs. negrisk pipeline.
-/// Both should produce valid results; dual decomposition should handle
-/// price consistency without synthetic arbitrage orders.
-#[test]
-fn test_dual_vs_negrisk_comparison() {
-    let problem = election_3way();
-
-    // Dual decomposition
-    let dual_pipeline = Pipeline::with_dual_decomposition();
-    let dual_result = dual_pipeline.solve(&problem);
-
-    // Negrisk (existing)
-    let negrisk_pipeline = Pipeline::with_negrisk();
-    let negrisk_result = negrisk_pipeline.solve(&problem);
-
-    // Both should produce fills
-    assert!(
-        dual_result.result.fills.len() > 0,
-        "Dual should produce fills"
-    );
-    assert!(
-        negrisk_result.result.fills.len() > 0,
-        "Negrisk should produce fills"
-    );
-
-    // Both should have non-negative welfare
-    assert!(
-        dual_result.result.total_welfare >= 0,
-        "Dual welfare should be non-negative: {}",
-        dual_result.result.total_welfare
-    );
-    assert!(
-        negrisk_result.result.total_welfare >= 0,
-        "Negrisk welfare should be non-negative: {}",
-        negrisk_result.result.total_welfare
-    );
-}
 
 /// Test that dual decomposition converges with a simple 2-outcome scenario.
 #[test]

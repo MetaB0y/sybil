@@ -517,8 +517,8 @@ impl MilpSolver {
         // every market costs only $1 total (guaranteed $1 payoff since exactly
         // one resolves YES). This is N times cheaper than per-market minting.
         //
-        // Positive group_mint = negrisk arbitrage (buy YES in all markets)
-        // Negative group_mint = posrisk arbitrage (sell YES in all markets)
+        // Positive group_mint = arbitrage (buy YES in all markets)
+        // Negative group_mint = reverse arbitrage (sell YES in all markets)
         //
         // Objective: -NANOS_PER_DOLLAR per unit (same $1 cost as a single mint)
         let market_to_group: HashMap<MarketId, usize> = problem
@@ -595,7 +595,7 @@ impl MilpSolver {
         //   NO:  Σ_i c_i_m_NO  * q_i = mint_m
         //
         // If market m belongs to group g, group_mint_g contributes +1 YES
-        // share per unit to market m. This models negrisk/posrisk arbitrage:
+        // share per unit to market m. This models group-level arbitrage:
         // minting 1 YES in every market of a mutually exclusive group costs
         // only $1 total (vs $N for N separate per-market mints).
 
@@ -1395,7 +1395,7 @@ mod tests {
 
     #[test]
     fn test_milp_group_minting() {
-        // Test that group-level minting enables negrisk-style arbitrage.
+        // Test that group-level minting enables cross-market arbitrage.
         //
         // Setup: 3 mutually exclusive markets (group), YES buyers in each.
         // Without group minting: can't fill because per-market minting creates
@@ -1414,7 +1414,7 @@ mod tests {
         group.add_market(m2);
         problem.add_market_group(group);
 
-        // YES buyers at prices that sum to > $1 (profitable negrisk)
+        // YES buyers at prices that sum to > $1 (profitable arbitrage)
         // A at 40c, B at 35c, C at 30c → sum = $1.05
         problem
             .orders

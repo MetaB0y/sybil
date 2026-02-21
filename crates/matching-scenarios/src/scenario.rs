@@ -53,6 +53,9 @@ pub struct ScenarioConfig {
     pub mm_budget_max: u64,
     /// MM spread in basis points (lower = tighter = more aggressive)
     pub mm_spread_bps: u32,
+    /// Capacity multiplier: total notional of MM orders = budget × this.
+    /// Higher = more orders relative to budget = tighter budget constraint.
+    pub mm_capacity_multiplier: u64,
 }
 
 impl Default for ScenarioConfig {
@@ -73,6 +76,7 @@ impl Default for ScenarioConfig {
             mm_budget_min: 2_500,
             mm_budget_max: 12_500,
             mm_spread_bps: 50, // 0.5% spread
+            mm_capacity_multiplier: 10,
         }
     }
 }
@@ -729,8 +733,8 @@ fn generate_mm_constraints(
 
         // MMs post on both sides of each market but only one side fills per market
         // (whichever side the clearing price moves to). Total notional can exceed
-        // budget since most orders won't fill. Use 3x budget as capacity.
-        let total_capacity = budget_dollars * 3;
+        // budget since most orders won't fill.
+        let total_capacity = budget_dollars * config.mm_capacity_multiplier;
         let qty_per_market = (total_capacity / markets_to_cover as u64).max(100);
 
         let half_spread = config.mm_spread_bps as f64 / 10_000.0 / 2.0;

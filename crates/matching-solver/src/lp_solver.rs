@@ -23,26 +23,19 @@ use matching_engine::{Fill, MarketId, MmSide, Nanos, Order, Problem, Qty, NANOS_
 use crate::coefficients::{order_sign, precompute_coefficients, OrderCoefficients};
 use crate::pipeline::{PipelineResult, PipelineTimings};
 use crate::traits::PriceDiscoveryResult;
-use crate::{MatchingResult, Pipeline};
+use crate::MatchingResult;
 
 /// Configuration for the LP solver.
 #[derive(Clone, Debug)]
 pub struct LpConfig {
-    /// Max iterations for MM budget shading (0 = LP only, no MM handling).
+    /// Max SLP iterations for MM budget linearization (0 = LP only, no MM handling).
     pub max_mm_iterations: usize,
-    /// Factor by which to reduce over-budget MM order limits each iteration.
-    /// 0.5 means halve the limit each round.
-    pub shading_factor: f64,
-    /// Max iterations for re-expansion pass after shading converges.
-    pub max_expand_iterations: usize,
 }
 
 impl Default for LpConfig {
     fn default() -> Self {
         Self {
-            max_mm_iterations: 10,
-            shading_factor: 0.5,
-            max_expand_iterations: 5,
+            max_mm_iterations: 1,
         }
     }
 }
@@ -104,101 +97,102 @@ impl LpSolver {
             })
             .collect();
 
-        // Current max_fill limits (may be shaded for MM budget iteration)
-        let original_limits: Vec<Qty> = problem.orders.iter().map(|o| o.max_fill).collect();
-        let mut effective_limits = original_limits.clone();
+        // Order limits (unchanged — budget is enforced via LP rows, not limit shading)
+        let limits: Vec<Qty> = problem.orders.iter().map(|o| o.max_fill).collect();
 
-        // Iterative LP + MM budget shading
+        // Sequential LP: solve without budgets, then add linearized budget
+        // constraints and re-solve until budgets are satisfied.
+        let mut budget_rows: Vec<(Vec<(usize, f64)>, f64)> = Vec::new();
         let mut best_solution: Option<LpSolution> = None;
 
-        // Phase 1: Shade down until budgets are satisfied
-        for mm_iter in 0..=self.config.max_mm_iterations {
+        for slp_iter in 0..=self.config.max_mm_iterations {
             let solution = self.solve_lp(
                 &problem.orders,
                 &coeffs,
                 &markets,
                 &market_to_group,
                 problem.market_groups.len(),
-                &effective_limits,
+                &limits,
+                &budget_rows,
             );
 
-            let Some(ref sol) = solution else {
+            let Some(sol) = solution else {
                 break;
             };
-
-            // Check MM budget violations
-            if problem.mm_constraints.is_empty() || mm_iter == self.config.max_mm_iterations {
-                best_solution = solution;
+            // No MM constraints or final iteration → keep solution and stop
+            if problem.mm_constraints.is_empty() || slp_iter == self.config.max_mm_iterations {
+                best_solution = Some(sol);
                 break;
             }
 
-            let prices = normalized_yes_prices(sol, &markets);
-            let violations = check_mm_budgets(
-                sol,
+            // Check MM budget violations at current prices
+            let prices = normalized_yes_prices(&sol, &markets);
+            let violated = has_mm_budget_violations(
+                &sol,
                 &problem.orders,
                 &problem.mm_constraints,
                 &mm_order_info,
                 &prices,
             );
 
-            if violations.is_empty() {
-                best_solution = solution;
+            if !violated {
+                best_solution = Some(sol);
                 break;
             }
 
-            // Shade limits for over-budget MM orders
-            shade_mm_limits(
-                &violations,
+            // Linearize budget constraints at current prices and re-solve.
+            // For each MM: Σ capital_per_unit_i(p) × q_i ≤ Budget_k
+            budget_rows = linearize_mm_budgets(
                 &problem.orders,
                 &problem.mm_constraints,
                 &mm_order_info,
-                &mut effective_limits,
-                self.config.shading_factor,
                 &prices,
             );
 
-            best_solution = solution;
-        }
-
-        // Phase 2: Re-expand shaded limits to recover MM liquidity.
-        // After shading converged, some MM orders may have been over-reduced.
-        // Try restoring them toward original limits (highest welfare/capital first).
-        if best_solution.is_some()
-            && !problem.mm_constraints.is_empty()
-            && self.config.max_expand_iterations > 0
-        {
-            expand_mm_limits(
-                &self,
-                &problem.orders,
-                &coeffs,
-                &markets,
-                &market_to_group,
-                problem.market_groups.len(),
-                &problem.mm_constraints,
-                &mm_order_info,
-                &original_limits,
-                &mut effective_limits,
-                &mut best_solution,
-            );
+            best_solution = Some(sol);
         }
 
         let Some(solution) = best_solution else {
             return PipelineResult::empty();
         };
 
-        // Extract fills and prices from LP solution
+        // The LP guarantees UCP via duality (complementary slackness):
+        //   - filled orders have non-negative surplus (fill_price ≤ limit_price)
+        //   - prices satisfy p_YES + p_NO = $1 (from mint variable stationarity)
+        //   - group prices satisfy Σp ≤ $1 (from gmint variables)
+        // No need for enforce_ucp — it was designed for the old decomposition pipeline.
         let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
-        let (result, prices, arb_orders) = extract_result(
+        let (mut result, prices) = extract_result(
             &solution,
             &problem.orders,
             &coeffs,
             &markets,
-            &market_to_group,
-            problem.market_groups.len(),
-            &order_map,
         );
 
-        // Build PipelineResult with prices for enforce_ucp
+        // Trim any tiny MM budget overflows from integer rounding.
+        if !problem.mm_constraints.is_empty() {
+            trim_mm_budget_overflows(
+                &mut result,
+                &problem.mm_constraints,
+                &mm_order_info,
+            );
+        }
+
+        // Create arb orders AFTER all post-processing (including MM trim)
+        // so position balance accounts for the final fill set.
+        let max_order_id = problem.orders.iter().map(|o| o.id).max().unwrap_or(0);
+        let arb_orders = create_position_arbs(&mut result, &order_map, &prices, max_order_id);
+
+        // Recompute welfare from scratch — incremental tracking is error-prone
+        // after trim + arb modifications. Arb fills contribute 0 welfare
+        // (limit == price), so minting_cost = 0 is consistent.
+        let mut order_map_with_arbs = order_map;
+        for arb in &arb_orders {
+            order_map_with_arbs.insert(arb.id, arb);
+        }
+        recompute_welfare(&mut result, &order_map_with_arbs);
+
+        // Build PipelineResult
         let mut pipeline_result = PipelineResult::empty();
         pipeline_result.result = result;
         pipeline_result.price_discovery = Some(PriceDiscoveryResult {
@@ -212,23 +206,6 @@ impl LpSolver {
             price_discovery_secs: start.elapsed().as_secs_f64(),
             ..Default::default()
         };
-
-        // Build order map including arb orders for enforce_ucp
-        let mut order_map_with_arbs = order_map;
-        for arb in &arb_orders {
-            order_map_with_arbs.insert(arb.id, arb);
-        }
-
-        // Enforce UCP: reprice at final clearing prices, trim position imbalance
-        Pipeline::enforce_ucp(&mut pipeline_result, &order_map_with_arbs);
-
-        // After enforce_ucp, minting cost is absorbed into the arb order fills
-        // (arb orders have limit_price == clearing_price, so zero welfare contribution).
-        // Reset minting_cost to 0 so the verifier's welfare check passes:
-        //   total_welfare == fill_welfare - minting_cost
-        pipeline_result.result.minting_cost = 0;
-
-        // Store arb orders for witness/verification
         pipeline_result.group_minting_arb_orders = arb_orders;
 
         // Gate: if total welfare is negative, return empty
@@ -242,6 +219,8 @@ impl LpSolver {
     /// Build and solve the core LP using HiGHS.
     ///
     /// Returns the raw LP solution (primal + dual values) or None if infeasible.
+    /// `budget_rows` contains linearized MM budget constraints: each entry is
+    /// (terms: [(order_index, capital_per_unit)], budget_nanos_f64).
     fn solve_lp(
         &self,
         orders: &[Order],
@@ -250,6 +229,7 @@ impl LpSolver {
         market_to_group: &HashMap<MarketId, usize>,
         num_groups: usize,
         effective_limits: &[Qty],
+        budget_rows: &[(Vec<(usize, f64)>, f64)],
     ) -> Option<LpSolution> {
         let n = orders.len();
         let nanos_f = NANOS_PER_DOLLAR as f64;
@@ -342,6 +322,20 @@ impl LpSolver {
             pb.add_row(0.0..=0.0, &no_terms);
             no_row_indices.insert(market, row_count);
             row_count += 1;
+        }
+
+        // ================================================================
+        // Linearized MM budget constraints
+        // ================================================================
+        // Σ capital_per_unit_i × q_i ≤ Budget_k
+        // where capital_per_unit_i is computed at previous iteration's prices.
+
+        for (terms, budget) in budget_rows {
+            let row_terms: Vec<(highs::Col, f64)> = terms
+                .iter()
+                .map(|&(order_idx, coeff)| (q_cols[order_idx], coeff))
+                .collect();
+            pb.add_row(..=*budget, &row_terms);
         }
 
         // ================================================================
@@ -470,53 +464,37 @@ fn collect_markets(orders: &[Order]) -> Vec<MarketId> {
     markets
 }
 
-/// Extract fills, prices, and arbitrage orders from the LP solution.
+/// Extract fills and clearing prices from the LP solution.
 ///
-/// Rounds continuous q_i to integer fills, derives clearing prices from duals,
-/// and creates synthetic arb orders to restore position balance (from minting).
+/// Rounds continuous q_i to integer fills, derives clearing prices from duals.
+/// Does NOT create arb orders — those are added after all post-processing
+/// (MM budget trim) so position balance accounts for final fills.
 fn extract_result(
     solution: &LpSolution,
     orders: &[Order],
     coeffs: &[OrderCoefficients],
     markets: &[MarketId],
-    _market_to_group: &HashMap<MarketId, usize>,
-    _num_groups: usize,
-    order_map: &HashMap<u64, &Order>,
-) -> (MatchingResult, HashMap<MarketId, Vec<Nanos>>, Vec<Order>) {
+) -> (MatchingResult, HashMap<MarketId, Vec<Nanos>>) {
     let nanos_f = NANOS_PER_DOLLAR as f64;
     let mut result = MatchingResult::new();
 
     // Derive clearing prices from dual variables.
-    //
-    // The dual of an equality constraint in a maximization LP gives the
-    // marginal value of relaxing the RHS by one unit. For balance constraints
-    // of the form "demand - supply = 0", the dual represents the price of
-    // that commodity (YES or NO shares).
-    //
-    // We take the absolute value and clamp to [0, NANOS_PER_DOLLAR].
     let mut clearing_prices: HashMap<MarketId, Vec<Nanos>> = HashMap::new();
 
     for &market in markets {
         let dual_y = solution.dual_yes.get(&market).copied().unwrap_or(0.0);
         let dual_n = solution.dual_no.get(&market).copied().unwrap_or(0.0);
 
-        // The dual values represent marginal value of shares.
-        // For a maximization problem with equality constraints,
-        // the dual should be positive for valuable resources.
         let p_yes = dual_y.abs().round().clamp(0.0, nanos_f) as Nanos;
         let p_no = dual_n.abs().round().clamp(0.0, nanos_f) as Nanos;
 
-        // If minting is active (mint > 0), duals should satisfy p_YES + p_NO = $1
-        // due to complementary slackness. We normalize to ensure this.
         let sum = p_yes + p_no;
         let (final_yes, final_no) = if sum > 0 {
-            // Normalize so YES + NO = $1
             let scale = nanos_f / sum as f64;
             let ny = (p_yes as f64 * scale).round() as Nanos;
             let nn = NANOS_PER_DOLLAR.saturating_sub(ny);
             (ny, nn)
         } else {
-            // Fallback: 50/50
             (NANOS_PER_DOLLAR / 2, NANOS_PER_DOLLAR / 2)
         };
 
@@ -558,15 +536,24 @@ fn extract_result(
         result.add_fill(fill, order);
     }
 
-    // Create synthetic arb orders to restore position balance from minting.
-    //
-    // The LP uses continuous mint/gmint variables for minting, but these aren't
-    // fills. Compute per-market position imbalance and create arb orders to cancel.
+    // Welfare is recomputed from scratch after all post-processing (trim + arbs).
+    (result, clearing_prices)
+}
+
+/// Create synthetic arb orders to restore position balance.
+///
+/// Computes per-market net position from all fills, then creates arb orders
+/// (and fills) to zero out any imbalance from minting or integer rounding.
+fn create_position_arbs(
+    result: &mut MatchingResult,
+    order_map: &HashMap<u64, &Order>,
+    clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
+    max_order_id: u64,
+) -> Vec<Order> {
     let mut arb_orders = Vec::new();
-    let max_order_id = orders.iter().map(|o| o.id).max().unwrap_or(0);
     let mut next_arb_id = max_order_id + 3_000_000_000;
 
-    // Compute net position using marginal payoffs (same approach as MILP)
+    // Compute net position per market from all current fills
     let mut net_position: HashMap<MarketId, i64> = HashMap::new();
     for fill in &result.fills {
         if fill.fill_qty == 0 {
@@ -580,7 +567,6 @@ fn extract_result(
         }
     }
 
-    // Create arb fills to cancel each market's imbalance
     for (&market, &net) in &net_position {
         if net == 0 {
             continue;
@@ -596,12 +582,10 @@ fn extract_result(
         order.num_markets = 1;
         order.num_states = 2;
         if net > 0 {
-            // Excess YES demand → sell YES
-            order.payoffs[0] = -1;
+            order.payoffs[0] = -1; // Sell YES to offset excess demand
             order.payoffs[1] = 0;
         } else {
-            // Excess NO demand → buy YES
-            order.payoffs[0] = 1;
+            order.payoffs[0] = 1; // Buy YES to offset excess supply
             order.payoffs[1] = 0;
         }
         order.limit_price = yes_price;
@@ -613,42 +597,17 @@ fn extract_result(
         next_arb_id += 1;
     }
 
-    // Adjust welfare to account for minting cost (same logic as MILP):
-    // The LP objective already deducts minting cost, but fill-level welfare doesn't
-    // because arb orders have limit_price == fill_price (zero welfare).
-    // Clamp to non-negative: tiny negative values arise from LP float rounding.
-    let fill_welfare = result.total_welfare;
-    let objective_welfare = solution.objective.round() as i64;
-    let minting_cost = (fill_welfare - objective_welfare).max(0);
-    result.minting_cost = minting_cost;
-    result.total_welfare = fill_welfare - minting_cost;
-
-    (result, clearing_prices, arb_orders)
+    arb_orders
 }
 
-/// Per-constraint MM budget violation info.
-struct MmViolation {
-    /// Index into problem.mm_constraints
-    mm_idx: usize,
-    /// Capital used (exceeds budget)
-    capital_used: u64,
-    /// Budget
-    budget: u64,
-}
-
-/// Check which MM budget constraints are violated.
-///
-/// Uses normalized clearing prices (p_YES + p_NO = $1) for capital computation,
-/// consistent with how fills are priced in extract_result.
-fn check_mm_budgets(
+/// Check whether any MM budget constraint is violated at current LP solution prices.
+fn has_mm_budget_violations(
     solution: &LpSolution,
     orders: &[Order],
     mm_constraints: &[matching_engine::MmConstraint],
     mm_order_info: &HashMap<u64, (usize, MmSide)>,
     prices: &HashMap<MarketId, Nanos>,
-) -> Vec<MmViolation> {
-    let mut violations = Vec::new();
-
+) -> bool {
     for (mm_idx, mm) in mm_constraints.iter().enumerate() {
         let mut total_capital: u128 = 0;
 
@@ -669,182 +628,125 @@ fn check_mm_budgets(
                 continue;
             }
 
-            // Use normalized clearing price for this order's market
             let market = order.markets[0];
             let p_yes = prices.get(&market).copied().unwrap_or(NANOS_PER_DOLLAR / 2);
-
             let capital = side.capital_needed(p_yes, fill_qty);
             total_capital += capital as u128;
         }
 
         if total_capital > mm.max_capital as u128 {
-            violations.push(MmViolation {
-                mm_idx,
-                capital_used: total_capital.min(u64::MAX as u128) as u64,
-                budget: mm.max_capital,
-            });
+            return true;
         }
     }
 
-    violations
+    false
 }
 
-/// Shade (reduce) effective limits for MM orders in violated constraints.
+/// Build linearized MM budget constraints from current clearing prices.
 ///
-/// Strategy: for each violated MM constraint, sort its orders by welfare/capital
-/// ratio (descending), and progressively reduce limits for low-ratio orders.
-/// Uses actual clearing prices for capital computation (not hardcoded 50c).
-fn shade_mm_limits(
-    violations: &[MmViolation],
+/// For each MM constraint, produces a row: Σ capital_per_unit_i × q_i ≤ Budget.
+/// The capital_per_unit is computed at the given prices (fixed for this LP iteration).
+/// This linearizes the bilinear p×q constraint, enabling the LP to enforce budgets directly.
+fn linearize_mm_budgets(
     orders: &[Order],
-    _mm_constraints: &[matching_engine::MmConstraint],
+    mm_constraints: &[matching_engine::MmConstraint],
     mm_order_info: &HashMap<u64, (usize, MmSide)>,
-    effective_limits: &mut [Qty],
-    shading_factor: f64,
     prices: &HashMap<MarketId, Nanos>,
-) {
-    for violation in violations {
-        let overshoot = violation.capital_used as f64 / violation.budget as f64;
+) -> Vec<(Vec<(usize, f64)>, f64)> {
+    let mut rows = Vec::new();
 
-        // Compute welfare/capital ratio for each MM order using actual prices
-        let mut order_ratios: Vec<(usize, f64)> = Vec::new();
+    for (mm_idx, mm) in mm_constraints.iter().enumerate() {
+        let mut terms = Vec::new();
 
         for (i, order) in orders.iter().enumerate() {
             let Some(&(oi_mm_idx, side)) = mm_order_info.get(&order.id) else {
                 continue;
             };
-            if oi_mm_idx != violation.mm_idx {
+            if oi_mm_idx != mm_idx {
                 continue;
             }
 
-            let welfare_per_unit = order.limit_price as f64;
-            // Use actual clearing price for capital computation
             let market = order.markets[0];
             let p_yes = prices.get(&market).copied().unwrap_or(NANOS_PER_DOLLAR / 2);
             let capital_per_unit = side.capital_needed(p_yes, 1) as f64;
 
-            let ratio = if capital_per_unit > 0.0 {
-                welfare_per_unit / capital_per_unit
-            } else {
-                f64::INFINITY
-            };
-
-            order_ratios.push((i, ratio));
+            if capital_per_unit > 0.0 {
+                terms.push((i, capital_per_unit));
+            }
         }
 
-        // Sort by ratio ascending (shade lowest-ratio orders first)
-        order_ratios.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-
-        // Reduce limits proportionally to overshoot
-        let reduction = shading_factor * (1.0 - 1.0 / overshoot).max(0.0).min(1.0);
-
-        for (idx, _ratio) in &order_ratios {
-            let current = effective_limits[*idx];
-            let new_limit = ((current as f64) * (1.0 - reduction)).round() as Qty;
-            effective_limits[*idx] = new_limit.max(1); // Never reduce to 0
-        }
+        rows.push((terms, mm.max_capital as f64));
     }
+
+    rows
 }
 
-/// Re-expand previously shaded MM order limits to recover liquidity.
+/// Trim MM fills to fix tiny budget overflows from integer rounding.
 ///
-/// After shading converges (budgets satisfied), some MM orders may have been
-/// reduced more than necessary. This pass tries restoring them toward their
-/// original limits, highest welfare/capital ratio first. Each expansion is
-/// validated by re-solving the LP and checking budgets.
-fn expand_mm_limits(
-    solver: &LpSolver,
-    orders: &[Order],
-    coeffs: &[OrderCoefficients],
-    markets: &[MarketId],
-    market_to_group: &HashMap<MarketId, usize>,
-    num_groups: usize,
+/// The SLP enforces budgets at linearized prices, but rounding continuous q_i
+/// to integers can push capital usage slightly over budget. Trims the minimum
+/// number of fill units to satisfy all budgets. Welfare is recomputed separately.
+fn trim_mm_budget_overflows(
+    result: &mut MatchingResult,
     mm_constraints: &[matching_engine::MmConstraint],
     mm_order_info: &HashMap<u64, (usize, MmSide)>,
-    original_limits: &[Qty],
-    effective_limits: &mut [Qty],
-    best_solution: &mut Option<LpSolution>,
 ) {
-    // Compute prices from current best solution for welfare/capital ranking
-    let current_prices = best_solution
-        .as_ref()
-        .map(|sol| normalized_yes_prices(sol, markets))
-        .unwrap_or_default();
+    for (mm_idx, mm) in mm_constraints.iter().enumerate() {
+        let mut mm_fills: Vec<(usize, u64)> = Vec::new(); // (fill_index, capital)
 
-    // Find MM orders that were shaded (effective < original)
-    let mut shaded_orders: Vec<(usize, f64)> = Vec::new();
-    for (i, order) in orders.iter().enumerate() {
-        let Some(&(_, side)) = mm_order_info.get(&order.id) else {
-            continue;
-        };
-        if effective_limits[i] >= original_limits[i] {
-            continue;
-        }
-        // Welfare/capital ratio using actual clearing prices
-        let market = order.markets[0];
-        let p_yes = current_prices.get(&market).copied().unwrap_or(NANOS_PER_DOLLAR / 2);
-        let capital_per_unit = side.capital_needed(p_yes, 1) as f64;
-        let ratio = if capital_per_unit > 0.0 {
-            order.limit_price as f64 / capital_per_unit
-        } else {
-            f64::INFINITY
-        };
-        shaded_orders.push((i, ratio));
-    }
-
-    if shaded_orders.is_empty() {
-        return;
-    }
-
-    // Sort by welfare/capital ratio descending — restore highest-value orders first
-    shaded_orders.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-    for _expand_iter in 0..solver.config.max_expand_iterations {
-        let mut any_expanded = false;
-
-        for &(idx, _ratio) in &shaded_orders {
-            if effective_limits[idx] >= original_limits[idx] {
-                continue;
-            }
-
-            // Try restoring halfway toward original
-            let current = effective_limits[idx];
-            let original = original_limits[idx];
-            let candidate = current + (original - current + 1) / 2;
-
-            effective_limits[idx] = candidate;
-
-            // Re-solve and check budgets
-            let solution = solver.solve_lp(
-                orders,
-                coeffs,
-                markets,
-                market_to_group,
-                num_groups,
-                effective_limits,
-            );
-
-            let Some(ref sol) = solution else {
-                effective_limits[idx] = current; // revert
+        for (fi, fill) in result.fills.iter().enumerate() {
+            let Some(&(oi_mm_idx, side)) = mm_order_info.get(&fill.order_id) else {
                 continue;
             };
-
-            let prices = normalized_yes_prices(sol, markets);
-            let violations = check_mm_budgets(sol, orders, mm_constraints, mm_order_info, &prices);
-
-            if violations.is_empty() {
-                // Expansion is budget-feasible — keep it
-                *best_solution = solution;
-                any_expanded = true;
-            } else {
-                // Violated — revert this order's expansion
-                effective_limits[idx] = current;
+            if oi_mm_idx != mm_idx || fill.fill_qty == 0 {
+                continue;
             }
+            mm_fills.push((fi, side.capital_needed(fill.fill_price, fill.fill_qty)));
         }
 
-        if !any_expanded {
-            break;
+        let total_capital: u128 = mm_fills.iter().map(|&(_, c)| c as u128).sum();
+        if total_capital <= mm.max_capital as u128 {
+            continue;
         }
+
+        // Over budget — trim smallest fills first (least disruptive)
+        mm_fills.sort_by_key(|&(_, cap)| cap);
+
+        let mut remaining = total_capital;
+        for &(fi, _) in &mm_fills {
+            if remaining <= mm.max_capital as u128 {
+                break;
+            }
+            let fill = &result.fills[fi];
+            let Some(&(_, side)) = mm_order_info.get(&fill.order_id) else {
+                continue;
+            };
+            let cpu = side.capital_needed(fill.fill_price, 1) as u128;
+            if cpu == 0 {
+                continue;
+            }
+            let overflow = remaining - mm.max_capital as u128;
+            let trim = ((overflow + cpu - 1) / cpu).min(result.fills[fi].fill_qty as u128) as u64;
+            remaining -= side.capital_needed(fill.fill_price, trim) as u128;
+            result.fills[fi].fill_qty -= trim;
+        }
+    }
+
+    result.fills.retain(|f| f.fill_qty > 0);
+}
+
+/// Recompute welfare, volume, and fill count from scratch.
+fn recompute_welfare(result: &mut MatchingResult, order_map: &HashMap<u64, &Order>) {
+    result.total_welfare = 0;
+    result.total_quantity_filled = 0;
+    result.orders_filled = 0;
+    result.minting_cost = 0;
+    for fill in &result.fills {
+        if let Some(&order) = order_map.get(&fill.order_id) {
+            result.total_welfare += order.welfare_contribution(fill.fill_price, fill.fill_qty);
+        }
+        result.total_quantity_filled += fill.fill_qty;
+        result.orders_filled += 1;
     }
 }
 

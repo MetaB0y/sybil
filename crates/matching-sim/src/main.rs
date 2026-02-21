@@ -68,7 +68,7 @@ fn main() {
 
     if matches!(
         solver_choice,
-        SolverChoice::Pipeline | SolverChoice::Negrisk | SolverChoice::Dual | SolverChoice::Lp
+        SolverChoice::Pipeline | SolverChoice::Dual | SolverChoice::Lp
     ) && (verbose || export_json.is_some() || show_charts)
     {
         // Detailed pipeline run with step-by-step output
@@ -124,7 +124,6 @@ fn print_help() {
     println!("Solver options:");
     println!("  --solver <S>         Solver to use:");
     println!("                         pipeline (default)");
-    println!("                         negrisk");
     println!("                         dual");
     println!("                         milp");
     println!("                         lp (LP + entropy smoothing, requires --features lp)");
@@ -497,8 +496,7 @@ fn run_detailed_pipeline(
             _ => {
                 let pipeline = match solver_choice {
                     SolverChoice::Dual => Pipeline::with_dual_decomposition(),
-                    SolverChoice::Negrisk => Pipeline::with_negrisk(),
-                    _ => Pipeline::with_negrisk(),
+                    _ => Pipeline::current(),
                 };
                 pipeline.solve(&problem)
             }
@@ -560,11 +558,6 @@ fn run_detailed_pipeline(
 
             // Add arbitrage orders to problem for stats and verification
             let mut problem_with_arb = problem.clone();
-            if let Some(ref negrisk) = result.negrisk {
-                for order in &negrisk.arbitrage_orders {
-                    problem_with_arb.orders.push(order.clone());
-                }
-            }
             for order in &result.group_minting_arb_orders {
                 problem_with_arb.orders.push(order.clone());
             }
@@ -810,32 +803,6 @@ fn print_pipeline_steps(result: &PipelineResult, _problem: &Problem) {
         );
     }
 
-    // Phase 2: Negrisk Arbitrage
-    if let Some(ref negrisk) = result.negrisk {
-        println!(
-            "  2. Negrisk Arbitrage  {:>7.3}s",
-            result.phase_times.negrisk_secs
-        );
-        if negrisk.opportunities_found > 0 {
-            println!(
-                "     └─ {} opportunities, {} shares, ${:.2} welfare",
-                negrisk.opportunities_found,
-                negrisk.total_shares,
-                negrisk.total_welfare as f64 / 1e9
-            );
-            for fill in &negrisk.fills {
-                println!(
-                    "        {}: {} shares @ ${:.4} profit/share = ${:.2}",
-                    fill.group_name,
-                    fill.shares,
-                    fill.profit_per_share as f64 / 1e9,
-                    fill.welfare as f64 / 1e9
-                );
-            }
-        } else {
-            println!("     └─ no arbitrage opportunities found");
-        }
-    }
 
     // Phase 3: MM Allocation
     if let Some(ref alloc) = result.allocation {
@@ -1202,7 +1169,6 @@ fn parse_scenario_config(args: &[String]) -> ScenarioConfig {
 enum SolverChoice {
     Milp,
     Pipeline,
-    Negrisk,
     Dual,
     Joint,
     #[cfg(feature = "lp")]
@@ -1214,7 +1180,6 @@ fn parse_solver_choice(args: &[String]) -> SolverChoice {
     match get_arg_value(args, "--solver").as_deref() {
         Some("milp") => SolverChoice::Milp,
         Some("pipeline") => SolverChoice::Pipeline,
-        Some("negrisk") => SolverChoice::Negrisk,
         Some("dual") => SolverChoice::Dual,
         Some("joint") => SolverChoice::Joint,
         #[cfg(feature = "lp")]
@@ -1318,7 +1283,6 @@ fn expand_solver_choices(choice: &SolverChoice) -> Vec<SolverChoice> {
         SolverChoice::All => {
             let mut choices = vec![
                 SolverChoice::Milp,
-                SolverChoice::Negrisk,
                 SolverChoice::Dual,
                 SolverChoice::Joint,
             ];
@@ -1341,7 +1305,6 @@ fn solver_display_name(choice: &SolverChoice, milp_timeout: Option<f64>) -> Stri
             }
         }
         SolverChoice::Pipeline => "Pipeline".to_string(),
-        SolverChoice::Negrisk => "Negrisk".to_string(),
         SolverChoice::Dual => "Dual Decomposition".to_string(),
         SolverChoice::Joint => "Joint Group".to_string(),
         #[cfg(feature = "lp")]
@@ -1377,9 +1340,8 @@ fn run_solver_with_witness(
             let witness = witness_from_pipeline(problem, &pipeline_result);
             (pipeline_result.result, witness)
         }
-        SolverChoice::Pipeline | SolverChoice::Negrisk | SolverChoice::Dual => {
+        SolverChoice::Pipeline | SolverChoice::Dual => {
             let pipeline = match choice {
-                SolverChoice::Negrisk => Pipeline::with_negrisk(),
                 SolverChoice::Dual => Pipeline::with_dual_decomposition(),
                 _ => Pipeline::current(),
             };
@@ -1394,11 +1356,6 @@ fn run_solver_with_witness(
 /// Build a BlockWitness from a PipelineResult (includes arb orders for position balance).
 fn witness_from_pipeline(problem: &Problem, result: &PipelineResult) -> BlockWitness {
     let mut problem_with_arb = problem.clone();
-    if let Some(ref negrisk) = result.negrisk {
-        for order in &negrisk.arbitrage_orders {
-            problem_with_arb.orders.push(order.clone());
-        }
-    }
     // Include group minting arb orders
     for order in &result.group_minting_arb_orders {
         problem_with_arb.orders.push(order.clone());

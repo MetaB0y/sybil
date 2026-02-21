@@ -2,14 +2,13 @@
 //!
 //! The pipeline provides a flexible way to combine solver components:
 //! - Price discovery (LocalSolver)
-//! - Negrisk arbitrage (NegriskSolver) - exploits price inconsistencies
 //! - Order allocation (MmAllocator)
 //! - Partial solvers (MILP, etc.) for alternative solutions
 //!
 //! # Example
 //!
 //! ```ignore
-//! let pipeline = Pipeline::with_negrisk();
+//! let pipeline = Pipeline::with_dual_decomposition();
 //! let result = pipeline.solve(&problem);
 //! ```
 
@@ -56,7 +55,7 @@ pub struct SolverContribution {
 }
 use crate::local_solver::LocalSolver;
 use crate::mm_allocator::MmAllocator;
-use crate::specialized::{MultiMarketSolver, NegriskSolver};
+use crate::specialized::MultiMarketSolver;
 use crate::traits::{
     AllocationResult, OrderAllocator, PartialSolver, PriceDiscoverer, PriceDiscoveryResult,
 };
@@ -160,8 +159,6 @@ pub struct PipelineResult {
     /// Price discovery result (if applicable).
     pub price_discovery: Option<PriceDiscoveryResult>,
 
-    /// Negrisk arbitrage result (if applicable).
-    pub negrisk: Option<crate::specialized::NegriskResult>,
 
     /// Allocation result (if applicable).
     pub allocation: Option<AllocationResult>,
@@ -201,7 +198,6 @@ pub struct PipelineResult {
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PipelineTimings {
     pub price_discovery_secs: f64,
-    pub negrisk_secs: f64,
     pub allocation_secs: f64,
     pub partial_solving_secs: f64,
     pub combining_secs: f64,
@@ -259,7 +255,6 @@ impl PipelineResult {
         Self {
             result: MatchingResult::new(),
             price_discovery: None,
-            negrisk: None,
             allocation: None,
             contributions: Vec::new(),
             combine_stats: None,
@@ -291,8 +286,6 @@ pub struct Pipeline {
     /// Runs after price discovery to handle bundles/spreads via direct price-shifting.
     multi_market_solver: Option<MultiMarketSolver>,
 
-    /// Negrisk arbitrage solver (optional).
-    negrisk_solver: Option<NegriskSolver>,
 
     /// Order allocator (optional).
     allocator: Option<Box<dyn OrderAllocator>>,
@@ -358,22 +351,6 @@ impl Pipeline {
             .build()
     }
 
-    /// Create a pipeline with negrisk arbitrage.
-    ///
-    /// Uses negrisk arbitrage instead of price projection to handle
-    /// mutually exclusive outcome pricing inconsistencies. Negrisk creates
-    /// welfare-adding arbitrage fills instead of adjusting prices.
-    pub fn with_negrisk() -> Self {
-        Self::builder()
-            .name("Negrisk")
-            .price_discoverer(LocalSolver::new())
-            .allocator(MmAllocator::new())
-            .negrisk_solver(NegriskSolver::new())
-            .multi_market_solver(MultiMarketSolver::new())
-            .use_fixed_point(true)
-            .max_iterations(5)
-            .build()
-    }
 
     /// Create a pipeline using dual decomposition.
     ///
@@ -382,7 +359,7 @@ impl Pipeline {
     /// MM budget limits) in a principled way.
     ///
     /// MultiMarketSolver runs inside the dual loop for bundle repricing,
-    /// and negrisk arbitrage is disabled (dual handles via lambda).
+    /// Price consistency is handled via Lagrangian multipliers (lambda).
     pub fn with_dual_decomposition() -> Self {
         Self::builder()
             .name("Dual Decomposition")
@@ -797,8 +774,7 @@ impl Pipeline {
     ///
     /// Runs phases in order, each consuming liquidity:
     /// 1. Price Discovery (LocalSolver) - fills single-market orders
-    /// 2. Negrisk Arbitrage - exploits price inconsistencies
-    /// 3. MM Allocation - activates MM orders within budget
+    /// 2. MM Allocation - activates MM orders within budget
     /// 4. Partial Solvers - fills bundles/spreads
     ///    Repeats until convergence or max iterations.
     #[tracing::instrument(skip_all, name = "pipeline.sequential")]
@@ -813,19 +789,12 @@ impl Pipeline {
         let mut iterations = 0;
 
         // Accumulate arbitrage orders across all iterations
-        let mut all_arbitrage_orders: Vec<matching_engine::Order> = Vec::new();
-
-        // Arb orders from previous negrisk iteration to include in next price discovery.
-        // This pushes clearing prices toward sum=$1 through market forces.
-        let mut pending_arb_orders: Vec<matching_engine::Order> = Vec::new();
 
         // All arb orders for order lookup (owned, since they're not in problem.orders)
-        let mut arb_order_map: std::collections::HashMap<u64, matching_engine::Order> =
+        let arb_order_map: std::collections::HashMap<u64, matching_engine::Order> =
             std::collections::HashMap::new();
 
         // Track next arbitrage order ID across iterations
-        let max_existing_id = problem.orders.iter().map(|o| o.id).max().unwrap_or(0);
-        let mut next_arb_order_id = max_existing_id + 1_000_000_000;
 
         // Build market_names map for phase snapshots (viz feature)
         #[cfg(feature = "viz")]
@@ -884,20 +853,12 @@ impl Pipeline {
             let mut iter_bundle_fills = 0usize;
 
             // Filter out already-filled orders (MM orders stay included for price discovery)
-            let mut remaining_orders: Vec<_> = problem
+            let remaining_orders: Vec<_> = problem
                 .orders
                 .iter()
                 .filter(|o| !filled_order_ids.contains(&o.id))
                 .cloned()
                 .collect();
-
-            // Include negrisk arb orders from previous iteration in price discovery.
-            // These orders add demand that pushes clearing prices toward sum=$1.
-            for arb_order in pending_arb_orders.drain(..) {
-                if !filled_order_ids.contains(&arb_order.id) {
-                    remaining_orders.push(arb_order);
-                }
-            }
 
             // Create problem view with unfilled orders
             let iter_problem = Problem {
@@ -969,68 +930,7 @@ impl Pipeline {
                 }
             }
 
-            // Phase 3: Negrisk Arbitrage
-            // Exploits price inconsistencies by creating arbitrage fills instead of adjusting prices
-            let negrisk_result = if let (Some(ref solver), Some(ref prices)) =
-                (&self.negrisk_solver, &price_result)
-            {
-                let negrisk_start = Instant::now();
-                let fill_volumes: HashMap<MarketId, u64> = prices
-                    .market_solutions
-                    .iter()
-                    .map(|(mid, sol)| (*mid, sol.fills.iter().map(|f| f.fill_qty).sum()))
-                    .collect();
-                let arb_result = solver.find_arbitrage(
-                    &prices.prices,
-                    &iter_problem.market_groups,
-                    &mut next_arb_order_id,
-                    &fill_volumes,
-                );
-                timings.negrisk_secs += negrisk_start.elapsed().as_secs_f64();
-                Some(arb_result)
-            } else {
-                None
-            };
-
-            // Store negrisk result and add arbitrage orders/fills to the result
-            if let Some(ref negrisk) = negrisk_result {
-                // Store arb orders for next iteration's price discovery.
-                // They'll participate in LocalSolver clearing, creating demand
-                // that pushes prices toward sum=$1 through market forces.
-                pending_arb_orders = negrisk.arbitrage_orders.clone();
-                for order in &negrisk.arbitrage_orders {
-                    arb_order_map.insert(order.id, order.clone());
-                }
-
-                // Accumulate arbitrage orders from this iteration
-                all_arbitrage_orders.extend(negrisk.arbitrage_orders.clone());
-
-                // Store latest negrisk result (we'll update arbitrage_orders at the end)
-                result.negrisk = Some(negrisk.clone());
-            }
-
-            // Capture after negrisk arbitrage
-            // NOTE: Negrisk fills are already added to result.result above
-            #[cfg(feature = "viz")]
-            if let Some(ref negrisk) = negrisk_result {
-                phase_snapshots.push(crate::viz::PhaseSnapshot::capture_with_phase_data(
-                    crate::viz::PipelinePhase::NegriskArbitrage,
-                    iterations,
-                    &market_names,
-                    result.result.fills.len(),
-                    result.result.total_welfare,
-                    start.elapsed().as_secs_f64(),
-                    Some(0),
-                    Some(0),
-                    Some(crate::viz::PhaseMetadata::NegriskArbitrage {
-                        opportunities_found: negrisk.opportunities_found,
-                        total_shares: negrisk.total_shares,
-                        welfare_added: 0.0,
-                    }),
-                ));
-            }
-
-            // Phase 3: MM Allocation
+            // Phase 2: MM Allocation
             let allocation_result =
                 if let (Some(ref allocator), Some(ref prices)) = (&self.allocator, &price_result) {
                     let alloc_start = Instant::now();
@@ -1425,11 +1325,6 @@ impl Pipeline {
         result.phase_times = timings;
         result.total_time_secs = start.elapsed().as_secs_f64();
         result.iterations = iterations;
-
-        // Update negrisk result with all accumulated arbitrage orders from all iterations
-        if let Some(ref mut negrisk) = result.negrisk {
-            negrisk.arbitrage_orders = all_arbitrage_orders;
-        }
 
         // Set phase snapshots
         #[cfg(feature = "viz")]
@@ -1900,7 +1795,6 @@ pub struct PipelineBuilder {
     name: String,
     price_discoverer: Option<Box<dyn PriceDiscoverer>>,
     multi_market_solver: Option<MultiMarketSolver>,
-    negrisk_solver: Option<NegriskSolver>,
     allocator: Option<Box<dyn OrderAllocator>>,
     dual_master: Option<DualMaster>,
     partial_solvers: Vec<Box<dyn PartialSolver>>,
@@ -1914,7 +1808,6 @@ impl PipelineBuilder {
             name: "Pipeline".to_string(),
             price_discoverer: None,
             multi_market_solver: None,
-            negrisk_solver: None,
             allocator: None,
             dual_master: None,
             partial_solvers: Vec::new(),
@@ -1976,11 +1869,6 @@ impl PipelineBuilder {
         self
     }
 
-    /// Set a custom negrisk solver.
-    pub fn negrisk_solver(mut self, solver: NegriskSolver) -> Self {
-        self.negrisk_solver = Some(solver);
-        self
-    }
 
     /// Build the pipeline.
     pub fn build(self) -> Pipeline {
@@ -1988,7 +1876,6 @@ impl PipelineBuilder {
             name: self.name,
             price_discoverer: self.price_discoverer,
             multi_market_solver: self.multi_market_solver,
-            negrisk_solver: self.negrisk_solver,
             allocator: self.allocator,
             dual_master: self.dual_master,
             partial_solvers: self.partial_solvers,
@@ -2087,13 +1974,4 @@ mod tests {
         assert!(result.price_discovery.is_some());
     }
 
-    #[test]
-    fn test_pipeline_with_negrisk() {
-        let problem = create_test_problem();
-        let pipeline = Pipeline::with_negrisk();
-        let result = pipeline.solve(&problem);
-
-        assert!(result.price_discovery.is_some());
-        assert!(result.total_time_secs >= 0.0);
-    }
 }

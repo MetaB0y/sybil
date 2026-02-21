@@ -4,15 +4,15 @@
 //!
 //! The solver operates in phases:
 //! 1. **Price Discovery** (`LocalSolver`): Find clearing prices per market
-//! 2. **Negrisk Arbitrage** (`NegriskSolver`): Exploit price inconsistencies
-//! 3. **MM Allocation** (`MmAllocator`): Respect market maker budget constraints
+//! 2. **MM Allocation** (`MmAllocator`): Respect market maker budget constraints
+//! 3. **Group Minting**: Exploit price inconsistencies via LP gmint variables
 //!
 //! # Quick Start
 //!
 //! ```ignore
 //! use matching_solver::Pipeline;
 //!
-//! let pipeline = Pipeline::with_negrisk();
+//! let pipeline = Pipeline::with_dual_decomposition();
 //! let result = pipeline.solve(&problem);
 //! ```
 

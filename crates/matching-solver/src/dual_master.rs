@@ -80,7 +80,7 @@ impl Default for DualConfig {
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct DualState {
     /// Price consistency multipliers: one per MarketGroup.
-    /// λ > 0 means prices sum above $1 (posrisk); λ < 0 means below $1 (negrisk).
+    /// λ > 0 means prices sum above $1; λ < 0 means below $1.
     pub lambda: HashMap<String, f64>,
     /// Previous λ values for convergence checking.
     pub prev_lambda: HashMap<String, f64>,
