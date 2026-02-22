@@ -159,8 +159,9 @@ struct SequencerActor {
     last_prices: HashMap<MarketId, Vec<Nanos>>,
     /// Interval between block production ticks.
     block_interval: Duration,
-    /// Whether block production is paused (for simulation freeze during LLM calls).
-    paused: bool,
+    /// Reference-counted pause: block production halts when > 0.
+    /// Multiple callers can pause independently; blocks resume only when all have resumed.
+    pause_count: u32,
 }
 
 impl SequencerActor {
@@ -181,7 +182,7 @@ impl SequencerActor {
             block_broadcast,
             last_prices: HashMap::new(),
             block_interval,
-            paused: false,
+            pause_count: 0,
         }
     }
 
@@ -207,7 +208,7 @@ impl SequencerActor {
     }
 
     fn on_tick(&mut self) {
-        if self.paused {
+        if self.pause_count > 0 {
             return;
         }
         let timestamp_ms = std::time::SystemTime::now()
@@ -421,11 +422,11 @@ impl SequencerActor {
                 let _ = respond_to.send(results);
             }
             Message::PauseBlockProduction { respond_to } => {
-                self.paused = true;
+                self.pause_count = self.pause_count.saturating_add(1);
                 let _ = respond_to.send(());
             }
             Message::ResumeBlockProduction { respond_to } => {
-                self.paused = false;
+                self.pause_count = self.pause_count.saturating_sub(1);
                 let _ = respond_to.send(());
             }
         }

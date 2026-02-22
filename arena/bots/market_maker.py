@@ -1,16 +1,155 @@
 """Market maker bots.
 
+AnchorMarketMaker: FBA-aware MM using EMA reference price and size-based
+  inventory management.  Uses flash liquidity (one-shot orders) to prevent
+  cross-block self-trading.
 SimpleMarketMaker: Basic MM using per-order balance checks.
 FlashMarketMaker: Uses mm_budget_nanos for ~20x capital efficiency.
   The solver picks the welfare-optimal subset that fits the budget.
   MM orders are one-shot (re-quoted every block).
 """
 
+import math
+
 from sybil_client import Block, BuyNo, BuyYes, OrderSpec, SellNo, SellYes
 
 from .base import BaseAgent
 
 NANOS_PER_DOLLAR = 1_000_000_000
+
+
+class AnchorMarketMaker(BaseAgent):
+    """FBA-aware market maker with EMA reference pricing and size-based inventory.
+
+    Designed to avoid the self-trading feedback loop that plagues naive MMs in
+    frequent batch auctions:
+
+    1. Quotes symmetrically around a slow-moving EMA reference price (not the
+       instantaneous clearing price).  This prevents new buy orders from
+       overlapping with stale sell orders across blocks.
+
+    2. Manages inventory through ORDER SIZE, not price skewing.  When holding
+       excess YES, reduce BuyYes quantity and increase SellYes quantity —
+       the mid stays put so the clearing price isn't pushed.
+
+    3. Uses flash liquidity (mm_budget_nanos) so orders are one-shot and never
+       carry over to the next block.  Belt-and-suspenders against self-trading.
+
+    4. Hard position limits: stop buying the heavy side entirely past a cap.
+
+    Anti-self-trade proof (same block):
+        bid_yes + bid_no = mid - offset + (1-mid) - offset = 1 - 2*offset < $1
+        → minting impossible.
+        ask_yes + ask_no = mid + offset + (1-mid) + offset = 1 + 2*offset > $1
+        → burning impossible.
+    """
+
+    def __init__(
+        self,
+        client,
+        account_id: int,
+        budget_dollars: float = 5000.0,
+        ema_alpha: float = 0.08,
+        base_spread: float = 0.06,
+        num_levels: int = 3,
+        level_spacing: float = 0.03,
+        base_size_dollars: float = 300.0,
+        max_position: int = 8000,
+        name: str | None = None,
+        market_ids: list[int] | None = None,
+    ):
+        super().__init__(client, account_id, name, market_ids)
+        self.mm_budget_nanos = int(budget_dollars * NANOS_PER_DOLLAR)
+        self.ema_alpha = ema_alpha
+        self.base_spread = base_spread
+        self.num_levels = num_levels
+        self.level_spacing = level_spacing
+        self.base_size_dollars = base_size_dollars
+        self.max_position = max_position
+        # Per-market EMA state
+        self._ema: dict[int, float] = {}
+
+    def _update_ema(self, market_id: int, clearing_yes: float) -> float:
+        """Update and return the EMA reference price for a market."""
+        if market_id not in self._ema:
+            self._ema[market_id] = clearing_yes
+        else:
+            self._ema[market_id] += self.ema_alpha * (
+                clearing_yes - self._ema[market_id]
+            )
+        return self._ema[market_id]
+
+    def _inventory_multipliers(
+        self, yes_pos: int, no_pos: int
+    ) -> tuple[float, float, float, float]:
+        """Compute size multipliers based on inventory imbalance.
+
+        Returns (buy_yes_mult, sell_yes_mult, buy_no_mult, sell_no_mult).
+        When holding excess YES: reduce BuyYes, boost SellYes (and vice versa).
+        Uses tanh for smooth, bounded scaling.
+        """
+        total = yes_pos + no_pos
+        if total == 0:
+            return (1.0, 1.0, 1.0, 1.0)
+
+        # imbalance in [-1, +1]: positive = excess YES
+        raw = (yes_pos - no_pos) / total
+        imbalance = math.tanh(2.0 * raw)  # amplify but bound
+
+        buy_yes = max(0.0, 1.0 - imbalance)
+        sell_yes = min(2.0, 1.0 + imbalance)
+        buy_no = max(0.0, 1.0 + imbalance)
+        sell_no = min(2.0, 1.0 - imbalance)
+        return (buy_yes, sell_yes, buy_no, sell_no)
+
+    async def on_block(self, block: Block) -> list[OrderSpec]:
+        orders: list[OrderSpec] = []
+
+        for market_id, (yes_nanos, no_nanos) in self.filter_markets(block).items():
+            clearing_yes = yes_nanos / NANOS_PER_DOLLAR
+            mid = self._update_ema(market_id, clearing_yes)
+            mid = max(0.05, min(0.95, mid))
+            no_mid = 1.0 - mid
+
+            yes_pos = self.get_position(market_id, "YES")
+            no_pos = self.get_position(market_id, "NO")
+            by_mult, sy_mult, bn_mult, sn_mult = self._inventory_multipliers(
+                yes_pos, no_pos
+            )
+
+            for level in range(1, self.num_levels + 1):
+                offset = self.base_spread / 2 + (level - 1) * self.level_spacing
+
+                yes_bid = mid - offset
+                yes_ask = mid + offset
+                no_bid = no_mid - offset
+                no_ask = no_mid + offset
+
+                # --- BuyYes ---
+                if yes_bid >= 0.01 and yes_pos < self.max_position:
+                    qty = max(1, int(self.base_size_dollars * by_mult / yes_bid))
+                    orders.append(BuyYes.at_price(market_id, yes_bid, qty))
+
+                # --- SellYes ---
+                if yes_ask <= 0.99 and yes_pos > 0:
+                    qty = max(1, int(self.base_size_dollars * sy_mult / yes_ask))
+                    qty = min(qty, yes_pos)
+                    if qty > 0:
+                        orders.append(SellYes.at_price(market_id, yes_ask, qty))
+
+                # --- BuyNo ---
+                if no_bid >= 0.01 and no_pos < self.max_position:
+                    qty = max(1, int(self.base_size_dollars * bn_mult / no_bid))
+                    orders.append(BuyNo.at_price(market_id, no_bid, qty))
+
+                # --- SellNo ---
+                if no_ask <= 0.99 and no_pos > 0:
+                    qty = max(1, int(self.base_size_dollars * sn_mult / no_ask))
+                    qty = min(qty, no_pos)
+                    if qty > 0:
+                        orders.append(SellNo.at_price(market_id, no_ask, qty))
+
+        return orders
 
 
 class SimpleMarketMaker(BaseAgent):

@@ -4,11 +4,7 @@ use std::sync::Arc;
 use matching_engine::{
     Fill, MarketGroup, MarketId, MarketSet, MmConstraint, Nanos, Order, Problem,
 };
-use matching_solver::PipelineResult;
-#[cfg(feature = "milp")]
-use matching_solver::{MilpConfig, MilpSolver, MmBudgetMode, PriceDiscoveryResult};
-#[cfg(not(feature = "milp"))]
-use matching_solver::Pipeline;
+use matching_solver::{LpSolver, PipelineResult};
 use tracing::debug;
 use sybil_oracle::{MarketStatus, Oracle, ResolutionAction, ResolutionRecord};
 use sybil_verifier::{
@@ -167,44 +163,6 @@ impl BlockSequencer {
             price_history: HashMap::new(),
             market_volumes: HashMap::new(),
             account_fills: HashMap::new(),
-        }
-    }
-
-    /// Solve the matching problem. Uses MILP solver when the `milp` feature is
-    /// enabled, otherwise falls back to the default pipeline (dual decomposition).
-    fn solve_problem(problem: &Problem) -> PipelineResult {
-        #[cfg(feature = "milp")]
-        {
-            let milp = MilpSolver::with_config(MilpConfig {
-                timeout_secs: Some(5.0),
-                gap_tolerance: 0.0,
-                mm_budget_mode: MmBudgetMode::Exact,
-            });
-            let milp_result = milp.solve_with_status(problem);
-            // Map MILP result to PipelineResult
-            let pd = PriceDiscoveryResult {
-                prices: milp_result.clearing_prices,
-                ..Default::default()
-            };
-            PipelineResult {
-                result: milp_result.result,
-                price_discovery: Some(pd),
-                negrisk: None,
-                allocation: None,
-                contributions: vec![],
-                combine_stats: None,
-                iterations: 1,
-                iteration_stats: vec![],
-                total_time_secs: milp_result.solve_time_secs,
-                phase_times: Default::default(),
-                ucp_stats: None,
-                group_minting_arb_orders: vec![],
-            }
-        }
-        #[cfg(not(feature = "milp"))]
-        {
-            let pipeline = Pipeline::current();
-            pipeline.solve(problem)
         }
     }
 
@@ -601,7 +559,8 @@ impl BlockSequencer {
         problem.market_groups = self.market_groups.clone();
 
         // Solve
-        let pipeline_result = Self::solve_problem(&problem);
+        let solver = LpSolver::new();
+        let pipeline_result = solver.solve(&problem);
 
         // Extract clearing prices: use fresh prices from solver where trades happened,
         // fall back to last known prices for markets with no activity this block.

@@ -22,7 +22,7 @@ class SimulatedClock:
     sim_start: datetime
     compression_ratio: float = 60.0
     real_start: datetime | None = field(default=None, init=False)
-    _paused: bool = field(default=False, init=False)
+    _pause_count: int = field(default=0, init=False)
     _pause_time: datetime | None = field(default=None, init=False)
 
     def start(self) -> None:
@@ -39,7 +39,7 @@ class SimulatedClock:
         if self.real_start is None:
             return self.sim_start
 
-        if self._paused and self._pause_time:
+        if self._pause_count > 0 and self._pause_time:
             real_elapsed = (self._pause_time - self.real_start).total_seconds()
         else:
             real_elapsed = (datetime.now() - self.real_start).total_seconds()
@@ -98,17 +98,19 @@ class SimulatedClock:
             await asyncio.sleep(real_seconds)
 
     def pause(self) -> None:
-        """Pause the clock."""
-        if not self._paused:
-            self._paused = True
+        """Pause the clock (reference-counted: multiple callers can pause independently)."""
+        if self._pause_count == 0:
             self._pause_time = datetime.now()
+        self._pause_count += 1
 
     def resume(self) -> None:
-        """Resume the clock after pausing."""
-        if self._paused and self._pause_time and self.real_start:
+        """Resume the clock (only actually resumes when all pausers have resumed)."""
+        if self._pause_count <= 0:
+            return
+        self._pause_count -= 1
+        if self._pause_count == 0 and self._pause_time and self.real_start:
             pause_duration = datetime.now() - self._pause_time
             self.real_start += pause_duration
-            self._paused = False
             self._pause_time = None
 
     def is_past(self, sim_time: datetime) -> bool:
