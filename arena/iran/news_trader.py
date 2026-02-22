@@ -59,6 +59,7 @@ class TradeRecord:
     no_pos: int = 0
     risk_pct: float = 0.0
     target_pos: int = 0  # target position on the chosen side
+    belief: float = 0.0  # running Beta belief at decision time
 
     def to_dict(self) -> dict:
         return {
@@ -79,6 +80,7 @@ class TradeRecord:
             "no_pos": self.no_pos,
             "risk_pct": self.risk_pct,
             "target_pos": self.target_pos,
+            "belief": self.belief,
         }
 
 
@@ -107,12 +109,7 @@ def load_articles(phase1_path: str, texts_path: str) -> list[Article]:
 
 
 PHASE2_PROMPT = """\
-You are a professional forecaster and prediction market trader specializing in US-Iran geopolitics.
-
-You're trading on the market: "Will the United States carry out a military strike against Iran before March 31, 2026?"
-
-Context:
-USA-Iran tensions stem from long-standing issues like Iran's nuclear program and proxies, but escalated sharply after the June 2025 US strikes on Iranian nuclear sites during the Israel-Iran Twelve-Day War. They rose further in early January 2026 amid Iran's crackdown on anti-government protests, prompting President Trump to threaten military action and review strike options.
+{persona}
 
 Market data:
 Last batch YES price: {yes_price:.2f}
@@ -140,6 +137,14 @@ MOTIVATION: [1-2 sentence thesis]
 PROBABILITY: [your estimate, 0.00 to 1.00]
 CONVICTION: [LOW / MEDIUM / HIGH]"""
 
+DEFAULT_PERSONA = """\
+You are a professional forecaster and prediction market trader specializing in US-Iran geopolitics.
+
+You're trading on the market: "Will the United States carry out a military strike against Iran before March 31, 2026?"
+
+Context:
+USA-Iran tensions stem from long-standing issues like Iran's nuclear program and proxies, but escalated sharply after the June 2025 US strikes on Iranian nuclear sites during the Israel-Iran Twelve-Day War. They rose further in early January 2026 amid Iran's crackdown on anti-government protests, prompting President Trump to threaten military action and review strike options."""
+
 
 class IranNewsTrader(BaseAgent):
     """LLM-powered news-reactive trader for the Iran strike market."""
@@ -154,16 +159,23 @@ class IranNewsTrader(BaseAgent):
         model_name: str = "moonshotai/kimi-k2",
         name: str | None = None,
         market_ids: list[int] | None = None,
+        persona: str | None = None,
     ):
         super().__init__(client, account_id, name or "IranNewsTrader", market_ids)
         self.articles = articles
         self.clock = clock
         self.api_key = api_key
         self.model_name = model_name
+        self.persona = persona or DEFAULT_PERSONA
         self._article_index = 0
         self._llm_client: openai.AsyncOpenAI | None = None
         self.trade_log: list[TradeRecord] = []
         self.price_history: list[PriceSnapshot] = []
+        # Beta distribution belief state: belief = alpha / (alpha + beta)
+        # Initialized from first observed clearing price in on_block()
+        self._belief_alpha: float = 0.0
+        self._belief_beta: float = 0.0
+        self._belief_initialized: bool = False
 
     def _get_llm_client(self) -> openai.AsyncOpenAI:
         if self._llm_client is None:
@@ -172,6 +184,29 @@ class IranNewsTrader(BaseAgent):
                 api_key=self.api_key,
             )
         return self._llm_client
+
+    # Evidence strength per conviction level for Beta belief updates
+    _BELIEF_STRENGTH = {"LOW": 1, "MEDIUM": 3, "HIGH": 6}
+    # Kelly fraction scaling per conviction level (fractional Kelly)
+    _KELLY_SCALE = {"LOW": 0.15, "MEDIUM": 0.30, "HIGH": 0.50}
+    # Each confirming signal boosts Kelly scale by this much (additive)
+    _CONFIRM_BOOST = 0.30
+    # Maximum Kelly scale after all boosts
+    _MAX_KELLY_SCALE = 2.0
+    # Minimum edge to trade (below this, Kelly produces negligible size)
+    _MIN_EDGE = 0.02
+
+    def _update_belief(self, probability: float, conviction: str) -> float:
+        """Update Beta belief with new LLM signal. Returns updated belief."""
+        s = self._BELIEF_STRENGTH[conviction]
+        self._belief_alpha += s * probability
+        self._belief_beta += s * (1 - probability)
+        return self._belief_alpha / (self._belief_alpha + self._belief_beta)
+
+    @property
+    def belief(self) -> float:
+        total = self._belief_alpha + self._belief_beta
+        return self._belief_alpha / total if total > 0 else 0.5
 
     def _drain_arrived_articles(self) -> list[Article]:
         """Return all articles whose timestamp <= clock.now(), advance cursor."""
@@ -241,6 +276,7 @@ class IranNewsTrader(BaseAgent):
         yes_price = yes_nanos / NANOS_PER_DOLLAR
 
         prompt = PHASE2_PROMPT.format(
+            persona=self.persona,
             yes_price=yes_price,
             recent_trades=self._format_recent_trades(),
             usdc=self.current_balance,
@@ -294,76 +330,82 @@ class IranNewsTrader(BaseAgent):
         return probability, conviction, motivation, text, llm_duration_s
 
     def _phase3_execute(
-        self, probability: float, conviction: str, block: Block,
+        self, conviction: str, block: Block,
         shadow_yes: int | None = None, shadow_no: int | None = None,
     ) -> list[OrderSpec]:
-        """Mechanical trade execution from Phase 2 output.
+        """Mechanical trade execution using running belief + Kelly sizing.
+
+        Uses self.belief (Beta distribution) rather than raw LLM probability.
+        Position size determined by Kelly criterion scaled by conviction.
 
         shadow_yes/shadow_no: if set, override get_position() to account for
         orders already generated earlier in the same batch.
         """
         market_id = next(iter(self.market_ids))
         yes_nanos, _ = self.filter_markets(block)[market_id]
-        last_price = yes_nanos / NANOS_PER_DOLLAR
+        mkt_price = yes_nanos / NANOS_PER_DOLLAR
+        b = self.belief
 
-        # Step 2: Edge check
-        edge = abs(probability - last_price)
-        thresholds = {"LOW": 0.05, "MEDIUM": 0.03, "HIGH": 0.02}
-        if edge < thresholds[conviction]:
-            # Store state even on no-trade for diagnostics
-            current_yes = shadow_yes if shadow_yes is not None else self.get_position(market_id, "YES")
-            current_no = shadow_no if shadow_no is not None else self.get_position(market_id, "NO")
+        current_yes = shadow_yes if shadow_yes is not None else self.get_position(market_id, "YES")
+        current_no = shadow_no if shadow_no is not None else self.get_position(market_id, "NO")
+
+        # Edge check — tiny edge means Kelly is negligible, skip
+        edge = abs(b - mkt_price)
+        if edge < self._MIN_EDGE:
             self._last_exec_state = (self.current_balance, current_yes, current_no, 0.0, 0)
             return []
 
-        # Step 3: Risk budget
-        current_yes = shadow_yes if shadow_yes is not None else self.get_position(market_id, "YES")
-        current_no = shadow_no if shadow_no is not None else self.get_position(market_id, "NO")
+        # Kelly sizing with confirming signal boost
         total_capital = (
             self.current_balance
-            + current_yes * last_price
-            + current_no * (1 - last_price)
+            + current_yes * mkt_price
+            + current_no * (1 - mkt_price)
         )
 
-        base_pcts = {"LOW": 0.05, "MEDIUM": 0.15, "HIGH": 0.30}
-        risk_pct = base_pcts[conviction]
-
-        # Count past confirming signals (same direction, meaningful conviction)
-        bullish = probability > last_price
+        # Count past confirming signals: same side, MEDIUM+ conviction
+        bullish = b > mkt_price
         confirming = sum(
             1 for rec in self.trade_log
             if rec.conviction in ("MEDIUM", "HIGH")
-            and (rec.probability > last_price) == bullish
+            and (rec.probability > mkt_price) == bullish
         )
-        risk_pct = min(risk_pct + confirming * 0.10, 0.80)
+        kelly_scale = min(
+            self._KELLY_SCALE[conviction] + confirming * self._CONFIRM_BOOST,
+            self._MAX_KELLY_SCALE,
+        )
 
-        risk_budget = risk_pct * total_capital
-
-        # Target position
-        if probability > last_price:
-            target_yes = int(risk_budget / probability) if probability > 0 else 0
+        if bullish:
+            # Bullish: buy YES
+            kelly = edge / (1 - mkt_price) if mkt_price < 1 else 0
+            bet_frac = kelly * kelly_scale
+            risk_budget = bet_frac * total_capital
+            target_yes = int(risk_budget / b) if b > 0 else 0
             target_no = 0
         else:
+            # Bearish: buy NO
+            kelly = edge / mkt_price if mkt_price > 0 else 0
+            bet_frac = kelly * kelly_scale
+            risk_budget = bet_frac * total_capital
             target_yes = 0
-            target_no = int(risk_budget / (1 - probability)) if probability < 1 else 0
+            target_no = int(risk_budget / (1 - b)) if b < 1 else 0
 
-        target_pos = target_yes if probability > last_price else target_no
-        self._last_exec_state = (self.current_balance, current_yes, current_no, risk_pct, target_pos)
+        target_pos = target_yes if b > mkt_price else target_no
+        self._last_exec_state = (self.current_balance, current_yes, current_no, bet_frac, target_pos)
 
-        # Step 4: Generate orders
+        # Generate orders
         orders: list[OrderSpec] = []
 
-        # Close wrong-side
+        # Close wrong-side positions
         if target_no == 0 and current_no > 0:
-            orders.append(SellNo.at_price(market_id, 1 - probability, current_no))
+            orders.append(SellNo.at_price(market_id, 1 - b, current_no))
         if target_yes == 0 and current_yes > 0:
-            orders.append(SellYes.at_price(market_id, probability, current_yes))
+            orders.append(SellYes.at_price(market_id, b, current_yes))
 
-        # Adjust right-side
+        # Increase right-side toward target
         if target_yes > current_yes:
-            orders.append(BuyYes.at_price(market_id, probability, target_yes - current_yes))
+            orders.append(BuyYes.at_price(market_id, b, target_yes - current_yes))
         if target_no > current_no:
-            orders.append(BuyNo.at_price(market_id, 1 - probability, target_no - current_no))
+            orders.append(BuyNo.at_price(market_id, 1 - b, target_no - current_no))
 
         return orders
 
@@ -373,23 +415,28 @@ class IranNewsTrader(BaseAgent):
         prices = self.filter_markets(block)
         if market_id in prices:
             yes_nanos, _ = prices[market_id]
+            yes_price = yes_nanos / NANOS_PER_DOLLAR
             self.price_history.append(PriceSnapshot(
                 block_height=block.height,
                 sim_time=self.clock.now(),
-                yes_price=yes_nanos / NANOS_PER_DOLLAR,
+                yes_price=yes_price,
             ))
+            # Anchor belief prior to first observed clearing price
+            if not self._belief_initialized and yes_price > 0:
+                self._belief_alpha = yes_price
+                self._belief_beta = 1.0 - yes_price
+                self._belief_initialized = True
 
         arrived = self._drain_arrived_articles()
-        all_orders: list[OrderSpec] = []
 
-        # Shadow positions track cumulative effect of orders within this batch,
-        # preventing sells that exceed actual holdings when multiple articles
-        # generate orders in the same on_block call.
         market_id = next(iter(self.market_ids))
-        shadow_yes = self.get_position(market_id, "YES")
-        shadow_no = self.get_position(market_id, "NO")
 
-        for i, article in enumerate(arrived):
+        # Phase 1: Analyze all articles and update belief (no trading yet)
+        analyses: list[tuple] = []  # (article, probability, conviction, motivation, raw_response, llm_duration_s)
+        best_conviction = "LOW"
+        conviction_rank = {"LOW": 0, "MEDIUM": 1, "HIGH": 2}
+
+        for article in arrived:
             log.info(
                 "[%s] Processing article: %s (%s)",
                 self.name, article.title[:60], article.source,
@@ -406,38 +453,27 @@ class IranNewsTrader(BaseAgent):
                     sim_time=self.clock.now(),
                     block_height=block.height,
                     balance=self.current_balance,
-                    yes_pos=shadow_yes,
-                    no_pos=shadow_no,
+                    yes_pos=self.get_position(market_id, "YES"),
+                    no_pos=self.get_position(market_id, "NO"),
                 ))
                 continue
 
             probability, conviction, motivation, raw_response, llm_duration_s = result
+            self._update_belief(probability, conviction)
+            analyses.append((article, probability, conviction, motivation, raw_response, llm_duration_s))
 
-            # When multiple articles land in the same batch, only trade on the
-            # first (older) one — later articles are analyzed for context only.
-            if i == 0:
-                orders = self._phase3_execute(
-                    probability, conviction, block,
-                    shadow_yes=shadow_yes, shadow_no=shadow_no,
-                )
-            else:
-                log.info(
-                    "[%s] Skipping orders for article %d/%d (same batch)",
-                    self.name, i + 1, len(arrived),
-                )
-                self._last_exec_state = (self.current_balance, shadow_yes, shadow_no, 0.0, 0)
-                orders = []
+            if conviction_rank.get(conviction, 0) > conviction_rank.get(best_conviction, 0):
+                best_conviction = conviction
 
-            # Update shadow positions based on generated orders
-            for order in orders:
-                if isinstance(order, BuyYes):
-                    shadow_yes += order.quantity
-                elif isinstance(order, SellYes):
-                    shadow_yes -= order.quantity
-                elif isinstance(order, BuyNo):
-                    shadow_no += order.quantity
-                elif isinstance(order, SellNo):
-                    shadow_no -= order.quantity
+        # Phase 2: Trade once based on aggregated belief, using highest conviction
+        orders: list[OrderSpec] = []
+        if analyses:
+            orders = self._phase3_execute(best_conviction, block)
+
+        # Log each article's TradeRecord; attach orders to the last one
+        for i, (article, probability, conviction, motivation, raw_response, llm_duration_s) in enumerate(analyses):
+            is_last = (i == len(analyses) - 1)
+            article_orders = orders if is_last else []
 
             bal, yp, np_, rp, tp = getattr(self, '_last_exec_state', (0, 0, 0, 0, 0))
             self.trade_log.append(TradeRecord(
@@ -445,7 +481,7 @@ class IranNewsTrader(BaseAgent):
                 probability=probability,
                 conviction=conviction,
                 motivation=motivation,
-                orders=orders,
+                orders=article_orders,
                 sim_time=self.clock.now(),
                 llm_response=raw_response,
                 block_height=block.height,
@@ -453,18 +489,19 @@ class IranNewsTrader(BaseAgent):
                 balance=bal,
                 yes_pos=yp,
                 no_pos=np_,
-                risk_pct=rp,
-                target_pos=tp,
+                risk_pct=rp if is_last else 0.0,
+                target_pos=tp if is_last else 0,
+                belief=self.belief,
             ))
 
             log.info(
-                "[%s] P=%.2f %s edge=%.2f → %d orders | %s",
-                self.name, probability, conviction,
-                abs(probability - (self.filter_markets(block)[market_id][0] / NANOS_PER_DOLLAR)),
-                len(orders), motivation,
+                "[%s] P=%.2f %s belief=%.3f edge=%.3f → %d orders | %s",
+                self.name, probability, conviction, self.belief,
+                abs(self.belief - (self.filter_markets(block)[market_id][0] / NANOS_PER_DOLLAR)),
+                len(article_orders), motivation,
             )
 
-            all_orders.extend(orders)
+        all_orders = orders
 
         return all_orders
 

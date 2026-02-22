@@ -29,6 +29,8 @@ class BaseAgent(ABC):
         self.total_orders_submitted: int = 0
         # Per-block order log: (block_height, orders_submitted)
         self.block_log: list[tuple[int, list[OrderSpec]]] = []
+        # Per-block stats from the sequencer (welfare, volume, fills)
+        self.block_stats: dict[int, tuple[int, int, int]] = {}  # height -> (welfare, volume, fills)
         # Fill tracking via get_account_fills()
         self._last_fill_count: int = 0
         self._fill_history: list = []  # list[AccountFill], available to subclasses
@@ -59,6 +61,11 @@ class BaseAgent(ABC):
 
                 # Update our state
                 await self._update_state(block)
+
+                # Record block-level stats (welfare, volume, fills)
+                self.block_stats[block.height] = (
+                    block.total_welfare, block.total_volume, block.orders_filled,
+                )
 
                 # Get orders from strategy
                 orders = await self.on_block(block)

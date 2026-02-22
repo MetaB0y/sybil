@@ -18,13 +18,13 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from bots.market_maker import BalancedMarketMaker
+from bots.market_maker import AnchorMarketMaker
 from bots.random_trader import RandomTrader
 from sybil_client import BuyNo, BuyYes, SybilClient
 from sybil_client.types import NANOS_PER_DOLLAR, PricePoint
 
 from .clock import SimulatedClock
-from .news_trader import IranNewsTrader, load_articles
+from .news_trader import DEFAULT_PERSONA, IranNewsTrader, load_articles
 
 log = logging.getLogger(__name__)
 
@@ -34,7 +34,6 @@ class SimulationConfig:
     base_url: str = "http://localhost:3001"
     compression_ratio: float = 300.0
     mm_balance: float = 20_000.0
-    mm_risk_fraction: float = 0.30
     mm_seed_qty: int = 10_000
     initial_price: float = 0.12
     noise_count: int = 20
@@ -93,9 +92,9 @@ async def run_simulation(config: SimulationConfig) -> None:
         )
 
         # 6. Create MM bot
-        mm = BalancedMarketMaker(
+        mm = AnchorMarketMaker(
             client, mm_acct.id,
-            risk_fraction=config.mm_risk_fraction,
+            budget_dollars=config.mm_balance,
             name="MM",
             market_ids=[market.id],
         )
@@ -114,23 +113,70 @@ async def run_simulation(config: SimulationConfig) -> None:
             noise_bots.append(bot)
         print(f"Created {config.noise_count} noise traders @ ${config.noise_balance} each")
 
-        # 8. Create American Trader
+        # 8. Create traders
         api_key = config.api_key or os.environ.get("OPENROUTER_API_KEY", "")
         if not api_key:
             print("WARNING: No OPENROUTER_API_KEY set. LLM calls will fail.")
+
+        BELIEVER_PERSONA = """\
+You are an American prediction market trader who closely follows US government and establishment sources on Iran.
+
+You're trading on the market: "Will the United States carry out a military strike against Iran before March 31, 2026?"
+
+Context:
+USA-Iran tensions stem from long-standing issues like Iran's nuclear program and proxies, but escalated sharply after the June 2025 US strikes on Iranian nuclear sites during the Israel-Iran Twelve-Day War. They rose further in early January 2026 amid Iran's crackdown on anti-government protests, prompting President Trump to threaten military action and review strike options.
+
+Your analytical style:
+- You take official US government statements and policy signals seriously
+- When senior officials say military options are on the table, you believe they mean it
+- You trust reporting from establishment outlets (NYT, WSJ, Reuters) as generally accurate
+- You view presidential rhetoric as reflecting actual policy intent
+- You believe the US military and intelligence apparatus acts on stated objectives"""
+
+        SKEPTIC_PERSONA = """\
+You are an American prediction market trader with a skeptical analytical lens on US-Iran relations.
+
+You're trading on the market: "Will the United States carry out a military strike against Iran before March 31, 2026?"
+
+Context:
+USA-Iran tensions stem from long-standing issues like Iran's nuclear program and proxies, but escalated sharply after the June 2025 US strikes on Iranian nuclear sites during the Israel-Iran Twelve-Day War. They rose further in early January 2026 amid Iran's crackdown on anti-government protests, prompting President Trump to threaten military action and review strike options.
+
+Your analytical style:
+- You distinguish sharply between political rhetoric and actual policy action
+- You believe officials often posture for leverage without intending to follow through
+- You weight concrete evidence (troop deployments, carrier movements, evacuations) far above verbal threats
+- You consider domestic political incentives that make tough talk cheap
+- You can be convinced by strong material signals, but words alone don't move you"""
+
         trader_acct = await client.create_account(int(config.trader_balance * NANOS_PER_DOLLAR))
         trader = IranNewsTrader(
             client, trader_acct.id, articles, clock,
             api_key=api_key,
             model_name=config.model_name,
-            name="AmericanTrader",
+            name="Believer",
             market_ids=[market.id],
+            persona=BELIEVER_PERSONA,
+
         )
-        print(f"AmericanTrader account {trader_acct.id}: ${config.trader_balance}")
+        print(f"Believer account {trader_acct.id}: ${config.trader_balance}")
+
+        trader2_acct = await client.create_account(int(config.trader_balance * NANOS_PER_DOLLAR))
+        trader2 = IranNewsTrader(
+            client, trader2_acct.id, articles, clock,
+            api_key=api_key,
+            model_name=config.model_name,
+            name="Skeptic",
+            market_ids=[market.id],
+            persona=SKEPTIC_PERSONA,
+
+        )
+        print(f"Skeptic account {trader2_acct.id}: ${config.trader_balance}")
+
+        traders = [trader, trader2]
 
         # 9. Start clock + all bots
         clock.start()
-        all_bots = [mm, *noise_bots, trader]
+        all_bots = [mm, *noise_bots, *traders]
         tasks = [asyncio.create_task(bot.run()) for bot in all_bots]
 
         sim_span = sim_end - sim_start
@@ -153,7 +199,7 @@ async def run_simulation(config: SimulationConfig) -> None:
         await asyncio.gather(*tasks, return_exceptions=True)
 
         # 12. Collect results, print, and save
-        await save_and_print_results(client, config, all_bots, trader, market.id)
+        await save_and_print_results(client, config, all_bots, traders, market.id)
 
 
 async def _fetch_all_fills(client, account_id: int) -> list:
@@ -170,15 +216,22 @@ async def _fetch_all_fills(client, account_id: int) -> list:
 
 
 def build_block_records(
-    all_bots, mm, noise_bots, trader, price_history: list[PricePoint],
-    trader_fills: list | None = None,
+    all_bots, mm, noise_bots, traders: list, price_history: list[PricePoint],
+    trader_fills_map: dict[str, list] | None = None,
     mm_fills: list | None = None,
     noise_fills: list | None = None,
     sim_start: datetime | None = None,
     compression_ratio: float = 300.0,
 ) -> list[dict]:
-    """Join per-bot block_logs with server price history into per-block records."""
+    """Join per-bot block_logs with server price history into per-block records.
+
+    traders: list of IranNewsTrader instances (each with .name, .trade_log, .block_log)
+    trader_fills_map: {trader.name: [AccountFill, ...]}
+    """
     from .news_trader import _describe_order
+
+    if trader_fills_map is None:
+        trader_fills_map = {}
 
     # 1. Collect all block heights seen by any bot
     all_heights: set[int] = set()
@@ -189,21 +242,23 @@ def build_block_records(
     # 2. Index price history by block height
     price_by_height = {pt.height: pt for pt in price_history}
 
-    # 3. Index trader LLM data by block height (multiple LLM calls can land on same block)
+    # 3. Index trader LLM data by block height, per trader
     llm_by_block: dict[int, list[dict]] = {}
-    for rec in trader.trade_log:
-        if rec.block_height >= 0:
-            llm_by_block.setdefault(rec.block_height, []).append({
-                "article_title": rec.article.title,
-                "article_source": rec.article.source,
-                "probability": rec.probability,
-                "conviction": rec.conviction,
-                "motivation": rec.motivation,
-                "llm_response": rec.llm_response,
-                "llm_duration_s": rec.llm_duration_s,
-            })
+    for t in traders:
+        for rec in t.trade_log:
+            if rec.block_height >= 0:
+                llm_by_block.setdefault(rec.block_height, []).append({
+                    "trader": t.name,
+                    "article_title": rec.article.title,
+                    "article_source": rec.article.source,
+                    "probability": rec.probability,
+                    "conviction": rec.conviction,
+                    "motivation": rec.motivation,
+                    "llm_response": rec.llm_response,
+                    "llm_duration_s": rec.llm_duration_s,
+                })
 
-    # 4. Index fills by block height (trader + MM)
+    # 4. Index fills by block height
     def _index_fills(raw_fills: list | None, source: str) -> dict[int, list[dict]]:
         by_height: dict[int, list[dict]] = {}
         if raw_fills:
@@ -221,7 +276,11 @@ def build_block_records(
                 })
         return by_height
 
-    trader_fills_by_height = _index_fills(trader_fills, "Trader")
+    # Merge all trader fills into one index (tagged by source=trader.name)
+    all_trader_fills_by_height: dict[int, list[dict]] = {}
+    for tname, fills in trader_fills_map.items():
+        for h, entries in _index_fills(fills, tname).items():
+            all_trader_fills_by_height.setdefault(h, []).extend(entries)
     mm_fills_by_height = _index_fills(mm_fills, "MM")
     noise_fills_by_height = _index_fills(noise_fills, "Noise")
 
@@ -237,9 +296,11 @@ def build_block_records(
         for h, orders in nb.block_log:
             noise_by_height.setdefault(h + 1, []).extend(orders)
 
-    trader_by_height: dict[int, list] = {}
-    for h, orders in trader.block_log:
-        trader_by_height.setdefault(h + 1, []).extend(orders)
+    # Per-trader order index
+    trader_orders_by_height: dict[int, list[tuple[str, list]]] = {}
+    for t in traders:
+        for h, orders in t.block_log:
+            trader_orders_by_height.setdefault(h + 1, []).append((t.name, orders))
 
     # 5a. Compute sim_time from block height (simple linear mapping since server
     # pauses during LLM calls, so every block = one tick of simulated time).
@@ -257,7 +318,14 @@ def build_block_records(
         pt = price_by_height.get(height)
         mm_orders = mm_by_height.get(height, [])
         noise_orders = noise_by_height.get(height, [])
-        trader_orders = trader_by_height.get(height, [])
+
+        # Flatten all trader orders for this block
+        trader_entries = trader_orders_by_height.get(height, [])
+        all_trader_orders = []
+        for tname, orders in trader_entries:
+            all_trader_orders.extend(
+                {"trader": tname, "order": _describe_order(o)} for o in orders
+            )
 
         rec = {
             "height": height,
@@ -268,8 +336,11 @@ def build_block_records(
             "mm_orders": [_describe_order(o) for o in mm_orders],
             "noise_orders": [_describe_order(o) for o in noise_orders],
             "noise_order_count": len(noise_orders),
-            "trader_orders": [_describe_order(o) for o in trader_orders],
-            "trader_fills": trader_fills_by_height.get(height, []),
+            # Backward-compat: flat list of order strings
+            "trader_orders": [e["order"] for e in all_trader_orders],
+            # Per-trader detail
+            "trader_orders_detail": all_trader_orders,
+            "trader_fills": all_trader_fills_by_height.get(height, []),
             "mm_fills": mm_fills_by_height.get(height, []),
             "noise_fills": noise_fills_by_height.get(height, []),
             "trader_llm": llm_by_block.get(height, []),
@@ -283,7 +354,18 @@ def build_block_records(
         h = rec["height"]
         # Expire orders past TTL
         active_orders = [o for o in active_orders if h - o["submitted_block"] < 3]
-        # Subtract fills
+        # Add new trader orders BEFORE subtracting fills (same-block fills)
+        for o_str in rec["trader_orders"]:
+            parts = o_str.split()
+            if len(parts) >= 2:
+                try:
+                    qty = int(parts[1])
+                except ValueError:
+                    qty = 0
+                active_orders.append({"qty": qty, "submitted_block": h})
+        # Count before fill subtraction (= what the solver saw)
+        rec["active_trader_orders"] = len(active_orders)
+        # Subtract fills (covers both carry-over and same-block orders)
         for f in rec["trader_fills"]:
             remaining = f["fill_qty"]
             for o in active_orders:
@@ -294,23 +376,14 @@ def build_block_records(
                     o["qty"] -= taken
                     remaining -= taken
         active_orders = [o for o in active_orders if o["qty"] > 0]
-        # Add new trader orders
-        for o_str in rec["trader_orders"]:
-            parts = o_str.split()
-            if len(parts) >= 2:
-                try:
-                    qty = int(parts[1])
-                except ValueError:
-                    qty = 0
-                active_orders.append({"qty": qty, "submitted_block": h})
-        rec["active_trader_orders"] = len(active_orders)
 
     return records
 
 
-async def save_and_print_results(client, config, all_bots, trader, market_id):
+async def save_and_print_results(client, config, all_bots, traders: list, market_id):
     mm = all_bots[0]  # first bot is always the MM
-    noise_bots = all_bots[1:-1]  # middle bots are noise
+    num_traders = len(traders)
+    noise_bots = all_bots[1:-num_traders]  # middle bots are noise
 
     print("\n" + "=" * 70)
     print("SIMULATION RESULTS")
@@ -352,20 +425,23 @@ async def save_and_print_results(client, config, all_bots, trader, market_id):
             f"${r['pnl']:>+9.2f}"
         )
 
-    # Trade log
-    print(f"\n--- AmericanTrader Trade Log ({len(trader.trade_log)} articles) ---")
-    for i, rec in enumerate(trader.trade_log, 1):
-        order_desc = ", ".join(rec.to_dict()["orders"]) or "no trade"
-        print(
-            f"  [{i}] {rec.sim_time:%H:%M} P={rec.probability:.2f} "
-            f"{rec.conviction:<6} | {order_desc}"
-        )
-        print(f"       {rec.article.source}: {rec.article.title[:65]}")
-        if rec.motivation:
-            print(f"       → {rec.motivation[:80]}")
+    # Trade logs — one per trader
+    for t in traders:
+        print(f"\n--- {t.name} Trade Log ({len(t.trade_log)} articles) ---")
+        for i, rec in enumerate(t.trade_log, 1):
+            order_desc = ", ".join(rec.to_dict()["orders"]) or "no trade"
+            print(
+                f"  [{i}] {rec.sim_time:%H:%M} P={rec.probability:.2f} "
+                f"{rec.conviction:<6} | {order_desc}"
+            )
+            print(f"       {rec.article.source}: {rec.article.title[:65]}")
+            if rec.motivation:
+                print(f"       → {rec.motivation[:80]}")
 
     # Fetch fills for fill tracking
-    trader_fills = await _fetch_all_fills(client, trader.account_id)
+    trader_fills_map: dict[str, list] = {}
+    for t in traders:
+        trader_fills_map[t.name] = await _fetch_all_fills(client, t.account_id)
     mm_fills = await _fetch_all_fills(client, mm.account_id)
     noise_fills = []
     for nb in noise_bots:
@@ -373,17 +449,32 @@ async def save_and_print_results(client, config, all_bots, trader, market_id):
 
     # Build per-block records
     price_history = await client.get_price_history(market_id)
-    article_date = trader.articles[0].timestamp.date() if trader.articles else None
+    article_date = traders[0].articles[0].timestamp.date() if traders and traders[0].articles else None
     if article_date:
         h, m = (int(x) for x in config.sim_start_hour.split(":"))
         rec_sim_start = datetime(article_date.year, article_date.month, article_date.day, h, m)
     else:
         rec_sim_start = None
     block_records = build_block_records(
-        all_bots, mm, noise_bots, trader, price_history, trader_fills,
+        all_bots, mm, noise_bots, traders, price_history,
+        trader_fills_map=trader_fills_map,
         mm_fills=mm_fills, noise_fills=noise_fills,
         sim_start=rec_sim_start, compression_ratio=config.compression_ratio,
     )
+
+    # Enrich block records with welfare/volume/fills from bot's live block stats
+    # (fetching via get_block() misses early blocks evicted from the ring buffer)
+    block_stats = mm.block_stats  # all bots see the same blocks; use MM's copy
+    for rec in block_records:
+        stats = block_stats.get(rec["height"])
+        if stats:
+            rec["welfare_nanos"] = stats[0]
+            rec["total_volume_nanos"] = stats[1]
+            rec["orders_filled"] = stats[2]
+        else:
+            rec["welfare_nanos"] = 0
+            rec["total_volume_nanos"] = 0
+            rec["orders_filled"] = 0
 
     # Block summary
     print(f"\n--- Block Log ({len(block_records)} blocks) ---")
@@ -394,7 +485,8 @@ async def save_and_print_results(client, config, all_bots, trader, market_id):
         trader_n = len(rec["trader_orders"])
         line = f"  Block {rec['height']:>3}: {price_str}  MM:{mm_n}  Noise:{noise_n}  Trader:{trader_n}"
         for llm in rec["trader_llm"]:
-            line += f"  ← LLM P={llm['probability']:.2f} {llm['conviction']}"
+            tag = f"[{llm['trader']}]" if "trader" in llm else ""
+            line += f"  ← {tag} P={llm['probability']:.2f} {llm['conviction']}"
         print(line)
 
     # Save to file
@@ -409,7 +501,7 @@ async def save_and_print_results(client, config, all_bots, trader, market_id):
             "config": asdict(config),
         },
         "blocks": block_records,
-        "trade_log": [rec.to_dict() for rec in trader.trade_log],
+        "trade_logs": {t.name: [rec.to_dict() for rec in t.trade_log] for t in traders},
         "leaderboard": leaderboard,
     }
     run_path.write_text(json.dumps(run_data, indent=2))
@@ -424,8 +516,6 @@ def main():
     parser.add_argument("--noise-count", type=int, default=20)
     parser.add_argument("--noise-balance", type=float, default=20.0)
     parser.add_argument("--trader-balance", type=float, default=1000.0)
-    parser.add_argument("--mm-risk-fraction", type=float, default=0.30,
-                        help="Fraction of portfolio value to use as risk budget (default: 0.30)")
     parser.add_argument("--initial-price", type=float, default=0.12)
     parser.add_argument("--model", default="moonshotai/kimi-k2")
     parser.add_argument("--api-key", default="")
@@ -447,7 +537,6 @@ def main():
         noise_count=args.noise_count,
         noise_balance=args.noise_balance,
         trader_balance=args.trader_balance,
-        mm_risk_fraction=args.mm_risk_fraction,
         initial_price=args.initial_price,
         model_name=args.model,
         api_key=args.api_key,
@@ -462,7 +551,6 @@ def main():
     print(f"  Model: {config.model_name}")
     print(f"  Compression: {config.compression_ratio}x")
     print(f"  Noise traders: {config.noise_count} @ ${config.noise_balance}")
-    print(f"  MM risk fraction: {config.mm_risk_fraction:.0%}")
     print(f"  Trader balance: ${config.trader_balance}")
     print()
 
