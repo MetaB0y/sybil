@@ -71,9 +71,9 @@ The Frank-Wolfe oracle is the same LP as the base solver, with adjusted objectiv
 
 Start with large b (fast convergence, smooth prices), decrease b toward 0 (sharp LP prices). Warm-start each temperature from previous solution. ~10 temperatures × 5 iterations = 50 LP solves total. Same b as LMSR — this is the unifying idea.
 
-## The Uniqueness Question (Theorem 8)
+## The Uniqueness Question (Theorems 8–9)
 
-### The breakthrough: budget slippage convexity
+### Budget slippage convexity (the core math)
 
 The Lagrangian L(q, μ) = f_b(q) - μ·cap(q) + μ·B is concave in q when cap(q) is convex. We computed the Hessian of the capital function cap = p(q)·q:
 
@@ -83,96 +83,100 @@ d²(p·Q)/dQ² = p(1-p)/b · [2 + Q(1-2p)/b]
 
 This is positive (cap convex) iff `Q·(2p-1) ≤ 2b`. Economic meaning: **price slippage is a brake**. Buying more shares raises the price, making each additional share more expensive. This negative feedback prevents multiple equilibria.
 
-### The Diluted Influence Condition
+Group version (Proposition 4): `v^T H v = (1/b) Σ_k p_k (v_k - v̄)² (2 + (Q_k - Q̄)/b)`. Covariance cross-terms cancel exactly. PSD iff `Q̄ - Q_k ≤ 2b` for all k, simplifying to cap_group ≤ 2b.
 
-An instance satisfies Diluted Influence at temperature b if for every MM k and every market m:
+### The Diluted Influence Condition (Theorem 8)
+
+Sufficient condition: for every MM k and every market/group, the fill influence is bounded relative to temperature. When DIC holds: cap convex → Lagrangian concave → unique KKT → Frank-Wolfe finds global optimum.
+
+**Practical limitation:** At realistic annealing temperatures (b₀ = $0.10), DIC typically fails. Cap_group ~$140 requires b ≥ $70. The DIC is a theoretical certificate, not a runtime guarantee.
+
+### Why unconditional uniqueness is impossible
+
+The symmetric counterexample: two identical markets, symmetric MM → two KKT points with DIFFERENT prices. The entropy curvature (from C_b) and the budget non-convexity (from cap_k) both scale as O(1/b) — neither dominates. This is the fundamental reason.
+
+### Generic uniqueness (Theorem 9) — the main new result
+
+**Theorem 9:** For any b > 0, the set of parameters with multiple KKT points has Lebesgue measure zero.
+
+**Proof structure:**
+1. **Sard/transversality:** KKT system is C^∞ for b > 0. Parametric Transversality Theorem → for generic parameters, all KKT points are non-degenerate (isolated, finitely many).
+2. **Homotopy from large b:** At b₀ > ||A||∞/2, contraction bound gives unique KKT point. As b decreases, KKT points trace smooth paths (implicit function theorem). New points appear only via saddle-node bifurcation (codimension-1).
+3. **Global max persistence:** Bifurcation-born local maxima have welfare strictly below the existing global max (generically). The global max is the smooth continuation of the unique optimum at b₀.
+
+**Corollary:** Annealed Frank-Wolfe with b₀ ≥ ||A||∞/2 converges to global optimum for generic parameters.
+
+**Economic meaning:** Multiple optima require exact parameter symmetry (measure zero). Real order books are generically unique. DIC is a checkable certificate for specific instances; Theorem 9 says you almost never need it.
+
+### Demand diameter bound (Proposition 5)
+
+When multiple KKT points exist (measure-zero case), their demands can't be far apart:
 
 ```
-Q_m^k · (2p_m - 1)⁺ ≤ 2b
+||D¹ - D²||₂ ≤ b · Σ_k μ_k Q̄_k / p_min
 ```
 
-When this holds: cap is convex → Lagrangian is concave → unique KKT point → Frank-Wolfe finds global optimum (Theorem 8).
+**Key corollary:** μ = 0 (no binding budgets) → demands are identical. The strict concavity of C_b fully controls the problem when budgets are slack.
 
-### When Diluted Influence holds naturally
+**Proof:** Midpoint argument. The entropy gain at (q¹+q²)/2 is quadratic: δ ≥ (p_min/2b)||D¹-D²||². The cap perturbation is linear: ε ≤ Σ_k μ_k Q̄_k/(4b) · ||D¹-D²||. Since the midpoint can't beat the optimum, δ ≤ ε, giving the bound.
 
-- **Large b** (high temperature): automatic for first phase of annealing
-- **Retail dilution**: MM fills small relative to total volume
-- **Buying underdogs** (p < 0.5): condition is unconditional
-- **Flash liquidity** (spreading across many markets): Q per market stays small
+### The expenditure perspective (Eisenberg-Gale)
 
-### When it fails
+Change variables to expenditure e_i = c_i(p)·q_i → budget becomes LINEAR: Σ e_i ≤ B_k. But welfare becomes w_i·e_i/c_i(p) — rational in prices.
 
-- MM dominates a market (Q >> 2b): price saturates (sigmoid flattens), slippage vanishes
-- Very small b (near-LP): sigmoid is steep, moderate fills exceed 2b
-- Symmetric counterexample: two identical markets, symmetric MM → two KKT points
+In Fisher markets (Eisenberg & Gale 1959), the analogous program is convex because agents have diminishing returns (log utility). Our MMs have constant marginal returns (linear welfare). **This is the structural reason** prediction market clearing is harder than Fisher market equilibrium.
 
-### The annealing rescue
+Open direction: if MMs had diminishing returns (bounded-loss à la Chen-Pennock), the expenditure program might be convex.
 
-Even when Diluted Influence fails at low b: Algorithm 2 starts at high b (condition holds, unique global optimum). As b decreases, the optimum traces a smooth path. The annealing trajectory tracks it, staying in the correct basin. So the condition only needs to hold at the START of annealing.
+### Landscape of uniqueness results
 
-### What's proven vs. open
+| Result | Condition | What's unique | Strength |
+|--------|-----------|---------------|----------|
+| Theorem 8 | DIC holds | Fills + prices | Checkable certificate |
+| Contraction | b > \|\|A\|\|∞/2 | Everything (exponential) | Checkable, global |
+| Proposition 5 | μ = 0 | Demands + prices | Unconditional (slack budgets) |
+| Theorem 9 | Generic θ | Everything | Almost everywhere |
+| Unconditional | — | — | **False** (counterexample) |
 
-**Proven:**
-- Budget slippage convexity condition (Proposition 3)
-- Global optimality under Diluted Influence for independent markets (Theorem 8)
-- Frank-Wolfe convergence to KKT at O(1/√t) (Theorem 7)
+### The Fenchel dual (Propositions 6-7) — structural impossibility
 
-**Proven (group extension, Proposition 4):**
-- Full group Hessian quadratic form: `v^T H v = (1/b) Σ_k p_k (v_k - v̄)² (2 + (Q_k - Q̄)/b)`
-- Group DIC: cap_group ≤ 2b (MM's capital on a group must be at most 2b)
-- Theorem 8 now covers groups — the conjecture about "restorative cross-terms" was correct and proven via the quadratic form (covariance terms cancel exactly)
+**Unconstrained (no budgets):** The Fenchel dual is `min_p [W*(p) + C_b*(p)]` where W* is consumer surplus (convex PL) and C_b* is negative entropy (strictly convex). Sum is strictly convex → **unique prices, unconditionally** (Proposition 6).
 
-**Partially proven:**
-- Annealing continuation: implicit function theorem gives smooth path tracking, but no formal error bound across temperature steps
+**Budget-constrained:** Replace W with W_B (includes cap constraint). The cap depends on D through softmax at rate O(1/b), making W_B non-concave. Its conjugate W_B* is non-convex with curvature O(1/b) — the **same scale as the entropy Hessian** O(1/(pb)).
 
-**Open:**
-- Unconditional uniqueness (without Diluted Influence) for generic instances — Devanur-Dudík price uniqueness via KL divergence is promising but needs formalization for batch auctions
-- Explicit convergence rates for the full annealing schedule
+**Proposition 7 (Cross-Price Obstruction):** The standard monotonicity argument for price uniqueness fails because of *cross-price budget violation*. Given two KKT points, strict convexity of C_b* gives ⟨D¹-D², p¹-p²⟩ > 0. But to force a contradiction, we need the fills of KKT point 1 to be budget-feasible at KKT point 2's prices — and there's no guarantee of this. If p² is higher where the MM is long, E_k(q¹, p²) > B_k. This is a **Generalized Nash Equilibrium Problem (GNEP)**: the feasible set depends on the dual variable. Both the entropy curvature and the cross-price violation scale as O(1/b), preventing either from dominating.
 
-### Connection to QRE (Quantal Response Equilibria)
+**The risk-averse escape:** Replace linear welfare with Kelly/log utility: U_k = Σ w_i ln(1 + q_i/s_i). The log Hessian O(w/q²) is independent of b, breaking the deadlock. This gives unconditional uniqueness for the modified model. Economically well-motivated (real MMs use Kelly-like sizing).
 
-Diluted Influence is the prediction-market analog of the contraction condition for Logit QRE (McKelvey & Palfrey 1995). Agents choose via softmax, uniqueness holds when temperature is high enough relative to payoff sensitivity. Same math, different domain.
+### Key references for uniqueness
 
-### Quantitative contraction threshold (from deep research)
+- McKelvey & Palfrey (1995): QRE uniqueness at high temperature — our analog is Theorem 8 (DIC)
+- Hofbauer & Sandholm (2007): unique logit equilibrium for NSD games — covers unconstrained case
+- Devanur & Dudík (2015): price uniqueness for budget-constrained sequential LMSR — budget additivity hints at hidden convexity
+- Rockafellar (2023): tilt stability at non-degenerate KKT points — mechanism underlying Theorem 9's homotopy
+- Abraham & Robbin (1967); Debreu (1970): Parametric Transversality Theorem — standard in economic theory
+- Eisenberg & Gale (1959): convex program for Fisher market equilibrium — identifies the structural gap (diminishing returns)
 
-Softmax is exactly 1/(2b)-Lipschitz (tight bound, improves commonly assumed 1/b). This gives a concrete threshold: the best-response Jacobian has spectral radius < 1 when `b > ||A||∞ / 2` where A is the demand matrix. For the annealing schedule: set b₀ ≥ ||A||∞ / 2 to guarantee the first phase finds the global optimum.
+## Approaches tried and their evolution
 
-### Three fallback layers when Diluted Influence fails
+### v1: Homotopy / differential topology (§8.8 v1)
 
-1. **Price uniqueness via Bregman divergence** (Devanur & Dudík 2015): Even when primal fills are non-unique, clearing PRICES are unique. KL(p || p') > 0 for distinct price vectors. Their result is for sequential LMSR, but the mechanism (strict convexity of KL) transfers to our batch auction via strict concavity of f_b in demand space.
+Original approach: prove uniqueness via homotopy continuation from b=∞ to b=0 using Sard's theorem and parametric transversality. Abandoned because non-constructive, wrong audience, and the Lagrangian concavity approach (DIC) was cleaner.
 
-2. **Local uniqueness via variational convexity** (Rockafellar 2023): The augmented Lagrangian L_r = L + (r/2)Σ(cap_k - B_k)² is locally strongly convex-concave near any regular KKT point. This gives tilt stability (Lipschitz continuity of the optimum w.r.t. parameters) without global concavity.
+### v2: Lagrangian concavity / DIC (§8.8 v2, Theorem 8)
 
-3. **Annealing continuation**: Start at high b (globally unique), track the smooth path as b decreases. Layer 2 prevents bifurcation at regular points.
+The constructive approach: prove cap(q) is convex under DIC → Lagrangian is concave → unique KKT. Solid math (Propositions 3-4, Theorem 8). But DIC fails at practical temperatures — it's a theoretical certificate, not a runtime guarantee.
 
-### Negative semidefinite games (Hofbauer & Sandholm 2007)
+### v3: Generic uniqueness + Fenchel dual + impossibility (§8.8 v3, current)
 
-Our market is a "negative semidefinite game": buying more of outcome k raises p_k, reducing the payoff to further buyers (self-defeating externality). Hofbauer & Sandholm proved unique logit equilibrium for this class. Their result covers the unconstrained case; our Theorem 8 extends to budget constraints.
+**Combined approach:**
+- **Theorem 9** (generic uniqueness via Sard — ironically the same tool from v1, now used properly)
+- **Proposition 5** (demand diameter bound — quantifies how bad non-uniqueness can be)
+- **Proposition 6** (unconstrained price uniqueness via Fenchel dual — clean positive result)
+- **Proposition 7** (isospectral obstruction — proves unconditional uniqueness is impossible for risk-neutral MMs)
+- **Risk-averse extension** (Kelly utility breaks the deadlock — concrete open direction)
 
-### Deep research assessment
-
-The deep research confirmed:
-- `cap(q) = p(q)·q` is NOT globally convex (matches our Proposition 3)
-- High-temperature uniqueness is real and well-established (QRE, contraction mapping)
-- The Diluted Influence condition is the right structure
-- Devanur-Dudík 2015 and Hofbauer-Sandholm 2007 are the key references to cite
-
-Overclaimed by deep research:
-- "The hypothesis is fundamentally correct and entirely resolvable" — too strong. The four "parallel guarantees" are really four angles on the same question
-- Gorissen hidden convexity "structural prerequisites align identically" — handwaved, not proven for our softmax case
-- Budget additivity transferring to batch auctions — open question, not settled
-
-## Approaches tried and abandoned
-
-### Homotopy / differential topology (§8.8 v1)
-
-Original approach: prove uniqueness via homotopy continuation from b=∞ to b=0 using Sard's theorem and parametric transversality. Problems:
-- **Non-constructive**: Sard gives "for generic parameters" but doesn't tell you which parameters fail
-- **Boundary nightmare**: polytope has exponentially many faces, face-by-face argument is tedious
-- **Uniform regularity gap**: need Jacobian non-singularity along the entire path, not just at each point
-- **Wrong audience**: differential topology is not in the toolbox of market design / optimization people
-
-Replaced by the Lagrangian concavity argument, which is constructive, gives a checkable condition, and uses standard optimization tools.
+The key insight: **unconditional uniqueness is provably impossible** for this model (Prop 7), so the right results are generic uniqueness (Thm 9) + structural explanation (isospectral) + modified model that works (Kelly). This is more satisfying than "condition X holds" because it explains WHY the condition exists.
 
 ## Paper Strategy
 
@@ -196,28 +200,39 @@ Applied systems / market design paper, not pure theory. "We bridge the 15-year g
 
 - Don't claim new math (the Fenchel duality is applied, not invented)
 - Don't claim the pipeline replacement is a contribution (it was obviously bad)
-- Don't over-claim unconditional uniqueness (Theorem 8 has the Diluted Influence condition)
+- Don't claim unconditional uniqueness (it's false — symmetric counterexample)
+- Don't oversell Theorem 9 — "generic" means "for almost all," not "for all"
 
 ### What TO claim
 
 - Self-financing minting (Theorem 4) — clean, original
 - O(K) scaling via group minting vs O(2^K) combinatorial LMSR — practical
 - Frank-Wolfe budget handling with LP oracle — novel algorithm for this domain
-- **Budget slippage convexity** — the genuinely novel insight (Proposition 3 + Theorem 8)
-- Diluted Influence Condition — checkable, economically meaningful sufficient condition for global optimality
+- **Budget slippage convexity** — the genuinely novel math (Propositions 3-4, Theorem 8)
+- **Generic uniqueness** — the strongest unconditional result (Theorem 9)
+- **Demand diameter bound** — quantitative stability even in the measure-zero non-unique case (Proposition 5)
+- Landscape table — clear positioning of what's proven at each level
 
 ## Key References
 
+**Core LMSR / prediction markets:**
 - Abernethy, Chen, Vaughan (2013): cost-function AMMs ↔ convex optimization ↔ conjugate duality
 - Fortnow et al. (2005): LP for combinatorial call markets
 - Agrawal, Wang, Ye (2011): convex pari-mutuel call auction
 - Hanson (2003): LMSR
-- Budish, Cramton, Shim (2015): FBAs for equity markets
 - Chen, Pennock (2007): bounded-loss market makers
+- Budish, Cramton, Shim (2015): FBAs for equity markets
+
+**Uniqueness / equilibrium:**
 - McKelvey, Palfrey (1995): Quantal Response Equilibria (logit uniqueness)
-- Gorissen, den Hertog, Reusken (2022): hidden convexity in bilinear programs
-- Fiacco (1983): sensitivity and stability analysis in NLP (local uniqueness via LICQ+SOSC)
-- Luo, Pang, Ralph (1996): MPECs (Mathematical Programs with Equilibrium Constraints)
+- Hofbauer, Sandholm (2007): unique logit equilibrium for NSD games
+- Devanur, Dudík (2015): price uniqueness for budget-constrained LMSR via Bregman divergence
+
+**Optimization theory:**
+- Rockafellar (2023): variational convexity, tilt stability
+- Eisenberg, Gale (1959): convex program for Fisher markets
+- Abraham, Robbin (1967): Parametric Transversality Theorem
+- Debreu (1970): generic finiteness of Walrasian equilibria
 - Lacoste-Julien (2016): Frank-Wolfe convergence for non-convex objectives
 
 ## Practical notes

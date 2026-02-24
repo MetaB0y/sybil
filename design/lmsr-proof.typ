@@ -553,32 +553,150 @@ where $A$ is the demand matrix ($D = A bold(q)$) and $||A||_infinity$ is its max
 
 For the annealing schedule (Algorithm 2), this means: set $b_0 >= ||A||_infinity / 2$ to ensure the first phase provably finds the global optimum.
 
-=== When the condition fails
+=== Why unconditional uniqueness fails
 
-The Diluted Influence Condition is _sufficient_, not necessary. It can fail when:
+Unconditional uniqueness — for _all_ parameters and all $b$ — is false. The entropy curvature (from $C_b$) and the budget non-convexity (from $"cap"_k$) both scale as $O(1\/b)$. Neither dominates the other in general, so the budget can create a "ridge" in the Lagrangian landscape that splits the global optimum into two local optima.
 
-- An MM dominates a market ($Q >> 2b$) — the price saturates and slippage vanishes
-- $b$ is very small (near-LP pricing) — the sigmoid is steep, and even moderate fills can exceed $2b$
+*Counterexample.* Two markets $A, B$ with identical order books and one MM with symmetric positions on both. By symmetry, there are two KKT points: "fill $A$, starve $B$" and "fill $B$, starve $A$." These produce different fill vectors, different demands ($D_A > D_B$ vs.~$D_B > D_A$), and different prices ($p_A > p_B$ vs.~$p_B > p_A$). No algorithm can select between them without breaking the symmetry.
 
-In these cases, the Lagrangian loses global concavity. However, three layers of fallback preserve practical uniqueness:
+This counterexample requires _exact_ parameter symmetry — a measure-zero set. Any perturbation of a single limit price selects a unique optimum.
 
-*Layer 1: Price uniqueness via duality.* Even when the primal fill vector is non-unique, the clearing _prices_ may still be unique. Devanur and Dudík (2015) proved price uniqueness for budget-constrained prediction markets with LMSR pricing via the Bregman divergence: the KL divergence $D_"KL" (bold(p) || bold(p)') > 0$ for any distinct price vectors $bold(p) != bold(p)'$, so the dual solution (prices) is unique even if multiple primal solutions (fill vectors) exist. Their model is sequential LMSR rather than simultaneous batch, but the mathematical mechanism (strict convexity of the KL divergence) transfers: in our smoothed problem, prices are softmax of demand, and distinct prices imply distinct demands, which would violate the strict concavity of $f_b$ in demand space.
+=== Generic uniqueness
 
-*Layer 2: Local uniqueness.* By Rockafellar's (2023) variational convexity framework, any KKT point satisfying standard second-order sufficient conditions is _tilt-stable_: it is locally unique, isolated, and varies Lipschitz-continuously with problem parameters. The augmented Lagrangian $cal(L)_r = cal(L) + (r\/2) sum_k ("cap"_k - B_k)^2$ is locally strongly convex-concave near such a point, even when the standard Lagrangian is not globally concave. For generic parameters, every KKT point satisfies these conditions (Fiacco 1983).
+The counterexample is essentially the only obstruction. For almost all parameter values, the budget-constrained problem has a unique KKT point.
 
-*Layer 3: Annealing continuation.* Algorithm 2 starts at high $b$ where Diluted Influence holds (Theorem 8 applies, unique global optimum). As $b$ decreases, the optimum traces a smooth path (implicit function theorem, since all functions are $C^infinity$ for $b > 0$). Layer 2 ensures no bifurcation at regular KKT points. The annealing trajectory tracks the unique optimum continuously.
+#block(inset: (left: 1em))[
+  *Theorem 9* (Generic Uniqueness). _Fix $b > 0$. Let $Theta$ denote the space of problem parameters (limit prices, budgets, max fills). The set of parameters $theta in Theta$ for which $P_b (theta)$ has multiple KKT points is closed and has Lebesgue measure zero._
+]
 
-=== Counterexample: symmetry breaks uniqueness
+_Proof._ The KKT system for the smoothed problem $P_b$ is $C^infinity$ (softmax is smooth for $b > 0$). For each active set — which orders have interior fills, which budgets bind — the KKT conditions form a square system $F(z, theta) = 0$ where $z = (q_I, mu_(K_a))$.
 
-Generic parameters are necessary. Consider two markets $A, B$ with identical order books and one MM with symmetric positions on both. By symmetry, there are two KKT points: "fill $A$, starve $B$" and "fill $B$, starve $A$." Both violate Diluted Influence (the MM dominates one market). Any asymmetric perturbation of limit prices selects a unique optimum.
+*Step 1 (Non-degeneracy).* The derivative $D_theta F$ has full rank: perturbing limit price $w_i$ shifts the $i$-th stationarity equation independently; perturbing budget $B_k$ shifts the $k$-th binding equation. By the Parametric Transversality Theorem (Abraham & Robbin, 1967; a consequence of Sard's theorem), for almost all $theta$, $0$ is a regular value of $F(dot, theta)$. At regular values, the KKT Jacobian $D_z F$ is nonsingular at every solution: each KKT point is non-degenerate. Finitely many active set choices $arrow.r$ union of exceptional parameters still measure zero. Compactness of $cal(C)$ $arrow.r$ finitely many KKT points.
+
+*Step 2 (Homotopy from large $b$).* At $b_0 > ||A||_infinity \/ 2$, the contraction bound gives exactly one KKT point. Consider the homotopy $b: b_0 arrow.r b_"min"$. Non-degenerate KKT points trace smooth paths in $(z, b)$-space (implicit function theorem). New KKT points appear only via _saddle-node bifurcation_: a max-saddle pair is born (or annihilated) when the bordered Hessian becomes singular. Bifurcations are codimension-1 in $(b, theta)$-space; for generic $theta$, they are isolated in $b$.
+
+*Step 3 (Global max persistence).* The global optimum value $V(b) = max f_b (bold(q))$ over the feasible set is continuous in $b$ (Berge's Maximum Theorem). At a bifurcation, the newborn local maximum has welfare _equal to its twin saddle_ — generically strictly below $V(b)$. The global maximum therefore continues as the smooth deformation of the unique optimum at $b_0$, without jumping or splitting. #h(1fr) $square$
+
+_Corollary._ For generic parameters, Algorithm 2 (Annealed Frank-Wolfe) with $b_0 >= ||A||_infinity \/ 2$ converges to the global optimum at every temperature along the annealing path.
+
+_Economic meaning._ The only instances with multiple optima require exact symmetries: identical order books, symmetric MM positions, matching budgets. Real order books — with heterogeneous beliefs, diverse limit prices, and asymmetric market structures — are generically unique. Theorem 8 (DIC) provides a _checkable certificate_ for specific instances; Theorem 9 says the certificate is almost never needed.
+
+=== Demand diameter bound
+
+Even when multiple KKT points exist (the measure-zero case), their demands and prices cannot be far apart.
+
+#block(inset: (left: 1em))[
+  *Proposition 5* (Demand Diameter). _Let $bold(q)^1, bold(q)^2$ both maximize $cal(L)(dot, bold(mu))$ over $cal(C)$ for fixed $bold(mu) >= 0$ and $b > 0$. Then:_
+  $ ||bold(D)^1 - bold(D)^2||_2 <= (b dot sum_k mu_k overline(Q)_k) / p_"min" $
+  _where $bold(D)^j = A bold(q)^j$, $overline(Q)_k = max_j sum_(i in "MM"_k) q_i^j$, and $p_"min" = min_m p_m (b)$. In particular, $bold(mu) = 0$ implies $bold(D)^1 = bold(D)^2$: demands and prices are unique when no budget binds._
+]
+
+_Proof._ The midpoint $overline(bold(q)) = (bold(q)^1 + bold(q)^2) \/ 2$ lies in $cal(C)$ (convex set). Its Lagrangian value:
+
+$
+cal(L)(overline(bold(q)), bold(mu)) - 1/2 (cal(L)(bold(q)^1, bold(mu)) + cal(L)(bold(q)^2, bold(mu))) = underbrace(delta, "entropy gain") - underbrace(epsilon, "cap perturbation")
+$
+
+The entropy gain: $delta = 1\/2 (C_b (bold(D)^1) + C_b (bold(D)^2)) - C_b (overline(bold(D))) >= (p_"min") / (2b) ||bold(D)^1 - bold(D)^2||_2^2$ by strict convexity of $C_b$ (minimum Hessian eigenvalue $= p_"min" \/ b$).
+
+The cap perturbation: $|epsilon| = |sum_k mu_k ["cap"_k (overline(bold(q))) - 1\/2 ("cap"_k (bold(q)^1) + "cap"_k (bold(q)^2))]|$. Each $|"cap"_k (overline(bold(q))) - 1\/2 (dots)| <= (overline(Q)_k) / (4b) ||bold(D)^1 - bold(D)^2||_2$ by the $1\/(2b)$-Lipschitz bound on softmax prices.
+
+Since $overline(bold(q))$ cannot exceed the optimal value: $delta <= |epsilon|$. Dividing through:
+
+$
+(p_"min") / (2b) ||bold(D)^1 - bold(D)^2||_2 <= (sum_k mu_k overline(Q)_k) / (4b)
+$
+
+Rearranging gives the bound. When $bold(mu) = 0$, the RHS vanishes, forcing $bold(D)^1 = bold(D)^2$. #h(1fr) $square$
+
+_Remark._ Proposition 5 interpolates between two regimes. When budgets are slack ($bold(mu) = 0$), the strict concavity of $C_b$ dominates and demands are unique — the problem is "essentially convex." As budgets become tighter (larger $mu_k$), the cap perturbation grows, allowing wider demand separation. The DIC (Theorem 8) is the condition under which the perturbation vanishes entirely (convex cap $arrow.r$ no perturbation $arrow.r$ unique demand regardless of $mu$).
+
+=== The Fenchel dual and price uniqueness <fenchel-dual>
+
+A natural hope: even if _fills_ are non-unique, perhaps _clearing prices_ are unconditionally unique. We test this via the Fenchel dual.
+
+*Unconstrained case (no budgets).* The primal in demand space is $max_D [W(D) - C_b (D)]$ where $W(D) = max_(bold(q): A bold(q) = D, bold(q) in "box") sum w_i q_i$ is concave piecewise-linear. Define $h = -W$ (convex). By Fenchel-Rockafellar duality:
+
+$
+min_(bold(p) in Delta^M) [underbrace(W^*(bold(p)), "consumer surplus") + underbrace(C_b^* (bold(p)), "entropy penalty")]
+$
+
+where $W^*(bold(p)) = sum_i (w_i - (A^top bold(p))_i)^+ overline(q)_i$ is the total surplus of orders whose limit prices exceed clearing prices, and $C_b^* (bold(p)) = sum_m b sum_k p_(m k) ln p_(m k)$ is the negative Shannon entropy (Theorem 2).
+
+#block(inset: (left: 1em))[
+  *Proposition 6* (Unconstrained Price Uniqueness). _The Fenchel dual of the unconstrained smoothed problem is strictly convex: $W^*$ is convex (piecewise linear) and $C_b^*$ is strictly convex on the interior of $Delta^M$. The clearing prices $bold(p)^*$ are therefore unique for any $b > 0$ and any order book, without any condition._
+]
+
+This is the Fenchel dual of Theorems 1–2: the indicator function $delta_Delta$ (hard simplex constraint) generalizes to the entropy penalty $-b H(bold(p))$ (soft simplex constraint). The entropy's strict convexity is what makes prices unique — it penalizes ambiguity.
+
+*Budget-constrained case.* Replace $W(D)$ with $W_B (D) = max_(bold(q) in cal(C), "cap"_k <= B_k) sum w_i q_i$ subject to $A bold(q) = D$. The cap constraint $sum_(i in "MM"_k) c_i ("softmax"(D\/b)) q_i <= B_k$ depends on $D$ through the softmax prices, making $W_B$ _non-concave_ in $D$.
+
+The Fenchel dual becomes $min_(bold(p)) [W_B^* (bold(p)) + C_b^* (bold(p))]$, but now $W_B^*$ is _non-convex_. The non-convexity arises from the cap constraint's dependence on $D$: as $D$ shifts, the softmax prices change at rate $O(1\/b)$, modifying which fills are budget-feasible. This introduces curvature of order $O(1\/b)$ into $W_B$ — the same scale as the entropy Hessian $nabla^2 C_b^* = "diag"(1\/bold(p))\/b$.
+
+#block(inset: (left: 1em))[
+  *Proposition 7* (Cross-Price Obstruction). _Unconditional price uniqueness is impossible for the budget-constrained smoothed problem. Specifically, the standard monotonicity argument fails due to cross-price budget violation._
+]
+
+_Proof._ Suppose two KKT points $(bold(q)^1, bold(p)^1, bold(mu)^1)$ and $(bold(q)^2, bold(p)^2, bold(mu)^2)$ exist with $bold(p)^1 != bold(p)^2$. The strict convexity of $C_b^*$ gives $chevron.l bold(D)^1 - bold(D)^2, bold(p)^1 - bold(p)^2 chevron.r > 0$ (the demand-price inner product is strictly positive for distinct prices). Cross-applying the optimality conditions and using complementary slackness ($mu_k^j (B_k - E_k (bold(q)^j, bold(p)^j)) = 0$) yields:
+
+$
+chevron.l bold(D)^1 - bold(D)^2, bold(p)^1 - bold(p)^2 chevron.r <= sum_k [mu_k^2 (E_k (bold(q)^1, bold(p)^2) - B_k) + mu_k^1 (E_k (bold(q)^2, bold(p)^1) - B_k)]
+$
+
+For a contradiction ($"LHS" > 0$ but $"RHS" <= 0$), we need $E_k (bold(q)^1, bold(p)^2) <= B_k$ — that the _first_ fills are affordable at the _second_ prices. But while $E_k (bold(q)^1, bold(p)^1) <= B_k$ holds (budget feasibility at own prices), there is *no guarantee* that $E_k (bold(q)^1, bold(p)^2) <= B_k$. If $bold(p)^2$ is higher in markets where MM $k$ holds long positions, the cross-price evaluation blows past the budget.
+
+This is the mathematical signature of a _Generalized Nash Equilibrium Problem_ (GNEP): the feasible set (budget constraint) depends on the dual variable (prices). Standard Fenchel duality requires the primal feasible set to be independent of the dual; the endogenous-price budget destroys this independence. The obstruction is structural, not a gap in technique: both the entropy curvature and the cross-price budget violation scale as $O(1\/b)$, preventing either from dominating unconditionally. #h(1fr) $square$
+
+_Remark._ This is the dual-space version of the symmetric counterexample. In the primal, two optima have different fills and different prices. In the dual, the budget feasibility "swaps" — fills affordable at one price are not affordable at the other — because the bilinear constraint $c(p) dot q <= B$ ties the feasible region to the solution.
+
+=== The expenditure perspective and risk-averse extension
+
+*Why Eisenberg-Gale fails.* Changing variables to capital expenditures $e_i = c_i (p) dot q_i$ linearizes the budget: $sum_(i in "MM"_k) e_i <= B_k$. But welfare transforms to $sum_i w_i dot e_i \/ c_i (p)$ — rational in prices. In Fisher markets (Eisenberg & Gale, 1959), the analogous program is convex because agents have _diminishing-returns_ utilities: the $ln U_k$ objective provides curvature. Our MMs have constant marginal returns (linear welfare), providing none.
+
+*The risk-averse fix.* Replace linear MM welfare $sum w_i q_i$ with a strictly concave utility:
+
+$
+U_k (bold(q)) = sum_(i in "MM"_k) w_i ln(1 + q_i \/ s_i), quad s_i > 0
+$
+
+The logarithm models _Kelly-criterion sizing_: each additional fill has diminishing marginal value, reflecting the risk aversion that real institutional MMs exhibit. The Hessian $U_k'' = -w_i \/ (s_i + q_i)^2$ provides curvature of order $O(w_i \/ overline(q)_i^2)$ in the primal.
+
+This breaks the isospectral deadlock: the utility curvature $O(w \/ overline(q)^2)$ is independent of $b$, while the budget non-convexity scales as $O(1\/b)$. For any $b > 0$, sufficiently strong risk aversion makes the Lagrangian _unconditionally_ strictly concave:
+
+$
+"Strict concavity" quad arrow.l.double quad min_i w_i \/ (s_i + overline(q)_i)^2 > sum_k mu_k dot ||nabla^2 "cap"_k||
+$
+
+Furthermore, the expenditure substitution now yields a convex program: $sum w_i ln(1 + e_i \/ (s_i c_i (p)))$ is jointly concave in $(e, p)$ on the feasible region.
+
+This changes the economic model — we are solving a _risk-averse_ batch auction, not the exact LP. But the modification is arguably more realistic: institutional MMs size positions using Kelly-like criteria, not linear utility. The question of whether the risk-neutral LP model admits unconditional uniqueness is settled negatively by Proposition 7.
+
+=== Landscape of uniqueness results
+
+#align(center)[
+  #table(
+    columns: 4,
+    align: (left, center, center, center),
+    [*Result*], [*Condition*], [*What's unique*], [*Strength*],
+    [Proposition 6], [No budgets], [Prices (Fenchel dual)], [Unconditional],
+    [Theorem 8], [DIC holds at $b$], [Fill vector + prices], [Checkable certificate],
+    [Contraction], [$b > ||A||_infinity \/ 2$], [Everything (exponential)], [Checkable, global],
+    [Proposition 5], [$bold(mu) = 0$], [Demands + prices], [Unconditional (slack budgets)],
+    [Theorem 9], [Generic $theta$], [Everything], [Almost everywhere],
+    [Risk-averse ext.], [Kelly utility], [Everything], [Unconditional (modified model)],
+    [Proposition 7], [---], [---], [Impossible (isospectral)],
+  )
+]
 
 === Connection to related frameworks
 
-*Quantal Response Equilibria.* The Diluted Influence Condition is the prediction-market analog of the contraction condition for Logit QRE (McKelvey & Palfrey, 1995). In a QRE, agents choose actions via softmax of expected payoffs; uniqueness holds when the temperature is high enough relative to the payoff sensitivity. Our condition $Q <= 2b\/(2p-1)$ is the market-specific contraction bound.
+*Quantal Response Equilibria.* The Diluted Influence Condition is the prediction-market analog of the contraction condition for Logit QRE (McKelvey & Palfrey, 1995). In a QRE, agents choose actions via softmax of expected payoffs; uniqueness holds when the temperature is high enough relative to the payoff sensitivity. Our condition $Q <= 2b\/(2p-1)$ is the market-specific contraction bound. Theorem 9 extends this: just as QRE uniqueness holds for generic payoff matrices even when the temperature is low (McKelvey & Palfrey, Theorem 5), our generic uniqueness holds for all $b > 0$.
 
-*Negative semidefinite games.* Hofbauer and Sandholm (2007) proved uniqueness of logit equilibria for _negative semidefinite_ games — games where increasing adoption of a strategy decreases its payoff. Our market is exactly this: buying more of outcome $k$ raises $p_k$, reducing the marginal payoff to further buyers. Their result gives uniqueness of the unconstrained logit equilibrium; our Theorem 8 extends it to budget-constrained agents under the Diluted Influence Condition.
+*Negative semidefinite games.* Hofbauer and Sandholm (2007) proved uniqueness of logit equilibria for _negative semidefinite_ games — games where increasing adoption of a strategy decreases its payoff. Our market is exactly this: buying more of outcome $k$ raises $p_k$, reducing the marginal payoff to further buyers. Their result covers the unconstrained case; our Theorem 8 extends it to budget-constrained agents under DIC, and Theorem 9 extends it to budget-constrained agents for generic parameters.
 
-*Budget additivity.* Devanur and Dudík (2015) showed that budget-constrained LMSR exhibits _budget additivity_: two agents with budgets $B_1, B_2$ and identical beliefs affect prices identically to one agent with budget $B_1 + B_2$. This is a manifestation of hidden convexity — the bilinear budget boundaries merge into a convex hull in the dual space. Whether this additivity extends to our batch auction setting is an open question.
+*Budget additivity.* Devanur and Dudík (2015) showed that budget-constrained LMSR exhibits _budget additivity_: two agents with budgets $B_1, B_2$ and identical beliefs affect prices identically to one agent with budget $B_1 + B_2$. This is a manifestation of hidden convexity — the bilinear budget boundaries merge into a convex hull in the dual space. Whether a similar structural convexity exists in our batch auction setting — perhaps through the expenditure reformulation — is an open question. A positive answer would strengthen Theorem 9 from generic to unconditional.
+
+*Parametric optimization.* Theorem 9 uses the Parametric Transversality Theorem from differential topology (Abraham & Robbin, 1967; Guillemin & Pollack, 1974). The technique is standard in economic theory: Debreu (1970) used it to prove generic finiteness of Walrasian equilibria, and Mas-Colell (1985) applied it to smooth economies. Our application is new in the prediction market context.
 
 
 = Discussion <discussion>
@@ -632,7 +750,7 @@ _Remark._ In the degenerate case $Delta = 0$ (tied demands), the softmax splits 
 
 + *Extension to non-exclusive groups.* When markets are correlated but not mutually exclusive, group minting doesn't apply directly. The marginal decomposition (paper §4) handles this approximately; the exact connection to combinatorial LMSR in this regime is open.
 
-+ *Removing the Diluted Influence Condition.* Theorem 8 now covers both independent markets and groups (Propositions 3–4). The remaining question: is the DIC necessary, or does uniqueness hold for all generic instances regardless of MM concentration? The symmetric counterexample (§8.8) shows some condition is needed, but the DIC may be overly conservative. The Devanur-Dudík (2015) price-uniqueness result via KL divergence suggests that prices are always unique even when fills are not; formalizing this for the batch auction setting would close the gap.
++ *Unconditional uniqueness via risk-averse welfare.* Proposition 7 settles the question for the risk-neutral model: the isospectral obstruction makes unconditional uniqueness impossible. The risk-averse extension (§8.8, Kelly-criterion utility) breaks the deadlock by introducing $b$-independent curvature. Formalizing this — proving that the Eisenberg-Gale expenditure program with logarithmic MM utilities is jointly convex — would establish unconditional uniqueness for the modified model. This is both mathematically tractable and economically well-motivated.
 
 == Connection to Prior Work
 
@@ -644,18 +762,22 @@ _Remark._ In the degenerate case $Delta = 0$ (tied demands), the softmax splits 
 
 *Chen and Pennock (2007)*: Utility framework for bounded-loss market makers. The parameter $b$ in our framework corresponds directly to their loss bound. Our contribution is showing that $b = 0$ (zero loss) is achievable in a batch auction setting.
 
-*Devanur and Dudík (2015)*: Proved price uniqueness for budget-constrained prediction markets via Bregman divergence (KL divergence for LMSR). Our Theorem 8 is complementary: they prove uniqueness in the dual (price) space unconditionally; we prove uniqueness in the primal (fill) space under the Diluted Influence Condition.
+*Devanur and Dudík (2015)*: Proved price uniqueness for budget-constrained sequential LMSR via Bregman divergence, and budget additivity. Our Theorem 8 proves primal uniqueness under DIC; Theorem 9 proves generic uniqueness unconditionally. Their budget additivity result hints at hidden convexity in the dual space — extending this to simultaneous batch auctions is the main open problem (§9.2).
 
-*Hofbauer and Sandholm (2007)*: Proved uniqueness of logit equilibria for negative semidefinite games. Our prediction market is negative semidefinite (price rises with demand). Their result covers the unconstrained case; our contribution is the extension to budget-constrained agents.
+*Hofbauer and Sandholm (2007)*: Proved uniqueness of logit equilibria for negative semidefinite games. Our prediction market is negative semidefinite (price rises with demand). Their result covers the unconstrained case; our Theorems 8–9 extend to budget-constrained agents.
 
-*McKelvey and Palfrey (1995)*: Established the Quantal Response Equilibrium framework. The Diluted Influence Condition is the prediction-market analog of their high-temperature uniqueness result.
+*McKelvey and Palfrey (1995)*: Established the Quantal Response Equilibrium framework. The Diluted Influence Condition is the prediction-market analog of their high-temperature uniqueness result; Theorem 9 extends to generic uniqueness at all temperatures.
 
-*Rockafellar (2023)*: Augmented Lagrangian framework for variational convexity. Provides local uniqueness (tilt stability) at KKT points without requiring global concavity — the theoretical backstop when Diluted Influence fails.
+*Rockafellar (2023)*: Augmented Lagrangian framework for variational convexity. Provides local uniqueness (tilt stability) at non-degenerate KKT points — the mechanism underlying Step 2 of Theorem 9's homotopy argument.
+
+*Abraham and Robbin (1967); Debreu (1970)*: The Parametric Transversality Theorem used in Theorem 9 is standard in economic theory: Debreu used it to prove generic finiteness of Walrasian equilibria. Our application to prediction market clearing with budget constraints is new.
+
+*Eisenberg and Gale (1959)*: Convex program for Fisher market equilibrium via expenditure variables. Our expenditure perspective (§8.8) identifies why the same approach does not directly apply to prediction markets: constant marginal returns (linear welfare) vs.~diminishing returns (concave utility).
 
 
 #v(2em)
 #line(length: 100%)
 #v(0.5em)
 #text(size: 9pt, style: "italic")[
-  Next steps: (1) Extend Theorem 8 to grouped markets (bound the softmax cross-terms). (2) Empirical validation: verify Diluted Influence holds on realistic order books. (3) Compute explicit convergence rates for the annealing schedule.
+  Next steps: (1) Empirical validation: implement LP solver with annealing, compare to MILP baseline. (2) Investigate convex reformulation via expenditure variables or Devanur-Dudík budget additivity. (3) Compute explicit convergence rates for the annealing schedule.
 ]
