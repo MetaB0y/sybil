@@ -202,38 +202,31 @@ The key insight: **unconditional uniqueness is provably impossible** for the ris
 
 ### Positioning
 
-Applied systems / market design paper, not pure theory. "We bridge the 15-year gap between LMSR theory and MEV-resistant practice."
+**"Prediction Markets Are Fisher Markets."** Applied mechanism design paper with a clean theoretical core. The Fisher market isomorphism (Theorem 5) is the crown jewel. Everything else is foundation or appendix.
 
-### Proposed structure (streamlined, 6 sections)
+### Final structure (6 sections + appendix, ~11 pages)
 
-**Part I: Core Mechanism (Convex & Unconstrained)**
-1. **Introduction & Setup**: LP batch auction + group minting
-2. **LMSR as Entropy-Smoothed LP**: Fenchel duality, LSE sandwich, main theorem (merge old §§2-4)
-3. **Endogenous Liquidity & Scaling**: Self-financing + O(K) scaling (merge old §§6-7)
-
-**Part II: Real-World Friction (Non-Convex Budgets)**
-4. **Budget Constraints via Frank-Wolfe**: Lagrangian relaxation, algorithm, O(1/√t) convergence
-5. **Global Optimality & Negative Feedback**: Budget slippage convexity, Diluted Influence Condition, uniqueness
-6. **Experimental Results & Conclusion**: Empirical validation, runtime comparisons
-
-### What NOT to claim
-
-- Don't claim new math (the Fenchel duality is applied, not invented)
-- Don't claim the pipeline replacement is a contribution (it was obviously bad)
-- Don't claim unconditional uniqueness (it's false — symmetric counterexample)
-- Don't oversell Theorem 9 — "generic" means "for almost all," not "for all"
+1. **Introduction** — state main result upfront: prediction markets with risk-averse MMs = Fisher markets
+2. **Batch Auction Clearing and LMSR** — compressed foundation: minting cost, Fenchel duality diagram, LMSR = smoothed LP, self-financing, group scaling O(K). (~3 pages)
+3. **The Budget Obstacle** — bilinear constraint, cross-price obstruction (Prop 3), GNEP structure. Why risk-neutral is provably non-convex. (~1.5 pages)
+4. **Why Market Makers Have Diminishing Returns** — economic case: Kelly/Breiman survival, order ladders, budget = risk aversion, inventory risk, repeated batches. (~1.5 pages)
+5. **Risk-Averse Batch Clearing** — Theorem 5 (main result): convex program, budget absorption proof, Fisher market isomorphism table. (~2.5 pages)
+6. **Discussion** — landscape table, open problems, prior work. (~1.5 pages)
+7. **Appendix A** — risk-neutral limit: Frank-Wolfe, DIC, generic uniqueness, convergence. (~3 pages)
 
 ### What TO claim
 
-- Self-financing minting (Theorem 4) — clean, original
-- O(K) scaling via group minting vs O(2^K) combinatorial LMSR — practical
-- Frank-Wolfe budget handling with LP oracle — novel algorithm for this domain
-- **Budget slippage convexity** — the genuinely novel math (Propositions 3-4, Theorem 8)
-- **Generic uniqueness** — the strongest result for the risk-neutral model (Theorem 9)
-- **Demand diameter bound** — quantitative stability even in the measure-zero non-unique case (Proposition 5)
-- **Risk-averse clearing = Fisher market** — Theorem 10 is the strongest overall result: prediction markets with Kelly-criterion MMs are isomorphic to Fisher markets, giving unconditional uniqueness + polynomial solvability + no annealing
-- **Impossibility for risk-neutral** — Proposition 7 (cross-price obstruction) settles the negative direction
-- Landscape table — clear positioning of what's proven at each level
+- **Prediction markets are Fisher markets** — Theorem 5 is the main result: unconditional uniqueness + polynomial solvability + no annealing for risk-averse MMs
+- **Impossibility for risk-neutral** — Proposition 3 settles the negative direction (GNEP)
+- **The economic case** — log utility is the correct model, linear is the approximation (§4)
+- LMSR–LP unification via Fenchel duality (foundation, not contribution)
+- Self-financing minting, O(K) group scaling (practical engineering wins)
+
+### What NOT to claim
+
+- Don't claim the Fenchel duality is new math (it's well-packaged known results)
+- Don't claim the DIC/Frank-Wolfe/generic uniqueness are the main results (they're appendix material for the risk-neutral fallback)
+- Don't present Theorem 5 as "a fix for a technical obstacle" — it IS the paper
 
 ## Key References
 
@@ -259,14 +252,15 @@ Applied systems / market design paper, not pure theory. "We bridge the 15-year g
 
 ## Practical notes
 
-- LP solve time ~1s at extreme scale (100k markets), not 1ms. Annealing with 50 iterations = 50s. Warm-starting should help dramatically (simplex pivots from previous basis).
-- Current SLP does 2 iterations with hand-wavy "it's enough". Frank-Wolfe gives principled convergence guarantees.
-- The same temperature b controls LMSR smoothing (§§1-7) and annealing (§8). This is the paper's unifying idea.
+- With Theorem 5 (risk-averse clearing), annealing is unnecessary. One convex program, one solution. Interior-point method or projected gradient.
+- For the risk-neutral fallback (Appendix A): LP solve time ~1s at extreme scale (100k markets). Annealing with 50 iterations = 50s.
+- The key implementation question: how much welfare does P_b^RA sacrifice vs risk-neutral LP? When B_k >> U_k, gap should vanish. Need empirical validation.
+- α = 1 (log/Kelly) is a qualitative phase transition, not a point on a spectrum. α < 1 (CRRA) does NOT absorb budgets — the Eisenberg-Gale trick requires exactly log. Don't parameterize α.
 
 ## Files
 
-- `design/paper.typ` — main paper draft (7 pages)
-- `design/lmsr-proof.typ` — proof sketch with Frank-Wolfe + uniqueness + Eisenberg-Gale (~20 pages)
+- `design/paper.typ` — main paper draft (7 pages, outdated — to be merged with lmsr-proof.typ)
+- `design/lmsr-proof.typ` — restructured proof sketch: "Prediction Markets Are Fisher Markets" (~11 pages)
 - `design/problem-statement.md` — LP formulation
 - `design/solution-approaches.md` — survey of 6 approaches to MM budgets
 - `design/lmsr-frank-wolfe-notes.md` — this file
