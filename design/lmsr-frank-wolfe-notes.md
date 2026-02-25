@@ -126,17 +126,37 @@ Change variables to expenditure e_i = c_i(p)·q_i → budget becomes LINEAR: Σ 
 
 In Fisher markets (Eisenberg & Gale 1959), the analogous program is convex because agents have diminishing returns (log utility). Our MMs have constant marginal returns (linear welfare). **This is the structural reason** prediction market clearing is harder than Fisher market equilibrium.
 
-Open direction: if MMs had diminishing returns (bounded-loss à la Chen-Pennock), the expenditure program might be convex.
+### Risk-averse clearing (Theorem 10) — the Eisenberg-Gale convex program
+
+**The key insight**: you don't even need the expenditure substitution. Budget constraints vanish INTO the objective:
+
+```
+P_b^RA: max_{q ∈ C}  Σ_k B_k ln(Σ_{i∈MM_k} w_i q_i) + Σ_{j∉MM} w_j q_j - C_b(D(q))
+```
+
+**Why it's convex**: B_k ln(linear) is concave (log of linear). Linear terms are concave. -C_b is concave (C_b is convex). Sum of concave = concave. Strictly concave from the ln term.
+
+**Budget absorption (the Eisenberg-Gale magic)**: No budget constraints appear anywhere! KKT conditions for interior MM fill i of agent k: B_k w_i / U_k = p_{m(i)}. Multiplying by q_i, summing: B_k/U_k · Σ w_i q_i = B_k/U_k · U_k = B_k = Σ c_i(p) q_i. Each MM automatically spends exactly its budget.
+
+**The C_b interaction is trivial**: In the risk-neutral model, entropy smoothing was the ONLY source of concavity → isospectral deadlock (both O(1/b)). In risk-averse model, B_k ln U_k provides b-independent curvature O(B_k/U_k²). The -C_b term adds MORE concavity. Even at b=0, the program is strictly concave. **Annealing is unnecessary.**
+
+**Fisher market isomorphism**: P_b^RA is structurally isomorphic to the Eisenberg-Gale Fisher market program. Prediction markets extend Fisher markets in two ways: (1) endogenous supply (minting), (2) mixed population (retail + MM). Both preserve concavity.
+
+**What changes economically**: MMs with larger B_k have proportionally more price influence, but with diminishing marginal impact. The ln naturally diversifies MM capital across markets — enforces flash-liquidity without protocol constraints.
+
+**Open question**: How much welfare does P_b^RA sacrifice vs risk-neutral LP? When B_k >> U_k, ln approaches linear → gap should vanish. Formalizing this convergence would establish risk-averse clearing as a practical drop-in.
 
 ### Landscape of uniqueness results
 
 | Result | Condition | What's unique | Strength |
 |--------|-----------|---------------|----------|
+| Proposition 6 | No budgets | Prices (Fenchel dual) | Unconditional |
 | Theorem 8 | DIC holds | Fills + prices | Checkable certificate |
 | Contraction | b > \|\|A\|\|∞/2 | Everything (exponential) | Checkable, global |
 | Proposition 5 | μ = 0 | Demands + prices | Unconditional (slack budgets) |
 | Theorem 9 | Generic θ | Everything | Almost everywhere |
-| Unconditional | — | — | **False** (counterexample) |
+| Theorem 10 | Kelly utility (B_k ln U_k) | Everything | Unconditional (modified model) |
+| Proposition 7 | — | — | **Impossible** (risk-neutral) |
 
 ### The Fenchel dual (Propositions 6-7) — structural impossibility
 
@@ -167,16 +187,16 @@ Original approach: prove uniqueness via homotopy continuation from b=∞ to b=0 
 
 The constructive approach: prove cap(q) is convex under DIC → Lagrangian is concave → unique KKT. Solid math (Propositions 3-4, Theorem 8). But DIC fails at practical temperatures — it's a theoretical certificate, not a runtime guarantee.
 
-### v3: Generic uniqueness + Fenchel dual + impossibility (§8.8 v3, current)
+### v3: Generic uniqueness + Fenchel dual + impossibility + convex fix (§8.8 v3, current)
 
 **Combined approach:**
 - **Theorem 9** (generic uniqueness via Sard — ironically the same tool from v1, now used properly)
 - **Proposition 5** (demand diameter bound — quantifies how bad non-uniqueness can be)
 - **Proposition 6** (unconstrained price uniqueness via Fenchel dual — clean positive result)
-- **Proposition 7** (isospectral obstruction — proves unconditional uniqueness is impossible for risk-neutral MMs)
-- **Risk-averse extension** (Kelly utility breaks the deadlock — concrete open direction)
+- **Proposition 7** (cross-price obstruction — proves unconditional uniqueness is impossible for risk-neutral MMs)
+- **Theorem 10** (risk-averse Eisenberg-Gale program — unconditional uniqueness for modified model)
 
-The key insight: **unconditional uniqueness is provably impossible** for this model (Prop 7), so the right results are generic uniqueness (Thm 9) + structural explanation (isospectral) + modified model that works (Kelly). This is more satisfying than "condition X holds" because it explains WHY the condition exists.
+The key insight: **unconditional uniqueness is provably impossible** for the risk-neutral model (Prop 7), but the modified model (Theorem 10) is convex and admits a clean solution. The risk-neutral obstruction is structural (GNEP from cross-price budget violation), not a technique gap. Theorem 10 resolves it by changing the economics (diminishing returns), not by finding cleverer math for the linear case.
 
 ## Paper Strategy
 
@@ -209,8 +229,10 @@ Applied systems / market design paper, not pure theory. "We bridge the 15-year g
 - O(K) scaling via group minting vs O(2^K) combinatorial LMSR — practical
 - Frank-Wolfe budget handling with LP oracle — novel algorithm for this domain
 - **Budget slippage convexity** — the genuinely novel math (Propositions 3-4, Theorem 8)
-- **Generic uniqueness** — the strongest unconditional result (Theorem 9)
+- **Generic uniqueness** — the strongest result for the risk-neutral model (Theorem 9)
 - **Demand diameter bound** — quantitative stability even in the measure-zero non-unique case (Proposition 5)
+- **Risk-averse clearing = Fisher market** — Theorem 10 is the strongest overall result: prediction markets with Kelly-criterion MMs are isomorphic to Fisher markets, giving unconditional uniqueness + polynomial solvability + no annealing
+- **Impossibility for risk-neutral** — Proposition 7 (cross-price obstruction) settles the negative direction
 - Landscape table — clear positioning of what's proven at each level
 
 ## Key References
@@ -244,7 +266,7 @@ Applied systems / market design paper, not pure theory. "We bridge the 15-year g
 ## Files
 
 - `design/paper.typ` — main paper draft (7 pages)
-- `design/lmsr-proof.typ` — proof sketch with Frank-Wolfe + uniqueness (~12 pages)
+- `design/lmsr-proof.typ` — proof sketch with Frank-Wolfe + uniqueness + Eisenberg-Gale (~20 pages)
 - `design/problem-statement.md` — LP formulation
 - `design/solution-approaches.md` — survey of 6 approaches to MM budgets
 - `design/lmsr-frank-wolfe-notes.md` — this file

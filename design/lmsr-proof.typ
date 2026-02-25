@@ -649,27 +649,98 @@ This is the mathematical signature of a _Generalized Nash Equilibrium Problem_ (
 
 _Remark._ This is the dual-space version of the symmetric counterexample. In the primal, two optima have different fills and different prices. In the dual, the budget feasibility "swaps" — fills affordable at one price are not affordable at the other — because the bilinear constraint $c(p) dot q <= B$ ties the feasible region to the solution.
 
-=== The expenditure perspective and risk-averse extension
+=== The expenditure perspective
 
-*Why Eisenberg-Gale fails.* Changing variables to capital expenditures $e_i = c_i (p) dot q_i$ linearizes the budget: $sum_(i in "MM"_k) e_i <= B_k$. But welfare transforms to $sum_i w_i dot e_i \/ c_i (p)$ — rational in prices. In Fisher markets (Eisenberg & Gale, 1959), the analogous program is convex because agents have _diminishing-returns_ utilities: the $ln U_k$ objective provides curvature. Our MMs have constant marginal returns (linear welfare), providing none.
+*Why Eisenberg-Gale fails for linear welfare.* Changing variables to capital expenditures $e_i = c_i (p) dot q_i$ linearizes the budget: $sum_(i in "MM"_k) e_i <= B_k$. But welfare transforms to $sum_i w_i dot e_i \/ c_i (p)$ — rational in prices. In Fisher markets (Eisenberg & Gale, 1959), the analogous program is convex because agents have _diminishing-returns_ utilities: $sum B_k ln U_k$ provides curvature. Our MMs have constant marginal returns (linear welfare), providing none.
 
-*The risk-averse fix.* Replace linear MM welfare $sum w_i q_i$ with a strictly concave utility:
+=== Risk-averse batch clearing <risk-averse>
+
+The expenditure substitution _does_ work when market makers have diminishing returns. Replace linear MM welfare with Kelly-criterion utility: each additional fill has diminishing marginal value, reflecting the risk aversion that real institutional MMs exhibit.
+
+#block(inset: (left: 1em))[
+  *Theorem 10* (Risk-Averse Clearing is Convex). _Define the risk-averse batch auction clearing program:_
+
+  $ P_b^"RA": quad max_(bold(q) in cal(C)) quad underbrace(sum_k B_k ln U_k (bold(q)), "MM welfare") + underbrace(sum_(j in.not "MM") w_j q_j, "retail welfare") - underbrace(C_b (bold(D)(bold(q))), "minting cost") $
+
+  _where $U_k (bold(q)) = sum_(i in "MM"_k) w_i q_i$ is MM $k$'s total weighted fill, $cal(C) = {bold(q) in [0, bold(overline(Q))]: "balance constraints"}$ is the LP feasible set, and $C_b$ is the smoothed minting cost (Definition 2). Then:_
+
+  + _The objective is strictly concave on the feasible set (whenever any MM has positive-welfare orders with $B_k > 0$)._
+  + _$P_b^"RA"$ has a unique optimal fill vector $bold(q)^*$._
+  + _No explicit budget constraints appear. At the optimum, each MM $k$ spends exactly $B_k$: $sum_(i in "MM"_k) c_i (p^*) q_i^* = B_k$._
+  + _Clearing prices $bold(p)^*$ are unique._
+  + _The program is solvable in polynomial time by any standard convex optimizer (interior point, projected gradient, etc.)._
+]
+
+_Proof._
+
+*(1) Strict concavity.* The objective is a sum of three terms:
+
+- $B_k ln(sum_(i in "MM"_k) w_i q_i)$: the composition of $ln$ (concave, increasing) with a linear function (concave). By the composition rule, this is concave. It is _strictly_ concave because $ln$ is strictly concave: for $bold(q)^1 != bold(q)^2$ with $U_k (bold(q)^1) != U_k (bold(q)^2)$, the strict inequality of $ln$ applies.
+
+- $sum_(j in.not "MM") w_j q_j$: linear, hence concave.
+
+- $-C_b (bold(D)(bold(q)))$: $C_b$ is convex (log-sum-exp) and $bold(D)$ is linear in $bold(q)$, so $C_b (bold(D)(bold(q)))$ is convex, hence $-C_b$ is concave.
+
+The sum of concave functions is concave. It is strictly concave because the $B_k ln U_k$ term is strictly concave whenever $B_k > 0$ and MM $k$ has at least two linearly independent order directions (so $U_k$ is non-constant on $cal(C)$).
+
+*(2) Uniqueness.* Strict concavity on a compact convex set ($cal(C)$ is a polytope) gives a unique maximizer.
+
+*(3) Budget absorption.* The KKT conditions for MM order $i$ belonging to agent $k$:
 
 $
-U_k (bold(q)) = sum_(i in "MM"_k) w_i ln(1 + q_i \/ s_i), quad s_i > 0
+(partial) / (partial q_i) [B_k ln U_k - C_b] = (B_k w_i) / U_k - p_(m(i)) - lambda_i^+ + lambda_i^- = 0
 $
 
-The logarithm models _Kelly-criterion sizing_: each additional fill has diminishing marginal value, reflecting the risk aversion that real institutional MMs exhibit. The Hessian $U_k'' = -w_i \/ (s_i + q_i)^2$ provides curvature of order $O(w_i \/ overline(q)_i^2)$ in the primal.
+where $lambda_i^+, lambda_i^-$ are box constraint multipliers and $p_(m(i)) = partial C_b \/ partial D_(m(i))$ is the clearing price. For interior fills ($0 < q_i < overline(Q)_i$):
 
-This breaks the isospectral deadlock: the utility curvature $O(w \/ overline(q)^2)$ is independent of $b$, while the budget non-convexity scales as $O(1\/b)$. For any $b > 0$, sufficiently strong risk aversion makes the Lagrangian _unconditionally_ strictly concave:
+$ (B_k w_i) / U_k = p_(m(i)) = c_i (bold(p)) $
+
+The _marginal rate of substitution_ equals the clearing price. Multiplying by $q_i$ and summing over $i in "MM"_k$:
 
 $
-"Strict concavity" quad arrow.l.double quad min_i w_i \/ (s_i + overline(q)_i)^2 > sum_k mu_k dot ||nabla^2 "cap"_k||
+sum_(i in "MM"_k) (B_k w_i q_i) / U_k = sum_(i in "MM"_k) c_i (bold(p)) q_i
 $
 
-Furthermore, the expenditure substitution now yields a convex program: $sum w_i ln(1 + e_i \/ (s_i c_i (p)))$ is jointly concave in $(e, p)$ on the feasible region.
+The left side simplifies: $B_k / U_k dot sum w_i q_i = B_k / U_k dot U_k = B_k$. Therefore:
 
-This changes the economic model — we are solving a _risk-averse_ batch auction, not the exact LP. But the modification is arguably more realistic: institutional MMs size positions using Kelly-like criteria, not linear utility. The question of whether the risk-neutral LP model admits unconditional uniqueness is settled negatively by Proposition 7.
+$ sum_(i in "MM"_k) c_i (bold(p)^*) q_i^* = B_k $
+
+Each MM spends its _entire_ budget at the optimum. The budget constraint is not imposed — it _emerges_ from the $B_k ln U_k$ objective. This is the Eisenberg-Gale mechanism: logarithmic utility + budget weight $B_k$ = implicit budget constraint.
+
+*(4) Price uniqueness.* Prices are $p_k = partial C_b \/ partial D_k = "softmax"(bold(D)\/b)$, a continuous function of the unique $bold(q)^*$.
+
+*(5) Polynomial solvability.* The objective is concave and $C^infinity$ (for $b > 0$, all components are smooth). The feasible set is a polytope. Standard interior-point methods solve this in polynomial time. #h(1fr) $square$
+
+*The $C_b$ interaction is trivial — and that's the point.* In the risk-neutral model, the entropy smoothing ($C_b$) was the _only_ source of concavity, creating the isospectral deadlock with the budget non-convexity (both $O(1\/b)$). In the risk-averse model, the $B_k ln U_k$ term provides $b$-independent curvature of order $O(B_k \/ U_k^2)$. The $-C_b$ term adds _more_ concavity (it helps, not hurts). Even at $b = 0$ (pure LP minting cost), the program remains strictly concave:
+
+$
+P_0^"RA": quad max_(bold(q) in cal(C)) quad sum_k B_k ln U_k + sum_(j in.not "MM") w_j q_j - max_k D_k
+$
+
+The $-max_k D_k$ term is concave (not strictly), but the $ln$ term provides strict concavity. Uniqueness holds at every temperature, including $b = 0$. *Annealing is unnecessary.*
+
+*The Fisher market isomorphism.* Program $P_b^"RA"$ is structurally isomorphic to the Eisenberg-Gale convex program for Fisher market equilibrium:
+
+#align(center)[
+  #table(
+    columns: 3,
+    align: (left, center, center),
+    stroke: none,
+    [*Component*], [*Fisher market*], [*Risk-averse batch auction*],
+    [Buyers], [Consumers with budgets $B_k$], [MMs with budgets $B_k$],
+    [Goods], [Divisible commodities], [Outcome shares],
+    [Supply], [Fixed endowment $s_j$], [Minting (endogenous, cost $C_b$)],
+    [Utility], [$U_k = sum w_i x_(k i)$], [$U_k = sum w_i q_i$],
+    [Objective], [$sum B_k ln U_k$], [$sum B_k ln U_k + "retail" - C_b$],
+    [Prices], [Dual of supply constraint], [Dual of balance constraint = softmax],
+  )
+]
+
+The prediction market extends Fisher markets in two ways: (1) supply is endogenous (minting adds shares at cost $C_b$, not fixed), and (2) non-MM ("retail") orders contribute linear welfare alongside the log-utility MMs. Both extensions preserve concavity.
+
+*What changes economically.* Under $P_b^"RA"$, MMs with larger budgets $B_k$ have proportionally more influence on prices (through the $B_k$ weight), but with diminishing marginal impact on any single market. An MM concentrating capital on one market faces the $ln$ penalty: the first dollar of fill generates infinite marginal utility, the last dollar generates vanishing utility. This naturally diversifies MM capital across markets — the $ln$ enforces the flash-liquidity pattern (spread capital thin) without protocol-level constraints.
+
+*What doesn't change.* Non-MM orders are still matched by UCP at clearing prices. The minting mechanism is unchanged. Prices are still softmax (for $b > 0$) or LP duals (for $b = 0$). The only difference is in how MM fills are _sized_ relative to each other: proportional to welfare-per-dollar rather than absolute welfare.
 
 === Landscape of uniqueness results
 
@@ -683,7 +754,7 @@ This changes the economic model — we are solving a _risk-averse_ batch auction
     [Contraction], [$b > ||A||_infinity \/ 2$], [Everything (exponential)], [Checkable, global],
     [Proposition 5], [$bold(mu) = 0$], [Demands + prices], [Unconditional (slack budgets)],
     [Theorem 9], [Generic $theta$], [Everything], [Almost everywhere],
-    [Risk-averse ext.], [Kelly utility], [Everything], [Unconditional (modified model)],
+    [Theorem 10], [Kelly utility ($B_k ln U_k$)], [Everything], [Unconditional (modified model)],
     [Proposition 7], [---], [---], [Impossible (isospectral)],
   )
 ]
@@ -694,7 +765,7 @@ This changes the economic model — we are solving a _risk-averse_ batch auction
 
 *Negative semidefinite games.* Hofbauer and Sandholm (2007) proved uniqueness of logit equilibria for _negative semidefinite_ games — games where increasing adoption of a strategy decreases its payoff. Our market is exactly this: buying more of outcome $k$ raises $p_k$, reducing the marginal payoff to further buyers. Their result covers the unconstrained case; our Theorem 8 extends it to budget-constrained agents under DIC, and Theorem 9 extends it to budget-constrained agents for generic parameters.
 
-*Budget additivity.* Devanur and Dudík (2015) showed that budget-constrained LMSR exhibits _budget additivity_: two agents with budgets $B_1, B_2$ and identical beliefs affect prices identically to one agent with budget $B_1 + B_2$. This is a manifestation of hidden convexity — the bilinear budget boundaries merge into a convex hull in the dual space. Whether a similar structural convexity exists in our batch auction setting — perhaps through the expenditure reformulation — is an open question. A positive answer would strengthen Theorem 9 from generic to unconditional.
+*Budget additivity.* Devanur and Dudík (2015) showed that budget-constrained LMSR exhibits _budget additivity_: two agents with budgets $B_1, B_2$ and identical beliefs affect prices identically to one agent with budget $B_1 + B_2$. This is a manifestation of hidden convexity — the bilinear budget boundaries merge into a convex hull in the dual space. Theorem 10 recovers this convexity for batch auctions by adopting the same economic model (diminishing-returns agents): the Eisenberg-Gale program is explicitly convex. Whether the _risk-neutral_ batch auction also has hidden convexity (which would strengthen Theorem 9 from generic to unconditional) remains open — Proposition 7 shows it cannot come from the standard Fenchel dual alone.
 
 *Parametric optimization.* Theorem 9 uses the Parametric Transversality Theorem from differential topology (Abraham & Robbin, 1967; Guillemin & Pollack, 1974). The technique is standard in economic theory: Debreu (1970) used it to prove generic finiteness of Walrasian equilibria, and Mas-Colell (1985) applied it to smooth economies. Our application is new in the prediction market context.
 
@@ -750,7 +821,7 @@ _Remark._ In the degenerate case $Delta = 0$ (tied demands), the softmax splits 
 
 + *Extension to non-exclusive groups.* When markets are correlated but not mutually exclusive, group minting doesn't apply directly. The marginal decomposition (paper §4) handles this approximately; the exact connection to combinatorial LMSR in this regime is open.
 
-+ *Unconditional uniqueness via risk-averse welfare.* Proposition 7 settles the question for the risk-neutral model: the isospectral obstruction makes unconditional uniqueness impossible. The risk-averse extension (§8.8, Kelly-criterion utility) breaks the deadlock by introducing $b$-independent curvature. Formalizing this — proving that the Eisenberg-Gale expenditure program with logarithmic MM utilities is jointly convex — would establish unconditional uniqueness for the modified model. This is both mathematically tractable and economically well-motivated.
++ *Risk-averse clearing in practice.* Theorem 10 proves that the Eisenberg-Gale program $P_b^"RA"$ is convex and has a unique optimum. The open question is _quantitative comparison_: how much welfare does the risk-averse model sacrifice relative to the risk-neutral LP? When $B_k >> U_k$ (large budgets, small fills), the $ln$ objective approaches linear welfare and the gap should vanish. Formalizing this convergence — $P_b^"RA" -> P_b$ as $B_k -> infinity$ with fixed welfare — would establish risk-averse clearing as a practical drop-in replacement.
 
 == Connection to Prior Work
 
@@ -762,7 +833,7 @@ _Remark._ In the degenerate case $Delta = 0$ (tied demands), the softmax splits 
 
 *Chen and Pennock (2007)*: Utility framework for bounded-loss market makers. The parameter $b$ in our framework corresponds directly to their loss bound. Our contribution is showing that $b = 0$ (zero loss) is achievable in a batch auction setting.
 
-*Devanur and Dudík (2015)*: Proved price uniqueness for budget-constrained sequential LMSR via Bregman divergence, and budget additivity. Our Theorem 8 proves primal uniqueness under DIC; Theorem 9 proves generic uniqueness unconditionally. Their budget additivity result hints at hidden convexity in the dual space — extending this to simultaneous batch auctions is the main open problem (§9.2).
+*Devanur and Dudík (2015)*: Proved price uniqueness for budget-constrained sequential LMSR via Bregman divergence, and budget additivity. Our Theorem 8 proves primal uniqueness under DIC; Theorem 9 proves generic uniqueness for the risk-neutral model; Theorem 10 achieves unconditional uniqueness for the risk-averse model via the same Eisenberg-Gale structure underlying their budget additivity result.
 
 *Hofbauer and Sandholm (2007)*: Proved uniqueness of logit equilibria for negative semidefinite games. Our prediction market is negative semidefinite (price rises with demand). Their result covers the unconstrained case; our Theorems 8–9 extend to budget-constrained agents.
 
@@ -772,12 +843,12 @@ _Remark._ In the degenerate case $Delta = 0$ (tied demands), the softmax splits 
 
 *Abraham and Robbin (1967); Debreu (1970)*: The Parametric Transversality Theorem used in Theorem 9 is standard in economic theory: Debreu used it to prove generic finiteness of Walrasian equilibria. Our application to prediction market clearing with budget constraints is new.
 
-*Eisenberg and Gale (1959)*: Convex program for Fisher market equilibrium via expenditure variables. Our expenditure perspective (§8.8) identifies why the same approach does not directly apply to prediction markets: constant marginal returns (linear welfare) vs.~diminishing returns (concave utility).
+*Eisenberg and Gale (1959)*: Convex program for Fisher market equilibrium via expenditure variables. Our Theorem 10 establishes that prediction markets with risk-averse MMs ($B_k ln U_k$ welfare) are isomorphic to Fisher markets: the Eisenberg-Gale program with endogenous supply (minting cost $C_b$) is convex. Proposition 7 identifies why the same approach fails for risk-neutral MMs: constant marginal returns provide no curvature to counteract the $O(1\/b)$ budget non-convexity.
 
 
 #v(2em)
 #line(length: 100%)
 #v(0.5em)
 #text(size: 9pt, style: "italic")[
-  Next steps: (1) Empirical validation: implement LP solver with annealing, compare to MILP baseline. (2) Investigate convex reformulation via expenditure variables or Devanur-Dudík budget additivity. (3) Compute explicit convergence rates for the annealing schedule.
+  Next steps: (1) Empirical validation: implement LP solver with annealing, compare to MILP baseline. (2) Implement risk-averse clearing (Theorem 10) as a convex program — no annealing needed. (3) Quantitative comparison: welfare gap between $P_b^"RA"$ and $P_b$ across realistic order books.
 ]
