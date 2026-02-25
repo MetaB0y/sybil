@@ -235,154 +235,20 @@ impl LpSolver {
         num_groups: usize,
         budget_rows: &[(Vec<(usize, f64)>, f64)],
     ) -> Option<LpSolution> {
-        let n = orders.len();
-        let nanos_f = NANOS_PER_DOLLAR as f64;
-
-        let mut pb = RowProblem::default();
-
-        // ================================================================
-        // Variables
-        // ================================================================
-
-        // q_i: fill quantity for order i
-        // Objective coefficient: sign_i * limit_price_i
-        let q_cols: Vec<_> = (0..n)
-            .map(|i| {
-                let sign = order_sign(&orders[i]);
-                let obj = sign * orders[i].limit_price as f64;
-                let ub = orders[i].max_fill as f64;
-                pb.add_column(obj, 0.0..=ub)
-            })
-            .collect();
-
-        // mint_m: per-market minting (free variable, can be negative for burning)
-        // Objective: -NANOS_PER_DOLLAR (minting costs $1 per unit)
-        //
-        // YES balance: Σ c_yes_i * q_i = mint_m + gmint_g
-        // NO balance:  Σ c_no_i * q_i = mint_m
-        //
-        // mint_m is free (positive=minting, negative=burning).
-        let big = 1e15_f64;
-        let mint_cols: HashMap<MarketId, _> = markets
+        // Default welfare objective: sign_i * limit_price_i
+        let objective_coeffs: Vec<f64> = orders
             .iter()
-            .map(|&m| {
-                let col = pb.add_column(-nanos_f, -big..=big);
-                (m, col)
-            })
+            .map(|o| order_sign(o) * o.limit_price as f64)
             .collect();
-
-        // gmint_g: group-level minting for each market group
-        // Objective: -NANOS_PER_DOLLAR per unit
-        // gmint_g >= 0 (group minting only, no group burning)
-        let gmint_cols: Vec<_> = (0..num_groups)
-            .map(|_| pb.add_column(-nanos_f, 0.0..))
-            .collect();
-
-        // ================================================================
-        // Constraints: YES and NO balance per market
-        // ================================================================
-        //
-        // For each market m:
-        //   YES: Σ_i c_yes_i_m * q_i - mint_m - gmint_g(m) = 0
-        //   NO:  Σ_i c_no_i_m  * q_i - mint_m = 0
-
-        // Track row indices for dual extraction
-        let mut yes_row_indices: HashMap<MarketId, usize> = HashMap::new();
-        let mut no_row_indices: HashMap<MarketId, usize> = HashMap::new();
-        let mut row_count = 0usize;
-
-        for &market in markets {
-            // YES balance
-            let mut yes_terms: Vec<(highs::Col, f64)> = Vec::new();
-            for i in 0..n {
-                if let Some(&c_y) = coeffs[i].c_yes.get(&market) {
-                    if c_y.abs() > 1e-12 {
-                        yes_terms.push((q_cols[i], c_y));
-                    }
-                }
-            }
-            if let Some(&mint_col) = mint_cols.get(&market) {
-                yes_terms.push((mint_col, -1.0));
-            }
-            if let Some(&g_idx) = market_to_group.get(&market) {
-                yes_terms.push((gmint_cols[g_idx], -1.0));
-            }
-            pb.add_row(0.0..=0.0, &yes_terms);
-            yes_row_indices.insert(market, row_count);
-            row_count += 1;
-
-            // NO balance
-            let mut no_terms: Vec<(highs::Col, f64)> = Vec::new();
-            for i in 0..n {
-                if let Some(&c_n) = coeffs[i].c_no.get(&market) {
-                    if c_n.abs() > 1e-12 {
-                        no_terms.push((q_cols[i], c_n));
-                    }
-                }
-            }
-            if let Some(&mint_col) = mint_cols.get(&market) {
-                no_terms.push((mint_col, -1.0));
-            }
-            pb.add_row(0.0..=0.0, &no_terms);
-            no_row_indices.insert(market, row_count);
-            row_count += 1;
-        }
-
-        // ================================================================
-        // Linearized MM budget constraints
-        // ================================================================
-        // Σ capital_per_unit_i × q_i ≤ Budget_k
-        // where capital_per_unit_i is computed at previous iteration's prices.
-
-        for (terms, budget) in budget_rows {
-            let row_terms: Vec<(highs::Col, f64)> = terms
-                .iter()
-                .map(|&(order_idx, coeff)| (q_cols[order_idx], coeff))
-                .collect();
-            pb.add_row(..=*budget, &row_terms);
-        }
-
-        // ================================================================
-        // Solve
-        // ================================================================
-
-        let mut model = pb.optimise(Sense::Maximise);
-        model.make_quiet();
-
-        let solved = model.solve();
-
-        match solved.status() {
-            HighsModelStatus::Optimal | HighsModelStatus::ObjectiveBound => {}
-            HighsModelStatus::Infeasible => return None,
-            _ => return None,
-        }
-
-        let solution = solved.get_solution();
-        let primal = solution.columns();
-        let dual_rows = solution.dual_rows();
-
-        let q_values: Vec<f64> = (0..n).map(|i| primal[i]).collect();
-
-        // Extract dual values (prices)
-        // The dual of the YES balance constraint gives the shadow price for YES shares
-        // The dual of the NO balance constraint gives the shadow price for NO shares
-        let mut dual_yes: HashMap<MarketId, f64> = HashMap::new();
-        let mut dual_no: HashMap<MarketId, f64> = HashMap::new();
-
-        for &market in markets {
-            if let Some(&row_idx) = yes_row_indices.get(&market) {
-                dual_yes.insert(market, dual_rows[row_idx]);
-            }
-            if let Some(&row_idx) = no_row_indices.get(&market) {
-                dual_no.insert(market, dual_rows[row_idx]);
-            }
-        }
-
-        Some(LpSolution {
-            q_values,
-            dual_yes,
-            dual_no,
-        })
+        build_and_solve_lp(
+            orders,
+            coeffs,
+            markets,
+            market_to_group,
+            num_groups,
+            &objective_coeffs,
+            budget_rows,
+        )
     }
 }
 
@@ -393,17 +259,179 @@ impl Default for LpSolver {
 }
 
 /// Raw solution from the LP solver: primal fill quantities + dual prices.
-struct LpSolution {
-    q_values: Vec<f64>,
-    dual_yes: HashMap<MarketId, f64>,
-    dual_no: HashMap<MarketId, f64>,
+pub(crate) struct LpSolution {
+    pub(crate) q_values: Vec<f64>,
+    pub(crate) dual_yes: HashMap<MarketId, f64>,
+    pub(crate) dual_no: HashMap<MarketId, f64>,
+}
+
+/// Build and solve an LP with custom objective coefficients.
+///
+/// This is the LP oracle used by both the LP solver (linear welfare) and
+/// the EG solver (Frank-Wolfe gradient). The constraints (position balance,
+/// quantity bounds, minting) are the same; only the objective varies.
+///
+/// `objective_coeffs[i]` is the objective coefficient for order i's fill variable.
+/// `budget_rows` contains linearized MM budget constraints (empty for EG solver).
+pub(crate) fn build_and_solve_lp(
+    orders: &[Order],
+    coeffs: &[OrderCoefficients],
+    markets: &[MarketId],
+    market_to_group: &HashMap<MarketId, usize>,
+    num_groups: usize,
+    objective_coeffs: &[f64],
+    budget_rows: &[(Vec<(usize, f64)>, f64)],
+) -> Option<LpSolution> {
+    let n = orders.len();
+    let nanos_f = NANOS_PER_DOLLAR as f64;
+
+    let mut pb = RowProblem::default();
+
+    // ================================================================
+    // Variables
+    // ================================================================
+
+    // q_i: fill quantity for order i
+    let q_cols: Vec<_> = (0..n)
+        .map(|i| {
+            let ub = orders[i].max_fill as f64;
+            pb.add_column(objective_coeffs[i], 0.0..=ub)
+        })
+        .collect();
+
+    // mint_m: per-market minting (free variable, can be negative for burning)
+    // Objective: -NANOS_PER_DOLLAR (minting costs $1 per unit)
+    //
+    // YES balance: Σ c_yes_i * q_i = mint_m + gmint_g
+    // NO balance:  Σ c_no_i * q_i = mint_m
+    //
+    // mint_m is free (positive=minting, negative=burning).
+    let big = 1e15_f64;
+    let mint_cols: HashMap<MarketId, _> = markets
+        .iter()
+        .map(|&m| {
+            let col = pb.add_column(-nanos_f, -big..=big);
+            (m, col)
+        })
+        .collect();
+
+    // gmint_g: group-level minting for each market group
+    // Objective: -NANOS_PER_DOLLAR per unit
+    // gmint_g >= 0 (group minting only, no group burning)
+    let gmint_cols: Vec<_> = (0..num_groups)
+        .map(|_| pb.add_column(-nanos_f, 0.0..))
+        .collect();
+
+    // ================================================================
+    // Constraints: YES and NO balance per market
+    // ================================================================
+    //
+    // For each market m:
+    //   YES: Σ_i c_yes_i_m * q_i - mint_m - gmint_g(m) = 0
+    //   NO:  Σ_i c_no_i_m  * q_i - mint_m = 0
+
+    // Track row indices for dual extraction
+    let mut yes_row_indices: HashMap<MarketId, usize> = HashMap::new();
+    let mut no_row_indices: HashMap<MarketId, usize> = HashMap::new();
+    let mut row_count = 0usize;
+
+    for &market in markets {
+        // YES balance
+        let mut yes_terms: Vec<(highs::Col, f64)> = Vec::new();
+        for i in 0..n {
+            if let Some(&c_y) = coeffs[i].c_yes.get(&market) {
+                if c_y.abs() > 1e-12 {
+                    yes_terms.push((q_cols[i], c_y));
+                }
+            }
+        }
+        if let Some(&mint_col) = mint_cols.get(&market) {
+            yes_terms.push((mint_col, -1.0));
+        }
+        if let Some(&g_idx) = market_to_group.get(&market) {
+            yes_terms.push((gmint_cols[g_idx], -1.0));
+        }
+        pb.add_row(0.0..=0.0, &yes_terms);
+        yes_row_indices.insert(market, row_count);
+        row_count += 1;
+
+        // NO balance
+        let mut no_terms: Vec<(highs::Col, f64)> = Vec::new();
+        for i in 0..n {
+            if let Some(&c_n) = coeffs[i].c_no.get(&market) {
+                if c_n.abs() > 1e-12 {
+                    no_terms.push((q_cols[i], c_n));
+                }
+            }
+        }
+        if let Some(&mint_col) = mint_cols.get(&market) {
+            no_terms.push((mint_col, -1.0));
+        }
+        pb.add_row(0.0..=0.0, &no_terms);
+        no_row_indices.insert(market, row_count);
+        row_count += 1;
+    }
+
+    // ================================================================
+    // Linearized MM budget constraints
+    // ================================================================
+    // Σ capital_per_unit_i × q_i ≤ Budget_k
+    // where capital_per_unit_i is computed at previous iteration's prices.
+
+    for (terms, budget) in budget_rows {
+        let row_terms: Vec<(highs::Col, f64)> = terms
+            .iter()
+            .map(|&(order_idx, coeff)| (q_cols[order_idx], coeff))
+            .collect();
+        pb.add_row(..=*budget, &row_terms);
+    }
+
+    // ================================================================
+    // Solve
+    // ================================================================
+
+    let mut model = pb.optimise(Sense::Maximise);
+    model.make_quiet();
+
+    let solved = model.solve();
+
+    match solved.status() {
+        HighsModelStatus::Optimal | HighsModelStatus::ObjectiveBound => {}
+        HighsModelStatus::Infeasible => return None,
+        _ => return None,
+    }
+
+    let solution = solved.get_solution();
+    let primal = solution.columns();
+    let dual_rows = solution.dual_rows();
+
+    let q_values: Vec<f64> = (0..n).map(|i| primal[i]).collect();
+
+    // Extract dual values (prices)
+    let mut dual_yes: HashMap<MarketId, f64> = HashMap::new();
+    let mut dual_no: HashMap<MarketId, f64> = HashMap::new();
+
+    for &market in markets {
+        if let Some(&row_idx) = yes_row_indices.get(&market) {
+            dual_yes.insert(market, dual_rows[row_idx]);
+        }
+        if let Some(&row_idx) = no_row_indices.get(&market) {
+            dual_no.insert(market, dual_rows[row_idx]);
+        }
+    }
+
+    Some(LpSolution {
+        q_values,
+        dual_yes,
+        dual_no,
+    })
 }
 
 /// Derive normalized YES clearing prices from LP dual variables.
 ///
 /// For each market, takes |dual_yes| and |dual_no|, normalizes so they sum to $1.
 /// Returns p_YES per market (in nanos). p_NO = NANOS_PER_DOLLAR - p_YES.
-fn normalized_yes_prices(
+pub(crate) fn normalized_yes_prices(
     solution: &LpSolution,
     markets: &[MarketId],
 ) -> HashMap<MarketId, Nanos> {
@@ -434,7 +462,7 @@ fn normalized_yes_prices(
 }
 
 /// Collect all unique markets from active orders.
-fn collect_markets(orders: &[Order]) -> Vec<MarketId> {
+pub(crate) fn collect_markets(orders: &[Order]) -> Vec<MarketId> {
     let mut seen = HashSet::new();
     orders
         .iter()
@@ -449,7 +477,7 @@ fn collect_markets(orders: &[Order]) -> Vec<MarketId> {
 /// Rounds continuous q_i to integer fills, derives clearing prices from duals.
 /// Does NOT create arb orders — those are added after all post-processing
 /// (MM budget trim) so position balance accounts for final fills.
-fn extract_result(
+pub(crate) fn extract_result(
     solution: &LpSolution,
     orders: &[Order],
     coeffs: &[OrderCoefficients],
@@ -507,7 +535,7 @@ fn extract_result(
 ///
 /// Computes per-market net position from all fills, then creates arb orders
 /// (and fills) to zero out any imbalance from minting or integer rounding.
-fn create_position_arbs(
+pub(crate) fn create_position_arbs(
     result: &mut MatchingResult,
     order_map: &HashMap<u64, &Order>,
     clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
@@ -564,7 +592,7 @@ fn create_position_arbs(
 }
 
 /// Check whether any MM budget constraint is violated at current LP solution prices.
-fn has_mm_budget_violations(
+pub(crate) fn has_mm_budget_violations(
     solution: &LpSolution,
     orders: &[Order],
     mm_constraints: &[matching_engine::MmConstraint],
@@ -600,7 +628,7 @@ fn has_mm_budget_violations(
 /// For each MM constraint, produces a row: Σ capital_per_unit_i × q_i ≤ Budget.
 /// The capital_per_unit is computed at the given prices (fixed for this LP iteration).
 /// This linearizes the bilinear p×q constraint, enabling the LP to enforce budgets directly.
-fn linearize_mm_budgets(
+pub(crate) fn linearize_mm_budgets(
     orders: &[Order],
     mm_constraints: &[matching_engine::MmConstraint],
     mm_constraint_orders: &[Vec<(usize, MmSide)>],
@@ -631,7 +659,7 @@ fn linearize_mm_budgets(
 /// The SLP enforces budgets at linearized prices, but rounding continuous q_i
 /// to integers can push capital usage slightly over budget. Trims the minimum
 /// number of fill units to satisfy all budgets. Welfare is recomputed separately.
-fn trim_mm_budget_overflows(
+pub(crate) fn trim_mm_budget_overflows(
     result: &mut MatchingResult,
     mm_constraints: &[matching_engine::MmConstraint],
     mm_order_info: &HashMap<u64, (usize, MmSide)>,
@@ -681,7 +709,7 @@ fn trim_mm_budget_overflows(
 }
 
 /// Recompute welfare, volume, and fill count from scratch.
-fn recompute_welfare(result: &mut MatchingResult, order_map: &HashMap<u64, &Order>) {
+pub(crate) fn recompute_welfare(result: &mut MatchingResult, order_map: &HashMap<u64, &Order>) {
     result.total_welfare = 0;
     result.total_quantity_filled = 0;
     result.orders_filled = 0;

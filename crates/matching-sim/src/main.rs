@@ -68,7 +68,7 @@ fn main() {
 
     if matches!(
         solver_choice,
-        SolverChoice::Pipeline | SolverChoice::Dual | SolverChoice::Lp
+        SolverChoice::Pipeline | SolverChoice::Dual | SolverChoice::Lp | SolverChoice::Eg
     ) && (verbose || export_json.is_some() || show_charts)
     {
         // Detailed pipeline run with step-by-step output
@@ -127,6 +127,7 @@ fn print_help() {
     println!("                         dual");
     println!("                         milp");
     println!("                         lp (LP + entropy smoothing, requires --features lp)");
+    println!("                         eg (Eisenberg-Gale / Fisher market, requires --features lp)");
     println!("                         all (compare all)");
     println!("  --milp-timeout <S>   MILP time limit in seconds");
     println!("  --mm-mode <M>        MM budget constraint mode:");
@@ -493,6 +494,10 @@ fn run_detailed_pipeline(
                 let solver = matching_solver::LpSolver::new();
                 solver.solve(&problem)
             }
+            SolverChoice::Eg => {
+                let solver = matching_solver::EgSolver::new();
+                solver.solve(&problem)
+            }
             _ => {
                 let pipeline = match solver_choice {
                     SolverChoice::Dual => Pipeline::with_dual_decomposition(),
@@ -503,11 +508,15 @@ fn run_detailed_pipeline(
         };
 
         if verbose {
-            // Print step-by-step results (pipeline-specific, skip for LP)
-            if !matches!(solver_choice, SolverChoice::Lp) {
+            // Print step-by-step results (pipeline-specific, skip for LP/EG)
+            if !matches!(solver_choice, SolverChoice::Lp | SolverChoice::Eg) {
                 print_pipeline_steps(&result, &problem);
             } else {
-                println!("LP Solver:");
+                let solver_label = match solver_choice {
+                    SolverChoice::Eg => "EG (Fisher) Solver",
+                    _ => "LP Solver",
+                };
+                println!("{}:", solver_label);
                 println!("─────────────────────────────────────────");
                 println!("  Solve time:     {:.3}s", result.total_time_secs);
                 println!("  Fills:          {}", result.result.fills.len());
@@ -1173,6 +1182,8 @@ enum SolverChoice {
     Joint,
     #[cfg(feature = "lp")]
     Lp,
+    #[cfg(feature = "lp")]
+    Eg,
     All,
 }
 
@@ -1184,6 +1195,8 @@ fn parse_solver_choice(args: &[String]) -> SolverChoice {
         Some("joint") => SolverChoice::Joint,
         #[cfg(feature = "lp")]
         Some("lp") => SolverChoice::Lp,
+        #[cfg(feature = "lp")]
+        Some("eg") => SolverChoice::Eg,
         Some("all") => SolverChoice::All,
         _ => SolverChoice::Lp, // Default to LP solver
     }
@@ -1288,6 +1301,8 @@ fn expand_solver_choices(choice: &SolverChoice) -> Vec<SolverChoice> {
             ];
             #[cfg(feature = "lp")]
             choices.push(SolverChoice::Lp);
+            #[cfg(feature = "lp")]
+            choices.push(SolverChoice::Eg);
             choices
         }
         other => vec![other.clone()],
@@ -1309,6 +1324,8 @@ fn solver_display_name(choice: &SolverChoice, milp_timeout: Option<f64>) -> Stri
         SolverChoice::Joint => "Joint Group".to_string(),
         #[cfg(feature = "lp")]
         SolverChoice::Lp => "LP".to_string(),
+        #[cfg(feature = "lp")]
+        SolverChoice::Eg => "EG (Fisher)".to_string(),
         SolverChoice::All => "All".to_string(),
     }
 }
@@ -1336,6 +1353,13 @@ fn run_solver_with_witness(
         #[cfg(feature = "lp")]
         SolverChoice::Lp => {
             let solver = matching_solver::LpSolver::new();
+            let pipeline_result = solver.solve(problem);
+            let witness = witness_from_pipeline(problem, &pipeline_result);
+            (pipeline_result.result, witness)
+        }
+        #[cfg(feature = "lp")]
+        SolverChoice::Eg => {
+            let solver = matching_solver::EgSolver::new();
             let pipeline_result = solver.solve(problem);
             let witness = witness_from_pipeline(problem, &pipeline_result);
             (pipeline_result.result, witness)

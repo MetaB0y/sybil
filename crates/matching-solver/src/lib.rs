@@ -37,6 +37,9 @@ pub mod milp;
 #[cfg(feature = "lp")]
 pub mod lp_solver;
 
+#[cfg(feature = "lp")]
+pub mod eg_solver;
+
 // === Public API ===
 
 // New architecture components
@@ -78,6 +81,9 @@ pub use milp::{MilpConfig, MilpResult, MilpSolver, MmBudgetMode, SolveStatus};
 
 #[cfg(feature = "lp")]
 pub use lp_solver::{LpConfig, LpSolver};
+
+#[cfg(feature = "lp")]
+pub use eg_solver::{EgConfig, EgSolver};
 
 use serde::Serialize;
 

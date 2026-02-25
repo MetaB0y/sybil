@@ -121,6 +121,10 @@ viz-run preset="small":
 viz-install:
     cd viz && uv sync
 
+# Run EG (Eisenberg-Gale / Fisher market) solver
+sim-eg preset="quick":
+    cargo run --bin matching-sim --release --features lp -- --preset {{preset}} --solver eg -v
+
 # Run arena demo (starts server, syncs deps, runs backtest)
 arena-demo:
     cd arena && uv sync --extra llm && uv run python demo.py
