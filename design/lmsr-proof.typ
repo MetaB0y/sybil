@@ -6,6 +6,24 @@
 #show heading.where(level: 1): it => block(above: 1.5em, below: 0.8em)[#it]
 #show heading.where(level: 2): it => block(above: 1.2em, below: 0.6em)[#it]
 
+// Theorem-like environments with auto-numbering and @label cross-referencing
+#show figure.where(kind: "theorem"): it => it.body
+#show figure.where(kind: "proposition"): it => it.body
+
+#let theorem(name: none, body) = figure(
+  kind: "theorem", supplement: [Theorem], numbering: "1", outlined: false,
+  block(width: 100%, inset: (left: 1em))[
+    *Theorem #context counter(figure.where(kind: "theorem")).display("1")*#if name != none [ (#name)]. #body
+  ]
+)
+
+#let proposition(name: none, body) = figure(
+  kind: "proposition", supplement: [Proposition], numbering: "1", outlined: false,
+  block(width: 100%, inset: (left: 1em))[
+    *Proposition #context counter(figure.where(kind: "proposition")).display("1")*#if name != none [ (#name)]. #body
+  ]
+)
+
 #align(center)[
   #text(size: 15pt, weight: "bold")[
     Prediction Markets Are Fisher Markets
@@ -20,7 +38,7 @@
 
 #block(inset: (x: 2em))[
   #text(weight: "bold")[Summary.]
-  We prove that prediction market batch auctions with budget-constrained market makers are Fisher markets (Theorem 6). Replacing linear market-maker welfare with logarithmic utility — reflecting the Kelly-criterion sizing that real institutional MMs use — transforms the budget-constrained clearing problem into a convex program with a unique solution, solvable in polynomial time. Budget constraints vanish from the formulation entirely, absorbed into the Eisenberg-Gale objective. Prices, fills, and budget allocation emerge simultaneously from a single convex optimization.
+  We prove that prediction market batch auctions with budget-constrained market makers are Fisher markets (@thm-main). Replacing linear market-maker welfare with logarithmic utility — reflecting the Kelly-criterion sizing that real institutional MMs use — transforms the budget-constrained clearing problem into a convex program with a unique solution, solvable in polynomial time. Budget constraints vanish from the formulation entirely, absorbed into the Eisenberg-Gale objective. Prices, fills, and budget allocation emerge simultaneously from a single convex optimization.
 ]
 
 #v(1em)
@@ -52,7 +70,7 @@ This section builds the mathematical framework that the main result operates wit
 + The _Fenchel duality_ that forces clearing prices to be probabilities — not by fiat, but as a conjugate of the minting cost (§2.2).
 + The _LMSR smoothing_ $C_b = b ln sum exp(D_k\/b)$ and its entropy dual (§2.3).
 + How the _KKT conditions_ produce clearing prices: the exponentials come from minting, not the order book (§2.4).
-+ That _without budgets, prices are always unique_ (Theorem 5) — making the budget obstacle of §3 precise (§2.6).
++ That _without budgets, prices are always unique_ (@thm-unique) — making the budget obstacle of §3 precise (§2.5).
 
 == Minting Cost and the LP
 
@@ -82,27 +100,27 @@ Its dual variables are clearing prices. (Mutual exclusivity collapses the joint 
 
 The constraint that clearing prices must be probabilities ($sum p_k = 1$, $p_k >= 0$) is not imposed by fiat — it is the Fenchel conjugate of the minting cost. Minting at \$1 per complete set _encodes_ the probability axiom.
 
-#block(inset: (left: 1em))[
-  *Theorem 1* (Minting–Simplex Duality). _The Fenchel conjugate of $V(bold(D)) = max_k D_k$ is the indicator function of the probability simplex:_
+#theorem(name: "Minting–Simplex Duality")[
+  _The Fenchel conjugate of $V(bold(D)) = max_k D_k$ is the indicator function of the probability simplex:_
   $ V^* (bold(p)) = delta_Delta (bold(p)) = cases(0 & "if" bold(p) in Delta, +infinity & "otherwise") $
   _where $Delta = {bold(p) >= 0 : sum_k p_k = 1}$._
-]
+] <thm-minting>
 
 _Proof._ For $bold(p) in Delta$: convexity gives $sum p_k D_k <= max_k D_k$, so the supremum is $0$ (attained at $bold(D) = bold(0)$). For $bold(p) in.not Delta$: some deviation from the simplex exists, and scaling $bold(D)$ in the exploiting direction sends the supremum to $+infinity$. #h(1fr) $square$
 
-*Interpretation.* The conjugate takes only two values: $0$ (prices in $Delta$) and $+infinity$ (prices outside). There is no middle ground because the supremum over $bold(D)$ exploits any deviation from the simplex as an _arbitrage_: if $sum p_k > 1$, mint complete sets at cost \$1 and sell shares at total price $sum p_k > dollar 1$ — scale up for unbounded profit. The probability axiom $sum p_k = 1$ is not a modeling choice; it is a no-arbitrage condition enforced by the minting mechanism.
+The probability axiom $sum p_k = 1$ is not a modeling choice — it is a no-arbitrage condition. Any deviation from the simplex is an arbitrage opportunity (e.g., if $sum p_k > 1$, mint at \$1 and sell at $sum p_k$), and the conjugate enforces this as a hard constraint.
 
 == Entropy Smoothing: LMSR as Soft LP
 
 Hanson's LMSR cost function $C_b(bold(D)) = b ln sum exp(D_k\/b)$ is a smooth ($C^infinity$) version of the minting cost, parametrized by a temperature $b > 0$. The structural content is in its Fenchel conjugate: where $V^* = delta_Delta$ was a hard constraint (prices must be probabilities), $C_b^*$ is a soft penalty (prices near uniform are cheap, prices near a vertex are expensive).
 
-#block(inset: (left: 1em))[
-  *Theorem 2* (LMSR–Entropy Duality). _The Fenchel conjugate of $C_b$ is negative Shannon entropy on the simplex:_
+#theorem(name: "LMSR–Entropy Duality")[
+  _The Fenchel conjugate of $C_b$ is negative Shannon entropy on the simplex:_
   $ C_b^*(bold(p)) = cases(
     b sum_k p_k ln p_k quad & "if" bold(p) in Delta,
     +infinity & "otherwise"
   ) $
-]
+] <thm-lmsr>
 
 _Proof._ We compute $C_b^*(bold(p)) = sup_(bold(D)) {sum p_k D_k - b ln sum exp(D_k \/ b)}$ by setting the gradient to zero:
 $
@@ -118,9 +136,9 @@ So $C_b^*(bold(p)) = b sum_k p_k ln p_k$. This is finite only when $bold(p) in D
 
 The approximation quality is controlled by $b$:
 
-#block(inset: (left: 1em))[
-  *Proposition 1* (LSE–Max Sandwich). $max_k D_k <= C_b(bold(D)) <= max_k D_k + b ln K$. _The gap $b ln K$ is the maximum LMSR subsidy._
-]
+#proposition(name: "LSE–Max Sandwich")[
+  $max_k D_k <= C_b(bold(D)) <= max_k D_k + b ln K$. _The gap $b ln K$ is the maximum LMSR subsidy._
+] <prop-sandwich>
 
 _Proof._ $exp(max_k D_k\/b) <= sum exp(D_k\/b) <= K exp(max_k D_k\/b)$. Apply $b ln$. #h(1fr) $square$
 
@@ -147,42 +165,20 @@ $ P_b: quad max_(bold(q) in [0, bold(overline(Q))]) quad sum_i w_i q_i - C_b(bol
 
 Since $C_b$ is convex and smooth, and $bold(D)(bold(q))$ is linear, $P_b$ is a smooth concave maximization. Its first-order conditions are necessary and sufficient. The punchline: the exponentials come from the minting cost, not the order book.
 
-#block(inset: (left: 1em))[
-  *Theorem 3* (LMSR = Smoothed Batch Clearing). _At the optimum of $P_b$, the clearing prices are the softmax of net demand:_
+#theorem(name: "LMSR = Smoothed Batch Clearing")[
+  _At the optimum of $P_b$, the clearing prices are the softmax of net demand:_
   $ p_k^* = (partial C_b) / (partial D_k) = exp(D_k^* \/ b) / (sum_j exp(D_j^* \/ b)) $
   _This is the LMSR marginal price function. By construction, $sum_k p_k^* = 1$._
-]
+] <thm-clearing>
 
-The two limits are immediate: as $b -> 0$, $P_b -> P$ (by Berge's theorem on the compact feasible set, with uniform convergence from Proposition 1); as $b -> infinity$, $exp(D_k\/b) -> 1$ for all $k$, so $p_k -> 1\/K$.
+The two limits are immediate: as $b -> 0$, $P_b -> P$ (by Berge's theorem on the compact feasible set, with uniform convergence from @prop-sandwich); as $b -> infinity$, $exp(D_k\/b) -> 1$ for all $k$, so $p_k -> 1\/K$.
 
-To see exactly how these prices emerge, we write out the KKT system. For a buy order $i$ on outcome $k$ with welfare coefficient $w_i = L_i$:
-
-$
-(partial) / (partial q_i) [w_i q_i - C_b (bold(D)(bold(q)))] = L_i - (partial C_b) / (partial D_k) dot (partial D_k) / (partial q_i) = L_i - p_k
-$
-
-Combined with the box constraints $q_i in [0, overline(Q)_i]$ and multipliers $mu_i^-, mu_i^+$:
-
-$
-L_i - p_k - mu_i^+ + mu_i^- = 0, quad mu_i^+ (q_i - overline(Q)_i) = 0, quad mu_i^- q_i = 0
-$
-
-This gives the familiar clearing rule:
+Applying KKT with box constraints $q_i in [0, overline(Q)_i]$ yields the familiar clearing rule (for a buy order $i$ on outcome $k$, the marginal welfare is $L_i - p_k$):
 - $q_i = overline(Q)_i$ (fully filled) $quad arrow.l.r.double quad L_i >= p_k$ #h(1em) _(buyer's limit above price)_
 - $q_i = 0$ (unfilled) $quad arrow.l.r.double quad L_i <= p_k$ #h(1em) _(buyer's limit below price)_
 - $0 < q_i < overline(Q)_i$ (marginal) $quad arrow.l.r.double quad L_i = p_k$ #h(1em) _(buyer is the price-setter)_
 
 This is the _Uniform Clearing Price_ (UCP) condition — identical to the LP case. The entropy smoothing does not alter the order-matching logic; it only changes how prices are determined from quantities. In the LP ($b = 0$), the clearing price is set by the marginal order — a discrete mechanism. In $P_b$ ($b > 0$), the price $p_k = exp(D_k\/b) \/ sum exp(D_j\/b)$ depends continuously on net demand. The order book determines _which_ orders fill (via UCP); the softmax determines _at what prices_ (via the minting cost gradient).
-
-== Self-Financing Minting
-
-#block(inset: (left: 1em))[
-  *Theorem 4* (Self-Financing Minting). _In the LP ($b = 0$), the minting mechanism breaks even exactly: $"P&L" = sum p_k D_k - max_k D_k = 0$._
-]
-
-_Proof._ By complementary slackness, $p_k > 0$ only where $D_k = max_j D_j$. So $sum p_k D_k = (max_j D_j) dot sum_(D_k = max) p_k = max_j D_j$, since the active prices sum to 1 (Theorem 1). #h(1fr) $square$
-
-For $b > 0$, the smoothed cost $C_b > V$ (Proposition 1), so $P_b$ collects less revenue than the LP. The gap $C_b - V <= b ln K$ is the LMSR subsidy — the cost of smooth pricing. In the LP limit, this subsidy vanishes.
 
 == Price Uniqueness Without Budgets
 
@@ -194,11 +190,11 @@ $
 min_(bold(p) in Delta) [underbrace(W^*(bold(p)), "consumer surplus") + underbrace(C_b^* (bold(p)), "entropy penalty")]
 $
 
-where $W^*(bold(p))$ is the total surplus of orders whose limit prices exceed clearing prices, and $C_b^* (bold(p)) = b sum p_k ln p_k$ is the negative Shannon entropy (Theorem 2).
+where $W^*(bold(p))$ is the total surplus of orders whose limit prices exceed clearing prices, and $C_b^* (bold(p)) = b sum p_k ln p_k$ is the negative Shannon entropy (@thm-lmsr).
 
-#block(inset: (left: 1em))[
-  *Theorem 5* (Unconstrained Price Uniqueness). _The Fenchel dual of the unconstrained smoothed problem is strictly convex: $W^*$ is convex (piecewise linear) and $C_b^*$ is strictly convex on the interior of $Delta$. The clearing prices $bold(p)^*$ are therefore unique for any $b > 0$ and any order book, unconditionally._
-]
+#theorem(name: "Unconstrained Price Uniqueness")[
+  _The Fenchel dual of the unconstrained smoothed problem is strictly convex: $W^*$ is convex (piecewise linear) and $C_b^*$ is strictly convex on the interior of $Delta$. The clearing prices $bold(p)^*$ are therefore unique for any $b > 0$ and any order book, unconditionally._
+] <thm-unique>
 
 _Proof._ $W^*$ is convex (conjugate of concave $W$) and $C_b^*$ is strictly convex on the simplex interior: its Hessian is $b dot "diag"(1\/p_k)$, positive definite for $bold(p) > 0$. The minimizer lies in the interior because $nabla C_b^* = b(1 + ln p_k) -> -infinity$ as any $p_k -> 0^+$, which dominates the finite gradient of $W^*$ and pulls the minimizer away from the boundary. Strict convexity on the interior gives uniqueness. #h(1fr) $square$
 
@@ -221,17 +217,17 @@ The budget constraint $"cap"_k <= B_k$ is _bilinear_: $p$ is determined by $bold
 
 == The Cross-Price Obstruction
 
-One might hope that despite the non-convexity, clearing prices are still unique (even if fills are not). After all, prices were unconditionally unique without budgets (Theorem 5). We prove this hope is false.
+One might hope that despite the non-convexity, clearing prices are still unique (even if fills are not). After all, prices were unconditionally unique without budgets (@thm-unique). We prove this hope is false.
 
-#block(inset: (left: 1em))[
-  *Proposition 2* (Cross-Price Obstruction). _For the risk-neutral budget-constrained problem, unconditional price uniqueness is impossible. The standard monotonicity argument fails due to cross-price budget violation._
-]
+#proposition(name: "Cross-Price Obstruction")[
+  _For the risk-neutral budget-constrained problem, unconditional price uniqueness is impossible. The standard monotonicity argument fails due to cross-price budget violation._
+] <prop-obstruction>
 
-_Proof._ Suppose two KKT points $(bold(q)^1, bold(p)^1, bold(mu)^1)$ and $(bold(q)^2, bold(p)^2, bold(mu)^2)$ exist with $bold(p)^1 != bold(p)^2$. The strict convexity of $C_b^*$ (Theorem 2) gives $chevron.l bold(D)^1 - bold(D)^2, bold(p)^1 - bold(p)^2 chevron.r > 0$ — the demand-price inner product is strictly positive for distinct prices. For a contradiction ($"LHS" > 0$ but $"RHS" <= 0$), we need the first fills to be budget-feasible at the second prices: $"cap"_k(bold(p)^2, bold(q)^1) <= B_k$. But while $"cap"_k(bold(p)^1, bold(q)^1) <= B_k$ holds (budget feasibility at own prices), there is *no guarantee* that $"cap"_k(bold(p)^2, bold(q)^1) <= B_k$. If $bold(p)^2$ is higher where MM $k$ is long, the cross-price evaluation exceeds the budget.
+_Proof._ Suppose two KKT points $(bold(q)^1, bold(p)^1, bold(mu)^1)$ and $(bold(q)^2, bold(p)^2, bold(mu)^2)$ exist with $bold(p)^1 != bold(p)^2$. The strict convexity of $C_b^*$ (@thm-lmsr) gives $chevron.l bold(D)^1 - bold(D)^2, bold(p)^1 - bold(p)^2 chevron.r > 0$ — the demand-price inner product is strictly positive for distinct prices. For a contradiction ($"LHS" > 0$ but $"RHS" <= 0$), we need the first fills to be budget-feasible at the second prices: $"cap"_k(bold(p)^2, bold(q)^1) <= B_k$. But while $"cap"_k(bold(p)^1, bold(q)^1) <= B_k$ holds (budget feasibility at own prices), there is *no guarantee* that $"cap"_k(bold(p)^2, bold(q)^1) <= B_k$. If $bold(p)^2$ is higher where MM $k$ is long, the cross-price evaluation exceeds the budget.
 
 This is the signature of a _Generalized Nash Equilibrium Problem_ (GNEP): the feasible set depends on the dual variable. The standard uniqueness proof cannot go through because it requires cross-price budget feasibility, which the bilinear constraint does not guarantee. #h(1fr) $square$
 
-*Counterexample.* Two markets $A, B$ with identical order books and one MM with symmetric positions on both. By symmetry, there exist two KKT points: "fill $A$, starve $B$" and "fill $B$, starve $A$," producing different fills, demands, and prices. This requires exact parameter symmetry — a measure-zero set — but it proves that no unconditional uniqueness theorem exists for the risk-neutral model. Theorem 6 resolves this by changing the model, not the proof technique.
+*Counterexample.* Two markets $A, B$ with identical order books and one MM with symmetric positions on both. By symmetry, there exist two KKT points: "fill $A$, starve $B$" and "fill $B$, starve $A$," producing different fills, demands, and prices. This requires exact parameter symmetry — a measure-zero set — but it proves that no unconditional uniqueness theorem exists for the risk-neutral model. @thm-main resolves this by changing the model, not the proof technique.
 
 == The Expenditure Perspective: Why the Obvious Fix Fails
 
@@ -314,19 +310,19 @@ _What this section proves:_ replacing linear MM welfare with Kelly-criterion uti
 
 == The Program
 
-#block(inset: (left: 1em))[
-  *Theorem 6* (Risk-Averse Clearing Is Convex). _Define the risk-averse batch auction clearing program:_
+#theorem(name: "Risk-Averse Clearing Is Convex")[
+  _Define the risk-averse batch auction clearing program:_
 
   $ P_b^"RA": quad max_(bold(q) in cal(C)) quad underbrace(sum_k B_k ln U_k(bold(q)), "MM welfare") + underbrace(sum_(j in.not "MM") w_j q_j, "retail welfare") - underbrace(C_b(bold(D)(bold(q))), "minting cost") $
 
-  _where $U_k(bold(q)) = sum_(i in "MM"_k) L_i q_i$ is MM $k$'s total weighted fill, $"MM"_k$ contains MM $k$'s buy orders (with $L_i > 0$; any sell orders from MMs contribute to the retail welfare term), $cal(C) = {bold(q) in [0, bold(overline(Q))]: "balance constraints"}$ is the LP feasible set, and $C_b$ is the smoothed minting cost (Proposition 1). Then:_
+  _where $U_k(bold(q)) = sum_(i in "MM"_k) L_i q_i$ is MM $k$'s total weighted fill, $"MM"_k$ contains MM $k$'s buy orders (with $L_i > 0$; any sell orders from MMs contribute to the retail welfare term), $cal(C) = {bold(q) in [0, bold(overline(Q))]: "balance constraints"}$ is the LP feasible set, and $C_b$ is the smoothed minting cost (@prop-sandwich). Then:_
 
   + _The objective is strictly concave on the feasible set (whenever any MM has positive-welfare orders with $B_k > 0$)._
   + _$P_b^"RA"$ has a unique optimal fill vector $bold(q)^*$._
   + _No explicit budget constraints appear. At the optimum, each MM $k$ spends at most $B_k$, with equality when no fill is capacity-constrained._
   + _Clearing prices $bold(p)^*$ are unique._
   + _The program is solvable in polynomial time by any standard convex optimizer (interior point, projected gradient, etc.)._
-]
+] <thm-main>
 
 == Proof
 
@@ -350,7 +346,7 @@ The left side telescopes to $B_k$. So:
 
 $ sum_(i in "MM"_k) p_(m(i))^* q_i^* = B_k - sum_(i in "MM"_k) lambda_i^+ q_i^* <= B_k $
 
-Each MM's capital deployed on purchases is at most $B_k$, with equality when no fill hits its upper bound. The $ln$ singularity at $U_k = 0$ drives the optimizer to exhaust all available capacity. The budget constraint is not imposed — it emerges from the $B_k ln U_k$ objective. This is the Eisenberg-Gale mechanism.
+Each MM's capital deployed on purchases is at most $B_k$, with equality when no fill hits its upper bound. Intuitively: the $ln$ singularity at $U_k = 0$ makes the first dollar of fill infinitely valuable, so the optimizer never leaves budget unspent — it always finds a way to deploy capital until box constraints or the minting cost push back. The budget constraint is not imposed — it emerges from the $B_k ln U_k$ objective. This is the Eisenberg-Gale mechanism.
 
 *(4) Price uniqueness.* Prices are $p_k = partial C_b \/ partial D_k = "softmax"(bold(D)\/b)$, a continuous function of the unique $bold(q)^*$.
 
@@ -358,7 +354,7 @@ Each MM's capital deployed on purchases is at most $B_k$, with equality when no 
 
 == Temperature Independence
 
-In the risk-neutral model, the entropy smoothing ($C_b$) was the _only_ source of concavity, and Proposition 2 shows this is insufficient to overcome the budget non-convexity. In the risk-averse model, $B_k ln U_k$ provides $b$-independent curvature of order $O(B_k\/U_k^2)$. The $-C_b$ term adds more concavity — it helps, not hurts.
+In the risk-neutral model, the entropy smoothing ($C_b$) was the _only_ source of concavity, and @prop-obstruction shows this is insufficient to overcome the budget non-convexity. In the risk-averse model, $B_k ln U_k$ provides $b$-independent curvature of order $O(B_k\/U_k^2)$. The $-C_b$ term adds more concavity — it helps, not hurts.
 
 Even at $b = 0$ (pure LP minting cost), the program remains strictly concave:
 
@@ -368,24 +364,29 @@ The $-max_k D_k$ term is concave (not strictly), but the $ln$ term provides stri
 
 == The Fisher Market Isomorphism
 
-Program $P_b^"RA"$ is structurally isomorphic to the Eisenberg-Gale convex program for Fisher market equilibrium:
+In a Fisher market (Eisenberg & Gale 1959), $n$ consumers with budgets $B_k$ purchase divisible goods with fixed supply $s_j$ at prices $p_j$. The equilibrium is the unique solution to:
+
+$ "EG": quad max_(bold(x) >= 0) quad sum_k B_k ln U_k (bold(x)_k) quad "s.t." quad sum_k x_(k j) <= s_j quad forall j $
+
+where $U_k(bold(x)_k) = sum_j u_(k j) x_(k j)$ is consumer $k$'s linear utility over goods. The supply constraints have dual variables $p_j$ — the equilibrium prices. Budget constraints do not appear explicitly; they emerge from the $B_k ln U_k$ objective by exactly the same telescoping argument as our proof of (3).
+
+Program $P_b^"RA"$ is this program with two extensions:
 
 #align(center)[
   #table(
     columns: 3,
     align: (left, center, center),
     stroke: none,
-    [*Component*], [*Fisher market*], [*Risk-averse batch auction*],
-    [Buyers], [Consumers with budgets $B_k$], [MMs with budgets $B_k$],
+    [*Component*], [*Fisher market (EG)*], [*Batch auction ($P_b^"RA"$)*],
+    [Consumers], [$n$ agents with budgets $B_k$], [MMs with budgets $B_k$],
     [Goods], [Divisible commodities], [Outcome shares],
-    [Supply], [Fixed endowment $s_j$], [Minting (endogenous, cost $C_b$)],
-    [Utility], [$U_k = sum w_i x_(k i)$], [$U_k = sum w_i q_i$],
-    [Objective], [$sum B_k ln U_k$], [$sum B_k ln U_k + "retail" - C_b$],
-    [Prices], [Dual of supply constraint], [Dual of balance constraint = softmax],
+    [Supply], [Fixed endowment $s_j$], [Endogenous: minting at cost $C_b$],
+    [Utility], [$U_k = sum_j u_(k j) x_(k j)$], [$U_k = sum_(i in "MM"_k) L_i q_i$],
+    [Prices], [Dual of $sum_k x_(k j) <= s_j$], [Gradient of $C_b$ (softmax)],
   )
 ]
 
-The prediction market extends Fisher markets in two ways: (1) supply is endogenous via minting (shares are created at cost $C_b$, not drawn from a fixed endowment), and (2) non-MM ("retail") orders contribute linear welfare alongside the log-utility MMs. Both extensions preserve concavity.
+The prediction market extends the Fisher market in two ways: (1) supply is endogenous — shares are created by minting at cost $C_b(bold(D))$ rather than drawn from a fixed endowment, and (2) non-MM ("retail") orders contribute linear welfare alongside the log-utility MMs. Both extensions preserve concavity. The minting cost replaces the fixed supply constraints: where EG has $sum_k x_(k j) <= s_j$ with dual prices, $P_b^"RA"$ has $C_b(bold(D))$ whose gradient _is_ the price vector.
 
 == What Changes and What Doesn't
 
@@ -407,14 +408,14 @@ The paper establishes one main result and the framework necessary to state and p
     columns: 3,
     align: (left, center, center),
     [*Section*], [*Result*], [*Role*],
-    [§2], [LMSR = smoothed LP (Thms 1–5)], [Framework],
+    [§2], [LMSR = smoothed LP (Thms 1–4)], [Framework],
     [§3], [Impossibility (Prop.~2)], [Motivation],
     [§4], [Log utility is correct model], [Economic argument],
-    [§5], [Fisher market isomorphism (Thm 6)], [*Main result*],
+    [§5], [Fisher market isomorphism (Thm 5)], [*Main result*],
   )
 ]
 
-The landscape: unconditional uniqueness is impossible for risk-neutral MMs (Proposition 2) and unconditional uniqueness holds for risk-averse MMs (Theorem 6). The transition from impossibility to tractability requires only a change of objective function — from $sum w_i q_i$ to $sum B_k ln U_k$ — reflecting the economic reality that repeat-participation market makers have diminishing returns.
+The landscape: unconditional uniqueness is impossible for risk-neutral MMs (@prop-obstruction) and unconditional uniqueness holds for risk-averse MMs (@thm-main). The transition from impossibility to tractability requires only a change of objective function — from $sum w_i q_i$ to $sum B_k ln U_k$ — reflecting the economic reality that repeat-participation market makers have diminishing returns.
 
 == Open Problems
 
@@ -422,25 +423,25 @@ The landscape: unconditional uniqueness is impossible for risk-neutral MMs (Prop
 
 + *Extension to non-exclusive groups.* When markets are correlated but not mutually exclusive, group minting doesn't apply directly. The exact connection to combinatorial LMSR in this regime is open.
 
-+ *Risk-neutral hidden convexity.* Is there a reformulation of the risk-neutral model that recovers convexity? Proposition 2 shows it cannot come from the standard Fenchel dual. Devanur and Dudík (2015) proved budget additivity for sequential LMSR, hinting at hidden convexity — but extending this to simultaneous batch auctions remains open.
++ *Risk-neutral hidden convexity.* Is there a reformulation of the risk-neutral model that recovers convexity? @prop-obstruction shows it cannot come from the standard Fenchel dual. Devanur and Dudík (2015) proved budget additivity for sequential LMSR, hinting at hidden convexity — but extending this to simultaneous batch auctions remains open.
 
 == Connection to Prior Work
 
-*Eisenberg and Gale (1959)*: Convex program for Fisher market equilibrium via expenditure variables. Our Theorem 6 establishes that prediction markets with risk-averse MMs are isomorphic to Fisher markets: the Eisenberg-Gale program with endogenous supply (minting cost $C_b$) is convex. §3 identifies why the same approach fails for risk-neutral MMs: constant marginal returns provide no curvature to counteract the budget non-convexity.
+*Eisenberg and Gale (1959)*: Convex program for Fisher market equilibrium via expenditure variables. Our @thm-main establishes that prediction markets with risk-averse MMs are isomorphic to Fisher markets: the Eisenberg-Gale program with endogenous supply (minting cost $C_b$) is convex. §3 identifies why the same approach fails for risk-neutral MMs: constant marginal returns provide no curvature to counteract the budget non-convexity.
 
 *Abernethy, Chen, and Vaughan (2013)*: Proved that cost-function market makers satisfying a set of axioms must price via a convex cost function, with LMSR corresponding to the entropy conjugate. Our §2 is the batch-auction formulation of their framework. The minting cost $V = max_k D_k$ is the "simplest" cost function, with LMSR as its entropy smoothing.
 
 *Breiman (1961)*: Optimal properties of the Kelly criterion. Our §4 uses Breiman's survival theorem to argue that log utility is not a convenience but a consequence of evolutionary selection among repeat-participation MMs.
 
-*Devanur and Dudík (2015)*: Price uniqueness and budget additivity for sequential LMSR via Bregman divergence. Their budget additivity is a manifestation of hidden convexity — the bilinear budget boundaries merge into a convex hull in the dual space. Our Theorem 6 achieves unconditional uniqueness for batch auctions via the same Eisenberg-Gale structure underlying their result. Whether the _risk-neutral_ batch auction also has hidden convexity remains open (§3 shows it cannot come from the standard Fenchel dual).
+*Devanur and Dudík (2015)*: Price uniqueness and budget additivity for sequential LMSR via Bregman divergence. Their budget additivity is a manifestation of hidden convexity — the bilinear budget boundaries merge into a convex hull in the dual space. Our @thm-main achieves unconditional uniqueness for batch auctions via the same Eisenberg-Gale structure underlying their result. Whether the _risk-neutral_ batch auction also has hidden convexity remains open (§3 shows it cannot come from the standard Fenchel dual).
 
 *Fortnow, Kilian, Pennock, and Wellman (2005)*: LP for combinatorial call markets. Our group minting provides the structural reason why LP works: it encodes mutual exclusivity in $O(K)$ vs $O(2^K)$.
 
-*Chen and Pennock (2007)*: Bounded-loss market makers. The parameter $b$ in our framework is their loss bound. $b = 0$ (zero loss) is achievable in the batch setting (Theorem 4).
+*Chen and Pennock (2007)*: Bounded-loss market makers. The parameter $b$ in our framework is their loss bound. $b = 0$ (zero loss) is achievable in the batch setting by complementary slackness: the minting mechanism breaks even exactly when prices are LP duals.
 
 *Hofbauer and Sandholm (2007)*: Unique logit equilibrium for negative semidefinite games — games where increasing adoption of a strategy decreases its payoff. Our prediction market is exactly NSD (demand raises price). Their result covers the unconstrained case; our Fisher market isomorphism extends to budget-constrained agents unconditionally.
 
-*McKelvey and Palfrey (1995)*: Quantal Response Equilibrium. The budget-constrained clearing problem is the prediction-market analog of QRE with budget constraints. Our impossibility result (Proposition 2) corresponds to the failure of high-temperature contraction when budgets bind; our resolution via log utility corresponds to adopting a different utility model entirely.
+*McKelvey and Palfrey (1995)*: Quantal Response Equilibrium. The budget-constrained clearing problem is the prediction-market analog of QRE with budget constraints. Our impossibility result (@prop-obstruction) corresponds to the failure of high-temperature contraction when budgets bind; our resolution via log utility corresponds to adopting a different utility model entirely.
 
 *Budish, Cramton, and Shim (2015)*: Frequent Batch Auctions for equity markets. Our framework applies FBAs to prediction markets, where the information-driven price shocks are even more severe than in equities.
 
@@ -449,5 +450,5 @@ The landscape: unconditional uniqueness is impossible for risk-neutral MMs (Prop
 #line(length: 100%)
 #v(0.5em)
 #text(size: 9pt, style: "italic")[
-  Next steps: (1) Implement risk-averse clearing (Theorem 6) — single convex program, no annealing. (2) Empirical welfare comparison between $P_b^"RA"$ and risk-neutral LP across realistic order books. (3) Quantify $P_b^"RA" -> P_b$ convergence as $B_k -> infinity$.
+  Next steps: (1) Implement risk-averse clearing (@thm-main) — single convex program, no annealing. (2) Empirical welfare comparison between $P_b^"RA"$ and risk-neutral LP across realistic order books. (3) Quantify $P_b^"RA" -> P_b$ convergence as $B_k -> infinity$.
 ]
