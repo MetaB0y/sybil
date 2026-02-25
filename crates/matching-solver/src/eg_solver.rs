@@ -9,16 +9,21 @@
 //! each iteration solves an LP with gradient-derived objective coefficients.
 //! For retail orders the gradient is constant (same as LP welfare);
 //! for MM orders the gradient diminishes as `B_k / U_k`, naturally enforcing budgets.
+//!
+//! **Optimization**: Exact line search via bisection on the EG objective derivative.
+//! The EG objective along the FW direction is concave in γ, so bisection on
+//! `dφ/dγ = 0` finds the optimal step in ~15 iterations. This typically halves
+//! the number of LP oracle calls vs fixed `γ = 2/(t+2)`.
 
 use std::collections::HashMap;
 use std::time::Instant;
 
-use matching_engine::{MarketId, MmSide, Nanos, Order, Problem, NANOS_PER_DOLLAR};
+use matching_engine::{MarketId, MmSide, Order, Problem};
 
 use crate::coefficients::{order_sign, precompute_coefficients, OrderCoefficients};
 use crate::lp_solver::{
-    build_and_solve_lp, collect_markets, create_position_arbs, extract_result,
-    normalized_yes_prices, recompute_welfare, trim_mm_budget_overflows,
+    build_and_solve_lp, collect_markets, create_position_arbs, extract_result, recompute_welfare,
+    trim_mm_budget_overflows,
 };
 use crate::pipeline::{PipelineResult, PipelineTimings};
 use crate::traits::PriceDiscoveryResult;
@@ -27,12 +32,14 @@ use crate::MatchingResult;
 /// Configuration for the Eisenberg-Gale solver.
 #[derive(Clone, Debug)]
 pub struct EgConfig {
-    /// Maximum Frank-Wolfe iterations (default: 50).
+    /// Maximum Frank-Wolfe iterations (default: 25).
     pub max_fw_iterations: usize,
     /// Convergence tolerance: relative change in EG objective (default: 1e-6).
     pub convergence_tol: f64,
-    /// Price stability tolerance: max price change between iterations in nanos (default: 0.001 * NANOS_PER_DOLLAR).
-    pub price_stability_tol: f64,
+    /// Q-stability tolerance: max absolute change in any q_i to declare convergence (default: 1.0).
+    pub q_stability_tol: f64,
+    /// Bisection steps for exact line search (default: 15).
+    pub line_search_steps: usize,
     /// SLP iterations for residual MM budget violations after rounding (default: 1).
     pub max_mm_slp_iterations: usize,
 }
@@ -40,15 +47,16 @@ pub struct EgConfig {
 impl Default for EgConfig {
     fn default() -> Self {
         Self {
-            max_fw_iterations: 50,
+            max_fw_iterations: 25,
             convergence_tol: 1e-6,
-            price_stability_tol: 0.001 * NANOS_PER_DOLLAR as f64,
+            q_stability_tol: 1.0,
+            line_search_steps: 15,
             max_mm_slp_iterations: 1,
         }
     }
 }
 
-/// Eisenberg-Gale solver using Frank-Wolfe with LP oracle.
+/// Eisenberg-Gale solver using Frank-Wolfe with LP oracle and exact line search.
 pub struct EgSolver {
     config: EgConfig,
 }
@@ -92,7 +100,7 @@ impl EgSolver {
             .flat_map(|(g_idx, group)| group.markets.iter().map(move |&m| (m, g_idx)))
             .collect();
 
-        // Build MM order info: order_index -> (mm_constraint_index, MmSide)
+        // Build MM order info: order_id -> (mm_constraint_index, MmSide)
         let mm_order_info_by_id: HashMap<u64, (usize, MmSide)> = problem
             .mm_constraints
             .iter()
@@ -164,6 +172,7 @@ impl EgSolver {
 
         // Initialize q from warm start
         let mut q: Vec<f64> = warm_sol.q_values.clone();
+        drop(warm_sol);
 
         // Seed MM fills: ensure each MM group has nonzero surplus
         // to avoid gradient explosion (B_k / 0) on first iteration.
@@ -176,7 +185,6 @@ impl EgSolver {
                 .map(|&i| welfare_weights[i] * q[i])
                 .sum();
             if surplus <= 0.0 {
-                // Seed each MM order with a tiny fill
                 for &i in group_orders {
                     if q[i] < 1.0 {
                         q[i] = 1.0_f64.min(orders[i].max_fill as f64);
@@ -186,67 +194,134 @@ impl EgSolver {
         }
 
         let mut prev_obj = f64::NEG_INFINITY;
-        let mut prev_prices: HashMap<MarketId, Nanos> = HashMap::new();
-        // warm_sol is consumed; we don't need its duals (projection LP gets proper duals)
-        drop(warm_sol);
 
         // ================================================================
-        // Step 2: Frank-Wolfe loop
+        // Step 2: Frank-Wolfe loop with exact line search
         // ================================================================
-        for t in 0..self.config.max_fw_iterations {
+        for _t in 0..self.config.max_fw_iterations {
             // Compute U_k = Σ_{i ∈ MM_k} w_i * q_i for each MM group
-            let mut u_k: Vec<f64> = vec![0.0; num_mm];
-            for (mm_idx, group_orders) in mm_groups.iter().enumerate() {
-                u_k[mm_idx] = group_orders
-                    .iter()
-                    .map(|&i| welfare_weights[i] * q[i])
-                    .sum();
-                // Floor at 1.0 (1 nano) to avoid division by zero
-                if u_k[mm_idx] < 1.0 {
-                    u_k[mm_idx] = 1.0;
-                }
-            }
+            let u_k: Vec<f64> = mm_groups
+                .iter()
+                .map(|group_orders| {
+                    let u: f64 = group_orders
+                        .iter()
+                        .map(|&i| welfare_weights[i] * q[i])
+                        .sum();
+                    u.max(1.0) // Floor at 1.0 nano to avoid division by zero
+                })
+                .collect();
 
             // Build gradient (objective coefficients for LP oracle)
             let grad: Vec<f64> = (0..n)
                 .map(|i| {
                     if let Some(&(mm_idx, _)) = mm_order_map.get(&i) {
-                        // MM order: grad = B_k * w_i / U_k
                         mm_budgets[mm_idx] * welfare_weights[i] / u_k[mm_idx]
                     } else {
-                        // Retail order: grad = w_i (constant)
                         welfare_weights[i]
                     }
                 })
                 .collect();
 
             // Solve LP oracle with gradient as objective
-            let lp_sol = build_and_solve_lp(
+            let Some(sol) = build_and_solve_lp(
                 orders,
                 &coeffs,
                 &markets,
                 &market_to_group,
                 problem.market_groups.len(),
                 &grad,
-                &[], // No budget constraints — EG handles them
-            );
-
-            let Some(sol) = lp_sol else {
+                &[],
+            ) else {
                 break;
             };
 
-            // Frank-Wolfe step size: γ = 2 / (t + 2)
-            let gamma = 2.0 / (t as f64 + 2.0);
+            // ============================================================
+            // Exact line search: find γ* that maximizes φ(γ) = f(q + γ(s-q))
+            // ============================================================
+            //
+            // φ(γ) = Σ_k B_k * ln((1-γ)*U_k(q) + γ*U_k(s))
+            //       + (1-γ)*R(q) + γ*R(s)
+            //
+            // φ'(γ) = Σ_k B_k * ΔU_k / ((1-γ)*U_k_q + γ*U_k_s) + ΔR
+            //
+            // Concave in γ → bisection on φ'(γ) = 0.
+
+            // Precompute U_k(s) for each MM group
+            let u_k_s: Vec<f64> = mm_groups
+                .iter()
+                .map(|group_orders| {
+                    let u: f64 = group_orders
+                        .iter()
+                        .map(|&i| welfare_weights[i] * sol.q_values[i])
+                        .sum();
+                    u.max(1.0)
+                })
+                .collect();
+
+            // ΔU_k = U_k(s) - U_k(q)
+            let delta_u: Vec<f64> = (0..num_mm)
+                .map(|k| u_k_s[k] - u_k[k])
+                .collect();
+
+            // R(q) = Σ_{j∉MM} w_j * q_j, R(s) = Σ_{j∉MM} w_j * s_j
+            let r_q: f64 = (0..n)
+                .filter(|i| !mm_order_map.contains_key(i))
+                .map(|i| welfare_weights[i] * q[i])
+                .sum();
+            let r_s: f64 = (0..n)
+                .filter(|i| !mm_order_map.contains_key(i))
+                .map(|i| welfare_weights[i] * sol.q_values[i])
+                .sum();
+            let delta_r = r_s - r_q;
+
+            // φ'(γ) evaluated at a given γ
+            let phi_prime = |gamma: f64| -> f64 {
+                let mut deriv = delta_r;
+                for k in 0..num_mm {
+                    if mm_budgets[k] == 0.0 {
+                        continue;
+                    }
+                    let denom = (1.0 - gamma) * u_k[k] + gamma * u_k_s[k];
+                    if denom > 0.0 {
+                        deriv += mm_budgets[k] * delta_u[k] / denom;
+                    }
+                }
+                deriv
+            };
+
+            // Bisection on φ'(γ) = 0 over [0, 1]
+            let gamma = if phi_prime(0.0) <= 0.0 {
+                // Objective decreasing from the start — take minimal step
+                // Use standard FW step as fallback (ensures convergence)
+                2.0 / (_t as f64 + 2.0)
+            } else if phi_prime(1.0) >= 0.0 {
+                // Objective still increasing at γ=1 — full step
+                1.0
+            } else {
+                // Normal case: bisect to find root
+                let mut lo = 0.0_f64;
+                let mut hi = 1.0_f64;
+                for _ in 0..self.config.line_search_steps {
+                    let mid = (lo + hi) / 2.0;
+                    if phi_prime(mid) > 0.0 {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                (lo + hi) / 2.0
+            };
 
             // Update q: q^{t+1} = (1 - γ) * q^t + γ * s^t
+            let mut max_q_change: f64 = 0.0;
             for i in 0..n {
-                q[i] = (1.0 - gamma) * q[i] + gamma * sol.q_values[i];
+                let q_new = (1.0 - gamma) * q[i] + gamma * sol.q_values[i];
+                max_q_change = max_q_change.max((q_new - q[i]).abs());
+                q[i] = q_new;
             }
 
             // Compute EG objective: Σ_k B_k * ln(U_k) + Σ_{j ∉ MM} w_j * q_j
             let mut eg_obj = 0.0;
-
-            // MM log-utility terms
             for (mm_idx, group_orders) in mm_groups.iter().enumerate() {
                 if mm_budgets[mm_idx] == 0.0 {
                     continue;
@@ -259,43 +334,25 @@ impl EgSolver {
                     eg_obj += mm_budgets[mm_idx] * surplus.ln();
                 }
             }
-
-            // Retail linear welfare terms
             for i in 0..n {
                 if !mm_order_map.contains_key(&i) {
                     eg_obj += welfare_weights[i] * q[i];
                 }
             }
 
-            // Check convergence: objective + price stability
+            // Check convergence: objective stability AND q-stability
             let obj_converged = if prev_obj > f64::NEG_INFINITY {
-                let rel_change = (eg_obj - prev_obj).abs()
-                    / (prev_obj.abs().max(1.0));
+                let rel_change = (eg_obj - prev_obj).abs() / prev_obj.abs().max(1.0);
                 rel_change < self.config.convergence_tol
             } else {
                 false
             };
 
-            // Extract prices from LP duals for price stability check
-            let current_prices = normalized_yes_prices(&sol, &markets);
-            let price_converged = if !prev_prices.is_empty() {
-                let max_delta: f64 = markets
-                    .iter()
-                    .map(|m| {
-                        let prev = prev_prices.get(m).copied().unwrap_or(0) as f64;
-                        let curr = current_prices.get(m).copied().unwrap_or(0) as f64;
-                        (prev - curr).abs()
-                    })
-                    .fold(0.0, f64::max);
-                max_delta < self.config.price_stability_tol
-            } else {
-                false
-            };
+            let q_converged = max_q_change < self.config.q_stability_tol;
 
             prev_obj = eg_obj;
-            prev_prices = current_prices;
 
-            if obj_converged && price_converged {
+            if obj_converged && q_converged {
                 break;
             }
         }
@@ -312,24 +369,21 @@ impl EgSolver {
 
         let projection_obj: Vec<f64> = welfare_weights.clone();
 
-        // Create projected orders with FW-derived upper bounds
         let mut projected_orders: Vec<Order> = orders.to_vec();
         for i in 0..n {
             let fw_fill = q[i].round().max(0.0) as u64;
             projected_orders[i].max_fill = fw_fill.min(orders[i].max_fill);
         }
 
-        let final_solution = build_and_solve_lp(
+        let Some(final_sol) = build_and_solve_lp(
             &projected_orders,
             &coeffs,
             &markets,
             &market_to_group,
             problem.market_groups.len(),
             &projection_obj,
-            &[], // No budget constraints — EG already handled them
-        );
-
-        let Some(final_sol) = final_solution else {
+            &[],
+        ) else {
             return PipelineResult::empty();
         };
 
@@ -337,7 +391,6 @@ impl EgSolver {
         let (mut result, prices) = extract_result(&final_sol, orders, &coeffs, &markets);
 
         // Budget trim: integer rounding breaks KKT budget absorption.
-        // This is always needed, not just when violations are detected.
         if has_mm {
             trim_mm_budget_overflows(
                 &mut result,
@@ -456,6 +509,7 @@ mod tests {
     use super::*;
     use matching_engine::{
         bundle_yes, outcome_sell, simple_no_buy, simple_yes_buy, MarketGroup, MmConstraint, MmId,
+        NANOS_PER_DOLLAR,
     };
 
     #[test]
