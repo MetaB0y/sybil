@@ -71,7 +71,7 @@ This turns an intractable monolithic optimization into a coordination problem: s
 
 + _Welfare bounds_ for approximate decomposition: when cross-group orders are dropped or leg-decomposed, the welfare loss is bounded by the contribution of the dropped correlations (§4).
 
-+ _Automatic grouping_: the coupling graph identifies minimal components; a threshold policy decides which to solve exactly vs. approximately (§5).
++ _Automatic grouping_: the coupling graph identifies minimal components; a threshold policy decides which to solve exactly vs. approximately. Column generation exploits demand sparsity to solve large components without full state enumeration (§5).
 
 + _The searcher model_: external solvers compete to clear coupled components, coordinated by the exchange via budget equalization. The Fisher market structure makes this incentive-compatible (§6).
 
@@ -270,7 +270,27 @@ Each cross-component order $i$ introduces a _factor_ $phi_i$ over the groups it 
 
 *Key observation.* If the coupling graph has treewidth $tau$, the minting cost and its gradients can be computed in $O(product_(j=1)^(tau+1) K_j)$ time via the junction tree algorithm, avoiding the full $product K_j$ enumeration. Since each order touches at most $kappa$ groups (in our system, $kappa <= 5$), factor size is bounded. The bottleneck is the treewidth $tau$ of the coupling graph, which grows with transitive coupling.
 
-In practice, coupling graphs tend to have moderate treewidth: most markets are coupled to only a few others through bundle orders. When treewidth is low (say $tau <= 10$ with binary outcomes), exact clearing via message passing is tractable ($2^11 approx 2000$ states per junction tree node). When treewidth is high, the threshold policy (§5.2) falls back to approximate decomposition.
+In practice, coupling graphs tend to have moderate treewidth: most markets are coupled to only a few others through bundle orders. When treewidth is low (say $tau <= 10$ with binary outcomes), exact clearing via message passing is tractable ($2^11 approx 2000$ states per junction tree node). When treewidth is high, the threshold policy (§5.2) falls back to approximate decomposition — or to column generation (§5.4).
+
+== Column Generation for Sparse Demand
+
+When a coupled component is too large to enumerate but demand is sparse (most joint states have zero net demand), _column generation_ avoids the full state space by iteratively discovering active states.
+
+The minting cost $C_b (bold(D)) = b ln sum_(s in cal(S)) exp(D_s \/ b)$ sums over all $|cal(S)|$ joint states, but most contribute negligibly: only states with significant demand $D_s$ matter. Restricting to an active set $cal(S)' subset cal(S)$ gives a relaxation $C_b' <= C_b$ that overestimates welfare. Column generation closes this gap iteratively:
+
++ *Initialize.* Set $cal(S)'$ to the joint states appearing in at least one bundle order's payoff (typically $|cal(S)'| << |cal(S)|$).
+
++ *Solve.* Run the EG program with minting cost restricted to $cal(S)'$, producing fills $bold(q)^*$ and minting level $M^*$.
+
++ *Price.* Find the most violated inactive state: $s^* = arg max_(s in.not cal(S)') D_s (bold(q)^*)$. This is the _pricing subproblem_: compute $D_s = sum_i q_i^* phi_i (s)$ and find the maximum over the product space.
+
++ *Terminate or add.* If $D_(s^*) <= M^*$ (within tolerance for $b > 0$), stop — the restricted solution is optimal for the full problem. Otherwise, add $s^*$ to $cal(S)'$ and repeat.
+
+The pricing subproblem — $max_s sum_i q_i phi_i (s)$ — is a sum of low-arity functions over a product space (one factor per order, each touching at most $kappa$ groups). This is MAP inference on the same factor graph as §5.3: solvable in $O(product K_j^(tau+1))$ time when treewidth $tau$ is low, and often tractable in practice even at higher treewidth because single-group orders contribute constants (they do not vary across the product space).
+
+The practical advantage: each iteration solves a _small_ EG program (over $|cal(S)'|$ states) rather than the full $|cal(S)|$-state program. When demand is sparse — the typical case, since bundle orders are rare relative to single-group orders — only a handful of joint states ever enter $cal(S)'$.
+
+_Remark._ Column generation and treewidth (§5.3) are complementary. Treewidth exploits graph structure to compute exact gradients efficiently. Column generation exploits demand sparsity to avoid enumerating inactive states. When treewidth is low, use message passing. When treewidth is high but demand is sparse, use column generation. When both are unfavorable, fall back to approximate decomposition (§4).
 
 
 = The Searcher Model <searchers>
