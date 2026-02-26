@@ -230,12 +230,12 @@ No. Welfare transforms to $sum_i w_i dot e_i \/ c_i(p)$ — a _rational_ functio
 
 The diagnosis is structural: _linear welfare with hard budget caps_ is an internally inconsistent economic model — agents simultaneously risk-neutral (constant marginal value) and risk-averse (capped exposure). The non-convexity is the computational symptom.
 
-§4 argues that correcting the economic model (from linear to logarithmic utility) resolves the inconsistency, and §5 proves that the correction resolves the non-convexity.
+The mathematics tells us exactly what is needed: diminishing-returns utility to provide curvature. §4 argues that this is not a mathematical convenience but the independently correct economic model — the computational need and the economic reality coincide. §5 proves the resulting program is convex.
 
 
 = Why Market Makers Have Diminishing Returns <economic-case>
 
-The standard assumption that market makers have linear welfare is the unrealistic approximation. Logarithmic (Kelly-criterion) utility is the correct model for repeat-participation MMs. We give three theoretical arguments and two empirical observations that independently converge on this conclusion.
+The previous section showed that clearing requires diminishing-returns utility to be computationally tractable. This section argues that diminishing returns is also the independently correct economic model for repeat-participation MMs — the mathematical fix and the economic reality are the same object. We give three theoretical arguments and two empirical observations.
 
 == Kelly Criterion Is a Survival Theorem
 
@@ -285,11 +285,11 @@ Replacing linear MM welfare with Kelly-criterion utility transforms the budget-c
 
   $ P_b^"RA": quad max_(bold(q) in cal(C), bold(s) >= 0) quad underbrace(sum_k [B_k ln(U_k(bold(q)) + s_k) - s_k], "MM welfare") + underbrace(sum_(j in.not "MM") w_j q_j, "retail welfare") - underbrace(C_b(bold(D)(bold(q))), "minting cost") $
 
-  _where $U_k(bold(q)) = sum_(i in "MM"_k) L_i q_i$ is MM $k$'s total weighted fill, $s_k >= 0$ is MM $k$'s retained cash, $"MM"_k$ contains MM $k$'s buy orders (with $L_i > 0$; any sell orders from MMs contribute to the retail welfare term), $cal(C) = {bold(q) in [0, bold(overline(Q))]: "balance constraints"}$ is the LP feasible set, and $C_b$ is the smoothed minting cost (@prop-sandwich). Define $mu_k = B_k \/ (U_k + s_k)$ as the shadow price of capital. Then:_
+  _where $"MM"_k^+$ is the set of MM $k$'s buy orders (sell orders from MMs enter the retail welfare term; see §5.5), $U_k(bold(q)) = sum_(i in "MM"_k^+) L_i q_i >= 0$ is MM $k$'s total weighted fill ($L_i > 0$ for all $i in "MM"_k^+$), $s_k >= 0$ is MM $k$'s retained cash, $cal(C) = {bold(q) in [0, bold(overline(Q))]: "balance constraints"}$ is the LP feasible set, and $C_b$ is the smoothed minting cost (@prop-sandwich). Define $mu_k = B_k \/ (U_k + s_k)$ as the shadow price of capital. Then:_
 
   + _The objective is strictly concave. $P_b^"RA"$ has a unique optimum $(bold(q)^*, bold(s)^*)$._
   + _Limit orders are exact: $mu_k <= 1$, so no MM order fills at negative welfare ($L_i < p_k$)._
-  + _No explicit budget constraints appear. At the optimum, each MM $k$ spends at most $B_k$: capital on fills plus retained cash $sum p_(m(i)) q_i + s_k <= B_k$._
+  + _No explicit budget constraints appear. At the optimum, each MM $k$ spends at most $B_k$: capital on fills plus retained cash $sum_(i in "MM"_k^+) p_(m(i)) q_i + s_k <= B_k$._
   + _Clearing prices $bold(p)^*$ are unique._
   + _The program is solvable in polynomial time by any standard convex optimizer._
   + _The program operates in two regimes per MM:_
@@ -299,7 +299,7 @@ Replacing linear MM welfare with Kelly-criterion utility transforms the budget-c
 
 == Proof
 
-*(1) Strict concavity and uniqueness.* Each $B_k ln(U_k + s_k)$ is the composition of $ln$ (strictly concave, increasing) with a positive affine function of $(bold(q), s_k)$ — strictly concave. The $-s_k$ term is linear. Retail welfare is linear. $-C_b$ is concave. The sum is strictly concave. The objective tends to $-infinity$ as $s_k -> infinity$ (since $-s_k$ dominates $ln s_k$), so the effective feasible set is compact. Strict concavity on a compact convex set gives a unique maximizer.
+*(1) Strict concavity and uniqueness.* Each $B_k ln(U_k + s_k)$ is the composition of $ln$ (strictly concave, increasing) with a positive affine function of $(bold(q), s_k)$ — strictly concave. The $-s_k$ term is linear. Retail welfare is linear. $-C_b$ is concave. The sum is strictly concave. The objective tends to $-infinity$ as $s_k -> infinity$ (since $-s_k$ dominates $ln s_k$) and as $bold(q)$ approaches the boundary of $cal(C)$ from outside (box constraints). Therefore the superlevel sets ${(bold(q), bold(s)) : f^"RA" >= c}$ are compact for any $c > -infinity$, so the supremum is attained. Strict concavity gives a unique maximizer.
 
 *(2) Limit order exactness.* The KKT condition for $s_k >= 0$ is:
 
@@ -311,15 +311,15 @@ where $mu_k = B_k \/ (U_k + s_k)$. This gives $mu_k <= 1$ unconditionally. The K
 
 The two regimes follow from complementary slackness: $s_k = 0$ when $mu_k < 1$ (i.e., $U_k > B_k$), and $s_k = B_k - U_k > 0$ when $mu_k = 1$ (i.e., $U_k < B_k$). In the over-capitalized regime ($mu_k = 1$), the fill condition $L_i >= p_(m(i))$ is exactly the risk-neutral UCP condition — the MM clears identically to the LP.
 
-*(3) Budget absorption.* Multiply the fill KKT by $q_i$ and sum over $i in "MM"_k$. By complementary slackness ($lambda_i^- q_i = 0$):
+*(3) Budget absorption.* Multiply the fill KKT by $q_i$ and sum over $i in "MM"_k^+$. By complementary slackness ($lambda_i^- q_i = 0$):
 
 $
-mu_k underbrace(sum_(i in "MM"_k) L_i q_i, = U_k) = sum_(i in "MM"_k) p_(m(i)) q_i + underbrace(sum_(i in "MM"_k) lambda_i^+ q_i, >= 0)
+mu_k underbrace(sum_(i in "MM"_k^+) L_i q_i, = U_k) = sum_(i in "MM"_k^+) p_(m(i)) q_i + underbrace(sum_(i in "MM"_k^+) lambda_i^+ q_i, >= 0)
 $
 
 So $sum p_(m(i)) q_i <= mu_k U_k$. Since $mu_k (U_k + s_k) = B_k$, we have $mu_k U_k = B_k - mu_k s_k <= B_k$:
 
-$ sum_(i in "MM"_k) p_(m(i))^* q_i^* + s_k^* <= B_k $
+$ sum_(i in "MM"_k^+) p_(m(i))^* q_i^* + s_k^* <= B_k $
 
 Each MM's total deployment — capital on fills plus retained cash — is at most $B_k$. The budget emerges from the objective, not from an explicit constraint. This is the Eisenberg-Gale mechanism extended to quasi-linear utilities: the $ln$ singularity absorbs the budget, and the cash variable absorbs the surplus.
 
@@ -340,7 +340,7 @@ The $-max_k D_k$ term is concave (not strictly), but the $ln$ term provides stri
 The cash retention variable makes the risk-averse program a strict generalization of the risk-neutral LP: when budgets are non-binding, the two programs agree exactly.
 
 #proposition(name: "LP Recovery")[
-  _Let $bold(q)^"LP"$ be the unconstrained LP optimum ($P_b$ without budgets). If $B_k >= U_k^"LP" = sum_(i in "MM"_k) L_i q_i^"LP"$ for every MM $k$, then the risk-averse optimum $(bold(q)^*, bold(s)^*)$ satisfies $bold(q)^* = bold(q)^"LP"$ and $s_k^* = B_k - U_k^"LP"$. Fills, prices, and welfare are identical._
+  _Let $bold(q)^"LP"$ be the unconstrained LP optimum ($P_b$ without budgets). If $B_k >= U_k^"LP" = sum_(i in "MM"_k^+) L_i q_i^"LP"$ for every MM $k$, then the risk-averse optimum $(bold(q)^*, bold(s)^*)$ satisfies $bold(q)^* = bold(q)^"LP"$ and $s_k^* = B_k - U_k^"LP"$. Fills, prices, and welfare are identical._
 ] <prop-welfare>
 
 _Proof._ When $B_k >= U_k^"LP"$ for all $k$, every MM is in the over-capitalized regime at $bold(q)^"LP"$: the optimizer sets $s_k = B_k - U_k^"LP" >= 0$ and $mu_k = 1$. The fill KKT reduces to $L_i - p_(m(i)) = lambda_i^+ - lambda_i^-$ — exactly the LP KKT. Since the LP and risk-averse programs have the same KKT conditions at $bold(q)^"LP"$, and the risk-averse program has a unique optimum, $bold(q)^* = bold(q)^"LP"$. #h(1fr) $square$
@@ -349,9 +349,9 @@ The cash variable $s_k$ acts as a _numeraire good_: the MM can "buy" cash at pri
 
 - _Capital-constrained_ ($U_k > B_k$, $s_k = 0$): the MM has more profitable opportunities than budget. Kelly sizing kicks in — the MM prioritizes the highest return-on-investment fills, deploying the full budget. This is where the log model departs from the LP.
 
-- _Over-capitalized_ ($U_k < B_k$, $s_k > 0$): the MM has more budget than profitable fills. Excess capital is retained as cash ($mu_k = 1$), and fills match the LP exactly. No order fills below its limit price.
+- _Over-capitalized_ ($U_k < B_k$, $s_k > 0$): the MM has more budget than profitable fills. Excess capital is retained as cash ($mu_k = 1$), and fills match the LP exactly. No order fills below its limit price. This is not a contradiction of Kelly — it is the Kelly prescription: bet a fraction of your bankroll proportional to your edge, keep the rest in cash. When the bankroll dwarfs the opportunity set, the Kelly fraction covers every profitable bet and the MM looks risk-neutral. The risk aversion is still there; it just doesn't bind.
 
-The welfare gap between $P_b^"RA"$ and the LP comes entirely from the capital-constrained regime: when $B_k < U_k^"LP"$, the MM throttles fills (under-filling relative to the LP, never over-filling). The gap is bounded by the total budget shortfall $sum_k max(0, U_k^"LP" - B_k)$ and vanishes as budgets grow.
+The welfare gap between $P_b^"RA"$ and the LP comes entirely from the capital-constrained regime: when $B_k < U_k^"LP"$, the MM throttles fills (under-filling relative to the LP, never over-filling). The gap is controlled by the total budget shortfall $sum_k max(0, U_k^"LP" - B_k)$: each capital-constrained MM contributes at most $U_k^"LP" - B_k$ in lost fill welfare (since $mu_k < 1$ scales down fills but never reverses them). As budgets grow, the set of capital-constrained MMs shrinks, and the gap vanishes.
 
 == The Fisher Market Isomorphism
 
@@ -372,7 +372,7 @@ Program $P_b^"RA"$ is a quasi-linear Fisher market with two extensions:
     [Consumers], [$n$ agents with budgets $B_k$], [MMs with budgets $B_k$],
     [Goods], [Divisible commodities], [Outcome shares],
     [Supply], [Fixed endowment $s_j$], [Endogenous: minting at cost $C_b$],
-    [Utility], [$U_k = sum_j u_(k j) x_(k j)$], [$U_k = sum_(i in "MM"_k) L_i q_i$],
+    [Utility], [$U_k = sum_j u_(k j) x_(k j)$], [$U_k = sum_(i in "MM"_k^+) L_i q_i$],
     [Cash], [Optional ($s_k >= 0$)], [Retained budget ($s_k >= 0$)],
     [Prices], [Dual of $sum_k x_(k j) <= s_j$], [Gradient of $C_b$ (softmax)],
   )
@@ -387,6 +387,8 @@ The prediction market extends the quasi-linear Fisher market in two ways: (1) su
 *What doesn't change.* Non-MM orders are still matched by UCP at clearing prices. The minting mechanism is unchanged. Prices are still softmax (for $b > 0$) or LP duals (for $b = 0$). Limit orders are exact: no order fills below its stated price.
 
 *The buy/sell decomposition.* The Fisher market isomorphism applies to MM buy orders — the orders that deploy capital and create demand. MM sell orders (if any) are treated as retail: filled by UCP with linear welfare, consuming no budget. This is economically correct: buying creates exposure and depletes the trading budget; selling liquidates existing exposure and _frees_ budget. A sell fill returns capital to the MM rather than consuming it, so it should not appear inside $B_k ln(U_k + s_k)$. For naked shorts (selling shares not yet held), collateral comes from a separate margin pool — a distinct balance with its own risk management, not the MM's active trading budget $B_k$.
+
+_Remark on the decomposition._ Under UCP, an MM's buy and sell on the same outcome never co-fill: a buy requires $L_i >= p_k$, a sell requires $p_k >= L_j$, and non-crossing orders ($L_j > L_i$) admit no such price. Crossing orders are self-dealing. So per outcome, the MM is either buying (capital-consuming, enters $ln$) or selling (capital-freeing, enters retail welfare), never both.
 
 *Extension to multiple groups and bundle orders.* Nothing in @thm-main requires a single mutually exclusive group. Consider $N$ groups, each with $K_j$ mutually exclusive outcomes. The joint state space is $cal(S) = product_j {1, dots, K_j}$ (exactly one joint state is realized). Bundle orders — orders whose payoffs depend on the joint state — create demand $D_s$ over $cal(S)$. The minting cost generalizes to $V(bold(D)) = max_s D_s$ (minting one complete set of all joint states costs \$1), and the smoothed version is $C_b = b ln sum_s exp(D_s\/b)$. Both are convex in $bold(D)$, and $bold(D)$ is linear in $bold(q)$. The proof of @thm-main goes through unchanged: $B_k ln(U_k + s_k)$ is still strictly concave, $-C_b$ is still concave, budget absorption and limit order exactness still hold. The Fisher market isomorphism holds over arbitrary joint state spaces.
 
