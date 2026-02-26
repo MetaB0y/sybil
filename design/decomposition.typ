@@ -199,19 +199,37 @@ This bound is crude — it ignores that cross-component orders compete for minti
 
 A tighter approximation: decompose each cross-component order into per-component _legs_ using marginal payoffs.
 
-A bundle order $i$ spanning components $C_a$ and $C_b$ has payoff $phi_i (s_a, s_b)$ depending on the joint state. Given current prices $bold(p)_b$ in component $b$, the _leg_ in component $a$ is the marginal payoff:
+A bundle order $i$ spanning components $C_a$ and $C_b$ has payoff $phi_i (s_a, s_b)$ depending on the joint state. Given reference prices $bold(p) = (p_a, p_b)$, the _legs_ are the marginal payoffs:
 
-$ phi_i^a (s_a) = sum_(s_b) p_b (s_b) dot phi_i (s_a, s_b) $
+$ phi_i^a (s_a) = sum_(s_b) p_b (s_b) phi_i (s_a, s_b), quad phi_i^b (s_b) = sum_(s_a) p_a (s_a) phi_i (s_a, s_b) $
 
-The leg captures the order's expected demand contribution to $a$, averaged over $b$'s outcomes at current prices.
+The _separable approximation_ is $hat(phi)_i (s_a, s_b) = phi_i^a (s_a) + phi_i^b (s_b) - EE_(bold(p)) [phi_i]$, and the _interaction residual_ is the non-additive part:
 
-#proposition(name: "Leg Decomposition Error")[
-  _The welfare difference between the joint optimum and the leg-decomposed optimum is bounded by the payoff correlation: the total variation between $phi_i (s_a, s_b)$ and the separable approximation $phi_i^a (s_a) + phi_i^b (s_b) - E[phi_i]$._
+$ delta_i (s_a, s_b) = phi_i (s_a, s_b) - hat(phi)_i (s_a, s_b) $
+
+The residual has zero marginals ($EE_(s_a) [delta_i] = EE_(s_b) [delta_i] = 0$) and vanishes iff the payoff is additively separable. The _interaction magnitude_ is $Delta_i = max_(s_a, s_b) |delta_i (s_a, s_b)|$.
+
+#proposition(name: "Leg Decomposition Bound")[
+  _Let $cal(O)_times$ be the cross-component orders and $hat(phi)_i$ the separable approximation of each. The welfare gap satisfies:_
+
+  $ |W^* - W^*_"leg"| <= sum_(i in cal(O)_times) overline(q)_i dot Delta_i $
+
+  _where $overline(q)_i$ is the maximum fill and $Delta_i = ||phi_i - hat(phi)_i||_infinity$ is the interaction magnitude._
 ] <prop-leg>
 
-The bound is tight when cross-component orders have nearly separable payoffs (e.g., a bundle "buy A and B" where A and B are nearly independent). It is loose when payoffs are strongly correlated (e.g., conditional orders "buy A if B resolves YES").
+_Proof._ For any feasible fills $bold(q)$, the welfare with true payoffs $W(bold(q); phi)$ and with separable payoffs $W(bold(q); hat(phi))$ differ only in the minting cost argument:
 
-_Remark._ Leg decomposition is iterative: the legs depend on prices $bold(p)_b$, which depend on fills, which depend on the legs. In practice, one round of leg decomposition (using prices from the within-component solution) captures most of the welfare. A second round, updating legs using the new prices, is rarely necessary.
+$ W(bold(q); phi) - W(bold(q); hat(phi)) = C_b (hat(bold(D))) - C_b (bold(D)) $
+
+where $D_s = sum_i q_i phi_i (s)$ and $hat(D)_s = sum_i q_i hat(phi)_i (s)$. The smoothed minting cost $C_b (bold(D)) = b ln sum_s exp(D_s \/ b)$ is 1-Lipschitz in $ell_infinity$: its gradient $nabla C_b = pi$ is a probability distribution ($||pi||_1 = 1$), so $|C_b (bold(x)) - C_b (bold(y))| <= ||bold(x) - bold(y)||_infinity$. Therefore:
+
+$ |W(bold(q); phi) - W(bold(q); hat(phi))| <= ||bold(D) - hat(bold(D))||_infinity <= sum_(i in cal(O)_times) q_i Delta_i <= sum_(i in cal(O)_times) overline(q)_i Delta_i $
+
+Since this holds for _all_ feasible $bold(q)$, it holds at both optima: $W^* = max_bold(q) W(bold(q); phi) <= max_bold(q) [W(bold(q); hat(phi)) + sum overline(q)_i Delta_i] = W^*_"leg" + sum overline(q)_i Delta_i$, and symmetrically. #h(1fr) $square$
+
+_Remark._ The bound is tight when payoffs are nearly separable ($Delta_i approx 0$). For the canonical "buy YES on both A and B" at uniform prices, $Delta_i = 1\/4$ — the interaction is 25% of the payoff range. For a conditional order "buy A if B=YES", $Delta_i = 1\/2$ — leg decomposition loses more because the payoff is strongly non-separable.
+
+_Remark._ Leg decomposition is iterative: the legs depend on reference prices $bold(p)$, which come from equilibrium. In practice, one round (using prices from the within-component solution) captures most of the welfare. The bound above holds for any choice of reference prices and is tightest at prices that minimize the interaction.
 
 == When Decomposition Is Exact
 
