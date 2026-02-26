@@ -355,7 +355,27 @@ The cash variable $s_k$ acts as a _numeraire good_: the MM can "buy" cash at pri
 
 - _Over-capitalized_ ($U_k < B_k$, $s_k > 0$): the MM has more budget than profitable fills. Excess capital is retained as cash ($mu_k = 1$), and fills match the LP exactly. No order fills below its limit price. This is not a contradiction of Kelly — it is the Kelly prescription: bet a fraction of your bankroll proportional to your edge, keep the rest in cash. When the bankroll dwarfs the opportunity set, the Kelly fraction covers every profitable bet and the MM looks risk-neutral. The risk aversion is still there; it just doesn't bind.
 
-Any welfare gap between $P_b^"RA"$ and the LP comes entirely from the capital-constrained regime: when $B_k < U_k^"LP"$, the MM throttles fills (under-filling relative to the LP, never over-filling). The gap depends on the budget shortfalls $max(0, U_k^"LP" - B_k)$ and on how prices adjust between the two programs. As budgets grow, the set of capital-constrained MMs shrinks; once all MMs are over-capitalized, @prop-welfare gives exact LP recovery. A formal bound on the welfare gap for general order books (incorporating the price response to reduced MM fills) remains open.
+#proposition(name: "Welfare Gap Bound")[
+  _Let $W^"LP"$ and $W^"RA"$ denote the total welfare (LP objective value) at the LP and risk-averse optima respectively, and let $Delta_k = max(0, U_k^"LP" - B_k)$ be MM $k$'s budget shortfall. Then:_
+
+  $ W^"LP" - W^"RA" <= sum_k [Delta_k - B_k ln(1 + Delta_k / B_k)] <= sum_k Delta_k^2 / (2 B_k) $
+
+  _Over-capitalized MMs ($Delta_k = 0$) contribute nothing. The bound is quadratic in the shortfall._
+] <prop-gap>
+
+_Proof._ For any $bold(q)$ and cash choice $bold(s)$ with $V_k = U_k + s_k$, the LP and RA objectives differ by $f^"LP" (bold(q)) - f^"RA" (bold(q), bold(s)) = sum_k phi_k (V_k)$ where $phi_k (V) = V - B_k ln V$ (this follows from $U_k = V_k - s_k$ and cancellation of $s_k$). Decompose:
+
+$
+W^"LP" - W^"RA" = underbrace([f^"LP" (bold(q)^"LP") - f^"RA" (bold(q)^"LP", bold(s)^*)], = sum_k phi_k (V_k^"LP")) + underbrace([f^"RA" (bold(q)^"LP", bold(s)^*) - f^"RA" (bold(q)^"RA", bold(s)^"RA")], <= 0) + underbrace([f^"RA" (bold(q)^"RA", bold(s)^"RA") - f^"LP" (bold(q)^"RA")], = -sum_k phi_k (V_k^"RA"))
+$
+
+where $bold(s)^*$ is the optimal cash at $bold(q)^"LP"$ and the middle term is non-positive by RA optimality. The function $phi_k$ is convex with minimum $phi_k (B_k)$ at $V = B_k$. Since $(bold(q)^"RA", bold(s)^"RA")$ is the RA optimum, $mu_k = B_k \/ V_k^"RA" <= 1$ holds (part 2 of @thm-main), giving $V_k^"RA" >= B_k$ and hence $phi_k (V_k^"RA") >= phi_k (B_k)$:
+
+$ W^"LP" - W^"RA" <= sum_k [phi_k (V_k^"LP") - phi_k (B_k)] $
+
+At $bold(q)^"LP"$, the optimal cash is $s_k^* = max(0, B_k - U_k^"LP")$, so $V_k^"LP" = max(U_k^"LP", B_k)$. Over-capitalized MMs have $V_k^"LP" = B_k$ (zero contribution). Capital-constrained MMs contribute $phi_k(U_k^"LP") - phi_k(B_k) = Delta_k - B_k ln(1 + Delta_k\/B_k)$. The quadratic bound follows from $ln(1 + x) >= x - x^2\/2$. #h(1fr) $square$
+
+The bound is tight: for moderate shortfalls ($Delta_k \/ B_k approx 0.5$), the exact bound is $approx 0.1 B_k$ versus the naive linear estimate $Delta_k = 0.5 B_k$. For large shortfalls ($Delta_k >> B_k$), the exact expression grows as $Delta_k - B_k ln(Delta_k \/ B_k)$ — sublinear in $Delta_k$, because the log model's prioritization becomes more efficient as the shortfall grows: the throttled fills are precisely the least profitable ones.
 
 == The Fisher Market Isomorphism
 
@@ -413,15 +433,15 @@ The paper establishes one main result and the framework necessary to state and p
     [§2], [LMSR = smoothed LP (Thms 1–4)], [Framework],
     [§3], [Computational obstruction (Prop.~2)], [Motivation],
     [§4], [Log utility is correct model], [Economic argument],
-    [§5], [Fisher market isomorphism (Thm 5); welfare bound (Prop.~3)], [*Main result*],
+    [§5], [Fisher market isomorphism (Thm 5); LP recovery (Prop.~3); welfare gap (Prop.~4)], [*Main result*],
   )
 ]
 
-The landscape: budget-constrained risk-neutral clearing is a non-convex bilinear program with no known polynomial-time algorithm (@prop-obstruction); risk-averse clearing is a standard convex program with guaranteed uniqueness and exact limit orders (@thm-main). When budgets are non-binding, the two programs agree exactly (@prop-welfare). The transition from intractability to tractability requires only the change of objective from $sum w_i q_i$ to $sum B_k [ln(U_k + s_k) - s_k]$.
+The landscape: budget-constrained risk-neutral clearing is a non-convex bilinear program with no known polynomial-time algorithm (@prop-obstruction); risk-averse clearing is a standard convex program with guaranteed uniqueness and exact limit orders (@thm-main). When budgets are non-binding, the two programs agree exactly (@prop-welfare). When they bind, the welfare gap is quadratic in the budget shortfall (@prop-gap). The transition from intractability to tractability requires only the change of objective from $sum w_i q_i$ to $sum B_k [ln(U_k + s_k) - s_k]$.
 
 == Open Problems
 
-+ *Welfare gap in practice.* @prop-welfare shows $P_b^"RA"$ matches the LP exactly when MM budgets are non-binding. The welfare gap in the capital-constrained regime (where log utility throttles fills relative to the LP) depends on the budget shortfall $sum max(0, U_k^"LP" - B_k)$. Quantifying this gap for realistic order book structures remains an empirical question.
++ *Welfare gap in practice.* @prop-gap bounds the welfare gap by $sum Delta_k^2 \/ (2B_k)$. For typical order books, is the bound tight? Empirical comparison between $P_b^"RA"$ and the LP across realistic MM ladder structures would quantify the practical cost of risk-averse clearing.
 
 + *Efficient combinatorial clearing.* The Fisher market isomorphism extends to joint state spaces (§5.5), but the state space $|cal(S)| = product K_j$ is exponentially large. Cross-group bundle orders couple groups transitively: if orders span $A$–$B$ and $B$–$C$, clearing requires the full $K_A times K_B times K_C$ space. In practice, a handful of bundle orders can connect all groups. Each order's payoff is a low-rank tensor (touching $<= 5$ groups), so the demand $D_s$ has exploitable structure. Can the EG program be solved in time polynomial in the number of orders rather than the state space? The analogous question for combinatorial LMSR (without budgets) is already open; budgets add a further layer.
 
