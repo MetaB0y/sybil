@@ -501,6 +501,15 @@ impl Default for EgSolver {
     }
 }
 
+impl crate::decomposed::ComponentSolver for EgSolver {
+    fn solve_component(&self, problem: &Problem) -> PipelineResult {
+        self.solve(problem)
+    }
+    fn name(&self) -> &str {
+        "EG"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

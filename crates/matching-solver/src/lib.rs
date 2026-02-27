@@ -24,6 +24,9 @@ pub mod eg_solver;
 #[cfg(feature = "conic")]
 pub mod conic_solver;
 
+#[cfg(feature = "lp")]
+pub mod decomposed;
+
 // === Public API ===
 
 // Result types
@@ -49,6 +52,9 @@ pub use eg_solver::{EgConfig, EgSolver};
 
 #[cfg(feature = "conic")]
 pub use conic_solver::{ConicConfig, ConicSolver};
+
+#[cfg(feature = "lp")]
+pub use decomposed::{ComponentSolver, DecomposedSolver};
 
 use serde::Serialize;
 

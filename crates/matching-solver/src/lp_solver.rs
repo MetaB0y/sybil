@@ -256,6 +256,15 @@ impl Default for LpSolver {
     }
 }
 
+impl crate::decomposed::ComponentSolver for LpSolver {
+    fn solve_component(&self, problem: &Problem) -> PipelineResult {
+        self.solve(problem)
+    }
+    fn name(&self) -> &str {
+        "LP"
+    }
+}
+
 /// Raw solution from the LP solver: primal fill quantities + dual prices.
 pub(crate) struct LpSolution {
     pub(crate) q_values: Vec<f64>,
