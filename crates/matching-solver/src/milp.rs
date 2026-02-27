@@ -22,7 +22,7 @@
 
 use matching_engine::{Fill, MarketId, Nanos, Order, Problem, NANOS_PER_DOLLAR};
 
-use crate::{MatchingResult, Solver};
+use crate::MatchingResult;
 
 use russcip::prelude::*;
 use russcip::Variable;
@@ -940,86 +940,6 @@ impl Default for MilpSolver {
     }
 }
 
-impl Solver for MilpSolver {
-    fn solve(&self, problem: &Problem) -> MatchingResult {
-        self.solve_with_status(problem).result
-    }
-
-    fn name(&self) -> &str {
-        if self.config.timeout_secs.is_some() {
-            "MILP (time-limited)"
-        } else {
-            "MILP"
-        }
-    }
-}
-
-// ============================================================================
-// PartialSolver Trait Implementation
-// ============================================================================
-
-use crate::traits::{PartialSolution, PartialSolver, SolutionConfidence};
-
-impl PartialSolver for MilpSolver {
-    fn solve_partial(&self, problem: &Problem) -> PartialSolution {
-        let milp_result = self.solve_with_status(problem);
-
-        let confidence = match &milp_result.status {
-            SolveStatus::Optimal => SolutionConfidence::Optimal,
-            SolveStatus::TimeLimitReached { gap_percent } => SolutionConfidence::BoundedGap {
-                gap_percent: *gap_percent,
-            },
-            SolveStatus::Infeasible | SolveStatus::Error(_) => SolutionConfidence::Heuristic,
-        };
-
-        // Strip arb fills — pipeline handles position balance via enforce_ucp
-        let arb_ids: HashSet<u64> = milp_result
-            .arbitrage_orders
-            .iter()
-            .map(|o| o.id)
-            .collect();
-        let real_fills: Vec<_> = milp_result
-            .result
-            .fills
-            .into_iter()
-            .filter(|f| !arb_ids.contains(&f.order_id))
-            .collect();
-        let real_welfare = real_fills
-            .iter()
-            .zip(problem.orders.iter())
-            .filter_map(|(f, _)| {
-                problem
-                    .orders
-                    .iter()
-                    .find(|o| o.id == f.order_id)
-                    .map(|o| f.welfare(o))
-            })
-            .sum::<i64>();
-
-        PartialSolution::with_fills(
-            PartialSolver::name(self),
-            real_fills,
-            real_welfare,
-            confidence,
-        )
-    }
-
-    fn name(&self) -> &str {
-        if self.config.timeout_secs.is_some() {
-            "MILP (time-limited)"
-        } else {
-            "MILP"
-        }
-    }
-
-    fn confidence(&self) -> SolutionConfidence {
-        if self.config.timeout_secs.is_some() {
-            SolutionConfidence::Heuristic
-        } else {
-            SolutionConfidence::Optimal
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -1072,7 +992,7 @@ mod tests {
         let problem = create_test_problem();
         let solver = MilpSolver::new();
 
-        let result = solver.solve(&problem);
+        let result = solver.solve_with_status(&problem).result;
         assert!(result.orders_filled > 0);
         assert!(
             result.total_welfare > 0,
@@ -1448,30 +1368,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_milp_upper_bound() {
-        // Verify MILP welfare >= pipeline welfare on a realistic scenario
-        use matching_scenarios::{generate_scenario, ScenarioConfig};
-
-        let mut config = ScenarioConfig::quick();
-        config.seed = 42;
-        let problem = generate_scenario(config);
-
-        let solver = MilpSolver::new();
-        let milp_result = solver.solve_with_status(&problem);
-
-        // Run pipeline for comparison
-        let pipeline = crate::Pipeline::current();
-        let pipeline_result = pipeline.solve(&problem);
-
-        let milp_welfare = milp_result.result.total_welfare;
-        let pipeline_welfare = pipeline_result.result.total_welfare;
-
-        assert!(
-            milp_welfare >= pipeline_welfare,
-            "MILP welfare ({}) should be >= pipeline welfare ({})",
-            milp_welfare,
-            pipeline_welfare
-        );
-    }
 }

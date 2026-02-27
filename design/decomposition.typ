@@ -1,4 +1,4 @@
-#set document(title: "Decomposed Combinatorial Clearing via Fisher Market Budget Allocation")
+#set document(title: "Decomposed Clearing via Fisher Market Budget Allocation")
 #set text(font: "New Computer Modern", size: 10pt)
 #set page(margin: (x: 1.5in, y: 1.2in), numbering: "1")
 #set par(justify: true, leading: 0.55em)
@@ -34,61 +34,57 @@
 
 #align(center)[
   #text(size: 15pt, weight: "bold")[
-    Decomposed Combinatorial Clearing \ via Fisher Market Budget Allocation
+    Decomposed Clearing \ via Fisher Market Budget Allocation
   ]
   #v(0.5em)
-  #text(size: 11pt)[Scalable Prediction Market Clearing through Eisenberg-Gale Decomposition]
+  #text(size: 11pt)[Prediction Market Clearing through Eisenberg-Gale Decomposition]
   #v(0.3em)
-  #text(size: 9pt, style: "italic")[Draft — February 2026]
+  #text(size: 9pt, style: "italic")[Draft --- February 2026]
 ]
 
 #v(1em)
 
 #block(inset: (x: 2em))[
   #text(weight: "bold")[Summary.]
-  Prediction market batch auctions with bundle orders face an exponential state space: $N$ groups of mutually exclusive outcomes produce $product K_j$ joint states. The welfare-maximizing clearing problem (an Eisenberg-Gale convex program) is structurally tractable but computationally intractable for large coupled components. We show that the Fisher market structure provides a natural decomposition: independently-solved components are coordinated through MM budget allocation, with the optimality condition being _equal utility_ across components. The iterative algorithm — mirror descent on the concave coordination problem — converges at rate $O(1\/t)$. We give welfare bounds for approximate decomposition, describe an automatic grouping algorithm based on the coupling graph, and propose a _searcher model_ in which external solvers compete to clear coupled components, coordinated by the exchange via budget equalization.
+  Prediction market batch auctions with bundle orders face an exponential state space: $N$ groups of mutually exclusive outcomes produce $product K_j$ joint states. We observe that the Fisher market (Eisenberg-Gale) formulation of clearing provides a natural decomposition mechanism that the standard linear welfare formulation lacks. The key insight: with log utility, splitting a market maker's budget across independently-solved components is a _smooth concave_ optimization problem, whereas with linear welfare the same budget split is _combinatorial_. We prove that the optimal split equalizes utility across components, and that standard mirror descent converges to it at rate $O(1\/t)$ with each iteration requiring only independent per-component solves.
 ]
 
 #v(1em)
 
 = Introduction
 
-The companion paper (_Prediction Markets Are Fisher Markets_) establishes that batch auction clearing with budget-constrained market makers is an Eisenberg-Gale convex program. The Fisher market isomorphism holds for _arbitrary joint state spaces_ — not just single mutually exclusive groups. This paper addresses the computational consequence: the joint state space is exponentially large, and we need to solve the clearing problem anyway.
+The companion paper (_Prediction Markets Are Fisher Markets_) establishes that batch auction clearing with budget-constrained market makers is an Eisenberg-Gale convex program. This paper addresses the computational consequence: the joint state space is exponentially large, and we need to solve the clearing problem anyway.
 
 *The problem.* Consider $N$ groups of mutually exclusive outcomes, group $j$ having $K_j$ outcomes. The joint state space is $cal(S) = product_j {1, dots, K_j}$, with $|cal(S)| = product K_j$. A _bundle order_ is an order whose payoff depends on the joint state: "buy YES on both $A$ and $B$" pays \$1 only in the joint state where both resolve YES. Such orders create non-separable demand across groups.
 
-When no orders span multiple groups, the clearing problem decomposes into independent per-group programs — the product-LMSR factorization (Chen and Pennock 2007). Cross-group orders break this, coupling groups _transitively_: if orders link $A$–$B$ and $B$–$C$, clearing requires the full $K_A times K_B times K_C$ state space. In practice, a handful of bundle orders can connect all groups into one giant component.
+When no orders span multiple groups, the clearing problem decomposes into independent per-group programs --- the product-LMSR factorization (Chen and Pennock 2007). Cross-group orders break this, coupling groups _transitively_: if orders link $A$--$B$ and $B$--$C$, clearing requires the full $K_A times K_B times K_C$ state space. In practice, even a handful of bundle orders can connect all groups into one giant component.
 
-*The insight.* The Eisenberg-Gale structure provides a decomposition mechanism that the linear (risk-neutral) formulation lacks. The key is _budget splitting_: an MM with budget $B_k$ and orders across multiple components can have its budget allocated across components, with each component solving independently. The optimal allocation satisfies a clean condition — equal utility across components — and the iterative algorithm that finds it is _mirror descent_ on the concave coordination problem.
+*The core insight.* The Eisenberg-Gale structure provides a decomposition mechanism that the linear (risk-neutral) formulation lacks. With log utility, an MM with budget $B_k$ and orders across multiple components can have its budget _smoothly allocated_ across components, with each component solving independently. The optimal allocation satisfies a clean condition --- equal utility across components --- and standard mirror descent finds it. With linear welfare, the same budget allocation is a combinatorial problem: a hard constraint $"cap"_k <= B_k$ cannot be smoothly split.
 
-This turns an intractable monolithic optimization into a coordination problem: solve components independently, adjust budget allocations, repeat. The components can be solved in parallel, by different machines, or by different _searchers_ (external solvers that compete to provide the best cross-group solutions).
+*What this paper proves.*
 
-*Contributions.*
++ The _budget decomposition theorem_: when no orders span multiple components, the joint EG program decomposes into independent per-component programs coordinated by budget allocation. The optimal allocation equalizes utility across components (#sym.section\2).
 
-+ The _budget decomposition theorem_: the joint EG program decomposes into per-component programs coordinated by budget allocation, with equal utility at optimality (§2).
++ _Mirror descent convergence_: the iterative budget reallocation algorithm converges at rate $O(1\/t)$, with each iteration requiring only independent per-component solves (#sym.section\3).
 
-+ _Mirror descent convergence_: the iterative budget reallocation algorithm converges at rate $O(1\/t)$, with each iteration requiring only independent per-component solves (§3).
-
-+ _Welfare bounds_ for approximate decomposition: when cross-group orders are dropped or leg-decomposed, the welfare loss is bounded by the contribution of the dropped correlations (§4).
-
-+ _Automatic grouping_: the coupling graph identifies minimal components; a threshold policy decides which to solve exactly vs. approximately. Column generation exploits demand sparsity to solve large components without full state enumeration (§5).
-
-+ _The searcher model_: external solvers compete to clear coupled components, coordinated by the exchange via budget equalization. The Fisher market structure makes this incentive-compatible (§6).
+*What this paper does not prove.* Tight welfare bounds for the case when bundle orders _do_ span components. We discuss the approximation quality of dropping or leg-decomposing cross-component orders (#sym.section\4), but the bounds are loose. We also sketch directions for exploiting coupling graph structure and external solvers (#sym.section\5), without proofs.
 
 
 = Budget Decomposition <decomposition>
 
 == Setup
 
-We use the notation and results of the companion paper. The risk-averse batch auction clearing program over a joint state space $cal(S)$ is:
+We use the notation and results of the companion paper. The risk-averse batch auction clearing program over a joint state space $cal(S)$ is the quasi-linear Fisher market:
 
 $
-P^"RA": quad max_(bold(q) in cal(C)) quad sum_k B_k ln U_k (bold(q)) + sum_(j in.not "MM") w_j q_j - C_b (bold(D)(bold(q)))
+P^"RA": quad max_(bold(q) in cal(C), bold(s) >= 0) quad sum_k [B_k ln(U_k (bold(q)) + s_k) - s_k] + sum_(j in.not "MM") w_j q_j - C_b (bold(D)(bold(q)))
 $
 
-where $bold(D)(bold(q)) in RR^(|cal(S)|)$ is the net demand vector over joint states, $C_b (bold(D)) = b ln sum_(s in cal(S)) exp(D_s \/ b)$ is the smoothed minting cost, and $U_k (bold(q)) = sum_(i in "MM"_k) L_i q_i$ is MM $k$'s weighted fill.
+where $bold(D)(bold(q)) in RR^(|cal(S)|)$ is the net demand vector over joint states, $C_b (bold(D)) = b ln sum_(s in cal(S)) exp(D_s \/ b)$ is the smoothed minting cost, $U_k (bold(q)) = sum_(i in "MM"_k) L_i q_i$ is MM $k$'s weighted fill, and $s_k >= 0$ is retained cash.
 
-Suppose the groups partition into _components_ $cal(M) = {C_1, dots, C_M}$ (we discuss how to choose this partition in §5). Each component $C_m$ has its own state space $cal(S)_m = product_(j in C_m) {1, dots, K_j}$, orders $cal(O)_m$, and minting cost $C_b^m$.
+We focus on the _capital-constrained_ regime where $s_k = 0$ for all MMs (i.e., $mu_k = B_k \/ U_k > 1$). When budgets don't bind, the LP solution is optimal regardless of budget allocation, so decomposition is trivially exact.
+
+Suppose the groups partition into _components_ $cal(M) = {C_1, dots, C_M}$. Each component $C_m$ has its own state space $cal(S)_m = product_(j in C_m) {1, dots, K_j}$, orders $cal(O)_m$, and minting cost $C_b^m$.
 
 == The Monolithic vs. Decomposed Program
 
@@ -114,29 +110,21 @@ where $W_m^* (bold(B)^m)$ is the optimal welfare of component $m$ given budgets 
   _Equal utility across components: MM $k$ achieves the same weighted fill in every component where it is active._
 ] <thm-decomp>
 
-_Proof._ When no orders span components, the minting cost separates: $C_b = sum_m C_b^m$ (product-LMSR). The monolithic program becomes a joint optimization over fills $bold(q)$ and budget allocations $bold(B)$:
+_Proof._ When no orders span components, the minting cost separates: $C_b = sum_m C_b^m$ (product-LMSR). We prove the claim in two steps: (i) the optimal budget allocation equalizes utility, and (ii) the decomposed fills match the monolithic optimum.
 
-$
-max_(bold(q), bold(B) >= 0) quad sum_m [sum_k B_k^m ln U_k^m (bold(q)_m) + "retail"_m - C_b^m (bold(D)^m)] quad "s.t." quad sum_m B_k^m = B_k quad forall k
-$
-
-This is jointly concave: $B_k^m ln U_k^m (bold(q)_m)$ is concave in $(B_k^m, bold(q)_m)$ jointly (it is the perspective of the concave function $ln U_k^m$, and the perspective of a concave function is concave). The remaining terms are concave in $bold(q)_m$ and independent of $bold(B)$.
-
-By the envelope theorem, the marginal value of budget in component $m$ is:
+*(i) Equal utility.* Each per-component program $P_m (bold(B)^m)$ is a strictly concave maximization with a unique optimum. The objective $B_k^m ln U_k^m (bold(q)_m)$ is jointly concave in $(B_k^m, bold(q)_m)$ (it is the perspective of $ln U_k^m$, and the perspective of a concave function is concave). By the envelope theorem, the marginal value of budget in component $m$ is:
 
 $ (d W_m^*) / (d B_k^m) = ln U_k^(m *) $
 
-where $U_k^(m *)$ is the optimal utility at the current budget. (The indirect effect through the optimal fills vanishes by the optimality of $bold(q)_m^*$.) The coordination problem $max_(bold(B)) sum_m W_m^* (bold(B)^m)$ subject to $sum_m B_k^m = B_k$ has the first-order condition:
+(The indirect effect through optimal fills vanishes by the optimality of $bold(q)_m^*$.) The coordination problem $max_(bold(B)) sum_m W_m^* (bold(B)^m)$ subject to $sum_m B_k^m = B_k$ has the first-order condition $ln U_k^(m *) = lambda_k$ for all active components: MM $k$ achieves the same utility in every component where it holds budget.
 
-$
-(d W_m^*) / (d B_k^m) = lambda_k quad forall m "where" B_k^m > 0
-$
+*(ii) Fills match the monolithic.* The monolithic program has shadow price $mu_k = B_k \/ sum_m U_k^(m *)$ --- the same for all components. At the decomposed optimum, $U_k^(m *) = u_k$ for all active $m$, so $sum_m U_k^(m *) = M_k u_k$ (where $M_k$ is the number of active components). The decomposed shadow price $mu_k^m = B_k^m \/ u_k = (B_k \/ M_k) \/ u_k = B_k \/ (M_k u_k) = mu_k$.
 
-Therefore $ln U_k^(m *) = lambda_k$ for all active components: MM $k$ achieves the same utility in every component. Since the decomposed problem is a relaxation of the monolithic (the monolithic is free to choose the same budget split), and the monolithic with separated minting cost factors as the decomposed problem, the welfare is identical. #h(1fr) $square$
+Since shadow prices match and minting costs are independent, the KKT conditions for each order $i$ are identical in both programs. By uniqueness of the per-component optimum, the fills agree. #h(1fr) $square$
 
-_Remark._ The equal-utility condition determines the budget split implicitly: increasing $B_k^m$ increases $U_k^(m *)$ (the $ln$ singularity guarantees this — more budget means more fills). Components with better opportunities for MM $k$ (higher utility per dollar) receive more budget until utilities equalize.
+_Remark._ The decomposed objective $sum_m B_k^m ln U_k^m$ is _less_ than the monolithic objective $B_k ln sum_m U_k^m$ (by Jensen's inequality). This reflects the pooling benefit of joint Kelly optimization. The theorem says the _fills_ agree, not the objective values.
 
-_Remark._ When orders _do_ span components, the decomposition is approximate: cross-component orders are either dropped, leg-decomposed, or handled by a searcher (§4, §6).
+_Remark._ This theorem is most interesting when MMs have orders across multiple independently-solvable components. Without cross-component MMs, the components are fully independent and no coordination is needed at all.
 
 
 == Why Linear Welfare Cannot Decompose
@@ -146,7 +134,7 @@ In the risk-neutral (linear welfare) model, MM $k$'s contribution is $sum_(i in 
 
 = Budget Equalization via Mirror Descent <algorithm>
 
-The equal-utility condition (@thm-decomp) suggests a natural iterative algorithm. We need to find the budget split that equalizes $ln U_k^(m *)$ across components. The coordination problem $max sum_m W_m^* (bold(B)^m)$ subject to $sum_m B_k^m = B_k$ is concave, and its gradient is $partial W_m^* \/ partial B_k^m = ln U_k^(m *)$ (envelope theorem). Mirror descent with KL divergence as Bregman divergence gives:
+The equal-utility condition (@thm-decomp) suggests a natural iterative algorithm. The coordination problem $max sum_m W_m^* (bold(B)^m)$ subject to $sum_m B_k^m = B_k$ is concave, and its gradient is $partial W_m^* \/ partial B_k^m = ln U_k^(m *)$ (envelope theorem). Mirror descent with KL divergence gives:
 
 + *Initialize.* For each MM $k$, set $B_k^m = B_k \/ |{m : "MM"_k inter cal(O)_m != emptyset}|$ (equal split across active components).
 
@@ -156,206 +144,74 @@ The equal-utility condition (@thm-decomp) suggests a natural iterative algorithm
   $ B_k^m <- B_k dot (B_k^m dot U_k^(m *)) / (sum_(m') B_k^(m') dot U_k^(m' *)) $
   Multiply each component's allocation by its utility and renormalize.
 
-+ *Repeat* steps 2–3 until convergence.
++ *Repeat* steps 2--3 until convergence.
 
-The update is _multiplicative weights_: each component's budget share grows proportionally to the utility it delivers. At the fixed point, $U_k^(m *)$ must be constant across $m$ (otherwise the highest-utility component would attract more budget), matching @thm-decomp.
+The update is _multiplicative weights_: each component's budget share grows proportionally to the utility it delivers. At the fixed point, $U_k^(m *)$ must be constant across $m$, matching @thm-decomp.
 
 #theorem(name: "Convergence")[
   _The mirror descent algorithm converges to the optimal budget allocation. For smooth $W_m^*$, the welfare gap satisfies $W^* - W(bold(B)^t) = O(1\/t)$._
 ] <thm-convergence>
 
-_Proof._ The coordination problem is concave: each $W_m^* (bold(B)^m)$ is concave (it is the value function of maximizing a jointly concave objective over a convex set). The gradient $partial W_m^* \/ partial B_k^m = ln U_k^(m *)$ is computable by solving the per-component program and reading off the equilibrium utilities.
+_Proof sketch._ The coordination problem is concave (each $W_m^*$ is a concave value function). The update exponentiates the gradient and renormalizes --- mirror descent with KL divergence. The $O(1\/t)$ rate for concave maximization over the simplex is standard (Beck and Teboulle 2003). Smoothness follows from continuous dependence of equilibrium utilities on budgets. #h(1fr) $square$
 
-The update exponentiates the gradient and renormalizes — this is mirror descent with the KL divergence as Bregman divergence (equivalently, exponentiated gradient ascent). Since $exp(ln U_k^(m *)) = U_k^(m *)$, the update takes the simple multiplicative form above.
+_Remark._ Each iteration requires solving $M$ independent convex programs --- fully parallelizable. In practice, 3--5 iterations suffice for budget stabilization. Interior-point solvers can warm-start from the previous iteration's solution.
 
-For concave maximization of an $L$-smooth function over the simplex, mirror descent with appropriate step size converges at rate $O(L D^2 \/ t)$ where $D$ is the KL diameter of the feasible region (Beck and Teboulle 2003). In our setting, smoothness follows from the continuous dependence of equilibrium utilities on budgets (the EG program has a unique optimum that varies smoothly with parameters in the interior). #h(1fr) $square$
-
-_Remark._ Each iteration requires solving $M$ independent convex programs — fully parallelizable. In practice, 3–5 iterations suffice for the budget allocation to stabilize (the per-component programs change slowly as budgets shift).
-
-_Remark._ Warm-starting: after a budget update, each component's program is a small perturbation of the previous one. Interior-point solvers can warm-start from the previous solution, making subsequent iterations much cheaper than the first.
+*Practical speed.* Without bundle orders, the decomposition gives a significant speed advantage. If $N$ groups each have $K$ outcomes, the monolithic solve has state space $K^N$ while the decomposed solve runs $N$ independent $K$-state programs in parallel. Even for moderate $N$ and $K$, this is the difference between intractable and instant. With MMs spanning components, add 3--5 iterations of budget equalization --- still far cheaper than monolithic.
 
 
 = Welfare Bounds for Approximate Decomposition <welfare>
 
-When bundle orders span multiple components, the decomposition is not exact. The cross-component orders must be handled approximately. We consider two strategies and bound the welfare loss of each.
+When bundle orders span multiple components, the decomposition is not exact and cross-component orders must be handled approximately. We state two simple bounds; both are loose but provide the right qualitative picture.
 
-== Dropping Cross-Component Orders
+*Dropping cross-component orders.* Excluding all cross-component orders $cal(O)_times$ loses at most $sum_(i in cal(O)_times) w_i overline(q)_i$ welfare (sum of each dropped order's limit price times max fill). This is an immediate consequence of feasibility containment.
 
-The simplest strategy: exclude all cross-component orders and solve the remaining (exactly decomposable) system.
+*Leg decomposition.* Decomposing each bundle into per-component marginal legs (averaging over the other components' states at reference prices) introduces error bounded by the _interaction magnitude_ $Delta_i = ||phi_i - hat(phi)_i||_infinity$: the welfare gap is at most $sum_(i in cal(O)_times) overline(q)_i Delta_i$. This follows from the Lipschitz property of the smoothed minting cost.
 
-#proposition(name: "Drop Bound")[
-  _Let $cal(O)_times$ be the set of cross-component orders. The welfare loss from dropping them satisfies:_
+*Limitations.* Both bounds are loose in practice. The drop bound ignores that cross orders compete for minting capacity with within-component orders. The leg decomposition bound is "tight when $Delta_i approx 0$" --- but this is vacuous, since the interesting cases have $Delta_i = 1\/4$ (buy both YES) or $Delta_i = 1\/2$ (conditional orders). Tighter instance-dependent bounds remain open.
 
-  $ W^* - W_"drop"^* <= sum_(i in cal(O)_times) w_i overline(q)_i $
 
-  _where $w_i$ is the limit price and $overline(q)_i$ the maximum fill of order $i$._
-] <prop-drop>
+= Directions <directions>
 
-_Proof._ The dropped system has feasible set $cal(C) inter {q_i = 0 : i in cal(O)_times}$, which is a subset of the monolithic feasible set, so $W_"drop"^* <= W^*$. Conversely, the monolithic optimum fills each cross-component order $i$ by at most $overline(q)_i$ at welfare per unit at most $w_i$ (the limit price). The within-component orders' fills in the monolithic optimum are feasible for the dropped system (since they don't couple across components), so the gap is at most the cross orders' contribution. #h(1fr) $square$
+This section sketches computational and architectural ideas that we have not proved but believe are promising.
 
-This bound is crude — it ignores that cross-component orders compete for minting capacity with within-component orders. In practice, the welfare contribution of cross orders is much smaller than $sum w_i overline(q)_i$ because many are only partially filled.
+== Coupling Graph and Structured Computation
 
-== Leg Decomposition
+The _coupling graph_ has market groups as vertices and edges wherever a bundle order creates non-separable dependence. Connected components identify the minimal sets of groups that must be solved jointly. In principle, if the coupling graph has low treewidth $tau$, minting cost gradients can be computed in $O(K^(tau+1))$ time via junction tree algorithms rather than $O(K^N)$ full enumeration.
 
-A tighter approximation: decompose each cross-component order into per-component _legs_ using marginal payoffs.
+In practice, coupling graphs may not have low treewidth --- a few popular bundles can connect many groups transitively. The question is whether _demand sparsity_ helps: most joint states have negligible demand, so column generation (iteratively discovering active states) may avoid full enumeration even when the coupling graph is dense.
 
-A bundle order $i$ spanning components $C_a$ and $C_b$ has payoff $phi_i (s_a, s_b)$ depending on the joint state. Given reference prices $bold(p) = (p_a, p_b)$, the _legs_ are the marginal payoffs:
+== A Searcher Model
 
-$ phi_i^a (s_a) = sum_(s_b) p_b (s_b) phi_i (s_a, s_b), quad phi_i^b (s_b) = sum_(s_a) p_a (s_a) phi_i (s_a, s_b) $
+The decomposition framework suggests a _market for clearing services_ analogous to Proposer-Builder Separation in Ethereum. The exchange solves per-group clearing (the easy separable part) and coordinates budget allocation. External _searchers_ compete to solve coupled components: a searcher takes a set of coupled groups, solves the joint clearing problem, and submits fills and prices. The exchange selects and combines proposals via budget equalization.
 
-The _separable approximation_ is $hat(phi)_i (s_a, s_b) = phi_i^a (s_a) + phi_i^b (s_b) - EE_(bold(p)) [phi_i]$, and the _interaction residual_ is the non-additive part:
-
-$ delta_i (s_a, s_b) = phi_i (s_a, s_b) - hat(phi)_i (s_a, s_b) $
-
-The residual has zero marginals ($EE_(s_a) [delta_i] = EE_(s_b) [delta_i] = 0$) and vanishes iff the payoff is additively separable. The _interaction magnitude_ is $Delta_i = max_(s_a, s_b) |delta_i (s_a, s_b)|$.
-
-#proposition(name: "Leg Decomposition Bound")[
-  _Let $cal(O)_times$ be the cross-component orders and $hat(phi)_i$ the separable approximation of each. The welfare gap satisfies:_
-
-  $ |W^* - W^*_"leg"| <= sum_(i in cal(O)_times) overline(q)_i dot Delta_i $
-
-  _where $overline(q)_i$ is the maximum fill and $Delta_i = ||phi_i - hat(phi)_i||_infinity$ is the interaction magnitude._
-] <prop-leg>
-
-_Proof._ For any feasible fills $bold(q)$, the welfare with true payoffs $W(bold(q); phi)$ and with separable payoffs $W(bold(q); hat(phi))$ differ only in the minting cost argument:
-
-$ W(bold(q); phi) - W(bold(q); hat(phi)) = C_b (hat(bold(D))) - C_b (bold(D)) $
-
-where $D_s = sum_i q_i phi_i (s)$ and $hat(D)_s = sum_i q_i hat(phi)_i (s)$. The smoothed minting cost $C_b (bold(D)) = b ln sum_s exp(D_s \/ b)$ is 1-Lipschitz in $ell_infinity$: its gradient $nabla C_b = pi$ is a probability distribution ($||pi||_1 = 1$), so $|C_b (bold(x)) - C_b (bold(y))| <= ||bold(x) - bold(y)||_infinity$. Therefore:
-
-$ |W(bold(q); phi) - W(bold(q); hat(phi))| <= ||bold(D) - hat(bold(D))||_infinity <= sum_(i in cal(O)_times) q_i Delta_i <= sum_(i in cal(O)_times) overline(q)_i Delta_i $
-
-Since this holds for _all_ feasible $bold(q)$, it holds at both optima: $W^* = max_bold(q) W(bold(q); phi) <= max_bold(q) [W(bold(q); hat(phi)) + sum overline(q)_i Delta_i] = W^*_"leg" + sum overline(q)_i Delta_i$, and symmetrically. #h(1fr) $square$
-
-_Remark._ The bound is tight when payoffs are nearly separable ($Delta_i approx 0$). For the canonical "buy YES on both A and B" at uniform prices, $Delta_i = 1\/4$ — the interaction is 25% of the payoff range. For a conditional order "buy A if B=YES", $Delta_i = 1\/2$ — leg decomposition loses more because the payoff is strongly non-separable.
-
-_Remark._ Leg decomposition is iterative: the legs depend on reference prices $bold(p)$, which come from equilibrium. In practice, one round (using prices from the within-component solution) captures most of the welfare. The bound above holds for any choice of reference prices and is tightest at prices that minimize the interaction.
-
-== When Decomposition Is Exact
-
-Decomposition incurs zero welfare loss when cross-component orders contribute no _irreducible_ correlation:
-
-+ *No cross-component orders.* The product-LMSR factorization applies directly (@thm-decomp).
-
-+ *Separable cross-component payoffs.* If every cross-component order $i$'s payoff factors as $phi_i (s_a, s_b) = phi_i^a (s_a) + phi_i^b (s_b)$, leg decomposition is exact (there is no correlation to approximate).
-
-+ *Sparse coupling with tight budgets.* When cross-component orders are few and MM budgets are large relative to their welfare contribution, the cross orders' fills are negligible and the decomposition error vanishes.
-
-
-= Automatic Grouping <grouping>
-
-== The Coupling Graph
-
-#definition(name: "Coupling Graph")[
-  _The coupling graph $G = (V, E)$ has groups as vertices. An edge $(j, j')$ exists if any order has non-separable payoffs across groups $j$ and $j'$ (i.e., the order's payoff depends on the joint state of $j$ and $j'$, not just their marginals)._
-] <def-coupling>
-
-Connected components of $G$ are the minimal sets of groups that must be solved jointly for exact clearing. The state space of component $C_m$ is $|cal(S)_m| = product_(j in C_m) K_j$.
-
-== Threshold Policy
-
-Given a computational budget (maximum tractable state space size $S_max$):
-
-+ Compute connected components of $G$.
-+ For each component: if $|cal(S)_m| <= S_max$, solve exactly.
-+ If $|cal(S)_m| > S_max$: find a minimum-weight edge cut that partitions the component into sub-components each with $|cal(S)| <= S_max$. Edge weights are the welfare contribution of the cross-group orders on that edge. Cut edges become leg-decomposed orders.
-
-This minimizes the welfare lost to approximation subject to the computational constraint.
-
-== Treewidth and Structured Coupling
-
-The coupling graph (@def-coupling) connects the clearing problem to graphical model inference. The minting cost $C_b (bold(D))$ requires summing over joint states $cal(S) = product K_j$, but this sum factors according to the coupling graph's structure.
-
-Each cross-component order $i$ introduces a _factor_ $phi_i$ over the groups it touches. The minting cost gradient $partial C_b \/ partial D_s$ becomes a marginal computation over a factor graph — exactly the setting of belief propagation and junction tree algorithms.
-
-*Key observation.* If the coupling graph has treewidth $tau$, the minting cost and its gradients can be computed in $O(product_(j=1)^(tau+1) K_j)$ time via the junction tree algorithm, avoiding the full $product K_j$ enumeration. Since each order touches at most $kappa$ groups (in our system, $kappa <= 5$), factor size is bounded. The bottleneck is the treewidth $tau$ of the coupling graph, which grows with transitive coupling.
-
-In practice, coupling graphs tend to have moderate treewidth: most markets are coupled to only a few others through bundle orders. When treewidth is low (say $tau <= 10$ with binary outcomes), exact clearing via message passing is tractable ($2^11 approx 2000$ states per junction tree node). When treewidth is high, the threshold policy (§5.2) falls back to approximate decomposition — or to column generation (§5.4).
-
-== Column Generation for Sparse Demand
-
-When a coupled component is too large to enumerate but demand is sparse (most joint states have zero net demand), _column generation_ avoids the full state space by iteratively discovering active states.
-
-The minting cost $C_b (bold(D)) = b ln sum_(s in cal(S)) exp(D_s \/ b)$ sums over all $|cal(S)|$ joint states, but most contribute negligibly: only states with significant demand $D_s$ matter. Restricting to an active set $cal(S)' subset cal(S)$ gives a relaxation $C_b' <= C_b$ that overestimates welfare. Column generation closes this gap iteratively:
-
-+ *Initialize.* Set $cal(S)'$ to the joint states appearing in at least one bundle order's payoff (typically $|cal(S)'| << |cal(S)|$).
-
-+ *Solve.* Run the EG program with minting cost restricted to $cal(S)'$, producing fills $bold(q)^*$ and minting level $M^*$.
-
-+ *Price.* Find the most violated inactive state: $s^* = arg max_(s in.not cal(S)') D_s (bold(q)^*)$. This is the _pricing subproblem_: compute $D_s = sum_i q_i^* phi_i (s)$ and find the maximum over the product space.
-
-+ *Terminate or add.* If $D_(s^*) <= M^*$ (within tolerance for $b > 0$), stop — the restricted solution is optimal for the full problem. Otherwise, add $s^*$ to $cal(S)'$ and repeat.
-
-The pricing subproblem — $max_s sum_i q_i phi_i (s)$ — is a sum of low-arity functions over a product space (one factor per order, each touching at most $kappa$ groups). This is MAP inference on the same factor graph as §5.3: solvable in $O(product K_j^(tau+1))$ time when treewidth $tau$ is low, and often tractable in practice even at higher treewidth because single-group orders contribute constants (they do not vary across the product space).
-
-The practical advantage: each iteration solves a _small_ EG program (over $|cal(S)'|$ states) rather than the full $|cal(S)|$-state program. When demand is sparse — the typical case, since bundle orders are rare relative to single-group orders — only a handful of joint states ever enter $cal(S)'$.
-
-_Remark._ Column generation and treewidth (§5.3) are complementary. Treewidth exploits graph structure to compute exact gradients efficiently. Column generation exploits demand sparsity to avoid enumerating inactive states. When treewidth is low, use message passing. When treewidth is high but demand is sparse, use column generation. When both are unfavorable, fall back to approximate decomposition (§4).
-
-
-= The Searcher Model <searchers>
-
-The decomposition framework enables a _market for clearing services_, analogous to Proposer-Builder Separation (PBS) in Ethereum.
-
-== Architecture
-
-+ *The exchange* solves per-group clearing (the easy, separable part) and coordinates budget allocation across components.
-
-+ *Searchers* are external solvers that identify profitable cross-group opportunities. A searcher takes a set of coupled groups, solves the joint EG program over their state space, and submits a _clearing proposal_: fills for the cross-group orders plus the induced prices.
-
-+ *Coordination.* The exchange combines proposals from multiple searchers via budget equalization (@thm-decomp). Each searcher's component receives MM budget proportional to the utility it delivers.
-
-== Incentive Structure
-
-A searcher that finds a higher-welfare solution for a coupled component attracts more MM budget (via the budget equalization mechanism), earning more from the bid-ask spread. Searchers compete on _welfare extraction_: the one that best exploits cross-group correlations wins the budget allocation.
-
-This is incentive-compatible: searchers are rewarded exactly for the welfare they create beyond what leg decomposition provides. The exchange does not need to know how to solve the combinatorial problem — it outsources it to competing searchers and coordinates via the Fisher market mechanism.
-
-== Connection to PBS
-
-In Ethereum's PBS, builders compete to construct blocks (bundles of transactions). The proposer selects the most valuable block. In our model:
-
-#align(center)[
-  #table(
-    columns: 3,
-    align: (left, center, center),
-    stroke: none,
-    [*Component*], [*PBS (Ethereum)*], [*Clearing decomposition*],
-    [Builder/Searcher], [Constructs blocks], [Solves coupled components],
-    [Proposer/Exchange], [Selects best block], [Coordinates via budget equalization],
-    [Bid], [Block value (MEV)], [Component welfare ($U_k^m$)],
-    [Selection], [Highest bid wins], [Mirror descent (smooth)],
-  )
-]
-
-The key difference: PBS is winner-take-all (one block selected); our model is _proportional_ (multiple searchers' solutions coexist, weighted by welfare). This follows from the $ln$ utility — the smooth allocation again.
+The log-utility structure makes this naturally proportional rather than winner-take-all: multiple searchers' solutions can coexist, weighted by the welfare they deliver. Whether this is incentive-compatible, collusion-resistant, or practically useful remains to be established.
 
 
 = Discussion
 
 == What We Proved
 
-The Eisenberg-Gale structure turns the intractable combinatorial clearing problem into a tractable coordination problem:
-
 #align(center)[
   #table(
     columns: 3,
     align: (left, center, center),
-    [*Problem*], [*Linear welfare*], [*Log welfare (EG)*],
+    stroke: none,
+    [*Setting*], [*Linear welfare*], [*Log welfare (EG)*],
     [Single group], [LP (easy)], [Convex program (easy)],
     [Multi-group, no bundles], [Independent LPs], [Independent EGs + budget split],
-    [Multi-group, bundles], [Intractable], [Decompose + mirror descent],
-    [Budget coordination], [Combinatorial], [Smooth (equal utility)],
+    [Multi-group + cross-component MMs], [Combinatorial budget split], [Smooth budget split (mirror descent)],
   )
 ]
 
-== Open Questions
+The key result is the contrast in the last row: with linear welfare, splitting an MM's hard budget constraint across components is a combinatorial optimization. With log utility, the same problem is smooth and concave --- the budget flows to where it generates the most utility, equalized at optimum by a simple multiplicative-weights iteration.
 
-+ *Tight welfare bounds.* Our bounds for approximate decomposition are worst-case. Can we give instance-dependent bounds based on the spectral properties of the coupling graph?
+== What Remains Open
 
-+ *Online / streaming setting.* Orders arrive continuously. Can mirror descent be run incrementally (updating budgets as new orders arrive) rather than from scratch each batch?
++ *Tight welfare bounds for bundles.* Our bounds for dropping or leg-decomposing cross-component orders are worst-case. Instance-dependent bounds would be much more useful for deciding when approximate decomposition is acceptable.
 
-+ *Searcher collusion.* If searchers collude, they can extract more MM budget than competitive equilibrium would allocate. What mechanisms prevent this?
++ *Bundle handling.* The per-market leg decomposition used by our LP and EG solvers misprices non-separable bundles. The fill price is linear in per-market prices ($0.5 p_A + 0.5 p_B$ for "buy both YES") while the true value is multiplicative ($p_A dot p_B$). At $p_A = 0.6, p_B = 0.4$: leg price $= 0.50$, true price $= 0.24$. This overpricing can reject profitable bundle orders. Correctly pricing bundles requires solving the joint-state formulation, making the decomposition approach essential.
+
++ *Practical convergence.* We proved $O(1\/t)$ worst-case. Empirical convergence may be much faster. Characterizing when this happens would guide the choice between decomposition and monolithic solving.
 
 
 #v(2em)

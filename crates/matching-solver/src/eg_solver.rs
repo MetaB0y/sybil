@@ -25,8 +25,7 @@ use crate::lp_solver::{
     build_and_solve_lp, collect_markets, create_position_arbs, extract_result, recompute_welfare,
     trim_mm_budget_overflows,
 };
-use crate::pipeline::{PipelineResult, PipelineTimings};
-use crate::traits::PriceDiscoveryResult;
+use crate::result::{PipelineResult, PipelineTimings, PriceDiscoveryResult};
 use crate::MatchingResult;
 
 /// Configuration for the Eisenberg-Gale solver.
@@ -417,7 +416,6 @@ impl EgSolver {
             prices,
             total_fills: pipeline_result.result.fills.len(),
             total_welfare: pipeline_result.result.total_welfare,
-            market_solutions: HashMap::new(),
         });
         pipeline_result.total_time_secs = start.elapsed().as_secs_f64();
         pipeline_result.phase_times = PipelineTimings {
@@ -481,7 +479,6 @@ impl EgSolver {
             prices,
             total_fills: pipeline_result.result.fills.len(),
             total_welfare: pipeline_result.result.total_welfare,
-            market_solutions: HashMap::new(),
         });
         pipeline_result.total_time_secs = start.elapsed().as_secs_f64();
         pipeline_result.phase_times = PipelineTimings {

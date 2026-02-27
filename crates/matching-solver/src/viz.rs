@@ -26,7 +26,7 @@ use serde::Serialize;
 
 use matching_engine::{MarketId, Nanos, Problem, NANOS_PER_DOLLAR};
 
-use crate::pipeline::{IterationStats, PipelineResult};
+use crate::result::{IterationStats, PipelineResult};
 
 /// Complete snapshot of a pipeline run for visualization and analysis.
 #[derive(Clone, Debug, Serialize)]
@@ -514,22 +514,8 @@ impl VizSnapshot {
                     })
                     .collect();
 
-                // Get MM allocations
-                let mm_allocations = if let Some(ref alloc) = result.allocation {
-                    alloc
-                        .mm_allocations
-                        .iter()
-                        .map(|mm| MmSnapshot {
-                            mm_id: mm.mm_id.0,
-                            activated_orders: mm.activated_orders.len(),
-                            capital_used: mm.capital_used as f64 / NANOS_PER_DOLLAR as f64,
-                            budget: mm.budget as f64 / NANOS_PER_DOLLAR as f64,
-                            utilization: mm.utilization,
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                };
+                // MM allocations (no longer tracked in result types)
+                let mm_allocations: Vec<MmSnapshot> = Vec::new();
 
                 IterationSnapshot {
                     iteration: stat.iteration,

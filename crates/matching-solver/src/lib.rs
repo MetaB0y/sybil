@@ -1,34 +1,15 @@
 //! Matching solver for prediction market FBA (Frequent Batch Auction).
 //!
-//! # Architecture
-//!
-//! The solver operates in phases:
-//! 1. **Price Discovery** (`LocalSolver`): Find clearing prices per market
-//! 2. **MM Allocation** (`MmAllocator`): Respect market maker budget constraints
-//! 3. **Group Minting**: Exploit price inconsistencies via LP gmint variables
-//!
-//! # Quick Start
-//!
-//! ```ignore
-//! use matching_solver::Pipeline;
-//!
-//! let pipeline = Pipeline::with_dual_decomposition();
-//! let result = pipeline.solve(&problem);
-//! ```
+//! Solves the welfare-maximizing order matching problem via convex programs:
+//! - **LP** (`lp_solver`): Linear program via HiGHS with entropy smoothing
+//! - **EG** (`eg_solver`): Eisenberg-Gale / Fisher market formulation
+//! - **Conic** (`conic_solver`): Conic EG via Clarabel
+//! - **MILP** (`milp`): Mixed-integer via SCIP (exact with timeout)
 
 // Internal modules
-pub mod benchmark;
 pub mod coefficients;
-pub mod dual_master;
-pub mod fill_extraction;
-pub mod local_solver;
-pub mod mm_allocator;
-pub mod pipeline;
-pub(crate) mod specialized;
-pub mod traits;
+pub mod result;
 pub mod verifier;
-pub mod group_minting;
-pub mod joint_solver;
 pub mod viz;
 
 #[cfg(feature = "milp")]
@@ -40,38 +21,19 @@ pub mod lp_solver;
 #[cfg(feature = "lp")]
 pub mod eg_solver;
 
+#[cfg(feature = "conic")]
+pub mod conic_solver;
+
 // === Public API ===
 
-// New architecture components
-pub use local_solver::{LocalSolver, MarketSolution};
-pub use mm_allocator::{MmAllocation, MmAllocator};
-
-// Experimentation platform traits
-pub use traits::{
-    matching_result_to_partial, AllocationResult, OrderAllocator, PartialSolution, PartialSolver,
-    PriceDiscoverer, PriceDiscoveryResult,
-};
-
-// Specialized solvers
-pub use specialized::MultiMarketSolver;
-
-// Dual decomposition
-pub use dual_master::{DualConfig, DualMaster, DualResult, DualState, StepDecay};
-
-// Joint group solver
-pub use joint_solver::JointGroupSolver;
-
-// Pipeline system
-pub use pipeline::{
-    IterationStats, Pipeline, PipelineBuilder, PipelineConfig, PipelineResult, PipelineTimings,
-    UcpStats,
+// Result types
+pub use result::{
+    CombineStats, IterationStats, PipelineResult, PipelineTimings, PriceDiscoveryResult,
+    SolverContribution, UcpStats,
 };
 
 // Visualization
 pub use viz::VizSnapshot;
-
-// Benchmark harness
-pub use benchmark::{compare_to_baseline, BenchmarkHarness, BenchmarkResults, BenchmarkRun};
 
 // Result verification (for ZK proof integration)
 pub use verifier::{verify, verify_strict, VerificationResult, Verifier, Violation, ViolationKind};
@@ -85,9 +47,12 @@ pub use lp_solver::{LpConfig, LpSolver};
 #[cfg(feature = "lp")]
 pub use eg_solver::{EgConfig, EgSolver};
 
+#[cfg(feature = "conic")]
+pub use conic_solver::{ConicConfig, ConicSolver};
+
 use serde::Serialize;
 
-use matching_engine::{Fill, Order, Problem};
+use matching_engine::{Fill, Order};
 
 /// Result of solving a matching problem.
 #[derive(Clone, Debug, Default, Serialize)]
@@ -97,10 +62,6 @@ pub struct MatchingResult {
     /// Total welfare achieved (fill-level surplus minus minting cost).
     pub total_welfare: i64,
     /// Cost of share creation (minting) not captured in fill-level welfare.
-    ///
-    /// For heuristic solvers this is 0 because arb order limits embed the cost.
-    /// For MILP this equals `fill_welfare - objective_welfare` (the gap from
-    /// group minting when Σp < $1 for some groups).
     pub minting_cost: i64,
     /// Number of orders filled (at least partially)
     pub orders_filled: usize,
@@ -130,10 +91,4 @@ impl MatchingResult {
         }
         self.fills.push(fill);
     }
-}
-
-/// Trait for matching solvers.
-pub trait Solver {
-    fn solve(&self, problem: &Problem) -> MatchingResult;
-    fn name(&self) -> &str;
 }

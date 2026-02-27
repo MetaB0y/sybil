@@ -3,7 +3,7 @@
 //! # Usage
 //!
 //! ```bash
-//! # Run quick test with pipeline (default)
+//! # Run quick test with LP solver (default)
 //! matching-sim --preset quick
 //!
 //! # Run with verbose step-by-step output
@@ -23,9 +23,7 @@ use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Cell, Color
 
 use matching_engine::{Fill, MarketId, Order, Problem};
 use matching_scenarios::{generate_scenario, ScenarioConfig};
-use matching_solver::{
-    IterationStats, MilpConfig, MilpSolver, MmBudgetMode, Pipeline, PipelineResult, VizSnapshot,
-};
+use matching_solver::{MilpConfig, MilpSolver, MmBudgetMode, PipelineResult, VizSnapshot};
 use sybil_verifier::{
     verify_match, BlockWitness, VerificationResult, WitnessBlockHeader, WitnessOrder,
 };
@@ -68,7 +66,7 @@ fn main() {
 
     if matches!(
         solver_choice,
-        SolverChoice::Pipeline | SolverChoice::Dual | SolverChoice::Lp | SolverChoice::Eg
+        SolverChoice::Lp | SolverChoice::Eg | SolverChoice::Conic
     ) && (verbose || export_json.is_some() || show_charts)
     {
         // Detailed pipeline run with step-by-step output
@@ -123,11 +121,10 @@ fn print_help() {
     println!();
     println!("Solver options:");
     println!("  --solver <S>         Solver to use:");
-    println!("                         pipeline (default)");
-    println!("                         dual");
-    println!("                         milp");
-    println!("                         lp (LP + entropy smoothing, requires --features lp)");
+    println!("                         lp (default, LP + entropy smoothing, requires --features lp)");
     println!("                         eg (Eisenberg-Gale / Fisher market, requires --features lp)");
+    println!("                         conic (Conic EG via Clarabel, requires --features conic)");
+    println!("                         milp (MIQCQP via SCIP)");
     println!("                         all (compare all)");
     println!("  --milp-timeout <S>   MILP time limit in seconds");
     println!("  --mm-mode <M>        MM budget constraint mode:");
@@ -490,30 +487,31 @@ fn run_detailed_pipeline(
 
         // Run solver and get detailed results
         let result = match solver_choice {
+            #[cfg(feature = "lp")]
             SolverChoice::Lp => {
                 let solver = matching_solver::LpSolver::new();
                 solver.solve(&problem)
             }
+            #[cfg(feature = "lp")]
             SolverChoice::Eg => {
                 let solver = matching_solver::EgSolver::new();
                 solver.solve(&problem)
             }
-            _ => {
-                let pipeline = match solver_choice {
-                    SolverChoice::Dual => Pipeline::with_dual_decomposition(),
-                    _ => Pipeline::current(),
-                };
-                pipeline.solve(&problem)
+            #[cfg(feature = "conic")]
+            SolverChoice::Conic => {
+                let solver = matching_solver::ConicSolver::new();
+                solver.solve(&problem)
             }
+            _ => unreachable!("only LP/EG/Conic reach run_detailed_pipeline"),
         };
 
         if verbose {
-            // Print step-by-step results (pipeline-specific, skip for LP/EG)
-            if !matches!(solver_choice, SolverChoice::Lp | SolverChoice::Eg) {
-                print_pipeline_steps(&result, &problem);
-            } else {
+            {
                 let solver_label = match solver_choice {
+                    #[cfg(feature = "lp")]
                     SolverChoice::Eg => "EG (Fisher) Solver",
+                    #[cfg(feature = "conic")]
+                    SolverChoice::Conic => "Conic (EG) Solver",
                     _ => "LP Solver",
                 };
                 println!("{}:", solver_label);
@@ -792,209 +790,6 @@ fn print_problem_summary(problem: &Problem, stats: &OrderStats) {
     println!();
 }
 
-fn print_pipeline_steps(result: &PipelineResult, _problem: &Problem) {
-    println!(
-        "Pipeline Steps (fixed-point, {} iterations):",
-        result.iterations
-    );
-    println!("─────────────────────────────────────────");
-
-    // Phase 1: Price Discovery (LocalSolver for single-market orders)
-    if let Some(ref pd) = result.price_discovery {
-        println!(
-            "  1. Price Discovery    {:>7.3}s",
-            result.phase_times.price_discovery_secs
-        );
-        println!(
-            "     └─ {} markets priced (last iter: {} fills)",
-            pd.prices.len(),
-            pd.total_fills,
-        );
-    }
-
-
-    // Phase 3: MM Allocation
-    if let Some(ref alloc) = result.allocation {
-        println!(
-            "  3. MM Allocation      {:>7.3}s",
-            result.phase_times.allocation_secs
-        );
-        println!(
-            "     └─ {} orders activated, {} iters",
-            alloc.activated_orders.len(),
-            alloc.iterations
-        );
-        if !alloc.mm_allocations.is_empty() {
-            for mm_alloc in &alloc.mm_allocations {
-                let util = if mm_alloc.budget > 0 {
-                    mm_alloc.capital_used as f64 / mm_alloc.budget as f64 * 100.0
-                } else {
-                    0.0
-                };
-                println!(
-                    "        MM{}: {}/{} capital ({:.0}% util), {} orders",
-                    mm_alloc.mm_id.0,
-                    format_price(mm_alloc.capital_used),
-                    format_price(mm_alloc.budget),
-                    util,
-                    mm_alloc.activated_orders.len()
-                );
-            }
-        }
-    }
-
-    // Show partial solver results
-    if result.phase_times.partial_solving_secs > 0.0 || !result.contributions.is_empty() {
-        println!(
-            "  4. Bundle Matching    {:>7.3}s",
-            result.phase_times.partial_solving_secs
-        );
-
-        // Aggregate contributions by solver
-        let mut solver_stats: HashMap<String, (usize, i64)> = HashMap::new();
-        for contrib in &result.contributions {
-            let entry = solver_stats
-                .entry(contrib.solver_name.clone())
-                .or_insert((0, 0));
-            entry.0 += contrib.fills_contributed;
-            entry.1 += contrib.welfare_contributed;
-        }
-
-        if solver_stats.is_empty() {
-            println!("     └─ no bundle fills");
-        } else {
-            for (name, (fills, welfare)) in &solver_stats {
-                println!(
-                    "     └─ {}: {} fills, welfare {}",
-                    name,
-                    fills,
-                    format_welfare(*welfare)
-                );
-            }
-        }
-    }
-
-    println!("─────────────────────────────────────────");
-    println!("  Total                 {:>7.3}s", result.total_time_secs);
-    println!();
-
-    // Print UCP enforcement diagnostics
-    if let Some(ref ucp) = result.ucp_stats {
-        print_ucp_stats(ucp);
-    }
-
-    // Print iteration convergence stats
-    if !result.iteration_stats.is_empty() {
-        print_iteration_convergence(&result.iteration_stats);
-    }
-}
-
-fn print_ucp_stats(ucp: &matching_solver::UcpStats) {
-    println!("UCP Enforcement:");
-    println!("─────────────────────────────────────────");
-    println!(
-        "  Input:    {:>6} fills, {} welfare",
-        ucp.input_fills,
-        format_welfare(ucp.input_welfare)
-    );
-
-    let reprice_drop_pct = if ucp.input_fills > 0 {
-        ucp.dropped_by_reprice as f64 / ucp.input_fills as f64 * 100.0
-    } else {
-        0.0
-    };
-    println!(
-        "  Reprice:  {:>6} survived, {} dropped ({:.1}%)",
-        ucp.after_reprice_fills, ucp.dropped_by_reprice, reprice_drop_pct
-    );
-    println!(
-        "  Trim:     {:>6} survived, {} trimmed",
-        ucp.after_trim_fills, ucp.dropped_by_trim
-    );
-    println!(
-        "  Final:    {:>6} fills, {} welfare",
-        ucp.final_fills,
-        format_welfare(ucp.final_welfare)
-    );
-    println!("  Retention: {:.1}%", ucp.welfare_retention_pct);
-
-    if !ucp.market_imbalances.is_empty() {
-        let top_n = ucp.market_imbalances.len().min(5);
-        let top: Vec<String> = ucp.market_imbalances[..top_n]
-            .iter()
-            .map(|(mid, yes, no, excess)| {
-                format!(
-                    "M{} (YES={}, NO={}, excess={})",
-                    mid.0, yes, no, excess
-                )
-            })
-            .collect();
-        println!("  Top imbalanced: {}", top.join(", "));
-    }
-
-    println!();
-}
-
-fn print_iteration_convergence(stats: &[IterationStats]) {
-    println!("Fixed-Point Convergence:");
-
-    let mut table = Table::new();
-    table
-        .load_preset(UTF8_FULL)
-        .apply_modifier(UTF8_ROUND_CORNERS)
-        .set_header(vec![
-            "Iter",
-            "Welfare",
-            "Δ Welfare",
-            "Volume",
-            "Δ Volume",
-            "Fills",
-            "PD Fills",
-            "Bundle",
-        ]);
-
-    for stat in stats {
-        let welfare_delta_str = if stat.welfare_delta > 0 {
-            format!("+{}", format_welfare(stat.welfare_delta))
-        } else if stat.welfare_delta < 0 {
-            format_welfare(stat.welfare_delta)
-        } else {
-            "—".to_string()
-        };
-
-        let volume_delta_str = if stat.volume_delta > 0 {
-            format!("+{}", format_qty(stat.volume_delta))
-        } else {
-            "—".to_string()
-        };
-
-        // Color the delta based on whether we're converging
-        let welfare_cell = if stat.iteration == 1 {
-            Cell::new(&welfare_delta_str)
-        } else if stat.welfare_delta == 0 {
-            Cell::new(&welfare_delta_str).fg(Color::Green)
-        } else if stat.welfare_delta > 0 {
-            Cell::new(&welfare_delta_str).fg(Color::Yellow)
-        } else {
-            Cell::new(&welfare_delta_str).fg(Color::Red)
-        };
-
-        table.add_row(vec![
-            Cell::new(stat.iteration),
-            Cell::new(format_welfare(stat.welfare)),
-            welfare_cell,
-            Cell::new(format_qty(stat.volume)),
-            Cell::new(&volume_delta_str),
-            Cell::new(stat.fills),
-            Cell::new(stat.price_discovery_fills),
-            Cell::new(stat.bundle_fills),
-        ]);
-    }
-
-    println!("{table}");
-    println!();
-}
-
 fn print_fill_stats(stats: &FillStats, order_stats: &OrderStats, num_markets: usize) {
     println!("Fill Statistics:");
     println!("─────────────────────────────────────────");
@@ -1177,26 +972,24 @@ fn parse_scenario_config(args: &[String]) -> ScenarioConfig {
 #[derive(Clone, Debug, PartialEq)]
 enum SolverChoice {
     Milp,
-    Pipeline,
-    Dual,
-    Joint,
     #[cfg(feature = "lp")]
     Lp,
     #[cfg(feature = "lp")]
     Eg,
+    #[cfg(feature = "conic")]
+    Conic,
     All,
 }
 
 fn parse_solver_choice(args: &[String]) -> SolverChoice {
     match get_arg_value(args, "--solver").as_deref() {
         Some("milp") => SolverChoice::Milp,
-        Some("pipeline") => SolverChoice::Pipeline,
-        Some("dual") => SolverChoice::Dual,
-        Some("joint") => SolverChoice::Joint,
         #[cfg(feature = "lp")]
         Some("lp") => SolverChoice::Lp,
         #[cfg(feature = "lp")]
         Some("eg") => SolverChoice::Eg,
+        #[cfg(feature = "conic")]
+        Some("conic") => SolverChoice::Conic,
         Some("all") => SolverChoice::All,
         _ => SolverChoice::Lp, // Default to LP solver
     }
@@ -1294,15 +1087,13 @@ struct GapAnalysisData {
 fn expand_solver_choices(choice: &SolverChoice) -> Vec<SolverChoice> {
     match choice {
         SolverChoice::All => {
-            let mut choices = vec![
-                SolverChoice::Milp,
-                SolverChoice::Dual,
-                SolverChoice::Joint,
-            ];
+            let mut choices = vec![SolverChoice::Milp];
             #[cfg(feature = "lp")]
             choices.push(SolverChoice::Lp);
             #[cfg(feature = "lp")]
             choices.push(SolverChoice::Eg);
+            #[cfg(feature = "conic")]
+            choices.push(SolverChoice::Conic);
             choices
         }
         other => vec![other.clone()],
@@ -1319,13 +1110,12 @@ fn solver_display_name(choice: &SolverChoice, milp_timeout: Option<f64>) -> Stri
                 "MILP".to_string()
             }
         }
-        SolverChoice::Pipeline => "Pipeline".to_string(),
-        SolverChoice::Dual => "Dual Decomposition".to_string(),
-        SolverChoice::Joint => "Joint Group".to_string(),
         #[cfg(feature = "lp")]
         SolverChoice::Lp => "LP".to_string(),
         #[cfg(feature = "lp")]
         SolverChoice::Eg => "EG (Fisher)".to_string(),
+        #[cfg(feature = "conic")]
+        SolverChoice::Conic => "Conic (EG)".to_string(),
         SolverChoice::All => "All".to_string(),
     }
 }
@@ -1344,12 +1134,6 @@ fn run_solver_with_witness(
             let witness = witness_from_milp(problem, &milp_result);
             (milp_result.result, witness)
         }
-        SolverChoice::Joint => {
-            let solver = matching_solver::JointGroupSolver::new();
-            let pipeline_result = solver.solve(problem);
-            let witness = witness_from_pipeline(problem, &pipeline_result);
-            (pipeline_result.result, witness)
-        }
         #[cfg(feature = "lp")]
         SolverChoice::Lp => {
             let solver = matching_solver::LpSolver::new();
@@ -1364,12 +1148,10 @@ fn run_solver_with_witness(
             let witness = witness_from_pipeline(problem, &pipeline_result);
             (pipeline_result.result, witness)
         }
-        SolverChoice::Pipeline | SolverChoice::Dual => {
-            let pipeline = match choice {
-                SolverChoice::Dual => Pipeline::with_dual_decomposition(),
-                _ => Pipeline::current(),
-            };
-            let pipeline_result = pipeline.solve(problem);
+        #[cfg(feature = "conic")]
+        SolverChoice::Conic => {
+            let solver = matching_solver::ConicSolver::new();
+            let pipeline_result = solver.solve(problem);
             let witness = witness_from_pipeline(problem, &pipeline_result);
             (pipeline_result.result, witness)
         }

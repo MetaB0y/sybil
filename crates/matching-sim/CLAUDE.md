@@ -17,7 +17,7 @@ cargo run -p matching-sim --release -- --preset medium --solver all
 cargo run -p matching-sim --release --features milp -- --preset small --solver milp --milp-timeout 60
 
 # Custom scenario
-cargo run -p matching-sim --release -- --markets 20 --orders 500 --bundles 0.2 --solver pipeline -v
+cargo run -p matching-sim --release -- --markets 20 --orders 500 --bundles 0.2 --solver lp -v
 ```
 
 ## CLI Options
@@ -33,7 +33,7 @@ cargo run -p matching-sim --release -- --markets 20 --orders 500 --bundles 0.2 -
 - `--mms N` — number of MM constraints
 - `--seed N` — random seed
 
-**Solver Selection:** `--solver <pipeline|negrisk|dual|milp|all>`
+**Solver Selection:** `--solver <lp|eg|conic|milp|all>`
 
 **MILP Options:**
 - `--milp-timeout S` — time limit in seconds (default: 5.0)
@@ -49,26 +49,11 @@ cargo run -p matching-sim --release -- --markets 20 --orders 500 --bundles 0.2 -
 
 | Solver | Description |
 |--------|-------------|
-| `pipeline` | Default. LocalSolver → NegriskSolver → MmAllocator (fixed-point) |
-| `negrisk` | Pipeline with negrisk arbitrage emphasis |
-| `dual` | Dual decomposition with Lagrangian relaxation |
+| `lp` | Default. LP via HiGHS with entropy smoothing |
+| `eg` | Eisenberg-Gale / Fisher market formulation |
+| `conic` | Conic EG via Clarabel |
 | `milp` | SCIP-based MIQCQP (exact with timeout) |
 | `all` | Run all solvers and compare metrics |
-
-## Output Metrics
-
-The results table shows per-solver:
-- **Welfare** — total value captured (in $)
-- **Fill %** — percentage of orders filled
-- **Volume** — total quantity matched
-- **Time** — execution time
-
-Verbose mode (`-v`) adds:
-- Problem summary (order composition, MM constraints)
-- Per-iteration convergence table
-- Fill statistics by order type
-- Sample market prices
-- Verification result
 
 ## Verification
 
@@ -83,7 +68,7 @@ All solver outputs are validated via `sybil-verifier`:
 ```
 matching-scenarios  →  Problem
         ↓
-matching-solver    →  MatchingResult (fills, welfare)
+matching-solver    →  PipelineResult (fills, welfare, prices)
         ↓
 sybil-verifier     →  VerificationResult
         ↓

@@ -247,7 +247,7 @@ Breiman (1961) proved that Kelly maximization (log utility) is the _unique_ repe
 
 A prediction market exchange runs _repeated_ batch auctions, compounding returns. The natural objective for a repeat participant is $max sum_t EE[ln(1 + r_t)]$ — exactly the Kelly criterion, exactly log utility per batch. Linear utility maximizes one-shot expected value but minimizes survival across batches. Since FBAs are inherently repeated, log utility is the only consistent objective.
 
-Modeling MMs with log utility is not an assumption but a _selection effect_: the MMs that survive long enough to matter are the ones already using Kelly-like sizing.
+Modeling MMs with log utility is not an arbitrary assumption but a consequence of competitive selection: the MMs that survive long enough to matter are the ones already using Kelly-like sizing.
 
 == Budget Constraints _Are_ Risk Aversion
 
@@ -278,7 +278,7 @@ Linear welfare with a hard budget is internally inconsistent: "I value each shar
 The non-convexity of §3 is not a feature of prediction markets — it is an artifact of the linear welfare model.
 
 
-= The Main Result: Risk-Averse Clearing Is a Fisher Market <risk-averse>
+= Risk-Averse Clearing Is a Fisher Market <risk-averse>
 
 Replacing linear MM welfare with Kelly-criterion utility transforms the budget-constrained clearing problem into a convex program with a unique solution. Budget constraints disappear from the formulation — they are absorbed into the Eisenberg-Gale objective. The resulting program is structurally isomorphic to a quasi-linear Fisher market with endogenous supply.
 
@@ -330,6 +330,14 @@ Each MM's total deployment — capital on fills plus retained cash — is at mos
 *(4) Price uniqueness ($b > 0$).* Prices are $p_k = partial C_b \/ partial D_k = "softmax"(bold(D)\/b)$, a continuous function of the unique $bold(q)^*$. (At $b = 0$, fills are unique but prices are LP duals, which may not be unique when multiple $D_k$ tie at $max_j D_j$; see §5.3.)
 
 *(5) Polynomial solvability.* For $b > 0$, the objective is concave and $C^infinity$. The feasible set is a polytope times $RR_+^(|cal(K)|)$. Standard interior-point methods solve this in polynomial time. At $b = 0$, the objective is concave but non-smooth; subgradient or bundle methods apply. #h(1fr) $square$
+
+*Example.* Binary market ($K = 2$), $b -> 0$. An MM ($B = 60$) posts two buy-Yes orders: $A$ at $L_A = 0.70$, qty $100$; $B$ at $L_B = 0.55$, qty $100$. A retail trader posts buy-No at $L_C = 0.60$, qty $200$.
+
+_LP (no budgets)._ All fill at balanced minting ($D_"Yes" = D_"No" = 200$, $p_"Yes" = 0.50$). Welfare $= 45$. MM capital $= 0.50 times 200 = 100 > B$.
+
+_Risk-averse._ The MM is capital-constrained ($U^"LP" = 125 > B = 60$, $s = 0$). Shadow price $mu = 60\/70 approx 0.86$. Order $A$ fills fully: $mu L_A = 0.60 > p_"Yes" = 0.50$. Order $B$ does not fill: $mu L_B = 0.47 < 0.50$ — the shadow price throttles the lower-ROI order. Minting balances at $D_"Yes" = D_"No" = 100$. Welfare $= 30$. Capital consumed $= 50 <= B$, with the gap of $10$ being infra-marginal surplus from order $A$.
+
+_Welfare gap._ Actual gap $= 15$; exact bound $= Delta - B ln(1 + Delta\/B) approx 21$; quadratic bound $= Delta^2\/(2B) approx 35$ (where $Delta = U^"LP" - B = 65$). The bound is conservative because the retail side contracts proportionally.
 
 == Temperature Independence
 
@@ -404,7 +412,7 @@ Program $P_b^"RA"$ is a quasi-linear Fisher market with two extensions:
   )
 ]
 
-The prediction market extends the quasi-linear Fisher market in two ways: (1) supply is endogenous — shares are created by minting at cost $C_b(bold(D))$ rather than drawn from a fixed endowment, and (2) non-MM ("retail") orders contribute linear welfare alongside the log-utility MMs. Both extensions preserve concavity. The minting cost replaces the fixed supply constraints: where EG has $sum_k x_(k j) <= s_j$ with dual prices, $P_b^"RA"$ has $C_b(bold(D))$ whose gradient _is_ the price vector. The cash variable $s_k$ ensures that over-capitalized MMs park excess budget rather than distorting fills — the quasi-linear structure is essential, not optional.
+The isomorphism maps limit prices to utility coefficients: $L_i$ plays the role of $u_(k j)$ in the Fisher market, and $U_k = sum L_i q_i$ is the gross value of fills to MM $k$ — the analog of utility from goods consumed. (The net profit — fills minus capital consumed — is not $U_k$ itself but emerges from the clearing prices, just as in Fisher markets the utility and expenditure are separate quantities.) The prediction market extends the quasi-linear Fisher market in two ways: (1) supply is endogenous — shares are created by minting at cost $C_b(bold(D))$ rather than drawn from a fixed endowment, and (2) non-MM ("retail") orders contribute linear welfare alongside the log-utility MMs. Both extensions preserve concavity. The minting cost replaces the fixed supply constraints: where EG has $sum_k x_(k j) <= s_j$ with dual prices, $P_b^"RA"$ has $C_b(bold(D))$ whose gradient _is_ the price vector. The cash variable $s_k$ ensures that over-capitalized MMs park excess budget rather than distorting fills — the quasi-linear structure is essential, not optional.
 
 == What Changes and What Doesn't
 

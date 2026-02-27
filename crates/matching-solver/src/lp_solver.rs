@@ -21,8 +21,7 @@ use highs::{HighsModelStatus, RowProblem, Sense};
 use matching_engine::{Fill, MarketId, MmSide, Nanos, Order, Problem, Qty, NANOS_PER_DOLLAR};
 
 use crate::coefficients::{order_sign, precompute_coefficients, OrderCoefficients};
-use crate::pipeline::{PipelineResult, PipelineTimings};
-use crate::traits::PriceDiscoveryResult;
+use crate::result::{PipelineResult, PipelineTimings, PriceDiscoveryResult};
 use crate::MatchingResult;
 
 /// Configuration for the LP solver.
@@ -204,7 +203,6 @@ impl LpSolver {
             prices,
             total_fills: pipeline_result.result.fills.len(),
             total_welfare: pipeline_result.result.total_welfare,
-            market_solutions: HashMap::new(),
         });
         pipeline_result.total_time_secs = start.elapsed().as_secs_f64();
         pipeline_result.phase_times = PipelineTimings {

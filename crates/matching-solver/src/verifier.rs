@@ -286,6 +286,18 @@ impl Verifier {
     /// Minting creates 1 YES + 1 NO share. If fills create an imbalance (e.g.,
     /// BuyNo fill without a corresponding BuyYes), positions are created from
     /// thin air — money at resolution.
+    ///
+    /// Uses f64 marginals to account for bundle orders whose per-market marginal
+    /// payoffs are fractional (e.g., "buy YES A and YES B" has marginal 0.5 per
+    /// market — the i64 version truncates this to 0, making bundles invisible).
+    ///
+    /// TODO: Per-market position balance is NECESSARY but NOT SUFFICIENT for
+    /// joint-state solvency with bundle orders. A bundle "buy YES A and YES B"
+    /// creates a joint-state liability that cannot be decomposed into per-market
+    /// shares. Full solvency verification requires tracking positions over the
+    /// joint state space (exponential in the number of coupled markets).
+    /// Until we have joint-state verification, this check catches per-market
+    /// imbalances but does NOT guarantee solvency when bundles are filled.
     fn verify_position_balance(
         &self,
         _problem: &Problem,
@@ -294,9 +306,7 @@ impl Verifier {
         violations: &mut Vec<Violation>,
         stats: &mut VerificationStats,
     ) {
-        // For each market, accumulate the net marginal payoff across all fills.
-        // The sum of marginal * fill_qty across all fills must be 0 for each market.
-        let mut net_position: HashMap<MarketId, i64> = HashMap::new();
+        let mut net_position: HashMap<MarketId, f64> = HashMap::new();
 
         for fill in &result.fills {
             if fill.fill_qty == 0 {
@@ -306,22 +316,24 @@ impl Verifier {
                 continue; // Already flagged by OrderNotFound
             };
 
-            for (market_id, normalized) in order.marginal_payoffs_i64() {
-                *net_position.entry(market_id).or_insert(0) +=
-                    normalized * fill.fill_qty as i64;
+            for (market_id, marginal) in order.marginal_payoffs_f64() {
+                *net_position.entry(market_id).or_insert(0.0) +=
+                    marginal * fill.fill_qty as f64;
             }
         }
 
         stats.markets_checked = net_position.len();
 
+        // Allow small float tolerance (< 0.5 shares) for f64 rounding.
+        let tolerance = 0.5;
         for (market_id, net) in &net_position {
-            if *net != 0 {
+            if net.abs() > tolerance {
                 violations.push(Violation {
                     kind: ViolationKind::PositionImbalance,
                     details: format!(
-                        "Market {}: net position delta = {} (expected 0). \
+                        "Market {}: net position delta = {:.2} (expected 0). \
                          Positions created from thin air.",
-                        market_id, net
+                        market_id, net,
                     ),
                 });
             }
@@ -376,7 +388,7 @@ pub fn verify_strict(problem: &Problem, result: &MatchingResult) -> Verification
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matching_engine::{simple_no_buy, simple_yes_buy, MmConstraint, MmId, MmSide};
+    use matching_engine::{bundle_yes, simple_no_buy, simple_yes_buy, MmConstraint, MmId, MmSide};
 
     fn create_test_problem() -> Problem {
         let mut problem = Problem::new("test");
@@ -643,6 +655,71 @@ mod tests {
                 .any(|v| v.kind == ViolationKind::VolumeCountMismatch),
             "Expected VolumeCountMismatch, got: {:?}",
             verification.violations
+        );
+    }
+
+    // ========== Bundle position balance tests ==========
+
+    #[test]
+    fn test_bundle_position_imbalance_detected() {
+        // A "buy YES A and YES B" bundle filled without counterparties
+        // should be caught by position balance (f64 marginals = 0.5 per market).
+        let mut problem = Problem::new("bundle_test");
+        let market_a = problem.markets.add_binary("A");
+        let market_b = problem.markets.add_binary("B");
+
+        problem.orders.push(bundle_yes(
+            &problem.markets, 1, &[market_a, market_b], 400_000_000, 100,
+        ));
+
+        let mut result = MatchingResult::new();
+        let fill = Fill::new(1, 100, 300_000_000);
+        let order = &problem.orders[0];
+        result.add_fill(fill, order);
+
+        let verification = verify(&problem, &result);
+        assert!(!verification.valid);
+        assert!(
+            verification.violations.iter().any(|v| v.kind == ViolationKind::PositionImbalance),
+            "Should detect position imbalance from bundle, got: {:?}",
+            verification.violations,
+        );
+    }
+
+    #[test]
+    fn test_bundle_balanced_with_counterparties() {
+        // Bundle + matching counterparties should pass position balance.
+        let mut problem = Problem::new("bundle_balanced");
+        let market_a = problem.markets.add_binary("A");
+        let market_b = problem.markets.add_binary("B");
+
+        // Bundle buyer: "buy YES A and YES B" → marginal 0.5 YES per market
+        problem.orders.push(bundle_yes(
+            &problem.markets, 1, &[market_a, market_b], 400_000_000, 100,
+        ));
+
+        // YES buyers on each market to bring total YES demand to 100
+        problem.orders.push(simple_yes_buy(&problem.markets, 2, market_a, 600_000_000, 50));
+        problem.orders.push(simple_yes_buy(&problem.markets, 3, market_b, 600_000_000, 50));
+        // NO buyers at 100 to balance
+        problem.orders.push(simple_no_buy(&problem.markets, 4, market_a, 500_000_000, 100));
+        problem.orders.push(simple_no_buy(&problem.markets, 5, market_b, 500_000_000, 100));
+
+        let mut result = MatchingResult::new();
+        // Bundle 100 qty → 50.0 marginal YES per market
+        result.add_fill(Fill::new(1, 100, 300_000_000), &problem.orders[0]);
+        // YES 50 qty each → 50 YES per market (total 100)
+        result.add_fill(Fill::new(2, 50, 500_000_000), &problem.orders[1]);
+        result.add_fill(Fill::new(3, 50, 500_000_000), &problem.orders[2]);
+        // NO 100 qty each → 100 NO per market (balances)
+        result.add_fill(Fill::new(4, 100, 500_000_000), &problem.orders[3]);
+        result.add_fill(Fill::new(5, 100, 500_000_000), &problem.orders[4]);
+
+        let verification = verify(&problem, &result);
+        assert!(
+            !verification.violations.iter().any(|v| v.kind == ViolationKind::PositionImbalance),
+            "Position should balance, got: {:?}",
+            verification.violations.iter().filter(|v| v.kind == ViolationKind::PositionImbalance).collect::<Vec<_>>(),
         );
     }
 
