@@ -1,8 +1,7 @@
 //! MIQCQP solver for optimal matching with Uniform Clearing Prices (UCP).
 //!
 //! Formulates the matching problem as a Mixed-Integer Quadratically Constrained
-//! Quadratic Program using SCIP. Handles ALL order types (single-market, bundles,
-//! spreads, multi-market) via per-market marginal contribution coefficients.
+//! Quadratic Program using SCIP for single-market binary orders.
 //!
 //! **Variables:**
 //! - `z_i ∈ {0,1}`: whether order i is filled
@@ -15,8 +14,8 @@
 //!
 //! **Constraints:**
 //! - z/q linking: AON, min/max fill
-//! - UCP (Big-M): generalized effective price via alpha/beta coefficients
-//! - Position balance: per-market c_YES/c_NO coefficients from payoff decomposition
+//! - UCP (Big-M): effective price via payoff-derived alpha/beta
+//! - Position balance: per-market YES/NO payoffs
 //! - MM budget (quadratic): exact bilinear `price × quantity` via SCIP MIQCQP
 //! - Market groups: `Σ p_m ≤ NANOS_PER_DOLLAR` per group
 
@@ -181,13 +180,7 @@ impl DualAnalysis {
     }
 }
 
-// Re-export from shared coefficients module
-pub use crate::coefficients::{precompute_coefficients, order_sign, OrderCoefficients};
-
-/// Legacy alias for `order_sign`.
-pub fn milp_sign(order: &Order) -> f64 {
-    order_sign(order)
-}
+use crate::lp_solver::order_sign;
 
 // ============================================================================
 // MILP Solver
@@ -262,12 +255,6 @@ impl MilpSolver {
                     clearing_prices.insert(market, vec![p_yes, p_no]);
                 }
 
-                // Precompute coefficients for fill price extraction
-                let coeffs: Vec<_> = active_orders
-                    .iter()
-                    .map(|o| precompute_coefficients(o))
-                    .collect();
-
                 // Extract fills from solution
                 for (i, order) in active_orders.iter().enumerate() {
                     let z_val = solution.z_values.get(i).copied().unwrap_or(0.0);
@@ -276,15 +263,20 @@ impl MilpSolver {
                     if z_val > 0.5 && q_val > 0.5 {
                         let fill_qty = q_val.round() as u64;
 
-                        // Compute fill_price using alpha/beta formula:
-                        // eff_price = |sum_m alpha_m * p_m + beta|
-                        let eff_price: f64 = coeffs[i]
-                            .alpha
-                            .iter()
-                            .map(|(m, &a)| a * solution.p_values.get(m).copied().unwrap_or(0.0))
-                            .sum::<f64>()
-                            + coeffs[i].beta;
-                        let fill_price = eff_price.abs().round().max(0.0) as Nanos;
+                        // Fill price from clearing price for single-market binary orders
+                        let market = order.markets[0];
+                        let p_yes = solution
+                            .p_values
+                            .get(&market)
+                            .copied()
+                            .unwrap_or(0.0)
+                            .round()
+                            .max(0.0) as Nanos;
+                        let fill_price = if order.payoffs[0] != 0 {
+                            p_yes
+                        } else {
+                            NANOS_PER_DOLLAR.saturating_sub(p_yes)
+                        };
 
                         let fill = Fill::new(order.id, fill_qty, fill_price);
                         result.add_fill(fill, order);
@@ -412,11 +404,10 @@ impl MilpSolver {
         let n = active_orders.len();
         let nanos_f = NANOS_PER_DOLLAR as f64;
 
-        // Precompute coefficients for all orders
-        let coeffs: Vec<_> = active_orders
-            .iter()
-            .map(|o| precompute_coefficients(o))
-            .collect();
+        debug_assert!(
+            active_orders.iter().all(|o| o.num_markets == 1),
+            "MILP solver only supports single-market binary orders"
+        );
 
         // Build order_id -> index map for MM constraint lookups
         let order_id_to_idx: HashMap<u64, usize> = active_orders
@@ -486,7 +477,7 @@ impl MilpSolver {
         let q_vars: Vec<Variable> = (0..n)
             .map(|i| {
                 let order = active_orders[i];
-                let sign = milp_sign(order);
+                let sign = order_sign(order);
                 let obj = sign * order.limit_price as f64;
                 model.add(var().cont(0.0..=(order.max_fill as f64)).obj(obj))
             })
@@ -547,38 +538,29 @@ impl MilpSolver {
         }
 
         // ================================================================
-        // UCP constraints (Big-M) using alpha/beta formulation
+        // UCP constraints (Big-M) for single-market binary orders
         // ================================================================
         //
-        // Effective price: eff_price_i = Σ_m alpha_i_m * p_m + beta_i
+        // For single-market order on market m:
+        //   alpha = payoffs[0] - payoffs[1]  (YES coefficient - NO coefficient)
+        //   beta  = payoffs[1] * NANOS       (NO coefficient * price scale)
+        //   eff_price = alpha * p_m + beta
         //
-        // For buyers (sign=+1): eff_price <= L when z=1
-        //   => Σ_m alpha_m * p_m + M * z_i <= L + M - beta
-        //
-        // For sellers (sign=-1): eff_price >= L when z=1
-        //   => -Σ_m alpha_m * p_m + M * z_i <= -L + M + beta
+        // Big-M relaxation: alpha*p + M*z <= sign*L + M - beta
 
-        let max_markets = active_orders
-            .iter()
-            .map(|o| o.num_markets as usize)
-            .max()
-            .unwrap_or(1);
-        let big_m = nanos_f * max_markets as f64;
+        let big_m = nanos_f;
 
         for (i, order) in active_orders.iter().enumerate() {
-            let sign = milp_sign(order);
+            let sign = order_sign(order);
             let limit = order.limit_price as f64;
-            let beta = coeffs[i].beta;
+            let alpha = (order.payoffs[0] - order.payoffs[1]) as f64;
+            let beta = order.payoffs[1] as f64 * nanos_f;
 
-            // Unified UCP constraint for both buyers and sellers:
-            //   Buyer (sign=+1): eff_price <= L when z=1
-            //   Seller (sign=-1): eff_price <= -L when z=1 (i.e., |eff_price| >= L)
-            //
-            // Big-M relaxation: alpha*p + M*z <= sign*L + M - beta
+            let market = order.markets[0];
             let mut c = cons().coef(&z_vars[i], big_m);
-            for (&market, &a) in &coeffs[i].alpha {
-                if let Some(p_var) = p_vars.get(&market) {
-                    c = c.coef(p_var, a);
+            if let Some(p_var) = p_vars.get(&market) {
+                if alpha.abs() > 1e-12 {
+                    c = c.coef(p_var, alpha);
                 }
             }
 
@@ -603,17 +585,15 @@ impl MilpSolver {
             let mut yes_cons = cons();
             let mut no_cons = cons();
 
-            for i in 0..active_orders.len() {
-                // Raw c_yes/c_no already encode direction correctly:
-                // Buy YES (payoffs=[+1,0]): c_YES=+1 (demands YES shares)
-                // Sell YES (payoffs=[-1,0]): c_YES=-1 (supplies YES shares)
-                if let Some(&c_y) = coeffs[i].c_yes.get(&market) {
+            for (i, order) in active_orders.iter().enumerate() {
+                // Direct payoff lookup for single-market binary orders
+                if order.markets[0] == market {
+                    let c_y = order.payoffs[0] as f64;
                     if c_y.abs() > 1e-12 {
                         yes_cons = yes_cons.coef(&q_vars[i], c_y);
                     }
-                }
 
-                if let Some(&c_n) = coeffs[i].c_no.get(&market) {
+                    let c_n = order.payoffs[1] as f64;
                     if c_n.abs() > 1e-12 {
                         no_cons = no_cons.coef(&q_vars[i], c_n);
                     }
@@ -1087,230 +1067,18 @@ mod tests {
     // =====================================================================
 
     #[test]
-    fn test_milp_coefficients() {
-        let mut problem = Problem::new("coeff_test");
-        let market_a = problem.markets.add_binary("A");
-        let market_b = problem.markets.add_binary("B");
-
-        // YES buyer: payoffs = [+1, 0] on single market
-        let yes_buy = simple_yes_buy(&problem.markets, 1, market_a, 600_000_000, 100);
-        let coeffs = precompute_coefficients(&yes_buy);
-        assert!(
-            (coeffs.c_yes[&market_a] - 1.0).abs() < 1e-9,
-            "YES buyer c_YES should be 1.0"
-        );
-        assert!(
-            coeffs.c_no[&market_a].abs() < 1e-9,
-            "YES buyer c_NO should be 0.0"
-        );
-        assert!(
-            (coeffs.alpha[&market_a] - 1.0).abs() < 1e-9,
-            "YES buyer alpha should be 1.0"
-        );
-        assert!(coeffs.beta.abs() < 1e-9, "YES buyer beta should be 0.0");
-
-        // NO buyer: payoffs = [0, +1] on single market
-        let no_buy =
-            matching_engine::simple_no_buy(&problem.markets, 2, market_a, 500_000_000, 100);
-        let coeffs = precompute_coefficients(&no_buy);
-        assert!(
-            coeffs.c_yes[&market_a].abs() < 1e-9,
-            "NO buyer c_YES should be 0.0"
-        );
-        assert!(
-            (coeffs.c_no[&market_a] - 1.0).abs() < 1e-9,
-            "NO buyer c_NO should be 1.0"
-        );
-        assert!(
-            (coeffs.alpha[&market_a] - (-1.0)).abs() < 1e-9,
-            "NO buyer alpha should be -1.0"
-        );
-        assert!(
-            (coeffs.beta - NANOS_PER_DOLLAR as f64).abs() < 1e-3,
-            "NO buyer beta should be NANOS"
-        );
-
-        // Bundle YES-YES: payoffs = [+1, 0, 0, 0] on two markets
-        let bundle = matching_engine::bundle_yes(
-            &problem.markets,
-            3,
-            &[market_a, market_b],
-            400_000_000,
-            50,
-        );
-        let coeffs = precompute_coefficients(&bundle);
-        // For all-YES bundle: c_YES_A = 0.5 (payoff 1 in state 0 out of 2 YES states),
-        // c_NO_A = 0.0, c_YES_B = 0.5, c_NO_B = 0.0
-        assert!(
-            (coeffs.c_yes[&market_a] - 0.5).abs() < 1e-9,
-            "bundle c_YES_A should be 0.5, got {}",
-            coeffs.c_yes[&market_a]
-        );
-        assert!(
-            coeffs.c_no[&market_a].abs() < 1e-9,
-            "bundle c_NO_A should be 0.0"
-        );
-        assert!(
-            (coeffs.c_yes[&market_b] - 0.5).abs() < 1e-9,
-            "bundle c_YES_B should be 0.5, got {}",
-            coeffs.c_yes[&market_b]
-        );
-
-        // Spread: payoffs = [0, -1, +1, 0] on two markets
-        let sp = matching_engine::spread(&problem.markets, 4, market_a, market_b, 200_000_000, 100);
-        let coeffs = precompute_coefficients(&sp);
-        // c_YES_A = avg(payoffs where A=YES) = avg(state0=0, state2=+1) = 0.5
-        // c_NO_A  = avg(payoffs where A=NO)  = avg(state1=-1, state3=0) = -0.5
-        // alpha_A = 0.5 - (-0.5) = 1.0
-        assert!(
-            (coeffs.c_yes[&market_a] - 0.5).abs() < 1e-9,
-            "spread c_YES_A should be 0.5, got {}",
-            coeffs.c_yes[&market_a]
-        );
-        assert!(
-            (coeffs.c_no[&market_a] - (-0.5)).abs() < 1e-9,
-            "spread c_NO_A should be -0.5, got {}",
-            coeffs.c_no[&market_a]
-        );
-        assert!(
-            (coeffs.alpha[&market_a] - 1.0).abs() < 1e-9,
-            "spread alpha_A should be 1.0, got {}",
-            coeffs.alpha[&market_a]
-        );
-    }
-
-    #[test]
-    fn test_milp_sign() {
+    fn test_order_sign() {
         let mut problem = Problem::new("sign_test");
         let market_a = problem.markets.add_binary("A");
-        let market_b = problem.markets.add_binary("B");
 
         // YES buyer: payoffs = [+1, 0] -> no negative -> buyer
         let yes_buy = simple_yes_buy(&problem.markets, 1, market_a, 600_000_000, 100);
-        assert!(milp_sign(&yes_buy) > 0.0, "YES buyer should be +1");
+        assert!(order_sign(&yes_buy) > 0.0, "YES buyer should be +1");
 
         // YES seller: payoffs = [-1, 0] -> has negative -> seller
         let yes_sell =
             matching_engine::outcome_sell(&problem.markets, 2, market_a, 0, 600_000_000, 100);
-        assert!(milp_sign(&yes_sell) < 0.0, "YES seller should be -1");
-
-        // Spread: payoffs = [0, -1, +1, 0] -> has negative -> seller
-        let sp = matching_engine::spread(&problem.markets, 3, market_a, market_b, 200_000_000, 100);
-        assert!(milp_sign(&sp) < 0.0, "spread has negative payoff -> seller");
-
-        // Bundle YES: payoffs = [+1, 0, 0, 0] -> no negative -> buyer
-        let bundle = matching_engine::bundle_yes(
-            &problem.markets,
-            4,
-            &[market_a, market_b],
-            400_000_000,
-            50,
-        );
-        assert!(milp_sign(&bundle) > 0.0, "bundle YES should be buyer");
-    }
-
-    #[test]
-    fn test_milp_bundle_matching() {
-        // Two-market bundle buyer + individual sellers -> positive welfare
-        let mut problem = Problem::new("bundle_test");
-        let market_a = problem.markets.add_binary("A");
-        let market_b = problem.markets.add_binary("B");
-
-        // Bundle buyer: wants all YES at 40c (limit=400M nanos)
-        problem.orders.push(matching_engine::bundle_yes(
-            &problem.markets,
-            1,
-            &[market_a, market_b],
-            400_000_000,
-            100,
-        ));
-
-        // Individual YES sellers on each market
-        // Seller A: sell YES A at 15c
-        problem.orders.push(matching_engine::outcome_sell(
-            &problem.markets,
-            10,
-            market_a,
-            0,
-            150_000_000,
-            200,
-        ));
-        // Seller B: sell YES B at 15c
-        problem.orders.push(matching_engine::outcome_sell(
-            &problem.markets,
-            11,
-            market_b,
-            0,
-            150_000_000,
-            200,
-        ));
-
-        let solver = MilpSolver::new();
-        let result = solver.solve_with_status(&problem);
-
-        assert!(
-            matches!(result.status, SolveStatus::Optimal),
-            "should find optimal solution, got {:?}",
-            result.status
-        );
-        assert!(result.result.orders_filled > 0, "should fill some orders");
-        assert!(
-            result.result.total_welfare > 0,
-            "should produce positive welfare, got {}",
-            result.result.total_welfare
-        );
-    }
-
-    #[test]
-    fn test_milp_spread_matching() {
-        // Spread buyer + counterparties -> fills
-        let mut problem = Problem::new("spread_test");
-        let market_a = problem.markets.add_binary("A");
-        let market_b = problem.markets.add_binary("B");
-
-        // Spread: long A YES, short B YES, at 10c
-        problem.orders.push(matching_engine::spread(
-            &problem.markets,
-            1,
-            market_a,
-            market_b,
-            100_000_000,
-            100,
-        ));
-
-        // Counterparty: sell A YES at 40c
-        problem.orders.push(matching_engine::outcome_sell(
-            &problem.markets,
-            10,
-            market_a,
-            0,
-            400_000_000,
-            200,
-        ));
-
-        // Counterparty: buy B YES at 60c
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            11,
-            market_b,
-            600_000_000,
-            200,
-        ));
-
-        let solver = MilpSolver::new();
-        let result = solver.solve_with_status(&problem);
-
-        assert!(
-            matches!(result.status, SolveStatus::Optimal),
-            "should find optimal solution, got {:?}",
-            result.status
-        );
-        // The spread + counterparties should produce some welfare
-        assert!(
-            result.result.total_welfare >= 0,
-            "should produce non-negative welfare, got {}",
-            result.result.total_welfare
-        );
+        assert!(order_sign(&yes_sell) < 0.0, "YES seller should be -1");
     }
 
     #[test]

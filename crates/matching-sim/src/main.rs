@@ -13,7 +13,7 @@
 //! matching-sim --preset small --solver all
 //!
 //! # Custom configuration
-//! matching-sim --markets 50 --orders 5000 --bundles 0.2
+//! matching-sim --markets 50 --orders 5000
 //! ```
 
 use std::collections::{HashMap, HashSet};
@@ -45,6 +45,11 @@ fn main() {
     let export_json = get_arg_value(&args, "--export-json");
     let export_comparison = get_arg_value(&args, "--export-comparison");
     let show_charts = args.iter().any(|a| a == "--show-charts");
+    let mm_budget_scale: Option<f64> = get_arg_value(&args, "--mm-budget-scale")
+        .and_then(|v| v.parse().ok());
+
+    #[cfg(feature = "conic")]
+    let conic_config = build_conic_config(&args);
 
     println!("========================================");
     println!("       MATCHING SIMULATION              ");
@@ -53,12 +58,21 @@ fn main() {
     println!("Configuration:");
     println!("  Markets: {}", config.num_markets);
     println!("  Orders: {}", config.num_orders);
-    println!("  Bundles: {:.0}%", config.bundle_fraction * 100.0);
     println!("  MMs: {}", config.num_mms);
     println!("  Solver: {:?}", solver_choice);
     println!("  Batches: {}", num_batches);
     if let Some(timeout) = milp_timeout {
         println!("  MILP timeout: {}s", timeout);
+    }
+    #[cfg(feature = "conic")]
+    if matches!(
+        solver_choice,
+        SolverChoice::Conic | SolverChoice::DecomposedConic
+    ) {
+        println!("  Mode: {:?}", conic_config.mode);
+        if conic_config.temperature > 0.0 {
+            println!("  Temperature: {}", conic_config.temperature);
+        }
     }
     println!();
 
@@ -77,6 +91,8 @@ fn main() {
             show_charts,
             verbose,
             &solver_choice,
+            mm_budget_scale,
+            &args,
         );
     } else {
         // Standard comparison run
@@ -88,6 +104,8 @@ fn main() {
             num_batches,
             verbose,
             export_comparison.as_deref(),
+            mm_budget_scale,
+            &args,
         );
         print_results(&results, &solver_choice);
         if let Some(ref data) = gap_data {
@@ -114,8 +132,6 @@ fn print_help() {
     println!("Custom configuration:");
     println!("  --markets <N>        Number of markets");
     println!("  --orders <N>         Number of orders");
-    println!("  --bundles <F>        Bundle fraction (0.0-1.0)");
-    println!("  --spreads <F>        Spread fraction (0.0-1.0)");
     println!("  --scarcity <F>       Liquidity scarcity (0.0-1.0, lower=scarcer)");
     println!("  --mms <N>            Number of market makers");
     println!();
@@ -131,6 +147,11 @@ fn print_help() {
     println!("                         exact (default) - bilinear MIQCQP");
     println!("                         mccormick       - linear relaxation");
     println!("                         ignore          - skip MM constraints");
+    println!("  --mode <M>           Conic solver objective mode:");
+    println!("                         linear       - LP welfare (delegates to LpSolver)");
+    println!("                         fisher       - B_k ln(U_k), no cash variable");
+    println!("                         quasi-fisher - B_k ln(U_k+s_k)-s_k (default)");
+    println!("  --temperature <F>    LMSR smoothing (default: 0.0, >0 not yet implemented)");
     println!();
     println!("Other options:");
     println!("  --batches <N>        Number of batches to run (default: 1)");
@@ -151,7 +172,6 @@ fn print_help() {
 struct OrderStats {
     total_orders: usize,
     single_market_orders: usize,
-    bundle_orders: usize,
     mm_order_ids: HashSet<u64>,
     user_order_count: usize,
     mm_order_count: usize,
@@ -165,17 +185,6 @@ impl OrderStats {
             .flat_map(|c| c.order_ids.iter().copied())
             .collect();
 
-        let mut single_market = 0;
-        let mut bundle = 0;
-
-        for order in &problem.orders {
-            if order.num_markets > 1 {
-                bundle += 1;
-            } else {
-                single_market += 1;
-            }
-        }
-
         let mm_count = problem
             .orders
             .iter()
@@ -184,8 +193,7 @@ impl OrderStats {
 
         Self {
             total_orders: problem.orders.len(),
-            single_market_orders: single_market,
-            bundle_orders: bundle,
+            single_market_orders: problem.orders.len(),
             mm_order_ids,
             user_order_count: problem.orders.len() - mm_count,
             mm_order_count: mm_count,
@@ -211,11 +219,6 @@ struct FillStats {
     mm_filled: usize,
     mm_welfare: i64,
     mm_volume: u64,
-
-    // By market type
-    bundle_filled: usize,
-    bundle_welfare: i64,
-    bundle_volume: u64,
 
     // Markets with activity
     markets_with_volume: usize,
@@ -243,10 +246,6 @@ impl FillStats {
         let mut mm_welfare: i64 = 0;
         let mut mm_volume: u64 = 0;
 
-        let mut bundle_filled = 0;
-        let mut bundle_welfare: i64 = 0;
-        let mut bundle_volume: u64 = 0;
-
         for order in &problem.orders {
             let fill_qty = fill_map.get(&order.id).copied().unwrap_or(0);
             let is_mm = order_stats.is_mm_order(order.id);
@@ -273,11 +272,6 @@ impl FillStats {
                         user_volume += fill_qty;
                     }
 
-                    if order.num_markets > 1 {
-                        bundle_filled += 1;
-                        bundle_welfare += welfare;
-                        bundle_volume += fill_qty;
-                    }
                 }
             }
         }
@@ -303,9 +297,6 @@ impl FillStats {
             mm_filled,
             mm_welfare,
             mm_volume,
-            bundle_filled,
-            bundle_welfare,
-            bundle_volume,
             markets_with_volume,
         }
     }
@@ -450,6 +441,7 @@ fn print_market_details(problem: &Problem, result: &PipelineResult, sample_marke
     println!("{table}");
 }
 
+#[allow(unused_variables)]
 fn run_detailed_pipeline(
     base_config: &ScenarioConfig,
     num_batches: usize,
@@ -457,6 +449,8 @@ fn run_detailed_pipeline(
     show_charts: bool,
     verbose: bool,
     solver_choice: &SolverChoice,
+    mm_budget_scale: Option<f64>,
+    args: &[String],
 ) {
     for batch in 0..num_batches {
         let config = ScenarioConfig {
@@ -464,7 +458,13 @@ fn run_detailed_pipeline(
             ..base_config.clone()
         };
 
-        let problem = generate_scenario(config.clone());
+        let mut problem = generate_scenario(config.clone());
+
+        if let Some(scale) = mm_budget_scale {
+            for mm in &mut problem.mm_constraints {
+                mm.max_capital = (mm.max_capital as f64 * scale) as u64;
+            }
+        }
         let order_stats = OrderStats::compute(&problem);
 
         if verbose {
@@ -499,7 +499,7 @@ fn run_detailed_pipeline(
             }
             #[cfg(feature = "conic")]
             SolverChoice::Conic => {
-                let solver = matching_solver::ConicSolver::new();
+                let solver = matching_solver::ConicSolver::with_config(build_conic_config(args));
                 solver.solve(&problem)
             }
             #[cfg(feature = "lp")]
@@ -514,7 +514,9 @@ fn run_detailed_pipeline(
             }
             #[cfg(feature = "conic")]
             SolverChoice::DecomposedConic => {
-                let solver = matching_solver::DecomposedSolver::new(matching_solver::ConicSolver::new());
+                let solver = matching_solver::DecomposedSolver::new(
+                    matching_solver::ConicSolver::with_config(build_conic_config(args)),
+                );
                 solver.solve(&problem)
             }
             _ => unreachable!("only LP/EG/Conic/Decomposed reach run_detailed_pipeline"),
@@ -806,7 +808,6 @@ fn print_problem_summary(problem: &Problem, stats: &OrderStats) {
     println!("    User orders: {}", stats.user_order_count);
     println!("    MM orders: {}", stats.mm_order_count);
     println!("    Single-market: {}", stats.single_market_orders);
-    println!("    Bundles: {}", stats.bundle_orders);
     println!("  MM constraints: {}", problem.mm_constraints.len());
     println!();
 }
@@ -865,18 +866,6 @@ fn print_fill_stats(stats: &FillStats, order_stats: &OrderStats, num_markets: us
         )),
         Cell::new(format_qty(stats.mm_volume)),
         Cell::new(format_welfare(stats.mm_welfare)).fg(Color::Yellow),
-    ]);
-
-    table.add_row(vec![
-        Cell::new("Bundle"),
-        Cell::new(format!(
-            "{}/{} ({:.1}%)",
-            stats.bundle_filled,
-            order_stats.bundle_orders,
-            pct(stats.bundle_filled, order_stats.bundle_orders)
-        )),
-        Cell::new(format_qty(stats.bundle_volume)),
-        Cell::new(format_welfare(stats.bundle_welfare)).fg(Color::Cyan),
     ]);
 
     println!("{table}");
@@ -959,6 +948,21 @@ fn parse_scenario_config(args: &[String]) -> ScenarioConfig {
         if let Some(seed) = get_arg_value(args, "--seed") {
             config.seed = seed.parse().unwrap_or(42);
         }
+        if let Some(v) = get_arg_value(args, "--mms") {
+            config.num_mms = v.parse().unwrap_or(config.num_mms);
+        }
+        if let Some(v) = get_arg_value(args, "--mm-capacity-mult") {
+            config.mm_capacity_multiplier = v.parse().unwrap_or(10);
+        }
+        if let Some(v) = get_arg_value(args, "--markets") {
+            config.num_markets = v.parse().unwrap_or(config.num_markets);
+        }
+        if let Some(v) = get_arg_value(args, "--orders") {
+            config.num_orders = v.parse().unwrap_or(config.num_orders);
+        }
+        if let Some(v) = get_arg_value(args, "--scarcity") {
+            config.liquidity_scarcity = v.parse().unwrap_or(config.liquidity_scarcity);
+        }
 
         return config;
     }
@@ -974,17 +978,14 @@ fn parse_scenario_config(args: &[String]) -> ScenarioConfig {
     if let Some(v) = get_arg_value(args, "--orders") {
         config.num_orders = v.parse().unwrap_or(1000);
     }
-    if let Some(v) = get_arg_value(args, "--bundles") {
-        config.bundle_fraction = v.parse().unwrap_or(0.15);
-    }
-    if let Some(v) = get_arg_value(args, "--spreads") {
-        config.spread_fraction = v.parse().unwrap_or(0.05);
-    }
     if let Some(v) = get_arg_value(args, "--scarcity") {
         config.liquidity_scarcity = v.parse().unwrap_or(0.5);
     }
     if let Some(v) = get_arg_value(args, "--mms") {
         config.num_mms = v.parse().unwrap_or(2);
+    }
+    if let Some(v) = get_arg_value(args, "--mm-capacity-mult") {
+        config.mm_capacity_multiplier = v.parse().unwrap_or(10);
     }
 
     config
@@ -1039,6 +1040,32 @@ fn parse_mm_mode(args: &[String]) -> MmBudgetMode {
         Some("mccormick") => MmBudgetMode::McCormick,
         Some("ignore") => MmBudgetMode::Ignore,
         _ => MmBudgetMode::Exact, // Default: exact bilinear via SCIP MIQCQP
+    }
+}
+
+#[cfg(feature = "conic")]
+fn parse_objective_mode(args: &[String]) -> matching_solver::ObjectiveMode {
+    match get_arg_value(args, "--mode").as_deref() {
+        Some("linear") => matching_solver::ObjectiveMode::Linear,
+        Some("fisher") => matching_solver::ObjectiveMode::Fisher,
+        Some("quasi-fisher") => matching_solver::ObjectiveMode::QuasiFisher,
+        _ => matching_solver::ObjectiveMode::QuasiFisher,
+    }
+}
+
+#[cfg(feature = "conic")]
+fn parse_temperature(args: &[String]) -> f64 {
+    get_arg_value(args, "--temperature")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.0)
+}
+
+#[cfg(feature = "conic")]
+fn build_conic_config(args: &[String]) -> matching_solver::ConicConfig {
+    matching_solver::ConicConfig {
+        mode: parse_objective_mode(args),
+        temperature: parse_temperature(args),
+        ..Default::default()
     }
 }
 
@@ -1169,11 +1196,13 @@ fn solver_display_name(choice: &SolverChoice, milp_timeout: Option<f64>) -> Stri
 }
 
 /// Run a single solver choice on a problem and return (MatchingResult, witness for verification).
+#[allow(unused_variables)]
 fn run_solver_with_witness(
     choice: &SolverChoice,
     problem: &Problem,
     milp_timeout: Option<f64>,
     mm_mode: MmBudgetMode,
+    args: &[String],
 ) -> (matching_solver::MatchingResult, BlockWitness) {
     match choice {
         SolverChoice::Milp => {
@@ -1198,7 +1227,7 @@ fn run_solver_with_witness(
         }
         #[cfg(feature = "conic")]
         SolverChoice::Conic => {
-            let solver = matching_solver::ConicSolver::new();
+            let solver = matching_solver::ConicSolver::with_config(build_conic_config(args));
             let pipeline_result = solver.solve(problem);
             let witness = witness_from_pipeline(problem, &pipeline_result);
             (pipeline_result.result, witness)
@@ -1219,7 +1248,9 @@ fn run_solver_with_witness(
         }
         #[cfg(feature = "conic")]
         SolverChoice::DecomposedConic => {
-            let solver = matching_solver::DecomposedSolver::new(matching_solver::ConicSolver::new());
+            let solver = matching_solver::DecomposedSolver::new(
+                matching_solver::ConicSolver::with_config(build_conic_config(args)),
+            );
             let pipeline_result = solver.solve(problem);
             let witness = witness_from_pipeline(problem, &pipeline_result);
             (pipeline_result.result, witness)
@@ -1283,6 +1314,7 @@ fn witness_from_milp(
     }
 }
 
+#[allow(unused_variables)]
 fn run_simulation(
     base_config: &ScenarioConfig,
     solver_choice: &SolverChoice,
@@ -1291,6 +1323,8 @@ fn run_simulation(
     num_batches: usize,
     verbose: bool,
     export_comparison: Option<&str>,
+    mm_budget_scale: Option<f64>,
+    args: &[String],
 ) -> (Vec<SolverResults>, Option<GapAnalysisData>) {
     let choices = expand_solver_choices(solver_choice);
     let collect_gap = *solver_choice == SolverChoice::All && verbose;
@@ -1311,7 +1345,13 @@ fn run_simulation(
             ..base_config.clone()
         };
 
-        let problem = generate_scenario(config);
+        let mut problem = generate_scenario(config);
+
+        if let Some(scale) = mm_budget_scale {
+            for mm in &mut problem.mm_constraints {
+                mm.max_capital = (mm.max_capital as f64 * scale) as u64;
+            }
+        }
 
         if verbose {
             println!(
@@ -1330,7 +1370,7 @@ fn run_simulation(
             let start = Instant::now();
 
             let (matching_result, witness) =
-                run_solver_with_witness(choice, &problem, milp_timeout, mm_mode);
+                run_solver_with_witness(choice, &problem, milp_timeout, mm_mode, args);
 
             let elapsed = start.elapsed().as_secs_f64();
 
@@ -1627,10 +1667,9 @@ fn print_solver_diff(problem: &Problem, best: &SolverDetail, other: &SolverDetai
     println!();
 
     // ── Welfare Breakdown ──
-    let breakdown = |fills: &[Fill]| -> (i64, i64, i64) {
+    let breakdown = |fills: &[Fill]| -> (i64, i64) {
         let mut user_w: i64 = 0;
         let mut mm_w: i64 = 0;
-        let mut bundle_w: i64 = 0;
         for f in fills {
             if let Some(order) = order_map.get(&f.order_id) {
                 let w = f.welfare(order);
@@ -1639,16 +1678,13 @@ fn print_solver_diff(problem: &Problem, best: &SolverDetail, other: &SolverDetai
                 } else {
                     user_w += w;
                 }
-                if order.num_markets > 1 {
-                    bundle_w += w;
-                }
             }
         }
-        (user_w, mm_w, bundle_w)
+        (user_w, mm_w)
     };
 
-    let (best_user, best_mm, best_bundle) = breakdown(&best_result.fills);
-    let (other_user, other_mm, other_bundle) = breakdown(&other_result.fills);
+    let (best_user, best_mm) = breakdown(&best_result.fills);
+    let (other_user, other_mm) = breakdown(&other_result.fills);
 
     println!("Welfare Breakdown:");
     println!(
@@ -1669,17 +1705,10 @@ fn print_solver_diff(problem: &Problem, best: &SolverDetail, other: &SolverDetai
         format_welfare(other_mm),
         format_welfare(best_mm - other_mm)
     );
-    println!(
-        "  {:<18} {:>10} {:>10} {:>10}",
-        "Bundles",
-        format_welfare(best_bundle),
-        format_welfare(other_bundle),
-        format_welfare(best_bundle - other_bundle)
-    );
     println!();
 
     // ── Per-Market Comparison ──
-    // Build per-market welfare maps (split bundle welfare evenly across markets)
+    // Build per-market welfare maps
     let market_welfare = |fills: &[Fill]| -> HashMap<MarketId, i64> {
         let mut map: HashMap<MarketId, i64> = HashMap::new();
         for f in fills {
@@ -1840,7 +1869,7 @@ fn print_solver_diff(problem: &Problem, best: &SolverDetail, other: &SolverDetai
                         .unwrap_or(&"?")
                         .to_string()
                 } else {
-                    format!("bundle({})", order.num_markets)
+                    format!("multi({})", order.num_markets)
                 };
                 let order_type = if order.is_seller() { "sell" } else { "buy" };
                 (f, order, w, market_name, order_type)
@@ -1991,7 +2020,6 @@ fn build_comparison_json(
                     let order = order_map.get(&f.order_id);
                     let welfare = order.map(|o| f.welfare(o)).unwrap_or(0);
                     let is_mm = mm_order_ids.contains(&f.order_id);
-                    let is_bundle = order.map(|o| o.num_markets > 1).unwrap_or(false);
                     let markets: Vec<u32> = order
                         .map(|o| {
                             (0..o.num_markets as usize)
@@ -2008,7 +2036,6 @@ fn build_comparison_json(
                         "welfare": welfare,
                         "welfare_dollars": welfare as f64 / 1e9,
                         "is_mm": is_mm,
-                        "is_bundle": is_bundle,
                         "markets": markets,
                         "limit_price": order.map(|o| o.limit_price).unwrap_or(0),
                         "limit_price_cents": order.map(|o| o.limit_price as f64 / 1e7).unwrap_or(0.0),
@@ -2074,7 +2101,6 @@ fn build_comparison_json(
                         "id": o.id,
                         "limit_price_cents": o.limit_price as f64 / 1e7,
                         "max_fill": o.max_fill,
-                        "is_bundle": o.num_markets > 1,
                         "is_mm": mm_order_ids.contains(&o.id),
                         "is_seller": o.is_seller(),
                         "markets": (0..o.num_markets as usize).map(|i| o.markets[i].0).collect::<Vec<_>>(),
@@ -2095,20 +2121,6 @@ fn build_comparison_json(
                 .filter(|f| mm_order_ids.contains(&f.order_id))
                 .filter_map(|f| order_map.get(&f.order_id).map(|o| f.welfare(o)))
                 .sum();
-            let bundle_welfare: i64 = result
-                .fills
-                .iter()
-                .filter_map(|f| {
-                    order_map.get(&f.order_id).and_then(|o| {
-                        if o.num_markets > 1 {
-                            Some(f.welfare(o))
-                        } else {
-                            None
-                        }
-                    })
-                })
-                .sum();
-
             serde_json::json!({
                 "solver": name,
                 "total_welfare": result.total_welfare,
@@ -2119,7 +2131,6 @@ fn build_comparison_json(
                 "welfare_breakdown": {
                     "user_dollars": user_welfare as f64 / 1e9,
                     "mm_dollars": mm_welfare as f64 / 1e9,
-                    "bundle_dollars": bundle_welfare as f64 / 1e9,
                 },
                 "fills": fills_json,
                 "clearing_prices": prices_json,

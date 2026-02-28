@@ -29,7 +29,6 @@ All solvers return a `PipelineResult` which contains `MatchingResult` (fills + w
 | `eg_solver.rs` | Eisenberg-Gale solver |
 | `conic_solver.rs` | Conic solver via Clarabel |
 | `milp.rs` | SCIP-based MIQCQP solver |
-| `coefficients.rs` | Payoff coefficient computation |
 | `verifier.rs` | Result verification for ZK integration |
 | `viz.rs` | Visualization snapshots and ASCII output |
 
@@ -43,7 +42,7 @@ cargo test -p matching-solver --features lp,conic,milp  # All solvers
 ## Design Principles
 
 - **All integer arithmetic**: Prices/quantities in nanos (1 dollar = 1,000,000,000 nanos)
-- **Payoff vectors**: Orders are payoff vectors over market states, enabling unified handling of simple orders, bundles, spreads, conditionals
+- **Payoff vectors**: Orders are payoff vectors over market states (single-market binary for now)
 - **Welfare maximization**: Objective is `Σ (limit_price - clearing_price) * fill_qty`
 - **Group minting**: LP/EG/Conic handle cross-market arbitrage via gmint variables
 - **Verification**: `verifier.rs` validates solver output for correctness (ZK-ready)

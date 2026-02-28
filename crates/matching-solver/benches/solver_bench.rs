@@ -56,11 +56,11 @@ mod lp {
     }
 
     #[divan::bench]
-    fn bench_lp_medium_high_bundles(bencher: Bencher) {
+    fn bench_lp_medium_hot_markets(bencher: Bencher) {
         static PROBLEM: OnceLock<Problem> = OnceLock::new();
         let problem = PROBLEM.get_or_init(|| {
             let mut config = ScenarioConfig::medium();
-            config.bundle_fraction = 0.30;
+            config.hot_market_fraction = 0.3;
             generate_scenario(config)
         });
 

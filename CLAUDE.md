@@ -19,7 +19,7 @@ sybil/
 ├── crates/                        # Rust workspace
 │   ├── matching-engine/           # Core types: orders, fills, markets, payoff vectors, MM constraints
 │   ├── matching-solver/           # Solver pipeline and algorithms (~7k lines, most dev happens here)
-│   ├── matching-scenarios/        # Test scenario generators (order mixes, bundles, spreads)
+│   ├── matching-scenarios/        # Test scenario generators (order mixes, spreads)
 │   ├── matching-sim/              # CLI simulation tool with presets and solver comparison
 │   ├── matching-sequencer/        # Agent-based multi-batch sequential simulation
 │   ├── sybil-api/                 # HTTP API server for agent trading
@@ -117,7 +117,7 @@ The default pipeline is `Pipeline::with_dual_decomposition()` which uses `DualMa
 
 ### Key Design Decisions
 
-- **Payoff vectors**: Orders are represented as payoff vectors over market states, enabling unified handling of simple orders, bundles, spreads, and conditionals.
+- **Payoff vectors**: Orders are represented as payoff vectors over market states, enabling unified handling of simple orders, spreads, and conditionals.
 - **Welfare maximization**: The objective is `Σ (limit_price - clearing_price) * fill_qty`, not volume.
 - **MILP is optional**: Feature-gated behind `milp` (uses SCIP via `russcip`). Supports group-level minting for optimal negrisk-style arbitrage.
 - **Verification** (`verifier.rs`): Validates solver output for correctness — designed for ZK proof integration.

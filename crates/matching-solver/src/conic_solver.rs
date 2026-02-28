@@ -1,16 +1,15 @@
 //! Conic EG solver using Clarabel.rs interior-point solver.
 //!
-//! Solves the Eisenberg-Gale convex program directly via exponential cones,
-//! replacing the Frank-Wolfe iterative approach in `eg_solver.rs` with a
-//! single interior-point solve.
+//! Supports three objective modes via [`ObjectiveMode`]:
+//!
+//! - **QuasiFisher** (default): `max Σ [B_k ln(V_k + s_k) - s_k] + Σ w_j q_j`
+//!   Cash variable s_k ensures μ_k ≤ 1 (no forced negative-welfare fills).
+//! - **Fisher**: `max Σ B_k ln(V_k) + Σ w_j q_j`
+//!   No cash variable — MMs may get negative-welfare fills.
+//! - **Linear**: Delegates to [`LpSolver`](crate::lp_solver::LpSolver).
 //!
 //! For each MM with positive budget B_k, models `t_k ≤ ln(V_k)` using a
-//! 3-dimensional exponential cone constraint where `V_k = Σ L_i q_i + s_k`
-//! (utility + retained cash). Everything else is linear.
-//!
-//! The full program:
-//!   max  Σ_k [B_k · ln(V_k) − s_k] + Σ_{j∉MM} w_j q_j − minting_cost
-//! which Clarabel solves as a minimization after negation.
+//! 3-dimensional exponential cone constraint. Everything else is linear.
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -20,17 +19,34 @@ use clarabel::solver::*;
 
 use matching_engine::{MarketId, MmSide, Order, Problem, NANOS_PER_DOLLAR};
 
-use crate::coefficients::{order_sign, precompute_coefficients, OrderCoefficients};
 use crate::lp_solver::{
-    build_and_solve_lp, collect_markets, create_position_arbs, extract_result, recompute_welfare,
-    trim_mm_budget_overflows,
+    build_and_solve_lp, collect_markets, create_position_arbs, extract_result, order_sign,
+    recompute_welfare, trim_mm_budget_overflows,
 };
 use crate::result::{PipelineResult, PipelineTimings, PriceDiscoveryResult};
 use crate::MatchingResult;
 
+/// Objective mode for the conic solver.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ObjectiveMode {
+    /// Linear welfare: max Σ w_j q_j. Delegates to LpSolver.
+    Linear,
+    /// Fisher market: max Σ B_k ln(U_k) + Σ_{j∉MM} w_j q_j.
+    /// No cash variable — MMs may get negative-welfare fills.
+    Fisher,
+    /// Quasi-linear Fisher: max Σ [B_k ln(U_k + s_k) - s_k] + Σ_{j∉MM} w_j q_j.
+    /// Cash variable ensures μ_k ≤ 1, no forced negative-welfare fills.
+    #[default]
+    QuasiFisher,
+}
+
 /// Configuration for the conic EG solver.
 #[derive(Clone, Debug)]
 pub struct ConicConfig {
+    /// Objective mode (default: QuasiFisher).
+    pub mode: ObjectiveMode,
+    /// LMSR smoothing temperature (default: 0.0). b>0 not yet implemented.
+    pub temperature: f64,
     /// Maximum solver iterations (default: 200).
     pub max_iter: u32,
     /// Convergence tolerance (default: 1e-8).
@@ -44,6 +60,8 @@ pub struct ConicConfig {
 impl Default for ConicConfig {
     fn default() -> Self {
         Self {
+            mode: ObjectiveMode::default(),
+            temperature: 0.0,
             max_iter: 200,
             tol: 1e-8,
             verbose: false,
@@ -70,6 +88,21 @@ impl ConicSolver {
 
     /// Solve a matching problem using the conic EG formulation.
     pub fn solve(&self, problem: &Problem) -> PipelineResult {
+        assert!(
+            self.config.temperature == 0.0,
+            "LMSR smoothing (temperature > 0) is not yet implemented"
+        );
+
+        // Linear mode: delegate to LpSolver
+        #[cfg(feature = "lp")]
+        if self.config.mode == ObjectiveMode::Linear {
+            return crate::lp_solver::LpSolver::new().solve(problem);
+        }
+        #[cfg(not(feature = "lp"))]
+        if self.config.mode == ObjectiveMode::Linear {
+            panic!("ObjectiveMode::Linear requires the `lp` feature");
+        }
+
         let start = Instant::now();
 
         if problem.orders.is_empty() {
@@ -79,11 +112,10 @@ impl ConicSolver {
         let orders = &problem.orders;
         let n = orders.len();
 
-        // Precompute per-order coefficients (c_yes, c_no, alpha, beta)
-        let coeffs: Vec<OrderCoefficients> = orders
-            .iter()
-            .map(|o| precompute_coefficients(o))
-            .collect();
+        debug_assert!(
+            orders.iter().all(|o| o.num_markets == 1),
+            "Conic solver only supports single-market orders"
+        );
 
         let markets = collect_markets(orders);
         let num_markets = markets.len();
@@ -156,16 +188,11 @@ impl ConicSolver {
             .collect();
 
         // ================================================================
-        // Variable layout
+        // Variable layout (parameterized by mode)
         // ================================================================
         //
-        // x = [q_0..q_{n-1}, s_0..s_{K-1}, t_0..t_{K-1}, mint_0..mint_{M-1}, gmint_0..gmint_{G-1}]
-        //
-        // q_i:     fill quantities          (n vars)
-        // s_k:     retained cash per MM     (K vars, ≥ 0)
-        // t_k:     log-utility epigraph     (K vars, free)
-        // mint_m:  per-market minting       (M vars, free)
-        // gmint_g: group minting            (G vars, ≥ 0)
+        // QuasiFisher: x = [q, s, t, mint, gmint]  (s_k = retained cash)
+        // Fisher:      x = [q, t, mint, gmint]     (no cash variable)
 
         // Filter out MMs with no positive-weight orders (they get no exp cone)
         let cone_mms: Vec<usize> = (0..num_active_mm)
@@ -174,17 +201,20 @@ impl ConicSolver {
         let k = cone_mms.len(); // number of MMs that actually get exp cone constraints
         let m = num_markets;
         let g = num_groups;
-        let d = n + 2 * k + m + g;
+
+        let has_cash = matches!(self.config.mode, ObjectiveMode::QuasiFisher);
+        let num_cash_vars = if has_cash { k } else { 0 };
+        let d = n + num_cash_vars + k + m + g;
 
         // Remap cone_mms index to get budgets/groups for exp-cone MMs only
         let cone_mm_budgets: Vec<f64> = cone_mms.iter().map(|&kk| mm_budgets[kk]).collect();
         let cone_mm_groups: Vec<&Vec<usize>> = cone_mms.iter().map(|&kk| &mm_groups[kk]).collect();
 
         let q_offset = 0;
-        let s_offset = n;
-        let t_offset = n + k;
-        let mint_offset = n + 2 * k;
-        let gmint_offset = n + 2 * k + m;
+        let s_offset = n; // only meaningful if has_cash
+        let t_offset = n + num_cash_vars;
+        let mint_offset = n + num_cash_vars + k;
+        let gmint_offset = n + num_cash_vars + k + m;
 
         // ================================================================
         // Scaling
@@ -234,7 +264,9 @@ impl ConicSolver {
             }
         }
         for kk in 0..k {
-            obj[s_offset + kk] = 1.0; // s_k' in dollars
+            if has_cash {
+                obj[s_offset + kk] = 1.0; // s_k' in dollars
+            }
             obj[t_offset + kk] = -1.0; // t_k' = α_k · t_k, so coeff is -1
         }
         for mm in 0..m {
@@ -253,7 +285,7 @@ impl ConicSolver {
 
         let num_exp_rows = 3 * k;
         let num_balance_rows = 2 * m;
-        let num_bound_rows = 2 * n + k + g;
+        let num_bound_rows = 2 * n + num_cash_vars + g;
         let total_rows = num_exp_rows + num_balance_rows + num_bound_rows;
 
         // Build A in COO (triplet) format
@@ -284,20 +316,24 @@ impl ConicSolver {
             b_vec[row_base + 1] = 1.0;
 
             // Row 2: slack = V_k/NANOS (only positive-weight orders)
+            // QuasiFisher: V_k = Σ L_i q_i + s_k
+            // Fisher:      V_k = Σ L_i q_i
             for &order_idx in cone_mm_groups[kk] {
                 tri_row.push(row_base + 2);
                 tri_col.push(q_offset + order_idx);
                 tri_val.push(-welfare_weights[order_idx] / nanos_f);
             }
-            tri_row.push(row_base + 2);
-            tri_col.push(s_offset + kk);
-            tri_val.push(-1.0); // s_k' already in dollars
+            if has_cash {
+                tri_row.push(row_base + 2);
+                tri_col.push(s_offset + kk);
+                tri_val.push(-1.0); // s_k' already in dollars
+            }
         }
 
         // --- Block 2: Position balance (ZeroCone, 2 rows per market) ---
         //
-        // YES: Σ c_yes_i q_i - mint_m - gmint_g = 0
-        // NO:  Σ c_no_i q_i  - mint_m            = 0
+        // For single-market binary orders:
+        //   c_yes = payoffs[0], c_no = payoffs[1]
 
         let balance_base = num_exp_rows;
         for (m_idx, &market) in markets.iter().enumerate() {
@@ -306,7 +342,8 @@ impl ConicSolver {
 
             // YES balance
             for i in 0..n {
-                if let Some(&c_y) = coeffs[i].c_yes.get(&market) {
+                if orders[i].markets[0] == market {
+                    let c_y = orders[i].payoffs[0] as f64;
                     if c_y.abs() > 1e-12 {
                         tri_row.push(yes_row);
                         tri_col.push(q_offset + i);
@@ -325,7 +362,8 @@ impl ConicSolver {
 
             // NO balance
             for i in 0..n {
-                if let Some(&c_n) = coeffs[i].c_no.get(&market) {
+                if orders[i].markets[0] == market {
+                    let c_n = orders[i].payoffs[1] as f64;
                     if c_n.abs() > 1e-12 {
                         tri_row.push(no_row);
                         tri_col.push(q_offset + i);
@@ -362,12 +400,14 @@ impl ConicSolver {
             bound_row += 1;
         }
 
-        // s_k' ≥ 0
-        for kk in 0..k {
-            tri_row.push(bound_row);
-            tri_col.push(s_offset + kk);
-            tri_val.push(-1.0);
-            bound_row += 1;
+        // s_k' ≥ 0 (QuasiFisher only)
+        if has_cash {
+            for kk in 0..k {
+                tri_row.push(bound_row);
+                tri_col.push(s_offset + kk);
+                tri_val.push(-1.0);
+                bound_row += 1;
+            }
         }
 
         // gmint_g ≥ 0
@@ -455,7 +495,6 @@ impl ConicSolver {
         let projection_obj: Vec<f64> = welfare_weights.clone();
         let Some(final_sol) = build_and_solve_lp(
             &projected_orders,
-            &coeffs,
             &markets,
             &market_to_group,
             num_groups,
@@ -466,7 +505,7 @@ impl ConicSolver {
         };
 
         let order_map: HashMap<u64, &Order> = orders.iter().map(|o| (o.id, o)).collect();
-        let (mut result, prices) = extract_result(&final_sol, orders, &coeffs, &markets);
+        let (mut result, prices) = extract_result(&final_sol, orders, &markets);
 
         // Budget trim: integer rounding breaks KKT budget absorption.
         if !problem.mm_constraints.is_empty() {
@@ -778,6 +817,116 @@ mod tests {
         assert!(
             conic_result.result.orders_filled > 0,
             "conic should produce fills"
+        );
+    }
+
+    #[test]
+    fn test_conic_fisher_mode() {
+        let mut problem = Problem::new("conic_fisher");
+        let market = problem.markets.add_binary("market");
+
+        // YES buyer at 60c
+        problem.orders.push(simple_yes_buy(
+            &problem.markets, 1, market, 600_000_000, 500,
+        ));
+
+        // MM buying NO at 50c, budget $50
+        let mm_order = simple_no_buy(&problem.markets, 200, market, 500_000_000, 1000);
+        problem.orders.push(mm_order);
+
+        let mut mm = MmConstraint::new(MmId(1), 50 * NANOS_PER_DOLLAR);
+        mm.add_order(200, MmSide::BuyNo);
+        problem.mm_constraints.push(mm);
+
+        let solver = ConicSolver::with_config(ConicConfig {
+            mode: ObjectiveMode::Fisher,
+            ..Default::default()
+        });
+        let result = solver.solve(&problem);
+
+        assert!(result.result.orders_filled > 0, "Fisher mode should fill orders");
+        assert!(result.result.total_welfare > 0, "Fisher mode should have positive welfare");
+    }
+
+    #[test]
+    fn test_conic_fisher_vs_quasi_fisher() {
+        // QuasiFisher welfare >= Fisher welfare (cash variable can only help)
+        let mut problem = Problem::new("fisher_vs_quasi");
+        let market = problem.markets.add_binary("market");
+
+        problem.orders.push(simple_yes_buy(
+            &problem.markets, 1, market, 600_000_000, 500,
+        ));
+        problem.orders.push(simple_yes_buy(
+            &problem.markets, 2, market, 550_000_000, 300,
+        ));
+
+        let mm_order = simple_no_buy(&problem.markets, 200, market, 500_000_000, 2000);
+        problem.orders.push(mm_order);
+
+        let mut mm = MmConstraint::new(MmId(1), 100 * NANOS_PER_DOLLAR);
+        mm.add_order(200, MmSide::BuyNo);
+        problem.mm_constraints.push(mm);
+
+        let fisher = ConicSolver::with_config(ConicConfig {
+            mode: ObjectiveMode::Fisher,
+            ..Default::default()
+        });
+        let quasi = ConicSolver::with_config(ConicConfig {
+            mode: ObjectiveMode::QuasiFisher,
+            ..Default::default()
+        });
+
+        let fisher_result = fisher.solve(&problem);
+        let quasi_result = quasi.solve(&problem);
+
+        // QuasiFisher has strictly more degrees of freedom (s_k ≥ 0),
+        // so its welfare should be >= Fisher welfare (within tolerance)
+        assert!(
+            quasi_result.result.total_welfare >= fisher_result.result.total_welfare - NANOS_PER_DOLLAR as i64,
+            "QuasiFisher welfare ({}) should be >= Fisher welfare ({})",
+            quasi_result.result.total_welfare,
+            fisher_result.result.total_welfare,
+        );
+    }
+
+    #[cfg(feature = "lp")]
+    #[test]
+    fn test_conic_linear_delegates_to_lp() {
+        use crate::lp_solver::LpSolver;
+
+        let mut problem = Problem::new("conic_linear");
+        let market = problem.markets.add_binary("market");
+
+        problem.orders.push(outcome_sell(
+            &problem.markets, 100, market, 0, 500_000_000, 1000,
+        ));
+        problem.orders.push(outcome_sell(
+            &problem.markets, 101, market, 1, 500_000_000, 1000,
+        ));
+        problem.orders.push(simple_yes_buy(
+            &problem.markets, 1, market, 600_000_000, 100,
+        ));
+        problem.orders.push(simple_no_buy(
+            &problem.markets, 2, market, 400_000_000, 50,
+        ));
+
+        let lp_result = LpSolver::new().solve(&problem);
+        let linear_result = ConicSolver::with_config(ConicConfig {
+            mode: ObjectiveMode::Linear,
+            ..Default::default()
+        }).solve(&problem);
+
+        // Linear mode delegates to LP, so results should be identical
+        assert_eq!(
+            lp_result.result.total_welfare,
+            linear_result.result.total_welfare,
+            "Linear mode should produce identical welfare to LP"
+        );
+        assert_eq!(
+            lp_result.result.orders_filled,
+            linear_result.result.orders_filled,
+            "Linear mode should produce identical fills to LP"
         );
     }
 }

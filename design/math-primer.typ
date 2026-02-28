@@ -13,14 +13,14 @@
   #v(0.3em)
   #text(size: 11pt)[For "Prediction Markets Are Fisher Markets"]
   #v(0.3em)
-  #text(size: 9pt, style: "italic")[Five ideas that make the paper work]
+  #text(size: 9pt, style: "italic")[Five ideas + the full proof of Theorem 5]
 ]
 
 #v(1em)
 
 #block(inset: (x: 2em))[
   #text(weight: "bold")[What this document covers.]
-  The paper uses five mathematical ideas. Each builds on the previous. If you understand these five things, you understand the entire paper — everything else is either an application of these ideas or context for why they matter.
+  The paper uses five mathematical ideas. Each builds on the previous. §6 then walks through the full Theorem 5 proof — the paper's main result — applying all five ideas.
 
   #v(0.5em)
   #align(center)[
@@ -30,11 +30,12 @@
       stroke: 0.5pt,
       inset: 6pt,
       [*\#*], [*Idea*], [*Unlocks*],
-      [1], [Complementary slackness], [Theorems 3, 4, 8],
-      [2], [Fenchel conjugates], [§2.2, §2.3, §2.8 (Theorems 1, 2, 7)],
-      [3], [KKT conditions], [§2.4, §5.2 (Theorems 3, 8)],
-      [4], [The budget absorption trick], [Theorem 8 part (3) — the punchline],
+      [1], [Complementary slackness], [Theorems 3, 4, 5],
+      [2], [Fenchel conjugates], [§2.2, §2.3, §2.8 (Theorems 1, 2, 4)],
+      [3], [KKT conditions], [§2.4, §5.2 (Theorems 3, 5)],
+      [4], [The budget absorption trick], [Theorem 5 part (3) — the punchline],
       [5], [Why log makes it convex], [The entire §3 → §5 arc],
+      [6], [Theorem 5 step by step], [The full proof with cash variable],
     )
   ]
 ]
@@ -138,9 +139,9 @@ Two cases:
 *Intuition.* "Relaxing" means raising the ceiling — changing $overline(Q)_i$ from 100 to 101, giving the constraint more room. If you're not using the full capacity, a higher ceiling wouldn't help — so the "price" of more capacity is zero. If you _are_ at full capacity, a higher ceiling might actually help, so the price can be positive.
 
 *Where the paper uses this:*
-- *Theorem 4* (self-financing): the dual variable of the minting constraint $D_k <= M$ is the price $p_k$. Complementary slackness says $p_k > 0$ only where $D_k = M$ — price is positive only for the highest-demand outcome.
+- *Theorem 3* (clearing prices): the dual variable of the minting constraint $D_k <= M$ is the price $p_k$. Complementary slackness says $p_k > 0$ only where $D_k = M$ — price is positive only for the highest-demand outcome.
 - *§2.4* (clearing rule): gives the three cases (fully filled / unfilled / marginal).
-- *Theorem 8* (budget absorption): the $lambda_i^+ q_i$ terms that make spending $<=$ budget.
+- *Theorem 5* (budget absorption): the $lambda_i^+ q_i$ terms that make spending $<=$ budget.
 
 
 = Fenchel Conjugates
@@ -265,7 +266,7 @@ Negative Shannon entropy. Finite only on the simplex (softmax always outputs pro
 
 $ min_(bold(p) in Delta) [W^*(bold(p)) + C_b^*(bold(p))] $
 
-The entropy term $C_b^*$ is _strictly convex_ — it curves. That curvature forces a unique minimizer. This is Theorem 7: without budgets, prices are always unique. The entire §3 obstacle is about budgets breaking this.
+The entropy term $C_b^*$ is _strictly convex_ — it curves. That curvature forces a unique minimizer. This is Theorem 4: without budgets, prices are always unique. The entire §3 obstacle is about budgets breaking this.
 
 
 = KKT Conditions
@@ -312,12 +313,12 @@ The derivative is just $L_i - p_k$ (limit price minus clearing price). KKT says:
 
 This is the Uniform Clearing Price rule: buy if your limit exceeds the price.
 
-*Why this matters.* Theorem 8 uses the exact same KKT structure, but with $B_k \/ U_k$ replacing $w_i$. If you understand the above, you understand the Theorem 8 proof — it's the same three cases with one extra chain-rule step.
+*Why this matters.* Theorem 5 uses the exact same KKT structure, but with $B_k \/ U_k$ replacing $w_i$. If you understand the above, you understand the Theorem 5 proof — it's the same three cases with one extra chain-rule step.
 
 
 = The Budget Absorption Trick
 
-This is the punchline of the paper (Theorem 8, part 3). We replace linear welfare $sum w_i q_i$ with $B_k ln U_k$ where $U_k = sum_(i in "MM"_k) L_i q_i$ is MM $k$'s total weighted fill. An important modeling choice: $"MM"_k$ contains only MM $k$'s _buy_ orders (with $L_i > 0$). Sell orders from MMs are treated as retail (linear welfare). This ensures $U_k > 0$ and aligns with the Fisher market analogy, where agents are consumers (buyers of goods).
+This is the punchline of the paper (Theorem 5, part 3). We replace linear welfare $sum w_i q_i$ with $B_k ln U_k$ where $U_k = sum_(i in "MM"_k) L_i q_i$ is MM $k$'s total weighted fill. An important modeling choice: $"MM"_k$ contains only MM $k$'s _buy_ orders (with $L_i > 0$). Sell orders from MMs are treated as retail (linear welfare). This ensures $U_k > 0$ and aligns with the Fisher market analogy, where agents are consumers (buyers of goods).
 
 == Step 1: KKT for the Log Objective
 
@@ -443,7 +444,7 @@ The $-max_k D_k$ is concave (not strictly), but $ln$ carries the strict concavit
       [Budget constraint], [Explicit, bilinear, non-convex], [Absent — absorbed into objective],
       [Curvature source], [$-C_b$ only ($O(1\/b)$)], [$ln$ ($O(B_k\/U_k^2)$, $b$-independent)],
       [At $b = 0$], [Zero curvature, non-convex — hopeless], [Strict curvature, convex — fine],
-      [Unique prices?], [Not always (Prop. 2)], [Always (Thm. 8)],
+      [Unique prices?], [Not always (Prop. 2)], [Always (Thm. 5)],
       [Complexity], [GNEP (intractable in general)], [Convex program (polynomial)],
     )
   ]
@@ -452,9 +453,189 @@ The $-max_k D_k$ is concave (not strictly), but $ln$ carries the strict concavit
   One modeling change — linear welfare $arrow.r$ log welfare — removes the non-convexity and adds strict curvature. The paper's thesis: this isn't a trick. The linear model was the fiction.
 ]
 
+= Theorem 5 Step by Step
+
+Sections 1–5 gave you the five tools. This section applies all of them to walk through the actual proof of Theorem 5 — the paper's main result. Everything below is a line-by-line unpacking of §5.2 in the paper.
+
+== The Program
+
+The risk-averse clearing program is:
+
+$ P_b^"RA": quad max_(bold(q) in cal(C), bold(s) >= 0) quad underbrace(sum_k [B_k ln(U_k(bold(q)) + s_k) - s_k], "MM welfare") + underbrace(sum_(j in.not "MM") w_j q_j, "retail welfare") - underbrace(C_b(bold(D)(bold(q))), "minting cost") $
+
+where $U_k = sum_(i in "MM"_k^+) L_i q_i$ is MM $k$'s total weighted fill (buy orders only, $L_i > 0$) and $s_k >= 0$ is retained cash.
+
+Three things to unpack about the per-MM objective $B_k ln(U_k + s_k) - s_k$:
+
+#block(inset: (x: 2em, y: 0.5em))[
+  *Why $U_k + s_k$, not just $U_k$?* If you used $B_k ln U_k$ alone (the simplified version from §4), an over-capitalized MM ($B_k > U_k^"LP"$) would be _forced_ to spend all its budget on fills to maximize $ln U_k$ — including unprofitable ones. The cash variable $s_k$ is a release valve: the MM can park unused budget as cash instead of buying garbage fills.
+]
+
+#block(inset: (x: 2em, y: 0.5em))[
+  *Why $-s_k$?* Cash has linear disutility — each dollar retained costs exactly one dollar of welfare. This makes cash a _numeraire good_: it has constant marginal value $1$, so the MM only retains cash when no fill can beat that marginal value. Without $-s_k$, the MM would hoard infinite cash for free.
+]
+
+#block(inset: (x: 2em, y: 0.5em))[
+  *Why $B_k$ out front?* This scales the curvature. Bigger budget $arrow.r$ the $ln$ singularity "fires" at a higher $U_k$. As §4 showed, the $B_k$ scaling is exactly what makes total spending equal $B_k$ at the optimum — the budget is encoded in the curvature, not in a constraint.
+]
+
+== Part 1: Strict Concavity (Why a Unique Optimum Exists)
+
+*Claim:* The objective is strictly concave in $(bold(q), bold(s))$, so it has a unique maximizer.
+
+*The composition rule.* There is a standard fact from convex analysis:
+
+#block(inset: (x: 2em, y: 0.8em), fill: luma(245), radius: 4pt)[
+  If $g$ is strictly concave and increasing, and $h$ is affine (linear + constant), then $g compose h$ is strictly concave.
+]
+
+Why? Take two points $x_1, x_2$ and $lambda in (0,1)$. Affinity of $h$ gives $h(lambda x_1 + (1-lambda) x_2) = lambda h(x_1) + (1-lambda) h(x_2)$. Then strict concavity of $g$ gives $g(lambda h(x_1) + (1-lambda) h(x_2)) > lambda g(h(x_1)) + (1-lambda) g(h(x_2))$. That's the definition of strict concavity for $g compose h$.
+
+Apply this to our objective:
+
+#align(center)[
+  #table(
+    columns: 3,
+    align: (left, left, left),
+    stroke: 0.5pt,
+    inset: 6pt,
+    [*Piece*], [*Role*], [*Curvature*],
+    [$U_k + s_k = sum L_i q_i + s_k$], [$h$ — affine in $(bold(q), s_k)$], [None (flat)],
+    [$ln(dot.c)$], [$g$ — strictly concave, increasing], [Strict],
+    [$B_k ln(U_k + s_k)$], [$B_k dot g compose h$], [Strictly concave ($B_k > 0$)],
+    [$-s_k$], [Linear], [None (preserves concavity)],
+    [Retail welfare], [Linear in $bold(q)$], [None (preserves concavity)],
+    [$-C_b$], [Concave (not strictly)], [Bonus curvature],
+  )
+]
+
+Sum of a strictly concave function and concave functions is strictly concave. The $ln$ alone carries the strict part.
+
+*The maximum is attained* (not just a supremum). Two boundary arguments:
+
+- As $s_k -> infinity$: $B_k ln(s_k) - s_k -> -infinity$ because $-s_k$ grows faster than $ln s_k$. So the objective is _coercive_ in $s_k$ — it eventually drives the objective down.
+
+- As $U_k + s_k -> 0^+$: The gradient $partial / (partial s_k)[B_k ln(U_k + s_k) - s_k] = B_k\/(U_k + s_k) - 1 -> +infinity$. The slope becomes infinitely steep upward. So the optimizer is always pushed _away_ from zero — the singularity repels.
+
+These two forces (coercive at infinity, repulsive at zero) trap the optimum in a bounded region. Bounded region + continuous function $arrow.r$ maximum attained. Strict concavity $arrow.r$ the maximizer is unique.
+
+== Part 2: Limit Order Exactness ($mu_k <= 1$)
+
+Define the *shadow price of capital*:
+
+$ mu_k equiv B_k / (U_k + s_k) $
+
+This is the marginal value of one more dollar of fills-plus-cash to MM $k$. Now differentiate the objective w.r.t. the cash variable $s_k$:
+
+$ (partial) / (partial s_k) [B_k ln(U_k + s_k) - s_k] = underbrace(B_k / (U_k + s_k), mu_k) - 1 = mu_k - 1 $
+
+The variable $s_k$ has the constraint $s_k >= 0$ (you can't retain negative cash). Apply KKT (§3 of this primer) to this floor constraint:
+
+#align(center)[
+  #table(
+    columns: 3,
+    align: (left, left, left),
+    stroke: 0.5pt,
+    inset: 6pt,
+    [*Case*], [*Condition*], [*Meaning*],
+    [Interior ($s_k > 0$)], [$mu_k - 1 = 0$, so $mu_k = 1$], [Marginal fill $=$ marginal cash $=$ 1],
+    [At floor ($s_k = 0$)], [$mu_k - 1 <= 0$, so $mu_k <= 1$], [Fills are worth less than cash — hold none],
+  )
+]
+
+In both cases: $mu_k <= 1$. This is unconditional — it holds for every MM at every optimum.
+
+*Why this matters.* The KKT condition for fill $q_i$ of MM $k$ (with minting cost included) is:
+
+$ mu_k L_i - p_(m(i)) = lambda_i^+ - lambda_i^- $
+
+For a fill to happen ($q_i > 0$), the left side must be $>= 0$ (by KKT at the floor, same logic as §3). So $mu_k L_i >= p_(m(i))$, which gives:
+
+$ L_i >= p_(m(i)) / mu_k >= p_(m(i)) $
+
+The limit price must exceed the clearing price. *No order fills below its stated price.* The $mu_k <= 1$ guarantee is what makes this work — it's the cash variable doing its job.
+
+== The Two Regimes
+
+Complementary slackness on $s_k >= 0$ creates two clean regimes:
+
+#block(inset: (x: 2em, y: 0.8em), fill: luma(245), radius: 4pt)[
+  #align(center)[
+    #table(
+      columns: 4,
+      align: (left, left, left, left),
+      stroke: 0.5pt,
+      inset: 6pt,
+      [*Regime*], [$s_k$], [$mu_k$], [*Behavior*],
+      [Capital-constrained ($U_k > B_k$)], [$0$], [$B_k\/U_k < 1$], [Throttles low-ROI fills],
+      [Over-capitalized ($U_k < B_k$)], [$B_k - U_k > 0$], [$1$], [Acts like LP],
+    )
+  ]
+]
+
+*Capital-constrained regime.* The MM has more profitable opportunities than budget. The shadow price $mu_k < 1$ scales down all limit prices by a factor $mu_k$. An order with $L_i = 0.55$ and $mu_k = 0.86$ acts as if its limit is $mu_k L_i = 0.47$. High-ROI orders (high $L_i$) survive the scaling; low-ROI orders get priced out. This is the MM organically prioritizing its best fills.
+
+*Over-capitalized regime.* The MM has more budget than opportunities. It sets $s_k = B_k - U_k > 0$ (parks the excess as cash) and $mu_k = 1$. The fill KKT becomes $L_i - p_(m(i)) = lambda_i^+ - lambda_i^-$ — exactly the risk-neutral LP KKT. The log model _degenerates to the LP_ when the budget doesn't bind. This is Proposition 3 (LP Recovery).
+
+== Part 3: Budget Absorption (With Cash)
+
+§4 showed the absorption trick for the simplified $B_k ln U_k$ model. Here we do it with $s_k$. The algebra is nearly identical, with one extra step.
+
+Start from the fill KKT (from Part 2):
+
+$ mu_k L_i - p_(m(i)) = lambda_i^+ - lambda_i^- $
+
+Multiply both sides by $q_i$ and use $lambda_i^- q_i = 0$ (complementary slackness — same as §4):
+
+$ mu_k L_i q_i - p_(m(i)) q_i = lambda_i^+ q_i $
+
+Sum over all $i in "MM"_k^+$:
+
+$ mu_k underbrace(sum L_i q_i, U_k) - sum p_(m(i)) q_i = underbrace(sum lambda_i^+ q_i, >= 0) $
+
+So $sum p_(m(i)) q_i <= mu_k U_k$. (Same as §4 so far.)
+
+*The extra step.* By definition, $mu_k = B_k \/ (U_k + s_k)$, so $mu_k(U_k + s_k) = B_k$, which gives $mu_k U_k = B_k - mu_k s_k$. Since $mu_k <= 1$ (Part 2) and $s_k >= 0$:
+
+$ mu_k U_k = B_k - mu_k s_k <= B_k $
+
+Combining with $sum p_(m(i)) q_i <= mu_k U_k$:
+
+#block(inset: (x: 2em, y: 0.8em), fill: luma(245), radius: 4pt)[
+  $ sum_(i in "MM"_k^+) p_(m(i)) q_i + s_k <= B_k $
+
+  Total deployment — capital on fills plus retained cash — is at most $B_k$. The gap $sum lambda_i^+ q_i$ is infra-marginal surplus from fully-filled orders — profit that doesn't require additional capital.
+]
+
+The budget constraint was never imposed. It emerged from the KKT conditions of the $ln$ objective plus the cash variable.
+
+== Part 4: Price Uniqueness
+
+For $b > 0$: clearing prices are $p_k = "softmax"(bold(D)\/b) = exp(D_k\/b) \/ sum_j exp(D_j\/b)$. This is a continuous function of $bold(D)$, which is a linear function of $bold(q)$. Since $bold(q)^*$ is unique (Part 1), $bold(D)^*$ is unique, and $bold(p)^*$ is unique.
+
+For $b = 0$: prices are LP duals — elements of the subdifferential of $max_k D_k$ at $bold(D)^*$. When two or more $D_k$ tie at $max_j D_j$, the subdifferential is a _face_ of the simplex (any convex combination of the tying outcomes' unit vectors works). Fills are still unique, but prices may not be. Any $b > 0$, no matter how small, breaks ties via the exponential and restores uniqueness.
+
+== Worked Example
+
+Binary market ($K = 2$), $b -> 0$. An MM ($B = 60$) posts two buy-Yes orders: $A$ at $L_A = 0.70$, qty $100$; $B$ at $L_B = 0.55$, qty $100$. A retail trader posts buy-No at $L_C = 0.60$, qty $200$.
+
+*LP (no budgets).* All orders fill. Balanced minting: $D_"Yes" = D_"No" = 200$, $p_"Yes" = 0.50$. Welfare $= (0.70 - 0.50)(100) + (0.55 - 0.50)(100) + (0.60 - 0.50)(200) = 45$. But MM capital consumed $= 0.50 times 200 = 100 > B = 60$. Budget violated.
+
+*Risk-averse.* The MM is capital-constrained: $U^"LP" = 0.70(100) + 0.55(100) = 125 > B = 60$, so $s = 0$ and $mu = B\/U$.
+
+#block(inset: (x: 2em, y: 0.5em))[
+  The optimizer finds $mu = 60\/70 approx 0.86$ (only order $A$ fills, $U = 70$). Check the fill KKT:
+  - Order $A$: $mu L_A = 0.86 times 0.70 = 0.60 >= p_"Yes" = 0.50$. #h(1em) Fills. #sym.checkmark
+  - Order $B$: $mu L_B = 0.86 times 0.55 = 0.47 < p_"Yes" = 0.50$. #h(1em) Does not fill. #sym.crossmark
+
+  The shadow price $mu < 1$ throttles the lower-ROI order.
+]
+
+Minting balances at $D_"Yes" = D_"No" = 100$. Welfare $= 30$. Capital consumed $= 0.50 times 100 = 50 <= B = 60$, with the gap of $10$ being infra-marginal surplus from order $A$ (it was willing to pay $0.70$ but only paid $0.50$, so $0.20 times 100 = 20$ of welfare was "free" profit, of which $10$ is the budget gap).
+
 #v(2em)
 #line(length: 100%)
 #v(0.5em)
 #text(size: 9pt, style: "italic")[
-  This primer covers the five mathematical ideas in "Prediction Markets Are Fisher Markets." For the full proofs, formal statements, and economic motivation, see the paper itself.
+  This primer covers the mathematical ideas in "Prediction Markets Are Fisher Markets." For the full proofs, formal statements, and economic motivation, see the paper itself.
 ]

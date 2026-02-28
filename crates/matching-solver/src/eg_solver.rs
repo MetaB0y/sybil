@@ -20,10 +20,9 @@ use std::time::Instant;
 
 use matching_engine::{MarketId, MmSide, Order, Problem};
 
-use crate::coefficients::{order_sign, precompute_coefficients, OrderCoefficients};
 use crate::lp_solver::{
-    build_and_solve_lp, collect_markets, create_position_arbs, extract_result, recompute_welfare,
-    trim_mm_budget_overflows,
+    build_and_solve_lp, collect_markets, create_position_arbs, extract_result, order_sign,
+    recompute_welfare, trim_mm_budget_overflows,
 };
 use crate::result::{PipelineResult, PipelineTimings, PriceDiscoveryResult};
 use crate::MatchingResult;
@@ -82,11 +81,10 @@ impl EgSolver {
         let orders = &problem.orders;
         let n = orders.len();
 
-        // Precompute coefficients for all orders
-        let coeffs: Vec<OrderCoefficients> = orders
-            .iter()
-            .map(|o| precompute_coefficients(o))
-            .collect();
+        debug_assert!(
+            orders.iter().all(|o| o.num_markets == 1),
+            "EG solver only supports single-market orders"
+        );
 
         // Collect all markets
         let markets = collect_markets(orders);
@@ -147,7 +145,7 @@ impl EgSolver {
         // If no MM orders, just run the LP directly (EG reduces to LP)
         if !has_mm {
             return self.solve_lp_only(
-                problem, orders, &coeffs, &markets, &market_to_group, start,
+                problem, orders, &markets, &market_to_group, start,
             );
         }
 
@@ -157,7 +155,6 @@ impl EgSolver {
         let linear_obj: Vec<f64> = welfare_weights.clone();
         let warm_solution = build_and_solve_lp(
             orders,
-            &coeffs,
             &markets,
             &market_to_group,
             problem.market_groups.len(),
@@ -224,7 +221,6 @@ impl EgSolver {
             // Solve LP oracle with gradient as objective
             let Some(sol) = build_and_solve_lp(
                 orders,
-                &coeffs,
                 &markets,
                 &market_to_group,
                 problem.market_groups.len(),
@@ -376,7 +372,6 @@ impl EgSolver {
 
         let Some(final_sol) = build_and_solve_lp(
             &projected_orders,
-            &coeffs,
             &markets,
             &market_to_group,
             problem.market_groups.len(),
@@ -387,7 +382,7 @@ impl EgSolver {
         };
 
         let order_map: HashMap<u64, &Order> = orders.iter().map(|o| (o.id, o)).collect();
-        let (mut result, prices) = extract_result(&final_sol, orders, &coeffs, &markets);
+        let (mut result, prices) = extract_result(&final_sol, orders, &markets);
 
         // Budget trim: integer rounding breaks KKT budget absorption.
         if has_mm {
@@ -437,7 +432,6 @@ impl EgSolver {
         &self,
         problem: &Problem,
         orders: &[Order],
-        coeffs: &[OrderCoefficients],
         markets: &[MarketId],
         market_to_group: &HashMap<MarketId, usize>,
         start: Instant,
@@ -449,7 +443,6 @@ impl EgSolver {
 
         let solution = build_and_solve_lp(
             orders,
-            coeffs,
             markets,
             market_to_group,
             problem.market_groups.len(),
@@ -462,7 +455,7 @@ impl EgSolver {
         };
 
         let order_map: HashMap<u64, &Order> = orders.iter().map(|o| (o.id, o)).collect();
-        let (mut result, prices) = extract_result(&sol, orders, coeffs, markets);
+        let (mut result, prices) = extract_result(&sol, orders, markets);
 
         let max_order_id = orders.iter().map(|o| o.id).max().unwrap_or(0);
         let arb_orders = create_position_arbs(&mut result, &order_map, &prices, max_order_id);
@@ -514,7 +507,7 @@ impl crate::decomposed::ComponentSolver for EgSolver {
 mod tests {
     use super::*;
     use matching_engine::{
-        bundle_yes, outcome_sell, simple_no_buy, simple_yes_buy, MarketGroup, MmConstraint, MmId,
+        outcome_sell, simple_no_buy, simple_yes_buy, MarketGroup, MmConstraint, MmId,
         NANOS_PER_DOLLAR,
     };
 
@@ -698,28 +691,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_eg_bundle_orders() {
-        let mut problem = Problem::new("eg_bundle");
-        let market_a = problem.markets.add_binary("A");
-        let market_b = problem.markets.add_binary("B");
-
-        problem.orders.push(bundle_yes(
-            &problem.markets, 1, &[market_a, market_b], 400_000_000, 100,
-        ));
-        problem.orders.push(outcome_sell(
-            &problem.markets, 10, market_a, 0, 150_000_000, 200,
-        ));
-        problem.orders.push(outcome_sell(
-            &problem.markets, 11, market_b, 0, 150_000_000, 200,
-        ));
-
-        let solver = EgSolver::new();
-        let result = solver.solve(&problem);
-
-        assert!(result.result.orders_filled > 0, "should fill bundle + sellers");
-        assert!(result.result.total_welfare > 0);
-    }
 
     #[test]
     fn test_eg_multiple_mms() {

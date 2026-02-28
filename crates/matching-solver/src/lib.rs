@@ -7,7 +7,6 @@
 //! - **MILP** (`milp`): Mixed-integer via SCIP (exact with timeout)
 
 // Internal modules
-pub mod coefficients;
 pub mod result;
 pub mod verifier;
 pub mod viz;
@@ -51,7 +50,7 @@ pub use lp_solver::{LpConfig, LpSolver};
 pub use eg_solver::{EgConfig, EgSolver};
 
 #[cfg(feature = "conic")]
-pub use conic_solver::{ConicConfig, ConicSolver};
+pub use conic_solver::{ConicConfig, ConicSolver, ObjectiveMode};
 
 #[cfg(feature = "lp")]
 pub use decomposed::{ComponentSolver, DecomposedSolver};

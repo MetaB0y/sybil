@@ -17,7 +17,7 @@ cargo run -p matching-sim --release -- --preset medium --solver all
 cargo run -p matching-sim --release --features milp -- --preset small --solver milp --milp-timeout 60
 
 # Custom scenario
-cargo run -p matching-sim --release -- --markets 20 --orders 500 --bundles 0.2 --solver lp -v
+cargo run -p matching-sim --release -- --markets 20 --orders 500 --solver lp -v
 ```
 
 ## CLI Options
@@ -27,8 +27,6 @@ cargo run -p matching-sim --release -- --markets 20 --orders 500 --bundles 0.2 -
 **Custom Scenario:**
 - `--markets N` — number of binary markets
 - `--orders N` — total orders
-- `--bundles F` — bundle fraction (0.0-1.0)
-- `--spreads F` — spread fraction
 - `--scarcity F` — liquidity scarcity (lower = scarcer)
 - `--mms N` — number of MM constraints
 - `--seed N` — random seed

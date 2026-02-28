@@ -20,9 +20,20 @@ use highs::{HighsModelStatus, RowProblem, Sense};
 
 use matching_engine::{Fill, MarketId, MmSide, Nanos, Order, Problem, Qty, NANOS_PER_DOLLAR};
 
-use crate::coefficients::{order_sign, precompute_coefficients, OrderCoefficients};
 use crate::result::{PipelineResult, PipelineTimings, PriceDiscoveryResult};
 use crate::MatchingResult;
+
+/// Determine the sign for an order in the welfare objective.
+///
+/// - Buyer (no negative payoffs) -> +1.0
+/// - Seller (any negative payoff) -> -1.0
+pub(crate) fn order_sign(order: &Order) -> f64 {
+    if order.is_seller() {
+        -1.0
+    } else {
+        1.0
+    }
+}
 
 /// Configuration for the LP solver.
 #[derive(Clone, Debug)]
@@ -64,12 +75,10 @@ impl LpSolver {
             return PipelineResult::empty();
         }
 
-        // Precompute coefficients for all orders
-        let coeffs: Vec<OrderCoefficients> = problem
-            .orders
-            .iter()
-            .map(|o| precompute_coefficients(o))
-            .collect();
+        debug_assert!(
+            problem.orders.iter().all(|o| o.num_markets == 1),
+            "LP solver only supports single-market orders"
+        );
 
         // Collect all markets
         let markets = collect_markets(&problem.orders);
@@ -113,7 +122,6 @@ impl LpSolver {
         for slp_iter in 0..=self.config.max_mm_iterations {
             let solution = self.solve_lp(
                 &problem.orders,
-                &coeffs,
                 &markets,
                 &market_to_group,
                 problem.market_groups.len(),
@@ -169,7 +177,6 @@ impl LpSolver {
         let (mut result, prices) = extract_result(
             &solution,
             &problem.orders,
-            &coeffs,
             &markets,
         );
 
@@ -227,7 +234,6 @@ impl LpSolver {
     fn solve_lp(
         &self,
         orders: &[Order],
-        coeffs: &[OrderCoefficients],
         markets: &[MarketId],
         market_to_group: &HashMap<MarketId, usize>,
         num_groups: usize,
@@ -240,7 +246,6 @@ impl LpSolver {
             .collect();
         build_and_solve_lp(
             orders,
-            coeffs,
             markets,
             market_to_group,
             num_groups,
@@ -278,11 +283,12 @@ pub(crate) struct LpSolution {
 /// the EG solver (Frank-Wolfe gradient). The constraints (position balance,
 /// quantity bounds, minting) are the same; only the objective varies.
 ///
+/// All orders must be single-market binary orders.
+///
 /// `objective_coeffs[i]` is the objective coefficient for order i's fill variable.
 /// `budget_rows` contains linearized MM budget constraints (empty for EG solver).
 pub(crate) fn build_and_solve_lp(
     orders: &[Order],
-    coeffs: &[OrderCoefficients],
     markets: &[MarketId],
     market_to_group: &HashMap<MarketId, usize>,
     num_groups: usize,
@@ -333,9 +339,10 @@ pub(crate) fn build_and_solve_lp(
     // Constraints: YES and NO balance per market
     // ================================================================
     //
-    // For each market m:
-    //   YES: Σ_i c_yes_i_m * q_i - mint_m - gmint_g(m) = 0
-    //   NO:  Σ_i c_no_i_m  * q_i - mint_m = 0
+    // For single-market binary orders, the payoff vector directly gives
+    // the per-market coefficients:
+    //   c_yes = payoffs[0] (YES outcome payoff)
+    //   c_no  = payoffs[1] (NO outcome payoff)
 
     // Track row indices for dual extraction
     let mut yes_row_indices: HashMap<MarketId, usize> = HashMap::new();
@@ -346,7 +353,8 @@ pub(crate) fn build_and_solve_lp(
         // YES balance
         let mut yes_terms: Vec<(highs::Col, f64)> = Vec::new();
         for i in 0..n {
-            if let Some(&c_y) = coeffs[i].c_yes.get(&market) {
+            if orders[i].markets[0] == market {
+                let c_y = orders[i].payoffs[0] as f64;
                 if c_y.abs() > 1e-12 {
                     yes_terms.push((q_cols[i], c_y));
                 }
@@ -365,7 +373,8 @@ pub(crate) fn build_and_solve_lp(
         // NO balance
         let mut no_terms: Vec<(highs::Col, f64)> = Vec::new();
         for i in 0..n {
-            if let Some(&c_n) = coeffs[i].c_no.get(&market) {
+            if orders[i].markets[0] == market {
+                let c_n = orders[i].payoffs[1] as f64;
                 if c_n.abs() > 1e-12 {
                     no_terms.push((q_cols[i], c_n));
                 }
@@ -482,12 +491,12 @@ pub(crate) fn collect_markets(orders: &[Order]) -> Vec<MarketId> {
 /// Extract fills and clearing prices from the LP solution.
 ///
 /// Rounds continuous q_i to integer fills, derives clearing prices from duals.
+/// All orders must be single-market binary orders.
 /// Does NOT create arb orders — those are added after all post-processing
 /// (MM budget trim) so position balance accounts for final fills.
 pub(crate) fn extract_result(
     solution: &LpSolution,
     orders: &[Order],
-    coeffs: &[OrderCoefficients],
     markets: &[MarketId],
 ) -> (MatchingResult, HashMap<MarketId, Vec<Nanos>>) {
     let mut result = MatchingResult::new();
@@ -513,22 +522,20 @@ pub(crate) fn extract_result(
             continue;
         }
 
-        // Compute fill price using alpha/beta formula (same as MILP):
-        // eff_price = |Σ_m alpha_m * p_m + beta|
-        let eff_price: f64 = coeffs[i]
-            .alpha
-            .iter()
-            .map(|(m, &a)| {
-                let p = clearing_prices
-                    .get(m)
-                    .and_then(|v| v.first())
-                    .copied()
-                    .unwrap_or(0) as f64;
-                a * p
-            })
-            .sum::<f64>()
-            + coeffs[i].beta;
-        let fill_price = eff_price.abs().round().max(0.0) as Nanos;
+        // For single-market binary orders, fill price is simply:
+        // - YES side (payoffs[0] != 0): p_yes
+        // - NO side (payoffs[1] != 0, payoffs[0] == 0): NANOS - p_yes
+        let market = order.markets[0];
+        let p_yes = clearing_prices
+            .get(&market)
+            .and_then(|v| v.first())
+            .copied()
+            .unwrap_or(0);
+        let fill_price = if order.payoffs[0] != 0 {
+            p_yes
+        } else {
+            NANOS_PER_DOLLAR.saturating_sub(p_yes)
+        };
 
         let fill = Fill::new(order.id, fill_qty, fill_price);
         result.add_fill(fill, order);
@@ -858,36 +865,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_lp_bundle_orders() {
-        let mut problem = Problem::new("lp_bundle");
-        let market_a = problem.markets.add_binary("A");
-        let market_b = problem.markets.add_binary("B");
-
-        // Bundle buyer: wants all YES at 40c
-        problem.orders.push(matching_engine::bundle_yes(
-            &problem.markets, 1, &[market_a, market_b], 400_000_000, 100,
-        ));
-
-        // Individual YES sellers on each market
-        problem.orders.push(outcome_sell(
-            &problem.markets, 10, market_a, 0, 150_000_000, 200,
-        ));
-        problem.orders.push(outcome_sell(
-            &problem.markets, 11, market_b, 0, 150_000_000, 200,
-        ));
-
-        let solver = LpSolver::new();
-        let result = solver.solve(&problem);
-
-        assert!(
-            result.result.orders_filled > 0,
-            "should fill bundle + sellers"
-        );
-        assert!(
-            result.result.total_welfare > 0,
-            "should produce positive welfare, got {}",
-            result.result.total_welfare
-        );
-    }
 }
