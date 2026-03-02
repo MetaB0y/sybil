@@ -25,6 +25,10 @@ optional = true
 version = "0.11"
 optional = true
 
+[dependencies.rayon]
+version = "1"
+optional = true
+
 [dev-dependencies]
 proptest = "1.9"
 divan = "0.1"
@@ -39,4 +43,5 @@ default = []
 milp = ["dep:russcip"]  # MIQCQP solver via SCIP
 lp = ["dep:highs"]      # LP solver via HiGHS
 conic = ["dep:clarabel", "lp"] # Conic EG solver via Clarabel (reuses LP utilities)
+parallel = ["dep:rayon"] # Parallel decomposed solves
 viz = []   # Enable detailed phase snapshots and orderbook data

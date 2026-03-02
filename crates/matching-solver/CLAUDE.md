@@ -17,6 +17,7 @@ The **matching-solver** crate is the core optimization engine for welfare-maximi
 | **ConicSolver** | `conic_solver.rs` | `conic` | Conic EG via Clarabel. |
 | **IterLpSolver** | `iterative_lp_solver.rs` | `lp` | Iterative LP with EG μ-boosted MM weights. |
 | **MilpSolver** | `milp.rs` | `milp` | MIQCQP via SCIP (russcip). Exact optimal with timeout. |
+| **DecomposedSolver** | `decomposed.rs` | `lp` (+`parallel`) | Per-market-group decomposition with mirror descent budget coordination. Wraps any ComponentSolver. |
 
 All solvers return a `PipelineResult` which contains `MatchingResult` (fills + welfare), clearing prices, and timing data.
 
@@ -31,6 +32,7 @@ All solvers return a `PipelineResult` which contains `MatchingResult` (fills + w
 | `conic_solver.rs` | Conic solver via Clarabel |
 | `milp.rs` | SCIP-based MIQCQP solver |
 | `verifier.rs` | Result verification for ZK integration |
+| `decomposed.rs` | Per-market-group decomposition with rayon parallelism (`parallel` feature) |
 | `viz.rs` | Visualization snapshots and ASCII output |
 
 ## Testing

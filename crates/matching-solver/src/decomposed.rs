@@ -11,6 +11,9 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+
 use matching_engine::{MarketGroup, MarketId, MarketSet, MmConstraint, MmSide, Order, Problem};
 
 use crate::result::{PipelineResult, PipelineTimings, PriceDiscoveryResult, SolverContribution};
@@ -21,7 +24,7 @@ use crate::MatchingResult;
 // ============================================================================
 
 /// A solver that can solve a single component sub-problem.
-pub trait ComponentSolver {
+pub trait ComponentSolver: Send + Sync {
     fn solve_component(&self, problem: &Problem) -> PipelineResult;
     fn name(&self) -> &str;
 }
@@ -41,7 +44,7 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
     pub fn new(inner: S) -> Self {
         Self {
             inner,
-            max_budget_iters: 10,
+            max_budget_iters: 20,
             convergence_eps: 1e-4,
         }
     }
@@ -77,6 +80,15 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
 
         // Step 4: Classify MMs into local vs spanning
         let (local_mms, spanning_mms) = classify_mms(&mm_components);
+
+        let dropped = order_components.iter().filter(|c| c.is_none()).count();
+        tracing::debug!(
+            num_components,
+            local_mms = local_mms.len(),
+            spanning_mms = spanning_mms.len(),
+            dropped_orders = dropped,
+            "decomposed: partitioned problem"
+        );
 
         // Step 5-7: Solve
         let component_results = if spanning_mms.is_empty() {
@@ -149,6 +161,43 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
         result
     }
 
+    /// Solve all components, using rayon parallelism when the `parallel` feature is enabled.
+    fn solve_components_parallel(
+        &self,
+        problem: &Problem,
+        market_to_component: &HashMap<MarketId, usize>,
+        num_components: usize,
+        order_components: &[Option<usize>],
+        mm_budgets: &HashMap<usize, HashMap<usize, u64>>,
+    ) -> Vec<PipelineResult> {
+        let solve_one = |comp: usize| {
+            let sub = build_sub_problem(
+                problem, market_to_component, comp,
+                order_components, mm_budgets,
+            );
+            if sub.orders.is_empty() {
+                PipelineResult::empty()
+            } else {
+                self.inner.solve_component(&sub)
+            }
+        };
+
+        #[cfg(feature = "parallel")]
+        {
+            (0..num_components)
+                .into_par_iter()
+                .map(solve_one)
+                .collect()
+        }
+
+        #[cfg(not(feature = "parallel"))]
+        {
+            (0..num_components)
+                .map(solve_one)
+                .collect()
+        }
+    }
+
     /// Solve each component independently (no spanning MMs).
     fn solve_independent(
         &self,
@@ -156,7 +205,7 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
         market_to_component: &HashMap<MarketId, usize>,
         num_components: usize,
         order_components: &[Option<usize>],
-        _mm_components: &[HashSet<usize>],
+        _mm_components: &[(HashSet<usize>, HashSet<usize>)],
         local_mms: &[(usize, usize)], // (mm_idx, component)
     ) -> Vec<PipelineResult> {
         // Build budget map: mm_idx -> component -> budget
@@ -166,19 +215,10 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
                 .insert(comp, problem.mm_constraints[mm_idx].max_capital);
         }
 
-        (0..num_components)
-            .map(|comp| {
-                let sub = build_sub_problem(
-                    problem, market_to_component, comp,
-                    order_components, &mm_budgets,
-                );
-                if sub.orders.is_empty() {
-                    PipelineResult::empty()
-                } else {
-                    self.inner.solve_component(&sub)
-                }
-            })
-            .collect()
+        self.solve_components_parallel(
+            problem, market_to_component, num_components,
+            order_components, &mm_budgets,
+        )
     }
 
     /// Solve with mirror descent to coordinate spanning MM budgets.
@@ -189,13 +229,15 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
         market_to_component: &HashMap<MarketId, usize>,
         num_components: usize,
         order_components: &[Option<usize>],
-        _mm_components: &[HashSet<usize>],
+        _mm_components: &[(HashSet<usize>, HashSet<usize>)],
         local_mms: &[(usize, usize)],
-        spanning_mms: &[(usize, Vec<usize>)], // (mm_idx, components)
+        spanning_mms: &[(usize, Vec<usize>)], // (mm_idx, positive-weight components)
     ) -> Vec<PipelineResult> {
         // Initialize budgets
         // Local MMs: full budget to their component
-        // Spanning MMs: split evenly across their active components
+        // Spanning MMs: proportional split across ALL active components (including
+        // seller-only ones). Mirror descent only rebalances among positive-weight
+        // components; seller-only components get a fixed share.
         let mut mm_budgets: HashMap<usize, HashMap<usize, u64>> = HashMap::new();
 
         for &(mm_idx, comp) in local_mms {
@@ -203,35 +245,60 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
                 .insert(comp, problem.mm_constraints[mm_idx].max_capital);
         }
 
-        for &(mm_idx, ref comps) in spanning_mms {
-            let total = problem.mm_constraints[mm_idx].max_capital;
-            let per_comp = total / comps.len() as u64;
-            let remainder = total - per_comp * comps.len() as u64;
+        // Build order lookup for initialization
+        let order_id_to_idx: HashMap<u64, usize> = problem.orders
+            .iter()
+            .enumerate()
+            .map(|(i, o)| (o.id, i))
+            .collect();
+
+        // For spanning MMs, allocate across ALL components (pos + seller-only)
+        // proportional to order count, but weight positive-weight orders higher.
+        for &(mm_idx, ref _pos_comps) in spanning_mms {
+            let mm = &problem.mm_constraints[mm_idx];
+            let (ref all_comps, _) = _mm_components[mm_idx];
+            let total = mm.max_capital;
+
+            // Weight: positive-weight order count (floor at 1 for seller-only comps)
+            let weights: Vec<(usize, f64)> = all_comps.iter().map(|&comp| {
+                let pos_count: usize = mm.order_ids.iter().filter(|&&oid| {
+                    order_id_to_idx.get(&oid).map_or(false, |&idx| {
+                        order_components[idx] == Some(comp)
+                            && !problem.orders[idx].is_seller()
+                    })
+                }).count();
+                // Seller-only components get weight 1 (minimal but non-zero)
+                (comp, pos_count.max(1) as f64)
+            }).collect();
+
+            let total_weight: f64 = weights.iter().map(|&(_, w)| w).sum();
             let map = mm_budgets.entry(mm_idx).or_default();
-            for (i, &comp) in comps.iter().enumerate() {
-                // Give remainder to first component
-                let budget = per_comp + if i == 0 { remainder } else { 0 };
-                map.insert(comp, budget);
+            let mut allocated = 0u64;
+            let last_idx = weights.len() - 1;
+            for (i, &(comp, w)) in weights.iter().enumerate() {
+                if i == last_idx {
+                    map.insert(comp, total - allocated);
+                } else {
+                    let budget = (total as f64 * w / total_weight).round() as u64;
+                    map.insert(comp, budget);
+                    allocated += budget;
+                }
             }
         }
 
         let mut best_results: Vec<PipelineResult> = Vec::new();
+        let mut best_welfare = i64::MIN;
 
-        for _iter in 0..self.max_budget_iters {
+        for iter in 0..self.max_budget_iters {
+            let iter_start = Instant::now();
+
             // Solve each component with current budget allocation
-            let results: Vec<PipelineResult> = (0..num_components)
-                .map(|comp| {
-                    let sub = build_sub_problem(
-                        problem, market_to_component, comp,
-                        order_components, &mm_budgets,
-                    );
-                    if sub.orders.is_empty() {
-                        PipelineResult::empty()
-                    } else {
-                        self.inner.solve_component(&sub)
-                    }
-                })
-                .collect();
+            let results = self.solve_components_parallel(
+                problem, market_to_component, num_components,
+                order_components, &mm_budgets,
+            );
+
+            let solve_secs = iter_start.elapsed().as_secs_f64();
 
             // If no spanning MMs need updating (first iter already done), break
             if spanning_mms.is_empty() {
@@ -239,7 +306,7 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
                 break;
             }
 
-            // Compute per-MM per-component utility (welfare contribution)
+            // Compute per-MM per-component EG utility
             let utilities = compute_mm_utilities(
                 problem, &results, order_components, spanning_mms,
             );
@@ -247,41 +314,78 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
             // Check convergence: utilities equalize across components for each MM
             let converged = check_convergence(&utilities, spanning_mms, self.convergence_eps);
 
-            best_results = results;
+            // Track best welfare seen across all iterations
+            let iter_welfare: i64 = results.iter().map(|r| r.result.total_welfare).sum();
+            if iter_welfare > best_welfare {
+                best_welfare = iter_welfare;
+                best_results = results;
+            }
+
+            // Log convergence progress
+            let max_gap = compute_max_log_gap(&utilities, spanning_mms);
+            tracing::debug!(
+                iter,
+                solve_secs = format!("{:.3}", solve_secs),
+                welfare = iter_welfare,
+                best_welfare,
+                max_ln_gap = format!("{:.4}", max_gap),
+                converged,
+                "mirror descent iteration"
+            );
+
 
             if converged {
                 break;
             }
 
-            // Mirror descent update: multiplicative rebalancing
-            for &(mm_idx, ref comps) in spanning_mms {
-                let total_budget = problem.mm_constraints[mm_idx].max_capital;
+            // Mirror descent with KL divergence (Beck & Teboulle 2003).
+            // Update: B_k^m ← B_k^m × (U_k^m)^η, then normalize to Σ = B_k.
+            //
+            // The paper's formula uses η=1, which is exact mirror descent but
+            // overshoots when U ∝ B (budget-binding regime makes the product
+            // B×U ∝ B², squaring the distribution and concentrating budget).
+            // Diminishing η_t = 1/√(1+t) is the textbook fix: O(1/√t)
+            // convergence regardless of the smoothness constant.
+            let eta = 1.0 / (1.0 + iter as f64).sqrt();
+
+            for &(mm_idx, ref pos_comps) in spanning_mms {
+                let full_budget = problem.mm_constraints[mm_idx].max_capital;
                 let budgets = mm_budgets.entry(mm_idx).or_default();
 
-                // Compute weighted product B_k^m * U_k^m for each component
-                let products: Vec<(usize, f64)> = comps.iter().map(|&comp| {
-                    let b = *budgets.get(&comp).unwrap_or(&0) as f64;
-                    let u = utilities.get(&(mm_idx, comp)).copied().unwrap_or(0.0);
-                    (comp, b * u)
+                // Budget reserved for seller-only components (not rebalanced)
+                let (ref all_comps, _) = _mm_components[mm_idx];
+                let seller_reserved: u64 = all_comps.iter()
+                    .filter(|c| !pos_comps.contains(c))
+                    .map(|c| budgets.get(c).copied().unwrap_or(0))
+                    .sum();
+                let pos_budget = full_budget.saturating_sub(seller_reserved);
+
+                // Mirror descent: B_k^m ← B_k^m × (U_k^m)^η, then normalize.
+                // Floor at 1.0 to prevent permanent starvation (mirror descent
+                // with KL never zeros out a weight, but integer rounding can).
+                let mut products: Vec<(usize, f64)> = pos_comps.iter().map(|&comp| {
+                    let b = (*budgets.get(&comp).unwrap_or(&0) as f64).max(1.0);
+                    let u = utilities.get(&(mm_idx, comp)).copied().unwrap_or(0.0).max(1.0);
+                    (comp, b * u.powf(eta))
                 }).collect();
+                // Sort for deterministic rounding remainder assignment
+                products.sort_by_key(|&(comp, _)| comp);
 
                 let total_product: f64 = products.iter().map(|&(_, p)| p).sum();
 
                 if total_product <= 0.0 {
-                    // All utilities zero → keep budgets unchanged
                     continue;
                 }
 
-                // Update: B_k^m ← total_budget × (B_k^m × U_k^m) / Σ(B_k^{m'} × U_k^{m'})
                 let mut allocated = 0u64;
-                let last_idx = comps.len() - 1;
+                let last_idx = products.len() - 1;
                 for (i, &(comp, product)) in products.iter().enumerate() {
                     if i == last_idx {
-                        // Last component gets remainder to ensure conservation
-                        budgets.insert(comp, total_budget - allocated);
+                        budgets.insert(comp, pos_budget.saturating_sub(allocated));
                     } else {
-                        let new_budget = (total_budget as f64 * product / total_product)
-                            .round() as u64;
+                        let new_budget = (pos_budget as f64 * product / total_product)
+                            .round()
+                            .max(1.0) as u64;
                         budgets.insert(comp, new_budget);
                         allocated += new_budget;
                     }
@@ -348,10 +452,14 @@ fn assign_orders(
 }
 
 /// For each MM, find which components its orders belong to.
+/// Returns (all_components, positive_weight_components) per MM.
+/// Mirror descent only operates on components with positive-weight orders
+/// (which participate in the EG exp cone). Seller-only components get
+/// fixed budget allocations.
 fn assign_mms(
     problem: &Problem,
     order_components: &[Option<usize>],
-) -> Vec<HashSet<usize>> {
+) -> Vec<(HashSet<usize>, HashSet<usize>)> {
     let order_id_to_idx: HashMap<u64, usize> = problem.orders
         .iter()
         .enumerate()
@@ -359,12 +467,19 @@ fn assign_mms(
         .collect();
 
     problem.mm_constraints.iter().map(|mm| {
-        mm.order_ids.iter()
-            .filter_map(|&oid| {
-                order_id_to_idx.get(&oid)
-                    .and_then(|&idx| order_components[idx])
-            })
-            .collect()
+        let mut all_comps = HashSet::new();
+        let mut pos_comps = HashSet::new();
+        for &oid in &mm.order_ids {
+            if let Some(&idx) = order_id_to_idx.get(&oid) {
+                if let Some(comp) = order_components[idx] {
+                    all_comps.insert(comp);
+                    if !problem.orders[idx].is_seller() {
+                        pos_comps.insert(comp);
+                    }
+                }
+            }
+        }
+        (all_comps, pos_comps)
     }).collect()
 }
 
@@ -374,21 +489,34 @@ type LocalMm = (usize, usize);
 type SpanningMm = (usize, Vec<usize>);
 
 /// Classify MMs into local (single component) vs spanning (multiple components).
+/// Uses positive-weight component set for classification — components with only
+/// seller orders don't need budget coordination (they don't participate in the
+/// EG exp cone).
 fn classify_mms(
-    mm_components: &[HashSet<usize>],
+    mm_components: &[(HashSet<usize>, HashSet<usize>)],
 ) -> (Vec<LocalMm>, Vec<SpanningMm>) {
     let mut local = Vec::new();
     let mut spanning = Vec::new();
 
-    for (mm_idx, comps) in mm_components.iter().enumerate() {
-        match comps.len() {
-            0 => {} // MM has no orders in any component (all dropped)
+    for (mm_idx, (all_comps, pos_comps)) in mm_components.iter().enumerate() {
+        if all_comps.is_empty() {
+            continue; // MM has no orders in any component
+        }
+        // Classify based on positive-weight components (which need budget coordination)
+        match pos_comps.len() {
+            0 => {
+                // Only seller orders — treat as local to avoid mirror descent
+                // Give full budget to the first component
+                if let Some(&comp) = all_comps.iter().next() {
+                    local.push((mm_idx, comp));
+                }
+            }
             1 => {
-                let comp = *comps.iter().next().unwrap();
+                let comp = *pos_comps.iter().next().unwrap();
                 local.push((mm_idx, comp));
             }
             _ => {
-                let mut sorted: Vec<usize> = comps.iter().copied().collect();
+                let mut sorted: Vec<usize> = pos_comps.iter().copied().collect();
                 sorted.sort();
                 spanning.push((mm_idx, sorted));
             }
@@ -436,8 +564,12 @@ fn build_sub_problem(
         }
     }
 
-    // Filter MM constraints: only include orders in this component,
-    // set budget to allocated share
+    // Filter MM constraints: only include POSITIVE-WEIGHT (buyer) orders.
+    // Seller MM orders stay in the problem as regular orders, outside the
+    // budget constraint. This ensures B_k^m → U_k^m is smooth (no seller
+    // capital drain) so mirror descent converges per the decomposition theorem.
+    // The global trim_mm_budget_overflows post-processing enforces the real
+    // budget across all orders including sellers.
     let mut mm_constraints = Vec::new();
     for (mm_idx, mm) in problem.mm_constraints.iter().enumerate() {
         let budget = mm_budgets
@@ -450,9 +582,14 @@ fn build_sub_problem(
             continue;
         }
 
-        // Filter to only orders in this component
+        // Only positive-weight (buyer) orders go into the budget constraint
         let filtered_order_ids: Vec<u64> = mm.order_ids.iter()
-            .filter(|&&oid| order_ids_in_component.contains(&oid))
+            .filter(|&&oid| {
+                order_ids_in_component.contains(&oid) && {
+                    // Check if this order is a buyer (positive welfare weight)
+                    problem.orders.iter().any(|o| o.id == oid && !o.is_seller())
+                }
+            })
             .copied()
             .collect();
 
@@ -487,7 +624,12 @@ fn build_sub_problem(
 // MM utility computation
 // ============================================================================
 
-/// Compute welfare contribution of each spanning MM in each component.
+/// Compute EG utility of each spanning MM in each component.
+///
+/// The decomposition theorem (design/decomposition.typ Theorem 1) says the
+/// optimal budget allocation equalizes `ln U_k^m` across components, where
+/// `U_k^m = Σ_{i ∈ MM_k ∩ comp_m} L_i q_i` is the EG utility (welfare
+/// weight × fill quantity), NOT the surplus (which depends on clearing prices).
 fn compute_mm_utilities(
     problem: &Problem,
     results: &[PipelineResult],
@@ -514,25 +656,55 @@ fn compute_mm_utilities(
     for &(mm_idx, ref comps) in spanning_mms {
         let mm = &problem.mm_constraints[mm_idx];
         for &comp in comps {
-            let mut welfare = 0.0f64;
+            let mut utility = 0.0f64;
             for &oid in &mm.order_ids {
                 if let Some(&(order_idx, order_comp)) = order_id_info.get(&oid) {
                     if order_comp != comp {
                         continue;
                     }
+                    let order = &problem.orders[order_idx];
+                    // L_i = sign_i × limit_price_i (welfare weight)
+                    let w_i = if order.is_seller() { -1.0 } else { 1.0 }
+                        * order.limit_price as f64;
+                    // Only positive-weight orders contribute to U_k
+                    if w_i <= 0.0 {
+                        continue;
+                    }
                     if let Some(fills) = fill_lookup.get(&comp) {
                         if let Some(fill) = fills.get(&oid) {
-                            let order = &problem.orders[order_idx];
-                            welfare += fill.welfare(order) as f64;
+                            utility += w_i * fill.fill_qty as f64;
                         }
                     }
                 }
             }
-            utilities.insert((mm_idx, comp), welfare.max(0.0));
+
+            utilities.insert((mm_idx, comp), utility.max(0.0));
         }
     }
 
     utilities
+}
+
+/// Compute the maximum ln-utility gap across all spanning MMs (for logging).
+fn compute_max_log_gap(
+    utilities: &HashMap<(usize, usize), f64>,
+    spanning_mms: &[(usize, Vec<usize>)],
+) -> f64 {
+    let mut max_gap = 0.0f64;
+    for &(mm_idx, ref comps) in spanning_mms {
+        let logs: Vec<f64> = comps.iter()
+            .filter_map(|&comp| {
+                let u = utilities.get(&(mm_idx, comp)).copied().unwrap_or(0.0);
+                if u > 0.0 { Some(u.ln()) } else { None }
+            })
+            .collect();
+        if logs.len() >= 2 {
+            let max_l = logs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let min_l = logs.iter().cloned().fold(f64::INFINITY, f64::min);
+            max_gap = max_gap.max((max_l - min_l).abs());
+        }
+    }
+    max_gap
 }
 
 /// Check if utilities have equalized across components for all spanning MMs.
