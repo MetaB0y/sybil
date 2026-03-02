@@ -15,6 +15,7 @@ The **matching-solver** crate is the core optimization engine for welfare-maximi
 | **LpSolver** | `lp_solver.rs` | `lp` | LP via HiGHS with entropy smoothing. Best welfare across all presets. |
 | **EgSolver** | `eg_solver.rs` | `lp` | Eisenberg-Gale / Fisher market formulation. |
 | **ConicSolver** | `conic_solver.rs` | `conic` | Conic EG via Clarabel. |
+| **IterLpSolver** | `iterative_lp_solver.rs` | `lp` | Iterative LP with EG μ-boosted MM weights. |
 | **MilpSolver** | `milp.rs` | `milp` | MIQCQP via SCIP (russcip). Exact optimal with timeout. |
 
 All solvers return a `PipelineResult` which contains `MatchingResult` (fills + welfare), clearing prices, and timing data.

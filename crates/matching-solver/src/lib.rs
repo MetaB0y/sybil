@@ -24,6 +24,9 @@ pub mod eg_solver;
 pub mod conic_solver;
 
 #[cfg(feature = "lp")]
+pub mod iterative_lp_solver;
+
+#[cfg(feature = "lp")]
 pub mod decomposed;
 
 // === Public API ===
@@ -48,6 +51,9 @@ pub use lp_solver::{LpConfig, LpSolver};
 
 #[cfg(feature = "lp")]
 pub use eg_solver::{EgConfig, EgSolver};
+
+#[cfg(feature = "lp")]
+pub use iterative_lp_solver::{IterLpConfig, IterLpSolver};
 
 #[cfg(feature = "conic")]
 pub use conic_solver::{ConicConfig, ConicSolver, ObjectiveMode};

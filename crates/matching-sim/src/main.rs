@@ -80,7 +80,7 @@ fn main() {
 
     if matches!(
         solver_choice,
-        SolverChoice::Lp | SolverChoice::Eg | SolverChoice::Conic | SolverChoice::DecomposedLp | SolverChoice::DecomposedEg | SolverChoice::DecomposedConic
+        SolverChoice::Lp | SolverChoice::Eg | SolverChoice::Conic | SolverChoice::DecomposedLp | SolverChoice::DecomposedEg | SolverChoice::DecomposedConic | SolverChoice::IterLp | SolverChoice::DecomposedIterLp
     ) && (verbose || export_json.is_some() || show_charts)
     {
         // Detailed pipeline run with step-by-step output
@@ -519,7 +519,17 @@ fn run_detailed_pipeline(
                 );
                 solver.solve(&problem)
             }
-            _ => unreachable!("only LP/EG/Conic/Decomposed reach run_detailed_pipeline"),
+            #[cfg(feature = "lp")]
+            SolverChoice::IterLp => {
+                let solver = matching_solver::IterLpSolver::new();
+                solver.solve(&problem)
+            }
+            #[cfg(feature = "lp")]
+            SolverChoice::DecomposedIterLp => {
+                let solver = matching_solver::DecomposedSolver::new(matching_solver::IterLpSolver::new());
+                solver.solve(&problem)
+            }
+            _ => unreachable!("only LP/EG/Conic/IterLP/Decomposed reach run_detailed_pipeline"),
         };
 
         if verbose {
@@ -535,6 +545,10 @@ fn run_detailed_pipeline(
                     SolverChoice::DecomposedConic => "Decomposed(Conic) Solver",
                     #[cfg(feature = "conic")]
                     SolverChoice::Conic => "Conic (EG) Solver",
+                    #[cfg(feature = "lp")]
+                    SolverChoice::IterLp => "IterLP Solver",
+                    #[cfg(feature = "lp")]
+                    SolverChoice::DecomposedIterLp => "Decomposed(IterLP) Solver",
                     _ => "LP Solver",
                 };
                 println!("{}:", solver_label);
@@ -1006,6 +1020,10 @@ enum SolverChoice {
     DecomposedEg,
     #[cfg(feature = "conic")]
     DecomposedConic,
+    #[cfg(feature = "lp")]
+    IterLp,
+    #[cfg(feature = "lp")]
+    DecomposedIterLp,
     All,
 }
 
@@ -1025,6 +1043,10 @@ fn parse_solver_choice(args: &[String]) -> SolverChoice {
         Some("decomposed-eg") => SolverChoice::DecomposedEg,
         #[cfg(feature = "conic")]
         Some("decomposed-conic") => SolverChoice::DecomposedConic,
+        #[cfg(feature = "lp")]
+        Some("iter-lp") => SolverChoice::IterLp,
+        #[cfg(feature = "lp")]
+        Some("decomposed-iter-lp") => SolverChoice::DecomposedIterLp,
         Some("all") => SolverChoice::All,
         _ => SolverChoice::Lp, // Default to LP solver
     }
@@ -1162,6 +1184,10 @@ fn expand_solver_choices(choice: &SolverChoice) -> Vec<SolverChoice> {
             choices.push(SolverChoice::DecomposedEg);
             #[cfg(feature = "conic")]
             choices.push(SolverChoice::DecomposedConic);
+            #[cfg(feature = "lp")]
+            choices.push(SolverChoice::IterLp);
+            #[cfg(feature = "lp")]
+            choices.push(SolverChoice::DecomposedIterLp);
             choices
         }
         other => vec![other.clone()],
@@ -1191,6 +1217,10 @@ fn solver_display_name(choice: &SolverChoice, milp_timeout: Option<f64>) -> Stri
         SolverChoice::DecomposedEg => "Decomposed(EG)".to_string(),
         #[cfg(feature = "conic")]
         SolverChoice::DecomposedConic => "Decomposed(Conic)".to_string(),
+        #[cfg(feature = "lp")]
+        SolverChoice::IterLp => "IterLP".to_string(),
+        #[cfg(feature = "lp")]
+        SolverChoice::DecomposedIterLp => "Decomposed(IterLP)".to_string(),
         SolverChoice::All => "All".to_string(),
     }
 }
@@ -1251,6 +1281,20 @@ fn run_solver_with_witness(
             let solver = matching_solver::DecomposedSolver::new(
                 matching_solver::ConicSolver::with_config(build_conic_config(args)),
             );
+            let pipeline_result = solver.solve(problem);
+            let witness = witness_from_pipeline(problem, &pipeline_result);
+            (pipeline_result.result, witness)
+        }
+        #[cfg(feature = "lp")]
+        SolverChoice::IterLp => {
+            let solver = matching_solver::IterLpSolver::new();
+            let pipeline_result = solver.solve(problem);
+            let witness = witness_from_pipeline(problem, &pipeline_result);
+            (pipeline_result.result, witness)
+        }
+        #[cfg(feature = "lp")]
+        SolverChoice::DecomposedIterLp => {
+            let solver = matching_solver::DecomposedSolver::new(matching_solver::IterLpSolver::new());
             let pipeline_result = solver.solve(problem);
             let witness = witness_from_pipeline(problem, &pipeline_result);
             (pipeline_result.result, witness)
