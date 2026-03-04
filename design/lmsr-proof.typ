@@ -284,7 +284,7 @@ Replacing linear MM welfare with Kelly-criterion utility transforms the budget-c
 
   _where $"MM"_k^+$ is the set of MM $k$'s buy orders (sell orders from MMs enter the retail welfare term; see §5.5), $U_k(bold(q)) = sum_(i in "MM"_k^+) L_i q_i >= 0$ is MM $k$'s total weighted fill ($L_i > 0$ for all $i in "MM"_k^+$), $s_k >= 0$ is MM $k$'s retained cash, $cal(C) = {bold(q) in [0, bold(overline(Q))]: "balance constraints"}$ is the LP feasible set, and $C_b$ is the smoothed minting cost (@prop-sandwich). Define $mu_k = B_k \/ (U_k + s_k)$ as the shadow price of capital. Then:_
 
-  + _The objective is strictly concave. $P_b^"RA"$ has a unique optimum $(bold(q)^*, bold(s)^*)$._
+  + _The objective is strictly concave in the aggregates $(U_k, s_k, bold(D))$. The optimal aggregates, welfare, and clearing prices are unique. Fills $bold(q)^*$ are unique up to reallocation among MM buy orders with identical market and limit price._
   + _Limit orders are exact: $mu_k <= 1$, so no MM order fills at negative welfare ($L_i < p_k$)._
   + _No explicit budget constraints appear. At the optimum, each MM $k$ spends at most $B_k$: capital on fills plus retained cash $sum_(i in "MM"_k^+) p_(m(i)) q_i + s_k <= B_k$._
   + _Clearing prices $bold(p)^*$ are unique._
@@ -296,7 +296,7 @@ Replacing linear MM welfare with Kelly-criterion utility transforms the budget-c
 
 == Proof
 
-*(1) Strict concavity and uniqueness.* Each $B_k ln(U_k + s_k)$ is the composition of $ln$ (strictly concave, increasing) with a positive affine function of $(bold(q), s_k)$ — strictly concave. The $-s_k$ term is linear. Retail welfare is linear. $-C_b$ is concave. The sum is strictly concave. The objective tends to $-infinity$ as $s_k -> infinity$ (since $-s_k$ dominates $ln s_k$) and as $bold(q)$ approaches the boundary of $cal(C)$ from outside (box constraints). Therefore the superlevel sets ${(bold(q), bold(s)) : f^"RA" >= c}$ are compact for any $c > -infinity$, so the supremum is attained. Strict concavity gives a unique maximizer. At the optimum, $U_k + s_k > 0$ for every MM with $B_k > 0$: the gradient $partial / (partial s_k)[B_k ln(U_k + s_k) - s_k] -> +infinity$ as $U_k + s_k -> 0^+$, so the boundary $U_k + s_k = 0$ is never optimal.
+*(1) Strict concavity and uniqueness.* The objective is strictly concave in the aggregate variables: each $B_k ln(U_k + s_k)$ is strictly concave in $(U_k, s_k)$, $-C_b(bold(D))$ is strictly concave in $bold(D)$ (for $b > 0$; concave for $b = 0$), and the remaining terms are linear. Since $U_k$ and $bold(D)$ are linear functions of $bold(q)$, the composition is concave in $bold(q)$ and strictly concave in the aggregates $(U_k, s_k, bold(D))$. The objective tends to $-infinity$ as $s_k -> infinity$ (since $-s_k$ dominates $ln s_k$) and as $bold(q)$ approaches the boundary of $cal(C)$ from outside (box constraints). Therefore the superlevel sets ${(bold(q), bold(s)) : f^"RA" >= c}$ are compact for any $c > -infinity$, so the supremum is attained. The optimal aggregates $(U_k^*, s_k^*, bold(D)^*)$ — and hence prices, total welfare, and per-MM utility — are unique. Individual fills $bold(q)^*$ are unique whenever the map $bold(q) |-> (U_k, bold(D))$ is injective over the feasible set (i.e., no two MM buy orders from the same MM in the same market share the same limit price); otherwise, equivalent orders may be reallocated freely without affecting any observable. At the optimum, $U_k + s_k > 0$ for every MM with $B_k > 0$: the gradient $partial / (partial s_k)[B_k ln(U_k + s_k) - s_k] -> +infinity$ as $U_k + s_k -> 0^+$, so the boundary $U_k + s_k = 0$ is never optimal.
 
 *(2) Limit order exactness.* The KKT condition for $s_k >= 0$ is:
 
@@ -320,17 +320,17 @@ $ sum_(i in "MM"_k^+) p_(m(i))^* q_i^* + s_k^* <= B_k $
 
 Each MM's total deployment — capital on fills plus retained cash — is at most $B_k$. (The gap $sum lambda_i^+ q_i$ is infra-marginal surplus from fully-filled orders — profit that does not require additional capital.) The budget emerges from the objective, not from an explicit constraint. This is the Eisenberg-Gale mechanism extended to quasi-linear utilities: the $ln$ singularity absorbs the budget, and the cash variable absorbs the surplus.
 
-*(4) Price uniqueness ($b > 0$).* Prices are $p_k = partial C_b \/ partial D_k = "softmax"(bold(D)\/b)$, a continuous function of the unique $bold(q)^*$. (At $b = 0$, fills are unique but prices are LP duals, which may not be unique when multiple $D_k$ tie at $max_j D_j$; see §5.3.)
+*(4) Price uniqueness ($b > 0$).* Prices are $p_k = partial C_b \/ partial D_k = "softmax"(bold(D)\/b)$, a continuous function of the unique $bold(D)^*$. (At $b = 0$, aggregates are unique but prices are LP duals, which may not be unique when multiple $D_k$ tie at $max_j D_j$; see §5.3.)
 
 *(5) Polynomial solvability.* For $b > 0$, the objective is concave and $C^infinity$. The feasible set is a polytope times $RR_+^(|cal(K)|)$. Standard interior-point methods solve this in polynomial time. At $b = 0$, the objective is concave but non-smooth; subgradient or bundle methods apply. #h(1fr) $square$
 
-*Example.* Binary market ($K = 2$), $b -> 0$. An MM ($B = 60$) posts two buy-Yes orders: $A$ at $L_A = 0.70$, qty $100$; $B$ at $L_B = 0.55$, qty $100$. A retail trader posts buy-No at $L_C = 0.60$, qty $200$.
+*Example.* Binary market ($K = 2$), $b -> 0$. An MM ($B = 50$) posts two buy-Yes orders: $A$ at $L_A = 0.70$, qty $100$; $B$ at $L_B = 0.55$, qty $100$. A retail trader posts buy-No at $L_C = 0.60$, qty $200$.
 
-_LP (no budgets)._ All fill at balanced minting ($D_"Yes" = D_"No" = 200$, $p_"Yes" = 0.50$). Welfare $= 45$. MM capital $= 0.50 times 200 = 100 > B$.
+_LP (no budgets)._ All fill at balanced minting ($D_"Yes" = D_"No" = 200$). Welfare $= 45$. MM capital at any supporting price exceeds $B$: even at the lowest dual price $p_"Yes" = 0.40$, capital $= 0.40 times 200 = 80 > B$.
 
-_Risk-averse._ The MM is capital-constrained ($U^"LP" = 125 > B = 60$, $s = 0$). Shadow price $mu = 60\/70 approx 0.86$. Order $A$ fills fully: $mu L_A = 0.60 > p_"Yes" = 0.50$. Order $B$ does not fill: $mu L_B = 0.47 < 0.50$ — the shadow price throttles the lower-ROI order. Minting balances at $D_"Yes" = D_"No" = 100$. Welfare $= 30$. Capital consumed $= 50 <= B$, with the gap of $10$ being infra-marginal surplus from order $A$.
+_Risk-averse._ The MM is capital-constrained ($U^"LP" = 125 > B = 50$, $s = 0$). Only order $A$ fills: $q_A = 100$, $q_B = 0$, $q_C = 100$. The retail order is partially filled, pinning $p_"No" = L_C = 0.60$, hence $p_"Yes" = 0.40$. Shadow price $mu = B\/U = 50\/70 approx 0.71$. Order $A$ fills: $mu L_A = 0.50 > p_"Yes" = 0.40$. Order $B$ does not fill: $mu L_B = 0.39 < 0.40$ — the shadow price throttles the lower-ROI order. Welfare $= 30$. Capital consumed $= 0.40 times 100 = 40 <= B$, with the gap of $10$ being infra-marginal surplus from order $A$.
 
-_Welfare gap._ Actual gap $= 15$; exact bound $= Delta - B ln(1 + Delta\/B) approx 21$; quadratic bound $= Delta^2\/(2B) approx 35$ (where $Delta = U^"LP" - B = 65$). The bound is conservative because the retail side contracts proportionally.
+_Welfare gap._ Actual gap $= 15$; exact bound $= Delta - B ln(1 + Delta\/B) approx 29$ (where $Delta = U^"LP" - B = 75$). The bound is conservative because the retail side contracts proportionally.
 
 == Temperature Independence
 
@@ -338,7 +338,7 @@ In the risk-neutral model, entropy smoothing was the only source of concavity �
 
 $ P_0^"RA": quad max_(bold(q) in cal(C), bold(s) >= 0) quad sum_k [B_k ln(U_k + s_k) - s_k] + sum_(j in.not "MM") w_j q_j - max_k D_k $
 
-The $-max_k D_k$ term is concave (not strictly), but the $ln$ term provides strict concavity. Fill uniqueness, limit order exactness, and budget absorption hold at every temperature, including $b = 0$. Price uniqueness requires $b > 0$: at $b = 0$, prices are LP dual variables, which may not be unique when multiple outcomes $k$ tie at $D_k = max_j D_j$ (the subdifferential of $max$ is a face of the simplex). Any $b > 0$ restores uniqueness, with LMSR subsidy bounded by $b ln K$ (@prop-sandwich).
+The $-max_k D_k$ term is concave (not strictly), but the $ln$ term provides strict concavity. Aggregate uniqueness, limit order exactness, and budget absorption hold at every temperature, including $b = 0$. Price uniqueness requires $b > 0$: at $b = 0$, prices are LP dual variables, which may not be unique when multiple outcomes $k$ tie at $D_k = max_j D_j$ (the subdifferential of $max$ is a face of the simplex). Any $b > 0$ restores uniqueness, with LMSR subsidy bounded by $b ln K$ (@prop-sandwich).
 
 == Welfare Convergence
 
@@ -407,7 +407,7 @@ The prediction market extends the quasi-linear Fisher market in two ways: (1) su
 
 *What doesn't change.* Non-MM orders are still matched by UCP at clearing prices. The minting mechanism is unchanged. Prices are still softmax (for $b > 0$) or LP duals (for $b = 0$). Limit orders are exact: no order fills below its stated price.
 
-*The buy/sell decomposition.* The Fisher market isomorphism applies to MM buy orders — the orders that deploy capital and create demand. MM sell orders are treated as retail: filled by UCP with linear welfare, consuming no budget. Per outcome per batch, the MM is either buying or selling, never both (MMs do not self-deal).
+*The buy/sell decomposition.* In each binary market, MM positions are netted per outcome before clearing: opposing buys and sells cancel, leaving a net directional position. Since "sell Yes at $L$" is economically equivalent to "buy No at $1-L$" (with capital cost $1-L$ per share), all net positions are expressed as buys. These net buy orders form $"MM"_k^+$ and their capital costs enter the budget accounting through $U_k$. The only MM sell orders that bypass the budget are liquidations of existing inventory — shares already held, not newly created short positions. Per outcome per batch, the MM is either net buying or net selling, never both.
 
 *Extension to multiple groups and bundle orders.* Nothing in @thm-main requires a single mutually exclusive group. Consider $N$ groups, each with $K_j$ mutually exclusive outcomes. The joint state space is $cal(S) = product_j {1, dots, K_j}$ (exactly one joint state is realized). Bundle orders — orders whose payoffs depend on the joint state — create demand $D_s$ over $cal(S)$. The minting cost generalizes to $V(bold(D)) = max_s D_s$ (minting one complete set of all joint states costs \$1), and the smoothed version is $C_b = b ln sum_s exp(D_s\/b)$. Both are convex in $bold(D)$, and $bold(D)$ is linear in $bold(q)$. The proof of @thm-main goes through unchanged for any fixed state space representation: $B_k ln(U_k + s_k)$ is still strictly concave, $-C_b$ is still concave, budget absorption and limit order exactness still hold. The open question is whether the program can be solved without explicitly enumerating the joint states (see §7.2).
 
@@ -418,19 +418,19 @@ When no orders span multiple groups, the joint problem decomposes: $C_b = sum_j 
 
 == Conic Formulation
 
-The EG program $P_b^"RA"$ is a linear objective subject to LP constraints plus $K$ logarithmic terms — one per MM. Each constraint $t_k <= ln(V_k)$ is modeled by a single exponential cone: $(t_k, 1, V_k) in cal(K)_"exp" = {(x,y,z) : y exp(x\/y) <= z}$. The full program is a conic optimization problem with $K$ exponential cones — one per MM — solvable by standard interior-point solvers (Clarabel, MOSEK).
+At $b = 0$, the minting cost $max_k D_k$ is modeled by LP epigraph constraints ($M >= D_k$). The EG program $P_0^"RA"$ then has a linear objective over LP constraints plus one logarithmic term per MM. Each constraint $t_k <= ln(V_k)$ is modeled by a single exponential cone: $(t_k, 1, V_k) in cal(K)_"exp" = {(x,y,z) : y exp(x\/y) <= z}$. The full program is a conic optimization problem solvable by standard interior-point solvers (Clarabel, MOSEK).
 
 #proposition(name: "Conic Reformulation")[
-  _$P_b^"RA"$ is equivalent to a conic program: minimize a linear objective over LP constraints and $K$ exponential cone constraints. Clearing prices are the dual variables of the position balance constraints, identical to the LP. The number of exponential cones equals the number of MMs, independent of the number of orders or markets._
+  _At $b = 0$, $P_0^"RA"$ is equivalent to a conic program: minimize a linear objective over LP constraints and $n_"MM"$ exponential cone constraints (one per MM). Clearing prices are the dual variables of the minting epigraph constraints. For $b > 0$, the log-sum-exp minting cost adds $O(K)$ additional exponential cones (one per outcome); the augmented-LP approach below avoids this overhead._
 ] <prop-conic>
 
-_Remark (Augmented LP)._ The EG Hessian $H = -sum_k (B_k \/ V_k^2) bold(ell)_k bold(ell)_k^T$ has rank at most $K$, where $bold(ell)_k$ is MM $k$'s welfare weight vector. By Sherman–Morrison–Woodbury, each Newton step costs the same as an LP interior-point step plus an $O(n K)$ rank-$K$ correction — dominated by the $O(n)$ LP cost when $K << n$. The EG problem has the same asymptotic complexity as the LP.
+_Remark (Augmented LP)._ The EG Hessian $H = -sum_k (B_k \/ V_k^2) bold(ell)_k bold(ell)_k^T$ has rank at most $n_"MM"$ (the number of MMs), where $bold(ell)_k$ is MM $k$'s welfare weight vector. By Sherman–Morrison–Woodbury, each Newton step costs the same as an LP interior-point step plus an $O(n dot n_"MM")$ rank-$n_"MM"$ correction — dominated by the $O(n)$ LP cost when $n_"MM" << n$. The EG problem has the same asymptotic complexity as the LP.
 
 == Decomposition Across Market Groups
 
 When no orders span multiple market groups, the minting cost separates: $C_b = sum_j C_b^(G_j)$ (product-LMSR factorization). The EG program decomposes into independent per-group programs, coordinated only by MM budget allocation.
 
-With log utility, splitting an MM's budget $B_k$ across components $m$ is a smooth concave problem: the coordination objective $max sum_m W_m^* (bold(B)^m)$ subject to $sum_m B_k^m = B_k$ has gradient $partial W_m^* \/ partial B_k^m = ln U_k^(m *)$ (envelope theorem). The optimal allocation equalizes utility across components: $ln U_k^(m *) = ln U_k^(m' *)$ for each MM $k$ active in components $m$ and $m'$. Standard mirror descent (multiplicative weights on budget shares) converges at rate $O(1\/t)$ (Beck and Teboulle 2003), with each iteration requiring only independent per-component solves.
+With log utility, splitting an MM's budget $B_k$ across components $m$ is a smooth concave problem: the coordination objective $max sum_m W_m^* (bold(B)^m)$ subject to $sum_m B_k^m = B_k$ has gradient $partial W_m^* \/ partial B_k^m = ln V_k^(m *)$ (envelope theorem), where $V_k^m = U_k^m + s_k^m$. The optimal allocation equalizes $V_k^(m *)$ across components: $V_k^(m *) = V_k^(m' *)$ for each MM $k$ active in components $m$ and $m'$. Standard mirror descent (multiplicative weights on budget shares) converges at rate $O(1\/t)$ (Beck and Teboulle 2003), with each iteration requiring only independent per-component solves.
 
 With linear welfare, the same budget allocation is combinatorial: a hard constraint $"cap"_k <= B_k$ cannot be smoothly split across components. This is the computational payoff of the Fisher market structure — the same $B_k ln U_k$ objective that absorbs budget constraints in the monolithic program also enables decomposition across components.
 
