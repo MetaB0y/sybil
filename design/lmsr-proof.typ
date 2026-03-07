@@ -38,14 +38,14 @@
 
 #block(inset: (x: 2em))[
   #text(weight: "bold")[Summary.]
-  We prove that prediction market batch auctions with budget-constrained market makers are Fisher markets (@thm-main). Replacing linear market-maker welfare with logarithmic utility — reflecting the Kelly-criterion sizing that real institutional MMs use — transforms the budget-constrained clearing problem into a convex program with a unique solution, solvable in polynomial time. Budget constraints vanish from the formulation entirely, absorbed into the Eisenberg-Gale objective. Prices, fills, and budget allocation emerge simultaneously from a single convex optimization.
+  We show that prediction market batch auctions with budget-constrained market makers admit a Fisher-market formulation (@thm-main). Replacing linear market-maker welfare with logarithmic utility — a standard Kelly-style model of diminishing returns — transforms the budget-constrained clearing problem into a concave program with exact KKT interpretation and polynomial-time conic formulations. Budget constraints vanish from the formulation entirely, absorbed into the Eisenberg-Gale objective. Prices, fills, and capital deployment emerge simultaneously from a single optimization, although order-level fills and zero-temperature prices need not be unique without additional nondegeneracy assumptions.
 ]
 
 #v(1em)
 
 = Introduction
 
-The main result of this paper is that prediction market batch auctions are Fisher markets.
+The main result of this paper is that prediction market batch auctions admit a Fisher-market formulation.
 
 A prediction market exchange runs _batch auctions_: orders accumulate, then clear simultaneously at uniform prices. The clearing problem is an allocation problem — find the fills and prices that maximize welfare subject to balance constraints. Without budget constraints, this is a standard Linear Program.
 
@@ -55,11 +55,11 @@ We prove three things, in order:
 
 + *The framework (§2).* LP batch clearing and Hanson's LMSR are the same mathematical object at different temperatures, connected by Fenchel duality. This is the foundation for everything that follows. It is also where we prove that clearing prices are unique when budgets are absent — a fact that makes the budget obstacle precise.
 
-+ *The obstacle (§3).* Adding budget constraints to the risk-neutral model makes the feasible set non-convex (bilinear constraints, indefinite Hessian). Standard convex optimization no longer applies, no polynomial-time algorithm is known, and uniqueness of clearing prices is an open question. The structural cause: linear welfare with hard budget caps is an internally inconsistent economic model.
++ *The obstacle (§3).* Adding budget constraints to the risk-neutral model can make the feasible set non-convex. Standard convex optimization no longer applies, no polynomial-time algorithm is known, and uniqueness of clearing prices is an open question. The structural cause: linear welfare with hard budget caps is an internally inconsistent economic model.
 
-+ *The resolution (§§4–5).* Replacing linear MM welfare with Kelly-criterion utility ($B_k ln U_k$) transforms the problem into a strictly convex Eisenberg-Gale program. Budget constraints are absorbed into the objective — they do not appear as constraints at all. The program has a unique optimum, unique clearing prices, and is polynomial-time solvable. This is the Fisher market isomorphism.
++ *The resolution (§§4–5).* Replacing linear MM welfare with Kelly-criterion utility transforms the problem into an Eisenberg-Gale-type concave program. Budget constraints are absorbed into the objective — they do not appear as constraints at all. The program has exact limit-order KKT conditions, endogenous budget absorption, and polynomial-time conic formulations. This is the Fisher market isomorphism.
 
-The modeling "trick" is not logarithmic utility — it is the linear assumption. When we fix it, the pathology fixes itself. §6 shows the result is practical: the program admits a conic formulation with $K$ exponential cones and decomposes across independent market groups via smooth budget allocation.
+The modeling "trick" is not logarithmic utility — it is the linear assumption. When we fix it, the pathology fixes itself. §6 shows the result is practical: the program admits a conic formulation with $K$ exponential cones and suggests a smooth budget-allocation decomposition across independent market groups.
 
 
 = Foundations: Batch Clearing and LMSR <foundation>
@@ -181,10 +181,10 @@ $
 where $W^*(bold(p))$ is the total surplus of orders whose limit prices exceed clearing prices, and $C_b^* (bold(p)) = b sum p_k ln p_k$ is the negative Shannon entropy (@thm-lmsr).
 
 #theorem(name: "Unconstrained Price Uniqueness")[
-  _The Fenchel dual of the unconstrained smoothed problem is strictly convex: $W^*$ is convex (piecewise linear) and $C_b^*$ is strictly convex on the interior of $Delta$. The clearing prices $bold(p)^*$ are therefore unique for any $b > 0$ and any order book, unconditionally._
+  _The Fenchel dual of the unconstrained smoothed problem is strictly convex on the simplex: $W^*$ is convex and $C_b^* (bold(p)) = b sum_k p_k ln p_k$ is strictly convex on $Delta$ (with the convention $0 ln 0 := 0$). The clearing prices $bold(p)^*$ are therefore unique for any $b > 0$ and any order book, unconditionally._
 ] <thm-unique>
 
-_Proof._ $W^*$ is convex (conjugate of concave $W$) and $C_b^*$ is strictly convex on the simplex interior: its Hessian is $b dot "diag"(1\/p_k)$, positive definite for $bold(p) > 0$. The minimizer lies in the interior because $nabla C_b^* = b(1 + ln p_k) -> -infinity$ as any $p_k -> 0^+$, which dominates the finite gradient of $W^*$ and pulls the minimizer away from the boundary. Strict convexity on the interior gives uniqueness. #h(1fr) $square$
+_Proof._ $W^*$ is convex because it is a Fenchel conjugate. The scalar function $x |-> x ln x$ is strictly convex on $[0, +infinity)$, so $sum_k p_k ln p_k$ is strictly convex on the convex set $Delta$. Therefore $W^* + C_b^*$ is strictly convex on $Delta$. Since $Delta$ is compact and the dual objective is lower-semicontinuous, a minimizer exists; strict convexity implies it is unique. #h(1fr) $square$
 
 
 = The Budget Obstacle <obstacle>
@@ -199,24 +199,30 @@ $
 "cap"_k(bold(p), bold(q)) = sum_(i in "MM"_k) c_i(p_(m(i))) dot q_i, quad c_i(p) = cases(p & "if BuyYes/SellNo", 1-p & "if SellYes/BuyNo")
 $
 
-The budget constraint $"cap"_k <= B_k$ is _bilinear_: $p$ is determined by $bold(q)$ through the clearing mechanism. The product $c(p(bold(q))) dot q$ makes the feasible set non-convex in fill space. This single constraint is what separates prediction market clearing from a standard LP.
+The budget constraint $"cap"_k <= B_k$ is _bilinear_: $p$ is determined by $bold(q)$ through the clearing mechanism. The product $c(p(bold(q))) dot q$ can make the feasible set non-convex in fill space. This single constraint is what separates prediction market clearing from a standard LP.
 
 == Computational Consequences <computational>
 
 The bilinear budget constraint has three consequences for computation:
 
-*1. The feasible set is non-convex.* Define $h_k (bold(q)) = sum_(i in "MM"_k) p_(m(i))(bold(q)) dot q_i$ as MM $k$'s capital consumption. We show the Hessian is indefinite via the simplest non-trivial case: an MM with buy orders on two independent binary groups, one order per group, fill quantities $q_1, q_2$. Since groups are independent, $h = f(q_1) + f(q_2)$ where $f(q) = sigma(q\/b) dot q$ and $sigma$ is the logistic sigmoid. Differentiating:
+*1. The feasible set can be non-convex.* Define $h_k (bold(q)) = sum_(i in "MM"_k) p_(m(i))(bold(q)) dot q_i$ as MM $k$'s capital consumption. We start with the simplest non-trivial case: an MM with buy orders on two independent binary groups, one order per group, fill quantities $q_1, q_2$. Since groups are independent, $h = f(q_1) + f(q_2)$ where $f(q) = sigma(q\/b) dot q$ and $sigma$ is the logistic sigmoid. Differentiating:
 $
 f''(q) = (sigma(1-sigma)) / b [2 + q(1-2sigma) / b]
 $
-Since $sigma(1-sigma) > 0$, the sign depends on $2 + q(1-2sigma)\/b$. At $q = 0$: $f''(0) = 1\/(2b) > 0$ (convex). For large $q$: $sigma -> 1$ and the bracket becomes $2 - q\/b -> -infinity$ (concave). The inflection point $f''(q^*) = 0$ is at $q^* approx 2.4 b$. With fills straddling the threshold — $q_1 < q^*$ and $q_2 > q^*$ — the diagonal Hessian $"diag"(f''(q_1), f''(q_2))$ is indefinite. Sublevel sets ${h <= B_k}$ are not guaranteed convex.
+Since $sigma(1-sigma) > 0$, the sign depends on $2 + q(1-2sigma)\/b$. At $q = 0$: $f''(0) = 1\/(2b) > 0$ (convex). For large $q$: $sigma -> 1$ and the bracket becomes $2 - q\/b -> -infinity$ (concave). The inflection point $f''(q^*) = 0$ is at $q^* approx 2.4 b$. So $h$ is neither convex nor concave.
 
-*2. No standard convex algorithm applies.* The unconstrained problem $P_b$ is a smooth concave maximization (solved by interior point in polynomial time). Adding budget constraints ${h_k <= B_k}$ makes the feasible set non-convex. Standard convex optimization — interior point, projected gradient, Frank-Wolfe — requires convex feasible sets. The budget-constrained problem is a bilinear program, for which no polynomial-time algorithm is known in general.
+To prove an actually non-convex sublevel set, fix $b = 1$ and compare the feasible points $a = (2, 9)$ and $b = (9, 2)$ with midpoint $m = (5.5, 5.5)$. Then
+$
+h(a) = h(b) approx 10.7605, quad h(m) approx 10.9552
+$
+So for budget $B = 10.8$, both endpoints satisfy $h <= B$ while the midpoint violates it. Therefore the sublevel set ${h <= B}$ is non-convex.
+
+*2. No standard convex algorithm applies directly.* The unconstrained problem $P_b$ is a smooth concave maximization (solved by interior point in polynomial time). Adding budget constraints ${h_k <= B_k}$ can make the feasible set non-convex. Standard convex optimization — interior point, projected gradient, Frank-Wolfe — requires convex feasible sets. The budget-constrained problem is a bilinear program, for which no polynomial-time algorithm is known in general.
 
 *3. The uniqueness question is open.* The proof of @thm-unique (price uniqueness without budgets) uses strict convexity of the Fenchel dual. With budgets, the argument breaks: uniqueness at one price vector requires _cross-price budget feasibility_ ($"cap"_k (bold(p)^2, bold(q)^1) <= B_k$), which the bilinear constraint does not guarantee. Whether clearing prices are nonetheless unique for all LMSR instances is an open question. (In the degenerate case of two identical markets with a symmetric MM, two KKT points exist by symmetry — but this requires exact parameter tuning and does not extend to generic order books.)
 
 #proposition(name: "Computational Obstruction")[
-  _The budget-constrained risk-neutral clearing problem is a bilinear program: the feasible set ${bold(q) in cal(C) : h_k (bold(q)) <= B_k}$ is non-convex (indefinite constraint Hessian). Standard convex optimization does not apply. By contrast, the risk-averse program $P_b^"RA"$ (@thm-main) is a standard convex program solvable in polynomial time._
+  _The budget-constrained risk-neutral clearing problem is a bilinear program and is non-convex in general: even in the two-group example above, the feasible set ${bold(q) in cal(C) : h_k (bold(q)) <= B_k}$ has non-convex sublevel sets. Standard convex optimization does not apply directly. By contrast, the risk-averse program $P_b^"RA"$ (@thm-main) is a standard convex program with conic formulations solvable in polynomial time._
 ] <prop-obstruction>
 
 In practice, exchanges handle budgets by iterative heuristics: solve the LP ignoring budgets, check for violations, adjust, repeat. Such methods have no convergence guarantee and can cycle. The risk-averse program eliminates this entirely — budgets are absorbed into the objective.
@@ -229,20 +235,20 @@ No. Welfare transforms to $sum_i w_i dot e_i \/ c_i(p)$ — a _rational_ functio
 
 The diagnosis is structural: _linear welfare with hard budget caps_ is an internally inconsistent economic model — agents simultaneously risk-neutral (constant marginal value) and risk-averse (capped exposure). The non-convexity is the computational symptom.
 
-The mathematics tells us exactly what is needed: diminishing-returns utility to provide curvature. §4 argues that this is not a mathematical convenience but the independently correct economic model — the computational need and the economic reality coincide. §5 proves the resulting program is convex.
+The mathematics tells us exactly what is needed: diminishing-returns utility to provide curvature. §4 argues that this is not merely a mathematical convenience but a plausible economic model for repeat-participation MMs. §5 proves the resulting program is convex.
 
 
-= Why Market Makers Have Diminishing Returns <economic-case>
+= Why Diminishing Returns Is a Plausible MM Model <economic-case>
 
-The previous section showed that clearing requires diminishing-returns utility to be computationally tractable. This section argues that diminishing returns is also the independently correct economic model for repeat-participation MMs — the mathematical fix and the economic reality are the same object. We give three theoretical arguments and two empirical observations.
+The previous section showed that clearing requires diminishing-returns utility to be computationally tractable. This section is a modeling argument rather than part of the proof spine: it gives reasons diminishing returns is a plausible reduced-form model for repeat-participation MMs.
 
 == Kelly Criterion Is a Survival Theorem
 
-Breiman (1961) proved that Kelly maximization (log utility) is the _unique_ repeated-game strategy that maximizes long-run growth rate a.s., reaches any wealth target in minimum expected time, and dominates any other strategy with probability 1. An MM that sizes linearly faces ruin with probability 1 given enough batches.
+Breiman (1961) showed that Kelly-style log utility is growth-optimal under classical repeated favorable-bet assumptions. This does not imply that every real MM literally maximizes log utility, but it does provide a principled repeated-game foundation for diminishing returns.
 
-A prediction market exchange runs _repeated_ batch auctions, compounding returns. The natural objective for a repeat participant is $max sum_t EE[ln(1 + r_t)]$ — exactly the Kelly criterion, exactly log utility per batch. Linear utility maximizes one-shot expected value but minimizes survival across batches. Since FBAs are inherently repeated, log utility is the only consistent objective.
+A prediction market exchange runs _repeated_ batch auctions, compounding returns. If an MM evaluates batches through long-run capital growth, an objective of the form $max sum_t EE[ln(1 + r_t)]$ is natural. Linear utility remains appropriate for one-shot welfare, but it misses sizing and survival tradeoffs across batches.
 
-Modeling MMs with log utility is not an arbitrary assumption but a consequence of competitive selection: the MMs that survive long enough to matter are the ones already using Kelly-like sizing.
+The modeling claim is therefore modest: log utility is not arbitrary; it is a defensible reduced form for repeat participants who care about growth and drawdown.
 
 == Budget Constraints _Are_ Risk Aversion
 
@@ -252,7 +258,7 @@ Linear welfare with a hard budget is internally inconsistent: "I value each shar
 
 == Empirical Grounding
 
-Real MMs post _ladders_ — multiple orders at decreasing limit prices with decreasing quantities — revealing concave demand directly through the order book. They also impose position limits to cap inventory risk: a linear-utility MM is indifferent between the 1st and 1,001st share, but real MMs are not. Both ladders and position limits are piecewise-linear approximations of diminishing returns. Log utility captures concave demand natively and penalizes concentration intrinsically.
+In practice, many MMs post _ladders_ — multiple orders at decreasing limit prices with decreasing quantities — revealing concave demand directly through the order book. They also impose position limits to cap inventory risk: a linear-utility MM is indifferent between the 1st and 1,001st share, but real MMs are not. Both ladders and position limits are piecewise-linear approximations of diminishing returns. Log utility captures concave demand natively and penalizes concentration intrinsically.
 
 == Synthesis
 
@@ -261,19 +267,19 @@ Real MMs post _ladders_ — multiple orders at decreasing limit prices with decr
     columns: 3,
     align: (left, left, left),
     [*Argument*], [*Why linear fails*], [*Why log is right*],
-    [Kelly/Breiman], [Bankrupt w.p.~1], [Unique growth-optimal],
+    [Kelly/Breiman], [Misses repeated-game sizing], [Growth-optimal benchmark],
     [Internal consistency], [Budget + risk-neutral contradicts], [Smooth risk aversion],
     [Order ladders], [Treats rungs as independent agents], [Captures concave demand],
     [Inventory risk], [Requires bolted-on position limits], [Concentration penalty intrinsic],
   )
 ]
 
-The non-convexity of §3 is not a feature of prediction markets — it is an artifact of the linear welfare model.
+The non-convexity of §3 is therefore better viewed as a pathology of the linear-with-hard-caps model than as an inherent feature of prediction markets.
 
 
 = Risk-Averse Clearing Is a Fisher Market <risk-averse>
 
-Replacing linear MM welfare with Kelly-criterion utility transforms the budget-constrained clearing problem into a convex program with a unique solution. Budget constraints disappear from the formulation — they are absorbed into the Eisenberg-Gale objective. The resulting program is structurally isomorphic to a quasi-linear Fisher market with endogenous supply.
+Replacing linear MM welfare with Kelly-criterion utility transforms the budget-constrained clearing problem into a concave optimization problem. Budget constraints disappear from the formulation — they are absorbed into the Eisenberg-Gale objective. The resulting program is structurally close to a quasi-linear Fisher market with endogenous supply.
 
 == The Program
 
@@ -284,11 +290,11 @@ Replacing linear MM welfare with Kelly-criterion utility transforms the budget-c
 
   _where $"MM"_k^+$ is the set of MM $k$'s buy orders (sell orders from MMs enter the retail welfare term; see §5.5), $U_k(bold(q)) = sum_(i in "MM"_k^+) L_i q_i >= 0$ is MM $k$'s total weighted fill ($L_i > 0$ for all $i in "MM"_k^+$), $s_k >= 0$ is MM $k$'s retained cash, $cal(C) = {bold(q) in [0, bold(overline(Q))]: "balance constraints"}$ is the LP feasible set, and $C_b$ is the smoothed minting cost (@prop-sandwich). Define $mu_k = B_k \/ (U_k + s_k)$ as the shadow price of capital. Then:_
 
-  + _The objective is strictly concave in the aggregates $(U_k, s_k, bold(D))$. The optimal aggregates, welfare, and clearing prices are unique. Fills $bold(q)^*$ are unique up to reallocation among MM buy orders with identical market and limit price._
+  + _The objective is concave and an optimum exists._
   + _Limit orders are exact: $mu_k <= 1$, so no MM order fills at negative welfare ($L_i < p_k$)._
   + _No explicit budget constraints appear. At the optimum, each MM $k$ spends at most $B_k$: capital on fills plus retained cash $sum_(i in "MM"_k^+) p_(m(i)) q_i + s_k <= B_k$._
-  + _Clearing prices $bold(p)^*$ are unique._
-  + _The program is solvable in polynomial time by any standard convex optimizer._
+  + _For $b > 0$, any optimal demand vector induces prices through the softmax rule $p_k = (partial C_b) / (partial D_k)$. At $b = 0$, clearing prices are LP dual variables and may be non-unique._
+  + _The program is polynomial-time solvable through the conic reformulations of §6._
   + _The program operates in two regimes per MM:_
     - _Capital-constrained ($U_k >= B_k$): $s_k = 0$, $mu_k = B_k\/U_k < 1$. The MM prioritizes highest-ROI fills, organically staying within budget._
     - _Over-capitalized ($U_k < B_k$): $s_k = B_k - U_k$, $mu_k = 1$. The MM clears identically to the risk-neutral LP, absorbing excess budget into cash._
@@ -296,7 +302,7 @@ Replacing linear MM welfare with Kelly-criterion utility transforms the budget-c
 
 == Proof
 
-*(1) Strict concavity and uniqueness.* The objective is strictly concave in the aggregate variables: each $B_k ln(U_k + s_k)$ is strictly concave in $(U_k, s_k)$, $-C_b(bold(D))$ is strictly concave in $bold(D)$ (for $b > 0$; concave for $b = 0$), and the remaining terms are linear. Since $U_k$ and $bold(D)$ are linear functions of $bold(q)$, the composition is concave in $bold(q)$ and strictly concave in the aggregates $(U_k, s_k, bold(D))$. The objective tends to $-infinity$ as $s_k -> infinity$ (since $-s_k$ dominates $ln s_k$) and as $bold(q)$ approaches the boundary of $cal(C)$ from outside (box constraints). Therefore the superlevel sets ${(bold(q), bold(s)) : f^"RA" >= c}$ are compact for any $c > -infinity$, so the supremum is attained. The optimal aggregates $(U_k^*, s_k^*, bold(D)^*)$ — and hence prices, total welfare, and per-MM utility — are unique. Individual fills $bold(q)^*$ are unique whenever the map $bold(q) |-> (U_k, bold(D))$ is injective over the feasible set (i.e., no two MM buy orders from the same MM in the same market share the same limit price); otherwise, equivalent orders may be reallocated freely without affecting any observable. At the optimum, $U_k + s_k > 0$ for every MM with $B_k > 0$: the gradient $partial / (partial s_k)[B_k ln(U_k + s_k) - s_k] -> +infinity$ as $U_k + s_k -> 0^+$, so the boundary $U_k + s_k = 0$ is never optimal.
+*(1) Concavity and existence.* Each term $B_k ln(U_k + s_k) - s_k$ is concave in $(U_k, s_k)$, $-C_b(bold(D))$ is concave in $bold(D)$, and the remaining terms are linear. Since $U_k$ and $bold(D)$ are linear functions of $bold(q)$, the full objective is concave in $(bold(q), bold(s))$. The fill vector lives in the compact polytope $cal(C)$, and the objective tends to $-infinity$ as any $s_k -> infinity$ (since $-s_k$ dominates $ln s_k$). So $bold(s)$ can be restricted to a sufficiently large box without changing the optimum, and Weierstrass gives existence. The log term is not strictly concave in $(U_k, s_k)$, so order-level fills and zero-temperature prices need not be unique without additional assumptions. At the optimum, $U_k + s_k > 0$ for every MM with $B_k > 0$: the gradient $partial / (partial s_k)[B_k ln(U_k + s_k) - s_k] -> +infinity$ as $U_k + s_k -> 0^+$, so the boundary $U_k + s_k = 0$ is never optimal.
 
 *(2) Limit order exactness.* The KKT condition for $s_k >= 0$ is:
 
@@ -306,7 +312,7 @@ $
 
 where $mu_k = B_k \/ (U_k + s_k)$. This gives $mu_k <= 1$ unconditionally. The KKT for fill $q_i$ of agent $k$ is $mu_k L_i - p_(m(i)) = lambda_i^+ - lambda_i^-$. A fill ($q_i > 0$) requires $mu_k L_i >= p_(m(i))$, hence $L_i >= p_(m(i)) \/ mu_k >= p_(m(i))$: the limit price must exceed the clearing price. No negative-welfare fill is possible.
 
-The two regimes follow from complementary slackness: $s_k = 0$ when $mu_k < 1$ (i.e., $U_k > B_k$), and $s_k = B_k - U_k > 0$ when $mu_k = 1$ (i.e., $U_k < B_k$). In the over-capitalized regime ($mu_k = 1$), the fill condition $L_i >= p_(m(i))$ is exactly the risk-neutral UCP condition — the MM clears identically to the LP.
+The two regimes follow from complementary slackness: $s_k = 0$ when $mu_k < 1$ (i.e., $U_k > B_k$). When $s_k > 0$, complementary slackness gives $mu_k = 1$, hence $U_k + s_k = B_k$ and therefore $s_k = B_k - U_k > 0$ whenever $U_k < B_k$. In the over-capitalized regime ($mu_k = 1$), the fill condition $L_i >= p_(m(i))$ is exactly the risk-neutral UCP condition — the MM clears identically to the LP.
 
 *(3) Budget absorption.* Multiply the fill KKT by $q_i$ and sum over $i in "MM"_k^+$. By complementary slackness ($lambda_i^- q_i = 0$):
 
@@ -320,9 +326,13 @@ $ sum_(i in "MM"_k^+) p_(m(i))^* q_i^* + s_k^* <= B_k $
 
 Each MM's total deployment — capital on fills plus retained cash — is at most $B_k$. (The gap $sum lambda_i^+ q_i$ is infra-marginal surplus from fully-filled orders — profit that does not require additional capital.) The budget emerges from the objective, not from an explicit constraint. This is the Eisenberg-Gale mechanism extended to quasi-linear utilities: the $ln$ singularity absorbs the budget, and the cash variable absorbs the surplus.
 
-*(4) Price uniqueness ($b > 0$).* Prices are $p_k = partial C_b \/ partial D_k = "softmax"(bold(D)\/b)$, a continuous function of the unique $bold(D)^*$. (At $b = 0$, aggregates are unique but prices are LP duals, which may not be unique when multiple $D_k$ tie at $max_j D_j$; see §5.3.)
+*(4) Price extraction.* For $b > 0$, prices are the gradient of the smoothed minting cost:
+$
+p_k = partial C_b \/ partial D_k = "softmax"(bold(D)\/b)
+$
+At $b = 0$, prices are the LP dual variables of the epigraph constraints $M >= D_k$, which may be non-unique when multiple outcomes tie at $max_j D_j$. The unconditional uniqueness result proved in this paper is the unconstrained smoothed case of @thm-unique.
 
-*(5) Polynomial solvability.* For $b > 0$, the objective is concave and $C^infinity$. The feasible set is a polytope times $RR_+^(|cal(K)|)$. Standard interior-point methods solve this in polynomial time. At $b = 0$, the objective is concave but non-smooth; subgradient or bundle methods apply. #h(1fr) $square$
+*(5) Polynomial solvability.* At $b = 0$, @prop-conic gives an exponential-cone formulation of $P_0^"RA"$, so standard interior-point solvers apply in polynomial time. For $b > 0$, the smoothed minting cost likewise admits a conic lift with $O(K)$ additional exponential cones (see §6.1), or can be handled directly by smooth convex optimization. #h(1fr) $square$
 
 *Example.* Binary market ($K = 2$), $b -> 0$. An MM ($B = 50$) posts two buy-Yes orders: $A$ at $L_A = 0.70$, qty $100$; $B$ at $L_B = 0.55$, qty $100$. A retail trader posts buy-No at $L_C = 0.60$, qty $200$.
 
@@ -334,21 +344,21 @@ _Welfare gap._ Actual gap $= 15$; exact bound $= Delta - B ln(1 + Delta\/B) appr
 
 == Temperature Independence
 
-In the risk-neutral model, entropy smoothing was the only source of concavity — insufficient against budget non-convexity (@prop-obstruction). Here, $B_k ln(U_k + s_k)$ provides $b$-independent curvature. Even at $b = 0$ (pure LP minting cost), the program remains strictly concave:
+In the risk-neutral model, entropy smoothing was the only source of concavity — insufficient against budget non-convexity (@prop-obstruction). Here, $B_k ln(U_k + s_k)$ provides curvature at every temperature. Even at $b = 0$ (pure LP minting cost), the program remains a well-posed concave optimization problem:
 
 $ P_0^"RA": quad max_(bold(q) in cal(C), bold(s) >= 0) quad sum_k [B_k ln(U_k + s_k) - s_k] + sum_(j in.not "MM") w_j q_j - max_k D_k $
 
-The $-max_k D_k$ term is concave (not strictly), but the $ln$ term provides strict concavity. Aggregate uniqueness, limit order exactness, and budget absorption hold at every temperature, including $b = 0$. Price uniqueness requires $b > 0$: at $b = 0$, prices are LP dual variables, which may not be unique when multiple outcomes $k$ tie at $D_k = max_j D_j$ (the subdifferential of $max$ is a face of the simplex). Any $b > 0$ restores uniqueness, with LMSR subsidy bounded by $b ln K$ (@prop-sandwich).
+The $-max_k D_k$ term is concave (not strictly), and the log term continues to regularize capital deployment. Limit order exactness and budget absorption therefore hold at every temperature, including $b = 0$. What fails at $b = 0$ is uniqueness: prices are LP dual variables and may be non-unique when multiple outcomes $k$ tie at $D_k = max_j D_j$ (the subdifferential of $max$ is a face of the simplex). Any $b > 0$ restores the unconstrained price-uniqueness result of @thm-unique, with LMSR subsidy bounded by $b ln K$ (@prop-sandwich).
 
 == Welfare Convergence
 
-The cash retention variable makes the risk-averse program a strict generalization of the risk-neutral LP: when budgets are non-binding, the two programs agree exactly.
+The cash retention variable makes the risk-averse program a strict generalization of the risk-neutral LP: when budgets are non-binding, the two programs share an optimum.
 
 #proposition(name: "LP Recovery")[
-  _Let $bold(q)^"LP"$ be the unconstrained LP optimum ($P_b$ without budgets). If $B_k >= U_k^"LP" = sum_(i in "MM"_k^+) L_i q_i^"LP"$ for every MM $k$, then the risk-averse optimum $(bold(q)^*, bold(s)^*)$ satisfies $bold(q)^* = bold(q)^"LP"$ and $s_k^* = B_k - U_k^"LP"$. Fills, prices, and welfare are identical._
+  _Let $bold(q)^"LP"$ be any unconstrained LP optimum ($P_b$ without budgets). If $B_k >= U_k^"LP" = sum_(i in "MM"_k^+) L_i q_i^"LP"$ for every MM $k$, then $(bold(q)^"LP", bold(s))$ with $s_k = B_k - U_k^"LP"$ is optimal for the risk-averse program. In particular, the LP and risk-averse programs share an optimum whenever all MM budgets are non-binding._
 ] <prop-welfare>
 
-_Proof._ When $B_k >= U_k^"LP"$ for all $k$, every MM is in the over-capitalized regime at $bold(q)^"LP"$: the optimizer sets $s_k = B_k - U_k^"LP" >= 0$ and $mu_k = 1$. The fill KKT reduces to $L_i - p_(m(i)) = lambda_i^+ - lambda_i^-$ — exactly the LP KKT. Since the LP and risk-averse programs have the same KKT conditions at $bold(q)^"LP"$, and the risk-averse program has a unique optimum, $bold(q)^* = bold(q)^"LP"$. #h(1fr) $square$
+_Proof._ When $B_k >= U_k^"LP"$ for all $k$, every MM is in the over-capitalized regime at $bold(q)^"LP"$: set $s_k = B_k - U_k^"LP" >= 0$, giving $mu_k = 1$. The fill KKT reduce to $L_i - p_(m(i)) = lambda_i^+ - lambda_i^-$ — exactly the LP KKT. So $(bold(q)^"LP", bold(s))$ satisfies the KKT conditions of the risk-averse program and is therefore optimal. #h(1fr) $square$
 
 The cash variable $s_k$ acts as a _numeraire good_, eliminating the over-fill pathology of the naive $B_k ln U_k$ model (which forces all budget into fills, including unprofitable ones). The quasi-linear structure is essential: without $s_k$, over-capitalized MMs would distort fills to exhaust their budget.
 
@@ -376,11 +386,11 @@ The bound is tight when all orders are marginal ($L_i approx p_k$) and conservat
 
 == The Fisher Market Isomorphism
 
-In a Fisher market (Eisenberg & Gale 1959), $n$ consumers with budgets $B_k$ purchase divisible goods with fixed supply $s_j$ at prices $p_j$. The equilibrium is the unique solution to:
+In a Fisher market (Eisenberg & Gale 1959), $n$ consumers with budgets $B_k$ purchase divisible goods with fixed supply $s_j$ at prices $p_j$. A market equilibrium can be characterized as a solution to:
 
 $ "EG": quad max_(bold(x) >= 0) quad sum_k B_k ln U_k (bold(x)_k) quad "s.t." quad sum_k x_(k j) <= s_j quad forall j $
 
-where $U_k(bold(x)_k) = sum_j u_(k j) x_(k j)$ is consumer $k$'s linear utility over goods. The supply constraints have dual variables $p_j$ — the equilibrium prices. Budget constraints do not appear explicitly; they emerge from the $B_k ln U_k$ objective by the same telescoping argument as our proof of (3). Adding a cash variable $s_k$ with cost $-s_k$ yields the _quasi-linear_ Fisher market (Cole et al. 2017, Chen et al. 2009) — agents can retain unspent budget as cash rather than being forced to spend it all on goods. Quasi-linear Fisher markets are well-studied: equilibrium existence, uniqueness, and polynomial-time computation are known under mild conditions.
+where $U_k(bold(x)_k) = sum_j u_(k j) x_(k j)$ is consumer $k$'s linear utility over goods. The supply constraints have dual variables $p_j$ — the equilibrium prices. Budget constraints do not appear explicitly; they emerge from the $B_k ln U_k$ objective by the same telescoping argument as our proof of (3). Adding a cash variable $s_k$ with cost $-s_k$ yields the _quasi-linear_ Fisher market (Cole et al. 2017, Chen et al. 2009) — agents can retain unspent budget as cash rather than being forced to spend it all on goods. Quasi-linear Fisher markets are well-studied: equilibrium existence and polynomial-time computation are known under mild conditions, while uniqueness typically concerns prices or utility profiles under additional regularity.
 
 Program $P_b^"RA"$ is a quasi-linear Fisher market with two extensions:
 
@@ -409,7 +419,7 @@ The prediction market extends the quasi-linear Fisher market in two ways: (1) su
 
 *The buy/sell decomposition.* In each binary market, MM positions are netted per outcome before clearing: opposing buys and sells cancel, leaving a net directional position. Since "sell Yes at $L$" is economically equivalent to "buy No at $1-L$" (with capital cost $1-L$ per share), all net positions are expressed as buys. These net buy orders form $"MM"_k^+$ and their capital costs enter the budget accounting through $U_k$. The only MM sell orders that bypass the budget are liquidations of existing inventory — shares already held, not newly created short positions. Per outcome per batch, the MM is either net buying or net selling, never both.
 
-*Extension to multiple groups and bundle orders.* Nothing in @thm-main requires a single mutually exclusive group. Consider $N$ groups, each with $K_j$ mutually exclusive outcomes. The joint state space is $cal(S) = product_j {1, dots, K_j}$ (exactly one joint state is realized). Bundle orders — orders whose payoffs depend on the joint state — create demand $D_s$ over $cal(S)$. The minting cost generalizes to $V(bold(D)) = max_s D_s$ (minting one complete set of all joint states costs \$1), and the smoothed version is $C_b = b ln sum_s exp(D_s\/b)$. Both are convex in $bold(D)$, and $bold(D)$ is linear in $bold(q)$. The proof of @thm-main goes through unchanged for any fixed state space representation: $B_k ln(U_k + s_k)$ is still strictly concave, $-C_b$ is still concave, budget absorption and limit order exactness still hold. The open question is whether the program can be solved without explicitly enumerating the joint states (see §7.2).
+*Extension to multiple groups and bundle orders.* Nothing in @thm-main requires a single mutually exclusive group. Consider $N$ groups, each with $K_j$ mutually exclusive outcomes. The joint state space is $cal(S) = product_j {1, dots, K_j}$ (exactly one joint state is realized). Bundle orders — orders whose payoffs depend on the joint state — create demand $D_s$ over $cal(S)$. The minting cost generalizes to $V(bold(D)) = max_s D_s$ (minting one complete set of all joint states costs \$1), and the smoothed version is $C_b = b ln sum_s exp(D_s\/b)$. Both are convex in $bold(D)$, and $bold(D)$ is linear in $bold(q)$. The proof of @thm-main goes through unchanged for any fixed state space representation: each MM term $B_k ln(U_k + s_k) - s_k$ remains concave, $-C_b$ remains concave, and budget absorption and limit order exactness still hold. The open question is whether the program can be solved without explicitly enumerating the joint states (see §7.2).
 
 When no orders span multiple groups, the joint problem decomposes: $C_b = sum_j C_b^(G_j)$ (the product-LMSR factorization of Chen and Pennock 2007). Cross-group orders break this separability, coupling groups transitively — if orders link groups $A$–$B$ and $B$–$C$, the clearing problem requires the full $K_A times K_B times K_C$ state space. The mathematical obstruction is purely computational, not structural (see §7.2).
 
@@ -428,26 +438,28 @@ _Remark (Augmented LP)._ The EG Hessian $H = -sum_k (B_k \/ V_k^2) bold(ell)_k b
 
 == Decomposition Across Market Groups
 
-When no orders span multiple market groups, the minting cost separates: $C_b = sum_j C_b^(G_j)$ (product-LMSR factorization). The EG program decomposes into independent per-group programs, coordinated only by MM budget allocation.
+When no orders span multiple market groups, the minting cost separates: $C_b = sum_j C_b^(G_j)$ (product-LMSR factorization). This suggests a decomposition of the EG program into independent per-group subproblems, coordinated by MM budget allocation.
 
-With log utility, splitting an MM's budget $B_k$ across components $m$ is a smooth concave problem: the coordination objective $max sum_m W_m^* (bold(B)^m)$ subject to $sum_m B_k^m = B_k$ has gradient $partial W_m^* \/ partial B_k^m = ln V_k^(m *)$ (envelope theorem), where $V_k^m = U_k^m + s_k^m$. The optimal allocation equalizes $V_k^(m *)$ across components: $V_k^(m *) = V_k^(m' *)$ for each MM $k$ active in components $m$ and $m'$. Standard mirror descent (multiplicative weights on budget shares) converges at rate $O(1\/t)$ (Beck and Teboulle 2003), with each iteration requiring only independent per-component solves.
+With log utility, splitting an MM's budget $B_k$ across components $m$ leads to a smooth concave coordination problem: the coordination objective $max sum_m W_m^* (bold(B)^m)$ subject to $sum_m B_k^m = B_k$ has gradient $partial W_m^* \/ partial B_k^m = ln V_k^(m *)$ (envelope theorem), where $V_k^m = U_k^m + s_k^m$. The first-order condition equalizes these component values across active components. Standard mirror descent (multiplicative weights on budget shares) is then a natural algorithmic candidate, with each iteration requiring only independent per-component solves. A companion note develops this decomposition in detail.
 
-With linear welfare, the same budget allocation is combinatorial: a hard constraint $"cap"_k <= B_k$ cannot be smoothly split across components. This is the computational payoff of the Fisher market structure — the same $B_k ln U_k$ objective that absorbs budget constraints in the monolithic program also enables decomposition across components.
+With linear welfare, the same budget allocation is combinatorial: a hard constraint $"cap"_k <= B_k$ cannot be smoothly split across components. This is the computational payoff of the Fisher market structure — the same log-utility mechanism that absorbs budget constraints in the monolithic program also enables decomposition across components.
 
-_Validation._ An implementation of the LP, conic, and EG solvers confirms the theoretical predictions on synthetic order books with $50$ market groups, $~11,000$ single-market orders, and $3$ budget-constrained MMs. The quasi-Fisher (conic) and linear (LP) solvers produce near-identical welfare (gap $< 0.7%$ across all budget scales), confirming @prop-welfare and @prop-gap. When budgets are non-binding, the programs coincide exactly. Decomposition with mirror descent on budget shares converges toward the monolithic solution on single-market order books, as expected from the product-LMSR factorization.
+_Validation._ An implementation of the LP, conic, and EG solvers confirms the theoretical predictions on synthetic order books with $50$ market groups, $~11,000$ single-market orders, and $3$ budget-constrained MMs. The quasi-Fisher (conic) and linear (LP) solvers produce near-identical welfare (gap $< 0.7%$ across all budget scales), consistent with @prop-welfare and @prop-gap. When budgets are non-binding, the programs share an optimum. Decomposition with mirror descent on budget shares converges toward the monolithic solution on single-market order books, as expected from the product-LMSR factorization.
 
 
 = Discussion <discussion>
 
 == Summary
 
-Budget-constrained risk-neutral clearing is a non-convex bilinear program with no known polynomial-time algorithm (@prop-obstruction). Risk-averse clearing is a standard convex program with guaranteed uniqueness and exact limit orders (@thm-main). When budgets are non-binding, the two programs agree exactly (@prop-welfare). When they bind, the welfare gap is quadratic in the budget shortfall (@prop-gap).
+Budget-constrained risk-neutral clearing is a non-convex bilinear program with no known polynomial-time algorithm (@prop-obstruction). Risk-averse clearing is a standard concave program with exact limit orders, endogenous budget absorption, and conic formulations (@thm-main, @prop-conic). When budgets are non-binding, the two programs share an optimum (@prop-welfare). When they bind, the welfare gap is quadratic in the budget shortfall (@prop-gap).
 
 == Open Problems
 
 + *Welfare gap tightness.* The quadratic bound of @prop-gap is conservative for typical order books: synthetic experiments show gaps under $0.7%$ even at $10 times$ budget oversubscription. Tighter instance-dependent bounds — exploiting the structure of real MM ladder orders — would sharpen the practical guarantees.
 
 + *Efficient combinatorial clearing.* The Fisher market isomorphism extends to joint state spaces (§5.5), but the state space $|cal(S)| = product K_j$ is exponentially large. Cross-group bundle orders couple groups transitively: if orders span $A$–$B$ and $B$–$C$, clearing requires the full $K_A times K_B times K_C$ space. In practice, a handful of bundle orders can connect all groups. Each order's payoff is a low-rank tensor (touching $<= 5$ groups), so the demand $D_s$ has exploitable structure. Can the EG program be solved in time polynomial in the number of orders rather than the state space? The analogous question for combinatorial LMSR (without budgets) is already open; budgets add a further layer.
+
++ *Risk-averse uniqueness.* The concave formulation proves existence, limit-order exactness, and budget absorption. Under what additional regularity are prices or aggregate fills unique once MM log utility is included? The unconditional uniqueness result in this paper is the unconstrained smoothed benchmark of @thm-unique; the full batch program may still exhibit degeneracy at $b = 0$ or under tied order books.
 
 + *Risk-neutral hidden convexity.* Is the budget-constrained risk-neutral problem actually convex despite the bilinear constraints? The LMSR softmax prices grow fast enough that concentrated positions are budget-expensive, and we have found no instance with non-unique clearing prices. A proof of uniqueness (or a counterexample) would settle whether the computational obstruction of §3 is fundamental or merely an artifact of current proof techniques. Devanur and Dudík (2015) proved budget additivity for sequential LMSR, hinting at hidden convexity — but extending this to simultaneous batch auctions remains open.
 
@@ -457,9 +469,9 @@ Budget-constrained risk-neutral clearing is a non-convex bilinear program with n
 
 *Abernethy, Chen, and Vaughan (2013)*: Axiomatic foundation for cost-function market makers. Our §2 recasts their framework as batch-auction clearing: $V = max_k D_k$ is the simplest cost function, LMSR its entropy smoothing.
 
-*Breiman (1961)*: Optimality of the Kelly criterion for repeated games. §4 uses this to argue log utility is not a convenience but a survival condition for repeat-participation MMs.
+*Breiman (1961)*: Optimality of the Kelly criterion for repeated games. §4 uses this as a repeated-game motivation for diminishing returns, not as a literal behavioral theorem about every MM.
 
-*Devanur and Dudík (2015)*: Price uniqueness and budget additivity for sequential LMSR. Their budget additivity hints at hidden convexity in the risk-neutral setting. Our @thm-main achieves unconditional uniqueness for batch auctions via EG; whether risk-neutral batches also have hidden convexity remains open.
+*Devanur and Dudík (2015)*: Budget constraints and additivity for sequential LMSR. Their budget additivity hints at hidden convexity in the risk-neutral setting. Our contribution is a concave EG-type formulation for batch auctions; whether risk-neutral batches also have hidden convexity remains open.
 
 *Fortnow, Kilian, Pennock, and Wellman (2005)*: LP for combinatorial call markets. Our group minting encodes mutual exclusivity in $O(K)$ constraints vs $O(2^K)$ enumeration.
 
