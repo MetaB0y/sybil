@@ -7,491 +7,133 @@
 #show heading.where(level: 2): it => block(above: 1.2em, below: 0.6em)[#it]
 
 #align(center)[
-  #text(size: 15pt, weight: "bold")[
-    Mathematical Primer
-  ]
+  #text(size: 15pt, weight: "bold")[Mathematical Primer]
   #v(0.3em)
   #text(size: 11pt)[For "Prediction Markets Are Fisher Markets"]
   #v(0.3em)
-  #text(size: 9pt, style: "italic")[Five ideas + the full proof of Theorem 5]
+  #text(size: 9pt, style: "italic")[Short on background, long on the reduced-form core]
 ]
 
 #v(1em)
 
-#block(inset: (x: 2em))[
-  #text(weight: "bold")[What this document covers.]
-  The paper uses five mathematical ideas. Each builds on the previous. §6 then walks through the full Theorem 5 proof — the paper's main result — applying all five ideas.
+#block(inset: (x: 2em, y: 0.7em), fill: luma(245), radius: 4pt)[
+  *Purpose.* This primer strips the paper down to the minimum math needed to read it confidently. Sections 1--4 compress the background that used to take many pages. Sections 5--6 spend the time on the paper's real center of gravity: reduced-form MM utility, deployed value, the price dual, and the computation story.
 
-  #v(0.5em)
-  #align(center)[
-    #table(
-      columns: 3,
-      align: (center, left, left),
-      stroke: 0.5pt,
-      inset: 6pt,
-      [*\#*], [*Idea*], [*Unlocks*],
-      [1], [Complementary slackness], [Theorems 3, 4, 5],
-      [2], [Fenchel conjugates], [§2.2, §2.3, §2.8 (Theorems 1, 2, 4)],
-      [3], [KKT conditions], [§2.4, §5.2 (Theorems 3, 5)],
-      [4], [The budget absorption trick], [Theorem 5 part (3) — the punchline],
-      [5], [Why log makes it convex], [The entire §3 → §5 arc],
-      [6], [Theorem 5 step by step], [The full proof with cash variable],
-    )
-  ]
-]
-
-#v(1em)
-
-= Minting Cost and the LP: Why $max_k D_k$?
-
-Before the five ideas, one piece of setup from the paper (§2.1) needs unpacking: the clearing LP and its minting cost.
-
-== What Minting Is
-
-A prediction market has $K$ mutually exclusive outcomes. Minting creates one share of _every_ outcome at cost \$1. This is fairly priced: exactly one outcome resolves to \$1 at settlement, so a complete set is always worth \$1.
-
-The key constraint: you cannot create shares of a single outcome. Every mint produces one share of each.
-
-== What $D_k$ Actually Is
-
-$D_k$ looks like "demand for outcome $k$" but it's more precise than that. It is the _net_ creation requirement — how many new shares of outcome $k$ the exchange must create, after netting buys against sells:
-
-$ D_k = sum_(i in "buy"(k)) q_i - sum_(j in "sell"(k)) q_j $
-
-Some shares come from sellers (they already hold shares and are giving them up). $D_k$ is what's left over — the shortfall that sellers can't cover.
-
-#block(inset: (x: 2em, y: 0.5em))[
-  *Example.* Outcome A has 100 shares of buy orders filled and 40 shares of sell orders filled. Net: $D_A = 100 - 40 = 60$. The exchange must _create_ 60 new A-shares. The other 40 came from sellers.
-]
-
-Crucially, *the optimizer controls $D_k$* through its choice of fills $bold(q)$. It can make $D_k$ small by filling fewer buy orders or filling more sell orders. $D_k$ is not external demand — it's a consequence of the optimizer's decisions.
-
-If $D_k <= 0$ (more selling than buying), no new shares of outcome $k$ are needed — shares are being returned/destroyed.
-
-== Why $M >= D_k$
-
-$M$ is the number of complete sets minted. Each mint produces one share of _every_ outcome. After $M$ mints, you have $M$ new shares of each outcome available.
-
-$D_k$ is how many new shares of outcome $k$ the fills require (as computed above).
-
-The constraint $M >= D_k$ says: *new shares produced $>=$ new shares needed*, for each outcome. You must mint enough complete sets to cover the largest shortfall. You don't need $M >= D_k$ for outcomes where sellers already cover the demand — only where the net is positive.
-
-== The LP Is a Tradeoff
-
-The clearing LP is:
-
-$ max_(bold(q), M) quad underbrace(sum_i w_i q_i, "welfare from fills") - underbrace(M, "minting cost") quad "s.t." quad D_k (bold(q)) <= M space forall k, quad bold(q) in [0, bold(overline(Q))] $
-
-The optimizer chooses _both_ which orders to fill _and_ how much to mint. It's a cost–benefit tradeoff:
-
-- *Filling orders creates welfare* ($w_i q_i > 0$ for profitable orders).
-- *Filling orders creates net demand* ($D_k$ increases), which requires minting.
-- *Minting costs money* ($-M$ in the objective).
-- *The optimizer is free to fill nothing.* Setting $bold(q) = bold(0)$ gives $D_k = 0$, $M = 0$, objective $= 0$. This is always feasible.
-
-The optimizer fills orders only when the welfare gained exceeds the minting cost incurred. The whole LP is the optimizer asking: *which fills create enough welfare to justify the minting they require?*
-
-#block(inset: (x: 2em, y: 0.5em))[
-  *Example.* Suppose filling a buy order creates \$0.60 of welfare but requires minting that costs \$0.80 (because no sellers offset it). The optimizer skips this order — it destroys value. But if a sell order offsets half the minting need, the net cost drops to \$0.40, and the fill becomes worthwhile.
-]
-
-== Why $M = max_k D_k$ at the Optimum
-
-The constraint _allows_ minting more than needed ($M >= D_k$, not $M = D_k$). But $M$ is subtracted from the objective — it's a cost. The optimizer pushes $M$ down as far as possible, which means $M = max_k D_k$ at the optimum (the tightest the constraints allow). The $>=$ is the LP formulation; the optimizer tightens it to equality.
-
-This is also complementary slackness at work: the dual variable of $D_k <= M$ is the price $p_k$, and $p_k > 0$ only where $D_k = M$ (the binding constraints).
-
-== Why Is the Surplus Free?
-
-When you mint 70 sets but only need 30 B-shares, the remaining 40 B-shares are surplus. Why don't they cost anything? Because complete sets cost \$1 and pay out \$1 — the surplus shares of losing outcomes are worthless at settlement, and the one winning outcome's surplus was already paid for by the mint. The $max_k D_k$ accounting captures this exactly: you pay for the most-demanded outcome, and everything else comes free with the complete sets.
-
-#v(0.5em)
-
-= Complementary Slackness
-
-You have a constraint — say, a fill can't exceed its maximum quantity:
-
-$ q_i <= overline(Q)_i $
-
-The optimizer assigns a _dual variable_ (also called a multiplier) $mu_i^+$ to this constraint. Think of it as the "price" of the constraint: how much better would the objective be if you relaxed this bound by one unit?
-
-Complementary slackness says:
-
-#block(inset: (x: 2em, y: 0.8em), fill: luma(245), radius: 4pt)[
-  *Rule.* At the optimum, at least one of these is zero: the multiplier, or the slack.
-  $ mu_i^+ dot (overline(Q)_i - q_i) = 0 $
-]
-
-Two cases:
-
-#align(center)[
-  #table(
-    columns: 3,
-    align: (left, left, left),
-    stroke: 0.5pt,
-    inset: 6pt,
-    [*Situation*], [*Slack*], [*Multiplier*],
-    [Constraint is tight ($q_i = overline(Q)_i$)], [Zero — no room left], [Can be positive — relaxing would help],
-    [Constraint is loose ($q_i < overline(Q)_i$)], [Positive — room left], [Must be zero — relaxing is pointless],
-  )
-]
-
-*Intuition.* "Relaxing" means raising the ceiling — changing $overline(Q)_i$ from 100 to 101, giving the constraint more room. If you're not using the full capacity, a higher ceiling wouldn't help — so the "price" of more capacity is zero. If you _are_ at full capacity, a higher ceiling might actually help, so the price can be positive.
-
-*Where the paper uses this:*
-- *Theorem 3* (clearing prices): the dual variable of the minting constraint $D_k <= M$ is the price $p_k$. Complementary slackness says $p_k > 0$ only where $D_k = M$ — price is positive only for the highest-demand outcome.
-- *§2.4* (clearing rule): gives the three cases (fully filled / unfilled / marginal).
-- *Theorem 5* (budget absorption): the $lambda_i^+ q_i$ terms that make spending $<=$ budget.
-
-
-= Fenchel Conjugates
-
-This is the engine of §2. A Fenchel conjugate transforms a function from "quantity space" to "price space."
-
-== The Definition
-
-Given a function $f(x)$, its conjugate is:
-
-$ f^*(p) = sup_x [p dot x - f(x)] $
-
-You sweep over all $x$, computing "revenue minus cost," and take the best.
-
-== The Meaning
-
-Think of $f(x)$ as a _cost function_ — producing quantity $x$ costs $f(x)$. Now someone offers price $p$ per unit. Your profit from producing $x$ is:
-
-$ "profit" = underbrace(p dot x, "revenue") - underbrace(f(x), "cost") $
-
-The conjugate $f^*(p)$ is your *maximum profit at price $p$* — the best you can do by choosing the optimal production quantity.
-
-#block(inset: (x: 2em, y: 0.8em), fill: luma(245), radius: 4pt)[
-  *Key idea.* $f$ lives in quantity space. $f^*$ lives in price space. They encode the same information from dual perspectives. For convex $f$, the conjugate of the conjugate gives back $f$.
-
-  #align(center)[
-    #table(
-      columns: 3,
-      align: center,
-      stroke: none,
-      [$f(x)$], [$stretch(arrow.l.r, size: #200%)^("conjugate")$], [$f^*(p)$],
-      [cost of producing $x$], [], [max profit at price $p$],
-      [quantity space], [], [price space],
-    )
-  ]
-]
-
-== Worked Example: Minting Cost (Theorem 1)
-
-Our cost function is $V(bold(D)) = max_k D_k$ — the minting cost. We want the conjugate:
-
-$ V^*(bold(p)) = sup_(bold(D)) [sum_k p_k D_k - max_k D_k] $
-
-You're selling outcome shares at prices $p_k$ and paying minting cost $max_k D_k$. What demand vector $bold(D)$ maximizes profit?
-
-#block(inset: (x: 2em, y: 0.5em))[
-  *Case: $bold(p)$ is a probability vector* ($sum p_k = 1$, all $p_k >= 0$).
-
-  Revenue $= sum p_k D_k$ is a weighted average of the $D_k$'s with weights summing to 1. A weighted average can never exceed the maximum:
-  $ sum p_k D_k <= max_k D_k $
-  So profit $<= 0$ for every $bold(D)$. At $bold(D) = bold(0)$, profit $= 0$. Best profit: $V^*(bold(p)) = 0$.
-]
-
-#block(inset: (x: 2em, y: 0.5em))[
-  *Case: $sum p_k > 1$.*
-
-  Set all $D_k = t$, send $t -> infinity$. Revenue $= t sum p_k$. Cost $= t$. Profit $= t(sum p_k - 1) -> infinity$.
-
-  _Arbitrage:_ you mint complete sets at \$1 each and sell the shares for $sum p_k > dollar 1$. Scale up for unbounded profit.
-]
-
-#block(inset: (x: 2em, y: 0.5em))[
-  *Case: $sum p_k < 1$.*
-
-  Set all $D_k = -t$ (buy back shares), send $t -> infinity$. Profit $= t(1 - sum p_k) -> infinity$.
-
-  _Reverse arbitrage:_ buy a complete set of shares for $sum p_k < dollar 1$ and redeem for \$1.
-]
-
-#block(inset: (x: 2em, y: 0.5em))[
-  *Case: some $p_k < 0$.*
-
-  Drive $D_k -> -infinity$ for that outcome. Someone is paying you to take shares. Infinite profit.
-]
-
-Result:
-
-$ V^*(bold(p)) = cases(0 & "if" bold(p) in Delta, +infinity & "otherwise") $
-
-This is the simplex indicator. Its meaning: *the only prices where you can't arbitrage the minting mechanism are probabilities.* The probability axiom is a no-arbitrage condition, not a modeling choice.
-
-== Worked Example: LMSR Cost (Theorem 2)
-
-Replace minting cost with LMSR: $C_b (bold(D)) = b ln sum exp(D_k\/b)$. Same game:
-
-$ C_b^*(bold(p)) = sup_(bold(D)) [sum p_k D_k - b ln sum exp(D_k\/b)] $
-
-For the minting cost (Theorem 1), $V = max_k D_k$ has a kink — it's not differentiable where two $D_k$'s are tied — so we had to reason case-by-case. The LMSR cost $C_b$ is smooth (that's the whole point of entropy smoothing), so we can use calculus: find the maximum by setting the derivative to zero.
-
-The expression inside the $sup$ — "linear in $bold(D)$" minus "convex in $bold(D)$" — is _concave_ in $bold(D)$. For a concave function, any point where the derivative is zero is the global maximum (not just a local one — this is what convexity/concavity buys you). So setting the derivative to zero finds _the_ answer:
-
-$ (partial) / (partial D_k) [sum p_k D_k - C_b(bold(D))] = p_k - exp(D_k\/b) / (sum_j exp(D_j\/b)) = 0 $
-
-$ therefore quad p_k = exp(D_k\/b) / (sum_j exp(D_j\/b)) $
-
-This is the *softmax*. The conjugate asks "what demand vector maximizes profit at prices $bold(p)$?" and the answer is: the one where prices equal the softmax of demand.
-
-Invert ($D_k = b ln p_k + b ln Z$ where $Z = sum exp(D_j\/b)$), substitute back, and after algebra:
-
-$ C_b^*(bold(p)) = b sum_k p_k ln p_k $
-
-Negative Shannon entropy. Finite only on the simplex (softmax always outputs probabilities). Most negative at uniform $p_k = 1\/K$ (maximum entropy = most uncertain prices).
-
-== The Duality Picture
-
-#align(center)[
-  #table(
-    columns: 4,
-    align: (center, center, center, left),
-    stroke: 0.5pt,
-    inset: 6pt,
-    [*Cost (quantity space)*], [], [*Conjugate (price space)*], [*Character*],
-    [$V = max_k D_k$], [$stretch(arrow.l.r, size: #150%)$], [$V^* = delta_Delta$], [Hard wall: probabilities or nothing],
-    [$C_b = b ln sum exp(D_k\/b)$], [$stretch(arrow.l.r, size: #150%)$], [$C_b^* = b sum p_k ln p_k$], [Soft penalty: non-uniform costs more],
-  )
-
-  #v(0.3em)
-  _As $b -> 0$: the soft penalty hardens into the wall._
-]
-
-*Why this matters for the paper.* In §2.8, the clearing problem is rewritten in price space as:
-
-$ min_(bold(p) in Delta) [W^*(bold(p)) + C_b^*(bold(p))] $
-
-The entropy term $C_b^*$ is _strictly convex_ — it curves. That curvature forces a unique minimizer. This is Theorem 4: without budgets, prices are always unique. The entire §3 obstacle is about budgets breaking this.
-
-
-= KKT Conditions
-
-You want to maximize $f(x)$ subject to $x in [0, overline(Q)]$. Calculus says "set $f'(x) = 0$" — but what if the max is at the boundary?
-
-KKT handles boundary optima with multipliers:
-
-$ f'(x) = mu^+ - mu^- $
-
-where $mu^+, mu^- >= 0$ with complementary slackness ($mu^+ (x - overline(Q)) = 0$, $mu^- x = 0$).
-
-#align(center)[
-  #table(
-    columns: 3,
-    align: (left, left, left),
-    stroke: 0.5pt,
-    inset: 6pt,
-    [*Case*], [*Condition*], [*Meaning*],
-    [Interior ($0 < x < overline(Q)$)], [$f'(x) = 0$], [Just calculus — both multipliers zero],
-    [At ceiling ($x = overline(Q)$)], [$f'(x) >= 0$], [Function still rising — you'd want more but you're capped],
-    [At floor ($x = 0$)], [$f'(x) <= 0$], [Function falling — you want none],
-  )
-]
-
-*In the paper (§2.4).* The objective per order is $w_i q_i - C_b (bold(D))$. For buy order $i$ on outcome $k$:
-
-$ (partial) / (partial q_i) [w_i q_i - C_b] = L_i - underbrace(exp(D_k\/b) / (sum_j exp(D_j\/b)), p_k) $
-
-The derivative is just $L_i - p_k$ (limit price minus clearing price). KKT says:
-
-#align(center)[
-  #table(
-    columns: 3,
-    align: (left, left, left),
-    stroke: 0.5pt,
-    inset: 6pt,
-    [*Case*], [*Derivative*], [*In English*],
-    [Fully filled ($q_i = overline(Q)_i$)], [$L_i - p_k >= 0$], [Limit above price — fill everything],
-    [Unfilled ($q_i = 0$)], [$L_i - p_k <= 0$], [Limit below price — fill nothing],
-    [Marginal ($0 < q_i < overline(Q)_i$)], [$L_i - p_k = 0$], [Limit equals price — this order sets the price],
-  )
-]
-
-This is the Uniform Clearing Price rule: buy if your limit exceeds the price.
-
-*Why this matters.* Theorem 5 uses the exact same KKT structure, but with $B_k \/ U_k$ replacing $w_i$. If you understand the above, you understand the Theorem 5 proof — it's the same three cases with one extra chain-rule step.
-
-
-= The Budget Absorption Trick
-
-This is the punchline of the paper (Theorem 5, part 3). We replace linear welfare $sum w_i q_i$ with $B_k ln U_k$ where $U_k = sum_(i in "MM"_k) L_i q_i$ is MM $k$'s total weighted fill. An important modeling choice: $"MM"_k$ contains only MM $k$'s _buy_ orders (with $L_i > 0$). Sell orders from MMs are treated as retail (linear welfare). This ensures $U_k > 0$ and aligns with the Fisher market analogy, where agents are consumers (buyers of goods).
-
-== Step 1: KKT for the Log Objective
-
-For MM buy order $i$ belonging to MM $k$, differentiate $B_k ln U_k$ with respect to $q_i$:
-
-$ (partial) / (partial q_i) [B_k ln U_k] = B_k dot 1/U_k dot L_i $
-
-This is the chain rule: derivative of $ln$ is $1\/U_k$, derivative of $U_k$ w.r.t. $q_i$ is $L_i$, times the weight $B_k$.
-
-The full KKT also includes the minting cost derivative. Since this is a buy order, it increases $D_(m(i))$ by $q_i$, costing $p_(m(i))$ per share. With box multipliers:
-
-$ (B_k L_i) / U_k - p_(m(i)) = lambda_i^+ - lambda_i^- $
-
-== Step 2: The Telescoping
-
-Multiply both sides by $q_i$:
-
-$ (B_k L_i q_i) / U_k - p_(m(i)) q_i = lambda_i^+ q_i - lambda_i^- q_i $
-
-Note: $lambda_i^- q_i = 0$ by complementary slackness (if $q_i > 0$ then $lambda_i^- = 0$; if $lambda_i^- > 0$ then $q_i = 0$). So the last term vanishes. Now sum over all $i in "MM"_k$:
-
-$ B_k / U_k dot underbrace(sum_(i in "MM"_k) L_i q_i, "this is " U_k " by definition") - underbrace(sum_(i in "MM"_k) p_(m(i)) q_i, "capital spent on purchases") = underbrace(sum_(i in "MM"_k) lambda_i^+ q_i, >= 0) $
-
-The left side: $U_k$ cancels, leaving $B_k - sum p_(m(i)) q_i$.
-
-#block(inset: (x: 2em, y: 0.8em), fill: luma(245), radius: 4pt)[
-  $ B_k - sum_(i in "MM"_k) p_(m(i)) q_i = sum_(i in "MM"_k) lambda_i^+ q_i >= 0 $
-
-  $ therefore quad sum_(i in "MM"_k) p_(m(i)) q_i <= B_k $
-
-  Each MM's capital deployed on purchases is *at most* $B_k$, with equality when no fill hits its upper bound.
-]
-
-That's it. Five lines of algebra. The budget constraint was never imposed — it _emerged_ from the first-order conditions of the log objective.
-
-== Why This Works: Intuition
-
-#block(inset: (x: 2em, y: 0.8em), fill: luma(245), radius: 4pt)[
-  $ln(U_k)$ has a singularity at $U_k = 0$: the slope goes to $infinity$.
-
-  #v(0.3em)
+  #v(0.4em)
   #align(center)[
     #table(
       columns: 2,
       align: (left, left),
-      stroke: none,
-      [Near $U_k = 0$:], [Marginal value $B_k\/U_k$ is huge — fill desperately],
-      [As $U_k$ grows:], [Marginal value $B_k\/U_k$ shrinks — diminishing returns],
-      [At optimum:], [Marginal value per dollar $=$ price for every active order],
-    )
-  ]
-
-  #v(0.3em)
-  Because of the $B_k$ scaling, this balance point is reached exactly when total spending $= B_k$. Bigger budget $arrow.r$ more fill before saturation. The budget isn't a constraint; it's a _consequence of the curvature_.
-]
-
-
-= Why Log Makes It Convex
-
-Now we connect everything. The risk-neutral model has a non-convexity problem (§3). The log model doesn't (§5). Here's why.
-
-== The Risk-Neutral Problem
-
-Objective: $sum w_i q_i - C_b (bold(D))$.
-
-#align(center)[
-  #table(
-    columns: 3,
-    align: (left, left, left),
-    stroke: 0.5pt,
-    inset: 6pt,
-    [*Component*], [*Curvature*], [*Source*],
-    [$sum w_i q_i$ (linear welfare)], [None — flat], [No help],
-    [$-C_b$ (minting cost)], [Concave, strength $O(1\/b)$], [Entropy smoothing],
-    [Budget constraint $c(p) dot q <= B_k$], [Non-convex, strength $O(1\/b)$], [Price $times$ quantity],
-  )
-]
-
-The only curvature comes from $-C_b$, which scales as $O(1\/b)$. But the budget non-convexity _also_ scales as $O(1\/b)$ — they grow at the same rate. Neither dominates. *Deadlock.*
-
-At $b = 0$ (LP), there is zero curvature and the budget constraint is fully non-convex. No hope.
-
-== The Risk-Averse Fix
-
-Objective: $sum B_k ln U_k + "retail" - C_b (bold(D))$.
-
-#align(center)[
-  #table(
-    columns: 3,
-    align: (left, left, left),
-    stroke: 0.5pt,
-    inset: 6pt,
-    [*Component*], [*Curvature*], [*Source*],
-    [$sum B_k ln U_k$ (log welfare)], [Strictly concave, $O(B_k\/U_k^2)$], [$ln$ — independent of $b$],
-    [$-C_b$ (minting cost)], [Concave, strength $O(1\/b)$], [Entropy smoothing — bonus],
-    [Budget constraint], [*Gone*], [Absorbed by §4 trick],
-  )
-]
-
-Two things change simultaneously:
-
-+ *The budget constraint disappears* from the feasible set. The bilinear $c(p) dot q <= B_k$ is gone — absorbed into the objective (§4 trick). No more non-convex feasible set.
-
-+ *Strict curvature appears* in the objective. The $ln$ provides $O(B_k\/U_k^2)$ concavity, independent of $b$. This guarantees a unique maximum.
-
-The $-C_b$ term is now pure bonus — extra concavity on top of what $ln$ already provides. Even at $b = 0$ (no entropy smoothing at all), the program is still strictly concave:
-
-$ max_(bold(q) in cal(C)) quad sum_k B_k ln U_k + sum_(j in.not "MM") w_j q_j - max_k D_k $
-
-The $-max_k D_k$ is concave (not strictly), but $ln$ carries the strict concavity alone. *No annealing needed.*
-
-== The Full Picture
-
-#block(inset: (x: 2em, y: 0.8em), fill: luma(245), radius: 4pt)[
-  #align(center)[
-    #table(
-      columns: 3,
-      align: (center, center, center),
       stroke: 0.5pt,
       inset: 6pt,
-      [], [*Risk-neutral*], [*Risk-averse*],
-      [Welfare], [$sum w_i q_i$ (linear)], [$sum B_k ln U_k$ (log)],
-      [Budget constraint], [Explicit, bilinear, non-convex], [Absent — absorbed into objective],
-      [Curvature source], [$-C_b$ only ($O(1\/b)$)], [$ln$ ($O(B_k\/U_k^2)$, $b$-independent)],
-      [At $b = 0$], [Zero curvature, non-convex — hopeless], [Strict curvature, convex — fine],
-      [Unique prices?], [Not always (Prop. 2)], [Always (Thm. 5)],
-      [Complexity], [GNEP (intractable in general)], [Convex program (polynomial)],
+      [*Section*], [*Main takeaway*],
+      [1--2], [LP clearing, simplex prices, LMSR smoothing, and the KKT logic behind uniform clearing],
+      [3--4], [Why hard MM budgets break convexity, and why diminishing returns is the right fix],
+      [5], [The key object is $psi_B(U)$: affine below budget, logarithmic above it],
+      [6], [The deployed-value lift gives a clean conic solver form and a decomposition story],
     )
   ]
-
-  #v(0.5em)
-  One modeling change — linear welfare $arrow.r$ log welfare — removes the non-convexity and adds strict curvature. The paper's thesis: this isn't a trick. The linear model was the fiction.
 ]
 
-= Theorem 5 Step by Step
+= Batch Clearing in One Page
 
-Sections 1–5 gave you the five tools. This section applies all of them to walk through the actual proof of Theorem 5 — the paper's main result. Everything below is a line-by-line unpacking of §5.2 in the paper.
+A batch auction chooses fills $bold(q)$ for all orders at once. The objective is simple: create as much surplus as possible, but pay for any new shares that must be minted.
 
-== The Program
+== Minting Cost
 
-The risk-averse clearing program is:
+With $K$ mutually exclusive outcomes, minting one complete set of shares costs $\$1$. If the fills imply net demand $D_k(bold(q))$ for outcome $k$, then the exchange must mint at least enough complete sets to cover the largest shortfall. The clearing LP is therefore
 
-$ P_b^"RA": quad max_(bold(q) in cal(C), bold(s) >= 0) quad underbrace(sum_k [B_k ln(U_k(bold(q)) + s_k) - s_k], "MM welfare") + underbrace(sum_(j in.not "MM") w_j q_j, "retail welfare") - underbrace(C_b(bold(D)(bold(q))), "minting cost") $
+$ max_(bold(q) in cal(C)) quad sum_i w_i q_i - max_k D_k(bold(q)) $
 
-where $U_k = sum_(i in "MM"_k^+) L_i q_i$ is MM $k$'s total weighted fill (buy orders only, $L_i > 0$) and $s_k >= 0$ is retained cash.
+where $cal(C)$ is the usual box-plus-balance polytope. The first term is welfare from fills; the second is the minting bill.
 
-Three things to unpack about the per-MM objective $B_k ln(U_k + s_k) - s_k$:
+The important point is conceptual: $max_k D_k$ is not an arbitrary penalty. It is the exact cost of endogenous supply under mutual exclusivity.
 
-#block(inset: (x: 2em, y: 0.5em))[
-  *Why $U_k + s_k$, not just $U_k$?* If you used $B_k ln U_k$ alone (the simplified version from §4), an over-capitalized MM ($B_k > U_k^"LP"$) would be _forced_ to spend all its budget on fills to maximize $ln U_k$ — including unprofitable ones. The cash variable $s_k$ is a release valve: the MM can park unused budget as cash instead of buying garbage fills.
-]
+== Why Prices Live on the Simplex
 
-#block(inset: (x: 2em, y: 0.5em))[
-  *Why $-s_k$?* Cash has linear disutility — each dollar retained costs exactly one dollar of welfare. This makes cash a _numeraire good_: it has constant marginal value $1$, so the MM only retains cash when no fill can beat that marginal value. Without $-s_k$, the MM would hoard infinite cash for free.
-]
+The convex conjugate of $max_k D_k$ is the indicator of the simplex:
 
-#block(inset: (x: 2em, y: 0.5em))[
-  *Why $B_k$ out front?* This scales the curvature. Bigger budget $arrow.r$ the $ln$ singularity "fires" at a higher $U_k$. As §4 showed, the $B_k$ scaling is exactly what makes total spending equal $B_k$ at the optimum — the budget is encoded in the curvature, not in a constraint.
-]
+$ (max_k D_k)^*(bold(p)) = delta_Delta(bold(p)) $
 
-== Part 1: Strict Concavity (Why a Unique Optimum Exists)
+So the only price vectors that avoid minting arbitrage are probability vectors. In this framework, “prices sum to one” is a consequence of the minting technology, not a separate assumption.
 
-*Claim:* The objective is strictly concave in $(bold(q), bold(s))$, so it has a unique maximizer.
+== LMSR Is the Smoothed Version
 
-*The composition rule.* There is a standard fact from convex analysis:
+Replace $max_k D_k$ by the log-sum-exp smoothing
 
-#block(inset: (x: 2em, y: 0.8em), fill: luma(245), radius: 4pt)[
-  If $g$ is strictly concave and increasing, and $h$ is affine (linear + constant), then $g compose h$ is strictly concave.
-]
+$ C_b(bold(D)) = b ln sum_k exp(D_k / b) $
 
-Why? Take two points $x_1, x_2$ and $lambda in (0,1)$. Affinity of $h$ gives $h(lambda x_1 + (1-lambda) x_2) = lambda h(x_1) + (1-lambda) h(x_2)$. Then strict concavity of $g$ gives $g(lambda h(x_1) + (1-lambda) h(x_2)) > lambda g(h(x_1)) + (1-lambda) g(h(x_2))$. That's the definition of strict concavity for $g compose h$.
+Then the conjugate becomes negative entropy:
 
-Apply this to our objective:
+$ C_b^*(bold(p)) = b sum_k p_k ln p_k $
+
+and the gradient is the familiar softmax rule
+
+$ p_k = (partial C_b) / (partial D_k) = exp(D_k / b) / sum_j exp(D_j / b) $
+
+So LMSR is not a different mechanism layered on top of batch clearing. It is the entropically smoothed version of the same clearing problem.
+
+== What the Temperature $b$ Does
+
+The smoothing error is explicit:
+
+$ max_k D_k <= C_b(bold(D)) <= max_k D_k + b ln K $
+
+So $b ln K$ is the worst-case subsidy paid for price uniqueness and smoothness. Small $b$ makes the market close to the LP. Positive $b$ also makes the price dual strictly convex, which is why smoothed prices are unique.
+
+= KKT and Clearing Logic
+
+Uniform clearing is just KKT conditions in disguise.
+
+If outcome $m$ clears at price $p_m$, then a buy order with limit price $L_i$ behaves as follows:
+
+- if $L_i > p_m$, it wants to fill up to its cap;
+- if $L_i < p_m$, it should not fill;
+- if $0 < q_i < overline(Q)_i$, then necessarily $L_i = p_m$.
+
+That is exactly the usual call-auction logic. The only twist later in the paper is that a budget-constrained MM does not compare $L_i$ directly to price. It compares $alpha_k L_i$ to price, where $alpha_k <= 1$ is a scarcity factor coming from the MM's reduced-form utility.
+
+= Why Hard Budgets Break Convexity
+
+The naive risk-neutral model keeps linear MM welfare but adds a budget cap. The problem is that spending depends on both fills and prices:
+
+$ sum_(i in "MM"_k) p_(m(i)) q_i <= B_k $
+
+Since prices themselves come from the clearing program, this is bilinear in the primal variables and the dual variables. In general the feasible set is nonconvex.
+
+That is the real obstruction in the paper. Prediction-market clearing is not intrinsically nonconvex. The pathology comes from combining:
+
+- linear MM welfare, and
+- hard budget caps written directly in price times quantity form.
+
+Once you see that, the natural question is not “how do we optimize this nonconvex program anyway?” but “what is the right MM objective if capital is genuinely scarce?”
+
+= Why Diminishing Returns Is the Right Fix
+
+The paper does not need a grand behavioral theorem saying every real market maker literally solves Kelly. It only needs a defensible reason to move away from linear welfare when capital is scarce.
+
+Three points matter:
+
+- A hard budget already means the MM is not truly risk neutral. If one extra dollar of fill were always worth one extra dollar of welfare, there would be no internal reason to stop at $B_k$.
+- Repeated-betting models make log utility the canonical growth-optimal benchmark.
+- Real systems use ladders, position limits, and other sizing rules that encode diminishing returns in practice.
+
+That motivates the resolution: model a budgeted MM as having a concave reduced-form utility. Section 5 derives the exact one induced by retained cash.
+
+= Reduced-Form Utility and Fisher-Market Clearing
+
+This section is the heart of the paper. The central object is not the deployed-value variable $V_k$ itself. The central object is the reduced-form MM utility $psi_B(U)$ that $V_k$ reveals.
+
+== The Four Quantities To Track
+
+For each market maker $k$:
+
+- $U_k(bold(q)) = sum_(i in "MM"_k^+) L_i q_i$ is the MM's weighted fill value.
+- $s_k >= 0$ is retained cash.
+- $V_k = U_k + s_k$ is total deployed value: fills plus retained cash.
+- $alpha_k = psi_(B_k)'(U_k)$ is the capital-scarcity factor.
+
+These play different roles.
 
 #align(center)[
   #table(
@@ -499,143 +141,334 @@ Apply this to our objective:
     align: (left, left, left),
     stroke: 0.5pt,
     inset: 6pt,
-    [*Piece*], [*Role*], [*Curvature*],
-    [$U_k + s_k = sum L_i q_i + s_k$], [$h$ — affine in $(bold(q), s_k)$], [None (flat)],
-    [$ln(dot.c)$], [$g$ — strictly concave, increasing], [Strict],
-    [$B_k ln(U_k + s_k)$], [$B_k dot g compose h$], [Strictly concave ($B_k > 0$)],
-    [$-s_k$], [Linear], [None (preserves concavity)],
-    [Retail welfare], [Linear in $bold(q)$], [None (preserves concavity)],
-    [$-C_b$], [Concave (not strictly)], [Bonus curvature],
+    [*Object*], [*Meaning*], [*Why it matters*],
+    [$U_k$], [Fill value], [How much outcome exposure the MM is trying to buy],
+    [$V_k$], [Deployed value], [The clean lift for proofs, KKT, and conic solvers],
+    [$psi_B(U)$], [Reduced-form utility], [The conceptual payload: affine when slack, log when binding],
+    [$alpha_k$], [Marginal scarcity], [Rescales MM limit prices in the KKT system],
   )
 ]
 
-Sum of a strictly concave function and concave functions is strictly concave. The $ln$ alone carries the strict part.
+== Deriving the Reduced Form
 
-*The maximum is attained* (not just a supremum). Two boundary arguments:
+Fix one MM with budget $B$. If its fill value is $U$, the lifted objective optimizes over deployed value:
 
-- As $s_k -> infinity$: $B_k ln(s_k) - s_k -> -infinity$ because $-s_k$ grows faster than $ln s_k$. So the objective is _coercive_ in $s_k$ — it eventually drives the objective down.
+$ psi_B(U) = max_(V >= U) [B ln V - V + U] $
 
-- As $U_k + s_k -> 0^+$: The gradient $partial / (partial s_k)[B_k ln(U_k + s_k) - s_k] = B_k\/(U_k + s_k) - 1 -> +infinity$. The slope becomes infinitely steep upward. So the optimizer is always pushed _away_ from zero — the singularity repels.
+This is a one-variable concave problem. The derivative is $B / V - 1$, so the unconstrained maximizer is $V = B$. The constraint $V >= U$ clips that at
 
-These two forces (coercive at infinity, repulsive at zero) trap the optimum in a bounded region. Bounded region + continuous function $arrow.r$ maximum attained. Strict concavity $arrow.r$ the maximizer is unique.
+$ V^*(U) = max(U, B) $
 
-== Part 2: Limit Order Exactness ($mu_k <= 1$)
+Substituting back gives the exact reduced form:
 
-Define the *shadow price of capital*:
+$ psi_B(U) = cases(
+  U + B ln B - B & "if" U <= B, 
+  B ln U & "if" U >= B
+) $
 
-$ mu_k equiv B_k / (U_k + s_k) $
+This is the key structural fact in the paper.
 
-This is the marginal value of one more dollar of fills-plus-cash to MM $k$. Now differentiate the objective w.r.t. the cash variable $s_k$:
+- *Slack budget:* $U <= B$. The utility is affine, with slope $1$.
+- *Binding budget:* $U >= B$. The utility becomes logarithmic, with slope $B / U$.
 
-$ (partial) / (partial s_k) [B_k ln(U_k + s_k) - s_k] = underbrace(B_k / (U_k + s_k), mu_k) - 1 = mu_k - 1 $
+So a budgeted MM behaves like the LP while it has spare capital, and like a log-utility agent once capital binds.
 
-The variable $s_k$ has the constraint $s_k >= 0$ (you can't retain negative cash). Apply KKT (§3 of this primer) to this floor constraint:
+#block(inset: (x: 1.6em, y: 0.6em), fill: luma(245), radius: 4pt)[
+  *Tiny numerical example.* Take one MM with budget $B = 10$.
 
-#align(center)[
-  #table(
-    columns: 3,
-    align: (left, left, left),
-    stroke: 0.5pt,
-    inset: 6pt,
-    [*Case*], [*Condition*], [*Meaning*],
-    [Interior ($s_k > 0$)], [$mu_k - 1 = 0$, so $mu_k = 1$], [Marginal fill $=$ marginal cash $=$ 1],
-    [At floor ($s_k = 0$)], [$mu_k - 1 <= 0$, so $mu_k <= 1$], [Fills are worth less than cash — hold none],
-  )
-]
-
-In both cases: $mu_k <= 1$. This is unconditional — it holds for every MM at every optimum.
-
-*Why this matters.* The KKT condition for fill $q_i$ of MM $k$ (with minting cost included) is:
-
-$ mu_k L_i - p_(m(i)) = lambda_i^+ - lambda_i^- $
-
-For a fill to happen ($q_i > 0$), the left side must be $>= 0$ (by KKT at the floor, same logic as §3). So $mu_k L_i >= p_(m(i))$, which gives:
-
-$ L_i >= p_(m(i)) / mu_k >= p_(m(i)) $
-
-The limit price must exceed the clearing price. *No order fills below its stated price.* The $mu_k <= 1$ guarantee is what makes this work — it's the cash variable doing its job.
-
-== The Two Regimes
-
-Complementary slackness on $s_k >= 0$ creates two clean regimes:
-
-#block(inset: (x: 2em, y: 0.8em), fill: luma(245), radius: 4pt)[
+  #v(0.4em)
   #align(center)[
     #table(
-      columns: 4,
-      align: (left, left, left, left),
+      columns: 6,
+      align: (left, center, center, center, center, center),
       stroke: 0.5pt,
       inset: 6pt,
-      [*Regime*], [$s_k$], [$mu_k$], [*Behavior*],
-      [Capital-constrained ($U_k > B_k$)], [$0$], [$B_k\/U_k < 1$], [Throttles low-ROI fills],
-      [Over-capitalized ($U_k < B_k$)], [$B_k - U_k > 0$], [$1$], [Acts like LP],
+      [*Case*], [*$U$*], [*$V^* = max(U, B)$*], [*$psi_B(U)$*], [*$alpha = psi_B'(U)$*], [*$g_B(U)$*],
+      [Slack], [$6$], [$10$], [$6 + 10 ln 10 - 10 approx 19.03$], [$1$], [$0$],
+      [Binding], [$16$], [$16$], [$10 ln 16 approx 27.73$], [$10 / 16 = 0.625$], [$16 - 10 - 10 ln(16 / 10) approx 1.30$],
     )
   ]
+
+  #v(0.4em)
+  In the slack case, the MM leaves $4$ units as cash, behaves exactly like the LP at the margin ($alpha = 1$), and pays no envelope penalty ($g_B = 0$). In the binding case, there is no retained cash, the MM discounts its marginal willingness to pay to $0.625$, and the gap $g_B$ records how far the reduced-form utility falls below the affine LP benchmark.
 ]
 
-*Capital-constrained regime.* The MM has more profitable opportunities than budget. The shadow price $mu_k < 1$ scales down all limit prices by a factor $mu_k$. An order with $L_i = 0.55$ and $mu_k = 0.86$ acts as if its limit is $mu_k L_i = 0.47$. High-ROI orders (high $L_i$) survive the scaling; low-ROI orders get priced out. This is the MM organically prioritizing its best fills.
+== Why $psi_B$ Is the Right Abstraction
 
-*Over-capitalized regime.* The MM has more budget than opportunities. It sets $s_k = B_k - U_k > 0$ (parks the excess as cash) and $mu_k = 1$. The fill KKT becomes $L_i - p_(m(i)) = lambda_i^+ - lambda_i^-$ — exactly the risk-neutral LP KKT. The log model _degenerates to the LP_ when the budget doesn't bind. This is Proposition 3 (LP Recovery).
+Two properties make $psi_B$ especially useful.
 
-== Part 3: Budget Absorption (With Cash)
+First, it is concave and $C^1$. The derivative is
 
-§4 showed the absorption trick for the simplified $B_k ln U_k$ model. Here we do it with $s_k$. The algebra is nearly identical, with one extra step.
+$ psi_B'(U) = min(1, B / U) $
 
-Start from the fill KKT (from Part 2):
+This derivative is the scarcity factor $alpha_k$. It is the MM's marginal willingness to turn one more unit of capital into one more unit of weighted fill.
 
-$ mu_k L_i - p_(m(i)) = lambda_i^+ - lambda_i^- $
+Second, $psi_B$ sits under its affine envelope:
 
-Multiply both sides by $q_i$ and use $lambda_i^- q_i = 0$ (complementary slackness — same as §4):
+$ psi_B(U) <= U + B ln B - B $
 
-$ mu_k L_i q_i - p_(m(i)) q_i = lambda_i^+ q_i $
+with equality exactly on the slack-budget region $U <= B$. That single inequality explains LP recovery and the welfare-gap bound later.
 
-Sum over all $i in "MM"_k^+$:
+== The Reduced-Form Clearing Program
 
-$ mu_k underbrace(sum L_i q_i, U_k) - sum p_(m(i)) q_i = underbrace(sum lambda_i^+ q_i, >= 0) $
+After substituting $psi_(B_k)$ for each MM, the whole batch auction becomes
 
-So $sum p_(m(i)) q_i <= mu_k U_k$. (Same as §4 so far.)
+$ max_(bold(q) in cal(C)) quad sum_k psi_(B_k)(U_k(bold(q))) + sum_(j in.not "MM") w_j q_j - C_b(bold(D)(bold(q))) $
 
-*The extra step.* By definition, $mu_k = B_k \/ (U_k + s_k)$, so $mu_k(U_k + s_k) = B_k$, which gives $mu_k U_k = B_k - mu_k s_k$. Since $mu_k <= 1$ (Part 2) and $s_k >= 0$:
+This is the paper's main primal program.
 
-$ mu_k U_k = B_k - mu_k s_k <= B_k $
+Read it as:
 
-Combining with $sum p_(m(i)) q_i <= mu_k U_k$:
+- MMs contribute concave welfare through $psi_B$;
+- retail orders stay linear;
+- minting cost stays exactly the same.
 
-#block(inset: (x: 2em, y: 0.8em), fill: luma(245), radius: 4pt)[
-  $ sum_(i in "MM"_k^+) p_(m(i)) q_i + s_k <= B_k $
+The geometry is now clean:
 
-  Total deployment — capital on fills plus retained cash — is at most $B_k$. The gap $sum lambda_i^+ q_i$ is infra-marginal surplus from fully-filled orders — profit that doesn't require additional capital.
+- the feasible set $cal(C)$ is convex;
+- each $psi_(B_k)(U_k(bold(q)))$ is concave in $bold(q)$ because $U_k$ is linear and $psi_B$ is concave;
+- $-C_b(bold(D)(bold(q)))$ is concave because $C_b$ is convex.
+
+So the whole program is a concave maximization over a convex feasible set.
+
+== Why the Deployed-Value Lift Still Matters
+
+Even though $psi_B$ is the main object, the lifted variable $V_k$ is still the best proof device:
+
+$ max_(bold(q) in cal(C), bold(V) >= bold(U)(bold(q))) quad sum_k [B_k ln V_k - V_k + U_k(bold(q))] + sum_(j in.not "MM") w_j q_j - C_b(bold(D)(bold(q))) $
+
+This lift is equivalent MM-by-MM to the reduced form because each bracketed term is exactly the definition of $psi_(B_k)(U_k)$ after optimizing over $V_k$.
+
+Why keep the lift around?
+
+- It exposes the KKT system cleanly.
+- It makes budget absorption transparent.
+- It is the form that conic solvers actually want.
+
+So the right split is:
+
+- $psi_B$ for exposition and theorem statements,
+- $V_k$ for derivation and implementation.
+
+== The KKT Story: Exact Limit Orders with Scarcity
+
+Let $p_m = (partial C_b)/(partial D_m)$ be the clearing price of outcome $m$. For an MM order $i$ belonging to MM $k$, the KKT condition becomes
+
+$ alpha_k L_i <= p_(m(i)) + lambda_i^- - lambda_i^+ $
+
+where $lambda_i^-$ and $lambda_i^+$ are the lower- and upper-bound multipliers for $q_i in [0, overline(Q)_i]$.
+
+The interpretation is the same as in an ordinary call auction, except that the order's effective value is $alpha_k L_i$ instead of $L_i$.
+
+- If $q_i > 0$, then $alpha_k L_i >= p_(m(i))$.
+- If $0 < q_i < overline(Q)_i$, then $alpha_k L_i = p_(m(i))$.
+- If $alpha_k L_i < p_(m(i))$, the order should not fill.
+
+So limit orders remain exact. Budget scarcity does not blur the price rule; it only rescales the MM's willingness to pay.
+
+== Two Regimes for a Market Maker
+
+The scarcity factor
+
+$ alpha_k = psi_(B_k)'(U_k) = min(1, B_k / U_k) $
+
+divides the MM into two regimes.
+
+#block(inset: (x: 1.6em, y: 0.6em), fill: luma(245), radius: 4pt)[
+  *Slack regime: $U_k < B_k$.* Then $alpha_k = 1$. The MM behaves exactly like the risk-neutral LP. Every profitable order is compared to price without discounting.
+
+  *Binding regime: $U_k > B_k$.* Then $alpha_k = B_k / U_k < 1$. The MM's lower-value orders are throttled first, because only orders with sufficiently high $L_i$ remain worth filling after the $alpha_k$ discount.
 ]
 
-The budget constraint was never imposed. It emerged from the KKT conditions of the $ln$ objective plus the cash variable.
+This is the economic content of the model. The MM is LP-like until capital becomes scarce; after that, capital is allocated to the highest-return fills.
 
-== Part 4: Price Uniqueness
+== Budget Absorption Without an Explicit Budget Constraint
 
-For $b > 0$: clearing prices are $p_k = "softmax"(bold(D)\/b) = exp(D_k\/b) \/ sum_j exp(D_j\/b)$. This is a continuous function of $bold(D)$, which is a linear function of $bold(q)$. Since $bold(q)^*$ is unique (Part 1), $bold(D)^*$ is unique, and $bold(p)^*$ is unique.
+A key feature of the paper is that the reduced-form program has no explicit spending constraint, yet the optimum still respects the budget.
 
-For $b = 0$: prices are LP duals — elements of the subdifferential of $max_k D_k$ at $bold(D)^*$. When two or more $D_k$ tie at $max_j D_j$, the subdifferential is a _face_ of the simplex (any convex combination of the tying outcomes' unit vectors works). Fills are still unique, but prices may not be. Any $b > 0$, no matter how small, breaks ties via the exponential and restores uniqueness.
+The reason is that the KKT inequality implies
 
-== Worked Example
+$ sum_(i in "MM"_k^+) p_(m(i)) q_i <= alpha_k U_k $
 
-Binary market ($K = 2$), $b -> 0$. An MM ($B = 60$) posts two buy-Yes orders: $A$ at $L_A = 0.70$, qty $100$; $B$ at $L_B = 0.55$, qty $100$. A retail trader posts buy-No at $L_C = 0.60$, qty $200$.
+Now split by regime.
 
-*LP (no budgets).* All orders fill. Balanced minting: $D_"Yes" = D_"No" = 200$, $p_"Yes" = 0.50$. Welfare $= (0.70 - 0.50)(100) + (0.55 - 0.50)(100) + (0.60 - 0.50)(200) = 45$. But MM capital consumed $= 0.50 times 200 = 100 > B = 60$. Budget violated.
+- If $U_k <= B_k$, then $alpha_k = 1$ and $V_k = B_k$, so retained cash is $V_k - U_k = B_k - U_k$. Total capital used is
 
-*Risk-averse.* The MM is capital-constrained: $U^"LP" = 0.70(100) + 0.55(100) = 125 > B = 60$, so $s = 0$ and $mu = B\/U$.
+  $ sum_i p_(m(i)) q_i + (V_k - U_k) <= U_k + (B_k - U_k) = B_k $
 
-#block(inset: (x: 2em, y: 0.5em))[
-  The optimizer finds $mu = 60\/70 approx 0.86$ (only order $A$ fills, $U = 70$). Check the fill KKT:
-  - Order $A$: $mu L_A = 0.86 times 0.70 = 0.60 >= p_"Yes" = 0.50$. #h(1em) Fills. #sym.checkmark
-  - Order $B$: $mu L_B = 0.86 times 0.55 = 0.47 < p_"Yes" = 0.50$. #h(1em) Does not fill. #sym.crossmark
+- If $U_k >= B_k$, then $alpha_k = B_k / U_k$ and $V_k = U_k$, so retained cash is zero. Total capital used is
 
-  The shadow price $mu < 1$ throttles the lower-ROI order.
+  $ sum_i p_(m(i)) q_i <= alpha_k U_k = B_k $
+
+So the budget is absorbed into the objective. That is why the paper can delete the explicit hard cap without losing economic discipline.
+
+== Price Dual and the Role of Temperature
+
+To study prices, project the primal into demand space. Define $W^"RA"(bold(D))$ as the best risk-averse welfare achievable with net demand $bold(D)$. Because it is the value function of a concave program with linear coupling constraints, $W^"RA"$ is concave.
+
+Then the clearing prices solve the dual problem
+
+$ min_(bold(p) in Delta) quad (W^"RA")^*(bold(p)) + b sum_k p_k ln p_k $
+
+This is the exact analogue of the LP/LMSR dual from Section 1, but with the reduced-form MM welfare folded into the conjugate.
+
+The temperature split is now clean.
+
+#align(center)[
+  #table(
+    columns: 3,
+    align: (left, left, left),
+    stroke: 0.5pt,
+    inset: 6pt,
+    [*Quantity*], [*$b > 0$*], [*$b = 0$*],
+    [Minting cost], [$C_b = b ln sum exp(D_k / b)$], [$max_k D_k$],
+    [Prices], [Softmax gradient], [LP dual variables],
+    [Price uniqueness], [Yes: entropy makes the dual strictly convex], [Not guaranteed],
+    [Existence / KKT / budget absorption], [Yes], [Yes],
+  )
 ]
 
-Minting balances at $D_"Yes" = D_"No" = 100$. Welfare $= 30$. Capital consumed $= 0.50 times 100 = 50 <= B = 60$, with the gap of $10$ being infra-marginal surplus from order $A$ (it was willing to pay $0.70$ but only paid $0.50$, so $0.20 times 100 = 20$ of welfare was "free" profit, of which $10$ is the budget gap).
+So positive temperature buys a unique price vector. Zero temperature keeps the same primal structure but loses the entropic tie-break.
 
-#v(2em)
-#line(length: 100%)
-#v(0.5em)
-#text(size: 9pt, style: "italic")[
-  This primer covers the mathematical ideas in "Prediction Markets Are Fisher Markets." For the full proofs, formal statements, and economic motivation, see the paper itself.
+== Affine Envelope: LP Recovery and Welfare Loss
+
+Define the envelope gap
+
+$ g_B(U) = U + B ln B - B - psi_B(U) = cases(
+  0 & "if" U <= B,
+  U - B - B ln(U / B) & "if" U >= B
+) $
+
+This measures how far the MM is from the affine LP regime.
+
+Two consequences become immediate.
+
+- *LP recovery.* If an LP optimum has $U_k <= B_k$ for every MM, then $g_(B_k)(U_k) = 0$ for every MM, so the LP optimum is also optimal for the reduced-form program.
+- *Welfare gap.* If the LP would overuse some MM's capital, the reduced-form welfare differs from LP welfare only through the sum of these gap terms. The exact loss for MM $k$ with shortfall $Delta_k = max(0, U_k^"LP" - B_k)$ is
+
+  $ Delta_k - B_k ln(1 + Delta_k / B_k) <= Delta_k^2 / (2 B_k) $
+
+This is why the risk-averse solution usually stays close to the LP in practice: only the capital-binding region is penalized, and the penalty is second-order for small shortfalls.
+
+== Why the Title Mentions Fisher Markets
+
+A quasi-linear Fisher market has:
+
+- agents with budgets,
+- divisible goods,
+- concave utility over goods,
+- optional retained cash,
+- prices as dual variables.
+
+The reduced-form clearing program has the same structure.
+
+#align(center)[
+  #table(
+    columns: 3,
+    align: (left, center, center),
+    stroke: 0.5pt,
+    inset: 6pt,
+    [*Component*], [*Quasi-linear Fisher market*], [*Batch auction here*],
+    [Agents], [Consumers], [Budgeted market makers],
+    [Goods], [Divisible commodities], [Outcome shares],
+    [Budgets], [$B_k$], [$B_k$],
+    [Cash], [Unspent budget], [Retained cash $s_k$],
+    [Utility], [Concave in allocations], [$psi_(B_k)(U_k)$],
+    [Prices], [Dual variables], [Clearing prices],
+  )
 ]
+
+The two extensions specific to prediction markets are:
+
+- supply is endogenous through minting cost instead of fixed endowment;
+- retail orders contribute linear welfare alongside MM utility.
+
+That is why the title is right, but also why the reduced form matters more than the slogan: the Fisher interpretation is a consequence of the utility structure.
+
+== Buy/Sell Reduction and Multiple Groups
+
+Two implementation notes matter.
+
+- *Buy/sell reduction.* MM sells are netted against buys. A net short in one outcome is equivalent to a net buy in the complement, so the theory can be written using net MM buy exposure only.
+- *Multiple groups and bundles.* Nothing in the reduced-form argument depends on having one mutually exclusive group. If the state space is joint, simply replace $k$ by joint state $s$ in the demand vector and minting cost. The structure survives; the problem becomes computational rather than conceptual.
+
+= Computation and Decomposition
+
+Section 6 of the paper is about turning the theory into solvers.
+
+== Why Solvers Want the Lifted Form
+
+The reduced form $psi_B(U)$ is excellent for theory, but the lifted form is better for optimization. At zero temperature, the program is
+
+$ max quad sum_k [B_k ln V_k - V_k + U_k] + "linear terms" - M $
+
+subject to linear constraints plus $V_k >= U_k$ and the minting epigraph constraints $M >= D_k$.
+
+After the lift, the only nonlinear pieces are the $ln V_k$ terms. That is exactly what lets the problem fit standard conic machinery.
+
+== Conic Formulation in Words
+
+Introduce variables $t_k$ with
+
+$ t_k <= ln V_k $
+
+Then each MM contribution becomes linear in $(t_k, V_k, U_k)$:
+
+$ B_k t_k - V_k + U_k $
+
+The constraint $t_k <= ln V_k$ is a standard exponential-cone constraint. Everything else is linear. So the whole $b = 0$ program becomes an exponential-cone program.
+
+This matters for two reasons.
+
+- It gives a direct polynomial-time solvability statement using standard conic optimization.
+- It shows that the “hard part” of the model is very structured: the only nonlinearity is one log term per MM.
+
+== Augmented-LP Intuition
+
+The conic view is the formal complexity result. The engineering intuition is even simpler: compared with the clearing LP, each MM contributes just one extra scalar nonlinear variable $V_k$ and one log barrier term.
+
+So in sparse order books with few budgeted MMs, the lifted program should behave much more like an LP with a low-rank correction than like a fundamentally different optimization problem. That is why the paper's practical solver story is plausible.
+
+== When Decomposition Helps
+
+Suppose the market has many groups. If no order spans multiple groups, then the smoothed minting cost factorizes across groups. The monolithic program splits into independent subproblems, except that each MM's total budget must still be allocated across the components.
+
+With reduced-form utility, this allocation is smooth. If MM $k$ splits its budget across components $m$, the coordination gradient is
+
+$ partial W_m^* / partial B_k^m = ln V_k^(m *) $
+
+So a first-order method such as mirror descent on budget shares is natural: solve each component independently, read off $ln V_k^(m *)$, and update the budget split.
+
+This is a structural payoff of the reduced form. Under hard budget constraints with linear welfare, there is no comparable smooth coordination layer.
+
+== When Decomposition Does Not Help
+
+Current small benchmarks are mostly independent binary markets. In that regime, monolithic LP clearing is already cheap, so decomposition pays coordination overhead without getting much in return.
+
+That is why the paper reports the following qualitative pattern:
+
+- decomposed LP is close in welfare to monolithic LP;
+- decomposed conic currently suffers from numerical issues when component budgets become tiny;
+- monolithic methods remain faster on small independent instances.
+
+This is not a contradiction. It just means the benchmark regime is not the regime decomposition is for.
+
+== The Regime Decomposition Is For
+
+Decomposition becomes valuable when bundle orders create an exponential joint state space but the coupling graph still splits into modest connected components.
+
+A simple picture:
+
+- monolithic clearing over $20$ binary groups sees $2^20 approx 10^6$ joint states;
+- if the coupling graph splits into four components of five groups each, componentwise clearing sees only $4 dot 2^5 = 128$ states, plus a smooth coordination layer over MM budgets.
+
+That is the asymptotic regime where decomposition should win. The current theory already points there; the empirical program still needs benchmarks that live there.
+
+= Mental Model
+
+If you remember only four lines from the paper, remember these.
+
+- *Baseline:* batch clearing is LP welfare minus minting cost.
+- *Obstacle:* linear MM welfare plus hard budgets makes the problem nonconvex.
+- *Fix:* with retained cash, a budgeted MM has reduced-form utility $psi_B(U)$, affine when slack and logarithmic when binding.
+- *Consequence:* the auction becomes a concave Fisher-style program with exact KKT logic, unique prices for $b > 0$, and a clean conic solver form.
