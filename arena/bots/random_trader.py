@@ -20,7 +20,7 @@ class RandomTrader(BaseAgent):
         client,
         account_id: int,
         trade_probability: float = 0.5,
-        price_noise: float = 0.035,
+        price_noise: float = 0.05,
         seed: int | None = None,
         name: str | None = None,
         market_ids: list[int] | None = None,
