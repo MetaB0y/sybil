@@ -30,7 +30,8 @@ def build_block_records(
     mm_fills: list | None = None,
     noise_fills: list | None = None,
     sim_start: datetime | None = None,
-    compression_ratio: float = 300.0,
+    compression_ratio: float = 600.0,
+    block_interval_s: float = 2.0,
 ) -> list[dict]:
     """Join per-bot block_logs with server price history into per-block records."""
     from .news_trader import _describe_order
@@ -102,7 +103,7 @@ def build_block_records(
     if sim_start and all_heights:
         first_height = min(all_heights)
         for h in all_heights:
-            offset = (h - first_height) * compression_ratio
+            offset = (h - first_height) * compression_ratio * block_interval_s
             st = sim_start + timedelta(seconds=offset)
             sim_time_by_height[h] = st.isoformat()
 
@@ -249,6 +250,7 @@ async def save_and_print_results(
         trader_fills_map=trader_fills_map,
         mm_fills=mm_fills, noise_fills=noise_fills,
         sim_start=rec_sim_start, compression_ratio=config.compression_ratio,
+        block_interval_s=getattr(config, 'block_interval_s', 2.0),
     )
 
     # Enrich with welfare/volume/fills

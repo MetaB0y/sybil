@@ -63,6 +63,7 @@ class TraderSpec:
 class SimulationConfig:
     base_url: str = "http://localhost:3001"
     compression_ratio: float = 600.0
+    block_interval_s: float = 2.0
     mm_balance: float = 50_000.0
     initial_price: float = 0.12
     noise_count: int = 20
@@ -275,8 +276,8 @@ def main():
     parser.add_argument("--compression", type=float, default=600.0,
                         help="Time compression ratio (default: 600)")
     parser.add_argument("--noise-count", type=int, default=20)
-    parser.add_argument("--noise-balance", type=float, default=20.0)
-    parser.add_argument("--trader-balance", type=float, default=1000.0)
+    parser.add_argument("--noise-balance", type=float, default=50.0)
+    parser.add_argument("--trader-balance", type=float, default=2000.0)
     parser.add_argument("--initial-price", type=float, default=None)
     parser.add_argument("--model", default="moonshotai/kimi-k2")
     parser.add_argument("--api-key", default="")
