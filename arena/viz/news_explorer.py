@@ -475,11 +475,17 @@ def render_simulation_tab():
             for f in b_iter.get(fill_key, []):
                 fside = _delta_side(f)
                 fsource = f.get("source")
+                fill_price = f.get("fill_price", 0)
                 remaining_fill = f["fill_qty"]
                 for co in all_fillable:
                     if remaining_fill <= 0:
                         break
                     if co["qty"] > 0 and co["side"] == fside and co["source"] == fsource:
+                        # Verify order limit is compatible with fill price
+                        if fside in ("BuyYes", "BuyNo") and co["price"] < fill_price - 0.0001:
+                            continue
+                        if fside in ("SellYes", "SellNo") and co["price"] > fill_price + 0.0001:
+                            continue
                         taken = min(co["qty"], remaining_fill)
                         co["qty"] -= taken
                         co["filled"] += taken
@@ -499,11 +505,20 @@ def render_simulation_tab():
 
         for f in b_iter.get("mm_fills", []):
             fside = _delta_side(f)
+            fill_price = f.get("fill_price", 0)
             remaining_fill = f["fill_qty"]
             for co in new_mm:
                 if remaining_fill <= 0:
                     break
-                if co["qty"] > 0 and co["side"] == fside:
+                # Only match if order limit is compatible with fill price
+                compatible = (
+                    co["qty"] > 0 and co["side"] == fside
+                    and (
+                        (fside in ("BuyYes", "BuyNo") and co["price"] >= fill_price - 0.0001)
+                        or (fside in ("SellYes", "SellNo") and co["price"] <= fill_price + 0.0001)
+                    )
+                )
+                if compatible:
                     taken = min(co["qty"], remaining_fill)
                     co["qty"] -= taken
                     co["filled"] += taken
