@@ -190,9 +190,17 @@ async def run_simulation(config: SimulationConfig) -> None:
             for spec in specs:
                 if spec.name not in spec_articles:
                     continue
+                # Only include articles within the sim window
+                window_articles = [
+                    a for a in spec_articles[spec.name]
+                    if sim_start <= a.timestamp <= sim_end
+                ]
+                if not window_articles:
+                    print(f"  {spec.name}: 0 articles in {config.sim_start_hour}–{config.sim_end_hour}, skipping")
+                    continue
                 t = NewsTrader(
                     client, trader_accounts[spec.name],
-                    spec_articles[spec.name], clock,
+                    window_articles, clock,
                     api_key=api_key,
                     persona=spec.persona,
                     analysis_question=config.analysis_question,
@@ -223,7 +231,26 @@ async def run_simulation(config: SimulationConfig) -> None:
                 f" (compression={config.compression_ratio}x)"
             )
 
+            # Block heartbeat monitor
+            async def _monitor():
+                last_block = 0
+                while True:
+                    await asyncio.sleep(15)
+                    try:
+                        blk = await client.get_latest_block()
+                        sim_t = clock.now().strftime("%H:%M")
+                        if blk.height > last_block:
+                            price = blk.clearing_prices.get(market.id, (0, 0))[0] / NANOS_PER_DOLLAR if blk.clearing_prices else 0
+                            print(f"\n  ── block {blk.height} | sim {sim_t} | YES={price:.4f} | fills={blk.orders_filled} ──", flush=True)
+                            last_block = blk.height
+                        else:
+                            print(f"\n  ── heartbeat | sim {sim_t} | block {blk.height} (paused — LLM in flight) ──", flush=True)
+                    except Exception:
+                        pass
+
+            monitor_task = asyncio.create_task(_monitor())
             await clock.sleep_until(sim_end)
+            monitor_task.cancel()
 
             print(f"\n  Stopping bots (day {day_label})...")
             for bot in all_bots:
@@ -265,9 +292,12 @@ def main():
     args = parser.parse_args()
 
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
+    # Only show sim-level logs at INFO unless verbose
+    if not args.verbose:
+        logging.getLogger("sim").setLevel(logging.INFO)
 
     # Load market config
     market_config = _load_market_config(args.market)

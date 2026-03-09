@@ -215,6 +215,7 @@ class NewsTrader(BaseAgent):
             self._llm_client = openai.AsyncOpenAI(
                 base_url="https://openrouter.ai/api/v1",
                 api_key=self.api_key,
+                timeout=120.0,
             )
         return self._llm_client
 
@@ -461,18 +462,20 @@ class NewsTrader(BaseAgent):
         arrived = self._drain_arrived_articles()
         market_id = next(iter(self.market_ids))
 
+        if arrived:
+            sim_t = self.clock.now().strftime("%H:%M")
+            print(f"  [{self.name}] block {block.height} ({sim_t}): {len(arrived)} article(s)", flush=True)
+
         analyses: list[tuple] = []
         best_conviction = "LOW"
         conviction_rank = {"LOW": 0, "MEDIUM": 1, "HIGH": 2}
 
         for article in arrived:
-            log.info(
-                "[%s] Processing article: %s (%s)",
-                self.name, article.title[:60], article.source,
-            )
+            print(f"    → LLM: \"{article.title[:60]}\" ({article.source})...", end="", flush=True)
 
             result = await self._phase2_analyze(article, block)
             if result is None:
+                print(" FAILED", flush=True)
                 self.trade_log.append(TradeRecord(
                     article=article,
                     probability=0.0,
@@ -490,6 +493,7 @@ class NewsTrader(BaseAgent):
 
             probability, conviction, motivation, raw_response, llm_duration_s = result
             self._update_belief(probability, conviction)
+            print(f" P={probability:.2f} {conviction} ({llm_duration_s:.1f}s) belief={self.belief:.3f}", flush=True)
             analyses.append((article, probability, conviction, motivation, raw_response, llm_duration_s))
 
             if conviction_rank.get(conviction, 0) > conviction_rank.get(best_conviction, 0):
@@ -498,6 +502,11 @@ class NewsTrader(BaseAgent):
         orders: list[OrderSpec] = []
         if analyses:
             orders = self._phase3_execute(best_conviction, block)
+            if orders:
+                order_desc = ", ".join(_describe_order(o) for o in orders)
+                print(f"    → trade: {order_desc}", flush=True)
+            else:
+                print(f"    → no trade (edge too small)", flush=True)
 
         for i, (article, probability, conviction, motivation, raw_response, llm_duration_s) in enumerate(analyses):
             is_last = (i == len(analyses) - 1)
@@ -536,13 +545,13 @@ def _describe_order(order: OrderSpec) -> str:
     """Human-readable order description."""
     price = order.limit_price_nanos / NANOS_PER_DOLLAR
     if isinstance(order, BuyYes):
-        return f"BuyYes {order.quantity} @ ${price:.2f}"
+        return f"BuyYes {order.quantity} @ ${price:.4f}"
     elif isinstance(order, BuyNo):
-        return f"BuyNo {order.quantity} @ ${price:.2f}"
+        return f"BuyNo {order.quantity} @ ${price:.4f}"
     elif isinstance(order, SellYes):
-        return f"SellYes {order.quantity} @ ${price:.2f}"
+        return f"SellYes {order.quantity} @ ${price:.4f}"
     elif isinstance(order, SellNo):
-        return f"SellNo {order.quantity} @ ${price:.2f}"
+        return f"SellNo {order.quantity} @ ${price:.4f}"
     return str(order)
 
 
