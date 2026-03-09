@@ -19,29 +19,19 @@ NANOS_PER_DOLLAR = 1_000_000_000
 
 
 class AnchorMarketMaker(BaseAgent):
-    """FBA-aware market maker with EMA reference pricing and size-based inventory.
+    """FBA-aware market maker with inventory-managed quoting.
 
-    Designed to avoid the self-trading feedback loop that plagues naive MMs in
-    frequent batch auctions:
-
-    1. Quotes symmetrically around a slow-moving EMA reference price (not the
-       instantaneous clearing price).  This prevents new buy orders from
-       overlapping with stale sell orders across blocks.
-
-    2. Manages inventory through ORDER SIZE, not price skewing.  When holding
-       excess YES, reduce BuyYes quantity and increase SellYes quantity —
-       the mid stays put so the clearing price isn't pushed.
-
-    3. Uses flash liquidity (mm_budget_nanos) so orders are one-shot and never
-       carry over to the next block.  Belt-and-suspenders against self-trading.
-
-    4. Hard position limits: stop buying the heavy side entirely past a cap.
-
-    Anti-self-trade proof (same block):
+    Quotes symmetrically around the latest clearing price.  Self-trading is
+    impossible because the spread guarantees:
         bid_yes + bid_no = mid - offset + (1-mid) - offset = 1 - 2*offset < $1
         → minting impossible.
         ask_yes + ask_no = mid + offset + (1-mid) + offset = 1 + 2*offset > $1
         → burning impossible.
+
+    Inventory management is through ORDER SIZE, not price skewing.  When
+    holding excess YES, reduce BuyYes quantity and increase SellYes quantity.
+
+    Orders are one-shot (flash liquidity) and never carry over.
     """
 
     def __init__(
@@ -49,7 +39,6 @@ class AnchorMarketMaker(BaseAgent):
         client,
         account_id: int,
         budget_dollars: float = 5000.0,
-        ema_alpha: float = 0.08,
         base_spread: float = 0.06,
         num_levels: int = 3,
         level_spacing: float = 0.03,
@@ -60,24 +49,11 @@ class AnchorMarketMaker(BaseAgent):
     ):
         super().__init__(client, account_id, name, market_ids)
         self.mm_budget_nanos = int(budget_dollars * NANOS_PER_DOLLAR)
-        self.ema_alpha = ema_alpha
         self.base_spread = base_spread
         self.num_levels = num_levels
         self.level_spacing = level_spacing
         self.base_size_dollars = base_size_dollars
         self.max_position = max_position
-        # Per-market EMA state
-        self._ema: dict[int, float] = {}
-
-    def _update_ema(self, market_id: int, clearing_yes: float) -> float:
-        """Update and return the EMA reference price for a market."""
-        if market_id not in self._ema:
-            self._ema[market_id] = clearing_yes
-        else:
-            self._ema[market_id] += self.ema_alpha * (
-                clearing_yes - self._ema[market_id]
-            )
-        return self._ema[market_id]
 
     def _inventory_multipliers(
         self, yes_pos: int, no_pos: int
@@ -106,8 +82,7 @@ class AnchorMarketMaker(BaseAgent):
         orders: list[OrderSpec] = []
 
         for market_id, (yes_nanos, no_nanos) in self.filter_markets(block).items():
-            clearing_yes = yes_nanos / NANOS_PER_DOLLAR
-            mid = self._update_ema(market_id, clearing_yes)
+            mid = yes_nanos / NANOS_PER_DOLLAR
             mid = max(0.05, min(0.95, mid))
             no_mid = 1.0 - mid
 

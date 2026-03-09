@@ -294,5 +294,5 @@ async def save_and_print_results(
         "trade_logs": {t.name: [rec.to_dict() for rec in t.trade_log] for t in traders},
         "leaderboard": leaderboard,
     }
-    run_path.write_text(json.dumps(run_data, indent=2))
+    run_path.write_text(json.dumps(run_data, indent=2, default=str))
     print(f"\nResults saved to {run_path}")
