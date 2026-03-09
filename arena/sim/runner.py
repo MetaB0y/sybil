@@ -56,18 +56,18 @@ class TraderSpec:
     persona: str
     phase1_path: str
     strategy: dict | None = None
+    model: str | None = None
 
 
 @dataclass
 class SimulationConfig:
     base_url: str = "http://localhost:3001"
     compression_ratio: float = 300.0
-    mm_balance: float = 20_000.0
-    mm_seed_qty: int = 10_000
+    mm_balance: float = 50_000.0
     initial_price: float = 0.12
     noise_count: int = 20
-    noise_balance: float = 20.0
-    trader_balance: float = 1_000.0
+    noise_balance: float = 50.0
+    trader_balance: float = 2_000.0
     api_key: str = ""
     model_name: str = "moonshotai/kimi-k2"
     sim_start_hour: str = "00:00"
@@ -97,10 +97,10 @@ async def run_simulation(config: SimulationConfig) -> None:
 
         mm_acct = await client.create_account(int(config.mm_balance * NANOS_PER_DOLLAR))
         await client.submit_orders(mm_acct.id, [
-            BuyYes.at_price(market.id, config.initial_price, config.mm_seed_qty),
-            BuyNo.at_price(market.id, 1 - config.initial_price, config.mm_seed_qty),
+            BuyYes.at_price(market.id, config.initial_price, 1),
+            BuyNo.at_price(market.id, 1 - config.initial_price, 1),
         ])
-        print(f"MM account {mm_acct.id}: seeded {config.mm_seed_qty} shares @ {config.initial_price:.2f}")
+        print(f"MM account {mm_acct.id}: seed price set @ {config.initial_price:.2f}")
 
         async for block in client.stream_blocks():
             print(f"Seed trade cleared in block {block.height}")
@@ -204,7 +204,7 @@ async def run_simulation(config: SimulationConfig) -> None:
                     api_key=api_key,
                     persona=spec.persona,
                     analysis_question=config.analysis_question,
-                    model_name=config.model_name,
+                    model_name=spec.model or config.model_name,
                     name=spec.name,
                     market_ids=[market.id],
                     strategy=spec.strategy,
@@ -320,6 +320,7 @@ def main():
                 persona=market_config.build_persona(bot_cfg),
                 phase1_path=_resolve_phase1_path(market_config, bot_key, args.date),
                 strategy=bot_cfg.get("strategy"),
+                model=bot_cfg.get("model"),
             ))
     else:
         # Default: first two tradeable personas
@@ -334,6 +335,7 @@ def main():
                 persona=market_config.build_persona(bot_cfg),
                 phase1_path=_resolve_phase1_path(market_config, bot_key, args.date),
                 strategy=bot_cfg.get("strategy"),
+                model=bot_cfg.get("model"),
             ))
 
     # Resolve dates
@@ -367,12 +369,14 @@ def main():
 
     print(f"{market_config.question}")
     print(f"  Server: {config.base_url}")
-    print(f"  Model: {config.model_name}")
+    print(f"  Default model: {config.model_name}")
     print(f"  Compression: {config.compression_ratio}x")
     print(f"  Noise traders: {config.noise_count} @ ${config.noise_balance}")
     print(f"  Trader balance: ${config.trader_balance}")
     if trader_specs:
-        print(f"  Traders: {', '.join(s.name for s in trader_specs)}")
+        for s in trader_specs:
+            model = (s.model or config.model_name).split("/")[-1]
+            print(f"  {s.name}: {model}")
     if dates:
         print(f"  Dates: {', '.join(dates)}")
     print()

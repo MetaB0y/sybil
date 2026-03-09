@@ -47,7 +47,7 @@ class PriceSnapshot:
 class TradeRecord:
     article: Article
     probability: float
-    conviction: str  # "LOW" / "MEDIUM" / "HIGH"
+    conviction: int  # 1-10 scale
     motivation: str
     orders: list[OrderSpec]
     sim_time: datetime
@@ -138,19 +138,20 @@ Then provide your conclusion in exactly this format:
 
 MOTIVATION: [1-2 sentence thesis]
 PROBABILITY: [your estimate, 0.00 to 1.00]
-CONVICTION: [LOW / MEDIUM / HIGH]"""
+CONVICTION: [1-10, where 1 = barely relevant noise, 5 = moderate signal, 10 = game-changing development]"""
 
 
 class NewsTrader(BaseAgent):
     """LLM-powered news-reactive trader (market-agnostic)."""
 
     # Defaults — overridden by strategy dict if provided
-    _DEFAULT_BELIEF_STRENGTH = {"LOW": 1, "MEDIUM": 3, "HIGH": 6}
+    # Conviction is 1-10 scale. Belief strength and Kelly scale interpolate linearly.
+    _DEFAULT_BELIEF_STRENGTH_RANGE = (1.0, 6.0)  # (conviction=1, conviction=10)
     _DEFAULT_BELIEF_WEIGHT_CAP = 30  # max alpha+beta before rescaling
-    _DEFAULT_KELLY_SCALE = {"LOW": 0.15, "MEDIUM": 0.30, "HIGH": 0.50}
-    _DEFAULT_CONFIRM_BOOST = 0.30
+    _DEFAULT_KELLY_RANGE = (0.05, 0.50)  # (conviction=1, conviction=10)
     _DEFAULT_MAX_KELLY_SCALE = 1.0
     _DEFAULT_MIN_EDGE = 0.02
+    _DEFAULT_WARMUP_TRADES = 5
 
     def __init__(
         self,
@@ -185,12 +186,12 @@ class NewsTrader(BaseAgent):
 
         # Apply strategy overrides
         s = strategy or {}
-        self._BELIEF_STRENGTH = s.get("belief_strength", self._DEFAULT_BELIEF_STRENGTH)
+        self._BELIEF_STRENGTH_RANGE = s.get("belief_strength_range", self._DEFAULT_BELIEF_STRENGTH_RANGE)
         self._BELIEF_WEIGHT_CAP = s.get("belief_weight_cap", self._DEFAULT_BELIEF_WEIGHT_CAP)
-        self._KELLY_SCALE = s.get("kelly_scale", self._DEFAULT_KELLY_SCALE)
-        self._CONFIRM_BOOST = s.get("confirm_boost", self._DEFAULT_CONFIRM_BOOST)
+        self._KELLY_RANGE = s.get("kelly_range", self._DEFAULT_KELLY_RANGE)
         self._MAX_KELLY_SCALE = s.get("max_kelly_scale", self._DEFAULT_MAX_KELLY_SCALE)
         self._MIN_EDGE = s.get("min_edge", self._DEFAULT_MIN_EDGE)
+        self._WARMUP_TRADES = s.get("warmup_trades", self._DEFAULT_WARMUP_TRADES)
 
     def snapshot_state(self) -> dict:
         """Capture cross-day state for multi-day simulations."""
@@ -219,14 +220,20 @@ class NewsTrader(BaseAgent):
             )
         return self._llm_client
 
-    def _update_belief(self, probability: float, conviction: str) -> float:
+    def _interp(self, lo_hi: tuple[float, float], conviction: int) -> float:
+        """Linearly interpolate between lo (conviction=1) and hi (conviction=10)."""
+        lo, hi = lo_hi
+        t = (conviction - 1) / 9.0  # 1→0.0, 10→1.0
+        return lo + t * (hi - lo)
+
+    def _update_belief(self, probability: float, conviction: int) -> float:
         """Update Beta belief with new LLM signal. Returns updated belief."""
         total = self._belief_alpha + self._belief_beta
         if total > self._BELIEF_WEIGHT_CAP:
             scale = self._BELIEF_WEIGHT_CAP / total
             self._belief_alpha *= scale
             self._belief_beta *= scale
-        s = self._BELIEF_STRENGTH[conviction]
+        s = self._interp(self._BELIEF_STRENGTH_RANGE, conviction)
         self._belief_alpha += s * probability
         self._belief_beta += s * (1 - probability)
         return self._belief_alpha / (self._belief_alpha + self._belief_beta)
@@ -343,7 +350,7 @@ class NewsTrader(BaseAgent):
 
         # Parse structured output
         prob_match = re.search(r"PROBABILITY:\s*([\d.]+)", text)
-        conv_match = re.search(r"CONVICTION:\s*(LOW|MEDIUM|HIGH)", text)
+        conv_match = re.search(r"CONVICTION:\s*(\d+)", text)
         motiv_match = re.search(r"MOTIVATION:\s*(.+)", text)
 
         if not prob_match or not conv_match:
@@ -351,7 +358,7 @@ class NewsTrader(BaseAgent):
             return None
 
         probability = float(prob_match.group(1))
-        conviction = conv_match.group(1)
+        conviction = max(1, min(10, int(conv_match.group(1))))
         motivation = motiv_match.group(1).strip() if motiv_match else ""
 
         if not 0.0 <= probability <= 1.0:
@@ -361,7 +368,7 @@ class NewsTrader(BaseAgent):
         return probability, conviction, motivation, text, llm_duration_s
 
     def _phase3_execute(
-        self, conviction: str, block: Block,
+        self, conviction: int, block: Block,
         shadow_yes: int | None = None, shadow_no: int | None = None,
     ) -> list[OrderSpec]:
         """Mechanical trade execution using running belief + Kelly sizing."""
@@ -385,13 +392,9 @@ class NewsTrader(BaseAgent):
         )
 
         bullish = b > mkt_price
-        confirming = sum(
-            1 for rec in self.trade_log
-            if rec.conviction in ("MEDIUM", "HIGH")
-            and (rec.probability > mkt_price) == bullish
-        )
+        experience = min(1.0, len(self.trade_log) / self._WARMUP_TRADES) if self._WARMUP_TRADES > 0 else 1.0
         kelly_scale = min(
-            self._KELLY_SCALE[conviction] + confirming * self._CONFIRM_BOOST,
+            self._interp(self._KELLY_RANGE, conviction) * experience,
             self._MAX_KELLY_SCALE,
         )
 
@@ -467,8 +470,7 @@ class NewsTrader(BaseAgent):
             print(f"  [{self.name}] block {block.height} ({sim_t}): {len(arrived)} article(s)", flush=True)
 
         analyses: list[tuple] = []
-        best_conviction = "LOW"
-        conviction_rank = {"LOW": 0, "MEDIUM": 1, "HIGH": 2}
+        best_conviction = 1
 
         for article in arrived:
             print(f"    → LLM: \"{article.title[:60]}\" ({article.source})...", end="", flush=True)
@@ -479,7 +481,7 @@ class NewsTrader(BaseAgent):
                 self.trade_log.append(TradeRecord(
                     article=article,
                     probability=0.0,
-                    conviction="LOW",
+                    conviction=1,
                     motivation="LLM parse failure",
                     orders=[],
                     sim_time=self.clock.now(),
@@ -493,10 +495,10 @@ class NewsTrader(BaseAgent):
 
             probability, conviction, motivation, raw_response, llm_duration_s = result
             self._update_belief(probability, conviction)
-            print(f" P={probability:.2f} {conviction} ({llm_duration_s:.1f}s) belief={self.belief:.3f}", flush=True)
+            print(f" P={probability:.2f} C={conviction}/10 ({llm_duration_s:.1f}s) belief={self.belief:.3f}", flush=True)
             analyses.append((article, probability, conviction, motivation, raw_response, llm_duration_s))
 
-            if conviction_rank.get(conviction, 0) > conviction_rank.get(best_conviction, 0):
+            if conviction > best_conviction:
                 best_conviction = conviction
 
         orders: list[OrderSpec] = []
