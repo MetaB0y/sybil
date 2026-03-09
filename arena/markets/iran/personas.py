@@ -28,7 +28,10 @@ BOT_PERSONAS = {
             ],
         },
         "strategy": {
-            "belief_weight_cap": 5,
+            "belief_strength_range": (0.5, 4.0),
+            "belief_weight_cap": 20,
+            "kelly_range": (0.05, 0.35),
+            "min_edge": 0.03,
         },
     },
     "american_skeptic": {
@@ -163,10 +166,9 @@ BOT_PERSONAS = {
             ],
         },
         "strategy": {
-            "belief_strength_range": (0.5, 4.0),
-            "belief_weight_cap": 8,
-            "kelly_range": (0.05, 0.35),
-            "min_edge": 0.03,
+            "belief_weight_cap": 5,
+            "kelly_range": (0.10, 0.50),
+            "min_edge": 0.02,
         },
     },
     "random_trader": {
