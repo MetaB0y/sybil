@@ -62,7 +62,7 @@ class AnchorMarketMaker(BaseAgent):
 
         Returns (buy_yes_mult, sell_yes_mult, buy_no_mult, sell_no_mult).
         When holding excess YES: reduce BuyYes, boost SellYes (and vice versa).
-        Uses tanh for smooth, bounded scaling.
+        Multipliers stay in [0.3, 1.5] so MM always quotes both sides.
         """
         total = yes_pos + no_pos
         if total == 0:
@@ -70,12 +70,14 @@ class AnchorMarketMaker(BaseAgent):
 
         # imbalance in [-1, +1]: positive = excess YES
         raw = (yes_pos - no_pos) / total
-        imbalance = math.tanh(2.0 * raw)  # amplify but bound
+        # Gentle curve: tanh(0.8*x) keeps multipliers moderate
+        skew = math.tanh(0.8 * raw)  # range roughly [-0.66, +0.66]
 
-        buy_yes = max(0.0, 1.0 - imbalance)
-        sell_yes = min(2.0, 1.0 + imbalance)
-        buy_no = max(0.0, 1.0 + imbalance)
-        sell_no = min(2.0, 1.0 - imbalance)
+        # Scale to [0.3, 1.5] — always quote both sides meaningfully
+        buy_yes = max(0.3, 1.0 - 0.7 * skew)
+        sell_yes = min(1.5, 1.0 + 0.7 * skew)
+        buy_no = max(0.3, 1.0 + 0.7 * skew)
+        sell_no = min(1.5, 1.0 - 0.7 * skew)
         return (buy_yes, sell_yes, buy_no, sell_no)
 
     async def on_block(self, block: Block) -> list[OrderSpec]:
@@ -106,24 +108,24 @@ class AnchorMarketMaker(BaseAgent):
 
                 # --- BuyYes ---
                 if yes_bid >= 0.01 and yes_pos < self.max_position:
-                    qty = max(1, int(self.base_size_dollars * by_mult / yes_bid))
+                    qty = max(1, min(self.max_position, int(self.base_size_dollars * by_mult / yes_bid)))
                     orders.append(BuyYes.at_price(market_id, yes_bid, qty))
 
                 # --- SellYes ---
                 if yes_ask <= 0.99 and yes_pos > 0:
-                    qty = max(1, int(self.base_size_dollars * sy_mult / yes_ask))
+                    qty = max(1, min(self.max_position, int(self.base_size_dollars * sy_mult / yes_ask)))
                     qty = min(qty, yes_pos)
                     if qty > 0:
                         orders.append(SellYes.at_price(market_id, yes_ask, qty))
 
                 # --- BuyNo ---
                 if no_bid >= 0.01 and no_pos < self.max_position:
-                    qty = max(1, int(self.base_size_dollars * bn_mult / no_bid))
+                    qty = max(1, min(self.max_position, int(self.base_size_dollars * bn_mult / no_bid)))
                     orders.append(BuyNo.at_price(market_id, no_bid, qty))
 
                 # --- SellNo ---
                 if no_ask <= 0.99 and no_pos > 0:
-                    qty = max(1, int(self.base_size_dollars * sn_mult / no_ask))
+                    qty = max(1, min(self.max_position, int(self.base_size_dollars * sn_mult / no_ask)))
                     qty = min(qty, no_pos)
                     if qty > 0:
                         orders.append(SellNo.at_price(market_id, no_ask, qty))

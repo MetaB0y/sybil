@@ -1116,10 +1116,19 @@ def render_simulation_tab():
         # trader_llm: list (new) or dict/None (old runs)
         raw_llm = b["trader_llm"]
         llm_list = raw_llm if isinstance(raw_llm, list) else ([raw_llm] if raw_llm else [])
+        # Only show LLM entries for traders that actually placed orders this block
+        traders_with_orders = set()
+        for entry in b.get("trader_orders_detail", []):
+            tname = entry.get("trader")
+            if tname:
+                traders_with_orders.add(tname)
         if llm_list:
             parts = []
             for l in llm_list:
-                tag = f"[{l['trader']}] " if "trader" in l else ""
+                trader_name = l.get("trader", "")
+                if trader_name and trader_name not in traders_with_orders:
+                    continue
+                tag = f"[{trader_name}] " if trader_name else ""
                 conv = l['conviction']
                 conv_str = f"C={conv}/10" if isinstance(conv, int) else str(conv)
                 parts.append(f"{tag}P={l['probability']:.2f} {conv_str}")
@@ -1129,7 +1138,7 @@ def render_simulation_tab():
     block_df = pd.DataFrame(block_table)
     st.dataframe(
         block_df.style.map(
-            lambda v: "background-color: #fff3cd" if v else "",
+            lambda v: "color: #f0c050" if v else "",
             subset=["LLM Orders"],
         ),
         hide_index=True,
@@ -1235,7 +1244,8 @@ def render_simulation_tab():
     orders_filled = b.get("orders_filled")
     if welfare_nanos is not None:
         orders_submitted = len(submitted_orders)
-        fill_rate = (orders_filled / orders_submitted * 100) if orders_submitted > 0 else 0
+        orders_with_fills = sum(1 for o in submitted_orders if o.get("filled_this_block", 0) > 0)
+        fill_rate = (orders_with_fills / orders_submitted * 100) if orders_submitted > 0 else 0
 
         # Per-source welfare for this batch
         batch_welfare: dict[str, float] = {}
@@ -1260,7 +1270,7 @@ def render_simulation_tab():
         ec1, ec2, ec3 = st.columns(3)
         ec1.metric("Welfare", f"${welfare_nanos / 1e9:,.2f}")
         ec2.metric("Volume", f"${total_vol_nanos / 1e9:,.2f}")
-        ec3.metric("Fill Rate", f"{orders_filled}/{orders_submitted} ({fill_rate:.0f}%)")
+        ec3.metric("Fill Rate", f"{orders_with_fills}/{orders_submitted} ({fill_rate:.0f}%)")
 
         # Per-source volume for this batch
         batch_mm_vol = sum(f["fill_qty"] * f["fill_price"] for f in b.get("mm_fills", []))
@@ -1390,8 +1400,11 @@ def render_simulation_tab():
         is_trader = source not in ("MM", "Noise")
         n_new = sum(1 for o in orders if o["submitted_block"] == b["height"])
         n_carried = len(orders) - n_new
+        n_filled_this_block = sum(1 for o in orders if o.get("filled_this_block", 0) > 0)
         carried_label = f" (+{n_carried} carried)" if n_carried else ""
-        with st.expander(f"**{source}**: {n_new} orders{carried_label} → {len(fills)} fills", expanded=is_trader):
+        fill_label = f", {n_filled_this_block} filled" if n_filled_this_block else ""
+        fills_label = f", {len(fills)} fills (prior orders)" if fills and not n_filled_this_block else ""
+        with st.expander(f"**{source}**: {n_new} orders{carried_label}{fill_label}{fills_label}", expanded=is_trader):
             if rows:
                 st.dataframe(rows, use_container_width=True, hide_index=True)
             else:
