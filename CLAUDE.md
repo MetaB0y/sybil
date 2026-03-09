@@ -25,8 +25,11 @@ sybil/
 │   ├── sybil-api/                 # HTTP API server for agent trading
 │   ├── sybil-oracle/              # Oracle/resolution service
 │   └── sybil-verifier/            # ZK-ready block verification
-├── arena/                         # Python: trading bots, client SDK, backtesting (has its own CLAUDE.md)
-├── viz/                           # Python: Streamlit visualization dashboard
+├── arena/                         # Python: trading bots, client SDK, simulation framework (has its own CLAUDE.md)
+│   ├── sim/                       #   Generic simulation framework (clock, news_trader, runner)
+│   ├── markets/                   #   Per-market config (iran/ with personas, sources, datasets)
+│   └── viz/                       #   Streamlit dashboards
+├── viz/                           # Python: Streamlit visualization dashboard (Rust solver)
 ├── fuzz/                          # Cargo-fuzz targets (separate workspace)
 ├── design/                        # Internal design notes
 │   ├── architecture.md            #   Pipeline design, solver phases, integration points

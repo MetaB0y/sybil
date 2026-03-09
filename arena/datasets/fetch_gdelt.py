@@ -165,7 +165,7 @@ def _save(raw_path: Path, chunks: list, total: int, capped: list, failed: list):
 
 
 async def main():
-    out_dir = Path(__file__).parent
+    out_dir = Path(__file__).parent.parent / "markets" / "iran" / "datasets"
     raw_path = out_dir / f"{OUTPUT_NAME}_raw.json"
     log_path = out_dir / f"{OUTPUT_NAME}.log"
     log = Logger(log_path)
