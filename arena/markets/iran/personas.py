@@ -11,6 +11,7 @@ from .sources import (
 
 BOT_PERSONAS = {
     "american_believer": {
+        "model": "meta-llama/llama-4-maverick",
         "name": "American Media (Believer)",
         "description": "US political/news outlets + UK mainstream. "
                        "Takes government rhetoric at face value, trusts establishment reporting.",
@@ -26,9 +27,12 @@ BOT_PERSONAS = {
                 "You believe the US military and intelligence apparatus acts on stated objectives",
             ],
         },
-        "strategy": {"belief_weight_cap": 5},
+        "strategy": {
+            "belief_weight_cap": 5,
+        },
     },
     "american_skeptic": {
+        "model": "deepseek/deepseek-r1",
         "name": "American Media (Skeptic)",
         "description": "US political/news outlets + UK mainstream. "
                        "Distinguishes rhetoric from action, demands concrete evidence.",
@@ -45,14 +49,14 @@ BOT_PERSONAS = {
             ],
         },
         "strategy": {
-            "belief_strength": {"LOW": 0.5, "MEDIUM": 1.5, "HIGH": 4},
+            "belief_strength_range": (0.5, 4.0),
             "belief_weight_cap": 40,
-            "kelly_scale": {"LOW": 0.10, "MEDIUM": 0.25, "HIGH": 0.50},
+            "kelly_range": (0.05, 0.40),
             "min_edge": 0.04,
-            "confirm_boost": 0.20,
         },
     },
     "israeli_trader": {
+        "model": "google/gemini-2.5-flash",
         "name": "Israeli Security Press",
         "description": "Israeli security establishment + Hebrew press. "
                        "Security-focused, weights military intelligence and defense establishment signals.",
@@ -68,13 +72,13 @@ BOT_PERSONAS = {
             ],
         },
         "strategy": {
-            "belief_strength": {"LOW": 1, "MEDIUM": 4, "HIGH": 8},
+            "belief_strength_range": (1.0, 8.0),
             "belief_weight_cap": 10,
-            "kelly_scale": {"LOW": 0.15, "MEDIUM": 0.35, "HIGH": 0.55},
-            "confirm_boost": 0.20,
+            "kelly_range": (0.10, 0.55),
         },
     },
     "arab_trader": {
+        "model": "deepseek/deepseek-chat",
         "name": "Arab Regional Press",
         "description": "Egypt, Gulf, Levant, Iraq, Palestine. Pan-Arab networks + regional press. "
                        "Ground-level reporting, diplomatic shifts, sovereignty lens.",
@@ -90,14 +94,14 @@ BOT_PERSONAS = {
             ],
         },
         "strategy": {
-            "belief_strength": {"LOW": 2, "MEDIUM": 4, "HIGH": 6},
+            "belief_strength_range": (2.0, 6.0),
             "belief_weight_cap": 30,
-            "kelly_scale": {"LOW": 0.20, "MEDIUM": 0.30, "HIGH": 0.40},
-            "confirm_boost": 0.15,
+            "kelly_range": (0.10, 0.40),
             "min_edge": 0.01,
         },
     },
     "anti_us_trader": {
+        "model": "qwen/qwen3-235b-a22b",
         "name": "Iran/Russia/China Media",
         "description": "Iranian, Russian, and Chinese state and independent media. "
                        "Skeptical of US threats, tracks military logistics and diplomatic back-channels.",
@@ -113,14 +117,14 @@ BOT_PERSONAS = {
             ],
         },
         "strategy": {
-            "belief_strength": {"LOW": 0.5, "MEDIUM": 2, "HIGH": 5},
+            "belief_strength_range": (0.5, 5.0),
             "belief_weight_cap": 8,
-            "kelly_scale": {"LOW": 0.05, "MEDIUM": 0.20, "HIGH": 0.55},
-            "confirm_boost": 0.20,
+            "kelly_range": (0.05, 0.55),
             "min_edge": 0.05,
         },
     },
     "financial_trader": {
+        "model": "google/gemini-2.5-flash",
         "name": "Financial Press",
         "description": "Global financial press — markets, oil, defense, sanctions. "
                        "Price movements as leading indicators, measurable signals over narratives.",
@@ -136,14 +140,14 @@ BOT_PERSONAS = {
             ],
         },
         "strategy": {
-            "belief_strength": {"LOW": 1, "MEDIUM": 2, "HIGH": 4},
+            "belief_strength_range": (1.0, 4.0),
             "belief_weight_cap": 20,
-            "kelly_scale": {"LOW": 0.15, "MEDIUM": 0.30, "HIGH": 0.40},
-            "confirm_boost": 0.15,
+            "kelly_range": (0.10, 0.40),
             "min_edge": 0.03,
         },
     },
     "balanced_trader": {
+        "model": "meta-llama/llama-4-maverick",
         "name": "Global Media Mix",
         "description": "Top mainstream outlets from 15+ countries across all continents. "
                        "Cross-regional corroboration, incremental updates, no strong prior.",
@@ -159,14 +163,14 @@ BOT_PERSONAS = {
             ],
         },
         "strategy": {
-            "belief_strength": {"LOW": 0.5, "MEDIUM": 2, "HIGH": 4},
+            "belief_strength_range": (0.5, 4.0),
             "belief_weight_cap": 8,
-            "kelly_scale": {"LOW": 0.10, "MEDIUM": 0.20, "HIGH": 0.35},
-            "confirm_boost": 0.20,
+            "kelly_range": (0.05, 0.35),
             "min_edge": 0.03,
         },
     },
     "random_trader": {
+        "model": "moonshotai/kimi-k2",
         "name": "Random Sampler",
         "description": "1 random article per 2-hour window sampled from all traders' accepted pools. "
                        "Maximally reactive — each article fully replaces prior belief.",
@@ -181,7 +185,7 @@ BOT_PERSONAS = {
         },
         "strategy": {
             "belief_weight_cap": 1,
-            "kelly_scale": {"LOW": 0.15, "MEDIUM": 0.30, "HIGH": 0.50},
+            "kelly_range": (0.05, 0.50),
             "min_edge": 0.02,
         },
     },

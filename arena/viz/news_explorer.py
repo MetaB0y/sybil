@@ -567,17 +567,23 @@ def render_simulation_tab():
     total_fills = sum(b.get("orders_filled", 0) for b in blocks)
     duration = (t_last - t_first) if (t_first and t_last) else None
 
-    model_short = config.get("model_name", "?").split("/")[-1]
-    trader_list = ", ".join(trade_logs.keys()) or "none"
+    default_model = config.get("model_name", "?").split("/")[-1]
+    trader_models = run_data.get("trader_models", {})
+    trader_parts = []
+    for tname in trade_logs:
+        m = trader_models.get(tname, "").split("/")[-1] if trader_models.get(tname) else default_model
+        trader_parts.append(f"{tname} ({m})")
+    trader_list = ", ".join(trader_parts) or "none"
     noise_count = config.get("noise_count", len(noise_rows))
     compression = config.get("compression_ratio", "?")
     period_str = f"Period: {t_first:%b %d %H:%M} – {t_last:%H:%M} ({_format_duration(duration)})" if duration else f"Batches {first_h}–{last_h}"
     st.caption(
         f"{period_str}; "
-        f"LLM traders: {trader_list} ({model_short}) · "
         f"Compression: {compression}x · "
         f"Noise: {noise_count} bots"
     )
+    if trader_parts:
+        st.caption(f"LLM traders: {trader_list}")
 
     # General
     st.markdown("#### General")
@@ -599,6 +605,16 @@ def render_simulation_tab():
     total_vol = total_vol_src if total_vol_src > 0 else total_vol_server
 
     total_welfare = sum(b.get("welfare_nanos", 0) for b in blocks)
+
+    # Row 0: Initial balances
+    mm_init = config.get("mm_balance", 0)
+    trader_init = config.get("trader_balance", 0)
+    noise_init = config.get("noise_balance", 0)
+    r0c1, r0c2, r0c3, r0c4 = st.columns(4)
+    r0c1.metric("MM Initial", f"${mm_init:,.0f}")
+    r0c2.metric("Trader Initial", f"${trader_init:,.0f}")
+    r0c3.metric("Noise Initial", f"${noise_init:,.0f}")
+    r0c4.metric("Noise Bots", noise_count)
 
     # Row 1: Batches, Total Fills, Duration (4 cols to align with rows below)
     r1c1, r1c2, r1c3, r1c4 = st.columns(4)
@@ -777,7 +793,7 @@ def render_simulation_tab():
                 "yes_price": yes_price,
                 "probability": tl["probability"],
                 "trade_price": trade_price,
-                "conviction": tl["conviction"],
+                "conviction": tl["conviction"] if isinstance(tl["conviction"], int) else {"LOW": 3, "MEDIUM": 5, "HIGH": 8}.get(tl["conviction"], 5),
                 "belief": tl.get("belief", tl["probability"]),
                 "trade_logic": trade_logic,
                 "holdings": f"${tl.get('balance', 0):.1f} / {tl.get('yes_pos', 0)}Y / {tl.get('no_pos', 0)}N",
@@ -854,7 +870,7 @@ def render_simulation_tab():
                 alt.Tooltip("time:N", title="Sim Time"),
                 alt.Tooltip("probability:Q", title="LLM Prob", format=".2f"),
                 alt.Tooltip("belief:Q", title="Belief", format=".3f"),
-                alt.Tooltip("conviction:N", title="Conviction"),
+                alt.Tooltip("conviction:Q", title="Conviction"),
                 alt.Tooltip("trade_logic:N", title="Logic"),
                 alt.Tooltip("holdings:N", title="Holdings"),
                 alt.Tooltip("orders:N", title="Orders"),
@@ -876,7 +892,7 @@ def render_simulation_tab():
                     x="block:Q",
                     y="trade_price:Q",
                     color=color_enc,
-                    text=alt.Text("conviction:N"),
+                    text=alt.Text("conviction:Q", format="d"),
                 )
                 layers.extend([trade_dots, trade_labels])
 
@@ -891,15 +907,6 @@ def render_simulation_tab():
                     tooltip=common_tooltip,
                 )
                 layers.append(no_trade_dots)
-
-            # Vertical rule at each trader event
-            rules = alt.Chart(trader_df).mark_rule(
-                strokeDash=[4, 4], opacity=0.4,
-            ).encode(
-                x="block:Q",
-                color=color_enc,
-            )
-            layers.append(rules)
 
         price_chart = alt.layer(*layers).properties(height=400, width="container")
         st.altair_chart(price_chart, use_container_width=True)
@@ -971,6 +978,8 @@ def render_simulation_tab():
 
     llm_trader_names = list(trade_logs.keys()) or ["AmericanTrader"]
     selected_trader = st.selectbox("LLM Trader", llm_trader_names, key="llm_trader_select")
+    trader_model = trader_models.get(selected_trader, "").split("/")[-1] if trader_models.get(selected_trader) else default_model
+    st.caption(f"Model: {trader_model}")
     trade_log = trade_logs.get(selected_trader, [])
 
     # Build price lookup: block_height -> yes_price (price the trader saw = previous block's clearing)
@@ -1023,11 +1032,12 @@ def render_simulation_tab():
         else:
             fill_str = ""
 
-        conv_color = {"HIGH": "red", "MEDIUM": "orange", "LOW": "gray"}.get(t["conviction"], "gray")
+        conv = t["conviction"] if isinstance(t["conviction"], int) else 5
+        conv_color = "red" if conv >= 7 else "orange" if conv >= 4 else "gray"
         header = (
             f"[{i}] Batch {order_block} · "
             f"{mkt_str} → LLM P={t['probability']:.2f} · "
-            f":{conv_color}[{t['conviction']}] · "
+            f":{conv_color}[C={conv}/10] · "
             f"{orders_str}{fill_str}"
         )
 
@@ -1110,7 +1120,9 @@ def render_simulation_tab():
             parts = []
             for l in llm_list:
                 tag = f"[{l['trader']}] " if "trader" in l else ""
-                parts.append(f"{tag}P={l['probability']:.2f} {l['conviction']}")
+                conv = l['conviction']
+                conv_str = f"C={conv}/10" if isinstance(conv, int) else str(conv)
+                parts.append(f"{tag}P={l['probability']:.2f} {conv_str}")
             row["LLM Orders"] = " | ".join(parts)
         block_table.append(row)
 

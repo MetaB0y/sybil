@@ -36,27 +36,29 @@ def _make_trader(**kwargs):
 
 
 def test_update_belief_low_conviction():
-    """LOW conviction updates with strength 1."""
+    """Conviction=1 updates with minimum belief strength."""
     t = _make_trader()
     t._belief_alpha = 5.0
     t._belief_beta = 5.0
     t._belief_initialized = True
 
-    belief = t._update_belief(0.8, "LOW")
-    # alpha += 1*0.8 = 0.8, beta += 1*0.2 = 0.2
+    # Default range (1.0, 6.0): conviction=1 → strength=1.0
+    belief = t._update_belief(0.8, 1)
+    # alpha += 1.0*0.8 = 0.8, beta += 1.0*0.2 = 0.2
     assert abs(t._belief_alpha - 5.8) < 0.01
     assert abs(t._belief_beta - 5.2) < 0.01
     assert abs(belief - 5.8 / 11.0) < 0.01
 
 
 def test_update_belief_high_conviction():
-    """HIGH conviction updates with strength 6."""
+    """Conviction=10 updates with maximum belief strength."""
     t = _make_trader()
     t._belief_alpha = 5.0
     t._belief_beta = 5.0
     t._belief_initialized = True
 
-    belief = t._update_belief(0.9, "HIGH")
+    # Default range (1.0, 6.0): conviction=10 → strength=6.0
+    belief = t._update_belief(0.9, 10)
     # alpha += 6*0.9 = 5.4, beta += 6*0.1 = 0.6
     assert abs(t._belief_alpha - 10.4) < 0.01
     assert abs(t._belief_beta - 5.6) < 0.01
@@ -70,9 +72,10 @@ def test_belief_weight_cap_rescaling():
     t._belief_initialized = True
 
     # Total = 16 > 10, so rescale to 10 first
-    t._update_belief(0.5, "LOW")
+    # conviction=1 → strength=1.0 (default range)
+    t._update_belief(0.5, 1)
     # After rescale: alpha = 8*10/16 = 5, beta = 5
-    # Then: alpha += 1*0.5 = 5.5, beta += 1*0.5 = 5.5
+    # Then: alpha += 1.0*0.5 = 0.5, beta += 1.0*0.5 = 0.5
     assert abs(t._belief_alpha - 5.5) < 0.01
     assert abs(t._belief_beta - 5.5) < 0.01
 

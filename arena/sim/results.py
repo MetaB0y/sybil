@@ -292,6 +292,7 @@ async def save_and_print_results(
         },
         "blocks": block_records,
         "trade_logs": {t.name: [rec.to_dict() for rec in t.trade_log] for t in traders},
+        "trader_models": {t.name: getattr(t, "model_name", None) for t in traders},
         "leaderboard": leaderboard,
     }
     run_path.write_text(json.dumps(run_data, indent=2, default=str))
