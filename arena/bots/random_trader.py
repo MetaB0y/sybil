@@ -59,10 +59,9 @@ class RandomTrader(BaseAgent):
             return []
 
         side = self.rng.choice(actions)
-        noise = 1 - self.price_noise, 1 + self.price_noise
 
         if side == "buy_yes":
-            price = yes_price * self.rng.uniform(*noise)
+            price = yes_price + self.rng.uniform(-self.price_noise, self.price_noise)
             price = max(0.01, min(0.99, price))
             max_shares = math.floor(0.5 * usdc / price)
             if max_shares < 1:
@@ -70,7 +69,7 @@ class RandomTrader(BaseAgent):
             size = self.rng.randint(1, max_shares)
             return [BuyYes.at_price(market_id, price, size)]
         elif side == "buy_no":
-            price = no_price * self.rng.uniform(*noise)
+            price = no_price + self.rng.uniform(-self.price_noise, self.price_noise)
             price = max(0.01, min(0.99, price))
             max_shares = math.floor(0.5 * usdc / price)
             if max_shares < 1:
@@ -78,12 +77,12 @@ class RandomTrader(BaseAgent):
             size = self.rng.randint(1, max_shares)
             return [BuyNo.at_price(market_id, price, size)]
         elif side == "sell_yes":
-            price = yes_price * self.rng.uniform(*noise)
+            price = yes_price + self.rng.uniform(-self.price_noise, self.price_noise)
             price = max(0.01, min(0.99, price))
             size = self.rng.randint(1, yes_pos)
             return [SellYes.at_price(market_id, price, size)]
         else:
-            price = no_price * self.rng.uniform(*noise)
+            price = no_price + self.rng.uniform(-self.price_noise, self.price_noise)
             price = max(0.01, min(0.99, price))
             size = self.rng.randint(1, no_pos)
             return [SellNo.at_price(market_id, price, size)]
