@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-MARKET_QUESTION = "Will the United States carry out a military strike against Iran before March 31, 2026?"
+MARKET_QUESTION = "US strikes Iran by March 31?"
 MARKET_DESCRIPTION = "Resolves YES if US military strikes Iran before 2026-03-31"
 MARKET_CATEGORY = "geopolitics"
 INITIAL_PRICE = 0.12
@@ -40,5 +40,5 @@ Answer only YES or NO."""
 # Directories
 _MARKET_DIR = Path(__file__).parent
 DATASETS_DIR = _MARKET_DIR / "datasets"
-PHASE1_DIR = _MARKET_DIR / "tmp"
+PHASE1_DIR = _MARKET_DIR / "phase1"
 RUNS_DIR = _MARKET_DIR / "runs"

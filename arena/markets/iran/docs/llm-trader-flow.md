@@ -61,18 +61,18 @@ Each trader persona is defined in `BOT_PERSONAS` with:
 
 Traders sharing sources (e.g. American Believer + American Skeptic) share phase1 results via `phase1_bot` aliasing.
 
-### Phase 1: Headline Filter (`phase1_filter.py`, offline)
+### Phase 1: Headline Filter (`sim/headline_filter.py`, offline)
 
 Runs once per bot per date before simulation:
 
 1. Load all articles from `iran_news_raw.json` matching the trader's source list and target date
 2. LLM classifies each headline as YES (relevant to US-Iran dynamics) or NO (unrelated)
 3. Fetch full article text for YES headlines via HTTP + trafilatura extraction
-4. Save results to `iran/tmp/{bot}_{YYYYMMDD}_phase1_results.json`
+4. Save results to `markets/iran/phase1/{bot}_{YYYYMMDD}_phase1_results.json`
 
 Prompt is permissive ("when in doubt, say YES") — cheap to filter later, expensive to miss relevant news.
 
-### Phase 2: Article Analysis (`news_trader.py:_phase2_analyze`, live)
+### Phase 2: Article Analysis (`sim/news_trader.py:_phase2_analyze`, live)
 
 Runs during simulation, triggered each block:
 
@@ -94,7 +94,7 @@ Runs during simulation, triggered each block:
 
 If multiple articles arrive in one block, all are analyzed sequentially, each updating belief. Trading happens once after all analyses.
 
-### Phase 3: Trade Execution (`news_trader.py:_phase3_execute`, mechanical)
+### Phase 3: Trade Execution (`sim/news_trader.py:_phase3_execute`, mechanical)
 
 Pure math, no LLM:
 
