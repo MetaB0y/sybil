@@ -1,0 +1,331 @@
+{
+  "bot": "financial_trader",
+  "window": "2026-02-13",
+  "model": "moonshotai/kimi-k2",
+  "total": 40,
+  "yes": 15,
+  "skip": 2,
+  "no": 23,
+  "results": [
+    {
+      "timestamp": "20260213T004500Z",
+      "title": "Risk off trade on more AI disruption fears - Newsquawk US Market Wrap",
+      "source": "zerohedge.com",
+      "url": "https://www.zerohedge.com/markets/risk-trade-more-ai-disruption-fears-newsquawk-us-market-wrap",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T023000Z",
+      "title": "Le p\u00e9trole soriente vers une baisse hebdomadaire alors que les risques li\u00e9s \u00e0 lIran sestompent et que les inqui\u00e9tudes sur la surabondance persistent",
+      "source": "zonebourse.com",
+      "url": "https://www.zonebourse.com/actualite-bourse/le-petrole-s-oriente-vers-une-baisse-hebdomadaire-alors-que-les-risques-lies-a-l-iran-s-estompent-et-ce7e5ad3d189f42c",
+      "phase1": "YES",
+      "full_text": "Les contrats \u00e0 terme sur le Brent ont termin\u00e9 en hausse de 23 cents, soit 0,3%, \u00e0 67,75$ le baril, tandis que le brut am\u00e9ricain West Texas Intermediate (WTI) a gagn\u00e9 5 cents, soit 0,08%, pour s'\u00e9tablir \u00e0 62,89$.\nLes deux r\u00e9f\u00e9rences affichent toutefois des pertes hebdomadaires, apr\u00e8s avoir connu des baisses proches de 3% jeudi. Sur la semaine, le Brent recule d'environ 0,5%, tandis que le WTI perd 1%.\nLes prix \u00e0 la consommation aux \u00c9tats-Unis ont augment\u00e9 moins que pr\u00e9vu en janvier, gr\u00e2ce \u00e0 la baisse des prix de l'essence et \u00e0 une mod\u00e9ration de l'inflation des loyers.\n\"Il semble que l'inflation se stabilise. Je pense que cela va favoriser une poursuite de la baisse des taux d'int\u00e9r\u00eat. Et, \u00e0 mesure que les taux baissent... c'est positif pour l'\u00e9conomie\", a d\u00e9clar\u00e9 Dennis Kissler, vice-pr\u00e9sident principal du trading chez BOK Financial.\n\"Le point n\u00e9gatif, c'est que l'OPEP pourrait augmenter un peu plus sa production\", a-t-il ajout\u00e9.\nLes prix ont recul\u00e9 plus t\u00f4t dans la s\u00e9ance, les investisseurs r\u00e9agissant \u00e0 un article de Reuters indiquant que l'OPEP envisage de reprendre l'augmentation de la production de p\u00e9trole \u00e0 partir d'avril, en pr\u00e9vision du pic de la demande estivale et dans un contexte de prix plus fermes du brut, sur fond de tensions entre les \u00c9tats-Unis et l'Iran. C\u00f4t\u00e9 offre am\u00e9ricaine, Baker Hughes a annonc\u00e9 que le nombre de forages p\u00e9troliers avait diminu\u00e9 de trois pour atteindre 409 cette semaine.\nLes prix du p\u00e9trole s'\u00e9taient renforc\u00e9s plus t\u00f4t dans la semaine, en raison des craintes d'une attaque am\u00e9ricaine contre l'Iran, producteur de p\u00e9trole du Moyen-Orient, au sujet de son programme nucl\u00e9aire. Mais les d\u00e9clarations jeudi du pr\u00e9sident am\u00e9ricain Donald Trump, affirmant que Washington pourrait conclure un accord avec l'Iran dans le mois \u00e0 venir, ont fait chuter les prix jeudi.\nLe Pentagone, toutefois, envoie un porte-avions du Cara\u00efbe vers le Moyen-Orient, ont indiqu\u00e9 vendredi des responsables am\u00e9ricains, une d\u00e9cision qui portera \u00e0 deux le nombre de porte-avions dans la r\u00e9gion alors que les tensions montent entre les \u00c9tats-Unis et l'Iran.\nLa Russie, de son c\u00f4t\u00e9, a annonc\u00e9 vendredi que le prochain cycle de pourparlers de paix sur l'Ukraine se tiendrait la semaine prochaine.\nLes n\u00e9gociations avec l'Iran et la Russie seront les principaux moteurs du march\u00e9 \u00e0 court terme, estime Kissler, ajoutant que l'offre mondiale de brut reste abondante \u00e0 court terme et que les contrats \u00e0 terme sur le brut int\u00e8grent probablement une prime g\u00e9opolitique de 5 \u00e0 7$ par baril.\nLes \u00c9tats-Unis ont \u00e9galement assoupli vendredi les sanctions visant le secteur \u00e9nerg\u00e9tique du Venezuela, en d\u00e9livrant deux licences g\u00e9n\u00e9rales permettant aux entreprises \u00e9nerg\u00e9tiques mondiales d'exploiter des projets p\u00e9troliers et gaziers dans ce pays membre de l'OPEP, et \u00e0 d'autres soci\u00e9t\u00e9s de n\u00e9gocier des contrats pour attirer de nouveaux investissements.\nLes ventes de p\u00e9trole du Venezuela contr\u00f4l\u00e9es par les \u00c9tats-Unis ont d\u00e9j\u00e0 rapport\u00e9 plus d'un milliard de dollars et devraient en rapporter cinq milliards de plus dans les prochains mois, a d\u00e9clar\u00e9 jeudi \u00e0 NBC News le secr\u00e9taire \u00e0 l'\u00e9nergie am\u00e9ricain Chris Wright.\nLes gestionnaires de fonds ont augment\u00e9 leurs positions nettes longues sur les contrats \u00e0 terme et options sur le brut am\u00e9ricain au cours de la semaine se terminant le 10 f\u00e9vrier, a annonc\u00e9 vendredi la Commodity Futures Trading Commission (CFTC) am\u00e9ricaine."
+    },
+    {
+      "timestamp": "20260213T023000Z",
+      "title": "Oil set for weekly drop as Iran risks recede , oversupply concerns",
+      "source": "marketscreener.com",
+      "url": "https://www.marketscreener.com/news/oil-set-for-weekly-drop-as-iran-risks-recede-oversupply-concerns-ce7e5ad3d189f42c",
+      "phase1": "YES",
+      "full_text": "HOUSTON, Feb 13 (Reuters) - Oil prices settled marginally higher on Friday after data showed an overall slowdown in U.S. inflation, helping offset supply concerns as OPEC+ is leaning towards a resumption in production increases.\nBrent crude futures closed 23 cents, or 0.3%, higher at $67.75 a barrel, while U.S. West Texas Intermediate crude settled 5 cents, or 0.08% higher at $62.89.\nBoth benchmarks posted weekly declines after incurring near 3% losses on Thursday. Brent settled down about 0.5%, while WTI lost 1% in the week.\nU.S. consumer prices increased less than expected in January amid cheaper gasoline prices and a moderation in rental inflation.\n\"Looks like inflation is stabilizing. So, I think that's going to be a boon for interest rates to probably continue to move a little bit lower. And I think as rates start to move lower... that's a positive to the economy,\" said Dennis Kissler, senior vice president of trading at BOK Financial.\n\"The negative is going to be that OPEC could possibly increase production a little further,\" he added.\nPrices fell earlier in the session as investors reacted to a Reuters report that OPEC is leaning towards a resumption in oil output increases from April, ahead of upcoming peak summer fuel demand, and amid firmer crude prices owing to tensions over U.S.-Iran relations. On the U.S. supply side, Baker Hughes said oil rigs fell by three to 409 this week.\nOil prices had strengthened earlier in the week on concerns that the U.S. could attack Middle Eastern oil producer Iran over its nuclear programme. But comments on Thursday from U.S. President Donald Trump that Washington could make a deal with Iran over the next month drove down prices on Thursday.\nThe Pentagon, however, is sending an aircraft carrier from the Caribbean to the Middle East, U.S. officials said on Friday, a move that would put two carriers in the region as tensions soar between the United States and Iran.\nRussia, meanwhile, said on Friday that the next round of peace talks on Ukraine will take place next week.\nNegotiations with Iran and Russia will be the near-term market movers, Kissler said, adding that near-term global crude supplies remain ample and crude futures likely have a $5 to $7 per barrel geopolitical premium baked in.\nThe U.S. also eased sanctions on Venezuela's energy sector on Friday, issuing two general licenses that allow global energy companies to operate oil and gas projects in the OPEC member and for other companies to negotiate contracts to bring in fresh investments.\nOil sales from Venezuela controlled by the U.S. have totalled over $1 billion so far and in the next few months will bring in another $5 billion, U.S. Secretary of Energy Chris Wright told NBC News on Thursday.\nMoney managers raised their net long U.S. crude futures and options positions in the week to February 10, the U.S. Commodity Futures Trading Commission said on Friday.\n(Reporting by Arathy Somasekhar, Robert Harvey, Stephanie Kelly, Sam Li, Lewis Jackson and Sudarshan VaradhanEditing by Susan Fenton, Kirsten Donovan and Deepa Babington)\nBy Arathy Somasekhar"
+    },
+    {
+      "timestamp": "20260213T024500Z",
+      "title": "Trump warns Iran over nuclear deal :  It going to be very traumatic if \u2026 ",
+      "source": "livemint.com",
+      "url": "https://www.livemint.com/news/world/trump-warns-iran-over-nuclear-deal-netanyahu-meet-white-house-it-going-to-be-very-traumatic-f-11770939698082.html",
+      "phase1": "YES",
+      "full_text": "US President Donald Trump threatened Iran Thursday with \"very traumatic\" consequences if it fails to make a nuclear deal.\n\"We have to make a deal, otherwise it's going to be very traumatic, very traumatic. I don't want that to happen, but we have to make a deal,\" Trump said. \u201cThis will be very traumatic for Iran if they don't make a deal,\u201d he added.\nTrump, who is considering sending a second aircraft carrier to the Middle East to pressure Iran, recalled the US military strikes he ordered on Tehran's nuclear facilities during Israel's 12-day war with Iran in July last year.\n\u201cThey should have made a deal the first time, then they got Midnight Hammer instead,\u201d he said.\n\"We'll see if we can get a deal with them, and if we can't, we'll have to go to phase two. Phase two will be very tough for them,\" Trump was quoted by AFP as saying.\nSpeaking a day after he hosted Israeli Prime Minister Benjamin Netanyahu at the White House, Trump said he hoped for a result \"over the next month\" from Washington's negotiations with Tehran over its nuclear programme.\nMeanwhile, Netanyahu said he was sceptical about the quality of any such agreement.\nNetanyahu travelled to Washington to push Trump to take a harder line in the Iran nuclear talks, particularly on including the Islamic Republic's arsenal of ballistic missiles.\nBut the Israeli and US leaders apparently remained at odds, with Trump saying after their meeting at the White House on Wednesday that he had insisted the negotiations should continue.\nNetanyahu said in Washington on Thursday, before departing for Israel, that Trump believed he was laying the ground for a deal.\n\"He believes that the conditions he is creating, combined with the fact that they surely understand they made a mistake last time when they didn't reach an agreement, may create the conditions for achieving a good deal,\" Netanyahu said, according to a video statement from his office.\nBut the Israeli premier added: \"I will not hide from you that I expressed general skepticism regarding the quality of any agreement with Iran.\"\nAny deal \"must include the elements that are very important from our perspective,\" Netanyahu continued, listing Iran's ballistic missile programme and its support for armed groups such as the Palestinian movement Hamas, Yemen's Houthi rebels and Hezbollah in Lebanon.\n\"It's not just the nuclear issue,\" he said.\nDespite their differences on Iran, Trump signalled his strong personal support for Netanyahu as he criticized Israeli President Isaac Herzog for rejecting his request to pardon the prime minister on corruption charges.\n\"You have a president that refuses to give him a pardon. I think that man should be ashamed of himself,\" Trump said on Thursday.\nTrump has repeatedly hinted at potential US military action against Iran following its deadly crackdown on protests last month, even as Washington and Tehran restarted talks last week with a meeting in Oman.\nThe last round of talks between the two foes was cut short by Israel's war with Iran and the US strikes.\nSo far, Iran has rejected expanding the new talks beyond the issue of its nuclear programme. Tehran denies seeking a nuclear weapon, and has said it will not give in to \"excessive demands\" on the subject.\n(With inputs from AFP)"
+    },
+    {
+      "timestamp": "20260213T031500Z",
+      "title": "Indian Shares Set To Follow Wall Street Lower On AI Jitters",
+      "source": "rttnews.com",
+      "url": "https://www.rttnews.com/3621276/indian-shares-set-to-follow-wall-street-lower-on-ai-jitters.aspx",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T040000Z",
+      "title": "Gold hovers near Rs 1 . 55 lakh after early losses ; is it the right time to invest ? ",
+      "source": "moneycontrol.com",
+      "url": "https://www.moneycontrol.com/news/business/personal-finance/gold-hovers-near-rs-1-55-lakh-after-early-losses-is-it-the-right-time-to-invest-13826505.html",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T041500Z",
+      "title": "Metals Market \u2013 Gold ( XAU / USD ) and Silver ( XAG / USD ) Flash Crash",
+      "source": "actionforex.com",
+      "url": "https://www.actionforex.com/contributors/fundamental-analysis/629354-metals-market-gold-xau-usd-and-silver-xag-usd-flash-crash/",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T051500Z",
+      "title": "  It is going to be very traumatic : Trump threatens Iran over nuclear deal",
+      "source": "business-standard.com",
+      "url": "https://www.business-standard.com/world-news/it-is-going-to-be-very-traumatic-trump-threatens-iran-over-nuclear-deal-126021300063_1.html",
+      "phase1": "SKIP",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T054500Z",
+      "title": "March\u00e9s en Asie : repli des Bourses avant linflation am\u00e9ricaine",
+      "source": "zonebourse.com",
+      "url": "https://www.zonebourse.com/actualite-bourse/marches-en-asie-repli-des-bourses-avant-l-inflation-americaine-ce7e5ad3d18df422",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T063000Z",
+      "title": "Indian Shares Set To Follow Wall Street Lower On AI Jitters",
+      "source": "rttnews.com",
+      "url": "https://www.rttnews.com/story.aspx?Id=3621276",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T070000Z",
+      "title": "Another U aircraft carrier likely being sent to Middle East amid tensions",
+      "source": "business-standard.com",
+      "url": "https://www.business-standard.com/world-news/another-us-aircraft-carrier-likely-being-sent-to-middle-east-amid-tensions-126021300495_1.html",
+      "phase1": "SKIP",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T070000Z",
+      "title": "Indian Shares Deep In Red ; IT Stocks And Oil Companies Succumb To Heavy Selling",
+      "source": "rttnews.com",
+      "url": "https://www.rttnews.com/3621297/indian-shares-deep-in-red-it-stocks-and-oil-companies-succumb-to-heavy-selling.aspx",
+      "phase1": "YES",
+      "full_text": "Indian shares were deep in the red on Friday, mirroring weak cues from global markets as investors fretted about the impact AI could have on revenues and profit margins of financial, transportation and logistics and even commercial real estate companies.\nThe benchmark BSE Sensex was down 808 points, or 1 percent, at 82,866 in early trade, while the broader NSE Nifty index fell by 270 points, or 1.1 percent, to 25,537.\nIT stocks extended losses for a third straight session, with Wipro, Tech Mahindra, HCL Technologies, TCS and Infosys tumbling 3-6 percent on near-term growth concerns and fragile global sentiment towards the IT sector.\nAccording to media reports, clients in the U.S. and Europe are being more cautious with discretionary IT spends, especially on older projects, until budgets are clearer.\nThe talk around AI has added to uncertainty about how fast traditional service models might change.\nONGC and Oil India plummeted 3-4 percent after crude oil prices fell nearly 3 percent on Thursday, pressured by a bearish outlook from the International Energy Agency (IEA) and signs that diplomatic talks between the United States and Iran could be prolonged.\nAzad Engineering fell more than 2 percent ahead of its earnings release.\nNatco Pharma declined 1.6 percent after its board approved incorporation of a subsidiary in Chile with an investment of $300,000.\nHCC was little changed on securing a Rs. 578 crore railway contract from the Northeast Frontier Railway.\neMudhra lost nearly 3 percent after it entered into a pact with LankaPay to build Sri Lanka's national digital signature ecosystem.\nFor comments and feedback contact: editorial@rttnews.com\nFebruary 07, 2026 02:38 ET The week saw central bank action from major economies as policymakers decided on interest rate settings. Private sector survey data for the manufacturing and services sectors were in focus in the U.S. along with some data on the labor market. In Europe, central bank decisions from the euro area and the U.K. gained attention. In the Asia-Pacific, the main news came from the Reserve Bank of Australia that announced its latest interest rate decision."
+    },
+    {
+      "timestamp": "20260213T070000Z",
+      "title": "European Shares To Open On Cautious Note As AI Disruption Fears Rattle Markets",
+      "source": "rttnews.com",
+      "url": "https://www.rttnews.com/3621316/european-shares-to-open-on-cautious-note-as-ai-disruption-fears-rattle-markets.aspx",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T074500Z",
+      "title": "Indian Shares Deep In Red ; IT Stocks And Oil Companies Succumb To Heavy Selling",
+      "source": "rttnews.com",
+      "url": "https://www.rttnews.com/story.aspx?Id=3621297",
+      "phase1": "YES",
+      "full_text": "Indian shares were deep in the red on Friday, mirroring weak cues from global markets as investors fretted about the impact AI could have on revenues and profit margins of financial, transportation and logistics and even commercial real estate companies.\nThe benchmark BSE Sensex was down 808 points, or 1 percent, at 82,866 in early trade, while the broader NSE Nifty index fell by 270 points, or 1.1 percent, to 25,537.\nIT stocks extended losses for a third straight session, with Wipro, Tech Mahindra, HCL Technologies, TCS and Infosys tumbling 3-6 percent on near-term growth concerns and fragile global sentiment towards the IT sector.\nAccording to media reports, clients in the U.S. and Europe are being more cautious with discretionary IT spends, especially on older projects, until budgets are clearer.\nThe talk around AI has added to uncertainty about how fast traditional service models might change.\nONGC and Oil India plummeted 3-4 percent after crude oil prices fell nearly 3 percent on Thursday, pressured by a bearish outlook from the International Energy Agency (IEA) and signs that diplomatic talks between the United States and Iran could be prolonged.\nAzad Engineering fell more than 2 percent ahead of its earnings release.\nNatco Pharma declined 1.6 percent after its board approved incorporation of a subsidiary in Chile with an investment of $300,000.\nHCC was little changed on securing a Rs. 578 crore railway contract from the Northeast Frontier Railway.\neMudhra lost nearly 3 percent after it entered into a pact with LankaPay to build Sri Lanka's national digital signature ecosystem.\nFor comments and feedback contact: editorial@rttnews.com\nFebruary 07, 2026 02:38 ET The week saw central bank action from major economies as policymakers decided on interest rate settings. Private sector survey data for the manufacturing and services sectors were in focus in the U.S. along with some data on the labor market. In Europe, central bank decisions from the euro area and the U.K. gained attention. In the Asia-Pacific, the main news came from the Reserve Bank of Australia that announced its latest interest rate decision."
+    },
+    {
+      "timestamp": "20260213T074500Z",
+      "title": "AI frightens logistics stocks ; Markets await US CPI - Newsquawk EU Market Open",
+      "source": "zerohedge.com",
+      "url": "https://www.zerohedge.com/markets/ai-frightens-logistics-stocks-markets-await-us-cpi-newsquawk-eu-market-open",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T074500Z",
+      "title": "Yen Stands Tall as Risk - Off Tone Strengthens With Metal Crash , Tech Rout",
+      "source": "actionforex.com",
+      "url": "https://www.actionforex.com/action-insight/market-overview/629381-yen-stands-tall-as-risk-off-tone-strengthens-with-metal-crash-tech-rout/",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T080000Z",
+      "title": "Crude futures edge lower as IEA sees global oil surplus in 2026",
+      "source": "thehindubusinessline.com",
+      "url": "https://www.thehindubusinessline.com/markets/commodities/crude-futures-edge-lower-as-iea-sees-global-oil-surplus-in-2026/article70627091.ece",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T090000Z",
+      "title": "Ultimatum dla Teheranu . Trump daje re\u017cimowi miesi\u0105c i szykuje drugi lotniskowiec",
+      "source": "bankier.pl",
+      "url": "https://www.bankier.pl/wiadomosc/Ultimatum-dla-Teheranu-Trump-daje-rezimowi-miesiac-i-szykuje-drogi-lotniskowiec-9083048.html",
+      "phase1": "YES",
+      "full_text": "Prezydent USA Donald Trump powiedzia\u0142 w czwartek, \u017ce w\u0142adze Iranu powinny zgodzi\u0107 si\u0119 na porozumienie nuklearne w ci\u0105gu miesi\u0105ca, lecz jednocze\u015bnie zaznaczy\u0142, \u017ce b\u0119dzie rozmawia\u0142 z Ira\u0144czykami \u201etak d\u0142ugo jak b\u0119dzie chcia\u0142\u201d.\n- Musimy zawrze\u0107 porozumienie, bo w przeciwnym razie to b\u0119dzie bardzo traumatyczne dla Iranu. I nie chc\u0119, by tak si\u0119 sta\u0142o - o\u015bwiadczy\u0142 Trump w rozmowie z dziennikarzami w Bia\u0142ym Domu.\n- Powinni byli zawrze\u0107 porozumienie za pierwszym razem, ale zamiast tego otrzymali Midnight Hammer - doda\u0142, odnosz\u0105c si\u0119 do kryptonimu operacji ameryka\u0144skich si\u0142, kt\u00f3re latem 2025 roku przeprowadzi\u0142y atak na ira\u0144skie instalacje j\u0105drowe.\n- Je\u015bli nie zawr\u0105 porozumienia, to b\u0119dzie inna historia - zapowiedzia\u0142.\nTrump powt\u00f3rzy\u0142, \u017ce w \u015brod\u0119 przeprowadzi\u0142 w Waszyngtonie bardzo dobre spotkanie z premierem Izraela Benjaminem Netanjahu. - On to rozumie, ale koniec ko\u0144c\u00f3w to zale\u017cy ode mnie - podkre\u015bli\u0142 prezydent. Pytany o ramy czasowe rozm\u00f3w na temat porozumienia, odpowiedzia\u0142: - My\u015bl\u0119, \u017ce w ci\u0105gu miesi\u0105ca, co\u015b takiego. (...) Powinno si\u0119 to sta\u0107 szybko, powinni zgodzi\u0107 si\u0119 bardzo szybko - doda\u0142.\nDrugi ameryka\u0144ski lotniskowiec dosta\u0142 rozkaz wyp\u0142yni\u0119cia na Bliski Wsch\u00f3d - poda\u0142a w pi\u0105tek agencja AP, powo\u0142uj\u0105c si\u0119 na informacje od osoby zaznajomionej ze spraw\u0105. Zdaniem agencji prezydent USA Donald Trump rozwa\u017ca podj\u0119cie dzia\u0142a\u0144 militarnych wymierzonych w Iran.\nDecyzja o skierowaniu z Morza Karaibskiego na Bliskim Wschodzie jednostki USS Gerald R. Ford oznacza, \u017ce w regionie znajd\u0105 si\u0119 dwa lotniskowce wraz z towarzysz\u0105cymi im okr\u0119tami wojennymi. Trump zamierza za pomoc\u0105 wywieranej w ten spos\u00f3b presji wymusi\u0107 na Iranie zawarcie porozumienia w sprawie programu nuklearnego Teheranu.\nPonad dwa tygodnie temu na Bliski Wsch\u00f3d dotar\u0142 lotniskowiec USS Abraham Lincoln wraz z trzema niszczycielami. Oznacza to szybki zwrot akcji dla okr\u0119tu USS Gerald R. Ford, kt\u00f3ry Trump wys\u0142a\u0142 z Morza \u015ar\u00f3dziemnego na Karaiby w pa\u017adzierniku ubieg\u0142ego roku, w ramach przygotowa\u0144 administracji do niespodziewanej akcji, wymierzonej w \u00f3wczesnego prezydenta Wenezueli Nicolasa Maduro - zauwa\u017cy\u0142a AP. Poci\u0105gni\u0119cie USA wydaje si\u0119 sprzeczne ze strategi\u0105 bezpiecze\u0144stwa narodowego Trumpa, kt\u00f3ra k\u0142adzie nacisk na p\u00f3\u0142kul\u0119 zachodni\u0105, a nie na inne regiony.\nJednocze\u015bnie zaznaczy\u0142, \u017ce b\u0119dzie rozmawia\u0142 z Ira\u0144czykami \u201etak d\u0142ugo jak b\u0119dzie chcia\u0142\u201d. - Zobaczymy, czy uda si\u0119 zawrze\u0107 porozumienie. Je\u015bli si\u0119 nie uda, trzeba b\u0119dzie przej\u015b\u0107 do fazy drugiej. Faza druga b\u0119dzie dla nich bardzo surowa, nie chcia\u0142bym tego - doda\u0142 Trump.\nW \u015brod\u0119 \u201eWall Street Journal\u201d napisa\u0142, \u017ce Pentagon wyda\u0142 rozkaz drugiej lotniskowcowej grupie uderzeniowej, by szykowa\u0142a si\u0119 do rozmieszczenia na Bliskim Wschodzie w ramach przygotowa\u0144 do potencjalnego ataku na Iran. Ostateczna decyzja w tej sprawie jeszcze jednak nie zapad\u0142a. Wed\u0142ug gazety rozkaz do przygotowa\u0144 mia\u0142 pa\u015b\u0107 po tym, jak we wtorek Trump powiedzia\u0142 w wywiadzie dla portalu Axios, \u017ce rozwa\u017ca taki ruch.\nNetanjahu o\u015bwiadczy\u0142 w czwartek, \u017ce gdyby zosta\u0142o zawarte porozumienie z Iranem, to musi rozwi\u0105zywa\u0107 problemy, kt\u00f3re s\u0105 szczeg\u00f3lnie istotne dla Izraela, jak kwestie ira\u0144skiego programu nuklearnego, budowy rakiet balistycznych, czy wspierania przez Teheran organizacji terrorystyczne b\u0119d\u0105cych jego regionalnymi sojusznikami.\nZ Waszyngtonu Natalia Dziurdzi\u0144ska (PAP)\nndz/ ap/"
+    },
+    {
+      "timestamp": "20260213T090000Z",
+      "title": "Inwestorzy boj\u0105 si\u0119 konflikt z Iranem . Ceny ropy w united states spadaj\u0105",
+      "source": "bankier.pl",
+      "url": "https://www.bankier.pl/wiadomosc/Inwestorzy-boja-sie-konflikt-z-Iranem-Ceny-ropy-w-USA-spadaja-9083213.html",
+      "phase1": "YES",
+      "full_text": "Ceny ropy naftowej w USA s\u0105 na minusach. Inwestorzy obawiaj\u0105 si\u0119 o konflikt mi\u0119dzy USA a Iranem, kt\u00f3ry m\u00f3g\u0142by wp\u0142yn\u0105\u0107 na poda\u017c.\nBary\u0142ka ropy West Texas Intermediate w dostawach na kwiecie\u0144 zni\u017ckuje na NYMEX w Nowym Jorku o 0,11 proc. do 62,77 USD i jest na drodze do spadku w tym tygodniu o 1,1 proc.\nCena Brent na ICE na marzec spada o 0,1 proc. do 67,46 USD za bary\u0142k\u0119 i jest na drodze do spadku w tym tygodniu o 0,8 proc.\nPrezydent USA Donald Trump powiedzia\u0142 w czwartek, \u017ce w\u0142adze Iranu powinny zgodzi\u0107 si\u0119 na porozumienie nuklearne w ci\u0105gu miesi\u0105ca, lecz jednocze\u015bnie zaznaczy\u0142, \u017ce b\u0119dzie rozmawia\u0142 z Ira\u0144czykami \u201etak d\u0142ugo jak b\u0119dzie chcia\u0142\u201d.\nAgencja AP poda\u0142a, powo\u0142uj\u0105c si\u0119 na \u017ar\u00f3d\u0142a, \u017ce drugi ameryka\u0144ski lotniskowiec dosta\u0142 rozkaz wyp\u0142yni\u0119cia na Bliski Wsch\u00f3d. Zdaniem agencji Trump rozwa\u017ca podj\u0119cie dzia\u0142a\u0144 militarnych wymierzonych w Iran.\n\u201eUSA chc\u0105 mie\u0107 wi\u0119cej czasu na zawarcie porozumienia nuklearnego z Iranem, co obni\u017cy kr\u00f3tkoterminow\u0105 premi\u0119 za ryzyko geopolityczne\u201d \u2013 napisa\u0142 w raporcie analityk IG, Tony Sycamore.\n\u201eG\u0142\u00f3wn\u0105 si\u0142\u0105 nap\u0119dow\u0105 na rynkach ropy naftowej pozostaj\u0105 obecnie napi\u0119cia mi\u0119dzy USA a Iranem. Ceny prawdopodobnie pozostan\u0105 zmienne\u201d \u2013 powiedzia\u0142 Zhou Mi, analityk z instytutu badawczego powi\u0105zanego z Chaos Ternary Futures.\nZ kolei Mi\u0119dzynarodowa Agencja Energetyczna zaprognozowa\u0142a w swoim miesi\u0119cznym raporcie w czwartek, \u017ce w tym roku globalny wzrost popytu na rop\u0119 b\u0119dzie s\u0142abszy ni\u017c wcze\u015bniej oczekiwano, a og\u00f3lna poda\u017c ma przewy\u017cszy\u0107 popyt. Agencja poda\u0142a, \u017ce w 2026 r. nadwy\u017cka wyniesie nieco ponad 3,7 mln bary\u0142ek dziennie, co by\u0142oby rekordem w uj\u0119ciu \u015bredniorocznym.\n\u201eFakt, \u017ce ceny nie spad\u0142y znacz\u0105co w obliczu pesymistycznych wiadomo\u015bci, jest godny uwagi, co sugeruje, \u017ce tendencja spadkowa wyhamuje w najbli\u017cszym czasie\u201d \u2013 powiedzia\u0142 Linh Tran, analityk rynku w XS.com.\nSycamore doda\u0142, \u017ce czwartkowy spadek zosta\u0142 wzmocniony wcze\u015bniejszymi danymi wskazuj\u0105cymi na ogromny wzrost zapas\u00f3w ropy naftowej w USA i rosn\u0105ce oczekiwania, \u017ce zwi\u0119kszona poda\u017c z Wenezueli mo\u017ce wkr\u00f3tce trafi\u0107 na rynek.\n\u201eOczekuje si\u0119, \u017ce w nadchodz\u0105cych miesi\u0105cach poda\u017c wenezuelskiej ropy powr\u00f3ci do poziomu sprzed blokady\u201d \u2013 powiedzia\u0142 Sycamore, dodaj\u0105c, \u017ce Wenezuela mo\u017ce zwi\u0119kszy\u0107 wydobycie z 880 tys. bary\u0142ek dziennie do oko\u0142o 1,2 mln b/d.\nBia\u0142y Dom poda\u0142 w czwartek, \u017ce Departament Skarbu USA wyda w tym tygodniu kolejne pozwolenia na wydobycie, \u0142agodz\u0105c sankcje wobec wenezuelskiej energetyki. (PAP Biznes)\nkek/ ana/"
+    },
+    {
+      "timestamp": "20260213T103000Z",
+      "title": "Europe  failed  on Trump , Putin  wrecking ball  politics : MSC chair",
+      "source": "cnbc.com",
+      "url": "https://www.cnbc.com/2026/02/13/europe-trump-putin-defense-munich-security-conference.html",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T110000Z",
+      "title": "Oil Set For Second Weekly Loss On Supply Glut Fears",
+      "source": "rttnews.com",
+      "url": "https://www.rttnews.com/3621450/oil-set-for-second-weekly-loss-on-supply-glut-fears.aspx",
+      "phase1": "YES",
+      "full_text": "Oil prices were slightly higher on Friday but were on track for a second weekly decline on receding concerns of a U.S.-Iran conflict and supply glut fears.\nBenchmark Brent crude futures were marginally higher at $67.56 a barrel, after falling nearly 3 percent on Thursday. WTI crude futures edged up by 0.1 percent to $62.93.\nOil headed for the first back-to-back weekly drop this year after the International Energy Agency lowered its global oil demand forecast for 2026 and projected a sizeable surplus despite outages that cut supply in January.\nU.S.-Iran tensions eased somewhat, with U.S. President Donald Trump saying that negotiations with Iran could stretch for as long as a month.\nAs talks between Iranian and U.S. officials continue over Iran's nuclear program, Trump threatened Iran Thursday with \"very traumatic\" consequences if it fails to make a nuclear deal.\nHowever, Israeli Prime Minister Benjamin Netanyahu said he was sceptical about the quality of any such agreement.\nFor comments and feedback contact: editorial@rttnews.com\nMarket Analysis\nFebruary 07, 2026 02:38 ET The week saw central bank action from major economies as policymakers decided on interest rate settings. Private sector survey data for the manufacturing and services sectors were in focus in the U.S. along with some data on the labor market. In Europe, central bank decisions from the euro area and the U.K. gained attention. In the Asia-Pacific, the main news came from the Reserve Bank of Australia that announced its latest interest rate decision."
+    },
+    {
+      "timestamp": "20260213T110000Z",
+      "title": "Le p\u00e9trole souffle avec des n\u00e9gociations qui sannoncent longues entre lIran",
+      "source": "zonebourse.com",
+      "url": "https://www.zonebourse.com/actualite-bourse/le-petrole-souffle-avec-des-negociations-qui-s-annoncent-longues-entre-l-iran-ce7e5ddada88f526",
+      "phase1": "YES",
+      "full_text": "et les Etats-Unis\nLondres (awp/afp) - Les cours du p\u00e9trole sont atones vendredi, les investisseurs tentant d'\u00e9valuer la probabilit\u00e9 d'un aboutissement des n\u00e9gociations entre les Etats-Unis et l'Iran, sur un march\u00e9 toujours per\u00e7u en surplus d'offre cette ann\u00e9e.\nApr\u00e8s avoir lourdement chut\u00e9 la veille, vers 10H10 GMT (11H10 HEC), le prix du baril de Brent de la mer du Nord, pour livraison en avril, prenait 0,22% \u00e0 67,67 dollars.\nSon \u00e9quivalent am\u00e9ricain, le baril de West Texas Intermediate, pour livraison en mars grappillait 0,19% \u00e0 62,96 dollars.\nLes tensions entre l'Iran et les Etats-Unis continuent de concentrer l'attention du march\u00e9 p\u00e9trolier.\nLe Pentagone a ordonn\u00e9 \u00e0 un deuxi\u00e8me groupe a\u00e9ronaval de se pr\u00e9parer \u00e0 un d\u00e9ploiement dans la r\u00e9gion du Golfe, ont indiqu\u00e9 plusieurs m\u00e9dias am\u00e9ricains, et Donald Trump a menac\u00e9 jeudi l'Iran de cons\u00e9quences \"tr\u00e8s traumatisantes\" s'il n'acceptait pas un accord sur son programme nucl\u00e9aire.\nOr l'Iran est l'un des dix premiers producteurs de p\u00e9trole au monde, et le pays est riverain du d\u00e9troit d'Ormuz par lequel transite pr\u00e8s de 20% de la production mondiale de p\u00e9trole. Une escalade militaire dans la r\u00e9gion serait donc synonyme de flamb\u00e9e des cours.\nN\u00e9anmoins, le pr\u00e9sident am\u00e9ricain a \u00e9galement dit qu'il esp\u00e9rait que les n\u00e9gociations avec la R\u00e9publique islamique aboutissent d'ici un mois.\n\"Cela r\u00e9duit consid\u00e9rablement le risque de conflit arm\u00e9 \u00e0 court terme\", estime Arne Lohmann Rasmussen de Global Risk Management.\nSelon l'analyste, il semblerait \"que Trump commence \u00e0 avoir des doutes\", car \"la derni\u00e8re chose dont les r\u00e9publicains ont besoin, c'est d'une hausse des prix du p\u00e9trole en cette ann\u00e9e d'\u00e9lections de mi-mandat\", contredisant les promesses du pr\u00e9sident.\nPar ailleurs, \"la croissance molle de la demande anticip\u00e9e pour 2026\" p\u00e8se sur les cours, affirme John Plassard, analyste chez Cit\u00e9 Gestion.\nDans son rapport mensuel publi\u00e9 jeudi, l'Agence internationale de l'\u00e9nergie (AIE) a revu l\u00e9g\u00e8rement en baisse, de 80.000 barils par jour (bp/j), sa pr\u00e9vision de croissance de la demande mondiale de p\u00e9trole pour 2026, en raison des hausses de prix observ\u00e9es en janvier.\npml/lul/abx"
+    },
+    {
+      "timestamp": "20260213T113000Z",
+      "title": "China Shanghai Composite index ends down 1 . 26 % ",
+      "source": "business-standard.com",
+      "url": "https://www.business-standard.com/markets/capital-market-news/china-s-shanghai-composite-index-ends-down-1-26-126021301141_1.html",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T114500Z",
+      "title": "North American Morning Briefing : Stock Futures Slip Ahead of Inflation Data",
+      "source": "marketscreener.com",
+      "url": "https://www.marketscreener.com/news/north-american-morning-briefing-stock-futures-slip-ahead-of-inflation-data-ce7e5ddada8ff52d",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T120000Z",
+      "title": "Berlin ma do\u015b\u0107 gr\u00f3\u017ab Trumpa ? Niemcy ostro o polityce united states przed szczytem w Monachium",
+      "source": "bankier.pl",
+      "url": "https://www.bankier.pl/wiadomosc/Berlin-ma-dosc-grozb-Trumpa-Niemcy-ostro-o-polityce-USA-przed-szczytem-w-Monachium-9083323.html",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T121500Z",
+      "title": "Dancing in the dark",
+      "source": "marketscreener.com",
+      "url": "https://www.marketscreener.com/news/dancing-in-the-dark-ce7e5ddadd89f420",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T123000Z",
+      "title": "Venezuelan crude shipments to US on track to rise in February | Hellenic Shipping News Worldwide",
+      "source": "hellenicshippingnews.com",
+      "url": "https://www.hellenicshippingnews.com/venezuelan-crude-shipments-to-us-on-track-to-rise-in-february/",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T130000Z",
+      "title": "OPEC+ leans towards resumption in oil output increases from April , sources say",
+      "source": "marketscreener.com",
+      "url": "https://www.marketscreener.com/news/opec-leans-towards-resumption-in-oil-output-increases-from-april-sources-say-ce7e5ddadd8cfe27",
+      "phase1": "YES",
+      "full_text": "MOSCOW/LONDON, Feb 13 (Reuters) - OPEC+ is leaning towards a resumption in oil output increases from April, three OPEC+ sources said, as the group prepares for peak summer demand and price strength is bolstered by tensions over U.S.-Iran relations.\nThe resumption would allow OPEC leader Saudi Arabia and fellow members, such as the UAE, to regain market share at a time other OPEC+ members, such as Russia and Iran, contend with Western sanctions and Kazakh output is restrained by a series of setbacks.\nEight OPEC+ producers - Saudi Arabia, Russia, the United Arab Emirates, Kazakhstan, Kuwait, Iraq, Algeria and Oman - meet on March 1.\nBRENT CRUDE CLOSE TO SIX-MONTH HIGH\nThe eight members raised production quotas by about 2.9 million barrels per day from April to the end of December 2025, equating to about 3% of global demand, and froze further planned increases for January through March 2026 because of seasonally weaker consumption.\nThe Brent crude benchmark is trading near $68 a barrel despite speculation that a supply glut would suppress prices this year. That's not far from a six-month high of $71.89 hit in January on tensions between the United States and Iran.\nAll three OPEC+ sources, who declined to be identified by name, said the eight members at the March 1 meeting were leaning towards a resumption in production quota increases from April. Three other sources familiar with OPEC+ thinking said they expected increases to resume in April.\nNo decision has yet been made and talks will continue in the weeks ahead of the March 1 meeting, two of the OPEC+ sources said.\nOPEC and authorities in Russia and Saudi Arabia did not reply immediately to requests for comment.\nSEASONAL DEMAND\nOPEC's latest oil market forecasts show demand for OPEC+ crude in the second quarter falling by 400,000 bpd from the first three months of the year, but demand for the whole year is projected to be 600,000 bpd higher than in 2025.\nRussian Deputy Prime Minister Alexander Novak, asked whether OPEC+ production increases would resume, told reporters last week that delegates expected demand to rise in the spring.\n\"Starting from around March and April, demand is gradually increasing. This will be an additional factor to ensure the balance,\" he said.\nThe International Energy Agency this week lowered its forecast for global oil demand growth this year to 850,000 bpd, though this is still higher than last year's growth of 770,000 bpd.\nOPEC+, which comprises the Organization of the Petroleum Exporting Countries plus Russia and other allies, pumps about half of the world's oil.\n(Reporting by Olesya Astakhova in Moscow and Alex Lawler and Ahmad Ghaddar in LondonWriting by Alex LawlerEditing by Dmitry Zhdannikov and David Goodman)\nBy Olesya Astakhova, Ahmad Ghaddar and Alex Lawler"
+    },
+    {
+      "timestamp": "20260213T131500Z",
+      "title": "Market Positioning Itself for Period of Higher Geopolitical Risk",
+      "source": "rigzone.com",
+      "url": "https://www.rigzone.com/news/market_positioning_itself_for_period_of_higher_geopolitical_risk-13-feb-2026-182977-article/",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T144500Z",
+      "title": "Un deuxi\u00e8me porte - avions am\u00e9ricain en route vers le Proche - Orient",
+      "source": "zonebourse.com",
+      "url": "https://www.zonebourse.com/actualite-bourse/un-deuxieme-porte-avions-americain-en-route-vers-le-proche-orient-ce7e5ddadc80ff20",
+      "phase1": "YES",
+      "full_text": "13 f\u00e9vrier (Reuters) - Les Etats-Unis ont d\u00e9cid\u00e9 d'envoyer un deuxi\u00e8me porte-avions au Proche-Orient dans un contexte de tensions avec l'Iran, ont d\u00e9clar\u00e9 vendredi deux responsables am\u00e9ricains \u00e0 Reuters.\nLe porte-avions USS Gerald R. Ford, le plus r\u00e9cent de la marine am\u00e9ricaine, et ses navires d'escorte seront d\u00e9p\u00each\u00e9s au Proche-Orient depuis les Cara\u00efbes et devraient arriver dans la r\u00e9gion dans moins d'une semaine, ont d\u00e9clar\u00e9 les responsables sous couvert d'anonymat.\nL'arm\u00e9e am\u00e9ricaine dispose de 11 porte-avions. Leurs calendriers et d\u00e9placements sont g\u00e9n\u00e9ralement fix\u00e9s longtemps \u00e0 l'avance.\nLe Gerald R. Ford joindra le porte-avions Abraham Lincoln, plusieurs destroyers lance-missiles, des avions de chasse et des avions de surveillance d\u00e9j\u00e0 d\u00e9ploy\u00e9s au Proche-Orient ces derni\u00e8res semaines.\nLe pr\u00e9sident am\u00e9ricain Donald Trump avait pr\u00e9venu mardi qu'il envisageait d'envoyer un deuxi\u00e8me porte-avions et son groupe a\u00e9ronaval au Proche-Orient si aucun accord n'\u00e9tait conclu avec l'Iran.\nDonald Trump a d\u00e9clar\u00e9 jeudi que les Etats-Unis devaient conclure un accord avec l'Iran et a laiss\u00e9 entendre qu'il pourrait \u00eatre nou\u00e9 au cours du mois prochain.\n\"Nous devons conclure un accord, sinon cela va \u00eatre tr\u00e8s traumatisant, tr\u00e8s traumatisant\", a d\u00e9clar\u00e9 le pr\u00e9sident am\u00e9ricain devant des journalistes.\nLe Gerald R. Ford est en mer depuis juin 2025. Il \u00e9tait cens\u00e9 op\u00e9rer en Europe mais a brusquement \u00e9t\u00e9 transf\u00e9r\u00e9 dans les Cara\u00efbes en novembre.\nSi les d\u00e9ploiements des porte-avions durent g\u00e9n\u00e9ralement neuf mois, il n'est pas rare qu'ils soient prolong\u00e9s pendant les p\u00e9riodes d'activit\u00e9 militaire accrue des \u00c9tats-Unis.\nLes responsables qui ont parl\u00e9 \u00e0 Reuters ont d\u00e9clar\u00e9 que l'administration avait envisag\u00e9 d'envoyer un autre porte-avions, le Bush, au Moyen-Orient, mais que celui-ci \u00e9tait en cours de certification et qu'il lui faudrait plus d'un mois pour atteindre la r\u00e9gion.\nLe Premier ministre isra\u00e9lien Benjamin Netanyahu a d\u00e9clar\u00e9 jeudi esp\u00e9rer que Donald Trump cr\u00e9erait les conditions n\u00e9cessaires pour parvenir \u00e0 un accord avec l'Iran afin d'\u00e9viter une intervention militaire.\nLa Maison blanche et le Pentagone n'ont pas dans l'imm\u00e9diat r\u00e9pondu \u00e0 la demande de commentaires de Reuters.\n(Reportage Hyunsu Yim \u00e0 Barcelona; version fran\u00e7aise Claude Chendjou et Etienne Breban, \u00e9dit\u00e9 par Blandine H\u00e9nault)"
+    },
+    {
+      "timestamp": "20260213T151500Z",
+      "title": "Iran Regime Is Facing a Crisis at Home and Abroad",
+      "source": "oilprice.com",
+      "url": "https://oilprice.com/Energy/Energy-General/Irans-Regime-Is-Facing-a-Crisis-at-Home-and-Abroad.html",
+      "phase1": "YES",
+      "full_text": "Iran\u2019s leadership is trying to put down nationwide protests with sustained force while the U.S. keeps negotiations open under sanctions pressure. Activist groups estimate more than 7,000 people have been killed, including many minors. Security forces remain cohesive and active across the country, but unrest has not fully subsided. The government controls territory, but not sentiment.\nSanctions and unrest are now fully intertwined. Oil exports are restricted, banking channels are limited, the currency remains weak, and inflation has eroded wages and savings. State revenue is dangerously tight while households face rising costs and dwindling economic outlets. The economic strain and the political crackdown are unfolding at the same time, each reinforcing the other. It\u2019s Iran at a weak point. But it\u2019s a fragility that could echo globally.\nThe U.S. is not striking Iran because the military option would be extensive and unpredictable. Iran\u2019s nuclear sites are spread out and built to withstand attack, so any strike that aims to do real damage would require a sustained campaign, not a limited show of force. Iran would retaliate against U.S. bases, Gulf energy infrastructure, Israel, and shipping routes. Oil markets would react immediately. Escalation would not be contained. A strike would also likely consolidate domestic support around the regime and close off negotiations. That assessment is more or less directing current policy.\nTehran is signaling willingness\u2026\nIran\u2019s leadership is trying to put down nationwide protests with sustained force while the U.S. keeps negotiations open under sanctions pressure. Activist groups estimate more than 7,000 people have been killed, including many minors. Security forces remain cohesive and active across the country, but unrest has not fully subsided. The government controls territory, but not sentiment.\nSanctions and unrest are now fully intertwined. Oil exports are restricted, banking channels are limited, the currency remains weak, and inflation has eroded wages and savings. State revenue is dangerously tight while households face rising costs and dwindling economic outlets. The economic strain and the political crackdown are unfolding at the same time, each reinforcing the other. It\u2019s Iran at a weak point. But it\u2019s a fragility that could echo globally.\nThe U.S. is not striking Iran because the military option would be extensive and unpredictable. Iran\u2019s nuclear sites are spread out and built to withstand attack, so any strike that aims to do real damage would require a sustained campaign, not a limited show of force. Iran would retaliate against U.S. bases, Gulf energy infrastructure, Israel, and shipping routes. Oil markets would react immediately. Escalation would not be contained. A strike would also likely consolidate domestic support around the regime and close off negotiations. That assessment is more or less directing current policy.\nTehran is signaling willingness to discuss more than just the nuclear file, but it is not offering to dismantle key elements of its programs. It is seeking relief without surrendering deterrent capacity. In earlier negotiations, time worked in Iran\u2019s favor. With ongoing protests and economic contraction, that margin is narrower. The internal clock is ticking away in tandem with the diplomatic one.\nIsrael is pushing for a harder course and is attempting to direct things here. Netanyahu isn\u2019t keen on the diplomatic track, as usual, and continues to push for pressure tactics that keep a military option front and center. Trump is trying to keep that relationship intact without appearing to be directed by Netanyahu. Publicly opposing West Bank annexation while backing Netanyahu politically serves that purpose.\nTo access this exclusive content...\nSelect your membership level below\nCOMMUNITY MEMBERSHIP\n(FREE)\nFull access to the largest energy community on the web"
+    },
+    {
+      "timestamp": "20260213T163000Z",
+      "title": "  Strategic project , symbol of constructive cooperation : Iranian envoy on Chabahar Port",
+      "source": "economictimes.indiatimes.com",
+      "url": "https://economictimes.indiatimes.com/news/india/strategic-project-symbol-of-constructive-cooperation-iranian-envoy-on-chabahar-port/articleshow/128314638.cms",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T171500Z",
+      "title": "Mocne s\u0142owa Merza w Monachium : united states by\u0107 mo\u017ce straci\u0142y roszczenia do \u015bwiatowego przyw\u00f3dztwa",
+      "source": "bankier.pl",
+      "url": "https://www.bankier.pl/wiadomosc/Mocne-slowa-Merza-w-Monachium-USA-byc-moze-stracily-roszczenia-do-swiatowego-przywodztwa-9083540.html",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T171500Z",
+      "title": "Les \u00c9tats - Unis autorisent les majors p\u00e9troli\u00e8res \u00e0 op\u00e9rer largement au Venezuela et encouragent de nouveaux investissements \u00e9nerg\u00e9tiques",
+      "source": "zonebourse.com",
+      "url": "https://www.zonebourse.com/actualite-bourse/les-etats-unis-autorisent-les-majors-petrolieres-a-reprendre-leurs-activites-au-venezuela-et-donnent-ce7e5ddadf81f322",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T174500Z",
+      "title": "Binance fires top investigators who claim to have uncovered evidence of Iranian sanctions violations",
+      "source": "fortune.com",
+      "url": "https://fortune.com/2026/02/13/binance-investigators-fired-iran-sanctions-potential-violations/",
+      "phase1": "YES",
+      "full_text": "In 2023 the crypto exchange Binance pleaded guilty to violating anti-money-laundering and know-your-customer laws as well as sanctions violations. The company agreed to pay $4.3 billion, one of the largest corporate fines in U.S. history. Binance founder Changpeng Zhao, meanwhile, pleaded guilty to failing to implement proper oversight, and was later sentenced to four months in prison. In response, Zhao agreed to step down as CEO of Binance, and the company consented to government-imposed monitorships, pledging to enter a new phase of \u201cregulatory maturity.\u201d\nBinance, however, appears to be reneging on its promise. According to multiple sources and internal documents viewed by Fortune, investigators on the company\u2019s compliance team uncovered evidence that entities tied to Iran had received more than $1 billion through the exchange from March 2024 through August 2025, in potential violation of sanctions laws. The transactions routed through Binance using the stablecoin Tether on a blockchain known as Tron.\nAfter the investigators surfaced the findings through internal reports, at least five were fired starting in late 2025, according to the sources, who spoke with Fortune on the condition of anonymity owing to fear of legal repercussions. At least three of the investigators came from law enforcement backgrounds in Europe and Asia. Several held leadership roles at Binance and were in charge of special and global financial investigations, including those related to sanction evasions and counter-terror financing.\nThe exact reason for their firings could not be determined. Several of the former staffers publicly announced they were leaving Binance on LinkedIn and did not specify the circumstances of their departure. Each of them declined to comment. Subsequent to publication of this article, Binance stated no investigators had been fired for reporting potential sanctions violations, and that, \u201cFollowing internal review, and based on the advice of qualified legal counsel, we found no evidence that Binance violated applicable sanctions laws in connection with the activity referenced.\u201d\nAnd beyond the firings of the investigators, at least four top compliance staff have left or been pushed out over the past three months, according to the sources and publicly available information.\n\u201cThat\u2019s rather shocking that that happened under a monitorship with [Binance] internal investigators,\u201d Robert Appleton, a partner at the law firm Olshan Frome Wolosky who led sanctions- and Iran-related cases at the DOJ, told Fortune.\nThe timing of the firings coincides with a number of U.S. political developments that benefited Binance. Those include President Donald Trump\u2019s rollback of crypto oversight and his decision in October to grant Zhao a pardon for his 2023 guilty plea. The pardon came after Zhao\u2019s team hired lobbyists in Washington, D.C., and after Binance helped the Trump family\u2019s crypto project, World Liberty Financial, launch its own stablecoin.\nNews of Binance firing the compliance staff also comes as the firm is seeking a replacement for Noah Perlman, a former U.S. prosecutor who serves as chief compliance officer, and arrived as a high-profile hire for Binance in 2023. Perlman is still with the company. According to a source familiar with the matter, who spoke with Fortune on the condition of anonymity to discuss internal company dynamics, Perlman plans to transition out of the company later this year. His plans aren\u2019t connected to the firings of the investigators, the source said.\n\u201cAs a matter of policy, we cannot comment on ongoing investigations. Binance is committed to complying with all applicable sanctions laws and regulations in the markets where it operates,\u201d a Binance spokesperson said in a statement, adding that the company cannot comment on specific personnel cases and that employees who breach company policy are subject to dismissal.\n\u201cWe continue to work closely with law enforcement partners to protect our users and the wider ecosystem. Our core expertise and teams driving these efforts remain in place,\u201d the statement continued.\nA new compliance approach\nFounded in 2017, Binance quickly rose to become the world\u2019s leading crypto exchange. But with that astronomic growth came a flood of regulatory and legal concerns. Amid an investigation from the DOJ into the exchange\u2019s operations, Binance instituted a campaign to reform its image, including building out its compliance team with star law enforcement officials from around the world.\nWhen the DOJ announced its settlement with Binance in November 2023, prosecutors stated that the company and its cofounder, Zhao, had prioritized wealth over regulatory compliance and facilitated billions of dollars in illegal transactions between users in countries like Iran, Cuba, and Syria. \u201cA corporate strategy that puts profits over compliance isn\u2019t a path to riches; it\u2019s a path to federal prosecution,\u201d wrote Deputy Attorney General Lisa Monaco.\nZhao agreed to step down as CEO, and the company said in a blog post that the settlement allowed Binance to \u201cturn the page on a challenging yet transformative chapter of learning and growth.\u201d Shortly after, Binance promoted Richard Teng, a former financial regulator in Singapore and the United Arab Emirates, to CEO. One year later, in November 2024, Binance announced plans to increase its staff of full-time compliance employees by 34% to 645 by the end of the year.\nOn its job listing platform, Binance is still hiring for over a dozen compliance roles.\nEditor\u2019s note: This story was updated on February 15 to include new information supplied by Binance.\nAre you a current or former Binance employee or have information about the company? You can contact Leo Schwartz on Signal at 856-872-2064 or Ben Weiss on Signal at @bdanweiss.123."
+    },
+    {
+      "timestamp": "20260213T181500Z",
+      "title": "Some OPEC Members See Scope to Resume Hikes in April",
+      "source": "rigzone.com",
+      "url": "https://www.rigzone.com/news/wire/some_opec_members_see_scope_to_resume_hikes_in_april-13-feb-2026-182979-article/",
+      "phase1": "YES",
+      "full_text": "Some OPEC+ Members See Scope to Resume Hikes in April\n(Update) February 13, 2026, 2:39 PM GMT: Article updated with survey in third-last paragraph.\nSome OPEC+ members see scope for the alliance to resume supply increases in April, believing concerns of a glut in global oil markets to be overblown.\nThe group led by Saudi Arabia and Russia hasn\u2019t committed to any course of action or begun formal discussions ahead of its meeting on March 1, according to several delegates, who asked not to be identified as the process is private. Their ultimate decision may depend on whether US President Donald Trump launches military action against \u2014 or reaches a nuclear deal with \u2014 OPEC member Iran, one added.\nNonetheless, some nations in the Organization of the Petroleum Exporting Countries and its allies said they see room to resume the output increases that the coalition paused during the seasonal demand slowdown of the first quarter.\nTrump\u2019s assertive stance toward OPEC members Venezuela and Iran, along with disruptions spanning from North America to Kazakhstan, drove oil prices to a strong start of the year despite warnings of a supply glut.\nSeveral top traders have said that prices are supported by tightness in key markets, as many of the surplus barrels are from producers subject to sanctions like Russia and Iran, and thus remain unavailable to a wider pool of buyers.\nThat has made the market surprisingly resilient.\nBrent futures are up 11% this year, after spiking to a six-month high near $72 a barrel at the end of January over concerns a conflict might erupt in the Middle East.\nOil inventories piled up last year at the fastest pace since the 2020 pandemic amid swelling output from both OPEC+ and its competitors in the Americas, according to the International Energy Agency, though the impact on prices was tempered as China scooped up barrels for its strategic reserves.\nLast April, the Saudis stunned crude traders by steering OPEC+ to rapidly revive production halted since 2023 despite widespread warnings that world markets were already comfortably supplied.\nSome OPEC+ delegates said the strategy pivot was aimed at reclaiming market share ceded during years of output cutbacks to rivals such as US shale drillers. Analysts have also speculated that Riyadh sought to appease Trump, who has called on OPEC to help lower fuel prices.\nSurvey\nEight key OPEC+ members agreed to restart roughly 2.6 million barrels a day of halted production last year, but then opted to pause in the first quarter, leaving them with about 1.2 million a day left to restore. Monthly hikes in the fourth quarter were at a modest pace of just 137,000 barrels a day.\nIt remains unclear whether the group will indeed ratify a further increase when it convenes online on March 1. Reuters reported they are leaning towards increasing. Before reports of the potential increase, only 6 of 18 traders and analysts surveyed by Bloomberg on Friday predicted that the group would hike in April, while the remainder said they expected a further pause.\nLast year, there sometimes appeared to be diverging viewpoints among top members, with the Saudis and the United Arab Emirates eager to press on with increases, while Russia seemed more cautious.\nRussian Deputy Prime Minister Alexander Novak said on Feb. 3 that OPEC+ expects global oil demand to grow gradually starting from March or April. Still, the country\u2019s output has been under pressure, declining for a second month in January as US sanctions make it difficult to find buyers.\nWHAT DO YOU THINK?\nGenerated by readers, the comments included herein do not reflect the views and opinions of Rigzone. All comments are subject to editorial review. Off-topic, inappropriate or insulting comments will be removed."
+    },
+    {
+      "timestamp": "20260213T214500Z",
+      "title": "US allows oil majors to resume Venezuela operations , broadly okays new energy investments \u2013 Oil & Gas 360",
+      "source": "oilandgas360.com",
+      "url": "https://www.oilandgas360.com/us-allows-oil-majors-to-resume-venezuela-operations-broadly-okays-new-energy-investments/",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T214500Z",
+      "title": "Trump : \u0130ranla anla\u015famazsak Orta Do\u011fuya ikinci u\u00e7ak gemisini g\u00f6nderece\u011fim",
+      "source": "bloomberght.com",
+      "url": "https://www.bloomberght.com/trump-iran-la-anlasamazsak-orta-dogu-ya-ikinci-ucak-gemisini-gonderecegim-3769236",
+      "phase1": "YES",
+      "full_text": "Trump: \u0130ran'la anla\u015famazsak Orta Do\u011fu'ya ikinci u\u00e7ak gemisini g\u00f6nderece\u011fim\n-\nTrump, \u0130ran ile y\u00fcr\u00fct\u00fclen g\u00f6r\u00fc\u015fmelerin ba\u015far\u0131s\u0131z olmas\u0131 halinde Orta Do\u011fu'ya ikinci bir u\u00e7ak gemisinin \u00e7ok yak\u0131nda sevk edilece\u011fini s\u00f6yledi.\nABD Ba\u015fkan\u0131 Donald Trump, Fort Bragg'de kat\u0131laca\u011f\u0131 program \u00f6ncesinde Beyaz Saray'dan ayr\u0131l\u0131rken gazetecilerin sorular\u0131n\u0131 yan\u0131tlad\u0131.\nABD'nin Orta Do\u011fu'ya ikinci bir u\u00e7ak gemisi g\u00f6nderip g\u00f6ndermeyece\u011fine ili\u015fkin soruya Trump, \"E\u011fer \u0130ran'la bir anla\u015fma yapmazsak, ona ihtiyac\u0131m\u0131z olacak\" yan\u0131t\u0131n\u0131 verdi. Hen\u00fcz \u0130ran ile bir anla\u015fmaya var\u0131lmad\u0131\u011f\u0131n\u0131 belirten Trump, \"U\u00e7ak gemisi \u00e7ok yak\u0131nda yola \u00e7\u0131kacak. Orada yeni konu\u015flanm\u0131\u015f bir tane var. E\u011fer ihtiyac\u0131m\u0131z olursa, haz\u0131rda bekletiyoruz. B\u00fcy\u00fck, \u00e7ok b\u00fcy\u00fck bir g\u00fc\u00e7\" ifadelerini kulland\u0131.\nTrump, \u0130ran ile m\u00fczakerelerin ba\u015far\u0131l\u0131 olup olmayaca\u011f\u0131na ili\u015fkin bir soruya ise \"Bence ba\u015far\u0131l\u0131 olacak ve e\u011fer olmazsa, \u0130ran i\u00e7in k\u00f6t\u00fc olacak\" cevab\u0131n\u0131 verdi.\n\"Suriye\u2019deki mevcut durumdan memnun musunuz?\" sorusunu da yan\u0131tlayan Trump, Suriye Devlet Ba\u015fkan\u0131 Ahmed \u015eara i\u00e7in, \"Yapt\u0131\u011f\u0131 i\u015ften memnunum. Suriye halk\u0131 i\u00e7in harika bir i\u015f yap\u0131yor. \u00dclkeyi birle\u015ftiriyor\" de\u011ferlendirmesinde bulundu.\nUkrayna-Rusya m\u00fczakerelerine ili\u015fkin bir soru \u00fczerine Trump, \"Rusya bir anla\u015fma yapmak istiyor ve (Ukrayna Devlet Ba\u015fkan\u0131 Volodimir Zelenskiy) Zelenskiy'nin harekete ge\u00e7mesi gerekiyor, aksi takdirde b\u00fcy\u00fck bir f\u0131rsat\u0131 ka\u00e7\u0131racak. Harekete ge\u00e7mek zorunda\" dedi.\nTrump, \u0130srail Ba\u015fbakan\u0131 Binyamin Netanyahu'nun affedilip affedilmeyece\u011fine ili\u015fkin soruya da \"Evet, \u00f6yle d\u00fc\u015f\u00fcn\u00fcyorum\" yan\u0131t\u0131n\u0131 verdi."
+    },
+    {
+      "timestamp": "20260213T233000Z",
+      "title": "Midterm Palpitations",
+      "source": "zerohedge.com",
+      "url": "https://www.zerohedge.com/political/midterm-palpitations",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260213T233000Z",
+      "title": "Small caps outperform after soft - leaning CPI - Newsquawk US Market Wrap",
+      "source": "zerohedge.com",
+      "url": "https://www.zerohedge.com/markets/small-caps-outperform-after-soft-leaning-cpi-newsquawk-us-market-wrap",
+      "phase1": "NO",
+      "full_text": null
+    }
+  ]
+}

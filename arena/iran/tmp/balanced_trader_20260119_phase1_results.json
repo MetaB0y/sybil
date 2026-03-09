@@ -1,0 +1,283 @@
+{
+  "bot": "balanced_trader",
+  "window": "2026-01-19",
+  "model": "moonshotai/kimi-k2",
+  "total": 34,
+  "yes": 0,
+  "skip": 0,
+  "no": 34,
+  "results": [
+    {
+      "timestamp": "20260119T004500Z",
+      "title": "Iran protest death toll reaches 3766 amid fears it could be higher",
+      "source": "9news.com.au",
+      "url": "https://www.9news.com.au/world/usbased-activist-agency-says-it-has-verified-3766-deaths-from-iran-protests/e67f9766-5597-41ae-b376-935cd4ad0789",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T010000Z",
+      "title": "From Minnesota to the Red Sea how Somalis became the front line of global politics",
+      "source": "dailymaverick.co.za",
+      "url": "https://www.dailymaverick.co.za/article/from-minnesota-to-the-red-sea-how-somal-somalis-became-the-front-line-of-global/",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T010000Z",
+      "title": "Trump preoccupation with Greenland reflects how his presidency is reshaping the world order",
+      "source": "theglobeandmail.com",
+      "url": "https://www.theglobeandmail.com/world/us-politics/article-trump-preoccupation-greenland-reflects-reshaping-world-order/",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T010000Z",
+      "title": "Trump d\u00fcnyaya bir kafes d\u00f6v\u015fs\u00fc gibi bak\u0131yor \u2026 \u0130\u015fte \u00f6rnekleri",
+      "source": "hurriyet.com.tr",
+      "url": "https://www.hurriyet.com.tr/yazarlar/fatih-cekirge/trump-dunyaya-bir-kafes-dovuscusu-gibi-bakiyor-iste-ornekleri-43087851",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T011500Z",
+      "title": "George Yong - Boon Yeo :  Trump is a bully . If you show weakness , hell be all over you \u2026 be firm but flexible  | India News",
+      "source": "indianexpress.com",
+      "url": "https://indianexpress.com/article/india/george-yong-boon-yeo-trump-is-a-bully-if-you-show-weakness-hell-be-all-over-you-be-firm-but-flexible-10481754/",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T020000Z",
+      "title": "Strategi Saudi Membidik JF - 17 untuk Dapat F - 35",
+      "source": "kompas.com",
+      "url": "https://www.kompas.com/global/read/2026/01/19/083000970/strategi-saudi-membidik-jf-17-untuk-dapat-f-35",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T030000Z",
+      "title": "Europe toughens stance as Trump threatens new tariffs over Greenland",
+      "source": "sbs.com.au",
+      "url": "https://www.sbs.com.au/news/podcast-episode/europe-toughens-stance-as-trump-threatens-new-tariffs-over-greenland/k2qgiveh9",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T033000Z",
+      "title": "Iraq announces full withdrawal of US forces from its federal territory",
+      "source": "cnn.com",
+      "url": "https://www.cnn.com/2026/01/18/world/iraq-announces-full-withdrawal-of-us-forces-from-its-federal-territory",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T033000Z",
+      "title": "Presiden Iran peringatkan serangan terhadap Khamenei akan picu perang",
+      "source": "antaranews.com",
+      "url": "https://www.antaranews.com/berita/5359278/presiden-iran-peringatkan-serangan-terhadap-khamenei-akan-picu-perang",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T044500Z",
+      "title": "Iran on edge :  Full - scale war  warning amid Trump threats ; exiled crown prince Reza Pahlavi declares  I will return  | World News",
+      "source": "timesofindia.indiatimes.com",
+      "url": "https://timesofindia.indiatimes.com/world/middle-east/satellite-breach-hits-iran-state-tv-amid-unrest-reza-pahlavis-anti-regime-message-aired-top-developments/articleshow/126667146.cms",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T044500Z",
+      "title": "Iran on edge :  Full - scale war  warning amid Trump threats ; exiled crown prince Reza Pahlavi declares  I will return  | World News",
+      "source": "timesofindia.indiatimes.com",
+      "url": "https://timesofindia.indiatimes.com/world/middle-east/iran-on-edge-full-scale-war-warning-amid-trump-threats-exiled-crown-prince-reza-pahlavi-declares-i-will-return/articleshow/126667146.cms",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T050000Z",
+      "title": "Iran protests Live : Death toll cross 16 , 500 , Tehran pins blame on US",
+      "source": "hindustantimes.com",
+      "url": "https://www.hindustantimes.com/world-news/iran-protests-live-updates-khamenei-crackdown-death-toll-trump-us-iran-101768791010128.html",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T050000Z",
+      "title": "Aggression towards Khamenei would lead to all - out war : Iran president warning to the US",
+      "source": "hindustantimes.com",
+      "url": "https://www.hindustantimes.com/world-news/aggression-towards-khamenei-would-lead-to-all-out-war-iran-president-masoud-pezeshkian-warns-us-trump-sanctions-protest-101768791716780.html",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T063000Z",
+      "title": "Efecto Trump , hoy en directo : Tensiones en Ir\u00e1n , Venezuela y Groenlandia",
+      "source": "elperiodico.com",
+      "url": "https://www.elperiodico.com/es/internacional/20260119/venezuela-donald-trump-nicolas-maduro-delcy-rodriguez-hoy-ultima-hora-directo-125544384",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T070000Z",
+      "title": "Gold price prediction today : Will gold prices continue to hit new highs on Trump tariff threats on EU ? Top points to watch out for",
+      "source": "timesofindia.indiatimes.com",
+      "url": "https://timesofindia.indiatimes.com/business/india-business/gold-price-prediction-what-is-the-gold-rate-outlook-for-january-19-2026-week-should-you-buy-or-sell-mcx-gold/articleshow/126670268.cms",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T081500Z",
+      "title": "What is it like living in Greenland and being threatened by Trump ? ",
+      "source": "theguardian.com",
+      "url": "https://www.theguardian.com/world/2026/jan/19/monday-news-briefing-greenland-denmark-us-donald-trump",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T081500Z",
+      "title": "K\u00fcresel piyasalarda jeopolitik ve ticari gerilimler \u00f6ne \u00e7\u0131k\u0131yor",
+      "source": "aa.com.tr",
+      "url": "https://www.aa.com.tr/tr/ekonomi/kuresel-piyasalarda-jeopolitik-ve-ticari-gerilimler-one-cikiyor/3803527",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T090000Z",
+      "title": "\u0622\u06cc\u0646\u062f\u0647 \u0631\u0647\u0628\u0631 \u0627\u06cc\u0631\u0627\u0646 \u0686\u0647 \u062e\u0648\u0627\u0647\u062f \u0634\u062f \u061f - BBC News \u0641\u0627\u0631\u0633\u06cc",
+      "source": "bbc.com",
+      "url": "https://www.bbc.com/persian/articles/c4g378dvqqyo",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T101500Z",
+      "title": "\u4e2d\u570b2025\u5e74\u7d93\u6fdf\u589e\u95775 %\uff1a\u300c \u4fdd\u4e94 \u300d \u80cc\u5f8c \uff0c \u51fa\u53e3\u5f37\u6490 \uff0c \u5167\u9700\u62d6\u7d2f - BBC News \u4e2d\u6587",
+      "source": "bbc.com",
+      "url": "https://www.bbc.com/zhongwen/articles/cwy1pwwdyewo/trad",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T114500Z",
+      "title": "How to Understand Trump Obsession With Greenland",
+      "source": "theatlantic.com",
+      "url": "https://www.theatlantic.com/ideas/2026/01/how-to-understand-trumps-obsession-with-greenland/685675/",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T114500Z",
+      "title": "Iranian diaspora in West : Politics , power , rivalry",
+      "source": "dailysabah.com",
+      "url": "https://www.dailysabah.com/opinion/op-ed/iranian-diaspora-in-west-politics-power-rivalry",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T123000Z",
+      "title": "  I was afraid for my life : the transgender refugees fleeing Trump America | Refugees",
+      "source": "theguardian.com",
+      "url": "https://www.theguardian.com/world/2026/jan/19/i-was-afraid-for-my-life-the-transgender-refugees-fleeing-trumps-america",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T131500Z",
+      "title": "Russia Jet - Powered Geran - 5 Drone Can Fly 600 km / h , Carry 90 kg Warhead \u2013 HUR",
+      "source": "kyivpost.com",
+      "url": "https://www.kyivpost.com/post/68327",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T140000Z",
+      "title": "\u9ed1\u5ba2\u5e72\u6270\u4f0a\u6717\u56fd\u5bb6\u7535\u89c6\u53f0\u4fe1\u53f7 \u64ad\u51fa\u6d41\u4ea1\u738b\u50a8\u8bb2\u8bdd\u5f71\u50cf",
+      "source": "dw.com",
+      "url": "https://www.dw.com/zh/%E9%BB%91%E5%AE%A2%E5%B9%B2%E6%89%B0%E4%BC%8A%E6%9C%97%E5%9B%BD%E5%AE%B6%E7%94%B5%E8%A7%86%E5%8F%B0%E4%BF%A1%E5%8F%B7-%E6%92%AD%E5%87%BA%E6%B5%81%E4%BA%A1%E7%8E%8B%E5%82%A8%E8%AE%B2%E8%AF%9D%E5%BD%B1%E5%83%8F/a-75562844",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T140000Z",
+      "title": "Tackling a bully - The Hindu",
+      "source": "thehindu.com",
+      "url": "https://www.thehindu.com/newsletter/newsletter-international/the-view-from-india-newsletter-tackling-a-bully/article70525202.ece",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T140000Z",
+      "title": "UPSC Key : Trump Board of Peace on Gaza , India record rice output , and Mumbai mayor selection process",
+      "source": "indianexpress.com",
+      "url": "https://indianexpress.com/article/upsc-current-affairs/upsc-key-trumps-board-of-peace-indias-rice-output-mumbai-mayor-selection-10482936/",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T140000Z",
+      "title": "\u7279\u6717\u666e\u53c2\u52a0\u8fbe\u6c83\u65af\u5e74\u4f1a\u5438\u5f15\u5168\u7403\u76ee\u5149",
+      "source": "dw.com",
+      "url": "https://www.dw.com/zh/%E7%89%B9%E6%9C%97%E6%99%AE%E5%8F%82%E5%8A%A0%E8%BE%BE%E6%B2%83%E6%96%AF%E5%B9%B4%E4%BC%9A%E5%90%B8%E5%BC%95%E5%85%A8%E7%90%83%E7%9B%AE%E5%85%89/a-75562832",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T140000Z",
+      "title": "Top news of the day | January 19 , 2026",
+      "source": "thehindu.com",
+      "url": "https://www.thehindu.com/news/top-news-of-the-day-january-19-2026/article70525586.ece",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T144500Z",
+      "title": "From Hungary to Iran , Washington Has a Long History of Betraying Popular Uprisings",
+      "source": "foreignpolicy.com",
+      "url": "https://foreignpolicy.com/2026/01/16/trump-iran-protests-intervention-kurds-nixon-kissinger-hungary/?tpcc=recirc_trending062921",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T144500Z",
+      "title": "Donald Trump Idea of Spheres of Influence Can and Cant Create Peace",
+      "source": "foreignpolicy.com",
+      "url": "https://foreignpolicy.com/2026/01/19/sphere-influence-trump-venezuela-donroe-doctrine/?tpcc=recirc_trending062921",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T153000Z",
+      "title": "Trump , other global leaders arrive in Davos for World Economic Forum",
+      "source": "theglobeandmail.com",
+      "url": "https://www.theglobeandmail.com/business/article-davos-world-economic-forum-opens-donald-trump-inequality-trade/",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T161500Z",
+      "title": "Putin invited to Trump  Board of Peace  amid shifting MidEast ties",
+      "source": "dailysabah.com",
+      "url": "https://www.dailysabah.com/world/mid-east/putin-invited-to-trumps-board-of-peace-amid-shifting-mideast-ties",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T204500Z",
+      "title": "Authoritarianism by exhaustion Trump new travel ban",
+      "source": "dailymaverick.co.za",
+      "url": "https://www.dailymaverick.co.za/opinionista/2026-01-19-authoritarianism-by-exhaustion-trumps-new-travel-ban/",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260119T211500Z",
+      "title": "Morning Mail : ATO debt collector pays zero corporate tax ; hate speech laws set to pass ; Trump ramps up Greenland threats | Australia news",
+      "source": "theguardian.com",
+      "url": "https://www.theguardian.com/australia-news/2026/jan/20/morning-mail-tuesday-ntwnfb",
+      "phase1": "NO",
+      "full_text": null
+    }
+  ]
+}

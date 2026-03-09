@@ -1,5 +1,6 @@
 """Iran news-reactive LLM trading bot."""
 
+import asyncio
 import json
 import logging
 import re
@@ -84,16 +85,18 @@ class TradeRecord:
         }
 
 
-def load_articles(phase1_path: str, texts_path: str) -> list[Article]:
+def load_articles(phase1_path: str) -> list[Article]:
     """Load phase1-YES articles that have full text available."""
-    phase1_data = json.loads(Path(phase1_path).read_text())
-    texts_data = json.loads(Path(texts_path).read_text())
+    p = Path(phase1_path)
+    if not p.exists():
+        return []
+    phase1_data = json.loads(p.read_text())
 
     articles = []
     for item in phase1_data["results"]:
         if item.get("phase1") != "YES":
             continue
-        text = texts_data.get(item["url"])
+        text = item.get("full_text")
         if not text:
             continue
         articles.append(Article(
@@ -149,6 +152,14 @@ USA-Iran tensions stem from long-standing issues like Iran's nuclear program and
 class IranNewsTrader(BaseAgent):
     """LLM-powered news-reactive trader for the Iran strike market."""
 
+    # Defaults — overridden by strategy dict if provided
+    _DEFAULT_BELIEF_STRENGTH = {"LOW": 1, "MEDIUM": 3, "HIGH": 6}
+    _DEFAULT_BELIEF_WEIGHT_CAP = 30  # max alpha+beta before rescaling
+    _DEFAULT_KELLY_SCALE = {"LOW": 0.15, "MEDIUM": 0.30, "HIGH": 0.50}
+    _DEFAULT_CONFIRM_BOOST = 0.30
+    _DEFAULT_MAX_KELLY_SCALE = 1.0
+    _DEFAULT_MIN_EDGE = 0.02
+
     def __init__(
         self,
         client,
@@ -160,6 +171,7 @@ class IranNewsTrader(BaseAgent):
         name: str | None = None,
         market_ids: list[int] | None = None,
         persona: str | None = None,
+        strategy: dict | None = None,
     ):
         super().__init__(client, account_id, name or "IranNewsTrader", market_ids)
         self.articles = articles
@@ -177,6 +189,33 @@ class IranNewsTrader(BaseAgent):
         self._belief_beta: float = 0.0
         self._belief_initialized: bool = False
 
+        # Apply strategy overrides
+        s = strategy or {}
+        self._BELIEF_STRENGTH = s.get("belief_strength", self._DEFAULT_BELIEF_STRENGTH)
+        self._BELIEF_WEIGHT_CAP = s.get("belief_weight_cap", self._DEFAULT_BELIEF_WEIGHT_CAP)
+        self._KELLY_SCALE = s.get("kelly_scale", self._DEFAULT_KELLY_SCALE)
+        self._CONFIRM_BOOST = s.get("confirm_boost", self._DEFAULT_CONFIRM_BOOST)
+        self._MAX_KELLY_SCALE = s.get("max_kelly_scale", self._DEFAULT_MAX_KELLY_SCALE)
+        self._MIN_EDGE = s.get("min_edge", self._DEFAULT_MIN_EDGE)
+
+    def snapshot_state(self) -> dict:
+        """Capture cross-day state for multi-day simulations."""
+        return {
+            "alpha": self._belief_alpha,
+            "beta": self._belief_beta,
+            "initialized": self._belief_initialized,
+            "trade_log": self.trade_log,
+            "price_history": self.price_history,
+        }
+
+    def restore_state(self, state: dict) -> None:
+        """Restore cross-day state from a previous day's snapshot."""
+        self._belief_alpha = state["alpha"]
+        self._belief_beta = state["beta"]
+        self._belief_initialized = state["initialized"]
+        self.trade_log = state["trade_log"]
+        self.price_history = state["price_history"]
+
     def _get_llm_client(self) -> openai.AsyncOpenAI:
         if self._llm_client is None:
             self._llm_client = openai.AsyncOpenAI(
@@ -185,19 +224,18 @@ class IranNewsTrader(BaseAgent):
             )
         return self._llm_client
 
-    # Evidence strength per conviction level for Beta belief updates
-    _BELIEF_STRENGTH = {"LOW": 1, "MEDIUM": 3, "HIGH": 6}
-    # Kelly fraction scaling per conviction level (fractional Kelly)
-    _KELLY_SCALE = {"LOW": 0.15, "MEDIUM": 0.30, "HIGH": 0.50}
-    # Each confirming signal boosts Kelly scale by this much (additive)
-    _CONFIRM_BOOST = 0.30
-    # Maximum Kelly scale after all boosts
-    _MAX_KELLY_SCALE = 2.0
-    # Minimum edge to trade (below this, Kelly produces negligible size)
-    _MIN_EDGE = 0.02
-
     def _update_belief(self, probability: float, conviction: str) -> float:
-        """Update Beta belief with new LLM signal. Returns updated belief."""
+        """Update Beta belief with new LLM signal. Returns updated belief.
+
+        Before adding new evidence, rescales alpha/beta so total weight
+        doesn't exceed belief_weight_cap. This keeps beliefs responsive:
+        low cap = reactive/impulsive trader, high cap = anchored/cold trader.
+        """
+        total = self._belief_alpha + self._belief_beta
+        if total > self._BELIEF_WEIGHT_CAP:
+            scale = self._BELIEF_WEIGHT_CAP / total
+            self._belief_alpha *= scale
+            self._belief_beta *= scale
         s = self._BELIEF_STRENGTH[conviction]
         self._belief_alpha += s * probability
         self._belief_beta += s * (1 - probability)
@@ -287,27 +325,35 @@ class IranNewsTrader(BaseAgent):
             full_text=article.full_text[:4000],  # truncate very long articles
         )
 
-        try:
-            llm = self._get_llm_client()
-            t0 = time.monotonic()
-            await self.client.pause()
-            self.clock.pause()
+        llm = self._get_llm_client()
+        text = ""
+        llm_duration_s = 0.0
+        for attempt in range(3):
             try:
-                resp = await llm.chat.completions.create(
-                    model=self.model_name,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.3,
-                    max_tokens=1024,
-                )
-            finally:
-                self.clock.resume()
-                await self.client.resume()
-            llm_duration_s = time.monotonic() - t0
-            text = resp.choices[0].message.content or ""
-            log.info("[%s] LLM response for '%s' (%.1fs):\n%s", self.name, article.title[:60], llm_duration_s, text)
-        except Exception as e:
-            log.error("[%s] LLM call failed: %s", self.name, e)
-            return None
+                t0 = time.monotonic()
+                await self.client.pause()
+                self.clock.pause()
+                try:
+                    resp = await llm.chat.completions.create(
+                        model=self.model_name,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.3,
+                        max_tokens=1024,
+                    )
+                finally:
+                    self.clock.resume()
+                    await self.client.resume()
+                llm_duration_s = time.monotonic() - t0
+                text = resp.choices[0].message.content or ""
+                log.info("[%s] LLM response for '%s' (%.1fs):\n%s", self.name, article.title[:60], llm_duration_s, text)
+                break
+            except Exception as e:
+                log.warning("[%s] LLM call attempt %d/3 failed: %s", self.name, attempt + 1, e)
+                if attempt < 2:
+                    await asyncio.sleep(2 ** attempt)  # 1s, 2s backoff
+                else:
+                    log.error("[%s] LLM call failed after 3 attempts", self.name)
+                    return None
 
         # Parse structured output
         prob_match = re.search(r"PROBABILITY:\s*([\d.]+)", text)
@@ -377,14 +423,14 @@ class IranNewsTrader(BaseAgent):
         if bullish:
             # Bullish: buy YES
             kelly = edge / (1 - mkt_price) if mkt_price < 1 else 0
-            bet_frac = kelly * kelly_scale
+            bet_frac = min(kelly * kelly_scale, 1.0)
             risk_budget = bet_frac * total_capital
             target_yes = int(risk_budget / b) if b > 0 else 0
             target_no = 0
         else:
             # Bearish: buy NO
             kelly = edge / mkt_price if mkt_price > 0 else 0
-            bet_frac = kelly * kelly_scale
+            bet_frac = min(kelly * kelly_scale, 1.0)
             risk_budget = bet_frac * total_capital
             target_yes = 0
             target_no = int(risk_budget / (1 - b)) if b < 1 else 0
@@ -394,18 +440,34 @@ class IranNewsTrader(BaseAgent):
 
         # Generate orders
         orders: list[OrderSpec] = []
+        cash = self.current_balance
 
-        # Close wrong-side positions
+        # Close wrong-side positions entirely
         if target_no == 0 and current_no > 0:
             orders.append(SellNo.at_price(market_id, 1 - b, current_no))
         if target_yes == 0 and current_yes > 0:
             orders.append(SellYes.at_price(market_id, b, current_yes))
 
-        # Increase right-side toward target
+        # Trim right-side positions down to target
+        if 0 < target_yes < current_yes:
+            orders.append(SellYes.at_price(market_id, b, current_yes - target_yes))
+        if 0 < target_no < current_no:
+            orders.append(SellNo.at_price(market_id, 1 - b, current_no - target_no))
+
+        # Increase right-side toward target (capped by available cash)
         if target_yes > current_yes:
-            orders.append(BuyYes.at_price(market_id, b, target_yes - current_yes))
+            want = target_yes - current_yes
+            affordable = int(cash / b) if b > 0.01 else 0
+            qty = min(want, affordable)
+            if qty > 0:
+                orders.append(BuyYes.at_price(market_id, b, qty))
         if target_no > current_no:
-            orders.append(BuyNo.at_price(market_id, 1 - b, target_no - current_no))
+            want = target_no - current_no
+            limit = 1 - b
+            affordable = int(cash / limit) if limit > 0.01 else 0
+            qty = min(want, affordable)
+            if qty > 0:
+                orders.append(BuyNo.at_price(market_id, limit, qty))
 
         return orders
 
@@ -455,6 +517,7 @@ class IranNewsTrader(BaseAgent):
                     balance=self.current_balance,
                     yes_pos=self.get_position(market_id, "YES"),
                     no_pos=self.get_position(market_id, "NO"),
+                    belief=self.belief,
                 ))
                 continue
 
