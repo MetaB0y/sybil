@@ -1,0 +1,301 @@
+{
+  "name": "NBA Game Night - December 15, 2025",
+  "sport": "basketball_nba",
+  "time_range": ["2025-12-15T23:30:00+00:00", "2025-12-16T06:00:00+00:00"],
+  "events": [
+    {
+      "event_id": "nba_det_bos_1215",
+      "home_team": "Boston Celtics",
+      "away_team": "Detroit Pistons",
+      "commence_time": "2025-12-16T00:00:00+00:00",
+      "end_time": "2025-12-16T02:30:00+00:00",
+      "actual_outcome": "away",
+      "final_score": {"home": 105, "away": 112},
+      "markets": [
+        {"market_name": "Boston Celtics beats Detroit Pistons", "market_type": "moneyline"}
+      ]
+    },
+    {
+      "event_id": "nba_tor_mia_1215",
+      "home_team": "Miami Heat",
+      "away_team": "Toronto Raptors",
+      "commence_time": "2025-12-16T00:30:00+00:00",
+      "end_time": "2025-12-16T03:00:00+00:00",
+      "actual_outcome": "away",
+      "final_score": {"home": 96, "away": 106},
+      "markets": [
+        {"market_name": "Miami Heat beats Toronto Raptors", "market_type": "moneyline"}
+      ]
+    },
+    {
+      "event_id": "nba_dal_uta_1215",
+      "home_team": "Utah Jazz",
+      "away_team": "Dallas Mavericks",
+      "commence_time": "2025-12-16T02:00:00+00:00",
+      "end_time": "2025-12-16T04:45:00+00:00",
+      "actual_outcome": "home",
+      "final_score": {"home": 140, "away": 133},
+      "markets": [
+        {"market_name": "Utah Jazz beats Dallas Mavericks", "market_type": "moneyline"}
+      ]
+    },
+    {
+      "event_id": "nba_hou_den_1215",
+      "home_team": "Denver Nuggets",
+      "away_team": "Houston Rockets",
+      "commence_time": "2025-12-16T02:00:00+00:00",
+      "end_time": "2025-12-16T04:45:00+00:00",
+      "actual_outcome": "home",
+      "final_score": {"home": 128, "away": 125},
+      "markets": [
+        {"market_name": "Denver Nuggets beats Houston Rockets", "market_type": "moneyline"}
+      ]
+    },
+    {
+      "event_id": "nba_mem_lac_1215",
+      "home_team": "LA Clippers",
+      "away_team": "Memphis Grizzlies",
+      "commence_time": "2025-12-16T03:00:00+00:00",
+      "end_time": "2025-12-16T05:30:00+00:00",
+      "actual_outcome": "away",
+      "final_score": {"home": 103, "away": 121},
+      "markets": [
+        {"market_name": "LA Clippers beats Memphis Grizzlies", "market_type": "moneyline"}
+      ]
+    }
+  ],
+  "news": [
+    {
+      "timestamp": "2025-12-15T23:30:00+00:00",
+      "headline": "Starting lineups announced: Detroit Pistons at Boston Celtics",
+      "content": "Celtics start Tatum, Brown, White, Holiday, and Horford. Pistons go with Cunningham, Ivey, Beasley, Duren, and Ausar Thompson.",
+      "source": "lineup",
+      "event_id": "nba_det_bos_1215",
+      "metadata": {"home_team": "Boston Celtics", "away_team": "Detroit Pistons"}
+    },
+    {
+      "timestamp": "2025-12-16T00:00:00+00:00",
+      "headline": "Starting lineups announced: Toronto Raptors at Miami Heat",
+      "content": "Heat start Herro, Butler, Robinson, Adebayo, and Highsmith. Raptors counter with Barnes, Barrett, Quickley, Poeltl, and Dick.",
+      "source": "lineup",
+      "event_id": "nba_tor_mia_1215",
+      "metadata": {"home_team": "Miami Heat", "away_team": "Toronto Raptors"}
+    },
+    {
+      "timestamp": "2025-12-16T00:22:00+00:00",
+      "headline": "End of Q1: Boston Celtics 28 - Detroit Pistons 24",
+      "content": "Celtics control the opening quarter. Tatum with 10 early points.",
+      "source": "in_game",
+      "event_id": "nba_det_bos_1215",
+      "metadata": {"quarter": 1, "home_score": 28, "away_score": 24, "home_team": "Boston Celtics", "away_team": "Detroit Pistons"}
+    },
+    {
+      "timestamp": "2025-12-16T00:52:00+00:00",
+      "headline": "End of Q1: Miami Heat 22 - Toronto Raptors 26",
+      "content": "Raptors come out hot with a 4-point lead. Barnes looks aggressive.",
+      "source": "in_game",
+      "event_id": "nba_tor_mia_1215",
+      "metadata": {"quarter": 1, "home_score": 22, "away_score": 26, "home_team": "Miami Heat", "away_team": "Toronto Raptors"}
+    },
+    {
+      "timestamp": "2025-12-16T00:45:00+00:00",
+      "headline": "End of Q2: Boston Celtics 54 - Detroit Pistons 50",
+      "content": "Celtics maintain a slim lead at the half. Cunningham keeping Detroit close with 16 points.",
+      "source": "in_game",
+      "event_id": "nba_det_bos_1215",
+      "metadata": {"quarter": 2, "home_score": 54, "away_score": 50, "home_team": "Boston Celtics", "away_team": "Detroit Pistons"}
+    },
+    {
+      "timestamp": "2025-12-16T01:15:00+00:00",
+      "headline": "End of Q2: Miami Heat 48 - Toronto Raptors 52",
+      "content": "Raptors lead at halftime. Barrett with 14 points on efficient shooting.",
+      "source": "in_game",
+      "event_id": "nba_tor_mia_1215",
+      "metadata": {"quarter": 2, "home_score": 48, "away_score": 52, "home_team": "Miami Heat", "away_team": "Toronto Raptors"}
+    },
+    {
+      "timestamp": "2025-12-16T01:10:00+00:00",
+      "headline": "End of Q3: Boston Celtics 78 - Detroit Pistons 80",
+      "content": "Pistons take the lead! Cunningham erupts for 15 in the third. Boston's defense struggles.",
+      "source": "in_game",
+      "event_id": "nba_det_bos_1215",
+      "metadata": {"quarter": 3, "home_score": 78, "away_score": 80, "home_team": "Boston Celtics", "away_team": "Detroit Pistons"}
+    },
+    {
+      "timestamp": "2025-12-16T01:05:00+00:00",
+      "headline": "INJURY ALERT: Jaylen Brown heads to locker room",
+      "content": "Brown appeared to tweak his hamstring late in the third quarter. Celtics medical staff evaluating.",
+      "source": "injury",
+      "event_id": "nba_det_bos_1215",
+      "metadata": {"player": "Jaylen Brown", "injury_type": "hamstring", "severity": "questionable"}
+    },
+    {
+      "timestamp": "2025-12-16T01:20:00+00:00",
+      "headline": "UPDATE: Jaylen Brown ruled out for remainder of game",
+      "content": "Brown will not return tonight. Hamstring tightness, severity to be determined.",
+      "source": "injury",
+      "event_id": "nba_det_bos_1215",
+      "metadata": {"player": "Jaylen Brown", "status": "out"}
+    },
+    {
+      "timestamp": "2025-12-16T01:38:00+00:00",
+      "headline": "End of Q3: Miami Heat 72 - Toronto Raptors 78",
+      "content": "Raptors extend their lead to 6. Heat's offense goes cold in the third.",
+      "source": "in_game",
+      "event_id": "nba_tor_mia_1215",
+      "metadata": {"quarter": 3, "home_score": 72, "away_score": 78, "home_team": "Miami Heat", "away_team": "Toronto Raptors"}
+    },
+    {
+      "timestamp": "2025-12-16T01:30:00+00:00",
+      "headline": "Starting lineups announced: Dallas Mavericks at Utah Jazz",
+      "content": "Jazz start Markkanen, Sexton, Kessler, Collins, and Clarkson. Mavericks go with Doncic, Irving, Washington, Gafford, and Jones.",
+      "source": "lineup",
+      "event_id": "nba_dal_uta_1215",
+      "metadata": {"home_team": "Utah Jazz", "away_team": "Dallas Mavericks"}
+    },
+    {
+      "timestamp": "2025-12-16T01:30:00+00:00",
+      "headline": "Starting lineups announced: Houston Rockets at Denver Nuggets",
+      "content": "Nuggets start Jokic, Murray, Porter, Gordon, and Braun. Rockets go with Green, VanVleet, Sengun, Smith, and Brooks.",
+      "source": "lineup",
+      "event_id": "nba_hou_den_1215",
+      "metadata": {"home_team": "Denver Nuggets", "away_team": "Houston Rockets"}
+    },
+    {
+      "timestamp": "2025-12-16T02:00:00+00:00",
+      "headline": "Final: Boston Celtics 105 - Detroit Pistons 112",
+      "content": "Pistons complete the upset in Boston! Cunningham finishes with 34 points. Celtics couldn't recover after losing Brown.",
+      "source": "in_game",
+      "event_id": "nba_det_bos_1215",
+      "metadata": {"final": true, "home_score": 105, "away_score": 112, "winner": "Detroit Pistons"}
+    },
+    {
+      "timestamp": "2025-12-16T02:00:00+00:00",
+      "headline": "Final: Miami Heat 96 - Toronto Raptors 106",
+      "content": "Raptors win in Miami! Barnes leads with 26 points. Butler held to 18 on an off night.",
+      "source": "in_game",
+      "event_id": "nba_tor_mia_1215",
+      "metadata": {"final": true, "home_score": 96, "away_score": 106, "winner": "Toronto Raptors"}
+    },
+    {
+      "timestamp": "2025-12-16T02:22:00+00:00",
+      "headline": "End of Q1: Utah Jazz 32 - Dallas Mavericks 30",
+      "content": "High-scoring start. Markkanen and Doncic trading buckets.",
+      "source": "in_game",
+      "event_id": "nba_dal_uta_1215",
+      "metadata": {"quarter": 1, "home_score": 32, "away_score": 30, "home_team": "Utah Jazz", "away_team": "Dallas Mavericks"}
+    },
+    {
+      "timestamp": "2025-12-16T02:22:00+00:00",
+      "headline": "End of Q1: Denver Nuggets 30 - Houston Rockets 28",
+      "content": "Tight opening quarter. Jokic with 9 points and 5 assists.",
+      "source": "in_game",
+      "event_id": "nba_hou_den_1215",
+      "metadata": {"quarter": 1, "home_score": 30, "away_score": 28, "home_team": "Denver Nuggets", "away_team": "Houston Rockets"}
+    },
+    {
+      "timestamp": "2025-12-16T02:30:00+00:00",
+      "headline": "Starting lineups announced: Memphis Grizzlies at LA Clippers",
+      "content": "Clippers start Harden, Powell, Kawhi, Zubac, and Mann. Grizzlies go with Morant, Bane, Jackson Jr., Aldama, and Smart.",
+      "source": "lineup",
+      "event_id": "nba_mem_lac_1215",
+      "metadata": {"home_team": "LA Clippers", "away_team": "Memphis Grizzlies"}
+    },
+    {
+      "timestamp": "2025-12-16T02:45:00+00:00",
+      "headline": "End of Q2: Utah Jazz 66 - Dallas Mavericks 64",
+      "content": "Shootout! Jazz up 2 at the half. Sexton pours in 18 first-half points.",
+      "source": "in_game",
+      "event_id": "nba_dal_uta_1215",
+      "metadata": {"quarter": 2, "home_score": 66, "away_score": 64, "home_team": "Utah Jazz", "away_team": "Dallas Mavericks"}
+    },
+    {
+      "timestamp": "2025-12-16T02:45:00+00:00",
+      "headline": "End of Q2: Denver Nuggets 58 - Houston Rockets 62",
+      "content": "Rockets take the halftime lead. Green and VanVleet combine for 30.",
+      "source": "in_game",
+      "event_id": "nba_hou_den_1215",
+      "metadata": {"quarter": 2, "home_score": 58, "away_score": 62, "home_team": "Denver Nuggets", "away_team": "Houston Rockets"}
+    },
+    {
+      "timestamp": "2025-12-16T03:22:00+00:00",
+      "headline": "End of Q1: LA Clippers 22 - Memphis Grizzlies 30",
+      "content": "Grizzlies come out firing. Morant with 12 first-quarter points.",
+      "source": "in_game",
+      "event_id": "nba_mem_lac_1215",
+      "metadata": {"quarter": 1, "home_score": 22, "away_score": 30, "home_team": "LA Clippers", "away_team": "Memphis Grizzlies"}
+    },
+    {
+      "timestamp": "2025-12-16T03:10:00+00:00",
+      "headline": "End of Q3: Utah Jazz 96 - Dallas Mavericks 98",
+      "content": "Mavs take a slim lead into the fourth. Doncic has 28 points. Back and forth affair.",
+      "source": "in_game",
+      "event_id": "nba_dal_uta_1215",
+      "metadata": {"quarter": 3, "home_score": 96, "away_score": 98, "home_team": "Utah Jazz", "away_team": "Dallas Mavericks"}
+    },
+    {
+      "timestamp": "2025-12-16T03:10:00+00:00",
+      "headline": "End of Q3: Denver Nuggets 88 - Houston Rockets 90",
+      "content": "Rockets maintain their lead. Jokic battling with 24 points but Sengun matching him.",
+      "source": "in_game",
+      "event_id": "nba_hou_den_1215",
+      "metadata": {"quarter": 3, "home_score": 88, "away_score": 90, "home_team": "Denver Nuggets", "away_team": "Houston Rockets"}
+    },
+    {
+      "timestamp": "2025-12-16T03:45:00+00:00",
+      "headline": "End of Q2: LA Clippers 48 - Memphis Grizzlies 62",
+      "content": "Grizzlies dominating! 14-point lead at the half. Clippers struggling on offense.",
+      "source": "in_game",
+      "event_id": "nba_mem_lac_1215",
+      "metadata": {"quarter": 2, "home_score": 48, "away_score": 62, "home_team": "LA Clippers", "away_team": "Memphis Grizzlies"}
+    },
+    {
+      "timestamp": "2025-12-16T03:35:00+00:00",
+      "headline": "End of Q4: Utah Jazz 122 - Dallas Mavericks 122",
+      "content": "Tied at the end of regulation! Markkanen hits a clutch three to force overtime! Incredible finish.",
+      "source": "in_game",
+      "event_id": "nba_dal_uta_1215",
+      "metadata": {"quarter": 4, "home_score": 122, "away_score": 122, "home_team": "Utah Jazz", "away_team": "Dallas Mavericks"}
+    },
+    {
+      "timestamp": "2025-12-16T03:35:00+00:00",
+      "headline": "End of Q4: Denver Nuggets 116 - Houston Rockets 116",
+      "content": "Overtime in Denver! Jokic forces OT with a contested hook shot at the buzzer!",
+      "source": "in_game",
+      "event_id": "nba_hou_den_1215",
+      "metadata": {"quarter": 4, "home_score": 116, "away_score": 116, "home_team": "Denver Nuggets", "away_team": "Houston Rockets"}
+    },
+    {
+      "timestamp": "2025-12-16T04:08:00+00:00",
+      "headline": "End of Q3: LA Clippers 74 - Memphis Grizzlies 92",
+      "content": "Blowout developing. Morant has 28, Jackson Jr. adds 22. Clippers look checked out.",
+      "source": "in_game",
+      "event_id": "nba_mem_lac_1215",
+      "metadata": {"quarter": 3, "home_score": 74, "away_score": 92, "home_team": "LA Clippers", "away_team": "Memphis Grizzlies"}
+    },
+    {
+      "timestamp": "2025-12-16T04:15:00+00:00",
+      "headline": "Final (OT): Utah Jazz 140 - Dallas Mavericks 133",
+      "content": "Jazz win a thriller in overtime! Markkanen with 38 points. Sexton adds 28. Doncic had 42 in a losing effort.",
+      "source": "in_game",
+      "event_id": "nba_dal_uta_1215",
+      "metadata": {"final": true, "home_score": 140, "away_score": 133, "winner": "Utah Jazz"}
+    },
+    {
+      "timestamp": "2025-12-16T04:15:00+00:00",
+      "headline": "Final (OT): Denver Nuggets 128 - Houston Rockets 125",
+      "content": "Nuggets survive in overtime! Jokic triple-double: 36 points, 14 rebounds, 11 assists. Murray clutch down the stretch.",
+      "source": "in_game",
+      "event_id": "nba_hou_den_1215",
+      "metadata": {"final": true, "home_score": 128, "away_score": 125, "winner": "Denver Nuggets"}
+    },
+    {
+      "timestamp": "2025-12-16T04:30:00+00:00",
+      "headline": "Final: LA Clippers 103 - Memphis Grizzlies 121",
+      "content": "Grizzlies cruise in LA! Morant finishes with 33 points and 8 assists. Memphis wins wire-to-wire.",
+      "source": "in_game",
+      "event_id": "nba_mem_lac_1215",
+      "metadata": {"final": true, "home_score": 103, "away_score": 121, "winner": "Memphis Grizzlies"}
+    }
+  ]
+}

@@ -24,10 +24,58 @@ from sybil_client import BuyNo, BuyYes, SybilClient
 from sybil_client.types import NANOS_PER_DOLLAR, PricePoint
 
 from .clock import SimulatedClock
-from .news_trader import DEFAULT_PERSONA, IranNewsTrader, load_articles
+from .news_explorer import BOT_PERSONAS
+from .news_trader import IranNewsTrader, load_articles
 
 log = logging.getLogger(__name__)
 
+# ── Persona template ──
+
+_CONTEXT = """\
+Context:
+USA-Iran tensions stem from long-standing issues like Iran's nuclear program and proxies, but escalated sharply after the June 2025 US strikes on Iranian nuclear sites during the Israel-Iran Twelve-Day War. They rose further in early January 2026 amid Iran's crackdown on anti-government protests, prompting President Trump to threaten military action and review strike options."""
+
+
+def build_persona(bot_config: dict) -> str:
+    """Build a full persona prompt from a BOT_PERSONAS entry."""
+    p = bot_config["persona"]
+    style_lines = "\n".join(f"- {s}" for s in p["style"])
+    return f"""\
+You are {p['identity']}.
+
+You're trading on the market: "Will the United States carry out a military strike against Iran before March 31, 2026?"
+
+{_CONTEXT}
+
+Your analytical style:
+{style_lines}"""
+
+
+def _resolve_phase1_path(bot_key: str, date: str | None = None) -> str:
+    """Resolve the phase1 results path for a bot key.
+
+    If date is given, looks for iran/tmp/{phase1_key}_{date}_phase1_results.json.
+    Otherwise, finds the most recent phase1 file for this bot.
+    """
+    phase1_key = BOT_PERSONAS.get(bot_key, {}).get("phase1_bot", bot_key)
+    phase1_dir = Path("iran/tmp")
+    if date:
+        return str(phase1_dir / f"{phase1_key}_{date}_phase1_results.json")
+    # Find most recent
+    candidates = sorted(phase1_dir.glob(f"{phase1_key}_*_phase1_results.json"))
+    if candidates:
+        return str(candidates[-1])
+    return str(phase1_dir / f"{phase1_key}_phase1_results.json")
+
+
+@dataclass
+class TraderSpec:
+    """Specification for a single LLM trader."""
+    name: str
+    bot_key: str          # e.g. "american_believer", for phase1 path resolution
+    persona: str
+    phase1_path: str
+    strategy: dict | None = None  # overrides for IranNewsTrader strategy params
 
 @dataclass
 class SimulationConfig:
@@ -39,16 +87,18 @@ class SimulationConfig:
     noise_count: int = 20
     noise_balance: float = 20.0
     trader_balance: float = 1_000.0
-    phase1_path: str = "iran/tmp/jan2_phase1_results.json"
-    texts_path: str = "iran/tmp/article_texts.json"
     api_key: str = ""
     model_name: str = "moonshotai/kimi-k2"
-    sim_start_hour: str = "10:00"  # HH:MM on the article date
-    sim_end_hour: str = "19:00"
+    sim_start_hour: str = "00:00"  # HH:MM on the article date
+    sim_end_hour: str = "23:59"
+    trader_specs: list[TraderSpec] | None = None
+    dates: list[str] | None = None  # e.g. ["20260101", "20260102", "20260103"]
 
 
 async def run_simulation(config: SimulationConfig) -> None:
     async with SybilClient(config.base_url) as client:
+        # === ONE-TIME SETUP ===
+
         # 1. Create market
         market = await client.create_market(
             "Will US strike Iran by March 31?",
@@ -57,16 +107,7 @@ async def run_simulation(config: SimulationConfig) -> None:
         )
         print(f"Created market {market.id}: {market.name}")
 
-        # 2. Load articles
-        articles = load_articles(config.phase1_path, config.texts_path)
-        print(f"Loaded {len(articles)} articles (phase1=YES with full text)")
-        if not articles:
-            print("ERROR: No articles loaded. Check paths.")
-            return
-        for i, art in enumerate(articles):
-            print(f"  [{i+1}] {art.timestamp:%H:%M} {art.source}: {art.title[:70]}")
-
-        # 3. Create MM account + seed trade
+        # 2. Create MM account + seed trade
         mm_acct = await client.create_account(int(config.mm_balance * NANOS_PER_DOLLAR))
         await client.submit_orders(mm_acct.id, [
             BuyYes.at_price(market.id, config.initial_price, config.mm_seed_qty),
@@ -74,132 +115,173 @@ async def run_simulation(config: SimulationConfig) -> None:
         ])
         print(f"MM account {mm_acct.id}: seeded {config.mm_seed_qty} shares @ {config.initial_price:.2f}")
 
-        # 4. Wait for seed trade to clear
+        # 3. Wait for seed trade to clear
         async for block in client.stream_blocks():
             print(f"Seed trade cleared in block {block.height}")
             break
 
-        # 5. Create clock — use explicit start time, not first article
-        article_date = articles[0].timestamp.date()
-        h, m = (int(x) for x in config.sim_start_hour.split(":"))
-        sim_start = datetime(article_date.year, article_date.month, article_date.day, h, m)
-        h_end, m_end = (int(x) for x in config.sim_end_hour.split(":"))
-        sim_end = datetime(article_date.year, article_date.month, article_date.day, h_end, m_end)
-
-        clock = SimulatedClock(
-            sim_start=sim_start,
-            compression_ratio=config.compression_ratio,
-        )
-
-        # 6. Create MM bot
-        mm = AnchorMarketMaker(
-            client, mm_acct.id,
-            budget_dollars=config.mm_balance,
-            name="MM",
-            market_ids=[market.id],
-        )
-
-        # 7. Create noise traders
-        noise_bots = []
-        for i in range(config.noise_count):
-            acct = await client.create_account(int(config.noise_balance * NANOS_PER_DOLLAR))
-            bot = RandomTrader(
-                client, acct.id,
-                trade_probability=0.5,
-                seed=i,
-                name=f"Noise-{i}",
-                market_ids=[market.id],
-            )
-            noise_bots.append(bot)
-        print(f"Created {config.noise_count} noise traders @ ${config.noise_balance} each")
-
-        # 8. Create traders
+        # 4. Resolve API key and trader specs
         api_key = config.api_key or os.environ.get("OPENROUTER_API_KEY", "")
         if not api_key:
             print("WARNING: No OPENROUTER_API_KEY set. LLM calls will fail.")
 
-        BELIEVER_PERSONA = """\
-You are an American prediction market trader who closely follows US government and establishment sources on Iran.
+        if config.trader_specs:
+            specs = config.trader_specs
+        else:
+            specs = [
+                TraderSpec(
+                    name="Believer",
+                    bot_key="american_believer",
+                    persona=build_persona(BOT_PERSONAS["american_believer"]),
+                    phase1_path=_resolve_phase1_path("american_believer"),
+                    strategy=BOT_PERSONAS["american_believer"].get("strategy"),
+                ),
+                TraderSpec(
+                    name="Skeptic",
+                    bot_key="american_skeptic",
+                    persona=build_persona(BOT_PERSONAS["american_skeptic"]),
+                    phase1_path=_resolve_phase1_path("american_skeptic"),
+                    strategy=BOT_PERSONAS["american_skeptic"].get("strategy"),
+                ),
+            ]
 
-You're trading on the market: "Will the United States carry out a military strike against Iran before March 31, 2026?"
+        # 5. Create trader accounts ONCE (persist across days)
+        trader_accounts: dict[str, int] = {}
+        for spec in specs:
+            acct = await client.create_account(int(config.trader_balance * NANOS_PER_DOLLAR))
+            trader_accounts[spec.name] = acct.id
+            print(f"{spec.name} account {acct.id}: ${config.trader_balance}")
 
-Context:
-USA-Iran tensions stem from long-standing issues like Iran's nuclear program and proxies, but escalated sharply after the June 2025 US strikes on Iranian nuclear sites during the Israel-Iran Twelve-Day War. They rose further in early January 2026 amid Iran's crackdown on anti-government protests, prompting President Trump to threaten military action and review strike options.
+        # Cross-day state
+        trader_state: dict[str, dict] = {}  # name -> snapshot from IranNewsTrader.snapshot_state()
 
-Your analytical style:
-- You take official US government statements and policy signals seriously
-- When senior officials say military options are on the table, you believe they mean it
-- You trust reporting from establishment outlets (NYT, WSJ, Reuters) as generally accurate
-- You view presidential rhetoric as reflecting actual policy intent
-- You believe the US military and intelligence apparatus acts on stated objectives"""
+        # Run ID for grouping multi-day saves in dashboard
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        SKEPTIC_PERSONA = """\
-You are an American prediction market trader with a skeptical analytical lens on US-Iran relations.
+        # Resolve date list
+        dates = config.dates
+        if not dates:
+            # Fall back to single-day: use spec.phase1_path as-is
+            dates = [None]
 
-You're trading on the market: "Will the United States carry out a military strike against Iran before March 31, 2026?"
+        # === PER-DAY LOOP ===
+        for day_idx, date_str in enumerate(dates):
+            day_label = date_str or "single"
+            print(f"\n{'='*70}")
+            print(f"DAY {day_idx + 1}/{len(dates)}: {day_label}")
+            print(f"{'='*70}")
 
-Context:
-USA-Iran tensions stem from long-standing issues like Iran's nuclear program and proxies, but escalated sharply after the June 2025 US strikes on Iranian nuclear sites during the Israel-Iran Twelve-Day War. They rose further in early January 2026 amid Iran's crackdown on anti-government protests, prompting President Trump to threaten military action and review strike options.
+            # 1. Load articles for each trader
+            spec_articles: dict[str, list] = {}
+            for spec in specs:
+                if date_str:
+                    path = _resolve_phase1_path(spec.bot_key, date=date_str)
+                else:
+                    path = spec.phase1_path
+                arts = load_articles(path)
+                if not arts:
+                    print(f"  WARNING: No articles for {spec.name} from {path}, skipping")
+                else:
+                    spec_articles[spec.name] = arts
+                    print(f"  {spec.name}: {len(arts)} articles from {path}")
 
-Your analytical style:
-- You distinguish sharply between political rhetoric and actual policy action
-- You believe officials often posture for leverage without intending to follow through
-- You weight concrete evidence (troop deployments, carrier movements, evacuations) far above verbal threats
-- You consider domestic political incentives that make tough talk cheap
-- You can be convinced by strong material signals, but words alone don't move you"""
+            if not spec_articles:
+                print(f"  ERROR: No articles for day {day_label}. Skipping.")
+                continue
 
-        trader_acct = await client.create_account(int(config.trader_balance * NANOS_PER_DOLLAR))
-        trader = IranNewsTrader(
-            client, trader_acct.id, articles, clock,
-            api_key=api_key,
-            model_name=config.model_name,
-            name="Believer",
-            market_ids=[market.id],
-            persona=BELIEVER_PERSONA,
+            # 2. New clock for this day
+            first_articles = next(iter(spec_articles.values()))
+            article_date = first_articles[0].timestamp.date()
+            h, m = (int(x) for x in config.sim_start_hour.split(":"))
+            sim_start = datetime(article_date.year, article_date.month, article_date.day, h, m)
+            h_end, m_end = (int(x) for x in config.sim_end_hour.split(":"))
+            sim_end = datetime(article_date.year, article_date.month, article_date.day, h_end, m_end)
 
-        )
-        print(f"Believer account {trader_acct.id}: ${config.trader_balance}")
+            clock = SimulatedClock(
+                sim_start=sim_start,
+                compression_ratio=config.compression_ratio,
+            )
 
-        trader2_acct = await client.create_account(int(config.trader_balance * NANOS_PER_DOLLAR))
-        trader2 = IranNewsTrader(
-            client, trader2_acct.id, articles, clock,
-            api_key=api_key,
-            model_name=config.model_name,
-            name="Skeptic",
-            market_ids=[market.id],
-            persona=SKEPTIC_PERSONA,
+            # 3. New MM instance (same account)
+            mm = AnchorMarketMaker(
+                client, mm_acct.id,
+                budget_dollars=config.mm_balance,
+                name="MM",
+                market_ids=[market.id],
+            )
 
-        )
-        print(f"Skeptic account {trader2_acct.id}: ${config.trader_balance}")
+            # 4. New noise bots (fresh accounts each day)
+            noise_bots = []
+            for i in range(config.noise_count):
+                acct = await client.create_account(int(config.noise_balance * NANOS_PER_DOLLAR))
+                bot = RandomTrader(
+                    client, acct.id,
+                    trade_probability=0.5,
+                    seed=day_idx * 1000 + i,
+                    name=f"Noise-{i}",
+                    market_ids=[market.id],
+                )
+                noise_bots.append(bot)
+            print(f"  Created {config.noise_count} noise traders @ ${config.noise_balance} each")
 
-        traders = [trader, trader2]
+            # 5. Create LLM traders (new instances, restore cross-day state)
+            traders = []
+            for spec in specs:
+                if spec.name not in spec_articles:
+                    continue
+                t = IranNewsTrader(
+                    client, trader_accounts[spec.name],
+                    spec_articles[spec.name], clock,
+                    api_key=api_key,
+                    model_name=config.model_name,
+                    name=spec.name,
+                    market_ids=[market.id],
+                    persona=spec.persona,
+                    strategy=spec.strategy,
+                )
+                # Restore cross-day state
+                if spec.name in trader_state:
+                    t.restore_state(trader_state[spec.name])
+                traders.append(t)
 
-        # 9. Start clock + all bots
-        clock.start()
-        all_bots = [mm, *noise_bots, *traders]
-        tasks = [asyncio.create_task(bot.run()) for bot in all_bots]
+            if not traders:
+                print(f"  ERROR: No traders created for day {day_label}. Skipping.")
+                continue
 
-        sim_span = sim_end - sim_start
-        real_span = sim_span.total_seconds() / config.compression_ratio
-        print(
-            f"\nSimulation started: {len(all_bots)} bots"
-            f"\n  Sim time: {sim_start:%H:%M} → {sim_end:%H:%M}"
-            f" ({sim_span})"
-            f"\n  Real time: ~{real_span:.0f}s"
-            f" (compression={config.compression_ratio}x)"
-        )
+            # 6. Start clock + all bots
+            clock.start()
+            all_bots = [mm, *noise_bots, *traders]
+            tasks = [asyncio.create_task(bot.run()) for bot in all_bots]
 
-        # 10. Wait for sim end
-        await clock.sleep_until(sim_end)
+            sim_span = sim_end - sim_start
+            real_span = sim_span.total_seconds() / config.compression_ratio
+            print(
+                f"\n  Simulation started: {len(all_bots)} bots"
+                f"\n    Sim time: {sim_start:%H:%M} → {sim_end:%H:%M}"
+                f" ({sim_span})"
+                f"\n    Real time: ~{real_span:.0f}s"
+                f" (compression={config.compression_ratio}x)"
+            )
 
-        # 11. Stop all bots
-        print("\nStopping bots...")
-        for bot in all_bots:
-            bot.stop()
-        await asyncio.gather(*tasks, return_exceptions=True)
+            # 7. Wait for sim end
+            await clock.sleep_until(sim_end)
 
-        # 12. Collect results, print, and save
-        await save_and_print_results(client, config, all_bots, traders, market.id)
+            # 8. Stop all bots
+            print(f"\n  Stopping bots (day {day_label})...")
+            for bot in all_bots:
+                bot.stop()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+            # 9. Save cross-day state
+            for t in traders:
+                trader_state[t.name] = t.snapshot_state()
+
+            # 10. Save this day's results (incremental!)
+            await save_and_print_results(
+                client, config, all_bots, traders, market.id,
+                day_label=date_str,
+                run_id=run_id,
+            )
 
 
 async def _fetch_all_fills(client, account_id: int) -> list:
@@ -380,7 +462,7 @@ def build_block_records(
     return records
 
 
-async def save_and_print_results(client, config, all_bots, traders: list, market_id):
+async def save_and_print_results(client, config, all_bots, traders: list, market_id, day_label=None, run_id=None):
     mm = all_bots[0]  # first bot is always the MM
     num_traders = len(traders)
     noise_bots = all_bots[1:-num_traders]  # middle bots are noise
@@ -493,11 +575,14 @@ async def save_and_print_results(client, config, all_bots, traders: list, market
     runs_dir = Path("iran/runs")
     runs_dir.mkdir(parents=True, exist_ok=True)
     run_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_path = runs_dir / f"{run_ts}.json"
+    suffix = f"_day{day_label}" if day_label else ""
+    run_path = runs_dir / f"{run_ts}{suffix}.json"
 
     run_data = {
         "meta": {
             "timestamp": datetime.now().isoformat(),
+            "simulation_date": day_label,
+            "run_id": run_id,
             "config": asdict(config),
         },
         "blocks": block_records,
@@ -519,10 +604,14 @@ def main():
     parser.add_argument("--initial-price", type=float, default=0.12)
     parser.add_argument("--model", default="moonshotai/kimi-k2")
     parser.add_argument("--api-key", default="")
-    parser.add_argument("--phase1", default="iran/tmp/jan2_phase1_results.json")
-    parser.add_argument("--texts", default="iran/tmp/article_texts.json")
-    parser.add_argument("--sim-start", default="10:00", help="Sim start HH:MM (default: 10:00)")
-    parser.add_argument("--sim-end", default="19:00", help="Sim end HH:MM (default: 19:00)")
+    parser.add_argument("--traders", nargs="+", metavar="BOT_KEY",
+                        help="Bot keys from BOT_PERSONAS, e.g. israeli_trader american_believer")
+    parser.add_argument("--date", default=None,
+                        help="Article date YYYYMMDD for phase1 file lookup (default: most recent)")
+    parser.add_argument("--dates", nargs="+", metavar="YYYYMMDD",
+                        help="Multiple dates for multi-day simulation, e.g. --dates 20260101 20260102 20260103")
+    parser.add_argument("--sim-start", default="00:00", help="Sim start HH:MM (default: 00:00)")
+    parser.add_argument("--sim-end", default="23:59", help="Sim end HH:MM (default: 23:59)")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -530,6 +619,33 @@ def main():
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
+
+    # Build trader specs from --traders arg
+    trader_specs = None
+    if args.traders:
+        trader_specs = []
+        tradeable = {k: v for k, v in BOT_PERSONAS.items() if "persona" in v}
+        for bot_key in args.traders:
+            if bot_key not in tradeable:
+                available = ", ".join(tradeable.keys())
+                print(f"Unknown or non-tradeable bot: {bot_key}. Available: {available}")
+                return
+            bot_cfg = tradeable[bot_key]
+            trader_specs.append(TraderSpec(
+                name=bot_cfg["name"],
+                bot_key=bot_key,
+                persona=build_persona(bot_cfg),
+                phase1_path=_resolve_phase1_path(bot_key, args.date),
+                strategy=bot_cfg.get("strategy"),
+            ))
+
+    # Resolve dates: --dates takes priority over --date
+    if args.dates:
+        dates = args.dates
+    elif args.date:
+        dates = [args.date]
+    else:
+        dates = None
 
     config = SimulationConfig(
         base_url=args.base_url,
@@ -540,10 +656,10 @@ def main():
         initial_price=args.initial_price,
         model_name=args.model,
         api_key=args.api_key,
-        phase1_path=args.phase1,
-        texts_path=args.texts,
         sim_start_hour=args.sim_start,
         sim_end_hour=args.sim_end,
+        trader_specs=trader_specs,
+        dates=dates,
     )
 
     print("Iran Strike Market Simulation")
@@ -552,6 +668,10 @@ def main():
     print(f"  Compression: {config.compression_ratio}x")
     print(f"  Noise traders: {config.noise_count} @ ${config.noise_balance}")
     print(f"  Trader balance: ${config.trader_balance}")
+    if trader_specs:
+        print(f"  Traders: {', '.join(s.name for s in trader_specs)}")
+    if dates:
+        print(f"  Dates: {', '.join(dates)}")
     print()
 
     asyncio.run(run_simulation(config))

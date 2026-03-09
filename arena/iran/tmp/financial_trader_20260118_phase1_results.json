@@ -1,0 +1,147 @@
+{
+  "bot": "financial_trader",
+  "window": "2026-01-18",
+  "model": "moonshotai/kimi-k2",
+  "total": 17,
+  "yes": 4,
+  "skip": 2,
+  "no": 11,
+  "results": [
+    {
+      "timestamp": "20260118T003000Z",
+      "title": "Oil Problem Isnt Iran or Russia It Too Much Oil",
+      "source": "oilprice.com",
+      "url": "https://oilprice.com/Energy/Crude-Oil/Oils-Problem-Isnt-Iran-or-Russia-Its-Too-Much-Oil.html",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260118T024500Z",
+      "title": "Big oil complicated calculus for investing in Venezuela",
+      "source": "economictimes.indiatimes.com",
+      "url": "https://economictimes.indiatimes.com/news/international/business/big-oils-complicated-calculus-for-investing-in-venezuela/articleshow/126635072.cms",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260118T030000Z",
+      "title": "Dollar Recovers on Fed Chair Speculation",
+      "source": "finance.yahoo.com",
+      "url": "https://finance.yahoo.com/news/dollar-recovers-fed-chair-speculation-204119300.html",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260118T031500Z",
+      "title": "Trump calls Khamenei a  sick man , slams Iran leader as failed ruler in response to  criminal  remark",
+      "source": "livemint.com",
+      "url": "https://www.livemint.com/news/world/trump-calls-khamenei-a-sick-man-slams-irans-leader-as-failed-ruler-in-response-to-criminal-remark-11768700765358.html",
+      "phase1": "YES",
+      "full_text": "US President Donald Trump recently shot back at Iran's Supreme Leader Ayatollah Ali Khamenei after the later labelled him \u201ccriminal\u201d and blamed him for the murder of thousands of protestors in Tehran. Responding to Ayatollah Ali Khamenei\u2019s recent remarks, he called the 86-year-old a \"sick man\" and a failed ruler.\nTrump alleged that Iran's leadership relies on repression as he raised calls for new leadership in the Middle Eastern nation. Marking a sharp escalation in the war of words between the two nations, Trump in an interview with Politico said, \u201cIt\u2019s time to look for new leadership in Iran,\u201d as he called for an end to Ayatollah Ali Khamenei\u2019s 37-year reign.\nAsserting that leadership is about respect, not fear and death, Trump said, \u201cWhat he is guilty of, as the leader of a country, is the complete destruction of the country and the use of violence at levels never seen before,\u201d the news outlet report. He added, \u201cIn order to keep the country functioning \u2014 even though that function is a very low level \u2014 the leadership should focus on running his country properly, like I do with the United States, and not killing people by the thousands in order to keep control.\u201d\nThis follows Ayatollah Ali Khamenei's statement on Saturday where he blamed Trump for weeks of demonstrations that reportedly led to more than 3,000 deaths.\nAccording to Iranian state media, Ayatollah Ali Khamenei said, \u201cWe consider the US president criminal for the casualties, damages and slander he inflicted on the Iranian nation.\u201d\nAsserting that leadership is about respect, not fear and death, Trump said, \u201cWhat he is guilty of, as the leader of a country, is the complete destruction of the country and the use of violence at levels never seen before,\u201d the news outlet report. He added, \u201cIn order to keep the country functioning \u2014 even though that function is a very low level \u2014 the leadership should focus on running his country properly, like I do with the United States, and not killing people by the thousands in order to keep control.\u201d\nThis follows Ayatollah Ali Khamenei's statement on Saturday where he blamed Trump for weeks of demonstrations that reportedly led to more than 3,000 deaths.\nAccording to Iranian state media, Ayatollah Ali Khamenei said, \u201cWe consider the US president criminal for the casualties, damages and slander he inflicted on the Iranian nation.\u201d\nIran's domestic situation destabilised after the agitators took to the streets on December 28 to protest over the economic hardship. As Khamenei blamed the US President of inciting deadly protests, he said, \"We will not drag the country into war, but we will not let domestic or international criminals go unpunished,\" state media reported. Khamenei said that internal criminals are worse than the international criminals as he warned of strict action.\nTrump repeatedly threatened military intervention and warned against \"very strong action\" if Iran executed protesters. On 13 January, Trump said that \u201chelp is on its way\" as he called on Iranians to keep protesting and \u201ctake over institutions.\"\nHowever, his statement abruptly changed course on Friday as Iran's unrest stabilised. Trump expressed gratitude to Iran's leaders for calling off mass hangings, but Ayatollah Ali Khamenei-led government dismissed such claims and said that there was \"no plan to hang people,\" Reuters reported.\nOver size of a possible US military operation in Iran, Trump on Saturday said, \u201cThe best decision he ever made was not hanging more than 800 people two days ago.\" The nationwide protests that rocked Iran over the last three weeks were the nation's worst unrest in years.\nAyatollah Ali Khamenei held Iran's longtime enemies the US and Israel responsible of organising the fatal violence and said, \u201cThose linked to Israel and the US caused massive damage and killed several thousand.\u201d He emphasised that agents of the US and Israel operating inside Iran, who started fires, destroyed public property and incited chaos, \u201ccommitted crimes and a grave slander.\u201d\nAccusing Trump over the deadly violence and unrest in Iran, Khamenei in a post on X stated, \u201cWe find the US President guilty due to the casualties, damages and slander he inflicted upon the Iranian nation.\""
+    },
+    {
+      "timestamp": "20260118T031500Z",
+      "title": "Q3 results , gold , silver rates to India - US trade deal : Top five triggers that may dictate Indian stock market this week",
+      "source": "livemint.com",
+      "url": "https://www.livemint.com/market/stock-market-news/q3-results-gold-silver-rates-to-india-us-trade-deal-top-five-triggers-that-may-dictate-indian-stock-market-this-week-11768641823168.html",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260118T053000Z",
+      "title": "Why Chabahar matters : India strategic gateway to Afghanistan and Central Asia",
+      "source": "moneycontrol.com",
+      "url": "https://www.moneycontrol.com/news/india/why-chabahar-matters-india-s-strategic-gateway-to-afghanistan-and-central-asia-13777329.html",
+      "phase1": "SKIP",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260118T054500Z",
+      "title": "Q3 earnings , US - Iran conflict & FII action among 9 factors to move D - St this week",
+      "source": "economictimes.indiatimes.com",
+      "url": "https://economictimes.indiatimes.com/markets/stocks/news/q3-earnings-us-iran-conflict-fii-action-among-9-factors-to-move-d-st-this-week/articleshow/126636772.cms",
+      "phase1": "YES",
+      "full_text": "Listen to this article in summarized format\nThe 50-stock index closed 28.75 points or 0.11% higher on Friday to end at 25,694.35.\nWhile the Nifty managed to end positive on Friday, the index closed the session forming a bearish gravestone doji candlestick on the daily chart, Vatsal Bhuva, Technical Analyst at LKP Securities said, as he highlighted the bearish crossover and underlying weakness in the RSI.\n\"The index is currently consolidating with a bearish undertone between the 25,550\u201325,600 zone, where the 100-day SMA is placed and is being repeatedly tested, and the 25,850\u201325,900 resistance area. Traders may look to trade this defined range between 25,850 and 25,550. A sustainable bullish bias can emerge only after the index decisively reclaims its 50-day SMA. Immediate support lies at 25,550\u201325,600, while resistance is placed near 25,900,\" he added. He expects sentiments to remain weak in the short term with potential for a further downside.\n1. Geopolitics\nThe US-Iran tension is expected to weigh on global markets. While, Iran's decision to call-off the execution of hundreds of protestors arrested in a crackdown calmed the nerves, US officials said military action was still on the table if Iran resumed the killing of protesters.The US military was sending additional defensive and offensive capabilities to the region to be ready in case Trump ordered a strike, TOI reported quoting US sources. The Abraham Lincoln aircraft carrier and its strike group were making their way to the Middle East from the South China Sea. More air defence systems, fighter jets and possibly submarines were also expected to arrive in the region.\nMeanwhile, PTI reported that India is mulling various options on its engagement in the development of the strategically-located Chabahar port in Iran against the backdrop of the Trump administration threatening a 25% additional tariff on countries doing business with Tehran.\n2. Q3 earnings\nIt will be an earnings heavy week with over 230 companies announcing their October-December quarter results. In the Nifty pack, Eternal (Zomato), Kotak Mahindra Bank, UltraTech Cement and InterGlobe Aviation will be posting their results.The other widely tracked companies like LTIMindtree, Punjab National Bank (PNB), Tata Capital, ITC Hotels, Adani Green Energy, IndusInd Bank and Urban Company will also report the quarterly numbers.\nThe market will also react to the earnings of Reliance Industries (RIL) and Wipro, who announced their results after market hours on Friday and HDFC Bank, ICICI Bank, Yes Bank on Saturday.\n3. US markets\nDomestic markets will take cues from the action on Wall Street. On Friday, the frontline US indices ended lackluster. Dow 30 settled at 49,359.30, down 83.11 points or 0.17% while S&P 500 closed at 6,940.01, declining 4.46 points or 0.06%. Meanwhile, Nasdaq Composite ended with a minor decline of 14.63 points or 0.06% at 23,515.40.4. FII / DII action\nWhile Friday data shows Foreign Institutional Investors (FII) sold Indian equities worth Rs 4,346.13 crore, the foreign outflows over the first fortnight in January stood at Rs 22,530 crore.The domestic institutional investors (DIIs) were net buyers at Rs 3,935.31 crore.\nIt appears that the FII selling trend may continue until some positive triggers for a market rally happens, VK Vijayakumar, Chief Investment Strategist, Geojit Investments said. \"The AI trade that dominated the stock market trend in 2025 is continuing in early 2026 also. A reversal of this trend might happen sometime in 2026,\" he added.\nHe also blamed poor earnings growth, elevated valuations in India along with continuing suspense over the US-India trade agreement, among other principal reasons for this tepid performance of Indian stock markets.\n5. IPO watch\nPlenty of action is lined-up in the domestic primary market with 4 companies looking to raise about Rs 2,066 crore through initial public offerings (IPOs).In the mainboard category, logistics firm Shadowfax Technologies will launch its IPO on Tuesday, January 20. The company has set the price band at Rs 118 - Rs 124. In the SME segment, IPOs of Digilogic Systems, KRM Ayurveda and Shayona Engineering will open for public bidding.\nA total of seven listings will happen this week, including two closely watched mainboard debuts \u2013 Bharat Coking Coal and Amagi Media Labs. Bharat Coking Coal\u2019s IPO has already drawn strong attention, with subscription at 147 times and grey market premium indicating a potential 57% listing gain.\nRead more: IPO Calendar: Shadowfax among 4 IPOs worth Rs 2,066 crore to hit the market; Bharat Coking Coal to lead 7 listings\n6. Technical triggers\nOsho Krishan, Chief Manager -Technical and Derivative research at Angel One said that the domestic markets will take cues from the development around trade tariffs, escalating geopolitical tensions, quarterly earnings announcements along with key macroeconomic data.From a technical perspective, the index is positioned at a critical inflection point, where any adverse developments on the global front could potentially disrupt the prevailing chart structure in the near term. On the downside, the 25,500-25,450 zone has emerged as a key support area, providing a cushion against declines, Krishan said.\n\"This range is expected to remain a crucial support band in the event of further weakness during the upcoming week. On the upside, the index continues to face strong resistance in the 25,875-25,900 range, which coincides with the 50-day EMA. In the absence of a decisive and sustained breakout above this resistance zone, the Nifty50 is likely to trade cautiously, with a consolidative bias,\" he added.\n7. Rupee Vs dollar\nThe Indian rupee slid to its worst one-day fall in nearly two months on Friday, as elevated dollar demand from importers alongside maturing positions in the non-deliverable forwards market hurt the South Asian currency. The rupee closed at 90.8650 per dollar, down 0.6% on the day to log its worst drop since mid-November last year and inching closer to its all-time low of 91.0750 hit in December. The currency was down about 0.7% week-on-week.Intermittent dollar sales from state-run banks, most likely on behalf of the Reserve Bank of India, helped limit the currency's fall, Reuters reported, quoting traders.\n\"The depreciation pressure on the INR is likely to stay here, especially in the absence of an India-US trade deal,\" analysts at ANZ said in a note.\nMeanwhile, Asian currencies were largely rangebound and the dollar index hovered near a six-week high after upbeat U.S. economic data left traders trimming bets on Federal Reserve rate cuts.\n8. Gold, silver trends\nAfter an extraordinary performance in 2025, both gold and silver have continued trading with strong uptrends in 2026 so far. The latest US-Iran conflict has given a fresh impetus to the bullion along with rupee\u2019s slide against the US dollar.Any further escalation in the crisis is expected to further push the safe haven appeal of gold and silver.\nGold prices have jumped by over 5% or Rs 7,000 per 10 gram in 2026, month-to-date while the white metal has gained 22% or by Rs 52,000 per kg in the first fortnight of January.\nAlso read: Gold-to-silver ratio hits 13-year low as silver\u2019s 170% surge leaves gold behind. What should investors do?\n9. Corporate action\nSelect stocks will be in focus this week because of corporate actions. Among them will be the recently listed ICICI Prudential Asset Management Company, which will have its record date for its interim dividend of Rs 14.85 per share on Wednesday, January 21.Others like Bank of Maharashtra, NLC India, Angel One, Central Bank of India and DCM Shriram will also have record dates for interim dividends, during the week.\n(Disclaimer: Recommendations, suggestions, views and opinions given by the experts are their own. These do not represent the views of Economic Times)\n(What's moving Sensex and Nifty Track latest market news, stock tips, Budget 2025, Share Market on Budget 2025 and expert advice, on ETMarkets. Also, ETMarkets.com is now on Telegram. For fastest news alerts on financial markets, investment strategies and stocks alerts, subscribe to our Telegram feeds .)\nSubscribe to ET Prime and read the Economic Times ePaper Online.and Sensex Today.\nTop Trending Stocks: SBI Share Price, Axis Bank Share Price, HDFC Bank Share Price, Infosys Share Price, Wipro Share Price, NTPC Share Price\n(What's moving Sensex and Nifty Track latest market news, stock tips, Budget 2025, Share Market on Budget 2025 and expert advice, on ETMarkets. Also, ETMarkets.com is now on Telegram. For fastest news alerts on financial markets, investment strategies and stocks alerts, subscribe to our Telegram feeds .)\nSubscribe to ET Prime and read the Economic Times ePaper Online.and Sensex Today.\nTop Trending Stocks: SBI Share Price, Axis Bank Share Price, HDFC Bank Share Price, Infosys Share Price, Wipro Share Price, NTPC Share Price"
+    },
+    {
+      "timestamp": "20260118T094500Z",
+      "title": "What Trump Second Term Has Changed So Far and What Next",
+      "source": "bloomberg.com",
+      "url": "https://www.bloomberg.com:443/features/2026-trump-year-one-presidential-power/",
+      "phase1": "SKIP",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260118T113000Z",
+      "title": "What do Trump Greenland tariff threats to NATO allies mean for gold , silver and Dalal Street ? ",
+      "source": "economictimes.indiatimes.com",
+      "url": "https://economictimes.indiatimes.com/markets/stocks/news/what-do-trumps-greenland-tariff-threats-to-nato-allies-mean-for-gold-silver-and-dalal-street/articleshow/126640083.cms",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260118T144500Z",
+      "title": "Links 1 / 18 / 2026 | naked capitalism",
+      "source": "nakedcapitalism.com",
+      "url": "https://www.nakedcapitalism.com/2026/01/links-1-18-2026.html",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260118T151500Z",
+      "title": "Iran : le pouvoir envisage de r\u00e9tablir internet , r\u00e9ouverture des \u00e9coles - 18 / 01 / 2026 \u00e0 14 : 23",
+      "source": "boursorama.com",
+      "url": "https://www.boursorama.com/actualite-economique/actualites/iran-le-pouvoir-envisage-de-retablir-internet-reouverture-des-ecoles-eb2af1ce17b01f93ef74b52f778e3629",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260118T154500Z",
+      "title": "While Ukraine bleeds , Trump turns on Europe - London Business News",
+      "source": "londonlovesbusiness.com",
+      "url": "https://londonlovesbusiness.com/while-ukraine-bleeds-trump-turns-on-europe/",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260118T173000Z",
+      "title": "Trump In First Suggests Iran Regime Change :  Time To Look For New Leadership  ",
+      "source": "zerohedge.com",
+      "url": "https://www.zerohedge.com/geopolitical/trump-first-suggests-iran-regime-change-time-look-new-leadership",
+      "phase1": "YES",
+      "full_text": "Trump In First Suggests Iran Regime Change: 'Time To Look For New Leadership'\nThe deadly unrest and protests in Iran have largely gone quiet, but White House pressure on Tehran has not. President Trump over the weekend for the first time in the two-week crisis called for the end of the Iranian Supreme Leader's rule. His words came in an interview with Politico:\nPresident Donald Trump on Saturday called for an end to Ayatollah Ali Khamenei\u2019s 37-year reign.\n\"It\u2019s time to look for new leadership in Iran,\" Trump told POLITICO, as widespread protests calling for an end to the regime appear to have waned.\n\"The man is a sick man who should run his country properly and stop killing people,\" Trump said. \"His country is the worst place to live anywhere in the world because of poor leadership.\"\nDays prior into last week, it became clear that Trump would hold off striking Iran. He described that the killing had stopped, and that Iranian leaders agreed to not execute any protesters.\nRecent reporting in major US news sources also indicated that the Pentagon could not assure success in taking out top leadership if strikes on Tehran were authorized. This figured strongly into Trump's holding off.\nReferencing Ayatollah Khamenei, Trump told Politico further, \"The best decision he ever made was not hanging more than 800 people two days ago.\"\nIt's unclear where this 800 figure comes from, as there's an absence to any such reference from Iranian officials or state media. Typically when the Islamic Republic executes someone, it is highly publicized by state sources as a stern message and warning to the public or other potential criminals.\nKhamenei himself isn't backing down, and is also engaging in accusatory rhetoric aimed at Trump. After linking US and Israeli intelligence to the protests in which \"thousands\" were killed (Iran has made clear that among these were many police and security forces), the top Shia cleric has said as follows:\n\"We find the US President guilty due to the casualties, damages and slander he inflicted upon the Iranian nation,\" Khamenei wrote.\nBut probably Khamenei is holding back his rhetoric to some degree, not wishing to provoke Trump into attacking Iran at a delicate moment, also when the economy and currency are in a tailspin. Trump responded:\nTrump, after being read the posts, said Tehran\u2019s rulers rely on repression and violence to govern. \u201cWhat he is guilty of, as the leader of a country, is the complete destruction of the country and the use of violence at levels never seen before,\u201d Trump said. \u201cIn order to keep the country functioning \u2014 even though that function is a very low level \u2014 the leadership should focus on running his country properly, like I do with the United States, and not killing people by the thousands in order to keep control.\u201d\nThere are fresh reports Sunday that internet access is slowly coming back to Iran, after the say prior SMS messaging was restored - though it's expected that authorities will continue to keep a ban on certain US and Western-based apps and communications platforms.\n\u2139\ufe0f Update: While ordinary internet connectivity in #Iran remains disrupted at hour 238, traffic data indicate a significant return to some online services including Google, suggesting that heavily filtered access has been enabled, corroborating user reports of partial restoration pic.twitter.com/YR1YfkxZCU\n\u2014 NetBlocks (@netblocks) January 18, 2026\nWhile Trump has refrained from attacking Iran, US military assets are said to be en route to the Middle East and CENTCOM area of responsibility. The bulk of the US Navy's strike group has been in the Caribbean, after the Jan.3rd operation to oust Maduro."
+    },
+    {
+      "timestamp": "20260118T191500Z",
+      "title": "Attack on Ayatollah Khamenei equals  all out war , warns Iranian President",
+      "source": "livemint.com",
+      "url": "https://www.livemint.com/news/world/attack-on-ayatollah-khamenei-equals-all-out-war-warns-iranian-president-11768754488609.html",
+      "phase1": "YES",
+      "full_text": "Iranian President Masoud Pezeshkian said on Sunday, 18 January, that any attack on the country's supreme leader, Ayatollah Ali Khamenei, would mean a declaration of war.\nIn a post on the social media platform X, Pezeshkian said, \u201cIf the people of Iran face hardship and difficulties in their lives, one of the main reasons for it is the longstanding enmity and inhumane sanctions imposed by the United States government and its allies. Any aggression against the Supreme Leader of our country is tantamount to all-out war against the Iranian nation.\u201d\nIranian President's warning comes a day after Supreme Leader Ayatollah Khamenei held US President Trump responsible for causing casualties, damage, and slander on Iranians during the protests, and described him as a \u2018criminal\u2019 as the death toll in the nation crossed 3000, Reuters reported, citing records as per a rights group.\nKhamenei also warned that although his government does not intend to lead the nation toward war, it will not allow domestic or international criminals to go unpunished. He alleged that \u2018those linked to Israel and the US caused massive damage and killed several thousand\u2019 during the protests.\nIran is witnessing significant anti-government protests calling for the removal of Ayatollah Khamenei's government, resulting in over 3,000 deaths. Some reports also noted a \"very slight rise\" in internet activity after an eight-day blackout.\n\"The latest anti-Iran sedition was different in that the US President personally became involved,\" Iranian media quoted Khamenei as saying, reported Reuters.\nUS warned to initiate \u2018military action\u2019 if Iran used force against protesters. Trump announced that he cancelled all meetings with Iranian officials in response to the ongoing crackdown on protests in the country, claiming that \u2018help is on the way.\u2019\nPreviously, Khamenei sharply criticized Trump, telling him to \u2018manage his own country' as the President repeatedly threatened to \u201chit very, very hard.'\n\"As for that fellow (Trump) who sits there with arrogance and pride, passing judgment on the whole world, he should also know that usually, the despots and arrogant powers of the world--such as Pharaoh, Nimrod, Reza Khan, Mohammad Reza, and the likes of them--were overthrown exactly when they were at the peak of their pride. This one will be overthrown as well,\" AP quoted Khamenei."
+    },
+    {
+      "timestamp": "20260118T193000Z",
+      "title": "Oil , Dollars , Gold , & Venezuela In A Nutshell",
+      "source": "zerohedge.com",
+      "url": "https://www.zerohedge.com/geopolitical/oil-dollars-gold-venezuela-nutshell",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260118T193000Z",
+      "title": "Here Lies the Liberal World Order : 1945 - 2025",
+      "source": "zerohedge.com",
+      "url": "https://www.zerohedge.com/news/2026-01-18/here-lies-liberal-world-order-1945-2025",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260118T203000Z",
+      "title": "PERSPECTIVES DE LA SEMAINE : Les menaces de droits de douane am\u00e9ricains pourraient freiner la course record du Dax",
+      "source": "zonebourse.com",
+      "url": "https://www.zonebourse.com/actualite-bourse/perspectives-de-la-semaine-les-menaces-de-droits-de-douane-americains-pourraient-freiner-la-course-ce7e58dfdc89f52c",
+      "phase1": "NO",
+      "full_text": null
+    }
+  ]
+}

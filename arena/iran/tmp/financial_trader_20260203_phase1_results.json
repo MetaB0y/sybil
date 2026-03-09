@@ -1,0 +1,523 @@
+{
+  "bot": "financial_trader",
+  "window": "2026-02-03",
+  "model": "moonshotai/kimi-k2",
+  "total": 64,
+  "yes": 20,
+  "skip": 4,
+  "no": 40,
+  "results": [
+    {
+      "timestamp": "20260203T014500Z",
+      "title": "Gold rebounds above $4 , 800 , traders brace for US - Iran talks",
+      "source": "fxstreet.com",
+      "url": "https://www.fxstreet.com/news/gold-price-forecast-xau-usd-rebounds-above-4-800-traders-brace-for-us-iran-talks-202602030048",
+      "phase1": "YES",
+      "full_text": "Gold Price Forecast: XAU/USD rebounds above $4,800, traders brace for US-Iran talks\n- Gold price rebounds to around $4,820 in Tuesday\u2019s early Asian session.\n- The CME Group over the weekend again raised margin requirements for the two metals futures contracts.\n- US officials said Iran is ready to meet and negotiate a deal.\nGold price (XAU/USD) recovers some lost ground to near $4,820 during the early Asian session on Tuesday. The precious metal edges higher following a historic market rout. However, the upside in the near term might be limited, as US President Donald Trump nominated Kevin Warsh as the next Federal Reserve (Fed) chair.\nThe nomination of Warsh to lead the US central bank has raised expectations of a more hawkish stance. Markets anticipate that Warsh may lean toward a smaller Fed balance sheet and hold the interest rate higher for longer, which typically strengthens the US Dollar (USD) and reduces the appeal of non-yielding gold.\nThe Chicago Mercantile Exchange Group (CME), the world's leading and most diverse derivatives marketplace, raised margin requirements for gold and silver over the weekend. This action forced many leveraged traders to sell their positions immediately to cover costs, exerting some selling pressure on the yellow metal.\nThe US and Iran may hold diplomatic talks in Istanbul later on Friday as Trump weighs a possible military strike on the Islamic Republic. Traders will closely monitor the developments surrounding negotiations. Any signs of escalating tensions between the US and Iran could boost traditional safe-haven assets such as Gold in the near term.\nGold FAQs\nGold has played a key role in human\u2019s history as it has been widely used as a store of value and medium of exchange. Currently, apart from its shine and usage for jewelry, the precious metal is widely seen as a safe-haven asset, meaning that it is considered a good investment during turbulent times. Gold is also widely seen as a hedge against inflation and against depreciating currencies as it doesn\u2019t rely on any specific issuer or government.\nCentral banks are the biggest Gold holders. In their aim to support their currencies in turbulent times, central banks tend to diversify their reserves and buy Gold to improve the perceived strength of the economy and the currency. High Gold reserves can be a source of trust for a country\u2019s solvency. Central banks added 1,136 tonnes of Gold worth around $70 billion to their reserves in 2022, according to data from the World Gold Council. This is the highest yearly purchase since records began. Central banks from emerging economies such as China, India and Turkey are quickly increasing their Gold reserves.\nGold has an inverse correlation with the US Dollar and US Treasuries, which are both major reserve and safe-haven assets. When the Dollar depreciates, Gold tends to rise, enabling investors and central banks to diversify their assets in turbulent times. Gold is also inversely correlated with risk assets. A rally in the stock market tends to weaken Gold price, while sell-offs in riskier markets tend to favor the precious metal.\nThe price can move due to a wide range of factors. Geopolitical instability or fears of a deep recession can quickly make Gold price escalate due to its safe-haven status. As a yield-less asset, Gold tends to rise with lower interest rates, while higher cost of money usually weighs down on the yellow metal. Still, most moves depend on how the US Dollar (USD) behaves as the asset is priced in dollars (XAU/USD). A strong Dollar tends to keep the price of Gold controlled, whereas a weaker Dollar is likely to push Gold prices up.\nAuthor\nLallalit Srijandorn\nFXStreet\nLallalit Srijandorn is a Parisian at heart. She has lived in France since 2019 and now becomes a digital entrepreneur based in Paris and Bangkok."
+    },
+    {
+      "timestamp": "20260203T020000Z",
+      "title": "UAE Firm Bought 49 % Of Trump - Linked Crypto Startup For $500M : WSJ",
+      "source": "zerohedge.com",
+      "url": "https://www.zerohedge.com/political/uae-firm-bought-49-trump-linked-crypto-startup-500m-wsj",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T021500Z",
+      "title": "Oil steady as markets consider possible U . S .- Iran de - escalation , firm dollar",
+      "source": "marketscreener.com",
+      "url": "https://www.marketscreener.com/news/oil-steady-as-markets-consider-possible-u-s-iran-de-escalation-firm-dollar-ce7e5bd2da81f227",
+      "phase1": "YES",
+      "full_text": "Feb 3(Reuters) - Oil prices held steady on Tuesday as market participants weighed the possibility of a de-escalation in U.S.-Iran tensions, with a firmer dollar limiting the upside.\nBrent crude futures were up 6 cents, or 0.1%, at $66.36 per barrel at 0102 GMT. U.S. West Texas Intermediate crude was at $62.24 per barrel, up 0.2%.\nOil prices fell more than 4% on Monday after U.S. President Donald Trump said Iran was \"seriously talking\" with Washington, signaling a de-escalation of tensions with the OPEC member.\nIran and the U.S. are expected to resume nuclear talks on Friday in Turkey, officials from both sides told Reuters on Monday, and Trump warned that with big U.S. warships heading to Iran, bad things could happen if a deal was not reached.\nLimiting the upside, the U.S. dollar index hovered near a high of more than a week. A stronger greenback hurts demand for dollar-denominated crude from foreign buyers.\nOn the trade front, Trump on Monday unveiled a deal with India that slashes U.S. tariffs on Indian goods to 18% from 50% in exchange for India halting Russian oil purchases and lowering trade barriers.\nTrump announced the deal on social media following a call with Indian Prime Minister Narendra Modi, noting that India had agreed to buy oil from the U.S. and possibly Venezuela.\nRecently, India had started to slow its purchases from Russia. In January, they stood at around 1.2 million barrels per day (bpd) and are projected to decline to about 1 million bpd in February and 800,000 bpd in March, according to a Reuters report.\nOPEC+ agreed to keep its oil output unchanged for March, the group said on Sunday.\nThe eight members - Saudi Arabia, Russia, the United Arab Emirates, Kazakhstan, Kuwait, Iraq, Algeria and Oman - raised production quotas by about 2.9 million bpd from April through December 2025, roughly 3% of global demand.\n(Reporting by Anushree Mukherjee in Bengaluru; Editing by Thomas Derpinghaus)"
+    },
+    {
+      "timestamp": "20260203T024500Z",
+      "title": "Dollar holds gains on economic data , Fed bets ; Aussie advances before RBA",
+      "source": "economictimes.indiatimes.com",
+      "url": "https://economictimes.indiatimes.com/markets/forex/forex-news/dollar-holds-gains-on-economic-data-fed-bets-aussie-advances-before-rba/articleshow/127874085.cms",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T024500Z",
+      "title": "LIran se pr\u00e9pare \u00e0 des pourparlers sur le nucl\u00e9aire avec Washington - 03 / 02 / 2026 \u00e0 01 : 27",
+      "source": "boursorama.com",
+      "url": "https://www.boursorama.com/actualite-economique/actualites/l-iran-se-prepare-a-des-pourparlers-sur-le-nucleaire-avec-washington-7d7a69889ae6e3770a49a572ec8ac735",
+      "phase1": "YES",
+      "full_text": "Cette photo diffus\u00e9e par la pr\u00e9sidence iranienne montre le pr\u00e9sident Massoud Pezeshkian (G) accompagn\u00e9 par le petit-fils du d\u00e9funt ayatollah Hassan Khomeini (D) lors d'une visite sur la tombe de ce dernier \u00e0 T\u00e9h\u00e9ran, le 31 janvier 2026 ( Iranian Presidency / Handout )\nLe pr\u00e9sident iranien Masoud Pezeshkian a annonc\u00e9 mardi avoir mandat\u00e9 son ministre des Affaires \u00e9trang\u00e8res, Abbas Araghchi, pour des n\u00e9gociations directes avec les Etats-Unis, qui selon une source inform\u00e9e du dossier pourraient avoir lieu d\u00e8s vendredi en Turquie.\n\"J'ai demand\u00e9 \u00e0 mon ministre des Affaires \u00e9trang\u00e8res, \u00e0 conditions qu'existe un environnement appropri\u00e9, sans menaces ni demandes d\u00e9raisonnables, de mener des n\u00e9gociations \u00e9quitables (...) dans le cadre de nos int\u00e9r\u00eats nationaux\", a indiqu\u00e9 M. Pezeshkian sur X.\nSon homologue am\u00e9ricain Donald Trump s'est dit lundi confiant sur la possibilit\u00e9 d'un accord, apr\u00e8s des jours d'\u00e9changes de menaces entre les deux pays.\nUne source arabe inform\u00e9e du dossier a d\u00e9clar\u00e9 \u00e0 l'AFP que ces discussions, organis\u00e9es selon elle gr\u00e2ce \u00e0 la m\u00e9diation de l'Egypte, du Qatar, d'Oman et de la Turquie, auront sans doute lieu dans ce dernier pays le 6 f\u00e9vrier.\nLe site am\u00e9ricain Axios et l'agence iranienne Tasnim avaient d\u00e9j\u00e0 indiqu\u00e9 que M. Araghchi \u00e9tait pressenti pour repr\u00e9senter T\u00e9h\u00e9ran, face selon ces sources \u00e0 Steve Witkoff, l'\u00e9missaire de M. Trump.\nLa pression s'accentue depuis d\u00e9but janvier sur T\u00e9h\u00e9ran, apr\u00e8s la r\u00e9pression dans le sang d'un vaste mouvement de contestation de la R\u00e9publique islamique en place depuis 1979, d\u00e9clench\u00e9 au d\u00e9part par des manifestations contre le co\u00fbt de la vie.\nApr\u00e8s avoir fait planer la menace d'une intervention militaire et envoy\u00e9 une dizaine de navires dans le Golfe, le pr\u00e9sident am\u00e9ricain a dit dimanche esp\u00e9rer \"trouver un accord\" avec l'Iran.\n\"Les pays de la r\u00e9gion servent de m\u00e9diateurs pour l'\u00e9change de messages\", a expliqu\u00e9 lundi le porte-parole de la diplomatie iranienne, Esma\u00efl Bagha\u00ef, alors que l'Iran et les Etats-Unis n'ont plus de relations diplomatiques depuis quatre d\u00e9cennies.\nDes consultations ont eu lieu avec l'Egypte, l'Arabie saoudite, la Turquie et la Jordanie.\n\"Nous examinons et finalisons les d\u00e9tails de chaque \u00e9tape du processus diplomatique (...) Cela concerne la m\u00e9thode et le cadre de travail\", a ajout\u00e9 le porte-parole, lors d'une conf\u00e9rence de presse \u00e0 laquelle l'AFP a assist\u00e9.\n- \"Pas d'armes nucl\u00e9aires\" -\nLes pays occidentaux accusent l'Iran de chercher \u00e0 se doter de l'arme nucl\u00e9aire, ce que T\u00e9h\u00e9ran d\u00e9ment . Des n\u00e9gociations entre les deux pays ennemis s'\u00e9taient tenues au printemps 2025, avant la guerre de 12 jours d\u00e9clench\u00e9e en juin par Isra\u00ebl, mais avaient notamment achopp\u00e9 sur la question de l'enrichissement d'uranium.\nLes Etats-Unis demandaient que l'Iran y renonce totalement, ce \u00e0 quoi T\u00e9h\u00e9ran se refuse, d\u00e9fendant ce qu'il dit \u00eatre son droit \u00e0 disposer d'un fili\u00e8re nucl\u00e9aire civile en vertu du trait\u00e9 de non-prolif\u00e9ration nucl\u00e9aire (TNP) dont il est signataire.\nLe ministre iranien des Affaires \u00e9trang\u00e8res, Abbas Araghchi, le 18 janvier 2026 \u00e0 T\u00e9h\u00e9ran ( AFP / ATTA KENARE )\n\"Le pr\u00e9sident Trump dit +pas d'armes nucl\u00e9aires+ et nous sommes tout \u00e0 fait d'accord avec ce point. (...) Bien s\u00fbr, en contrepartie, nous attendons une lev\u00e9e des sanctions. Cet accord est donc possible. Ne parlons pas de choses impossibles\", a insist\u00e9 dimanche sur CNN M. Araghchi, dont le pays a aussi exclu de discuter de ses capacit\u00e9s de d\u00e9fense et balistiques.\nLa R\u00e9publique islamique avait conclu en 2015 un accord encadrant strictement ses activit\u00e9s nucl\u00e9aires, mais celui-ci \u00e9tait devenu caduc apr\u00e8s un retrait unilat\u00e9ral am\u00e9ricain ordonn\u00e9 par Donald Trump lors de son premier mandat en 2018.\nDans les rues de T\u00e9h\u00e9ran, Ali Hamidi, 68 ans, un retrait\u00e9, juge \"inutiles\" les \"tensions actuelles\": \"l'Am\u00e9rique devrait s'occuper de ses propres affaires\", dit-il \u00e0 l'AFP, tout en jugeant que \"les responsables iraniens sont aussi en tort de ne pas subvenir aux besoins du peuple\".\n\"Les difficult\u00e9s \u00e9conomiques sont \u00e9crasantes; je ne vois personne autour de moi satisfait\", ajoute-t-il.\n- \"On ne parle de rien\" -\nDans le pays, la r\u00e9pression se poursuit: quatre ressortissants \u00e9trangers, dont la nationalit\u00e9 n'a pas \u00e9t\u00e9 pr\u00e9cis\u00e9e, ont \u00e9t\u00e9 arr\u00eat\u00e9s pour \"participation aux \u00e9meutes\", selon la t\u00e9l\u00e9vision d'Etat lundi.\nDes Iraniennes passent devant une fresque peinte sur les murs ext\u00e9rieurs de l'ancienne ambassade am\u00e9ricaine \u00e0 T\u00e9h\u00e9ran, le 1er f\u00e9vrier 2026 ( AFP / ATTA KENARE )\nL'ONG Human Rights Activists News Agency (HRANA), \u00e9tablie aux Etats-Unis, a recens\u00e9 plus de 42.000 personnes arr\u00eat\u00e9es, et a pu confirmer 6.854 morts dans la mobilisation, en grande majorit\u00e9 des manifestants.\nMais le nombre de morts pourrait \u00eatre bien plus \u00e9lev\u00e9, avec plus de 17.000 d\u00e9c\u00e8s en cours d'examen.\nPartie en Turquie il y a trois ans, Masha, 30 ans, y confie \u00e0 l'AFP que ses proches rest\u00e9s en Iran \"ont peur de parler au t\u00e9l\u00e9phone. Ils n'osent m\u00eame pas sortir dans la rue. Pour \u00e9viter tout probl\u00e8me, on ne parle de rien. Parce qu'aux informations, on pr\u00e9vient: +Ne parlez pas, sinon il arrivera quelque chose \u00e0 votre famille+\".\nLes autorit\u00e9s iraniennes reconnaissent la mort de milliers de personnes mais affirment que la grande majorit\u00e9 sont des membres des forces de s\u00e9curit\u00e9 ou des passants tu\u00e9s par des \"terroristes\". Une op\u00e9ration orchestr\u00e9e selon T\u00e9h\u00e9ran par les Etats-Unis et Isra\u00ebl, l'ennemi jur\u00e9.\nLa pr\u00e9sidence a jusque l\u00e0 publi\u00e9 les noms de 2.986 personnes tu\u00e9es, sur une liste de 3. 117.\n17 commentaires\nVous devez \u00eatre membre pour ajouter un commentaire.\nVous \u00eates d\u00e9j\u00e0 membre ? Connectez-vous\nPas encore membre ? Devenez membre gratuitement\nSignaler le commentaire\nFermer"
+    },
+    {
+      "timestamp": "20260203T030000Z",
+      "title": "Indian Shares Set To Rally On Tariff Boost",
+      "source": "rttnews.com",
+      "url": "https://www.rttnews.com/story.aspx?Id=3616370",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T030000Z",
+      "title": "Oil Closes Sharply Lower as Iran Risk Fades",
+      "source": "rigzone.com",
+      "url": "https://www.rigzone.com/news/wire/oil_closes_sharply_lower_as_iran_risk_fades-02-feb-2026-182908-article/",
+      "phase1": "YES",
+      "full_text": "Oil Closes Sharply Lower as Iran Risk Fades\nOil fell sharply as geopolitical risk premiums faded after US President Donald Trump said Washington is talking with Iran, while a broader commodities selloff exacerbated the slide.\nWest Texas Intermediate plummeted 4.7% to settle near $62 a barrel, the biggest loss since June, while Brent futures also nosedived. Trump downplayed Iran supreme leader Ayatollah Ali Khamenei's threats of a regional war over the weekend, reiterating he's hopeful they'll make a deal.\nThe Islamic Republic's foreign ministry said it hopes diplomatic efforts will avert a war. White House envoy Steve Witkoff and Iranian Foreign Minister Abbas Araghchi are set to meet in Istanbul on Friday, Axios reported, citing two people familiar with the matter.\n\"The move lower looks more like a positioning reset than a fundamental shift,\" said Haris Khurshid, chief investment officer at Karobaar Capital LP. \"With no new supply shock, oil is giving back some risk premium as the market recalibrates after pricing in near-term disruption that just didn't materialize.\"\nCrude was also hit as commodities, particularly metals, came under intense selling pressure. Gold fell as much as 10%, and copper at one point dropped more than 5% as they continued a retreat that started on Friday.\nThe precipitous drop comes on the back of WTI's biggest monthly increase since 2023, supported by broad-based flows into commodities during the same period. The prospect of conflict with Iran and pockets of supply disruption led to a surprisingly tight first month of the year. Still, the wider backdrop is one of elevated supplies, particularly in the first half of 2026.\nAt current prices, the sharp reversal will trigger selling from trend-following commodity trading advisors, according to James Taylor, head of the quant service at consultant Energy Aspects. More selling would come if Brent falls below $65 a barrel, he added, noting that large levels of options open interest could also exacerbate price swings.\nRapid shifts in financial flows have amplified the moves in oil prices so far this year. Traders began the year with bumper short positions that have quickly reversed after weeks of geopolitical tumult.\nElsewhere, the US and India reached a trade agreement cutting tariffs on Indian goods after Prime Minister Narendra Modi agreed during a phone call to stop buying Russian oil. Shipments of Moscow's crude to Indian ports have tumbled toward the lowest in more than three years, contributing to a growing pool of unsold sanctioned barrels across the globe.\nOil Prices\n- WTI for March delivery declined 4.7% to settle at $62.14 a barrel in New York.\n- Brent for April settlement fell 4.4% to settle at $66.30 a barrel.\nWhat do you think? We\u2019d love to hear from you, join the conversation on the\nRigzone Energy Network.\nThe Rigzone Energy Network is a new social experience created for you and all energy professionals to Speak Up about our industry, share knowledge, connect with peers and industry insiders and engage in a professional community that will empower your career in energy."
+    },
+    {
+      "timestamp": "20260203T030000Z",
+      "title": "Hong Kong Shares Expected To Open To The Upside On Tuesday",
+      "source": "rttnews.com",
+      "url": "https://www.rttnews.com/3616346/hong-kong-shares-expected-to-open-to-the-upside-on-tuesday.aspx",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T030000Z",
+      "title": "Indonesia Bourse May Cut Into Monday Losses",
+      "source": "rttnews.com",
+      "url": "https://www.rttnews.com/3616347/indonesia-bourse-may-cut-into-monday-s-losses.aspx",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T034500Z",
+      "title": "From bomb threats to bargaining : Why Trump pulled back from the brink and chose talks with Iran",
+      "source": "moneycontrol.com",
+      "url": "https://www.moneycontrol.com/world/from-bomb-threats-to-bargaining-why-trump-pulled-back-from-the-brink-and-chose-talks-with-iran-explained-article-13806966.html",
+      "phase1": "SKIP",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T034500Z",
+      "title": "Silver price on February 3 gains nearly 9 % at $83 . 79 / oz , as global tensions rise",
+      "source": "moneycontrol.com",
+      "url": "https://www.moneycontrol.com/news/business/personal-finance/silver-price-on-february-3-gains-nearly-9-at-83-79oz-as-global-tensions-rise-13806970.html",
+      "phase1": "SKIP",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T034500Z",
+      "title": "Trump Says  He Doesnt Know About  The Alleged $500 Million UAE Investment In Family Crypto Firm :  My Sons Are Handling That  ",
+      "source": "benzinga.com",
+      "url": "https://www.benzinga.com/crypto/cryptocurrency/26/02/50321530/trump-says-he-doesnt-know-about-the-alleged-500-million-uae-investment-in-familys-crypto-firm-my-sons-are-handling-that",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T041500Z",
+      "title": "investingLive Asia - Pacific FX news wrap : AUD jumps on a hawkish RBA rate hike",
+      "source": "investinglive.com",
+      "url": "https://investinglive.com:443/news/investinglive-asia-pacific-fx-news-wrap-aud-jumps-on-a-hawkish-rba-rate-hike-20260203/",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T041500Z",
+      "title": "Le p\u00e9trole recule en raison dune possible d\u00e9escalade entre les \u00c9tats - Unis et lIran et dun dollar ferme",
+      "source": "zonebourse.com",
+      "url": "https://www.zonebourse.com/actualite-bourse/le-petrole-recule-en-raison-d-une-possible-deescalade-entre-les-etats-unis-et-l-iran-et-d-un-dollar-ce7e5bd2dd8df427",
+      "phase1": "YES",
+      "full_text": "Les prix du p\u00e9trole ont augment\u00e9 d'environ 2% mardi, apr\u00e8s que les \u00c9tats-Unis ont abattu un drone iranien et que des vedettes arm\u00e9es se sont approch\u00e9es d'un navire battant pavillon am\u00e9ricain dans le d\u00e9troit d'Hormuz, ravivant les craintes que les discussions visant \u00e0 d\u00e9samorcer les tensions entre Washington et T\u00e9h\u00e9ran ne soient perturb\u00e9es.\nLe Brent a progress\u00e9 de 1,03$ US, soit 1,6%, pour cl\u00f4turer \u00e0 67,33$ US le baril, tandis que le brut am\u00e9ricain West Texas Intermediate (WTI) a gagn\u00e9 1,07$ US, soit 1,7%, pour finir \u00e0 63,21$ US.\nLundi, les deux r\u00e9f\u00e9rences du brut avaient chut\u00e9 de plus de 4% apr\u00e8s que le pr\u00e9sident am\u00e9ricain Donald Trump eut d\u00e9clar\u00e9 que l'Iran \u00e9tait \u00ab s\u00e9rieusement en discussion \u00bb avec Washington.\nMais mardi, l'arm\u00e9e am\u00e9ricaine a abattu un drone iranien qui s'\u00e9tait \u00ab approch\u00e9 de mani\u00e8re agressive \u00bb du porte-avions Abraham Lincoln en mer d'Arabie.\nDans le d\u00e9troit d'Hormuz, entre le golfe Persique et le golfe d'Oman, un groupe de vedettes iraniennes arm\u00e9es s'est approch\u00e9 d'un p\u00e9trolier battant pavillon am\u00e9ricain au nord d'Oman, ont indiqu\u00e9 mardi des sources maritimes et une soci\u00e9t\u00e9 de conseil en s\u00e9curit\u00e9.\nLes membres de l'OPEP, dont l'Arabie saoudite, l'Iran, les \u00c9mirats arabes unis, le Kowe\u00eft et l'Irak, exportent la majeure partie de leur brut via ce d\u00e9troit, principalement vers l'Asie.\n\u00ab L'effort diplomatique pour \u00e9viter une frappe militaire am\u00e9ricaine contre l'Iran est en train de s'effriter... il semblerait que certains \u00e9l\u00e9ments en Iran tentent de saboter ce processus \u00e0 l'heure actuelle \u00bb, a estim\u00e9 Bob Yawger, directeur des march\u00e9s \u00e9nerg\u00e9tiques chez Mizuho, dans une note.\nL'Iran \u00e9tait le troisi\u00e8me producteur de brut de l'OPEP en 2025, selon les donn\u00e9es de l'U.S. Energy Information Administration.\nPuissance r\u00e9gionale, les \u00c9mirats arabes unis ont exhort\u00e9 mardi l'Iran et les \u00c9tats-Unis \u00e0 profiter de la reprise des discussions nucl\u00e9aires cette semaine pour r\u00e9soudre une impasse ayant men\u00e9 \u00e0 des menaces mutuelles de frappes a\u00e9riennes.\nL'Iran, de son c\u00f4t\u00e9, exige que les pourparlers avec les \u00c9tats-Unis cette semaine se tiennent \u00e0 Oman et non en Turquie, et que leur port\u00e9e soit limit\u00e9e \u00e0 des discussions bilat\u00e9rales sur le nucl\u00e9aire uniquement, jetant le doute sur la tenue de la r\u00e9union comme pr\u00e9vu.\nLes prix du p\u00e9trole avaient poursuivi leur hausse apr\u00e8s la cl\u00f4ture, le Brent d\u00e9passant 68$ et le WTI franchissant les 64$ le baril, mais ont l\u00e9g\u00e8rement reflu\u00e9 apr\u00e8s que Trump a d\u00e9clar\u00e9 que les \u00c9tats-Unis \u00e9taient toujours en n\u00e9gociation avec l'Iran.\nLe Brent \u00e9tait derni\u00e8rement \u00e9chang\u00e9 \u00e0 68$ le baril, et le WTI \u00e0 63,91$.\nLes cours du brut ont \u00e9galement \u00e9t\u00e9 soutenus par des estimations faisant \u00e9tat d'une forte baisse des stocks de brut am\u00e9ricains la semaine derni\u00e8re. Les stocks de brut du premier pays producteur et consommateur auraient chut\u00e9 de plus de 11 millions de barils la semaine derni\u00e8re, selon des sources citant les chiffres de l'American Petroleum Institute. [API/S]\nRUSSIE ET INDE\nPlus t\u00f4t mardi, les prix du p\u00e9trole avaient \u00e9t\u00e9 soutenus par la conclusion d'un accord commercial entre les \u00c9tats-Unis et l'Inde, faisant esp\u00e9rer une hausse de la demande \u00e9nerg\u00e9tique mondiale, alors que la poursuite des attaques russes contre l'Ukraine faisait craindre que le p\u00e9trole de Moscou reste sanctionn\u00e9 plus longtemps.\nLa d\u00e9cision de Trump de r\u00e9duire les droits de douane sur les importations indiennes a soutenu le moral des exportateurs et des responsables politiques, m\u00eame si les d\u00e9tails de l'accord demeurent rares.\nTrump a annonc\u00e9 lundi un accord commercial avec l'Inde visant \u00e0 ramener les droits de douane \u00e0 18% contre 50% auparavant, en \u00e9change de l'arr\u00eat par New Delhi des achats de p\u00e9trole russe et de la baisse des barri\u00e8res commerciales. L'Inde est l'une des plus grandes \u00e9conomies et importatrices de p\u00e9trole au monde.\nSi l'accord peut para\u00eetre positif pour le p\u00e9trole, \u00ab l'impact \u00e0 court terme se traduira vraisemblablement par une nouvelle ristourne sur les barils russes, ce qui ne devrait pas affecter la sortie des cargaisons occultes vers le march\u00e9 mondial \u00bb, estime la soci\u00e9t\u00e9 de conseil \u00e9nerg\u00e9tique Ritterbusch and Associates.\nEn Ukraine, le pr\u00e9sident Volodymyr Zelenskiy a accus\u00e9 mardi la Russie de profiter d'une tr\u00eave \u00e9nerg\u00e9tique soutenue par les \u00c9tats-Unis pour stocker des munitions, et de les utiliser pour attaquer l'Ukraine la veille de pourparlers de paix.\nL'attaque nocturne a priv\u00e9 de chauffage plusieurs villes, dont la capitale Kiev, alors que les n\u00e9gociateurs ukrainiens se rendaient \u00e0 Abou Dhabi pour un second round de discussions trilat\u00e9rales sous l'\u00e9gide des \u00c9tats-Unis pr\u00e9vu mercredi et jeudi.\nTout retard dans la fin de la guerre en Ukraine devrait maintenir les prix du p\u00e9trole \u00e0 un niveau \u00e9lev\u00e9 en maintenant en place les sanctions limitant les exportations de brut russe, cons\u00e9cutives \u00e0 l'invasion de 2022 par Moscou.\nLa Russie \u00e9tait le troisi\u00e8me producteur mondial de brut derri\u00e8re les \u00c9tats-Unis et l'Arabie saoudite en 2025, selon les donn\u00e9es de l'EIA."
+    },
+    {
+      "timestamp": "20260203T041500Z",
+      "title": "Oil falls on possible US - Iran de - escalation , firm dollar",
+      "source": "marketscreener.com",
+      "url": "https://www.marketscreener.com/news/oil-falls-on-possible-us-iran-de-escalation-firm-dollar-ce7e5bd2dd8df427",
+      "phase1": "YES",
+      "full_text": "NEW YORK, Feb 3 (Reuters) - Oil prices climbed about 2% on Tuesday after the U.S. shot down an Iranian drone and armed boats approached a U.S.-flagged vessel in the Strait of Hormuz, stoking concerns that talks aimed at de-escalating U.S.-Iran tensions could be disrupted.\nBrent futures rose $1.03, or 1.6%, to settle at $67.33 per barrel, while U.S. West Texas Intermediate crude rose $1.07, or 1.7%, to settle at $63.21.\nOn Monday, both crude benchmarks had dropped more than 4% after U.S. President Donald Trump said Iran was \"seriously talking\" with Washington.\nBut on Tuesday, the U.S. military shot down an Iranian drone that \"aggressively\" approached the Abraham Lincoln aircraft carrier in the Arabian Sea.\nIn the Strait of Hormuz between the Persian Gulf and the Gulf of Oman, a group of Iranian gunboats approached a U.S.-flagged tanker north of Oman, maritime sources and a security consultancy said on Tuesday.\nOPEC members Saudi Arabia, Iran, the United Arab Emirates, Kuwait and Iraq export most of their crude via the strait, mainly to Asia.\n\"The diplomatic effort to avoid a U.S. military strike in Iran is unravelling... it would appear (elements in Iran) are trying their best to sabotage the process right now,\" Bob Yawger, director of energy futures at Mizuho, said in a note.\nIran was the third-biggest OPEC crude producer in 2025, according to U.S. Energy Information Administration data.\nRegional power United Arab Emirates urged Iran and the U.S. on Tuesday to use the resumption of nuclear talks this week to resolve a standoff that has led to mutual threats of air strikes.\nIran, meanwhile, is demanding that talks with the U.S. this week be held in Oman not Turkey, and that the scope be narrowed to two-way talks on nuclear issues only, casting doubt on whether the meeting will go ahead as planned.\nOil prices had climbed further post-settlement, with Brent surpassing $68 and WTI hitting over $64 per barrel, but pared slightly after Trump said the U.S. was still negotiating with Iran.\nBrent was last trading at $68 per barrel, and WTI at $63.91.\nOil prices also gained some support from estimates that U.S. crude stockpiles declined sharply last week. Crude inventories in the top producing and consuming nation fell over 11 million barrels last week, sources said, citing American Petroleum Institute figures. [API/S]\nRUSSIA AND INDIA\nEarlier on Tuesday, oil prices had gained support as a trade agreement between the U.S. and India raised hopes that global energy demand could increase, while Russia's continued attacks on Ukraine boosted worries Moscow's oil would remain sanctioned for longer.\nTrump's move to slash tariffs on Indian imports lifted sentiment among exporters and policymakers even as details of the agreement remained scant.\nTrump announced a trade deal with India on Monday to cut tariffs to 18% from 50% in exchange for New Delhi halting Russian oil purchases and lowering trade barriers. India is one of the world's biggest economies and oil importers.\nWhile the deal might appear bullish for oil, \"the near-term impact will likely be on a further discount on Russian crude barrels that is unlikely to affect exit of shadow cargoes into the world market,\" energy advisory firm Ritterbusch and Associates said.\nIn Ukraine, President Volodymyr Zelenskiy accused Russia on Tuesday of exploiting a U.S.-backed energy truce to stockpile munitions, and using them to attack Ukraine a day before peace talks.\nThe overnight attack knocked out heating in cities including the capital Kyiv as Ukrainian negotiators headed to Abu Dhabi for a second round of U.S.-brokered trilateral talks set for Wednesday and Thursday.\nAny delay to ending the war in Ukraine would likely keep oil prices elevated by leaving sanctions limiting Russia's oil exports in place following Moscow's 2022 invasion.\nRussia was the world's third-biggest crude producer behind the U.S. and Saudi Arabia in 2025, according to EIA data.\n(Reporting by Scott DiSavino in New York, Robert Harvey and Stephanie Kelly in London, Anushree Mukherjee in Bengaluru and Trixie Yap in Singapore; Editing by Nia Williams, Nick Zieminski and Deepa Babington)\nBy Scott DiSavino"
+    },
+    {
+      "timestamp": "20260203T041500Z",
+      "title": "Le dollar conserve ses gains port\u00e9 par les donn\u00e9es \u00e9conomiques et les anticipations sur la Fed ; le dollar australien bondit apr\u00e8s la hausse de la RBA",
+      "source": "zonebourse.com",
+      "url": "https://www.zonebourse.com/actualite-bourse/le-dollar-conserve-ses-gains-porte-par-les-donnees-economiques-et-les-anticipations-sur-la-fed-le-ce7e5bd2dd8df623",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T041500Z",
+      "title": "Dollar holds gains on economic data , Fed bets ; Aussie jumps on RBA hike",
+      "source": "marketscreener.com",
+      "url": "https://www.marketscreener.com/news/dollar-holds-gains-on-economic-data-fed-bets-aussie-jumps-on-rba-hike-ce7e5bd2dd8df623",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T041500Z",
+      "title": "Oil price pulls back as OPEC+ preserves production , US signals proIran talks",
+      "source": "proactiveinvestors.com",
+      "url": "https://www.proactiveinvestors.com/companies/news/1086669/oil-price-pulls-back-as-opec-preserves-production-us-signals-proiran-talks-1086669.html",
+      "phase1": "YES",
+      "full_text": "Oil price pulls back as OPEC+ preserves production, US signals proIran talks\nPublished: 10:17 02 Feb 2026 EST\nCrude oil prices fell after OPEC+ again decided not to raise output in the first quarter of 2026, a move that has helped underpin crude oil prices in recent weeks.\nAt a meeting on 1 February, the eight member states with voluntary production cuts reiterated their decision to keep quotas unchanged. The meeting lasted just six minutes, signalling broad agreement among participants.\nTemporary supply disruptions in the US and Kazakhstan have also tightened the market, with cold weather in the US hitting production by as much as two million barrels per day before easing to around 500,000 barrels per day, and a power outage and problems at the Caspian pipeline consortium disrupting Kazakhstan, although production is being restored.\nVenezuelan exports were also materially lower in January. At the same time, a weaker US dollar and geopolitical tensions in the Middle East have supported prices.\nThese factors helped Brent crude trade above US$70 a barrel in January, a four-month high.\nBut UBS strategists say much of the support is temporary. \u201cAn easing of those disruptions is our base case,\u201d they wrote.\nIf US and Kazakh supply comes back online and logistics improve, the market should be better supplied in the coming weeks, and prices could drift lower from current levels.\nOPEC+ has emphasised that it will \u201ccontinue to closely monitor and assess market conditions\u201d and stands ready to adjust output if fundamentals require it. For now, that means keeping a close eye on supply data out of North America and Central Asia as well as broader demand trends.\nOther analysts pointed to geopolitical factors as putting pressure on crude prices.\nBrent crude futures were down by over 5% early on Monday, with Deutsche Bank macro strategists saying that they were \"being impacted by the commodities deleveraging and news that Washington is in talks with Iran\".\nNikos Tzabouras, senior market analyst at Tradu, said oil prices fell after President Trump signalled talks with Iran, \"easing geopolitical tensions and supply disruption risks\".\n\"The decline could extend as de-escalation shifts focus back to unfavourable fundamentals, with supply rising faster than demand amid global economic headwinds.\"\nTzabouras said a rebound in the US dollar also weighed on oil prices following the nomination of a less dovish Fed chair pick of Kevin Warsh.\n\"However, oil could find support as supply risks are likely to persist. President Trump has threatened Iran with military action and deployed ships to the region, while Khamenei warned of a regional war.\""
+    },
+    {
+      "timestamp": "20260203T041500Z",
+      "title": "Asian stocks up ; Aussie rallies after rate hike",
+      "source": "marketscreener.com",
+      "url": "https://www.marketscreener.com/news/asian-stocks-up-aussie-rallies-after-rate-hike-ce7e5bd2dd8df321",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T050000Z",
+      "title": "Oil Prices Down 6 % as US - Iran De - escalation Hopes Cool Market Heat \u2026 End of the Line for Bulls ? ",
+      "source": "actionforex.com",
+      "url": "https://www.actionforex.com/contributors/fundamental-analysis/627968-oil-prices-down-6-as-us-iran-de-escalation-hopes-cool-market-heat-end-of-the-line-for-bulls/",
+      "phase1": "YES",
+      "full_text": "Oil prices have slipped 6% today in what is a poor start to the month. This comes after an impressive rally in the month of January.\nWTI finished January with gains of around 14% but that turned sour this morning with a 5% plunge in the Asian session. This sharp reversal appears to be driven by a combination of diplomatic shifts in the Middle East and strategic supply decisions by major producers.\nThe primary drivers behind the drop\nThe most immediate catalyst for the price drop is the sudden cooling of tensions between the United States and Iran. Just a week ago, markets were pricing in a significant risk of military conflict after US President Donald Trump hinted at potential strikes.\nHowever, remarks made by the President on Sunday expressing hope for a new deal with Iran with a meeting scheduled for Friday this week which has dramatically pivoted investor sentiment.\nThe prospect of a diplomatic breakthrough suggests a potential easing of sanctions. If an agreement is reached, Iran, a major OPEC member, could legally return significant volumes of crude to the global market.\nThis \u201cpeace premium\u201d being removed from the price of oil has led to a rapid sell-off, as traders re calibrate for a more well-supplied market than previously feared.\nOPEC + maintains the status quo\nAdding to the downward pressure, OPEC+ concluded its latest meeting with a decision to keep production levels unchanged for March. While the group\u2019s \u201ccautious approach\u201d is intended to maintain market stability, it failed to provide the bullish spark some investors were hoping for. By reaffirming a freeze on planned production increases, OPEC+ signaled that they anticipate seasonally weaker demand in the coming months.\nTaking a look at US drilling activity, it appears to be in a slump because low prices are making new investments less attractive for energy companies. Recent data from Baker Hughes shows that the number of active oil rigs held steady at 411 last week, which is significantly lower than this time last year.\nWhile there was a tiny increase in gas drilling, the overall number of active rigs remains 36 below last year\u2019s levels. Because experts expect there to be more oil on the market than people actually need this year (a \u201csurplus\u201d), US oil production growth is expected to stay limited throughout 2026.\nForward Outlook \u2013 bulls or bears to prevail?\nThe future of oil prices currently hangs on two major variables: the reality of US-Iran diplomacy and the strength of the US dollar.\n- Geopolitical Volatility: While de-escalation is the current theme, financial institutions like DBS and Deutsche Bank warn that the situation remains fragile. Should diplomatic efforts fail or military rhetoric resurface, a renewed rally beyond the $70/barrel mark cannot be ruled out.\n- The \u201cWarsh Effect\u201d: The US dollar has been gaining strength following the nomination of Kevin Warsh as the next Federal Reserve Chair. Because oil is priced in dollars, a stronger greenback makes the commodity more expensive for international buyers, creating a natural headwind for price growth.\nIn the short term, markets are looking toward upcoming US inventory data from the API and EIA to gauge domestic demand.\nWhile the current trend is bearish, the structural risks in the Middle East suggest that the \u201cpause\u201d in the oil rally may be temporary rather than a permanent reversal.\nFor now, investors are moving with caution, balancing the hope of a diplomatic solution against the ever-present threat of supply disruptions. Keep an eye on developments between Iran-US when they meet on Friday in Turkey.\nTechnical Analysis \u2013 WTI\nFrom a technical analysis standpoint, WTI drop is flirting with a close below the 200-day MA.\nThis would not be the first time that WTI has broken above the 200-day MA and reversed the move in a few days.\nThe last time WTI traded above the 200-day MA was in July 2025 when the price only managed to hold above the 200-day MA for two days before slipping back below for a prolonged period.\nAll is not lost for bulls though as the 100-day MA may provide the support that bulls are looking for as it rests on the psychological 60.00 handle, making this area a key confluence zone.\nThe period-14 RSI is just shy of the neutral 50 level and if it holds above this is a positive signs for bulls as it is seen as a sign of bullish momentum.\nWTI Crude Oil Daily Chart, February 2, 2026\nSource: TradingView (click to enlarge)\nKey levels to keep an eye on\nSupport:\n- 60.00\n- 58.50\n- 57.00\nResistance:\n- 62.32\n- 64.73\n- 66.15"
+    },
+    {
+      "timestamp": "20260203T061500Z",
+      "title": "Les actions asiatiques sont en hausse ; le dollar australien se redresse apr\u00e8s la hausse des taux dint\u00e9r\u00eat - 03 / 02 / 2026 \u00e0 04 : 56",
+      "source": "boursorama.com",
+      "url": "https://www.boursorama.com/bourse/actualites/les-actions-asiatiques-sont-en-hausse-le-dollar-australien-se-redresse-apres-la-hausse-des-taux-d-interet-df5545a8dd3dc289c008a29272be3a77",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T063000Z",
+      "title": "US - Iran Nuclear Deal In 2026 ? Here What The Crypto Punters Are Betting On Even As Trump Remains Tight - Lipped",
+      "source": "benzinga.com",
+      "url": "https://www.benzinga.com/news/events/26/02/50321905/us-iran-nuclear-deal-in-2026-heres-what-the-crypto-punters-are-betting-on-even-as-trump-remains-tight-lipped",
+      "phase1": "YES",
+      "full_text": "Odds of a nuclear deal between the U.S. and Iran rose on prediction markets Monday amid renewed optimism from Tehran.\nWill Iran And The US Finally Agree?\nThe chances of the two countries reaching an agreement this year climbed to 57% on Polymarket before easing to 53%. The odds were only 30% a week ago.\nOver $23,000 has been wagered on the outcome. The market will resolve to \u201cYes\u201d if an official agreement over Iranian nuclear research or weapon development, defined as a publicly announced mutual agreement, is reached between the U.S. and Iran before Dec. 31.\nNotably, the odds of a U.S. military strike on Iran fell sharply across various time horizons.\nPolymarket, based on Polygon (CRYPTO: POL), allows users to buy \"Yes\" and \"No\" shares in USDC (CRYPTO: USDC). The shares representing the correct outcome are paid out $1 USDC each upon market resolution.\nThe Geopolitical Implications Of US-Iran Talks\nThe jump in odds comes after Iran's Foreign Minister Abbas Araghchi expressed optimism about securing a nuclear deal, following what he described as \u201cfruitful\u201d talks with the U.S. through friendly countries.\nAraghchi said a quick, achievable deal to prevent nuclear weapons is possible, but only if the U.S. lifts sanctions and recognizes Iran\u2019s right to peaceful nuclear enrichment.\nPresident Donald Trump refused to divulge much on the matter. \u201cWe have talks going on with Iran. We\u2019ll see how it all works out,\u201d Trump told reporters at White House.\nThe U.S. entered the Iran-Israel armed conflict last year by bombing three crucial Iranian nuclear sites, which Trump termed a \u201cspectacular military success.\u201d\nPhoto Courtesy: danielo on Shutterstock.com\n\u00a9 2026 Benzinga.com. Benzinga does not provide investment advice. All rights reserved.\nTo add Benzinga News as your preferred source on Google, click here."
+    },
+    {
+      "timestamp": "20260203T063000Z",
+      "title": "Indonesia Bourse May Cut Into Monday Losses",
+      "source": "rttnews.com",
+      "url": "https://www.rttnews.com/story.aspx?Id=3616347",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T064500Z",
+      "title": "Surowcowa hossa w Portfelu Gwiazd . Technologiczny zwyci\u0119zca stycznia",
+      "source": "bankier.pl",
+      "url": "https://www.bankier.pl/wiadomosc/Surowcowa-hossa-w-Portfelu-Gwiazd-Technologiczny-zwyciezca-stycznia-9078013.html",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T064500Z",
+      "title": "Dow Jones Top Energy Headlines at 12 AM ET : Oil Futures Fall on Easing Tensions But Risks Remain | Google ... ",
+      "source": "morningstar.com",
+      "url": "https://www.morningstar.com/news/dow-jones/2026020349/dow-jones-top-energy-headlines-at-12-am-et-oil-futures-fall-on-easing-tensions-but-risks-remain-google",
+      "phase1": "SKIP",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T064500Z",
+      "title": "Dow Jones Top Markets Headlines at 1 AM ET : Precious Metals , Asian Equities Broadly Higher | Australia ... ",
+      "source": "morningstar.com",
+      "url": "https://www.morningstar.com/news/dow-jones/20260203441/dow-jones-top-markets-headlines-at-1-am-et-precious-metals-asian-equities-broadly-higher-australias",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T064500Z",
+      "title": "Wall Street cl\u00f4ture en hausse , port\u00e9e par les valeurs li\u00e9es \u00e0 lIA",
+      "source": "zonebourse.com",
+      "url": "https://www.zonebourse.com/actualite-bourse/wall-street-cloture-en-hausse-portee-par-les-valeurs-liees-a-l-ia-ce7e5bd2dc89ff25",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T070000Z",
+      "title": "LEurope vue dans le vert avec le rebond des m\u00e9taux pr\u00e9cieux",
+      "source": "zonebourse.com",
+      "url": "https://www.zonebourse.com/actualite-bourse/l-europe-vue-dans-le-vert-avec-le-rebond-des-metaux-precieux-ce7e5bd2dc8bf32c",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T080000Z",
+      "title": "LEurope vue dans le vert avec le rebond des m\u00e9taux pr\u00e9cieux ( actualis\u00e9 ) ",
+      "source": "zonebourse.com",
+      "url": "https://www.zonebourse.com/actualite-bourse/l-europe-vue-dans-le-vert-avec-le-rebond-des-metaux-precieux-actualise-ce7e5bd2de88f12d",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T081500Z",
+      "title": "Oil slips amid possible thaw in US - Iran tension",
+      "source": "businessday.co.za",
+      "url": "https://www.businessday.co.za/markets/2026-02-03-oil-slips-amid-possible-thaw-in-us-iran-tension/",
+      "phase1": "YES",
+      "full_text": "By Anushree Mukherjee and Trixie Yap\nBengaluru/Singapore \u2014 Oil prices fell on Tuesday, easing for a second day, as traders weighed the possibility of a de-escalation in US-Iran tension, while a firmer dollar placed greater downside pressure on prices.\nBrent crude futures fell 39c, or 0.5%, at $65.91 a barrel at 3.30am GMT. US West Texas Intermediate (WTI) crude was at $61.83 a barrel, down 31c, or 0.5%.\nOil prices fell more than 4% on Monday after US President Donald Trump said Iran was \u201cseriously talking\u201d with Washington, signalling a de-escalation of tension with the Opec member.\nIran and the US are expected to resume nuclear talks on Friday in Turkey, officials from both sides told Reuters on Monday, and Trump warned that with big US warships heading to Iran, bad things could happen if a deal was not reached.\n\u201cThe sharp up-and-down moves in oil prices over the last few sessions look more like sentiment-driven trading rather than any major shift in fundamentals,\u201d said Phillip Nova senior market analyst Priyanka Sachdeva. \u201cAfter last week\u2019s rally, markets quickly gave back gains as broader risk assets also turned volatile.\n\u201cWith no fresh escalation on the geopolitical front and macro data still mixed, oil clearly failed to hold onto gains.\u201d\nWeighing on prices further, the dollar index hovered near a high of more than a week. A stronger greenback hurts demand for dollar-denominated crude from foreign buyers.\n\u201cThe continued recovery in the US dollar yesterday, following President Trump\u2019s nomination of Kevin Warsh as the next Federal Reserve chair, also exerted downward pressure on oil prices,\u201d ING analysts said in a note.\nOn the trade front, Trump on Monday unveiled a deal with India that slashes US tariffs on Indian goods to 18% from 50% in exchange for India halting Russian oil purchases and lowering trade barriers.\n\u201cOvernight, the US and India agreed on a trade deal ... if we do see this happen, it will only lead to a further increase in the amount of Russian oil floating at sea,\u201d the ING analysts said.\nTrump announced the deal on social media following a call with Indian Prime Minister Narendra Modi, noting that India had agreed to buy oil from the US and possibly Venezuela.\nSome analysts said they were expecting volatile price movements this month.\n\u201cLooking ahead into February, prices are likely to remain choppy and range-bound ... [they] are expected to stay highly reactive to headlines and macro cues rather than a decisive trend, with risk skewed to the downside,\u201d said Sachdeva.\nWould you like to comment on this article?\nSign up (it's quick and free) or sign in now.\nPlease read our Comment Policy before commenting."
+    },
+    {
+      "timestamp": "20260203T094500Z",
+      "title": "Le Moyen - Orient na pas besoin dune guerre Iran - \u00c9tats - Unis , affirme le conseiller diplomatique du pr\u00e9sident des \u00c9mirats arabes unis",
+      "source": "zonebourse.com",
+      "url": "https://www.zonebourse.com/actualite-bourse/le-moyen-orient-n-a-pas-besoin-d-une-guerre-iran-etats-unis-affirme-le-conseiller-diplomatique-du-p-ce7e5bd2de81f02d",
+      "phase1": "YES",
+      "full_text": "L'Iran et les \u00c9tats-Unis reprendront les discussions nucl\u00e9aires vendredi en Turquie, ont indiqu\u00e9 lundi \u00e0 Reuters des responsables iraniens et am\u00e9ricains. Le pr\u00e9sident am\u00e9ricain Donald Trump a averti que d'importants navires de guerre am\u00e9ricains faisaient route vers l'Iran et que de \"mauvaises choses\" pourraient probablement se produire si aucun accord n'\u00e9tait trouv\u00e9.\nLes \u00c9mirats arabes unis, puissance arabe influente du Golfe, ont estim\u00e9 qu'une solution \u00e0 long terme \u00e9tait n\u00e9cessaire.\n\u00ab Je pense que la r\u00e9gion a travers\u00e9 diverses confrontations calamiteuses. Je ne pense pas que nous ayons besoin d'une nouvelle, mais j'aimerais voir des n\u00e9gociations directes irano-am\u00e9ricaines aboutissant \u00e0 des ententes afin que nous n'ayons pas ces probl\u00e8mes tous les deux jours \u00bb, a d\u00e9clar\u00e9 Anwar Gargash, conseiller du pr\u00e9sident des EAU.\nLe sp\u00e9cial envoy\u00e9 am\u00e9ricain Steve Witkoff et le ministre iranien des Affaires \u00e9trang\u00e8res Abbas Araqchi se rencontreront \u00e0 Istanbul dans le but de relancer la diplomatie autour du long diff\u00e9rend sur le programme nucl\u00e9aire iranien et de dissiper les craintes d'une nouvelle guerre r\u00e9gionale. Un diplomate r\u00e9gional a indiqu\u00e9 que des repr\u00e9sentants de pays comme l'Arabie saoudite et l'\u00c9gypte participeraient \u00e9galement.\nLe renforcement naval am\u00e9ricain pr\u00e8s de l'Iran fait suite \u00e0 une r\u00e9pression violente contre des manifestations antigouvernementales le mois dernier, les troubles int\u00e9rieurs les plus meurtriers en Iran depuis la r\u00e9volution de 1979.\nTrump, qui s'est abstenu de mettre \u00e0 ex\u00e9cution ses menaces d'intervenir lors de la r\u00e9pression, a depuis exig\u00e9 que T\u00e9h\u00e9ran fasse des concessions nucl\u00e9aires et envoy\u00e9 une flottille au large de ses c\u00f4tes. Il a d\u00e9clar\u00e9 la semaine derni\u00e8re que l'Iran \u00e9tait \"s\u00e9rieusement en train de discuter\", tandis que le principal responsable de la s\u00e9curit\u00e9 iranienne, Ali Larijani, a affirm\u00e9 que des arrangements pour des n\u00e9gociations \u00e9taient en cours.\nLes EAU, carrefour r\u00e9gional du commerce et des affaires, sont sous les projecteurs depuis d\u00e9cembre, lorsque les tensions ont augment\u00e9 avec l'Arabie saoudite au sujet de l'\u00e9volution de la situation au Y\u00e9men.\nLe retrait des forces \u00e9miraties du Y\u00e9men apr\u00e8s une frappe a\u00e9rienne saoudienne n'a pas apais\u00e9 les tensions entre ces deux puissances p\u00e9troli\u00e8res du Golfe, aux divergences de longue date.\nDepuis, les EAU font l'objet de vives critiques sur les r\u00e9seaux sociaux en raison de leur soutien aux s\u00e9paratistes au Y\u00e9men et de leur pr\u00e9sum\u00e9 appui \u00e0 un groupe paramilitaire accus\u00e9 d'atrocit\u00e9s dans la guerre d\u00e9vastatrice contre l'arm\u00e9e soudanaise.\nGargash a rejet\u00e9 ces critiques, estimant qu'il fallait distinguer le bruit de la r\u00e9alit\u00e9.\n\u00ab Je lisais un message indiquant que nous recevions 45 000 tweets hostiles chaque jour sur la question soudanaise et sur notre position au Soudan. Et soudainement, le Y\u00e9men \u00e9tait devenu un sujet, et le nombre de bots soudanais \u00e9tait pass\u00e9 de 45 000 \u00e0 3 000 par jour, donc tout le groupe \u00e9tait pass\u00e9 \u00e0 une autre bataille \u00bb, a-t-il d\u00e9clar\u00e9."
+    },
+    {
+      "timestamp": "20260203T114500Z",
+      "title": "Amid soaring gold , silver rates today , ICICI Pru AMC Sankaran Naren thinks differently ; here why",
+      "source": "livemint.com",
+      "url": "https://www.livemint.com/market/stock-market-news/amid-soaring-gold-silver-rates-today-icici-pru-amcs-sankaran-naren-thinks-differently-heres-why-11770116452618.html",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T114500Z",
+      "title": "Historic Record for the Mib ; Banks Lead the Rally",
+      "source": "marketscreener.com",
+      "url": "https://www.marketscreener.com/news/historic-record-for-the-mib-banks-lead-the-rally-ce7e5bd2d180f12c",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T114500Z",
+      "title": "Record historique pour le Mib ; les valeurs bancaires m\u00e8nent la hausse",
+      "source": "zonebourse.com",
+      "url": "https://www.zonebourse.com/actualite-bourse/record-historique-pour-le-mib-les-valeurs-bancaires-menent-la-hausse-ce7e5bd2d180f12c",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T114500Z",
+      "title": "Oil Extends Losses For Second Day As US - Iran Tensions Ease",
+      "source": "rttnews.com",
+      "url": "https://www.rttnews.com/3616535/oil-extends-losses-for-second-day-as-us-iran-tensions-ease.aspx",
+      "phase1": "YES",
+      "full_text": "Oil extended losses on Tuesday after falling more than 4 percent the previous day amid signs of de-escalation in U.S.-Iran tensions. A firmer dollar also put downward pressure on prices.\nBenchmark Brent crude futures fell 1.2 percent to $65.53 a barrel while WTI crude futures were down a little over 1 percent at $61.50.\nIran and the United States are set to resume indirect nuclear negotiations on Friday in Istanbul, according to officials from both sides.\nTrump has presented a stark choice regarding the OPEC member, stating that reaching a deal would be positive, but failure could lead to \"bad things.\"\nTalks with the U.S. should be pursued to secure Iran's national interests as long as \"threats and unreasonable expectations\" are avoided, Iranian President Masoud Pezeshkian posted on X today.\nIn an interview broadcast on Monday, Iran's Foreign Minister Abbas Araghchi told CNN that he believed a nuclear deal with the U.S. was achievable.\nA stronger dollar also added to the pressure on oil prices after data showed U.S. factory activity grew for the first time in a year in January.\nThe U.S. dollar index hovered near its highest in more than a week as Trump unveiled a trade deal with India that slashes U.S. tariffs on Indian goods to 18 percent from 50 percent in exchange for India halting Russian oil purchases and lowering trade barriers.\nMeanwhile, the U.S. House of Representatives is preparing for a crucial vote on a Senate compromise to end the partial government shutdown.\nPresident Trump has implored lawmakers to quicky end the shutdown, promising to \"work in good faith\" on raised issues and concerns.\nFor comments and feedback contact: editorial@rttnews.com\nFebruary 07, 2026 02:38 ET The week saw central bank action from major economies as policymakers decided on interest rate settings. Private sector survey data for the manufacturing and services sectors were in focus in the U.S. along with some data on the labor market. In Europe, central bank decisions from the euro area and the U.K. gained attention. In the Asia-Pacific, the main news came from the Reserve Bank of Australia that announced its latest interest rate decision."
+    },
+    {
+      "timestamp": "20260203T114500Z",
+      "title": "Near - zero to 50 % to 18 %: The tariff shock reshaping India - US trade",
+      "source": "livemint.com",
+      "url": "https://www.livemint.com/economy/nearzero-to-50-to-18-the-tariff-shock-reshaping-india-us-trade-11770103315044.html",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T114500Z",
+      "title": "Indian Shares Rally After US Trade Deal",
+      "source": "rttnews.com",
+      "url": "https://www.rttnews.com/3616553/indian-shares-rally-after-us-trade-deal.aspx",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T114500Z",
+      "title": "Sensex jumps over 2 , 000 points , investors earn over \u20b912 lakh crore 10 key highlights from Indian stock market today",
+      "source": "livemint.com",
+      "url": "https://www.livemint.com/market/sensex-jumps-over-2-000-points-investors-earn-over-rs-12-lakh-crore-10-key-highlights-from-indian-stock-market-today-11770112329110.html",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T121500Z",
+      "title": "Accords et retards",
+      "source": "zonebourse.com",
+      "url": "https://www.zonebourse.com/actualite-bourse/accords-et-retards-ce7e5bd2d08cf22d",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T141500Z",
+      "title": "Links 2 / 3 / 2026 | naked capitalism",
+      "source": "nakedcapitalism.com",
+      "url": "https://www.nakedcapitalism.com/2026/02/links-2-3-2026.html",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T141500Z",
+      "title": "Chinese Oil Firms Turn To Iran To Replace Venezuelan Crude",
+      "source": "zerohedge.com",
+      "url": "https://www.zerohedge.com/energy/chinese-oil-firms-turn-iran-replace-venezuelan-crude",
+      "phase1": "YES",
+      "full_text": "Chinese Oil Firms Turn To Iran To Replace Venezuelan Crude\nChina's teapot refiners are buying discounted Iranian crude to replace the loss of supplies from Venezuela following Washington's violent takeover of the South American nation's oil, Reuters reported Monday.\n\"The drawdown of Iranian oil held in storage is making up for the drop in Venezuelan supply to the world's largest crude importer,\" the news agency wrote, citing two people with knowledge of the matter.\nVenezuelan oil shipments to China have fallen drastically since US President Donald Trump imposed a blockade on Venezuelan oil tankers attempting to leave the country in December.\nOn January 3rd, US forces bombed the Venezuelan capital, abducted Venezuelan President Nicholas Maduro, and took control of the country's oil. Washington announced it was placing Venezuela's oil revenues in accounts in Qatar under White House control.\nTrump has allowed global trading firms Vitol and Trafigura to sell up to 50 million barrels of Venezuelan oil. However, Beijing-owned firm PetroChina has halted its oil purchases from Caracas amid the uncertainty.\nBeijing's independent refiners have responded by stepping up purchases of Iranian heavy crude stored in bonded storage tanks in China and on ships at steep discounts, the sources told Reuters.\nAdditional Chinese purchases of Iranian Heavy and Pars crude grades are expected in February and March, one of the two sources added. The refiners can purchase Iranian Heavy crude at discounts of about $12 per barrel, as Iran is faced with few willing buyers due to US sanctions.\nRussian Urals trade at a discount of $11 to $12 per barrel, also due to US sanctions. With Washington's permission, Vitol is offering Chinese buyers discounts of roughly $5 per barrel for Venezuelan crude.\nChina's imports of Venezuelan crude averaged 394,000 barrels per day (bpd), around four percent of Beijing's total seaborne crude imports, before the US takeover.\nYears ago China imported almost no oil from Venezuela due to a lack of heavy crude refining facilities. Since the establishment of a strategic partnership between the two nations, China invested tens of billions to strengthen cooperation. Specifically, in 2023, the\u2026 pic.twitter.com/O8s7p2rxrq\n\u2014 Bin Xie (@bxieus) January 7, 2026\nOn Saturday, Trump said India will begin buying Venezuelan oil, helping to replace the loss of Russian supplies amid US tariff threats. \u201cWe've already made that deal, the concept of the deal,\u201d Trump told reporters while traveling aboard Air Force One.\nLast year, after Trump imposed a 25 percent tariff on countries buying Venezuelan oil, New Delhi stopped buying oil from Caracas. India and China have been forced to shift their purchases of oil in recent years due to aggressive sanctions on Russia, Venezuela, and Iran."
+    },
+    {
+      "timestamp": "20260203T141500Z",
+      "title": "Futures Rise As Tech Gains On Palantir  Cosmic Reward  ",
+      "source": "zerohedge.com",
+      "url": "https://www.zerohedge.com/markets/futures-rise-tech-gains-palantirs-cosmic-reward",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T141500Z",
+      "title": "A Month Of Shock And Awe : These Were The Best And Worst Performing Assets In January",
+      "source": "zerohedge.com",
+      "url": "https://www.zerohedge.com/markets/month-shock-and-awe-these-were-best-and-worst-performing-assets-january",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T141500Z",
+      "title": "NQ outperforms following Palantir earnings ; Precious metals rebound with gold nearing USD 5k / oz - Newsquawk US Market Open",
+      "source": "zerohedge.com",
+      "url": "https://www.zerohedge.com/markets/nq-outperforms-following-palantir-earnings-precious-metals-rebound-gold-nearing-usd-5koz",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T141500Z",
+      "title": "Iran - US tensions : IndiGo cancels flights to and from these cities till 28 February - check details",
+      "source": "livemint.com",
+      "url": "https://www.livemint.com/companies/news/iranus-tensions-indigo-cancels-flights-to-and-from-these-cities-till-28-february-check-details-11770114623732.html",
+      "phase1": "YES",
+      "full_text": "IndiGo on Tuesday issued a travel advisory, warning passengers of cancellations on certain routes, stating that its flight schedules are being adjusted in view of recent developments around Iran and the country's tensions with the United States.\nThese disruptions come amid heightened tensions between Iran and the United States, with President Donald Trump earlier announcing that the US was moving naval warships closer to the region.\nHowever, the situation may ease in the coming days, as Iranian President Masoud Pezeshkian on Tuesday signalled a conditional willingness to engage in negotiations with Washington, pointing to a potential diplomatic opening.\n\u201cIn view of the developing situation around Iran, we have made additional adjustments to our flight schedule to ensure a safe and seamless experience for our customers and crew,\u201d IndiGo said on X (formerly Twitter).\nThe country's largest carrier by market capitalisation has announced changes to several international flights due to the evolving security situation in certain regions.\nThe airline has advised passengers to check their flight status regularly and stay in touch with customer support for the latest updates. The flyers can also explore alternative options, including future flights or a full refund, on IndiGo's official website.\n\u201cAs the situation continues to evolve, our plans remain under regular review. Any further updates or changes will be shared through our communication channels,\u201d the airline said in the X post.\nPresident Pezeshkian said in a formal statement that he had acted in response to requests from \u201cfriendly governments in the region\u201d urging Tehran to reply to a proposal by the US president for negotiations.\nHe further added he had instructed Iran\u2019s foreign minister to explore the groundwork for talks, provided key conditions were met, particularly stressing that the discussions would be held within the framework of national interests.\nThe development comes amid rising regional tensions, after Washington dispatched an aircraft carrier strike group to the Middle East following Iran\u2019s deadly response to anti-government protests that peaked last month.\nUS President Donald Trump has said he is still hopeful that Washington and Iran can reach an agreement, saying the US could \u201cwork something out\u201d with Tehran. At the same time, he warned that \u201cbad things would happen\u201d if no agreement is reached."
+    },
+    {
+      "timestamp": "20260203T141500Z",
+      "title": "Cuban Missile Crisis 2 . 0 ? ... May Involve Russian Drones With Crosshairs On US Homeland",
+      "source": "zerohedge.com",
+      "url": "https://www.zerohedge.com/military/cuban-missile-crisis-20-may-involve-russian-drones-crosshairs-us-homeland",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T141500Z",
+      "title": "Mexico Warns of  Far - Reaching Humanitarian Crisis  in Cuba , As US Seeks to Starve Island Nation Into Final Submission",
+      "source": "nakedcapitalism.com",
+      "url": "https://www.nakedcapitalism.com/2026/02/mexico-warns-of-far-reaching-humanitarian-crisis-in-cuba-as-trump-tries-to-starve-island-nation-into-submission.html",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T141500Z",
+      "title": "Modi Appears to Cave to Trump , Agrees to Buy Venezuela Oil in Place of Russia , End Tariffs on US Agriculture",
+      "source": "nakedcapitalism.com",
+      "url": "https://www.nakedcapitalism.com/2026/02/modi-appears-to-cave-to-trump-agrees-to-buy-venezuela-oil-in-place-of-russias-end-tariffs-on-us-agriculture.html",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T164500Z",
+      "title": "Pakistan : le Baloutchistan en \u00e9tat dalerte apr\u00e8s des attaques ayant fait pr\u00e8s de 200 morts - 01 / 02 / 2026 \u00e0 14 : 15",
+      "source": "boursorama.com",
+      "url": "https://www.boursorama.com/actualite-economique/actualites/pakistan-le-baloutchistan-en-etat-d-alerte-apres-des-attaques-ayant-fait-pres-de-200-morts-e2a327e1d4d0187c58062346e4f2fb6a",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T173000Z",
+      "title": "Oil Tanker Rates Soar Amid Shipping Shortages and Middle East Tensions",
+      "source": "oilprice.com",
+      "url": "https://oilprice.com/Latest-Energy-News/World-News/Oil-Tanker-Rates-Soar-Amid-Shipping-Shortages-and-Middle-East-Tensions.html",
+      "phase1": "YES",
+      "full_text": "Kazakhstan and Uzbekistan joined Trump\u2019s\u2026\nDespite $17 billion in pledged\u2026\nOil tanker rates on the key Middle East-to-China route surged this week to the highest level since November as vessel supply is tightening and persistent tensions around Iran put shippers on alert.\nThe daily rate for an oil tanker to ship crude from the Middle East to China jumped to as high as $129,000 on Monday, up by 5.1% on the day, to the highest level since November 2025, per data from the Baltic Exchange cited by Bloomberg.\nRates had already soared by over 60% in a single day on Friday amid the U.S.-Iran tensions, which sent Brent Crude prices to $70 per barrel last week when U.S. President Donald Trump warned Iran that a \u201cmassive armada\u201d of U.S. Navy ships is headed to the Persian Gulf.\nThe Iran-U.S. war premium put shipowners and charterers on alert.\nAlthough tensions eased this weekend after President Trump said that he believes Iran is \u201cseriously\u201d talking with the U.S., tanker rates haven\u2019t slumped.\nSupply of vessels for near-term charters remains constrained, pushing earnings for available tankers higher, according to analysts.\n\u201cWith fewer vessels available for immediate hire, the remaining independent shipowners have gained significant pricing power,\u201d Wanying Zhang, freight analyst with the ship-tracking platform Vortexa, told Bloomberg.\nThe fading war premium, for now, could push tanker rates lower later this week. But the vessel supply tightness is still there, supporting higher freight rates.\nOil tanker rates have jumped so far this year, picking up where they left off in 2025 - multi-year highs amid growing supply, longer routes, and disruptions due to sanctions and altered shipping lanes.\nAt the end of 2025, the global supertanker market tightened as crude supply from the OPEC+ group and the Americas rose, and vessels were making increasingly longer trips.\nShipbrokers and analysts expect oil freight rates to remain elevated this year as new geopolitical developments are upending crude flows and tanker markets.\nBy Charles Kennedy for Oilprice.com\nMore Top Reads From Oilprice.com"
+    },
+    {
+      "timestamp": "20260203T173000Z",
+      "title": "Indian Oil Buyers Reassess Russian Crude Under New U . S . Deal",
+      "source": "oilprice.com",
+      "url": "https://oilprice.com/Energy/Crude-Oil/Indian-Oil-Buyers-Reassess-Russian-Crude-Under-New-US-Deal.html",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T173000Z",
+      "title": "A Few More Losers Than Winners in Paris Today",
+      "source": "marketscreener.com",
+      "url": "https://www.marketscreener.com/news/a-few-more-losers-than-winners-in-paris-today-ce7e5bd3da8ef726",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T174500Z",
+      "title": "LEurope finit sans direction , la  tech  et la publicit\u00e9 d\u00e9gringolent",
+      "source": "zonebourse.com",
+      "url": "https://www.zonebourse.com/actualite-bourse/l-europe-finit-sans-direction-la-tech-et-la-publicite-degringolent-ce7e5bd3dd89f32d",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T193000Z",
+      "title": "US - India trade deal : Rice output to prop up export dreams",
+      "source": "economictimes.indiatimes.com",
+      "url": "https://economictimes.indiatimes.com/news/economy/foreign-trade/us-india-trade-deal-rice-output-to-prop-up-export-dreams/articleshow/127893093.cms",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T193000Z",
+      "title": "Silver surges as buyers return amid pullback , macro support",
+      "source": "fxstreet.com",
+      "url": "https://www.fxstreet.com/news/silver-rebounds-sharply-as-buyers-capitalize-on-recent-pullback-202602031830",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T200000Z",
+      "title": "Stocks Set to Open Lower as Risk Sentiment Weakens , U . S . Jobs Data and Earnings in Focus",
+      "source": "finance.yahoo.com",
+      "url": "https://finance.yahoo.com/news/stocks-set-open-lower-risk-112954891.html",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T210000Z",
+      "title": "F - 35 w akcji na Bliskim Wschodzie . Ira\u0144ski Shahed zestrzelony w pobli\u017cu lotniskowca united states ",
+      "source": "bankier.pl",
+      "url": "https://www.bankier.pl/wiadomosc/F-35-w-akcji-na-Bliskim-Wschodzie-Iranski-Shahed-zestrzelony-w-poblizu-lotniskowca-USA-9078702.html",
+      "phase1": "YES",
+      "full_text": "Rzeczniczka prasowa Bia\u0142ego Domu Karoline Leavitt potwierdzi\u0142a w wywiadzie dla telewizji Fox News, \u017ce we wtorek si\u0142y zbrojne Stan\u00f3w Zjednoczonych zestrzeli\u0142y nad Morzem Arabskim ira\u0144skiego drona. Podkre\u015bli\u0142a zarazem, \u017ce jeszcze w tym tygodniu Waszyngton mo\u017ce wznowi\u0107 rokowania z Teheranem.\nDo incydentu dosz\u0142o, kiedy dron Shahed-139 \u2013 w ocenie ameryka\u0144skich wojskowych \u2013 \u201eagresywnie\u201d zbli\u017cy\u0142 si\u0119 do b\u0119d\u0105cego na neutralnych wodach Morza Arabskiego lotniskowca USS Abraham Lincoln. Do zestrzelenia bezza\u0142ogowca u\u017cyto my\u015bliwca F-35, kt\u00f3ry stacjonuje na lotniskowcu \u2013 poinformowa\u0142 rzecznik Centralnego Dow\u00f3dztwa Si\u0142 Zbrojnych USA, kapitan marynarki wojennej Tim Hawkins.\nPodkre\u015bli\u0142, \u017ce decyzja o zestrzeleniu drona by\u0142a podyktowana \u201esamoobron\u0105 oraz ochron\u0105 lotniskowca i personelu na jego pok\u0142adzie\u201d. Doda\u0142 te\u017c, \u017ce w akcji nie ucierpia\u0142 \u017caden ameryka\u0144ski \u017co\u0142nierz, a ameryka\u0144ski sprz\u0119t nie uleg\u0142 uszkodzeniu.\nIra\u0144skie media: Dron przeprowadzi\u0142 misj\u0119 obserwacyjn\u0105 na wodach mi\u0119dzynarodowych Morza Arabskiego\nIra\u0144ska agencja Fars poinformowa\u0142a we wtorek, \u017ce \u201eira\u0144ski dron przeprowadzi\u0142 misj\u0119 obserwacyjn\u0105 na wodach mi\u0119dzynarodowych\u201d. Inna ira\u0144ska agencji - Tasnim poda\u0142a, \u017ce \u201ez nieznanych przyczyn utracono \u0142\u0105czno\u015b\u0107 z bezza\u0142ogowcem\u201d. Wcze\u015bniej armia USA przekaza\u0142a, \u017ce my\u015bliwiec F-35 zestrzeli\u0142 ira\u0144skiego drona nad Morzem Arabskim.\nObie ira\u0144skie agencje s\u0105 powi\u0105zane z Korpusem Stra\u017cnik\u00f3w Rewolucji Islamskiej; nieoficjalnie Fars uchodzi za medialne rami\u0119 wywiadu tej instytucji, a Tasnim ma opini\u0119 instytucji propagandowej, kt\u00f3rej g\u0142\u00f3wnym zadaniem jest walka z zagranicznymi przekazami na temat Iranu.\nW wieczornych komunikatach Fars przekaza\u0142a lakoniczny komunikat, \u017ce \u201eira\u0144ski dron przeprowadzi\u0142 misj\u0119 obserwacyjn\u0105 na wodach mi\u0119dzynarodowych\u201d, nie u\u015bci\u015blaj\u0105c zakresu dzia\u0142a\u0144 ani ich efektu. Tasnim poda\u0142a natomiast, \u017ce \u201ez nieznanych przyczyn utracono \u0142\u0105czno\u015b\u0107 z bezza\u0142ogowcem\u201d. W \u017cadnym z komunikat\u00f3w nie wyja\u015bniono, czy chodzi o tego samego drona.\nPr\u00f3ba przej\u0119cia tankowca w Cie\u015bninie Ormuz\nAgencja Reutera przypomnia\u0142a, \u017ce tego samego dnia dosz\u0142o do jeszcze jednego ameryka\u0144sko-ira\u0144skiego incydentu z udzia\u0142em si\u0142 zbrojnych jednej ze stron. Jak przekaza\u0142a ameryka\u0144ska armia, kilka godzin wcze\u015bniej na wodach Cie\u015bniny Ormuz si\u0142y ira\u0144skiego Korpusu Stra\u017cnik\u00f3w Rewolucji Islamskiej mia\u0142y zaatakowa\u0107 p\u0142ywaj\u0105cy pod bander\u0105 USA tankowiec z ameryka\u0144sk\u0105 za\u0142og\u0105 na pok\u0142adzie.\n\u201eDwie \u0142odzie Korpusu Stra\u017cnik\u00f3w Rewolucji Islamskiej oraz ira\u0144ski dron Mohajer zbli\u017ca\u0142y si\u0119 z du\u017c\u0105 pr\u0119dko\u015bci\u0105 do tankowca Stena Imperative i grozi\u0142y wej\u015bciem na pok\u0142ad oraz przej\u0119ciem tankowca\u201d \u2013 powiedzia\u0142 Hawkins, cytowany przez Reutersa.\nAmeryka\u0144ska firma odpowiedzialna za bezpiecze\u0144stwo jednostki podkre\u015bli\u0142a, \u017ce w chwili zdarzenia tankowiec pozostawa\u0142 poza wodami terytorialnymi Iranu, a towarzyszy\u0142 mu okr\u0119t wojenny USA. Incydent mia\u0142 miejsce na wodach Cie\u015bniny Ormuz, kt\u00f3ra \u0142\u0105czy Morze Arabskie z Zatok\u0105 Persk\u0105.\nPrzeczytaj tak\u017ce\n\u201eOkr\u0119ty p\u0142yn\u0105, ale rozmawiamy\u201d\nR\u00f3wnie\u017c we wtorek ameryka\u0144skie w\u0142adze potwierdzi\u0142y, \u017ce jeszcze w tym tygodniu mo\u017ce doj\u015b\u0107 do wznowienia negocjacji z Teheranem na temat uregulowania dwustronnych stosunk\u00f3w. Prezydent Iranu Masud Pezeszkian powiedzia\u0142 we wtorek, \u017ce poleci\u0142 szefowi dyplomacji Abbasowi Aragcziemu, aby do\u0142o\u017cy\u0142 stara\u0144, by negocjacje z USA by\u0142y \u201euczciwe i sprawiedliwe\u201d.\nCho\u0107 prezydent USA Donald Trump wielokrotnie grozi\u0142 Iranowi interwencj\u0105 w reakcji na krwawe st\u0142umienie protest\u00f3w spo\u0142ecznych, to w ostatnich dniach deklarowa\u0142 r\u00f3wnie\u017c, \u017ce jest sk\u0142onny podj\u0105\u0107 rozmowy na temat ira\u0144skiego programu nuklearnego. W poniedzia\u0142ek zasugerowa\u0142, \u017ce rozmowy z Iranem trwaj\u0105 mimo du\u017cego napi\u0119cia. \u2013 W tej chwili do Iranu p\u0142yn\u0105 nasze wielkie okr\u0119ty i prowadzimy rozmowy z Iranem. Zobaczymy, jak to si\u0119 potoczy \u2013 powiedzia\u0142 Trump.(PAP)\npiu/ mal/"
+    },
+    {
+      "timestamp": "20260203T210000Z",
+      "title": "Iran says it will turn regional shipping routes unsafe after any strike | Hellenic Shipping News Worldwide",
+      "source": "hellenicshippingnews.com",
+      "url": "https://www.hellenicshippingnews.com/iran-says-it-will-turn-regional-shipping-routes-unsafe-after-any-strike/",
+      "phase1": "YES",
+      "full_text": "Iran says it will turn regional shipping routes unsafe after any strike\nIran warned on Sunday it could retaliate against any US strike on its vital infrastructure by disrupting key international waterways and targeting American forces across the region, according to remarks by a lawmaker carried by Iranian media.\n\u201cIf Americans want to threaten our vital infrastructure like the energy sector or our export terminals, they themselves know that certainly the Strait of Hormuz and Bab al-Mandab will be closed and the Suez Canal will definitely become insecure,\u201d Salar Velayatmadar, a member of parliament\u2019s national security and foreign policy committee, told Didban Iran.\nVelayatmadar said Iran would not be forced to retreat from its positions by military threats. \u201cToday our finger is on the trigger and if the enemy makes a mistake, it will see that the blow it receives will be much more severe than before,\u201d he said.\nHe warned that US bases in countries around Iran would be targeted if Washington \u201cputs a foot wrong,\u201d saying the entire region would be drawn into the conflict.\nVelayatmadar dismissed President Donald Trump\u2019s recent statements about sending aircraft carriers and \u201cvery big, very powerful ships\u201d toward Iran as bluster, arguing that moving warships closer to Iran indicated the United States did not intend to fight because such vessels would become clear targets.\nVelayatmadar added that he saw no sign of war unless the United States committed what he called a \u201csuicidal\u201d act, warning that any attack would backfire and trigger global consequences given Iran\u2019s control over strategic waterways.\nSource: Iran International"
+    },
+    {
+      "timestamp": "20260203T210000Z",
+      "title": "Oman zamiast Stambu\u0142u . Teheran chce rozmawia\u0107 z united states w cztery oczy i bez s\u0105siad\u00f3w",
+      "source": "bankier.pl",
+      "url": "https://www.bankier.pl/wiadomosc/Oman-zamiast-Stambulu-Teheran-chce-rozmawiac-z-USA-w-cztery-oczy-i-bez-sasiadow-9078695.html",
+      "phase1": "YES",
+      "full_text": "Iran chce, by planowane na pi\u0105tek rozmowy ze Stanami Zjednoczonymi zosta\u0142y przeniesione ze Stambu\u0142u do Omanu i by toczy\u0142y si\u0119 tylko w formacie dwustronnym \u2013 poinformowa\u0142 we wtorek ameryka\u0144ski portal Axios, powo\u0142uj\u0105c si\u0119 na dwa \u017ar\u00f3d\u0142a maj\u0105ce wiedz\u0119 na ten temat.\nTeheran zabiega te\u017c o to, by rozmowy dotyczy\u0142y tylko kwestii nuklearnych i by nie uczestniczyli w nich bezpo\u015brednio przedstawiciele innych pa\u0144stw regionu \u2013 poda\u0142a agencja Reutera, powo\u0142uj\u0105c si\u0119 na bliskowschodniego dyplomat\u0119.\nTylko atom i bez \u015bwiadk\u00f3w\nPrezydent Iranu Masud Pezeszkian powiedzia\u0142 we wtorek, \u017ce poleci\u0142 szefowi ira\u0144skiej dyplomacji Abbasowi Aragcziemu do\u0142o\u017cy\u0107 stara\u0144, aby negocjacje z USA by\u0142y \u201euczciwe i sprawiedliwe\u201d.\nAgencja AP podkre\u015bli\u0142a, \u017ce wypowied\u017a Pezeszkiana \u015bwiadczy o tym, i\u017c uzyska\u0142 on od najwy\u017cszego przyw\u00f3dcy ajatollaha Alego Chameneia zgod\u0119 z rozmowy, kt\u00f3re ten wcze\u015bniej odrzuca\u0142.\nAxios w ubieg\u0142ym tygodniu zwr\u00f3ci\u0142 uwag\u0119, \u017ce r\u00f3\u017cnice mi\u0119dzy Waszyngtonem i Teheranem mog\u0105 by\u0107 nie do pokonania, bo o ile administracja Trumpa domaga si\u0119, by ewentualne porozumienie dotyczy\u0142o szerszego zakresu tematycznego, to re\u017cim ajatollah\u00f3w zgadza si\u0119 tylko na rozmowy nuklearne.\nOkr\u0119ty i trzy twarde warunki Trumpa\nCho\u0107 prezydent USA Donald Trump wielokrotnie grozi\u0142 Iranowi interwencj\u0105 w reakcji na krwawe st\u0142umienie protest\u00f3w spo\u0142ecznych przez ira\u0144ski re\u017cim, to w ostatnich dniach deklarowa\u0142 r\u00f3wnie\u017c, \u017ce jest sk\u0142onny podj\u0105\u0107 rozmowy na temat ira\u0144skiego programu nuklearnego. W poniedzia\u0142ek zasugerowa\u0142, \u017ce rozmowy z Iranem trwaj\u0105 mimo du\u017cego napi\u0119cia. - W tej chwili do Iranu p\u0142yn\u0105 nasze wielkie okr\u0119ty i prowadzimy rozmowy z Iranem. Zobaczymy, jak to si\u0119 potoczy \u2013 powiedzia\u0142.\nTrump mia\u0142 za\u017c\u0105da\u0107 spe\u0142nienia przez Iran trzech warunk\u00f3w wst\u0119pnych: zaprzestania wzbogacania uranu, ograniczenia programu rakiet balistycznych oraz zako\u0144czenia wsparcia dla regionalnych podmiot\u00f3w, takich jak terrorystyczne organizacje Hamas, Hezbollah czy Huti. Iran od dawna odrzuca\u0142 wszystkie trzy \u017c\u0105dania jako niedopuszczalne naruszenia jego suwerenno\u015bci.\nUSA w ostatnich tygodniach wzmocni\u0142y obecno\u015b\u0107 militarn\u0105 na Bliskim Wschodzie. Iran zapowiedzia\u0142, \u017ce w przypadku agresji odpowie atakiem na ameryka\u0144skie instalacje wojskowe w regionie. (PAP)\nmw/ kar/"
+    },
+    {
+      "timestamp": "20260203T221500Z",
+      "title": "Washington abat un drone iranien mais les discussions restent programm\u00e9es - 03 / 02 / 2026 \u00e0 20 : 51",
+      "source": "boursorama.com",
+      "url": "https://www.boursorama.com/actualite-economique/actualites/washington-abat-un-drone-iranien-mais-les-discussions-restent-programmees-d3444d92df1c0069d516dc9be2ea0e9c",
+      "phase1": "YES",
+      "full_text": "L'ancienne ambassade am\u00e9ricaine \u00e0 T\u00e9h\u00e9ran, commun\u00e9ment appel\u00e9 le \"nid d'espions\", le 1er f\u00e9vrier 2026 ( AFP / ATTA KENARE )\nUn avion furtif am\u00e9ricain a abattu mardi un drone iranien qui s'\u00e9tait approch\u00e9 d'un porte-avions am\u00e9ricain dans la mer d'Arabie, mais les discussions pr\u00e9vues en fin de semaine entre les deux pays sont maintenues selon la Maison Blanche.\nDepuis janvier et le vaste mouvement de contestation r\u00e9prim\u00e9 dans le sang par le pouvoir iranien, Washington et T\u00e9h\u00e9ran alternent menaces et ouvertures au dialogue, alors que des pays m\u00e9diateurs s'efforcent de r\u00e9duire les tensions.\nDans ce contexte f\u00e9brile, deux incidents se sont produits mardi dans les eaux du Moyen-Orient.\nUn avion de combat du porte-avions Abraham Lincoln a abattu le drone \"en \u00e9tat de l\u00e9gitime d\u00e9fense et pour prot\u00e9ger le porte-avions et le personnel \u00e0 bord\", a expliqu\u00e9 le porte-parole du commandement am\u00e9ricain pour la r\u00e9gion (Centcom), le capitaine Tim Hawkins.\nCe navire a r\u00e9cemment \u00e9t\u00e9 d\u00e9ploy\u00e9 dans le Golfe par le pr\u00e9sident Donald Trump, d\u00e9cid\u00e9 \u00e0 accentuer la pression sur l'ennemi iranien au moment o\u00f9 celui-ci \u00e9touffait les manifestations et \u00e0 qui il veut arracher un accord sur le nucl\u00e9aire.\nLe Centcom a \u00e9galement confirm\u00e9 que deux bateaux arm\u00e9s iraniens et un drone s'\u00e9taient approch\u00e9s \"\u00e0 grande vitesse\" d'un p\u00e9trolier sous pavillon am\u00e9ricain, le Stena Imperative, et \"mena\u00e7aient de l'aborder et le saisir\".\nUn destroyer am\u00e9ricain a port\u00e9 assistance au p\u00e9trolier, avec le soutien de l'arm\u00e9e de l'air, et l'a escort\u00e9 hors de danger, selon la m\u00eame source.\nL'agence de presse iranienne Fars avait auparavant indiqu\u00e9 qu'un navire, entr\u00e9 \"ill\u00e9galement\" dans le d\u00e9troit d'Ormuz et \"dans les eaux territoriales iraniennes\", avait \u00e9t\u00e9 \"averti\" et avait \"imm\u00e9diatement quitt\u00e9 la zone.\nT\u00e9h\u00e9ran a r\u00e9cemment menac\u00e9 de bloquer le d\u00e9troit, passage cl\u00e9 pour le transport mondial de p\u00e9trole et de gaz naturel liqu\u00e9fi\u00e9, en cas d'attaque am\u00e9ricaine.\n- Efforts \"tr\u00e8s intenses\" -\nMalgr\u00e9 ces incidents, les pourparlers \"restent programm\u00e9s pour l'instant\", a d\u00e9clar\u00e9 la porte-parole de la Maison Blanche Karoline Leavitt, alors que ces derniers jours, les deux pays ont sembl\u00e9 vouloir donner une chance \u00e0 la diplomatie.\nLe pr\u00e9sident iranien, Massoud Pezeshkian, a annonc\u00e9 mardi avoir mandat\u00e9 son ministre des Affaires \u00e9trang\u00e8res Abbas Araghchi pour des n\u00e9gociations directes avec les Etats-Unis, rejetant n\u00e9anmoins toutes \"demandes d\u00e9raisonnables\".\nUne source arabe proche du dossier a indiqu\u00e9 \u00e0 l'AFP que ces discussions auraient \"probablement\" lieu vendredi, en Turquie.\nLe minist\u00e8re iranien des Affaires \u00e9trang\u00e8res a toutefois soulign\u00e9 que si des pourparlers \u00e9taient bien pr\u00e9vus \"dans les prochains jours\", la date et le lieu pr\u00e9cis faisaient toujours l'objet de \"consultations\".\n\"Tant la Turquie que Oman et d'autres pays de la r\u00e9gion se sont montr\u00e9s dispos\u00e9s \u00e0 accueillir les pourparlers\", a relev\u00e9 le minist\u00e8re, relay\u00e9 par l'agence de presse iranienne Tasnim.\nSi le dialogue aboutit, \"super\". Mais dans le cas contraire, \"de mauvaises choses se produiraient probablement\", a pr\u00e9venu le pr\u00e9sident Trump.\nAbbas Araghchi a multipli\u00e9 mardi les consultations avec ses homologues de la r\u00e9gion. Il s'est entretenu successivement avec ses homologues du Qatar, de la Turquie, d'Oman et du Kowe\u00eft.\nLes efforts diplomatiques se \"poursuivent de mani\u00e8re tr\u00e8s intense\", a affirm\u00e9 le Qatar.\nQuant \u00e0 l'\u00e9missaire am\u00e9ricain Steve Witkoff, il a rencontr\u00e9 \u00e0 J\u00e9rusalem le Premier ministre isra\u00e9lien Benjamin Netanyahu qui l'a mis en garde, l'Iran ayant selon lui \"prouv\u00e9 de mani\u00e8re r\u00e9p\u00e9t\u00e9e que l'on ne pouvait pas faire confiance \u00e0 ses promesses\".\n- Nucl\u00e9aire -\nLes tensions entre Washington et T\u00e9h\u00e9ran se sont accentu\u00e9es apr\u00e8s le mouvement de contestation iranien, d\u00e9clench\u00e9 par des manifestations contre le co\u00fbt de la vie.\nLe ministre iranien des Affaires \u00e9trang\u00e8res, Abbas Araghchi, le 18 janvier 2026 \u00e0 T\u00e9h\u00e9ran ( AFP / ATTA KENARE )\nL'ONG Human Rights Activists News Agency (HRANA), \u00e9tablie aux Etats-Unis, a recens\u00e9 plus de 50.000 personnes arr\u00eat\u00e9es et a pu confirmer 6.872 morts, en grande majorit\u00e9 des manifestants.\nMais le nombre de morts pourrait \u00eatre bien plus \u00e9lev\u00e9, avec plus de 17.000 d\u00e9c\u00e8s en cours d'examen.\nMardi, Paris a estim\u00e9 que les discussions irano-am\u00e9ricaines devraient viser \u00e0 mettre fin \u00e0 la \"r\u00e9pression\" de T\u00e9h\u00e9ran, \"avant de \"traiter des questions du nucl\u00e9aire, des missiles, du soutien aux organisations terroristes\".\nLes pays occidentaux accusent l'Iran de chercher \u00e0 se doter de l'arme nucl\u00e9aire, ce que T\u00e9h\u00e9ran d\u00e9ment.\nDes n\u00e9gociations avec les Etats-Unis s'\u00e9taient tenues au printemps 2025, avant la guerre de 12 jours d\u00e9clench\u00e9e en juin par Isra\u00ebl, mais avaient notamment achopp\u00e9 sur la question de l'enrichissement d'uranium.\nAbbas Araghchi a indiqu\u00e9 dimanche sur CNN qu'un accord \u00e9tait \"possible\" mais dit attendre une lev\u00e9e des sanctions contre son pays, qui a exclu de discuter de ses capacit\u00e9s de d\u00e9fense et balistiques.\n1 commentaire\nVous devez \u00eatre membre pour ajouter un commentaire.\nVous \u00eates d\u00e9j\u00e0 membre ? Connectez-vous\nPas encore membre ? Devenez membre gratuitement\nSignaler le commentaire\nFermer"
+    },
+    {
+      "timestamp": "20260203T221500Z",
+      "title": "Les prix du p\u00e9trole grimpent de 2 % apr\u00e8s que les \u00c9tats - Unis ont abattu un drone iranien , sur fond dinqui\u00e9tudes concernant des bateaux arm\u00e9s - 03 / 02 / 2026 \u00e0 21 : 38",
+      "source": "boursorama.com",
+      "url": "https://www.boursorama.com/bourse/actualites/les-prix-du-petrole-grimpent-de-2-apres-que-les-etats-unis-ont-abattu-un-drone-iranien-sur-fond-d-inquietudes-concernant-des-bateaux-armes-827e4702ecfbfba4abefea048b0b6c34",
+      "phase1": "SKIP",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T221500Z",
+      "title": "US Crude Oil Inventories Take Big Hits In Storm Aftermath",
+      "source": "oilprice.com",
+      "url": "https://oilprice.com/Latest-Energy-News/World-News/US-Crude-Oil-Inventories-Take-Big-Hits-In-Storm-Aftermath.html",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T230000Z",
+      "title": "Canadian Stocks Move Higher , Led By Surges In Mining , Energy Shares",
+      "source": "rttnews.com",
+      "url": "https://www.rttnews.com/3616873/canadian-stocks-move-higher-led-by-surges-in-mining-energy-shares.aspx",
+      "phase1": "NO",
+      "full_text": null
+    },
+    {
+      "timestamp": "20260203T234500Z",
+      "title": "Bangkok Post - Are the Iranians pretending to have nukes ? ",
+      "source": "bangkokpost.com",
+      "url": "https://www.bangkokpost.com/opinion/opinion/3189759/are-the-iranians-pretending-to-have-nukes",
+      "phase1": "YES",
+      "full_text": "The Iranian regime is brutal, fanatical and corrupt. It has just committed the mass murder of its own citizens in the city streets and in their own homes. But the story we are told about Iran's pursuit of nuclear weapons is very misleading.\nLet's begin with the two President George Bushes. Just 12 years after George Senior defeated Iraq in 1991 and forced dictator Saddam Hussein to destroy all his \"weapons of mass destruction\" (just poison gas, really), George W Bush Jr invaded Iraq again in 2003. That time round, it was completely the wrong country, but he did it anyway.\nThe main reason Bush Junior believed that Saddam was lying and really had nuclear weapons was that the Iraqi dictator obstructed the work of UN inspectors. He caused enough delay to rouse everybody's suspicions about Iraqi nuclear weapons. Why did he do that?\nProbably because he lived in a very dangerous neighbourhood: Israel, Egypt, Syria, Iran and Saudi Arabia were all his enemies. He wanted them to fear that he really did have weapons of mass destruction in order to deter them from attacking Iraq. It might even prevent the United States from having another go.\nIt was a dangerous game, bound to raise suspicions about Iraqi nukes everywhere, and in the end, it did kill Saddam. After the 2003 invasion, American experts spent a year searching Iraq for evidence of Saddam's alleged \"weapons of mass destruction\" and found nothing, but they hanged him anyway.\nWhy bring all this up 20 years later? Because a similar kind of logic may apply to Iran's \"nuclear weapons programme\".\nIran was not part of the Arab-Israeli confrontation under the Shah's regime, and the nuclear power programme he launched in the early 1970s did not seek to create nuclear weapons. Israel's nuclear weapons, acquired in the 1960s, did not worry the Shah either.\nThe 1979 revolution in Iran brought to power an Islamist regime that saw a nuclear-armed Israel as a potential threat. However, the new Supreme Leader, Ayatollah Khomeini, declared the development and use of weapons of mass destruction forbidden on moral and religious grounds -- and he meant it.\nThis was not to Iran's advantage. In the 1980s, Iraq invaded Iran with American backing in order to destroy the new and destabilising regime of the ayatollahs. Saddam Hussein's troops were flooding the battlefields with poison gas, while the Iranian defenders were banned from replying in kind.\nThe episode shows how seriously Iran's Islamic rulers take their own religious decrees. Abstaining from chemical \"weapons of mass destruction\" probably caused the deaths of tens of thousands of Iranian soldiers. We too should take the ayatollah's decrees seriously, because that would open the way to an alternative explanation of Iranian behaviour.\nThere is no evidence that Iran even considered nuclear weapons until Pakistan and India tested their first nuclear weapons in 1998. There was then clearly some dalliance in Tehran with the notion of getting a \"threshold\" nuclear capacity (just short of weapons-grade), but that was halted after an opposition group revealed it in 2003. In 2015, Iran signed an agreement backed by all the great powers that restricted it to 3.67% enrichment of uranium, useful for civil reactors but far below the level needed for nuclear weapons. The sanctions that had been imposed on Iran were removed, and all went well -- until Donald Trump tore up the agreement in 2018.\nIsraelis are as obsessed by the threat from Iran, small though it is in practice, as the ayatollahs are obsessed with Israel. They don't even share a border, and Israel has hundreds of nuclear weapons versus Iran's none.\nMr Trump was able to force the other signatories to reimpose sanctions on Iran, and the Iranian economy crashed. After two years, the Iranians began inching up the degree of enrichment, carefully announcing each increase, in an attempt to put pressure on the countries that had let the agreement die.\nFive years later, a lot of uranium has reached 60% enrichment, the last step before weapons-grade enrichment, and still the same fools are in charge on both sides.\nThree plausible conclusions:\n1: Ayatollah Khamenei has followed the same stupid strategy as Saddam Hussein, and is approaching the same ugly consequences.\n2: The \"nuclear threat\" from Iran's enriched uranium may have been deliberately encouraged by Iran in the past to create leverage that evades (but does not violate) a fatwa that bans the manufacture or use of weapons of mass destruction. (It's okay to pretend.)\n3: Lots of people will be killed for no good reason."
+    }
+  ]
+}

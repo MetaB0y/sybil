@@ -30,6 +30,7 @@ crypto = [
 llm = [
     "anthropic>=0.25",      # For Claude-powered bots
     "openai>=1.0",          # For GPT-powered bots
+    "trafilatura>=2.0",     # Article text extraction
 ]
 
 [build-system]
@@ -45,3 +46,8 @@ target-version = "py311"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
