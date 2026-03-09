@@ -39,9 +39,9 @@ class AnchorMarketMaker(BaseAgent):
         client,
         account_id: int,
         budget_dollars: float = 5000.0,
-        base_spread: float = 0.06,
+        base_spread: float = 0.03,
         num_levels: int = 3,
-        level_spacing: float = 0.03,
+        level_spacing: float = 0.01,
         base_size_dollars: float = 300.0,
         max_position: int = 8000,
         name: str | None = None,
@@ -92,8 +92,12 @@ class AnchorMarketMaker(BaseAgent):
                 yes_pos, no_pos
             )
 
+            # Compress spreads near edges so quotes stay in [0.01, 0.99]
+            edge_room = min(mid, 1.0 - mid)  # distance to nearest edge
+            edge_scale = min(1.0, edge_room / 0.15)  # compress when < 15% from edge
+
             for level in range(1, self.num_levels + 1):
-                offset = self.base_spread / 2 + (level - 1) * self.level_spacing
+                offset = (self.base_spread / 2 + (level - 1) * self.level_spacing) * edge_scale
 
                 yes_bid = mid - offset
                 yes_ask = mid + offset
