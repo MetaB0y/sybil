@@ -62,7 +62,7 @@ class TraderSpec:
 @dataclass
 class SimulationConfig:
     base_url: str = "http://localhost:3001"
-    compression_ratio: float = 300.0
+    compression_ratio: float = 600.0
     mm_balance: float = 50_000.0
     initial_price: float = 0.12
     noise_count: int = 20
@@ -272,8 +272,8 @@ def main():
     parser = argparse.ArgumentParser(description="News-reactive LLM simulation runner")
     parser.add_argument("--market", required=True, help="Market name (e.g. iran)")
     parser.add_argument("--base-url", default="http://localhost:3001")
-    parser.add_argument("--compression", type=float, default=300.0,
-                        help="Time compression ratio (default: 300)")
+    parser.add_argument("--compression", type=float, default=600.0,
+                        help="Time compression ratio (default: 600)")
     parser.add_argument("--noise-count", type=int, default=20)
     parser.add_argument("--noise-balance", type=float, default=20.0)
     parser.add_argument("--trader-balance", type=float, default=1000.0)

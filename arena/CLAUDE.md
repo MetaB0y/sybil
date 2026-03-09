@@ -134,7 +134,7 @@ cd arena && uv run streamlit run viz/news_explorer.py -- --market iran
 
 - **BuyYes + BuyNo** can match via minting (costs $1 total)
 - **SellYes/SellNo** requires owning the position first
-- Orders persist for 3 blocks if unfilled (TTL)
+- Orders persist for 5 blocks if unfilled (TTL)
 - Prices are in nanos: 1 dollar = 1,000,000,000 nanos
 
 ## Testing

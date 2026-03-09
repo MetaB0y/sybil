@@ -112,7 +112,7 @@ pub struct BlockSequencer {
     pending_orders: Vec<PendingOrder>,
     /// Current block height.
     height: u64,
-    /// Maximum number of blocks an order persists (default: 3).
+    /// Maximum number of blocks an order persists (default: 5).
     order_ttl: u64,
     /// Track when each order was originally created: order_id -> block height.
     order_created_at: HashMap<u64, u64>,
@@ -151,7 +151,7 @@ impl BlockSequencer {
             next_order_id: 1,
             pending_orders: Vec::new(),
             height: 0,
-            order_ttl: 3,
+            order_ttl: 5,
             order_created_at: HashMap::new(),
             markets,
             market_groups,
