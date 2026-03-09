@@ -544,59 +544,78 @@ def render_simulation_tab():
     # ═══════════ SUMMARY ═══════════
     st.subheader("Summary")
 
-    # Starting Conditions
-    st.markdown("**Initial Conditions**")
-    num_traders = len(trade_logs)
-    noise_count = config.get("noise_count", len(noise_rows))
-    mm_balance = config.get("mm_balance", "?")
-    trader_balance = config.get("trader_balance", "?")
-    noise_balance = config.get("noise_balance", "?")
-    initial_price = config.get("initial_price", "?")
-    compression = config.get("compression_ratio", "?")
-    sc1, sc2, sc3, sc4, sc5, sc6 = st.columns(6)
-    sc1.metric("LLM Traders", num_traders)
-    sc2.metric("Noise Bots", noise_count)
-    sc3.metric("MM Balance", f"${mm_balance:,.0f}" if isinstance(mm_balance, (int, float)) else mm_balance)
-    sc4.metric("Trader Balance", f"${trader_balance:,.0f}" if isinstance(trader_balance, (int, float)) else trader_balance)
-    sc5.metric("Noise Balance", f"${noise_balance:,.0f}" if isinstance(noise_balance, (int, float)) else noise_balance)
-    sc6.metric("Initial Price", f"{initial_price}" if isinstance(initial_price, (int, float)) else initial_price)
-    if isinstance(compression, (int, float)):
-        st.caption(f"Compression: {compression}x")
-
-    # General
-    st.markdown("**General**")
-    # Server volume_nanos counts both sides of each fill; halve for single-counted volume
-    total_vol = sum(b["volume_nanos"] for b in blocks) // 2
+    # Subtitle line: period, traders, compression, noise
     first_h = blocks[0]["height"] if blocks else 0
     last_h = blocks[-1]["height"] if blocks else 0
     t_first = block_times.get(first_h)
     t_last = block_times.get(last_h)
+    total_fills = sum(b.get("orders_filled", 0) for b in blocks)
+    duration = (t_last - t_first) if (t_first and t_last) else None
+
+    model_short = config.get("model_name", "?").split("/")[-1]
+    trader_list = ", ".join(trade_logs.keys()) or "none"
+    noise_count = config.get("noise_count", len(noise_rows))
+    compression = config.get("compression_ratio", "?")
+    period_str = f"Period: {t_first:%b %d %H:%M} – {t_last:%H:%M} ({_format_duration(duration)})" if duration else f"Batches {first_h}–{last_h}"
+    st.caption(
+        f"{period_str}; "
+        f"LLM traders: {trader_list} ({model_short}) · "
+        f"Compression: {compression}x · "
+        f"Noise: {noise_count} bots"
+    )
+
+    # General
+    st.markdown("#### General")
+
+    # Compute per-source volume from fills
+    mm_vol = 0.0
+    llm_vol = 0.0
+    noise_vol = 0.0
+    for b_v in blocks:
+        for f in b_v.get("mm_fills", []):
+            mm_vol += f["fill_qty"] * f["fill_price"]
+        for f in b_v.get("trader_fills", []):
+            llm_vol += f["fill_qty"] * f["fill_price"]
+        for f in b_v.get("noise_fills", []):
+            noise_vol += f["fill_qty"] * f["fill_price"]
+    total_vol_src = mm_vol + llm_vol + noise_vol
+    # Fallback to server volume if no per-source fill data
+    total_vol_server = sum(b["volume_nanos"] for b in blocks) // 2 / 1e9
+    total_vol = total_vol_src if total_vol_src > 0 else total_vol_server
 
     total_welfare = sum(b.get("welfare_nanos", 0) for b in blocks)
-    total_fills = sum(b.get("orders_filled", 0) for b in blocks)
-    has_welfare = any(b.get("welfare_nanos") for b in blocks)
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Batches", len(blocks))
-    c2.metric("Total Volume", f"${total_vol / 1e9:,.0f}")
-    if has_welfare:
-        c3.metric("Total Welfare", f"${total_welfare / 1e9:,.0f}")
-        c4.metric("Total Fills", f"{total_fills:,}")
-    if welfare_by_source:
-        wc1, wc2, wc3 = st.columns(3)
-        wc1.metric("MM Welfare", f"${mm_welfare:,.2f}")
-        wc2.metric("LLM Welfare", f"${trader_welfare:,.2f}")
-        wc3.metric("Noise Welfare", f"${noise_welfare:,.2f}")
-    if t_first and t_last:
-        duration = t_last - t_first
-        c5.metric("Duration", _format_duration(duration))
-        st.caption(f"Period: {t_first:%b %d %H:%M} – {t_last:%H:%M} ({_format_duration(duration)})")
-    elif not has_welfare:
-        c3.metric("Duration", "N/A")
-        c4.metric("Period", f"Batch {first_h} – {last_h}")
+    # Row 1: Batches, Total Fills, Duration (4 cols to align with rows below)
+    r1c1, r1c2, r1c3, r1c4 = st.columns(4)
+    r1c1.metric("Batches", len(blocks))
+    r1c2.metric("Total Fills", f"{total_fills:,}")
+    r1c3.metric("Duration", _format_duration(duration) if duration else "N/A")
+
+    # Row 2: Volume breakdown
+    r2c1, r2c2, r2c3, r2c4 = st.columns(4)
+    r2c1.metric("Total Volume", f"${total_vol:,.0f}")
+    r2c2.metric("MM Volume", f"${mm_vol:,.0f}")
+    r2c3.metric("LLM Volume", f"${llm_vol:,.0f}")
+    r2c4.metric("Noise Volume", f"${noise_vol:,.0f}")
+
+    # Row 3: Welfare breakdown
+    r3c1, r3c2, r3c3, r3c4 = st.columns(4)
+    r3c1.metric("Total Welfare", f"${total_welfare / 1e9:,.0f}" if total_welfare else f"${mm_welfare + trader_welfare + noise_welfare:,.2f}")
+    r3c2.metric("MM Welfare", f"${mm_welfare:,.2f}")
+    r3c3.metric("LLM Welfare", f"${trader_welfare:,.2f}")
+    r3c4.metric("Noise Welfare", f"${noise_welfare:,.2f}")
+
+    # Market Maker & Noise
+    st.markdown("#### Market Maker & Noise")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("MM PnL", f"${mm_row['pnl']:+.2f}" if mm_row else "N/A")
+    if noise_pnls:
+        c2.metric("Noise PnL (min)", f"${noise_pnls[0]:+.2f}")
+        c3.metric("Noise PnL (max)", f"${noise_pnls[-1]:+.2f}")
+        c4.metric("Noise PnL (median)", f"${statistics.median(noise_pnls):+.2f}")
 
     # LLM Traders
-    st.markdown("**LLM Traders**")
+    st.markdown("#### LLM Traders")
     trades_with_orders = [t for t in all_trade_entries if t["orders"]]
     has_fill_data = any(b_f.get("trader_fills") for b_f in blocks)
     filled_vol_nanos = 0
@@ -637,24 +656,6 @@ def render_simulation_tab():
         pnl_df = pd.DataFrame(rows)
         pnl_df = pnl_df.sort_values("PnL ($)", ascending=False).reset_index(drop=True)
         st.dataframe(pnl_df, use_container_width=True, hide_index=True)
-
-    # Others
-    st.markdown("**Market Maker & Noise**")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("MM PnL", f"${mm_row['pnl']:+.2f}" if mm_row else "N/A")
-    if noise_pnls:
-        c2.metric("Noise PnL (min)", f"${noise_pnls[0]:+.2f}")
-        c3.metric("Noise PnL (max)", f"${noise_pnls[-1]:+.2f}")
-        c4.metric("Noise PnL (median)", f"${statistics.median(noise_pnls):+.2f}")
-
-    # Config line
-    model_short = config.get("model_name", "?").split("/")[-1]
-    trader_list = ", ".join(trade_logs.keys()) or "none"
-    st.caption(
-        f"LLM traders: {trader_list} ({model_short}) · "
-        f"Compression: {config.get('compression_ratio', '?')}x · "
-        f"Noise: {config.get('noise_count', '?')} bots"
-    )
 
     # ═══════════ PRICE CHART ═══════════
     st.subheader("Price + Trader Activity")
@@ -1233,6 +1234,16 @@ def render_simulation_tab():
         ec1.metric("Welfare", f"${welfare_nanos / 1e9:,.2f}")
         ec2.metric("Volume", f"${total_vol_nanos / 1e9:,.2f}")
         ec3.metric("Fill Rate", f"{orders_filled}/{orders_submitted} ({fill_rate:.0f}%)")
+
+        # Per-source volume for this batch
+        batch_mm_vol = sum(f["fill_qty"] * f["fill_price"] for f in b.get("mm_fills", []))
+        batch_llm_vol = sum(f["fill_qty"] * f["fill_price"] for f in b.get("trader_fills", []))
+        batch_noise_vol = sum(f["fill_qty"] * f["fill_price"] for f in b.get("noise_fills", []))
+        vc1, vc2, vc3 = st.columns(3)
+        vc1.metric("MM Volume", f"${batch_mm_vol:,.2f}")
+        vc2.metric("LLM Volume", f"${batch_llm_vol:,.2f}")
+        vc3.metric("Noise Volume", f"${batch_noise_vol:,.2f}")
+
         wc1, wc2, wc3 = st.columns(3)
         wc1.metric("MM Welfare", f"${batch_mm_w:,.2f}")
         wc2.metric("LLM Welfare", f"${batch_trader_w:,.2f}")
@@ -1363,6 +1374,13 @@ def render_simulation_tab():
 
 def main():
     st.set_page_config(page_title=f"{_market_name.title()} News Explorer", layout="wide")
+
+    # Shrink metric values so section headers are visually dominant
+    st.markdown("""<style>
+    [data-testid="stMetricValue"] { font-size: 1.1rem; }
+    [data-testid="stMetricLabel"] { font-size: 0.85rem; }
+    </style>""", unsafe_allow_html=True)
+
     st.title(f"{_market_config.question} — News Explorer")
 
     df = load_data()

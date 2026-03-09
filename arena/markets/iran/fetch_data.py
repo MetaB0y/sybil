@@ -2,7 +2,7 @@
 Fetch news articles from GDELT API for prediction market simulation.
 
 Usage:
-    cd arena && uv run python datasets/fetch_gdelt.py
+    cd arena && uv run python -m markets.iran.fetch_data
 
 Fetches in configurable time windows to stay under GDELT's 250-result cap.
 Sequential requests with delay to respect GDELT rate limits (1 req per 5s).
@@ -165,7 +165,7 @@ def _save(raw_path: Path, chunks: list, total: int, capped: list, failed: list):
 
 
 async def main():
-    out_dir = Path(__file__).parent.parent / "markets" / "iran" / "datasets"
+    out_dir = Path(__file__).parent / "datasets"
     raw_path = out_dir / f"{OUTPUT_NAME}_raw.json"
     log_path = out_dir / f"{OUTPUT_NAME}.log"
     log = Logger(log_path)

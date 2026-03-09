@@ -36,14 +36,13 @@ Bots (Python)  →  sybil_client  →  HTTP/SSE  →  sybil-api (Rust)
 | `bots/` | Trading bot implementations (generic) |
 | `sim/` | Generic simulation framework (clock, news trader, runner, results) |
 | `markets/` | Per-market configuration (personas, sources, prompts) |
-| `markets/iran/` | Iran strike market config, datasets, phase1 results, run data |
+| `markets/iran/` | Iran strike market: config, personas, sources, fetch_data, merge_data, datasets/, phase1/, runs/ |
+| `markets/iran/docs/` | Market-specific docs (llm-trader-flow decision pipeline) |
 | `viz/` | Streamlit dashboards |
 | `feeds/` | Data feed integrations (synthetic) |
-| `datasets/` | Generic data utilities (fetch_gdelt, merge_datasets) |
 | `scripts/` | Competition orchestration |
 | `examples/` | Example competition scripts |
 | `tests/` | Pytest test suite |
-| `iran/` | Legacy redirects (thin wrappers importing from sim/ and markets/) |
 | `nba/` | Legacy NBA/sports code (preserved for reference) |
 
 ## Key Components

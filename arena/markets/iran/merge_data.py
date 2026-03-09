@@ -2,7 +2,7 @@
 Merge multiple GDELT raw JSON files into a single deduplicated dataset.
 
 Usage:
-    cd arena && uv run python datasets/merge_datasets.py
+    cd arena && uv run python -m markets.iran.merge_data
 
 Reads all *_raw.json files in the datasets directory, merges articles,
 deduplicates by URL, and writes the combined result back to iran_news_raw.json.
@@ -11,7 +11,7 @@ deduplicates by URL, and writes the combined result back to iran_news_raw.json.
 import json
 from pathlib import Path
 
-OUT_DIR = Path(__file__).parent.parent / "markets" / "iran" / "datasets"
+OUT_DIR = Path(__file__).parent / "datasets"
 MERGED_NAME = "iran_news_raw.json"
 
 # Files to merge (order doesn't matter — we dedup by URL)
