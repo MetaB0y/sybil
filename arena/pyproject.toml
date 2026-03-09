@@ -38,7 +38,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["sybil_client", "bots", "feeds", "backtest"]
+packages = ["sybil_client", "bots", "feeds", "sim", "markets"]
 
 [tool.ruff]
 line-length = 100

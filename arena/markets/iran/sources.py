@@ -1,19 +1,35 @@
 """
-News source lists for different trader personas.
+News source lists for different trader personas in the Iran strike market.
 
 Each trader gets a curated list of source domains that reflect a specific
 geopolitical lens. Used to filter the GDELT dataset before feeding articles
-to IranNewsTrader instances.
-
-Usage:
-    from datasets.trader_sources import ISRAELI_TRADER_SOURCES
-    articles = [a for a in all_articles if a["source"] in ISRAELI_TRADER_SOURCES]
+to NewsTrader instances.
 """
+
+# ── American Trader ──────────────────────────────────────────────────────
+# Perspective: US political/news outlets + UK mainstream.
+
+AMERICAN_TRADER_SOURCES = [
+    # Tier 1: Major US national
+    "yahoo.com", "nypost.com", "foxnews.com", "washingtonexaminer.com",
+    "newsweek.com", "cnbc.com", "cbsnews.com", "abcnews.go.com",
+    "bostonglobe.com", "forbes.com", "pbs.org", "cnn.com", "edition.cnn.com",
+    "us.cnn.com", "nbcnews.com", "time.com", "latimes.com", "upi.com",
+    "chicagotribune.com", "npr.org", "theatlantic.com", "abcnews.com",
+    "politico.eu",
+    # Tier 2: US political/opinion
+    "breitbart.com", "aol.com", "foreignpolicy.com", "dailycaller.com",
+    "csmonitor.com", "seattletimes.com", "baltimoresun.com",
+    "dallasnews.com", "denverpost.com",
+    # Tier 3: UK outlets with major US readership
+    "dailymail.co.uk", "independent.co.uk", "theguardian.com",
+    "bbc.co.uk", "bbc.com",
+]
+
 
 # ── Israeli Trader ────────────────────────────────────────────────────────
 # Perspective: Israeli security establishment + Hebrew press.
 # Hawkish framing, existential threat lens, security-focused.
-# ~1,800 articles in current dataset.
 
 ISRAELI_TRADER_SOURCES = {
     # Tier 1 — Core Israeli press (English)
@@ -80,10 +96,6 @@ ISRAELI_TRADER_SOURCES = {
 
 # ── Arab Trader ───────────────────────────────────────────────────────────
 # Perspective: Arab world — Egypt, Gulf, Levant, Iraq, Palestine.
-# Core Arab media ecosystem: pan-Arab networks, Egyptian press (largest),
-# Gulf state media, Palestinian/Lebanese/Iraqi outlets, Jordanian press.
-# Sees Iran through sectarian, regional rivalry, and sovereignty lenses.
-# ~3,600 articles in current dataset.
 
 ARAB_TRADER_SOURCES = {
     # ── Pan-Arab / satellite networks ──
@@ -91,56 +103,56 @@ ARAB_TRADER_SOURCES = {
     "aljazeera.com",          # Al Jazeera English (Qatar)
     "english.aawsat.com",     # Asharq Al-Awsat English (Saudi-owned, pan-Arab)
     "aawsat.com",             # Asharq Al-Awsat Arabic
-    "alarabiya.net",          # Al Arabiya (Saudi — 0 in current dataset, major network)
+    "alarabiya.net",          # Al Arabiya (Saudi)
     "skynewsarabia.com",      # Sky News Arabia (UAE)
 
-    # ── Egypt (top 7 by volume) ──
-    "dostor.org",             # Al-Dostor — constitution-themed, popular
+    # ── Egypt ──
+    "dostor.org",             # Al-Dostor
     "shorouknews.com",        # Shorouk News
     "vetogate.com",           # Veto Gate
-    "almasryalyoum.com",      # Al-Masry Al-Youm — top independent daily
+    "almasryalyoum.com",      # Al-Masry Al-Youm
     "elwatannews.com",        # El Watan News
     "nile.eg",                # Nile TV / state
     "el-balad.com",           # Sada El Balad
 
-    # ── Palestine (top 9) ──
+    # ── Palestine ──
     "pnn.ps",                 # Palestine News Network
     "shasha.ps",              # Shasha News
-    "alquds.com",             # Al-Quds (Palestinian daily)
+    "alquds.com",             # Al-Quds
     "alfajertv.com",          # Al Fajer TV
-    "bokra.net",              # Bokra — Arab-Israeli community
+    "bokra.net",              # Bokra
     "raya.ps",                # Raya FM
     "alhadath.ps",            # Al Hadath
     "arn.ps",                 # Arn News
-    "alwatanvoice.com",       # Al Watan Voice (Donia Al-Watan)
+    "alwatanvoice.com",       # Al Watan Voice
 
-    # ── Lebanon (top 7 by volume) ──
+    # ── Lebanon ──
     "almanar.com.lb",         # Al Manar (Hezbollah)
-    "naharnet.com",           # Naharnet (An-Nahar online)
-    "yalibnan.com",           # Ya Libnan (English)
+    "naharnet.com",           # Naharnet
+    "yalibnan.com",           # Ya Libnan
     "tayyar.org",             # Free Patriotic Movement
     "cedarnews.net",          # Cedar News
     "lebanon24.com",          # Lebanon 24
     "anbaaonline.com",        # Anbaa Online
 
-    # ── Iraq (top 7) ──
-    "iraqsun.com",            # Iraq Sun (English)
+    # ── Iraq ──
+    "iraqsun.com",            # Iraq Sun
     "kitabat.com",            # Kitabat
-    "middle-east-online.com", # Middle East Online (Iraq-based)
+    "middle-east-online.com", # Middle East Online
     "azzaman.com",            # Azzaman
     "annabaa.org",            # Annabaa
     "almadapaper.net",        # Al Mada
     "mustaqila.com",          # Al Mustaqila
 
-    # ── Gulf States (top 6 by volume) ──
+    # ── Gulf States ──
     "albayan.ae",             # Al Bayan (UAE)
     "alriyadh.com",           # Al Riyadh (Saudi)
     "annaharkw.com",          # Al Nahar (Kuwait)
     "okaz.com.sa",            # Okaz (Saudi)
     "alwatan.com.sa",         # Al Watan (Saudi)
-    "omanobserver.om",        # Oman Observer (English)
+    "omanobserver.om",        # Oman Observer
 
-    # ── Jordan (top 4) ──
+    # ── Jordan ──
     "jo24.net",               # Jo24
     "addustour.com",          # Ad-Dustour
     "assabeel.net",           # Assabeel
@@ -148,20 +160,14 @@ ARAB_TRADER_SOURCES = {
 
     # ── Diaspora / London-based Arab ──
     "alquds.co.uk",           # Al-Quds Al-Arabi (London)
-    "middleeastmonitor.com",  # MEMO (London, pro-Palestinian)
-    "middleeasteye.net",      # Middle East Eye (London, Qatar-linked)
-    "elaph.com",              # Elaph — Saudi-owned, London-based pan-Arab
+    "middleeastmonitor.com",  # MEMO (London)
+    "middleeasteye.net",      # Middle East Eye (London)
+    "elaph.com",              # Elaph (London)
 }
 
 
 # ── Anti-US Trader ────────────────────────────────────────────────────────
 # Perspective: Iran + Russia + China — the "multipolar" bloc.
-# State media, establishment outlets, and major portals from countries with
-# adversarial/skeptical stance toward US foreign policy. Sees US strikes as
-# imperialism, frames sanctions as aggression, skeptical of Western narratives.
-# Excludes: Taiwan, anti-CCP diaspora (Epoch Times, NTD), US-funded outlets
-# (RFE/RL, VOA, Radio Farda), Iranian exile opposition, Western think tanks.
-# ~3,500 articles in current dataset.
 
 ANTI_US_TRADER_SOURCES = {
     # ── Chinese state media ──
@@ -171,7 +177,7 @@ ANTI_US_TRADER_SOURCES = {
     "spanish.xinhuanet.com",  # Xinhua Spanish
     "kr.xinhuanet.com",       # Xinhua Korean
     "arabic.news.cn",         # Xinhua Arabic
-    "globaltimes.cn",         # Global Times — state tabloid, hawkish
+    "globaltimes.cn",         # Global Times
     "chinadaily.com.cn",      # China Daily
     "usa.chinadaily.com.cn",  # China Daily US edition
     "europe.chinadaily.com.cn", # China Daily Europe
@@ -184,22 +190,22 @@ ANTI_US_TRADER_SOURCES = {
     "arabic.peopledaily.com.cn", # People's Daily Arabic alt
     "spanish.peopledaily.com.cn", # People's Daily Spanish
     "military.people.com.cn", # People's Daily military
-    "china.org.cn",           # China Internet Information Center (state)
+    "china.org.cn",           # China Internet Information Center
     "french.china.org.cn",    # China.org.cn French
-    "en.ce.cn",               # China Economic Net (state)
+    "en.ce.cn",               # China Economic Net
     "81.cn",                  # PLA Daily
     "eng.chinamil.com.cn",    # China Military Online English
-    "chinanews.com.cn",       # China News Service (state)
-    "bjreview.com",           # Beijing Review (state)
+    "chinanews.com.cn",       # China News Service
+    "bjreview.com",           # Beijing Review
     "bjreview.com.cn",        # Beijing Review alt
-    "qstheory.cn",            # Qiushi (CCP theory journal)
-    "banyuetan.org",          # Banyuetan (Xinhua biweekly)
+    "qstheory.cn",            # Qiushi
+    "banyuetan.org",          # Banyuetan
     "news.cyol.com",          # China Youth Daily
 
     # ── Chinese major portals & aggregators ──
-    "baijiahao.baidu.com",    # Baidu Baijiahao — largest content platform
-    "163.com",                # NetEase — major portal
-    "news.ifeng.com",         # iFeng News (Phoenix New Media)
+    "baijiahao.baidu.com",    # Baidu Baijiahao
+    "163.com",                # NetEase
+    "news.ifeng.com",         # iFeng News
     "finance.ifeng.com",      # iFeng Finance
     "mil.ifeng.com",          # iFeng Military
     "news.sina.com.cn",       # Sina News
@@ -213,7 +219,7 @@ ANTI_US_TRADER_SOURCES = {
     "sohu.com",               # Sohu
 
     # ── Chinese financial media ──
-    "finance.eastmoney.com",  # East Money — top financial portal
+    "finance.eastmoney.com",  # East Money
     "nbd.com.cn",             # National Business Daily
     "stcn.com",               # Securities Times
     "yicai.com",              # Yicai (CBN)
@@ -238,57 +244,55 @@ ANTI_US_TRADER_SOURCES = {
     "sputniknews.cn",         # Sputnik Chinese edition
 
     # ── Iranian state / establishment media ──
-    "presstv.ir",             # Press TV — Iranian state English channel
-    "alalam.ir",              # Al Alam — Iranian state Arabic channel
-    "mehrnews.com",           # Mehr News Agency (state-linked)
+    "presstv.ir",             # Press TV
+    "alalam.ir",              # Al Alam
+    "mehrnews.com",           # Mehr News Agency
     "khabaronline.ir",        # Khabar Online
     "negaheiraniannews.ir",   # Negahe Iranian News
-    "iranoilgas.com",         # Iran Oil & Gas (industry)
+    "iranoilgas.com",         # Iran Oil & Gas
 
     # ── Iranian independent / diaspora (non-opposition) ──
-    "balatarin.com",          # Balatarin — Persian social news aggregator
-    "iranherald.com",         # Iran Herald (English)
-    "news.gooya.com",         # Gooya News (Persian)
-    "kar-online.com",         # Kar Online (Persian)
-    "iranpressnews.com",      # Iran Press News (Persian)
+    "balatarin.com",          # Balatarin
+    "iranherald.com",         # Iran Herald
+    "news.gooya.com",         # Gooya News
+    "kar-online.com",         # Kar Online
+    "iranpressnews.com",      # Iran Press News
 
     # ── Russian state media ──
-    "rt.com",                 # RT (Russia Today) English
+    "rt.com",                 # RT English
     "russian.rt.com",         # RT Russian
     "arabic.rt.com",          # RT Arabic
     "actualidad.rt.com",      # RT Spanish
-    "sputnikglobe.com",       # Sputnik Global (blank country tag)
-    "sputniknews.cn",         # Sputnik Chinese
-    "big5.sputniknews.cn",    # Sputnik Chinese Traditional
+    "sputnikglobe.com",       # Sputnik Global
     "sputnik.af",             # Sputnik Afghanistan
     "sputnik-georgia.ru",     # Sputnik Georgia (.ru)
     "sputnik-georgia.com",    # Sputnik Georgia (.com)
     "fr.sputniknews.africa",  # Sputnik Africa French
     "tass.ru",                # TASS Russian
-    "tass.com",               # TASS English (blank country tag)
+    "tass.com",               # TASS English
     "ria.ru",                 # RIA Novosti
 
     # ── Russian mainstream / establishment ──
-    "interfax.ru",            # Interfax — major wire service
+    "interfax.ru",            # Interfax
     "iz.ru",                  # Izvestia
     "mk.ru",                  # Moskovsky Komsomolets
-    "rbc.ru",                 # RBC — business/news
-    "kommersant.ru",          # Kommersant — business daily
-    "vedomosti.ru",           # Vedomosti — business daily
+    "rbc.ru",                 # RBC
+    "kommersant.ru",          # Kommersant
+    "vedomosti.ru",           # Vedomosti
     "ng.ru",                  # Nezavisimaya Gazeta
-    "inosmi.ru",              # InoSMI — foreign press translations
+    "inosmi.ru",              # InoSMI
     "english.pravda.ru",      # Pravda English
     "gazeta-pravda.ru",       # Pravda Russian
     "aif.ru",                 # Argumenty i Fakty
     "argumenti.ru",           # Argumenty Nedeli
-    "zavtra.ru",              # Zavtra — nationalist
+    "zavtra.ru",              # Zavtra
     "vestikavkaza.ru",        # Vestnik Kavkaza
     "bloknot.ru",             # Bloknot
     "odnako.org",             # Odnako
     "news.mail.ru",           # Mail.ru News
-    "bfm.ru",                 # BFM — business FM
-    "vesti.ru",               # Vesti (state TV online)
-    "tvzvezda.ru",            # Zvezda (MoD channel)
+    "bfm.ru",                 # BFM
+    "vesti.ru",               # Vesti
+    "tvzvezda.ru",            # Zvezda
     "fondsk.ru",              # Strategic Culture Foundation
     "islam-today.ru",         # Islam Today Russia
 }
@@ -296,11 +300,6 @@ ANTI_US_TRADER_SOURCES = {
 
 # ── Financial Trader ──────────────────────────────────────────────────────
 # Perspective: Markets, economics, oil, sanctions impact.
-# Reads financial press — thinks about how geopolitics moves prices, not
-# who's right/wrong. English-heavy, global. Excludes Greek financial press
-# (would dominate feed), Chinese financial (covered by Anti-US), and sources
-# with <5 articles.
-# ~2,300 articles in current dataset.
 
 FINANCIAL_TRADER_SOURCES = {
     # ── Major international financial press ──
@@ -317,38 +316,38 @@ FINANCIAL_TRADER_SOURCES = {
     "foxbusiness.com",        # Fox Business
 
     # ── Financial wire / data / research ──
-    "marketscreener.com",     # MarketScreener (English)
-    "zonebourse.com",         # Zonebourse (French — same company as MarketScreener)
-    "rttnews.com",            # RTT News — real-time financial wire
+    "marketscreener.com",     # MarketScreener
+    "zonebourse.com",         # Zonebourse (French)
+    "rttnews.com",            # RTT News
     "benzinga.com",           # Benzinga
-    "markets.financialcontent.com", # Financial Content syndication
-    "marketpulse.com",        # MarketPulse (OANDA)
+    "markets.financialcontent.com", # Financial Content
+    "marketpulse.com",        # MarketPulse
     "investinglive.com",      # Investing Live
     "investing.com",          # Investing.com
     "investopedia.com",       # Investopedia
     "morningstar.com",        # Morningstar
 
-    # ── Indian financial (large English cluster) ──
+    # ── Indian financial ──
     "economictimes.indiatimes.com", # Economic Times
     "auto.economictimes.indiatimes.com", # ET Auto
     "moneycontrol.com",       # Moneycontrol
-    "livemint.com",           # Mint (HT Media)
+    "livemint.com",           # Mint
     "thehindubusinessline.com", # Hindu Business Line
     "businesstoday.in",       # Business Today
     "business-standard.com",  # Business Standard
     "ibtimes.co.in",          # IBTimes India
-    "shippingtribune.com",    # Shipping Tribune (India)
+    "shippingtribune.com",    # Shipping Tribune
 
-    # ── Energy / oil / commodities (directly Iran-relevant) ──
+    # ── Energy / oil / commodities ──
     "oilprice.com",           # OilPrice.com
-    "rigzone.com",            # Rigzone — oil & gas
+    "rigzone.com",            # Rigzone
     "oilandgas360.com",       # Oil & Gas 360
-    "hellenicshippingnews.com", # Hellenic Shipping News (energy/shipping)
+    "hellenicshippingnews.com", # Hellenic Shipping News
     "maritime-executive.com", # Maritime Executive
     "worldoil.com",           # World Oil
 
     # ── Alternative / contrarian finance ──
-    "zerohedge.com",          # ZeroHedge — contrarian markets
+    "zerohedge.com",          # ZeroHedge
     "nakedcapitalism.com",    # Naked Capitalism
     "armstrongeconomics.com", # Armstrong Economics
     "theeconomiccollapseblog.com", # Economic Collapse Blog
@@ -359,11 +358,11 @@ FINANCIAL_TRADER_SOURCES = {
     "dailyforex.com",         # Daily Forex
 
     # ── European financial ──
-    "boursorama.com",         # Boursorama (France — top finance portal)
-    "bankier.pl",             # Bankier (Poland — top financial site)
+    "boursorama.com",         # Boursorama (France)
+    "bankier.pl",             # Bankier (Poland)
     "portfolio.hu",           # Portfolio.hu (Hungary)
     "eleconomista.es",        # El Economista (Spain)
-    "dunya.com",              # Dünya (Turkey — main business daily)
+    "dunya.com",              # Dünya (Turkey)
     "londonlovesbusiness.com", # London Loves Business
     "proactiveinvestors.co.uk", # Proactive Investors UK
     "proactiveinvestors.com", # Proactive Investors US
@@ -376,7 +375,7 @@ FINANCIAL_TRADER_SOURCES = {
     # ── Asia-Pacific financial ──
     "businesstimes.com.sg",   # Business Times Singapore
     "nikkei.com",             # Nikkei
-    "asia.nikkei.com",        # Nikkei Asia (English)
+    "asia.nikkei.com",        # Nikkei Asia
     "businessday.co.za",      # Business Day South Africa
     "bangkokpost.com",        # Bangkok Post
 
@@ -388,14 +387,10 @@ FINANCIAL_TRADER_SOURCES = {
 
 # ── Balanced Trader ───────────────────────────────────────────────────────
 # Perspective: Geographically diverse, mainstream global press.
-# 2-3 top outlets from each major region. Aims for roughly equal
-# representation so no single country dominates the news feed.
-# The "calibrated centrist" — reads what the global educated public reads.
-# ~2,600 articles in current dataset.
 
 BALANCED_TRADER_SOURCES = {
-    # ── United States (cap at 3 — already huge in other lists) ──
-    "foreignpolicy.com",      # Foreign Policy — elite foreign affairs
+    # ── United States ──
+    "foreignpolicy.com",      # Foreign Policy
     "cnn.com",                # CNN
     "npr.org",                # NPR
     "theatlantic.com",        # The Atlantic
@@ -407,59 +402,60 @@ BALANCED_TRADER_SOURCES = {
     "independent.co.uk",      # The Independent
 
     # ── France ──
-    "lemonde.fr",             # Le Monde — paper of record
-    "france24.com",           # France 24 — international broadcaster
+    "lemonde.fr",             # Le Monde
+    "france24.com",           # France 24
 
     # ── Germany ──
-    "dw.com",                 # Deutsche Welle — international broadcaster
+    "dw.com",                 # Deutsche Welle
 
     # ── India ──
-    "timesofindia.indiatimes.com", # Times of India — largest English daily
+    "timesofindia.indiatimes.com", # Times of India
     "hindustantimes.com",     # Hindustan Times
-    "thehindu.com",           # The Hindu — respected broadsheet
+    "thehindu.com",           # The Hindu
     "indianexpress.com",      # Indian Express
 
     # ── Turkey ──
-    "aa.com.tr",              # Anadolu Agency — state wire (English+Turkish)
-    "hurriyet.com.tr",        # Hürriyet — largest circulation daily
-    "dailysabah.com",         # Daily Sabah — English-language
+    "aa.com.tr",              # Anadolu Agency
+    "hurriyet.com.tr",        # Hürriyet
+    "dailysabah.com",         # Daily Sabah
 
     # ── Australia ──
     "abc.net.au",             # ABC Australia
-    "sbs.com.au",             # SBS — multicultural broadcaster
+    "sbs.com.au",             # SBS
     "9news.com.au",           # Nine Network
 
     # ── Canada ──
-    "theglobeandmail.com",    # Globe & Mail — paper of record
+    "theglobeandmail.com",    # Globe & Mail
     "nationalpost.com",       # National Post
 
     # ── South Korea ──
-    "koreatimes.com",         # Korea Times — oldest English-language
-    "hani.co.kr",             # Hankyoreh — progressive major daily
+    "koreatimes.com",         # Korea Times
+    "hani.co.kr",             # Hankyoreh
 
     # ── Japan ──
-    "japantimes.co.jp",       # Japan Times — leading English daily
-    "mainichi.jp",            # Mainichi Shimbun — Big Five daily
+    "japantimes.co.jp",       # Japan Times
+    "mainichi.jp",            # Mainichi Shimbun
 
     # ── Southeast Asia ──
-    "straitstimes.com",       # Straits Times — Singapore's paper of record
-    "channelnewsasia.com",    # CNA — Singapore's BBC equivalent
-    "kompas.com",             # Kompas — Indonesia's paper of record
-    "antaranews.com",         # Antara — Indonesia's national wire
+    "straitstimes.com",       # Straits Times
+    "channelnewsasia.com",    # CNA
+    "kompas.com",             # Kompas
+    "antaranews.com",         # Antara
+
     # ── Pakistan ──
     "tribune.com.pk",         # Express Tribune
-    "geo.tv",                 # Geo TV — largest network
+    "geo.tv",                 # Geo TV
 
     # ── Ukraine ──
-    "ukrinform.ua",           # Ukrinform — national news agency
-    "kyivpost.com",           # Kyiv Post — English-language
+    "ukrinform.ua",           # Ukrinform
+    "kyivpost.com",           # Kyiv Post
 
     # ── Africa ──
-    "punchng.com",            # Punch — Nigeria's most-read
-    "dailymaverick.co.za",    # Daily Maverick — South Africa
+    "punchng.com",            # Punch (Nigeria)
+    "dailymaverick.co.za",    # Daily Maverick (South Africa)
 
     # ── Latin America ──
-    "elpais.com",             # El País — Spain/LatAm paper of record
+    "elpais.com",             # El País
 
     # ── Spain ──
     "elperiodico.com",        # El Periódico

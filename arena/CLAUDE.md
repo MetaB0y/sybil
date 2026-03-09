@@ -34,11 +34,16 @@ Bots (Python)  →  sybil_client  →  HTTP/SSE  →  sybil-api (Rust)
 |-----------|---------|
 | `sybil_client/` | Async Python SDK for sybil-api |
 | `bots/` | Trading bot implementations (generic) |
+| `sim/` | Generic simulation framework (clock, news trader, runner, results) |
+| `markets/` | Per-market configuration (personas, sources, prompts) |
+| `markets/iran/` | Iran strike market config, datasets, phase1 results, run data |
+| `viz/` | Streamlit dashboards |
 | `feeds/` | Data feed integrations (synthetic) |
+| `datasets/` | Generic data utilities (fetch_gdelt, merge_datasets) |
 | `scripts/` | Competition orchestration |
 | `examples/` | Example competition scripts |
 | `tests/` | Pytest test suite |
-| `iran/` | Iran strike market simulation (news data, bot logic, runner) |
+| `iran/` | Legacy redirects (thin wrappers importing from sim/ and markets/) |
 | `nba/` | Legacy NBA/sports code (preserved for reference) |
 
 ## Key Components
@@ -72,15 +77,40 @@ All bots extend `BaseAgent` and implement `on_block()`:
 ```python
 class MyBot(BaseAgent):
     async def on_block(self, block: Block) -> list[OrderSpec]:
-        # Use filter_markets() to only trade on allowed markets
         for market_id, (yes_nanos, no_nanos) in self.filter_markets(block).items():
             return [BuyYes.at_price(market_id, price=0.55, quantity=5)]
         return []
 ```
 
-All bots accept `market_ids: list[int] | None` to restrict trading to specific markets. The competition runner automatically passes the competition market IDs to all bots.
+All bots accept `market_ids: list[int] | None` to restrict trading to specific markets.
 
-For `InformedTrader`, use `use_market_index=True` when the probability model uses indices (0, 1, 2...) rather than absolute market IDs.
+### sim/ — Generic Simulation Framework
+
+| Module | Purpose |
+|--------|---------|
+| `sim/clock.py` | `SimulatedClock` — time-compressed clock with ref-counted pause |
+| `sim/news_trader.py` | `NewsTrader` — LLM-powered news-reactive trader (market-agnostic) |
+| `sim/headline_filter.py` | Phase 1 headline relevance filter |
+| `sim/runner.py` | `SimulationConfig` + `run_simulation()` orchestration |
+| `sim/results.py` | `build_block_records()` + `save_and_print_results()` |
+
+### markets/ — Per-Market Configuration
+
+Each market provides a `get_config() -> MarketConfig` with question, prompts, personas, sources, and paths.
+
+```python
+from markets.iran import get_config
+config = get_config()
+# config.question, config.personas, config.build_persona, config.datasets_dir, ...
+```
+
+To add a new market: create `markets/mymarket/` with `__init__.py` (get_config), `config.py`, `personas.py`, `sources.py`.
+
+### viz/ — Dashboards
+
+```bash
+cd arena && uv run streamlit run viz/news_explorer.py -- --market iran
+```
 
 ### feeds
 
@@ -88,12 +118,18 @@ For `InformedTrader`, use `use_market_index=True` when the probability model use
 |------|--------|
 | `SyntheticFeed` | Random events for testing |
 
-### scripts
+## Simulation Commands
 
-`run_competition.py` provides:
-- `setup_competition()` - create accounts and markets
-- `run_competition()` - execute with live standings
-- `print_leaderboard()` - display results
+```bash
+# Run simulation
+cd arena && uv run python -m sim.runner --market iran --compression 300 --dates 20260101
+
+# Run phase1 filter
+cd arena && uv run python -m sim.headline_filter --market iran --bot american_believer --date 2026-01-02
+
+# Launch dashboard
+cd arena && uv run streamlit run viz/news_explorer.py -- --market iran
+```
 
 ## Order Matching Rules
 
