@@ -72,7 +72,7 @@ Agents implement: `submit_orders(view: &MarketView, account: &Account) → Agent
 ## Pending Orders
 
 - Unfilled non-MM orders persist across batches
-- Expire after `order_ttl` batches (default 3)
+- Expire after `order_ttl` batches (default 5)
 - Re-validated on reinclusion
 
 ## Mempool

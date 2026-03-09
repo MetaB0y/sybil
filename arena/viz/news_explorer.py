@@ -734,7 +734,7 @@ def render_simulation_tab():
                         break
 
             # Collect fills within TTL window from order submission
-            ttl_end = order_block + 2  # inclusive
+            ttl_end = order_block + 4  # inclusive (TTL=5)
             nearby_fills = []
             for bk in blocks:
                 if order_block <= bk["height"] <= ttl_end:
@@ -1008,11 +1008,11 @@ def render_simulation_tab():
         mkt_price = price_at_block.get(bh)
         mkt_str = f"mkt={mkt_price:.2f}" if mkt_price is not None else "mkt=?"
 
-        # Collect per-fill data within TTL window (orders live for 3 blocks)
+        # Collect per-fill data within TTL window (orders live for 5 blocks)
         # Only look for fills if this decision actually placed orders
         per_fill_items = []  # list of (fill_block, fill_qty, fill_price)
         if t["orders"]:
-            ttl_end = order_block + 2  # inclusive
+            ttl_end = order_block + 4  # inclusive (TTL=5)
             for bk in blocks:
                 if order_block <= bk["height"] <= ttl_end:
                     for f in bk.get("trader_fills", []):
@@ -1152,7 +1152,7 @@ def render_simulation_tab():
         "BuyYes and SellNo are both bids for YES (bullish). "
         "BuyNo and SellYes are both asks on YES (bearish). "
         "Same directional bet, different mechanics: Buy uses cash, Sell uses inventory. "
-        "Includes carried-over orders from previous batches (TTL=3)."
+        "Includes carried-over orders from previous batches (TTL=5)."
     )
 
     # Build orderbook from ALL submitted orders (including fully filled)
