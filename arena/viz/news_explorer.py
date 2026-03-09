@@ -733,11 +733,16 @@ def render_simulation_tab():
                         order_block = bk["height"]
                         break
 
-            # Collect fills within TTL window from order submission
+            # Collect fills from order submission until next order by same trader
             ttl_end = order_block + 4  # inclusive (TTL=5)
+            if tl["orders"]:
+                remaining_tlog = [t2 for t2 in trade_logs.get(tname, [])
+                                  if t2.get("orders") and t2.get("block_height", -1) > bh]
+                if remaining_tlog:
+                    ttl_end = min(ttl_end, remaining_tlog[0]["block_height"])
             nearby_fills = []
             for bk in blocks:
-                if order_block <= bk["height"] <= ttl_end:
+                if order_block < bk["height"] <= ttl_end:
                     for f in bk.get("trader_fills", []):
                         fsrc = f.get("source", "Trader")
                         if fsrc in (tname, "Trader"):
@@ -1008,13 +1013,18 @@ def render_simulation_tab():
         mkt_price = price_at_block.get(bh)
         mkt_str = f"mkt={mkt_price:.2f}" if mkt_price is not None else "mkt=?"
 
-        # Collect per-fill data within TTL window (orders live for 5 blocks)
-        # Only look for fills if this decision actually placed orders
+        # Collect per-fill data: from order submission until next decision with orders
+        # (the next order supersedes this one, so fills after that belong to it)
         per_fill_items = []  # list of (fill_block, fill_qty, fill_price)
         if t["orders"]:
             ttl_end = order_block + 4  # inclusive (TTL=5)
+            # Shrink window if a later decision also placed orders
+            for future_t in trade_log[i:]:  # i is 1-based, so trade_log[i:] = remaining
+                if future_t.get("orders") and future_t.get("block_height", -1) > order_block:
+                    ttl_end = min(ttl_end, future_t["block_height"])
+                    break
             for bk in blocks:
-                if order_block <= bk["height"] <= ttl_end:
+                if order_block < bk["height"] <= ttl_end:
                     for f in bk.get("trader_fills", []):
                         # Filter to selected trader (new runs tag fills with source=trader name)
                         fsrc = f.get("source", "Trader")
@@ -1116,12 +1126,15 @@ def render_simulation_tab():
         # trader_llm: list (new) or dict/None (old runs)
         raw_llm = b["trader_llm"]
         llm_list = raw_llm if isinstance(raw_llm, list) else ([raw_llm] if raw_llm else [])
-        # Only show LLM entries for traders that actually placed orders this block
+        # Only show LLM entries for traders that actually placed orders
+        # Orders appear in the NEXT block (h+1) due to submission timing
         traders_with_orders = set()
-        for entry in b.get("trader_orders_detail", []):
-            tname = entry.get("trader")
-            if tname:
-                traders_with_orders.add(tname)
+        next_block = next((nb for nb in blocks if nb["height"] == b["height"] + 1), None)
+        for src in [b, next_block] if next_block else [b]:
+            for entry in src.get("trader_orders_detail", []):
+                tname = entry.get("trader")
+                if tname:
+                    traders_with_orders.add(tname)
         if llm_list:
             parts = []
             for l in llm_list:

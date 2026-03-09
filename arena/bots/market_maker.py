@@ -39,7 +39,7 @@ class AnchorMarketMaker(BaseAgent):
         client,
         account_id: int,
         budget_dollars: float = 5000.0,
-        base_spread: float = 0.03,
+        base_spread: float = 0.05,
         num_levels: int = 3,
         level_spacing: float = 0.01,
         base_size_dollars: float = 300.0,
