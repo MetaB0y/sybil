@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from sim.clock import SimulatedClock
-from sim.news_trader import (
+from sim.news_trader_legacy import (
     Article,
     NewsTrader,
     PriceSnapshot,

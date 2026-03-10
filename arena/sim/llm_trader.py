@@ -1,0 +1,578 @@
+"""LLM-driven trader that delegates all trading decisions to the language model."""
+
+import json
+import logging
+import re
+import time
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+
+import openai
+
+from bots.base import BaseAgent
+from sybil_client import Block, BuyNo, BuyYes, OrderSpec, SellNo, SellYes
+from sybil_client.types import NANOS_PER_DOLLAR
+
+from .clock import SimulatedClock
+
+log = logging.getLogger(__name__)
+
+
+@dataclass
+class Article:
+    timestamp: datetime
+    title: str
+    source: str
+    url: str
+    full_text: str
+
+
+@dataclass
+class PriceSnapshot:
+    block_height: int
+    sim_time: datetime
+    yes_price: float
+
+    def to_dict(self) -> dict:
+        return {
+            "block": self.block_height,
+            "sim_time": self.sim_time.isoformat(),
+            "yes_price": self.yes_price,
+        }
+
+
+@dataclass
+class TradeRecord:
+    articles: list[Article]
+    analysis: str
+    fair_value: float
+    orders: list[OrderSpec]
+    motivation: str
+    raw_llm_response: str
+    llm_duration_s: float
+    block_height: int
+    sim_time: datetime
+    balance: float
+    yes_pos: int
+    no_pos: int
+
+    def to_dict(self) -> dict:
+        articles_list = [
+            {
+                "title": a.title,
+                "source": a.source,
+                "url": a.url,
+                "timestamp": a.timestamp.isoformat(),
+            }
+            for a in self.articles
+        ]
+        # Backward-compat top-level fields from first article
+        first = self.articles[0] if self.articles else None
+        return {
+            "sim_time": self.sim_time.isoformat(),
+            "block_height": self.block_height,
+            "llm_duration_s": self.llm_duration_s,
+            "article_title": first.title if first else "",
+            "article_source": first.source if first else "",
+            "article_url": first.url if first else "",
+            "article_timestamp": first.timestamp.isoformat() if first else "",
+            "articles": articles_list,
+            "analysis": self.analysis,
+            "fair_value": self.fair_value,
+            "orders": [_describe_order(o) for o in self.orders],
+            "motivation": self.motivation,
+            "raw_llm_response": self.raw_llm_response,
+            "balance": self.balance,
+            "yes_pos": self.yes_pos,
+            "no_pos": self.no_pos,
+        }
+
+
+def load_articles(phase1_path: str) -> list[Article]:
+    """Load phase1-YES articles that have full text available."""
+    p = Path(phase1_path)
+    if not p.exists():
+        return []
+    phase1_data = json.loads(p.read_text())
+
+    articles = []
+    for item in phase1_data["results"]:
+        if item.get("phase1") != "YES":
+            continue
+        text = item.get("full_text")
+        if not text:
+            continue
+        articles.append(Article(
+            timestamp=datetime.strptime(item["timestamp"], "%Y%m%dT%H%M%SZ"),
+            title=item["title"],
+            source=item["source"],
+            url=item["url"],
+            full_text=text,
+        ))
+
+    articles.sort(key=lambda a: a.timestamp)
+    return articles
+
+
+SYSTEM_PROMPT = """\
+You are trading in a Frequent Batch Auction prediction market.
+- Batches clear every ~10 minutes of simulated time
+- Minting: BUY_YES + BUY_NO at prices summing to $1 creates new shares
+- Your orders persist for 3 batches (TTL=3) — no need to resubmit
+- Multiple traders compete; market price reflects collective information
+
+Order types:
+- BUY_YES: bet that the event happens
+- BUY_NO: bet that the event does NOT happen
+- SELL_YES / SELL_NO: sell shares you already hold — you CANNOT sell shares you don't own
+- To bet against the event without holdings, use BUY_NO (not SELL_YES)
+
+Note: this is a batch auction — all orders clear at the same uniform price.
+Your limit price is the worst price you'd accept, not the price you'll pay.
+
+Trading principles:
+- Size positions by conviction: small (5-15%) for weak signals, medium (15-30%) for moderate, large (30-50%) for strong
+- If you're highly confident (confirmed concrete development), go all-in
+- Actively sell positions when your thesis weakens or you see counter-evidence
+- Don't overtrade: if the market already reflects your view, HOLD
+
+Always think and respond in English regardless of article language."""
+
+
+class LlmTrader(BaseAgent):
+    """LLM-driven trader that delegates all trading decisions to the language model."""
+
+    def __init__(
+        self,
+        client,
+        account_id: int,
+        articles: list[Article],
+        clock: SimulatedClock,
+        api_key: str,
+        persona: str,
+        market_question: str,
+        context: str = "",
+        model_name: str = "moonshotai/kimi-k2",
+        name: str | None = None,
+        market_ids: list[int] | None = None,
+    ):
+        super().__init__(client, account_id, name or "LlmTrader", market_ids)
+        self.articles = articles
+        self.clock = clock
+        self.api_key = api_key
+        self.model_name = model_name
+        self.persona = persona
+        self.market_question = market_question
+        self.context = context
+        self._article_index = 0
+        self._llm_client: openai.AsyncOpenAI | None = None
+        self.trade_log: list[TradeRecord] = []
+        self.price_history: list[PriceSnapshot] = []
+        self._observed_first_block = False
+
+    def snapshot_state(self) -> dict:
+        """Capture cross-day state for multi-day simulations."""
+        return {
+            "trade_log": self.trade_log,
+            "price_history": self.price_history,
+        }
+
+    def restore_state(self, state: dict) -> None:
+        """Restore cross-day state from a previous day's snapshot."""
+        self.trade_log = state["trade_log"]
+        self.price_history = state["price_history"]
+
+    def _get_llm_client(self) -> openai.AsyncOpenAI:
+        if self._llm_client is None:
+            self._llm_client = openai.AsyncOpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=self.api_key,
+                timeout=openai.Timeout(60.0, connect=10.0),
+                max_retries=0,
+            )
+        return self._llm_client
+
+    def _drain_arrived_articles(self) -> list[Article]:
+        """Return all articles whose timestamp <= clock.now(), advance cursor."""
+        arrived = []
+        while self._article_index < len(self.articles):
+            art = self.articles[self._article_index]
+            if not self.clock.is_past(art.timestamp):
+                break
+            arrived.append(art)
+            self._article_index += 1
+        return arrived
+
+    def _fills_for_trade(self, trade_idx: int) -> list:
+        """Get AccountFill objects that resulted from a given trade."""
+        rec = self.trade_log[trade_idx]
+        if rec.block_height < 0 or not rec.orders:
+            return []
+        start = rec.block_height
+        if trade_idx + 1 < len(self.trade_log):
+            end = self.trade_log[trade_idx + 1].block_height
+        else:
+            end = float("inf")
+        return [
+            f for f in self._fill_history
+            if start < f.block_height <= end
+        ]
+
+    def _format_recent_trades(self) -> str:
+        if not self.trade_log:
+            return "No trades yet."
+        lines = []
+        entries = self.trade_log[-5:]
+        start_idx = len(self.trade_log) - len(entries)
+        for i, rec in enumerate(entries):
+            is_last = (start_idx + i == len(self.trade_log) - 1)
+            art_count = f" ({len(rec.articles)} articles)" if len(rec.articles) > 1 else ""
+            lines.append(
+                f"- [{rec.sim_time:%H:%M}] FV={rec.fair_value:.2f}{art_count} | {rec.motivation}"
+            )
+            if not rec.orders:
+                lines.append("  No orders")
+            else:
+                order_desc = ", ".join(
+                    _describe_order(o) for o in rec.orders
+                )
+                lines.append(f"  Submitted: {order_desc}")
+                if is_last:
+                    lines.append("  (awaiting fill)")
+                else:
+                    fills = self._fills_for_trade(start_idx + i)
+                    fill_desc = _format_fills(rec.orders, fills)
+                    lines.append(f"  Filled: {fill_desc}")
+            lines.append("")  # blank line between entries
+        return "\n".join(lines).rstrip()
+
+    def _build_prompt(self, articles: list[Article], block: Block) -> str:
+        """Assemble the full prompt for the LLM."""
+        market_id = next(iter(self.market_ids))
+        yes_nanos, _ = self.filter_markets(block)[market_id]
+        yes_price = yes_nanos / NANOS_PER_DOLLAR
+
+        # Price trend from last 5 snapshots
+        recent_prices = [s.yes_price for s in self.price_history[-5:]]
+        price_trend = ", ".join(f"{p:.4f}" for p in recent_prices) if recent_prices else "n/a"
+
+        balance = self.current_balance
+        yes_shares = self.get_position(market_id, "YES")
+        no_shares = self.get_position(market_id, "NO")
+        portfolio_value = balance + yes_shares * yes_price + no_shares * (1 - yes_price)
+
+        context_line = f"\n{self.context}" if self.context else ""
+
+        # Build article section
+        if len(articles) == 1:
+            art = articles[0]
+            article_section = (
+                f'New article from {art.source}:\n'
+                f'"{art.title}"\n\n'
+                f'{art.full_text[:3000]}'
+            )
+        else:
+            # Distribute truncation budget across articles
+            budget_per = max(500, 6000 // len(articles))
+            parts = ["New articles this batch:\n"]
+            for idx, art in enumerate(articles, 1):
+                parts.append(
+                    f'[{idx}] From {art.source}: "{art.title}"\n'
+                    f'{art.full_text[:budget_per]}\n'
+                )
+            article_section = "\n".join(parts)
+
+        return f"""{SYSTEM_PROMPT}
+
+{self.persona}
+
+Market: "{self.market_question}"{context_line}
+
+Current state:
+- YES price: {yes_price:.4f} (last 5: {price_trend})
+- Your portfolio: ${balance:.2f} cash, {yes_shares} YES shares, {no_shares} NO shares
+- Estimated portfolio value: ~${portfolio_value:.2f}
+
+Recent trades:
+{self._format_recent_trades()}
+
+{article_section}
+
+Analyze {"these articles" if len(articles) > 1 else "this article"} and decide your trade. Respond in this exact format:
+
+ANALYSIS: [Your analysis of what {"these articles signal" if len(articles) > 1 else "this article signals"}, 2-4 sentences]
+FAIR_VALUE: [Your probability estimate for the market question, 0.01-0.99]
+ORDERS: [One or more of: BUY_YES <qty> @ <price>, BUY_NO <qty> @ <price>, SELL_YES <qty> @ <price>, SELL_NO <qty> @ <price>, or HOLD]
+MOTIVATION: [1-2 sentence thesis for your trade decision]"""
+
+    def _parse_orders(self, text: str) -> tuple[str, float, list[OrderSpec], str] | None:
+        """Parse structured LLM output into (analysis, fair_value, orders, motivation)."""
+        # Parse ANALYSIS (everything until next keyword)
+        analysis_match = re.search(
+            r"ANALYSIS:\s*(.*?)(?=\nFAIR_VALUE:|\nORDERS:|\nMOTIVATION:|\Z)",
+            text, re.DOTALL,
+        )
+        analysis = analysis_match.group(1).strip() if analysis_match else ""
+
+        # Parse FAIR_VALUE
+        fv_match = re.search(r"FAIR_VALUE:\s*([\d.]+)", text)
+        if not fv_match:
+            log.warning("Failed to parse FAIR_VALUE from LLM output")
+            return None
+        fair_value = float(fv_match.group(1))
+        if not 0.01 <= fair_value <= 0.99:
+            log.warning("FAIR_VALUE out of range: %s", fair_value)
+            return None
+
+        # Parse MOTIVATION (everything after keyword until end or next keyword)
+        motiv_match = re.search(
+            r"MOTIVATION:\s*(.*?)(?=\nANALYSIS:|\nFAIR_VALUE:|\nORDERS:|\Z)",
+            text, re.DOTALL,
+        )
+        motivation = motiv_match.group(1).strip() if motiv_match else ""
+
+        # Parse ORDERS
+        orders_match = re.search(
+            r"ORDERS:\s*(.*?)(?=\nANALYSIS:|\nFAIR_VALUE:|\nMOTIVATION:|\Z)",
+            text, re.DOTALL,
+        )
+        orders_text = orders_match.group(1).strip() if orders_match else ""
+
+        orders: list[OrderSpec] = []
+        if "HOLD" in orders_text.upper() and not re.search(r"(BUY|SELL)", orders_text.upper()):
+            return (analysis, fair_value, [], motivation)
+
+        market_id = next(iter(self.market_ids))
+        order_map = {
+            "BUY_YES": BuyYes,
+            "BUY_NO": BuyNo,
+            "SELL_YES": SellYes,
+            "SELL_NO": SellNo,
+        }
+        for m in re.finditer(r"(BUY_YES|BUY_NO|SELL_YES|SELL_NO)\s+(\d+)\s*@\s*\$?([\d.]+)", orders_text):
+            side = m.group(1)
+            qty = int(m.group(2))
+            price = float(m.group(3))
+            cls = order_map[side]
+            if qty > 0:
+                orders.append(cls.at_price(market_id, price, qty))
+
+        return (analysis, fair_value, orders, motivation)
+
+    def _validate_orders(self, orders: list[OrderSpec], block: Block) -> list[OrderSpec]:
+        """Clip orders to what's affordable/held, clamp prices, drop zero-qty."""
+        market_id = next(iter(self.market_ids))
+        yes_held = self.get_position(market_id, "YES")
+        no_held = self.get_position(market_id, "NO")
+        cash = self.current_balance
+
+        valid: list[OrderSpec] = []
+        for order in orders:
+            price = order.limit_price_nanos / NANOS_PER_DOLLAR
+            price = max(0.01, min(0.99, price))
+            qty = order.quantity
+
+            if isinstance(order, SellYes):
+                qty = min(qty, yes_held)
+                yes_held -= qty
+            elif isinstance(order, SellNo):
+                qty = min(qty, no_held)
+                no_held -= qty
+            elif isinstance(order, (BuyYes, BuyNo)):
+                cost = qty * price
+                if cost > cash:
+                    qty = int(cash / price) if price > 0 else 0
+                cash -= qty * price
+
+            if qty <= 0:
+                continue
+
+            cls = type(order)
+            valid.append(cls.at_price(market_id, price, qty))
+
+        return valid
+
+    async def _call_llm(self, prompt: str) -> tuple[str, float]:
+        """Pause clock + client, call LLM, resume. Returns (text, duration_s)."""
+        llm = self._get_llm_client()
+        t0 = time.monotonic()
+        await self.client.pause()
+        self.clock.pause()
+        try:
+            resp = await llm.chat.completions.create(
+                model=self.model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=1024,
+            )
+            text = resp.choices[0].message.content or ""
+        finally:
+            self.clock.resume()
+            await self.client.resume()
+        duration = time.monotonic() - t0
+        return text, duration
+
+    async def on_block(self, block: Block) -> list[OrderSpec]:
+        market_id = next(iter(self.market_ids))
+        prices = self.filter_markets(block)
+        if market_id in prices:
+            yes_nanos, _ = prices[market_id]
+            yes_price = yes_nanos / NANOS_PER_DOLLAR
+            self.price_history.append(PriceSnapshot(
+                block_height=block.height,
+                sim_time=self.clock.now(),
+                yes_price=yes_price,
+            ))
+
+        # Skip first block: observe the market price before trading
+        if not self._observed_first_block:
+            self._observed_first_block = True
+            return []
+
+        arrived = self._drain_arrived_articles()
+        if not arrived:
+            return []
+
+        sim_t = self.clock.now().strftime("%H:%M")
+        titles = "; ".join(f'"{a.title[:50]}"' for a in arrived)
+        print(f"  [{self.name}] block {block.height} ({sim_t}): {len(arrived)} article(s)", flush=True)
+        print(f"    -> LLM: {titles}...", end="", flush=True)
+
+        prompt = self._build_prompt(arrived, block)
+
+        try:
+            raw_text, llm_duration_s = await self._call_llm(prompt)
+            log.info(
+                "[%s] LLM response for %d articles (%.1fs):\n%s",
+                self.name, len(arrived), llm_duration_s, raw_text,
+            )
+        except Exception as e:
+            log.warning("[%s] LLM call failed: %s", self.name, e)
+            print(f" FAILED (API error: {e})", flush=True)
+            self.trade_log.append(TradeRecord(
+                articles=arrived,
+                analysis="",
+                fair_value=0.0,
+                orders=[],
+                motivation=f"API error: {e}",
+                raw_llm_response="",
+                llm_duration_s=0.0,
+                block_height=block.height,
+                sim_time=self.clock.now(),
+                balance=self.current_balance,
+                yes_pos=self.get_position(market_id, "YES"),
+                no_pos=self.get_position(market_id, "NO"),
+            ))
+            return []
+
+        parsed = self._parse_orders(raw_text)
+        if parsed is None:
+            print(f" FAILED (parse error)", flush=True)
+            self.trade_log.append(TradeRecord(
+                articles=arrived,
+                analysis="",
+                fair_value=0.0,
+                orders=[],
+                motivation="parse error",
+                raw_llm_response=raw_text,
+                llm_duration_s=llm_duration_s,
+                block_height=block.height,
+                sim_time=self.clock.now(),
+                balance=self.current_balance,
+                yes_pos=self.get_position(market_id, "YES"),
+                no_pos=self.get_position(market_id, "NO"),
+            ))
+            return []
+
+        analysis, fair_value, orders, motivation = parsed
+        orders = self._validate_orders(orders, block)
+
+        self.trade_log.append(TradeRecord(
+            articles=arrived,
+            analysis=analysis,
+            fair_value=fair_value,
+            orders=orders,
+            motivation=motivation,
+            raw_llm_response=raw_text,
+            llm_duration_s=llm_duration_s,
+            block_height=block.height,
+            sim_time=self.clock.now(),
+            balance=self.current_balance,
+            yes_pos=self.get_position(market_id, "YES"),
+            no_pos=self.get_position(market_id, "NO"),
+        ))
+
+        if orders:
+            order_desc = ", ".join(_describe_order(o) for o in orders)
+            print(f" FV={fair_value:.2f} ({llm_duration_s:.1f}s) -> {order_desc}", flush=True)
+        else:
+            print(f" FV={fair_value:.2f} ({llm_duration_s:.1f}s) -> HOLD", flush=True)
+
+        log.info(
+            "[%s] FV=%.2f -> %d orders | %s",
+            self.name, fair_value, len(orders), motivation,
+        )
+
+        return orders
+
+
+def _describe_order(order: OrderSpec) -> str:
+    """Human-readable order description."""
+    price = order.limit_price_nanos / NANOS_PER_DOLLAR
+    if isinstance(order, BuyYes):
+        return f"BuyYes {order.quantity} @ ${price:.4f}"
+    elif isinstance(order, BuyNo):
+        return f"BuyNo {order.quantity} @ ${price:.4f}"
+    elif isinstance(order, SellYes):
+        return f"SellYes {order.quantity} @ ${price:.4f}"
+    elif isinstance(order, SellNo):
+        return f"SellNo {order.quantity} @ ${price:.4f}"
+    return str(order)
+
+
+def _order_side(order: OrderSpec) -> tuple[str, str]:
+    """Return (action, outcome) for an order. e.g. ('Buy', 'YES')."""
+    if isinstance(order, BuyYes):
+        return ("Buy", "YES")
+    elif isinstance(order, BuyNo):
+        return ("Buy", "NO")
+    elif isinstance(order, SellYes):
+        return ("Sell", "YES")
+    elif isinstance(order, SellNo):
+        return ("Sell", "NO")
+    return ("?", "?")
+
+
+def _format_fills(orders: list[OrderSpec], fills: list) -> str:
+    """Match fills to submitted orders and format as a summary string."""
+    if not fills:
+        return "no fills"
+
+    fill_agg: dict[tuple[str, str], tuple[int, int]] = {}
+    for f in fills:
+        for delta in f.position_deltas:
+            action = "Buy" if delta.delta > 0 else "Sell"
+            key = (action, delta.outcome)
+            prev_qty, prev_cost = fill_agg.get(key, (0, 0))
+            fill_agg[key] = (
+                prev_qty + abs(delta.delta),
+                prev_cost + abs(delta.delta) * f.fill_price_nanos,
+            )
+
+    parts = []
+    for order in orders:
+        action, outcome = _order_side(order)
+        key = (action, outcome)
+        filled_qty, filled_cost = fill_agg.get(key, (0, 0))
+        label = f"{action}{outcome.capitalize()}"
+        if filled_qty == 0:
+            parts.append(f"{label} 0/{order.quantity} unfilled")
+        else:
+            avg_price = filled_cost / filled_qty / NANOS_PER_DOLLAR
+            partial = " (partial)" if filled_qty < order.quantity else ""
+            parts.append(
+                f"{label} {filled_qty}/{order.quantity} @ avg ${avg_price:.2f}{partial}"
+            )
+
+    return ", ".join(parts)

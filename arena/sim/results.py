@@ -34,7 +34,7 @@ def build_block_records(
     block_interval_s: float = 2.0,
 ) -> list[dict]:
     """Join per-bot block_logs with server price history into per-block records."""
-    from .news_trader import _describe_order
+    from .llm_trader import _describe_order
 
     if trader_fills_map is None:
         trader_fills_map = {}
@@ -45,19 +45,30 @@ def build_block_records(
             all_heights.add(height)
 
     price_by_height = {pt.height: pt for pt in price_history}
+    # Include server price history blocks (captures seed trade + early blocks)
+    all_heights.update(price_by_height.keys())
 
     llm_by_block: dict[int, list[dict]] = {}
     for t in traders:
         for rec in t.trade_log:
             if rec.block_height >= 0:
+                n = len(rec.articles)
+                if n == 1:
+                    title = rec.articles[0].title
+                    source = rec.articles[0].source
+                else:
+                    title = f"{n} articles: " + ", ".join(a.title[:40] for a in rec.articles)
+                    sources = list(dict.fromkeys(a.source for a in rec.articles))
+                    source = sources[0] if len(sources) == 1 else "multiple"
                 llm_by_block.setdefault(rec.block_height, []).append({
                     "trader": t.name,
-                    "article_title": rec.article.title,
-                    "article_source": rec.article.source,
-                    "probability": rec.probability,
-                    "conviction": rec.conviction,
+                    "article_title": title,
+                    "article_source": source,
+                    "article_count": n,
+                    "fair_value": rec.fair_value,
+                    "analysis": rec.analysis,
                     "motivation": rec.motivation,
-                    "llm_response": rec.llm_response,
+                    "llm_response": rec.raw_llm_response,
                     "llm_duration_s": rec.llm_duration_s,
                 })
 
@@ -217,14 +228,17 @@ async def save_and_print_results(
 
     # Trade logs
     for t in traders:
-        print(f"\n--- {t.name} Trade Log ({len(t.trade_log)} articles) ---")
+        total_articles = sum(len(rec.articles) for rec in t.trade_log)
+        print(f"\n--- {t.name} Trade Log ({len(t.trade_log)} decisions, {total_articles} articles) ---")
         for i, rec in enumerate(t.trade_log, 1):
             order_desc = ", ".join(rec.to_dict()["orders"]) or "no trade"
+            art_tag = f" ({len(rec.articles)} articles)" if len(rec.articles) > 1 else ""
             print(
-                f"  [{i}] {rec.sim_time:%H:%M} P={rec.probability:.2f} "
-                f"{rec.conviction:<6} | {order_desc}"
+                f"  [{i}] {rec.sim_time:%H:%M} FV={rec.fair_value:.2f}{art_tag} "
+                f"| {order_desc}"
             )
-            print(f"       {rec.article.source}: {rec.article.title[:65]}")
+            for art in rec.articles:
+                print(f"       {art.source}: {art.title[:65]}")
             if rec.motivation:
                 print(f"       → {rec.motivation[:80]}")
 
@@ -276,7 +290,8 @@ async def save_and_print_results(
         line = f"  Block {rec['height']:>3}: {price_str}  MM:{mm_n}  Noise:{noise_n}  Trader:{trader_n}"
         for llm in rec["trader_llm"]:
             tag = f"[{llm['trader']}]" if "trader" in llm else ""
-            line += f"  ← {tag} P={llm['probability']:.2f} {llm['conviction']}"
+            fv = llm.get('fair_value', llm.get('probability', 0))
+            line += f"  ← {tag} FV={fv:.2f}"
         print(line)
 
     # Save to file

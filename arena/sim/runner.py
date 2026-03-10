@@ -23,7 +23,7 @@ from sybil_client import BuyNo, BuyYes, SybilClient
 from sybil_client.types import NANOS_PER_DOLLAR
 
 from .clock import SimulatedClock
-from .news_trader import NewsTrader, load_articles
+from .llm_trader import LlmTrader, load_articles
 from .results import save_and_print_results
 
 log = logging.getLogger(__name__)
@@ -57,7 +57,6 @@ class TraderSpec:
     bot_key: str
     persona: str
     phase1_path: str
-    strategy: dict | None = None
     model: str | None = None
 
 
@@ -82,7 +81,6 @@ class SimulationConfig:
     market_description: str = ""
     market_category: str = ""
     context: str = ""
-    analysis_question: str = ""
     phase1_dir: Path | None = None
     runs_dir: Path | None = None
 
@@ -210,16 +208,16 @@ async def run_simulation(config: SimulationConfig) -> None:
                 if not window_articles:
                     print(f"  {spec.name}: 0 articles in {config.sim_start_hour}–{config.sim_end_hour}, skipping")
                     continue
-                t = NewsTrader(
+                t = LlmTrader(
                     client, trader_accounts[spec.name],
                     window_articles, clock,
                     api_key=api_key,
                     persona=spec.persona,
-                    analysis_question=config.analysis_question,
+                    market_question=config.market_question,
+                    context=config.context,
                     model_name=spec.model or config.model_name,
                     name=spec.name,
                     market_ids=[market.id],
-                    strategy=spec.strategy,
                 )
                 if spec.name in trader_state:
                     t.restore_state(trader_state[spec.name])
@@ -331,7 +329,6 @@ def main():
                 bot_key=bot_key,
                 persona=market_config.build_persona(bot_cfg),
                 phase1_path=_resolve_phase1_path(market_config, bot_key, args.date),
-                strategy=bot_cfg.get("strategy"),
                 model=bot_cfg.get("model"),
             ))
     else:
@@ -346,7 +343,6 @@ def main():
                 bot_key=bot_key,
                 persona=market_config.build_persona(bot_cfg),
                 phase1_path=_resolve_phase1_path(market_config, bot_key, args.date),
-                strategy=bot_cfg.get("strategy"),
                 model=bot_cfg.get("model"),
             ))
 
@@ -375,7 +371,6 @@ def main():
         market_description=market_config.description,
         market_category=market_config.category,
         context=market_config.context,
-        analysis_question=market_config.analysis_question,
         runs_dir=market_config.runs_dir,
     )
 
