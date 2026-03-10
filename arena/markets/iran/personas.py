@@ -11,7 +11,7 @@ from .sources import (
 
 BOT_PERSONAS = {
     "american_believer": {
-        "model": "meta-llama/llama-4-maverick",
+        "model": "google/gemini-2.5-flash",
         "name": "American Media (Believer)",
         "description": "US political/news outlets + UK mainstream. "
                        "Takes government rhetoric at face value, trusts establishment reporting.",
@@ -35,7 +35,7 @@ BOT_PERSONAS = {
         },
     },
     "american_skeptic": {
-        "model": "deepseek/deepseek-r1",
+        "model": "google/gemini-2.5-flash",
         "name": "American Media (Skeptic)",
         "description": "US political/news outlets + UK mainstream. "
                        "Distinguishes rhetoric from action, demands concrete evidence.",
@@ -81,7 +81,7 @@ BOT_PERSONAS = {
         },
     },
     "arab_trader": {
-        "model": "deepseek/deepseek-chat",
+        "model": "google/gemini-2.5-flash",
         "name": "Arab Regional Press",
         "description": "Egypt, Gulf, Levant, Iraq, Palestine. Pan-Arab networks + regional press. "
                        "Ground-level reporting, diplomatic shifts, sovereignty lens.",
@@ -104,7 +104,7 @@ BOT_PERSONAS = {
         },
     },
     "anti_us_trader": {
-        "model": "qwen/qwen3-235b-a22b",
+        "model": "google/gemini-2.5-flash",
         "name": "Iran/Russia/China Media",
         "description": "Iranian, Russian, and Chinese state and independent media. "
                        "Skeptical of US threats, tracks military logistics and diplomatic back-channels.",
@@ -150,7 +150,7 @@ BOT_PERSONAS = {
         },
     },
     "balanced_trader": {
-        "model": "meta-llama/llama-4-maverick",
+        "model": "google/gemini-2.5-flash",
         "name": "Global Media Mix",
         "description": "Top mainstream outlets from 15+ countries across all continents. "
                        "Cross-regional corroboration, incremental updates, no strong prior.",
@@ -172,7 +172,7 @@ BOT_PERSONAS = {
         },
     },
     "random_trader": {
-        "model": "moonshotai/kimi-k2",
+        "model": "google/gemini-2.5-flash",
         "name": "Random Sampler",
         "description": "1 random article per 2-hour window sampled from all traders' accepted pools. "
                        "Maximally reactive — each article fully replaces prior belief.",
