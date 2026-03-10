@@ -40,7 +40,7 @@ impl SequencerState {
             next_order_id: 1,
             pending_orders: Vec::new(),
             height: 0,
-            order_ttl: 5,
+            order_ttl: 3,
             order_created_at: HashMap::new(),
         }
     }
