@@ -599,10 +599,8 @@ def render_simulation_tab():
             llm_vol += f["fill_qty"] * f["fill_price"]
         for f in b_v.get("noise_fills", []):
             noise_vol += f["fill_qty"] * f["fill_price"]
-    total_vol_src = mm_vol + llm_vol + noise_vol
-    # Fallback to server volume if no per-source fill data
-    total_vol_server = sum(b["volume_nanos"] for b in blocks) // 2 / 1e9
-    total_vol = total_vol_src if total_vol_src > 0 else total_vol_server
+    # Server volume is single-counted (each trade counted once)
+    total_vol = sum(b.get("total_volume_nanos", b.get("volume_nanos", 0)) for b in blocks) / 1e9
 
     total_welfare = sum(b.get("welfare_nanos", 0) for b in blocks)
 
