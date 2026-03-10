@@ -19,17 +19,16 @@ NANOS_PER_DOLLAR = 1_000_000_000
 
 
 class AnchorMarketMaker(BaseAgent):
-    """FBA-aware market maker with inventory-managed quoting.
+    """FBA-aware market maker with price-skewing inventory management.
 
-    Quotes symmetrically around the latest clearing price.  Self-trading is
-    impossible because the spread guarantees:
-        bid_yes + bid_no = mid - offset + (1-mid) - offset = 1 - 2*offset < $1
-        → minting impossible.
-        ask_yes + ask_no = mid + offset + (1-mid) + offset = 1 + 2*offset > $1
-        → burning impossible.
+    Places one BuyYes and one BuyNo per block at ±spread from clearing price.
+    Self-trading is impossible because:
+        bid_yes + bid_no = mid - spread + (1-mid) - spread = 1 - 2*spread < $1
 
-    Inventory management is through ORDER SIZE, not price skewing.  When
-    holding excess YES, reduce BuyYes quantity and increase SellYes quantity.
+    Inventory management via price skewing (NBA-style): when long YES, shift
+    mid DOWN so BuyYes becomes less attractive and BuyNo more attractive.
+
+    Spread widens automatically after large price moves (volatility detection).
 
     Orders are one-shot (flash liquidity) and never carry over.
     """
@@ -39,96 +38,88 @@ class AnchorMarketMaker(BaseAgent):
         client,
         account_id: int,
         budget_dollars: float = 5000.0,
-        base_spread: float = 0.01,
-        num_levels: int = 3,
-        level_spacing: float = 0.01,
+        half_spread: float = 0.015,
         base_size_dollars: float = 300.0,
         max_position: int = 8000,
+        skew_factor: float = 0.03,
+        vol_lookback: int = 5,
+        vol_widen_mult: float = 3.0,
         name: str | None = None,
         market_ids: list[int] | None = None,
     ):
         super().__init__(client, account_id, name, market_ids)
         self.mm_budget_nanos = int(budget_dollars * NANOS_PER_DOLLAR)
-        self.base_spread = base_spread
-        self.num_levels = num_levels
-        self.level_spacing = level_spacing
+        self.half_spread = half_spread
         self.base_size_dollars = base_size_dollars
         self.max_position = max_position
+        self.skew_factor = skew_factor
+        self.vol_lookback = vol_lookback
+        self.vol_widen_mult = vol_widen_mult
+        # Price history per market for volatility detection
+        self._price_history: dict[int, list[float]] = {}
 
-    def _inventory_multipliers(
-        self, yes_pos: int, no_pos: int
-    ) -> tuple[float, float, float, float]:
-        """Compute size multipliers based on inventory imbalance.
+    def _compute_skew(self, yes_pos: int, no_pos: int) -> float:
+        """Price skew based on inventory imbalance.
 
-        Returns (buy_yes_mult, sell_yes_mult, buy_no_mult, sell_no_mult).
-        When holding excess YES: reduce BuyYes, boost SellYes (and vice versa).
-        Multipliers stay in [0.3, 1.5] so MM always quotes both sides.
+        When long YES (net > 0), returns negative skew → shifts mid DOWN
+        → BuyYes cheaper (less likely to fill), BuyNo more expensive (more fills)
+        → market pushes inventory back toward balance.
         """
-        total = yes_pos + no_pos
-        if total == 0:
-            return (1.0, 1.0, 1.0, 1.0)
+        net = yes_pos - no_pos
+        if self.max_position == 0:
+            return 0.0
+        raw = net / self.max_position  # [-1, +1]
+        return -math.tanh(raw) * self.skew_factor
 
-        # imbalance in [-1, +1]: positive = excess YES
-        raw = (yes_pos - no_pos) / total
-        # Gentle curve: tanh(0.8*x) keeps multipliers moderate
-        skew = math.tanh(0.8 * raw)  # range roughly [-0.66, +0.66]
-
-        # Scale to [0.3, 1.5] — always quote both sides meaningfully
-        buy_yes = max(0.3, 1.0 - 0.7 * skew)
-        sell_yes = min(1.5, 1.0 + 0.7 * skew)
-        buy_no = max(0.3, 1.0 + 0.7 * skew)
-        sell_no = min(1.5, 1.0 - 0.7 * skew)
-        return (buy_yes, sell_yes, buy_no, sell_no)
+    def _vol_multiplier(self, market_id: int, mid: float) -> float:
+        """Widen spread after large price moves."""
+        history = self._price_history.setdefault(market_id, [])
+        history.append(mid)
+        # Keep only lookback window
+        if len(history) > self.vol_lookback + 1:
+            del history[:-self.vol_lookback - 1]
+        if len(history) < 3:
+            return 1.0
+        recent = history[-self.vol_lookback:]
+        vol = max(recent) - min(recent)
+        if vol > 0.05:
+            return min(self.vol_widen_mult, 1.0 + vol * 5)
+        return 1.0
 
     async def on_block(self, block: Block) -> list[OrderSpec]:
         orders: list[OrderSpec] = []
 
         for market_id, (yes_nanos, no_nanos) in self.filter_markets(block).items():
             mid = yes_nanos / NANOS_PER_DOLLAR
-            mid = max(0.05, min(0.95, mid))
-            no_mid = 1.0 - mid
+            mid = max(0.02, min(0.98, mid))
 
             yes_pos = self.get_position(market_id, "YES")
             no_pos = self.get_position(market_id, "NO")
-            by_mult, sy_mult, bn_mult, sn_mult = self._inventory_multipliers(
-                yes_pos, no_pos
-            )
 
-            # Compress spreads near edges so quotes stay in [0.01, 0.99]
-            edge_room = min(mid, 1.0 - mid)  # distance to nearest edge
-            edge_scale = min(1.0, edge_room / 0.15)  # compress when < 15% from edge
+            # Price skew: shift mid based on inventory
+            skew = self._compute_skew(yes_pos, no_pos)
+            skewed_mid = max(0.02, min(0.98, mid + skew))
 
-            for level in range(1, self.num_levels + 1):
-                offset = (self.base_spread / 2 + (level - 1) * self.level_spacing) * edge_scale
+            # Volatility-aware spread
+            vol_mult = self._vol_multiplier(market_id, mid)
+            spread = self.half_spread * vol_mult
 
-                yes_bid = mid - offset
-                yes_ask = mid + offset
-                no_bid = no_mid - offset
-                no_ask = no_mid + offset
+            # Compress spread near edges so quotes stay in [0.01, 0.99]
+            edge_room = min(skewed_mid, 1.0 - skewed_mid)
+            spread = min(spread, edge_room - 0.01)
 
-                # --- BuyYes ---
-                if yes_bid >= 0.01 and yes_pos < self.max_position:
-                    qty = max(1, min(self.max_position, int(self.base_size_dollars * by_mult / yes_bid)))
-                    orders.append(BuyYes.at_price(market_id, yes_bid, qty))
+            yes_bid = skewed_mid - spread
+            no_bid = (1.0 - skewed_mid) - spread
 
-                # --- SellYes ---
-                if yes_ask <= 0.99 and yes_pos > 0:
-                    qty = max(1, min(self.max_position, int(self.base_size_dollars * sy_mult / yes_ask)))
-                    qty = min(qty, yes_pos)
-                    if qty > 0:
-                        orders.append(SellYes.at_price(market_id, yes_ask, qty))
+            # BuyYes
+            if yes_bid >= 0.01 and yes_pos < self.max_position:
+                qty = max(1, int(self.base_size_dollars / yes_bid))
+                orders.append(BuyYes.at_price(market_id, yes_bid, qty))
 
-                # --- BuyNo ---
-                if no_bid >= 0.01 and no_pos < self.max_position:
-                    qty = max(1, min(self.max_position, int(self.base_size_dollars * bn_mult / no_bid)))
-                    orders.append(BuyNo.at_price(market_id, no_bid, qty))
-
-                # --- SellNo ---
-                if no_ask <= 0.99 and no_pos > 0:
-                    qty = max(1, min(self.max_position, int(self.base_size_dollars * sn_mult / no_ask)))
-                    qty = min(qty, no_pos)
-                    if qty > 0:
-                        orders.append(SellNo.at_price(market_id, no_ask, qty))
+            # BuyNo
+            if no_bid >= 0.01 and no_pos < self.max_position:
+                qty = max(1, int(self.base_size_dollars / no_bid))
+                orders.append(BuyNo.at_price(market_id, no_bid, qty))
 
         return orders
 

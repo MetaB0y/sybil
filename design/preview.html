@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Sybil Architecture Diagrams</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 2rem;
+      background: #0d1117;
+      color: #e6edf3;
+    }
+    h1 { border-bottom: 1px solid #30363d; padding-bottom: 0.5rem; }
+    h2 { border-bottom: 1px solid #21262d; padding-bottom: 0.3rem; margin-top: 3rem; }
+    hr { border: none; border-top: 1px solid #30363d; margin: 2rem 0; }
+    pre { background: #161b22; padding: 1rem; border-radius: 6px; overflow-x: auto; }
+    code { font-size: 0.9em; }
+    .mermaid { background: #fff; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+    a { color: #58a6ff; }
+  </style>
+</head>
+<body>
+  <div id="content">Loading...</div>
+  <script>
+    mermaid.initialize({ startOnLoad: false, theme: 'default' });
+
+    async function render() {
+      const resp = await fetch('architecture-diagrams.md');
+      const md = await resp.text();
+
+      // Extract mermaid blocks before marked processes them
+      const mermaidBlocks = [];
+      const processed = md.replace(/```mermaid\n([\s\S]*?)```/g, (_, code) => {
+        const id = `mermaid-${mermaidBlocks.length}`;
+        mermaidBlocks.push({ id, code: code.trim() });
+        return `<div class="mermaid" id="${id}"></div>`;
+      });
+
+      document.getElementById('content').innerHTML = marked.parse(processed);
+
+      for (const block of mermaidBlocks) {
+        const el = document.getElementById(block.id);
+        const { svg } = await mermaid.render(`svg-${block.id}`, block.code);
+        el.innerHTML = svg;
+      }
+    }
+    render();
+  </script>
+</body>
+</html>
