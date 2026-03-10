@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from bots.market_maker import AnchorMarketMaker
+from bots.market_maker import BalancedMarketMaker
 from bots.random_trader import RandomTrader
 from sybil_client import BuyNo, BuyYes, SybilClient
 from sybil_client.types import NANOS_PER_DOLLAR
@@ -176,9 +176,8 @@ async def run_simulation(config: SimulationConfig) -> None:
                 compression_ratio=config.compression_ratio,
             )
 
-            mm = AnchorMarketMaker(
+            mm = BalancedMarketMaker(
                 client, mm_acct.id,
-                budget_dollars=config.mm_balance,
                 name="MM",
                 market_ids=[market.id],
             )

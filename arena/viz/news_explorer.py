@@ -734,18 +734,34 @@ def render_simulation_tab():
             # Collect fills from order submission until next order by same trader
             fill_str = ""
             if tl["orders"]:
-                ttl_end = order_block + 2  # inclusive (TTL=3)
+                ttl_end = order_block + 4  # inclusive (TTL=5)
                 remaining_tlog = [t2 for t2 in trade_logs.get(tname, [])
                                   if t2.get("orders") and t2.get("block_height", -1) > bh]
                 if remaining_tlog:
                     ttl_end = min(ttl_end, remaining_tlog[0]["block_height"])
+                # Cap fills to total ordered quantity
+                total_ordered = 0
+                for o_str in tl["orders"]:
+                    parts = o_str.split()
+                    if len(parts) >= 2:
+                        try:
+                            total_ordered += int(parts[1])
+                        except ValueError:
+                            pass
+                remaining_cap = total_ordered
                 nearby_fills = []
                 for bk in blocks:
-                    if order_block <= bk["height"] <= ttl_end:
+                    if remaining_cap <= 0:
+                        break
+                    if order_block < bk["height"] <= ttl_end:
                         for f in bk.get("trader_fills", []):
+                            if remaining_cap <= 0:
+                                break
                             fsrc = f.get("source", "Trader")
                             if fsrc in (tname, "Trader"):
-                                nearby_fills.append(f)
+                                capped_qty = min(f["fill_qty"], remaining_cap)
+                                nearby_fills.append({**f, "fill_qty": capped_qty})
+                                remaining_cap -= capped_qty
                 if nearby_fills:
                     total_filled = sum(f["fill_qty"] for f in nearby_fills)
                     avg_price = sum(f["fill_price"] * f["fill_qty"] for f in nearby_fills) / total_filled if total_filled else 0
