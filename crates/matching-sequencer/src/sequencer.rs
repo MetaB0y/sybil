@@ -4,7 +4,7 @@ use std::sync::Arc;
 use matching_engine::{
     Fill, MarketGroup, MarketId, MarketSet, MmConstraint, Nanos, Order, Problem,
 };
-use matching_solver::{LpSolver, PipelineResult};
+use matching_solver::{MilpConfig, MilpSolver, PipelineResult};
 use tracing::debug;
 use sybil_oracle::{MarketStatus, Oracle, ResolutionAction, ResolutionRecord};
 use sybil_verifier::{
@@ -151,7 +151,7 @@ impl BlockSequencer {
             next_order_id: 1,
             pending_orders: Vec::new(),
             height: 0,
-            order_ttl: 5,
+            order_ttl: 3,
             order_created_at: HashMap::new(),
             markets,
             market_groups,
@@ -558,9 +558,12 @@ impl BlockSequencer {
         problem.mm_constraints = all_mm_constraints;
         problem.market_groups = self.market_groups.clone();
 
-        // Solve
-        let solver = LpSolver::new();
-        let pipeline_result = solver.solve(&problem);
+        // Solve using MILP (exact welfare-optimal)
+        let pipeline_result = {
+            let milp = MilpSolver::with_config(MilpConfig::with_timeout(5.0));
+            let milp_result = milp.solve_with_status(&problem);
+            PipelineResult::from_matching_result(milp_result.result, milp_result.clearing_prices)
+        };
 
         // Extract clearing prices: use fresh prices from solver where trades happened,
         // fall back to last known prices for markets with no activity this block.
