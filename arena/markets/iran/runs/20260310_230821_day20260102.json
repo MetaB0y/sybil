@@ -1,0 +1,1234 @@
+{
+  "meta": {
+    "timestamp": "2026-03-10T23:08:21.847435",
+    "simulation_date": "20260102",
+    "run_id": "20260310_230749",
+    "config": {
+      "base_url": "http://localhost:3001",
+      "compression_ratio": 600.0,
+      "block_interval_s": 2.0,
+      "mm_balance": 50000.0,
+      "initial_price": 0.12,
+      "noise_count": 10,
+      "noise_balance": 50.0,
+      "trader_balance": 2000.0,
+      "api_key": "",
+      "model_name": "moonshotai/kimi-k2",
+      "sim_start_hour": "10:00",
+      "sim_end_hour": "12:00",
+      "trader_specs": [
+        {
+          "name": "American Media (Believer)",
+          "bot_key": "american_believer",
+          "persona": "You are an American prediction market trader who closely follows US government and establishment sources on Iran.\n\nHow you read signals:\n- You take official US government statements and policy signals seriously \u2014 when senior officials say military options are on the table, you believe they mean it\n- You trust establishment reporting (NYT, WSJ, Reuters) as generally accurate reflections of policy intent\n\nHow you trade:\n- Impulsive \u2014 you move fast when you see a policy signal, often buying before fully digesting\n- Sizes up aggressively on government rhetoric, FOMO-prone on breaking news\n- Slow to sell even when signals fade \u2014 you anchor to your initial read",
+          "phase1_path": "/Users/r/Sybil/arena/markets/iran/phase1/american_trader_{date}_phase1_results.json",
+          "model": "google/gemini-2.5-flash"
+        },
+        {
+          "name": "American Media (Skeptic)",
+          "bot_key": "american_skeptic",
+          "persona": "You are an American prediction market trader with a skeptical analytical lens on US-Iran relations.\n\nHow you read signals:\n- You distinguish sharply between political rhetoric and actual policy action \u2014 words are cheap\n- You weight concrete evidence (troop deployments, carrier movements, evacuations) far above verbal threats\n\nHow you trade:\n- Patient \u2014 you take small initial positions and wait for confirmation before sizing up\n- Quick to sell when rhetoric fizzles without follow-through action\n- Demands at least 2 corroborating signals before committing significant capital",
+          "phase1_path": "/Users/r/Sybil/arena/markets/iran/phase1/american_trader_{date}_phase1_results.json",
+          "model": "google/gemini-2.5-flash"
+        },
+        {
+          "name": "Israeli Security Press",
+          "bot_key": "israeli_trader",
+          "persona": "You are an Israeli prediction market trader who reads Israeli news and security publications.\n\nHow you read signals:\n- You follow Israeli security establishment sources and Hebrew-language press closely\n- Security-focused: you weight military intelligence signals, IDF assessments, and defense establishment leaks heavily\n\nHow you trade:\n- Decisive on security signals \u2014 takes medium-large positions when military intel is clear\n- Holds through volatility once committed to a thesis\n- Treats Iran nuclear developments as existential \u2014 reacts strongly to enrichment or IAEA news",
+          "phase1_path": "/Users/r/Sybil/arena/markets/iran/phase1/israeli_trader_{date}_phase1_results.json",
+          "model": "google/gemini-2.5-flash"
+        },
+        {
+          "name": "Arab Regional Press",
+          "bot_key": "arab_trader",
+          "persona": "You are an Arab prediction market trader who follows regional Arabic-language press and pan-Arab networks.\n\nHow you read signals:\n- You read between the lines on what regional governments do vs say publicly\n- You weight regional diplomatic shifts (Saudi, UAE, Qatari positioning) as leading indicators\n\nHow you trade:\n- Incremental \u2014 builds positions slowly across multiple articles rather than going big on one signal\n- Actively rebalances: sells partial positions when counter-evidence appears\n- Trusts patterns over single events \u2014 wants to see a trend before committing",
+          "phase1_path": "/Users/r/Sybil/arena/markets/iran/phase1/arab_trader_{date}_phase1_results.json",
+          "model": "google/gemini-2.5-flash"
+        },
+        {
+          "name": "Iran/Russia/China Media",
+          "bot_key": "anti_us_trader",
+          "persona": "You are a prediction market trader who reads Iranian, Russian, and Chinese state and independent media.\n\nHow you read signals:\n- Default skeptical that US threats lead to action \u2014 you treat rhetoric as leverage, not intent\n- You track concrete military logistics (carrier groups, base deployments) because your sources cover US force posture closely\n\nHow you trade:\n- Contrarian \u2014 fades market overreactions to US rhetoric by selling YES aggressively\n- Aggressive YES seller on bluster and threats without matching military movement\n- Will reverse quickly if concrete military deployment evidence appears",
+          "phase1_path": "/Users/r/Sybil/arena/markets/iran/phase1/anti_us_trader_{date}_phase1_results.json",
+          "model": "google/gemini-2.5-flash"
+        },
+        {
+          "name": "Financial Press",
+          "bot_key": "financial_trader",
+          "persona": "You are a financial prediction market trader who reads global financial press on oil, defense, and sanctions.\n\nHow you read signals:\n- You treat price movements (oil futures, defense stocks, shipping insurance) as leading indicators over political statements\n- You are probability-focused \u2014 you look for measurable signals, not narratives\n\nHow you trade:\n- Disciplined \u2014 strict edge requirement, won't trade without clear mispricing\n- Cuts losses fast: sells immediately when the market moves against your thesis\n- Never holds negative-EV positions \u2014 if fair value equals market price, you flatten",
+          "phase1_path": "/Users/r/Sybil/arena/markets/iran/phase1/financial_trader_{date}_phase1_results.json",
+          "model": "google/gemini-2.5-flash"
+        },
+        {
+          "name": "Global Media Mix",
+          "bot_key": "balanced_trader",
+          "persona": "You are a geographically diverse prediction market trader who reads mainstream outlets from 15+ countries.\n\nHow you read signals:\n- When sources across multiple regions converge on the same signal, that's high conviction\n- You discount single-source narratives and look for cross-regional corroboration\n\nHow you trade:\n- Cautious \u2014 takes small initial positions on most signals\n- Updates slowly: waits for multi-source confirmation before adding to positions\n- Rarely goes above 20% of portfolio on any single thesis",
+          "phase1_path": "/Users/r/Sybil/arena/markets/iran/phase1/balanced_trader_{date}_phase1_results.json",
+          "model": "google/gemini-2.5-flash"
+        },
+        {
+          "name": "Random Sampler",
+          "bot_key": "random_trader",
+          "persona": "You are a prediction market trader who reads a random sample of news from all available sources.\n\nHow you read signals:\n- You have no ideological prior \u2014 you react purely to what each article says\n- Each article is evaluated on its own merits without anchoring to previous views\n\nHow you trade:\n- Maximally reactive \u2014 new information can fully update your worldview\n- Sizes proportionally to signal strength without memory of past positions\n- Often takes opposite positions across consecutive articles",
+          "phase1_path": "/Users/r/Sybil/arena/markets/iran/phase1/random_trader_{date}_phase1_results.json",
+          "model": "google/gemini-2.5-flash"
+        }
+      ],
+      "dates": [
+        "20260102"
+      ],
+      "market_question": "US strikes Iran by March 31?",
+      "market_description": "Resolves YES if US military strikes Iran before 2026-03-31",
+      "market_category": "geopolitics",
+      "context": "Context:\nUSA-Iran tensions stem from long-standing issues like Iran's nuclear program and proxies, but escalated sharply after the June 2025 US strikes on Iranian nuclear sites during the Israel-Iran Twelve-Day War. They rose further in early January 2026 amid Iran's crackdown on anti-government protests, prompting President Trump to threaten military action and review strike options.",
+      "phase1_dir": null,
+      "runs_dir": "/Users/r/Sybil/arena/markets/iran/runs"
+    }
+  },
+  "blocks": [
+    {
+      "height": 4,
+      "timestamp_ms": null,
+      "sim_time": "2026-01-02T10:00:00",
+      "yes_price": null,
+      "volume_nanos": 0,
+      "mm_orders": [],
+      "noise_orders": [],
+      "noise_order_count": 0,
+      "trader_orders": [],
+      "trader_orders_detail": [],
+      "trader_fills": [],
+      "mm_fills": [],
+      "noise_fills": [],
+      "trader_llm": [
+        {
+          "trader": "American Media (Believer)",
+          "article_title": "Trump warns Iran the US is  locked and loaded and ready to go  ",
+          "article_source": "dailymail.co.uk",
+          "fair_value": 0.45,
+          "analysis": "Trump's \"locked and loaded\" statement, coupled with his vow to \"rescue\" protesters if Iran kills them, is a strong signal of potential military action. This direct threat from the President, especially given the escalating violence against protesters, indicates a significant increase in the likelihood of US intervention. The article highlights the ongoing unrest and deaths, providing a clear trigger for Trump's stated condition.",
+          "motivation": "Trump's explicit \"locked and loaded\" threat and commitment to \"rescue\" protesters is a major escalation, and I'm buying aggressively to front-run the market on this clear policy signal.",
+          "llm_response": "ANALYSIS: Trump's \"locked and loaded\" statement, coupled with his vow to \"rescue\" protesters if Iran kills them, is a strong signal of potential military action. This direct threat from the President, especially given the escalating violence against protesters, indicates a significant increase in the likelihood of US intervention. The article highlights the ongoing unrest and deaths, providing a clear trigger for Trump's stated condition.\nFAIR_VALUE: 0.45\nORDERS: BUY_YES 6000 @ 0.15\nMOTIVATION: Trump's explicit \"locked and loaded\" threat and commitment to \"rescue\" protesters is a major escalation, and I'm buying aggressively to front-run the market on this clear policy signal.",
+          "llm_duration_s": 2.444186417007586
+        },
+        {
+          "trader": "American Media (Skeptic)",
+          "article_title": "Trump warns Iran the US is  locked and loaded and ready to go  ",
+          "article_source": "dailymail.co.uk",
+          "fair_value": 0.15,
+          "analysis": "This article reports on Trump's rhetoric regarding potential intervention in Iran if the regime violently suppresses protests. While the language is strong (\"locked and loaded\"), it's a conditional threat tied to a specific, yet common, Iranian government response. There's no mention of concrete US military movements or preparations, only verbal warnings.",
+          "motivation": "Trump's strong rhetoric, while conditional, slightly increases the probability of a US strike, but it's still just words without corroborating actions. I'm taking a small position to reflect a marginal increase in risk, but will wait for concrete developments before sizing up.",
+          "llm_response": "ANALYSIS: This article reports on Trump's rhetoric regarding potential intervention in Iran if the regime violently suppresses protests. While the language is strong (\"locked and loaded\"), it's a conditional threat tied to a specific, yet common, Iranian government response. There's no mention of concrete US military movements or preparations, only verbal warnings.\nFAIR_VALUE: 0.15\nORDERS: BUY_YES 75 @ 0.1300\nMOTIVATION: Trump's strong rhetoric, while conditional, slightly increases the probability of a US strike, but it's still just words without corroborating actions. I'm taking a small position to reflect a marginal increase in risk, but will wait for concrete developments before sizing up.",
+          "llm_duration_s": 2.3401067910017446
+        },
+        {
+          "trader": "Iran/Russia/China Media",
+          "article_title": "\u062a\u0631\u0627\u0645\u067e : \u0627\u06af\u0631 \u0627\u06cc\u0631\u0627\u0646 \u0645\u0639\u062a\u0631\u0636\u0627\u0646 \u0645\u0633\u0627\u0644\u0645\u062a\u200c\u062c\u0648 \u0631\u0627 \u0628\u06a9\u0634\u062f \u060c \u0622\u0645\u0631\u06cc\u06a9\u0627 \u0628\u0647 \u06a9\u0645\u06a9 \u0622\u0646\u0647\u0627 \u062e\u0648\u0627\u0647\u062f \u0622\u0645\u062f",
+          "article_source": "news.gooya.com",
+          "fair_value": 0.08,
+          "analysis": "The article reports Trump's threat of US intervention if Iran kills peaceful protestors, stating the US is \"fully alert and ready for action.\" However, the analysis within the article itself questions whether this is bluster or a strategic shift, noting that such threats often serve as political deterrence rather than immediate operational directives. It highlights the dual audience and the potential for a shift in tactics from general condemnation to conditional threats, but ultimately suggests it might remain a psychological lever.",
+          "motivation": "This is typical US rhetoric designed to exert pressure without concrete military movements. As a contrarian trader, I am fading the market's slight overreaction to this bluster by aggressively selling YES shares.",
+          "llm_response": "ANALYSIS: The article reports Trump's threat of US intervention if Iran kills peaceful protestors, stating the US is \"fully alert and ready for action.\" However, the analysis within the article itself questions whether this is bluster or a strategic shift, noting that such threats often serve as political deterrence rather than immediate operational directives. It highlights the dual audience and the potential for a shift in tactics from general condemnation to conditional threats, but ultimately suggests it might remain a psychological lever.\nFAIR_VALUE: 0.08\nORDERS: SELL_YES 600 @ 0.1300\nMOTIVATION: This is typical US rhetoric designed to exert pressure without concrete military movements. As a contrarian trader, I am fading the market's slight overreaction to this bluster by aggressively selling YES shares.",
+          "llm_duration_s": 2.328886583010899
+        },
+        {
+          "trader": "Financial Press",
+          "article_title": "Trump says US will intervene if Iran violently suppresses peaceful protests",
+          "article_source": "economictimes.indiatimes.com",
+          "fair_value": 0.25,
+          "analysis": "Trump's statement, \"locked and loaded and ready to go,\" directly links US intervention to Iran's suppression of protests, which are currently turning violent. This significantly increases the probability of US military action. The economic hardship and currency slide further destabilize Iran, making violent suppression more likely.",
+          "motivation": "Trump's explicit threat of intervention tied to ongoing violent protests is a strong signal. The current market price significantly underprices this increased risk of US strikes.",
+          "llm_response": "ANALYSIS: Trump's statement, \"locked and loaded and ready to go,\" directly links US intervention to Iran's suppression of protests, which are currently turning violent. This significantly increases the probability of US military action. The economic hardship and currency slide further destabilize Iran, making violent suppression more likely.\nFAIR_VALUE: 0.25\nORDERS: BUY_YES 200 @ 0.13\nMOTIVATION: Trump's explicit threat of intervention tied to ongoing violent protests is a strong signal. The current market price significantly underprices this increased risk of US strikes.",
+          "llm_duration_s": 2.250624583015451
+        },
+        {
+          "trader": "Financial Press",
+          "article_title": "Trump and top Iranian security official exchange threats over protests now roiling Iran",
+          "article_source": "economictimes.indiatimes.com",
+          "fair_value": 0.35,
+          "analysis": "Trump's explicit \"locked and loaded\" threat directly links US intervention to the ongoing violent protests, which have already resulted in deaths. This significantly increases the probability of US strikes, especially given the previous US strikes in June and Iran's retaliatory actions. The exchange of threats between high-level officials indicates a heightened state of alert and a clear escalation path.",
+          "motivation": "The market is still significantly underpricing the increased risk of US strikes given Trump's direct and aggressive threat. I am increasing my position to reflect this stronger conviction.",
+          "llm_response": "ANALYSIS: Trump's explicit \"locked and loaded\" threat directly links US intervention to the ongoing violent protests, which have already resulted in deaths. This significantly increases the probability of US strikes, especially given the previous US strikes in June and Iran's retaliatory actions. The exchange of threats between high-level officials indicates a heightened state of alert and a clear escalation path.\nFAIR_VALUE: 0.35\nORDERS: BUY_YES 300 @ 0.1300\nMOTIVATION: The market is still significantly underpricing the increased risk of US strikes given Trump's direct and aggressive threat. I am increasing my position to reflect this stronger conviction.",
+          "llm_duration_s": 2.1854874170094263
+        },
+        {
+          "trader": "Financial Press",
+          "article_title": "  Locked and ready to go : Trump threatens action if Iran kills protesters amid unrest",
+          "article_source": "businesstoday.in",
+          "fair_value": 0.45,
+          "analysis": "This article confirms and elaborates on Trump's explicit threat of intervention, directly linking it to potential lethal force against protesters. The phrase \"locked and loaded and ready to go\" reinforces the seriousness of the threat, making US intervention more probable if casualties mount. The ongoing protests and reported deaths increase the likelihood of the trigger condition being met.",
+          "motivation": "The article strengthens the conviction that Trump is serious about intervention if protesters are killed, and the current market price significantly underprices this increased risk. I am increasing my position to reflect this higher probability.",
+          "llm_response": "ANALYSIS: This article confirms and elaborates on Trump's explicit threat of intervention, directly linking it to potential lethal force against protesters. The phrase \"locked and loaded and ready to go\" reinforces the seriousness of the threat, making US intervention more probable if casualties mount. The ongoing protests and reported deaths increase the likelihood of the trigger condition being met.\nFAIR_VALUE: 0.45\nORDERS: BUY_YES 500 @ 0.1300\nMOTIVATION: The article strengthens the conviction that Trump is serious about intervention if protesters are killed, and the current market price significantly underprices this increased risk. I am increasing my position to reflect this higher probability.",
+          "llm_duration_s": 2.586442750005517
+        }
+      ],
+      "active_trader_orders": 0,
+      "welfare_nanos": 0,
+      "total_volume_nanos": 0,
+      "orders_filled": 0
+    },
+    {
+      "height": 5,
+      "timestamp_ms": 1773158879792,
+      "sim_time": "2026-01-02T10:20:00",
+      "yes_price": 0.145,
+      "volume_nanos": 372000000000,
+      "mm_orders": [
+        "BuyYes 2608 @ $0.1150",
+        "BuyNo 350 @ $0.8550"
+      ],
+      "noise_orders": [
+        "BuyNo 25 @ $0.8318",
+        "BuyNo 16 @ $0.9116",
+        "BuyNo 3 @ $0.8679",
+        "BuyNo 3 @ $0.8851",
+        "BuyYes 12 @ $0.0993",
+        "BuyNo 28 @ $0.8339"
+      ],
+      "noise_order_count": 6,
+      "trader_orders": [
+        "BuyYes 6000 @ $0.1500",
+        "BuyYes 75 @ $0.1300",
+        "BuyYes 200 @ $0.1300",
+        "BuyYes 300 @ $0.1300",
+        "BuyYes 500 @ $0.1300"
+      ],
+      "trader_orders_detail": [
+        {
+          "trader": "American Media (Believer)",
+          "order": "BuyYes 6000 @ $0.1500"
+        },
+        {
+          "trader": "American Media (Skeptic)",
+          "order": "BuyYes 75 @ $0.1300"
+        },
+        {
+          "trader": "Financial Press",
+          "order": "BuyYes 200 @ $0.1300"
+        },
+        {
+          "trader": "Financial Press",
+          "order": "BuyYes 300 @ $0.1300"
+        },
+        {
+          "trader": "Financial Press",
+          "order": "BuyYes 500 @ $0.1300"
+        }
+      ],
+      "trader_fills": [
+        {
+          "source": "American Media (Believer)",
+          "order_id": 10,
+          "fill_qty": 372,
+          "fill_price": 0.145,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "YES",
+              "delta": 372
+            }
+          ]
+        }
+      ],
+      "mm_fills": [
+        {
+          "source": "MM",
+          "order_id": 12,
+          "fill_qty": 350,
+          "fill_price": 0.855,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "NO",
+              "delta": 350
+            }
+          ]
+        }
+      ],
+      "noise_fills": [
+        {
+          "source": "Noise",
+          "order_id": 8,
+          "fill_qty": 16,
+          "fill_price": 0.855,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "NO",
+              "delta": 16
+            }
+          ]
+        },
+        {
+          "source": "Noise",
+          "order_id": 3,
+          "fill_qty": 3,
+          "fill_price": 0.855,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "NO",
+              "delta": 3
+            }
+          ]
+        },
+        {
+          "source": "Noise",
+          "order_id": 4,
+          "fill_qty": 3,
+          "fill_price": 0.855,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "NO",
+              "delta": 3
+            }
+          ]
+        }
+      ],
+      "trader_llm": [
+        {
+          "trader": "Global Media Mix",
+          "article_title": "Trump says U . S . will intervene if Iran violently suppresses peaceful protests",
+          "article_source": "thehindu.com",
+          "fair_value": 0.25,
+          "analysis": "This article from an Indian source corroborates previous signals about escalating US-Iran tensions, specifically President Trump's direct threat of intervention if Iran violently suppresses protests. The mention of the June 2025 US strikes on Iranian nuclear sites during the Israel-Iran war provides crucial context for the current \"locked and loaded\" rhetoric. While the threat is strong, it's still a conditional statement and Iranian officials are also issuing warnings.",
+          "motivation": "Trump's explicit threat of intervention, coupled with the historical context of recent US strikes, suggests a moderate increase in the probability of US military action. I'm taking a small initial position as this is still a conditional threat and I'm awaiting further international corroboration.",
+          "llm_response": "ANALYSIS: This article from an Indian source corroborates previous signals about escalating US-Iran tensions, specifically President Trump's direct threat of intervention if Iran violently suppresses protests. The mention of the June 2025 US strikes on Iranian nuclear sites during the Israel-Iran war provides crucial context for the current \"locked and loaded\" rhetoric. While the threat is strong, it's still a conditional statement and Iranian officials are also issuing warnings.\nFAIR_VALUE: 0.25\nORDERS: BUY_YES 70 @ 0.15\nMOTIVATION: Trump's explicit threat of intervention, coupled with the historical context of recent US strikes, suggests a moderate increase in the probability of US military action. I'm taking a small initial position as this is still a conditional threat and I'm awaiting further international corroboration.",
+          "llm_duration_s": 2.822361541999271
+        }
+      ],
+      "active_trader_orders": 5,
+      "welfare_nanos": 2894455554,
+      "total_volume_nanos": 372000000000,
+      "orders_filled": 5
+    },
+    {
+      "height": 6,
+      "timestamp_ms": null,
+      "sim_time": "2026-01-02T10:40:00",
+      "yes_price": null,
+      "volume_nanos": 0,
+      "mm_orders": [
+        "BuyYes 2284 @ $0.1313",
+        "BuyNo 357 @ $0.8387"
+      ],
+      "noise_orders": [
+        "BuyYes 8 @ $0.1044",
+        "SellNo 1 @ $0.8968",
+        "BuyYes 8 @ $0.1351"
+      ],
+      "noise_order_count": 3,
+      "trader_orders": [
+        "BuyYes 70 @ $0.1500"
+      ],
+      "trader_orders_detail": [
+        {
+          "trader": "Global Media Mix",
+          "order": "BuyYes 70 @ $0.1500"
+        }
+      ],
+      "trader_fills": [],
+      "mm_fills": [],
+      "noise_fills": [],
+      "trader_llm": [],
+      "active_trader_orders": 6,
+      "welfare_nanos": 0,
+      "total_volume_nanos": 0,
+      "orders_filled": 0
+    },
+    {
+      "height": 7,
+      "timestamp_ms": 1773158885793,
+      "sim_time": "2026-01-02T11:00:00",
+      "yes_price": 0.145501731,
+      "volume_nanos": 35708996538,
+      "mm_orders": [
+        "BuyYes 2284 @ $0.1313",
+        "BuyNo 357 @ $0.8387"
+      ],
+      "noise_orders": [
+        "BuyNo 26 @ $0.8455",
+        "BuyNo 24 @ $0.8885",
+        "BuyNo 8 @ $0.8309",
+        "BuyNo 4 @ $0.8830",
+        "BuyYes 241 @ $0.0950",
+        "SellNo 1 @ $0.8265",
+        "BuyNo 7 @ $0.8545",
+        "BuyYes 158 @ $0.1284"
+      ],
+      "noise_order_count": 8,
+      "trader_orders": [],
+      "trader_orders_detail": [],
+      "trader_fills": [
+        {
+          "source": "Global Media Mix",
+          "order_id": 19,
+          "fill_qty": 34,
+          "fill_price": 0.145501731,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "YES",
+              "delta": 34
+            }
+          ]
+        }
+      ],
+      "mm_fills": [],
+      "noise_fills": [
+        {
+          "source": "Noise",
+          "order_id": 29,
+          "fill_qty": 24,
+          "fill_price": 0.854498269,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "NO",
+              "delta": 24
+            }
+          ]
+        },
+        {
+          "source": "Noise",
+          "order_id": 27,
+          "fill_qty": 4,
+          "fill_price": 0.854498269,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "NO",
+              "delta": 4
+            }
+          ]
+        },
+        {
+          "source": "Noise",
+          "order_id": 24,
+          "fill_qty": 1,
+          "fill_price": 0.854498269,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "NO",
+              "delta": -1
+            }
+          ]
+        },
+        {
+          "source": "Noise",
+          "order_id": 25,
+          "fill_qty": 7,
+          "fill_price": 0.854498269,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "NO",
+              "delta": 7
+            }
+          ]
+        }
+      ],
+      "trader_llm": [
+        {
+          "trader": "Financial Press",
+          "article_title": "Trump threatens Iran over protest deaths as unrest flares",
+          "article_source": "marketscreener.com",
+          "fair_value": 0.65,
+          "analysis": "Trump's explicit threat of intervention, directly linking US action to the killing of peaceful protesters, is a significant escalation. The article confirms ongoing violent protests and reported deaths, which directly triggers Trump's stated condition for intervention. This substantially increases the probability of US strikes.",
+          "motivation": "The article confirms the conditions for Trump's intervention threat are being met, significantly increasing the likelihood of US strikes. The current market price still underprices this heightened risk.",
+          "llm_response": "ANALYSIS: Trump's explicit threat of intervention, directly linking US action to the killing of peaceful protesters, is a significant escalation. The article confirms ongoing violent protests and reported deaths, which directly triggers Trump's stated condition for intervention. This substantially increases the probability of US strikes.\nFAIR_VALUE: 0.65\nORDERS: BUY_YES 500 @ 0.1455\nMOTIVATION: The article confirms the conditions for Trump's intervention threat are being met, significantly increasing the likelihood of US strikes. The current market price still underprices this heightened risk.",
+          "llm_duration_s": 2.492874167015543
+        },
+        {
+          "trader": "Global Media Mix",
+          "article_title": "Demo Iran Ricuh , AS Akan Turun Gunung Lagi",
+          "article_source": "kompas.com",
+          "fair_value": 0.28,
+          "analysis": "This Indonesian article from Kompas.com corroborates President Trump's threat of intervention if Iran kills protestors, echoing the previous signal. It details the escalating protests, casualties, and government shutdown in Iran, reinforcing the context for potential US action. The multi-regional confirmation strengthens the conviction that US intervention is a live possibility.",
+          "motivation": "The multi-regional corroboration of Trump's explicit threat and the worsening situation in Iran warrant a moderate increase in my YES position. I am still cautious, as this is a conditional threat and not a confirmed strike.",
+          "llm_response": "ANALYSIS: This Indonesian article from Kompas.com corroborates President Trump's threat of intervention if Iran kills protestors, echoing the previous signal. It details the escalating protests, casualties, and government shutdown in Iran, reinforcing the context for potential US action. The multi-regional confirmation strengthens the conviction that US intervention is a live possibility.\nFAIR_VALUE: 0.28\nORDERS: BUY_YES 50 @ 0.1500\nMOTIVATION: The multi-regional corroboration of Trump's explicit threat and the worsening situation in Iran warrant a moderate increase in my YES position. I am still cautious, as this is a conditional threat and not a confirmed strike.",
+          "llm_duration_s": 2.0887084580026567
+        }
+      ],
+      "active_trader_orders": 6,
+      "welfare_nanos": 1112113573,
+      "total_volume_nanos": 35708996538,
+      "orders_filled": 5
+    },
+    {
+      "height": 8,
+      "timestamp_ms": null,
+      "sim_time": "2026-01-02T11:20:00",
+      "yes_price": null,
+      "volume_nanos": 0,
+      "mm_orders": [
+        "BuyYes 2275 @ $0.1318",
+        "BuyNo 357 @ $0.8382"
+      ],
+      "noise_orders": [
+        "BuyNo 26 @ $0.8311",
+        "SellNo 16 @ $0.8881",
+        "SellNo 7 @ $0.8852",
+        "BuyYes 109 @ $0.1046"
+      ],
+      "noise_order_count": 4,
+      "trader_orders": [
+        "BuyYes 500 @ $0.1455",
+        "BuyYes 50 @ $0.1500"
+      ],
+      "trader_orders_detail": [
+        {
+          "trader": "Financial Press",
+          "order": "BuyYes 500 @ $0.1455"
+        },
+        {
+          "trader": "Global Media Mix",
+          "order": "BuyYes 50 @ $0.1500"
+        }
+      ],
+      "trader_fills": [],
+      "mm_fills": [],
+      "noise_fills": [],
+      "trader_llm": [],
+      "active_trader_orders": 3,
+      "welfare_nanos": 0,
+      "total_volume_nanos": 0,
+      "orders_filled": 0
+    },
+    {
+      "height": 9,
+      "timestamp_ms": 1773158891793,
+      "sim_time": "2026-01-02T11:40:00",
+      "yes_price": 0.169064599,
+      "volume_nanos": 69000000000,
+      "mm_orders": [
+        "BuyYes 2275 @ $0.1318",
+        "BuyNo 357 @ $0.8382"
+      ],
+      "noise_orders": [
+        "BuyNo 1 @ $0.8076",
+        "BuyYes 112 @ $0.1590",
+        "BuyNo 24 @ $0.8335",
+        "BuyYes 150 @ $0.1586",
+        "BuyYes 69 @ $0.1714"
+      ],
+      "noise_order_count": 5,
+      "trader_orders": [],
+      "trader_orders_detail": [],
+      "trader_fills": [],
+      "mm_fills": [
+        {
+          "source": "MM",
+          "order_id": 46,
+          "fill_qty": 43,
+          "fill_price": 0.830935401,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "NO",
+              "delta": 43
+            }
+          ]
+        }
+      ],
+      "noise_fills": [
+        {
+          "source": "Noise",
+          "order_id": 28,
+          "fill_qty": 26,
+          "fill_price": 0.830935401,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "NO",
+              "delta": 26
+            }
+          ]
+        },
+        {
+          "source": "Noise",
+          "order_id": 40,
+          "fill_qty": 69,
+          "fill_price": 0.169064599,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "YES",
+              "delta": 69
+            }
+          ]
+        }
+      ],
+      "trader_llm": [
+        {
+          "trader": "American Media (Believer)",
+          "article_title": "Following the US Bomber Task Force Around the World in 2025",
+          "article_source": "newsweek.com",
+          "fair_value": 0.2,
+          "analysis": "This article details routine, global bomber deployments from 2025, emphasizing deterrence and readiness across various theaters. While it mentions the Middle East generally, it doesn't specifically link these deployments to current US-Iran tensions or suggest a heightened readiness for strikes against Iran. This is a general overview of existing military posture, not a new signal of imminent action.",
+          "motivation": "The article describes standard, global bomber task force operations from 2025, not a specific escalation or new deployment related to Iran. My previous aggressive buy was based on Trump's direct threats, and this article doesn't add new information to that specific thesis.",
+          "llm_response": "ANALYSIS: This article details routine, global bomber deployments from 2025, emphasizing deterrence and readiness across various theaters. While it mentions the Middle East generally, it doesn't specifically link these deployments to current US-Iran tensions or suggest a heightened readiness for strikes against Iran. This is a general overview of existing military posture, not a new signal of imminent action.\nFAIR_VALUE: 0.20\nORDERS: HOLD\nMOTIVATION: The article describes standard, global bomber task force operations from 2025, not a specific escalation or new deployment related to Iran. My previous aggressive buy was based on Trump's direct threats, and this article doesn't add new information to that specific thesis.",
+          "llm_duration_s": 3.3422424159944057
+        },
+        {
+          "trader": "American Media (Believer)",
+          "article_title": "Trump threatens Iran saying military is  locked and loaded and ready to go  ",
+          "article_source": "yahoo.com",
+          "fair_value": 0.45,
+          "analysis": "This article directly confirms and amplifies President Trump's \"locked and loaded\" threat regarding Iran, explicitly linking it to the ongoing protests and potential US intervention. The strong rhetoric from both Trump and Iranian officials indicates a significant escalation in tensions, making a US strike more probable. The market has already reacted somewhat, but I believe this reinforces the signal.",
+          "motivation": "Trump's explicit and public threat to intervene if Iran harms protesters is a clear, strong signal of potential military action. I'm buying aggressively to capitalize on this direct policy statement.",
+          "llm_response": "ANALYSIS: This article directly confirms and amplifies President Trump's \"locked and loaded\" threat regarding Iran, explicitly linking it to the ongoing protests and potential US intervention. The strong rhetoric from both Trump and Iranian officials indicates a significant escalation in tensions, making a US strike more probable. The market has already reacted somewhat, but I believe this reinforces the signal.\nFAIR_VALUE: 0.45\nORDERS: BUY_YES 6000 @ 0.20\nMOTIVATION: Trump's explicit and public threat to intervene if Iran harms protesters is a clear, strong signal of potential military action. I'm buying aggressively to capitalize on this direct policy statement.",
+          "llm_duration_s": 2.4427566670055967
+        },
+        {
+          "trader": "American Media (Skeptic)",
+          "article_title": "Following the US Bomber Task Force Around the World in 2025",
+          "article_source": "newsweek.com",
+          "fair_value": 0.15,
+          "analysis": "This article details routine, global bomber deployments throughout 2025, emphasizing deterrence and reassurance of allies in various regions, including the Middle East. However, it does not provide any specific, new information regarding increased bomber activity or deployments directly targeting Iran in early 2026. The information presented is historical and general, not indicative of an imminent strike.",
+          "motivation": "The article describes standard, pre-existing bomber task force operations from 2025, not new deployments or actions related to the current US-Iran tensions in early 2026. This is merely background noise and does not provide the concrete, corroborating signal needed to increase my position.",
+          "llm_response": "ANALYSIS: This article details routine, global bomber deployments throughout 2025, emphasizing deterrence and reassurance of allies in various regions, including the Middle East. However, it does not provide any specific, new information regarding increased bomber activity or deployments directly targeting Iran in early 2026. The information presented is historical and general, not indicative of an imminent strike.\nFAIR_VALUE: 0.15\nORDERS: HOLD\nMOTIVATION: The article describes standard, pre-existing bomber task force operations from 2025, not new deployments or actions related to the current US-Iran tensions in early 2026. This is merely background noise and does not provide the concrete, corroborating signal needed to increase my position.",
+          "llm_duration_s": 3.246084124984918
+        },
+        {
+          "trader": "American Media (Skeptic)",
+          "article_title": "Trump threatens Iran saying military is  locked and loaded and ready to go  ",
+          "article_source": "yahoo.com",
+          "fair_value": 0.15,
+          "analysis": "This article is pure rhetoric from both sides. Trump's \"locked and loaded\" comment is a verbal threat, not a concrete action or deployment. Iran's response is equally bluster, warning against intervention without specifying any new, immediate threats. There's no tangible evidence of military movement or policy shifts.",
+          "motivation": "The market has already priced in Trump's strong rhetoric. This article offers no new, concrete signals to justify increasing my position or changing my fair value assessment.",
+          "llm_response": "ANALYSIS: This article is pure rhetoric from both sides. Trump's \"locked and loaded\" comment is a verbal threat, not a concrete action or deployment. Iran's response is equally bluster, warning against intervention without specifying any new, immediate threats. There's no tangible evidence of military movement or policy shifts.\nFAIR_VALUE: 0.15\nORDERS: HOLD\nMOTIVATION: The market has already priced in Trump's strong rhetoric. This article offers no new, concrete signals to justify increasing my position or changing my fair value assessment.",
+          "llm_duration_s": 4.40444212500006
+        },
+        {
+          "trader": "Israeli Security Press",
+          "article_title": "\u05d8\u05e8\u05d0\u05de\u05e4 \u05d1\u05d0\u05de\u05d9\u05e8\u05d4 \u05d3\u05e8\u05de\u05d8\u05d9\u05ea \u05dc\u05d0\u05d9\u05e8\u05d0\u05df :  \u05d0\u05dd \u05ea\u05d4\u05e8\u05d2\u05d5 \u05de\u05e4\u05d2\u05d9\u05e0\u05d9\u05dd - \u05d0\u05e8\u05d4  \u05d1 \u05ea\u05ea\u05e2\u05e8\u05d1 \u05e6\u05d1\u05d0\u05d9\u05ea  ",
+          "article_source": "kipa.co.il",
+          "fair_value": 0.45,
+          "analysis": "President Trump has issued a direct and unprecedented threat of military intervention in Iran if the regime continues to kill peaceful protestors. This is a significant escalation, especially given his past hawkish stance and recent discussions with PM Netanyahu, where he even backed an Israeli strike. The article also mentions Iran's nuclear program, stating they are \"close\" to being nuclear, which is an existential concern.",
+          "motivation": "Trump's explicit threat of military intervention in response to the crackdown on protests, coupled with the mention of Iran being \"close\" to nuclear capability, represents a strong security signal that significantly increases the probability of US strikes. I am taking a medium-large position to reflect this heightened risk.",
+          "llm_response": "ANALYSIS: President Trump has issued a direct and unprecedented threat of military intervention in Iran if the regime continues to kill peaceful protestors. This is a significant escalation, especially given his past hawkish stance and recent discussions with PM Netanyahu, where he even backed an Israeli strike. The article also mentions Iran's nuclear program, stating they are \"close\" to being nuclear, which is an existential concern.\nFAIR_VALUE: 0.45\nORDERS: BUY_YES 600 @ 0.17\nMOTIVATION: Trump's explicit threat of military intervention in response to the crackdown on protests, coupled with the mention of Iran being \"close\" to nuclear capability, represents a strong security signal that significantly increases the probability of US strikes. I am taking a medium-large position to reflect this heightened risk.",
+          "llm_duration_s": 4.195542665984249
+        }
+      ],
+      "active_trader_orders": 2,
+      "welfare_nanos": 851739793,
+      "total_volume_nanos": 69000000000,
+      "orders_filled": 3
+    },
+    {
+      "height": 10,
+      "timestamp_ms": 1773158899793,
+      "sim_time": "2026-01-02T12:00:00",
+      "yes_price": 0.192442733,
+      "volume_nanos": 450608092418,
+      "mm_orders": [
+        "BuyYes 1928 @ $0.1555",
+        "BuyNo 368 @ $0.8145"
+      ],
+      "noise_orders": [
+        "SellNo 5 @ $0.7949",
+        "SellNo 22 @ $0.7845",
+        "BuyNo 7 @ $0.8298",
+        "BuyNo 8 @ $0.7967"
+      ],
+      "noise_order_count": 4,
+      "trader_orders": [
+        "BuyYes 6000 @ $0.2000",
+        "BuyYes 600 @ $0.1700"
+      ],
+      "trader_orders_detail": [
+        {
+          "trader": "American Media (Believer)",
+          "order": "BuyYes 6000 @ $0.2000"
+        },
+        {
+          "trader": "Israeli Security Press",
+          "order": "BuyYes 600 @ $0.1700"
+        }
+      ],
+      "trader_fills": [
+        {
+          "source": "American Media (Believer)",
+          "order_id": 52,
+          "fill_qty": 407,
+          "fill_price": 0.192442733,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "YES",
+              "delta": 407
+            }
+          ]
+        }
+      ],
+      "mm_fills": [
+        {
+          "source": "MM",
+          "order_id": 54,
+          "fill_qty": 368,
+          "fill_price": 0.807557267,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "NO",
+              "delta": 368
+            }
+          ]
+        }
+      ],
+      "noise_fills": [
+        {
+          "source": "Noise",
+          "order_id": 50,
+          "fill_qty": 5,
+          "fill_price": 0.807557267,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "NO",
+              "delta": -5
+            }
+          ]
+        },
+        {
+          "source": "Noise",
+          "order_id": 32,
+          "fill_qty": 26,
+          "fill_price": 0.807557267,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "NO",
+              "delta": 26
+            }
+          ]
+        },
+        {
+          "source": "Noise",
+          "order_id": 41,
+          "fill_qty": 1,
+          "fill_price": 0.807557267,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "NO",
+              "delta": 1
+            }
+          ]
+        },
+        {
+          "source": "Noise",
+          "order_id": 47,
+          "fill_qty": 22,
+          "fill_price": 0.807557267,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "NO",
+              "delta": -22
+            }
+          ]
+        },
+        {
+          "source": "Noise",
+          "order_id": 22,
+          "fill_qty": 8,
+          "fill_price": 0.807557267,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "NO",
+              "delta": 8
+            }
+          ]
+        },
+        {
+          "source": "Noise",
+          "order_id": 42,
+          "fill_qty": 24,
+          "fill_price": 0.807557267,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "NO",
+              "delta": 24
+            }
+          ]
+        },
+        {
+          "source": "Noise",
+          "order_id": 49,
+          "fill_qty": 7,
+          "fill_price": 0.807557267,
+          "position_deltas": [
+            {
+              "market_id": 3,
+              "outcome": "NO",
+              "delta": 7
+            }
+          ]
+        }
+      ],
+      "trader_llm": [],
+      "active_trader_orders": 4,
+      "welfare_nanos": 7765102568,
+      "total_volume_nanos": 450608092418,
+      "orders_filled": 9
+    }
+  ],
+  "trade_logs": {
+    "American Media (Believer)": [
+      {
+        "sim_time": "2026-01-02T10:19:46.742400",
+        "block_height": 4,
+        "llm_duration_s": 2.444186417007586,
+        "article_title": "Trump warns Iran the US is  locked and loaded and ready to go  ",
+        "article_source": "dailymail.co.uk",
+        "article_url": "https://www.dailymail.co.uk/news/article-15428501/Trump-warns-Iran-US-locked-loaded-ready-vows-rescue-protesters-Islamic-Republic-shoots-violently-kills-amid-mounting-social-unrest.html",
+        "article_timestamp": "2026-01-02T10:15:00",
+        "analysis": "Trump's \"locked and loaded\" statement, coupled with his vow to \"rescue\" protesters if Iran kills them, is a strong signal of potential military action. This direct threat from the President, especially given the escalating violence against protesters, indicates a significant increase in the likelihood of US intervention. The article highlights the ongoing unrest and deaths, providing a clear trigger for Trump's stated condition.",
+        "fair_value": 0.45,
+        "orders": [
+          "BuyYes 6000 @ $0.1500"
+        ],
+        "motivation": "Trump's explicit \"locked and loaded\" threat and commitment to \"rescue\" protesters is a major escalation, and I'm buying aggressively to front-run the market on this clear policy signal.",
+        "raw_llm_response": "ANALYSIS: Trump's \"locked and loaded\" statement, coupled with his vow to \"rescue\" protesters if Iran kills them, is a strong signal of potential military action. This direct threat from the President, especially given the escalating violence against protesters, indicates a significant increase in the likelihood of US intervention. The article highlights the ongoing unrest and deaths, providing a clear trigger for Trump's stated condition.\nFAIR_VALUE: 0.45\nORDERS: BUY_YES 6000 @ 0.15\nMOTIVATION: Trump's explicit \"locked and loaded\" threat and commitment to \"rescue\" protesters is a major escalation, and I'm buying aggressively to front-run the market on this clear policy signal.",
+        "balance": 2000.0,
+        "yes_pos": 0,
+        "no_pos": 0
+      },
+      {
+        "sim_time": "2026-01-02T11:37:23.362800",
+        "block_height": 9,
+        "llm_duration_s": 3.3422424159944057,
+        "article_title": "Following the US Bomber Task Force Around the World in 2025",
+        "article_source": "newsweek.com",
+        "article_url": "https://www.newsweek.com/following-us-bomber-task-force-around-world-2025-11288533",
+        "article_timestamp": "2026-01-02T11:30:00",
+        "analysis": "This article details routine, global bomber deployments from 2025, emphasizing deterrence and readiness across various theaters. While it mentions the Middle East generally, it doesn't specifically link these deployments to current US-Iran tensions or suggest a heightened readiness for strikes against Iran. This is a general overview of existing military posture, not a new signal of imminent action.",
+        "fair_value": 0.2,
+        "orders": [],
+        "motivation": "The article describes standard, global bomber task force operations from 2025, not a specific escalation or new deployment related to Iran. My previous aggressive buy was based on Trump's direct threats, and this article doesn't add new information to that specific thesis.",
+        "raw_llm_response": "ANALYSIS: This article details routine, global bomber deployments from 2025, emphasizing deterrence and readiness across various theaters. While it mentions the Middle East generally, it doesn't specifically link these deployments to current US-Iran tensions or suggest a heightened readiness for strikes against Iran. This is a general overview of existing military posture, not a new signal of imminent action.\nFAIR_VALUE: 0.20\nORDERS: HOLD\nMOTIVATION: The article describes standard, global bomber task force operations from 2025, not a specific escalation or new deployment related to Iran. My previous aggressive buy was based on Trump's direct threats, and this article doesn't add new information to that specific thesis.",
+        "balance": 1946.06,
+        "yes_pos": 372,
+        "no_pos": 0
+      },
+      {
+        "sim_time": "2026-01-02T11:37:23.362800",
+        "block_height": 9,
+        "llm_duration_s": 2.4427566670055967,
+        "article_title": "Trump threatens Iran saying military is  locked and loaded and ready to go  ",
+        "article_source": "yahoo.com",
+        "article_url": "https://www.yahoo.com/news/articles/trump-threatens-iran-saying-military-084237389.html",
+        "article_timestamp": "2026-01-02T11:30:00",
+        "analysis": "This article directly confirms and amplifies President Trump's \"locked and loaded\" threat regarding Iran, explicitly linking it to the ongoing protests and potential US intervention. The strong rhetoric from both Trump and Iranian officials indicates a significant escalation in tensions, making a US strike more probable. The market has already reacted somewhat, but I believe this reinforces the signal.",
+        "fair_value": 0.45,
+        "orders": [
+          "BuyYes 6000 @ $0.2000"
+        ],
+        "motivation": "Trump's explicit and public threat to intervene if Iran harms protesters is a clear, strong signal of potential military action. I'm buying aggressively to capitalize on this direct policy statement.",
+        "raw_llm_response": "ANALYSIS: This article directly confirms and amplifies President Trump's \"locked and loaded\" threat regarding Iran, explicitly linking it to the ongoing protests and potential US intervention. The strong rhetoric from both Trump and Iranian officials indicates a significant escalation in tensions, making a US strike more probable. The market has already reacted somewhat, but I believe this reinforces the signal.\nFAIR_VALUE: 0.45\nORDERS: BUY_YES 6000 @ 0.20\nMOTIVATION: Trump's explicit and public threat to intervene if Iran harms protesters is a clear, strong signal of potential military action. I'm buying aggressively to capitalize on this direct policy statement.",
+        "balance": 1946.06,
+        "yes_pos": 372,
+        "no_pos": 0
+      }
+    ],
+    "American Media (Skeptic)": [
+      {
+        "sim_time": "2026-01-02T10:19:46.742400",
+        "block_height": 4,
+        "llm_duration_s": 2.3401067910017446,
+        "article_title": "Trump warns Iran the US is  locked and loaded and ready to go  ",
+        "article_source": "dailymail.co.uk",
+        "article_url": "https://www.dailymail.co.uk/news/article-15428501/Trump-warns-Iran-US-locked-loaded-ready-vows-rescue-protesters-Islamic-Republic-shoots-violently-kills-amid-mounting-social-unrest.html",
+        "article_timestamp": "2026-01-02T10:15:00",
+        "analysis": "This article reports on Trump's rhetoric regarding potential intervention in Iran if the regime violently suppresses protests. While the language is strong (\"locked and loaded\"), it's a conditional threat tied to a specific, yet common, Iranian government response. There's no mention of concrete US military movements or preparations, only verbal warnings.",
+        "fair_value": 0.15,
+        "orders": [
+          "BuyYes 75 @ $0.1300"
+        ],
+        "motivation": "Trump's strong rhetoric, while conditional, slightly increases the probability of a US strike, but it's still just words without corroborating actions. I'm taking a small position to reflect a marginal increase in risk, but will wait for concrete developments before sizing up.",
+        "raw_llm_response": "ANALYSIS: This article reports on Trump's rhetoric regarding potential intervention in Iran if the regime violently suppresses protests. While the language is strong (\"locked and loaded\"), it's a conditional threat tied to a specific, yet common, Iranian government response. There's no mention of concrete US military movements or preparations, only verbal warnings.\nFAIR_VALUE: 0.15\nORDERS: BUY_YES 75 @ 0.1300\nMOTIVATION: Trump's strong rhetoric, while conditional, slightly increases the probability of a US strike, but it's still just words without corroborating actions. I'm taking a small position to reflect a marginal increase in risk, but will wait for concrete developments before sizing up.",
+        "balance": 2000.0,
+        "yes_pos": 0,
+        "no_pos": 0
+      },
+      {
+        "sim_time": "2026-01-02T11:37:23.362800",
+        "block_height": 9,
+        "llm_duration_s": 3.246084124984918,
+        "article_title": "Following the US Bomber Task Force Around the World in 2025",
+        "article_source": "newsweek.com",
+        "article_url": "https://www.newsweek.com/following-us-bomber-task-force-around-world-2025-11288533",
+        "article_timestamp": "2026-01-02T11:30:00",
+        "analysis": "This article details routine, global bomber deployments throughout 2025, emphasizing deterrence and reassurance of allies in various regions, including the Middle East. However, it does not provide any specific, new information regarding increased bomber activity or deployments directly targeting Iran in early 2026. The information presented is historical and general, not indicative of an imminent strike.",
+        "fair_value": 0.15,
+        "orders": [],
+        "motivation": "The article describes standard, pre-existing bomber task force operations from 2025, not new deployments or actions related to the current US-Iran tensions in early 2026. This is merely background noise and does not provide the concrete, corroborating signal needed to increase my position.",
+        "raw_llm_response": "ANALYSIS: This article details routine, global bomber deployments throughout 2025, emphasizing deterrence and reassurance of allies in various regions, including the Middle East. However, it does not provide any specific, new information regarding increased bomber activity or deployments directly targeting Iran in early 2026. The information presented is historical and general, not indicative of an imminent strike.\nFAIR_VALUE: 0.15\nORDERS: HOLD\nMOTIVATION: The article describes standard, pre-existing bomber task force operations from 2025, not new deployments or actions related to the current US-Iran tensions in early 2026. This is merely background noise and does not provide the concrete, corroborating signal needed to increase my position.",
+        "balance": 2000.0,
+        "yes_pos": 0,
+        "no_pos": 0
+      },
+      {
+        "sim_time": "2026-01-02T11:37:25.993800",
+        "block_height": 9,
+        "llm_duration_s": 4.40444212500006,
+        "article_title": "Trump threatens Iran saying military is  locked and loaded and ready to go  ",
+        "article_source": "yahoo.com",
+        "article_url": "https://www.yahoo.com/news/articles/trump-threatens-iran-saying-military-084237389.html",
+        "article_timestamp": "2026-01-02T11:30:00",
+        "analysis": "This article is pure rhetoric from both sides. Trump's \"locked and loaded\" comment is a verbal threat, not a concrete action or deployment. Iran's response is equally bluster, warning against intervention without specifying any new, immediate threats. There's no tangible evidence of military movement or policy shifts.",
+        "fair_value": 0.15,
+        "orders": [],
+        "motivation": "The market has already priced in Trump's strong rhetoric. This article offers no new, concrete signals to justify increasing my position or changing my fair value assessment.",
+        "raw_llm_response": "ANALYSIS: This article is pure rhetoric from both sides. Trump's \"locked and loaded\" comment is a verbal threat, not a concrete action or deployment. Iran's response is equally bluster, warning against intervention without specifying any new, immediate threats. There's no tangible evidence of military movement or policy shifts.\nFAIR_VALUE: 0.15\nORDERS: HOLD\nMOTIVATION: The market has already priced in Trump's strong rhetoric. This article offers no new, concrete signals to justify increasing my position or changing my fair value assessment.",
+        "balance": 2000.0,
+        "yes_pos": 0,
+        "no_pos": 0
+      }
+    ],
+    "Israeli Security Press": [
+      {
+        "sim_time": "2026-01-02T11:37:23.362800",
+        "block_height": 9,
+        "llm_duration_s": 4.195542665984249,
+        "article_title": "\u05d8\u05e8\u05d0\u05de\u05e4 \u05d1\u05d0\u05de\u05d9\u05e8\u05d4 \u05d3\u05e8\u05de\u05d8\u05d9\u05ea \u05dc\u05d0\u05d9\u05e8\u05d0\u05df :  \u05d0\u05dd \u05ea\u05d4\u05e8\u05d2\u05d5 \u05de\u05e4\u05d2\u05d9\u05e0\u05d9\u05dd - \u05d0\u05e8\u05d4  \u05d1 \u05ea\u05ea\u05e2\u05e8\u05d1 \u05e6\u05d1\u05d0\u05d9\u05ea  ",
+        "article_source": "kipa.co.il",
+        "article_url": "https://www.kipa.co.il/%D7%97%D7%93%D7%A9%D7%95%D7%AA/1217446-0/",
+        "article_timestamp": "2026-01-02T11:30:00",
+        "analysis": "President Trump has issued a direct and unprecedented threat of military intervention in Iran if the regime continues to kill peaceful protestors. This is a significant escalation, especially given his past hawkish stance and recent discussions with PM Netanyahu, where he even backed an Israeli strike. The article also mentions Iran's nuclear program, stating they are \"close\" to being nuclear, which is an existential concern.",
+        "fair_value": 0.45,
+        "orders": [
+          "BuyYes 600 @ $0.1700"
+        ],
+        "motivation": "Trump's explicit threat of military intervention in response to the crackdown on protests, coupled with the mention of Iran being \"close\" to nuclear capability, represents a strong security signal that significantly increases the probability of US strikes. I am taking a medium-large position to reflect this heightened risk.",
+        "raw_llm_response": "ANALYSIS: President Trump has issued a direct and unprecedented threat of military intervention in Iran if the regime continues to kill peaceful protestors. This is a significant escalation, especially given his past hawkish stance and recent discussions with PM Netanyahu, where he even backed an Israeli strike. The article also mentions Iran's nuclear program, stating they are \"close\" to being nuclear, which is an existential concern.\nFAIR_VALUE: 0.45\nORDERS: BUY_YES 600 @ 0.17\nMOTIVATION: Trump's explicit threat of military intervention in response to the crackdown on protests, coupled with the mention of Iran being \"close\" to nuclear capability, represents a strong security signal that significantly increases the probability of US strikes. I am taking a medium-large position to reflect this heightened risk.",
+        "balance": 2000.0,
+        "yes_pos": 0,
+        "no_pos": 0
+      }
+    ],
+    "Iran/Russia/China Media": [
+      {
+        "sim_time": "2026-01-02T10:19:46.742400",
+        "block_height": 4,
+        "llm_duration_s": 2.328886583010899,
+        "article_title": "\u062a\u0631\u0627\u0645\u067e : \u0627\u06af\u0631 \u0627\u06cc\u0631\u0627\u0646 \u0645\u0639\u062a\u0631\u0636\u0627\u0646 \u0645\u0633\u0627\u0644\u0645\u062a\u200c\u062c\u0648 \u0631\u0627 \u0628\u06a9\u0634\u062f \u060c \u0622\u0645\u0631\u06cc\u06a9\u0627 \u0628\u0647 \u06a9\u0645\u06a9 \u0622\u0646\u0647\u0627 \u062e\u0648\u0627\u0647\u062f \u0622\u0645\u062f",
+        "article_source": "news.gooya.com",
+        "article_url": "https://news.gooya.com/2026/01/post-104999.php",
+        "article_timestamp": "2026-01-02T10:00:00",
+        "analysis": "The article reports Trump's threat of US intervention if Iran kills peaceful protestors, stating the US is \"fully alert and ready for action.\" However, the analysis within the article itself questions whether this is bluster or a strategic shift, noting that such threats often serve as political deterrence rather than immediate operational directives. It highlights the dual audience and the potential for a shift in tactics from general condemnation to conditional threats, but ultimately suggests it might remain a psychological lever.",
+        "fair_value": 0.08,
+        "orders": [],
+        "motivation": "This is typical US rhetoric designed to exert pressure without concrete military movements. As a contrarian trader, I am fading the market's slight overreaction to this bluster by aggressively selling YES shares.",
+        "raw_llm_response": "ANALYSIS: The article reports Trump's threat of US intervention if Iran kills peaceful protestors, stating the US is \"fully alert and ready for action.\" However, the analysis within the article itself questions whether this is bluster or a strategic shift, noting that such threats often serve as political deterrence rather than immediate operational directives. It highlights the dual audience and the potential for a shift in tactics from general condemnation to conditional threats, but ultimately suggests it might remain a psychological lever.\nFAIR_VALUE: 0.08\nORDERS: SELL_YES 600 @ 0.1300\nMOTIVATION: This is typical US rhetoric designed to exert pressure without concrete military movements. As a contrarian trader, I am fading the market's slight overreaction to this bluster by aggressively selling YES shares.",
+        "balance": 2000.0,
+        "yes_pos": 0,
+        "no_pos": 0
+      }
+    ],
+    "Financial Press": [
+      {
+        "sim_time": "2026-01-02T10:19:46.742400",
+        "block_height": 4,
+        "llm_duration_s": 2.250624583015451,
+        "article_title": "Trump says US will intervene if Iran violently suppresses peaceful protests",
+        "article_source": "economictimes.indiatimes.com",
+        "article_url": "https://economictimes.indiatimes.com/news/international/world-news/trump-says-us-will-intervene-if-iran-violently-suppresses-peaceful-protests/articleshow/126302071.cms",
+        "article_timestamp": "2026-01-02T10:00:00",
+        "analysis": "Trump's statement, \"locked and loaded and ready to go,\" directly links US intervention to Iran's suppression of protests, which are currently turning violent. This significantly increases the probability of US military action. The economic hardship and currency slide further destabilize Iran, making violent suppression more likely.",
+        "fair_value": 0.25,
+        "orders": [
+          "BuyYes 200 @ $0.1300"
+        ],
+        "motivation": "Trump's explicit threat of intervention tied to ongoing violent protests is a strong signal. The current market price significantly underprices this increased risk of US strikes.",
+        "raw_llm_response": "ANALYSIS: Trump's statement, \"locked and loaded and ready to go,\" directly links US intervention to Iran's suppression of protests, which are currently turning violent. This significantly increases the probability of US military action. The economic hardship and currency slide further destabilize Iran, making violent suppression more likely.\nFAIR_VALUE: 0.25\nORDERS: BUY_YES 200 @ 0.13\nMOTIVATION: Trump's explicit threat of intervention tied to ongoing violent protests is a strong signal. The current market price significantly underprices this increased risk of US strikes.",
+        "balance": 2000.0,
+        "yes_pos": 0,
+        "no_pos": 0
+      },
+      {
+        "sim_time": "2026-01-02T10:19:50.712600",
+        "block_height": 4,
+        "llm_duration_s": 2.1854874170094263,
+        "article_title": "Trump and top Iranian security official exchange threats over protests now roiling Iran",
+        "article_source": "economictimes.indiatimes.com",
+        "article_url": "https://economictimes.indiatimes.com/news/international/world-news/trump-and-top-iranian-security-official-exchange-threats-over-protests-now-roiling-iran/articleshow/126303250.cms",
+        "article_timestamp": "2026-01-02T10:00:00",
+        "analysis": "Trump's explicit \"locked and loaded\" threat directly links US intervention to the ongoing violent protests, which have already resulted in deaths. This significantly increases the probability of US strikes, especially given the previous US strikes in June and Iran's retaliatory actions. The exchange of threats between high-level officials indicates a heightened state of alert and a clear escalation path.",
+        "fair_value": 0.35,
+        "orders": [
+          "BuyYes 300 @ $0.1300"
+        ],
+        "motivation": "The market is still significantly underpricing the increased risk of US strikes given Trump's direct and aggressive threat. I am increasing my position to reflect this stronger conviction.",
+        "raw_llm_response": "ANALYSIS: Trump's explicit \"locked and loaded\" threat directly links US intervention to the ongoing violent protests, which have already resulted in deaths. This significantly increases the probability of US strikes, especially given the previous US strikes in June and Iran's retaliatory actions. The exchange of threats between high-level officials indicates a heightened state of alert and a clear escalation path.\nFAIR_VALUE: 0.35\nORDERS: BUY_YES 300 @ 0.1300\nMOTIVATION: The market is still significantly underpricing the increased risk of US strikes given Trump's direct and aggressive threat. I am increasing my position to reflect this stronger conviction.",
+        "balance": 1974.0,
+        "yes_pos": 200,
+        "no_pos": 0
+      },
+      {
+        "sim_time": "2026-01-02T10:20:24.540600",
+        "block_height": 4,
+        "llm_duration_s": 2.586442750005517,
+        "article_title": "  Locked and ready to go : Trump threatens action if Iran kills protesters amid unrest",
+        "article_source": "businesstoday.in",
+        "article_url": "https://www.businesstoday.in/world/story/locked-and-ready-to-go-trump-threatens-action-if-iran-kills-protesters-amid-unrest-509157-2026-01-02",
+        "article_timestamp": "2026-01-02T10:15:00",
+        "analysis": "This article confirms and elaborates on Trump's explicit threat of intervention, directly linking it to potential lethal force against protesters. The phrase \"locked and loaded and ready to go\" reinforces the seriousness of the threat, making US intervention more probable if casualties mount. The ongoing protests and reported deaths increase the likelihood of the trigger condition being met.",
+        "fair_value": 0.45,
+        "orders": [
+          "BuyYes 500 @ $0.1300"
+        ],
+        "motivation": "The article strengthens the conviction that Trump is serious about intervention if protesters are killed, and the current market price significantly underprices this increased risk. I am increasing my position to reflect this higher probability.",
+        "raw_llm_response": "ANALYSIS: This article confirms and elaborates on Trump's explicit threat of intervention, directly linking it to potential lethal force against protesters. The phrase \"locked and loaded and ready to go\" reinforces the seriousness of the threat, making US intervention more probable if casualties mount. The ongoing protests and reported deaths increase the likelihood of the trigger condition being met.\nFAIR_VALUE: 0.45\nORDERS: BUY_YES 500 @ 0.1300\nMOTIVATION: The article strengthens the conviction that Trump is serious about intervention if protesters are killed, and the current market price significantly underprices this increased risk. I am increasing my position to reflect this higher probability.",
+        "balance": 1935.0,
+        "yes_pos": 500,
+        "no_pos": 0
+      },
+      {
+        "sim_time": "2026-01-02T11:02:10.392000",
+        "block_height": 7,
+        "llm_duration_s": 2.492874167015543,
+        "article_title": "Trump threatens Iran over protest deaths as unrest flares",
+        "article_source": "marketscreener.com",
+        "article_url": "https://www.marketscreener.com/news/trump-threatens-iran-over-protest-deaths-as-unrest-flares-ce7e59d9da8dff21",
+        "article_timestamp": "2026-01-02T11:00:00",
+        "analysis": "Trump's explicit threat of intervention, directly linking US action to the killing of peaceful protesters, is a significant escalation. The article confirms ongoing violent protests and reported deaths, which directly triggers Trump's stated condition for intervention. This substantially increases the probability of US strikes.",
+        "fair_value": 0.65,
+        "orders": [
+          "BuyYes 500 @ $0.1455"
+        ],
+        "motivation": "The article confirms the conditions for Trump's intervention threat are being met, significantly increasing the likelihood of US strikes. The current market price still underprices this heightened risk.",
+        "raw_llm_response": "ANALYSIS: Trump's explicit threat of intervention, directly linking US action to the killing of peaceful protesters, is a significant escalation. The article confirms ongoing violent protests and reported deaths, which directly triggers Trump's stated condition for intervention. This substantially increases the probability of US strikes.\nFAIR_VALUE: 0.65\nORDERS: BUY_YES 500 @ 0.1455\nMOTIVATION: The article confirms the conditions for Trump's intervention threat are being met, significantly increasing the likelihood of US strikes. The current market price still underprices this heightened risk.",
+        "balance": 2000.0,
+        "yes_pos": 0,
+        "no_pos": 0
+      }
+    ],
+    "Global Media Mix": [
+      {
+        "sim_time": "2026-01-02T10:31:02.068800",
+        "block_height": 5,
+        "llm_duration_s": 2.822361541999271,
+        "article_title": "Trump says U . S . will intervene if Iran violently suppresses peaceful protests",
+        "article_source": "thehindu.com",
+        "article_url": "https://www.thehindu.com/news/international/trump-says-us-will-intervene-if-iran-violently-suppresses-peaceful-protests/article70463406.ece",
+        "article_timestamp": "2026-01-02T10:30:00",
+        "analysis": "This article from an Indian source corroborates previous signals about escalating US-Iran tensions, specifically President Trump's direct threat of intervention if Iran violently suppresses protests. The mention of the June 2025 US strikes on Iranian nuclear sites during the Israel-Iran war provides crucial context for the current \"locked and loaded\" rhetoric. While the threat is strong, it's still a conditional statement and Iranian officials are also issuing warnings.",
+        "fair_value": 0.25,
+        "orders": [
+          "BuyYes 70 @ $0.1500"
+        ],
+        "motivation": "Trump's explicit threat of intervention, coupled with the historical context of recent US strikes, suggests a moderate increase in the probability of US military action. I'm taking a small initial position as this is still a conditional threat and I'm awaiting further international corroboration.",
+        "raw_llm_response": "ANALYSIS: This article from an Indian source corroborates previous signals about escalating US-Iran tensions, specifically President Trump's direct threat of intervention if Iran violently suppresses protests. The mention of the June 2025 US strikes on Iranian nuclear sites during the Israel-Iran war provides crucial context for the current \"locked and loaded\" rhetoric. While the threat is strong, it's still a conditional statement and Iranian officials are also issuing warnings.\nFAIR_VALUE: 0.25\nORDERS: BUY_YES 70 @ 0.15\nMOTIVATION: Trump's explicit threat of intervention, coupled with the historical context of recent US strikes, suggests a moderate increase in the probability of US military action. I'm taking a small initial position as this is still a conditional threat and I'm awaiting further international corroboration.",
+        "balance": 2000.0,
+        "yes_pos": 0,
+        "no_pos": 0
+      },
+      {
+        "sim_time": "2026-01-02T11:02:08.830800",
+        "block_height": 7,
+        "llm_duration_s": 2.0887084580026567,
+        "article_title": "Demo Iran Ricuh , AS Akan Turun Gunung Lagi",
+        "article_source": "kompas.com",
+        "article_url": "https://www.kompas.com/global/read/2026/01/02/172621070/demo-iran-ricuh-as-akan-turun-gunung-lagi",
+        "article_timestamp": "2026-01-02T10:45:00",
+        "analysis": "This Indonesian article from Kompas.com corroborates President Trump's threat of intervention if Iran kills protestors, echoing the previous signal. It details the escalating protests, casualties, and government shutdown in Iran, reinforcing the context for potential US action. The multi-regional confirmation strengthens the conviction that US intervention is a live possibility.",
+        "fair_value": 0.28,
+        "orders": [
+          "BuyYes 50 @ $0.1500"
+        ],
+        "motivation": "The multi-regional corroboration of Trump's explicit threat and the worsening situation in Iran warrant a moderate increase in my YES position. I am still cautious, as this is a conditional threat and not a confirmed strike.",
+        "raw_llm_response": "ANALYSIS: This Indonesian article from Kompas.com corroborates President Trump's threat of intervention if Iran kills protestors, echoing the previous signal. It details the escalating protests, casualties, and government shutdown in Iran, reinforcing the context for potential US action. The multi-regional confirmation strengthens the conviction that US intervention is a live possibility.\nFAIR_VALUE: 0.28\nORDERS: BUY_YES 50 @ 0.1500\nMOTIVATION: The multi-regional corroboration of Trump's explicit threat and the worsening situation in Iran warrant a moderate increase in my YES position. I am still cautious, as this is a conditional threat and not a confirmed strike.",
+        "balance": 1995.052941146,
+        "yes_pos": 34,
+        "no_pos": 0
+      }
+    ]
+  },
+  "trader_models": {
+    "American Media (Believer)": "google/gemini-2.5-flash",
+    "American Media (Skeptic)": "google/gemini-2.5-flash",
+    "Israeli Security Press": "google/gemini-2.5-flash",
+    "Iran/Russia/China Media": "google/gemini-2.5-flash",
+    "Financial Press": "google/gemini-2.5-flash",
+    "Global Media Mix": "google/gemini-2.5-flash"
+  },
+  "leaderboard": [
+    {
+      "name": "American Media (Believer)",
+      "account_id": 1,
+      "balance": 1867.735807669,
+      "yes_shares": 779,
+      "no_shares": 0,
+      "position_value": 163.814279553,
+      "portfolio_value": 2031.550087222,
+      "pnl": 31.550087222
+    },
+    {
+      "name": "Noise-8",
+      "account_id": 17,
+      "balance": 32.353054786,
+      "yes_shares": 69,
+      "no_shares": 7,
+      "position_value": 20.037850234,
+      "portfolio_value": 52.39090502,
+      "pnl": 2.39090502
+    },
+    {
+      "name": "Global Media Mix",
+      "account_id": 7,
+      "balance": 1995.052941146,
+      "yes_shares": 34,
+      "no_shares": 0,
+      "position_value": 7.149788838,
+      "portfolio_value": 2002.202729984,
+      "pnl": 2.202729984
+    },
+    {
+      "name": "Noise-5",
+      "account_id": 14,
+      "balance": 50.0,
+      "yes_shares": 0,
+      "no_shares": 0,
+      "position_value": 0.0,
+      "portfolio_value": 50.0,
+      "pnl": 0.0
+    },
+    {
+      "name": "Noise-9",
+      "account_id": 18,
+      "balance": 33.167907906,
+      "yes_shares": 50,
+      "no_shares": 8,
+      "position_value": 16.832092094,
+      "portfolio_value": 50.0,
+      "pnl": 0.0
+    },
+    {
+      "name": "American Media (Skeptic)",
+      "account_id": 2,
+      "balance": 2000.0,
+      "yes_shares": 0,
+      "no_shares": 0,
+      "position_value": 0.0,
+      "portfolio_value": 2000.0,
+      "pnl": 0.0
+    },
+    {
+      "name": "Israeli Security Press",
+      "account_id": 3,
+      "balance": 2000.0,
+      "yes_shares": 0,
+      "no_shares": 0,
+      "position_value": 0.0,
+      "portfolio_value": 2000.0,
+      "pnl": 0.0
+    },
+    {
+      "name": "Iran/Russia/China Media",
+      "account_id": 5,
+      "balance": 2000.0,
+      "yes_shares": 0,
+      "no_shares": 0,
+      "position_value": 0.0,
+      "portfolio_value": 2000.0,
+      "pnl": 0.0
+    },
+    {
+      "name": "Financial Press",
+      "account_id": 6,
+      "balance": 2000.0,
+      "yes_shares": 0,
+      "no_shares": 0,
+      "position_value": 0.0,
+      "portfolio_value": 2000.0,
+      "pnl": 0.0
+    },
+    {
+      "name": "Noise-6",
+      "account_id": 15,
+      "balance": 44.347099131,
+      "yes_shares": 0,
+      "no_shares": 7,
+      "position_value": 5.527984651,
+      "portfolio_value": 49.875083782,
+      "pnl": -0.124916218
+    },
+    {
+      "name": "Noise-7",
+      "account_id": 16,
+      "balance": 48.289498269,
+      "yes_shares": 0,
+      "no_shares": 2,
+      "position_value": 1.579424186,
+      "portfolio_value": 49.868922455,
+      "pnl": -0.131077545
+    },
+    {
+      "name": "Noise-1",
+      "account_id": 10,
+      "balance": 39.251923093,
+      "yes_shares": 0,
+      "no_shares": 13,
+      "position_value": 10.266257209,
+      "portfolio_value": 49.518180302,
+      "pnl": -0.481819698
+    },
+    {
+      "name": "Noise-4",
+      "account_id": 13,
+      "balance": 24.635632516,
+      "yes_shares": 0,
+      "no_shares": 31,
+      "position_value": 24.481074883,
+      "portfolio_value": 49.116707399,
+      "pnl": -0.883292601
+    },
+    {
+      "name": "Noise-0",
+      "account_id": 9,
+      "balance": 32.433465909,
+      "yes_shares": 0,
+      "no_shares": 21,
+      "position_value": 16.583953953,
+      "portfolio_value": 49.017419862,
+      "pnl": -0.982580138
+    },
+    {
+      "name": "Noise-2",
+      "account_id": 11,
+      "balance": 47.258301418,
+      "yes_shares": 0,
+      "no_shares": 2,
+      "position_value": 1.579424186,
+      "portfolio_value": 48.837725604,
+      "pnl": -1.162274396
+    },
+    {
+      "name": "Noise-3",
+      "account_id": 12,
+      "balance": 29.859541864,
+      "yes_shares": 0,
+      "no_shares": 24,
+      "position_value": 18.953090232,
+      "portfolio_value": 48.812632096,
+      "pnl": -1.187367904
+    },
+    {
+      "name": "MM",
+      "account_id": 0,
+      "balance": 49322.614826293,
+      "yes_shares": 1,
+      "no_shares": 818,
+      "position_value": 646.194779981,
+      "portfolio_value": 49968.809606274,
+      "pnl": -31.190393726
+    }
+  ]
+}

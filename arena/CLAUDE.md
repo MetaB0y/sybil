@@ -88,7 +88,8 @@ All bots accept `market_ids: list[int] | None` to restrict trading to specific m
 | Module | Purpose |
 |--------|---------|
 | `sim/clock.py` | `SimulatedClock` — time-compressed clock with ref-counted pause |
-| `sim/news_trader.py` | `NewsTrader` — LLM-powered news-reactive trader (market-agnostic) |
+| `sim/llm_trader.py` | `LlmTrader` — LLM makes full trading decisions (analysis + orders) |
+| `sim/news_trader_legacy.py` | `NewsTrader` — legacy mechanical trader (Beta belief + Kelly sizing) |
 | `sim/headline_filter.py` | Phase 1 headline relevance filter |
 | `sim/runner.py` | `SimulationConfig` + `run_simulation()` orchestration |
 | `sim/results.py` | `build_block_records()` + `save_and_print_results()` |

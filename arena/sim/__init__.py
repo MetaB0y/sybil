@@ -1,6 +1,6 @@
 """Generic simulation framework for news-reactive LLM trading."""
 
 from .clock import SimulatedClock
-from .news_trader import NewsTrader
+from .llm_trader import LlmTrader
 
-__all__ = ["SimulatedClock", "NewsTrader"]
+__all__ = ["SimulatedClock", "LlmTrader"]

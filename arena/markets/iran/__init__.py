@@ -21,18 +21,22 @@ from .personas import BOT_PERSONAS
 
 
 def build_persona(bot_config: dict) -> str:
-    """Build a full persona prompt from a BOT_PERSONAS entry."""
+    """Build a persona prompt from a BOT_PERSONAS entry.
+
+    Market question and context are injected by the LlmTrader prompt,
+    so the persona only describes identity + style.
+    """
     p = bot_config["persona"]
-    style_lines = "\n".join(f"- {s}" for s in p["style"])
+    read_lines = "\n".join(f"- {s}" for s in p["read_style"])
+    trade_lines = "\n".join(f"- {s}" for s in p["trade_style"])
     return f"""\
 You are {p['identity']}.
 
-You're trading on the market: "{MARKET_QUESTION}"
+How you read signals:
+{read_lines}
 
-{CONTEXT}
-
-Your analytical style:
-{style_lines}"""
+How you trade:
+{trade_lines}"""
 
 
 def get_config() -> MarketConfig:

@@ -21,29 +21,16 @@ flowchart TD
         P1_1 --> P1_2 --> P1_3 --> P1_4 --> P1_5
     end
 
-    subgraph PHASE2["Phase 2 -- Article Analysis -- live, per block"]
+    subgraph PHASE2["Phase 2 -- LLM Trading Decision -- live, per block"]
         P2_1["Drain arrived articles"]
         P2_2{"New articles?"}
-        P2_3["Build LLM prompt: persona + price + portfolio + trades + article"]
-        P2_4["LLM returns PROBABILITY + CONVICTION + MOTIVATION"]
-        P2_5["Update Beta belief with weight cap"]
+        P2_3["Build prompt: mechanics + persona + state + article"]
+        P2_4["LLM returns ANALYSIS + FAIR_VALUE + ORDERS + MOTIVATION"]
+        P2_5["Validate & clip orders"]
+        P2_6["Submit to matching engine"]
         P2_1 --> P2_2
         P2_2 -- No --> IDLE["No orders this block"]
-        P2_2 -- Yes --> P2_3 --> P2_4 --> P2_5
-    end
-
-    subgraph PHASE3["Phase 3 -- Trade Execution -- mechanical, no LLM"]
-        P3_1["Compute edge: abs belief - price"]
-        P3_2{"Edge > min_edge?"}
-        P3_3["Kelly sizing scaled by conviction"]
-        P3_4["Determine side: bullish or bearish"]
-        P3_5["Calculate target position"]
-        P3_6["Generate orders: close, trim, buy"]
-        P3_7["Submit to matching engine"]
-        P2_5 --> P3_1
-        P3_1 --> P3_2
-        P3_2 -- No --> SKIP["Skip -- edge too small"]
-        P3_2 -- Yes --> P3_3 --> P3_4 --> P3_5 --> P3_6 --> P3_7
+        P2_2 -- Yes --> P2_3 --> P2_4 --> P2_5 --> P2_6
     end
 
     SETUP --> PHASE1
@@ -55,9 +42,10 @@ flowchart TD
 ### Setup: Source Assignment
 
 Each trader persona is defined in `BOT_PERSONAS` with:
-- **Identity & style** — LLM system prompt shaping analytical bias (e.g. hawkish believer vs cold skeptic)
-- **Source list** — which news outlets this trader reads (e.g. American Believer reads US/UK mainstream; Anti-US Trader reads Iranian/Russian/Chinese media)
-- **Strategy params** — `belief_weight_cap` (reactivity), `kelly_scale` (sizing aggressiveness), `min_edge`, `confirm_boost`
+- **Identity** — who the trader is
+- **Read style** — how they interpret signals (1-2 bullets)
+- **Trade style** — how they trade: sizing, patience, risk tolerance (2-3 bullets)
+- **Source list** — which news outlets this trader reads
 
 Traders sharing sources (e.g. American Believer + American Skeptic) share phase1 results via `phase1_bot` aliasing.
 
@@ -72,58 +60,45 @@ Runs once per bot per date before simulation:
 
 Prompt is permissive ("when in doubt, say YES") — cheap to filter later, expensive to miss relevant news.
 
-### Phase 2: Article Analysis (`sim/news_trader.py:_phase2_analyze`, live)
+### Phase 2: LLM Trading Decision (`sim/llm_trader.py`, live)
 
-Runs during simulation, triggered each block:
+The LLM makes the full trading decision — no mechanical Kelly/Beta system. Runs during simulation, triggered each block:
 
 1. **Drain arrived articles** — articles whose real-world timestamp has passed in simulated time
-2. **Build prompt** containing:
-   - Trader persona (identity + analytical style)
-   - Current market YES price
-   - Last 5 trades with fill results
-   - Current portfolio (USDC, YES shares, NO shares)
-   - Article source, title, and full text (truncated to 4k chars)
-3. **LLM analyzes** using chain-of-thought, returns structured output:
-   - `PROBABILITY` — trader's estimate of event likelihood (0.00-1.00)
-   - `CONVICTION` — signal strength (LOW / MEDIUM / HIGH)
-   - `MOTIVATION` — 1-2 sentence thesis
-4. **Update running belief** (Beta distribution):
-   - If total weight (alpha + beta) exceeds `belief_weight_cap`, rescale down proportionally
-   - Add weighted evidence: `alpha += strength * probability`, `beta += strength * (1 - probability)`
-   - Low cap = reactive trader (recent articles dominate), high cap = anchored trader (history matters)
-
-If multiple articles arrive in one block, all are analyzed sequentially, each updating belief. Trading happens once after all analyses.
-
-### Phase 3: Trade Execution (`sim/news_trader.py:_phase3_execute`, mechanical)
-
-Pure math, no LLM:
-
-1. **Edge check** — `|belief - market_price|`. Skip if below `min_edge`
-2. **Kelly criterion** — `edge / (1 - price)` for bullish, `edge / price` for bearish
-3. **Scale by conviction** — LOW=0.15x, MEDIUM=0.30x, HIGH=0.50x (configurable)
-4. **Confirming signal boost** — each past same-direction MEDIUM/HIGH trade adds `confirm_boost` to scale
-5. **Target position** — `risk_budget / belief` for YES, `risk_budget / (1 - belief)` for NO
-6. **Order generation**:
-   - Close any wrong-side positions (bullish but holding NO → sell NO)
-   - Trim right-side if above target
-   - Buy toward target, capped by available cash
-7. **Submit** to Sybil's Frequent Batch Auction engine
+2. **Process articles sequentially** (each trade changes portfolio state for the next):
+   a. **Build prompt** containing:
+      - FBA mechanics (batches, minting, TTL=3, competition)
+      - Trading principles (sizing by conviction, sell when thesis weakens, don't overtrade)
+      - Trader persona (identity + read style + trade style)
+      - Market question + context
+      - Current YES price + last 5 price trend
+      - Portfolio state (cash, YES/NO shares, estimated value)
+      - Recent trades with motivations and fill results
+      - Article source, title, and full text (truncated to 3000 chars)
+   b. **LLM decides** — outputs structured response:
+      - `ANALYSIS` — 2-4 sentence interpretation of the article
+      - `FAIR_VALUE` — probability estimate (0.01-0.99)
+      - `ORDERS` — specific orders (`BUY_YES 50 @ 0.35`, `SELL_NO 100 @ 0.60`, or `HOLD`)
+      - `MOTIVATION` — 1-2 sentence thesis
+   c. **Validate orders** — clip sells to held positions, buys to affordable, clamp prices to 0.01-0.99
+   d. **Update shadow portfolio** — track pending orders for next article's prompt
+3. **Submit all orders** to Sybil's Frequent Batch Auction engine
 
 ### Cross-Day Persistence (multi-day simulation)
 
 Between simulation days:
-- **Persists**: Beta belief state (alpha, beta), trade log, price history, account balances/positions (server-side)
+- **Persists**: Trade log, price history, account balances/positions (server-side)
 - **Resets**: Clock, articles (new day's phase1 file), noise bots, block logs
 
 ## Trader Personality Spectrum
 
-| Trader | Cap | Responsiveness | Bias |
-|--------|-----|----------------|------|
-| American Believer | 5 | Impulsive | Hawkish, trusts govt rhetoric |
-| Iran/Russia/China Media | 8 | Impulsive | Skeptical of US threats |
-| Global Media Mix | 8 | Impulsive | Balanced cross-source |
-| Israeli Security Press | 10 | Responsive | Security-focused, weights military intel |
-| Financial Press | 20 | Moderate | Risk/reward driven |
-| Arab Regional Press | 30 | Deliberate | Diplomatic shifts, ground-level |
-| American Skeptic | 40 | Cold | Demands concrete evidence |
-| Random Sampler | 1 | Fully reactive | No memory, each article overwrites |
+| Trader | Read Style | Trade Style |
+|--------|-----------|-------------|
+| American Believer | Trusts govt rhetoric | Impulsive, FOMO, slow to sell |
+| American Skeptic | Demands concrete evidence | Patient, small positions, quick to cut |
+| Israeli Security Press | Security/military intel focused | Decisive, holds through volatility |
+| Arab Regional Press | Diplomatic shifts, reading between lines | Incremental, active rebalancer |
+| Iran/Russia/China Media | Skeptical of US threats | Contrarian, aggressive YES seller on bluster |
+| Financial Press | Price movements as leading indicators | Disciplined, strict edge, cuts losses fast |
+| Global Media Mix | Cross-regional corroboration | Cautious, small positions, waits for confirmation |
+| Random Sampler | No prior, pure reaction | Maximally reactive, no memory |

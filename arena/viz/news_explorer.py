@@ -773,31 +773,16 @@ def render_simulation_tab():
                         except (ValueError, IndexError):
                             pass
 
-            # Build trade logic summary: "kelly=X% → target YES 209 (cur 564, -355)"
-            trade_logic = ""
-            risk_pct = tl.get("risk_pct")
-            target = tl.get("target_pos")
-            if risk_pct and target:
-                kelly_pct = risk_pct * 100
-                cur_yes = tl.get("yes_pos", 0)
-                cur_no = tl.get("no_pos", 0)
-                blf = tl.get("belief", tl["probability"])
-                side = "YES" if blf > (yes_price or 0.5) else "NO"
-                cur = cur_yes if side == "YES" else cur_no
-                delta = target - cur
-                sign = "+" if delta >= 0 else ""
-                trade_logic = f"kelly={kelly_pct:.1f}% → target {side} {target} (cur {cur}, {sign}{delta})"
+            # Fair value (backward-compat: fall back to probability)
+            fair_value = tl.get("fair_value", tl.get("probability", 0))
 
             trader_events.append({
                 "block": bh,
                 "trader": tname,
                 "time": time_str,
                 "yes_price": yes_price,
-                "probability": tl["probability"],
+                "fair_value": fair_value,
                 "trade_price": trade_price,
-                "conviction": tl["conviction"] if isinstance(tl["conviction"], int) else {"LOW": 3, "MEDIUM": 5, "HIGH": 8}.get(tl["conviction"], 5),
-                "belief": tl.get("belief", tl["probability"]),
-                "trade_logic": trade_logic,
                 "holdings": f"${tl.get('balance', 0):.1f} / {tl.get('yes_pos', 0)}Y / {tl.get('no_pos', 0)}N",
                 "orders": orders_str,
                 "fills": fill_str,
@@ -870,10 +855,7 @@ def render_simulation_tab():
                 alt.Tooltip("block:Q", title="Batch"),
                 alt.Tooltip("trader:N", title="Trader"),
                 alt.Tooltip("time:N", title="Sim Time"),
-                alt.Tooltip("probability:Q", title="LLM Prob", format=".2f"),
-                alt.Tooltip("belief:Q", title="Belief", format=".3f"),
-                alt.Tooltip("conviction:Q", title="Conviction"),
-                alt.Tooltip("trade_logic:N", title="Logic"),
+                alt.Tooltip("fair_value:Q", title="Fair Value", format=".2f"),
                 alt.Tooltip("holdings:N", title="Holdings"),
                 alt.Tooltip("orders:N", title="Orders"),
                 alt.Tooltip("fills:N", title="Fills"),
@@ -888,15 +870,7 @@ def render_simulation_tab():
                     color=color_enc,
                     tooltip=common_tooltip,
                 )
-                trade_labels = alt.Chart(traded_df).mark_text(
-                    align="left", dx=5, dy=-10, fontSize=10,
-                ).encode(
-                    x="block:Q",
-                    y="trade_price:Q",
-                    color=color_enc,
-                    text=alt.Text("conviction:Q", format="d"),
-                )
-                layers.extend([trade_dots, trade_labels])
+                layers.append(trade_dots)
 
             # NO TRADE events: show as hollow diamonds at LLM probability
             if not no_trade_df.empty:
@@ -904,7 +878,7 @@ def render_simulation_tab():
                     size=80, filled=False, shape="diamond",
                 ).encode(
                     x="block:Q",
-                    y=alt.Y("probability:Q"),
+                    y=alt.Y("fair_value:Q"),
                     color=color_enc,
                     tooltip=common_tooltip,
                 )
@@ -1002,7 +976,6 @@ def render_simulation_tab():
     )
     visible_log = trade_log if show_all else trade_log[:INITIAL_SHOW]
 
-    prev_belief = None
     for i, t in enumerate(trade_log, 1):
         bh = t.get("block_height", -1)
         order_block = bh
@@ -1020,14 +993,30 @@ def render_simulation_tab():
                 if future_t.get("orders") and future_t.get("block_height", -1) > order_block:
                     ttl_end = min(ttl_end, future_t["block_height"])
                     break
+            # Cap fills to the total quantity this trade entry ordered
+            total_ordered = 0
+            for o_str in t["orders"]:
+                parts = o_str.split()
+                if len(parts) >= 2:
+                    try:
+                        total_ordered += int(parts[1])
+                    except ValueError:
+                        pass
+            remaining_cap = total_ordered
             for bk in blocks:
+                if remaining_cap <= 0:
+                    break
                 if order_block < bk["height"] <= ttl_end:
                     for f in bk.get("trader_fills", []):
+                        if remaining_cap <= 0:
+                            break
                         # Filter to selected trader (new runs tag fills with source=trader name)
                         fsrc = f.get("source", "Trader")
                         if fsrc not in (selected_trader, "Trader"):
                             continue
-                        per_fill_items.append((bk["height"], f["fill_qty"], f["fill_price"]))
+                        capped_qty = min(f["fill_qty"], remaining_cap)
+                        per_fill_items.append((bk["height"], capped_qty, f["fill_price"]))
+                        remaining_cap -= capped_qty
 
         # Summary for header
         if per_fill_items:
@@ -1039,48 +1028,30 @@ def render_simulation_tab():
         else:
             fill_str = ""
 
-        conv = t["conviction"] if isinstance(t["conviction"], int) else 5
-        conv_color = "red" if conv >= 7 else "orange" if conv >= 4 else "gray"
+        fv = t.get("fair_value", t.get("probability", 0))
         header = (
             f"[{i}] Batch {order_block} · "
-            f"{mkt_str} → LLM P={t['probability']:.2f} · "
-            f":{conv_color}[C={conv}/10] · "
+            f"{mkt_str} → FV={fv:.2f} · "
             f"{orders_str}{fill_str}"
         )
 
-        cur_belief = t.get("belief", 0)
-
-        # Only render expanders for visible rows; still iterate all for prev_belief tracking
+        # Only render expanders for visible rows
         if i <= len(visible_log):
             with st.expander(header):
                 # Timing info
                 if order_block != bh:
                     st.markdown(f"**LLM call initiated:** batch {bh}")
 
-                # Holdings at decision time (backward-compatible with older runs)
+                # Holdings at decision time
                 bal = t.get("balance", 0)
                 yp = t.get("yes_pos", 0)
                 np_ = t.get("no_pos", 0)
-                rp = t.get("risk_pct", 0)
-                tp = t.get("target_pos", 0)
                 if bal or yp or np_:
                     total_val = bal + yp * (mkt_price or 0) + np_ * (1 - (mkt_price or 0))
                     holdings = f"**Holdings:** \\${bal:.2f} cash · YES {yp} · NO {np_} · total ~\\${total_val:.2f}"
-                    if cur_belief > 0:
-                        belief_side = "bullish" if cur_belief > (mkt_price or 0.5) else "bearish"
-                        if prev_belief is not None:
-                            holdings += f" | belief={prev_belief:.3f}→{cur_belief:.3f} ({belief_side})"
-                        else:
-                            holdings += f" | belief={cur_belief:.3f} ({belief_side})"
-                    if rp > 0:
-                        side = "YES" if cur_belief > (mkt_price or 0) else "NO"
-                        current = yp if side == "YES" else np_
-                        gap = tp - current
-                        sign = "+" if gap > 0 else ""
-                        holdings += f" | kelly={rp:.1%} → target {side} {tp} (current {current}, {sign}{gap})"
                     st.markdown(holdings)
 
-                st.markdown(f"**Orders:** {orders_str}, batch {order_block}" if t["orders"] else "**No trade** (edge too small or parse failure)")
+                st.markdown(f"**Orders:** {orders_str}, batch {order_block}" if t["orders"] else "**No trade**")
 
                 # Per-fill breakdown
                 if per_fill_items:
@@ -1091,16 +1062,29 @@ def render_simulation_tab():
                 elif t["orders"]:
                     st.markdown("**Fills:** no fills")
 
-                # Then: article info
+                # Article info
                 st.markdown("---")
-                st.markdown(f"**Article:** {t['article_source']} — {t['article_title']}")
-                if t["motivation"]:
-                    st.info(t["motivation"])
-                if t.get("llm_response"):
-                    st.markdown("**LLM Chain of Thought:**")
-                    st.text(t["llm_response"])
+                articles_list = t.get("articles", [])
+                if articles_list and len(articles_list) > 1:
+                    st.markdown(f"**Articles ({len(articles_list)}):**")
+                    for ai, art in enumerate(articles_list, 1):
+                        st.markdown(f"{ai}. **{art['source']}** — {art['title']}")
+                else:
+                    st.markdown(f"**Article:** {t.get('article_source', '')} — {t.get('article_title', '')}")
 
-        prev_belief = cur_belief
+                # Analysis (new format) or motivation
+                analysis = t.get("analysis")
+                if analysis:
+                    st.markdown(f"**LLM Analysis:**")
+                    st.info(analysis)
+                if t.get("motivation"):
+                    st.markdown(f"**Motivation:** {t['motivation']}")
+
+                # Full LLM response
+                raw = t.get("raw_llm_response") or t.get("llm_response")
+                if raw:
+                    st.markdown("**Full LLM Response:**")
+                    st.text(raw)
 
     # ═══════════ PER-BLOCK TABLE ═══════════
     st.subheader("Per-Batch Activity")
@@ -1139,9 +1123,8 @@ def render_simulation_tab():
                 if trader_name and trader_name not in traders_with_orders:
                     continue
                 tag = f"[{trader_name}] " if trader_name else ""
-                conv = l['conviction']
-                conv_str = f"C={conv}/10" if isinstance(conv, int) else str(conv)
-                parts.append(f"{tag}P={l['probability']:.2f} {conv_str}")
+                fv = l.get("fair_value", l.get("probability", 0))
+                parts.append(f"{tag}FV={fv:.2f}")
             row["LLM Orders"] = " | ".join(parts)
         block_table.append(row)
 
