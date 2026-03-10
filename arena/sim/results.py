@@ -138,11 +138,11 @@ def build_block_records(
         }
         records.append(rec)
 
-    # Compute active trader orders with TTL=5 carry-over
+    # Compute active trader orders with TTL=3 carry-over
     active_orders: list[dict] = []
     for rec in records:
         h = rec["height"]
-        active_orders = [o for o in active_orders if h - o["submitted_block"] < 5]
+        active_orders = [o for o in active_orders if h - o["submitted_block"] < 3]
         for o_str in rec["trader_orders"]:
             parts = o_str.split()
             if len(parts) >= 2:

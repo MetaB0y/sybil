@@ -734,27 +734,26 @@ def render_simulation_tab():
                         break
 
             # Collect fills from order submission until next order by same trader
-            ttl_end = order_block + 4  # inclusive (TTL=5)
+            fill_str = ""
             if tl["orders"]:
+                ttl_end = order_block + 2  # inclusive (TTL=3)
                 remaining_tlog = [t2 for t2 in trade_logs.get(tname, [])
                                   if t2.get("orders") and t2.get("block_height", -1) > bh]
                 if remaining_tlog:
                     ttl_end = min(ttl_end, remaining_tlog[0]["block_height"])
-            nearby_fills = []
-            for bk in blocks:
-                if order_block < bk["height"] <= ttl_end:
-                    for f in bk.get("trader_fills", []):
-                        fsrc = f.get("source", "Trader")
-                        if fsrc in (tname, "Trader"):
-                            nearby_fills.append(f)
-            if nearby_fills:
-                total_filled = sum(f["fill_qty"] for f in nearby_fills)
-                avg_price = sum(f["fill_price"] * f["fill_qty"] for f in nearby_fills) / total_filled if total_filled else 0
-                fill_str = f"{total_filled} filled @ {avg_price:.4f}"
-            elif tl["orders"]:
-                fill_str = "no fills"
-            else:
-                fill_str = ""
+                nearby_fills = []
+                for bk in blocks:
+                    if order_block <= bk["height"] <= ttl_end:
+                        for f in bk.get("trader_fills", []):
+                            fsrc = f.get("source", "Trader")
+                            if fsrc in (tname, "Trader"):
+                                nearby_fills.append(f)
+                if nearby_fills:
+                    total_filled = sum(f["fill_qty"] for f in nearby_fills)
+                    avg_price = sum(f["fill_price"] * f["fill_qty"] for f in nearby_fills) / total_filled if total_filled else 0
+                    fill_str = f"{total_filled} filled @ {avg_price:.4f}"
+                else:
+                    fill_str = "no fills"
 
             # Use LLM block for chart position (that's when the decision was made)
             llm_block_data = next((b for b in blocks if b["height"] == bh), None)
@@ -807,7 +806,7 @@ def render_simulation_tab():
             })
     trader_df = pd.DataFrame(trader_events) if trader_events else None
     if trader_df is not None and not trader_df.empty:
-        trader_df["filled"] = trader_df["fills"].str.contains("filled", na=False)
+        trader_df["filled"] = trader_df["fills"].str.contains(r"^\d+\s+filled", na=False, regex=True)
 
     try:
         import altair as alt
