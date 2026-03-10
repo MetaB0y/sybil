@@ -37,15 +37,17 @@ def _load_market_config(market_name: str):
 
 
 def _resolve_phase1_path(market_config, bot_key: str, date: str | None = None) -> str:
-    """Resolve the phase1 results path for a bot key."""
+    """Resolve the phase1 results path for a bot key.
+
+    Returns a template path with {date} placeholder when date is None
+    and --dates will be used, or a concrete path when date is given.
+    """
     phase1_key = market_config.personas.get(bot_key, {}).get("phase1_bot", bot_key)
     phase1_dir = market_config.phase1_dir
     if date:
         return str(phase1_dir / f"{phase1_key}_{date}_phase1_results.json")
-    candidates = sorted(phase1_dir.glob(f"{phase1_key}_*_phase1_results.json"))
-    if candidates:
-        return str(candidates[-1])
-    return str(phase1_dir / f"{phase1_key}_phase1_results.json")
+    # Return a template — the per-day loop will substitute {date}
+    return str(phase1_dir / f"{phase1_key}_{{date}}_phase1_results.json")
 
 
 @dataclass
@@ -97,15 +99,22 @@ async def run_simulation(config: SimulationConfig) -> None:
         print(f"Created market {market.id}: {market.name}")
 
         mm_acct = await client.create_account(int(config.mm_balance * NANOS_PER_DOLLAR))
+        # Seed trade: slight surplus ($1.02 total) guarantees positive welfare
+        # so the solver always matches it, even alone in a batch.
+        seed_yes = config.initial_price + 0.01
+        seed_no = (1 - config.initial_price) + 0.01
         await client.submit_orders(mm_acct.id, [
-            BuyYes.at_price(market.id, config.initial_price, 1),
-            BuyNo.at_price(market.id, 1 - config.initial_price, 1),
+            BuyYes.at_price(market.id, seed_yes, 1),
+            BuyNo.at_price(market.id, seed_no, 1),
         ])
-        print(f"MM account {mm_acct.id}: seed price set @ {config.initial_price:.2f}")
+        print(f"MM account {mm_acct.id}: seed price @ {config.initial_price:.2f} (waiting for fill...)")
 
+        # Wait until the seed trade actually clears (market appears in clearing_prices)
         async for block in client.stream_blocks():
-            print(f"Seed trade cleared in block {block.height}")
-            break
+            if market.id in block.clearing_prices:
+                yes_nanos, _ = block.clearing_prices[market.id]
+                print(f"Seed trade cleared in block {block.height} @ YES={yes_nanos / NANOS_PER_DOLLAR:.4f}")
+                break
 
         api_key = config.api_key or os.environ.get("OPENROUTER_API_KEY", "")
         if not api_key:
@@ -137,11 +146,13 @@ async def run_simulation(config: SimulationConfig) -> None:
 
             spec_articles: dict[str, list] = {}
             for spec in specs:
-                if date_str:
-                    path = spec.phase1_path.replace("_phase1_results.json", f"_{date_str}_phase1_results.json")
-                    # Try date-specific path first, fall back to original
+                if date_str and "{date}" in spec.phase1_path:
+                    path = spec.phase1_path.replace("{date}", date_str)
                     if not Path(path).exists():
-                        path = spec.phase1_path
+                        # Fall back: try without date
+                        path = spec.phase1_path.replace("_{date}", "")
+                elif date_str:
+                    path = spec.phase1_path
                 else:
                     path = spec.phase1_path
                 arts = load_articles(path)
