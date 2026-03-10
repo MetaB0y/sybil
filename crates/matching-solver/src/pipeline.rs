@@ -250,6 +250,25 @@ pub struct IterationStats {
 }
 
 impl PipelineResult {
+    /// Wrap a MatchingResult (e.g. from MILP) into a PipelineResult,
+    /// including clearing prices for the sequencer to read.
+    pub fn from_matching_result(
+        result: MatchingResult,
+        clearing_prices: HashMap<MarketId, Vec<Nanos>>,
+    ) -> Self {
+        let mut pr = Self::empty();
+        pr.result = result;
+        if !clearing_prices.is_empty() {
+            pr.price_discovery = Some(PriceDiscoveryResult {
+                prices: clearing_prices,
+                market_solutions: HashMap::new(),
+                total_welfare: 0,
+                total_fills: 0,
+            });
+        }
+        pr
+    }
+
     /// Create an empty result.
     pub fn empty() -> Self {
         Self {
