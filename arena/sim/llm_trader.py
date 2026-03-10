@@ -133,8 +133,8 @@ Your limit price is the worst price you'd accept, not the price you'll pay.
 
 Trading principles:
 - Size positions by conviction: small (5-15%) for weak signals, medium (15-30%) for moderate, large (30-50%) for strong
-- If you're highly confident (confirmed concrete development), go all-in
 - Actively sell positions when your thesis weakens or you see counter-evidence
+- Take profit: if you hold shares that are now worth more than you paid and you're not strongly convicted, sell some or all to lock in gains
 - Don't overtrade: if the market already reflects your view, HOLD
 
 Always think and respond in English regardless of article language."""
@@ -283,6 +283,28 @@ class LlmTrader(BaseAgent):
                 )
             article_section = "\n".join(parts)
 
+        # Build dynamic available-actions block
+        actions = []
+        if balance >= 0.01:
+            max_yes = int(balance / yes_price) if yes_price > 0 else 0
+            max_no = int(balance / (1 - yes_price)) if (1 - yes_price) > 0 else 0
+            actions.append(f"- BUY_YES <qty> @ <price>: bet event happens (max ~{max_yes} shares with your cash)")
+            actions.append(f"- BUY_NO <qty> @ <price>: bet event does NOT happen (max ~{max_no} shares with your cash)")
+        else:
+            actions.append("- BUY_YES / BUY_NO: not available (no cash)")
+        if yes_shares > 0:
+            actions.append(f"- SELL_YES <qty> @ <price>: sell some or all of your {yes_shares} YES shares")
+        else:
+            actions.append("- SELL_YES: NOT available (you hold 0 YES shares)")
+        if no_shares > 0:
+            actions.append(f"- SELL_NO <qty> @ <price>: sell some or all of your {no_shares} NO shares")
+        else:
+            actions.append("- SELL_NO: NOT available (you hold 0 NO shares)")
+        actions.append("- HOLD: do nothing")
+        actions_block = "\n".join(actions)
+
+        analyze_word = "these articles" if len(articles) > 1 else "this article"
+
         return f"""{SYSTEM_PROMPT}
 
 {self.persona}
@@ -299,11 +321,14 @@ Recent trades:
 
 {article_section}
 
-Analyze {"these articles" if len(articles) > 1 else "this article"} and decide your trade. Respond in this exact format:
+Available actions:
+{actions_block}
 
-ANALYSIS: [Your analysis of what {"these articles signal" if len(articles) > 1 else "this article signals"}, 2-4 sentences]
+Analyze {analyze_word} and decide your trade. Respond in this exact format:
+
+ANALYSIS: [Your analysis of what {analyze_word} signals, 2-4 sentences]
 FAIR_VALUE: [Your probability estimate for the market question, 0.01-0.99]
-ORDERS: [One or more of: BUY_YES <qty> @ <price>, BUY_NO <qty> @ <price>, SELL_YES <qty> @ <price>, SELL_NO <qty> @ <price>, or HOLD]
+ORDERS: [Choose from the available actions above, e.g. BUY_YES 100 @ 0.25, or HOLD]
 MOTIVATION: [1-2 sentence thesis for your trade decision]"""
 
     def _parse_orders(self, text: str) -> tuple[str, float, list[OrderSpec], str] | None:
