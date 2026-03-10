@@ -216,7 +216,7 @@ class NewsTrader(BaseAgent):
             self._llm_client = openai.AsyncOpenAI(
                 base_url="https://openrouter.ai/api/v1",
                 api_key=self.api_key,
-                timeout=120.0,
+                timeout=30.0,
             )
         return self._llm_client
 
@@ -299,7 +299,7 @@ class NewsTrader(BaseAgent):
 
     async def _phase2_analyze(
         self, article: Article, block: Block
-    ) -> tuple[float, str, str, str, float] | None:
+    ) -> tuple[float, str, str, str, float] | str:
         """Call LLM for probability/conviction/motivation."""
         market_id = next(iter(self.market_ids))
         yes_nanos, _ = self.filter_markets(block)[market_id]
@@ -321,32 +321,26 @@ class NewsTrader(BaseAgent):
         llm = self._get_llm_client()
         text = ""
         llm_duration_s = 0.0
-        for attempt in range(3):
+        try:
+            t0 = time.monotonic()
+            await self.client.pause()
+            self.clock.pause()
             try:
-                t0 = time.monotonic()
-                await self.client.pause()
-                self.clock.pause()
-                try:
-                    resp = await llm.chat.completions.create(
-                        model=self.model_name,
-                        messages=[{"role": "user", "content": prompt}],
-                        temperature=0.3,
-                        max_tokens=1024,
-                    )
-                finally:
-                    self.clock.resume()
-                    await self.client.resume()
-                llm_duration_s = time.monotonic() - t0
-                text = resp.choices[0].message.content or ""
-                log.info("[%s] LLM response for '%s' (%.1fs):\n%s", self.name, article.title[:60], llm_duration_s, text)
-                break
-            except Exception as e:
-                log.warning("[%s] LLM call attempt %d/3 failed: %s", self.name, attempt + 1, e)
-                if attempt < 2:
-                    await asyncio.sleep(2 ** attempt)
-                else:
-                    log.error("[%s] LLM call failed after 3 attempts", self.name)
-                    return None
+                resp = await llm.chat.completions.create(
+                    model=self.model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    max_tokens=1024,
+                )
+            finally:
+                self.clock.resume()
+                await self.client.resume()
+            llm_duration_s = time.monotonic() - t0
+            text = resp.choices[0].message.content or ""
+            log.info("[%s] LLM response for '%s' (%.1fs):\n%s", self.name, article.title[:60], llm_duration_s, text)
+        except Exception as e:
+            log.warning("[%s] LLM call failed: %s", self.name, e)
+            return f"API error: {e}"
 
         # Parse structured output
         prob_match = re.search(r"PROBABILITY:\s*([\d.]+)", text)
@@ -355,7 +349,7 @@ class NewsTrader(BaseAgent):
 
         if not prob_match or not conv_match:
             log.warning("[%s] Failed to parse LLM output", self.name)
-            return None
+            return "parse error: no PROBABILITY/CONVICTION"
 
         probability = float(prob_match.group(1))
         conviction = max(1, min(10, int(conv_match.group(1))))
@@ -363,7 +357,7 @@ class NewsTrader(BaseAgent):
 
         if not 0.0 <= probability <= 1.0:
             log.warning("[%s] Probability out of range: %s", self.name, probability)
-            return None
+            return f"probability out of range: {probability}"
 
         return probability, conviction, motivation, text, llm_duration_s
 
@@ -469,20 +463,26 @@ class NewsTrader(BaseAgent):
             sim_t = self.clock.now().strftime("%H:%M")
             print(f"  [{self.name}] block {block.height} ({sim_t}): {len(arrived)} article(s)", flush=True)
 
+        # Fire all LLM calls concurrently (clock pause is ref-counted)
+        async def _analyze_one(article):
+            print(f"    → LLM: \"{article.title[:60]}\" ({article.source})...", end="", flush=True)
+            result = await self._phase2_analyze(article, block)
+            return article, result
+
+        results = await asyncio.gather(*[_analyze_one(a) for a in arrived])
+
+        # Process results sequentially for belief updates
         analyses: list[tuple] = []
         best_conviction = 1
 
-        for article in arrived:
-            print(f"    → LLM: \"{article.title[:60]}\" ({article.source})...", end="", flush=True)
-
-            result = await self._phase2_analyze(article, block)
-            if result is None:
-                print(" FAILED", flush=True)
+        for article, result in results:
+            if isinstance(result, str):
+                print(f" FAILED ({result})", flush=True)
                 self.trade_log.append(TradeRecord(
                     article=article,
                     probability=0.0,
                     conviction=1,
-                    motivation="LLM parse failure",
+                    motivation=result,
                     orders=[],
                     sim_time=self.clock.now(),
                     block_height=block.height,
