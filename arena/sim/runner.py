@@ -178,6 +178,7 @@ async def run_simulation(config: SimulationConfig) -> None:
 
             mm = BalancedMarketMaker(
                 client, mm_acct.id,
+                budget_dollars=config.mm_balance,
                 name="MM",
                 market_ids=[market.id],
             )
@@ -225,6 +226,9 @@ async def run_simulation(config: SimulationConfig) -> None:
             if not traders:
                 print(f"  ERROR: No traders created for day {day_label}. Skipping.")
                 continue
+
+            # Record starting block so results only include this day's blocks
+            day_start_block = (await client.get_latest_block()).height
 
             clock.start()
             all_bots = [mm, *noise_bots, *traders]
@@ -274,6 +278,7 @@ async def run_simulation(config: SimulationConfig) -> None:
                 runs_dir=runs_dir,
                 day_label=date_str,
                 run_id=run_id,
+                min_block=day_start_block,
             )
 
 

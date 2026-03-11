@@ -234,137 +234,154 @@ class FlashMarketMaker(BaseAgent):
 
 
 class BalancedMarketMaker(BaseAgent):
-    """Two-sided market maker with inventory-aware quoting.
+    """FBA-compatible two-sided market maker with no self-trading.
 
-    Quotes buy and sell on both YES and NO at multiple price levels.
-    Buy budget capped at risk_fraction of portfolio value.
-    Sell quantities distributed evenly across levels (most at best ask).
-    Skew is proportional to mid price to avoid distorting low-probability markets.
-    Uses regular balance checks (no flash liquidity).
+    Core rule: per outcome, only be on ONE side (buy or sell) per block.
+    Uses flash liquidity (mm_budget_nanos) for one-shot orders — no TTL
+    carryover prevents cross-block self-trading.
+
+    Three modes based on inventory:
+      BALANCED: BuyYes + BuyNo (minting — standard MM liquidity)
+      LONG_YES: SellYes + BuyNo (offload YES, absorb NO)
+      LONG_NO:  BuyYes + SellNo (absorb YES, offload NO)
     """
 
     def __init__(
         self,
         client,
         account_id: int,
+        budget_dollars: float = 50_000.0,
+        half_spread: float = 0.03,
         num_levels: int = 3,
         level_spacing_cents: int = 3,
-        risk_fraction: float = 0.30,
+        base_size_dollars: float = 250.0,
+        max_position: int = 15_000,
+        sell_threshold_pct: float = 0.10,
         skew_factor: float = 0.1,
         name: str | None = None,
         market_ids: list[int] | None = None,
     ):
         super().__init__(client, account_id, name, market_ids)
+        self.mm_budget_nanos = int(budget_dollars * NANOS_PER_DOLLAR)
+        self.half_spread = half_spread
         self.num_levels = num_levels
-        self.level_spacing_cents = level_spacing_cents
-        self.risk_fraction = risk_fraction
+        self.level_spacing = level_spacing_cents / 100
+        self.base_size_dollars = base_size_dollars
+        self.max_position = max_position
+        self.sell_threshold = int(max_position * sell_threshold_pct)
         self.skew_factor = skew_factor
-        # mm_budget_nanos stays None — no flash liquidity
 
-    def _compute_skew(self, market_id: int, mid: float) -> float:
-        """Inventory skew: excess YES → shift mid DOWN to sell YES faster.
+    def _compute_skew(self, net: int, mid: float) -> float:
+        """Price skew based on inventory imbalance.
 
-        Skew is capped at 25% of mid price to avoid distorting low-prob markets.
-        E.g. mid=0.20 → max skew ±0.05, mid=0.50 → max skew ±0.10.
+        Capped at 20% of distance-from-edge to avoid distorting low-prob markets.
+        E.g. mid=0.20 → max skew ±0.04, mid=0.50 → max skew ±0.10.
         """
-        yes_pos = self.get_position(market_id, "YES")
-        no_pos = self.get_position(market_id, "NO")
-        imbalance = yes_pos - no_pos
-        # Cap relative to distance from edge — symmetric for YES and NO
-        max_skew = min(mid, 1.0 - mid) * 0.25
-        if max_skew < 0.005:
+        max_skew = min(mid, 1.0 - mid) * 0.20
+        if max_skew < 0.005 or self.max_position == 0:
             return 0.0
-        # ~500 imbalance → ~half of max_skew
-        normalized = imbalance * self.skew_factor * 0.01 / max_skew
+        normalized = net * self.skew_factor * 0.01 / max_skew
         return max_skew * math.tanh(normalized)
 
-    def _portfolio_value(self, market_id: int, mid: float) -> float:
-        """cash + yes_pos * mid + no_pos * (1 - mid)"""
-        cash = self.current_balance
-        yes_pos = self.get_position(market_id, "YES")
-        no_pos = self.get_position(market_id, "NO")
-        return cash + yes_pos * mid + no_pos * (1 - mid)
+    def _buy_orders(
+        self, market_id: int, mid: float, is_yes: bool, remaining_cash: float,
+    ) -> tuple[list[OrderSpec], float]:
+        """Generate buy orders for one side. Returns (orders, cash_remaining)."""
+        orders = []
+        cls = BuyYes if is_yes else BuyNo
+        for level in range(1, self.num_levels + 1):
+            bid = mid - level * self.level_spacing
+            if bid < 0.01 or remaining_cash <= 0:
+                continue
+            qty = min(
+                int(self.base_size_dollars / bid),
+                int(remaining_cash / bid),
+                self.max_position,
+            )
+            if qty > 0:
+                orders.append(cls.at_price(market_id, bid, qty))
+                remaining_cash -= qty * bid
+        return orders, remaining_cash
+
+    def _sell_orders(
+        self, market_id: int, mid: float, is_yes: bool, held: int,
+    ) -> list[OrderSpec]:
+        """Generate sell orders for one side. Tapered: most at best ask."""
+        orders = []
+        cls = SellYes if is_yes else SellNo
+        remaining = held
+        # Sell taper weights: 50%, 30%, 20% at levels 1, 2, 3
+        weights = [0.50, 0.30, 0.20]
+        for level in range(1, self.num_levels + 1):
+            ask = mid + level * self.level_spacing
+            if ask > 0.99 or remaining <= 0:
+                continue
+            w = weights[level - 1] if level <= len(weights) else weights[-1]
+            qty = max(1, min(int(held * w), remaining))
+            if qty > 0:
+                orders.append(cls.at_price(market_id, ask, qty))
+                remaining -= qty
+        return orders
 
     async def on_block(self, block: Block) -> list[OrderSpec]:
-        orders = []
-        spacing = self.level_spacing_cents / 100
-        remaining_cash = self.current_balance
+        orders: list[OrderSpec] = []
 
         for market_id, (yes_nanos, no_nanos) in self.filter_markets(block).items():
             yes_mid = yes_nanos / NANOS_PER_DOLLAR
             yes_mid = max(0.05, min(0.95, yes_mid))
-            skew = self._compute_skew(market_id, yes_mid)
-            adjusted_mid = max(0.05, min(0.95, yes_mid - skew))
-            no_mid = 1.0 - adjusted_mid
 
             yes_pos = self.get_position(market_id, "YES")
             no_pos = self.get_position(market_id, "NO")
+            net = yes_pos - no_pos  # positive = long YES
 
-            # Asymmetric buy budget: reduce buying on the side we're long
-            portfolio_val = self._portfolio_value(market_id, yes_mid)
-            buy_budget = self.risk_fraction * portfolio_val
-            # When long YES: less YES buying, more NO buying
-            net = yes_pos - no_pos
-            max_pos = max(yes_pos, no_pos, 1)
-            bias = math.tanh(net / max(max_pos, 500))  # [-1, 1]
-            yes_buy_budget = buy_budget * (0.5 - 0.4 * bias)  # long YES → less YES buying
-            no_buy_budget = buy_budget * (0.5 + 0.4 * bias)   # long YES → more NO buying
-            yes_buy_per_level = yes_buy_budget / self.num_levels if self.num_levels else 0
-            no_buy_per_level = no_buy_budget / self.num_levels if self.num_levels else 0
+            # Skew mid based on inventory
+            skew = self._compute_skew(net, yes_mid)
+            adjusted_yes_mid = max(0.05, min(0.95, yes_mid - skew))
+            adjusted_no_mid = 1.0 - adjusted_yes_mid
 
-            # Sell quantities: distribute evenly, taper down by level
-            # Level 1 (best ask) gets most, level N gets least
-            remaining_yes = yes_pos
-            remaining_no = no_pos
+            # Compress spread near edges
+            edge_room = min(adjusted_yes_mid, adjusted_no_mid)
+            spread = min(self.half_spread, edge_room - 0.01)
+            if spread < 0.005:
+                continue
 
-            for level in range(1, self.num_levels + 1):
-                offset = level * spacing
-                # Taper: level 1 gets ~50% of remaining, level 2 ~33%, etc.
-                taper = 1.0 / level
+            remaining_cash = self.current_balance
 
-                # YES Bid (BuyYes)
-                yes_bid = adjusted_mid - offset
-                if yes_bid >= 0.01 and remaining_cash > 0:
-                    qty = min(
-                        int(yes_buy_per_level / yes_bid),
-                        int(remaining_cash / yes_bid),
-                    )
-                    if qty > 0:
-                        orders.append(BuyYes.at_price(market_id, yes_bid, qty))
-                        remaining_cash -= qty * yes_bid
+            # Buy orders at mid - spread - (level-1)*spacing
+            # Level 1 (tightest): mid - spread
+            # Level 2: mid - spread - spacing, etc.
+            # Minting sum at level 1: (yes_mid - spread) + (no_mid - spread)
+            #                       = 1.0 - 2*spread < $1 (MM profit from spread)
+            # Sell orders at mid + spread + (level-1)*spacing
+            yes_buy_center = adjusted_yes_mid - spread + self.level_spacing
+            no_buy_center = adjusted_no_mid - spread + self.level_spacing
+            yes_sell_center = adjusted_yes_mid + spread - self.level_spacing
+            no_sell_center = adjusted_no_mid + spread - self.level_spacing
 
-                # YES Ask (SellYes) — taper: more at best ask
-                yes_ask = adjusted_mid + offset
-                if yes_ask <= 0.99 and remaining_yes > 0:
-                    qty = min(
-                        int(remaining_yes * taper),
-                        remaining_yes,
-                    )
-                    if qty > 0:
-                        orders.append(SellYes.at_price(market_id, yes_ask, qty))
-                        remaining_yes -= qty
+            if net > self.sell_threshold:
+                # LONG YES: sell YES + buy NO
+                orders.extend(self._sell_orders(
+                    market_id, yes_sell_center, True, yes_pos))
+                buy_orders, _ = self._buy_orders(
+                    market_id, no_buy_center, False, remaining_cash)
+                orders.extend(buy_orders)
 
-                # NO Bid (BuyNo)
-                no_bid = no_mid - offset
-                if no_bid >= 0.01 and remaining_cash > 0:
-                    qty = min(
-                        int(no_buy_per_level / no_bid),
-                        int(remaining_cash / no_bid),
-                    )
-                    if qty > 0:
-                        orders.append(BuyNo.at_price(market_id, no_bid, qty))
-                        remaining_cash -= qty * no_bid
+            elif net < -self.sell_threshold:
+                # LONG NO: buy YES + sell NO
+                buy_orders, _ = self._buy_orders(
+                    market_id, yes_buy_center, True, remaining_cash)
+                orders.extend(buy_orders)
+                orders.extend(self._sell_orders(
+                    market_id, no_sell_center, False, no_pos))
 
-                # NO Ask (SellNo) — taper: more at best ask
-                no_ask = no_mid + offset
-                if no_ask <= 0.99 and remaining_no > 0:
-                    qty = min(
-                        int(remaining_no * taper),
-                        remaining_no,
-                    )
-                    if qty > 0:
-                        orders.append(SellNo.at_price(market_id, no_ask, qty))
-                        remaining_no -= qty
+            else:
+                # BALANCED: buy YES + buy NO (minting mode)
+                yes_orders, remaining_cash = self._buy_orders(
+                    market_id, yes_buy_center, True, remaining_cash)
+                no_orders, _ = self._buy_orders(
+                    market_id, no_buy_center, False, remaining_cash)
+                orders.extend(yes_orders)
+                orders.extend(no_orders)
 
         return orders
 
