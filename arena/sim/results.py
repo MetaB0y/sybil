@@ -32,6 +32,7 @@ def build_block_records(
     sim_start: datetime | None = None,
     compression_ratio: float = 600.0,
     block_interval_s: float = 2.0,
+    min_block: int = 0,
 ) -> list[dict]:
     """Join per-bot block_logs with server price history into per-block records."""
     from .llm_trader import _describe_order
@@ -42,9 +43,10 @@ def build_block_records(
     all_heights: set[int] = set()
     for bot in all_bots:
         for height, _ in bot.block_log:
-            all_heights.add(height)
+            if height >= min_block:
+                all_heights.add(height)
 
-    price_by_height = {pt.height: pt for pt in price_history}
+    price_by_height = {pt.height: pt for pt in price_history if pt.height >= min_block}
     # Include server price history blocks (captures seed trade + early blocks)
     all_heights.update(price_by_height.keys())
 
@@ -180,7 +182,7 @@ def build_block_records(
 async def save_and_print_results(
     client, config, all_bots, traders: list, market_id,
     runs_dir: Path,
-    day_label=None, run_id=None,
+    day_label=None, run_id=None, min_block: int = 0,
 ):
     mm = all_bots[0]
     num_traders = len(traders)
@@ -265,6 +267,7 @@ async def save_and_print_results(
         mm_fills=mm_fills, noise_fills=noise_fills,
         sim_start=rec_sim_start, compression_ratio=config.compression_ratio,
         block_interval_s=getattr(config, 'block_interval_s', 2.0),
+        min_block=min_block,
     )
 
     # Enrich with welfare/volume/fills

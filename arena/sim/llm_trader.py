@@ -122,20 +122,26 @@ You are trading in a Frequent Batch Auction prediction market.
 - Your orders persist for 3 batches (TTL=3) — no need to resubmit
 - Multiple traders compete; market price reflects collective information
 
-Order types:
-- BUY_YES: bet that the event happens
-- BUY_NO: bet that the event does NOT happen
-- SELL_YES / SELL_NO: sell shares you already hold — you CANNOT sell shares you don't own
-- To bet against the event without holdings, use BUY_NO (not SELL_YES)
+Pricing:
+- YES price + NO price = $1.00 always
+- If YES price = $0.80, then NO price = $0.20
+- BUY_YES costs the YES price; BUY_NO costs the NO price (= 1 - YES price)
+- SELL_YES: you receive ~YES price per share; SELL_NO: you receive ~NO price per share
+- Your limit price is the WORST price you'd accept, not what you'll pay
 
-Note: this is a batch auction — all orders clear at the same uniform price.
-Your limit price is the worst price you'd accept, not the price you'll pay.
+Core logic — your FAIR_VALUE determines your trade direction:
+- If FAIR_VALUE > YES price: market underprices YES → BUY_YES or SELL_NO
+- If FAIR_VALUE < YES price: market overprices YES → BUY_NO or SELL_YES
+- SELL_NO only makes sense when you're BULLISH (FV > YES price) — you sell NO at the low NO price
+- SELL_YES only makes sense when you're BEARISH (FV < YES price) — you sell YES at the high YES price
+- Example: if YES=0.80 and you're bearish (FV=0.30), BUY_NO at $0.20 is cheap. Do NOT sell your NO shares for $0.20 — that's giving away a position you believe in!
 
 Trading principles:
 - Size positions by conviction: small (5-15%) for weak signals, medium (15-30%) for moderate, large (30-50%) for strong
+- Deploy your cash: if you see edge >5 cents and have cash, TRADE. Sitting on idle cash is wasting opportunity.
 - Actively sell positions when your thesis weakens or you see counter-evidence
-- Take profit: if you hold shares that are now worth more than you paid and you're not strongly convicted, sell some or all to lock in gains
-- Don't overtrade: if the market already reflects your view, HOLD
+- Take profit: if you hold shares worth more than you paid AND your conviction has weakened, sell some
+- Don't overtrade: if the market already reflects your view AND you're already positioned, HOLD
 
 Always think and respond in English regardless of article language."""
 
@@ -284,20 +290,21 @@ class LlmTrader(BaseAgent):
             article_section = "\n".join(parts)
 
         # Build dynamic available-actions block
+        no_price = 1 - yes_price
         actions = []
         if balance >= 0.01:
             max_yes = int(balance / yes_price) if yes_price > 0 else 0
-            max_no = int(balance / (1 - yes_price)) if (1 - yes_price) > 0 else 0
-            actions.append(f"- BUY_YES <qty> @ <price>: bet event happens (max ~{max_yes} shares with your cash)")
-            actions.append(f"- BUY_NO <qty> @ <price>: bet event does NOT happen (max ~{max_no} shares with your cash)")
+            max_no = int(balance / no_price) if no_price > 0 else 0
+            actions.append(f"- BUY_YES <qty> @ <price>: costs ~${yes_price:.2f}/share (max ~{max_yes} shares)")
+            actions.append(f"- BUY_NO <qty> @ <price>: costs ~${no_price:.2f}/share (max ~{max_no} shares)")
         else:
             actions.append("- BUY_YES / BUY_NO: not available (no cash)")
         if yes_shares > 0:
-            actions.append(f"- SELL_YES <qty> @ <price>: sell some or all of your {yes_shares} YES shares")
+            actions.append(f"- SELL_YES <qty> @ <price>: sell {yes_shares} YES shares at ~${yes_price:.2f}/share (only if BEARISH, FV < {yes_price:.2f})")
         else:
             actions.append("- SELL_YES: NOT available (you hold 0 YES shares)")
         if no_shares > 0:
-            actions.append(f"- SELL_NO <qty> @ <price>: sell some or all of your {no_shares} NO shares")
+            actions.append(f"- SELL_NO <qty> @ <price>: sell {no_shares} NO shares at ~${no_price:.2f}/share (only if BULLISH, FV > {yes_price:.2f})")
         else:
             actions.append("- SELL_NO: NOT available (you hold 0 NO shares)")
         actions.append("- HOLD: do nothing")
@@ -312,7 +319,7 @@ class LlmTrader(BaseAgent):
 Market: "{self.market_question}"{context_line}
 
 Current state:
-- YES price: {yes_price:.4f} (last 5: {price_trend})
+- YES price: ${yes_price:.4f} | NO price: ${no_price:.4f} (last 5 YES: {price_trend})
 - Your portfolio: ${balance:.2f} cash, {yes_shares} YES shares, {no_shares} NO shares
 - Estimated portfolio value: ~${portfolio_value:.2f}
 
@@ -328,7 +335,7 @@ Analyze {analyze_word} and decide your trade. Respond in this exact format:
 
 ANALYSIS: [Your analysis of what {analyze_word} signals, 2-4 sentences]
 FAIR_VALUE: [Your probability estimate for the market question, 0.01-0.99]
-ORDERS: [Choose from the available actions above, e.g. BUY_YES 100 @ 0.25, or HOLD]
+ORDERS: [Choose from the available actions above. IMPORTANT: if your FAIR_VALUE < {yes_price:.4f}, buy NO (not YES). If your FAIR_VALUE > {yes_price:.4f}, buy YES (not NO). Or HOLD if no edge.]
 MOTIVATION: [1-2 sentence thesis for your trade decision]"""
 
     def _parse_orders(self, text: str) -> tuple[str, float, list[OrderSpec], str] | None:
