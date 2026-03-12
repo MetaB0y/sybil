@@ -116,33 +116,26 @@ def load_articles(phase1_path: str) -> list[Article]:
 
 
 SYSTEM_PROMPT = """\
-You are trading in a prediction market that clears in batches every ~20 minutes.
-All orders submitted between batches are collected and matched simultaneously at a single clearing price — there is no order book or first-come advantage.
-- Minting: BUY_YES + BUY_NO at prices summing to $1 creates new shares
-- Your orders persist for 3 batches (TTL=3) — no need to resubmit
+You are trading in a prediction market using Frequent Batch Auctions.
+All orders in a batch are matched simultaneously at a single clearing price — no order book, no first-come advantage. Batches clear every ~20 minutes. Orders persist for 3 batches (TTL=3).
 
 Pricing:
-- YES price + NO price = $1.00 always
-- If YES price = $0.80, then NO price = $0.20
-- BUY_YES costs the YES price; BUY_NO costs the NO price (= 1 - YES price)
-- SELL_YES: you receive ~YES price per share; SELL_NO: you receive ~NO price per share
-- Your limit price is the WORST price you'd accept, not what you'll pay
+- YES + NO = $1.00 always. If YES=$0.80, NO=$0.20.
+- BUY_YES costs the YES price; BUY_NO costs the NO price
+- Your limit price is the WORST price you'd accept — you'll pay the clearing price, not your limit
 
-Core logic — your FAIR_VALUE determines your trade direction:
-- If FAIR_VALUE > YES price: market underprices YES → BUY_YES or SELL_NO
-- If FAIR_VALUE < YES price: market overprices YES → BUY_NO or SELL_YES
-- SELL_NO only makes sense when you're BULLISH (FV > YES price) — you sell NO at the low NO price
-- SELL_YES only makes sense when you're BEARISH (FV < YES price) — you sell YES at the high YES price
-- Example: if YES=0.80 and you're bearish (FV=0.30), BUY_NO at $0.20 is cheap. Do NOT sell your NO shares for $0.20 — that's giving away a position you believe in!
+Direction:
+- FAIR_VALUE > YES price → BUY_YES or SELL_NO (bullish)
+- FAIR_VALUE < YES price → BUY_NO or SELL_YES (bearish)
+- SELL_NO = bullish (selling cheap NO). SELL_YES = bearish (selling expensive YES).
 
-Trading principles:
-- Size positions by conviction: small (5-15%) for weak signals, medium (15-30%) for moderate, large (30-50%) for strong
-- If you see meaningful edge, trade. But pace yourself — spread trades over time rather than going all-in early.
-- Actively sell positions when your thesis weakens or you see counter-evidence
-- Take profit: if you hold shares worth more than you paid AND your conviction has weakened, sell some
-- Don't overtrade: if the market already reflects your view AND you're already positioned, HOLD
+Trading:
+- Deploy at most 10-20% of your cash per trade. Only exception: edge >30 cents, then up to 40%. This is a long day — prices will move, and you want cash for better opportunities later.
+- Keep at least 20-30% cash in reserve at all times.
+- Sell when your thesis weakens or counter-evidence appears. HOLD if already positioned and no new edge.
+- Extreme FAIR_VALUE (>0.85 or <0.15) requires extraordinary evidence. Most geopolitical events have genuine uncertainty — reflect that. Update based on the full picture, not just the latest article.
 
-Always think and respond in English regardless of article language."""
+Always respond in English regardless of article language."""
 
 
 class LlmTrader(BaseAgent):
@@ -266,6 +259,7 @@ class LlmTrader(BaseAgent):
         yes_shares = self.get_position(market_id, "YES")
         no_shares = self.get_position(market_id, "NO")
         portfolio_value = balance + yes_shares * yes_price + no_shares * (1 - yes_price)
+        cash_pct = (balance / portfolio_value * 100) if portfolio_value > 0 else 100
 
         context_line = f"\n{self.context}" if self.context else ""
 
@@ -319,7 +313,7 @@ Market: "{self.market_question}"{context_line}
 
 Current state:
 - YES price: ${yes_price:.4f} | NO price: ${no_price:.4f} (last 5 YES: {price_trend})
-- Your portfolio: ${balance:.2f} cash, {yes_shares} YES shares, {no_shares} NO shares
+- Your portfolio: ${balance:.2f} cash ({cash_pct:.0f}% of portfolio), {yes_shares} YES shares, {no_shares} NO shares
 - Estimated portfolio value: ~${portfolio_value:.2f}
 
 Recent trades:
@@ -333,9 +327,9 @@ Available actions:
 Analyze {analyze_word} and decide your trade. Respond in this exact format:
 
 ANALYSIS: [Your analysis of what {analyze_word} signals, 2-4 sentences]
-FAIR_VALUE: [Your probability estimate for the market question, 0.01-0.99]
-ORDERS: [Choose from the available actions above, or HOLD if no edge.]
-MOTIVATION: [1-2 sentence thesis for your trade decision]"""
+FAIR_VALUE: [Your probability estimate, 0.01-0.99]
+ORDERS: [Choose from available actions, or HOLD if no edge. LIMIT PRICE — do NOT just use the current market price. For BUY_YES: set limit between YES price and your FAIR_VALUE. For BUY_NO: set limit between NO price and (1 - FAIR_VALUE). Example: if YES=$0.70, NO=$0.30, and your FV=0.15, your NO fair value is $0.85 — bid NO at $0.50-0.60, NOT $0.30. Routine news → limit closer to market. Breaking news → limit closer to your fair value.]
+MOTIVATION: [1-2 sentence thesis]"""
 
     def _parse_orders(self, text: str) -> tuple[str, float, list[OrderSpec], str] | None:
         """Parse structured LLM output into (analysis, fair_value, orders, motivation)."""

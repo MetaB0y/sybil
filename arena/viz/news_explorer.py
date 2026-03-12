@@ -754,7 +754,7 @@ def render_simulation_tab():
                 for bk in blocks:
                     if remaining_cap <= 0:
                         break
-                    if order_block < bk["height"] <= ttl_end:
+                    if order_block <= bk["height"] <= ttl_end:
                         for f in bk.get("trader_fills", []):
                             if remaining_cap <= 0:
                                 break
