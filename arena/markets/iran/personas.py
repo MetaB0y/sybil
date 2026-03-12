@@ -11,7 +11,7 @@ from .sources import (
 
 BOT_PERSONAS = {
     "american_believer": {
-        "model": "google/gemini-2.5-flash",
+        "model": "google/gemini-3.1-flash-lite-preview",
         "name": "American Media (Believer)",
         "description": "US political/news outlets + UK mainstream. "
                        "Takes government rhetoric at face value, trusts establishment reporting.",
@@ -31,7 +31,7 @@ BOT_PERSONAS = {
         },
     },
     "american_skeptic": {
-        "model": "google/gemini-2.5-flash",
+        "model": "google/gemini-3.1-flash-lite-preview",
         "name": "American Media (Skeptic)",
         "description": "US political/news outlets + UK mainstream. "
                        "Distinguishes rhetoric from action, demands concrete evidence.",
@@ -51,7 +51,7 @@ BOT_PERSONAS = {
         },
     },
     "israeli_trader": {
-        "model": "google/gemini-2.5-flash",
+        "model": "google/gemini-3.1-flash-lite-preview",
         "name": "Israeli Security Press",
         "description": "Israeli security establishment + Hebrew press. "
                        "Security-focused, weights military intelligence and defense establishment signals.",
@@ -71,7 +71,7 @@ BOT_PERSONAS = {
         },
     },
     "arab_trader": {
-        "model": "google/gemini-2.5-flash",
+        "model": "google/gemini-3.1-flash-lite-preview",
         "name": "Arab Regional Press",
         "description": "Egypt, Gulf, Levant, Iraq, Palestine. Pan-Arab networks + regional press. "
                        "Ground-level reporting, diplomatic shifts, sovereignty lens.",
@@ -90,7 +90,7 @@ BOT_PERSONAS = {
         },
     },
     "anti_us_trader": {
-        "model": "google/gemini-2.5-flash",
+        "model": "google/gemini-3.1-flash-lite-preview",
         "name": "Iran/Russia/China Media",
         "description": "Iranian, Russian, and Chinese state and independent media. "
                        "Skeptical of US threats, tracks military logistics and diplomatic back-channels.",
@@ -109,7 +109,7 @@ BOT_PERSONAS = {
         },
     },
     "financial_trader": {
-        "model": "google/gemini-2.5-flash",
+        "model": "google/gemini-3.1-flash-lite-preview",
         "name": "Financial Press",
         "description": "Global financial press — markets, oil, defense, sanctions. "
                        "Price movements as leading indicators, measurable signals over narratives.",
@@ -129,7 +129,7 @@ BOT_PERSONAS = {
         },
     },
     "balanced_trader": {
-        "model": "google/gemini-2.5-flash",
+        "model": "google/gemini-3.1-flash-lite-preview",
         "name": "Global Media Mix",
         "description": "Top mainstream outlets from 15+ countries across all continents. "
                        "Cross-regional corroboration, incremental updates, no strong prior.",
@@ -149,7 +149,7 @@ BOT_PERSONAS = {
         },
     },
     "random_trader": {
-        "model": "google/gemini-2.5-flash",
+        "model": "google/gemini-3.1-flash-lite-preview",
         "name": "Random Sampler",
         "description": "1 random article per 2-hour window sampled from all traders' accepted pools. "
                        "Maximally reactive — each article fully replaces prior belief.",

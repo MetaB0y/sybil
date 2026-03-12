@@ -116,11 +116,10 @@ def load_articles(phase1_path: str) -> list[Article]:
 
 
 SYSTEM_PROMPT = """\
-You are trading in a Frequent Batch Auction prediction market.
-- Batches clear every ~10 minutes of simulated time
+You are trading in a prediction market that clears in batches every ~20 minutes.
+All orders submitted between batches are collected and matched simultaneously at a single clearing price — there is no order book or first-come advantage.
 - Minting: BUY_YES + BUY_NO at prices summing to $1 creates new shares
 - Your orders persist for 3 batches (TTL=3) — no need to resubmit
-- Multiple traders compete; market price reflects collective information
 
 Pricing:
 - YES price + NO price = $1.00 always
@@ -138,7 +137,7 @@ Core logic — your FAIR_VALUE determines your trade direction:
 
 Trading principles:
 - Size positions by conviction: small (5-15%) for weak signals, medium (15-30%) for moderate, large (30-50%) for strong
-- Deploy your cash: if you see edge >5 cents and have cash, TRADE. Sitting on idle cash is wasting opportunity.
+- If you see meaningful edge, trade. But pace yourself — spread trades over time rather than going all-in early.
 - Actively sell positions when your thesis weakens or you see counter-evidence
 - Take profit: if you hold shares worth more than you paid AND your conviction has weakened, sell some
 - Don't overtrade: if the market already reflects your view AND you're already positioned, HOLD
@@ -295,8 +294,8 @@ class LlmTrader(BaseAgent):
         if balance >= 0.01:
             max_yes = int(balance / yes_price) if yes_price > 0 else 0
             max_no = int(balance / no_price) if no_price > 0 else 0
-            actions.append(f"- BUY_YES <qty> @ <price>: costs ~${yes_price:.2f}/share (max ~{max_yes} shares)")
-            actions.append(f"- BUY_NO <qty> @ <price>: costs ~${no_price:.2f}/share (max ~{max_no} shares)")
+            actions.append(f"- BUY_YES <qty> @ <price>: costs ~${yes_price:.2f}/share (up to ~{max_yes} shares)")
+            actions.append(f"- BUY_NO <qty> @ <price>: costs ~${no_price:.2f}/share (up to ~{max_no} shares)")
         else:
             actions.append("- BUY_YES / BUY_NO: not available (no cash)")
         if yes_shares > 0:
@@ -335,7 +334,7 @@ Analyze {analyze_word} and decide your trade. Respond in this exact format:
 
 ANALYSIS: [Your analysis of what {analyze_word} signals, 2-4 sentences]
 FAIR_VALUE: [Your probability estimate for the market question, 0.01-0.99]
-ORDERS: [Choose from the available actions above. IMPORTANT: if your FAIR_VALUE < {yes_price:.4f}, buy NO (not YES). If your FAIR_VALUE > {yes_price:.4f}, buy YES (not NO). Or HOLD if no edge.]
+ORDERS: [Choose from the available actions above, or HOLD if no edge.]
 MOTIVATION: [1-2 sentence thesis for your trade decision]"""
 
     def _parse_orders(self, text: str) -> tuple[str, float, list[OrderSpec], str] | None:

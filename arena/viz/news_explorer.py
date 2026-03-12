@@ -265,6 +265,7 @@ def load_sim_runs() -> list[tuple[str, dict]]:
             },
             "blocks": all_blocks,
             "trade_logs": last_data.get("trade_logs", {}),
+            "trader_models": last_data.get("trader_models", {}),
             "leaderboard": last_data.get("leaderboard", []),
         }
 
