@@ -356,31 +356,53 @@ class BalancedMarketMaker(BaseAgent):
             remaining -= qty
         return orders
 
-    def _inventory_fractions(self, net: int) -> tuple[float, float, float]:
-        """Return (yes_buy_scale, no_buy_scale, sell_fraction) based on inventory.
+    def _inventory_fractions(
+        self, net: int, yes_pos: int, no_pos: int,
+    ) -> tuple[float, float, float, float]:
+        """Return (yes_buy_scale, no_buy_scale, net_sell_frac, matched_sell_frac).
 
-        Continuous blending: as imbalance grows, reduce buying on the long side,
-        increase buying on the short side, and start selling the long side.
+        Two sell mechanisms:
+        1. net_sell_frac: sell the net-long side to reduce directional risk
+        2. matched_sell_frac: sell BOTH sides to unlock capital trapped in matched pairs
         """
+        matched = min(yes_pos, no_pos)
+        total = yes_pos + no_pos
+
+        # --- Matched-pair unwinding ---
+        # When matched pairs exceed threshold, sell both sides to free capital.
+        # Ramps from 0% at 100 matched to 60% at max_position matched.
+        matched_threshold = 100
+        if matched > matched_threshold:
+            matched_intensity = min(1.0, matched / self.max_position)
+            matched_sell = min(0.60, matched_intensity * 1.5)
+        else:
+            matched_sell = 0.0
+
+        # --- Total inventory pressure on buying ---
+        # Reduce buying on BOTH sides when total inventory is high,
+        # regardless of net balance.
+        total_threshold = 200
+        if total > total_threshold:
+            total_intensity = min(1.0, total / (self.max_position * 2))
+            buy_dampen = max(0.1, 1.0 - total_intensity * 2.0)
+        else:
+            buy_dampen = 1.0
+
+        # --- Net imbalance ---
         if abs(net) < self.inventory_decay_start:
-            return 1.0, 1.0, 0.0
+            return buy_dampen, buy_dampen, 0.0, matched_sell
 
-        # How far toward max_position (0.0 = just started, 1.0 = at max)
         intensity = min(1.0, abs(net) / self.max_position)
-
-        # Sell fraction: ramps from 0% to 80% of held shares
-        sell_frac = min(0.80, intensity * 2.0)
+        net_sell = min(0.80, intensity * 2.0)
 
         if net > 0:
-            # Long YES: reduce YES buying, increase NO buying
-            yes_scale = max(0.0, 1.0 - intensity * 3.0)
-            no_scale = 1.0
+            yes_scale = max(0.0, buy_dampen * (1.0 - intensity * 3.0))
+            no_scale = buy_dampen
         else:
-            # Long NO: reduce NO buying, increase YES buying
-            yes_scale = 1.0
-            no_scale = max(0.0, 1.0 - intensity * 3.0)
+            yes_scale = buy_dampen
+            no_scale = max(0.0, buy_dampen * (1.0 - intensity * 3.0))
 
-        return yes_scale, no_scale, sell_frac
+        return yes_scale, no_scale, net_sell, matched_sell
 
     async def on_block(self, block: Block) -> list[OrderSpec]:
         orders: list[OrderSpec] = []
@@ -410,7 +432,8 @@ class BalancedMarketMaker(BaseAgent):
                 continue
 
             # Continuous inventory management
-            yes_buy_scale, no_buy_scale, sell_frac = self._inventory_fractions(net)
+            yes_buy_scale, no_buy_scale, net_sell, matched_sell = \
+                self._inventory_fractions(net, yes_pos, no_pos)
 
             budget = min(self.current_balance, self.max_per_side)
 
@@ -424,17 +447,30 @@ class BalancedMarketMaker(BaseAgent):
                     market_id, adjusted_no_mid, spread,
                     False, budget, no_buy_scale))
 
-            # Sell orders (continuous decay — sell the long side)
-            if sell_frac > 0 and net > 0 and yes_pos > 0:
-                sell_qty = max(1, int(yes_pos * sell_frac))
+            # Sell orders: net imbalance (sell the long side)
+            if net_sell > 0 and net > 0 and yes_pos > 0:
+                sell_qty = max(1, int(yes_pos * net_sell))
                 orders.extend(self._sell_orders(
                     market_id, adjusted_yes_mid, spread,
                     True, sell_qty))
-            elif sell_frac > 0 and net < 0 and no_pos > 0:
-                sell_qty = max(1, int(no_pos * sell_frac))
+            elif net_sell > 0 and net < 0 and no_pos > 0:
+                sell_qty = max(1, int(no_pos * net_sell))
                 orders.extend(self._sell_orders(
                     market_id, adjusted_no_mid, spread,
                     False, sell_qty))
+
+            # Sell orders: matched-pair unwinding (sell BOTH sides)
+            if matched_sell > 0:
+                matched = min(yes_pos, no_pos)
+                unwind_qty = max(1, int(matched * matched_sell))
+                if yes_pos >= unwind_qty:
+                    orders.extend(self._sell_orders(
+                        market_id, adjusted_yes_mid, spread,
+                        True, unwind_qty))
+                if no_pos >= unwind_qty:
+                    orders.extend(self._sell_orders(
+                        market_id, adjusted_no_mid, spread,
+                        False, unwind_qty))
 
         return orders
 
