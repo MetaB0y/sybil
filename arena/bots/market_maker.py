@@ -240,24 +240,32 @@ class BalancedMarketMaker(BaseAgent):
     Uses flash liquidity (mm_budget_nanos) for one-shot orders — no TTL
     carryover prevents cross-block self-trading.
 
-    Three modes based on inventory:
-      BALANCED: BuyYes + BuyNo (minting — standard MM liquidity)
-      LONG_YES: SellYes + BuyNo (offload YES, absorb NO)
-      LONG_NO:  BuyYes + SellNo (absorb YES, offload NO)
+    Features:
+    - Tapered multi-level quoting (inner levels larger, outer levels smaller)
+    - Volatility-adaptive spread widening
+    - Continuous inventory decay (gradual sell pressure, no binary threshold)
+    - Per-side exposure cap
+    - Matched-pair awareness (widen spread when capital is locked)
     """
+
+    # Taper weights per level (inner → outer). Sum ≈ 1.0.
+    _BUY_TAPER = [0.25, 0.20, 0.16, 0.12, 0.09, 0.07, 0.06, 0.05]
+    _SELL_TAPER = [0.30, 0.22, 0.16, 0.12, 0.08, 0.05, 0.04, 0.03]
 
     def __init__(
         self,
         client,
         account_id: int,
         budget_dollars: float = 50_000.0,
-        half_spread: float = 0.03,
-        num_levels: int = 3,
-        level_spacing_cents: int = 3,
-        base_size_dollars: float = 250.0,
+        half_spread: float = 0.02,
+        num_levels: int = 8,
+        level_spacing: float = 0.01,
+        max_per_side_dollars: float = 400.0,
         max_position: int = 15_000,
-        sell_threshold_pct: float = 0.10,
         skew_factor: float = 0.1,
+        vol_lookback: int = 10,
+        vol_widen_max: float = 3.0,
+        inventory_decay_start: int = 50,
         name: str | None = None,
         market_ids: list[int] | None = None,
     ):
@@ -265,18 +273,41 @@ class BalancedMarketMaker(BaseAgent):
         self.mm_budget_nanos = int(budget_dollars * NANOS_PER_DOLLAR)
         self.half_spread = half_spread
         self.num_levels = num_levels
-        self.level_spacing = level_spacing_cents / 100
-        self.base_size_dollars = base_size_dollars
+        self.level_spacing = level_spacing
+        self.max_per_side = max_per_side_dollars
         self.max_position = max_position
-        self.sell_threshold = int(max_position * sell_threshold_pct)
         self.skew_factor = skew_factor
+        self.vol_lookback = vol_lookback
+        self.vol_widen_max = vol_widen_max
+        self.inventory_decay_start = inventory_decay_start
+        self._price_history: dict[int, list[float]] = {}
+
+    def _vol_multiplier(self, market_id: int, mid: float) -> float:
+        """Widen spread after large price moves."""
+        history = self._price_history.setdefault(market_id, [])
+        history.append(mid)
+        if len(history) > self.vol_lookback + 1:
+            del history[:-self.vol_lookback - 1]
+        if len(history) < 3:
+            return 1.0
+        recent = history[-self.vol_lookback:]
+        vol = max(recent) - min(recent)
+        if vol > 0.04:
+            return min(self.vol_widen_max, 1.0 + vol * 5)
+        return 1.0
+
+    def _matched_pair_penalty(self, yes_pos: int, no_pos: int) -> float:
+        """Extra spread multiplier when too much capital is locked in matched pairs."""
+        matched = min(yes_pos, no_pos)
+        # Each matched pair locks ~$1. Penalty kicks in when >10% of budget is locked.
+        budget = self.mm_budget_nanos / NANOS_PER_DOLLAR
+        locked_frac = matched / budget if budget > 0 else 0
+        if locked_frac > 0.10:
+            return 1.0 + min(1.0, (locked_frac - 0.10) * 5)  # up to 2x at 30%
+        return 1.0
 
     def _compute_skew(self, net: int, mid: float) -> float:
-        """Price skew based on inventory imbalance.
-
-        Capped at 20% of distance-from-edge to avoid distorting low-prob markets.
-        E.g. mid=0.20 → max skew ±0.04, mid=0.50 → max skew ±0.10.
-        """
+        """Price skew based on inventory imbalance."""
         max_skew = min(mid, 1.0 - mid) * 0.20
         if max_skew < 0.005 or self.max_position == 0:
             return 0.0
@@ -284,44 +315,72 @@ class BalancedMarketMaker(BaseAgent):
         return max_skew * math.tanh(normalized)
 
     def _buy_orders(
-        self, market_id: int, mid: float, is_yes: bool, remaining_cash: float,
-    ) -> tuple[list[OrderSpec], float]:
-        """Generate buy orders for one side. Returns (orders, cash_remaining)."""
+        self, market_id: int, mid: float, spread: float,
+        is_yes: bool, budget: float, scale: float = 1.0,
+    ) -> list[OrderSpec]:
+        """Generate tapered buy orders for one side, respecting per-side budget."""
         orders = []
         cls = BuyYes if is_yes else BuyNo
-        for level in range(1, self.num_levels + 1):
-            bid = mid - level * self.level_spacing
-            if bid < 0.01 or remaining_cash <= 0:
-                continue
-            qty = min(
-                int(self.base_size_dollars / bid),
-                int(remaining_cash / bid),
-                self.max_position,
-            )
+        spent = 0.0
+        for level in range(self.num_levels):
+            bid = mid - spread - level * self.level_spacing
+            if bid < 0.01:
+                break
+            w = self._BUY_TAPER[level] if level < len(self._BUY_TAPER) else self._BUY_TAPER[-1]
+            level_dollars = self.max_per_side * w * scale
+            room = budget - spent
+            if room <= 0:
+                break
+            level_dollars = min(level_dollars, room)
+            qty = int(level_dollars / bid)
             if qty > 0:
                 orders.append(cls.at_price(market_id, bid, qty))
-                remaining_cash -= qty * bid
-        return orders, remaining_cash
+                spent += qty * bid
+        return orders
 
     def _sell_orders(
-        self, market_id: int, mid: float, is_yes: bool, held: int,
+        self, market_id: int, mid: float, spread: float,
+        is_yes: bool, held: int,
     ) -> list[OrderSpec]:
-        """Generate sell orders for one side. Tapered: most at best ask."""
+        """Generate tapered sell orders for one side."""
         orders = []
         cls = SellYes if is_yes else SellNo
         remaining = held
-        # Sell taper weights: 50%, 30%, 20% at levels 1, 2, 3
-        weights = [0.50, 0.30, 0.20]
-        for level in range(1, self.num_levels + 1):
-            ask = mid + level * self.level_spacing
+        for level in range(self.num_levels):
+            ask = mid + spread + level * self.level_spacing
             if ask > 0.99 or remaining <= 0:
-                continue
-            w = weights[level - 1] if level <= len(weights) else weights[-1]
+                break
+            w = self._SELL_TAPER[level] if level < len(self._SELL_TAPER) else self._SELL_TAPER[-1]
             qty = max(1, min(int(held * w), remaining))
-            if qty > 0:
-                orders.append(cls.at_price(market_id, ask, qty))
-                remaining -= qty
+            orders.append(cls.at_price(market_id, ask, qty))
+            remaining -= qty
         return orders
+
+    def _inventory_fractions(self, net: int) -> tuple[float, float, float]:
+        """Return (yes_buy_scale, no_buy_scale, sell_fraction) based on inventory.
+
+        Continuous blending: as imbalance grows, reduce buying on the long side,
+        increase buying on the short side, and start selling the long side.
+        """
+        if abs(net) < self.inventory_decay_start:
+            return 1.0, 1.0, 0.0
+
+        # How far toward max_position (0.0 = just started, 1.0 = at max)
+        intensity = min(1.0, abs(net) / self.max_position)
+
+        # Sell fraction: ramps from 0% to 80% of held shares
+        sell_frac = min(0.80, intensity * 2.0)
+
+        if net > 0:
+            # Long YES: reduce YES buying, increase NO buying
+            yes_scale = max(0.0, 1.0 - intensity * 3.0)
+            no_scale = 1.0
+        else:
+            # Long NO: reduce NO buying, increase YES buying
+            yes_scale = 1.0
+            no_scale = max(0.0, 1.0 - intensity * 3.0)
+
+        return yes_scale, no_scale, sell_frac
 
     async def on_block(self, block: Block) -> list[OrderSpec]:
         orders: list[OrderSpec] = []
@@ -339,49 +398,43 @@ class BalancedMarketMaker(BaseAgent):
             adjusted_yes_mid = max(0.05, min(0.95, yes_mid - skew))
             adjusted_no_mid = 1.0 - adjusted_yes_mid
 
-            # Compress spread near edges
+            # Adaptive spread: base × volatility × matched-pair penalty
+            vol_mult = self._vol_multiplier(market_id, yes_mid)
+            pair_mult = self._matched_pair_penalty(yes_pos, no_pos)
+            spread = self.half_spread * vol_mult * pair_mult
+
+            # Compress near edges
             edge_room = min(adjusted_yes_mid, adjusted_no_mid)
-            spread = min(self.half_spread, edge_room - 0.01)
+            spread = min(spread, edge_room - 0.01)
             if spread < 0.005:
                 continue
 
-            remaining_cash = self.current_balance
+            # Continuous inventory management
+            yes_buy_scale, no_buy_scale, sell_frac = self._inventory_fractions(net)
 
-            # Buy orders at mid - spread - (level-1)*spacing
-            # Level 1 (tightest): mid - spread
-            # Level 2: mid - spread - spacing, etc.
-            # Minting sum at level 1: (yes_mid - spread) + (no_mid - spread)
-            #                       = 1.0 - 2*spread < $1 (MM profit from spread)
-            # Sell orders at mid + spread + (level-1)*spacing
-            yes_buy_center = adjusted_yes_mid - spread + self.level_spacing
-            no_buy_center = adjusted_no_mid - spread + self.level_spacing
-            yes_sell_center = adjusted_yes_mid + spread - self.level_spacing
-            no_sell_center = adjusted_no_mid + spread - self.level_spacing
+            budget = min(self.current_balance, self.max_per_side)
 
-            if net > self.sell_threshold:
-                # LONG YES: sell YES + buy NO
+            # Buy orders (both sides, scaled by inventory)
+            if yes_buy_scale > 0:
+                orders.extend(self._buy_orders(
+                    market_id, adjusted_yes_mid, spread,
+                    True, budget, yes_buy_scale))
+            if no_buy_scale > 0:
+                orders.extend(self._buy_orders(
+                    market_id, adjusted_no_mid, spread,
+                    False, budget, no_buy_scale))
+
+            # Sell orders (continuous decay — sell the long side)
+            if sell_frac > 0 and net > 0 and yes_pos > 0:
+                sell_qty = max(1, int(yes_pos * sell_frac))
                 orders.extend(self._sell_orders(
-                    market_id, yes_sell_center, True, yes_pos))
-                buy_orders, _ = self._buy_orders(
-                    market_id, no_buy_center, False, remaining_cash)
-                orders.extend(buy_orders)
-
-            elif net < -self.sell_threshold:
-                # LONG NO: buy YES + sell NO
-                buy_orders, _ = self._buy_orders(
-                    market_id, yes_buy_center, True, remaining_cash)
-                orders.extend(buy_orders)
+                    market_id, adjusted_yes_mid, spread,
+                    True, sell_qty))
+            elif sell_frac > 0 and net < 0 and no_pos > 0:
+                sell_qty = max(1, int(no_pos * sell_frac))
                 orders.extend(self._sell_orders(
-                    market_id, no_sell_center, False, no_pos))
-
-            else:
-                # BALANCED: buy YES + buy NO (minting mode)
-                yes_orders, remaining_cash = self._buy_orders(
-                    market_id, yes_buy_center, True, remaining_cash)
-                no_orders, _ = self._buy_orders(
-                    market_id, no_buy_center, False, remaining_cash)
-                orders.extend(yes_orders)
-                orders.extend(no_orders)
+                    market_id, adjusted_no_mid, spread,
+                    False, sell_qty))
 
         return orders
 
