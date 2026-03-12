@@ -52,6 +52,7 @@ BOT_PERSONAS = {
         },
     },
     "israeli_trader": {
+        "enabled": False,
         "model": "google/gemini-3.1-flash-lite-preview",
         "name": "Israeli Security Press",
         "description": "Israeli security establishment + Hebrew press. "

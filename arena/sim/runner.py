@@ -336,8 +336,9 @@ def main():
                 model=bot_cfg.get("model"),
             ))
     else:
-        # Default: all tradeable personas
-        tradeable = {k: v for k, v in market_config.personas.items() if "persona" in v}
+        # Default: all tradeable personas that are enabled
+        tradeable = {k: v for k, v in market_config.personas.items()
+                     if "persona" in v and v.get("enabled", True)}
         keys = list(tradeable.keys())
         trader_specs = []
         for bot_key in keys:
