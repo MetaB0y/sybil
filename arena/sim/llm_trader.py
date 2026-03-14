@@ -641,7 +641,7 @@ position through a reversal means you never had the profit. Consider:
 
 ANALYSIS: [1-2 sentences: should you take profit, cut losses, reduce exposure,
 or is holding still justified? Why?]
-FAIR_VALUE: [Your current probability estimate, 0.01-0.99]
+FAIR_VALUE: [Your probability that YES happens, 0.01-0.99. NOT your confidence in your position — the actual probability of the event. Low FV = event unlikely = NO is valuable.]
 ORDERS: [HOLD | SELL_YES <qty> @ <price> | SELL_NO <qty> @ <price>]
 MOTIVATION: [1 sentence thesis]"""
 

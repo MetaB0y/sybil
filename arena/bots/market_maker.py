@@ -257,14 +257,16 @@ class BalancedMarketMaker(BaseAgent):
         client,
         account_id: int,
         budget_dollars: float = 50_000.0,
-        half_spread: float = 0.02,
+        half_spread: float = 0.03,
         num_levels: int = 8,
         level_spacing: float = 0.01,
         max_per_side_dollars: float = 400.0,
         max_position: int = 15_000,
         skew_factor: float = 0.1,
-        vol_lookback: int = 10,
+        vol_lookback: int = 4,
         vol_widen_max: float = 3.0,
+        momentum_lookback: int = 3,
+        momentum_widen_max: float = 0.03,
         inventory_decay_start: int = 50,
         name: str | None = None,
         market_ids: list[int] | None = None,
@@ -279,22 +281,57 @@ class BalancedMarketMaker(BaseAgent):
         self.skew_factor = skew_factor
         self.vol_lookback = vol_lookback
         self.vol_widen_max = vol_widen_max
+        self.momentum_lookback = momentum_lookback
+        self.momentum_widen_max = momentum_widen_max
         self.inventory_decay_start = inventory_decay_start
         self._price_history: dict[int, list[float]] = {}
 
     def _vol_multiplier(self, market_id: int, mid: float) -> float:
-        """Widen spread after large price moves."""
+        """Widen spread after large price moves.
+
+        Two signals: windowed range + single-block jump (amplified 2x).
+        """
         history = self._price_history.setdefault(market_id, [])
         history.append(mid)
         if len(history) > self.vol_lookback + 1:
             del history[:-self.vol_lookback - 1]
-        if len(history) < 3:
+        if len(history) < 2:
             return 1.0
         recent = history[-self.vol_lookback:]
-        vol = max(recent) - min(recent)
-        if vol > 0.04:
-            return min(self.vol_widen_max, 1.0 + vol * 5)
+        windowed_vol = max(recent) - min(recent)
+        single_jump = abs(history[-1] - history[-2]) * 2.0
+        effective_vol = max(windowed_vol, single_jump)
+        if effective_vol > 0.02:
+            return min(self.vol_widen_max, 1.0 + effective_vol * 8)
         return 1.0
+
+    def _momentum_asymmetry(self, market_id: int) -> tuple[float, float]:
+        """Compute asymmetric buy-side widening based on price momentum.
+
+        Returns (yes_extra, no_extra) — extra spread to add to each side's buys.
+        """
+        history = self._price_history.get(market_id, [])
+        if len(history) < 2:
+            return 0.0, 0.0
+        # Exponentially-weighted momentum from recent price changes
+        n = min(self.momentum_lookback, len(history) - 1)
+        weights = [0.5 ** i for i in range(n)]  # 1.0, 0.5, 0.25, ...
+        momentum = 0.0
+        weight_sum = 0.0
+        for i in range(n):
+            delta = history[-(i + 1)] - history[-(i + 2)]
+            momentum += delta * weights[i]
+            weight_sum += weights[i]
+        momentum /= weight_sum
+        # Ignore noise below 1c
+        if abs(momentum) < 0.01:
+            return 0.0, 0.0
+        # Scale: 5c momentum → full momentum_widen_max
+        extra = min(self.momentum_widen_max, abs(momentum) / 0.05 * self.momentum_widen_max)
+        if momentum > 0:
+            return extra, 0.0  # price rising → widen YES buys
+        else:
+            return 0.0, extra  # price falling → widen NO buys
 
     def _matched_pair_penalty(self, yes_pos: int, no_pos: int) -> float:
         """Extra spread multiplier when too much capital is locked in matched pairs."""
@@ -431,6 +468,11 @@ class BalancedMarketMaker(BaseAgent):
             if spread < 0.005:
                 continue
 
+            # Momentum-based asymmetric buy widening
+            yes_extra, no_extra = self._momentum_asymmetry(market_id)
+            yes_buy_spread = min(spread + yes_extra, edge_room - 0.01)
+            no_buy_spread = min(spread + no_extra, edge_room - 0.01)
+
             # Continuous inventory management
             yes_buy_scale, no_buy_scale, net_sell, matched_sell = \
                 self._inventory_fractions(net, yes_pos, no_pos)
@@ -440,11 +482,11 @@ class BalancedMarketMaker(BaseAgent):
             # Buy orders (both sides, scaled by inventory)
             if yes_buy_scale > 0:
                 orders.extend(self._buy_orders(
-                    market_id, adjusted_yes_mid, spread,
+                    market_id, adjusted_yes_mid, yes_buy_spread,
                     True, budget, yes_buy_scale))
             if no_buy_scale > 0:
                 orders.extend(self._buy_orders(
-                    market_id, adjusted_no_mid, spread,
+                    market_id, adjusted_no_mid, no_buy_spread,
                     False, budget, no_buy_scale))
 
             # Sell orders: net imbalance (sell the long side)
