@@ -204,6 +204,7 @@ def test_validate_orders_clips_sell():
         SellNo.at_price(0, 0.40, 20),   # want to sell 20, only hold 5
     ]
     block = MagicMock()
+    block.clearing_prices = {0: (500_000_000, 500_000_000)}
     validated = t._validate_orders(orders, block)
     sell_yes = [o for o in validated if isinstance(o, SellYes)]
     sell_no = [o for o in validated if isinstance(o, SellNo)]
@@ -223,6 +224,7 @@ def test_validate_orders_clips_buy():
         BuyYes.at_price(0, 0.50, 1000),  # would cost $500, but only have $10
     ]
     block = MagicMock()
+    block.clearing_prices = {0: (500_000_000, 500_000_000)}
     validated = t._validate_orders(orders, block)
     assert len(validated) == 1
     assert validated[0].quantity < 1000
@@ -240,6 +242,7 @@ def test_validate_orders_drops_zero():
         SellYes.at_price(0, 0.60, 50),  # hold 0 → clipped to 0 → dropped
     ]
     block = MagicMock()
+    block.clearing_prices = {0: (500_000_000, 500_000_000)}
     validated = t._validate_orders(orders, block)
     assert len(validated) == 0
 
@@ -255,6 +258,7 @@ def test_validate_orders_clamps_price():
         BuyNo.at_price(0, 1.50, 10),    # price too high
     ]
     block = MagicMock()
+    block.clearing_prices = {0: (500_000_000, 500_000_000)}
     validated = t._validate_orders(orders, block)
     for order in validated:
         price = order.limit_price_nanos / 1_000_000_000
@@ -448,3 +452,127 @@ def test_trade_record_to_dict_multiple():
     # Full list
     assert len(d["articles"]) == 3
     assert d["articles"][2]["title"] == "Art2"
+
+
+# ---------------------------------------------------------------------------
+# Rebalancing
+# ---------------------------------------------------------------------------
+
+
+def test_build_rebalance_prompt():
+    """Rebalance prompt includes portfolio info, cost basis, no buy actions."""
+    t = _make_trader(market_ids=[0])
+    t.positions = {(0, "YES"): 100, (0, "NO"): 0}
+    t.balance_history = [1500.0]
+    t.price_history = [
+        PriceSnapshot(block_height=1, sim_time=datetime(2026, 1, 1, 8, 0), yes_price=0.30),
+        PriceSnapshot(block_height=10, sim_time=datetime(2026, 1, 1, 12, 0), yes_price=0.50),
+    ]
+    # Add a trade to get cost basis
+    t.trade_log = [TradeRecord(
+        articles=[_make_article()],
+        analysis="test",
+        fair_value=0.40,
+        orders=[BuyYes.at_price(0, 0.30, 100)],
+        motivation="initial buy",
+        raw_llm_response="raw",
+        llm_duration_s=1.0,
+        block_height=1,
+        sim_time=datetime(2026, 1, 1, 8, 0),
+        balance=2000.0,
+        yes_pos=0,
+        no_pos=0,
+    )]
+
+    block = MagicMock()
+    block.clearing_prices = {0: (500_000_000, 500_000_000)}
+    block.height = 20
+
+    prompt = t._build_rebalance_prompt(block)
+    assert "PORTFOLIO REVIEW" in prompt
+    assert "avg cost" in prompt
+    assert "unrealized P&L" in prompt
+    assert "SELL or HOLD only" in prompt
+    # Actions block should not offer BUY options
+    actions_section = prompt.split("Available actions")[1]
+    assert "BUY_YES" not in actions_section
+    assert "BUY_NO" not in actions_section
+
+
+def test_rebalance_filters_buy_orders():
+    """Any BUY orders from LLM are stripped during rebalance parsing."""
+    t = _make_trader(market_ids=[0])
+    t.positions = {(0, "YES"): 50, (0, "NO"): 0}
+    t.balance_history = [1000.0]
+
+    text = (
+        "ANALYSIS: Market looks strong.\n"
+        "FAIR_VALUE: 0.60\n"
+        "ORDERS: BUY_YES 20 @ 0.55, SELL_YES 10 @ 0.60\n"
+        "MOTIVATION: Rebalancing."
+    )
+    parsed = t._parse_orders(text)
+    assert parsed is not None
+    _, _, orders, _ = parsed
+
+    # Filter as rebalance() would
+    from sybil_client import SellYes, SellNo
+    filtered = [o for o in orders if isinstance(o, (SellYes, SellNo))]
+    assert len(filtered) == 1
+    assert isinstance(filtered[0], SellYes)
+
+
+def test_should_rebalance_no_positions():
+    """should_rebalance returns False when no positions."""
+    t = _make_trader(market_ids=[0])
+    t.positions = {(0, "YES"): 0, (0, "NO"): 0}
+    assert t.should_rebalance(4) is False
+
+
+def test_should_rebalance_timing():
+    """should_rebalance respects interval relative to first trade."""
+    t = _make_trader(market_ids=[0])
+    t.positions = {(0, "YES"): 50, (0, "NO"): 0}
+
+    # No trades yet — should return False even with positions
+    assert t.should_rebalance(4) is False
+
+    # Add a trade 5 hours ago — should return True (first rebalance after first trade)
+    t.trade_log = [TradeRecord(
+        articles=[_make_article()], analysis="", fair_value=0.5,
+        orders=[BuyYes.at_price(0, 0.30, 50)], motivation="test",
+        raw_llm_response="", llm_duration_s=1.0, block_height=1,
+        sim_time=t.clock.now() - timedelta(hours=5),
+        balance=2000.0, yes_pos=0, no_pos=0,
+    )]
+    assert t.should_rebalance(4) is True
+
+    # After rebalancing, timer resets — should return False
+    t._last_rebalance_time = t.clock.now()
+    assert t.should_rebalance(4) is False
+
+    # 5 hours after last rebalance — should return True again
+    t._last_rebalance_time = t.clock.now() - timedelta(hours=5)
+    assert t.should_rebalance(4) is True
+
+
+def test_rebalance_snapshot_restore():
+    """_last_rebalance_time persists through snapshot/restore."""
+    t = _make_trader()
+    rebal_time = datetime(2026, 1, 1, 12, 0)
+    t._last_rebalance_time = rebal_time
+    t.trade_log = []
+    t.price_history = []
+
+    state = t.snapshot_state()
+    assert state["_last_rebalance_time"] == rebal_time
+
+    t2 = _make_trader()
+    t2.restore_state(state)
+    assert t2._last_rebalance_time == rebal_time
+
+
+def test_last_rebalance_time_initialized_none():
+    """_last_rebalance_time starts as None — first rebalance anchored to first trade."""
+    t = _make_trader(market_ids=[0])
+    assert t._last_rebalance_time is None

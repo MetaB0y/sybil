@@ -55,7 +55,10 @@ def build_block_records(
         for rec in t.trade_log:
             if rec.block_height >= 0:
                 n = len(rec.articles)
-                if n == 1:
+                if n == 0:
+                    title = "[REBALANCE]"
+                    source = ""
+                elif n == 1:
                     title = rec.articles[0].title
                     source = rec.articles[0].source
                 else:

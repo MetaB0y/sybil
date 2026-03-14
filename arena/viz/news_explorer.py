@@ -1081,13 +1081,20 @@ def render_simulation_tab():
 
                 # Article info
                 st.markdown("---")
-                articles_list = t.get("articles", [])
-                if articles_list and len(articles_list) > 1:
-                    st.markdown(f"**Articles ({len(articles_list)}):**")
-                    for ai, art in enumerate(articles_list, 1):
-                        st.markdown(f"{ai}. **{art['source']}** — {art['title']}")
+                is_rebalance = (
+                    not t.get("articles")
+                    and t.get("motivation", "").startswith("[REBALANCE]")
+                )
+                if is_rebalance:
+                    st.markdown("**Portfolio Review** (periodic rebalance)")
                 else:
-                    st.markdown(f"**Article:** {t.get('article_source', '')} — {t.get('article_title', '')}")
+                    articles_list = t.get("articles", [])
+                    if articles_list and len(articles_list) > 1:
+                        st.markdown(f"**Articles ({len(articles_list)}):**")
+                        for ai, art in enumerate(articles_list, 1):
+                            st.markdown(f"{ai}. **{art['source']}** — {art['title']}")
+                    else:
+                        st.markdown(f"**Article:** {t.get('article_source', '')} — {t.get('article_title', '')}")
 
                 # Analysis (new format) or motivation
                 analysis = t.get("analysis")

@@ -5,7 +5,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import openai
@@ -168,18 +168,21 @@ class LlmTrader(BaseAgent):
         self.trade_log: list[TradeRecord] = []
         self.price_history: list[PriceSnapshot] = []
         self._observed_first_block = False
+        self._last_rebalance_time: datetime | None = None
 
     def snapshot_state(self) -> dict:
         """Capture cross-day state for multi-day simulations."""
         return {
             "trade_log": self.trade_log,
             "price_history": self.price_history,
+            "_last_rebalance_time": self._last_rebalance_time,
         }
 
     def restore_state(self, state: dict) -> None:
         """Restore cross-day state from a previous day's snapshot."""
         self.trade_log = state["trade_log"]
         self.price_history = state["price_history"]
+        self._last_rebalance_time = state.get("_last_rebalance_time")
 
     def _get_llm_client(self) -> openai.AsyncOpenAI:
         if self._llm_client is None:
@@ -245,6 +248,38 @@ class LlmTrader(BaseAgent):
             lines.append("")  # blank line between entries
         return "\n".join(lines).rstrip()
 
+    def _format_last_reasoning(self) -> str:
+        """Format the last trade's reasoning for self-reflection."""
+        # Find last trade with actual analysis (skip API/parse errors)
+        last = None
+        for rec in reversed(self.trade_log):
+            if rec.analysis and rec.fair_value > 0:
+                last = rec
+                break
+        if last is None:
+            return ""
+
+        current_price = self.price_history[-1].yes_price if self.price_history else None
+        if current_price is not None:
+            price_at_trade = None
+            for snap in self.price_history:
+                if snap.block_height >= last.block_height:
+                    price_at_trade = snap.yes_price
+                    break
+            if price_at_trade is not None:
+                move = current_price - price_at_trade
+                move_str = f"YES moved {move:+.4f} since then"
+            else:
+                move_str = "price movement unknown"
+        else:
+            move_str = "no price data"
+
+        return (
+            f"Your last reasoning (FV={last.fair_value:.2f}, {move_str}):\n"
+            f'"{last.analysis}"\n'
+            f"Reflect: does the new evidence support or contradict your prior thesis?"
+        )
+
     def _build_prompt(self, articles: list[Article], block: Block) -> str:
         """Assemble the full prompt for the LLM."""
         market_id = next(iter(self.market_ids))
@@ -305,6 +340,9 @@ class LlmTrader(BaseAgent):
 
         analyze_word = "these articles" if len(articles) > 1 else "this article"
 
+        last_reasoning = self._format_last_reasoning()
+        reflection_section = f"\nPrevious reasoning:\n{last_reasoning}\n" if last_reasoning else ""
+
         return f"""{SYSTEM_PROMPT}
 
 {self.persona}
@@ -318,7 +356,7 @@ Current state:
 
 Recent trades:
 {self._format_recent_trades()}
-
+{reflection_section}
 {article_section}
 
 Available actions:
@@ -328,14 +366,17 @@ Analyze {analyze_word} and decide your trade. Respond in this exact format:
 
 ANALYSIS: [Your analysis of what {analyze_word} signals, 2-4 sentences]
 FAIR_VALUE: [Your probability estimate, 0.01-0.99]
+EDGE: [Calculate: |FAIR_VALUE - YES price| = edge per share. edge × quantity = expected profit. Only trade if edge > $0.03]
 ORDERS: [Choose from available actions, or HOLD if no edge. LIMIT PRICE — do NOT just use the current market price. For BUY_YES: set limit between YES price and your FAIR_VALUE. For BUY_NO: set limit between NO price and (1 - FAIR_VALUE). Example: if YES=$0.70, NO=$0.30, and your FV=0.15, your NO fair value is $0.85 — bid NO at $0.50-0.60, NOT $0.30. Routine news → limit closer to market. Breaking news → limit closer to your fair value.]
 MOTIVATION: [1-2 sentence thesis]"""
 
     def _parse_orders(self, text: str) -> tuple[str, float, list[OrderSpec], str] | None:
         """Parse structured LLM output into (analysis, fair_value, orders, motivation)."""
+        KEYWORDS = r"\nANALYSIS:|\nFAIR_VALUE:|\nEDGE:|\nORDERS:|\nMOTIVATION:|\Z"
+
         # Parse ANALYSIS (everything until next keyword)
         analysis_match = re.search(
-            r"ANALYSIS:\s*(.*?)(?=\nFAIR_VALUE:|\nORDERS:|\nMOTIVATION:|\Z)",
+            rf"ANALYSIS:\s*(.*?)(?={KEYWORDS})",
             text, re.DOTALL,
         )
         analysis = analysis_match.group(1).strip() if analysis_match else ""
@@ -352,14 +393,14 @@ MOTIVATION: [1-2 sentence thesis]"""
 
         # Parse MOTIVATION (everything after keyword until end or next keyword)
         motiv_match = re.search(
-            r"MOTIVATION:\s*(.*?)(?=\nANALYSIS:|\nFAIR_VALUE:|\nORDERS:|\Z)",
+            rf"MOTIVATION:\s*(.*?)(?={KEYWORDS})",
             text, re.DOTALL,
         )
         motivation = motiv_match.group(1).strip() if motiv_match else ""
 
         # Parse ORDERS
         orders_match = re.search(
-            r"ORDERS:\s*(.*?)(?=\nANALYSIS:|\nFAIR_VALUE:|\nMOTIVATION:|\Z)",
+            rf"ORDERS:\s*(.*?)(?={KEYWORDS})",
             text, re.DOTALL,
         )
         orders_text = orders_match.group(1).strip() if orders_match else ""
@@ -386,11 +427,19 @@ MOTIVATION: [1-2 sentence thesis]"""
         return (analysis, fair_value, orders, motivation)
 
     def _validate_orders(self, orders: list[OrderSpec], block: Block) -> list[OrderSpec]:
-        """Clip orders to what's affordable/held, clamp prices, drop zero-qty."""
+        """Clip orders to what's affordable/held, clamp prices, enforce concentration limit."""
         market_id = next(iter(self.market_ids))
+        yes_nanos, _ = self.filter_markets(block)[market_id]
+        yes_price = yes_nanos / NANOS_PER_DOLLAR
+        no_price = 1 - yes_price
+
         yes_held = self.get_position(market_id, "YES")
         no_held = self.get_position(market_id, "NO")
         cash = self.current_balance
+        portfolio_value = cash + yes_held * yes_price + no_held * no_price
+
+        # Hard cap: no single buy order can exceed 25% of portfolio value
+        max_order_value = portfolio_value * 0.25
 
         valid: list[OrderSpec] = []
         for order in orders:
@@ -405,6 +454,10 @@ MOTIVATION: [1-2 sentence thesis]"""
                 qty = min(qty, no_held)
                 no_held -= qty
             elif isinstance(order, (BuyYes, BuyNo)):
+                # Concentration limit
+                max_qty_by_conc = int(max_order_value / price) if price > 0 else 0
+                qty = min(qty, max_qty_by_conc)
+                # Cash limit
                 cost = qty * price
                 if cost > cash:
                     qty = int(cash / price) if price > 0 else 0
@@ -418,25 +471,247 @@ MOTIVATION: [1-2 sentence thesis]"""
 
         return valid
 
-    async def _call_llm(self, prompt: str) -> tuple[str, float]:
-        """Pause clock + client, call LLM, resume. Returns (text, duration_s)."""
+    async def _call_llm_raw(self, prompt: str) -> tuple[str, float]:
+        """Call LLM without pause/resume. Caller must handle pausing."""
         llm = self._get_llm_client()
         t0 = time.monotonic()
+        resp = await llm.chat.completions.create(
+            model=self.model_name,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=1024,
+        )
+        text = resp.choices[0].message.content or ""
+        return text, time.monotonic() - t0
+
+    async def _call_llm(self, prompt: str) -> tuple[str, float]:
+        """Pause clock + client, call LLM, resume. Returns (text, duration_s)."""
         await self.client.pause()
         self.clock.pause()
         try:
-            resp = await llm.chat.completions.create(
-                model=self.model_name,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=1024,
-            )
-            text = resp.choices[0].message.content or ""
+            return await self._call_llm_raw(prompt)
         finally:
             self.clock.resume()
             await self.client.resume()
-        duration = time.monotonic() - t0
-        return text, duration
+
+    def should_rebalance(self, interval_hours: float = 4) -> bool:
+        """Return True if the trader has positions and enough time has passed since first trade."""
+        market_id = next(iter(self.market_ids))
+        yes_pos = self.get_position(market_id, "YES")
+        no_pos = self.get_position(market_id, "NO")
+        if yes_pos == 0 and no_pos == 0:
+            return False
+        # First rebalance: 4h after first trade. Subsequent: 4h after last rebalance.
+        anchor = self._last_rebalance_time
+        if anchor is None:
+            # Use time of first trade with orders as anchor
+            for rec in self.trade_log:
+                if rec.orders:
+                    anchor = rec.sim_time
+                    break
+            if anchor is None:
+                return False
+        elapsed = (self.clock.now() - anchor).total_seconds() / 3600
+        return elapsed >= interval_hours
+
+    def _compute_cost_basis(self, market_id: int) -> tuple[float, float]:
+        """Compute weighted average entry price for YES and NO from trade_log.
+
+        Returns (yes_avg_cost, no_avg_cost).
+        """
+        yes_total_cost = 0.0
+        yes_total_qty = 0
+        no_total_cost = 0.0
+        no_total_qty = 0
+        for rec in self.trade_log:
+            for order in rec.orders:
+                price = order.limit_price_nanos / NANOS_PER_DOLLAR
+                if isinstance(order, BuyYes):
+                    yes_total_cost += price * order.quantity
+                    yes_total_qty += order.quantity
+                elif isinstance(order, BuyNo):
+                    no_total_cost += price * order.quantity
+                    no_total_qty += order.quantity
+        yes_avg = yes_total_cost / yes_total_qty if yes_total_qty > 0 else 0.0
+        no_avg = no_total_cost / no_total_qty if no_total_qty > 0 else 0.0
+        return yes_avg, no_avg
+
+    def _get_price_at_offset(self, hours_ago: float) -> float | None:
+        """Get YES price from price_history approximately hours_ago sim hours back."""
+        if not self.price_history:
+            return None
+        target = self.clock.now() - timedelta(hours=hours_ago)
+        best = None
+        best_delta = float("inf")
+        for snap in self.price_history:
+            delta = abs((snap.sim_time - target).total_seconds())
+            if delta < best_delta:
+                best_delta = delta
+                best = snap.yes_price
+        return best
+
+    def _build_rebalance_prompt(self, block: Block) -> str:
+        """Construct the rebalance-specific prompt."""
+        market_id = next(iter(self.market_ids))
+        yes_nanos, _ = self.filter_markets(block)[market_id]
+        yes_price = yes_nanos / NANOS_PER_DOLLAR
+        no_price = 1 - yes_price
+
+        price_4h = self._get_price_at_offset(4)
+        price_8h = self._get_price_at_offset(8)
+        price_4h_str = f"${price_4h:.2f}" if price_4h is not None else "n/a"
+        price_8h_str = f"${price_8h:.2f}" if price_8h is not None else "n/a"
+
+        balance = self.current_balance
+        yes_pos = self.get_position(market_id, "YES")
+        no_pos = self.get_position(market_id, "NO")
+        portfolio_value = balance + yes_pos * yes_price + no_pos * no_price
+        cash_pct = (balance / portfolio_value * 100) if portfolio_value > 0 else 100
+
+        yes_avg_cost, no_avg_cost = self._compute_cost_basis(market_id)
+        yes_pnl = (yes_price - yes_avg_cost) * yes_pos if yes_pos > 0 else 0.0
+        no_pnl = (no_price - no_avg_cost) * no_pos if no_pos > 0 else 0.0
+        starting_balance = 2000.0
+        total_pnl = portfolio_value - starting_balance
+
+        # Recent trade motivations (last 5)
+        recent_trades_lines = []
+        for rec in self.trade_log[-5:]:
+            if rec.motivation:
+                prefix = "[REBALANCE] " if rec.motivation.startswith("[REBALANCE]") else ""
+                order_desc = ", ".join(_describe_order(o) for o in rec.orders) or "HOLD"
+                recent_trades_lines.append(
+                    f"- [{rec.sim_time:%H:%M}] {order_desc} | {rec.motivation}"
+                )
+        recent_trades = "\n".join(recent_trades_lines) if recent_trades_lines else "No trades yet."
+
+        # Recent headlines since last rebalance
+        headline_lines = []
+        cutoff = self._last_rebalance_time or self.clock.now() - timedelta(hours=4)
+        for art in self.articles:
+            if art.timestamp > cutoff and self.clock.is_past(art.timestamp):
+                headline_lines.append(f"- {art.source}: {art.title}")
+        recent_headlines = "\n".join(headline_lines[-10:]) if headline_lines else "No new headlines."
+
+        # Available actions — sell only
+        actions = []
+        if yes_pos > 0:
+            actions.append(f"- SELL_YES <qty> @ <price>: sell up to {yes_pos} YES shares (currently ${yes_price:.2f}/share)")
+        if no_pos > 0:
+            actions.append(f"- SELL_NO <qty> @ <price>: sell up to {no_pos} NO shares (currently ${no_price:.2f}/share)")
+        actions.append("- HOLD: keep current positions")
+        actions_block = "\n".join(actions)
+
+        return f"""{SYSTEM_PROMPT}
+
+{self.persona}
+
+PORTFOLIO REVIEW — Periodic rebalancing check.
+
+Market: "{self.market_question}"
+Current YES price: ${yes_price:.2f} | NO price: ${no_price:.2f}
+Price 4h ago: {price_4h_str} | Price 8h ago: {price_8h_str}
+
+Reminder: This is a Frequent Batch Auction — your limit price is the worst
+price you'd accept, not what you'll pay. Set sell limits between your target
+and market price.
+
+Your portfolio:
+- ${balance:.2f} cash ({cash_pct:.0f}% of portfolio)
+- {yes_pos} YES shares (avg cost: ${yes_avg_cost:.2f}, now ${yes_price:.2f} each) → unrealized P&L: ${yes_pnl:+.2f}
+- {no_pos} NO shares (avg cost: ${no_avg_cost:.2f}, now ${no_price:.2f} each) → unrealized P&L: ${no_pnl:+.2f}
+- Portfolio value: ${portfolio_value:.2f} (started at $2,000 → total P&L: ${total_pnl:+.2f})
+
+Your recent trades:
+{recent_trades}
+
+Recent headlines since your last review:
+{recent_headlines}
+
+Available actions (SELL or HOLD only — no buying during rebalance):
+{actions_block}
+
+Review your positions. Profits are only real when locked in. Holding a winning
+position through a reversal means you never had the profit. Consider:
+- Has the market already priced in your thesis? If price ≈ what you expected,
+  your edge is gone — sell some or all.
+- Has counter-evidence appeared? Cut losers early.
+- Are you overexposed? Reducing a large position to free cash for later
+  opportunities is smart risk management.
+
+ANALYSIS: [1-2 sentences: should you take profit, cut losses, reduce exposure,
+or is holding still justified? Why?]
+FAIR_VALUE: [Your current probability estimate, 0.01-0.99]
+ORDERS: [HOLD | SELL_YES <qty> @ <price> | SELL_NO <qty> @ <price>]
+MOTIVATION: [1 sentence thesis]"""
+
+    async def rebalance(self, block: Block) -> list[OrderSpec]:
+        """Run a rebalance check. Caller must handle clock/client pausing."""
+        market_id = next(iter(self.market_ids))
+        yes_pos = self.get_position(market_id, "YES")
+        no_pos = self.get_position(market_id, "NO")
+        if yes_pos == 0 and no_pos == 0:
+            return []
+
+        prompt = self._build_rebalance_prompt(block)
+
+        try:
+            raw_text, llm_duration_s = await self._call_llm_raw(prompt)
+            log.info(
+                "[%s] Rebalance LLM response (%.1fs):\n%s",
+                self.name, llm_duration_s, raw_text,
+            )
+        except Exception as e:
+            log.warning("[%s] Rebalance LLM call failed: %s", self.name, e)
+            print(f"  [{self.name}] REBALANCE FAILED (API error: {e})", flush=True)
+            return []
+
+        parsed = self._parse_orders(raw_text)
+        if parsed is None:
+            print(f"  [{self.name}] REBALANCE FAILED (parse error)", flush=True)
+            self._last_rebalance_time = self.clock.now()
+            return []
+
+        analysis, fair_value, orders, motivation = parsed
+
+        # Filter out any BUY orders — rebalance is sell-only
+        orders = [o for o in orders if isinstance(o, (SellYes, SellNo))]
+        orders = self._validate_orders(orders, block)
+
+        # Deduct pending sells from local positions to prevent double-selling
+        # when on_block fires before these orders fill.
+        for order in orders:
+            if isinstance(order, SellYes):
+                key = (market_id, "YES")
+                self.positions[key] = self.positions.get(key, 0) - order.quantity
+            elif isinstance(order, SellNo):
+                key = (market_id, "NO")
+                self.positions[key] = self.positions.get(key, 0) - order.quantity
+
+        self._last_rebalance_time = self.clock.now()
+
+        self.trade_log.append(TradeRecord(
+            articles=[],
+            analysis=analysis,
+            fair_value=fair_value,
+            orders=orders,
+            motivation=f"[REBALANCE] {motivation}",
+            raw_llm_response=raw_text,
+            llm_duration_s=llm_duration_s,
+            block_height=block.height,
+            sim_time=self.clock.now(),
+            balance=self.current_balance,
+            yes_pos=self.get_position(market_id, "YES"),
+            no_pos=self.get_position(market_id, "NO"),
+        ))
+
+        if orders:
+            order_desc = ", ".join(_describe_order(o) for o in orders)
+            print(f"  [{self.name}] REBALANCE FV={fair_value:.2f} ({llm_duration_s:.1f}s) -> {order_desc}", flush=True)
+        else:
+            print(f"  [{self.name}] REBALANCE FV={fair_value:.2f} ({llm_duration_s:.1f}s) -> HOLD", flush=True)
+
+        return orders
 
     async def on_block(self, block: Block) -> list[OrderSpec]:
         market_id = next(iter(self.market_ids))
