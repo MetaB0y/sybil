@@ -234,40 +234,36 @@ class FlashMarketMaker(BaseAgent):
 
 
 class BalancedMarketMaker(BaseAgent):
-    """FBA-compatible two-sided market maker with no self-trading.
+    """FBA-native two-sided market maker.
 
-    Core rule: per outcome, only be on ONE side (buy or sell) per block.
-    Uses flash liquidity (mm_budget_nanos) for one-shot orders — no TTL
-    carryover prevents cross-block self-trading.
+    Core design: In FBA, spread is a fill threshold, not price protection.
+    The clearing mechanism provides automatic price improvement — you never
+    pay more than the clearing price regardless of your limit.
 
-    Features:
-    - Tapered multi-level quoting (inner levels larger, outer levels smaller)
-    - Volatility-adaptive spread widening
-    - Continuous inventory decay (gradual sell pressure, no binary threshold)
-    - Per-side exposure cap
-    - Matched-pair awareness (widen spread when capital is locked)
+    Tight inner spread (1c) maximizes fill rate against noise. Vol-adaptive
+    widening and momentum asymmetry protect against informed traders.
     """
 
     # Taper weights per level (inner → outer). Sum ≈ 1.0.
-    _BUY_TAPER = [0.25, 0.20, 0.16, 0.12, 0.09, 0.07, 0.06, 0.05]
-    _SELL_TAPER = [0.30, 0.22, 0.16, 0.12, 0.08, 0.05, 0.04, 0.03]
+    _BUY_TAPER = [0.50, 0.30, 0.20]
+    _SELL_TAPER = [0.50, 0.30, 0.20]
 
     def __init__(
         self,
         client,
         account_id: int,
         budget_dollars: float = 50_000.0,
-        half_spread: float = 0.03,
-        num_levels: int = 8,
-        level_spacing: float = 0.01,
-        max_per_side_dollars: float = 400.0,
-        max_position: int = 15_000,
+        half_spread: float = 0.01,
+        num_levels: int = 3,
+        level_spacing: float = 0.015,
+        max_per_side_dollars: float = 100.0,
+        max_position: int = 5_000,
         skew_factor: float = 0.1,
         vol_lookback: int = 4,
         vol_widen_max: float = 3.0,
         momentum_lookback: int = 3,
         momentum_widen_max: float = 0.03,
-        inventory_decay_start: int = 50,
+        inventory_decay_start: int = 30,
         name: str | None = None,
         market_ids: list[int] | None = None,
     ):
@@ -408,7 +404,7 @@ class BalancedMarketMaker(BaseAgent):
         # --- Matched-pair unwinding ---
         # When matched pairs exceed threshold, sell both sides to free capital.
         # Ramps from 0% at 100 matched to 60% at max_position matched.
-        matched_threshold = 100
+        matched_threshold = 50
         if matched > matched_threshold:
             matched_intensity = min(1.0, matched / self.max_position)
             matched_sell = min(0.60, matched_intensity * 1.5)
@@ -418,7 +414,7 @@ class BalancedMarketMaker(BaseAgent):
         # --- Total inventory pressure on buying ---
         # Reduce buying on BOTH sides when total inventory is high,
         # regardless of net balance.
-        total_threshold = 200
+        total_threshold = 100
         if total > total_threshold:
             total_intensity = min(1.0, total / (self.max_position * 2))
             buy_dampen = max(0.1, 1.0 - total_intensity * 2.0)
@@ -430,7 +426,7 @@ class BalancedMarketMaker(BaseAgent):
             return buy_dampen, buy_dampen, 0.0, matched_sell
 
         intensity = min(1.0, abs(net) / self.max_position)
-        net_sell = min(0.80, intensity * 2.0)
+        net_sell = min(0.80, intensity * 3.0)
 
         if net > 0:
             yes_scale = max(0.0, buy_dampen * (1.0 - intensity * 3.0))
