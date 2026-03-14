@@ -24,9 +24,19 @@ from sybil_client.types import NANOS_PER_DOLLAR
 
 from .clock import SimulatedClock
 from .llm_trader import LlmTrader, load_articles
+from .rebalancer import run_rebalancer
 from .results import save_and_print_results
 
 log = logging.getLogger(__name__)
+
+
+def _default_model(trader_specs: list | None) -> str:
+    """Derive default model from trader specs, or fall back to a hardcoded default."""
+    if trader_specs:
+        for s in trader_specs:
+            if s.model:
+                return s.model
+    return "google/gemini-2.5-flash"
 
 
 def _load_market_config(market_name: str):
@@ -76,6 +86,7 @@ class SimulationConfig:
     sim_end_hour: str = "23:59"
     trader_specs: list[TraderSpec] | None = None
     dates: list[str] | None = None
+    rebalance_interval: float = 4.0
     # Market-specific fields
     market_question: str = ""
     market_description: str = ""
@@ -234,6 +245,12 @@ async def run_simulation(config: SimulationConfig) -> None:
             all_bots = [mm, *noise_bots, *traders]
             tasks = [asyncio.create_task(bot.run()) for bot in all_bots]
 
+            rebalance_task = None
+            if config.rebalance_interval > 0 and traders:
+                rebalance_task = asyncio.create_task(
+                    run_rebalancer(traders, clock, client, config.rebalance_interval)
+                )
+
             sim_span = sim_end - sim_start
             real_span = sim_span.total_seconds() / config.compression_ratio
             print(
@@ -264,6 +281,8 @@ async def run_simulation(config: SimulationConfig) -> None:
             monitor_task = asyncio.create_task(_monitor())
             await clock.sleep_until(sim_end)
             monitor_task.cancel()
+            if rebalance_task is not None:
+                rebalance_task.cancel()
 
             print(f"\n  Stopping bots (day {day_label})...")
             for bot in all_bots:
@@ -292,7 +311,8 @@ def main():
     parser.add_argument("--noise-balance", type=float, default=50.0)
     parser.add_argument("--trader-balance", type=float, default=2000.0)
     parser.add_argument("--initial-price", type=float, default=None)
-    parser.add_argument("--model", default="moonshotai/kimi-k2")
+    parser.add_argument("--model", default=None,
+                        help="Default LLM model (overrides market config per-persona models)")
     parser.add_argument("--api-key", default="")
     parser.add_argument("--traders", nargs="+", metavar="BOT_KEY",
                         help="Bot keys from market personas")
@@ -302,6 +322,8 @@ def main():
                         help="Multiple dates for multi-day simulation")
     parser.add_argument("--sim-start", default="00:00", help="Sim start HH:MM (default: 00:00)")
     parser.add_argument("--sim-end", default="23:59", help="Sim end HH:MM (default: 23:59)")
+    parser.add_argument("--rebalance-interval", type=float, default=4,
+                        help="Rebalance interval in sim hours (0=disabled, default: 4)")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -366,12 +388,13 @@ def main():
         noise_balance=args.noise_balance,
         trader_balance=args.trader_balance,
         initial_price=initial_price,
-        model_name=args.model,
+        model_name=args.model or _default_model(trader_specs),
         api_key=args.api_key,
         sim_start_hour=args.sim_start,
         sim_end_hour=args.sim_end,
         trader_specs=trader_specs,
         dates=dates,
+        rebalance_interval=args.rebalance_interval,
         market_question=market_config.question,
         market_description=market_config.description,
         market_category=market_config.category,
