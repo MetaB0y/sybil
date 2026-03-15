@@ -793,6 +793,22 @@ MOTIVATION: [1 sentence thesis]"""
         analysis, fair_value, orders, motivation = parsed
         orders = self._validate_orders(orders, block)
 
+        # Reject directionally inconsistent orders (not applied to rebalancing)
+        yes_nanos, _ = self.filter_markets(block)[market_id]
+        cur_yes = yes_nanos / NANOS_PER_DOLLAR
+        consistent = []
+        for o in orders:
+            if isinstance(o, (BuyYes, SellNo)) and fair_value < cur_yes:
+                log.info("[%s] Rejected bullish order (FV=%.2f < mkt=%.2f): %s",
+                         self.name, fair_value, cur_yes, _describe_order(o))
+                continue
+            if isinstance(o, (BuyNo, SellYes)) and fair_value > cur_yes:
+                log.info("[%s] Rejected bearish order (FV=%.2f > mkt=%.2f): %s",
+                         self.name, fair_value, cur_yes, _describe_order(o))
+                continue
+            consistent.append(o)
+        orders = consistent
+
         self.trade_log.append(TradeRecord(
             articles=arrived,
             analysis=analysis,

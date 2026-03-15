@@ -578,13 +578,15 @@ def render_simulation_tab():
     noise_count = config.get("noise_count", len(noise_rows))
     compression = config.get("compression_ratio", "?")
     period_str = f"Period: {t_first:%b %d %H:%M} – {t_last:%H:%M} ({_format_duration(duration)})" if duration else f"Batches {first_h}–{last_h}"
+    block_interval = config.get("block_interval_s", 2.0)
+    batch_min = int(block_interval * compression / 60)
+    llm_count = len(trade_logs)
     st.caption(
-        f"{period_str}; "
-        f"Compression: {compression}x · "
-        f"Noise: {noise_count} bots"
+        f"{period_str} · "
+        f"Batch every {batch_min} min · "
+        f"{llm_count} LLM traders · "
+        f"{noise_count} noise bots"
     )
-    if trader_parts:
-        st.caption(f"LLM traders: {trader_list}")
 
     # General
     st.markdown("#### General")
@@ -1100,9 +1102,9 @@ def render_simulation_tab():
                 analysis = t.get("analysis")
                 if analysis:
                     st.markdown(f"**LLM Analysis:**")
-                    st.info(analysis)
+                    st.info(analysis.replace("$", "\\$"))
                 if t.get("motivation"):
-                    st.markdown(f"**Motivation:** {t['motivation']}")
+                    st.markdown(f"**Motivation:** {t['motivation'].replace('$', chr(92) + '$')}")
 
                 # Full LLM response
                 raw = t.get("raw_llm_response") or t.get("llm_response")
@@ -1430,7 +1432,7 @@ def render_simulation_tab():
 
 
 def main():
-    st.set_page_config(page_title=f"{_market_name.title()} News Explorer", layout="wide")
+    st.set_page_config(page_title=f"{_market_name.title()} Simulation", layout="wide")
 
     # Shrink metric values so section headers are visually dominant
     st.markdown("""<style>
@@ -1438,7 +1440,7 @@ def main():
     [data-testid="stMetricLabel"] { font-size: 0.85rem; }
     </style>""", unsafe_allow_html=True)
 
-    st.title(f"{_market_config.question} — News Explorer")
+    st.title(f"{_market_config.question} — Simulation")
 
     df = load_data()
 
@@ -1450,12 +1452,12 @@ def main():
     active_bots = {k: v for k, v in BOT_PERSONAS.items()
                    if v.get("enabled", True) and v.get("sources")}
 
-    # ── Tabs: Summary, Daily, Simulation, LLM Traders ──
-    all_tabs = st.tabs(["Summary", "Daily Explorer", "Simulation", "LLM Traders"])
-    tab_summary = all_tabs[0]
-    tab_daily = all_tabs[1]
-    tab_simulation = all_tabs[2]
-    tab_traders = all_tabs[3]
+    # ── Tabs ──
+    all_tabs = st.tabs(["Simulation", "LLM Traders", "News Sources", "Daily Explorer"])
+    tab_simulation = all_tabs[0]
+    tab_traders = all_tabs[1]
+    tab_summary = all_tabs[2]
+    tab_daily = all_tabs[3]
 
     # ═══════════════════════════ SUMMARY ═══════════════════════════
     with tab_summary:
@@ -1469,6 +1471,24 @@ def main():
         date_range = f"{filtered['date'].min()} → {filtered['date'].max()}"
         days = filtered["date"].nunique()
         st.caption(f"Period: {date_range}  ({days} days)")
+
+        with st.expander("How were these articles collected?"):
+            st.markdown(
+                "**Source:** [GDELT Project](https://www.gdeltproject.org/) — the world's "
+                "largest open news monitoring platform, tracking news from virtually every "
+                "country in over 100 languages.\n\n"
+                "**Method:** Articles were fetched via the GDELT DOC 2.0 API in 2-hour sliding windows. "
+                "Two complementary queries were run and merged:\n\n"
+                "1. **Broad query:** (iran OR tehran OR iranian) AND "
+                "(strike OR attack OR military OR war OR nuclear OR sanctions OR missile)\n"
+                '2. **Diplomacy query:** (iran OR tehran OR iranian) AND '
+                '(trump OR pentagon OR "united states") AND '
+                "(negotiations OR deal OR diplomacy OR talks OR agreement OR ceasefire OR peace OR treaty)\n\n"
+                "**Processing pipeline:**\n\n"
+                "1. **Fetch** — Raw articles collected from GDELT with metadata (title, source, country, language, timestamp)\n"
+                "2. **Merge & deduplicate** — Both query results combined, deduplicated by URL"
+            )
+
 
         # ── Articles per day ──
         st.subheader("Articles per day")
@@ -1570,10 +1590,85 @@ def main():
 
     # ═══════════════════════════ SIMULATION ═══════════════════════════
     with tab_simulation:
+        with st.expander("How the simulation works"):
+            st.markdown(
+                "**Market mechanism: Frequent Batch Auctions (FBA)**\n\n"
+                "Unlike traditional order books where orders execute one-by-one, "
+                "all orders in a batch are collected and cleared simultaneously at a single price. "
+                "This eliminates front-running and ensures fair price discovery — "
+                "every participant in a batch gets the same clearing price regardless of submission order.\n\n"
+                "**Matching engine**\n\n"
+                "The Rust-based matching engine solves a welfare-maximizing optimization problem each batch: "
+                "it finds clearing prices and fill quantities that maximize total trader surplus. "
+                "BuyYes + BuyNo orders can match via minting (total cost = \\$1). "
+                "All arithmetic is in integer nanos (1 dollar = 1,000,000,000 nanos) — no floating point.\n\n"
+                "**Time compression**\n\n"
+                "The simulation compresses real calendar time — each simulated day runs in minutes of wall-clock time. "
+                "Block production interval and compression ratio are configurable. "
+                "Articles arrive at their original publication timestamps within the compressed timeline.\n\n"
+                "**Participants**\n\n"
+                "- **Market Maker (MM)** — a two-sided liquidity provider that continuously quotes "
+                "buy prices on both YES and NO outcomes. Quotes at multiple price levels with tapered sizing "
+                "(larger near the mid, smaller at outer levels). Spread widens automatically when volatility "
+                "spikes and narrows in calm markets. When price momentum is detected, quoting shifts "
+                "asymmetrically to avoid being picked off by informed flow. Inventory management gradually "
+                "increases sell pressure as positions grow, and unwinds matched pairs to free capital.\n"
+                "- **Noise traders** — 20 bots placing random orders each block with 50% probability, "
+                "providing baseline order flow.\n"
+                "- **LLM traders** — autonomous agents powered by language models. "
+                "Each receives news articles matching their persona and makes independent trading decisions. "
+                "See the LLM Traders tab for details.\n\n"
+                "**Order mechanics**\n\n"
+                "- Limit price = worst price you'd accept. FBA guarantees you get the clearing price (which is better)\n"
+                "- Orders persist for 3 batches (TTL=3) if not filled\n\n"
+                "**Multi-day simulation**\n\n"
+                "Positions and balances carry over between simulated days. "
+                "Each day, fresh articles are loaded and LLM traders continue from their prior state — "
+                "portfolio, trade history, and last reasoning are preserved for continuity.\n\n"
+                "**What you'll find below**\n\n"
+                "- **Summary** — key metrics: total volume, fills, welfare breakdown by participant type\n"
+                "- **Price + Trader Activity** — interactive chart showing YES price over time, "
+                "overlaid with LLM trader fair value estimates and trade markers\n"
+                "- **Leaderboard** — final P&L ranking across all participants\n"
+                "- **LLM Decisions** — chronological log of every LLM trader decision: "
+                "article received, analysis, fair value, orders placed, and fill results\n"
+                "- **Per-Batch Activity** — volume and fill count per block over time\n"
+                "- **Batch Inspector** — drill into any individual batch to see all orders, "
+                "fills, and the clearing price"
+            )
         render_simulation_tab()
 
     # ═══════════════════════════ LLM TRADERS ═══════════════════════════
     with tab_traders:
+        with st.expander("How LLM traders work"):
+            st.markdown(
+                "Each LLM trader is an autonomous agent powered by a language model "
+                "(Gemini 3.1 Flash Lite via OpenRouter). Traders receive news articles "
+                "in real-time during the simulation and make independent trading decisions.\n\n"
+                "**Per-trader configuration:**\n"
+                "- **News sources** — each trader reads from a curated set of outlets "
+                "matching their geographic/thematic focus (e.g. Arab press, US media, financial outlets)\n"
+                "- **Headline filter** — before the simulation, an LLM pre-screens every headline "
+                "from the trader's sources, keeping only articles relevant to the market question. "
+                "Full article text is then fetched for accepted headlines\n"
+                "- **Persona** — defines how the trader interprets signals and trades: "
+                "identity, reading style, and trading style\n\n"
+                "**During simulation, each block the trader receives:**\n"
+                "- New articles that have arrived since the last block\n"
+                "- Current market price and recent price trend\n"
+                "- Their portfolio state (cash, positions, P&L)\n"
+                "- History of their recent trades and fill results\n"
+                "- Their own prior reasoning (for self-reflection)\n\n"
+                "**The trader responds with:**\n"
+                "- ANALYSIS — interpretation of the new information\n"
+                "- FAIR_VALUE — their probability estimate for the event\n"
+                "- EDGE — difference vs market price; only trades if edge > \\$0.03\n"
+                "- ORDERS — buy/sell/hold with limit prices\n\n"
+                "**Portfolio rebalancing** runs every 4 simulated hours. "
+                "Traders with open positions are prompted to review and "
+                "optionally trim or exit positions to lock in profits or cut losses."
+            )
+
         trader_names = {k: v["name"] for k, v in active_bots.items()}
         selected_trader = st.selectbox(
             "Select trader",

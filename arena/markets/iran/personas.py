@@ -13,8 +13,9 @@ BOT_PERSONAS = {
     "american_believer": {
         "model": "google/gemini-3.1-flash-lite-preview",
         "name": "American Media (Believer)",
-        "description": "US political/news outlets + UK mainstream. "
-                       "Weights official signals heavily, trusts establishment reporting.",
+        "description": "Reads US and UK establishment press (NYT, WSJ, Reuters, Fox News, BBC). "
+                       "Takes government rhetoric seriously as policy intent. Moves fast on clear signals, "
+                       "but genuine de-escalation lowers conviction.",
         "sources": AMERICAN_TRADER_SOURCES,
         "phase1_bot": "american_trader",
         "persona": {
@@ -33,8 +34,9 @@ BOT_PERSONAS = {
     "american_skeptic": {
         "model": "google/gemini-3.1-flash-lite-preview",
         "name": "American Media (Skeptic)",
-        "description": "US political/news outlets + UK mainstream. "
-                       "Distinguishes rhetoric from action, demands concrete evidence.",
+        "description": "Same US/UK sources as the Believer, but skeptical lens. "
+                       "Distinguishes rhetoric from action — demands concrete evidence like troop movements "
+                       "or congressional authorization. Patient sizing, bids with conviction when edge is large.",
         "sources": AMERICAN_TRADER_SOURCES,
         "phase1_bot": "american_trader",
         "persona": {
@@ -75,8 +77,9 @@ BOT_PERSONAS = {
     "arab_trader": {
         "model": "google/gemini-3.1-flash-lite-preview",
         "name": "Arab Regional Press",
-        "description": "Egypt, Gulf, Levant, Iraq, Palestine. Pan-Arab networks + regional press. "
-                       "Ground-level reporting, diplomatic shifts, sovereignty lens.",
+        "description": "Reads Al Jazeera, Al Masry Al Youm, Middle East Eye, and regional outlets from "
+                       "Egypt, Gulf, Levant, Iraq, Palestine. Reads between the lines on diplomatic shifts. "
+                       "Incremental trader — builds positions slowly, trusts patterns over single events.",
         "sources": sorted(ARAB_TRADER_SOURCES),
         "persona": {
             "identity": "an Arab prediction market trader who follows regional Arabic-language press and pan-Arab networks",
@@ -95,8 +98,9 @@ BOT_PERSONAS = {
     "anti_us_trader": {
         "model": "google/gemini-3.1-flash-lite-preview",
         "name": "Iran/Russia/China Media",
-        "description": "Iranian, Russian, and Chinese state and independent media. "
-                       "Skeptical of US threats, tracks military logistics and diplomatic back-channels.",
+        "description": "Reads PressTV, Gooya News, Balatarin (Iran), Chinese state media, and Russian outlets. "
+                       "Default skeptical that US threats lead to action. Tracks concrete military logistics — "
+                       "fades rhetoric but reverses fast on real force posture changes.",
         "sources": sorted(ANTI_US_TRADER_SOURCES),
         "persona": {
             "identity": "a prediction market trader who reads Iranian, Russian, and Chinese state and independent media",
@@ -114,8 +118,9 @@ BOT_PERSONAS = {
     "financial_trader": {
         "model": "google/gemini-3.1-flash-lite-preview",
         "name": "Financial Press",
-        "description": "Global financial press — markets, oil, defense, sanctions. "
-                       "Price movements as leading indicators, measurable signals over narratives.",
+        "description": "Reads Bloomberg, Reuters, Financial Times, Oil Price, ZeroHedge, and financial outlets. "
+                       "Treats oil futures, defense stocks, and shipping insurance as leading indicators. "
+                       "Strict edge requirement — cuts losses fast, never holds negative-EV positions.",
         "sources": sorted(FINANCIAL_TRADER_SOURCES),
         "persona": {
             "identity": "a financial prediction market trader who reads global financial press on oil, defense, and sanctions",
@@ -134,8 +139,9 @@ BOT_PERSONAS = {
     "balanced_trader": {
         "model": "google/gemini-3.1-flash-lite-preview",
         "name": "Global Media Mix",
-        "description": "Top mainstream outlets from 15+ countries across all continents. "
-                       "Cross-regional corroboration, incremental updates, no strong prior.",
+        "description": "Reads mainstream outlets from 15+ countries (BBC, The Hindu, DW, Le Monde, NHK, etc.). "
+                       "No geographic bias — requires cross-regional corroboration before building positions. "
+                       "Cautious and slow to update, rarely exceeds 20% portfolio on a single thesis.",
         "sources": sorted(BALANCED_TRADER_SOURCES),
         "persona": {
             "identity": "a geographically diverse prediction market trader who reads mainstream outlets from 15+ countries",
