@@ -1288,8 +1288,8 @@ def render_simulation_tab():
         batch_trader_w = sum(v for k, v in batch_welfare.items() if k not in ("MM", "Noise"))
 
         ec1, ec2, ec3 = st.columns(3)
-        ec1.metric("Welfare", f"${welfare_nanos / 1e9:,.2f}")
-        ec2.metric("Volume", f"${total_vol_nanos / 1e9:,.2f}")
+        ec1.metric("Volume", f"${total_vol_nanos / 1e9:,.2f}")
+        ec2.metric("Welfare", f"${welfare_nanos / 1e9:,.2f}")
         ec3.metric("Fill Rate", f"{orders_with_fills}/{orders_submitted} ({fill_rate:.0f}%)")
 
         # Per-source volume for this batch

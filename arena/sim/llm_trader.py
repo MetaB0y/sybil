@@ -117,7 +117,7 @@ def load_articles(phase1_path: str) -> list[Article]:
 
 SYSTEM_PROMPT = """\
 You are trading in a prediction market using Frequent Batch Auctions.
-All orders in a batch are matched simultaneously at a single clearing price — no order book, no first-come advantage. Batches clear every ~20 minutes. Orders persist for 3 batches (TTL=3).
+All orders in a batch are matched simultaneously at a single clearing price — no order book, no first-come advantage. Batches clear every ~10 minutes. Orders persist for 3 batches (TTL=3).
 
 Pricing:
 - YES + NO = $1.00 always. If YES=$0.80, NO=$0.20.
