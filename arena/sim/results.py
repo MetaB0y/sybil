@@ -274,7 +274,12 @@ async def save_and_print_results(
     )
 
     # Enrich with welfare/volume/fills
-    block_stats = mm.block_stats
+    # Merge block_stats from all bots (MM may stop early with max_blocks)
+    block_stats: dict[int, tuple[int, int, int]] = {}
+    for bot in all_bots:
+        for h, stats in bot.block_stats.items():
+            if h not in block_stats:
+                block_stats[h] = stats
     for rec in block_records:
         stats = block_stats.get(rec["height"])
         if stats:

@@ -16,7 +16,9 @@ use crate::block::{compute_state_root, hash_header, Block, BlockHeader, BlockPro
 use crate::error::{Rejection, RejectionReason, SequencerError};
 use crate::market_info::{AccountFillRecord, MarketMetadata, PricePoint};
 use crate::settlement;
-use crate::validation::{validate_order, validate_order_with_reservation};
+use crate::validation::{
+    sell_reservations, validate_order, validate_order_with_reservation, PositionKey,
+};
 
 /// An order submission from a participant.
 #[derive(Clone, Debug)]
@@ -368,6 +370,9 @@ impl BlockSequencer {
             .map(|(&id, _)| id)
             .collect();
 
+        // Track reserved positions per account to prevent double-selling
+        let mut reserved_positions: HashMap<(AccountId, PositionKey), i64> = HashMap::new();
+
         // Phase 1: Re-validate and include pending orders
         let pending = std::mem::take(&mut self.pending_orders);
         for pending_order in pending {
@@ -395,7 +400,20 @@ impl BlockSequencer {
                 continue;
             }
 
-            if validate_order(&pending_order.order, account).is_ok() {
+            // Build per-account position reservations view
+            let acct_reserved: HashMap<PositionKey, i64> = reserved_positions
+                .iter()
+                .filter(|((aid, _), _)| *aid == pending_order.account_id)
+                .map(|((_, key), &qty)| (*key, qty))
+                .collect();
+
+            if validate_order(&pending_order.order, account, &acct_reserved).is_ok() {
+                // Track position reservations for sells
+                for (key, qty) in sell_reservations(&pending_order.order) {
+                    *reserved_positions
+                        .entry((pending_order.account_id, key))
+                        .or_insert(0) += qty;
+                }
                 witness_orders.push(WitnessOrder {
                     order: pending_order.order.clone(),
                     account_id: pending_order.account_id.0,
@@ -454,12 +472,25 @@ impl BlockSequencer {
                     accepted_orders.push(order);
                 } else {
                     let reserved = *reserved_balance.get(&account_id).unwrap_or(&0);
-                    match validate_order_with_reservation(&order, account, reserved) {
+                    let acct_reserved: HashMap<PositionKey, i64> = reserved_positions
+                        .iter()
+                        .filter(|((aid, _), _)| *aid == account_id)
+                        .map(|((_, key), &qty)| (*key, qty))
+                        .collect();
+                    match validate_order_with_reservation(
+                        &order, account, reserved, &acct_reserved,
+                    ) {
                         Ok(cost) => {
                             self.order_account_map.insert(order_id, account_id);
                             self.order_created_at.insert(order_id, self.height);
                             if cost > 0 {
                                 *reserved_balance.entry(account_id).or_insert(0) += cost;
+                            }
+                            // Track position reservations for sells
+                            for (key, qty) in sell_reservations(&order) {
+                                *reserved_positions
+                                    .entry((account_id, key))
+                                    .or_insert(0) += qty;
                             }
                             witness_orders.push(WitnessOrder {
                                 order: order.clone(),
@@ -961,7 +992,7 @@ mod tests {
     use super::*;
     use crate::account::AccountStore;
     use crate::error::RejectionReason;
-    use crate::validation::{validate_order, validate_order_with_reservation};
+    use crate::validation::{validate_order, validate_order_with_reservation, PositionKey};
     use matching_engine::{outcome_buy, outcome_sell, MarketId, MarketSet, MmId, NANOS_PER_DOLLAR};
     use sybil_oracle::AdminOracle;
 
@@ -1005,7 +1036,7 @@ mod tests {
         let account = accounts.get(aid).unwrap();
 
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        assert!(validate_order(&order, account).is_ok());
+        assert!(validate_order(&order, account, &HashMap::new()).is_ok());
     }
 
     #[test]
@@ -1016,7 +1047,7 @@ mod tests {
         let account = accounts.get(aid).unwrap();
 
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        let result = validate_order(&order, account);
+        let result = validate_order(&order, account, &HashMap::new());
         assert!(result.is_err());
         match result.unwrap_err() {
             RejectionReason::InsufficientBalance {
@@ -1039,7 +1070,7 @@ mod tests {
         account.positions.insert((m0, 0), 10);
 
         let order = outcome_sell(&markets, 1, m0, 0, 500_000_000, 5);
-        assert!(validate_order(&order, account).is_ok());
+        assert!(validate_order(&order, account, &HashMap::new()).is_ok());
     }
 
     #[test]
@@ -1051,7 +1082,7 @@ mod tests {
         account.positions.insert((m0, 0), 3);
 
         let order = outcome_sell(&markets, 1, m0, 0, 500_000_000, 5);
-        let result = validate_order(&order, account);
+        let result = validate_order(&order, account, &HashMap::new());
         assert!(result.is_err());
         match result.unwrap_err() {
             RejectionReason::InsufficientPosition {
@@ -1079,7 +1110,7 @@ mod tests {
         let account = accounts.get(aid).unwrap();
 
         let order = outcome_buy(&markets, 1, m0, 0, 600_000_000, 5);
-        let cost = validate_order_with_reservation(&order, account, 0).unwrap();
+        let cost = validate_order_with_reservation(&order, account, 0, &HashMap::new()).unwrap();
         assert_eq!(cost, 600_000_000i64 * 5);
     }
 
@@ -1091,11 +1122,11 @@ mod tests {
         let account = accounts.get(aid).unwrap();
 
         let order1 = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        let cost1 = validate_order_with_reservation(&order1, account, 0).unwrap();
+        let cost1 = validate_order_with_reservation(&order1, account, 0, &HashMap::new()).unwrap();
         assert_eq!(cost1, 5_000_000_000);
 
         let order2 = outcome_buy(&markets, 2, m0, 0, 500_000_000, 10);
-        let result = validate_order_with_reservation(&order2, account, cost1);
+        let result = validate_order_with_reservation(&order2, account, cost1, &HashMap::new());
         assert!(result.is_err());
         match result.unwrap_err() {
             RejectionReason::InsufficientBalance {
@@ -1141,7 +1172,7 @@ mod tests {
         account.positions.insert((m0, 0), 100);
 
         let sell = outcome_sell(&markets, 1, m0, 0, 500_000_000, 10);
-        let cost = validate_order_with_reservation(&sell, account, 0).unwrap();
+        let cost = validate_order_with_reservation(&sell, account, 0, &HashMap::new()).unwrap();
         assert_eq!(cost, 0);
     }
 

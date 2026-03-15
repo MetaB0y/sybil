@@ -14,11 +14,13 @@ class BaseAgent(ABC):
         account_id: int,
         name: str | None = None,
         market_ids: list[int] | None = None,
+        max_blocks: int | None = None,
     ):
         self.client = client
         self.account_id = account_id
         self.name = name or self.__class__.__name__
         self.market_ids = set(market_ids) if market_ids else None  # None means all markets
+        self.max_blocks = max_blocks  # None = unlimited
         self.positions: dict[tuple[int, str], int] = {}
         self.balance_history: list[float] = []
         self._running = False
@@ -54,6 +56,7 @@ class BaseAgent(ABC):
     async def run(self) -> None:
         """Main loop - stream blocks and react."""
         self._running = True
+        blocks_traded = 0
         try:
             async for block in self.client.stream_blocks():
                 if not self._running:
@@ -82,6 +85,10 @@ class BaseAgent(ABC):
                         )
                     except Exception as e:
                         print(f"[{self.name}] Order submission failed: {e}")
+                    blocks_traded += 1
+                    if self.max_blocks is not None and blocks_traded >= self.max_blocks:
+                        print(f"[{self.name}] Reached max_blocks={self.max_blocks}, stopping.")
+                        break
 
         except Exception as e:
             print(f"[{self.name}] Error in run loop: {e}")
