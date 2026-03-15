@@ -6,6 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The **sybil-verifier** crate provides comprehensive block verification for ZK proof integration. It validates every aspect of a block produced by the sequencer across 4 independent layers.
 
+## Architecture Notes
+
+Before modifying this crate, read these vault notes (`docs/architecture/`):
+- [[Four-Layer Verification]] — the 4-layer verification model
+- [[Block Witness]] — witness structure for ZK proof generation
+- [[ZK Integration Path]] — roadmap from verifier to SNARK circuits
+
 ## Verification Layers
 
 ### Layer 1: Match Verification (`match_verifier.rs`)

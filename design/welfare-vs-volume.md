@@ -42,32 +42,17 @@ The question is: **would we ever sacrifice $10 of volume for $0.10 of welfare?**
 
 ---
 
-## Component-by-Component Analysis
+## How the Solver Enforces Welfare-First
 
-### 1. LocalSolver (Per-Market Clearing)
+The LP solver (production default, `lp_solver.rs`) maximizes `Σ (limit_price - clearing_price) × fill_qty` directly as its LP objective. This means:
 
-**File**: `local_solver.rs`
-
-**How it works**:
-1. Finds clearing price via supply-demand crossing (lines 408-491)
-2. At that price, fills buyers sorted by **welfare contribution** (lines 228-229)
-
-**Key code** (line 228-229):
-```rust
-// Sort buyers by welfare contribution (descending)
-buyers.sort_by(|a, b| b.2.cmp(&a.2));
-```
-
-**Welfare vs Volume behavior**:
-- The clearing price mechanism inherently finds the price that maximizes volume at that price level
-- BUT when filling at that price, orders are filled by welfare priority, not FIFO
-- Zero-surplus orders (limit = clearing price) get **lowest priority**
-- If liquidity is limited, zero-surplus orders may not fill at all
+- Orders with higher surplus are naturally preferred by the optimizer
+- Zero-surplus orders (limit = clearing price) may not fill if they compete with higher-surplus orders for liquidity
+- MM budget allocation uses iterative shading (SLP) which also prioritizes welfare per unit of capital
 
 **Example**:
 ```
-Clearing price: 50¢
-Liquidity: 100 shares available
+Clearing price: 50¢, Liquidity: 100 shares
 Orders:
   A: limit 70¢, wants 50 shares (welfare/share = 20¢)
   B: limit 60¢, wants 50 shares (welfare/share = 10¢)
@@ -79,78 +64,11 @@ Result:
   C fills 0 shares ← SACRIFICED VOLUME
 
 Total: 100 shares, $15 welfare
-Alternative (FIFO): 100 shares, $10-15 welfare (depending on order arrival)
 ```
 
-**Verdict**: Order C (zero-surplus) could trade at the clearing price, but doesn't get filled because higher-welfare orders consume all liquidity. **This sacrifices 50 shares of potential volume to maximize welfare.**
+Order C could trade at the clearing price but doesn't get filled because higher-welfare orders consume all liquidity. **This sacrifices 50 shares of potential volume to maximize welfare.**
 
-### 2. MultiMarketSolver (Bundle & Spread Matching)
-
-**File**: `specialized/multi_market.rs`
-
-**How it works**:
-Matches multi-market orders via complement matching (paired opposite-payoff orders) and repricing (injecting bundle leg demand into per-market supply/demand curves).
-
-**Welfare vs Volume behavior**:
-- Repricing only commits to a full re-solve when the fast trial shows positive net welfare
-- Complement matching uses standard bid >= ask, which inherently favors welfare
-- Bundle orders that would reduce total welfare are left unfilled even if they increase volume
-
-**Verdict**: Welfare-first, consistent with the rest of the pipeline. Bundles that are marginal (near-zero surplus) may not fill.
-
-### 3. MmAllocator (Market Maker Budget Allocation)
-
-**File**: `mm_allocator.rs`
-
-**How it works**:
-Allocates constrained MM budgets by **welfare/capital ratio**:
-
-```rust
-// Lines 274-278
-order_info.sort_by(|(_, w1, c1), (_, w2, c2)| {
-    let ratio1 = if *c1 > 0 { *w1 as f64 / *c1 as f64 } else { f64::MAX };
-    let ratio2 = if *c2 > 0 { *w2 as f64 / *c2 as f64 } else { f64::MAX };
-    ratio2.partial_cmp(&ratio1).unwrap_or(std::cmp::Ordering::Equal)
-});
-```
-
-**Welfare vs Volume behavior**:
-- Orders that generate more welfare per dollar of capital go first
-- Zero-welfare orders (limit = fill price) have ratio = 0 and get lowest priority
-- This is a **capital efficiency** measure, not pure welfare or volume
-
-**Example**:
-```
-MM budget: $100
-Orders:
-  A: needs $50 capital, generates $5 welfare (ratio = 0.10)
-  B: needs $100 capital, generates $2 welfare (ratio = 0.02)
-  C: needs $50 capital, generates $0 welfare (ratio = 0.00)
-
-Allocation:
-  1. A activates ($50 used, $5 welfare)
-  2. C next in remaining budget... but $0 welfare
-  3. Budget allows C (50 shares) OR part of B
-
-Current implementation: activates C (it has ratio = 0, but still > no fill)
-Actually: C gets activated because ratio sort puts it last but budget allows it
-```
-
-**Verdict**: The MM allocator explicitly prioritizes welfare/capital ratio. Zero-surplus trades can still happen if budget allows after high-ratio orders.
-
-### 4. DualMaster (Dual Decomposition)
-
-**File**: `dual_master.rs`
-
-**How it works**:
-Uses Lagrangian relaxation to handle price consistency (sum = $1) and MM budgets jointly. Shades order prices via dual variables and solves per-market subproblems iteratively.
-
-**Welfare vs Volume behavior**:
-- Fills are validated against original (unshaded) limit prices — only positive-welfare fills survive
-- MM fills are allocated via greedy knapsack sorted by welfare/capital ratio
-- Zero-surplus fills can survive validation but get lowest MM knapsack priority
-
-**Verdict**: Strongly welfare-first. The dual approach handles coupling constraints more principally but has the same welfare bias as the sequential pipeline.
+The Fisher market formulation (EgSolver, ConicSolver with QuasiFisher mode) has the same welfare-first bias but handles MM budget constraints more elegantly — budgets are absorbed into the log-utility objective rather than handled as explicit constraints. See `lmsr-proof.typ` for the theoretical foundation.
 
 ---
 
@@ -158,20 +76,13 @@ Uses Lagrangian relaxation to handle price consistency (sum = $1) and MM budgets
 
 ### Current Behavior
 
-Based on the code analysis:
-
-| Component | Zero-surplus handling | Tradeoff severity |
-|-----------|----------------------|-------------------|
-| LocalSolver | Lowest priority, may not fill | Medium |
-| MultiMarketSolver | Only fills with positive net welfare | Medium |
-| MmAllocator | Lowest priority by ratio | Low |
-| DualMaster | Validated against original limits | Medium |
+The LP solver's welfare objective naturally prioritizes high-surplus orders. Zero-surplus orders get lowest priority and may not fill when liquidity is scarce.
 
 ### Specific Scenarios
 
 **Scenario 1: Would we sacrifice $10 volume for $0.10 welfare?**
 
-Yes, this can happen in LocalSolver:
+Yes, this can happen:
 
 ```
 Clearing price: 50¢, Liquidity: 100 shares
@@ -308,9 +219,9 @@ The current implementation strongly favors welfare over volume. This is a delibe
 1. **Benefits**: Ensures allocative efficiency, rewards informed traders
 2. **Costs**: May leave volume on the table, frustrate marginal traders
 
-Multi-market orders (bundles, spreads) are handled by the MultiMarketSolver
-via complement matching and repricing, and by the DualMaster via bid shading.
-Both approaches maintain the welfare-first bias.
+Multi-market orders (bundles, spreads) are handled natively by the LP/EG/Conic
+solvers as payoff vectors over joint market states. The welfare-first bias
+applies uniformly to all order types.
 
 For most prediction market use cases, welfare maximization is appropriate. If
 volume maximization becomes important (e.g., for fee revenue or liquidity

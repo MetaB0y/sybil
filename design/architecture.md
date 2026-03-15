@@ -1,3 +1,5 @@
+> **Superseded.** The canonical architecture spec now lives in the Obsidian vault at `docs/architecture/`. This file is kept for historical reference. Entry point: `docs/architecture/Sybil Architecture.md`.
+
 # Sybil: Architecture
 
 ## Overview

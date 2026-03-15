@@ -6,6 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The **sybil-oracle** crate provides a pluggable resolution system for prediction markets. It makes authorization and lifecycle decisions — the sequencer executes them. It does NOT perform settlement, fetch external data, or handle bond escrow.
 
+## Architecture Notes
+
+Before modifying this crate, read these vault notes (`docs/architecture/`):
+- [[Oracle Lifecycle]] — resolution flow: propose, challenge, finalize
+- [[Market Resolution]] — payout model and fractional resolution
+
 ## Market Lifecycle
 
 ```

@@ -18,7 +18,7 @@ This project uses **jj (Jujutsu)** for version control, NOT git.
 sybil/
 ├── crates/                        # Rust workspace
 │   ├── matching-engine/           # Core types: orders, fills, markets, payoff vectors, MM constraints
-│   ├── matching-solver/           # Solver pipeline and algorithms (~7k lines, most dev happens here)
+│   ├── matching-solver/           # Solver implementations (LP, EG, Conic, MILP, Decomposed)
 │   ├── matching-scenarios/        # Test scenario generators (order mixes, spreads)
 │   ├── matching-sim/              # CLI simulation tool with presets and solver comparison
 │   ├── matching-sequencer/        # Agent-based multi-batch sequential simulation
@@ -31,11 +31,13 @@ sybil/
 │   └── viz/                       #   Streamlit dashboards
 ├── viz/                           # Python: Streamlit visualization dashboard (Rust solver)
 ├── fuzz/                          # Cargo-fuzz targets (separate workspace)
-├── design/                        # Internal design notes
-│   ├── architecture.md            #   Pipeline design, solver phases, integration points
-│   ├── solver-research.md         #   MILP gap analysis, 3 improvement approaches
-│   └── welfare-vs-volume.md       #   Optimization objective tradeoffs
-├── docs/                          # Public documentation (Mintlify site)
+├── design/                        # Historical design notes (superseded by docs/architecture/)
+│   ├── architecture.md            #   [superseded] Solver design, key abstractions
+│   ├── architecture-diagrams.md   #   [superseded] System overview diagrams
+│   ├── solver-benchmarks.md       #   Comparative solver evaluation
+│   └── welfare-vs-volume.md       #   Optimization objective tradeoffs (deep-dive)
+├── docs/architecture/             # Obsidian vault — canonical architecture spec (~35 notes)
+├── scripts/check-vault.sh         # Vault validation (links, frontmatter, staleness)
 ├── CLAUDE.md                      # This file
 ├── justfile                       # Task runner (run `just` to see all commands)
 └── Cargo.toml                     # Workspace root
@@ -67,7 +69,7 @@ just sim-quick        # ~50 orders
 just sim-small        # ~300 orders
 just sim-medium       # ~3000 orders
 just compare          # Compare all solvers on medium scenario
-just sim preset solver # Custom: just sim large negrisk
+just sim preset solver # Custom: just sim large lp
 just milp-killer      # MILP stress test (forces timeout)
 ```
 
@@ -101,30 +103,62 @@ cd fuzz && cargo fuzz run fuzz_settlement
 
 ## Architecture
 
-Sybil is a **prediction market matching engine** built on Frequent Batch Auctions (FBA). It solves the welfare-maximizing order matching problem (NP-hard in general) via a multi-phase pipeline.
+Sybil is a **prediction market matching engine** built on Frequent Batch Auctions (FBA). It solves the welfare-maximizing clearing problem via convex programs.
 
-### Solver Pipeline (matching-solver)
+### Solvers (matching-solver)
 
-The pipeline runs in phases, orchestrated by `pipeline.rs`:
+All solvers take a `Problem` and return a `PipelineResult` (fills, clearing prices, welfare, timing). Feature-gated.
 
-1. **LocalSolver** (`local_solver.rs`): Per-market price discovery. O(n log n), handles ~80% of single-market orders. Finds clearing prices where outcome prices sum to $1.
-2. **NegriskSolver** (`specialized/negrisk.rs`): Exploits price inconsistencies across related markets (arbitrage). Creates synthetic fills when prices don't perfectly sum to $1.
-3. **MmAllocator** (`mm_allocator.rs`): Allocates market maker fills respecting budget constraints. Greedy allocation by welfare/capital ratio with fixed-point iteration.
-4. **Partial Solvers** (parallel): `MilpSolver` (ILP, optimal with timeout; feature-gated behind `milp`).
-
-The default pipeline is `Pipeline::with_dual_decomposition()` which uses `DualMaster` for Lagrangian relaxation of price consistency + MM budgets.
-
-**Other solvers** (exported but not in default pipeline):
-- `lp_solver.rs`: LP via HiGHS + iterative MM budget shading. Feature-gated: `lp`. Best welfare across all presets.
-- `joint_solver.rs`: Joint group optimization via parametric search on Σp=$1 simplex (volume-oriented)
+| Solver | File | Feature | Description |
+|--------|------|---------|-------------|
+| **LpSolver** | `lp_solver.rs` | `lp` | LP via HiGHS + entropy smoothing + iterative MM budget shading. **Production default.** |
+| **EgSolver** | `eg_solver.rs` | `lp` | Eisenberg-Gale / Fisher market formulation. |
+| **ConicSolver** | `conic_solver.rs` | `conic` | Interior-point via Clarabel. Configurable objective (Linear, Fisher, QuasiFisher). |
+| **MilpSolver** | `milp.rs` | `milp` | SCIP MIQCQP. Exact optimal with timeout. |
+| **DecomposedSolver** | `decomposed.rs` | `lp` | Per-market-group decomposition with mirror descent budget coordination. |
 
 ### Key Design Decisions
 
 - **Payoff vectors**: Orders are represented as payoff vectors over market states, enabling unified handling of simple orders, spreads, and conditionals.
 - **Welfare maximization**: The objective is `Σ (limit_price - clearing_price) * fill_qty`, not volume.
-- **MILP is optional**: Feature-gated behind `milp` (uses SCIP via `russcip`). Supports group-level minting for optimal negrisk-style arbitrage.
+- **Fisher market structure**: MM budgets can be absorbed into the EG objective (no explicit budget constraints). See `lmsr-proof.typ`.
 - **Verification** (`verifier.rs`): Validates solver output for correctness — designed for ZK proof integration.
 - **All integer arithmetic**: No floating point. Prices/quantities in nanos (1 dollar = 1,000,000,000 nanos).
+
+## Architecture Knowledge Base
+
+An Obsidian vault at `docs/architecture/` is the canonical architectural spec. ~35 interlinked notes covering every major concept. Notes use `[[wiki-links]]` and YAML frontmatter (`tags`, `layer`, `status`, `last_verified`).
+
+**Entry point**: `docs/architecture/Sybil Architecture.md`
+
+**When to read**: Before modifying any crate, read the notes listed in that crate's CLAUDE.md under "Architecture Notes". This gives you the design context and invariants you need to preserve.
+
+**When to update**: After significant architectural changes (new solver, new crate, changed data flow), update the relevant note(s) and run `just docs-check` to validate.
+
+### Quick Reference
+
+| Topic | Notes |
+|-------|-------|
+| Core model | Payoff Vectors, Binary Markets and Market Groups, Nanos and Integer Arithmetic, Order Types |
+| Solvers | Solver Landscape, LP Solver, EG Solver, Conic Solver, MILP Solver, Decomposed Solver, The LP Core |
+| Sequencer | Block Lifecycle, Mempool, Settlement, Pending Orders and TTL |
+| API | REST API, SSE Block Stream, P256 Authentication |
+| Oracle | Oracle Lifecycle, Market Resolution |
+| Verification | Four-Layer Verification, Block Witness, ZK Integration Path |
+| Economics | Welfare Maximization, Welfare vs Volume, MM Budget Constraint, LP Duality and Clearing Prices, Minting |
+| Arena | Bot Framework, LLM Trader, Python SDK |
+
+### Vault Commands
+
+```bash
+just docs-check               # Validate links, frontmatter, staleness
+just docs-list                 # List all notes with layer + status
+just docs-stale                # List notes with last_verified > 90 days
+just docs-search "welfare"     # Grep vault content
+just docs-rename old new       # Rename note + update wiki-links (needs notesmd-cli)
+just docs-read "LP Solver"     # Print note with linked mentions (needs notesmd-cli)
+just docs-verify "LP Solver"   # Set last_verified to today (needs notesmd-cli)
+```
 
 ## Development Notes
 

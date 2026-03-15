@@ -8,6 +8,16 @@ The **matching-solver** crate is the core optimization engine for welfare-maximi
 
 **Key metric**: `welfare = Σ (limit_price - clearing_price) × fill_qty`
 
+## Architecture Notes
+
+Before modifying this crate, read these vault notes (`docs/architecture/`):
+- [[Solver Landscape]] — comparison of all solver approaches
+- [[LP Solver]] / [[EG Solver]] / [[Conic Solver]] / [[MILP Solver]] / [[Decomposed Solver]] — per-solver design
+- [[The LP Core]] — the LP formulation all solvers build on
+- [[MM Budget Constraint]] — how market maker budgets interact with solving
+- [[LP Duality and Clearing Prices]] — dual variables as clearing prices
+- [[Welfare Maximization]] — objective function design and tradeoffs
+
 ## Solver Types
 
 | Solver | File | Feature | Purpose |

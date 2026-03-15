@@ -6,6 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The **sybil-api** crate is an HTTP API server exposing the prediction market matching engine to external clients. Built with Axum and OpenAPI documentation.
 
+## Architecture Notes
+
+Before modifying this crate, read these vault notes (`docs/architecture/`):
+- [[REST API]] — endpoint design, request/response contracts
+- [[SSE Block Stream]] — server-sent events for real-time block updates
+- [[P256 Authentication]] — signed order submission flow
+
 ## Endpoints
 
 ### System

@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The **matching-sequencer** crate is an agent-based, multi-batch sequential simulation engine. It orchestrates block production, manages account state, validates orders, and settles fills. Provides both synchronous (simulation) and async actor-based (API) interfaces.
 
+## Architecture Notes
+
+Before modifying this crate, read these vault notes (`docs/architecture/`):
+- [[Block Lifecycle]] — batch collection, solving, settlement, sealed block
+- [[Mempool]] — order buffering, segregation, and drain limits
+- [[Settlement]] — fill settlement logic (simple and generic)
+- [[Pending Orders and TTL]] — cross-batch order persistence and expiry
+- [[State Root and Parent Hash]] — block chaining and state commitment
+
 ## Core Architecture
 
 ```

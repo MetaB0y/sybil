@@ -12,3 +12,4 @@ arena/markets/*/phase1/
 arena/markets/*/datasets/
 arena/*/datasets/
 design/*.pdf
+docs/architecture/.obsidian/

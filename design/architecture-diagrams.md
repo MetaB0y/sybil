@@ -1,3 +1,5 @@
+> **Superseded.** Diagrams now live inline in the relevant vault notes at `docs/architecture/`. This file is kept for historical reference.
+
 # Architecture Diagrams
 
 ---
@@ -77,45 +79,43 @@ graph TB
 
 ## 1b. Core Internals — Engineering Deep-Dive
 
-Zooms into the Core layer showing technical details: order representation, sequencer internals, solver phases, settlement mechanics, and state commitments.
+Zooms into the Core layer showing technical details: order representation, solver options, settlement mechanics, and state commitments.
 
 ```mermaid
 graph TB
-    IN["P256 Signed Orders"]
+    IN["Orders"]
 
     IN --> SINGLE["Single-market orders"]
     IN --> MULTI["Bundles · Spreads"]
     IN --> MMQ["MM quotes"]
 
-    SINGLE & MULTI & MMQ --> LOCAL["LocalSolver<br/>per-market clearing"]
-    LOCAL --> MMATCH["MultiMarketSolver<br/>cross-market matching"]
+    SINGLE & MULTI & MMQ --> PROBLEM["Problem<br/>orders + markets + MM constraints"]
 
-    MMATCH --> DUAL["DualMaster · Lagrangian relaxation"]
-    DUAL --> MMA["MmAllocator · budget knapsack"]
-    DUAL -.->|"iterate with λ"| LOCAL
+    PROBLEM --> LP["LpSolver · HiGHS<br/>production default"]
+    PROBLEM --> EG["EgSolver · Fisher market"]
+    PROBLEM --> CONIC["ConicSolver · Clarabel"]
+    PROBLEM --> MILP["MilpSolver · SCIP<br/>exact optimal"]
+    PROBLEM --> DECOMP["DecomposedSolver<br/>parallel per-group"]
 
-    MMA --> LP["LP · HiGHS"]
-    MMA --> MILP["MILP · SCIP"]
+    LP & EG & CONIC & MILP & DECOMP --> RESULT["PipelineResult<br/>fills · prices · welfare"]
 
-    LP & MILP --> UCP["UCP Enforcement<br/>reprice · P_YES+P_NO=$1"]
-
-    UCP --> SETTLE["Settlement<br/>mint shares · update balances"]
+    RESULT --> SETTLE["Settlement<br/>mint shares · update balances"]
 
     SETTLE --> BLOCK["Block<br/>fills · prices · blake3 state root"]
     SETTLE --> WITNESS["BlockWitness<br/>pre/post state · ZK audit trail"]
     SETTLE --> PEND["Pending orders<br/>unfilled carry over · TTL"]
 
     classDef inputStyle fill:#fef3c7,stroke:#d97706,color:#78350f
-    classDef solverStyle fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
-    classDef exactStyle fill:#ede9fe,stroke:#7c3aed,color:#3b1f6e
-    classDef ucpStyle fill:#fce4ec,stroke:#e11d48,color:#881337
+    classDef problemStyle fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+    classDef solverStyle fill:#ede9fe,stroke:#7c3aed,color:#3b1f6e
+    classDef resultStyle fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
     classDef settleStyle fill:#dcfce7,stroke:#16a34a,color:#14532d
     classDef outStyle fill:#f5f5f4,stroke:#78716c,color:#292524
 
     class IN,SINGLE,MULTI,MMQ inputStyle
-    class LOCAL,MMATCH,DUAL,MMA solverStyle
-    class LP,MILP exactStyle
-    class UCP ucpStyle
+    class PROBLEM problemStyle
+    class LP,EG,CONIC,MILP,DECOMP solverStyle
+    class RESULT resultStyle
     class SETTLE settleStyle
     class BLOCK,WITNESS,PEND outStyle
 ```
@@ -124,62 +124,40 @@ graph TB
 - **Payoff vectors**: Every order is a vector over atomic market states — unifies simple orders, bundles, spreads, and conditionals into one representation. Max 5 markets, 32 states per order (stack-allocated).
 - **Integer arithmetic**: All prices and quantities in nanos (1 dollar = 10^9). No floating point anywhere. Overflow-safe via i128 intermediates in settlement.
 - **Welfare objective**: `Σ (limit_price - clearing_price) × fill_qty`. The solver maximizes total trader surplus, not volume.
-- **UCP (Uniform Clearing Price)**: One price per outcome per market. Enforced post-pipeline — fills are repriced, limit-violating fills dropped, YES/NO quantities balanced.
+- **Uniform clearing price**: One price per outcome per market. All fills at the same price within a batch.
 - **Minting**: When a BuyYes and BuyNo fill match, $1 creates a YES+NO position pair. No counterparty needed — the protocol mints shares.
 - **State commitment**: blake3 hash of all account state. Parent hash chains blocks. Designed for ZK proof integration via `BlockWitness`.
 - **Pending orders**: Unfilled orders persist across batches with TTL expiry (default 3 batches). MM quotes are one-shot — consumed each batch.
 
 ---
 
-## 2. Solver Pipeline
+## 2. Solvers
 
 ```mermaid
 flowchart LR
     IN["Problem"]
 
-    subgraph pipeline["Solver Pipeline"]
-        direction LR
-        LOCAL["LocalSolver<br/>per-market prices<br/>O(n log n)"]
-        MULTI["MultiMarketSolver<br/>bundles & spreads"]
-        DUAL["DualMaster<br/>Lagrangian relaxation"]
-        MMA["MmAllocator<br/>budget knapsack"]
-
-        LOCAL --> MULTI --> DUAL --> MMA
-        DUAL -.->|"iterate"| LOCAL
-    end
-
-    subgraph exact["Exact Solvers"]
+    subgraph solvers["Solver (pick one)"]
         direction TB
-        MILP["MILP · SCIP"]
-        LP["LP · HiGHS"]
+        LP["LpSolver<br/>HiGHS · LP + entropy<br/>production default"]
+        EG["EgSolver<br/>HiGHS · Fisher market"]
+        CONIC["ConicSolver<br/>Clarabel · conic"]
+        MILP["MilpSolver<br/>SCIP · exact"]
+        DECOMP["DecomposedSolver<br/>parallel per-group"]
     end
 
-    subgraph post["Post-processing"]
-        direction TB
-        UCP["UCP Enforcement<br/>reprice · trim · filter"]
-        CHECK{"welfare >= 0?"}
-        UCP --> CHECK
-    end
+    OUT["PipelineResult<br/>fills · prices · welfare"]
 
-    OUT["MatchingResult"]
-    NONE["no fills"]
+    IN --> solvers --> OUT
 
-    IN --> LOCAL
-    MMA --> exact
-    exact --> UCP
-    CHECK -->|"yes"| OUT
-    CHECK -->|"no"| NONE
+    classDef solverStyle fill:#ede9fe,stroke:#7c3aed,color:#3b1f6e
+    classDef defaultStyle fill:#dbeafe,stroke:#2563eb,stroke-width:3px,color:#1e3a5f
 
-    classDef phase fill:#dbeafe,stroke:#2563eb,color:#1e3a5f
-    classDef exactStyle fill:#ede9fe,stroke:#7c3aed,color:#3b1f6e
-    classDef postStyle fill:#fef9c3,stroke:#ca8a04,color:#713f12
-
-    class pipeline phase
-    class exact exactStyle
-    class post postStyle
+    class EG,CONIC,MILP,DECOMP solverStyle
+    class LP defaultStyle
 ```
 
-The pipeline runs 4 phases sequentially. DualMaster iterates back through LocalSolver with Lagrangian multiplier updates until prices converge. Feature-gated exact solvers (MILP/LP) run in parallel after the heuristic phases. UCP enforcement reprices all fills at final clearing prices — if total welfare goes negative, the batch produces no fills.
+All solvers are self-contained: they take a `Problem` and return a `PipelineResult`. The **LpSolver** is the production default — fastest and highest welfare. The sequencer calls whichever solver is configured; there is no multi-phase pipeline.
 
 ---
 
