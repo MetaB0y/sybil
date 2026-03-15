@@ -14,11 +14,13 @@ class BaseAgent(ABC):
         account_id: int,
         name: str | None = None,
         market_ids: list[int] | None = None,
+        max_blocks: int | None = None,
     ):
         self.client = client
         self.account_id = account_id
         self.name = name or self.__class__.__name__
         self.market_ids = set(market_ids) if market_ids else None  # None means all markets
+        self.max_blocks = max_blocks  # None = unlimited
         self.positions: dict[tuple[int, str], int] = {}
         self.balance_history: list[float] = []
         self._running = False
@@ -27,8 +29,13 @@ class BaseAgent(ABC):
         # Order tracking for observability
         self.last_orders: list[OrderSpec] = []
         self.total_orders_submitted: int = 0
+        # Per-block order log: (block_height, orders_submitted)
+        self.block_log: list[tuple[int, list[OrderSpec]]] = []
+        # Per-block stats from the sequencer (welfare, volume, fills)
+        self.block_stats: dict[int, tuple[int, int, int]] = {}  # height -> (welfare, volume, fills)
         # Fill tracking via get_account_fills()
         self._last_fill_count: int = 0
+        self._fill_history: list = []  # list[AccountFill], available to subclasses
 
     @abstractmethod
     async def on_block(self, block: Block) -> list[OrderSpec]:
@@ -49,6 +56,7 @@ class BaseAgent(ABC):
     async def run(self) -> None:
         """Main loop - stream blocks and react."""
         self._running = True
+        blocks_traded = 0
         try:
             async for block in self.client.stream_blocks():
                 if not self._running:
@@ -57,10 +65,16 @@ class BaseAgent(ABC):
                 # Update our state
                 await self._update_state(block)
 
+                # Record block-level stats (welfare, volume, fills)
+                self.block_stats[block.height] = (
+                    block.total_welfare, block.total_volume, block.orders_filled,
+                )
+
                 # Get orders from strategy
                 orders = await self.on_block(block)
 
-                # Submit orders if any
+                # Log and submit orders
+                self.block_log.append((block.height, orders))
                 if orders:
                     self.last_orders = orders
                     self.total_orders_submitted += len(orders)
@@ -71,6 +85,10 @@ class BaseAgent(ABC):
                         )
                     except Exception as e:
                         print(f"[{self.name}] Order submission failed: {e}")
+                    blocks_traded += 1
+                    if self.max_blocks is not None and blocks_traded >= self.max_blocks:
+                        print(f"[{self.name}] Reached max_blocks={self.max_blocks}, stopping.")
+                        break
 
         except Exception as e:
             print(f"[{self.name}] Error in run loop: {e}")
@@ -93,6 +111,7 @@ class BaseAgent(ABC):
             new_fills = await self.client.get_account_fills(
                 self.account_id, limit=20, offset=self._last_fill_count
             )
+            self._fill_history.extend(new_fills)
             for fill in new_fills:
                 await self.on_fill(fill.order_id, fill.fill_qty, fill.fill_price)
             self._last_fill_count += len(new_fills)

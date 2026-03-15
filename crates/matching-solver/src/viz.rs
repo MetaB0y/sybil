@@ -26,7 +26,7 @@ use serde::Serialize;
 
 use matching_engine::{MarketId, Nanos, Problem, NANOS_PER_DOLLAR};
 
-use crate::pipeline::{IterationStats, PipelineResult};
+use crate::result::{IterationStats, PipelineResult};
 
 /// Complete snapshot of a pipeline run for visualization and analysis.
 #[derive(Clone, Debug, Serialize)]
@@ -135,7 +135,6 @@ pub struct FinalSnapshot {
 #[derive(Clone, Debug, Serialize)]
 pub struct PipelineTimes {
     pub price_discovery_secs: f64,
-    pub negrisk_secs: f64,
     pub allocation_secs: f64,
     pub partial_solving_secs: f64,
     pub combining_secs: f64,
@@ -223,8 +222,6 @@ pub struct LiquiditySnapshot {
 pub enum PipelinePhase {
     Initial,
     PriceDiscovery,
-    /// Negrisk arbitrage phase (exploits price < $1 for mutually exclusive outcomes)
-    NegriskArbitrage,
     MmAllocation,
     /// After single-market fills are merged (confirmed single-market orders)
     Merged,
@@ -260,12 +257,6 @@ pub struct PhaseSnapshot {
 pub enum PhaseMetadata {
     PriceDiscovery {
         markets_priced: usize,
-    },
-    /// Negrisk arbitrage (exploits price inconsistencies)
-    NegriskArbitrage {
-        opportunities_found: usize,
-        total_shares: u64,
-        welfare_added: f64,
     },
     MmAllocation {
         orders_activated: usize,
@@ -523,22 +514,8 @@ impl VizSnapshot {
                     })
                     .collect();
 
-                // Get MM allocations
-                let mm_allocations = if let Some(ref alloc) = result.allocation {
-                    alloc
-                        .mm_allocations
-                        .iter()
-                        .map(|mm| MmSnapshot {
-                            mm_id: mm.mm_id.0,
-                            activated_orders: mm.activated_orders.len(),
-                            capital_used: mm.capital_used as f64 / NANOS_PER_DOLLAR as f64,
-                            budget: mm.budget as f64 / NANOS_PER_DOLLAR as f64,
-                            utilization: mm.utilization,
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                };
+                // MM allocations (no longer tracked in result types)
+                let mm_allocations: Vec<MmSnapshot> = Vec::new();
 
                 IterationSnapshot {
                     iteration: stat.iteration,
@@ -691,7 +668,6 @@ impl VizSnapshot {
             final_result,
             phase_times: PipelineTimes {
                 price_discovery_secs: result.phase_times.price_discovery_secs,
-                negrisk_secs: result.phase_times.negrisk_secs,
                 allocation_secs: result.phase_times.allocation_secs,
                 partial_solving_secs: result.phase_times.partial_solving_secs,
                 combining_secs: result.phase_times.combining_secs,
@@ -830,7 +806,6 @@ mod tests {
             },
             phase_times: PipelineTimes {
                 price_discovery_secs: 0.1,
-                negrisk_secs: 0.05,
                 allocation_secs: 0.02,
                 partial_solving_secs: 0.03,
                 combining_secs: 0.01,

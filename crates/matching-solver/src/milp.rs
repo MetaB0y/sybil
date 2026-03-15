@@ -1,8 +1,7 @@
 //! MIQCQP solver for optimal matching with Uniform Clearing Prices (UCP).
 //!
 //! Formulates the matching problem as a Mixed-Integer Quadratically Constrained
-//! Quadratic Program using SCIP. Handles ALL order types (single-market, bundles,
-//! spreads, multi-market) via per-market marginal contribution coefficients.
+//! Quadratic Program using SCIP for single-market binary orders.
 //!
 //! **Variables:**
 //! - `z_i ∈ {0,1}`: whether order i is filled
@@ -15,14 +14,14 @@
 //!
 //! **Constraints:**
 //! - z/q linking: AON, min/max fill
-//! - UCP (Big-M): generalized effective price via alpha/beta coefficients
-//! - Position balance: per-market c_YES/c_NO coefficients from payoff decomposition
+//! - UCP (Big-M): effective price via payoff-derived alpha/beta
+//! - Position balance: per-market YES/NO payoffs
 //! - MM budget (quadratic): exact bilinear `price × quantity` via SCIP MIQCQP
 //! - Market groups: `Σ p_m ≤ NANOS_PER_DOLLAR` per group
 
 use matching_engine::{Fill, MarketId, Nanos, Order, Problem, NANOS_PER_DOLLAR};
 
-use crate::{MatchingResult, Solver};
+use crate::MatchingResult;
 
 use russcip::prelude::*;
 use russcip::Variable;
@@ -181,104 +180,7 @@ impl DualAnalysis {
     }
 }
 
-// ============================================================================
-// Generalized order coefficient computation
-// ============================================================================
-
-/// Per-market marginal contribution coefficients for an order.
-///
-/// Decomposition mirrors `settle_generic`: for each market m, we compute
-/// the average payoff when m=YES vs m=NO across all states.
-pub struct OrderCoefficients {
-    /// Average payoff when market m outcome = YES (outcome 0)
-    pub c_yes: HashMap<MarketId, f64>,
-    /// Average payoff when market m outcome = NO (outcome 1)
-    pub c_no: HashMap<MarketId, f64>,
-    /// alpha_m = c_YES_m - c_NO_m (price sensitivity per market)
-    pub alpha: HashMap<MarketId, f64>,
-    /// beta = NANOS_PER_DOLLAR * sum(c_NO_m) (price-independent offset)
-    pub beta: f64,
-}
-
-/// Compute per-market marginal contribution coefficients from payoff vector.
-///
-/// For each market m (at index m_idx in the order's market list):
-/// - stride = 1 << m_idx (binary markets)
-/// - For each state s, `(s / stride) % 2` gives the outcome for market m
-/// - c_YES_m = average of payoffs where market m = YES (outcome 0)
-/// - c_NO_m = average of payoffs where market m = NO (outcome 1)
-pub fn precompute_coefficients(order: &Order) -> OrderCoefficients {
-    let num_markets = order.num_markets as usize;
-    let num_states = order.num_states as usize;
-    let nanos_f = NANOS_PER_DOLLAR as f64;
-
-    let mut c_yes = HashMap::new();
-    let mut c_no = HashMap::new();
-    let mut alpha = HashMap::new();
-    let mut beta_sum = 0.0;
-
-    for m_idx in 0..num_markets {
-        let market = order.markets[m_idx];
-        if market.is_none() {
-            continue;
-        }
-
-        let stride = 1usize << m_idx;
-
-        let mut yes_sum: f64 = 0.0;
-        let mut yes_count: usize = 0;
-        let mut no_sum: f64 = 0.0;
-        let mut no_count: usize = 0;
-
-        for s in 0..num_states {
-            let outcome_for_market = (s / stride) % 2;
-            let payoff = order.payoffs[s] as f64;
-            if outcome_for_market == 0 {
-                yes_sum += payoff;
-                yes_count += 1;
-            } else {
-                no_sum += payoff;
-                no_count += 1;
-            }
-        }
-
-        let c_y = if yes_count > 0 {
-            yes_sum / yes_count as f64
-        } else {
-            0.0
-        };
-        let c_n = if no_count > 0 {
-            no_sum / no_count as f64
-        } else {
-            0.0
-        };
-
-        c_yes.insert(market, c_y);
-        c_no.insert(market, c_n);
-        alpha.insert(market, c_y - c_n);
-        beta_sum += c_n;
-    }
-
-    OrderCoefficients {
-        c_yes,
-        c_no,
-        alpha,
-        beta: nanos_f * beta_sum,
-    }
-}
-
-/// Determine the sign for an order in the welfare objective.
-///
-/// Uses `is_seller()` for consistency with the verifier and welfare calculation.
-/// - Buyer (no negative payoffs) -> +1.0
-/// - Seller (any negative payoff) -> -1.0
-pub fn milp_sign(order: &Order) -> f64 {
-    if order.is_seller() {
-        -1.0
-    } else {
-        1.0
-    }
-}
+use crate::lp_solver::order_sign;
 
 // ============================================================================
 // MILP Solver
@@ -353,12 +255,6 @@ impl MilpSolver {
                     clearing_prices.insert(market, vec![p_yes, p_no]);
                 }
 
-                // Precompute coefficients for fill price extraction
-                let coeffs: Vec<_> = active_orders
-                    .iter()
-                    .map(|o| precompute_coefficients(o))
-                    .collect();
-
                 // Extract fills from solution
                 for (i, order) in active_orders.iter().enumerate() {
                     let z_val = solution.z_values.get(i).copied().unwrap_or(0.0);
@@ -367,15 +263,20 @@ impl MilpSolver {
                     if z_val > 0.5 && q_val > 0.5 {
                         let fill_qty = q_val.round() as u64;
 
-                        // Compute fill_price using alpha/beta formula:
-                        // eff_price = |sum_m alpha_m * p_m + beta|
-                        let eff_price: f64 = coeffs[i]
-                            .alpha
-                            .iter()
-                            .map(|(m, &a)| a * solution.p_values.get(m).copied().unwrap_or(0.0))
-                            .sum::<f64>()
-                            + coeffs[i].beta;
-                        let fill_price = eff_price.abs().round().max(0.0) as Nanos;
+                        // Fill price from clearing price for single-market binary orders
+                        let market = order.markets[0];
+                        let p_yes = solution
+                            .p_values
+                            .get(&market)
+                            .copied()
+                            .unwrap_or(0.0)
+                            .round()
+                            .max(0.0) as Nanos;
+                        let fill_price = if order.payoffs[0] != 0 {
+                            p_yes
+                        } else {
+                            NANOS_PER_DOLLAR.saturating_sub(p_yes)
+                        };
 
                         let fill = Fill::new(order.id, fill_qty, fill_price);
                         result.add_fill(fill, order);
@@ -503,11 +404,10 @@ impl MilpSolver {
         let n = active_orders.len();
         let nanos_f = NANOS_PER_DOLLAR as f64;
 
-        // Precompute coefficients for all orders
-        let coeffs: Vec<_> = active_orders
-            .iter()
-            .map(|o| precompute_coefficients(o))
-            .collect();
+        debug_assert!(
+            active_orders.iter().all(|o| o.num_markets == 1),
+            "MILP solver only supports single-market binary orders"
+        );
 
         // Build order_id -> index map for MM constraint lookups
         let order_id_to_idx: HashMap<u64, usize> = active_orders
@@ -577,7 +477,7 @@ impl MilpSolver {
         let q_vars: Vec<Variable> = (0..n)
             .map(|i| {
                 let order = active_orders[i];
-                let sign = milp_sign(order);
+                let sign = order_sign(order);
                 let obj = sign * order.limit_price as f64;
                 model.add(var().cont(0.0..=(order.max_fill as f64)).obj(obj))
             })
@@ -608,8 +508,8 @@ impl MilpSolver {
         // every market costs only $1 total (guaranteed $1 payoff since exactly
         // one resolves YES). This is N times cheaper than per-market minting.
         //
-        // Positive group_mint = negrisk arbitrage (buy YES in all markets)
-        // Negative group_mint = posrisk arbitrage (sell YES in all markets)
+        // Positive group_mint = arbitrage (buy YES in all markets)
+        // Negative group_mint = reverse arbitrage (sell YES in all markets)
         //
         // Objective: -NANOS_PER_DOLLAR per unit (same $1 cost as a single mint)
         let market_to_group: HashMap<MarketId, usize> = problem
@@ -638,38 +538,29 @@ impl MilpSolver {
         }
 
         // ================================================================
-        // UCP constraints (Big-M) using alpha/beta formulation
+        // UCP constraints (Big-M) for single-market binary orders
         // ================================================================
         //
-        // Effective price: eff_price_i = Σ_m alpha_i_m * p_m + beta_i
+        // For single-market order on market m:
+        //   alpha = payoffs[0] - payoffs[1]  (YES coefficient - NO coefficient)
+        //   beta  = payoffs[1] * NANOS       (NO coefficient * price scale)
+        //   eff_price = alpha * p_m + beta
         //
-        // For buyers (sign=+1): eff_price <= L when z=1
-        //   => Σ_m alpha_m * p_m + M * z_i <= L + M - beta
-        //
-        // For sellers (sign=-1): eff_price >= L when z=1
-        //   => -Σ_m alpha_m * p_m + M * z_i <= -L + M + beta
+        // Big-M relaxation: alpha*p + M*z <= sign*L + M - beta
 
-        let max_markets = active_orders
-            .iter()
-            .map(|o| o.num_markets as usize)
-            .max()
-            .unwrap_or(1);
-        let big_m = nanos_f * max_markets as f64;
+        let big_m = nanos_f;
 
         for (i, order) in active_orders.iter().enumerate() {
-            let sign = milp_sign(order);
+            let sign = order_sign(order);
             let limit = order.limit_price as f64;
-            let beta = coeffs[i].beta;
+            let alpha = (order.payoffs[0] - order.payoffs[1]) as f64;
+            let beta = order.payoffs[1] as f64 * nanos_f;
 
-            // Unified UCP constraint for both buyers and sellers:
-            //   Buyer (sign=+1): eff_price <= L when z=1
-            //   Seller (sign=-1): eff_price <= -L when z=1 (i.e., |eff_price| >= L)
-            //
-            // Big-M relaxation: alpha*p + M*z <= sign*L + M - beta
+            let market = order.markets[0];
             let mut c = cons().coef(&z_vars[i], big_m);
-            for (&market, &a) in &coeffs[i].alpha {
-                if let Some(p_var) = p_vars.get(&market) {
-                    c = c.coef(p_var, a);
+            if let Some(p_var) = p_vars.get(&market) {
+                if alpha.abs() > 1e-12 {
+                    c = c.coef(p_var, alpha);
                 }
             }
 
@@ -686,7 +577,7 @@ impl MilpSolver {
         //   NO:  Σ_i c_i_m_NO  * q_i = mint_m
         //
         // If market m belongs to group g, group_mint_g contributes +1 YES
-        // share per unit to market m. This models negrisk/posrisk arbitrage:
+        // share per unit to market m. This models group-level arbitrage:
         // minting 1 YES in every market of a mutually exclusive group costs
         // only $1 total (vs $N for N separate per-market mints).
 
@@ -694,17 +585,15 @@ impl MilpSolver {
             let mut yes_cons = cons();
             let mut no_cons = cons();
 
-            for i in 0..active_orders.len() {
-                // Raw c_yes/c_no already encode direction correctly:
-                // Buy YES (payoffs=[+1,0]): c_YES=+1 (demands YES shares)
-                // Sell YES (payoffs=[-1,0]): c_YES=-1 (supplies YES shares)
-                if let Some(&c_y) = coeffs[i].c_yes.get(&market) {
+            for (i, order) in active_orders.iter().enumerate() {
+                // Direct payoff lookup for single-market binary orders
+                if order.markets[0] == market {
+                    let c_y = order.payoffs[0] as f64;
                     if c_y.abs() > 1e-12 {
                         yes_cons = yes_cons.coef(&q_vars[i], c_y);
                     }
-                }
 
-                if let Some(&c_n) = coeffs[i].c_no.get(&market) {
+                    let c_n = order.payoffs[1] as f64;
                     if c_n.abs() > 1e-12 {
                         no_cons = no_cons.coef(&q_vars[i], c_n);
                     }
@@ -1031,86 +920,6 @@ impl Default for MilpSolver {
     }
 }
 
-impl Solver for MilpSolver {
-    fn solve(&self, problem: &Problem) -> MatchingResult {
-        self.solve_with_status(problem).result
-    }
-
-    fn name(&self) -> &str {
-        if self.config.timeout_secs.is_some() {
-            "MILP (time-limited)"
-        } else {
-            "MILP"
-        }
-    }
-}
-
-// ============================================================================
-// PartialSolver Trait Implementation
-// ============================================================================
-
-use crate::traits::{PartialSolution, PartialSolver, SolutionConfidence};
-
-impl PartialSolver for MilpSolver {
-    fn solve_partial(&self, problem: &Problem) -> PartialSolution {
-        let milp_result = self.solve_with_status(problem);
-
-        let confidence = match &milp_result.status {
-            SolveStatus::Optimal => SolutionConfidence::Optimal,
-            SolveStatus::TimeLimitReached { gap_percent } => SolutionConfidence::BoundedGap {
-                gap_percent: *gap_percent,
-            },
-            SolveStatus::Infeasible | SolveStatus::Error(_) => SolutionConfidence::Heuristic,
-        };
-
-        // Strip arb fills — pipeline handles position balance via enforce_ucp
-        let arb_ids: HashSet<u64> = milp_result
-            .arbitrage_orders
-            .iter()
-            .map(|o| o.id)
-            .collect();
-        let real_fills: Vec<_> = milp_result
-            .result
-            .fills
-            .into_iter()
-            .filter(|f| !arb_ids.contains(&f.order_id))
-            .collect();
-        let real_welfare = real_fills
-            .iter()
-            .zip(problem.orders.iter())
-            .filter_map(|(f, _)| {
-                problem
-                    .orders
-                    .iter()
-                    .find(|o| o.id == f.order_id)
-                    .map(|o| f.welfare(o))
-            })
-            .sum::<i64>();
-
-        PartialSolution::with_fills(
-            PartialSolver::name(self),
-            real_fills,
-            real_welfare,
-            confidence,
-        )
-    }
-
-    fn name(&self) -> &str {
-        if self.config.timeout_secs.is_some() {
-            "MILP (time-limited)"
-        } else {
-            "MILP"
-        }
-    }
-
-    fn confidence(&self) -> SolutionConfidence {
-        if self.config.timeout_secs.is_some() {
-            SolutionConfidence::Heuristic
-        } else {
-            SolutionConfidence::Optimal
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -1163,7 +972,7 @@ mod tests {
         let problem = create_test_problem();
         let solver = MilpSolver::new();
 
-        let result = solver.solve(&problem);
+        let result = solver.solve_with_status(&problem).result;
         assert!(result.orders_filled > 0);
         assert!(
             result.total_welfare > 0,
@@ -1258,235 +1067,23 @@ mod tests {
     // =====================================================================
 
     #[test]
-    fn test_milp_coefficients() {
-        let mut problem = Problem::new("coeff_test");
-        let market_a = problem.markets.add_binary("A");
-        let market_b = problem.markets.add_binary("B");
-
-        // YES buyer: payoffs = [+1, 0] on single market
-        let yes_buy = simple_yes_buy(&problem.markets, 1, market_a, 600_000_000, 100);
-        let coeffs = precompute_coefficients(&yes_buy);
-        assert!(
-            (coeffs.c_yes[&market_a] - 1.0).abs() < 1e-9,
-            "YES buyer c_YES should be 1.0"
-        );
-        assert!(
-            coeffs.c_no[&market_a].abs() < 1e-9,
-            "YES buyer c_NO should be 0.0"
-        );
-        assert!(
-            (coeffs.alpha[&market_a] - 1.0).abs() < 1e-9,
-            "YES buyer alpha should be 1.0"
-        );
-        assert!(coeffs.beta.abs() < 1e-9, "YES buyer beta should be 0.0");
-
-        // NO buyer: payoffs = [0, +1] on single market
-        let no_buy =
-            matching_engine::simple_no_buy(&problem.markets, 2, market_a, 500_000_000, 100);
-        let coeffs = precompute_coefficients(&no_buy);
-        assert!(
-            coeffs.c_yes[&market_a].abs() < 1e-9,
-            "NO buyer c_YES should be 0.0"
-        );
-        assert!(
-            (coeffs.c_no[&market_a] - 1.0).abs() < 1e-9,
-            "NO buyer c_NO should be 1.0"
-        );
-        assert!(
-            (coeffs.alpha[&market_a] - (-1.0)).abs() < 1e-9,
-            "NO buyer alpha should be -1.0"
-        );
-        assert!(
-            (coeffs.beta - NANOS_PER_DOLLAR as f64).abs() < 1e-3,
-            "NO buyer beta should be NANOS"
-        );
-
-        // Bundle YES-YES: payoffs = [+1, 0, 0, 0] on two markets
-        let bundle = matching_engine::bundle_yes(
-            &problem.markets,
-            3,
-            &[market_a, market_b],
-            400_000_000,
-            50,
-        );
-        let coeffs = precompute_coefficients(&bundle);
-        // For all-YES bundle: c_YES_A = 0.5 (payoff 1 in state 0 out of 2 YES states),
-        // c_NO_A = 0.0, c_YES_B = 0.5, c_NO_B = 0.0
-        assert!(
-            (coeffs.c_yes[&market_a] - 0.5).abs() < 1e-9,
-            "bundle c_YES_A should be 0.5, got {}",
-            coeffs.c_yes[&market_a]
-        );
-        assert!(
-            coeffs.c_no[&market_a].abs() < 1e-9,
-            "bundle c_NO_A should be 0.0"
-        );
-        assert!(
-            (coeffs.c_yes[&market_b] - 0.5).abs() < 1e-9,
-            "bundle c_YES_B should be 0.5, got {}",
-            coeffs.c_yes[&market_b]
-        );
-
-        // Spread: payoffs = [0, -1, +1, 0] on two markets
-        let sp = matching_engine::spread(&problem.markets, 4, market_a, market_b, 200_000_000, 100);
-        let coeffs = precompute_coefficients(&sp);
-        // c_YES_A = avg(payoffs where A=YES) = avg(state0=0, state2=+1) = 0.5
-        // c_NO_A  = avg(payoffs where A=NO)  = avg(state1=-1, state3=0) = -0.5
-        // alpha_A = 0.5 - (-0.5) = 1.0
-        assert!(
-            (coeffs.c_yes[&market_a] - 0.5).abs() < 1e-9,
-            "spread c_YES_A should be 0.5, got {}",
-            coeffs.c_yes[&market_a]
-        );
-        assert!(
-            (coeffs.c_no[&market_a] - (-0.5)).abs() < 1e-9,
-            "spread c_NO_A should be -0.5, got {}",
-            coeffs.c_no[&market_a]
-        );
-        assert!(
-            (coeffs.alpha[&market_a] - 1.0).abs() < 1e-9,
-            "spread alpha_A should be 1.0, got {}",
-            coeffs.alpha[&market_a]
-        );
-    }
-
-    #[test]
-    fn test_milp_sign() {
+    fn test_order_sign() {
         let mut problem = Problem::new("sign_test");
         let market_a = problem.markets.add_binary("A");
-        let market_b = problem.markets.add_binary("B");
 
         // YES buyer: payoffs = [+1, 0] -> no negative -> buyer
         let yes_buy = simple_yes_buy(&problem.markets, 1, market_a, 600_000_000, 100);
-        assert!(milp_sign(&yes_buy) > 0.0, "YES buyer should be +1");
+        assert!(order_sign(&yes_buy) > 0.0, "YES buyer should be +1");
 
         // YES seller: payoffs = [-1, 0] -> has negative -> seller
         let yes_sell =
             matching_engine::outcome_sell(&problem.markets, 2, market_a, 0, 600_000_000, 100);
-        assert!(milp_sign(&yes_sell) < 0.0, "YES seller should be -1");
-
-        // Spread: payoffs = [0, -1, +1, 0] -> has negative -> seller
-        let sp = matching_engine::spread(&problem.markets, 3, market_a, market_b, 200_000_000, 100);
-        assert!(milp_sign(&sp) < 0.0, "spread has negative payoff -> seller");
-
-        // Bundle YES: payoffs = [+1, 0, 0, 0] -> no negative -> buyer
-        let bundle = matching_engine::bundle_yes(
-            &problem.markets,
-            4,
-            &[market_a, market_b],
-            400_000_000,
-            50,
-        );
-        assert!(milp_sign(&bundle) > 0.0, "bundle YES should be buyer");
-    }
-
-    #[test]
-    fn test_milp_bundle_matching() {
-        // Two-market bundle buyer + individual sellers -> positive welfare
-        let mut problem = Problem::new("bundle_test");
-        let market_a = problem.markets.add_binary("A");
-        let market_b = problem.markets.add_binary("B");
-
-        // Bundle buyer: wants all YES at 40c (limit=400M nanos)
-        problem.orders.push(matching_engine::bundle_yes(
-            &problem.markets,
-            1,
-            &[market_a, market_b],
-            400_000_000,
-            100,
-        ));
-
-        // Individual YES sellers on each market
-        // Seller A: sell YES A at 15c
-        problem.orders.push(matching_engine::outcome_sell(
-            &problem.markets,
-            10,
-            market_a,
-            0,
-            150_000_000,
-            200,
-        ));
-        // Seller B: sell YES B at 15c
-        problem.orders.push(matching_engine::outcome_sell(
-            &problem.markets,
-            11,
-            market_b,
-            0,
-            150_000_000,
-            200,
-        ));
-
-        let solver = MilpSolver::new();
-        let result = solver.solve_with_status(&problem);
-
-        assert!(
-            matches!(result.status, SolveStatus::Optimal),
-            "should find optimal solution, got {:?}",
-            result.status
-        );
-        assert!(result.result.orders_filled > 0, "should fill some orders");
-        assert!(
-            result.result.total_welfare > 0,
-            "should produce positive welfare, got {}",
-            result.result.total_welfare
-        );
-    }
-
-    #[test]
-    fn test_milp_spread_matching() {
-        // Spread buyer + counterparties -> fills
-        let mut problem = Problem::new("spread_test");
-        let market_a = problem.markets.add_binary("A");
-        let market_b = problem.markets.add_binary("B");
-
-        // Spread: long A YES, short B YES, at 10c
-        problem.orders.push(matching_engine::spread(
-            &problem.markets,
-            1,
-            market_a,
-            market_b,
-            100_000_000,
-            100,
-        ));
-
-        // Counterparty: sell A YES at 40c
-        problem.orders.push(matching_engine::outcome_sell(
-            &problem.markets,
-            10,
-            market_a,
-            0,
-            400_000_000,
-            200,
-        ));
-
-        // Counterparty: buy B YES at 60c
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            11,
-            market_b,
-            600_000_000,
-            200,
-        ));
-
-        let solver = MilpSolver::new();
-        let result = solver.solve_with_status(&problem);
-
-        assert!(
-            matches!(result.status, SolveStatus::Optimal),
-            "should find optimal solution, got {:?}",
-            result.status
-        );
-        // The spread + counterparties should produce some welfare
-        assert!(
-            result.result.total_welfare >= 0,
-            "should produce non-negative welfare, got {}",
-            result.result.total_welfare
-        );
+        assert!(order_sign(&yes_sell) < 0.0, "YES seller should be -1");
     }
 
     #[test]
     fn test_milp_group_minting() {
-        // Test that group-level minting enables negrisk-style arbitrage.
+        // Test that group-level minting enables cross-market arbitrage.
         //
         // Setup: 3 mutually exclusive markets (group), YES buyers in each.
         // Without group minting: can't fill because per-market minting creates
@@ -1505,7 +1102,7 @@ mod tests {
         group.add_market(m2);
         problem.add_market_group(group);
 
-        // YES buyers at prices that sum to > $1 (profitable negrisk)
+        // YES buyers at prices that sum to > $1 (profitable arbitrage)
         // A at 40c, B at 35c, C at 30c → sum = $1.05
         problem
             .orders
@@ -1539,30 +1136,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_milp_upper_bound() {
-        // Verify MILP welfare >= pipeline welfare on a realistic scenario
-        use matching_scenarios::{generate_scenario, ScenarioConfig};
-
-        let mut config = ScenarioConfig::quick();
-        config.seed = 42;
-        let problem = generate_scenario(config);
-
-        let solver = MilpSolver::new();
-        let milp_result = solver.solve_with_status(&problem);
-
-        // Run pipeline for comparison
-        let pipeline = crate::Pipeline::current();
-        let pipeline_result = pipeline.solve(&problem);
-
-        let milp_welfare = milp_result.result.total_welfare;
-        let pipeline_welfare = pipeline_result.result.total_welfare;
-
-        assert!(
-            milp_welfare >= pipeline_welfare,
-            "MILP welfare ({}) should be >= pipeline welfare ({})",
-            milp_welfare,
-            pipeline_welfare
-        );
-    }
 }

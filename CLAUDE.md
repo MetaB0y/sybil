@@ -19,14 +19,17 @@ sybil/
 ├── crates/                        # Rust workspace
 │   ├── matching-engine/           # Core types: orders, fills, markets, payoff vectors, MM constraints
 │   ├── matching-solver/           # Solver pipeline and algorithms (~7k lines, most dev happens here)
-│   ├── matching-scenarios/        # Test scenario generators (order mixes, bundles, spreads)
+│   ├── matching-scenarios/        # Test scenario generators (order mixes, spreads)
 │   ├── matching-sim/              # CLI simulation tool with presets and solver comparison
 │   ├── matching-sequencer/        # Agent-based multi-batch sequential simulation
 │   ├── sybil-api/                 # HTTP API server for agent trading
 │   ├── sybil-oracle/              # Oracle/resolution service
 │   └── sybil-verifier/            # ZK-ready block verification
-├── arena/                         # Python: trading bots, client SDK, backtesting (has its own CLAUDE.md)
-├── viz/                           # Python: Streamlit visualization dashboard
+├── arena/                         # Python: trading bots, client SDK, simulation framework (has its own CLAUDE.md)
+│   ├── sim/                       #   Generic simulation framework (clock, news_trader, runner)
+│   ├── markets/                   #   Per-market config (iran/ with personas, sources, datasets)
+│   └── viz/                       #   Streamlit dashboards
+├── viz/                           # Python: Streamlit visualization dashboard (Rust solver)
 ├── fuzz/                          # Cargo-fuzz targets (separate workspace)
 ├── design/                        # Internal design notes
 │   ├── architecture.md            #   Pipeline design, solver phases, integration points
@@ -111,13 +114,13 @@ The pipeline runs in phases, orchestrated by `pipeline.rs`:
 
 The default pipeline is `Pipeline::with_dual_decomposition()` which uses `DualMaster` for Lagrangian relaxation of price consistency + MM budgets.
 
-**Experimental solvers** (exported but not in default pipeline):
-- `smoothed_solver.rs`: Entropy-smoothed gradient descent + annealing approach
-- `joint_solver.rs`: Joint group optimization via parametric search on Σp=$1 simplex
+**Other solvers** (exported but not in default pipeline):
+- `lp_solver.rs`: LP via HiGHS + iterative MM budget shading. Feature-gated: `lp`. Best welfare across all presets.
+- `joint_solver.rs`: Joint group optimization via parametric search on Σp=$1 simplex (volume-oriented)
 
 ### Key Design Decisions
 
-- **Payoff vectors**: Orders are represented as payoff vectors over market states, enabling unified handling of simple orders, bundles, spreads, and conditionals.
+- **Payoff vectors**: Orders are represented as payoff vectors over market states, enabling unified handling of simple orders, spreads, and conditionals.
 - **Welfare maximization**: The objective is `Σ (limit_price - clearing_price) * fill_qty`, not volume.
 - **MILP is optional**: Feature-gated behind `milp` (uses SCIP via `russcip`). Supports group-level minting for optimal negrisk-style arbitrage.
 - **Verification** (`verifier.rs`): Validates solver output for correctness — designed for ZK proof integration.

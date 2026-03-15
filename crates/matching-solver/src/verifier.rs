@@ -286,6 +286,18 @@ impl Verifier {
     /// Minting creates 1 YES + 1 NO share. If fills create an imbalance (e.g.,
     /// BuyNo fill without a corresponding BuyYes), positions are created from
     /// thin air — money at resolution.
+    ///
+    /// Uses f64 marginals to account for bundle orders whose per-market marginal
+    /// payoffs are fractional (e.g., "buy YES A and YES B" has marginal 0.5 per
+    /// market — the i64 version truncates this to 0, making bundles invisible).
+    ///
+    /// TODO: Per-market position balance is NECESSARY but NOT SUFFICIENT for
+    /// joint-state solvency with bundle orders. A bundle "buy YES A and YES B"
+    /// creates a joint-state liability that cannot be decomposed into per-market
+    /// shares. Full solvency verification requires tracking positions over the
+    /// joint state space (exponential in the number of coupled markets).
+    /// Until we have joint-state verification, this check catches per-market
+    /// imbalances but does NOT guarantee solvency when bundles are filled.
     fn verify_position_balance(
         &self,
         _problem: &Problem,
@@ -294,9 +306,7 @@ impl Verifier {
         violations: &mut Vec<Violation>,
         stats: &mut VerificationStats,
     ) {
-        // For each market, accumulate the net marginal payoff across all fills.
-        // The sum of marginal * fill_qty across all fills must be 0 for each market.
-        let mut net_position: HashMap<MarketId, i64> = HashMap::new();
+        let mut net_position: HashMap<MarketId, f64> = HashMap::new();
 
         for fill in &result.fills {
             if fill.fill_qty == 0 {
@@ -306,22 +316,24 @@ impl Verifier {
                 continue; // Already flagged by OrderNotFound
             };
 
-            for (market_id, normalized) in order.marginal_payoffs_i64() {
-                *net_position.entry(market_id).or_insert(0) +=
-                    normalized * fill.fill_qty as i64;
+            for (market_id, marginal) in order.marginal_payoffs_f64() {
+                *net_position.entry(market_id).or_insert(0.0) +=
+                    marginal * fill.fill_qty as f64;
             }
         }
 
         stats.markets_checked = net_position.len();
 
+        // Allow small float tolerance (< 0.5 shares) for f64 rounding.
+        let tolerance = 0.5;
         for (market_id, net) in &net_position {
-            if *net != 0 {
+            if net.abs() > tolerance {
                 violations.push(Violation {
                     kind: ViolationKind::PositionImbalance,
                     details: format!(
-                        "Market {}: net position delta = {} (expected 0). \
+                        "Market {}: net position delta = {:.2} (expected 0). \
                          Positions created from thin air.",
-                        market_id, net
+                        market_id, net,
                     ),
                 });
             }

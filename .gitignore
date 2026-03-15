@@ -7,3 +7,8 @@ comparison*.json
 .venv/
 *.swp
 *.swo
+arena/markets/*/runs/
+arena/markets/*/phase1/
+arena/markets/*/datasets/
+arena/*/datasets/
+design/*.pdf

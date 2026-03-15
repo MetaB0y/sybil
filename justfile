@@ -40,16 +40,16 @@ sim-large:
 sim-extreme:
     cargo run --bin matching-sim --release -- --preset extreme -v
 
-# Compare all solvers on medium scenario
-compare:
-    cargo run --bin matching-sim --release -- --preset medium --solver all
+# Compare all solvers on a scenario
+compare preset="medium":
+    cargo run --bin matching-sim --release -- --preset {{preset}} --solver all
 
 # MILP-killer test (forces MILP timeout)
 milp-killer:
     cargo run --bin matching-sim --release -- --preset milp-killer --solver all --milp-timeout 5.0
 
 # Run with specific preset and solver
-sim preset="medium" solver="pipeline" verbose="-v":
+sim preset="medium" solver="lp" verbose="-v":
     cargo run --bin matching-sim --release -- --preset {{preset}} --solver {{solver}} {{verbose}}
 
 # Run with negrisk arbitrage solver
@@ -120,6 +120,10 @@ viz-run preset="small":
 # Install viz dependencies
 viz-install:
     cd viz && uv sync
+
+# Run EG (Eisenberg-Gale / Fisher market) solver
+sim-eg preset="quick":
+    cargo run --bin matching-sim --release --features lp -- --preset {{preset}} --solver eg -v
 
 # Run arena demo (starts server, syncs deps, runs backtest)
 arena-demo:

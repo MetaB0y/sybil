@@ -1,13 +1,11 @@
 //! Random hard instance generation with binary markets.
 
 use rand::rngs::StdRng;
-use rand::seq::SliceRandom;
 use rand::Rng;
 use rand::SeedableRng;
 
 use matching_engine::{
-    bundle_yes, outcome_buy, outcome_sell, price_to_nanos, spread, MarketId, MarketSet, Order,
-    Problem, Qty,
+    outcome_buy, outcome_sell, price_to_nanos, MarketId, MarketSet, Order, Problem, Qty,
 };
 
 /// Configuration for random hard instance generation
@@ -16,8 +14,6 @@ pub struct RandomConfig {
     pub seed: u64,
     pub num_markets: usize,
     pub num_orders: usize,
-    pub bundle_fraction: f64,
-    pub spread_fraction: f64,
     pub oversubscription: f64,
     pub base_liquidity_depth: Qty,
     pub price_levels: usize,
@@ -30,8 +26,6 @@ impl Default for RandomConfig {
             seed: 42,
             num_markets: 5,
             num_orders: 50,
-            bundle_fraction: 0.2,
-            spread_fraction: 0.1,
             oversubscription: 2.0,
             base_liquidity_depth: 100,
             price_levels: 3,
@@ -44,8 +38,6 @@ impl RandomConfig {
     pub fn easy() -> Self {
         Self {
             oversubscription: 0.5,
-            bundle_fraction: 0.0,
-            spread_fraction: 0.0,
             ..Default::default()
         }
     }
@@ -53,8 +45,6 @@ impl RandomConfig {
     pub fn medium() -> Self {
         Self {
             oversubscription: 1.5,
-            bundle_fraction: 0.1,
-            spread_fraction: 0.1,
             ..Default::default()
         }
     }
@@ -62,8 +52,6 @@ impl RandomConfig {
     pub fn hard() -> Self {
         Self {
             oversubscription: 3.0,
-            bundle_fraction: 0.3,
-            spread_fraction: 0.2,
             num_orders: 100,
             ..Default::default()
         }
@@ -150,36 +138,10 @@ pub fn generate_random_scenario(config: RandomConfig) -> Problem {
     }
 
     // Generate orders
-    let num_bundles = (config.num_orders as f64 * config.bundle_fraction) as usize;
-    let num_spreads = (config.num_orders as f64 * config.spread_fraction) as usize;
-    let num_simple = config.num_orders - num_bundles - num_spreads;
-
     let mut order_id = 1u64;
 
-    for _ in 0..num_simple {
+    for _ in 0..config.num_orders {
         let order = generate_simple_random_order(
-            &problem.markets,
-            &mut rng,
-            &mut order_id,
-            &market_ids,
-            &market_prices,
-        );
-        problem.orders.push(order);
-    }
-
-    for _ in 0..num_bundles {
-        let order = generate_bundle_random_order(
-            &problem.markets,
-            &mut rng,
-            &mut order_id,
-            &market_ids,
-            &market_prices,
-        );
-        problem.orders.push(order);
-    }
-
-    for _ in 0..num_spreads {
-        let order = generate_spread_random_order(
             &problem.markets,
             &mut rng,
             &mut order_id,
@@ -220,61 +182,6 @@ fn generate_simple_random_order(
     let qty: Qty = rng.random_range(30..120);
 
     outcome_buy(markets, id, market, outcome, price_to_nanos(limit), qty)
-}
-
-fn generate_bundle_random_order(
-    markets: &MarketSet,
-    rng: &mut StdRng,
-    order_id: &mut u64,
-    market_ids: &[MarketId],
-    market_prices: &[f64],
-) -> Order {
-    let id = *order_id;
-    *order_id += 1;
-
-    let num_to_bundle = rng.random_range(2..=market_ids.len().min(3));
-    let mut selected: Vec<usize> = (0..market_ids.len()).collect();
-    selected.shuffle(rng);
-    selected.truncate(num_to_bundle);
-
-    let bundle_markets: Vec<MarketId> = selected.iter().map(|&i| market_ids[i]).collect();
-
-    let combined_prob: f64 = selected.iter().map(|&i| market_prices[i]).product();
-
-    let limit = (combined_prob * rng.random_range(0.9..1.2)).clamp(0.01, 0.95);
-    let qty: Qty = rng.random_range(20..80);
-
-    bundle_yes(markets, id, &bundle_markets, price_to_nanos(limit), qty)
-}
-
-fn generate_spread_random_order(
-    markets: &MarketSet,
-    rng: &mut StdRng,
-    order_id: &mut u64,
-    market_ids: &[MarketId],
-    market_prices: &[f64],
-) -> Order {
-    let id = *order_id;
-    *order_id += 1;
-
-    if market_ids.len() < 2 {
-        return outcome_buy(markets, id, market_ids[0], 0, price_to_nanos(0.5), 50);
-    }
-
-    let m1_idx = rng.random_range(0..market_ids.len());
-    let mut m2_idx = rng.random_range(0..market_ids.len());
-    while m2_idx == m1_idx {
-        m2_idx = rng.random_range(0..market_ids.len());
-    }
-
-    let market_a = market_ids[m1_idx];
-    let market_b = market_ids[m2_idx];
-
-    let price_diff = (market_prices[m1_idx] - market_prices[m2_idx]).abs();
-    let limit = (price_diff + rng.random_range(-0.05..0.1)).clamp(0.01, 0.5);
-    let qty: Qty = rng.random_range(30..100);
-
-    spread(markets, id, market_a, market_b, price_to_nanos(limit), qty)
 }
 
 fn inject_conflicts(problem: &mut Problem, rng: &mut StdRng, market_ids: &[MarketId]) {

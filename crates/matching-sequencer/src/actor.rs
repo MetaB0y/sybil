@@ -121,6 +121,12 @@ pub enum Message {
         query: MarketSearchQuery,
         respond_to: oneshot::Sender<Vec<MarketSearchResult>>,
     },
+    PauseBlockProduction {
+        respond_to: oneshot::Sender<()>,
+    },
+    ResumeBlockProduction {
+        respond_to: oneshot::Sender<()>,
+    },
 }
 
 /// A market search result enriched with metadata, prices, and volume.
@@ -151,10 +157,20 @@ struct SequencerActor {
     block_broadcast: broadcast::Sender<Block>,
     /// Last known clearing prices across all markets.
     last_prices: HashMap<MarketId, Vec<Nanos>>,
+    /// Interval between block production ticks.
+    block_interval: Duration,
+    /// Reference-counted pause: block production halts when > 0.
+    /// Multiple callers can pause independently; blocks resume only when all have resumed.
+    pause_count: u32,
 }
 
 impl SequencerActor {
-    fn new(sequencer: BlockSequencer, mempool: Mempool, receiver: mpsc::Receiver<Message>) -> Self {
+    fn new(
+        sequencer: BlockSequencer,
+        mempool: Mempool,
+        receiver: mpsc::Receiver<Message>,
+        block_interval: Duration,
+    ) -> Self {
         let (block_broadcast, _) = broadcast::channel(64);
         Self {
             sequencer,
@@ -165,13 +181,15 @@ impl SequencerActor {
             block_history: Vec::new(),
             block_broadcast,
             last_prices: HashMap::new(),
+            block_interval,
+            pause_count: 0,
         }
     }
 
     async fn run(mut self) {
         let mut ticker = interval_at(
-            Instant::now() + Duration::from_secs(1),
-            Duration::from_secs(1),
+            Instant::now() + self.block_interval,
+            self.block_interval,
         );
 
         loop {
@@ -190,6 +208,9 @@ impl SequencerActor {
     }
 
     fn on_tick(&mut self) {
+        if self.pause_count > 0 {
+            return;
+        }
         let timestamp_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -400,6 +421,14 @@ impl SequencerActor {
                 let results = self.handle_search_markets(query);
                 let _ = respond_to.send(results);
             }
+            Message::PauseBlockProduction { respond_to } => {
+                self.pause_count = self.pause_count.saturating_add(1);
+                let _ = respond_to.send(());
+            }
+            Message::ResumeBlockProduction { respond_to } => {
+                self.pause_count = self.pause_count.saturating_sub(1);
+                let _ = respond_to.send(());
+            }
         }
     }
 
@@ -575,9 +604,18 @@ pub struct SequencerHandle {
 impl SequencerHandle {
     /// Spawn a new sequencer actor and return a handle.
     pub fn spawn(sequencer: BlockSequencer, mempool_config: MempoolConfig) -> Self {
+        Self::spawn_with_interval(sequencer, mempool_config, Duration::from_secs(1))
+    }
+
+    /// Spawn with a custom block production interval.
+    pub fn spawn_with_interval(
+        sequencer: BlockSequencer,
+        mempool_config: MempoolConfig,
+        block_interval: Duration,
+    ) -> Self {
         let (sender, receiver) = mpsc::channel(256);
         let mempool = Mempool::new(mempool_config);
-        let actor = SequencerActor::new(sequencer, mempool, receiver);
+        let actor = SequencerActor::new(sequencer, mempool, receiver, block_interval);
         tokio::spawn(actor.run());
         Self { sender }
     }
@@ -936,6 +974,26 @@ impl SequencerHandle {
                 query,
                 respond_to: tx,
             })
+            .await
+            .map_err(|_| SequencerError::ActorGone)?;
+        rx.await.map_err(|_| SequencerError::ActorGone)
+    }
+
+    /// Pause block production (for simulation freeze during LLM calls).
+    pub async fn pause_block_production(&self) -> Result<(), SequencerError> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(Message::PauseBlockProduction { respond_to: tx })
+            .await
+            .map_err(|_| SequencerError::ActorGone)?;
+        rx.await.map_err(|_| SequencerError::ActorGone)
+    }
+
+    /// Resume block production after a pause.
+    pub async fn resume_block_production(&self) -> Result<(), SequencerError> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(Message::ResumeBlockProduction { respond_to: tx })
             .await
             .map_err(|_| SequencerError::ActorGone)?;
         rx.await.map_err(|_| SequencerError::ActorGone)

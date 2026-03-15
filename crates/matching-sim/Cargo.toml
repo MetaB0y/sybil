@@ -18,5 +18,8 @@ comfy-table = "7"
 serde_json = "1"
 
 [features]
-default = []
+default = ["lp", "conic"]
 viz = ["matching-solver/viz"]
+lp = ["matching-solver/lp"]
+conic = ["matching-solver/conic"]
+parallel = ["matching-solver/parallel"]

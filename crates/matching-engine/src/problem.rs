@@ -152,7 +152,7 @@ impl Problem {
     }
 
     pub fn summary(&self) -> ProblemSummary {
-        let bundle_orders = self.orders.iter().filter(|o| o.num_markets > 1).count();
+        let multi_market_orders = self.orders.iter().filter(|o| o.num_markets > 1).count();
         let conditional_orders = self.orders.iter().filter(|o| o.is_conditional()).count();
 
         ProblemSummary {
@@ -160,7 +160,7 @@ impl Problem {
             num_markets: self.num_markets(),
             num_orders: self.num_orders(),
             num_mm_constraints: self.mm_constraints.len(),
-            bundle_orders,
+            multi_market_orders,
             conditional_orders,
             total_demand: self.total_demand(),
         }
@@ -174,7 +174,7 @@ pub struct ProblemSummary {
     pub num_markets: usize,
     pub num_orders: usize,
     pub num_mm_constraints: usize,
-    pub bundle_orders: usize,
+    pub multi_market_orders: usize,
     pub conditional_orders: usize,
     pub total_demand: u64,
 }
@@ -183,11 +183,15 @@ impl std::fmt::Display for ProblemSummary {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Problem: {}", self.name)?;
         writeln!(f, "  Markets: {}", self.num_markets)?;
-        writeln!(
-            f,
-            "  Orders: {} (bundles: {}, conditional: {})",
-            self.num_orders, self.bundle_orders, self.conditional_orders
-        )?;
+        if self.multi_market_orders > 0 || self.conditional_orders > 0 {
+            writeln!(
+                f,
+                "  Orders: {} (multi-market: {}, conditional: {})",
+                self.num_orders, self.multi_market_orders, self.conditional_orders
+            )?;
+        } else {
+            writeln!(f, "  Orders: {}", self.num_orders)?;
+        }
         if self.num_mm_constraints > 0 {
             writeln!(f, "  MM Constraints: {}", self.num_mm_constraints)?;
         }
