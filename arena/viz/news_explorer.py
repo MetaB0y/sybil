@@ -1442,30 +1442,20 @@ def main():
 
     df = load_data()
 
-    # ── Sidebar filters ──
-    st.sidebar.header("Filters")
-    countries = sorted(df["sourcecountry"].unique())
-    selected_countries = st.sidebar.multiselect("Countries", countries, default=[])
-    languages = sorted(df["language"].unique())
-    selected_languages = st.sidebar.multiselect("Languages", languages, default=[])
-    sources = sorted(df["source"].unique())
-    selected_sources = st.sidebar.multiselect("Sources", sources, default=[])
+    # Filter to January 2026
+    from datetime import date as _date
+    filtered = df[(df["date"] >= _date(2026, 1, 1)) & (df["date"] <= _date(2026, 2, 5))].copy()
 
-    filtered = df.copy()
-    if selected_countries:
-        filtered = filtered[filtered["sourcecountry"].isin(selected_countries)]
-    if selected_languages:
-        filtered = filtered[filtered["language"].isin(selected_languages)]
-    if selected_sources:
-        filtered = filtered[filtered["source"].isin(selected_sources)]
+    # Filter out disabled bots (e.g. israeli_trader)
+    active_bots = {k: v for k, v in BOT_PERSONAS.items()
+                   if v.get("enabled", True) and v.get("sources")}
 
-    # ── Tabs: Summary, Daily, Simulation, + one per bot persona ──
-    bot_tab_names = [p["name"] for p in BOT_PERSONAS.values()]
-    all_tabs = st.tabs(["Summary", "Daily Explorer", "Simulation"] + [f"Bot: {n}" for n in bot_tab_names])
+    # ── Tabs: Summary, Daily, Simulation, LLM Traders ──
+    all_tabs = st.tabs(["Summary", "Daily Explorer", "Simulation", "LLM Traders"])
     tab_summary = all_tabs[0]
     tab_daily = all_tabs[1]
     tab_simulation = all_tabs[2]
-    bot_tabs = {k: all_tabs[i + 3] for i, k in enumerate(BOT_PERSONAS)}
+    tab_traders = all_tabs[3]
 
     # ═══════════════════════════ SUMMARY ═══════════════════════════
     with tab_summary:
@@ -1582,10 +1572,15 @@ def main():
     with tab_simulation:
         render_simulation_tab()
 
-    # ═══════════════════════════ BOT PERSONAS ═══════════════════════════
-    for bot_key, persona in BOT_PERSONAS.items():
-        with bot_tabs[bot_key]:
-            render_bot_tab(df, bot_key, persona)
+    # ═══════════════════════════ LLM TRADERS ═══════════════════════════
+    with tab_traders:
+        trader_names = {k: v["name"] for k, v in active_bots.items()}
+        selected_trader = st.selectbox(
+            "Select trader",
+            options=list(trader_names.keys()),
+            format_func=lambda k: trader_names[k],
+        )
+        render_bot_tab(filtered, selected_trader, active_bots[selected_trader])
 
 
 if __name__ == "__main__":
