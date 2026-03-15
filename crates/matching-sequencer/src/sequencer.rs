@@ -788,12 +788,13 @@ impl BlockSequencer {
         // Snapshot post-state (after settlement)
         let post_state = snapshot_accounts(&self.accounts, &participating_accounts);
 
-        // Persist unfilled non-MM orders
-        let filled_order_ids: HashSet<u64> = fills
-            .iter()
-            .filter(|f| f.fill_qty > 0)
-            .map(|f| f.order_id)
-            .collect();
+        // Persist unfilled non-MM orders (with reduced qty for partial fills)
+        let mut filled_qty_map: HashMap<u64, u64> = HashMap::new();
+        for f in &fills {
+            if f.fill_qty > 0 {
+                *filled_qty_map.entry(f.order_id).or_insert(0) += f.fill_qty;
+            }
+        }
 
         let mm_order_ids: HashSet<u64> = problem
             .mm_constraints
@@ -805,14 +806,17 @@ impl BlockSequencer {
             if mm_order_ids.contains(&order.id) {
                 continue;
             }
-            if filled_order_ids.contains(&order.id) {
-                continue;
+            let filled = filled_qty_map.get(&order.id).copied().unwrap_or(0);
+            if filled >= order.max_fill {
+                continue; // fully filled
             }
             if let Some(&account_id) = self.order_account_map.get(&order.id) {
                 let created_at = *self.order_created_at.get(&order.id).unwrap_or(&self.height);
 
+                let mut remainder = order.clone();
+                remainder.max_fill -= filled;
                 self.pending_orders.push(PendingOrder {
-                    order: order.clone(),
+                    order: remainder,
                     account_id,
                     created_at,
                 });
