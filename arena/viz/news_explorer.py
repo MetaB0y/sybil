@@ -1186,7 +1186,8 @@ def render_simulation_tab():
     # Build orderbook from ALL submitted orders (including fully filled)
     book_rows = []
     for o in submitted_orders:
-        if o["original_qty"] <= 0:
+        entering_qty = o["qty"] + o.get("filled_this_block", 0)
+        if entering_qty <= 0:
             continue
         if o["side"] in ("BuyYes", "SellNo"):
             yes_equiv = 1.0 - o["price"] if o["side"] == "SellNo" else o["price"]
@@ -1197,8 +1198,8 @@ def render_simulation_tab():
         else:
             continue
         # Show filled portion dimmed, unfilled portion solid
-        filled = o.get("filled", 0)
-        remaining = o["original_qty"] - filled
+        filled = o.get("filled_this_block", 0)
+        remaining = entering_qty - filled
         if filled > 0:
             book_rows.append({
                 "price": round(yes_equiv, 4), "quantity": filled,
@@ -1359,9 +1360,11 @@ def render_simulation_tab():
             else:
                 origin = "new"
 
+            # For carried orders, show remaining qty (original minus previously filled)
+            display_qty = o["qty"] + o.get("filled_this_block", 0)
             row = {
                 "Side": o["side"],
-                "Qty": o["original_qty"],
+                "Qty": display_qty,
                 "Limit": f"${o['price']:.2f}",
                 "Origin": origin,
             }
