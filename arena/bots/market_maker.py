@@ -46,8 +46,9 @@ class AnchorMarketMaker(BaseAgent):
         vol_widen_mult: float = 3.0,
         name: str | None = None,
         market_ids: list[int] | None = None,
+        max_blocks: int | None = None,
     ):
-        super().__init__(client, account_id, name, market_ids)
+        super().__init__(client, account_id, name, market_ids, max_blocks=max_blocks)
         self.mm_budget_nanos = int(budget_dollars * NANOS_PER_DOLLAR)
         self.half_spread = half_spread
         self.base_size_dollars = base_size_dollars
@@ -141,8 +142,9 @@ class SimpleMarketMaker(BaseAgent):
         max_position: int = 50,
         name: str | None = None,
         market_ids: list[int] | None = None,
+        max_blocks: int | None = None,
     ):
-        super().__init__(client, account_id, name, market_ids)
+        super().__init__(client, account_id, name, market_ids, max_blocks=max_blocks)
         self.spread_bps = spread_bps
         self.quote_size = quote_size
         self.max_position = max_position
@@ -197,8 +199,9 @@ class FlashMarketMaker(BaseAgent):
         skew_factor: float = 0.1,
         name: str | None = None,
         market_ids: list[int] | None = None,
+        max_blocks: int | None = None,
     ):
-        super().__init__(client, account_id, name, market_ids)
+        super().__init__(client, account_id, name, market_ids, max_blocks=max_blocks)
         self.mm_budget_nanos = int(budget_dollars * NANOS_PER_DOLLAR)
         self.num_levels = num_levels
         self.level_spacing_cents = level_spacing_cents
@@ -266,8 +269,9 @@ class BalancedMarketMaker(BaseAgent):
         inventory_decay_start: int = 30,
         name: str | None = None,
         market_ids: list[int] | None = None,
+        max_blocks: int | None = None,
     ):
-        super().__init__(client, account_id, name, market_ids)
+        super().__init__(client, account_id, name, market_ids, max_blocks=max_blocks)
         self.mm_budget_nanos = int(budget_dollars * NANOS_PER_DOLLAR)
         self.half_spread = half_spread
         self.num_levels = num_levels

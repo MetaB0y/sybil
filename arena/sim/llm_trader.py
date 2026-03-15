@@ -367,7 +367,10 @@ Analyze {analyze_word} and decide your trade. Respond in this exact format:
 ANALYSIS: [Your analysis of what {analyze_word} signals, 2-4 sentences]
 FAIR_VALUE: [Your probability estimate, 0.01-0.99]
 EDGE: [Calculate: |FAIR_VALUE - YES price| = edge per share. edge × quantity = expected profit. Only trade if edge > $0.03]
-ORDERS: [Choose from available actions, or HOLD if no edge. LIMIT PRICE — do NOT just use the current market price. For BUY_YES: set limit between YES price and your FAIR_VALUE. For BUY_NO: set limit between NO price and (1 - FAIR_VALUE). Example: if YES=$0.70, NO=$0.30, and your FV=0.15, your NO fair value is $0.85 — bid NO at $0.50-0.60, NOT $0.30. Routine news → limit closer to market. Breaking news → limit closer to your fair value.]
+ORDERS: [Choose from available actions, or HOLD if no edge. LIMIT PRICE — do NOT just use the current market price.
+For BUY_YES: set limit between YES price and your FAIR_VALUE. For BUY_NO: set limit between NO price and (1 - FAIR_VALUE). Example: if YES=$0.70, NO=$0.30, and your FV=0.15, your NO fair value is $0.85 — bid NO at $0.50-0.60, NOT $0.30.
+For SELL_YES: set limit between your FAIR_VALUE and YES price (lower = more likely to fill; FBA guarantees you get the clearing price, not your limit). For SELL_NO: set limit between (1 - FAIR_VALUE) and NO price.
+Routine news → limit closer to market. Breaking news → limit closer to your fair value.]
 MOTIVATION: [1-2 sentence thesis]"""
 
     def _parse_orders(self, text: str) -> tuple[str, float, list[OrderSpec], str] | None:
@@ -613,8 +616,10 @@ Current YES price: ${yes_price:.2f} | NO price: ${no_price:.2f}
 Price 4h ago: {price_4h_str} | Price 8h ago: {price_8h_str}
 
 Reminder: This is a Frequent Batch Auction — your limit price is the worst
-price you'd accept, not what you'll pay. Set sell limits between your target
-and market price.
+price you'd accept, not what you'll pay. FBA guarantees you get the clearing
+price, not your limit. For SELL_YES: set limit between your FAIR_VALUE and
+the current YES price (lower = more likely to fill). For SELL_NO: set limit
+between (1 - FAIR_VALUE) and the current NO price.
 
 Your portfolio:
 - ${balance:.2f} cash ({cash_pct:.0f}% of portfolio)

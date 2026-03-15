@@ -94,6 +94,7 @@ class SimulationConfig:
     context: str = ""
     phase1_dir: Path | None = None
     runs_dir: Path | None = None
+    mm_max_blocks: int | None = None  # None = unlimited, 1 = single initial trade
 
 
 async def run_simulation(config: SimulationConfig) -> None:
@@ -192,6 +193,7 @@ async def run_simulation(config: SimulationConfig) -> None:
                 budget_dollars=config.mm_balance,
                 name="MM",
                 market_ids=[market.id],
+                max_blocks=config.mm_max_blocks,
             )
 
             noise_bots = []
@@ -324,6 +326,8 @@ def main():
     parser.add_argument("--sim-end", default="23:59", help="Sim end HH:MM (default: 23:59)")
     parser.add_argument("--rebalance-interval", type=float, default=4,
                         help="Rebalance interval in sim hours (0=disabled, default: 4)")
+    parser.add_argument("--mm-max-blocks", type=int, default=None,
+                        help="Stop MM after N blocks with trades (default: unlimited, 1=seed only)")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -400,6 +404,7 @@ def main():
         market_category=market_config.category,
         context=market_config.context,
         runs_dir=market_config.runs_dir,
+        mm_max_blocks=args.mm_max_blocks,
     )
 
     print(f"{market_config.question}")
