@@ -263,10 +263,11 @@ class BalancedMarketMaker(BaseAgent):
         max_position: int = 5_000,
         skew_factor: float = 0.1,
         vol_lookback: int = 4,
-        vol_widen_max: float = 3.0,
+        vol_widen_max: float = 6.0,
         momentum_lookback: int = 3,
-        momentum_widen_max: float = 0.03,
+        momentum_widen_max: float = 0.08,
         inventory_decay_start: int = 30,
+        ema_alpha: float = 0.15,
         name: str | None = None,
         market_ids: list[int] | None = None,
         max_blocks: int | None = None,
@@ -284,12 +285,24 @@ class BalancedMarketMaker(BaseAgent):
         self.momentum_lookback = momentum_lookback
         self.momentum_widen_max = momentum_widen_max
         self.inventory_decay_start = inventory_decay_start
+        self.ema_alpha = ema_alpha
         self._price_history: dict[int, list[float]] = {}
+        self._ema: dict[int, float] = {}
+
+    def _update_ema(self, market_id: int, price: float) -> float:
+        """Update and return EMA of clearing prices."""
+        if market_id not in self._ema:
+            self._ema[market_id] = price
+            return price
+        self._ema[market_id] += self.ema_alpha * (price - self._ema[market_id])
+        return self._ema[market_id]
 
     def _vol_multiplier(self, market_id: int, mid: float) -> float:
         """Widen spread after large price moves.
 
         Two signals: windowed range + single-block jump (amplified 2x).
+        Returns multiplier for spread widening. Also used inversely for
+        size scaling — high vol → wide spread AND small size.
         """
         history = self._price_history.setdefault(market_id, [])
         history.append(mid)
@@ -301,9 +314,16 @@ class BalancedMarketMaker(BaseAgent):
         windowed_vol = max(recent) - min(recent)
         single_jump = abs(history[-1] - history[-2]) * 2.0
         effective_vol = max(windowed_vol, single_jump)
-        if effective_vol > 0.02:
-            return min(self.vol_widen_max, 1.0 + effective_vol * 8)
+        if effective_vol > 0.01:
+            return min(self.vol_widen_max, 1.0 + effective_vol * 15)
         return 1.0
+
+    def _should_skip_buys(self, market_id: int) -> bool:
+        """Skip buying after a very large single-block move (adverse selection guard)."""
+        history = self._price_history.get(market_id, [])
+        if len(history) < 2:
+            return False
+        return abs(history[-1] - history[-2]) > 0.05
 
     def _momentum_asymmetry(self, market_id: int) -> tuple[float, float]:
         """Compute asymmetric buy-side widening based on price momentum.
@@ -445,8 +465,9 @@ class BalancedMarketMaker(BaseAgent):
         orders: list[OrderSpec] = []
 
         for market_id, (yes_nanos, no_nanos) in self.filter_markets(block).items():
-            yes_mid = yes_nanos / NANOS_PER_DOLLAR
-            yes_mid = max(0.05, min(0.95, yes_mid))
+            raw_yes = yes_nanos / NANOS_PER_DOLLAR
+            raw_yes = max(0.05, min(0.95, raw_yes))
+            yes_mid = self._update_ema(market_id, raw_yes)
 
             yes_pos = self.get_position(market_id, "YES")
             no_pos = self.get_position(market_id, "NO")
@@ -458,7 +479,8 @@ class BalancedMarketMaker(BaseAgent):
             adjusted_no_mid = 1.0 - adjusted_yes_mid
 
             # Adaptive spread: base × volatility × matched-pair penalty
-            vol_mult = self._vol_multiplier(market_id, yes_mid)
+            # Use raw price for vol detection so it sees actual jumps
+            vol_mult = self._vol_multiplier(market_id, raw_yes)
             pair_mult = self._matched_pair_penalty(yes_pos, no_pos)
             spread = self.half_spread * vol_mult * pair_mult
 
@@ -477,14 +499,19 @@ class BalancedMarketMaker(BaseAgent):
             yes_buy_scale, no_buy_scale, net_sell, matched_sell = \
                 self._inventory_fractions(net, yes_pos, no_pos)
 
-            budget = min(self.current_balance, self.max_per_side)
+            # Vol-inverse size scaling: high vol → deploy less capital
+            effective_per_side = self.max_per_side / vol_mult
+            budget = min(self.current_balance, effective_per_side)
+
+            # Skip buying after large single-block moves (adverse selection guard)
+            skip_buys = self._should_skip_buys(market_id)
 
             # Buy orders (both sides, scaled by inventory)
-            if yes_buy_scale > 0:
+            if not skip_buys and yes_buy_scale > 0:
                 orders.extend(self._buy_orders(
                     market_id, adjusted_yes_mid, yes_buy_spread,
                     True, budget, yes_buy_scale))
-            if no_buy_scale > 0:
+            if not skip_buys and no_buy_scale > 0:
                 orders.extend(self._buy_orders(
                     market_id, adjusted_no_mid, no_buy_spread,
                     False, budget, no_buy_scale))
