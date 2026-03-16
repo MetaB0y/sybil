@@ -77,7 +77,7 @@ class SimulationConfig:
     block_interval_s: float = 2.0
     mm_balance: float = 50_000.0
     initial_price: float = 0.12
-    noise_count: int = 20
+    noise_count: int = 10
     noise_balance: float = 50.0
     trader_balance: float = 2_000.0
     api_key: str = ""
@@ -94,6 +94,7 @@ class SimulationConfig:
     context: str = ""
     phase1_dir: Path | None = None
     runs_dir: Path | None = None
+    mm_per_side: float = 500.0  # max $ deployed per side per block
     mm_max_blocks: int | None = None  # None = unlimited, 1 = single initial trade
 
 
@@ -196,6 +197,7 @@ async def run_simulation(config: SimulationConfig) -> None:
             mm = BalancedMarketMaker(
                 client, mm_acct.id,
                 budget_dollars=config.mm_balance,
+                max_per_side_dollars=config.mm_per_side,
                 name="MM",
                 market_ids=[market.id],
                 max_blocks=config.mm_max_blocks,

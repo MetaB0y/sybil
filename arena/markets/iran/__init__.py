@@ -15,6 +15,7 @@ from .config import (
     PHASE1_CRITERIA,
     PHASE1_DIR,
     PHASE1_PROMPT_TEMPLATE,
+    POLYMARKET_PRICES_FILE,
     RUNS_DIR,
 )
 from .personas import BOT_PERSONAS
@@ -58,4 +59,5 @@ def get_config() -> MarketConfig:
         runs_dir=RUNS_DIR,
         personas=BOT_PERSONAS,
         build_persona=build_persona,
+        polymarket_prices_file=POLYMARKET_PRICES_FILE,
     )
