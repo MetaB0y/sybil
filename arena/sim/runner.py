@@ -138,6 +138,11 @@ async def run_simulation(config: SimulationConfig) -> None:
             trader_accounts[spec.name] = acct.id
             print(f"{spec.name} account {acct.id}: ${config.trader_balance}")
 
+        noise_accounts = []
+        for i in range(config.noise_count):
+            acct = await client.create_account(int(config.noise_balance * NANOS_PER_DOLLAR))
+            noise_accounts.append(acct)
+
         trader_state: dict[str, dict] = {}
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -197,8 +202,7 @@ async def run_simulation(config: SimulationConfig) -> None:
             )
 
             noise_bots = []
-            for i in range(config.noise_count):
-                acct = await client.create_account(int(config.noise_balance * NANOS_PER_DOLLAR))
+            for i, acct in enumerate(noise_accounts):
                 bot = RandomTrader(
                     client, acct.id,
                     trade_probability=0.5,
@@ -207,7 +211,10 @@ async def run_simulation(config: SimulationConfig) -> None:
                     market_ids=[market.id],
                 )
                 noise_bots.append(bot)
-            print(f"  Created {config.noise_count} noise traders @ ${config.noise_balance} each")
+            if day_idx == 0:
+                print(f"  Created {config.noise_count} noise traders @ ${config.noise_balance} each")
+            else:
+                print(f"  Reusing {config.noise_count} noise traders")
 
             traders = []
             for spec in specs:
