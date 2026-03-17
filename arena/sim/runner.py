@@ -318,7 +318,7 @@ def main():
     parser.add_argument("--base-url", default="http://localhost:3001")
     parser.add_argument("--compression", type=float, default=300.0,
                         help="Time compression ratio (default: 300)")
-    parser.add_argument("--noise-count", type=int, default=20)
+    parser.add_argument("--noise-count", type=int, default=10)
     parser.add_argument("--noise-balance", type=float, default=50.0)
     parser.add_argument("--trader-balance", type=float, default=2000.0)
     parser.add_argument("--initial-price", type=float, default=None)
