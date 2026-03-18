@@ -2058,6 +2058,7 @@ source = { editable = "." }
 dependencies = [
     { name = "altair" },
     { name = "httpx" },
+    { name = "openai" },
     { name = "pandas" },
     { name = "pydantic" },
     { name = "python-dotenv" },
@@ -2065,6 +2066,7 @@ dependencies = [
     { name = "sseclient-py" },
     { name = "streamlit" },
     { name = "textual" },
+    { name = "trafilatura" },
 ]
 
 [package.optional-dependencies]
@@ -2096,6 +2098,7 @@ requires-dist = [
     { name = "altair", specifier = ">=6.0.0" },
     { name = "anthropic", marker = "extra == 'llm'", specifier = ">=0.25" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "openai", specifier = ">=2.16.0" },
     { name = "openai", marker = "extra == 'llm'", specifier = ">=1.0" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "pydantic", specifier = ">=2.0" },
@@ -2107,6 +2110,7 @@ requires-dist = [
     { name = "sseclient-py", specifier = ">=1.8" },
     { name = "streamlit", specifier = ">=1.54.0" },
     { name = "textual", specifier = ">=1.0" },
+    { name = "trafilatura", specifier = ">=2.0.0" },
     { name = "trafilatura", marker = "extra == 'llm'", specifier = ">=2.0" },
     { name = "websockets", marker = "extra == 'crypto'", specifier = ">=12.0" },
 ]

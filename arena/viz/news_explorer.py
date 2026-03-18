@@ -22,13 +22,35 @@ def _load_market_config(market_name: str):
     return mod.get_config()
 
 
-# Parse --market from CLI args (streamlit passes args after --)
-_market_name = "iran"  # default
+# Discover available markets by scanning the markets/ directory
+def _discover_markets() -> list[str]:
+    markets_dir = Path(__file__).parent.parent / "markets"
+    return sorted(
+        d.name for d in markets_dir.iterdir()
+        if d.is_dir() and (d / "__init__.py").exists() and d.name != "__pycache__"
+    )
+
+_AVAILABLE_MARKETS = _discover_markets()
+
+# Parse --market from CLI args as default (streamlit passes args after --)
+_default_market = "iran"
 if "--market" in sys.argv:
     idx = sys.argv.index("--market")
     if idx + 1 < len(sys.argv):
-        _market_name = sys.argv[idx + 1]
+        _default_market = sys.argv[idx + 1]
 
+
+def _get_active_market() -> str:
+    return st.session_state.get("market_name", _default_market)
+
+
+def _load_active_config():
+    name = _get_active_market()
+    return name, _load_market_config(name)
+
+
+# These are set lazily in main() after sidebar selection
+_market_name = _default_market
 _market_config = _load_market_config(_market_name)
 DATASETS_DIR = _market_config.datasets_dir
 PHASE1_DIR = _market_config.phase1_dir
@@ -38,14 +60,17 @@ BOT_PERSONAS = _market_config.personas
 # Keep backward-compat module-level name for any remaining references
 
 @st.cache_data
-def load_data() -> pd.DataFrame:
+def load_data(datasets_dir: str = "") -> pd.DataFrame:
     # Load all *_raw.json dataset files and deduplicate by URL
+    datasets_path = Path(datasets_dir) if datasets_dir else DATASETS_DIR
     articles = []
-    for path in sorted(DATASETS_DIR.glob("*_raw.json")):
+    for path in sorted(datasets_path.glob("*_raw.json")):
         with open(path) as f:
             raw = json.load(f)
         for chunk in raw["chunks"]:
             articles.extend(chunk["articles"])
+    if not articles:
+        return pd.DataFrame(columns=["url", "timestamp", "title", "source", "sourcecountry", "language", "dt", "date", "hour"])
     df = pd.DataFrame(articles)
     df = df.drop_duplicates(subset="url", keep="first")
     df["dt"] = pd.to_datetime(df["timestamp"], format="%Y%m%dT%H%M%SZ")
@@ -55,14 +80,15 @@ def load_data() -> pd.DataFrame:
 
 
 @st.cache_data
-def load_accepted_articles(bot_key: str) -> pd.DataFrame | None:
+def load_accepted_articles(bot_key: str, phase1_dir: str = "", market_name: str = "") -> pd.DataFrame | None:
     """Load Phase 1 results for a bot. Looks for *_phase1_results.json files."""
+    phase1_path = Path(phase1_dir) if phase1_dir else PHASE1_DIR
     # Support phase1_bot indirection (e.g. american_believer uses american_trader's results)
     phase1_key = BOT_PERSONAS.get(bot_key, {}).get("phase1_bot", bot_key)
     results = []
-    if not PHASE1_DIR.exists():
+    if not phase1_path.exists():
         return None
-    for f in sorted(PHASE1_DIR.glob(f"{phase1_key}_*_phase1_results.json")):
+    for f in sorted(phase1_path.glob(f"{phase1_key}_*_phase1_results.json")):
         with open(f) as fh:
             data = json.load(fh)
         for art in data.get("results", []):
@@ -129,7 +155,7 @@ def render_bot_tab(df: pd.DataFrame, bot_key: str, persona: dict):
     )
 
     if bot_sub == "Accepted Articles":
-        accepted = load_accepted_articles(bot_key)
+        accepted = load_accepted_articles(bot_key, str(PHASE1_DIR), _market_name)
         if accepted is None or accepted.empty:
             st.info("No Phase 1 results yet. Run the relevance filter to populate.")
         else:
@@ -210,18 +236,19 @@ def render_bot_tab(df: pd.DataFrame, bot_key: str, persona: dict):
 
 
 @st.cache_data
-def load_sim_runs() -> list[tuple[str, dict]]:
+def load_sim_runs(runs_dir: str = "") -> list[tuple[str, dict]]:
     """Load all simulation run JSON files, newest first.
 
     Multi-day runs (sharing a run_id) are merged into a single entry:
     blocks are concatenated, trade_logs and leaderboard come from the last day.
     """
-    if not RUNS_DIR.exists():
+    runs_path = Path(runs_dir) if runs_dir else RUNS_DIR
+    if not runs_path.exists():
         return []
 
     # Load all files
     raw: list[tuple[str, dict]] = []
-    for f in sorted(RUNS_DIR.glob("*.json")):
+    for f in sorted(runs_path.glob("*.json")):
         with open(f) as fh:
             raw.append((f.stem, json.load(fh)))
 
@@ -364,7 +391,7 @@ def _format_duration(td: timedelta) -> str:
 
 def render_simulation_tab():
     """Render the simulation replay tab."""
-    runs = load_sim_runs()
+    runs = load_sim_runs(str(RUNS_DIR))
     if not runs:
         st.info(f"No simulation runs yet. Run `uv run python -m sim.runner --market {_market_name}` to generate data.")
         return
@@ -1498,7 +1525,9 @@ def render_simulation_tab():
 
 
 def main():
-    st.set_page_config(page_title=f"{_market_name.title()} Simulation", layout="wide")
+    global _market_name, _market_config, DATASETS_DIR, PHASE1_DIR, RUNS_DIR, BOT_PERSONAS
+
+    st.set_page_config(page_title="Sybil Arena", layout="wide")
 
     # Shrink metric values so section headers are visually dominant
     st.markdown("""<style>
@@ -1506,13 +1535,26 @@ def main():
     [data-testid="stMetricLabel"] { font-size: 0.85rem; }
     </style>""", unsafe_allow_html=True)
 
-    st.title(f"{_market_config.question} — Simulation")
+    # ── Sidebar: market selector ──
+    selected_market = st.sidebar.selectbox(
+        "Market",
+        options=_AVAILABLE_MARKETS,
+        index=_AVAILABLE_MARKETS.index(_default_market) if _default_market in _AVAILABLE_MARKETS else 0,
+        key="market_name",
+    )
+    _market_name = selected_market
+    _market_config = _load_market_config(_market_name)
+    DATASETS_DIR = _market_config.datasets_dir
+    PHASE1_DIR = _market_config.phase1_dir
+    RUNS_DIR = _market_config.runs_dir
+    BOT_PERSONAS = _market_config.personas
 
-    df = load_data()
+    st.title(f"{_market_config.question}")
 
-    # Filter to January 2026
-    from datetime import date as _date
-    filtered = df[(df["date"] >= _date(2026, 1, 1)) & (df["date"] <= _date(2026, 2, 5))].copy()
+    df = load_data(str(DATASETS_DIR))
+
+    # Use full date range from the dataset
+    filtered = df.copy()
 
     # Filter out disabled bots (e.g. israeli_trader)
     active_bots = {k: v for k, v in BOT_PERSONAS.items()
@@ -1524,6 +1566,10 @@ def main():
     tab_traders = all_tabs[1]
     tab_summary = all_tabs[2]
     tab_daily = all_tabs[3]
+
+    if filtered.empty:
+        st.info("No news data yet. Fetch articles first, then reload.")
+        return
 
     # ═══════════════════════════ SUMMARY ═══════════════════════════
     with tab_summary:
