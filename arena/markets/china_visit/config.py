@@ -5,7 +5,7 @@ from pathlib import Path
 MARKET_QUESTION = "Will Trump visit China by March 31?"
 MARKET_DESCRIPTION = "Resolves YES if Trump travels to mainland China before 2026-03-31"
 MARKET_CATEGORY = "geopolitics"
-INITIAL_PRICE = 0.08
+INITIAL_PRICE = 0.015
 
 CONTEXT = """\
 Context:

@@ -36,7 +36,7 @@ def _default_model(trader_specs: list | None) -> str:
         for s in trader_specs:
             if s.model:
                 return s.model
-    return "google/gemini-2.5-flash"
+    return "google/gemini-3.1-flash-lite-preview"
 
 
 def _load_market_config(market_name: str):
