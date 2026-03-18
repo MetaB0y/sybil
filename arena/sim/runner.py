@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from bots.market_maker import BalancedMarketMaker
+from bots.market_maker import BalancedMarketMaker, FastAnchorMM
 from bots.random_trader import RandomTrader
 from sybil_client import BuyNo, BuyYes, SybilClient
 from sybil_client.types import NANOS_PER_DOLLAR
@@ -96,6 +96,7 @@ class SimulationConfig:
     runs_dir: Path | None = None
     mm_per_side: float = 500.0  # max $ deployed per side per block
     mm_max_blocks: int | None = None  # None = unlimited, 1 = single initial trade
+    mm_strategy: str = "balanced"  # "balanced" or "fast-anchor"
 
 
 async def run_simulation(config: SimulationConfig) -> None:
@@ -194,14 +195,24 @@ async def run_simulation(config: SimulationConfig) -> None:
                 compression_ratio=config.compression_ratio,
             )
 
-            mm = BalancedMarketMaker(
-                client, mm_acct.id,
-                budget_dollars=config.mm_balance,
-                max_per_side_dollars=config.mm_per_side,
-                name="MM",
-                market_ids=[market.id],
-                max_blocks=config.mm_max_blocks,
-            )
+            if config.mm_strategy == "fast-anchor":
+                mm = FastAnchorMM(
+                    client, mm_acct.id,
+                    budget_dollars=config.mm_balance,
+                    max_per_side_dollars=config.mm_per_side,
+                    name="MM",
+                    market_ids=[market.id],
+                    max_blocks=config.mm_max_blocks,
+                )
+            else:
+                mm = BalancedMarketMaker(
+                    client, mm_acct.id,
+                    budget_dollars=config.mm_balance,
+                    max_per_side_dollars=config.mm_per_side,
+                    name="MM",
+                    market_ids=[market.id],
+                    max_blocks=config.mm_max_blocks,
+                )
 
             noise_bots = []
             for i, acct in enumerate(noise_accounts):
@@ -337,6 +348,8 @@ def main():
                         help="Rebalance interval in sim hours (0=disabled, default: 4)")
     parser.add_argument("--mm-max-blocks", type=int, default=None,
                         help="Stop MM after N blocks with trades (default: unlimited, 1=seed only)")
+    parser.add_argument("--mm", default="balanced", choices=["balanced", "fast-anchor"],
+                        help="MM strategy: balanced (slow anchor) or fast-anchor (default: balanced)")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -414,11 +427,13 @@ def main():
         context=market_config.context,
         runs_dir=market_config.runs_dir,
         mm_max_blocks=args.mm_max_blocks,
+        mm_strategy=args.mm,
     )
 
     print(f"{market_config.question}")
     print(f"  Server: {config.base_url}")
     print(f"  Default model: {config.model_name}")
+    print(f"  MM strategy: {config.mm_strategy}")
     print(f"  Compression: {config.compression_ratio}x")
     print(f"  Noise traders: {config.noise_count} @ ${config.noise_balance}")
     print(f"  Trader balance: ${config.trader_balance}")
