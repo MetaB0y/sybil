@@ -81,7 +81,7 @@ class SimulationConfig:
     noise_balance: float = 50.0
     trader_balance: float = 2_000.0
     api_key: str = ""
-    model_name: str = "moonshotai/kimi-k2"
+    model_name: str = "google/gemini-3.1-flash-lite-preview"
     sim_start_hour: str = "00:00"
     sim_end_hour: str = "23:59"
     trader_specs: list[TraderSpec] | None = None

@@ -1,5 +1,59 @@
 """Source domain lists for Texas primary market personas."""
 
+# ── Phase 1 source pools ─────────────────────────────────────────────────────
+# These define the two article sets for phase 1 headline filtering.
+# Sources chosen based on actual volume in our GDELT dataset.
+
+REPUBLICAN_PRESS = [
+    # Core conservative TV/digital
+    "foxnews.com",
+    "washingtonexaminer.com",
+    "breitbart.com",
+    "nypost.com",
+    "townhall.com",
+    "dailycaller.com",
+    "freerepublic.com",
+    "newsbusters.org",
+    "redstate.com",
+    "newsmax.com",
+    "dailywire.com",
+    "nationalreview.com",
+    "washingtontimes.com",
+    "freebeacon.com",
+    "thefederalist.com",
+    "oann.com",
+    # Shared Texas local (both pools)
+    "texastribune.org",
+    "dallasnews.com",
+]
+
+DEMOCRATIC_PRESS = [
+    # Liberal/center-left outlets
+    "rawstory.com",
+    "thedailybeast.com",
+    "cnn.com",
+    "us.cnn.com",
+    "edition.cnn.com",
+    "nbcnews.com",
+    "theguardian.com",
+    "alternet.org",
+    "bostonglobe.com",
+    "newsweek.com",
+    "mediaite.com",
+    "msnbc.com",
+    "npr.org",
+    "vox.com",
+    "theatlantic.com",
+    "slate.com",
+    "nytimes.com",
+    "washingtonpost.com",
+    # Shared Texas local (both pools)
+    "texastribune.org",
+    "dallasnews.com",
+]
+
+# ── Trader persona sources (used later for simulation) ────────────────────────
+
 CONSERVATIVE_SOURCES = [
     "foxnews.com",
     "nypost.com",

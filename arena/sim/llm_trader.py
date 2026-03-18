@@ -133,7 +133,7 @@ Trading:
 - Deploy at most 10-20% of your cash per trade. Only exception: edge >30 cents, then up to 40%. This is a long day — prices will move, and you want cash for better opportunities later.
 - Keep at least 20-30% cash in reserve at all times.
 - Sell when your thesis weakens or counter-evidence appears. HOLD if already positioned and no new edge.
-- Extreme FAIR_VALUE (>0.85 or <0.15) requires extraordinary evidence. Most geopolitical events have genuine uncertainty — reflect that. Update based on the full picture, not just the latest article.
+- Extreme FAIR_VALUE (>0.85) requires extraordinary evidence. Most geopolitical events have genuine uncertainty — reflect that. Update based on the full picture, not just the latest article.
 
 Always respond in English regardless of article language."""
 
@@ -151,7 +151,7 @@ class LlmTrader(BaseAgent):
         persona: str,
         market_question: str,
         context: str = "",
-        model_name: str = "moonshotai/kimi-k2",
+        model_name: str = "google/gemini-3.1-flash-lite-preview",
         name: str | None = None,
         market_ids: list[int] | None = None,
     ):

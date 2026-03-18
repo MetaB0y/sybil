@@ -2,13 +2,43 @@
 
 from .sources import (
     CONSERVATIVE_SOURCES,
+    DEMOCRATIC_PRESS,
     LIBERAL_SOURCES,
-    TEXAS_LOCAL_SOURCES,
     POLITICAL_INSIDER_SOURCES,
+    REPUBLICAN_PRESS,
+    TEXAS_LOCAL_SOURCES,
     BALANCED_SOURCES,
 )
 
 BOT_PERSONAS = {
+    # ── Phase 1 source pools (temp personas for headline filtering) ───────
+    "republican_press": {
+        "name": "Republican Press",
+        "description": "Conservative/right-leaning media source pool for phase 1 filtering",
+        "model": None,
+        "sources": REPUBLICAN_PRESS,
+        "phase1_bot": "republican_press",
+        "enabled": True,
+        "persona": {
+            "identity": "placeholder — phase 1 only",
+            "read_style": [],
+            "trade_style": [],
+        },
+    },
+    "democratic_press": {
+        "name": "Democratic Press",
+        "description": "Liberal/left-leaning media source pool for phase 1 filtering",
+        "model": None,
+        "sources": DEMOCRATIC_PRESS,
+        "phase1_bot": "democratic_press",
+        "enabled": True,
+        "persona": {
+            "identity": "placeholder — phase 1 only",
+            "read_style": [],
+            "trade_style": [],
+        },
+    },
+    # ── Trader personas (used in simulation) ──────────────────────────────
     "maga_trader": {
         "name": "MAGA Trader",
         "description": "Pro-Trump populist who favors Paxton and distrusts the GOP establishment",

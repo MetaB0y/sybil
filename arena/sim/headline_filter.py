@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DEFAULT_MODEL = "google/gemini-2.5-flash"
+DEFAULT_MODEL = "google/gemini-3.1-flash-lite-preview"
 
 
 def _load_market_config(market_name: str):
