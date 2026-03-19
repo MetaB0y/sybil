@@ -46,6 +46,24 @@ def _load_market_config(market_name: str):
     return mod.get_config()
 
 
+def _lookup_polymarket_price(prices_file: Path, date_str: str) -> float | None:
+    """Look up the Polymarket YES price at the start of a given date (YYYYMMDD)."""
+    import json
+    if not prices_file.exists():
+        return None
+    try:
+        with open(prices_file) as f:
+            prices = json.load(f)
+        # Format: [{"timestamp": "2026-01-26T00:00:36+00:00", "yes_price": 0.585}, ...]
+        target = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+        for entry in prices:
+            if entry["timestamp"].startswith(target):
+                return entry["yes_price"]
+    except Exception:
+        pass
+    return None
+
+
 def _resolve_phase1_path(market_config, bot_key: str, date: str | None = None) -> str:
     """Resolve the phase1 results path for a bot key.
 
@@ -367,6 +385,14 @@ def main():
     # Load market config
     market_config = _load_market_config(args.market)
     initial_price = args.initial_price if args.initial_price is not None else market_config.initial_price
+
+    # Auto-lookup Polymarket price for the first sim date if available
+    first_date = (args.dates or [args.date])[0] if (args.dates or args.date) else None
+    if args.initial_price is None and first_date and market_config.polymarket_prices_file:
+        poly_price = _lookup_polymarket_price(market_config.polymarket_prices_file, first_date)
+        if poly_price is not None:
+            initial_price = poly_price
+            print(f"  Initial price from Polymarket: {initial_price:.4f} (date {first_date})")
 
     # Build trader specs from --traders arg or defaults
     trader_specs = None
