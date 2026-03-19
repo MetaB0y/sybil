@@ -135,6 +135,11 @@ Trading:
 - Sell when your thesis weakens or counter-evidence appears. HOLD if already positioned and no new edge.
 - Extreme FAIR_VALUE (>0.85) requires extraordinary evidence. Most geopolitical events have genuine uncertainty — reflect that. Update based on the full picture, not just the latest article.
 
+Evidence discipline:
+- Base your FAIR_VALUE only on information in the article(s) provided and the current market price. Do NOT use prior knowledge or information from previous articles.
+- Each decision is independent. The fact that you previously estimated a high/low FV does not mean this article supports the same conclusion.
+- If the article contains no information relevant to the market question, your FV should stay near the current market price. Irrelevant news is not evidence.
+
 Always respond in English regardless of article language."""
 
 
@@ -682,6 +687,15 @@ MOTIVATION: [1 sentence thesis]"""
         # Filter out any BUY orders — rebalance is sell-only
         orders = [o for o in orders if isinstance(o, (SellYes, SellNo))]
         orders = self._validate_orders(orders, block)
+
+        # Directional consistency: same check as on_block()
+        yes_nanos, _ = self.filter_markets(block)[market_id]
+        cur_yes = yes_nanos / NANOS_PER_DOLLAR
+        orders = [o for o in orders if not (
+            isinstance(o, SellNo) and fair_value < cur_yes  # bearish shouldn't sell NO
+        ) and not (
+            isinstance(o, SellYes) and fair_value > cur_yes  # bullish shouldn't sell YES
+        )]
 
         # Deduct pending sells from local positions to prevent double-selling
         # when on_block fires before these orders fill.
