@@ -311,6 +311,9 @@ async def run_simulation(config: SimulationConfig) -> None:
                 bot.stop()
             await asyncio.gather(*tasks, return_exceptions=True)
 
+            # Wait for pending orders to settle (TTL up to 5 blocks × 2s)
+            await asyncio.sleep(12)
+
             for t in traders:
                 trader_state[t.name] = t.snapshot_state()
 
