@@ -50,4 +50,4 @@ _MARKET_DIR = Path(__file__).parent
 DATASETS_DIR = _MARKET_DIR / "datasets"
 PHASE1_DIR = _MARKET_DIR / "phase1"
 RUNS_DIR = _MARKET_DIR / "runs"
-POLYMARKET_PRICES_FILE = None
+POLYMARKET_PRICES_FILE = _MARKET_DIR / "polymarket_prices.json"

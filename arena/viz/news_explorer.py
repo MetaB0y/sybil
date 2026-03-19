@@ -719,19 +719,16 @@ def render_simulation_tab():
     # ═══════════ PRICE CHART ═══════════
     st.subheader("Price + Trader Activity")
 
-    # Build price data — include all blocks, forward-fill nulls
+    # Build price data — only include blocks with actual clearing prices
     price_rows = []
-    last_price = None
     for b in blocks:
         p = b["yes_price"]
-        if p is not None:
-            last_price = p
         t = block_times.get(b["height"])
         time_label = t.strftime("%b %d %H:%M") if t else ""
         price_rows.append({
             "block": b["height"],
             "time": time_label,
-            "yes_price": last_price,
+            "yes_price": p,
             "volume": b.get("total_volume_nanos", 0) / 1e9,
             "fills": b.get("orders_filled", 0),
         })
@@ -886,29 +883,19 @@ def render_simulation_tab():
             labelPadding=5,
         )
 
-        if show_poly and block_times:
-            # Hourly aggregation mode — truncate block datetimes to the hour
-            hour_map = {h: bt.replace(minute=0, second=0, microsecond=0) for h, bt in block_times.items()}
-            price_hourly = price_df.copy()
-            price_hourly["hour"] = price_hourly["block"].map(hour_map)
-            price_hourly = price_hourly.groupby("hour", as_index=False)["yes_price"].mean()
-
-            base = alt.Chart(price_hourly).mark_line(color="#4A90D9", strokeWidth=2).encode(
-                x=alt.X("hour:T", title="Time"),
-                y=alt.Y("yes_price:Q", title="YES Price", scale=alt.Scale(zero=False)),
-                tooltip=[alt.Tooltip("hour:T", title="Hour"), alt.Tooltip("yes_price:Q", format=".4f")],
-            )
-        else:
-            base = alt.Chart(price_df).mark_line(color="#4A90D9", strokeWidth=2).encode(
-                x=alt.X("block:Q", title="", axis=shared_x_axis,
-                        scale=alt.Scale(domain=x_domain)),
-                y=alt.Y("yes_price:Q", title="YES Price", scale=alt.Scale(zero=False)),
-                tooltip=["block:Q", "time:N", alt.Tooltip("yes_price:Q", format=".4f")],
-            )
+        # Always use block-based rendering for sim data
+        base = alt.Chart(price_df).mark_line(
+            color="#4A90D9", strokeWidth=1.5, fillOpacity=0,
+        ).encode(
+            x=alt.X("block:Q", title="", axis=shared_x_axis,
+                    scale=alt.Scale(domain=x_domain)),
+            y=alt.Y("yes_price:Q", title="YES Price", scale=alt.Scale(zero=False)),
+            tooltip=["block:Q", "time:N", alt.Tooltip("yes_price:Q", format=".4f")],
+        )
 
         layers = [base]
 
-        if trader_df is not None and not trader_df.empty and not show_poly:
+        if trader_df is not None and not trader_df.empty:
             has_multi = trader_df["trader"].nunique() > 1 if "trader" in trader_df.columns else False
             color_enc = alt.Color("trader:N", title="Trader") if has_multi else alt.value("#E74C3C")
 
@@ -949,70 +936,58 @@ def render_simulation_tab():
                 )
                 layers.append(no_trade_dots)
 
-        # Polymarket price overlay (hourly aggregation)
+        # Polymarket price overlay — map poly timestamps to block numbers
         if show_poly and block_times:
             from datetime import datetime, timezone
             poly_data = json.loads(poly_file.read_text())
             sorted_bt = sorted(block_times.items())
-            block_ts = [
-                (h, bt.replace(tzinfo=timezone.utc).timestamp() if bt.tzinfo is None else bt.timestamp())
+            # Build timestamp->block mapping for interpolation
+            block_ts_pairs = [
+                (bt.replace(tzinfo=timezone.utc).timestamp() if bt.tzinfo is None else bt.timestamp(), h)
                 for h, bt in sorted_bt
             ]
+            min_ts, max_ts = block_ts_pairs[0][0], block_ts_pairs[-1][0]
+            min_block, max_block = block_ts_pairs[0][1], block_ts_pairs[-1][1]
+
             poly_rows = []
             for pt in poly_data:
                 pt_ts = pt["unix_ts"]
-                if pt_ts < block_ts[0][1] or pt_ts > block_ts[-1][1]:
+                if pt_ts < min_ts or pt_ts > max_ts:
                     continue
-                dt = datetime.utcfromtimestamp(pt_ts).replace(minute=0, second=0, microsecond=0)
-                poly_rows.append({"hour": dt, "poly_price": pt["yes_price"]})
+                # Linearly interpolate block number from timestamp
+                frac = (pt_ts - min_ts) / (max_ts - min_ts) if max_ts > min_ts else 0
+                block_num = min_block + frac * (max_block - min_block)
+                poly_rows.append({"block": block_num, "poly_price": pt["yes_price"]})
 
             if poly_rows:
                 poly_df = pd.DataFrame(poly_rows)
-                poly_df = poly_df.groupby("hour", as_index=False)["poly_price"].mean()
                 poly_line = alt.Chart(poly_df).mark_line(
-                    color="#E67E22", strokeWidth=2, strokeDash=[6, 3],
+                    color="#E67E22", strokeWidth=2, strokeDash=[6, 3], fillOpacity=0,
                 ).encode(
-                    x="hour:T",
+                    x=alt.X("block:Q", scale=alt.Scale(domain=x_domain)),
                     y=alt.Y("poly_price:Q"),
-                    tooltip=[alt.Tooltip("hour:T", title="Hour"), alt.Tooltip("poly_price:Q", title="Polymarket", format=".4f")],
+                    tooltip=[alt.Tooltip("block:Q", title="Block", format=".0f"), alt.Tooltip("poly_price:Q", title="Polymarket", format=".4f")],
                 )
                 layers.append(poly_line)
 
         price_chart = alt.layer(*layers).properties(height=400, width="container")
-        st.altair_chart(price_chart, use_container_width=True)
 
-        # Volume chart — add an invisible color legend to reserve the same space as price chart
-        if show_poly and block_times:
-            vol_hourly = price_df.copy()
-            hour_map_vol = {h: bt.replace(minute=0, second=0, microsecond=0) for h, bt in block_times.items()}
-            vol_hourly["hour"] = vol_hourly["block"].map(hour_map_vol)
-            vol_hourly = vol_hourly.groupby("hour", as_index=False).agg({"volume": "sum", "fills": "sum"})
-            vol_base = alt.Chart(vol_hourly).mark_bar(color="#7FB3D8", opacity=0.7).encode(
-                x=alt.X("hour:T", title="Time"),
-                y=alt.Y("volume:Q", title="Volume ($)"),
-                tooltip=[
-                    alt.Tooltip("hour:T", title="Hour"),
-                    alt.Tooltip("volume:Q", title="Volume ($)", format=",.2f"),
-                    alt.Tooltip("fills:Q", title="Fills"),
-                ],
-            )
-        else:
-            vol_base = alt.Chart(price_df).mark_bar(color="#7FB3D8", opacity=0.7).encode(
-                x=alt.X("block:Q", title="", axis=shared_x_axis,
-                        scale=alt.Scale(domain=x_domain)),
-                y=alt.Y("volume:Q", title="Volume ($)"),
-                tooltip=[
-                    alt.Tooltip("block:Q", title="Batch"),
-                    alt.Tooltip("time:N", title="Time"),
-                    alt.Tooltip("volume:Q", title="Volume ($)", format=",.2f"),
-                    alt.Tooltip("fills:Q", title="Fills"),
-                ],
-            )
+        # Volume chart — always block-based
+        vol_base = alt.Chart(price_df).mark_bar(color="#7FB3D8", opacity=0.7).encode(
+            x=alt.X("block:Q", title="", axis=shared_x_axis,
+                    scale=alt.Scale(domain=x_domain)),
+            y=alt.Y("volume:Q", title="Volume ($)"),
+            tooltip=[
+                alt.Tooltip("block:Q", title="Batch"),
+                alt.Tooltip("time:N", title="Time"),
+                alt.Tooltip("volume:Q", title="Volume ($)", format=",.2f"),
+                alt.Tooltip("fills:Q", title="Fills"),
+            ],
+        )
         # Invisible points layer with same color encoding to reserve matching legend space
-        if trader_df is not None and not trader_df.empty and not show_poly:
+        if trader_df is not None and not trader_df.empty:
             has_multi = trader_df["trader"].nunique() > 1 if "trader" in trader_df.columns else False
             if has_multi:
-                # One row per unique trader so legend reserves full width
                 dummy_df = trader_df.drop_duplicates("trader")[["trader", "block"]].copy()
                 dummy_legend = alt.Chart(dummy_df).mark_point(opacity=0).encode(
                     x=alt.X("block:Q"),
@@ -1024,7 +999,12 @@ def render_simulation_tab():
                 vol_chart = vol_base.properties(height=120, width="container")
         else:
             vol_chart = vol_base.properties(height=120, width="container")
-        st.altair_chart(vol_chart, use_container_width=True)
+
+        # Combine price and volume into a single vconcat chart so they stay aligned
+        combined = alt.vconcat(price_chart, vol_chart, spacing=5).resolve_scale(
+            x="shared",
+        )
+        st.altair_chart(combined, use_container_width=True)
     except ImportError:
         st.line_chart(price_df.set_index("block")["yes_price"], height=350)
 
