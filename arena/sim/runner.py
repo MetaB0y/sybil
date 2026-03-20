@@ -197,12 +197,15 @@ async def run_simulation(config: SimulationConfig) -> None:
                     spec_articles[spec.name] = arts
                     print(f"  {spec.name}: {len(arts)} articles from {path}")
 
-            if not spec_articles:
-                print(f"  ERROR: No articles for day {day_label}. Skipping.")
+            if spec_articles:
+                first_articles = next(iter(spec_articles.values()))
+                article_date = first_articles[0].timestamp.date()
+            elif date_str:
+                article_date = datetime.strptime(date_str, "%Y%m%d").date()
+            else:
+                print(f"  ERROR: No articles and no date for day {day_label}. Skipping.")
                 continue
 
-            first_articles = next(iter(spec_articles.values()))
-            article_date = first_articles[0].timestamp.date()
             h, m = (int(x) for x in config.sim_start_hour.split(":"))
             sim_start = datetime(article_date.year, article_date.month, article_date.day, h, m)
             h_end, m_end = (int(x) for x in config.sim_end_hour.split(":"))
@@ -249,16 +252,15 @@ async def run_simulation(config: SimulationConfig) -> None:
 
             traders = []
             for spec in specs:
-                if spec.name not in spec_articles:
-                    continue
-                # Only include articles within the sim window
+                # Include articles within the sim window (empty list if none)
                 window_articles = [
-                    a for a in spec_articles[spec.name]
+                    a for a in spec_articles.get(spec.name, [])
                     if sim_start <= a.timestamp <= sim_end
                 ]
-                if not window_articles:
-                    print(f"  {spec.name}: 0 articles in {config.sim_start_hour}–{config.sim_end_hour}, skipping")
-                    continue
+                if window_articles:
+                    print(f"  {spec.name}: {len(window_articles)} articles in window")
+                else:
+                    print(f"  {spec.name}: 0 articles (will still rebalance)")
                 t = LlmTrader(
                     client, trader_accounts[spec.name],
                     window_articles, clock,
