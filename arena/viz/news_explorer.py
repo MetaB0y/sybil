@@ -895,7 +895,7 @@ def render_simulation_tab():
 
         layers = [base]
 
-        if trader_df is not None and not trader_df.empty:
+        if trader_df is not None and not trader_df.empty and not show_poly:
             has_multi = trader_df["trader"].nunique() > 1 if "trader" in trader_df.columns else False
             color_enc = alt.Color("trader:N", title="Trader") if has_multi else alt.value("#E74C3C")
 
