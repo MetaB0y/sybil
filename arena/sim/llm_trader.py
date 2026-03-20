@@ -136,9 +136,10 @@ Trading:
 - Extreme FAIR_VALUE (>0.85) requires extraordinary evidence. Most geopolitical events have genuine uncertainty — reflect that. Update based on the full picture, not just the latest article.
 
 Evidence discipline:
-- Base your FAIR_VALUE only on information in the article(s) provided and the current market price. Do NOT use prior knowledge or information from previous articles.
-- Each decision is independent. The fact that you previously estimated a high/low FV does not mean this article supports the same conclusion.
-- If the article contains no information relevant to the market question, your FV should stay near the current market price. Irrelevant news is not evidence.
+- Base your FAIR_VALUE on the article(s) provided, the current market price, and your prior fair value estimate.
+- If the article contains no NEW information relevant to the market question, keep your FV near your PRIOR fair value — do not reset to the market price. Irrelevant news is not a reason to change your view.
+- Only revise your FV significantly when an article provides DIRECT evidence for or against the market question. Tangential news warrants at most a 1-2 cent adjustment.
+- Do NOT inject outside knowledge. But DO maintain conviction from previous evidence unless new information contradicts it.
 
 Always respond in English regardless of article language."""
 
@@ -301,6 +302,14 @@ class LlmTrader(BaseAgent):
         portfolio_value = balance + yes_shares * yes_price + no_shares * (1 - yes_price)
         cash_pct = (balance / portfolio_value * 100) if portfolio_value > 0 else 100
 
+        # Extract last fair value estimate for anchoring
+        last_fv = None
+        for rec in reversed(self.trade_log):
+            if rec.fair_value > 0:
+                last_fv = rec.fair_value
+                break
+        last_fv_line = f"\n- Your last fair value estimate: {last_fv:.2f}" if last_fv else ""
+
         context_line = f"\n{self.context}" if self.context else ""
 
         # Build article section
@@ -357,7 +366,7 @@ Market: "{self.market_question}"{context_line}
 Current state:
 - YES price: ${yes_price:.4f} | NO price: ${no_price:.4f} (last 5 YES: {price_trend})
 - Your portfolio: ${balance:.2f} cash ({cash_pct:.0f}% of portfolio), {yes_shares} YES shares, {no_shares} NO shares
-- Estimated portfolio value: ~${portfolio_value:.2f}
+- Estimated portfolio value: ~${portfolio_value:.2f}{last_fv_line}
 
 Recent trades:
 {self._format_recent_trades()}
