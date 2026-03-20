@@ -5,7 +5,7 @@ from pathlib import Path
 MARKET_QUESTION = "Will John Cornyn win the 2026 Texas Republican Senate primary?"
 MARKET_DESCRIPTION = "Resolves YES if Cornyn wins the TX GOP Senate primary"
 MARKET_CATEGORY = "politics"
-INITIAL_PRICE = 0.61
+INITIAL_PRICE = 0.25
 
 CONTEXT = """\
 Context:
