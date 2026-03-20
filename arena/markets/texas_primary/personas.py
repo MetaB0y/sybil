@@ -10,28 +10,14 @@ BOT_PERSONAS = {
     "republican_press": {
         "name": "Republican Press",
         "description": "Conservative/right-leaning media source pool for phase 1 filtering",
-        "model": None,
         "sources": REPUBLICAN_PRESS,
         "phase1_bot": "republican_press",
-        "enabled": True,
-        "persona": {
-            "identity": "placeholder — phase 1 only",
-            "read_style": [],
-            "trade_style": [],
-        },
     },
     "democratic_press": {
         "name": "Democratic Press",
         "description": "Liberal/left-leaning media source pool for phase 1 filtering",
-        "model": None,
         "sources": DEMOCRATIC_PRESS,
         "phase1_bot": "democratic_press",
-        "enabled": True,
-        "persona": {
-            "identity": "placeholder — phase 1 only",
-            "read_style": [],
-            "trade_style": [],
-        },
     },
     # ── LLM trader personas (3 archetypes × 2 source pools) ─────────────
     # Republican press readers
