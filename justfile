@@ -167,3 +167,21 @@ docs-read note:
 # Set last_verified to today (requires notesmd-cli)
 docs-verify note:
     notesmd-cli frontmatter "{{note}}" --vault docs/architecture --edit --key last_verified --value "$(date +%Y-%m-%d)"
+
+# ── Docker ─────────────────────────────────────────────────────────────────
+
+# Build Docker image
+docker-build:
+    docker compose build
+
+# Start all services (API + VictoriaMetrics + Tempo + Grafana)
+docker-up:
+    docker compose up -d
+
+# Stop all services
+docker-down:
+    docker compose down
+
+# Tail API logs
+docker-logs:
+    docker compose logs -f sybil-api

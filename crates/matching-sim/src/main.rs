@@ -45,8 +45,8 @@ fn main() {
     let export_json = get_arg_value(&args, "--export-json");
     let export_comparison = get_arg_value(&args, "--export-comparison");
     let show_charts = args.iter().any(|a| a == "--show-charts");
-    let mm_budget_scale: Option<f64> = get_arg_value(&args, "--mm-budget-scale")
-        .and_then(|v| v.parse().ok());
+    let mm_budget_scale: Option<f64> =
+        get_arg_value(&args, "--mm-budget-scale").and_then(|v| v.parse().ok());
 
     #[cfg(feature = "conic")]
     let conic_config = build_conic_config(&args);
@@ -80,7 +80,14 @@ fn main() {
 
     if matches!(
         solver_choice,
-        SolverChoice::Lp | SolverChoice::Eg | SolverChoice::Conic | SolverChoice::DecomposedLp | SolverChoice::DecomposedEg | SolverChoice::DecomposedConic | SolverChoice::IterLp | SolverChoice::DecomposedIterLp
+        SolverChoice::Lp
+            | SolverChoice::Eg
+            | SolverChoice::Conic
+            | SolverChoice::DecomposedLp
+            | SolverChoice::DecomposedEg
+            | SolverChoice::DecomposedConic
+            | SolverChoice::IterLp
+            | SolverChoice::DecomposedIterLp
     ) && (verbose || export_json.is_some() || show_charts)
     {
         // Detailed pipeline run with step-by-step output
@@ -137,8 +144,12 @@ fn print_help() {
     println!();
     println!("Solver options:");
     println!("  --solver <S>         Solver to use:");
-    println!("                         lp (default, LP + entropy smoothing, requires --features lp)");
-    println!("                         eg (Eisenberg-Gale / Fisher market, requires --features lp)");
+    println!(
+        "                         lp (default, LP + entropy smoothing, requires --features lp)"
+    );
+    println!(
+        "                         eg (Eisenberg-Gale / Fisher market, requires --features lp)"
+    );
     println!("                         conic (Conic EG via Clarabel, requires --features conic)");
     println!("                         milp (MIQCQP via SCIP)");
     println!("                         all (compare all)");
@@ -271,7 +282,6 @@ impl FillStats {
                         user_welfare += welfare;
                         user_volume += fill_qty;
                     }
-
                 }
             }
         }
@@ -441,7 +451,7 @@ fn print_market_details(problem: &Problem, result: &PipelineResult, sample_marke
     println!("{table}");
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables, clippy::too_many_arguments)]
 fn run_detailed_pipeline(
     base_config: &ScenarioConfig,
     num_batches: usize,
@@ -504,12 +514,14 @@ fn run_detailed_pipeline(
             }
             #[cfg(feature = "lp")]
             SolverChoice::DecomposedLp => {
-                let solver = matching_solver::DecomposedSolver::new(matching_solver::LpSolver::new());
+                let solver =
+                    matching_solver::DecomposedSolver::new(matching_solver::LpSolver::new());
                 solver.solve(&problem)
             }
             #[cfg(feature = "lp")]
             SolverChoice::DecomposedEg => {
-                let solver = matching_solver::DecomposedSolver::new(matching_solver::EgSolver::new());
+                let solver =
+                    matching_solver::DecomposedSolver::new(matching_solver::EgSolver::new());
                 solver.solve(&problem)
             }
             #[cfg(feature = "conic")]
@@ -526,7 +538,8 @@ fn run_detailed_pipeline(
             }
             #[cfg(feature = "lp")]
             SolverChoice::DecomposedIterLp => {
-                let solver = matching_solver::DecomposedSolver::new(matching_solver::IterLpSolver::new());
+                let solver =
+                    matching_solver::DecomposedSolver::new(matching_solver::IterLpSolver::new());
                 solver.solve(&problem)
             }
             _ => unreachable!("only LP/EG/Conic/IterLP/Decomposed reach run_detailed_pipeline"),
@@ -555,8 +568,14 @@ fn run_detailed_pipeline(
                 println!("─────────────────────────────────────────");
                 println!("  Solve time:     {:.3}s", result.total_time_secs);
                 println!("  Fills:          {}", result.result.fills.len());
-                println!("  Welfare:        {}", format_welfare(result.result.total_welfare));
-                println!("  Volume:         {}", format_qty(result.result.total_quantity_filled));
+                println!(
+                    "  Welfare:        {}",
+                    format_welfare(result.result.total_welfare)
+                );
+                println!(
+                    "  Volume:         {}",
+                    format_qty(result.result.total_quantity_filled)
+                );
 
                 if !problem.mm_constraints.is_empty() {
                     let mm_fills: HashMap<u64, (u64, u64)> = result
@@ -616,8 +635,7 @@ fn run_detailed_pipeline(
             print_verification_result(&verification);
 
             // Also run matching-solver's verifier which checks position balance
-            let solver_verification =
-                matching_solver::verify(&problem_with_arb, &result.result);
+            let solver_verification = matching_solver::verify(&problem_with_arb, &result.result);
             print_solver_verification(&solver_verification);
         }
 
@@ -796,10 +814,7 @@ fn print_solver_verification(result: &matching_solver::VerificationResult) {
             }
         }
         if !other_violations.is_empty() {
-            println!(
-                "  Other violations: {} found",
-                other_violations.len()
-            );
+            println!("  Other violations: {} found", other_violations.len());
             for v in other_violations.iter().take(5) {
                 println!("    {:?}: {}", v.kind, v.details);
             }
@@ -1113,7 +1128,6 @@ fn create_milp_solver(milp_timeout: Option<f64>, mm_mode: MmBudgetMode) -> MilpS
     })
 }
 
-
 #[derive(Default)]
 struct SolverResults {
     name: String,
@@ -1294,7 +1308,8 @@ fn run_solver_with_witness(
         }
         #[cfg(feature = "lp")]
         SolverChoice::DecomposedIterLp => {
-            let solver = matching_solver::DecomposedSolver::new(matching_solver::IterLpSolver::new());
+            let solver =
+                matching_solver::DecomposedSolver::new(matching_solver::IterLpSolver::new());
             let pipeline_result = solver.solve(problem);
             let witness = witness_from_pipeline(problem, &pipeline_result);
             (pipeline_result.result, witness)
@@ -1315,10 +1330,7 @@ fn witness_from_pipeline(problem: &Problem, result: &PipelineResult) -> BlockWit
 
 /// Build a BlockWitness from a MilpResult.
 /// Includes synthetic arb orders so verifier can validate position balance.
-fn witness_from_milp(
-    problem: &Problem,
-    result: &matching_solver::MilpResult,
-) -> BlockWitness {
+fn witness_from_milp(problem: &Problem, result: &matching_solver::MilpResult) -> BlockWitness {
     let mut all_orders: Vec<&Order> = problem.orders.iter().collect();
     all_orders.extend(result.arbitrage_orders.iter());
 
@@ -1358,7 +1370,7 @@ fn witness_from_milp(
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables, clippy::too_many_arguments)]
 fn run_simulation(
     base_config: &ScenarioConfig,
     solver_choice: &SolverChoice,
@@ -1601,11 +1613,7 @@ fn print_results(results: &[SolverResults], choice: &SolverChoice) {
         if let Some(ref v) = result.verification {
             if !v.valid {
                 println!();
-                println!(
-                    "{}: {} violations",
-                    result.name,
-                    v.violations.len()
-                );
+                println!("{}: {} violations", result.name, v.violations.len());
                 for (i, violation) in v.violations.iter().enumerate().take(10) {
                     println!("  {}. {:?}: {}", i + 1, violation.kind, violation.details);
                 }
@@ -1936,8 +1944,7 @@ fn print_solver_diff(problem: &Problem, best: &SolverDetail, other: &SolverDetai
             "", "", "", "", "", "", "", ""
         );
 
-        for (i, (fill, order, welfare, market, order_type)) in
-            best_only.iter().take(15).enumerate()
+        for (i, (fill, order, welfare, market, order_type)) in best_only.iter().take(15).enumerate()
         {
             println!(
                 "  {:>3} │ {:>7} │ {:>8} │ {:>8} │ {:>6.1}c │ {:>6.1}c │ {:>5} │ {:>8}",

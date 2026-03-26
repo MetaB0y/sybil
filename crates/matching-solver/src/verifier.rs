@@ -216,8 +216,11 @@ impl Verifier {
                 kind: ViolationKind::WelfareMismatch,
                 details: format!(
                     "Computed welfare {} - minting_cost {} = {} != reported welfare {} (diff={})",
-                    computed_welfare, result.minting_cost, expected_welfare,
-                    result.total_welfare, welfare_diff
+                    computed_welfare,
+                    result.minting_cost,
+                    expected_welfare,
+                    result.total_welfare,
+                    welfare_diff
                 ),
             });
         }
@@ -317,8 +320,7 @@ impl Verifier {
             };
 
             for (market_id, marginal) in order.marginal_payoffs_f64() {
-                *net_position.entry(market_id).or_insert(0.0) +=
-                    marginal * fill.fill_qty as f64;
+                *net_position.entry(market_id).or_insert(0.0) += marginal * fill.fill_qty as f64;
             }
         }
 

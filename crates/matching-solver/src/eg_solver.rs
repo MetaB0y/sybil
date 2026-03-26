@@ -113,11 +113,7 @@ impl EgSolver {
         let mm_order_map: HashMap<usize, (usize, MmSide)> = orders
             .iter()
             .enumerate()
-            .filter_map(|(i, o)| {
-                mm_order_info_by_id
-                    .get(&o.id)
-                    .map(|&info| (i, info))
-            })
+            .filter_map(|(i, o)| mm_order_info_by_id.get(&o.id).map(|&info| (i, info)))
             .collect();
 
         // Group MM orders by constraint index
@@ -144,9 +140,7 @@ impl EgSolver {
 
         // If no MM orders, just run the LP directly (EG reduces to LP)
         if !has_mm {
-            return self.solve_lp_only(
-                problem, orders, &markets, &market_to_group, start,
-            );
+            return self.solve_lp_only(problem, orders, &markets, &market_to_group, start);
         }
 
         // ================================================================
@@ -254,9 +248,7 @@ impl EgSolver {
                 .collect();
 
             // ΔU_k = U_k(s) - U_k(q)
-            let delta_u: Vec<f64> = (0..num_mm)
-                .map(|k| u_k_s[k] - u_k[k])
-                .collect();
+            let delta_u: Vec<f64> = (0..num_mm).map(|k| u_k_s[k] - u_k[k]).collect();
 
             // R(q) = Σ_{j∉MM} w_j * q_j, R(s) = Σ_{j∉MM} w_j * s_j
             let r_q: f64 = (0..n)
@@ -309,10 +301,10 @@ impl EgSolver {
 
             // Update q: q^{t+1} = (1 - γ) * q^t + γ * s^t
             let mut max_q_change: f64 = 0.0;
-            for i in 0..n {
-                let q_new = (1.0 - gamma) * q[i] + gamma * sol.q_values[i];
-                max_q_change = max_q_change.max((q_new - q[i]).abs());
-                q[i] = q_new;
+            for (i, q_i) in q.iter_mut().enumerate() {
+                let q_new = (1.0 - gamma) * *q_i + gamma * sol.q_values[i];
+                max_q_change = max_q_change.max((q_new - *q_i).abs());
+                *q_i = q_new;
             }
 
             // Compute EG objective: Σ_k B_k * ln(U_k) + Σ_{j ∉ MM} w_j * q_j
@@ -386,11 +378,7 @@ impl EgSolver {
 
         // Budget trim: integer rounding breaks KKT budget absorption.
         if has_mm {
-            trim_mm_budget_overflows(
-                &mut result,
-                &problem.mm_constraints,
-                &mm_order_info_by_id,
-            );
+            trim_mm_budget_overflows(&mut result, &problem.mm_constraints, &mm_order_info_by_id);
         }
 
         // Create arb orders after all post-processing
@@ -518,13 +506,27 @@ mod tests {
         let market = problem.markets.add_binary("market");
 
         problem.orders.push(outcome_sell(
-            &problem.markets, 100, market, 0, 500_000_000, 1000,
+            &problem.markets,
+            100,
+            market,
+            0,
+            500_000_000,
+            1000,
         ));
         problem.orders.push(outcome_sell(
-            &problem.markets, 101, market, 1, 500_000_000, 1000,
+            &problem.markets,
+            101,
+            market,
+            1,
+            500_000_000,
+            1000,
         ));
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 100,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            100,
         ));
 
         let solver = EgSolver::new();
@@ -544,11 +546,15 @@ mod tests {
         let market = problem.markets.add_binary("market");
 
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 100,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            100,
         ));
-        problem.orders.push(simple_no_buy(
-            &problem.markets, 2, market, 500_000_000, 100,
-        ));
+        problem
+            .orders
+            .push(simple_no_buy(&problem.markets, 2, market, 500_000_000, 100));
 
         let solver = EgSolver::new();
         let result = solver.solve(&problem);
@@ -573,9 +579,15 @@ mod tests {
         group.add_market(m2);
         problem.add_market_group(group);
 
-        problem.orders.push(simple_yes_buy(&problem.markets, 1, m0, 400_000_000, 100));
-        problem.orders.push(simple_yes_buy(&problem.markets, 2, m1, 350_000_000, 100));
-        problem.orders.push(simple_yes_buy(&problem.markets, 3, m2, 300_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 1, m0, 400_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 2, m1, 350_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 3, m2, 300_000_000, 100));
 
         let solver = EgSolver::new();
         let result = solver.solve(&problem);
@@ -602,16 +614,23 @@ mod tests {
         let market = problem.markets.add_binary("market");
 
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 300_000_000, 100,
+            &problem.markets,
+            1,
+            market,
+            300_000_000,
+            100,
         ));
-        problem.orders.push(simple_no_buy(
-            &problem.markets, 2, market, 300_000_000, 100,
-        ));
+        problem
+            .orders
+            .push(simple_no_buy(&problem.markets, 2, market, 300_000_000, 100));
 
         let solver = EgSolver::new();
         let result = solver.solve(&problem);
 
-        assert_eq!(result.result.orders_filled, 0, "should not fill unprofitable minting");
+        assert_eq!(
+            result.result.orders_filled, 0,
+            "should not fill unprofitable minting"
+        );
     }
 
     #[test]
@@ -624,14 +643,16 @@ mod tests {
 
         // YES buyer at 60c, 500 shares
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 500,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            500,
         ));
 
         // MM buying NO at 50c, 1000 shares, budget $50
         // BuyNo capital = (1 - p_yes) * qty
-        let mm_order = simple_no_buy(
-            &problem.markets, 200, market, 500_000_000, 1000,
-        );
+        let mm_order = simple_no_buy(&problem.markets, 200, market, 500_000_000, 1000);
         problem.orders.push(mm_order);
 
         let mut mm = MmConstraint::new(MmId(1), 50 * NANOS_PER_DOLLAR); // $50 budget
@@ -664,16 +685,22 @@ mod tests {
 
         // YES buyer + NO buyer pair via minting
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 100,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            100,
         ));
         problem.orders.push(simple_no_buy(
-            &problem.markets, 100, market, 500_000_000, 100,
+            &problem.markets,
+            100,
+            market,
+            500_000_000,
+            100,
         ));
 
         // MM with zero budget (also wants NO)
-        let mm_order = simple_no_buy(
-            &problem.markets, 200, market, 500_000_000, 1000,
-        );
+        let mm_order = simple_no_buy(&problem.markets, 200, market, 500_000_000, 1000);
         problem.orders.push(mm_order);
 
         let mut mm = MmConstraint::new(MmId(1), 0);
@@ -691,7 +718,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn test_eg_multiple_mms() {
         // Two MMs with different budgets, both buying NO to pair with YES buyers via minting
@@ -700,25 +726,29 @@ mod tests {
 
         // YES buyers
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 1000,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            1000,
         ));
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 2, market, 550_000_000, 1000,
+            &problem.markets,
+            2,
+            market,
+            550_000_000,
+            1000,
         ));
 
         // MM1: buys NO at 45c, budget $100
-        let mm1_order = simple_no_buy(
-            &problem.markets, 200, market, 450_000_000, 2000,
-        );
+        let mm1_order = simple_no_buy(&problem.markets, 200, market, 450_000_000, 2000);
         problem.orders.push(mm1_order);
         let mut mm1 = MmConstraint::new(MmId(1), 100 * NANOS_PER_DOLLAR);
         mm1.add_order(200, MmSide::BuyNo);
         problem.mm_constraints.push(mm1);
 
         // MM2: buys NO at 50c, budget $50
-        let mm2_order = simple_no_buy(
-            &problem.markets, 300, market, 500_000_000, 2000,
-        );
+        let mm2_order = simple_no_buy(&problem.markets, 300, market, 500_000_000, 2000);
         problem.orders.push(mm2_order);
         let mut mm2 = MmConstraint::new(MmId(2), 50 * NANOS_PER_DOLLAR);
         mm2.add_order(300, MmSide::BuyNo);

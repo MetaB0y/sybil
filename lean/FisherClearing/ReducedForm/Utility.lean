@@ -200,4 +200,64 @@ theorem psiB_eq_affine_iff (hB : 0 < B) (hU : 0 < U) :
   · -- Backward: U ≤ B implies equality
     exact psiB_of_le
 
+/-! ### Monotonicity -/
+
+/-- `ψ_B` is nondecreasing on `[0, ∞)`. -/
+theorem monotoneOn_psiB (hB : 0 < B) :
+    MonotoneOn (psiB B) (Set.Ici 0) := by
+  intro u₁ hu₁ u₂ hu₂ h12
+  have h1 := Set.mem_Ici.mp hu₁  -- 0 ≤ u₁
+  have h2 := Set.mem_Ici.mp hu₂  -- 0 ≤ u₂
+  by_cases h1B : u₁ ≤ B <;> by_cases h2B : u₂ ≤ B
+  · -- Both ≤ B: affine branch, psiB = U + const
+    rw [psiB_of_le h1B, psiB_of_le h2B]; linarith
+  · -- u₁ ≤ B < u₂: transition through boundary
+    push_neg at h2B
+    rw [psiB_of_le h1B, psiB_of_gt h2B]
+    -- u₁ + B*log B - B ≤ B + B*log B - B = B*log B ≤ B*log u₂
+    have : u₁ + B * log B - B ≤ B * log B := by linarith
+    linarith [mul_le_mul_of_nonneg_left (log_le_log hB h2B.le) hB.le]
+  · -- u₂ ≤ B but u₁ > B: impossible since u₁ ≤ u₂
+    push_neg at h1B; linarith
+  · -- Both > B: log branch, B * log u₁ ≤ B * log u₂
+    push_neg at h1B h2B
+    rw [psiB_of_gt h1B, psiB_of_gt h2B]
+    exact mul_le_mul_of_nonneg_left (log_le_log (lt_trans hB h1B) h12) hB.le
+
+/-! ### Continuity -/
+
+/-- `ψ_B` is continuous on `[0, ∞)`. -/
+theorem continuousOn_psiB (hB : 0 < B) :
+    ContinuousOn (psiB B) (Set.Ici 0) := by
+  intro x hx
+  rcases eq_or_lt_of_le (Set.mem_Ici.mp hx) with rfl | hx_pos
+  · -- At x = 0: psiB B agrees with the continuous affine function near 0
+    set f := fun U : ℝ => U + (B * log B - B)
+    have hf : ContinuousWithinAt f (Set.Ici 0) 0 :=
+      continuousWithinAt_id.add continuousWithinAt_const
+    have heq : psiB B =ᶠ[nhdsWithin 0 (Set.Ici 0)] f := by
+      filter_upwards [nhdsWithin_le_nhds (Iio_mem_nhds hB)] with y hy
+      show psiB B y = y + (B * log B - B)
+      rw [psiB_of_le (le_of_lt hy)]; ring
+    exact hf.congr_of_eventuallyEq heq (by show psiB B 0 = f 0; simp only [f, psiB_of_le hB.le]; ring)
+  · exact (hasDerivAt_psiB hB hx_pos).continuousAt.continuousWithinAt
+
+/-- `ψ_B` is concave on `[0, ∞)`. -/
+theorem concaveOn_psiB_Ici (hB : 0 < B) :
+    ConcaveOn ℝ (Set.Ici 0) (psiB B) := by
+  apply AntitoneOn.concaveOn_of_deriv (convex_Ici 0)
+  · exact continuousOn_psiB hB
+  · rw [interior_Ici]
+    exact fun x hx => (hasDerivAt_psiB hB hx).differentiableAt.differentiableWithinAt
+  · rw [interior_Ici]
+    intro u₁ hu₁ u₂ hu₂ h12
+    rw [(hasDerivAt_psiB hB hu₁).deriv, (hasDerivAt_psiB hB hu₂).deriv]
+    by_cases h1 : u₁ < B <;> by_cases h2 : u₂ < B
+    · simp [h1, h2]
+    · simp only [if_pos h1, if_neg h2]
+      push_neg at h2; exact (div_le_one hu₂).mpr h2
+    · exact absurd (lt_of_le_of_lt h12 h2) (not_lt.mpr (not_lt.mp h1))
+    · simp only [if_neg h1, if_neg h2]
+      exact (div_le_div_iff_of_pos_left hB hu₂ hu₁).mpr h12
+
 end FisherClearing

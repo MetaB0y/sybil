@@ -117,7 +117,8 @@ mod tests {
 
     #[test]
     fn test_sign_verify_roundtrip() {
-        let key = SigningKey::random(&mut crypto_rng());
+        let key =
+            <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(&mut crypto_rng());
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("Test");
 
@@ -129,8 +130,10 @@ mod tests {
 
     #[test]
     fn test_invalid_signature_rejected() {
-        let key1 = SigningKey::random(&mut crypto_rng());
-        let key2 = SigningKey::random(&mut crypto_rng());
+        let key1 =
+            <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(&mut crypto_rng());
+        let key2 =
+            <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(&mut crypto_rng());
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("Test");
 
@@ -154,7 +157,8 @@ mod tests {
 
     #[test]
     fn test_tampered_order_rejected() {
-        let key = SigningKey::random(&mut crypto_rng());
+        let key =
+            <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(&mut crypto_rng());
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("Test");
 

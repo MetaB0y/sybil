@@ -1,4 +1,9 @@
-use axum::response::IntoResponse;
+use std::time::Instant;
+
+use axum::extract::State;
+use axum::http::Request;
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
@@ -34,6 +39,7 @@ use crate::types::response::*;
         routes::blocks::get_latest_block,
         routes::blocks::get_block_by_height,
         routes::blocks::stream_blocks,
+        routes::blocks::ws_blocks,
     ),
     components(schemas(
         CreateAccountRequest,
@@ -80,10 +86,32 @@ async fn openapi_json() -> impl IntoResponse {
     Json(ApiDoc::openapi())
 }
 
+async fn prometheus_metrics(State(state): State<AppState>) -> impl IntoResponse {
+    state.prometheus.render()
+}
+
+async fn http_metrics(req: Request<axum::body::Body>, next: Next) -> Response {
+    let method = req.method().clone();
+    let path = req.uri().path().to_string();
+    let start = Instant::now();
+
+    let response = next.run(req).await;
+
+    let duration = start.elapsed().as_secs_f64();
+    let status = response.status().as_u16().to_string();
+
+    metrics::counter!("sybil_http_requests_total", "method" => method.to_string(), "path" => path.clone(), "status" => status).increment(1);
+    metrics::histogram!("sybil_http_request_duration_seconds", "method" => method.to_string(), "path" => path).record(duration);
+
+    response
+}
+
 pub fn create_router(state: AppState) -> Router {
     Router::new()
         // OpenAPI spec
         .route("/openapi.json", axum::routing::get(openapi_json))
+        // Metrics (outside http_metrics middleware to avoid self-scraping noise)
+        .route("/metrics", axum::routing::get(prometheus_metrics))
         // System
         .route("/v1/health", axum::routing::get(routes::system::health))
         .route(
@@ -173,9 +201,14 @@ pub fn create_router(state: AppState) -> Router {
             axum::routing::get(routes::blocks::stream_blocks),
         )
         .route(
+            "/v1/blocks/ws",
+            axum::routing::get(routes::blocks::ws_blocks),
+        )
+        .route(
             "/v1/blocks/{height}",
             axum::routing::get(routes::blocks::get_block_by_height),
         )
+        .layer(middleware::from_fn(http_metrics))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state)

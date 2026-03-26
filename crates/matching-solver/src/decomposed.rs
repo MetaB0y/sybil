@@ -93,13 +93,24 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
         // Step 5-7: Solve
         let component_results = if spanning_mms.is_empty() {
             // No spanning MMs → independent solves
-            self.solve_independent(problem, &market_to_component, num_components,
-                                   &order_components, &mm_components, &local_mms)
+            self.solve_independent(
+                problem,
+                &market_to_component,
+                num_components,
+                &order_components,
+                &mm_components,
+                &local_mms,
+            )
         } else {
             // Mirror descent for spanning MMs
             self.solve_with_mirror_descent(
-                problem, &market_to_component, num_components,
-                &order_components, &mm_components, &local_mms, &spanning_mms,
+                problem,
+                &market_to_component,
+                num_components,
+                &order_components,
+                &mm_components,
+                &local_mms,
+                &spanning_mms,
             )
         };
 
@@ -130,7 +141,8 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
 
         // Re-create position arb orders globally (trim may have broken balance).
         // We need two passes to avoid borrow conflicts.
-        let prices = result.price_discovery
+        let prices = result
+            .price_discovery
             .as_ref()
             .map(|pd| pd.prices.clone())
             .unwrap_or_default();
@@ -144,7 +156,10 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
                 order_map.insert(arb.id, arb);
             }
             crate::lp_solver::create_position_arbs(
-                &mut result.result, &order_map, &prices, max_order_id,
+                &mut result.result,
+                &order_map,
+                &prices,
+                max_order_id,
             )
         };
         result.group_minting_arb_orders.extend(new_arbs);
@@ -172,8 +187,11 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
     ) -> Vec<PipelineResult> {
         let solve_one = |comp: usize| {
             let sub = build_sub_problem(
-                problem, market_to_component, comp,
-                order_components, mm_budgets,
+                problem,
+                market_to_component,
+                comp,
+                order_components,
+                mm_budgets,
             );
             if sub.orders.is_empty() {
                 PipelineResult::empty()
@@ -184,17 +202,12 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
 
         #[cfg(feature = "parallel")]
         {
-            (0..num_components)
-                .into_par_iter()
-                .map(solve_one)
-                .collect()
+            (0..num_components).into_par_iter().map(solve_one).collect()
         }
 
         #[cfg(not(feature = "parallel"))]
         {
-            (0..num_components)
-                .map(solve_one)
-                .collect()
+            (0..num_components).map(solve_one).collect()
         }
     }
 
@@ -211,13 +224,18 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
         // Build budget map: mm_idx -> component -> budget
         let mut mm_budgets: HashMap<usize, HashMap<usize, u64>> = HashMap::new();
         for &(mm_idx, comp) in local_mms {
-            mm_budgets.entry(mm_idx).or_default()
+            mm_budgets
+                .entry(mm_idx)
+                .or_default()
                 .insert(comp, problem.mm_constraints[mm_idx].max_capital);
         }
 
         self.solve_components_parallel(
-            problem, market_to_component, num_components,
-            order_components, &mm_budgets,
+            problem,
+            market_to_component,
+            num_components,
+            order_components,
+            &mm_budgets,
         )
     }
 
@@ -241,12 +259,15 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
         let mut mm_budgets: HashMap<usize, HashMap<usize, u64>> = HashMap::new();
 
         for &(mm_idx, comp) in local_mms {
-            mm_budgets.entry(mm_idx).or_default()
+            mm_budgets
+                .entry(mm_idx)
+                .or_default()
                 .insert(comp, problem.mm_constraints[mm_idx].max_capital);
         }
 
         // Build order lookup for initialization
-        let order_id_to_idx: HashMap<u64, usize> = problem.orders
+        let order_id_to_idx: HashMap<u64, usize> = problem
+            .orders
             .iter()
             .enumerate()
             .map(|(i, o)| (o.id, i))
@@ -260,16 +281,23 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
             let total = mm.max_capital;
 
             // Weight: positive-weight order count (floor at 1 for seller-only comps)
-            let weights: Vec<(usize, f64)> = all_comps.iter().map(|&comp| {
-                let pos_count: usize = mm.order_ids.iter().filter(|&&oid| {
-                    order_id_to_idx.get(&oid).map_or(false, |&idx| {
-                        order_components[idx] == Some(comp)
-                            && !problem.orders[idx].is_seller()
-                    })
-                }).count();
-                // Seller-only components get weight 1 (minimal but non-zero)
-                (comp, pos_count.max(1) as f64)
-            }).collect();
+            let weights: Vec<(usize, f64)> = all_comps
+                .iter()
+                .map(|&comp| {
+                    let pos_count: usize = mm
+                        .order_ids
+                        .iter()
+                        .filter(|&&oid| {
+                            order_id_to_idx.get(&oid).is_some_and(|&idx| {
+                                order_components[idx] == Some(comp)
+                                    && !problem.orders[idx].is_seller()
+                            })
+                        })
+                        .count();
+                    // Seller-only components get weight 1 (minimal but non-zero)
+                    (comp, pos_count.max(1) as f64)
+                })
+                .collect();
 
             let total_weight: f64 = weights.iter().map(|&(_, w)| w).sum();
             let map = mm_budgets.entry(mm_idx).or_default();
@@ -294,8 +322,11 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
 
             // Solve each component with current budget allocation
             let results = self.solve_components_parallel(
-                problem, market_to_component, num_components,
-                order_components, &mm_budgets,
+                problem,
+                market_to_component,
+                num_components,
+                order_components,
+                &mm_budgets,
             );
 
             let solve_secs = iter_start.elapsed().as_secs_f64();
@@ -307,9 +338,7 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
             }
 
             // Compute per-MM per-component EG utility
-            let utilities = compute_mm_utilities(
-                problem, &results, order_components, spanning_mms,
-            );
+            let utilities = compute_mm_utilities(problem, &results, order_components, spanning_mms);
 
             // Check convergence: utilities equalize across components for each MM
             let converged = check_convergence(&utilities, spanning_mms, self.convergence_eps);
@@ -333,7 +362,6 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
                 "mirror descent iteration"
             );
 
-
             if converged {
                 break;
             }
@@ -354,7 +382,8 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
 
                 // Budget reserved for seller-only components (not rebalanced)
                 let (ref all_comps, _) = _mm_components[mm_idx];
-                let seller_reserved: u64 = all_comps.iter()
+                let seller_reserved: u64 = all_comps
+                    .iter()
                     .filter(|c| !pos_comps.contains(c))
                     .map(|c| budgets.get(c).copied().unwrap_or(0))
                     .sum();
@@ -363,11 +392,18 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
                 // Mirror descent: B_k^m ← B_k^m × (U_k^m)^η, then normalize.
                 // Floor at 1.0 to prevent permanent starvation (mirror descent
                 // with KL never zeros out a weight, but integer rounding can).
-                let mut products: Vec<(usize, f64)> = pos_comps.iter().map(|&comp| {
-                    let b = (*budgets.get(&comp).unwrap_or(&0) as f64).max(1.0);
-                    let u = utilities.get(&(mm_idx, comp)).copied().unwrap_or(0.0).max(1.0);
-                    (comp, b * u.powf(eta))
-                }).collect();
+                let mut products: Vec<(usize, f64)> = pos_comps
+                    .iter()
+                    .map(|&comp| {
+                        let b = (*budgets.get(&comp).unwrap_or(&0) as f64).max(1.0);
+                        let u = utilities
+                            .get(&(mm_idx, comp))
+                            .copied()
+                            .unwrap_or(0.0)
+                            .max(1.0);
+                        (comp, b * u.powf(eta))
+                    })
+                    .collect();
                 // Sort for deterministic rounding remainder assignment
                 products.sort_by_key(|&(comp, _)| comp);
 
@@ -415,7 +451,8 @@ fn partition_markets(problem: &Problem) -> (HashMap<MarketId, usize>, usize) {
     }
 
     // Standalone markets (not in any group) → each gets its own component
-    let grouped_markets: HashSet<MarketId> = problem.market_groups
+    let grouped_markets: HashSet<MarketId> = problem
+        .market_groups
         .iter()
         .flat_map(|g| g.markets.iter().copied())
         .collect();
@@ -435,20 +472,23 @@ fn assign_orders(
     orders: &[Order],
     market_to_component: &HashMap<MarketId, usize>,
 ) -> Vec<Option<usize>> {
-    orders.iter().map(|order| {
-        let mut component = None;
-        for market_id in order.active_markets() {
-            let Some(&comp) = market_to_component.get(&market_id) else {
-                return None; // market not in any component
-            };
-            match component {
-                None => component = Some(comp),
-                Some(c) if c != comp => return None, // cross-component
-                _ => {}
+    orders
+        .iter()
+        .map(|order| {
+            let mut component = None;
+            for market_id in order.active_markets() {
+                let Some(&comp) = market_to_component.get(&market_id) else {
+                    return None; // market not in any component
+                };
+                match component {
+                    None => component = Some(comp),
+                    Some(c) if c != comp => return None, // cross-component
+                    _ => {}
+                }
             }
-        }
-        component
-    }).collect()
+            component
+        })
+        .collect()
 }
 
 /// For each MM, find which components its orders belong to.
@@ -460,27 +500,32 @@ fn assign_mms(
     problem: &Problem,
     order_components: &[Option<usize>],
 ) -> Vec<(HashSet<usize>, HashSet<usize>)> {
-    let order_id_to_idx: HashMap<u64, usize> = problem.orders
+    let order_id_to_idx: HashMap<u64, usize> = problem
+        .orders
         .iter()
         .enumerate()
         .map(|(i, o)| (o.id, i))
         .collect();
 
-    problem.mm_constraints.iter().map(|mm| {
-        let mut all_comps = HashSet::new();
-        let mut pos_comps = HashSet::new();
-        for &oid in &mm.order_ids {
-            if let Some(&idx) = order_id_to_idx.get(&oid) {
-                if let Some(comp) = order_components[idx] {
-                    all_comps.insert(comp);
-                    if !problem.orders[idx].is_seller() {
-                        pos_comps.insert(comp);
+    problem
+        .mm_constraints
+        .iter()
+        .map(|mm| {
+            let mut all_comps = HashSet::new();
+            let mut pos_comps = HashSet::new();
+            for &oid in &mm.order_ids {
+                if let Some(&idx) = order_id_to_idx.get(&oid) {
+                    if let Some(comp) = order_components[idx] {
+                        all_comps.insert(comp);
+                        if !problem.orders[idx].is_seller() {
+                            pos_comps.insert(comp);
+                        }
                     }
                 }
             }
-        }
-        (all_comps, pos_comps)
-    }).collect()
+            (all_comps, pos_comps)
+        })
+        .collect()
 }
 
 /// (mm_idx, component) for MMs whose orders all lie in one component.
@@ -539,7 +584,8 @@ fn build_sub_problem(
     mm_budgets: &HashMap<usize, HashMap<usize, u64>>,
 ) -> Problem {
     // Collect markets in this component
-    let component_markets: Vec<MarketId> = market_to_component.iter()
+    let component_markets: Vec<MarketId> = market_to_component
+        .iter()
         .filter(|&(_, &comp)| comp == component)
         .map(|(&mid, _)| mid)
         .collect();
@@ -583,7 +629,9 @@ fn build_sub_problem(
         }
 
         // Only positive-weight (buyer) orders go into the budget constraint
-        let filtered_order_ids: Vec<u64> = mm.order_ids.iter()
+        let filtered_order_ids: Vec<u64> = mm
+            .order_ids
+            .iter()
             .filter(|&&oid| {
                 order_ids_in_component.contains(&oid) && {
                     // Check if this order is a buyer (positive welfare weight)
@@ -607,7 +655,9 @@ fn build_sub_problem(
     }
 
     // Filter market groups: only groups whose markets are in this component
-    let market_groups: Vec<MarketGroup> = problem.market_groups.iter()
+    let market_groups: Vec<MarketGroup> = problem
+        .market_groups
+        .iter()
         .filter(|g| g.markets.iter().all(|mid| market_set.contains(mid)))
         .cloned()
         .collect();
@@ -637,7 +687,9 @@ fn compute_mm_utilities(
     spanning_mms: &[(usize, Vec<usize>)],
 ) -> HashMap<(usize, usize), f64> {
     // Build order_id -> (order_index, component) mapping
-    let order_id_info: HashMap<u64, (usize, usize)> = problem.orders.iter()
+    let order_id_info: HashMap<u64, (usize, usize)> = problem
+        .orders
+        .iter()
         .enumerate()
         .filter_map(|(i, o)| order_components[i].map(|comp| (o.id, (i, comp))))
         .collect();
@@ -664,8 +716,7 @@ fn compute_mm_utilities(
                     }
                     let order = &problem.orders[order_idx];
                     // L_i = sign_i × limit_price_i (welfare weight)
-                    let w_i = if order.is_seller() { -1.0 } else { 1.0 }
-                        * order.limit_price as f64;
+                    let w_i = if order.is_seller() { -1.0 } else { 1.0 } * order.limit_price as f64;
                     // Only positive-weight orders contribute to U_k
                     if w_i <= 0.0 {
                         continue;
@@ -692,10 +743,15 @@ fn compute_max_log_gap(
 ) -> f64 {
     let mut max_gap = 0.0f64;
     for &(mm_idx, ref comps) in spanning_mms {
-        let logs: Vec<f64> = comps.iter()
+        let logs: Vec<f64> = comps
+            .iter()
             .filter_map(|&comp| {
                 let u = utilities.get(&(mm_idx, comp)).copied().unwrap_or(0.0);
-                if u > 0.0 { Some(u.ln()) } else { None }
+                if u > 0.0 {
+                    Some(u.ln())
+                } else {
+                    None
+                }
             })
             .collect();
         if logs.len() >= 2 {
@@ -714,7 +770,8 @@ fn check_convergence(
     eps: f64,
 ) -> bool {
     for &(mm_idx, ref comps) in spanning_mms {
-        let utils: Vec<f64> = comps.iter()
+        let utils: Vec<f64> = comps
+            .iter()
             .map(|&comp| utilities.get(&(mm_idx, comp)).copied().unwrap_or(0.0))
             .collect();
 
@@ -724,11 +781,13 @@ fn check_convergence(
         }
 
         // Check max |ln U_k^m - ln U_k^{m'}| < eps
-        let log_utils: Vec<f64> = utils.iter()
+        let log_utils: Vec<f64> = utils
+            .iter()
             .map(|&u| if u > 0.0 { u.ln() } else { f64::NEG_INFINITY })
             .collect();
 
-        let finite_logs: Vec<f64> = log_utils.iter()
+        let finite_logs: Vec<f64> = log_utils
+            .iter()
             .filter(|&&l| l.is_finite())
             .copied()
             .collect();
@@ -737,7 +796,10 @@ fn check_convergence(
             continue;
         }
 
-        let max_log = finite_logs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let max_log = finite_logs
+            .iter()
+            .cloned()
+            .fold(f64::NEG_INFINITY, f64::max);
         let min_log = finite_logs.iter().cloned().fold(f64::INFINITY, f64::min);
 
         if (max_log - min_log).abs() > eps {
@@ -812,8 +874,7 @@ fn aggregate_results(component_results: Vec<PipelineResult>, solver_name: &str) 
 mod tests {
     use super::*;
     use matching_engine::{
-        simple_yes_buy, simple_no_buy, MarketGroup, MmConstraint, MmId,
-        MmSide, NANOS_PER_DOLLAR,
+        simple_no_buy, simple_yes_buy, MarketGroup, MmConstraint, MmId, MmSide, NANOS_PER_DOLLAR,
     };
 
     /// Trivial component solver that delegates to LpSolver.
@@ -825,7 +886,9 @@ mod tests {
         fn solve_component(&self, problem: &Problem) -> PipelineResult {
             crate::LpSolver::new().solve(problem)
         }
-        fn name(&self) -> &str { "TestLP" }
+        fn name(&self) -> &str {
+            "TestLP"
+        }
     }
 
     #[cfg(feature = "lp")]
@@ -849,12 +912,20 @@ mod tests {
         problem.add_market_group(group_b);
 
         // Group A orders
-        problem.orders.push(simple_yes_buy(&problem.markets, 1, m0, 400_000_000, 100));
-        problem.orders.push(simple_yes_buy(&problem.markets, 2, m1, 350_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 1, m0, 400_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 2, m1, 350_000_000, 100));
 
         // Group B orders
-        problem.orders.push(simple_yes_buy(&problem.markets, 3, m2, 400_000_000, 100));
-        problem.orders.push(simple_yes_buy(&problem.markets, 4, m3, 350_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 3, m2, 400_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 4, m3, 350_000_000, 100));
 
         // Monolithic solve
         let mono = crate::LpSolver::new().solve(&problem);
@@ -868,7 +939,9 @@ mod tests {
         assert!(
             diff <= NANOS_PER_DOLLAR as i64,
             "welfare should match: mono={}, decomp={}, diff={}",
-            mono.result.total_welfare, decomp.result.total_welfare, diff
+            mono.result.total_welfare,
+            decomp.result.total_welfare,
+            diff
         );
     }
 
@@ -885,8 +958,12 @@ mod tests {
         group.add_market(m1);
         problem.add_market_group(group);
 
-        problem.orders.push(simple_yes_buy(&problem.markets, 1, m0, 400_000_000, 100));
-        problem.orders.push(simple_yes_buy(&problem.markets, 2, m1, 350_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 1, m0, 400_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 2, m1, 350_000_000, 100));
 
         let decomposed = DecomposedSolver::new(TestLpSolver);
         let result = decomposed.solve(&problem);
@@ -914,8 +991,12 @@ mod tests {
         group_b.add_market(m1);
         problem.add_market_group(group_b);
 
-        problem.orders.push(simple_yes_buy(&problem.markets, 1, m0, 400_000_000, 100));
-        problem.orders.push(simple_yes_buy(&problem.markets, 2, m1, 350_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 1, m0, 400_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 2, m1, 350_000_000, 100));
 
         let (market_to_comp, num_comp) = partition_markets(&problem);
         assert_eq!(num_comp, 2);
@@ -949,8 +1030,12 @@ mod tests {
         problem.add_market_group(group_b);
 
         // YES buyers on each market
-        problem.orders.push(simple_yes_buy(&problem.markets, 1, m0, 600_000_000, 500));
-        problem.orders.push(simple_yes_buy(&problem.markets, 2, m1, 600_000_000, 500));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 1, m0, 600_000_000, 500));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 2, m1, 600_000_000, 500));
 
         // MM NO buyers on each market, shared budget
         let mm_a = simple_no_buy(&problem.markets, 100, m0, 500_000_000, 1000);
@@ -967,7 +1052,10 @@ mod tests {
         let result = decomposed.solve(&problem);
 
         assert!(result.result.orders_filled > 0, "should fill some orders");
-        assert!(result.result.total_welfare > 0, "should produce positive welfare");
+        assert!(
+            result.result.total_welfare > 0,
+            "should produce positive welfare"
+        );
     }
 
     #[cfg(feature = "lp")]
@@ -987,8 +1075,12 @@ mod tests {
         problem.add_market_group(group_b);
 
         // More demand on market A than B
-        problem.orders.push(simple_yes_buy(&problem.markets, 1, m0, 700_000_000, 500));
-        problem.orders.push(simple_yes_buy(&problem.markets, 2, m1, 550_000_000, 200));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 1, m0, 700_000_000, 500));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 2, m1, 550_000_000, 200));
 
         // MM provides NO liquidity on both markets
         let mm_a = simple_no_buy(&problem.markets, 100, m0, 500_000_000, 1000);
@@ -1005,7 +1097,10 @@ mod tests {
         let result = decomposed.solve(&problem);
 
         assert!(result.result.orders_filled > 0, "should produce fills");
-        assert!(result.result.total_welfare > 0, "should produce positive welfare");
+        assert!(
+            result.result.total_welfare > 0,
+            "should produce positive welfare"
+        );
     }
 
     #[cfg(feature = "lp")]
@@ -1025,12 +1120,20 @@ mod tests {
         problem.add_market_group(group_b);
 
         // Single-market orders
-        problem.orders.push(simple_yes_buy(&problem.markets, 1, m0, 600_000_000, 100));
-        problem.orders.push(simple_no_buy(&problem.markets, 2, m0, 500_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 1, m0, 600_000_000, 100));
+        problem
+            .orders
+            .push(simple_no_buy(&problem.markets, 2, m0, 500_000_000, 100));
 
         // Cross-group bundle order (spans m0 and m1)
         problem.orders.push(matching_engine::bundle_yes(
-            &problem.markets, 3, &[m0, m1], 400_000_000, 100,
+            &problem.markets,
+            3,
+            &[m0, m1],
+            400_000_000,
+            100,
         ));
 
         let (market_to_comp, _) = partition_markets(&problem);
@@ -1068,14 +1171,25 @@ mod tests {
         let m1 = problem.markets.add_binary("B");
         // No market groups
 
-        problem.orders.push(simple_yes_buy(&problem.markets, 1, m0, 600_000_000, 100));
-        problem.orders.push(simple_no_buy(&problem.markets, 2, m0, 500_000_000, 100));
-        problem.orders.push(simple_yes_buy(&problem.markets, 3, m1, 600_000_000, 50));
-        problem.orders.push(simple_no_buy(&problem.markets, 4, m1, 500_000_000, 50));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 1, m0, 600_000_000, 100));
+        problem
+            .orders
+            .push(simple_no_buy(&problem.markets, 2, m0, 500_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 3, m1, 600_000_000, 50));
+        problem
+            .orders
+            .push(simple_no_buy(&problem.markets, 4, m1, 500_000_000, 50));
 
         let decomposed = DecomposedSolver::new(TestLpSolver);
         let result = decomposed.solve(&problem);
 
-        assert!(result.result.orders_filled > 0, "should fill standalone market orders");
+        assert!(
+            result.result.orders_filled > 0,
+            "should fill standalone market orders"
+        );
     }
 }

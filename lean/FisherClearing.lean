@@ -17,3 +17,5 @@ import FisherClearing.ReducedForm.LpRecovery
 import FisherClearing.ReducedForm.WelfareGap
 import FisherClearing.Clearing.Program
 import FisherClearing.Clearing.PriceUniqueness
+import FisherClearing.Clearing.DeployedValue
+import FisherClearing.Clearing.FullProgram

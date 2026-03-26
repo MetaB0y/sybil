@@ -75,7 +75,6 @@ impl ScenarioConfig {
             num_markets: 5,
             num_orders: 50,
 
-
             num_mms: 0,
             liquidity_scarcity: 0.8,
             ..Default::default()
@@ -163,8 +162,7 @@ pub fn generate_scenario(config: ScenarioConfig) -> Problem {
     let mut rng = ChaCha8Rng::seed_from_u64(config.seed);
     let mut problem = Problem::new(format!(
         "Scenario(m={},o={})",
-        config.num_markets,
-        config.num_orders,
+        config.num_markets, config.num_orders,
     ));
 
     // Generate binary markets, some grouped into multi-outcome events

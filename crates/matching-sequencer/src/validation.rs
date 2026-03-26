@@ -81,7 +81,7 @@ pub fn sell_reservations(order: &Order) -> Vec<(PositionKey, i64)> {
     let has_positive = order.payoffs[..num_states].iter().any(|&p| p > 0);
     let has_negative = order.payoffs[..num_states].iter().any(|&p| p < 0);
 
-    if !(has_negative && !has_positive) || order.num_markets != 1 {
+    if !has_negative || has_positive || order.num_markets != 1 {
         return Vec::new();
     }
 

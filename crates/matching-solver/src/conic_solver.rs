@@ -341,9 +341,9 @@ impl ConicSolver {
             let no_row = balance_base + 2 * m_idx + 1;
 
             // YES balance
-            for i in 0..n {
-                if orders[i].markets[0] == market {
-                    let c_y = orders[i].payoffs[0] as f64;
+            for (i, order) in orders.iter().enumerate() {
+                if order.markets[0] == market {
+                    let c_y = order.payoffs[0] as f64;
                     if c_y.abs() > 1e-12 {
                         tri_row.push(yes_row);
                         tri_col.push(q_offset + i);
@@ -361,9 +361,9 @@ impl ConicSolver {
             }
 
             // NO balance
-            for i in 0..n {
-                if orders[i].markets[0] == market {
-                    let c_n = orders[i].payoffs[1] as f64;
+            for (i, order) in orders.iter().enumerate() {
+                if order.markets[0] == market {
+                    let c_n = order.payoffs[1] as f64;
                     if c_n.abs() > 1e-12 {
                         tri_row.push(no_row);
                         tri_col.push(q_offset + i);
@@ -384,11 +384,11 @@ impl ConicSolver {
         let mut bound_row = bound_base;
 
         // q_i ≤ max_fill → slack = max_fill - q_i ≥ 0
-        for i in 0..n {
+        for (i, order) in orders.iter().enumerate() {
             tri_row.push(bound_row);
             tri_col.push(q_offset + i);
             tri_val.push(1.0);
-            b_vec[bound_row] = orders[i].max_fill as f64;
+            b_vec[bound_row] = order.max_fill as f64;
             bound_row += 1;
         }
 
@@ -434,8 +434,7 @@ impl ConicSolver {
         }
 
         // Build sparse A matrix from triplets
-        let a_mat =
-            CscMatrix::new_from_triplets(total_rows, d, tri_row, tri_col, tri_val);
+        let a_mat = CscMatrix::new_from_triplets(total_rows, d, tri_row, tri_col, tri_val);
 
         // ================================================================
         // Solve
@@ -455,8 +454,7 @@ impl ConicSolver {
             ..DefaultSettings::default()
         };
 
-        let Ok(mut solver) =
-            DefaultSolver::new(&p_mat, &obj, &a_mat, &b_vec, &cones, settings)
+        let Ok(mut solver) = DefaultSolver::new(&p_mat, &obj, &a_mat, &b_vec, &cones, settings)
         else {
             return PipelineResult::empty();
         };
@@ -509,11 +507,7 @@ impl ConicSolver {
 
         // Budget trim: integer rounding breaks KKT budget absorption.
         if !problem.mm_constraints.is_empty() {
-            trim_mm_budget_overflows(
-                &mut result,
-                &problem.mm_constraints,
-                &mm_order_info_by_id,
-            );
+            trim_mm_budget_overflows(&mut result, &problem.mm_constraints, &mm_order_info_by_id);
         }
 
         // Arb orders record the minting operations (mint variables from the LP).
@@ -580,13 +574,27 @@ mod tests {
         let market = problem.markets.add_binary("market");
 
         problem.orders.push(outcome_sell(
-            &problem.markets, 100, market, 0, 500_000_000, 1000,
+            &problem.markets,
+            100,
+            market,
+            0,
+            500_000_000,
+            1000,
         ));
         problem.orders.push(outcome_sell(
-            &problem.markets, 101, market, 1, 500_000_000, 1000,
+            &problem.markets,
+            101,
+            market,
+            1,
+            500_000_000,
+            1000,
         ));
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 100,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            100,
         ));
 
         let solver = ConicSolver::new();
@@ -606,11 +614,15 @@ mod tests {
         let market = problem.markets.add_binary("market");
 
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 100,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            100,
         ));
-        problem.orders.push(simple_no_buy(
-            &problem.markets, 2, market, 500_000_000, 100,
-        ));
+        problem
+            .orders
+            .push(simple_no_buy(&problem.markets, 2, market, 500_000_000, 100));
 
         let solver = ConicSolver::new();
         let result = solver.solve(&problem);
@@ -635,9 +647,15 @@ mod tests {
         group.add_market(m2);
         problem.add_market_group(group);
 
-        problem.orders.push(simple_yes_buy(&problem.markets, 1, m0, 400_000_000, 100));
-        problem.orders.push(simple_yes_buy(&problem.markets, 2, m1, 350_000_000, 100));
-        problem.orders.push(simple_yes_buy(&problem.markets, 3, m2, 300_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 1, m0, 400_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 2, m1, 350_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 3, m2, 300_000_000, 100));
 
         let solver = ConicSolver::new();
         let result = solver.solve(&problem);
@@ -664,16 +682,23 @@ mod tests {
         let market = problem.markets.add_binary("market");
 
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 300_000_000, 100,
+            &problem.markets,
+            1,
+            market,
+            300_000_000,
+            100,
         ));
-        problem.orders.push(simple_no_buy(
-            &problem.markets, 2, market, 300_000_000, 100,
-        ));
+        problem
+            .orders
+            .push(simple_no_buy(&problem.markets, 2, market, 300_000_000, 100));
 
         let solver = ConicSolver::new();
         let result = solver.solve(&problem);
 
-        assert_eq!(result.result.orders_filled, 0, "should not fill unprofitable minting");
+        assert_eq!(
+            result.result.orders_filled, 0,
+            "should not fill unprofitable minting"
+        );
     }
 
     #[test]
@@ -683,7 +708,11 @@ mod tests {
 
         // YES buyer at 60c, 500 shares
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 500,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            500,
         ));
 
         // MM buying NO at 50c, 1000 shares, budget $50
@@ -719,10 +748,18 @@ mod tests {
 
         // YES buyers
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 1000,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            1000,
         ));
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 2, market, 550_000_000, 1000,
+            &problem.markets,
+            2,
+            market,
+            550_000_000,
+            1000,
         ));
 
         // MM1: buys NO at 45c, budget $100
@@ -753,10 +790,18 @@ mod tests {
 
         // YES buyer + NO buyer pair via minting
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 100,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            100,
         ));
         problem.orders.push(simple_no_buy(
-            &problem.markets, 100, market, 500_000_000, 100,
+            &problem.markets,
+            100,
+            market,
+            500_000_000,
+            100,
         ));
 
         // MM with zero budget
@@ -788,23 +833,38 @@ mod tests {
         let market = problem.markets.add_binary("market");
 
         problem.orders.push(outcome_sell(
-            &problem.markets, 100, market, 0, 500_000_000, 1000,
+            &problem.markets,
+            100,
+            market,
+            0,
+            500_000_000,
+            1000,
         ));
         problem.orders.push(outcome_sell(
-            &problem.markets, 101, market, 1, 500_000_000, 1000,
+            &problem.markets,
+            101,
+            market,
+            1,
+            500_000_000,
+            1000,
         ));
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 100,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            100,
         ));
-        problem.orders.push(simple_no_buy(
-            &problem.markets, 2, market, 400_000_000, 50,
-        ));
+        problem
+            .orders
+            .push(simple_no_buy(&problem.markets, 2, market, 400_000_000, 50));
 
         let lp_result = LpSolver::new().solve(&problem);
         let conic_result = ConicSolver::new().solve(&problem);
 
         // Welfare should match (within rounding tolerance)
-        let welfare_diff = (lp_result.result.total_welfare - conic_result.result.total_welfare).abs();
+        let welfare_diff =
+            (lp_result.result.total_welfare - conic_result.result.total_welfare).abs();
         assert!(
             welfare_diff <= 2 * NANOS_PER_DOLLAR as i64,
             "welfare should match: LP={}, Conic={}, diff={}",
@@ -827,7 +887,11 @@ mod tests {
 
         // YES buyer at 60c
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 500,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            500,
         ));
 
         // MM buying NO at 50c, budget $50
@@ -844,8 +908,14 @@ mod tests {
         });
         let result = solver.solve(&problem);
 
-        assert!(result.result.orders_filled > 0, "Fisher mode should fill orders");
-        assert!(result.result.total_welfare > 0, "Fisher mode should have positive welfare");
+        assert!(
+            result.result.orders_filled > 0,
+            "Fisher mode should fill orders"
+        );
+        assert!(
+            result.result.total_welfare > 0,
+            "Fisher mode should have positive welfare"
+        );
     }
 
     #[test]
@@ -855,10 +925,18 @@ mod tests {
         let market = problem.markets.add_binary("market");
 
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 500,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            500,
         ));
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 2, market, 550_000_000, 300,
+            &problem.markets,
+            2,
+            market,
+            550_000_000,
+            300,
         ));
 
         let mm_order = simple_no_buy(&problem.markets, 200, market, 500_000_000, 2000);
@@ -883,7 +961,8 @@ mod tests {
         // QuasiFisher has strictly more degrees of freedom (s_k ≥ 0),
         // so its welfare should be >= Fisher welfare (within tolerance)
         assert!(
-            quasi_result.result.total_welfare >= fisher_result.result.total_welfare - NANOS_PER_DOLLAR as i64,
+            quasi_result.result.total_welfare
+                >= fisher_result.result.total_welfare - NANOS_PER_DOLLAR as i64,
             "QuasiFisher welfare ({}) should be >= Fisher welfare ({})",
             quasi_result.result.total_welfare,
             fisher_result.result.total_welfare,
@@ -899,33 +978,46 @@ mod tests {
         let market = problem.markets.add_binary("market");
 
         problem.orders.push(outcome_sell(
-            &problem.markets, 100, market, 0, 500_000_000, 1000,
+            &problem.markets,
+            100,
+            market,
+            0,
+            500_000_000,
+            1000,
         ));
         problem.orders.push(outcome_sell(
-            &problem.markets, 101, market, 1, 500_000_000, 1000,
+            &problem.markets,
+            101,
+            market,
+            1,
+            500_000_000,
+            1000,
         ));
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 100,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            100,
         ));
-        problem.orders.push(simple_no_buy(
-            &problem.markets, 2, market, 400_000_000, 50,
-        ));
+        problem
+            .orders
+            .push(simple_no_buy(&problem.markets, 2, market, 400_000_000, 50));
 
         let lp_result = LpSolver::new().solve(&problem);
         let linear_result = ConicSolver::with_config(ConicConfig {
             mode: ObjectiveMode::Linear,
             ..Default::default()
-        }).solve(&problem);
+        })
+        .solve(&problem);
 
         // Linear mode delegates to LP, so results should be identical
         assert_eq!(
-            lp_result.result.total_welfare,
-            linear_result.result.total_welfare,
+            lp_result.result.total_welfare, linear_result.result.total_welfare,
             "Linear mode should produce identical welfare to LP"
         );
         assert_eq!(
-            lp_result.result.orders_filled,
-            linear_result.result.orders_filled,
+            lp_result.result.orders_filled, linear_result.result.orders_filled,
             "Linear mode should produce identical fills to LP"
         );
     }

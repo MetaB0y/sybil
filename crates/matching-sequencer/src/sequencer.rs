@@ -5,11 +5,11 @@ use matching_engine::{
     Fill, MarketGroup, MarketId, MarketSet, MmConstraint, Nanos, Order, Problem,
 };
 use matching_solver::{LpSolver, PipelineResult};
-use tracing::debug;
 use sybil_oracle::{MarketStatus, Oracle, ResolutionAction, ResolutionRecord};
 use sybil_verifier::{
     AccountSnapshot, BlockWitness, WitnessBlockHeader, WitnessOrder, WitnessRejection,
 };
+use tracing::debug;
 
 use crate::account::{AccountId, AccountStore};
 use crate::block::{compute_state_root, hash_header, Block, BlockHeader, BlockProduction};
@@ -477,9 +477,8 @@ impl BlockSequencer {
                         .filter(|((aid, _), _)| *aid == account_id)
                         .map(|((_, key), &qty)| (*key, qty))
                         .collect();
-                    match validate_order_with_reservation(
-                        &order, account, reserved, &acct_reserved,
-                    ) {
+                    match validate_order_with_reservation(&order, account, reserved, &acct_reserved)
+                    {
                         Ok(cost) => {
                             self.order_account_map.insert(order_id, account_id);
                             self.order_created_at.insert(order_id, self.height);
@@ -488,9 +487,7 @@ impl BlockSequencer {
                             }
                             // Track position reservations for sells
                             for (key, qty) in sell_reservations(&order) {
-                                *reserved_positions
-                                    .entry((account_id, key))
-                                    .or_insert(0) += qty;
+                                *reserved_positions.entry((account_id, key)).or_insert(0) += qty;
                             }
                             witness_orders.push(WitnessOrder {
                                 order: order.clone(),
@@ -569,7 +566,10 @@ impl BlockSequencer {
             debug!(
                 accepted = all_orders.len(),
                 rejected = rejections.len(),
-                buy_yes, sell_yes, buy_no, sell_no,
+                buy_yes,
+                sell_yes,
+                buy_no,
+                sell_no,
                 "block order summary"
             );
             for rej in &rejections {
@@ -995,7 +995,7 @@ mod tests {
     use super::*;
     use crate::account::AccountStore;
     use crate::error::RejectionReason;
-    use crate::validation::{validate_order, validate_order_with_reservation, PositionKey};
+    use crate::validation::{validate_order, validate_order_with_reservation};
     use matching_engine::{outcome_buy, outcome_sell, MarketId, MarketSet, MmId, NANOS_PER_DOLLAR};
     use sybil_oracle::AdminOracle;
 
@@ -1505,7 +1505,10 @@ mod tests {
 
         // State root should reflect the updated account state
         // (even if the order didn't fill, state root is computed after settlement)
-        assert_eq!(bp2.block.header.state_root, compute_state_root(&seq.accounts));
+        assert_eq!(
+            bp2.block.header.state_root,
+            compute_state_root(&seq.accounts)
+        );
         // First and second blocks should have the same state root since no fills happened
         // (only pending orders changed, which aren't in the state root)
         assert_eq!(root1, bp2.block.header.state_root);

@@ -37,7 +37,9 @@ pub enum Message {
         respond_to: oneshot::Sender<[u8; 32]>,
     },
     /// Force-produce a block immediately (for testing).
-    ProduceBlock { respond_to: oneshot::Sender<Block> },
+    ProduceBlock {
+        respond_to: oneshot::Sender<Block>,
+    },
     // --- New messages for API support ---
     CreateAccount {
         initial_balance: i64,
@@ -187,10 +189,7 @@ impl SequencerActor {
     }
 
     async fn run(mut self) {
-        let mut ticker = interval_at(
-            Instant::now() + self.block_interval,
-            self.block_interval,
-        );
+        let mut ticker = interval_at(Instant::now() + self.block_interval, self.block_interval);
 
         loop {
             tokio::select! {
@@ -216,9 +215,20 @@ impl SequencerActor {
             .unwrap_or_default()
             .as_millis() as u64;
 
+        let mempool_size = self.mempool.len();
         let submissions = self.mempool.drain();
         let bp = self.sequencer.produce_block(submissions, timestamp_ms);
         let block = bp.block;
+
+        // Record block production metrics
+        metrics::counter!("sybil_blocks_produced").increment(1);
+        metrics::gauge!("sybil_block_height").set(block.header.height as f64);
+        metrics::histogram!("sybil_orders_per_block").record(block.header.order_count as f64);
+        metrics::histogram!("sybil_fills_per_block").record(block.header.fill_count as f64);
+        metrics::gauge!("sybil_welfare_nanos").set(block.total_welfare as f64);
+        metrics::gauge!("sybil_volume_nanos").set(block.total_volume as f64);
+        metrics::gauge!("sybil_mempool_size").set(mempool_size as f64);
+        metrics::histogram!("sybil_solve_time_seconds").record(bp.pipeline.total_time_secs);
 
         // Update last known prices from this block
         for (market_id, prices) in &block.clearing_prices {
@@ -1221,9 +1231,10 @@ mod tests {
         let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
 
         // Generate a P256 key
-        let signing_key = p256::ecdsa::SigningKey::random(
-            &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
-        );
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
         let pubkey = PublicKey(signing_key.verifying_key().clone());
 
         // Register the key
@@ -1244,9 +1255,10 @@ mod tests {
         let (seq, aid) = make_test_sequencer();
         let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
 
-        let signing_key = p256::ecdsa::SigningKey::random(
-            &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
-        );
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
         let pubkey = PublicKey(signing_key.verifying_key().clone());
 
         handle.register_pubkey(aid, pubkey.clone()).await.unwrap();

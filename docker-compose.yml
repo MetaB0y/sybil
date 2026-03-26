@@ -1,0 +1,53 @@
+services:
+  sybil-api:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      SYBIL_PORT: "3000"
+      SYBIL_DEV_MODE: "true"
+      SYBIL_BLOCK_INTERVAL_MS: "2000"
+      RUST_LOG: "info"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.101.0
+    ports:
+      - "8428:8428"
+    volumes:
+      - vmdata:/storage
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - "-storageDataPath=/storage"
+      - "-promscrape.config=/etc/prometheus/prometheus.yml"
+      - "-retentionPeriod=30d"
+
+  tempo:
+    image: grafana/tempo:2.4.1
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "3200:3200"   # Tempo query API
+    volumes:
+      - ./deploy/tempo.yml:/etc/tempo.yml
+      - tempodata:/var/tempo
+    command:
+      - "-config.file=/etc/tempo.yml"
+
+  grafana:
+    image: grafana/grafana:11.0.0
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - victoriametrics
+      - tempo
+
+volumes:
+  vmdata:
+  tempodata:
