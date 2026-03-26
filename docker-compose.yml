@@ -9,6 +9,12 @@ services:
       SYBIL_BLOCK_INTERVAL_MS: "2000"
       RUST_LOG: "info"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/v1/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
 
   victoriametrics:
     image: victoriametrics/victoria-metrics:v1.101.0
@@ -21,6 +27,11 @@ services:
       - "-storageDataPath=/storage"
       - "-promscrape.config=/etc/prometheus/prometheus.yml"
       - "-retentionPeriod=30d"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8428/-/healthy"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   tempo:
     image: grafana/tempo:2.4.1
@@ -32,6 +43,11 @@ services:
       - tempodata:/var/tempo
     command:
       - "-config.file=/etc/tempo.yml"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3200/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   grafana:
     image: grafana/grafana:11.0.0
@@ -45,8 +61,15 @@ services:
       - ./deploy/grafana/provisioning:/etc/grafana/provisioning
       - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards
     depends_on:
-      - victoriametrics
-      - tempo
+      victoriametrics:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
 volumes:
   vmdata:

@@ -6,7 +6,6 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
 use tower_http::cors::CorsLayer;
-use tower_http::trace::TraceLayer;
 use utoipa::OpenApi;
 
 use crate::routes;
@@ -97,11 +96,19 @@ async fn http_metrics(req: Request<axum::body::Body>, next: Next) -> Response {
 
     let response = next.run(req).await;
 
-    let duration = start.elapsed().as_secs_f64();
-    let status = response.status().as_u16().to_string();
+    let duration_secs = start.elapsed().as_secs_f64();
+    let status = response.status().as_u16();
 
-    metrics::counter!("sybil_http_requests_total", "method" => method.to_string(), "path" => path.clone(), "status" => status).increment(1);
-    metrics::histogram!("sybil_http_request_duration_seconds", "method" => method.to_string(), "path" => path).record(duration);
+    metrics::counter!("sybil_http_requests_total", "method" => method.to_string(), "path" => path.clone(), "status" => status.to_string()).increment(1);
+    metrics::histogram!("sybil_http_request_duration_seconds", "method" => method.to_string(), "path" => path.clone()).record(duration_secs);
+
+    tracing::info!(
+        http.method = %method,
+        http.path = %path,
+        http.status = status,
+        http.duration_ms = format_args!("{:.1}", duration_secs * 1000.0),
+        "request"
+    );
 
     response
 }
@@ -210,6 +217,5 @@ pub fn create_router(state: AppState) -> Router {
         )
         .layer(middleware::from_fn(http_metrics))
         .layer(CorsLayer::permissive())
-        .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

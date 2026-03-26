@@ -1,5 +1,7 @@
 # Build stage
-FROM rust:1.83-bookworm AS builder
+FROM rust:1.94-bookworm AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends cmake libclang-dev && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

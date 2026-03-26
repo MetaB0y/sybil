@@ -168,6 +168,15 @@ docs-read note:
 docs-verify note:
     notesmd-cli frontmatter "{{note}}" --vault docs/architecture --edit --key last_verified --value "$(date +%Y-%m-%d)"
 
+# Pre-commit check (fmt + clippy, ~3s with warm cache)
+pre-commit:
+    cargo fmt --all -- --check
+    cargo clippy --workspace --all-features
+
+# E2E smoke test (starts server, exercises API, tears down)
+smoke:
+    ./scripts/smoke-test.sh
+
 # ── Docker ─────────────────────────────────────────────────────────────────
 
 # Build Docker image
