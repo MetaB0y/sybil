@@ -16,6 +16,25 @@ services:
       retries: 10
       start_period: 5s
 
+  sybil-polymarket:
+    build: .
+    entrypoint: ["sybil-polymarket"]
+    command:
+      - "--sybil-url=http://sybil-api:3000"
+      - "--max-events=20"
+      - "--mm-half-spread=0.02"
+      - "--mm-budget-dollars=5000"
+      - "--mm-initial-balance-dollars=1000000"
+      - "--mapping-store-path=/data/polymarket_mapping.json"
+    environment:
+      RUST_LOG: "sybil_polymarket=info"
+    volumes:
+      - polymarket-data:/data
+    depends_on:
+      sybil-api:
+        condition: service_healthy
+    restart: unless-stopped
+
   victoriametrics:
     image: victoriametrics/victoria-metrics:v1.101.0
     ports:
@@ -74,3 +93,4 @@ services:
 volumes:
   vmdata:
   tempodata:
+  polymarket-data:

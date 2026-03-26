@@ -204,3 +204,25 @@ polymarket max_events="10":
 # Run Polymarket mirror with custom Sybil URL
 polymarket-dev port="3001" max_events="10":
     cargo run --release -p sybil-polymarket -- --sybil-url http://localhost:{{port}} --max-events {{max_events}} --mm-half-spread 0.03
+
+# ── Deploy (Kamal) ────────────────────────────────────────────────────────
+
+# First-time server setup (installs Docker, starts accessories)
+deploy-setup:
+    kamal setup
+
+# Deploy latest code
+deploy:
+    kamal deploy
+
+# Deploy accessories only (VictoriaMetrics, Tempo, Grafana)
+deploy-accessories:
+    kamal accessory boot --all
+
+# View deploy logs
+deploy-logs:
+    kamal app logs -f
+
+# Open remote console
+deploy-shell:
+    kamal app exec -i bash

@@ -3,4 +3,6 @@ scrape_configs:
     scrape_interval: 5s
     metrics_path: /metrics
     static_configs:
-      - targets: ["sybil-api:3000"]
+      # In docker-compose: sybil-api:3000
+      # In Kamal: host.docker.internal:3000 (port is exposed on host)
+      - targets: ["host.docker.internal:3000"]

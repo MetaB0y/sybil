@@ -14,3 +14,4 @@ arena/*/datasets/
 design/*.pdf
 docs/architecture/.obsidian/
 polymarket_mapping.json
+.kamal/secrets

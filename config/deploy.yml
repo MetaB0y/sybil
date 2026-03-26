@@ -1,0 +1,104 @@
+# Kamal 2 deployment configuration for Sybil API
+#
+# First time:  kamal setup       (provisions server, starts accessories)
+# Deploy:      kamal deploy      (builds image, zero-downtime deploy)
+# Accessories: kamal accessory boot --all
+#
+# Required env vars (set in .kamal/secrets):
+#   DEPLOY_HOST, DEPLOY_DOMAIN
+#   KAMAL_REGISTRY_USERNAME, KAMAL_REGISTRY_PASSWORD
+
+service: sybil
+
+image: sybil-api
+
+servers:
+  web:
+    hosts:
+      - <%= ENV["DEPLOY_HOST"] %>
+
+proxy:
+  ssl: true
+  host: <%= ENV.fetch("DEPLOY_DOMAIN", "localhost") %>
+  healthcheck:
+    path: /v1/health
+    interval: 5
+    max_attempts: 30
+
+registry:
+  server: ghcr.io
+  username:
+    - KAMAL_REGISTRY_USERNAME
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+builder:
+  arch: amd64
+  context: .
+
+env:
+  clear:
+    SYBIL_PORT: "3000"
+    SYBIL_DEV_MODE: "true"
+    SYBIL_BLOCK_INTERVAL_MS: "2000"
+    RUST_LOG: "info"
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://sybil-tempo:4317"
+  secret:
+    - SYBIL_SEED_MARKETS
+
+accessories:
+  polymarket:
+    image: ghcr.io/<%= ENV.fetch("KAMAL_REGISTRY_USERNAME", "metab0y") %>/sybil-api:latest
+    host: <%= ENV["DEPLOY_HOST"] %>
+    cmd: >
+      sybil-polymarket
+      --sybil-url http://host.docker.internal:3000
+      --max-events 50
+      --mm-half-spread 0.02
+      --mm-budget-dollars 5000
+      --mm-initial-balance-dollars 1000000
+      --sync-interval-secs 120
+      --mapping-store-path /data/polymarket_mapping.json
+    env:
+      clear:
+        RUST_LOG: "sybil_polymarket=info"
+    volumes:
+      - polymarket-data:/data
+
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.101.0
+    host: <%= ENV["DEPLOY_HOST"] %>
+    port: "8428:8428"
+    volumes:
+      - vmdata:/storage
+    files:
+      - deploy/prometheus.yml:/etc/prometheus/prometheus.yml
+    cmd: >
+      -storageDataPath=/storage
+      -promscrape.config=/etc/prometheus/prometheus.yml
+      -retentionPeriod=30d
+
+  tempo:
+    image: grafana/tempo:2.4.1
+    host: <%= ENV["DEPLOY_HOST"] %>
+    port:
+      - "4317:4317"
+      - "3200:3200"
+    volumes:
+      - tempodata:/var/tempo
+    files:
+      - deploy/tempo.yml:/etc/tempo.yml
+    cmd: "-config.file=/etc/tempo.yml"
+
+  grafana:
+    image: grafana/grafana:11.0.0
+    host: <%= ENV["DEPLOY_HOST"] %>
+    port: "3001:3000"
+    env:
+      clear:
+        GF_SECURITY_ADMIN_PASSWORD: admin
+        GF_AUTH_ANONYMOUS_ENABLED: "true"
+        GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    directories:
+      - deploy/grafana/provisioning:/etc/grafana/provisioning
+      - deploy/grafana/dashboards:/var/lib/grafana/dashboards
