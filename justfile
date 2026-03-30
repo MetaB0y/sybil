@@ -194,3 +194,13 @@ docker-down:
 # Tail API logs
 docker-logs:
     docker compose logs -f sybil-api
+
+# ── Polymarket Mirror ──────────────────────────────────────────────────────
+
+# Run Polymarket mirror (sybil-api must be running in dev-mode)
+polymarket max_events="10":
+    cargo run --release -p sybil-polymarket -- --max-events {{max_events}}
+
+# Run Polymarket mirror with custom Sybil URL
+polymarket-dev port="3001" max_events="10":
+    cargo run --release -p sybil-polymarket -- --sybil-url http://localhost:{{port}} --max-events {{max_events}} --mm-half-spread 0.03

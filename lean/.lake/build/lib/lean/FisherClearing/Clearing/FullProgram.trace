@@ -1,0 +1,96 @@
+{"synthetic": false,
+ "schemaVersion": "2025-09-10",
+ "outputs":
+ {"o": ["9cd63e845e8c295f.olean"],
+  "i": "4b9d42cc3265e3d6.ilean",
+  "c": "590006b599a10346.c"},
+ "log":
+ [{"message":
+   ".> LEAN_PATH=/home/anonymous/sybil/lean/.lake/packages/Cli/.lake/build/lib/lean:/home/anonymous/sybil/lean/.lake/packages/batteries/.lake/build/lib/lean:/home/anonymous/sybil/lean/.lake/packages/Qq/.lake/build/lib/lean:/home/anonymous/sybil/lean/.lake/packages/aesop/.lake/build/lib/lean:/home/anonymous/sybil/lean/.lake/packages/proofwidgets/.lake/build/lib/lean:/home/anonymous/sybil/lean/.lake/packages/importGraph/.lake/build/lib/lean:/home/anonymous/sybil/lean/.lake/packages/LeanSearchClient/.lake/build/lib/lean:/home/anonymous/sybil/lean/.lake/packages/plausible/.lake/build/lib/lean:/home/anonymous/sybil/lean/.lake/packages/mathlib/.lake/build/lib/lean:/home/anonymous/sybil/lean/.lake/build/lib/lean /home/anonymous/.elan/toolchains/leanprover--lean4---v4.28.0/bin/lean /home/anonymous/sybil/lean/FisherClearing/Clearing/FullProgram.lean -o /home/anonymous/sybil/lean/.lake/build/lib/lean/FisherClearing/Clearing/FullProgram.olean -i /home/anonymous/sybil/lean/.lake/build/lib/lean/FisherClearing/Clearing/FullProgram.ilean -c /home/anonymous/sybil/lean/.lake/build/ir/FisherClearing/Clearing/FullProgram.c --setup /home/anonymous/sybil/lean/.lake/build/ir/FisherClearing/Clearing/FullProgram.setup.json --json",
+   "level": "trace"},
+  {"message":
+   "FisherClearing/Clearing/FullProgram.lean:61:0: automatically included section variable(s) unused in theorem `FisherClearing.convex_boxFeasible`:\n  [Fintype J]\nconsider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:\n  omit [Fintype J] in theorem ...\n\nNote: This linter can be disabled with `set_option linter.unusedSectionVars false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/Clearing/FullProgram.lean:61:0: `convex_boxFeasible` has the hypothesis:\n  • [Fintype J] (#2)\nwhich is not used in the remainder of the type.\n\nConsider replacing this hypothesis with the corresponding instance of `Finite` and using `Fintype.ofFinite` in the proof, or removing it entirely.\n\nNote: This linter can be disabled with `set_option linter.unusedFintypeInType false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/Clearing/FullProgram.lean:64:0: automatically included section variable(s) unused in theorem `FisherClearing.isCompact_boxFeasible`:\n  [Fintype J]\nconsider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:\n  omit [Fintype J] in theorem ...\n\nNote: This linter can be disabled with `set_option linter.unusedSectionVars false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/Clearing/FullProgram.lean:64:0: `isCompact_boxFeasible` has the hypothesis:\n  • [Fintype J] (#2)\nwhich is not used in the remainder of the type.\n\nConsider replacing this hypothesis with the corresponding instance of `Finite` and using `Fintype.ofFinite` in the proof, or removing it entirely.\n\nNote: This linter can be disabled with `set_option linter.unusedFintypeInType false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/Clearing/FullProgram.lean:67:0: automatically included section variable(s) unused in theorem `FisherClearing.nonempty_boxFeasible`:\n  [Fintype J]\nconsider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:\n  omit [Fintype J] in theorem ...\n\nNote: This linter can be disabled with `set_option linter.unusedSectionVars false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/Clearing/FullProgram.lean:67:0: `nonempty_boxFeasible` has the hypothesis:\n  • [Fintype J] (#2)\nwhich is not used in the remainder of the type.\n\nConsider replacing this hypothesis with the corresponding instance of `Finite` and using `Fintype.ofFinite` in the proof, or removing it entirely.\n\nNote: This linter can be disabled with `set_option linter.unusedFintypeInType false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/Clearing/FullProgram.lean:72:0: automatically included section variable(s) unused in theorem `FisherClearing.FullInstance.mmUtil_nonneg`:\n  [Fintype ι]\n  [Nonempty ι]\n  [Fintype K]\nconsider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:\n  omit [Fintype ι] [Nonempty ι] [Fintype K] in theorem ...\n\nNote: This linter can be disabled with `set_option linter.unusedSectionVars false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/Clearing/FullProgram.lean:72:0: `FullInstance.mmUtil_nonneg` has the hypotheses:\n  • [Fintype ι] (#2)\n  • [Fintype K] (#7)\nwhich are not used in the remainder of the type.\n\nConsider replacing these hypotheses with the corresponding instances of `Finite` and using `Fintype.ofFinite` in the proof, or removing them entirely.\n\nNote: This linter can be disabled with `set_option linter.unusedFintypeInType false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/Clearing/FullProgram.lean:79:0: automatically included section variable(s) unused in theorem `FisherClearing.FullInstance.mmUtil_linear`:\n  [Fintype ι]\n  [Nonempty ι]\n  [Fintype K]\nconsider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:\n  omit [Fintype ι] [Nonempty ι] [Fintype K] in theorem ...\n\nNote: This linter can be disabled with `set_option linter.unusedSectionVars false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/Clearing/FullProgram.lean:79:0: `FullInstance.mmUtil_linear` has the hypotheses:\n  • [Fintype ι] (#2)\n  • [Fintype K] (#7)\nwhich are not used in the remainder of the type.\n\nConsider replacing these hypotheses with the corresponding instances of `Finite` and using `Fintype.ofFinite` in the proof, or removing them entirely.\n\nNote: This linter can be disabled with `set_option linter.unusedFintypeInType false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/Clearing/FullProgram.lean:90:0: automatically included section variable(s) unused in theorem `FisherClearing.FullInstance.netDemand_linear`:\n  [Fintype ι]\n  [Nonempty ι]\n  [Fintype K]\n  [DecidableEq K]\nconsider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:\n  omit [Fintype ι] [Nonempty ι] [Fintype K] [DecidableEq K] in theorem ...\n\nNote: This linter can be disabled with `set_option linter.unusedSectionVars false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/Clearing/FullProgram.lean:90:0: `FullInstance.netDemand_linear` has the hypotheses:\n  • [Fintype ι] (#2)\n  • [Fintype K] (#7)\nwhich are not used in the remainder of the type.\n\nConsider replacing these hypotheses with the corresponding instances of `Finite` and using `Fintype.ofFinite` in the proof, or removing them entirely.\n\nNote: This linter can be disabled with `set_option linter.unusedFintypeInType false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/Clearing/FullProgram.lean:90:0: `FullInstance.netDemand_linear` has the hypothesis:\n  • [DecidableEq K] (#8)\nwhich is not used in the remainder of the type.\n\nConsider removing this hypothesis and using `classical` in the proof instead. For terms, consider using `open scoped Classical in` at the term level (not the command level).\n\nNote: This linter can be disabled with `set_option linter.unusedDecidableInType false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/Clearing/FullProgram.lean:100:0: `FullInstance.concaveOn_psiB_mmUtil` has the hypotheses:\n  • [Fintype ι] (#2)\n  • [Fintype K] (#7)\nwhich are not used in the remainder of the type.\n\nConsider replacing these hypotheses with the corresponding instances of `Finite` and using `Fintype.ofFinite` in the proof, or removing them entirely.\n\nNote: This linter can be disabled with `set_option linter.unusedFintypeInType false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/Clearing/FullProgram.lean:114:0: `FullInstance.concaveOn_mmWelfare` has the hypothesis:\n  • [Fintype ι] (#2)\nwhich is not used in the remainder of the type.\n\nConsider replacing this hypothesis with the corresponding instance of `Finite` and using `Fintype.ofFinite` in the proof, or removing it entirely.\n\nNote: This linter can be disabled with `set_option linter.unusedFintypeInType false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/Clearing/FullProgram.lean:138:0: `FullInstance.concaveOn_neg_minting` has the hypothesis:\n  • [Fintype K] (#7)\nwhich is not used in the remainder of the type.\n\nConsider replacing this hypothesis with the corresponding instance of `Finite` and using `Fintype.ofFinite` in the proof, or removing it entirely.\n\nNote: This linter can be disabled with `set_option linter.unusedFintypeInType false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/Clearing/FullProgram.lean:138:0: `FullInstance.concaveOn_neg_minting` has the hypothesis:\n  • [DecidableEq K] (#8)\nwhich is not used in the remainder of the type.\n\nConsider removing this hypothesis and using `classical` in the proof instead. For terms, consider using `open scoped Classical in` at the term level (not the command level).\n\nNote: This linter can be disabled with `set_option linter.unusedDecidableInType false`",
+   "level": "warning"}],
+ "inputs":
+ [["FisherClearing.Clearing.FullProgram:deps",
+   [["deps",
+     [["FisherClearing/FisherClearing:extraDep",
+       [["@FisherClearing:extraDep", "00000000000006bb"]]],
+      ["imports",
+       [["Mathlib transitive imports (legacy)", "8fd896a9b3011bd6"],
+        ["Mathlib:importAllArts", "8fc2a9ec06d95bdc"],
+        ["FisherClearing.Convex.LogSumExp transitive imports (legacy)",
+         "12c1ba7185138d42"],
+        ["FisherClearing.Convex.LogSumExp:importAllArts", "023499a47d3a1801"],
+        ["FisherClearing.ReducedForm.Utility transitive imports (legacy)",
+         "12c1ba7185138d42"],
+        ["FisherClearing.ReducedForm.Utility:importAllArts",
+         "5bebc2766514eabd"],
+        ["FisherClearing.Clearing.DeployedValue transitive imports (legacy)",
+         "54541a04739999d1"],
+        ["FisherClearing.Clearing.DeployedValue:importAllArts",
+         "e6816c544c0715d3"]]]]],
+    ["libs",
+     [["import dynlibs", "00000000000006bb"],
+      ["package external libraries", "00000000000006bb"],
+      ["module dynlibs", "00000000000006bb"],
+      ["module plugins", "00000000000006bb"]]]]],
+  ["Lean 4.28.0, commit 7e01a1bf5c70fc6167d49c345d3bf80596e9a79b",
+   "a96bc04a2e5e9630"],
+  ["/home/anonymous/sybil/lean/FisherClearing/Clearing/FullProgram.lean",
+   "b9da4e47ec5beb54"],
+  ["options",
+   [["-Dweak.linter.mathlibStandardSet=true", "8a155799906f2b42"],
+    ["-DrelaxedAutoImplicit=false", "74a2b5546b55be80"],
+    ["-Dpp.unicode.fun=true", "9b94070140457fab"],
+    ["-DautoImplicit=false", "4a85acb881fd49d0"]]],
+  ["Module.leanArgs: #[]", "00000000000006bb"]],
+ "depHash": "eecca6166cfebdf4"}

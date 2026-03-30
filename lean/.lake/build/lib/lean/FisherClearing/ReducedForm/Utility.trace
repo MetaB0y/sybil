@@ -1,0 +1,61 @@
+{"synthetic": false,
+ "schemaVersion": "2025-09-10",
+ "outputs":
+ {"o": ["2e769d5dff2ff5ab.olean"],
+  "i": "273847d9265a93fd.ilean",
+  "c": "853d5def63592104.c"},
+ "log":
+ [{"message":
+   ".> LEAN_PATH=/home/anonymous/sybil/lean/.lake/packages/Cli/.lake/build/lib/lean:/home/anonymous/sybil/lean/.lake/packages/batteries/.lake/build/lib/lean:/home/anonymous/sybil/lean/.lake/packages/Qq/.lake/build/lib/lean:/home/anonymous/sybil/lean/.lake/packages/aesop/.lake/build/lib/lean:/home/anonymous/sybil/lean/.lake/packages/proofwidgets/.lake/build/lib/lean:/home/anonymous/sybil/lean/.lake/packages/importGraph/.lake/build/lib/lean:/home/anonymous/sybil/lean/.lake/packages/LeanSearchClient/.lake/build/lib/lean:/home/anonymous/sybil/lean/.lake/packages/plausible/.lake/build/lib/lean:/home/anonymous/sybil/lean/.lake/packages/mathlib/.lake/build/lib/lean:/home/anonymous/sybil/lean/.lake/build/lib/lean /home/anonymous/.elan/toolchains/leanprover--lean4---v4.28.0/bin/lean /home/anonymous/sybil/lean/FisherClearing/ReducedForm/Utility.lean -o /home/anonymous/sybil/lean/.lake/build/lib/lean/FisherClearing/ReducedForm/Utility.olean -i /home/anonymous/sybil/lean/.lake/build/lib/lean/FisherClearing/ReducedForm/Utility.ilean -c /home/anonymous/sybil/lean/.lake/build/ir/FisherClearing/ReducedForm/Utility.c --setup /home/anonymous/sybil/lean/.lake/build/ir/FisherClearing/ReducedForm/Utility.setup.json --json",
+   "level": "trace"},
+  {"message":
+   "FisherClearing/ReducedForm/Utility.lean:52:19: unused variable `hB`\n\nNote: This linter can be disabled with `set_option linter.unusedVariables false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/ReducedForm/Utility.lean:66:31: unused variable `hB`\n\nNote: This linter can be disabled with `set_option linter.unusedVariables false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/ReducedForm/Utility.lean:66:44: unused variable `hU`\n\nNote: This linter can be disabled with `set_option linter.unusedVariables false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/ReducedForm/Utility.lean:76:2: The `show` tactic should only be used to indicate intermediate goal states for readability.\nHowever, this tactic invocation changed the goal. Please use `change` instead for these purposes.\n\nNote: This linter can be disabled with `set_option linter.style.show false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/ReducedForm/Utility.lean:99:2: The following tactic starts with 2 goals and ends with 3 goals, 1 of which is not operated on.\n  apply HasDerivWithinAt.union\nPlease focus on the current goal, for instance using `·` (typed as \"\\.\").\n\nNote: This linter can be disabled with `set_option linter.style.multiGoal false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/ReducedForm/Utility.lean:161:37: unused variable `hU`\n\nNote: This linter can be disabled with `set_option linter.unusedVariables false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/ReducedForm/Utility.lean:178:41: unused variable `hU`\n\nNote: This linter can be disabled with `set_option linter.unusedVariables false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/ReducedForm/Utility.lean:242:100: This line exceeds the 100 character limit, please shorten it!\n\nNote: This linter can be disabled with `set_option linter.style.longLine false`",
+   "level": "warning"},
+  {"message":
+   "FisherClearing/ReducedForm/Utility.lean:240:6: The `show` tactic should only be used to indicate intermediate goal states for readability.\nHowever, this tactic invocation changed the goal. Please use `change` instead for these purposes.\n\nNote: This linter can be disabled with `set_option linter.style.show false`",
+   "level": "warning"}],
+ "inputs":
+ [["FisherClearing.ReducedForm.Utility:deps",
+   [["deps",
+     [["FisherClearing/FisherClearing:extraDep",
+       [["@FisherClearing:extraDep", "00000000000006bb"]]],
+      ["imports",
+       [["Mathlib transitive imports (legacy)", "8fd896a9b3011bd6"],
+        ["Mathlib:importAllArts", "8fc2a9ec06d95bdc"]]]]],
+    ["libs",
+     [["import dynlibs", "00000000000006bb"],
+      ["package external libraries", "00000000000006bb"],
+      ["module dynlibs", "00000000000006bb"],
+      ["module plugins", "00000000000006bb"]]]]],
+  ["Lean 4.28.0, commit 7e01a1bf5c70fc6167d49c345d3bf80596e9a79b",
+   "a96bc04a2e5e9630"],
+  ["/home/anonymous/sybil/lean/FisherClearing/ReducedForm/Utility.lean",
+   "976cd64017d225ae"],
+  ["options",
+   [["-Dweak.linter.mathlibStandardSet=true", "8a155799906f2b42"],
+    ["-DrelaxedAutoImplicit=false", "74a2b5546b55be80"],
+    ["-Dpp.unicode.fun=true", "9b94070140457fab"],
+    ["-DautoImplicit=false", "4a85acb881fd49d0"]]],
+  ["Module.leanArgs: #[]", "00000000000006bb"]],
+ "depHash": "cc52e2583ee26763"}

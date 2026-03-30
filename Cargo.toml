@@ -9,6 +9,7 @@ members = [
     "crates/sybil-oracle",
     "crates/sybil-api",
     "crates/sybil-verifier",
+    "crates/sybil-polymarket",
 ]
 
 [workspace.dependencies]
