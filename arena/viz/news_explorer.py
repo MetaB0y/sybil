@@ -22,13 +22,35 @@ def _load_market_config(market_name: str):
     return mod.get_config()
 
 
-# Parse --market from CLI args (streamlit passes args after --)
-_market_name = "iran"  # default
+# Discover available markets by scanning the markets/ directory
+def _discover_markets() -> list[str]:
+    markets_dir = Path(__file__).parent.parent / "markets"
+    return sorted(
+        d.name for d in markets_dir.iterdir()
+        if d.is_dir() and (d / "__init__.py").exists() and d.name != "__pycache__"
+    )
+
+_AVAILABLE_MARKETS = _discover_markets()
+
+# Parse --market from CLI args as default (streamlit passes args after --)
+_default_market = "iran"
 if "--market" in sys.argv:
     idx = sys.argv.index("--market")
     if idx + 1 < len(sys.argv):
-        _market_name = sys.argv[idx + 1]
+        _default_market = sys.argv[idx + 1]
 
+
+def _get_active_market() -> str:
+    return st.session_state.get("market_name", _default_market)
+
+
+def _load_active_config():
+    name = _get_active_market()
+    return name, _load_market_config(name)
+
+
+# These are set lazily in main() after sidebar selection
+_market_name = _default_market
 _market_config = _load_market_config(_market_name)
 DATASETS_DIR = _market_config.datasets_dir
 PHASE1_DIR = _market_config.phase1_dir
@@ -38,14 +60,17 @@ BOT_PERSONAS = _market_config.personas
 # Keep backward-compat module-level name for any remaining references
 
 @st.cache_data
-def load_data() -> pd.DataFrame:
+def load_data(datasets_dir: str = "") -> pd.DataFrame:
     # Load all *_raw.json dataset files and deduplicate by URL
+    datasets_path = Path(datasets_dir) if datasets_dir else DATASETS_DIR
     articles = []
-    for path in sorted(DATASETS_DIR.glob("*_raw.json")):
+    for path in sorted(datasets_path.glob("*_raw.json")):
         with open(path) as f:
             raw = json.load(f)
         for chunk in raw["chunks"]:
             articles.extend(chunk["articles"])
+    if not articles:
+        return pd.DataFrame(columns=["url", "timestamp", "title", "source", "sourcecountry", "language", "dt", "date", "hour"])
     df = pd.DataFrame(articles)
     df = df.drop_duplicates(subset="url", keep="first")
     df["dt"] = pd.to_datetime(df["timestamp"], format="%Y%m%dT%H%M%SZ")
@@ -55,14 +80,15 @@ def load_data() -> pd.DataFrame:
 
 
 @st.cache_data
-def load_accepted_articles(bot_key: str) -> pd.DataFrame | None:
+def load_accepted_articles(bot_key: str, phase1_dir: str = "", market_name: str = "") -> pd.DataFrame | None:
     """Load Phase 1 results for a bot. Looks for *_phase1_results.json files."""
+    phase1_path = Path(phase1_dir) if phase1_dir else PHASE1_DIR
     # Support phase1_bot indirection (e.g. american_believer uses american_trader's results)
     phase1_key = BOT_PERSONAS.get(bot_key, {}).get("phase1_bot", bot_key)
     results = []
-    if not PHASE1_DIR.exists():
+    if not phase1_path.exists():
         return None
-    for f in sorted(PHASE1_DIR.glob(f"{phase1_key}_*_phase1_results.json")):
+    for f in sorted(phase1_path.glob(f"{phase1_key}_*_phase1_results.json")):
         with open(f) as fh:
             data = json.load(fh)
         for art in data.get("results", []):
@@ -129,7 +155,7 @@ def render_bot_tab(df: pd.DataFrame, bot_key: str, persona: dict):
     )
 
     if bot_sub == "Accepted Articles":
-        accepted = load_accepted_articles(bot_key)
+        accepted = load_accepted_articles(bot_key, str(PHASE1_DIR), _market_name)
         if accepted is None or accepted.empty:
             st.info("No Phase 1 results yet. Run the relevance filter to populate.")
         else:
@@ -210,18 +236,19 @@ def render_bot_tab(df: pd.DataFrame, bot_key: str, persona: dict):
 
 
 @st.cache_data
-def load_sim_runs() -> list[tuple[str, dict]]:
+def load_sim_runs(runs_dir: str = "") -> list[tuple[str, dict]]:
     """Load all simulation run JSON files, newest first.
 
     Multi-day runs (sharing a run_id) are merged into a single entry:
     blocks are concatenated, trade_logs and leaderboard come from the last day.
     """
-    if not RUNS_DIR.exists():
+    runs_path = Path(runs_dir) if runs_dir else RUNS_DIR
+    if not runs_path.exists():
         return []
 
     # Load all files
     raw: list[tuple[str, dict]] = []
-    for f in sorted(RUNS_DIR.glob("*.json")):
+    for f in sorted(runs_path.glob("*.json")):
         with open(f) as fh:
             raw.append((f.stem, json.load(fh)))
 
@@ -364,7 +391,7 @@ def _format_duration(td: timedelta) -> str:
 
 def render_simulation_tab():
     """Render the simulation replay tab."""
-    runs = load_sim_runs()
+    runs = load_sim_runs(str(RUNS_DIR))
     if not runs:
         st.info(f"No simulation runs yet. Run `uv run python -m sim.runner --market {_market_name}` to generate data.")
         return
@@ -578,13 +605,15 @@ def render_simulation_tab():
     noise_count = config.get("noise_count", len(noise_rows))
     compression = config.get("compression_ratio", "?")
     period_str = f"Period: {t_first:%b %d %H:%M} – {t_last:%H:%M} ({_format_duration(duration)})" if duration else f"Batches {first_h}–{last_h}"
+    block_interval = config.get("block_interval_s", 2.0)
+    batch_min = int(block_interval * compression / 60)
+    llm_count = len(trade_logs)
     st.caption(
-        f"{period_str}; "
-        f"Compression: {compression}x · "
-        f"Noise: {noise_count} bots"
+        f"{period_str} · "
+        f"Batch every {batch_min} min · "
+        f"{llm_count} LLM traders · "
+        f"{noise_count} noise bots"
     )
-    if trader_parts:
-        st.caption(f"LLM traders: {trader_list}")
 
     # General
     st.markdown("#### General")
@@ -690,19 +719,16 @@ def render_simulation_tab():
     # ═══════════ PRICE CHART ═══════════
     st.subheader("Price + Trader Activity")
 
-    # Build price data — include all blocks, forward-fill nulls
+    # Build price data — only include blocks with actual clearing prices
     price_rows = []
-    last_price = None
     for b in blocks:
         p = b["yes_price"]
-        if p is not None:
-            last_price = p
         t = block_times.get(b["height"])
         time_label = t.strftime("%b %d %H:%M") if t else ""
         price_rows.append({
             "block": b["height"],
             "time": time_label,
-            "yes_price": last_price,
+            "yes_price": p,
             "volume": b.get("total_volume_nanos", 0) / 1e9,
             "fills": b.get("orders_filled", 0),
         })
@@ -811,7 +837,13 @@ def render_simulation_tab():
     try:
         import altair as alt
 
-        only_filled = st.checkbox("Show only filled orders", value=False)
+        cb1, cb2 = st.columns(2)
+        with cb1:
+            only_filled = st.checkbox("Show only filled orders", value=False)
+        with cb2:
+            poly_file = Path(__file__).parent.parent / "markets" / _market_name / "polymarket_prices.json"
+            has_poly = poly_file.exists()
+            show_poly = st.checkbox("Show Polymarket prices", value=False) if has_poly else False
         if only_filled and trader_df is not None and not trader_df.empty:
             trader_df = trader_df[trader_df["filled"]].copy()
 
@@ -851,7 +883,10 @@ def render_simulation_tab():
             labelPadding=5,
         )
 
-        base = alt.Chart(price_df).mark_line(color="#4A90D9", strokeWidth=2).encode(
+        # Always use block-based rendering for sim data
+        base = alt.Chart(price_df).mark_line(
+            color="#4A90D9", strokeWidth=1.5, fillOpacity=0,
+        ).encode(
             x=alt.X("block:Q", title="", axis=shared_x_axis,
                     scale=alt.Scale(domain=x_domain)),
             y=alt.Y("yes_price:Q", title="YES Price", scale=alt.Scale(zero=False)),
@@ -860,7 +895,7 @@ def render_simulation_tab():
 
         layers = [base]
 
-        if trader_df is not None and not trader_df.empty:
+        if trader_df is not None and not trader_df.empty and not show_poly:
             has_multi = trader_df["trader"].nunique() > 1 if "trader" in trader_df.columns else False
             color_enc = alt.Color("trader:N", title="Trader") if has_multi else alt.value("#E74C3C")
 
@@ -901,10 +936,43 @@ def render_simulation_tab():
                 )
                 layers.append(no_trade_dots)
 
-        price_chart = alt.layer(*layers).properties(height=400, width="container")
-        st.altair_chart(price_chart, use_container_width=True)
+        # Polymarket price overlay — map poly timestamps to block numbers
+        if show_poly and block_times:
+            from datetime import datetime, timezone
+            poly_data = json.loads(poly_file.read_text())
+            sorted_bt = sorted(block_times.items())
+            # Build timestamp->block mapping for interpolation
+            block_ts_pairs = [
+                (bt.replace(tzinfo=timezone.utc).timestamp() if bt.tzinfo is None else bt.timestamp(), h)
+                for h, bt in sorted_bt
+            ]
+            min_ts, max_ts = block_ts_pairs[0][0], block_ts_pairs[-1][0]
+            min_block, max_block = block_ts_pairs[0][1], block_ts_pairs[-1][1]
 
-        # Volume chart — add an invisible color legend to reserve the same space as price chart
+            poly_rows = []
+            for pt in poly_data:
+                pt_ts = pt["unix_ts"]
+                if pt_ts < min_ts or pt_ts > max_ts:
+                    continue
+                # Linearly interpolate block number from timestamp
+                frac = (pt_ts - min_ts) / (max_ts - min_ts) if max_ts > min_ts else 0
+                block_num = min_block + frac * (max_block - min_block)
+                poly_rows.append({"block": block_num, "poly_price": pt["yes_price"]})
+
+            if poly_rows:
+                poly_df = pd.DataFrame(poly_rows)
+                poly_line = alt.Chart(poly_df).mark_line(
+                    color="#E67E22", strokeWidth=2, strokeDash=[6, 3], fillOpacity=0,
+                ).encode(
+                    x=alt.X("block:Q", scale=alt.Scale(domain=x_domain)),
+                    y=alt.Y("poly_price:Q"),
+                    tooltip=[alt.Tooltip("block:Q", title="Block", format=".0f"), alt.Tooltip("poly_price:Q", title="Polymarket", format=".4f")],
+                )
+                layers.append(poly_line)
+
+        price_chart = alt.layer(*layers).properties(height=400, width="container")
+
+        # Volume chart — always block-based
         vol_base = alt.Chart(price_df).mark_bar(color="#7FB3D8", opacity=0.7).encode(
             x=alt.X("block:Q", title="", axis=shared_x_axis,
                     scale=alt.Scale(domain=x_domain)),
@@ -920,7 +988,6 @@ def render_simulation_tab():
         if trader_df is not None and not trader_df.empty:
             has_multi = trader_df["trader"].nunique() > 1 if "trader" in trader_df.columns else False
             if has_multi:
-                # One row per unique trader so legend reserves full width
                 dummy_df = trader_df.drop_duplicates("trader")[["trader", "block"]].copy()
                 dummy_legend = alt.Chart(dummy_df).mark_point(opacity=0).encode(
                     x=alt.X("block:Q"),
@@ -932,7 +999,12 @@ def render_simulation_tab():
                 vol_chart = vol_base.properties(height=120, width="container")
         else:
             vol_chart = vol_base.properties(height=120, width="container")
-        st.altair_chart(vol_chart, use_container_width=True)
+
+        # Combine price and volume into a single vconcat chart so they stay aligned
+        combined = alt.vconcat(price_chart, vol_chart, spacing=5).resolve_scale(
+            x="shared",
+        )
+        st.altair_chart(combined, use_container_width=True)
     except ImportError:
         st.line_chart(price_df.set_index("block")["yes_price"], height=350)
 
@@ -1100,9 +1172,9 @@ def render_simulation_tab():
                 analysis = t.get("analysis")
                 if analysis:
                     st.markdown(f"**LLM Analysis:**")
-                    st.info(analysis)
+                    st.info(analysis.replace("$", "\\$"))
                 if t.get("motivation"):
-                    st.markdown(f"**Motivation:** {t['motivation']}")
+                    st.markdown(f"**Motivation:** {t['motivation'].replace('$', chr(92) + '$')}")
 
                 # Full LLM response
                 raw = t.get("raw_llm_response") or t.get("llm_response")
@@ -1184,7 +1256,8 @@ def render_simulation_tab():
     # Build orderbook from ALL submitted orders (including fully filled)
     book_rows = []
     for o in submitted_orders:
-        if o["original_qty"] <= 0:
+        entering_qty = o["qty"] + o.get("filled_this_block", 0)
+        if entering_qty <= 0:
             continue
         if o["side"] in ("BuyYes", "SellNo"):
             yes_equiv = 1.0 - o["price"] if o["side"] == "SellNo" else o["price"]
@@ -1195,8 +1268,8 @@ def render_simulation_tab():
         else:
             continue
         # Show filled portion dimmed, unfilled portion solid
-        filled = o.get("filled", 0)
-        remaining = o["original_qty"] - filled
+        filled = o.get("filled_this_block", 0)
+        remaining = entering_qty - filled
         if filled > 0:
             book_rows.append({
                 "price": round(yes_equiv, 4), "quantity": filled,
@@ -1285,8 +1358,8 @@ def render_simulation_tab():
         batch_trader_w = sum(v for k, v in batch_welfare.items() if k not in ("MM", "Noise"))
 
         ec1, ec2, ec3 = st.columns(3)
-        ec1.metric("Welfare", f"${welfare_nanos / 1e9:,.2f}")
-        ec2.metric("Volume", f"${total_vol_nanos / 1e9:,.2f}")
+        ec1.metric("Volume", f"${total_vol_nanos / 1e9:,.2f}")
+        ec2.metric("Welfare", f"${welfare_nanos / 1e9:,.2f}")
         ec3.metric("Fill Rate", f"{orders_with_fills}/{orders_submitted} ({fill_rate:.0f}%)")
 
         # Per-source volume for this batch
@@ -1357,9 +1430,11 @@ def render_simulation_tab():
             else:
                 origin = "new"
 
+            # For carried orders, show remaining qty (original minus previously filled)
+            display_qty = o["qty"] + o.get("filled_this_block", 0)
             row = {
                 "Side": o["side"],
-                "Qty": o["original_qty"],
+                "Qty": display_qty,
                 "Limit": f"${o['price']:.2f}",
                 "Origin": origin,
             }
@@ -1430,7 +1505,9 @@ def render_simulation_tab():
 
 
 def main():
-    st.set_page_config(page_title=f"{_market_name.title()} News Explorer", layout="wide")
+    global _market_name, _market_config, DATASETS_DIR, PHASE1_DIR, RUNS_DIR, BOT_PERSONAS
+
+    st.set_page_config(page_title="Sybil Arena", layout="wide")
 
     # Shrink metric values so section headers are visually dominant
     st.markdown("""<style>
@@ -1438,34 +1515,41 @@ def main():
     [data-testid="stMetricLabel"] { font-size: 0.85rem; }
     </style>""", unsafe_allow_html=True)
 
-    st.title(f"{_market_config.question} — News Explorer")
+    # ── Sidebar: market selector ──
+    selected_market = st.sidebar.selectbox(
+        "Market",
+        options=_AVAILABLE_MARKETS,
+        index=_AVAILABLE_MARKETS.index(_default_market) if _default_market in _AVAILABLE_MARKETS else 0,
+        key="market_name",
+    )
+    _market_name = selected_market
+    _market_config = _load_market_config(_market_name)
+    DATASETS_DIR = _market_config.datasets_dir
+    PHASE1_DIR = _market_config.phase1_dir
+    RUNS_DIR = _market_config.runs_dir
+    BOT_PERSONAS = _market_config.personas
 
-    df = load_data()
+    st.title(f"{_market_config.question}")
 
-    # ── Sidebar filters ──
-    st.sidebar.header("Filters")
-    countries = sorted(df["sourcecountry"].unique())
-    selected_countries = st.sidebar.multiselect("Countries", countries, default=[])
-    languages = sorted(df["language"].unique())
-    selected_languages = st.sidebar.multiselect("Languages", languages, default=[])
-    sources = sorted(df["source"].unique())
-    selected_sources = st.sidebar.multiselect("Sources", sources, default=[])
+    df = load_data(str(DATASETS_DIR))
 
+    # Use full date range from the dataset
     filtered = df.copy()
-    if selected_countries:
-        filtered = filtered[filtered["sourcecountry"].isin(selected_countries)]
-    if selected_languages:
-        filtered = filtered[filtered["language"].isin(selected_languages)]
-    if selected_sources:
-        filtered = filtered[filtered["source"].isin(selected_sources)]
 
-    # ── Tabs: Summary, Daily, Simulation, + one per bot persona ──
-    bot_tab_names = [p["name"] for p in BOT_PERSONAS.values()]
-    all_tabs = st.tabs(["Summary", "Daily Explorer", "Simulation"] + [f"Bot: {n}" for n in bot_tab_names])
-    tab_summary = all_tabs[0]
-    tab_daily = all_tabs[1]
-    tab_simulation = all_tabs[2]
-    bot_tabs = {k: all_tabs[i + 3] for i, k in enumerate(BOT_PERSONAS)}
+    # Filter out disabled bots (e.g. israeli_trader)
+    active_bots = {k: v for k, v in BOT_PERSONAS.items()
+                   if v.get("enabled", True) and v.get("sources")}
+
+    # ── Tabs ──
+    all_tabs = st.tabs(["Simulation", "LLM Traders", "News Sources", "Daily Explorer"])
+    tab_simulation = all_tabs[0]
+    tab_traders = all_tabs[1]
+    tab_summary = all_tabs[2]
+    tab_daily = all_tabs[3]
+
+    if filtered.empty:
+        st.info("No news data yet. Fetch articles first, then reload.")
+        return
 
     # ═══════════════════════════ SUMMARY ═══════════════════════════
     with tab_summary:
@@ -1479,6 +1563,24 @@ def main():
         date_range = f"{filtered['date'].min()} → {filtered['date'].max()}"
         days = filtered["date"].nunique()
         st.caption(f"Period: {date_range}  ({days} days)")
+
+        with st.expander("How were these articles collected?"):
+            st.markdown(
+                "**Source:** [GDELT Project](https://www.gdeltproject.org/) — the world's "
+                "largest open news monitoring platform, tracking news from virtually every "
+                "country in over 100 languages.\n\n"
+                "**Method:** Articles were fetched via the GDELT DOC 2.0 API in 2-hour sliding windows. "
+                "Two complementary queries were run and merged:\n\n"
+                "1. **Broad query:** (iran OR tehran OR iranian) AND "
+                "(strike OR attack OR military OR war OR nuclear OR sanctions OR missile)\n"
+                '2. **Diplomacy query:** (iran OR tehran OR iranian) AND '
+                '(trump OR pentagon OR "united states") AND '
+                "(negotiations OR deal OR diplomacy OR talks OR agreement OR ceasefire OR peace OR treaty)\n\n"
+                "**Processing pipeline:**\n\n"
+                "1. **Fetch** — Raw articles collected from GDELT with metadata (title, source, country, language, timestamp)\n"
+                "2. **Merge & deduplicate** — Both query results combined, deduplicated by URL"
+            )
+
 
         # ── Articles per day ──
         st.subheader("Articles per day")
@@ -1580,12 +1682,92 @@ def main():
 
     # ═══════════════════════════ SIMULATION ═══════════════════════════
     with tab_simulation:
+        with st.expander("How the simulation works"):
+            st.markdown(
+                "**Market mechanism: Frequent Batch Auctions (FBA)**\n\n"
+                "Unlike traditional order books where orders execute one-by-one, "
+                "all orders in a batch are collected and cleared simultaneously at a single price. "
+                "This eliminates front-running and ensures fair price discovery — "
+                "every participant in a batch gets the same clearing price regardless of submission order.\n\n"
+                "**Matching engine**\n\n"
+                "The Rust-based matching engine solves a welfare-maximizing optimization problem each batch: "
+                "it finds clearing prices and fill quantities that maximize total trader surplus. "
+                "BuyYes + BuyNo orders can match via minting (total cost = \\$1). "
+                "All arithmetic is in integer nanos (1 dollar = 1,000,000,000 nanos) — no floating point.\n\n"
+                "**Time compression**\n\n"
+                "The simulation compresses real calendar time — each simulated day runs in minutes of wall-clock time. "
+                "Block production interval and compression ratio are configurable. "
+                "Articles arrive at their original publication timestamps within the compressed timeline.\n\n"
+                "**Participants**\n\n"
+                "- **Market Maker (MM)** — a two-sided liquidity provider that continuously quotes "
+                "buy prices on both YES and NO outcomes. Quotes at multiple price levels with tapered sizing "
+                "(larger near the mid, smaller at outer levels). Spread widens automatically when volatility "
+                "spikes and narrows in calm markets. When price momentum is detected, quoting shifts "
+                "asymmetrically to avoid being picked off by informed flow. Inventory management gradually "
+                "increases sell pressure as positions grow, and unwinds matched pairs to free capital.\n"
+                "- **Noise traders** — 20 bots placing random orders each block with 50% probability, "
+                "providing baseline order flow.\n"
+                "- **LLM traders** — autonomous agents powered by language models. "
+                "Each receives news articles matching their persona and makes independent trading decisions. "
+                "See the LLM Traders tab for details.\n\n"
+                "**Order mechanics**\n\n"
+                "- Limit price = worst price you'd accept. FBA guarantees you get the clearing price (which is better)\n"
+                "- Orders persist for 3 batches (TTL=3) if not filled\n\n"
+                "**Multi-day simulation**\n\n"
+                "Positions and balances carry over between simulated days. "
+                "Each day, fresh articles are loaded and LLM traders continue from their prior state — "
+                "portfolio, trade history, and last reasoning are preserved for continuity.\n\n"
+                "**What you'll find below**\n\n"
+                "- **Summary** — key metrics: total volume, fills, welfare breakdown by participant type\n"
+                "- **Price + Trader Activity** — interactive chart showing YES price over time, "
+                "overlaid with LLM trader fair value estimates and trade markers\n"
+                "- **Leaderboard** — final P&L ranking across all participants\n"
+                "- **LLM Decisions** — chronological log of every LLM trader decision: "
+                "article received, analysis, fair value, orders placed, and fill results\n"
+                "- **Per-Batch Activity** — volume and fill count per block over time\n"
+                "- **Batch Inspector** — drill into any individual batch to see all orders, "
+                "fills, and the clearing price"
+            )
         render_simulation_tab()
 
-    # ═══════════════════════════ BOT PERSONAS ═══════════════════════════
-    for bot_key, persona in BOT_PERSONAS.items():
-        with bot_tabs[bot_key]:
-            render_bot_tab(df, bot_key, persona)
+    # ═══════════════════════════ LLM TRADERS ═══════════════════════════
+    with tab_traders:
+        with st.expander("How LLM traders work"):
+            st.markdown(
+                "Each LLM trader is an autonomous agent powered by a language model "
+                "(Gemini 3.1 Flash Lite via OpenRouter). Traders receive news articles "
+                "in real-time during the simulation and make independent trading decisions.\n\n"
+                "**Per-trader configuration:**\n"
+                "- **News sources** — each trader reads from a curated set of outlets "
+                "matching their geographic/thematic focus (e.g. Arab press, US media, financial outlets)\n"
+                "- **Headline filter** — before the simulation, an LLM pre-screens every headline "
+                "from the trader's sources, keeping only articles relevant to the market question. "
+                "Full article text is then fetched for accepted headlines\n"
+                "- **Persona** — defines how the trader interprets signals and trades: "
+                "identity, reading style, and trading style\n\n"
+                "**During simulation, each block the trader receives:**\n"
+                "- New articles that have arrived since the last block\n"
+                "- Current market price and recent price trend\n"
+                "- Their portfolio state (cash, positions, P&L)\n"
+                "- History of their recent trades and fill results\n"
+                "- Their own prior reasoning (for self-reflection)\n\n"
+                "**The trader responds with:**\n"
+                "- ANALYSIS — interpretation of the new information\n"
+                "- FAIR_VALUE — their probability estimate for the event\n"
+                "- EDGE — difference vs market price; only trades if edge > \\$0.03\n"
+                "- ORDERS — buy/sell/hold with limit prices\n\n"
+                "**Portfolio rebalancing** runs every 4 simulated hours. "
+                "Traders with open positions are prompted to review and "
+                "optionally trim or exit positions to lock in profits or cut losses."
+            )
+
+        trader_names = {k: v["name"] for k, v in active_bots.items()}
+        selected_trader = st.selectbox(
+            "Select trader",
+            options=list(trader_names.keys()),
+            format_func=lambda k: trader_names[k],
+        )
+        render_bot_tab(filtered, selected_trader, active_bots[selected_trader])
 
 
 if __name__ == "__main__":

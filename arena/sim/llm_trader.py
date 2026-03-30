@@ -117,7 +117,7 @@ def load_articles(phase1_path: str) -> list[Article]:
 
 SYSTEM_PROMPT = """\
 You are trading in a prediction market using Frequent Batch Auctions.
-All orders in a batch are matched simultaneously at a single clearing price — no order book, no first-come advantage. Batches clear every ~20 minutes. Orders persist for 3 batches (TTL=3).
+All orders in a batch are matched simultaneously at a single clearing price — no order book, no first-come advantage. Batches clear every ~10 minutes. Orders persist for 3 batches (TTL=3).
 
 Pricing:
 - YES + NO = $1.00 always. If YES=$0.80, NO=$0.20.
@@ -133,7 +133,13 @@ Trading:
 - Deploy at most 10-20% of your cash per trade. Only exception: edge >30 cents, then up to 40%. This is a long day — prices will move, and you want cash for better opportunities later.
 - Keep at least 20-30% cash in reserve at all times.
 - Sell when your thesis weakens or counter-evidence appears. HOLD if already positioned and no new edge.
-- Extreme FAIR_VALUE (>0.85 or <0.15) requires extraordinary evidence. Most geopolitical events have genuine uncertainty — reflect that. Update based on the full picture, not just the latest article.
+- Extreme FAIR_VALUE (>0.85) requires extraordinary evidence. Most geopolitical events have genuine uncertainty — reflect that. Update based on the full picture, not just the latest article.
+
+Evidence discipline:
+- Base your FAIR_VALUE on the article(s) provided, the current market price, and your prior fair value estimate.
+- If the article contains no NEW information relevant to the market question, keep your FV near your PRIOR fair value — do not reset to the market price. Irrelevant news is not a reason to change your view.
+- Only revise your FV significantly when an article provides DIRECT evidence for or against the market question. Tangential news warrants at most a 1-2 cent adjustment.
+- Do NOT inject outside knowledge. But DO maintain conviction from previous evidence unless new information contradicts it.
 
 Always respond in English regardless of article language."""
 
@@ -151,7 +157,7 @@ class LlmTrader(BaseAgent):
         persona: str,
         market_question: str,
         context: str = "",
-        model_name: str = "moonshotai/kimi-k2",
+        model_name: str = "google/gemini-3.1-flash-lite-preview",
         name: str | None = None,
         market_ids: list[int] | None = None,
     ):
@@ -296,6 +302,14 @@ class LlmTrader(BaseAgent):
         portfolio_value = balance + yes_shares * yes_price + no_shares * (1 - yes_price)
         cash_pct = (balance / portfolio_value * 100) if portfolio_value > 0 else 100
 
+        # Extract last fair value estimate for anchoring
+        last_fv = None
+        for rec in reversed(self.trade_log):
+            if rec.fair_value > 0:
+                last_fv = rec.fair_value
+                break
+        last_fv_line = f"\n- Your last fair value estimate: {last_fv:.2f}" if last_fv else ""
+
         context_line = f"\n{self.context}" if self.context else ""
 
         # Build article section
@@ -352,7 +366,7 @@ Market: "{self.market_question}"{context_line}
 Current state:
 - YES price: ${yes_price:.4f} | NO price: ${no_price:.4f} (last 5 YES: {price_trend})
 - Your portfolio: ${balance:.2f} cash ({cash_pct:.0f}% of portfolio), {yes_shares} YES shares, {no_shares} NO shares
-- Estimated portfolio value: ~${portfolio_value:.2f}
+- Estimated portfolio value: ~${portfolio_value:.2f}{last_fv_line}
 
 Recent trades:
 {self._format_recent_trades()}
@@ -683,6 +697,15 @@ MOTIVATION: [1 sentence thesis]"""
         orders = [o for o in orders if isinstance(o, (SellYes, SellNo))]
         orders = self._validate_orders(orders, block)
 
+        # Directional consistency: same check as on_block()
+        yes_nanos, _ = self.filter_markets(block)[market_id]
+        cur_yes = yes_nanos / NANOS_PER_DOLLAR
+        orders = [o for o in orders if not (
+            isinstance(o, SellNo) and fair_value < cur_yes  # bearish shouldn't sell NO
+        ) and not (
+            isinstance(o, SellYes) and fair_value > cur_yes  # bullish shouldn't sell YES
+        )]
+
         # Deduct pending sells from local positions to prevent double-selling
         # when on_block fires before these orders fill.
         for order in orders:
@@ -792,6 +815,22 @@ MOTIVATION: [1 sentence thesis]"""
 
         analysis, fair_value, orders, motivation = parsed
         orders = self._validate_orders(orders, block)
+
+        # Reject directionally inconsistent orders (not applied to rebalancing)
+        yes_nanos, _ = self.filter_markets(block)[market_id]
+        cur_yes = yes_nanos / NANOS_PER_DOLLAR
+        consistent = []
+        for o in orders:
+            if isinstance(o, (BuyYes, SellNo)) and fair_value < cur_yes:
+                log.info("[%s] Rejected bullish order (FV=%.2f < mkt=%.2f): %s",
+                         self.name, fair_value, cur_yes, _describe_order(o))
+                continue
+            if isinstance(o, (BuyNo, SellYes)) and fair_value > cur_yes:
+                log.info("[%s] Rejected bearish order (FV=%.2f > mkt=%.2f): %s",
+                         self.name, fair_value, cur_yes, _describe_order(o))
+                continue
+            consistent.append(o)
+        orders = consistent
 
         self.trade_log.append(TradeRecord(
             articles=arrived,

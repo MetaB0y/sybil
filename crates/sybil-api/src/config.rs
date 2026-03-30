@@ -12,7 +12,7 @@ pub struct ApiConfig {
     pub dev_mode: bool,
 
     /// Block production interval in milliseconds.
-    #[arg(long, default_value = "2000", env = "SYBIL_BLOCK_INTERVAL_MS")]
+    #[arg(long, default_value = "500", env = "SYBIL_BLOCK_INTERVAL_MS")]
     pub block_interval_ms: u64,
 
     /// Seed markets to create on startup (comma-separated names).

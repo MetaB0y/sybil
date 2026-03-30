@@ -237,14 +237,15 @@ class FlashMarketMaker(BaseAgent):
 
 
 class BalancedMarketMaker(BaseAgent):
-    """FBA-native two-sided market maker.
+    """FBA-native mean-reversion market maker.
 
-    Core design: In FBA, spread is a fill threshold, not price protection.
-    The clearing mechanism provides automatic price improvement — you never
-    pay more than the clearing price regardless of your limit.
+    Core design: profits from mean reversion via a slow anchor price and
+    deviation-based asymmetric quoting. Only buys the cheap side (relative
+    to anchor) and only sells when price is favorable. Skips buying during
+    momentum or large deviations to avoid adverse selection.
 
     Tight inner spread (1c) maximizes fill rate against noise. Vol-adaptive
-    widening and momentum asymmetry protect against informed traders.
+    widening and patient inventory management protect against informed traders.
     """
 
     # Taper weights per level (inner → outer). Sum ≈ 1.0.
@@ -263,10 +264,11 @@ class BalancedMarketMaker(BaseAgent):
         max_position: int = 5_000,
         skew_factor: float = 0.1,
         vol_lookback: int = 4,
-        vol_widen_max: float = 3.0,
-        momentum_lookback: int = 3,
-        momentum_widen_max: float = 0.03,
+        vol_widen_max: float = 6.0,
         inventory_decay_start: int = 30,
+        anchor_alpha: float = 0.03,
+        fast_alpha: float = 0.15,
+        deviation_threshold: float = 0.05,
         name: str | None = None,
         market_ids: list[int] | None = None,
         max_blocks: int | None = None,
@@ -281,15 +283,30 @@ class BalancedMarketMaker(BaseAgent):
         self.skew_factor = skew_factor
         self.vol_lookback = vol_lookback
         self.vol_widen_max = vol_widen_max
-        self.momentum_lookback = momentum_lookback
-        self.momentum_widen_max = momentum_widen_max
         self.inventory_decay_start = inventory_decay_start
+        self.anchor_alpha = anchor_alpha
+        self.fast_alpha = fast_alpha
+        self.deviation_threshold = deviation_threshold
         self._price_history: dict[int, list[float]] = {}
+        self._anchor: dict[int, float] = {}
+        self._fast_ema: dict[int, float] = {}
+
+    def _update_prices(self, market_id: int, price: float) -> tuple[float, float]:
+        """Update and return (anchor, fast_ema)."""
+        if market_id not in self._anchor:
+            self._anchor[market_id] = price
+            self._fast_ema[market_id] = price
+            return price, price
+        self._anchor[market_id] += self.anchor_alpha * (price - self._anchor[market_id])
+        self._fast_ema[market_id] += self.fast_alpha * (price - self._fast_ema[market_id])
+        return self._anchor[market_id], self._fast_ema[market_id]
 
     def _vol_multiplier(self, market_id: int, mid: float) -> float:
         """Widen spread after large price moves.
 
         Two signals: windowed range + single-block jump (amplified 2x).
+        Returns multiplier for spread widening. Also used inversely for
+        size scaling — high vol → wide spread AND small size.
         """
         history = self._price_history.setdefault(market_id, [])
         history.append(mid)
@@ -301,37 +318,61 @@ class BalancedMarketMaker(BaseAgent):
         windowed_vol = max(recent) - min(recent)
         single_jump = abs(history[-1] - history[-2]) * 2.0
         effective_vol = max(windowed_vol, single_jump)
-        if effective_vol > 0.02:
-            return min(self.vol_widen_max, 1.0 + effective_vol * 8)
+        if effective_vol > 0.01:
+            return min(self.vol_widen_max, 1.0 + effective_vol * 15)
         return 1.0
 
-    def _momentum_asymmetry(self, market_id: int) -> tuple[float, float]:
-        """Compute asymmetric buy-side widening based on price momentum.
-
-        Returns (yes_extra, no_extra) — extra spread to add to each side's buys.
-        """
+    def _should_skip(self, market_id: int, raw_price: float, anchor: float) -> bool:
+        """Skip buying entirely when conditions are unfavorable."""
         history = self._price_history.get(market_id, [])
-        if len(history) < 2:
-            return 0.0, 0.0
-        # Exponentially-weighted momentum from recent price changes
-        n = min(self.momentum_lookback, len(history) - 1)
-        weights = [0.5 ** i for i in range(n)]  # 1.0, 0.5, 0.25, ...
-        momentum = 0.0
-        weight_sum = 0.0
-        for i in range(n):
-            delta = history[-(i + 1)] - history[-(i + 2)]
-            momentum += delta * weights[i]
-            weight_sum += weights[i]
-        momentum /= weight_sum
-        # Ignore noise below 1c
-        if abs(momentum) < 0.01:
-            return 0.0, 0.0
-        # Scale: 5c momentum → full momentum_widen_max
-        extra = min(self.momentum_widen_max, abs(momentum) / 0.05 * self.momentum_widen_max)
-        if momentum > 0:
-            return extra, 0.0  # price rising → widen YES buys
+
+        # Skip after large single-block move (existing guard)
+        if len(history) >= 2 and abs(history[-1] - history[-2]) > 0.05:
+            return True
+
+        # Skip when price is far from anchor (>8c) — the move already happened,
+        # adverse selection risk is highest
+        if abs(raw_price - anchor) > 0.08:
+            return True
+
+        # Skip during sustained directional momentum (3+ blocks same direction)
+        if len(history) >= 4:
+            deltas = [history[i] - history[i - 1] for i in range(-3, 0)]
+            if all(d > 0.005 for d in deltas) or all(d < -0.005 for d in deltas):
+                return True
+
+        return False
+
+    def _deviation_scales(self, raw_price: float, anchor: float) -> tuple[float, float]:
+        """Scale buy sizes based on price deviation from anchor.
+
+        Returns (yes_buy_scale, no_buy_scale) in [0, 1].
+        When price > anchor (YES expensive): suppress BuyYes, boost BuyNo
+        When price < anchor (YES cheap): boost BuyYes, suppress BuyNo
+        """
+        deviation = raw_price - anchor
+        # Normalize: deviation_threshold deviation = full suppression of one side
+        intensity = min(1.0, abs(deviation) / self.deviation_threshold)
+
+        if deviation > 0:  # price above anchor — YES is expensive
+            yes_scale = max(0.0, 1.0 - intensity * 2.0)  # suppress buying YES
+            no_scale = 1.0  # happy to buy NO (= sell YES exposure)
+        else:  # price below anchor — YES is cheap
+            yes_scale = 1.0  # happy to buy YES
+            no_scale = max(0.0, 1.0 - intensity * 2.0)  # suppress buying NO
+
+        return yes_scale, no_scale
+
+    def _should_sell(self, raw_price: float, anchor: float, is_yes: bool) -> bool:
+        """Only sell when price is above anchor (favorable for the seller).
+
+        If holding YES, only sell when YES price > anchor (selling expensive YES).
+        If holding NO, only sell when NO price > (1-anchor), i.e. YES price < anchor.
+        """
+        if is_yes:
+            return raw_price >= anchor  # YES is at/above fair → good time to sell YES
         else:
-            return 0.0, extra  # price falling → widen NO buys
+            return raw_price <= anchor  # YES is at/below fair → NO is at/above fair
 
     def _matched_pair_penalty(self, yes_pos: int, no_pos: int) -> float:
         """Extra spread multiplier when too much capital is locked in matched pairs."""
@@ -445,8 +486,12 @@ class BalancedMarketMaker(BaseAgent):
         orders: list[OrderSpec] = []
 
         for market_id, (yes_nanos, no_nanos) in self.filter_markets(block).items():
-            yes_mid = yes_nanos / NANOS_PER_DOLLAR
-            yes_mid = max(0.05, min(0.95, yes_mid))
+            raw_yes = yes_nanos / NANOS_PER_DOLLAR
+            raw_yes = max(0.05, min(0.95, raw_yes))
+            anchor, fast_ema = self._update_prices(market_id, raw_yes)
+
+            # Use anchor as the MM's reference mid
+            yes_mid = anchor
 
             yes_pos = self.get_position(market_id, "YES")
             no_pos = self.get_position(market_id, "NO")
@@ -458,7 +503,8 @@ class BalancedMarketMaker(BaseAgent):
             adjusted_no_mid = 1.0 - adjusted_yes_mid
 
             # Adaptive spread: base × volatility × matched-pair penalty
-            vol_mult = self._vol_multiplier(market_id, yes_mid)
+            # Use raw price for vol detection so it sees actual jumps
+            vol_mult = self._vol_multiplier(market_id, raw_yes)
             pair_mult = self._matched_pair_penalty(yes_pos, no_pos)
             spread = self.half_spread * vol_mult * pair_mult
 
@@ -468,51 +514,240 @@ class BalancedMarketMaker(BaseAgent):
             if spread < 0.005:
                 continue
 
-            # Momentum-based asymmetric buy widening
-            yes_extra, no_extra = self._momentum_asymmetry(market_id)
-            yes_buy_spread = min(spread + yes_extra, edge_room - 0.01)
-            no_buy_spread = min(spread + no_extra, edge_room - 0.01)
-
             # Continuous inventory management
             yes_buy_scale, no_buy_scale, net_sell, matched_sell = \
                 self._inventory_fractions(net, yes_pos, no_pos)
 
-            budget = min(self.current_balance, self.max_per_side)
+            # Deviation-based asymmetric quoting (mean reversion)
+            skip = self._should_skip(market_id, raw_yes, anchor)
+            dev_yes, dev_no = self._deviation_scales(raw_yes, anchor)
+            yes_buy_scale *= dev_yes
+            no_buy_scale *= dev_no
 
-            # Buy orders (both sides, scaled by inventory)
-            if yes_buy_scale > 0:
+            # Vol-inverse size scaling: high vol → deploy less capital
+            effective_per_side = self.max_per_side / vol_mult
+            budget = min(self.current_balance, effective_per_side)
+
+            # Buy orders (both sides, scaled by inventory + deviation)
+            if not skip and yes_buy_scale > 0:
                 orders.extend(self._buy_orders(
-                    market_id, adjusted_yes_mid, yes_buy_spread,
+                    market_id, adjusted_yes_mid, spread,
                     True, budget, yes_buy_scale))
-            if no_buy_scale > 0:
+            if not skip and no_buy_scale > 0:
                 orders.extend(self._buy_orders(
-                    market_id, adjusted_no_mid, no_buy_spread,
+                    market_id, adjusted_no_mid, spread,
                     False, budget, no_buy_scale))
 
-            # Sell orders: net imbalance (sell the long side)
+            # Sell orders: net imbalance (sell the long side) — patience gated
             if net_sell > 0 and net > 0 and yes_pos > 0:
-                sell_qty = max(1, int(yes_pos * net_sell))
-                orders.extend(self._sell_orders(
-                    market_id, adjusted_yes_mid, spread,
-                    True, sell_qty))
+                if self._should_sell(raw_yes, anchor, is_yes=True):
+                    sell_qty = max(1, int(yes_pos * net_sell))
+                    orders.extend(self._sell_orders(
+                        market_id, adjusted_yes_mid, spread,
+                        True, sell_qty))
             elif net_sell > 0 and net < 0 and no_pos > 0:
-                sell_qty = max(1, int(no_pos * net_sell))
-                orders.extend(self._sell_orders(
-                    market_id, adjusted_no_mid, spread,
-                    False, sell_qty))
+                if self._should_sell(raw_yes, anchor, is_yes=False):
+                    sell_qty = max(1, int(no_pos * net_sell))
+                    orders.extend(self._sell_orders(
+                        market_id, adjusted_no_mid, spread,
+                        False, sell_qty))
 
-            # Sell orders: matched-pair unwinding (sell BOTH sides)
+            # Sell orders: matched-pair unwinding — also patience gated
             if matched_sell > 0:
                 matched = min(yes_pos, no_pos)
                 unwind_qty = max(1, int(matched * matched_sell))
-                if yes_pos >= unwind_qty:
+                if yes_pos >= unwind_qty and self._should_sell(raw_yes, anchor, is_yes=True):
                     orders.extend(self._sell_orders(
                         market_id, adjusted_yes_mid, spread,
                         True, unwind_qty))
-                if no_pos >= unwind_qty:
+                if no_pos >= unwind_qty and self._should_sell(raw_yes, anchor, is_yes=False):
                     orders.extend(self._sell_orders(
                         market_id, adjusted_no_mid, spread,
                         False, unwind_qty))
+
+        return orders
+
+
+class FastAnchorMM(BaseAgent):
+    """FBA-native spread-capture market maker with fast anchor.
+
+    Key FBA insight: spread is an entry-selection filter, not a profit source.
+    In FBA with minting, the MM accumulates positions at the clearing price.
+    Wider spread → fills only when price has moved significantly → better
+    mean-reversion entries. The MM profits when positions revert, not from
+    the bid-ask spread directly.
+
+    Design:
+    - Fast EMA anchor (α=0.20) tracks current price closely (vs 0.03 in BalancedMM)
+    - Wider base spread (3c vs 1c) as entry-quality filter
+    - Symmetric quoting with inventory skew (no directional bias)
+    - Vol-adaptive spread widening
+    - Inventory selling when positions exceed threshold
+
+    Backtest (36-day Iran sim): +$7,143 vs BalancedMM's -$2,767.
+    Eliminates noise-trader exploit (noise PnL goes from +$3,394 to negative).
+    """
+
+    _BUY_TAPER = [0.50, 0.30, 0.20]
+    _SELL_TAPER = [0.50, 0.30, 0.20]
+
+    def __init__(
+        self,
+        client,
+        account_id: int,
+        budget_dollars: float = 50_000.0,
+        half_spread: float = 0.03,
+        num_levels: int = 3,
+        level_spacing: float = 0.02,
+        max_per_side_dollars: float = 100.0,
+        max_position: int = 5_000,
+        skew_factor: float = 0.15,
+        vol_lookback: int = 4,
+        vol_widen_max: float = 4.0,
+        anchor_alpha: float = 0.20,
+        inventory_sell_start: int = 50,
+        name: str | None = None,
+        market_ids: list[int] | None = None,
+        max_blocks: int | None = None,
+    ):
+        super().__init__(client, account_id, name, market_ids, max_blocks=max_blocks)
+        self.mm_budget_nanos = int(budget_dollars * NANOS_PER_DOLLAR)
+        self.half_spread = half_spread
+        self.num_levels = num_levels
+        self.level_spacing = level_spacing
+        self.max_per_side = max_per_side_dollars
+        self.max_position = max_position
+        self.skew_factor = skew_factor
+        self.vol_lookback = vol_lookback
+        self.vol_widen_max = vol_widen_max
+        self.anchor_alpha = anchor_alpha
+        self.inventory_sell_start = inventory_sell_start
+        self._price_history: dict[int, list[float]] = {}
+        self._anchor: dict[int, float] = {}
+
+    def _update_anchor(self, market_id: int, price: float) -> float:
+        """Update and return the fast anchor."""
+        if market_id not in self._anchor:
+            self._anchor[market_id] = price
+            return price
+        self._anchor[market_id] += self.anchor_alpha * (price - self._anchor[market_id])
+        return self._anchor[market_id]
+
+    def _vol_multiplier(self, market_id: int, mid: float) -> float:
+        """Widen spread after large price moves."""
+        history = self._price_history.setdefault(market_id, [])
+        history.append(mid)
+        if len(history) > self.vol_lookback + 2:
+            del history[:-self.vol_lookback - 2]
+        if len(history) < 2:
+            return 1.0
+        recent = history[-self.vol_lookback:]
+        windowed_vol = max(recent) - min(recent)
+        single_jump = abs(history[-1] - history[-2]) * 2.0
+        effective_vol = max(windowed_vol, single_jump)
+        if effective_vol > 0.02:
+            return min(self.vol_widen_max, 1.0 + effective_vol * 10)
+        return 1.0
+
+    def _buy_orders(
+        self, market_id: int, mid: float, spread: float,
+        is_yes: bool, budget: float, scale: float = 1.0,
+    ) -> list[OrderSpec]:
+        """Generate tapered buy orders for one side."""
+        orders = []
+        cls = BuyYes if is_yes else BuyNo
+        spent = 0.0
+        for level in range(self.num_levels):
+            bid = mid - spread - level * self.level_spacing
+            if bid < 0.01:
+                break
+            w = self._BUY_TAPER[min(level, len(self._BUY_TAPER) - 1)]
+            level_dollars = self.max_per_side * w * scale
+            room = budget - spent
+            if room <= 0:
+                break
+            level_dollars = min(level_dollars, room)
+            qty = int(level_dollars / bid)
+            if qty > 0:
+                orders.append(cls.at_price(market_id, bid, qty))
+                spent += qty * bid
+        return orders
+
+    def _sell_orders(
+        self, market_id: int, mid: float, spread: float,
+        is_yes: bool, held: int,
+    ) -> list[OrderSpec]:
+        """Generate tapered sell orders for one side."""
+        orders = []
+        cls = SellYes if is_yes else SellNo
+        remaining = held
+        for level in range(self.num_levels):
+            ask = mid + spread + level * self.level_spacing
+            if ask > 0.99 or remaining <= 0:
+                break
+            w = self._SELL_TAPER[min(level, len(self._SELL_TAPER) - 1)]
+            qty = max(1, min(int(held * w), remaining))
+            orders.append(cls.at_price(market_id, ask, qty))
+            remaining -= qty
+        return orders
+
+    async def on_block(self, block: Block) -> list[OrderSpec]:
+        orders: list[OrderSpec] = []
+
+        for market_id, (yes_nanos, no_nanos) in self.filter_markets(block).items():
+            raw_yes = yes_nanos / NANOS_PER_DOLLAR
+            raw_yes = max(0.05, min(0.95, raw_yes))
+            anchor = self._update_anchor(market_id, raw_yes)
+
+            yes_pos = self.get_position(market_id, "YES")
+            no_pos = self.get_position(market_id, "NO")
+            net = yes_pos - no_pos
+
+            # Inventory skew: shift mid AWAY from net position to rebalance
+            if self.max_position > 0:
+                skew = -math.tanh(net / self.max_position) * self.skew_factor
+            else:
+                skew = 0.0
+            yes_mid = max(0.05, min(0.95, anchor + skew))
+            no_mid = 1.0 - yes_mid
+
+            # Adaptive spread: base × volatility
+            vol_mult = self._vol_multiplier(market_id, raw_yes)
+            spread = self.half_spread * vol_mult
+
+            # Compress near edges
+            edge_room = min(yes_mid, no_mid)
+            spread = min(spread, edge_room - 0.01)
+            if spread < 0.005:
+                continue
+
+            # Dampen buying when total inventory is high
+            total = yes_pos + no_pos
+            if total > 100:
+                buy_scale = max(0.1, 1.0 - min(1.0, total / (self.max_position * 2)) * 2.0)
+            else:
+                buy_scale = 1.0
+
+            # Vol-inverse size scaling
+            eff_per_side = self.max_per_side / vol_mult
+            budget = min(self.current_balance, eff_per_side)
+
+            # Symmetric buy orders on both sides
+            if buy_scale > 0:
+                orders.extend(self._buy_orders(
+                    market_id, yes_mid, spread, True, budget, buy_scale))
+                orders.extend(self._buy_orders(
+                    market_id, no_mid, spread, False, budget, buy_scale))
+
+            # Sell excess inventory on either side (no patience gating)
+            for is_yes in [True, False]:
+                pos = yes_pos if is_yes else no_pos
+                if pos > self.inventory_sell_start:
+                    mid = yes_mid if is_yes else no_mid
+                    sell_frac = min(0.5, (pos - self.inventory_sell_start) / self.max_position * 2.0)
+                    qty = max(1, int(pos * sell_frac))
+                    orders.extend(self._sell_orders(
+                        market_id, mid, spread, is_yes, qty))
 
         return orders
 

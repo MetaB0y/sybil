@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from bots.market_maker import BalancedMarketMaker
+from bots.market_maker import BalancedMarketMaker, FastAnchorMM
 from bots.random_trader import RandomTrader
 from sybil_client import BuyNo, BuyYes, SybilClient
 from sybil_client.types import NANOS_PER_DOLLAR
@@ -36,7 +36,7 @@ def _default_model(trader_specs: list | None) -> str:
         for s in trader_specs:
             if s.model:
                 return s.model
-    return "google/gemini-2.5-flash"
+    return "google/gemini-3.1-flash-lite-preview"
 
 
 def _load_market_config(market_name: str):
@@ -44,6 +44,24 @@ def _load_market_config(market_name: str):
     import importlib
     mod = importlib.import_module(f"markets.{market_name}")
     return mod.get_config()
+
+
+def _lookup_polymarket_price(prices_file: Path, date_str: str) -> float | None:
+    """Look up the Polymarket YES price at the start of a given date (YYYYMMDD)."""
+    import json
+    if not prices_file.exists():
+        return None
+    try:
+        with open(prices_file) as f:
+            prices = json.load(f)
+        # Format: [{"timestamp": "2026-01-26T00:00:36+00:00", "yes_price": 0.585}, ...]
+        target = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+        for entry in prices:
+            if entry["timestamp"].startswith(target):
+                return entry["yes_price"]
+    except Exception:
+        pass
+    return None
 
 
 def _resolve_phase1_path(market_config, bot_key: str, date: str | None = None) -> str:
@@ -73,15 +91,15 @@ class TraderSpec:
 @dataclass
 class SimulationConfig:
     base_url: str = "http://localhost:3001"
-    compression_ratio: float = 600.0
-    block_interval_s: float = 2.0
+    compression_ratio: float = 1200.0
+    block_interval_s: float = 0.5
     mm_balance: float = 50_000.0
     initial_price: float = 0.12
-    noise_count: int = 20
+    noise_count: int = 10
     noise_balance: float = 50.0
     trader_balance: float = 2_000.0
     api_key: str = ""
-    model_name: str = "moonshotai/kimi-k2"
+    model_name: str = "google/gemini-3.1-flash-lite-preview"
     sim_start_hour: str = "00:00"
     sim_end_hour: str = "23:59"
     trader_specs: list[TraderSpec] | None = None
@@ -94,7 +112,9 @@ class SimulationConfig:
     context: str = ""
     phase1_dir: Path | None = None
     runs_dir: Path | None = None
+    mm_per_side: float = 500.0  # max $ deployed per side per block
     mm_max_blocks: int | None = None  # None = unlimited, 1 = single initial trade
+    mm_strategy: str = "balanced"  # "balanced" or "fast-anchor"
 
 
 async def run_simulation(config: SimulationConfig) -> None:
@@ -138,6 +158,11 @@ async def run_simulation(config: SimulationConfig) -> None:
             trader_accounts[spec.name] = acct.id
             print(f"{spec.name} account {acct.id}: ${config.trader_balance}")
 
+        noise_accounts = []
+        for i in range(config.noise_count):
+            acct = await client.create_account(int(config.noise_balance * NANOS_PER_DOLLAR))
+            noise_accounts.append(acct)
+
         trader_state: dict[str, dict] = {}
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -172,12 +197,15 @@ async def run_simulation(config: SimulationConfig) -> None:
                     spec_articles[spec.name] = arts
                     print(f"  {spec.name}: {len(arts)} articles from {path}")
 
-            if not spec_articles:
-                print(f"  ERROR: No articles for day {day_label}. Skipping.")
+            if spec_articles:
+                first_articles = next(iter(spec_articles.values()))
+                article_date = first_articles[0].timestamp.date()
+            elif date_str:
+                article_date = datetime.strptime(date_str, "%Y%m%d").date()
+            else:
+                print(f"  ERROR: No articles and no date for day {day_label}. Skipping.")
                 continue
 
-            first_articles = next(iter(spec_articles.values()))
-            article_date = first_articles[0].timestamp.date()
             h, m = (int(x) for x in config.sim_start_hour.split(":"))
             sim_start = datetime(article_date.year, article_date.month, article_date.day, h, m)
             h_end, m_end = (int(x) for x in config.sim_end_hour.split(":"))
@@ -188,17 +216,27 @@ async def run_simulation(config: SimulationConfig) -> None:
                 compression_ratio=config.compression_ratio,
             )
 
-            mm = BalancedMarketMaker(
-                client, mm_acct.id,
-                budget_dollars=config.mm_balance,
-                name="MM",
-                market_ids=[market.id],
-                max_blocks=config.mm_max_blocks,
-            )
+            if config.mm_strategy == "fast-anchor":
+                mm = FastAnchorMM(
+                    client, mm_acct.id,
+                    budget_dollars=config.mm_balance,
+                    max_per_side_dollars=config.mm_per_side,
+                    name="MM",
+                    market_ids=[market.id],
+                    max_blocks=config.mm_max_blocks,
+                )
+            else:
+                mm = BalancedMarketMaker(
+                    client, mm_acct.id,
+                    budget_dollars=config.mm_balance,
+                    max_per_side_dollars=config.mm_per_side,
+                    name="MM",
+                    market_ids=[market.id],
+                    max_blocks=config.mm_max_blocks,
+                )
 
             noise_bots = []
-            for i in range(config.noise_count):
-                acct = await client.create_account(int(config.noise_balance * NANOS_PER_DOLLAR))
+            for i, acct in enumerate(noise_accounts):
                 bot = RandomTrader(
                     client, acct.id,
                     trade_probability=0.5,
@@ -207,20 +245,22 @@ async def run_simulation(config: SimulationConfig) -> None:
                     market_ids=[market.id],
                 )
                 noise_bots.append(bot)
-            print(f"  Created {config.noise_count} noise traders @ ${config.noise_balance} each")
+            if day_idx == 0:
+                print(f"  Created {config.noise_count} noise traders @ ${config.noise_balance} each")
+            else:
+                print(f"  Reusing {config.noise_count} noise traders")
 
             traders = []
             for spec in specs:
-                if spec.name not in spec_articles:
-                    continue
-                # Only include articles within the sim window
+                # Include articles within the sim window (empty list if none)
                 window_articles = [
-                    a for a in spec_articles[spec.name]
+                    a for a in spec_articles.get(spec.name, [])
                     if sim_start <= a.timestamp <= sim_end
                 ]
-                if not window_articles:
-                    print(f"  {spec.name}: 0 articles in {config.sim_start_hour}–{config.sim_end_hour}, skipping")
-                    continue
+                if window_articles:
+                    print(f"  {spec.name}: {len(window_articles)} articles in window")
+                else:
+                    print(f"  {spec.name}: 0 articles (will still rebalance)")
                 t = LlmTrader(
                     client, trader_accounts[spec.name],
                     window_articles, clock,
@@ -291,6 +331,9 @@ async def run_simulation(config: SimulationConfig) -> None:
                 bot.stop()
             await asyncio.gather(*tasks, return_exceptions=True)
 
+            # Wait for pending orders to settle (TTL up to 5 blocks × 2s)
+            await asyncio.sleep(12)
+
             for t in traders:
                 trader_state[t.name] = t.snapshot_state()
 
@@ -307,9 +350,9 @@ def main():
     parser = argparse.ArgumentParser(description="News-reactive LLM simulation runner")
     parser.add_argument("--market", required=True, help="Market name (e.g. iran)")
     parser.add_argument("--base-url", default="http://localhost:3001")
-    parser.add_argument("--compression", type=float, default=600.0,
-                        help="Time compression ratio (default: 600)")
-    parser.add_argument("--noise-count", type=int, default=20)
+    parser.add_argument("--compression", type=float, default=1200.0,
+                        help="Time compression ratio (default: 1200)")
+    parser.add_argument("--noise-count", type=int, default=10)
     parser.add_argument("--noise-balance", type=float, default=50.0)
     parser.add_argument("--trader-balance", type=float, default=2000.0)
     parser.add_argument("--initial-price", type=float, default=None)
@@ -328,6 +371,8 @@ def main():
                         help="Rebalance interval in sim hours (0=disabled, default: 4)")
     parser.add_argument("--mm-max-blocks", type=int, default=None,
                         help="Stop MM after N blocks with trades (default: unlimited, 1=seed only)")
+    parser.add_argument("--mm", default="balanced", choices=["balanced", "fast-anchor"],
+                        help="MM strategy: balanced (slow anchor) or fast-anchor (default: balanced)")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -342,6 +387,14 @@ def main():
     # Load market config
     market_config = _load_market_config(args.market)
     initial_price = args.initial_price if args.initial_price is not None else market_config.initial_price
+
+    # Auto-lookup Polymarket price for the first sim date if available
+    first_date = (args.dates or [args.date])[0] if (args.dates or args.date) else None
+    if args.initial_price is None and first_date and market_config.polymarket_prices_file:
+        poly_price = _lookup_polymarket_price(market_config.polymarket_prices_file, first_date)
+        if poly_price is not None:
+            initial_price = poly_price
+            print(f"  Initial price from Polymarket: {initial_price:.4f} (date {first_date})")
 
     # Build trader specs from --traders arg or defaults
     trader_specs = None
@@ -405,11 +458,13 @@ def main():
         context=market_config.context,
         runs_dir=market_config.runs_dir,
         mm_max_blocks=args.mm_max_blocks,
+        mm_strategy=args.mm,
     )
 
     print(f"{market_config.question}")
     print(f"  Server: {config.base_url}")
     print(f"  Default model: {config.model_name}")
+    print(f"  MM strategy: {config.mm_strategy}")
     print(f"  Compression: {config.compression_ratio}x")
     print(f"  Noise traders: {config.noise_count} @ ${config.noise_balance}")
     print(f"  Trader balance: ${config.trader_balance}")

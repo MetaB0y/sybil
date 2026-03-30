@@ -1,6 +1,4 @@
-"""Iran strike market configuration."""
-
-from pathlib import Path
+"""Texas Republican Senate primary market configuration."""
 
 from markets import MarketConfig
 
@@ -22,11 +20,7 @@ from .personas import BOT_PERSONAS
 
 
 def build_persona(bot_config: dict) -> str:
-    """Build a persona prompt from a BOT_PERSONAS entry.
-
-    Market question and context are injected by the LlmTrader prompt,
-    so the persona only describes identity + style.
-    """
+    """Build a persona prompt from a BOT_PERSONAS entry."""
     p = bot_config["persona"]
     read_lines = "\n".join(f"- {s}" for s in p["read_style"])
     trade_lines = "\n".join(f"- {s}" for s in p["trade_style"])
@@ -41,7 +35,7 @@ How you trade:
 
 
 def get_config() -> MarketConfig:
-    """Return the MarketConfig for the Iran strike market."""
+    """Return the MarketConfig for the Texas primary market."""
     return MarketConfig(
         question=MARKET_QUESTION,
         description=MARKET_DESCRIPTION,

@@ -21,3 +21,4 @@ class MarketConfig:
     runs_dir: Path
     personas: dict
     build_persona: Callable[[dict], str]
+    polymarket_prices_file: Path | None = None

@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DEFAULT_MODEL = "moonshotai/kimi-k2"
+DEFAULT_MODEL = "google/gemini-3.1-flash-lite-preview"
 
 
 def _load_market_config(market_name: str):
@@ -32,7 +32,7 @@ def _load_market_config(market_name: str):
 
 
 def load_articles_for_date(data_path: Path, target_date: date, sources: list[str]) -> list[dict]:
-    """Load English articles from the given sources on the given date."""
+    """Load articles from the given sources on the given date."""
     with open(data_path) as f:
         raw = json.load(f)
 
@@ -183,12 +183,12 @@ async def main():
     persona = config.personas[args.bot]
     sources = persona["sources"]
 
-    # Find dataset files
+    # Find dataset file — use largest raw file (the merged one)
     data_paths = sorted(config.datasets_dir.glob("*_raw.json"))
     if not data_paths:
         print(f"No dataset files found in {config.datasets_dir}")
         return
-    data_path = data_paths[0]
+    data_path = max(data_paths, key=lambda p: p.stat().st_size)
 
     client = openai.AsyncOpenAI(
         base_url="https://openrouter.ai/api/v1",
