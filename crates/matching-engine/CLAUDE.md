@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The **matching-engine** crate is the foundational core of Sybil. It defines all fundamental types, data structures, and the problem representation. It contains **zero solver logic** — only the domain model that solvers use.
 
+## Architecture Notes
+
+Before modifying this crate, read these vault notes (`docs/architecture/`):
+- [[Payoff Vectors]] — the central abstraction for all order types
+- [[Binary Markets and Market Groups]] — market structure and mutually exclusive sets
+- [[Nanos and Integer Arithmetic]] — fixed-point arithmetic invariants
+- [[Order Types]] — user-facing order specs converted to payoff vectors
+- [[Minting]] — how group minting creates/destroys complete sets
+
 ## Key Design Decisions
 
 - **All markets are binary** (YES/NO). Multi-outcome events are modeled as groups of binary markets at the solver layer via `MarketGroup`.

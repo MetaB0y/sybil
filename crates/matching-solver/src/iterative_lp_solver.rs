@@ -192,9 +192,9 @@ impl IterLpSolver {
                     eg_obj += mm_budgets[k] * u_k[k].ln();
                 }
             }
-            for i in 0..n {
+            for (i, &w) in welfare_weights.iter().enumerate() {
                 if !mm_order_map.contains_key(&i) {
-                    eg_obj += welfare_weights[i] * sol.q_values[i];
+                    eg_obj += w * sol.q_values[i];
                 }
             }
 
@@ -217,8 +217,7 @@ impl IterLpSolver {
                 let mu_new = mm_budgets[k] / (u_k[k] + s_k);
 
                 // Damped update
-                let mu_updated = (1.0 - self.config.damping) * mu[k]
-                    + self.config.damping * mu_new;
+                let mu_updated = (1.0 - self.config.damping) * mu[k] + self.config.damping * mu_new;
 
                 max_delta = max_delta.max((mu_updated - mu[k]).abs());
                 mu[k] = mu_updated;
@@ -262,11 +261,7 @@ impl IterLpSolver {
 
         // Budget trim: integer rounding can push capital slightly over budget
         if !problem.mm_constraints.is_empty() {
-            trim_mm_budget_overflows(
-                &mut result,
-                &problem.mm_constraints,
-                &mm_order_info_by_id,
-            );
+            trim_mm_budget_overflows(&mut result, &problem.mm_constraints, &mm_order_info_by_id);
         }
 
         // Arb orders for position balance
@@ -332,13 +327,27 @@ mod tests {
         let market = problem.markets.add_binary("market");
 
         problem.orders.push(outcome_sell(
-            &problem.markets, 100, market, 0, 500_000_000, 1000,
+            &problem.markets,
+            100,
+            market,
+            0,
+            500_000_000,
+            1000,
         ));
         problem.orders.push(outcome_sell(
-            &problem.markets, 101, market, 1, 500_000_000, 1000,
+            &problem.markets,
+            101,
+            market,
+            1,
+            500_000_000,
+            1000,
         ));
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 100,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            100,
         ));
 
         let solver = IterLpSolver::new();
@@ -358,11 +367,15 @@ mod tests {
         let market = problem.markets.add_binary("market");
 
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 100,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            100,
         ));
-        problem.orders.push(simple_no_buy(
-            &problem.markets, 2, market, 500_000_000, 100,
-        ));
+        problem
+            .orders
+            .push(simple_no_buy(&problem.markets, 2, market, 500_000_000, 100));
 
         let solver = IterLpSolver::new();
         let result = solver.solve(&problem);
@@ -387,9 +400,15 @@ mod tests {
         group.add_market(m2);
         problem.add_market_group(group);
 
-        problem.orders.push(simple_yes_buy(&problem.markets, 1, m0, 400_000_000, 100));
-        problem.orders.push(simple_yes_buy(&problem.markets, 2, m1, 350_000_000, 100));
-        problem.orders.push(simple_yes_buy(&problem.markets, 3, m2, 300_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 1, m0, 400_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 2, m1, 350_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 3, m2, 300_000_000, 100));
 
         let solver = IterLpSolver::new();
         let result = solver.solve(&problem);
@@ -416,16 +435,23 @@ mod tests {
         let market = problem.markets.add_binary("market");
 
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 300_000_000, 100,
+            &problem.markets,
+            1,
+            market,
+            300_000_000,
+            100,
         ));
-        problem.orders.push(simple_no_buy(
-            &problem.markets, 2, market, 300_000_000, 100,
-        ));
+        problem
+            .orders
+            .push(simple_no_buy(&problem.markets, 2, market, 300_000_000, 100));
 
         let solver = IterLpSolver::new();
         let result = solver.solve(&problem);
 
-        assert_eq!(result.result.orders_filled, 0, "should not fill unprofitable minting");
+        assert_eq!(
+            result.result.orders_filled, 0,
+            "should not fill unprofitable minting"
+        );
     }
 
     #[test]
@@ -435,7 +461,11 @@ mod tests {
 
         // YES buyer at 60c, 500 shares
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 500,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            500,
         ));
 
         // MM buying NO at 50c, 1000 shares, budget $50
@@ -471,10 +501,18 @@ mod tests {
 
         // YES buyer + NO buyer pair via minting
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 100,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            100,
         ));
         problem.orders.push(simple_no_buy(
-            &problem.markets, 100, market, 500_000_000, 100,
+            &problem.markets,
+            100,
+            market,
+            500_000_000,
+            100,
         ));
 
         // MM with zero budget
@@ -503,10 +541,18 @@ mod tests {
 
         // YES buyers
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 1000,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            1000,
         ));
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 2, market, 550_000_000, 1000,
+            &problem.markets,
+            2,
+            market,
+            550_000_000,
+            1000,
         ));
 
         // MM1: buys NO at 45c, budget $100
@@ -539,30 +585,42 @@ mod tests {
         let market = problem.markets.add_binary("market");
 
         problem.orders.push(outcome_sell(
-            &problem.markets, 100, market, 0, 500_000_000, 1000,
+            &problem.markets,
+            100,
+            market,
+            0,
+            500_000_000,
+            1000,
         ));
         problem.orders.push(outcome_sell(
-            &problem.markets, 101, market, 1, 500_000_000, 1000,
+            &problem.markets,
+            101,
+            market,
+            1,
+            500_000_000,
+            1000,
         ));
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 100,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            100,
         ));
-        problem.orders.push(simple_no_buy(
-            &problem.markets, 2, market, 400_000_000, 50,
-        ));
+        problem
+            .orders
+            .push(simple_no_buy(&problem.markets, 2, market, 400_000_000, 50));
 
         let lp_result = LpSolver::new().solve(&problem);
         let aug_result = IterLpSolver::new().solve(&problem);
 
         // Welfare should match exactly (delegates to LP)
         assert_eq!(
-            lp_result.result.total_welfare,
-            aug_result.result.total_welfare,
+            lp_result.result.total_welfare, aug_result.result.total_welfare,
             "AugLP should produce identical welfare to LP when no MMs"
         );
         assert_eq!(
-            lp_result.result.orders_filled,
-            aug_result.result.orders_filled,
+            lp_result.result.orders_filled, aug_result.result.orders_filled,
             "AugLP should produce identical fills to LP when no MMs"
         );
     }
@@ -624,8 +682,7 @@ mod tests {
         let lp_w = lp_result.result.total_welfare;
         let aug_w = aug_result.result.total_welfare;
 
-        eprintln!(
-            "Tight budget price-shift scenario:");
+        eprintln!("Tight budget price-shift scenario:");
         eprintln!(
             "  LP:    welfare=${:.2}, fills={}",
             lp_w as f64 / 1e9,
@@ -845,7 +902,10 @@ mod tests {
         let budgets_dollars = [1u64, 2, 5, 10, 25, 50, 100, 250, 500, 1000];
 
         eprintln!("\nBudget sweep (LP vs AugLP):");
-        eprintln!("{:>10} {:>12} {:>12} {:>8} {:>8}", "Budget", "LP", "AugLP", "Gap%", "Winner");
+        eprintln!(
+            "{:>10} {:>12} {:>12} {:>8} {:>8}",
+            "Budget", "LP", "AugLP", "Gap%", "Winner"
+        );
 
         for &budget in &budgets_dollars {
             let mut problem = Problem::new("sweep");

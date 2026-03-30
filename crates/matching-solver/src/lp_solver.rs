@@ -174,19 +174,11 @@ impl LpSolver {
         //   - group prices satisfy Σp ≤ $1 (from gmint variables)
         // No need for enforce_ucp — it was designed for the old decomposition pipeline.
         let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
-        let (mut result, prices) = extract_result(
-            &solution,
-            &problem.orders,
-            &markets,
-        );
+        let (mut result, prices) = extract_result(&solution, &problem.orders, &markets);
 
         // Trim any tiny MM budget overflows from integer rounding.
         if !problem.mm_constraints.is_empty() {
-            trim_mm_budget_overflows(
-                &mut result,
-                &problem.mm_constraints,
-                &mm_order_info,
-            );
+            trim_mm_budget_overflows(&mut result, &problem.mm_constraints, &mm_order_info);
         }
 
         // Create arb orders AFTER all post-processing (including MM trim)
@@ -713,7 +705,9 @@ pub(crate) fn trim_mm_budget_overflows(
                 continue;
             }
             let overflow = remaining - mm.max_capital as u128;
-            let trim = ((overflow + cpu - 1) / cpu).min(result.fills[fi].fill_qty as u128) as u64;
+            let trim = overflow
+                .div_ceil(cpu)
+                .min(result.fills[fi].fill_qty as u128) as u64;
             remaining -= side.capital_needed(fill.fill_price, trim) as u128;
             result.fills[fi].fill_qty -= trim;
         }
@@ -740,7 +734,7 @@ pub(crate) fn recompute_welfare(result: &mut MatchingResult, order_map: &HashMap
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matching_engine::{simple_yes_buy, simple_no_buy, outcome_sell, MarketGroup};
+    use matching_engine::{outcome_sell, simple_no_buy, simple_yes_buy, MarketGroup};
 
     #[test]
     fn test_lp_single_market() {
@@ -749,15 +743,29 @@ mod tests {
 
         // YES seller at 50c, 1000 shares
         problem.orders.push(outcome_sell(
-            &problem.markets, 100, market, 0, 500_000_000, 1000,
+            &problem.markets,
+            100,
+            market,
+            0,
+            500_000_000,
+            1000,
         ));
         // NO seller at 50c, 1000 shares
         problem.orders.push(outcome_sell(
-            &problem.markets, 101, market, 1, 500_000_000, 1000,
+            &problem.markets,
+            101,
+            market,
+            1,
+            500_000_000,
+            1000,
         ));
         // YES buyer at 60c, 100 shares
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 100,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            100,
         ));
 
         let solver = LpSolver::new();
@@ -778,12 +786,16 @@ mod tests {
 
         // YES buyer at 60c
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 600_000_000, 100,
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            100,
         ));
         // NO buyer at 50c
-        problem.orders.push(simple_no_buy(
-            &problem.markets, 2, market, 500_000_000, 100,
-        ));
+        problem
+            .orders
+            .push(simple_no_buy(&problem.markets, 2, market, 500_000_000, 100));
 
         let solver = LpSolver::new();
         let result = solver.solve(&problem);
@@ -813,9 +825,15 @@ mod tests {
         problem.add_market_group(group);
 
         // YES buyers at prices that sum to > $1 (profitable negrisk)
-        problem.orders.push(simple_yes_buy(&problem.markets, 1, m0, 400_000_000, 100));
-        problem.orders.push(simple_yes_buy(&problem.markets, 2, m1, 350_000_000, 100));
-        problem.orders.push(simple_yes_buy(&problem.markets, 3, m2, 300_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 1, m0, 400_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 2, m1, 350_000_000, 100));
+        problem
+            .orders
+            .push(simple_yes_buy(&problem.markets, 3, m2, 300_000_000, 100));
 
         let solver = LpSolver::new();
         let result = solver.solve(&problem);
@@ -847,12 +865,16 @@ mod tests {
 
         // YES buyer at 30c
         problem.orders.push(simple_yes_buy(
-            &problem.markets, 1, market, 300_000_000, 100,
+            &problem.markets,
+            1,
+            market,
+            300_000_000,
+            100,
         ));
         // NO buyer at 30c → sum = 60c < $1, not profitable to mint
-        problem.orders.push(simple_no_buy(
-            &problem.markets, 2, market, 300_000_000, 100,
-        ));
+        problem
+            .orders
+            .push(simple_no_buy(&problem.markets, 2, market, 300_000_000, 100));
         // No sellers → only minting possible, but it costs $1 and only returns 60c
 
         let solver = LpSolver::new();
@@ -864,5 +886,4 @@ mod tests {
             "should not fill unprofitable minting"
         );
     }
-
 }

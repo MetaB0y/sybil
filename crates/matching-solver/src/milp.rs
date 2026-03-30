@@ -305,10 +305,7 @@ impl MilpSolver {
                     if fill.fill_qty == 0 {
                         continue;
                     }
-                    let Some(order) = active_orders
-                        .iter()
-                        .find(|o| o.id == fill.order_id)
-                    else {
+                    let Some(order) = active_orders.iter().find(|o| o.id == fill.order_id) else {
                         continue;
                     };
 
@@ -394,6 +391,7 @@ impl MilpSolver {
     /// - Position balance via per-market c_YES/c_NO coefficients
     /// - MM budget constraints (exact bilinear price*qty via quadratic constraints)
     /// - Market group constraints (sum of YES prices <= $1)
+    ///
     /// Returns (solution, status, solve_time, objective_value).
     fn solve_with_scip(
         &self,
@@ -920,7 +918,6 @@ impl Default for MilpSolver {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1135,5 +1132,4 @@ mod tests {
             result.result.total_welfare
         );
     }
-
 }

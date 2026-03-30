@@ -5,7 +5,9 @@ use axum::http::{Method, Request, StatusCode};
 use axum::Router;
 use http_body_util::BodyExt;
 use matching_engine::MarketSet;
-use matching_sequencer::{AccountStore, AdminOracle, BlockSequencer, MempoolConfig, SequencerHandle};
+use matching_sequencer::{
+    AccountStore, AdminOracle, BlockSequencer, MempoolConfig, SequencerHandle,
+};
 use sybil_api::app::create_router;
 use sybil_api::state::AppState;
 use tower::ServiceExt;
@@ -17,22 +19,29 @@ pub async fn test_app(dev_mode: bool) -> (Router, SequencerHandle) {
     let oracle = Arc::new(AdminOracle::new());
     let sequencer = BlockSequencer::new(accounts, markets, vec![], oracle);
     let handle = SequencerHandle::spawn(sequencer, MempoolConfig::default());
+    let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .build_recorder()
+        .handle();
     let state = AppState {
         sequencer: handle.clone(),
         dev_mode,
+        prometheus,
     };
     (create_router(state), handle)
 }
 
 /// Send a GET request and return (status, body bytes).
 pub async fn get(app: Router, uri: &str) -> (StatusCode, Vec<u8>) {
-    let req = Request::builder()
-        .uri(uri)
-        .body(Body::empty())
-        .unwrap();
+    let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
     let resp = app.oneshot(req).await.unwrap();
     let status = resp.status();
-    let body = resp.into_body().collect().await.unwrap().to_bytes().to_vec();
+    let body = resp
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes()
+        .to_vec();
     (status, body)
 }
 
@@ -46,6 +55,12 @@ pub async fn post_json(app: Router, uri: &str, body: serde_json::Value) -> (Stat
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     let status = resp.status();
-    let body = resp.into_body().collect().await.unwrap().to_bytes().to_vec();
+    let body = resp
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes()
+        .to_vec();
     (status, body)
 }

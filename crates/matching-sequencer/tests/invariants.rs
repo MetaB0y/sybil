@@ -7,9 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use matching_engine::{outcome_buy, MarketId, MarketSet, NANOS_PER_DOLLAR};
-use matching_sequencer::{
-    AccountId, AccountStore, AdminOracle, BlockSequencer, OrderSubmission,
-};
+use matching_sequencer::{AccountId, AccountStore, AdminOracle, BlockSequencer, OrderSubmission};
 use proptest::prelude::*;
 
 // ---------------------------------------------------------------------------
@@ -25,10 +23,10 @@ fn arb_crossing_pair(
 ) -> impl Strategy<Value = Vec<OrderSubmission>> {
     let ms = markets.clone();
     (
-        0..n_markets,                                       // market
-        NANOS_PER_DOLLAR / 10..9 * NANOS_PER_DOLLAR / 10,  // yes_price (10%-90%)
-        NANOS_PER_DOLLAR / 100..NANOS_PER_DOLLAR / 5,        // 1-20% surplus guarantees positive welfare
-        1u64..50,                                           // quantity
+        0..n_markets,                                     // market
+        NANOS_PER_DOLLAR / 10..9 * NANOS_PER_DOLLAR / 10, // yes_price (10%-90%)
+        NANOS_PER_DOLLAR / 100..NANOS_PER_DOLLAR / 5, // 1-20% surplus guarantees positive welfare
+        1u64..50,                                     // quantity
         (0..n_accounts, 0..n_accounts).prop_filter("distinct accounts", |(a, b)| a != b),
     )
         .prop_map(move |(market_idx, yes_price, surplus, qty, (a1, a2))| {
@@ -75,16 +73,21 @@ fn arb_solo_order(
     markets: MarketSet,
 ) -> impl Strategy<Value = OrderSubmission> {
     let ms = markets.clone();
-    (0..n_accounts, 0..n_markets, 1..NANOS_PER_DOLLAR, 1u64..50, 0u8..2).prop_map(
-        move |(acct, market_idx, price, qty, outcome)| {
+    (
+        0..n_accounts,
+        0..n_markets,
+        1..NANOS_PER_DOLLAR,
+        1u64..50,
+        0u8..2,
+    )
+        .prop_map(move |(acct, market_idx, price, qty, outcome)| {
             let mid = MarketId::new(market_idx);
             OrderSubmission {
                 account_id: AccountId(acct),
                 orders: vec![outcome_buy(&ms, 0, mid, outcome, price, qty)],
                 mm_constraint: None,
             }
-        },
-    )
+        })
 }
 
 // ---------------------------------------------------------------------------

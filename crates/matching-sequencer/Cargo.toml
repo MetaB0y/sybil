@@ -10,7 +10,7 @@ path = "src/bin/sybil_sim.rs"
 
 [dependencies]
 matching-engine = { path = "../matching-engine" }
-matching-solver = { path = "../matching-solver", features = ["lp", "milp"] }
+matching-solver = { path = "../matching-solver", features = ["lp"] }
 sybil-oracle = { path = "../sybil-oracle" }
 sybil-verifier = { path = "../sybil-verifier" }
 rand = { workspace = true }
@@ -23,6 +23,7 @@ p256 = { version = "0.14.0-rc.7", features = ["ecdsa"] }
 thiserror = { workspace = true }
 tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
 tracing = "0.1"
+metrics = "0.24"
 
 [dev-dependencies]
 proptest = "1.6"

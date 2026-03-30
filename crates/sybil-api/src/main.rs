@@ -2,7 +2,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
+use opentelemetry::trace::TracerProvider;
 use tokio::net::TcpListener;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
 use matching_engine::MarketSet;
@@ -14,14 +17,50 @@ use sybil_api::app::create_router;
 use sybil_api::config::ApiConfig;
 use sybil_api::state::AppState;
 
+fn init_telemetry() -> metrics_exporter_prometheus::PrometheusHandle {
+    // Prometheus metrics recorder
+    let prometheus_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .install_recorder()
+        .expect("failed to install Prometheus metrics recorder");
+
+    // OpenTelemetry trace exporter (OTLP over gRPC)
+    // Respects OTEL_EXPORTER_OTLP_ENDPOINT env var (default: http://localhost:4317)
+    let otel_layer = match opentelemetry_otlp::SpanExporter::builder()
+        .with_tonic()
+        .build()
+    {
+        Ok(exporter) => {
+            let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+                .with_batch_exporter(exporter)
+                .with_resource(
+                    opentelemetry_sdk::Resource::builder()
+                        .with_service_name("sybil-api")
+                        .build(),
+                )
+                .build();
+            opentelemetry::global::set_tracer_provider(provider.clone());
+            let tracer = provider.tracer("sybil-api");
+            Some(tracing_opentelemetry::layer().with_tracer(tracer))
+        }
+        Err(e) => {
+            eprintln!("OpenTelemetry OTLP exporter unavailable, traces will not be exported: {e}");
+            None
+        }
+    };
+
+    // Layered subscriber: console fmt + optional OTel export
+    tracing_subscriber::registry()
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with(tracing_subscriber::fmt::layer())
+        .with(otel_layer)
+        .init();
+
+    prometheus_handle
+}
+
 #[tokio::main]
 async fn main() {
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .init();
+    let prometheus_handle = init_telemetry();
 
     let config = ApiConfig::parse();
 
@@ -63,7 +102,7 @@ async fn main() {
     );
 
     // Build app
-    let state = AppState::new(handle, &config);
+    let state = AppState::new(handle, &config, prometheus_handle);
     let app = create_router(state);
 
     // Start server

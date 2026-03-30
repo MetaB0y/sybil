@@ -6,6 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The **matching-sim** crate is a CLI simulation harness for testing and benchmarking the matching engine. It compares solver implementations, validates correctness, and generates visualization data.
 
+## Architecture Notes
+
+For context on what this crate orchestrates, see vault notes (`docs/architecture/`):
+- [[Crate Dependency Map]] — where this crate fits in the dependency graph
+- [[Solver Landscape]] — the solvers being compared
+
 ## Usage
 
 ```bash

@@ -39,8 +39,7 @@ async fn create_market_forbidden_without_dev_mode() {
 #[tokio::test]
 async fn fund_account_forbidden_without_dev_mode() {
     let (app, _) = test_app(false).await;
-    let (status, _) =
-        post_json(app, "/v1/accounts/0/fund", json!({ "amount_nanos": 100 })).await;
+    let (status, _) = post_json(app, "/v1/accounts/0/fund", json!({ "amount_nanos": 100 })).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
@@ -166,7 +165,10 @@ async fn create_market_with_metadata() {
     assert_eq!(status, StatusCode::OK);
     let resp = parse_json(&body);
     assert_eq!(resp["name"].as_str().unwrap(), "Will it rain?");
-    assert_eq!(resp["description"].as_str().unwrap(), "Whether it rains tomorrow");
+    assert_eq!(
+        resp["description"].as_str().unwrap(),
+        "Whether it rains tomorrow"
+    );
     assert_eq!(resp["category"].as_str().unwrap(), "weather");
     assert_eq!(resp["status"].as_str().unwrap(), "active");
 }
@@ -328,7 +330,10 @@ async fn end_to_end_trade_lifecycle() {
 
     // Force block production
     let block = handle.produce_block().await.unwrap();
-    assert!(!block.fills.is_empty(), "Expected fills from matching orders");
+    assert!(
+        !block.fills.is_empty(),
+        "Expected fills from matching orders"
+    );
 
     // Verify block via API
     let (status, body) = get(app.clone(), "/v1/blocks/latest").await;
@@ -386,9 +391,7 @@ async fn end_to_end_trade_lifecycle() {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|p| {
-            p["market_id"].as_u64().unwrap() == market_id
-        })
+        .filter(|p| p["market_id"].as_u64().unwrap() == market_id)
         .collect();
     assert!(
         yes_positions.is_empty(),

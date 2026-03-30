@@ -52,10 +52,6 @@ milp-killer:
 sim preset="medium" solver="lp" verbose="-v":
     cargo run --bin matching-sim --release -- --preset {{preset}} --solver {{solver}} {{verbose}}
 
-# Run with negrisk arbitrage solver
-sim-negrisk preset="medium":
-    cargo run --bin matching-sim --release --features viz -- --preset {{preset}} --solver negrisk -v
-
 # Build release
 build:
     cargo build --release
@@ -132,3 +128,69 @@ arena-demo:
 # Run arena demo without starting server (server must already be running)
 arena-demo-quick:
     cd arena && uv run python demo.py
+
+# ── Architecture Vault ───────────────────────────────────────────────────────
+
+# Validate vault (links, frontmatter, staleness, orphans)
+docs-check:
+    ./scripts/check-vault.sh
+
+# List notes with last_verified > 90 days
+docs-stale:
+    @for f in docs/architecture/*.md; do \
+        lv="$(awk '/^---$/{n++; next} n==1 && /^last_verified:/{print $2; exit}' "$f")"; \
+        [ -z "$lv" ] && continue; \
+        days=$(( ($(date +%s) - $(date -d "$lv" +%s 2>/dev/null || echo $(date +%s))) / 86400 )); \
+        [ "$days" -gt 90 ] && echo "  $days days: $(basename "$f" .md) (last: $lv)"; \
+    done; true
+
+# Search vault content
+docs-search term:
+    @grep -rni "{{term}}" docs/architecture/*.md --include='*.md' | sed 's|docs/architecture/||'
+
+# List all notes with layer + status
+docs-list:
+    @for f in docs/architecture/*.md; do \
+        layer="$(awk '/^---$/{n++; next} n==1 && /^layer:/{print $2; exit}' "$f")"; \
+        status="$(awk '/^---$/{n++; next} n==1 && /^status:/{print $2; exit}' "$f")"; \
+        printf "  %-12s %-12s %s\n" "$layer" "$status" "$(basename "$f" .md)"; \
+    done
+
+# Rename note and update wiki-links (requires notesmd-cli)
+docs-rename old new:
+    notesmd-cli move "{{old}}" "{{new}}" --vault docs/architecture
+
+# Print note with incoming mentions (requires notesmd-cli)
+docs-read note:
+    notesmd-cli print "{{note}}" --vault docs/architecture --mentions
+
+# Set last_verified to today (requires notesmd-cli)
+docs-verify note:
+    notesmd-cli frontmatter "{{note}}" --vault docs/architecture --edit --key last_verified --value "$(date +%Y-%m-%d)"
+
+# Pre-commit check (fmt + clippy, ~3s with warm cache)
+pre-commit:
+    cargo fmt --all -- --check
+    cargo clippy --workspace --all-features
+
+# E2E smoke test (starts server, exercises API, tears down)
+smoke:
+    ./scripts/smoke-test.sh
+
+# ── Docker ─────────────────────────────────────────────────────────────────
+
+# Build Docker image
+docker-build:
+    docker compose build
+
+# Start all services (API + VictoriaMetrics + Tempo + Grafana)
+docker-up:
+    docker compose up -d
+
+# Stop all services
+docker-down:
+    docker compose down
+
+# Tail API logs
+docker-logs:
+    docker compose logs -f sybil-api

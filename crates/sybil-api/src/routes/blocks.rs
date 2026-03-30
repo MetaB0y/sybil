@@ -1,5 +1,7 @@
+use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{Path, State};
 use axum::response::sse::{Event, Sse};
+use axum::response::Response;
 use axum::Json;
 
 use crate::convert::block_to_response;
@@ -58,4 +60,18 @@ pub async fn stream_blocks(
 ) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>>, AppError>
 {
     crate::sse::block_stream(&state.sequencer).await
+}
+
+/// GET /v1/blocks/ws
+#[utoipa::path(
+    get,
+    path = "/v1/blocks/ws",
+    responses(
+        (status = 101, description = "WebSocket upgrade for block streaming")
+    )
+)]
+pub async fn ws_blocks(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+    ws.on_upgrade(move |socket| async move {
+        crate::ws::handle_block_ws(socket, &state.sequencer).await;
+    })
 }
