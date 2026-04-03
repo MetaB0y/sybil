@@ -7,7 +7,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/sybil-api
+  IMAGE_NAME: metab0y/sybil-api
 
 jobs:
   build:
