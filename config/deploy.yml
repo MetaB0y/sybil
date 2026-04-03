@@ -15,15 +15,14 @@ image: sybil-api
 servers:
   web:
     hosts:
-      - <%= ENV["DEPLOY_HOST"] %>
+      - 172.104.31.54
 
 proxy:
   ssl: true
-  host: <%= ENV.fetch("DEPLOY_DOMAIN", "localhost") %>
+  host: 172.104.31.54
   healthcheck:
     path: /v1/health
     interval: 5
-    max_attempts: 30
 
 registry:
   server: ghcr.io
@@ -33,6 +32,7 @@ registry:
     - KAMAL_REGISTRY_PASSWORD
 
 builder:
+  remote: ssh://root@172.104.31.54
   arch: amd64
   context: .
 
@@ -48,8 +48,8 @@ env:
 
 accessories:
   polymarket:
-    image: ghcr.io/<%= ENV.fetch("KAMAL_REGISTRY_USERNAME", "metab0y") %>/sybil-api:latest
-    host: <%= ENV["DEPLOY_HOST"] %>
+    image: ghcr.io/metab0y/sybil-api:latest
+    host: 172.104.31.54
     cmd: >
       sybil-polymarket
       --sybil-url http://host.docker.internal:3000
@@ -67,7 +67,7 @@ accessories:
 
   victoriametrics:
     image: victoriametrics/victoria-metrics:v1.101.0
-    host: <%= ENV["DEPLOY_HOST"] %>
+    host: 172.104.31.54
     port: "8428:8428"
     volumes:
       - vmdata:/storage
@@ -80,10 +80,8 @@ accessories:
 
   tempo:
     image: grafana/tempo:2.4.1
-    host: <%= ENV["DEPLOY_HOST"] %>
-    port:
-      - "4317:4317"
-      - "3200:3200"
+    host: 172.104.31.54
+    port: "4317:4317"
     volumes:
       - tempodata:/var/tempo
     files:
@@ -92,7 +90,7 @@ accessories:
 
   grafana:
     image: grafana/grafana:11.0.0
-    host: <%= ENV["DEPLOY_HOST"] %>
+    host: 172.104.31.54
     port: "3001:3000"
     env:
       clear:

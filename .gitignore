@@ -15,3 +15,6 @@ design/*.pdf
 docs/architecture/.obsidian/
 polymarket_mapping.json
 .kamal/secrets
+lean/.lake/
+*.olean
+*.ilean
