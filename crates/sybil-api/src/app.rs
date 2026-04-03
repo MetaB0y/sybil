@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use axum::extract::State;
-use axum::http::Request;
+use axum::http::{Request, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
@@ -85,6 +85,13 @@ async fn openapi_json() -> impl IntoResponse {
     Json(ApiDoc::openapi())
 }
 
+async fn dashboard() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        include_str!("../static/index.html"),
+    )
+}
+
 async fn prometheus_metrics(State(state): State<AppState>) -> impl IntoResponse {
     state.prometheus.render()
 }
@@ -115,6 +122,8 @@ async fn http_metrics(req: Request<axum::body::Body>, next: Next) -> Response {
 
 pub fn create_router(state: AppState) -> Router {
     Router::new()
+        // Dashboard
+        .route("/", axum::routing::get(dashboard))
         // OpenAPI spec
         .route("/openapi.json", axum::routing::get(openapi_json))
         // Metrics (outside http_metrics middleware to avoid self-scraping noise)

@@ -16,6 +16,11 @@ use sybil_polymarket::sync::SyncActor;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Install rustls crypto provider (needed for WebSocket TLS)
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("failed to install rustls crypto provider");
+
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(

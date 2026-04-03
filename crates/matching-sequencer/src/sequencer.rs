@@ -617,9 +617,6 @@ impl BlockSequencer {
                 // Only update price if this market had actual fills
                 if markets_with_fills.contains(market_id) {
                     clearing_prices.insert(*market_id, prices.clone());
-                } else if !clearing_prices.contains_key(market_id) {
-                    // First time seeing this market — use solver's default
-                    clearing_prices.insert(*market_id, prices.clone());
                 }
             }
         }

@@ -70,18 +70,11 @@ async fn main() {
         "Starting Sybil API server"
     );
 
-    // Initialize markets
+    // Initialize markets (empty by default, use --seed-markets to add)
     let mut markets = MarketSet::new();
-    if config.seed_markets.is_empty() {
-        // Default seed markets
-        markets.add_binary("BTC > $100k by end of year");
-        markets.add_binary("ETH > $10k by end of year");
-        markets.add_binary("US GDP growth > 3%");
-    } else {
-        for name in &config.seed_markets {
-            if !name.is_empty() {
-                markets.add_binary(name);
-            }
+    for name in &config.seed_markets {
+        if !name.is_empty() {
+            markets.add_binary(name);
         }
     }
 
