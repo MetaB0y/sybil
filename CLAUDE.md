@@ -160,6 +160,67 @@ just docs-read "LP Solver"     # Print note with linked mentions (needs notesmd-
 just docs-verify "LP Solver"   # Set last_verified to today (needs notesmd-cli)
 ```
 
+## Deployment
+
+**Server**: Linode g6-standard-1 (2GB), Debian 13, IP in `config/deploy.yml`.
+
+**Deploy tool**: Kamal 2. Builds Docker image locally, pushes to GHCR, deploys via SSH.
+
+**IMPORTANT**: Claude Code cannot deploy. Docker buildx requires host networking which is unavailable in the sandboxed environment. When deploying:
+1. Remind the user to run commands from their own terminal
+2. Provide the exact commands
+3. Never attempt `kamal deploy`, `docker build`, or remote builds yourself
+
+### Deploy commands (run from your terminal, not Claude Code)
+
+```bash
+# First time setup (installs Docker on server, starts proxy)
+kamal setup
+
+# Deploy latest code
+kamal deploy
+
+# Boot polymarket mirror accessory
+kamal accessory boot polymarket
+
+# View logs
+kamal app logs -f                   # sybil-api
+kamal accessory logs polymarket     # polymarket mirror
+
+# Restart after config change
+kamal app restart
+kamal accessory restart polymarket
+```
+
+### Manual deploy (if Kamal has issues)
+
+```bash
+# Build locally
+docker build -t ghcr.io/metab0y/sybil-api:latest .
+docker push ghcr.io/metab0y/sybil-api:latest
+
+# On server
+ssh root@<server-ip>
+docker pull ghcr.io/metab0y/sybil-api:latest
+docker stop sybil-api sybil-polymarket
+docker rm sybil-api sybil-polymarket
+docker run -d --name sybil-api --restart unless-stopped \
+  -p 3000:3000 \
+  -e SYBIL_DEV_MODE=true -e SYBIL_BLOCK_INTERVAL_MS=2000 -e RUST_LOG=info \
+  ghcr.io/metab0y/sybil-api:latest
+docker run -d --name sybil-polymarket --restart unless-stopped \
+  -v polymarket-data:/data -e RUST_LOG=sybil_polymarket=info \
+  --entrypoint sybil-polymarket \
+  ghcr.io/metab0y/sybil-api:latest \
+  --sybil-url http://172.17.0.1:3000 --max-events 50 --mm-half-spread 0.02 \
+  --mm-budget-dollars 5000 --mm-initial-balance-dollars 1000000 \
+  --mapping-store-path /data/polymarket_mapping.json
+```
+
+### Dashboard
+
+`http://<server-ip>:3000/` — Alpine.js single-page view of markets, MM state, live blocks.
+
 ## Development Notes
 
 - Do not use floating point numbers, use u64 etc.
