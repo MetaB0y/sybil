@@ -16,6 +16,8 @@ pub enum RejectionReason {
         available: i64,
     },
     AccountNotFound,
+    /// MM orders form a complete set within a market group (self-trade via minting).
+    CompleteSetFormation,
 }
 
 /// A rejected order.

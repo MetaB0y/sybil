@@ -167,6 +167,10 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
                     ),
                 });
             }
+            RejectionReason::CompleteSetFormation => {
+                // Valid rejection: MM orders would form a complete set in a market group.
+                // No further validation needed — the sequencer detected self-trade potential.
+            }
         }
     }
 

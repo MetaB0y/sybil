@@ -98,7 +98,73 @@ fn convert_rejection_reason(r: &RejectionReason) -> sybil_verifier::RejectionRea
             available: *available,
         },
         RejectionReason::AccountNotFound => sybil_verifier::RejectionReason::AccountNotFound,
+        RejectionReason::CompleteSetFormation => {
+            sybil_verifier::RejectionReason::CompleteSetFormation
+        }
     }
+}
+
+/// Check if an MM's accepted orders form a complete set in any market group.
+/// A complete set = buying all N outcomes of a group = minting opportunity = self-trade.
+///
+/// Returns the set of order indices (into `orders`) that should be rejected.
+///
+/// Coverage rules:
+/// - BuyYes on market_i (payoffs[0]>0, payoffs[1]=0) → covers outcome i
+/// - BuyNo on market_i (payoffs[0]=0, payoffs[1]>0) → covers all outcomes EXCEPT i
+/// - SellYes/SellNo → does NOT contribute (reduces exposure, not a buy)
+///
+/// BuyYes+BuyNo on the SAME market is fine (normal MM, spread prevents self-trade).
+/// Only cross-market coverage within a group is checked.
+fn detect_complete_set_orders(
+    orders: &[Order],
+    market_groups: &[MarketGroup],
+) -> HashSet<usize> {
+    let mut reject_indices = HashSet::new();
+
+    for group in market_groups {
+        let group_set: HashSet<MarketId> = group.markets.iter().copied().collect();
+        let n = group.markets.len();
+        if n == 0 {
+            continue;
+        }
+
+        let mut covered: HashSet<MarketId> = HashSet::new();
+        let mut group_order_indices: Vec<usize> = Vec::new();
+
+        for (i, order) in orders.iter().enumerate() {
+            if order.num_markets != 1 || order.num_states != 2 {
+                continue;
+            }
+            let market = order.markets[0];
+            if !group_set.contains(&market) {
+                continue;
+            }
+
+            let (yes_pay, no_pay) = (order.payoffs[0], order.payoffs[1]);
+            if yes_pay > 0 && no_pay == 0 {
+                // BuyYes → covers this outcome
+                covered.insert(market);
+                group_order_indices.push(i);
+            } else if yes_pay == 0 && no_pay > 0 {
+                // BuyNo → covers all OTHER outcomes in group
+                for &gm in &group.markets {
+                    if gm != market {
+                        covered.insert(gm);
+                    }
+                }
+                group_order_indices.push(i);
+            }
+            // SellYes/SellNo: do not contribute to coverage
+        }
+
+        if covered.len() == n {
+            // Complete set detected — reject all buy-side group orders
+            reject_indices.extend(group_order_indices);
+        }
+    }
+
+    reject_indices
 }
 
 /// Block-producing sequencer. Core sync layer.
@@ -426,7 +492,7 @@ impl BlockSequencer {
         // Phase 2: Process new submissions
         let mut reserved_balance: HashMap<AccountId, i64> = HashMap::new();
 
-        for sub in submissions {
+        for mut sub in submissions {
             let account_id = sub.account_id;
 
             let Some(account) = self.accounts.get(account_id) else {
@@ -446,6 +512,17 @@ impl BlockSequencer {
             };
 
             let is_mm = sub.mm_constraint.is_some();
+
+            // Cap MM budget to account balance — prevents cumulative overdraft.
+            // Flash liquidity skips per-order validation, but the solver's budget
+            // must never exceed what the account can actually afford.
+            if let Some(ref mut mm_c) = sub.mm_constraint {
+                if account.balance <= 0 {
+                    continue; // bankrupt: skip entire MM submission
+                }
+                mm_c.max_capital = mm_c.max_capital.min(account.balance as u64);
+            }
+
             let mut accepted_orders: Vec<Order> = Vec::new();
 
             for mut order in sub.orders {
@@ -512,7 +589,36 @@ impl BlockSequencer {
                 }
             }
 
-            // Rebuild MmConstraint with assigned IDs
+            // Reject MM orders that form a complete set in any market group.
+            // A complete set = buying all N outcomes = self-trade via minting.
+            let rejected_ids: HashSet<u64> = if is_mm {
+                let reject_idx =
+                    detect_complete_set_orders(&accepted_orders, &self.market_groups);
+                let ids: HashSet<u64> =
+                    reject_idx.iter().map(|&i| accepted_orders[i].id).collect();
+                for &idx in &reject_idx {
+                    let order = &accepted_orders[idx];
+                    self.order_account_map.remove(&order.id);
+                    self.order_created_at.remove(&order.id);
+                    mm_order_ids_set.remove(&order.id);
+                    witness_orders.retain(|wo| wo.order.id != order.id);
+                    witness_rejections.push(WitnessRejection {
+                        order: order.clone(),
+                        account_id: account_id.0,
+                        reason: sybil_verifier::RejectionReason::CompleteSetFormation,
+                    });
+                    rejections.push(Rejection {
+                        order_id: order.id,
+                        account_id,
+                        reason: RejectionReason::CompleteSetFormation,
+                    });
+                }
+                ids
+            } else {
+                HashSet::new()
+            };
+
+            // Rebuild MmConstraint with assigned IDs (excluding rejected orders)
             if let Some(mm_constraint) = sub.mm_constraint {
                 let old_order_ids = &mm_constraint.order_ids;
                 let old_sides = &mm_constraint.order_sides;
@@ -530,7 +636,9 @@ impl BlockSequencer {
                     if let (Some(&new_id), Some(&side)) =
                         (old_to_new.get(&old_id), old_sides.get(&old_id))
                     {
-                        new_constraint.add_order(new_id, side);
+                        if !rejected_ids.contains(&new_id) {
+                            new_constraint.add_order(new_id, side);
+                        }
                     }
                 }
 
@@ -539,7 +647,11 @@ impl BlockSequencer {
                 }
             }
 
-            all_orders.extend(accepted_orders);
+            all_orders.extend(
+                accepted_orders
+                    .into_iter()
+                    .filter(|o| !rejected_ids.contains(&o.id)),
+            );
         }
 
         let order_ids: Vec<u64> = all_orders.iter().map(|o| o.id).collect();
@@ -1509,5 +1621,224 @@ mod tests {
         // First and second blocks should have the same state root since no fills happened
         // (only pending orders changed, which aren't in the state root)
         assert_eq!(root1, bp2.block.header.state_root);
+    }
+
+    // --- Complete-set self-trade prevention ---
+
+    fn setup_group() -> (MarketSet, MarketId, MarketId, MarketId, MarketGroup) {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("A");
+        let m1 = markets.add_binary("B");
+        let m2 = markets.add_binary("C");
+        let mut group = MarketGroup::new("Election");
+        group.add_market(m0);
+        group.add_market(m1);
+        group.add_market(m2);
+        (markets, m0, m1, m2, group)
+    }
+
+    #[test]
+    fn test_mm_complete_set_buyyes_rejected() {
+        let (markets, m0, m1, m2, group) = setup_group();
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::new(accounts, markets.clone(), vec![group], oracle);
+
+        let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
+        constraint.add_order(0, matching_engine::MmSide::BuyYes);
+        constraint.add_order(1, matching_engine::MmSide::BuyYes);
+        constraint.add_order(2, matching_engine::MmSide::BuyYes);
+
+        let sub = OrderSubmission {
+            account_id: aid,
+            orders: vec![
+                outcome_buy(&markets, 0, m0, 0, 400_000_000, 10),
+                outcome_buy(&markets, 0, m1, 0, 350_000_000, 10),
+                outcome_buy(&markets, 0, m2, 0, 300_000_000, 10),
+            ],
+            mm_constraint: Some(constraint),
+        };
+
+        let bp = seq.produce_block(vec![sub], 1000);
+        // All 3 group orders should be rejected as CompleteSetFormation
+        assert_eq!(bp.block.rejections.len(), 3);
+        assert!(bp.block.fills.is_empty());
+    }
+
+    #[test]
+    fn test_mm_partial_group_accepted() {
+        let (markets, m0, m1, _m2, group) = setup_group();
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::new(accounts, markets.clone(), vec![group], oracle);
+
+        // Only quote 2 of 3 outcomes — not a complete set
+        let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
+        constraint.add_order(0, matching_engine::MmSide::BuyYes);
+        constraint.add_order(1, matching_engine::MmSide::BuyYes);
+
+        let sub = OrderSubmission {
+            account_id: aid,
+            orders: vec![
+                outcome_buy(&markets, 0, m0, 0, 400_000_000, 10),
+                outcome_buy(&markets, 0, m1, 0, 350_000_000, 10),
+            ],
+            mm_constraint: Some(constraint),
+        };
+
+        let bp = seq.produce_block(vec![sub], 1000);
+        assert_eq!(bp.block.rejections.len(), 0, "Partial group should be accepted");
+    }
+
+    #[test]
+    fn test_mm_same_market_both_sides_accepted() {
+        // BuyYes + BuyNo on same market (not in a group) — legitimate MM behavior
+        let (markets, m0) = setup();
+        let (mut seq, aid) = make_sequencer(100 * NANOS_PER_DOLLAR as i64);
+
+        let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
+        constraint.add_order(0, matching_engine::MmSide::BuyYes);
+        constraint.add_order(1, matching_engine::MmSide::BuyNo);
+
+        let sub = OrderSubmission {
+            account_id: aid,
+            orders: vec![
+                outcome_buy(&markets, 0, m0, 0, 400_000_000, 10),
+                outcome_buy(&markets, 0, m0, 1, 400_000_000, 10),
+            ],
+            mm_constraint: Some(constraint),
+        };
+
+        let result = run_batch(&mut seq, vec![sub], &markets, &[]);
+        assert_eq!(result.rejections.len(), 0, "Same-market BuyYes+BuyNo should be accepted");
+    }
+
+    #[test]
+    fn test_mm_buyno_complete_set_rejected() {
+        // 3-market group: BuyNo on M0 covers {M1,M2}, BuyNo on M1 covers {M0,M2}
+        // Union = {M0,M1,M2} = complete set
+        let (markets, m0, m1, _m2, group) = setup_group();
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::new(accounts, markets.clone(), vec![group], oracle);
+
+        let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
+        constraint.add_order(0, matching_engine::MmSide::BuyNo);
+        constraint.add_order(1, matching_engine::MmSide::BuyNo);
+
+        let sub = OrderSubmission {
+            account_id: aid,
+            orders: vec![
+                outcome_buy(&markets, 0, m0, 1, 800_000_000, 10), // BuyNo M0
+                outcome_buy(&markets, 0, m1, 1, 800_000_000, 10), // BuyNo M1
+            ],
+            mm_constraint: Some(constraint),
+        };
+
+        let bp = seq.produce_block(vec![sub], 1000);
+        assert_eq!(bp.block.rejections.len(), 2, "BuyNo complete set should be rejected");
+    }
+
+    // --- MM budget capping ---
+
+    #[test]
+    fn test_mm_budget_clamped_to_balance() {
+        // MM has $10 balance but requests $50 budget
+        let (markets, m0) = setup();
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+        let counter = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::new(accounts, markets.clone(), vec![], oracle);
+
+        // Give counterparty YES positions to sell
+        seq.accounts.get_mut(counter).unwrap().positions.insert((m0, 0), 1000);
+
+        let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
+        constraint.add_order(0, matching_engine::MmSide::BuyYes);
+
+        let mm_sub = OrderSubmission {
+            account_id: aid,
+            orders: vec![outcome_buy(&markets, 0, m0, 0, 600_000_000, 100)],
+            mm_constraint: Some(constraint),
+        };
+        let sell_sub = OrderSubmission {
+            account_id: counter,
+            orders: vec![outcome_sell(&markets, 0, m0, 0, 400_000_000, 100)],
+            mm_constraint: None,
+        };
+
+        let _result = run_batch(&mut seq, vec![mm_sub, sell_sub], &markets, &[]);
+
+        // MM balance should never go below 0
+        let mm_acct = seq.accounts.get(aid).unwrap();
+        assert!(mm_acct.balance >= 0, "MM balance negative: {}", mm_acct.balance);
+    }
+
+    #[test]
+    fn test_bankrupt_mm_skipped() {
+        let (markets, m0) = setup();
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(0); // zero balance
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::new(accounts, MarketSet::new(), vec![], oracle);
+
+        let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
+        constraint.add_order(0, matching_engine::MmSide::BuyYes);
+
+        let sub = OrderSubmission {
+            account_id: aid,
+            orders: vec![outcome_buy(&markets, 0, m0, 0, 500_000_000, 100)],
+            mm_constraint: Some(constraint),
+        };
+
+        let bp = seq.produce_block(vec![sub], 1000);
+        assert!(bp.block.fills.is_empty(), "Bankrupt MM should not generate fills");
+    }
+
+    #[test]
+    fn test_mm_balance_nonnegative_across_blocks() {
+        let (markets, m0) = setup();
+        let mut accounts = AccountStore::new();
+        let mm_id = accounts.create_account(1000 * NANOS_PER_DOLLAR as i64);
+        let counter_id = accounts.create_account(100_000 * NANOS_PER_DOLLAR as i64);
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::new(accounts, markets.clone(), vec![], oracle);
+
+        // Give counterparty massive YES position to sell
+        seq.accounts
+            .get_mut(counter_id)
+            .unwrap()
+            .positions
+            .insert((m0, 0), 100_000);
+
+        for block_num in 0..10 {
+            let mut constraint = MmConstraint::new(MmId::new(1), 500 * NANOS_PER_DOLLAR);
+            constraint.add_order(0, matching_engine::MmSide::BuyYes);
+
+            let mm_sub = OrderSubmission {
+                account_id: mm_id,
+                orders: vec![outcome_buy(&markets, 0, m0, 0, 600_000_000, 1000)],
+                mm_constraint: Some(constraint),
+            };
+            let counter_sub = OrderSubmission {
+                account_id: counter_id,
+                orders: vec![outcome_sell(&markets, 0, m0, 0, 400_000_000, 1000)],
+                mm_constraint: None,
+            };
+
+            run_batch(&mut seq, vec![mm_sub, counter_sub], &markets, &[]);
+
+            let mm_acct = seq.accounts.get(mm_id).unwrap();
+            assert!(
+                mm_acct.balance >= 0,
+                "MM balance negative at block {}: {}",
+                block_num,
+                mm_acct.balance
+            );
+        }
     }
 }
