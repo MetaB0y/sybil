@@ -125,7 +125,7 @@ dec_query = f"""
 if time_clause:
     dec_query = f"""
         SELECT trader_name, market_name, fair_value, market_price, orders,
-               motivation, analysis, llm_duration_s, timestamp, balance
+               motivation, analysis, llm_duration_s, timestamp, balance, article_urls
         FROM decisions
         WHERE trader_name IN ({trader_filter}) AND timestamp > '{cutoff}'
         ORDER BY id DESC LIMIT 50
@@ -133,7 +133,7 @@ if time_clause:
 else:
     dec_query = f"""
         SELECT trader_name, market_name, fair_value, market_price, orders,
-               motivation, analysis, llm_duration_s, timestamp, balance
+               motivation, analysis, llm_duration_s, timestamp, balance, article_urls
         FROM decisions
         WHERE trader_name IN ({trader_filter})
         ORDER BY id DESC LIMIT 50
@@ -158,6 +158,13 @@ else:
             st.markdown(f"**Analysis:** {row['analysis']}")
             st.markdown(f"**Motivation:** {row['motivation']}")
             st.markdown(f"**LLM latency:** {row['llm_duration_s']:.1f}s | **Balance:** ${row['balance']:.2f}")
+
+            # Show linked articles with clickable URLs
+            article_urls = json.loads(row["article_urls"]) if row.get("article_urls") else []
+            if article_urls:
+                st.markdown("**Sources:**")
+                for art in article_urls:
+                    st.markdown(f"- [{art['title'][:80]}]({art['url']}) ({art['source']})")
 
 # --------------------------------------------------------------------------- #
 # 3. PnL Chart
@@ -206,13 +213,13 @@ st.header("News Feed")
 
 if time_clause:
     art_query = f"""
-        SELECT title, source, fetched_at, matched_market_ids
+        SELECT title, source, url, fetched_at, matched_market_ids
         FROM articles
         WHERE fetched_at > '{cutoff}'
         ORDER BY id DESC LIMIT 30
     """
 else:
-    art_query = "SELECT title, source, fetched_at, matched_market_ids FROM articles ORDER BY id DESC LIMIT 30"
+    art_query = "SELECT title, source, url, fetched_at, matched_market_ids FROM articles ORDER BY id DESC LIMIT 30"
 
 art_df = pd.read_sql_query(art_query, conn)
 
@@ -222,10 +229,62 @@ else:
     for _, row in art_df.iterrows():
         market_ids = json.loads(row["matched_market_ids"]) if row["matched_market_ids"] else []
         ts = row["fetched_at"][:16] if row["fetched_at"] else ""
-        st.markdown(f"- **{ts}** [{row['source']}] {row['title']} → {len(market_ids)} market(s)")
+        title = row["title"] or "(no title)"
+        url = row["url"] or ""
+        if url:
+            st.markdown(f"- **{ts}** [{row['source']}] [{title}]({url}) → {len(market_ids)} market(s)")
+        else:
+            st.markdown(f"- **{ts}** [{row['source']}] {title} → {len(market_ids)} market(s)")
 
 # --------------------------------------------------------------------------- #
-# 5. Stats
+# 5. Token Usage / Cost
+# --------------------------------------------------------------------------- #
+st.header("LLM Cost Tracker")
+
+# Check if token_usage table exists
+has_token_table = conn.execute(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='token_usage'"
+).fetchone()
+
+if has_token_table:
+    token_query = f"""
+        SELECT trader_name,
+               COUNT(*) as calls,
+               SUM(prompt_tokens) as total_prompt,
+               SUM(completion_tokens) as total_completion,
+               AVG(duration_s) as avg_latency_s
+        FROM token_usage
+        {f"WHERE timestamp > '{cutoff}'" if time_clause else ""}
+        GROUP BY trader_name
+    """
+    token_df = pd.read_sql_query(token_query, conn)
+
+    if not token_df.empty:
+        # MiniMax M2.7 pricing: $0.70/M input, $0.70/M output (OpenRouter)
+        token_df["est_cost"] = (
+            token_df["total_prompt"] * 0.70 / 1_000_000
+            + token_df["total_completion"] * 0.70 / 1_000_000
+        )
+        token_df.columns = ["Trader", "Calls", "Prompt Tokens", "Completion Tokens", "Avg Latency (s)", "Est. Cost ($)"]
+        token_df["Est. Cost ($)"] = token_df["Est. Cost ($)"].apply(lambda x: f"${x:.4f}")
+        token_df["Avg Latency (s)"] = token_df["Avg Latency (s)"].apply(lambda x: f"{x:.1f}")
+        st.dataframe(token_df, use_container_width=True, hide_index=True)
+
+        # Total cost
+        total_cost_row = conn.execute(
+            f"SELECT SUM(prompt_tokens), SUM(completion_tokens) FROM token_usage"
+            + (f" WHERE timestamp > '{cutoff}'" if time_clause else "")
+        ).fetchone()
+        if total_cost_row[0]:
+            total_cost = (total_cost_row[0] + total_cost_row[1]) * 0.70 / 1_000_000
+            st.metric("Total Estimated Cost", f"${total_cost:.4f}")
+    else:
+        st.info("No token usage data yet.")
+else:
+    st.info("Token usage tracking not available (older DB schema).")
+
+# --------------------------------------------------------------------------- #
+# 6. Stats
 # --------------------------------------------------------------------------- #
 st.header("Stats")
 col1, col2, col3 = st.columns(3)

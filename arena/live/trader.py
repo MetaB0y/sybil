@@ -517,6 +517,10 @@ ANALYSIS: [2-3 sentences max]"""
                      "price": o.limit_price_nanos / NANOS_PER_DOLLAR}
                     for o in orders
                 ]
+                article_urls = [
+                    {"title": a.title, "url": a.url, "source": a.source}
+                    for a in articles
+                ]
                 self.db.log_decision(
                     trader_name=self.name,
                     market_id=market_id,
@@ -531,6 +535,7 @@ ANALYSIS: [2-3 sentences max]"""
                     balance=self.current_balance,
                     yes_pos=self.get_position(market_id, "YES"),
                     no_pos=self.get_position(market_id, "NO"),
+                    article_urls=article_urls,
                 )
 
             if orders:

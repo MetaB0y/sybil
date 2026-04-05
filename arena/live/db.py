@@ -36,6 +36,7 @@ class DecisionDB:
                     market_name TEXT,
                     timestamp TEXT,
                     article_ids TEXT,
+                    article_urls TEXT,
                     analysis TEXT,
                     fair_value REAL,
                     market_price REAL,
@@ -118,20 +119,23 @@ class DecisionDB:
         yes_pos: int,
         no_pos: int,
         article_ids: list[int] | None = None,
+        article_urls: list[dict] | None = None,
     ) -> int:
         with self._lock:
             cur = self.conn.execute(
                 """INSERT INTO decisions
                    (trader_name, market_id, market_name, timestamp, article_ids,
-                    analysis, fair_value, market_price, orders, motivation,
-                    raw_llm_response, llm_duration_s, balance, yes_pos, no_pos)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    article_urls, analysis, fair_value, market_price, orders,
+                    motivation, raw_llm_response, llm_duration_s, balance,
+                    yes_pos, no_pos)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     trader_name,
                     market_id,
                     market_name,
                     datetime.now(timezone.utc).isoformat(),
                     json.dumps(article_ids or []),
+                    json.dumps(article_urls or []),
                     analysis,
                     fair_value,
                     market_price,
