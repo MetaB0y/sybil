@@ -205,24 +205,56 @@ polymarket max_events="10":
 polymarket-dev port="3001" max_events="10":
     cargo run --release -p sybil-polymarket -- --sybil-url http://localhost:{{port}} --max-events {{max_events}} --mm-half-spread 0.03
 
-# ── Deploy (Kamal) ────────────────────────────────────────────────────────
+# ── Deploy (SSH) ──────────────────────────────────────────────────────────
 
-# First-time server setup (installs Docker, starts accessories)
-deploy-setup:
-    kamal setup
+SERVER := "root@172.104.31.54"
 
-# Deploy latest code
-deploy:
-    kamal deploy
+# Build and deploy sybil-api + polymarket mirror to server
+deploy-api:
+    docker build -t sybil-api:latest .
+    docker save sybil-api:latest | ssh {{SERVER}} docker load
+    ssh {{SERVER}} 'docker stop sybil-api sybil-polymarket 2>/dev/null; docker rm sybil-api sybil-polymarket 2>/dev/null; true'
+    ssh {{SERVER}} 'docker run -d --name sybil-api --restart unless-stopped \
+        -p 3000:3000 \
+        -e SYBIL_DEV_MODE=true -e SYBIL_BLOCK_INTERVAL_MS=2000 -e RUST_LOG=info \
+        sybil-api:latest'
+    ssh {{SERVER}} 'docker run -d --name sybil-polymarket --restart unless-stopped \
+        -v polymarket-data:/data -e RUST_LOG=sybil_polymarket=info \
+        --entrypoint sybil-polymarket sybil-api:latest \
+        --sybil-url http://172.17.0.1:3000 --max-events 50 --mm-half-spread 0.02 \
+        --mm-budget-dollars 5000 --mm-initial-balance-dollars 1000000 \
+        --mapping-store-path /data/polymarket_mapping.json --sync-interval-secs 120'
 
-# Deploy accessories only (VictoriaMetrics, Tempo, Grafana)
-deploy-accessories:
-    kamal accessory boot --all
+# Build and deploy arena bots (pass OpenRouter key)
+deploy-arena key:
+    cd arena && docker build -t sybil-arena:latest .
+    docker save sybil-arena:latest | ssh {{SERVER}} docker load
+    ssh {{SERVER}} 'docker stop sybil-arena 2>/dev/null; docker rm sybil-arena 2>/dev/null; true'
+    ssh {{SERVER}} 'docker run -d --name sybil-arena --restart unless-stopped \
+        -v arena-data:/data -e PYTHONUNBUFFERED=1 \
+        sybil-arena:latest \
+        --sybil-url http://172.17.0.1:3000 --api-key {{key}} \
+        --max-markets 20 --model minimax/minimax-m2.7 --db-path /data/decisions.db'
 
-# View deploy logs
-deploy-logs:
-    kamal app logs -f
+# Deploy arena dashboard (arena image must be loaded already)
+deploy-dashboard:
+    ssh {{SERVER}} 'docker stop sybil-arena-dashboard 2>/dev/null; docker rm sybil-arena-dashboard 2>/dev/null; true'
+    ssh {{SERVER}} 'docker run -d --name sybil-arena-dashboard --restart unless-stopped \
+        -v arena-data:/data -p 8501:8501 -e PYTHONUNBUFFERED=1 \
+        --entrypoint uv sybil-arena:latest \
+        run streamlit run live/dashboard.py \
+        --server.port=8501 --server.address=0.0.0.0 --server.headless=true'
 
-# Open remote console
+# Deploy everything (api + polymarket + arena + dashboard)
+deploy-all key:
+    just deploy-api
+    just deploy-arena {{key}}
+    just deploy-dashboard
+
+# Tail logs from a container on the server
+deploy-logs service="sybil-api":
+    ssh {{SERVER}} docker logs -f --tail 100 {{service}}
+
+# SSH into server
 deploy-shell:
-    kamal app exec -i bash
+    ssh {{SERVER}}

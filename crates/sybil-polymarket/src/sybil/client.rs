@@ -142,6 +142,7 @@ impl SybilClient {
         let resp = self
             .http
             .get(self.url("/v1/blocks/stream"))
+            .timeout(std::time::Duration::from_secs(86400)) // SSE stream: effectively no timeout
             .send()
             .await?;
         let resp = self.check_response(resp).await?;

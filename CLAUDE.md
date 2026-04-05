@@ -162,90 +162,26 @@ just docs-verify "LP Solver"   # Set last_verified to today (needs notesmd-cli)
 
 ## Deployment
 
-**Server**: Linode g6-standard-1 (2GB), Debian 13, IP in `config/deploy.yml`.
+**Server**: Linode g6-standard-1 (2GB), Debian 13, IP `172.104.31.54`.
 
-**Deploy tool**: Kamal 2. Builds Docker image locally, pushes to GHCR, deploys via SSH.
-
-**IMPORTANT**: Claude Code cannot deploy. Docker buildx requires host networking which is unavailable in the sandboxed environment. When deploying:
-1. Remind the user to run commands from their own terminal
-2. Provide the exact commands
-3. Never attempt `kamal deploy`, `docker build`, or remote builds yourself
-
-### Deploy commands (run from your terminal, not Claude Code)
+**Deploy method**: Build locally, `docker save | ssh docker load`, restart containers. All via justfile recipes.
 
 ```bash
-# First time setup (installs Docker on server, starts proxy)
-kamal setup
+just deploy-api                    # Build + deploy sybil-api + polymarket mirror
+just deploy-arena $OPENROUTER_KEY  # Build + deploy arena bots
+just deploy-dashboard              # Deploy Streamlit dashboard
+just deploy-all $OPENROUTER_KEY    # Everything at once
 
-# Deploy latest code
-kamal deploy
-
-# Boot polymarket mirror accessory
-kamal accessory boot polymarket
-
-# View logs
-kamal app logs -f                   # sybil-api
-kamal accessory logs polymarket     # polymarket mirror
-
-# Restart after config change
-kamal app restart
-kamal accessory restart polymarket
-```
-
-### Manual deploy (if Kamal has issues)
-
-```bash
-# Build locally
-docker build -t ghcr.io/metab0y/sybil-api:latest .
-docker push ghcr.io/metab0y/sybil-api:latest
-
-# On server
-ssh root@<server-ip>
-docker pull ghcr.io/metab0y/sybil-api:latest
-docker stop sybil-api sybil-polymarket
-docker rm sybil-api sybil-polymarket
-docker run -d --name sybil-api --restart unless-stopped \
-  -p 3000:3000 \
-  -e SYBIL_DEV_MODE=true -e SYBIL_BLOCK_INTERVAL_MS=2000 -e RUST_LOG=info \
-  ghcr.io/metab0y/sybil-api:latest
-docker run -d --name sybil-polymarket --restart unless-stopped \
-  -v polymarket-data:/data -e RUST_LOG=sybil_polymarket=info \
-  --entrypoint sybil-polymarket \
-  ghcr.io/metab0y/sybil-api:latest \
-  --sybil-url http://172.17.0.1:3000 --max-events 50 --mm-half-spread 0.02 \
-  --mm-budget-dollars 5000 --mm-initial-balance-dollars 1000000 \
-  --mapping-store-path /data/polymarket_mapping.json
-```
-
-### Arena (AI trading bots) deploy
-
-```bash
-# Build arena image locally
-cd arena && docker build -t ghcr.io/metab0y/sybil-arena:latest .
-docker push ghcr.io/metab0y/sybil-arena:latest
-
-# On server
-docker pull ghcr.io/metab0y/sybil-arena:latest
-
-# Trading bots (needs OPENROUTER_API_KEY)
-docker run -d --name sybil-arena --restart unless-stopped \
-  -v arena-data:/data -e PYTHONUNBUFFERED=1 \
-  ghcr.io/metab0y/sybil-arena:latest \
-  --sybil-url http://172.17.0.1:3000 --api-key $OPENROUTER_API_KEY \
-  --max-markets 20 --model minimax/minimax-m2.7 --db-path /data/decisions.db
-
-# Dashboard (reads from shared volume)
-docker run -d --name sybil-arena-dashboard --restart unless-stopped \
-  -v arena-data:/data -p 8501:8501 -e PYTHONUNBUFFERED=1 \
-  --entrypoint uv ghcr.io/metab0y/sybil-arena:latest \
-  run streamlit run live/dashboard.py \
-  --server.port=8501 --server.address=0.0.0.0 --server.headless=true
+just deploy-logs                   # Tail sybil-api logs
+just deploy-logs sybil-polymarket  # Tail polymarket mirror logs
+just deploy-logs sybil-arena       # Tail arena bot logs
+just deploy-shell                  # SSH into server
 ```
 
 ### Dashboards
 
-- `http://<server-ip>:3000/` — Alpine.js: markets, MM state, live blocks
-- `http://<server-ip>:8501/` — Streamlit: arena bot decisions, PnL, news feed
+- `http://172.104.31.54:3000/` — Alpine.js: markets, MM state, live blocks
+- `http://172.104.31.54:8501/` — Streamlit: arena bot decisions, PnL, news feed
 
 ## Development Notes
 

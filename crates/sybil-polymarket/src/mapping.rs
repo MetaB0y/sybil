@@ -129,6 +129,24 @@ impl MappingStore {
     pub fn market_count(&self) -> usize {
         self.condition_to_sybil.len()
     }
+
+    /// Iterate all mapped markets: yields (sybil_market_id, yes_token_id, in_group).
+    pub fn all_markets(&self) -> Vec<(u32, String, bool)> {
+        let group_market_ids: std::collections::HashSet<u32> = self
+            .event_to_group
+            .values()
+            .filter(|g| g.neg_risk)
+            .flat_map(|g| g.sybil_market_ids.iter().copied())
+            .collect();
+
+        self.token_to_sybil
+            .iter()
+            .filter(|(_, (_, outcome))| *outcome == 0) // YES tokens only
+            .map(|(token_id, (sybil_id, _))| {
+                (*sybil_id, token_id.clone(), group_market_ids.contains(sybil_id))
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]

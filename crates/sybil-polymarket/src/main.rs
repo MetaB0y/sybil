@@ -90,10 +90,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "created MM account"
     );
 
-    // Channels
+    // Channels — size MM channel to fit all existing markets for bootstrap
+    let existing = mapping.all_markets();
+    let mm_channel_size = (existing.len() + 256).max(256);
     let (feed_tx, feed_rx) = mpsc::channel(64);
-    let (mm_tx, mm_rx) = mpsc::channel(256);
+    let (mm_tx, mm_rx) = mpsc::channel(mm_channel_size);
     let (price_tx, price_rx) = watch::channel(PriceSnapshot::default());
+
+    // Bootstrap MM with existing markets from mapping
+    if !existing.is_empty() {
+        info!(count = existing.len(), "bootstrapping MM with existing markets");
+        for (sybil_market_id, yes_token_id, in_group) in existing {
+            let _ = mm_tx.try_send(sybil_polymarket::mm::MmMessage::MarketMirrored {
+                sybil_market_id,
+                yes_token_id,
+                initial_mid: 0.5,
+                in_group,
+            });
+        }
+    }
+
+    // Bootstrap Feed with existing token subscriptions
+    let all_tokens = mapping.all_token_ids();
+    if !all_tokens.is_empty() {
+        info!(count = all_tokens.len(), "bootstrapping Feed with existing tokens");
+        let _ = feed_tx.try_send(sybil_polymarket::feed::FeedMessage::SubscribeTokens(all_tokens));
+    }
 
     // Cancellation
     let cancel = CancellationToken::new();
