@@ -178,6 +178,7 @@ impl SyncActor {
                                 sybil_market_id: sybil_id,
                                 yes_token_id: token_ids[0].clone(),
                                 initial_mid,
+                                in_group: event.is_neg_risk(),
                             })
                             .await;
 

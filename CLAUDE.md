@@ -217,9 +217,35 @@ docker run -d --name sybil-polymarket --restart unless-stopped \
   --mapping-store-path /data/polymarket_mapping.json
 ```
 
-### Dashboard
+### Arena (AI trading bots) deploy
 
-`http://<server-ip>:3000/` — Alpine.js single-page view of markets, MM state, live blocks.
+```bash
+# Build arena image locally
+cd arena && docker build -t ghcr.io/metab0y/sybil-arena:latest .
+docker push ghcr.io/metab0y/sybil-arena:latest
+
+# On server
+docker pull ghcr.io/metab0y/sybil-arena:latest
+
+# Trading bots (needs OPENROUTER_API_KEY)
+docker run -d --name sybil-arena --restart unless-stopped \
+  -v arena-data:/data -e PYTHONUNBUFFERED=1 \
+  ghcr.io/metab0y/sybil-arena:latest \
+  --sybil-url http://172.17.0.1:3000 --api-key $OPENROUTER_API_KEY \
+  --max-markets 20 --model minimax/minimax-m2.7 --db-path /data/decisions.db
+
+# Dashboard (reads from shared volume)
+docker run -d --name sybil-arena-dashboard --restart unless-stopped \
+  -v arena-data:/data -p 8501:8501 -e PYTHONUNBUFFERED=1 \
+  --entrypoint uv ghcr.io/metab0y/sybil-arena:latest \
+  run streamlit run live/dashboard.py \
+  --server.port=8501 --server.address=0.0.0.0 --server.headless=true
+```
+
+### Dashboards
+
+- `http://<server-ip>:3000/` — Alpine.js: markets, MM state, live blocks
+- `http://<server-ip>:8501/` — Streamlit: arena bot decisions, PnL, news feed
 
 ## Development Notes
 

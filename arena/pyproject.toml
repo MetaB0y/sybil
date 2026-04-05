@@ -15,6 +15,7 @@ dependencies = [
     "altair>=6.0.0",
     "openai>=2.16.0",
     "trafilatura>=2.0.0",
+    "feedparser>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -40,7 +41,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["sybil_client", "bots", "feeds", "sim", "markets"]
+packages = ["sybil_client", "bots", "feeds", "sim", "markets", "live"]
 
 [tool.ruff]
 line-length = 100

@@ -65,6 +65,36 @@ accessories:
     volumes:
       - polymarket-data:/data
 
+  arena:
+    image: ghcr.io/metab0y/sybil-arena:latest
+    host: 172.104.31.54
+    cmd: >
+      --sybil-url http://host.docker.internal:3000
+      --api-key ${OPENROUTER_API_KEY}
+      --max-markets 20
+      --model minimax/minimax-m2.7
+      --db-path /data/decisions.db
+    env:
+      clear:
+        PYTHONUNBUFFERED: "1"
+      secret:
+        - OPENROUTER_API_KEY
+    volumes:
+      - arena-data:/data
+
+  arena-dashboard:
+    image: ghcr.io/metab0y/sybil-arena:latest
+    host: 172.104.31.54
+    port: "8501:8501"
+    cmd: >
+      uv run streamlit run live/dashboard.py
+      --server.port=8501 --server.address=0.0.0.0 --server.headless=true
+    env:
+      clear:
+        PYTHONUNBUFFERED: "1"
+    volumes:
+      - arena-data:/data
+
   victoriametrics:
     image: victoriametrics/victoria-metrics:v1.101.0
     host: 172.104.31.54

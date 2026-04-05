@@ -17,6 +17,8 @@ pub enum MmMessage {
         yes_token_id: String,
         /// Initial midpoint from Polymarket.
         initial_mid: f64,
+        /// Whether this market is part of a NegRisk group.
+        in_group: bool,
     },
 }
 
@@ -24,6 +26,8 @@ pub enum MmMessage {
 struct ActiveMarket {
     sybil_market_id: u32,
     yes_token_id: String,
+    /// In a NegRisk group — skip BuyNo to avoid complete-set formation.
+    in_group: bool,
 }
 
 /// Market maker actor. Listens to Sybil's SSE block stream and submits
@@ -131,16 +135,19 @@ impl MmActor {
                 sybil_market_id,
                 yes_token_id,
                 initial_mid,
+                in_group,
             } => {
                 info!(
                     sybil_market_id,
                     yes_token_id,
                     initial_mid,
+                    in_group,
                     "MM tracking new market"
                 );
                 self.active_markets.push(ActiveMarket {
                     sybil_market_id,
                     yes_token_id,
+                    in_group,
                 });
             }
         }
@@ -186,8 +193,10 @@ impl MmActor {
                 });
             }
 
-            // BuyNo
-            if (0.01..=0.99).contains(&no_bid) {
+            // BuyNo — skip for group markets to avoid complete-set formation.
+            // In NegRisk groups, BuyNo on market_i ≈ BuyYes on other outcomes,
+            // so BuyYes-only provides full liquidity. The solver handles minting.
+            if !market.in_group && (0.01..=0.99).contains(&no_bid) {
                 let price_nanos = (no_bid * NANOS_PER_DOLLAR as f64) as u64;
                 let qty = (quote_size_dollars / no_bid).max(1.0) as u64;
                 orders.push(OrderSpec::BuyNo {

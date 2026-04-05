@@ -35,6 +35,40 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  sybil-arena:
+    build: ./arena
+    command:
+      - "--sybil-url=http://sybil-api:3000"
+      - "--api-key=${OPENROUTER_API_KEY}"
+      - "--max-markets=20"
+      - "--model=minimax/minimax-m2.7"
+      - "--db-path=/data/decisions.db"
+    environment:
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - arena-data:/data
+    depends_on:
+      sybil-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  sybil-arena-dashboard:
+    build: ./arena
+    entrypoint: ["uv", "run", "streamlit", "run", "live/dashboard.py"]
+    command:
+      - "--server.port=8501"
+      - "--server.address=0.0.0.0"
+      - "--server.headless=true"
+    environment:
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "8501:8501"
+    volumes:
+      - arena-data:/data
+    depends_on:
+      - sybil-arena
+    restart: unless-stopped
+
   victoriametrics:
     image: victoriametrics/victoria-metrics:v1.101.0
     ports:
@@ -94,3 +128,4 @@ volumes:
   vmdata:
   tempodata:
   polymarket-data:
+  arena-data:

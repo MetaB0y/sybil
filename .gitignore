@@ -18,3 +18,5 @@ polymarket_mapping.json
 lean/.lake/
 *.olean
 *.ilean
+arena/live/decisions.db
+arena/live/__pycache__/
