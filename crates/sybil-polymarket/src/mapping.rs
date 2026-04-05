@@ -143,7 +143,11 @@ impl MappingStore {
             .iter()
             .filter(|(_, (_, outcome))| *outcome == 0) // YES tokens only
             .map(|(token_id, (sybil_id, _))| {
-                (*sybil_id, token_id.clone(), group_market_ids.contains(sybil_id))
+                (
+                    *sybil_id,
+                    token_id.clone(),
+                    group_market_ids.contains(sybil_id),
+                )
             })
             .collect()
     }

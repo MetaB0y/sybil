@@ -1,8 +1,8 @@
 use reqwest::Client;
 use tracing::debug;
 
-use sybil_api_types::*;
 use crate::error::Error;
+use sybil_api_types::*;
 
 /// HTTP client for the Sybil API. Mirrors the Python `SybilClient`.
 pub struct SybilClient {
@@ -42,7 +42,10 @@ impl SybilClient {
 
     // === Accounts ===
 
-    pub async fn create_account(&self, initial_balance_nanos: u64) -> Result<AccountResponse, Error> {
+    pub async fn create_account(
+        &self,
+        initial_balance_nanos: u64,
+    ) -> Result<AccountResponse, Error> {
         let req = CreateAccountRequest {
             initial_balance_nanos,
         };
@@ -102,11 +105,7 @@ impl SybilClient {
         Ok(resp.json().await?)
     }
 
-    pub async fn resolve_market(
-        &self,
-        market_id: u32,
-        payout_nanos: u64,
-    ) -> Result<(), Error> {
+    pub async fn resolve_market(&self, market_id: u32, payout_nanos: u64) -> Result<(), Error> {
         let req = ResolveMarketRequest { payout_nanos };
         let resp = self
             .http

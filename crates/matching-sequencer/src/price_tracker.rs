@@ -46,8 +46,7 @@ impl PriceTracker {
         if let Some(ref pd) = price_discovery {
             for (market_id, prices) in &pd.prices {
                 if markets_with_fills.contains(market_id) {
-                    self.last_clearing_prices
-                        .insert(*market_id, prices.clone());
+                    self.last_clearing_prices.insert(*market_id, prices.clone());
                 }
             }
         }

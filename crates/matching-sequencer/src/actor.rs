@@ -1054,7 +1054,10 @@ mod tests {
         let mut markets = MarketSet::new();
         markets.add_binary("Test");
         let oracle = Arc::new(AdminOracle::new());
-        (BlockSequencer::with_default_solver(accounts, markets, vec![], oracle), aid)
+        (
+            BlockSequencer::with_default_solver(accounts, markets, vec![], oracle),
+            aid,
+        )
     }
 
     #[tokio::test]

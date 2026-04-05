@@ -139,10 +139,7 @@ impl MmActor {
             } => {
                 info!(
                     sybil_market_id,
-                    yes_token_id,
-                    initial_mid,
-                    in_group,
-                    "MM tracking new market"
+                    yes_token_id, initial_mid, in_group, "MM tracking new market"
                 );
                 self.active_markets.push(ActiveMarket {
                     sybil_market_id,
@@ -178,10 +175,7 @@ impl MmActor {
 
             // Check staleness
             if now.saturating_sub(snapshot.last_updated_ms) > stale_threshold_ms {
-                debug!(
-                    market_id = market.sybil_market_id,
-                    "skipping stale price"
-                );
+                debug!(market_id = market.sybil_market_id, "skipping stale price");
                 continue;
             }
 

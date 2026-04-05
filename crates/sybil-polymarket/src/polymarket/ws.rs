@@ -28,7 +28,11 @@ pub async fn run_ws_feed(
         .await
         .map_err(|e| crate::error::Error::WebSocket(e.to_string()))?;
 
-    info!(url = ws_url, tokens = token_ids.len(), "WebSocket connected");
+    info!(
+        url = ws_url,
+        tokens = token_ids.len(),
+        "WebSocket connected"
+    );
 
     let (mut sink, mut stream) = ws_stream.split();
 

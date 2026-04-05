@@ -17,14 +17,10 @@ use std::time::Instant;
 use clarabel::algebra::*;
 use clarabel::solver::*;
 
-use matching_engine::{MarketId, MmSide, Order, Problem, NANOS_PER_DOLLAR};
+use matching_engine::{MmSide, Order, Problem, NANOS_PER_DOLLAR};
 
-use crate::lp_solver::{
-    build_and_solve_lp, collect_markets, create_position_arbs, extract_result, order_sign,
-    recompute_welfare, trim_mm_budget_overflows,
-};
-use crate::result::{PipelineResult, PipelineTimings, PriceDiscoveryResult};
-use crate::MatchingResult;
+use crate::lp_solver::{build_and_solve_lp, build_solver_context, finalize_result, order_sign};
+use crate::result::PipelineResult;
 
 /// Objective mode for the conic solver.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -117,35 +113,14 @@ impl ConicSolver {
             "Conic solver only supports single-market orders"
         );
 
-        let markets = collect_markets(orders);
-        let num_markets = markets.len();
-
-        // Map market -> group index
-        let market_to_group: HashMap<MarketId, usize> = problem
-            .market_groups
-            .iter()
-            .enumerate()
-            .flat_map(|(g_idx, group)| group.markets.iter().map(move |&m| (m, g_idx)))
-            .collect();
-        let num_groups = problem.market_groups.len();
-
-        // MM order info: order_id -> (mm_constraint_index, MmSide)
-        let mm_order_info_by_id: HashMap<u64, (usize, MmSide)> = problem
-            .mm_constraints
-            .iter()
-            .enumerate()
-            .flat_map(|(mm_idx, mm)| {
-                mm.order_ids.iter().filter_map(move |&oid| {
-                    mm.order_sides.get(&oid).map(|&side| (oid, (mm_idx, side)))
-                })
-            })
-            .collect();
+        let ctx = build_solver_context(problem);
+        let num_markets = ctx.markets.len();
 
         // Per-order MM info: order_index -> (mm_constraint_index, MmSide)
         let mm_order_map: HashMap<usize, (usize, MmSide)> = orders
             .iter()
             .enumerate()
-            .filter_map(|(i, o)| mm_order_info_by_id.get(&o.id).map(|&info| (i, info)))
+            .filter_map(|(i, o)| ctx.mm_order_info.get(&o.id).map(|&info| (i, info)))
             .collect();
 
         // Per-order welfare weight: sign × limit_price
@@ -200,7 +175,7 @@ impl ConicSolver {
             .collect();
         let k = cone_mms.len(); // number of MMs that actually get exp cone constraints
         let m = num_markets;
-        let g = num_groups;
+        let g = ctx.num_groups;
 
         let has_cash = matches!(self.config.mode, ObjectiveMode::QuasiFisher);
         let num_cash_vars = if has_cash { k } else { 0 };
@@ -336,7 +311,7 @@ impl ConicSolver {
         //   c_yes = payoffs[0], c_no = payoffs[1]
 
         let balance_base = num_exp_rows;
-        for (m_idx, &market) in markets.iter().enumerate() {
+        for (m_idx, &market) in ctx.markets.iter().enumerate() {
             let yes_row = balance_base + 2 * m_idx;
             let no_row = balance_base + 2 * m_idx + 1;
 
@@ -354,7 +329,7 @@ impl ConicSolver {
             tri_row.push(yes_row);
             tri_col.push(mint_offset + m_idx);
             tri_val.push(-1.0);
-            if let Some(&g_idx) = market_to_group.get(&market) {
+            if let Some(&g_idx) = ctx.market_to_group.get(&market) {
                 tri_row.push(yes_row);
                 tri_col.push(gmint_offset + g_idx);
                 tri_val.push(-1.0);
@@ -493,54 +468,16 @@ impl ConicSolver {
         let projection_obj: Vec<f64> = welfare_weights.clone();
         let Some(final_sol) = build_and_solve_lp(
             &projected_orders,
-            &markets,
-            &market_to_group,
-            num_groups,
+            &ctx.markets,
+            &ctx.market_to_group,
+            ctx.num_groups,
             &projection_obj,
             &[],
         ) else {
             return PipelineResult::empty();
         };
 
-        let order_map: HashMap<u64, &Order> = orders.iter().map(|o| (o.id, o)).collect();
-        let (mut result, prices) = extract_result(&final_sol, orders, &markets);
-
-        // Budget trim: integer rounding breaks KKT budget absorption.
-        if !problem.mm_constraints.is_empty() {
-            trim_mm_budget_overflows(&mut result, &problem.mm_constraints, &mm_order_info_by_id);
-        }
-
-        // Arb orders record the minting operations (mint variables from the LP).
-        let max_order_id = orders.iter().map(|o| o.id).max().unwrap_or(0);
-        let arb_orders = create_position_arbs(&mut result, &order_map, &prices, max_order_id);
-
-        let mut order_map_with_arbs = order_map;
-        for arb in &arb_orders {
-            order_map_with_arbs.insert(arb.id, arb);
-        }
-        recompute_welfare(&mut result, &order_map_with_arbs);
-
-        // Build PipelineResult
-        let mut pipeline_result = PipelineResult::empty();
-        pipeline_result.result = result;
-        pipeline_result.price_discovery = Some(PriceDiscoveryResult {
-            prices,
-            total_fills: pipeline_result.result.fills.len(),
-            total_welfare: pipeline_result.result.total_welfare,
-        });
-        pipeline_result.total_time_secs = start.elapsed().as_secs_f64();
-        pipeline_result.phase_times = PipelineTimings {
-            price_discovery_secs: start.elapsed().as_secs_f64(),
-            ..Default::default()
-        };
-        pipeline_result.group_minting_arb_orders = arb_orders;
-
-        // Gate: negative welfare → return empty
-        if pipeline_result.result.total_welfare < 0 {
-            pipeline_result.result = MatchingResult::new();
-        }
-
-        pipeline_result
+        finalize_result(&final_sol, problem, &ctx, start)
     }
 }
 

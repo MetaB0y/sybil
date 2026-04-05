@@ -18,14 +18,10 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use matching_engine::{MarketId, MmSide, Order, Problem};
+use matching_engine::{MmSide, Order, Problem};
 
-use crate::lp_solver::{
-    build_and_solve_lp, collect_markets, create_position_arbs, extract_result, order_sign,
-    recompute_welfare, trim_mm_budget_overflows,
-};
-use crate::result::{PipelineResult, PipelineTimings, PriceDiscoveryResult};
-use crate::MatchingResult;
+use crate::lp_solver::{build_and_solve_lp, build_solver_context, finalize_result, order_sign};
+use crate::result::PipelineResult;
 
 /// Configuration for the Eisenberg-Gale solver.
 #[derive(Clone, Debug)]
@@ -86,34 +82,13 @@ impl EgSolver {
             "EG solver only supports single-market orders"
         );
 
-        // Collect all markets
-        let markets = collect_markets(orders);
-
-        // Build market -> group index mapping
-        let market_to_group: HashMap<MarketId, usize> = problem
-            .market_groups
-            .iter()
-            .enumerate()
-            .flat_map(|(g_idx, group)| group.markets.iter().map(move |&m| (m, g_idx)))
-            .collect();
-
-        // Build MM order info: order_id -> (mm_constraint_index, MmSide)
-        let mm_order_info_by_id: HashMap<u64, (usize, MmSide)> = problem
-            .mm_constraints
-            .iter()
-            .enumerate()
-            .flat_map(|(mm_idx, mm)| {
-                mm.order_ids.iter().filter_map(move |&oid| {
-                    mm.order_sides.get(&oid).map(|&side| (oid, (mm_idx, side)))
-                })
-            })
-            .collect();
+        let ctx = build_solver_context(problem);
 
         // Per-order MM info: order_index -> (mm_constraint_index, MmSide)
         let mm_order_map: HashMap<usize, (usize, MmSide)> = orders
             .iter()
             .enumerate()
-            .filter_map(|(i, o)| mm_order_info_by_id.get(&o.id).map(|&info| (i, info)))
+            .filter_map(|(i, o)| ctx.mm_order_info.get(&o.id).map(|&info| (i, info)))
             .collect();
 
         // Group MM orders by constraint index
@@ -140,7 +115,7 @@ impl EgSolver {
 
         // If no MM orders, just run the LP directly (EG reduces to LP)
         if !has_mm {
-            return self.solve_lp_only(problem, orders, &markets, &market_to_group, start);
+            return self.solve_lp_only(problem, orders, &ctx, start);
         }
 
         // ================================================================
@@ -149,9 +124,9 @@ impl EgSolver {
         let linear_obj: Vec<f64> = welfare_weights.clone();
         let warm_solution = build_and_solve_lp(
             orders,
-            &markets,
-            &market_to_group,
-            problem.market_groups.len(),
+            &ctx.markets,
+            &ctx.market_to_group,
+            ctx.num_groups,
             &linear_obj,
             &[], // No budget constraints
         );
@@ -215,9 +190,9 @@ impl EgSolver {
             // Solve LP oracle with gradient as objective
             let Some(sol) = build_and_solve_lp(
                 orders,
-                &markets,
-                &market_to_group,
-                problem.market_groups.len(),
+                &ctx.markets,
+                &ctx.market_to_group,
+                ctx.num_groups,
                 &grad,
                 &[],
             ) else {
@@ -364,55 +339,16 @@ impl EgSolver {
 
         let Some(final_sol) = build_and_solve_lp(
             &projected_orders,
-            &markets,
-            &market_to_group,
-            problem.market_groups.len(),
+            &ctx.markets,
+            &ctx.market_to_group,
+            ctx.num_groups,
             &projection_obj,
             &[],
         ) else {
             return PipelineResult::empty();
         };
 
-        let order_map: HashMap<u64, &Order> = orders.iter().map(|o| (o.id, o)).collect();
-        let (mut result, prices) = extract_result(&final_sol, orders, &markets);
-
-        // Budget trim: integer rounding breaks KKT budget absorption.
-        if has_mm {
-            trim_mm_budget_overflows(&mut result, &problem.mm_constraints, &mm_order_info_by_id);
-        }
-
-        // Create arb orders after all post-processing
-        let max_order_id = orders.iter().map(|o| o.id).max().unwrap_or(0);
-        let arb_orders = create_position_arbs(&mut result, &order_map, &prices, max_order_id);
-
-        // Recompute welfare from scratch
-        let mut order_map_with_arbs = order_map;
-        for arb in &arb_orders {
-            order_map_with_arbs.insert(arb.id, arb);
-        }
-        recompute_welfare(&mut result, &order_map_with_arbs);
-
-        // Build PipelineResult
-        let mut pipeline_result = PipelineResult::empty();
-        pipeline_result.result = result;
-        pipeline_result.price_discovery = Some(PriceDiscoveryResult {
-            prices,
-            total_fills: pipeline_result.result.fills.len(),
-            total_welfare: pipeline_result.result.total_welfare,
-        });
-        pipeline_result.total_time_secs = start.elapsed().as_secs_f64();
-        pipeline_result.phase_times = PipelineTimings {
-            price_discovery_secs: start.elapsed().as_secs_f64(),
-            ..Default::default()
-        };
-        pipeline_result.group_minting_arb_orders = arb_orders;
-
-        // Gate: if total welfare is negative, return empty
-        if pipeline_result.result.total_welfare < 0 {
-            pipeline_result.result = MatchingResult::new();
-        }
-
-        pipeline_result
+        finalize_result(&final_sol, problem, &ctx, start)
     }
 
     /// Fast path: no MM orders → single LP solve (identical to LpSolver).
@@ -420,8 +356,7 @@ impl EgSolver {
         &self,
         problem: &Problem,
         orders: &[Order],
-        markets: &[MarketId],
-        market_to_group: &HashMap<MarketId, usize>,
+        ctx: &crate::lp_solver::SolverContext,
         start: Instant,
     ) -> PipelineResult {
         let objective_coeffs: Vec<f64> = orders
@@ -429,50 +364,18 @@ impl EgSolver {
             .map(|o| order_sign(o) * o.limit_price as f64)
             .collect();
 
-        let solution = build_and_solve_lp(
+        let Some(sol) = build_and_solve_lp(
             orders,
-            markets,
-            market_to_group,
-            problem.market_groups.len(),
+            &ctx.markets,
+            &ctx.market_to_group,
+            ctx.num_groups,
             &objective_coeffs,
             &[],
-        );
-
-        let Some(sol) = solution else {
+        ) else {
             return PipelineResult::empty();
         };
 
-        let order_map: HashMap<u64, &Order> = orders.iter().map(|o| (o.id, o)).collect();
-        let (mut result, prices) = extract_result(&sol, orders, markets);
-
-        let max_order_id = orders.iter().map(|o| o.id).max().unwrap_or(0);
-        let arb_orders = create_position_arbs(&mut result, &order_map, &prices, max_order_id);
-
-        let mut order_map_with_arbs = order_map;
-        for arb in &arb_orders {
-            order_map_with_arbs.insert(arb.id, arb);
-        }
-        recompute_welfare(&mut result, &order_map_with_arbs);
-
-        let mut pipeline_result = PipelineResult::empty();
-        pipeline_result.result = result;
-        pipeline_result.price_discovery = Some(PriceDiscoveryResult {
-            prices,
-            total_fills: pipeline_result.result.fills.len(),
-            total_welfare: pipeline_result.result.total_welfare,
-        });
-        pipeline_result.total_time_secs = start.elapsed().as_secs_f64();
-        pipeline_result.phase_times = PipelineTimings {
-            price_discovery_secs: start.elapsed().as_secs_f64(),
-            ..Default::default()
-        };
-        pipeline_result.group_minting_arb_orders = arb_orders;
-
-        if pipeline_result.result.total_welfare < 0 {
-            pipeline_result.result = MatchingResult::new();
-        }
-
-        pipeline_result
+        finalize_result(&sol, problem, ctx, start)
     }
 }
 

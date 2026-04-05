@@ -1,7 +1,10 @@
 use clap::Parser;
 
 #[derive(Parser, Debug, Clone)]
-#[command(name = "sybil-polymarket", about = "Mirror Polymarket markets onto Sybil")]
+#[command(
+    name = "sybil-polymarket",
+    about = "Mirror Polymarket markets onto Sybil"
+)]
 pub struct Config {
     /// Sybil API base URL.
     #[arg(long, default_value = "http://localhost:3000", env = "SYBIL_URL")]

@@ -80,34 +80,13 @@ impl LpSolver {
             "LP solver only supports single-market orders"
         );
 
-        // Collect all markets
-        let markets = collect_markets(&problem.orders);
-
-        // Build market -> group index mapping
-        let market_to_group: HashMap<MarketId, usize> = problem
-            .market_groups
-            .iter()
-            .enumerate()
-            .flat_map(|(g_idx, group)| group.markets.iter().map(move |&m| (m, g_idx)))
-            .collect();
-
-        // Build MM order info: order_id -> (mm_constraint_index, MmSide)
-        let mm_order_info: HashMap<u64, (usize, MmSide)> = problem
-            .mm_constraints
-            .iter()
-            .enumerate()
-            .flat_map(|(mm_idx, mm)| {
-                mm.order_ids.iter().filter_map(move |&oid| {
-                    mm.order_sides.get(&oid).map(|&side| (oid, (mm_idx, side)))
-                })
-            })
-            .collect();
+        let ctx = build_solver_context(problem);
 
         // Pre-group MM orders by constraint for efficient iteration
         let mm_constraint_orders: Vec<Vec<(usize, MmSide)>> = {
             let mut by_mm = vec![Vec::new(); problem.mm_constraints.len()];
             for (i, order) in problem.orders.iter().enumerate() {
-                if let Some(&(mm_idx, side)) = mm_order_info.get(&order.id) {
+                if let Some(&(mm_idx, side)) = ctx.mm_order_info.get(&order.id) {
                     by_mm[mm_idx].push((i, side));
                 }
             }
@@ -122,9 +101,9 @@ impl LpSolver {
         for slp_iter in 0..=self.config.max_mm_iterations {
             let solution = self.solve_lp(
                 &problem.orders,
-                &markets,
-                &market_to_group,
-                problem.market_groups.len(),
+                &ctx.markets,
+                &ctx.market_to_group,
+                ctx.num_groups,
                 &budget_rows,
             );
 
@@ -138,7 +117,7 @@ impl LpSolver {
             }
 
             // Check MM budget violations at current prices
-            let prices = normalized_yes_prices(&sol, &markets);
+            let prices = normalized_yes_prices(&sol, &ctx.markets);
             let violated = has_mm_budget_violations(
                 &sol,
                 &problem.orders,
@@ -168,54 +147,7 @@ impl LpSolver {
             return PipelineResult::empty();
         };
 
-        // The LP guarantees UCP via duality (complementary slackness):
-        //   - filled orders have non-negative surplus (fill_price ≤ limit_price)
-        //   - prices satisfy p_YES + p_NO = $1 (from mint variable stationarity)
-        //   - group prices satisfy Σp ≤ $1 (from gmint variables)
-        // No need for enforce_ucp — it was designed for the old decomposition pipeline.
-        let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
-        let (mut result, prices) = extract_result(&solution, &problem.orders, &markets);
-
-        // Trim any tiny MM budget overflows from integer rounding.
-        if !problem.mm_constraints.is_empty() {
-            trim_mm_budget_overflows(&mut result, &problem.mm_constraints, &mm_order_info);
-        }
-
-        // Create arb orders AFTER all post-processing (including MM trim)
-        // so position balance accounts for the final fill set.
-        let max_order_id = problem.orders.iter().map(|o| o.id).max().unwrap_or(0);
-        let arb_orders = create_position_arbs(&mut result, &order_map, &prices, max_order_id);
-
-        // Recompute welfare from scratch — incremental tracking is error-prone
-        // after trim + arb modifications. Arb fills contribute 0 welfare
-        // (limit == price), so minting_cost = 0 is consistent.
-        let mut order_map_with_arbs = order_map;
-        for arb in &arb_orders {
-            order_map_with_arbs.insert(arb.id, arb);
-        }
-        recompute_welfare(&mut result, &order_map_with_arbs);
-
-        // Build PipelineResult
-        let mut pipeline_result = PipelineResult::empty();
-        pipeline_result.result = result;
-        pipeline_result.price_discovery = Some(PriceDiscoveryResult {
-            prices,
-            total_fills: pipeline_result.result.fills.len(),
-            total_welfare: pipeline_result.result.total_welfare,
-        });
-        pipeline_result.total_time_secs = start.elapsed().as_secs_f64();
-        pipeline_result.phase_times = PipelineTimings {
-            price_discovery_secs: start.elapsed().as_secs_f64(),
-            ..Default::default()
-        };
-        pipeline_result.group_minting_arb_orders = arb_orders;
-
-        // Gate: if total welfare is negative, return empty
-        if pipeline_result.result.total_welfare < 0 {
-            pipeline_result.result = MatchingResult::new();
-        }
-
-        pipeline_result
+        finalize_result(&solution, problem, &ctx, start)
     }
 
     /// Build and solve the core LP using HiGHS.
@@ -716,6 +648,90 @@ pub(crate) fn trim_mm_budget_overflows(
     }
 
     result.fills.retain(|f| f.fill_qty > 0);
+}
+
+/// Common setup shared across all LP-family solvers: collect markets,
+/// build market-to-group mapping, build MM order info.
+pub(crate) struct SolverContext {
+    pub markets: Vec<MarketId>,
+    pub market_to_group: HashMap<MarketId, usize>,
+    pub num_groups: usize,
+    pub mm_order_info: HashMap<u64, (usize, MmSide)>,
+}
+
+/// Build the common context from a Problem.
+pub(crate) fn build_solver_context(problem: &Problem) -> SolverContext {
+    let markets = collect_markets(&problem.orders);
+    let market_to_group: HashMap<MarketId, usize> = problem
+        .market_groups
+        .iter()
+        .enumerate()
+        .flat_map(|(g_idx, group)| group.markets.iter().map(move |&m| (m, g_idx)))
+        .collect();
+    let mm_order_info: HashMap<u64, (usize, MmSide)> = problem
+        .mm_constraints
+        .iter()
+        .enumerate()
+        .flat_map(|(mm_idx, mm)| {
+            mm.order_ids
+                .iter()
+                .filter_map(move |&oid| mm.order_sides.get(&oid).map(|&side| (oid, (mm_idx, side))))
+        })
+        .collect();
+    SolverContext {
+        markets,
+        market_to_group,
+        num_groups: problem.market_groups.len(),
+        mm_order_info,
+    }
+}
+
+/// Common post-processing shared across all LP-family solvers.
+///
+/// After the core solving phase (LP, Frank-Wolfe, conic, or μ-iteration),
+/// all solvers share this finalization: extract fills from the LP solution,
+/// trim MM budget overflows, create arb orders for position balance,
+/// recompute welfare, and gate on non-negative welfare.
+pub(crate) fn finalize_result(
+    solution: &LpSolution,
+    problem: &Problem,
+    ctx: &SolverContext,
+    start: Instant,
+) -> PipelineResult {
+    let orders = &problem.orders;
+    let order_map: HashMap<u64, &Order> = orders.iter().map(|o| (o.id, o)).collect();
+    let (mut result, prices) = extract_result(solution, orders, &ctx.markets);
+
+    trim_mm_budget_overflows(&mut result, &problem.mm_constraints, &ctx.mm_order_info);
+
+    let max_order_id = orders.iter().map(|o| o.id).max().unwrap_or(0);
+    let arb_orders = create_position_arbs(&mut result, &order_map, &prices, max_order_id);
+
+    let mut order_map_with_arbs = order_map;
+    for arb in &arb_orders {
+        order_map_with_arbs.insert(arb.id, arb);
+    }
+    recompute_welfare(&mut result, &order_map_with_arbs);
+
+    let mut pipeline_result = PipelineResult::empty();
+    pipeline_result.result = result;
+    pipeline_result.price_discovery = Some(PriceDiscoveryResult {
+        prices,
+        total_fills: pipeline_result.result.fills.len(),
+        total_welfare: pipeline_result.result.total_welfare,
+    });
+    pipeline_result.total_time_secs = start.elapsed().as_secs_f64();
+    pipeline_result.phase_times = PipelineTimings {
+        price_discovery_secs: start.elapsed().as_secs_f64(),
+        ..Default::default()
+    };
+    pipeline_result.group_minting_arb_orders = arb_orders;
+
+    if pipeline_result.result.total_welfare < 0 {
+        pipeline_result.result = MatchingResult::new();
+    }
+
+    pipeline_result
 }
 
 /// Recompute welfare, volume, and fill count from scratch.

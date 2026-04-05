@@ -5,13 +5,13 @@ use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
+use sybil_api_types::NANOS_PER_DOLLAR;
 use sybil_polymarket::config::Config;
 use sybil_polymarket::feed::{FeedActor, PriceSnapshot};
 use sybil_polymarket::mapping::MappingStore;
 use sybil_polymarket::mm::MmActor;
 use sybil_polymarket::polymarket::gamma::GammaClient;
 use sybil_polymarket::sybil::client::SybilClient;
-use sybil_api_types::NANOS_PER_DOLLAR;
 use sybil_polymarket::sync::SyncActor;
 
 #[tokio::main]
@@ -99,7 +99,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Bootstrap MM with existing markets from mapping
     if !existing.is_empty() {
-        info!(count = existing.len(), "bootstrapping MM with existing markets");
+        info!(
+            count = existing.len(),
+            "bootstrapping MM with existing markets"
+        );
         for (sybil_market_id, yes_token_id, in_group) in existing {
             let _ = mm_tx.try_send(sybil_polymarket::mm::MmMessage::MarketMirrored {
                 sybil_market_id,
@@ -113,8 +116,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Bootstrap Feed with existing token subscriptions
     let all_tokens = mapping.all_token_ids();
     if !all_tokens.is_empty() {
-        info!(count = all_tokens.len(), "bootstrapping Feed with existing tokens");
-        let _ = feed_tx.try_send(sybil_polymarket::feed::FeedMessage::SubscribeTokens(all_tokens));
+        info!(
+            count = all_tokens.len(),
+            "bootstrapping Feed with existing tokens"
+        );
+        let _ = feed_tx.try_send(sybil_polymarket::feed::FeedMessage::SubscribeTokens(
+            all_tokens,
+        ));
     }
 
     // Cancellation

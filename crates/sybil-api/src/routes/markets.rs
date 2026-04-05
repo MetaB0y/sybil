@@ -6,13 +6,20 @@ use matching_sequencer::MarketMetadata;
 
 use crate::convert::prices_to_response;
 use crate::state::AppState;
-use crate::types::error::AppError;
 use crate::state::MarketExtra;
+use crate::types::error::AppError;
 use crate::types::request::{
     CreateMarketGroupRequest, CreateMarketRequest, MarketSearchParams, ResolveMarketRequest,
     SetMarketMetadataRequest, SetReferencePricesRequest,
 };
 use crate::types::response::*;
+
+/// Optional market data from external sources (reference prices, URLs, volume).
+struct MarketExtraInfo {
+    volume: u64,
+    reference_price_nanos: Option<u64>,
+    external_url: Option<String>,
+}
 
 /// Helper to build a MarketResponse with optional metadata.
 fn build_market_response(
@@ -22,9 +29,7 @@ fn build_market_response(
     no_price: Option<u64>,
     status: &matching_sequencer::MarketStatus,
     metadata: Option<&MarketMetadata>,
-    volume: u64,
-    reference_price_nanos: Option<u64>,
-    external_url: Option<String>,
+    extra: MarketExtraInfo,
 ) -> MarketResponse {
     MarketResponse {
         market_id,
@@ -46,9 +51,9 @@ fn build_market_response(
             .filter(|s| !s.is_empty()),
         expiry_timestamp_ms: metadata.map(|m| m.expiry_timestamp_ms).filter(|&v| v != 0),
         created_at_ms: metadata.map(|m| m.created_at_ms).filter(|&v| v != 0),
-        volume_nanos: volume,
-        reference_price_nanos,
-        external_url,
+        volume_nanos: extra.volume,
+        reference_price_nanos: extra.reference_price_nanos,
+        external_url: extra.external_url,
     }
 }
 
@@ -86,9 +91,13 @@ pub async fn list_markets(
             market_prices.and_then(|p| p.get(1).copied()),
             &status,
             metadata.as_ref(),
-            0,
-            ref_prices.get(&m.id.0).copied(),
-            market_extra.get(&m.id.0).and_then(|e| e.external_url.clone()),
+            MarketExtraInfo {
+                volume: 0,
+                reference_price_nanos: ref_prices.get(&m.id.0).copied(),
+                external_url: market_extra
+                    .get(&m.id.0)
+                    .and_then(|e| e.external_url.clone()),
+            },
         ));
     }
 
@@ -120,7 +129,12 @@ pub async fn get_market(
     let status = state.sequencer.get_market_status(mid).await?;
     let metadata = state.sequencer.get_market_metadata(mid).await?;
     let ref_price = state.reference_prices.read().await.get(&id).copied();
-    let ext_url = state.market_extra.read().await.get(&id).and_then(|e| e.external_url.clone());
+    let ext_url = state
+        .market_extra
+        .read()
+        .await
+        .get(&id)
+        .and_then(|e| e.external_url.clone());
 
     Ok(Json(build_market_response(
         market.id.0,
@@ -129,9 +143,11 @@ pub async fn get_market(
         market_prices.and_then(|p| p.get(1).copied()),
         &status,
         metadata.as_ref(),
-        0,
-        ref_price,
-        ext_url,
+        MarketExtraInfo {
+            volume: 0,
+            reference_price_nanos: ref_price,
+            external_url: ext_url,
+        },
     )))
 }
 
@@ -410,9 +426,11 @@ pub async fn search_markets(
                 r.no_price_nanos,
                 &r.status,
                 r.metadata.as_ref(),
-                r.volume_nanos,
-                ref_prices.get(&mid).copied(),
-                market_extra.get(&mid).and_then(|e| e.external_url.clone()),
+                MarketExtraInfo {
+                    volume: r.volume_nanos,
+                    reference_price_nanos: ref_prices.get(&mid).copied(),
+                    external_url: market_extra.get(&mid).and_then(|e| e.external_url.clone()),
+                },
             )
         })
         .collect();
