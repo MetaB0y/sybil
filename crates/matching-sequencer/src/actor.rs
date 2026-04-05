@@ -159,14 +159,10 @@ struct SequencerActor {
     mempool: Mempool,
     receiver: mpsc::Receiver<Message>,
     latest_block: Option<Block>,
-    /// P256 public key to account mapping.
-    pubkey_registry: HashMap<PublicKey, AccountId>,
     /// Recent block history (ring buffer, last N blocks).
     block_history: Vec<Block>,
     /// Broadcast channel for new blocks (SSE).
     block_broadcast: broadcast::Sender<Block>,
-    /// Last known clearing prices across all markets.
-    last_prices: HashMap<MarketId, Vec<Nanos>>,
     /// Interval between block production ticks.
     block_interval: Duration,
     /// Reference-counted pause: block production halts when > 0.
@@ -187,10 +183,8 @@ impl SequencerActor {
             mempool,
             receiver,
             latest_block: None,
-            pubkey_registry: HashMap::new(),
             block_history: Vec::new(),
             block_broadcast,
-            last_prices: HashMap::new(),
             block_interval,
             pause_count: 0,
         }
@@ -237,11 +231,6 @@ impl SequencerActor {
         metrics::gauge!("sybil_volume_nanos").set(block.total_volume as f64);
         metrics::gauge!("sybil_mempool_size").set(mempool_size as f64);
         metrics::histogram!("sybil_solve_time_seconds").record(bp.pipeline.total_time_secs);
-
-        // Update last known prices from this block
-        for (market_id, prices) in &block.clearing_prices {
-            self.last_prices.insert(*market_id, prices.clone());
-        }
 
         // Store in history (ring buffer)
         if self.block_history.len() >= BLOCK_HISTORY_CAPACITY {
@@ -382,14 +371,17 @@ impl SequencerActor {
                 let _ = respond_to.send(rx);
             }
             Message::GetMarketPrices { respond_to } => {
-                let _ = respond_to.send(self.last_prices.clone());
+                let _ = respond_to.send(self.sequencer.last_clearing_prices().clone());
             }
             Message::GetPortfolio {
                 account_id,
                 respond_to,
             } => {
                 let result = match self.sequencer.accounts.get(account_id) {
-                    Some(account) => Ok(portfolio::compute_portfolio(account, &self.last_prices)),
+                    Some(account) => Ok(portfolio::compute_portfolio(
+                        account,
+                        self.sequencer.last_clearing_prices(),
+                    )),
                     None => Err(SequencerError::Rejected(crate::error::Rejection {
                         order_id: 0,
                         account_id,
@@ -470,9 +462,8 @@ impl SequencerActor {
 
         // Look up account by pubkey
         let account_id = self
-            .pubkey_registry
-            .get(&signed.signer)
-            .copied()
+            .sequencer
+            .lookup_pubkey(&signed.signer)
             .ok_or(SequencerError::UnknownSigner)?;
 
         // Create an OrderSubmission and route to mempool
@@ -536,7 +527,7 @@ impl SequencerActor {
                 }
             }
 
-            let market_prices = self.last_prices.get(&mid);
+            let market_prices = self.sequencer.last_clearing_prices().get(&mid);
             let yes_price = market_prices.and_then(|p| p.first().copied());
             let no_price = market_prices.and_then(|p| p.get(1).copied());
             let volume = self.sequencer.market_volume(mid);
@@ -608,22 +599,7 @@ impl SequencerActor {
         account_id: AccountId,
         pubkey: PublicKey,
     ) -> Result<(), SequencerError> {
-        // Check that the account exists
-        if self.sequencer.accounts.get(account_id).is_none() {
-            return Err(SequencerError::Rejected(crate::error::Rejection {
-                order_id: 0,
-                account_id,
-                reason: crate::error::RejectionReason::AccountNotFound,
-            }));
-        }
-
-        // Check that the pubkey is not already registered
-        if self.pubkey_registry.contains_key(&pubkey) {
-            return Err(SequencerError::AccountAlreadyRegistered);
-        }
-
-        self.pubkey_registry.insert(pubkey, account_id);
-        Ok(())
+        self.sequencer.register_pubkey(account_id, pubkey)
     }
 }
 

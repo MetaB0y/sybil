@@ -4,15 +4,17 @@ pub mod agent;
 pub mod block;
 pub mod crypto;
 pub mod error;
+pub mod fill_recorder;
 pub mod market_info;
+pub mod market_lifecycle;
 pub mod mempool;
 pub mod metrics;
 pub mod portfolio;
+pub mod price_tracker;
 pub mod scenario;
 pub mod sequencer;
 pub mod settlement;
 pub mod simulation;
-pub mod state;
 pub mod validation;
 
 pub use account::{Account, AccountId, AccountStore};

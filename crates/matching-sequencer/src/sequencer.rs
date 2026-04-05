@@ -5,7 +5,7 @@ use matching_engine::{
     Fill, MarketGroup, MarketId, MarketSet, MmConstraint, Nanos, Order, Problem,
 };
 use matching_solver::{PipelineResult, Solver};
-use sybil_oracle::{MarketStatus, Oracle, ResolutionAction, ResolutionRecord};
+use sybil_oracle::{MarketStatus, Oracle, ResolutionRecord};
 use sybil_verifier::{
     AccountSnapshot, BlockWitness, WitnessBlockHeader, WitnessOrder, WitnessRejection,
 };
@@ -240,20 +240,14 @@ pub struct BlockSequencer {
     market_groups: Vec<MarketGroup>,
     /// Last block header for hash chaining.
     last_header: Option<BlockHeader>,
-    /// Oracle-managed lifecycle status per market.
-    market_statuses: HashMap<MarketId, MarketStatus>,
-    /// Pluggable oracle for resolution decisions.
-    oracle: Arc<dyn Oracle>,
-    /// Persisted clearing prices across blocks (used as default when no trades happen).
-    last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
-    /// Market metadata (sequencer-layer, not in matching-engine).
-    market_metadata: HashMap<MarketId, MarketMetadata>,
-    /// Price history per market.
-    price_history: HashMap<MarketId, Vec<PricePoint>>,
-    /// Cumulative per-market volume in nanos.
-    market_volumes: HashMap<MarketId, u64>,
-    /// Fill records per account.
-    account_fills: HashMap<AccountId, Vec<AccountFillRecord>>,
+    /// Price tracking: clearing prices, history, volume.
+    pub price_tracker: crate::price_tracker::PriceTracker,
+    /// Fill recording: per-account fill history.
+    pub fill_recorder: crate::fill_recorder::FillRecorder,
+    /// Market lifecycle: statuses, oracle, metadata.
+    pub lifecycle: crate::market_lifecycle::MarketLifecycle,
+    /// P256 public key to account mapping.
+    pubkey_registry: HashMap<crate::crypto::PublicKey, AccountId>,
 }
 
 impl BlockSequencer {
@@ -276,13 +270,10 @@ impl BlockSequencer {
             markets,
             market_groups,
             last_header: None,
-            market_statuses: HashMap::new(),
-            oracle,
-            last_clearing_prices: HashMap::new(),
-            market_metadata: HashMap::new(),
-            price_history: HashMap::new(),
-            market_volumes: HashMap::new(),
-            account_fills: HashMap::new(),
+            price_tracker: crate::price_tracker::PriceTracker::new(),
+            fill_recorder: crate::fill_recorder::FillRecorder::new(),
+            lifecycle: crate::market_lifecycle::MarketLifecycle::new(oracle),
+            pubkey_registry: HashMap::new(),
         }
     }
 
@@ -328,28 +319,24 @@ impl BlockSequencer {
 
     /// Get the oracle-tracked status for a market. Returns `Active` if not explicitly set.
     pub fn market_status(&self, id: MarketId) -> MarketStatus {
-        self.market_statuses
-            .get(&id)
-            .cloned()
-            .unwrap_or(MarketStatus::Active)
+        self.lifecycle.market_status(id)
     }
 
-    /// Get all explicitly tracked market statuses.
     pub fn market_statuses(&self) -> &HashMap<MarketId, MarketStatus> {
-        &self.market_statuses
+        self.lifecycle.market_statuses()
     }
-
-    // --- Market metadata ---
 
     pub fn set_market_metadata(&mut self, market_id: MarketId, metadata: MarketMetadata) {
-        self.market_metadata.insert(market_id, metadata);
+        self.lifecycle.set_market_metadata(market_id, metadata);
     }
 
     pub fn market_metadata(&self, market_id: MarketId) -> Option<&MarketMetadata> {
-        self.market_metadata.get(&market_id)
+        self.lifecycle.market_metadata(market_id)
     }
 
-    // --- Price history ---
+    pub fn last_clearing_prices(&self) -> &HashMap<MarketId, Vec<Nanos>> {
+        self.price_tracker.last_clearing_prices()
+    }
 
     pub fn price_history(
         &self,
@@ -357,22 +344,12 @@ impl BlockSequencer {
         from_ms: Option<u64>,
         to_ms: Option<u64>,
     ) -> Vec<PricePoint> {
-        let Some(history) = self.price_history.get(&market_id) else {
-            return Vec::new();
-        };
-        history
-            .iter()
-            .filter(|p| from_ms.is_none_or(|f| p.timestamp_ms >= f))
-            .filter(|p| to_ms.is_none_or(|t| p.timestamp_ms <= t))
-            .cloned()
-            .collect()
+        self.price_tracker.price_history(market_id, from_ms, to_ms)
     }
 
     pub fn market_volume(&self, market_id: MarketId) -> u64 {
-        self.market_volumes.get(&market_id).copied().unwrap_or(0)
+        self.price_tracker.market_volume(market_id)
     }
-
-    // --- Account fills ---
 
     pub fn account_fills(
         &self,
@@ -381,19 +358,33 @@ impl BlockSequencer {
         limit: usize,
         offset: usize,
     ) -> Vec<AccountFillRecord> {
-        let Some(fills) = self.account_fills.get(&account_id) else {
-            return Vec::new();
-        };
-        fills
-            .iter()
-            .filter(|f| {
-                market_id_filter
-                    .is_none_or(|mid| f.position_deltas.iter().any(|(m, _, _)| *m == mid))
-            })
-            .skip(offset)
-            .take(limit)
-            .cloned()
-            .collect()
+        self.fill_recorder
+            .account_fills(account_id, market_id_filter, limit, offset)
+    }
+
+    // --- Public key registry ---
+
+    pub fn register_pubkey(
+        &mut self,
+        account_id: AccountId,
+        pubkey: crate::crypto::PublicKey,
+    ) -> Result<(), SequencerError> {
+        if self.accounts.get(account_id).is_none() {
+            return Err(SequencerError::Rejected(Rejection {
+                order_id: 0,
+                account_id,
+                reason: RejectionReason::AccountNotFound,
+            }));
+        }
+        if self.pubkey_registry.contains_key(&pubkey) {
+            return Err(SequencerError::AccountAlreadyRegistered);
+        }
+        self.pubkey_registry.insert(pubkey, account_id);
+        Ok(())
+    }
+
+    pub fn lookup_pubkey(&self, pubkey: &crate::crypto::PublicKey) -> Option<AccountId> {
+        self.pubkey_registry.get(pubkey).copied()
     }
 
     /// Get pending orders, optionally filtered by account.
@@ -429,60 +420,14 @@ impl BlockSequencer {
         payout_nanos: Nanos,
         timestamp_ms: u64,
     ) -> Result<ResolutionRecord, SequencerError> {
-        // Verify market exists
-        if self.markets.get(market_id).is_none() {
-            return Err(SequencerError::MarketNotFound);
-        }
-
-        let current_status = self.market_status(market_id);
-        let action = self
-            .oracle
-            .resolve(market_id, payout_nanos, &current_status, timestamp_ms)
-            .map_err(|e| SequencerError::OracleError(e.to_string()))?;
-
-        match action {
-            ResolutionAction::SettleNow {
-                market_id,
-                payout_nanos,
-                record,
-            } => {
-                // Settle positions
-                settlement::resolve_market(&mut self.accounts, market_id, payout_nanos);
-
-                // Remove from market groups
-                self.market_groups
-                    .retain(|g| !g.markets.contains(&market_id));
-
-                // Update status
-                self.market_statuses.insert(
-                    market_id,
-                    MarketStatus::Resolved {
-                        record: record.clone(),
-                    },
-                );
-
-                Ok(record)
-            }
-            ResolutionAction::Propose {
-                proposal,
-                challenge_window_ms,
-            } => {
-                let deadline = timestamp_ms + challenge_window_ms;
-                self.market_statuses.insert(
-                    market_id,
-                    MarketStatus::Proposed {
-                        proposal,
-                        challenge_deadline_ms: deadline,
-                    },
-                );
-                // For now, return an error since we don't have the full record yet.
-                // Future: the sequencer would return a "pending" response.
-                Err(SequencerError::OracleError(
-                    "resolution proposed but not yet settled".to_string(),
-                ))
-            }
-            ResolutionAction::Reject { reason } => Err(SequencerError::OracleError(reason)),
-        }
+        self.lifecycle.resolve_market(
+            market_id,
+            payout_nanos,
+            &mut self.accounts,
+            &self.markets,
+            &mut self.market_groups,
+            timestamp_ms,
+        )
     }
 
     /// Core sync method: produce one block from the given submissions.
@@ -519,7 +464,8 @@ impl BlockSequencer {
 
         // Collect resolved market IDs for witness
         let resolved_markets: Vec<MarketId> = self
-            .market_statuses
+            .lifecycle
+            .market_statuses()
             .iter()
             .filter(|(_, status)| matches!(status, MarketStatus::Resolved { .. }))
             .map(|(&id, _)| id)
@@ -809,22 +755,11 @@ impl BlockSequencer {
                 .collect()
         };
 
-        let mut clearing_prices = self.last_clearing_prices.clone();
-        if let Some(ref pd) = pipeline_result.price_discovery {
-            for (market_id, prices) in &pd.prices {
-                // Only update price if this market had actual fills
-                if markets_with_fills.contains(market_id) {
-                    clearing_prices.insert(*market_id, prices.clone());
-                }
-            }
-        }
-        self.last_clearing_prices = clearing_prices.clone();
-
-        // Only include active (non-resolved) markets in the block response
-        let clearing_prices: HashMap<MarketId, Vec<Nanos>> = clearing_prices
-            .into_iter()
-            .filter(|(m, _)| active_markets.contains(m))
-            .collect();
+        let clearing_prices = self.price_tracker.merge_prices(
+            &pipeline_result.price_discovery,
+            &markets_with_fills,
+            &active_markets,
+        );
 
         let fills = pipeline_result.result.fills.clone();
         let total_welfare = pipeline_result.result.total_welfare;
@@ -850,67 +785,14 @@ impl BlockSequencer {
             &self.order_account_map,
         );
 
-        // --- Record price history + per-market volume ---
+        // Record price history, volume, and account fills via sub-structs
         {
             let order_map: HashMap<u64, &Order> =
                 problem.orders.iter().map(|o| (o.id, o)).collect();
-            // Compute per-market volume from fills
-            let mut per_market_volume: HashMap<MarketId, u64> = HashMap::new();
-            for fill in &fills {
-                if fill.fill_qty == 0 {
-                    continue;
-                }
-                if let Some(order) = order_map.get(&fill.order_id) {
-                    let vol = fill.fill_price.saturating_mul(fill.fill_qty);
-                    for mid in order.active_markets() {
-                        *per_market_volume.entry(mid).or_insert(0) += vol;
-                    }
-                }
-            }
-            // Append PricePoint for each market that had fills
-            for (&mid, &vol) in &per_market_volume {
-                if let Some(prices) = clearing_prices.get(&mid) {
-                    let yes_price = prices.first().copied().unwrap_or(0);
-                    let no_price = prices.get(1).copied().unwrap_or(0);
-                    self.price_history.entry(mid).or_default().push(PricePoint {
-                        height: self.height,
-                        timestamp_ms,
-                        yes_price,
-                        no_price,
-                        volume_nanos: vol,
-                    });
-                }
-                *self.market_volumes.entry(mid).or_insert(0) += vol;
-            }
-        }
-
-        // --- Record account fill records ---
-        {
-            let order_map: HashMap<u64, &Order> =
-                problem.orders.iter().map(|o| (o.id, o)).collect();
-            for fill in &fills {
-                if fill.fill_qty == 0 {
-                    continue;
-                }
-                let Some(&account_id) = self.order_account_map.get(&fill.order_id) else {
-                    continue;
-                };
-                let Some(order) = order_map.get(&fill.order_id) else {
-                    continue;
-                };
-                let position_deltas = compute_position_deltas(order, fill.fill_qty);
-                self.account_fills
-                    .entry(account_id)
-                    .or_default()
-                    .push(AccountFillRecord {
-                        order_id: fill.order_id,
-                        fill_qty: fill.fill_qty,
-                        fill_price: fill.fill_price,
-                        block_height: self.height,
-                        timestamp_ms,
-                        position_deltas,
-                    });
-            }
+            self.price_tracker
+                .record_block(&fills, &order_map, &clearing_prices, self.height, timestamp_ms);
+            self.fill_recorder
+                .record_fills(&fills, &order_map, &self.order_account_map, self.height, timestamp_ms);
         }
 
         // Verify position balance after settlement
@@ -1100,72 +982,6 @@ impl BlockSequencer {
             witness,
         }
     }
-}
-
-/// Compute position deltas for an order fill without mutating state.
-/// Reuses the same payoff logic as settlement but only returns the deltas.
-fn compute_position_deltas(order: &Order, fill_qty: u64) -> Vec<(MarketId, u8, i64)> {
-    let num_markets = order.num_markets as usize;
-    let num_states = order.num_states as usize;
-    let mut deltas = Vec::new();
-
-    if num_markets == 1 && num_states == 2 {
-        let market = order.markets[0];
-        let yes_payoff = order.payoffs[0];
-        let no_payoff = order.payoffs[1];
-
-        if yes_payoff > 0 && no_payoff == 0 {
-            deltas.push((market, 0, fill_qty as i64));
-        } else if yes_payoff == 0 && no_payoff > 0 {
-            deltas.push((market, 1, fill_qty as i64));
-        } else if yes_payoff < 0 && no_payoff == 0 {
-            deltas.push((market, 0, -(fill_qty as i64)));
-        } else if yes_payoff == 0 && no_payoff < 0 {
-            deltas.push((market, 1, -(fill_qty as i64)));
-        } else {
-            // General single-market case
-            if yes_payoff != 0 {
-                deltas.push((market, 0, yes_payoff as i64 * fill_qty as i64));
-            }
-            if no_payoff != 0 {
-                deltas.push((market, 1, no_payoff as i64 * fill_qty as i64));
-            }
-        }
-    } else {
-        // Multi-market: compute marginal position per market per outcome
-        for m_idx in 0..num_markets {
-            let market = order.markets[m_idx];
-            let stride = 1usize << m_idx;
-
-            let mut yes_sum: i64 = 0;
-            let mut yes_count: usize = 0;
-            let mut no_sum: i64 = 0;
-            let mut no_count: usize = 0;
-
-            for s in 0..num_states {
-                let outcome_for_market = (s / stride) % 2;
-                let payoff = order.payoffs[s] as i64;
-                if outcome_for_market == 0 {
-                    yes_sum += payoff;
-                    yes_count += 1;
-                } else {
-                    no_sum += payoff;
-                    no_count += 1;
-                }
-            }
-
-            if yes_count > 0 && yes_sum != 0 {
-                let delta = yes_sum * fill_qty as i64 / yes_count as i64;
-                deltas.push((market, 0, delta));
-            }
-            if no_count > 0 && no_sum != 0 {
-                let delta = no_sum * fill_qty as i64 / no_count as i64;
-                deltas.push((market, 1, delta));
-            }
-        }
-    }
-
-    deltas
 }
 
 /// Convert a Block + PipelineResult into a BatchResult for simulation compatibility.
