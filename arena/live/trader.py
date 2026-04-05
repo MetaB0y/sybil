@@ -152,7 +152,8 @@ class LiveLlmTrader(BaseAgent):
             model=self.model_name,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=1024,
+            max_tokens=4096,
+            extra_body={"reasoning": {"max_tokens": 1024}},
         )
         text = resp.choices[0].message.content or ""
         return text, time.monotonic() - t0
@@ -283,16 +284,12 @@ Recent trades:
 Available actions:
 {actions_block}
 
-Analyze {analyze_word} and decide your trade. Respond in this exact format:
+Analyze {analyze_word} and decide your trade. Be concise. Respond in this EXACT format (structured fields FIRST):
 
-ANALYSIS: [Your analysis of what {analyze_word} signals, 2-4 sentences]
 FAIR_VALUE: [Your probability estimate, 0.01-0.99]
-EDGE: [Calculate: |FAIR_VALUE - Polymarket price| = edge per share. Only trade if edge > $0.03]
-ORDERS: [Choose from available actions, or HOLD if no edge. Set your LIMIT PRICE to cross the market maker's spread:
-For BUY_YES: set limit 1-2 cents ABOVE the Polymarket YES price (to ensure fill).
-For BUY_NO: set limit 1-2 cents ABOVE the Polymarket NO price (to ensure fill).
-For SELL: set limit 1-2 cents BELOW the market price.]
-MOTIVATION: [1-2 sentence thesis]"""
+ORDERS: [HOLD, or action like BUY_YES 10 @ 0.55. Set limit 1-2c above Polymarket price to ensure fill. Only trade if |FV - poly price| > $0.03]
+MOTIVATION: [1 sentence]
+ANALYSIS: [2-3 sentences max]"""
 
     def _parse_orders(
         self, text: str, market_id: int

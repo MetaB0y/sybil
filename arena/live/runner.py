@@ -44,16 +44,41 @@ class LiveConfig:
 
 
 def select_markets(markets, max_n: int = 20):
-    """Pick interesting Polymarket-mirrored markets for trading."""
+    """Pick diverse Polymarket-mirrored markets for trading.
+
+    Avoids picking many markets from the same group (e.g. 18 NBA MVP candidates).
+    Prefers standalone markets and picks at most 2 per group prefix.
+    """
     active = [
         m for m in markets
         if "polymarket" in m.tags
         and m.status.lower() == "active"
     ]
-    # Sort by volume (markets with trading activity first), then by name length
-    # (shorter names = more popular/generic markets)
-    active.sort(key=lambda m: (-m.volume_nanos, len(m.name)))
-    return active[:max_n]
+
+    # Separate standalone markets from group sub-markets (name contains ":")
+    standalone = [m for m in active if ":" not in m.name]
+    grouped = [m for m in active if ":" in m.name]
+
+    selected = []
+
+    # Add standalone markets first (these are typically more interesting)
+    standalone.sort(key=lambda m: (-m.volume_nanos, m.id))
+    selected.extend(standalone)
+
+    # From grouped markets, pick at most 2 per group prefix
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for m in grouped:
+        prefix = m.name.split(":")[0].strip()
+        groups[prefix].append(m)
+
+    for prefix in sorted(groups, key=lambda p: -len(groups[p])):
+        # Sort within group by yes_price closeness to 0.5 (most uncertain = most interesting)
+        members = groups[prefix]
+        members.sort(key=lambda m: abs(m.yes_price - 0.5))
+        selected.extend(members[:2])
+
+    return selected[:max_n]
 
 
 async def snapshot_portfolios(traders, db: DecisionDB, interval_s: float = 300):
