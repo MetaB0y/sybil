@@ -109,6 +109,15 @@ fn compute_generic_settlement(
     } else {
         // Multi-market: compute marginal position per market per outcome.
         // State index uses mixed-radix: state = o0 + 2*o1 + 4*o2 + ...
+        //
+        // NOTE: The division `yes_sum * fill_qty / yes_count` truncates when
+        // the numerator is not evenly divisible. This is acceptable because:
+        // 1. All current solvers require single-market orders (num_markets == 1),
+        //    so this path is only reached by multi-market orders in tests/future use.
+        // 2. For standard binary markets, yes_count = 2^(n-1) and typical payoff
+        //    vectors produce exact divisions.
+        // 3. If multi-market orders are supported in production, this should be
+        //    replaced with proper composite position tracking.
         for m_idx in 0..num_markets {
             let market = order.markets[m_idx];
             let stride = 1usize << m_idx;
@@ -232,15 +241,59 @@ mod tests {
         // Each market gets +1 YES position per fill unit
         // m0: yes_sum=1, yes_count=2, delta = 1*4/2 = 2
         // m1: yes_sum=1, yes_count=2, delta = 1*4/2 = 2
-        assert!(delta.position_deltas.iter().any(|&(m, o, q)| m == m0 && o == 0 && q == 2));
-        assert!(delta.position_deltas.iter().any(|&(m, o, q)| m == m1 && o == 0 && q == 2));
+        assert!(delta
+            .position_deltas
+            .iter()
+            .any(|&(m, o, q)| m == m0 && o == 0 && q == 2));
+        assert!(delta
+            .position_deltas
+            .iter()
+            .any(|&(m, o, q)| m == m1 && o == 0 && q == 2));
+    }
+
+    #[test]
+    fn test_bundle_truncation_documented() {
+        // Demonstrates integer truncation in multi-market settlement.
+        // A bundle YES on 2 markets with odd fill_qty loses 1 unit per market
+        // because `yes_sum * fill_qty / yes_count` = `1 * 3 / 2` = 1 (not 1.5).
+        //
+        // This is currently acceptable because all solvers require single-market
+        // orders. If multi-market orders go to production, replace the marginal
+        // decomposition with composite position tracking.
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("A");
+        let m1 = markets.add_binary("B");
+        let order = crate::bundle_yes(&markets, 10, &[m0, m1], 250_000_000, 3);
+        let fill = Fill::new(10, 3, 250_000_000);
+
+        let delta = compute_fill_settlement(&order, &fill).unwrap();
+        // Bundle YES: payoffs = [1, 0, 0, 0]
+        // m0: yes_sum=1, yes_count=2, delta = 1*3/2 = 1 (truncated from 1.5)
+        // m1: yes_sum=1, yes_count=2, delta = 1*3/2 = 1 (truncated from 1.5)
+        assert!(delta
+            .position_deltas
+            .iter()
+            .any(|&(m, o, q)| m == m0 && o == 0 && q == 1));
+        assert!(delta
+            .position_deltas
+            .iter()
+            .any(|&(m, o, q)| m == m1 && o == 0 && q == 1));
+        // Cost is still exact (no truncation in balance)
+        assert_eq!(delta.balance_delta, -(250_000_000i64 * 3));
     }
 
     #[test]
     fn test_large_price_qty_no_overflow() {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
-        let order = outcome_buy(&markets, 1, m0, 0, NANOS_PER_DOLLAR - 1, u64::MAX / NANOS_PER_DOLLAR);
+        let order = outcome_buy(
+            &markets,
+            1,
+            m0,
+            0,
+            NANOS_PER_DOLLAR - 1,
+            u64::MAX / NANOS_PER_DOLLAR,
+        );
         let qty = u64::MAX / NANOS_PER_DOLLAR;
         let fill = Fill::new(1, qty, NANOS_PER_DOLLAR - 1);
 
