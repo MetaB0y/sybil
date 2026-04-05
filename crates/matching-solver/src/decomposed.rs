@@ -20,28 +20,17 @@ use crate::result::{PipelineResult, PipelineTimings, PriceDiscoveryResult, Solve
 use crate::MatchingResult;
 
 // ============================================================================
-// ComponentSolver trait
-// ============================================================================
-
-/// A solver that can solve a single component sub-problem.
-/// Now a supertrait of `Solver` — any `Solver` is automatically a `ComponentSolver`.
-pub trait ComponentSolver: crate::Solver {}
-
-/// Blanket impl: every `Solver` is a `ComponentSolver`.
-impl<T: crate::Solver> ComponentSolver for T {}
-
-// ============================================================================
 // DecomposedSolver
 // ============================================================================
 
 /// Decomposes the problem by market group and coordinates MM budgets.
-pub struct DecomposedSolver<S> {
+pub struct DecomposedSolver<S: crate::Solver> {
     inner: S,
     max_budget_iters: usize,
     convergence_eps: f64,
 }
 
-impl<S: ComponentSolver> DecomposedSolver<S> {
+impl<S: crate::Solver> DecomposedSolver<S> {
     pub fn new(inner: S) -> Self {
         Self {
             inner,
@@ -435,7 +424,7 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
 }
 
 // ============================================================================
-impl<S: ComponentSolver + 'static> crate::Solver for DecomposedSolver<S> {
+impl<S: crate::Solver + 'static> crate::Solver for DecomposedSolver<S> {
     fn solve(&self, problem: &Problem) -> PipelineResult {
         DecomposedSolver::solve(self, problem)
     }

@@ -63,7 +63,7 @@ pub use iterative_lp_solver::{IterLpConfig, IterLpSolver};
 pub use conic_solver::{ConicConfig, ConicSolver, ObjectiveMode};
 
 #[cfg(feature = "lp")]
-pub use decomposed::{ComponentSolver, DecomposedSolver};
+pub use decomposed::DecomposedSolver;
 
 use serde::Serialize;
 

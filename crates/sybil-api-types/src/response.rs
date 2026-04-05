@@ -101,15 +101,10 @@ pub struct RejectionResponse {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct BlockResponse {
     pub height: u64,
-    #[serde(default)]
     pub parent_hash: String,
-    #[serde(default)]
     pub state_root: String,
-    #[serde(default)]
     pub order_count: u32,
-    #[serde(default)]
     pub fill_count: u32,
-    #[serde(default)]
     pub timestamp_ms: u64,
     #[serde(default)]
     pub fills: Vec<FillResponse>,
@@ -117,11 +112,8 @@ pub struct BlockResponse {
     pub clearing_prices_nanos: HashMap<String, Vec<u64>>,
     #[serde(default)]
     pub rejections: Vec<RejectionResponse>,
-    #[serde(default)]
     pub total_welfare_nanos: i64,
-    #[serde(default)]
     pub total_volume_nanos: u64,
-    #[serde(default)]
     pub orders_filled: usize,
 }
 
