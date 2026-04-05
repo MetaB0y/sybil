@@ -5,7 +5,7 @@ use tracing::{debug, info, warn};
 use crate::config::Config;
 use crate::feed::PriceSnapshot;
 use crate::sybil::client::SybilClient;
-use crate::sybil::types::*;
+use sybil_api_types::*;
 
 /// Message from SyncActor to MmActor.
 #[derive(Debug)]

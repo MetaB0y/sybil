@@ -189,7 +189,7 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
 mod tests {
     use super::*;
     use crate::types::{WitnessBlockHeader, WitnessOrder};
-    use matching_engine::{outcome_buy, outcome_sell, MarketSet, NANOS_PER_DOLLAR};
+    use matching_engine::{outcome_buy, outcome_sell, Fill, MarketSet, NANOS_PER_DOLLAR};
 
     fn empty_header() -> WitnessBlockHeader {
         WitnessBlockHeader {

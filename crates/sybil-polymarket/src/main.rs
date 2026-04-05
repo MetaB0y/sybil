@@ -11,7 +11,7 @@ use sybil_polymarket::mapping::MappingStore;
 use sybil_polymarket::mm::MmActor;
 use sybil_polymarket::polymarket::gamma::GammaClient;
 use sybil_polymarket::sybil::client::SybilClient;
-use sybil_polymarket::sybil::types::NANOS_PER_DOLLAR;
+use sybil_api_types::NANOS_PER_DOLLAR;
 use sybil_polymarket::sync::SyncActor;
 
 #[tokio::main]

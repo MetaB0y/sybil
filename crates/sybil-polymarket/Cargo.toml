@@ -9,6 +9,7 @@ name = "sybil-polymarket"
 path = "src/main.rs"
 
 [dependencies]
+sybil-api-types = { path = "../sybil-api-types" }
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }

@@ -1,31 +1,36 @@
-use serde::Deserialize;
-use utoipa::ToSchema;
+//! API request types (DTOs).
 
-#[derive(Debug, Deserialize, ToSchema)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateAccountRequest {
     /// Initial balance in nanos (1 dollar = 1_000_000_000 nanos).
-    #[schema(example = 100_000_000_000u64)]
+    #[cfg_attr(feature = "openapi", schema(example = 100_000_000_000u64))]
     pub initial_balance_nanos: u64,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct FundAccountRequest {
     /// Amount to add in nanos (1 dollar = 1_000_000_000 nanos).
-    #[schema(example = 50_000_000_000u64)]
+    #[cfg_attr(feature = "openapi", schema(example = 50_000_000_000u64))]
     pub amount_nanos: u64,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RegisterKeyRequest {
     /// Hex-encoded compressed P256 public key (33 bytes).
-    #[schema(example = "02a1b2c3...")]
+    #[cfg_attr(feature = "openapi", schema(example = "02a1b2c3..."))]
     pub public_key_hex: String,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateMarketRequest {
     /// Name of the binary market.
-    #[schema(example = "Will it rain tomorrow?")]
+    #[cfg_attr(feature = "openapi", schema(example = "Will it rain tomorrow?"))]
     pub name: String,
     /// Optional description of the market.
     #[serde(default)]
@@ -44,24 +49,27 @@ pub struct CreateMarketRequest {
     pub expiry_timestamp_ms: Option<u64>,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateMarketGroupRequest {
     /// Name for the group of mutually exclusive markets.
-    #[schema(example = "2024 Election")]
+    #[cfg_attr(feature = "openapi", schema(example = "2024 Election"))]
     pub name: String,
     /// Market IDs in the group.
     pub market_ids: Vec<u32>,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ResolveMarketRequest {
     /// Payout per YES share in nanos (0 to 1_000_000_000).
     /// 1_000_000_000 = YES wins ($1), 0 = NO wins, 700_000_000 = $0.70 fractional.
-    #[schema(example = 1_000_000_000u64)]
+    #[cfg_attr(feature = "openapi", schema(example = 1_000_000_000u64))]
     pub payout_nanos: u64,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SubmitOrderRequest {
     /// Account ID submitting the orders.
     pub account_id: u64,
@@ -76,7 +84,8 @@ pub struct SubmitOrderRequest {
 }
 
 /// Tagged enum representing different order types.
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(tag = "type")]
 pub enum OrderSpec {
     /// Buy YES shares on a single market.
@@ -133,7 +142,8 @@ pub enum OrderSpec {
 }
 
 /// Query parameters for market search.
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MarketSearchParams {
     /// Text search (searches name + description).
     #[serde(default)]
@@ -165,7 +175,8 @@ pub struct MarketSearchParams {
     pub offset: Option<usize>,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SubmitSignedOrderRequest {
     /// Hex-encoded compressed P256 public key of the signer.
     pub signer_pubkey_hex: String,
@@ -175,7 +186,8 @@ pub struct SubmitSignedOrderRequest {
     pub signature_hex: String,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SignedOrderData {
     /// Market IDs this order spans.
     pub market_ids: Vec<u32>,
@@ -187,15 +199,17 @@ pub struct SignedOrderData {
     pub max_fill: u64,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SetReferencePricesRequest {
     /// Map of market_id -> reference price in nanos.
     pub prices: std::collections::HashMap<u32, u64>,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SetMarketMetadataRequest {
     /// External URL (e.g., Polymarket link).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_url: Option<String>,
 }

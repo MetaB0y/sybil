@@ -1,0 +1,13 @@
+[package]
+name = "sybil-api-types"
+version = "0.1.0"
+edition = "2021"
+description = "Shared request/response types for the Sybil prediction market API"
+
+[features]
+default = []
+openapi = ["utoipa"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+utoipa = { version = "5", features = ["axum_extras"], optional = true }

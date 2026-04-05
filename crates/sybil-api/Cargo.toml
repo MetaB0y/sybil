@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 matching-engine = { path = "../matching-engine" }
 matching-sequencer = { path = "../matching-sequencer" }
+sybil-api-types = { path = "../sybil-api-types", features = ["openapi"] }
 sybil-oracle = { path = "../sybil-oracle" }
 axum = { version = "0.8", features = ["json", "ws"] }
 tokio = { version = "1", features = ["full"] }

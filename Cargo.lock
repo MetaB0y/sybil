@@ -2954,6 +2954,7 @@ dependencies = [
  "p256",
  "serde",
  "serde_json",
+ "sybil-api-types",
  "sybil-oracle",
  "tokio",
  "tokio-stream",
@@ -2962,6 +2963,14 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "utoipa",
+]
+
+[[package]]
+name = "sybil-api-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
  "utoipa",
 ]
 
@@ -2983,6 +2992,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "sybil-api-types",
  "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite 0.26.2",

@@ -9,7 +9,7 @@ use crate::mapping::{GroupInfo, MappingStore};
 use crate::mm::MmMessage;
 use crate::polymarket::gamma::GammaClient;
 use crate::sybil::client::SybilClient;
-use crate::sybil::types::*;
+use sybil_api_types::*;
 
 /// Market sync actor. Polls Polymarket for new events, creates corresponding
 /// markets on Sybil, and notifies Feed and MM actors.

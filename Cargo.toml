@@ -8,6 +8,7 @@ members = [
     "crates/matching-sequencer",
     "crates/sybil-oracle",
     "crates/sybil-api",
+    "crates/sybil-api-types",
     "crates/sybil-verifier",
     "crates/sybil-polymarket",
 ]

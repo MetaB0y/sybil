@@ -1,7 +1,7 @@
 use reqwest::Client;
 use tracing::debug;
 
-use super::types::*;
+use sybil_api_types::*;
 use crate::error::Error;
 
 /// HTTP client for the Sybil API. Mirrors the Python `SybilClient`.
