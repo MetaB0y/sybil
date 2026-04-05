@@ -46,7 +46,10 @@
 <div class="container" x-data="dashboard()" x-init="start()">
 
   <header>
-    <h1>sybil</h1>
+    <div style="display: flex; gap: 20px; align-items: center;">
+      <h1>sybil</h1>
+      <a href="/trade" style="color: var(--blue); text-decoration: none; font-size: 12px;">Trade &rarr;</a>
+    </div>
     <div class="status">
       <span>block <strong x-text="health.height || '...'"></strong></span>
       <span class="live" x-show="health.status === 'ok'">live</span>

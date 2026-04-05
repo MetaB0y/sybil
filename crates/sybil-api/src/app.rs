@@ -92,6 +92,13 @@ async fn dashboard() -> impl IntoResponse {
     )
 }
 
+async fn trade() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        include_str!("../static/trade.html"),
+    )
+}
+
 async fn prometheus_metrics(State(state): State<AppState>) -> impl IntoResponse {
     state.prometheus.render()
 }
@@ -124,6 +131,7 @@ pub fn create_router(state: AppState) -> Router {
     Router::new()
         // Dashboard
         .route("/", axum::routing::get(dashboard))
+        .route("/trade", axum::routing::get(trade))
         // OpenAPI spec
         .route("/openapi.json", axum::routing::get(openapi_json))
         // Metrics (outside http_metrics middleware to avoid self-scraping noise)

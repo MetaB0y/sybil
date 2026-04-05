@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sybil — Trade</title>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+<style>
+  :root { --bg: #0a0a0f; --surface: #12121a; --border: #1e1e2e; --text: #e0e0e8; --dim: #6b6b80; --green: #4ade80; --red: #f87171; --blue: #60a5fa; --yellow: #fbbf24; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'SF Mono', 'Fira Code', monospace; background: var(--bg); color: var(--text); font-size: 13px; line-height: 1.5; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
+  header { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  header h1 { font-size: 16px; font-weight: 600; }
+  header h1 a { color: var(--text); text-decoration: none; }
+  .status { display: flex; gap: 16px; color: var(--dim); font-size: 12px; align-items: center; }
+  .status .live { color: var(--green); }
+  .nav { display: flex; gap: 16px; align-items: center; font-size: 12px; }
+  .nav a { color: var(--dim); text-decoration: none; }
+  .nav a:hover, .nav a.active { color: var(--blue); }
+  .account-bar { display: flex; gap: 16px; align-items: center; font-size: 12px; color: var(--dim); }
+  .account-bar strong { color: var(--text); }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+  .tab { padding: 8px 16px; cursor: pointer; color: var(--dim); border-bottom: 2px solid transparent; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  th { text-align: left; padding: 8px 12px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--dim); border-bottom: 1px solid var(--border); font-weight: 500; }
+  td { padding: 6px 12px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  tr:hover { background: rgba(255,255,255,0.02); }
+  tr.clickable { cursor: pointer; }
+  .price { font-variant-numeric: tabular-nums; }
+  .green { color: var(--green); }
+  .red { color: var(--red); }
+  .blue { color: var(--blue); }
+  .dim { color: var(--dim); }
+  .yellow { color: var(--yellow); }
+  .bar-bg { background: var(--border); border-radius: 2px; height: 4px; width: 80px; display: inline-block; vertical-align: middle; }
+  .bar-fill { background: var(--blue); height: 100%; border-radius: 2px; }
+
+  /* Groups */
+  .groups { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .group-tag { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; }
+  .group-tag.active { border-color: var(--blue); color: var(--blue); }
+
+  /* Stats row */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px; }
+  .stat .label { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat .value { font-size: 20px; font-weight: 600; margin-top: 4px; }
+
+  h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--dim); margin: 20px 0 8px; }
+
+  /* Order form */
+  .order-form { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 16px; margin: 16px 0; max-width: 400px; }
+  .order-form .field { margin-bottom: 12px; }
+  .order-form label { display: block; color: var(--dim); font-size: 11px; text-transform: uppercase; margin-bottom: 4px; }
+  .order-form input { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 8px; color: var(--text); font-family: inherit; font-size: 13px; width: 100%; }
+  .order-form input:focus { outline: none; border-color: var(--blue); }
+  .side-toggle { display: flex; gap: 0; }
+  .side-btn { flex: 1; padding: 8px; text-align: center; cursor: pointer; border: 1px solid var(--border); font-size: 12px; font-weight: 600; }
+  .side-btn:first-child { border-radius: 4px 0 0 4px; }
+  .side-btn:last-child { border-radius: 0 4px 4px 0; }
+  .side-btn.yes { background: var(--green); color: #000; border-color: var(--green); }
+  .side-btn.no { background: var(--red); color: #000; border-color: var(--red); }
+  .side-btn.inactive { background: var(--surface); color: var(--dim); }
+  .cost-preview { color: var(--yellow); font-size: 12px; margin-top: 4px; }
+  .submit-btn { width: 100%; padding: 10px; border: none; border-radius: 4px; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; margin-top: 8px; }
+  .submit-btn.yes { background: var(--green); color: #000; }
+  .submit-btn.no { background: var(--red); color: #000; }
+  .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Toast */
+  .toast { position: fixed; top: 20px; right: 20px; padding: 12px 20px; border-radius: 6px; font-size: 13px; z-index: 1000; animation: fadeIn 0.3s; }
+  .toast.success { background: var(--green); color: #000; }
+  .toast.error { background: var(--red); color: #000; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* Registration overlay */
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .overlay-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 32px; max-width: 400px; width: 90%; }
+  .overlay-box h2 { color: var(--text); margin-bottom: 16px; font-size: 16px; }
+  .overlay-box input, .overlay-box select { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 8px; color: var(--text); font-family: inherit; font-size: 13px; width: 100%; margin-bottom: 12px; }
+  .overlay-box button { padding: 10px 20px; border: none; border-radius: 4px; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; width: 100%; margin-bottom: 8px; }
+  .overlay-box .primary { background: var(--blue); color: #000; }
+  .overlay-box .secondary { background: var(--surface); color: var(--dim); border: 1px solid var(--border); }
+  .overlay-box .error { color: var(--red); font-size: 12px; margin-top: 4px; }
+
+  /* Back link */
+  .back { color: var(--blue); cursor: pointer; font-size: 12px; margin-bottom: 12px; display: inline-block; }
+  .back:hover { text-decoration: underline; }
+
+  /* Search */
+  .search { margin-bottom: 12px; }
+  .search input { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 8px 12px; color: var(--text); font-family: inherit; font-size: 13px; width: 300px; }
+  .search input:focus { outline: none; border-color: var(--blue); }
+
+  /* P256 key badge */
+  .key-badge { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 10px; }
+  .key-badge.registered { background: rgba(74,222,128,0.15); color: var(--green); }
+  .key-badge.none { background: rgba(107,107,128,0.15); color: var(--dim); }
+</style>
+</head>
+<body>
+<div class="container" x-data="tradingApp()" x-init="start()">
+
+  <!-- Toast notifications -->
+  <template x-if="toast">
+    <div class="toast" :class="toast.type" x-text="toast.msg"
+         x-init="setTimeout(() => toast = null, 3000)"></div>
+  </template>
+
+  <!-- Registration overlay -->
+  <template x-if="!accountId">
+    <div class="overlay">
+      <div class="overlay-box">
+        <h2 style="text-transform: none; color: var(--text);">Welcome to Sybil</h2>
+        <p style="color: var(--dim); margin-bottom: 16px; font-size: 12px;">Create an account to start trading prediction markets.</p>
+
+        <template x-if="!showLogin">
+          <div>
+            <label style="color: var(--dim); font-size: 11px;">Display Name</label>
+            <input type="text" x-model="regName" placeholder="Your name">
+            <label style="color: var(--dim); font-size: 11px;">Starting Balance</label>
+            <select x-model="regBalance">
+              <option value="100">$100</option>
+              <option value="500" selected>$500</option>
+              <option value="1000">$1,000</option>
+              <option value="10000">$10,000</option>
+            </select>
+            <button class="primary" @click="createAccount()" :disabled="creating">
+              <span x-text="creating ? 'Creating...' : 'Create Account + Generate Key'"></span>
+            </button>
+            <button class="secondary" @click="showLogin = true">I have an account</button>
+            <div class="error" x-text="regError"></div>
+          </div>
+        </template>
+
+        <template x-if="showLogin">
+          <div>
+            <label style="color: var(--dim); font-size: 11px;">Account ID</label>
+            <input type="number" x-model="loginId" placeholder="Enter account ID">
+            <button class="primary" @click="loginExisting()">Log In</button>
+            <button class="secondary" @click="showLogin = false">Back</button>
+            <div class="error" x-text="regError"></div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </template>
+
+  <!-- Header -->
+  <header>
+    <div style="display: flex; gap: 24px; align-items: center;">
+      <h1><a href="/">sybil</a></h1>
+      <div class="nav">
+        <a href="/">Monitor</a>
+        <a href="/trade" class="active">Trade</a>
+      </div>
+    </div>
+    <div class="status">
+      <template x-if="accountId">
+        <div class="account-bar">
+          <span x-text="displayName || ('Account #' + accountId)"></span>
+          <strong :class="balance >= 0 ? 'green' : 'red'" x-text="'$' + Math.round(balance / 1e9).toLocaleString()"></strong>
+          <span class="key-badge" :class="hasKey ? 'registered' : 'none'" x-text="hasKey ? 'P256' : 'no key'"></span>
+          <span>block <strong x-text="health.height || '...'"></strong></span>
+          <span class="live" x-show="health.status === 'ok'">live</span>
+          <span style="color: var(--dim); cursor: pointer;" @click="logout()">logout</span>
+        </div>
+      </template>
+    </div>
+  </header>
+
+  <!-- Tabs -->
+  <template x-if="accountId">
+    <div>
+      <div class="tabs">
+        <div class="tab" :class="view === 'markets' && 'active'" @click="view = 'markets'; selectedMarket = null;">Markets</div>
+        <div class="tab" :class="view === 'portfolio' && 'active'" @click="view = 'portfolio'; fetchPortfolio();">Portfolio</div>
+      </div>
+
+      <!-- Markets view -->
+      <template x-if="view === 'markets' && !selectedMarket">
+        <div>
+          <div class="search">
+            <input type="text" x-model="searchQuery" placeholder="Search markets...">
+          </div>
+
+          <div class="groups">
+            <span class="group-tag" :class="selectedGroup === null && 'active'" @click="selectedGroup = null">All</span>
+            <template x-for="g in groups" :key="g.name">
+              <span class="group-tag" :class="selectedGroup === g.name && 'active'"
+                    @click="selectedGroup = selectedGroup === g.name ? null : g.name"
+                    x-text="g.name + ' (' + g.market_ids.length + ')'"></span>
+            </template>
+          </div>
+
+          <table>
+            <thead><tr><th>#</th><th>Market</th><th>Yes</th><th>No</th><th></th><th>Volume</th></tr></thead>
+            <tbody>
+              <template x-for="m in displayMarkets" :key="m.market_id">
+                <tr class="clickable" @click="selectMarket(m)">
+                  <td class="dim" x-text="m.market_id"></td>
+                  <td x-text="m.name.length > 60 ? m.name.slice(0, 57) + '...' : m.name"></td>
+                  <td class="price green" x-text="fmt(m.yes_price_nanos)"></td>
+                  <td class="price red" x-text="fmt(m.no_price_nanos)"></td>
+                  <td><span class="bar-bg"><span class="bar-fill" :style="'width:' + pct(m.yes_price_nanos) + '%'"></span></span></td>
+                  <td class="dim price" x-text="'$' + dollars(m.volume_nanos)"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+          <p class="dim" style="margin-top: 8px; font-size: 11px;" x-text="displayMarkets.length + ' / ' + markets.length + ' markets'"></p>
+        </div>
+      </template>
+
+      <!-- Market detail view -->
+      <template x-if="view === 'markets' && selectedMarket">
+        <div>
+          <span class="back" @click="selectedMarket = null">&larr; Back to markets</span>
+
+          <h2 style="color: var(--text); font-size: 15px; text-transform: none;" x-text="selectedMarket.name"></h2>
+          <p class="dim" style="margin: 8px 0;" x-text="selectedMarket.description || ''"></p>
+          <p class="dim" style="font-size: 11px;" x-show="selectedMarket.resolution_criteria" x-text="'Resolution: ' + (selectedMarket.resolution_criteria || '')"></p>
+
+          <div class="stats" style="margin-top: 16px;">
+            <div class="stat">
+              <div class="label">YES Price</div>
+              <div class="value green" x-text="fmt(selectedMarket.yes_price_nanos)"></div>
+            </div>
+            <div class="stat">
+              <div class="label">NO Price</div>
+              <div class="value red" x-text="fmt(selectedMarket.no_price_nanos)"></div>
+            </div>
+            <div class="stat">
+              <div class="label">Volume</div>
+              <div class="value" x-text="'$' + dollars(selectedMarket.volume_nanos)"></div>
+            </div>
+            <div class="stat" x-show="myPosition(selectedMarket.market_id, 'YES') || myPosition(selectedMarket.market_id, 'NO')">
+              <div class="label">Your Position</div>
+              <div class="value" style="font-size: 14px;">
+                <span x-show="myPosition(selectedMarket.market_id, 'YES')" class="green" x-text="myPosition(selectedMarket.market_id, 'YES') + ' YES'"></span>
+                <span x-show="myPosition(selectedMarket.market_id, 'YES') && myPosition(selectedMarket.market_id, 'NO')"> / </span>
+                <span x-show="myPosition(selectedMarket.market_id, 'NO')" class="red" x-text="myPosition(selectedMarket.market_id, 'NO') + ' NO'"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Order form -->
+          <div class="order-form">
+            <div class="field">
+              <label>Side</label>
+              <div class="side-toggle">
+                <div class="side-btn" :class="orderSide === 'BuyYes' ? 'yes' : 'inactive'" @click="orderSide = 'BuyYes'">Buy Yes</div>
+                <div class="side-btn" :class="orderSide === 'BuyNo' ? 'no' : 'inactive'" @click="orderSide = 'BuyNo'">Buy No</div>
+              </div>
+            </div>
+            <div class="field">
+              <label>Price ($)</label>
+              <input type="number" x-model.number="orderPrice" min="0.01" max="0.99" step="0.01">
+            </div>
+            <div class="field">
+              <label>Quantity</label>
+              <input type="number" x-model.number="orderQty" min="1" step="1">
+            </div>
+            <div class="cost-preview" x-text="'Cost: $' + (orderPrice * orderQty).toFixed(2) + ' (max)'"></div>
+            <button class="submit-btn" :class="orderSide === 'BuyYes' ? 'yes' : 'no'"
+                    @click="submitOrder()" :disabled="submitting">
+              <span x-text="submitting ? 'Submitting...' : (orderSide === 'BuyYes' ? 'Buy Yes' : 'Buy No') + ' — ' + orderQty + ' @ $' + orderPrice.toFixed(2)"></span>
+            </button>
+            <p class="dim" style="font-size: 11px; margin-top: 8px;" x-text="hasKey ? 'Signed with P256 key' : 'Unsigned (dev mode)'"></p>
+          </div>
+
+          <!-- Fills for this market -->
+          <template x-if="marketFills.length > 0">
+            <div>
+              <h2>Your Fills</h2>
+              <table>
+                <thead><tr><th>Block</th><th>Side</th><th>Qty</th><th>Price</th></tr></thead>
+                <tbody>
+                  <template x-for="f in marketFills" :key="f.block_height + '-' + f.fill_price_nanos">
+                    <tr>
+                      <td class="dim" x-text="'#' + f.block_height"></td>
+                      <td :class="f.outcome === 'YES' ? 'green' : 'red'" x-text="f.outcome"></td>
+                      <td class="price" x-text="f.quantity"></td>
+                      <td class="price" x-text="'$' + (f.fill_price_nanos / 1e9).toFixed(4)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </template>
+        </div>
+      </template>
+
+      <!-- Portfolio view -->
+      <template x-if="view === 'portfolio'">
+        <div>
+          <div class="stats">
+            <div class="stat">
+              <div class="label">Balance</div>
+              <div class="value green" x-text="'$' + Math.round(balance / 1e9).toLocaleString()"></div>
+            </div>
+            <div class="stat">
+              <div class="label">Portfolio Value</div>
+              <div class="value" x-text="portfolio ? '$' + Math.round(portfolio.portfolio_value_nanos / 1e9).toLocaleString() : '...'"></div>
+            </div>
+            <div class="stat">
+              <div class="label">PnL</div>
+              <div class="value" :class="portfolio && portfolio.pnl_nanos >= 0 ? 'green' : 'red'"
+                   x-text="portfolio ? (portfolio.pnl_nanos >= 0 ? '+$' : '-$') + Math.abs(Math.round(portfolio.pnl_nanos / 1e9)).toLocaleString() : '...'"></div>
+            </div>
+            <div class="stat">
+              <div class="label">Account ID</div>
+              <div class="value dim" x-text="'#' + accountId"></div>
+            </div>
+          </div>
+
+          <!-- P256 Key info -->
+          <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 16px;">
+            <template x-if="hasKey">
+              <div>
+                <span class="key-badge registered">P256 Key Registered</span>
+                <span class="dim" style="font-size: 11px; margin-left: 8px;" x-text="'Public key: ' + pubKeyHex.slice(0, 16) + '...'"></span>
+              </div>
+            </template>
+            <template x-if="!hasKey">
+              <div>
+                <span class="key-badge none">No signing key</span>
+                <span class="dim" style="font-size: 11px; margin-left: 8px;">Orders submitted unsigned (dev mode)</span>
+              </div>
+            </template>
+          </div>
+
+          <!-- Add funds -->
+          <div style="margin-bottom: 16px;">
+            <button style="background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 6px 12px; color: var(--text); font-family: inherit; font-size: 12px; cursor: pointer;"
+                    @click="addFunds()">+ Add $500</button>
+          </div>
+
+          <!-- Positions -->
+          <template x-if="portfolio && portfolio.positions && portfolio.positions.length > 0">
+            <div>
+              <h2>Positions</h2>
+              <table>
+                <thead><tr><th>Market</th><th>Side</th><th>Qty</th><th>Value</th></tr></thead>
+                <tbody>
+                  <template x-for="p in portfolio.positions" :key="p.market_id + p.outcome">
+                    <tr class="clickable" @click="selectMarketById(p.market_id)">
+                      <td x-text="marketName(p.market_id)"></td>
+                      <td :class="p.outcome === 'YES' ? 'green' : 'red'" x-text="p.outcome"></td>
+                      <td class="price" x-text="p.quantity"></td>
+                      <td class="price dim" x-text="'$' + (p.value_nanos / 1e9).toFixed(2)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </template>
+          <template x-if="!portfolio || !portfolio.positions || portfolio.positions.length === 0">
+            <p class="dim">No positions yet. Go trade!</p>
+          </template>
+
+          <!-- Fill history -->
+          <h2>Fill History</h2>
+          <template x-if="allFills.length > 0">
+            <table>
+              <thead><tr><th>Block</th><th>Market</th><th>Side</th><th>Qty</th><th>Price</th></tr></thead>
+              <tbody>
+                <template x-for="f in allFills" :key="f.block_height + '-' + f.fill_price_nanos + '-' + f.market_id">
+                  <tr>
+                    <td class="dim" x-text="'#' + f.block_height"></td>
+                    <td x-text="marketName(f.market_id)"></td>
+                    <td :class="f.outcome === 'YES' ? 'green' : 'red'" x-text="f.outcome"></td>
+                    <td class="price" x-text="f.quantity"></td>
+                    <td class="price" x-text="'$' + (f.fill_price_nanos / 1e9).toFixed(4)"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </template>
+          <template x-if="allFills.length === 0">
+            <p class="dim">No fills yet.</p>
+          </template>
+        </div>
+      </template>
+    </div>
+  </template>
+
+</div>
+
+<script>
+// P256 canonical order encoding (must match crates/matching-sequencer/src/crypto.rs)
+const MAX_MARKETS = 5;
+const MAX_STATES = 32;
+const MARKET_NONE = 0xFFFFFFFF;
+
+function canonicalOrderBytes(marketIds, payoffs, limitPrice, maxFill) {
+  const buf = new ArrayBuffer(MAX_MARKETS * 4 + 1 + MAX_STATES + 1 + 8 + 8 + 1);
+  const view = new DataView(buf);
+  let off = 0;
+
+  // 5 x u32 LE market IDs
+  for (let i = 0; i < MAX_MARKETS; i++) {
+    view.setUint32(off, i < marketIds.length ? marketIds[i] : MARKET_NONE, true);
+    off += 4;
+  }
+  // num_markets: u8
+  view.setUint8(off++, marketIds.length);
+
+  // 32 x i8 payoffs
+  for (let i = 0; i < MAX_STATES; i++) {
+    view.setInt8(off++, i < payoffs.length ? payoffs[i] : 0);
+  }
+  // num_states: u8
+  const numStates = 1 << marketIds.length;
+  view.setUint8(off++, numStates);
+
+  // limit_price: u64 LE
+  writeBigUint64LE(view, off, BigInt(limitPrice)); off += 8;
+  // max_fill: u64 LE
+  writeBigUint64LE(view, off, BigInt(maxFill)); off += 8;
+
+  // condition: u8 (0 = none)
+  view.setUint8(off++, 0);
+
+  return new Uint8Array(buf, 0, off);
+}
+
+function writeBigUint64LE(view, offset, val) {
+  view.setUint32(offset, Number(val & 0xFFFFFFFFn), true);
+  view.setUint32(offset + 4, Number(val >> 32n), true);
+}
+
+function toHex(buf) {
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Compress a 65-byte uncompressed P256 public key to 33 bytes
+function compressPublicKey(rawKey) {
+  const bytes = new Uint8Array(rawKey);
+  // rawKey is 04 || x (32 bytes) || y (32 bytes)
+  const x = bytes.slice(1, 33);
+  const y = bytes.slice(33, 65);
+  const prefix = (y[31] & 1) === 0 ? 0x02 : 0x03;
+  const compressed = new Uint8Array(33);
+  compressed[0] = prefix;
+  compressed.set(x, 1);
+  return compressed;
+}
+
+function tradingApp() {
+  return {
+    // Auth
+    accountId: null,
+    displayName: '',
+    balance: 0,
+    hasKey: false,
+    pubKeyHex: '',
+    _privateKey: null, // CryptoKey (non-extractable in memory)
+
+    // Registration
+    showLogin: false,
+    regName: '',
+    regBalance: '500',
+    loginId: '',
+    regError: '',
+    creating: false,
+
+    // UI
+    view: 'markets',
+    toast: null,
+    health: {},
+
+    // Markets
+    markets: [],
+    groups: [],
+    selectedGroup: null,
+    selectedMarket: null,
+    searchQuery: '',
+
+    // Trading
+    orderSide: 'BuyYes',
+    orderPrice: 0.50,
+    orderQty: 10,
+    submitting: false,
+
+    // Portfolio
+    portfolio: null,
+    allFills: [],
+    marketFills: [],
+
+    // Computed
+    get displayMarkets() {
+      let list = this.markets;
+      if (this.selectedGroup) {
+        const g = this.groups.find(g => g.name === this.selectedGroup);
+        if (g) {
+          const ids = new Set(g.market_ids);
+          list = list.filter(m => ids.has(m.market_id));
+        }
+      }
+      if (this.searchQuery) {
+        const q = this.searchQuery.toLowerCase();
+        list = list.filter(m => m.name.toLowerCase().includes(q));
+      }
+      return list;
+    },
+
+    // Helpers
+    fmt(nanos) { return nanos ? (nanos / 1e9).toFixed(3) : '-'; },
+    pct(nanos) { return nanos ? Math.round(nanos / 1e7) : 0; },
+    dollars(nanos) { return nanos ? Math.round(nanos / 1e9).toLocaleString() : '0'; },
+    marketName(id) {
+      const m = this.markets.find(m => m.market_id === id);
+      if (!m) return '#' + id;
+      return m.name.length > 40 ? m.name.slice(0, 37) + '...' : m.name;
+    },
+    myPosition(marketId, outcome) {
+      if (!this.portfolio || !this.portfolio.positions) return 0;
+      const p = this.portfolio.positions.find(p => p.market_id === marketId && p.outcome === outcome);
+      return p ? p.quantity : 0;
+    },
+    showToast(msg, type = 'success') {
+      this.toast = { msg, type };
+    },
+
+    // Auth
+    async createAccount() {
+      this.creating = true;
+      this.regError = '';
+      try {
+        const nanos = Math.round(parseFloat(this.regBalance) * 1e9);
+        const resp = await fetch('/v1/accounts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ initial_balance_nanos: nanos }),
+        });
+        if (!resp.ok) { this.regError = 'Failed: ' + (await resp.text()); return; }
+        const data = await resp.json();
+        this.accountId = data.account_id;
+        this.balance = nanos;
+        this.displayName = this.regName || 'Trader';
+        localStorage.setItem('sybil_account_id', this.accountId);
+        localStorage.setItem('sybil_display_name', this.displayName);
+
+        // Generate P256 keypair and register
+        await this.generateAndRegisterKey();
+
+        this.showToast('Account #' + this.accountId + ' created!');
+      } catch (e) {
+        this.regError = 'Error: ' + e.message;
+      } finally {
+        this.creating = false;
+      }
+    },
+
+    async generateAndRegisterKey() {
+      try {
+        const keyPair = await crypto.subtle.generateKey(
+          { name: 'ECDSA', namedCurve: 'P-256' },
+          true,  // extractable for JWK export
+          ['sign']
+        );
+
+        // Export public key as raw (uncompressed: 04 || x || y, 65 bytes)
+        const rawPub = await crypto.subtle.exportKey('raw', keyPair.publicKey);
+        const compressed = compressPublicKey(rawPub);
+        const pubHex = toHex(compressed);
+
+        // Register with server
+        const resp = await fetch('/v1/accounts/' + this.accountId + '/keys', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ public_key_hex: pubHex }),
+        });
+        if (!resp.ok) {
+          console.warn('Key registration failed:', await resp.text());
+          return;
+        }
+
+        // Store private key as JWK in localStorage
+        const jwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey);
+        localStorage.setItem('sybil_private_key_jwk', JSON.stringify(jwk));
+        localStorage.setItem('sybil_public_key_hex', pubHex);
+
+        this._privateKey = keyPair.privateKey;
+        this.hasKey = true;
+        this.pubKeyHex = pubHex;
+      } catch (e) {
+        console.error('P256 key generation failed:', e);
+      }
+    },
+
+    async loadStoredKey() {
+      const jwkStr = localStorage.getItem('sybil_private_key_jwk');
+      const pubHex = localStorage.getItem('sybil_public_key_hex');
+      if (!jwkStr || !pubHex) return;
+      try {
+        const jwk = JSON.parse(jwkStr);
+        this._privateKey = await crypto.subtle.importKey(
+          'jwk', jwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']
+        );
+        this.hasKey = true;
+        this.pubKeyHex = pubHex;
+      } catch (e) {
+        console.warn('Failed to load stored key:', e);
+      }
+    },
+
+    async loginExisting() {
+      this.regError = '';
+      const id = parseInt(this.loginId);
+      if (isNaN(id)) { this.regError = 'Invalid account ID'; return; }
+      try {
+        const resp = await fetch('/v1/accounts/' + id);
+        if (!resp.ok) { this.regError = 'Account not found'; return; }
+        const data = await resp.json();
+        this.accountId = data.account_id;
+        this.balance = data.balance_nanos;
+        this.displayName = 'Trader';
+        localStorage.setItem('sybil_account_id', this.accountId);
+        localStorage.setItem('sybil_display_name', this.displayName);
+        this.showToast('Logged in as #' + this.accountId);
+      } catch (e) {
+        this.regError = 'Error: ' + e.message;
+      }
+    },
+
+    logout() {
+      this.accountId = null;
+      this._privateKey = null;
+      this.hasKey = false;
+      this.pubKeyHex = '';
+      localStorage.removeItem('sybil_account_id');
+      localStorage.removeItem('sybil_display_name');
+      localStorage.removeItem('sybil_private_key_jwk');
+      localStorage.removeItem('sybil_public_key_hex');
+    },
+
+    // Data
+    async poll() {
+      try {
+        const [h, m, g] = await Promise.all([
+          fetch('/v1/health').then(r => r.json()),
+          fetch('/v1/markets').then(r => r.json()),
+          fetch('/v1/markets/groups').then(r => r.json()),
+        ]);
+        this.health = h;
+        this.markets = m.sort((a, b) => (b.volume_nanos || 0) - (a.volume_nanos || 0));
+        this.groups = g;
+
+        if (this.accountId) {
+          await this.fetchPortfolio();
+        }
+
+        // Update selected market data
+        if (this.selectedMarket) {
+          const updated = this.markets.find(m => m.market_id === this.selectedMarket.market_id);
+          if (updated) this.selectedMarket = updated;
+        }
+      } catch (e) {
+        console.error('poll failed:', e);
+      }
+    },
+
+    async fetchPortfolio() {
+      if (!this.accountId) return;
+      try {
+        const resp = await fetch('/v1/accounts/' + this.accountId + '/portfolio');
+        if (resp.ok) {
+          this.portfolio = await resp.json();
+          this.balance = this.portfolio.balance_nanos;
+        }
+      } catch {}
+    },
+
+    async fetchFills(marketId) {
+      if (!this.accountId) return;
+      try {
+        const url = '/v1/accounts/' + this.accountId + '/fills?limit=50' + (marketId != null ? '&market_id=' + marketId : '');
+        const resp = await fetch(url);
+        if (resp.ok) {
+          const fills = await resp.json();
+          if (marketId != null) {
+            this.marketFills = fills;
+          } else {
+            this.allFills = fills;
+          }
+        }
+      } catch {}
+    },
+
+    selectMarket(m) {
+      this.selectedMarket = m;
+      // Set default price to current YES price
+      const yesPrice = m.yes_price_nanos ? m.yes_price_nanos / 1e9 : 0.50;
+      this.orderPrice = Math.round(yesPrice * 100) / 100 || 0.50;
+      this.orderSide = 'BuyYes';
+      this.marketFills = [];
+      this.fetchFills(m.market_id);
+    },
+
+    selectMarketById(id) {
+      const m = this.markets.find(m => m.market_id === id);
+      if (m) { this.view = 'markets'; this.selectMarket(m); }
+    },
+
+    // Trading
+    async submitOrder() {
+      if (!this.selectedMarket || !this.accountId) return;
+      this.submitting = true;
+
+      const priceNanos = Math.round(this.orderPrice * 1e9);
+      const marketId = this.selectedMarket.market_id;
+
+      try {
+        if (this.hasKey && this._privateKey) {
+          // Signed order via P256
+          await this.submitSignedOrder(marketId, priceNanos, this.orderQty);
+        } else {
+          // Unsigned (dev mode)
+          await this.submitUnsignedOrder(marketId, priceNanos, this.orderQty);
+        }
+      } finally {
+        this.submitting = false;
+      }
+    },
+
+    async submitUnsignedOrder(marketId, priceNanos, qty) {
+      const body = {
+        account_id: this.accountId,
+        orders: [{
+          type: this.orderSide,
+          market_id: marketId,
+          limit_price_nanos: priceNanos,
+          quantity: qty,
+        }],
+      };
+      const resp = await fetch('/v1/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (resp.ok) {
+        this.showToast(this.orderSide + ' ' + qty + ' @ $' + this.orderPrice.toFixed(2) + ' submitted!');
+        this.fetchFills(marketId);
+        this.fetchPortfolio();
+      } else {
+        const err = await resp.text();
+        this.showToast('Error: ' + err, 'error');
+      }
+    },
+
+    async submitSignedOrder(marketId, priceNanos, qty) {
+      // Build payoffs: BuyYes = [1, 0], BuyNo = [0, 1] for binary market
+      // State 0 = YES wins (outcome 0), State 1 = NO wins (outcome 1)
+      const payoffs = this.orderSide === 'BuyYes' ? [1, 0] : [0, 1];
+      const marketIds = [marketId];
+
+      // Build canonical bytes (must match Rust crypto.rs)
+      const canonical = canonicalOrderBytes(marketIds, payoffs, priceNanos, qty);
+
+      // Sign with P256 (SubtleCrypto produces P1363 r||s format, 64 bytes)
+      const sigBuf = await crypto.subtle.sign(
+        { name: 'ECDSA', hash: 'SHA-256' },
+        this._privateKey,
+        canonical,
+      );
+
+      const body = {
+        signer_pubkey_hex: this.pubKeyHex,
+        order: {
+          market_ids: marketIds,
+          payoffs: payoffs,
+          limit_price_nanos: priceNanos,
+          max_fill: qty,
+        },
+        signature_hex: toHex(sigBuf),
+      };
+
+      const resp = await fetch('/v1/orders/signed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (resp.ok) {
+        this.showToast(this.orderSide + ' ' + qty + ' @ $' + this.orderPrice.toFixed(2) + ' signed & submitted!');
+        this.fetchFills(marketId);
+        this.fetchPortfolio();
+      } else {
+        const err = await resp.text();
+        this.showToast('Signature error: ' + err, 'error');
+      }
+    },
+
+    async addFunds() {
+      if (!this.accountId) return;
+      const resp = await fetch('/v1/accounts/' + this.accountId + '/fund', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount_nanos: 500_000_000_000 }),
+      });
+      if (resp.ok) {
+        this.showToast('Added $500');
+        this.fetchPortfolio();
+      } else {
+        this.showToast('Failed to add funds', 'error');
+      }
+    },
+
+    // SSE
+    async streamBlocks() {
+      try {
+        const resp = await fetch('/v1/blocks/stream');
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+          for (const line of lines) {
+            if (line.startsWith('data:')) {
+              try {
+                const block = JSON.parse(line.slice(5).trim());
+                this.health.height = block.height;
+                // Refresh portfolio on fills
+                if (block.fill_count > 0 && this.accountId) {
+                  this.fetchPortfolio();
+                  if (this.selectedMarket) this.fetchFills(this.selectedMarket.market_id);
+                }
+              } catch {}
+            }
+          }
+        }
+      } catch (e) {
+        console.error('SSE failed:', e);
+        setTimeout(() => this.streamBlocks(), 3000);
+      }
+    },
+
+    // Init
+    async start() {
+      // Restore session
+      const storedId = localStorage.getItem('sybil_account_id');
+      if (storedId) {
+        this.accountId = parseInt(storedId);
+        this.displayName = localStorage.getItem('sybil_display_name') || 'Trader';
+        // Validate account still exists
+        try {
+          const resp = await fetch('/v1/accounts/' + this.accountId);
+          if (!resp.ok) {
+            this.accountId = null;
+            localStorage.removeItem('sybil_account_id');
+          } else {
+            const data = await resp.json();
+            this.balance = data.balance_nanos;
+          }
+        } catch {
+          this.accountId = null;
+        }
+        // Load stored P256 key
+        await this.loadStoredKey();
+      }
+
+      this.poll();
+      setInterval(() => this.poll(), 5000);
+      this.streamBlocks();
+    },
+  };
+}
+</script>
+</body>
+</html>
