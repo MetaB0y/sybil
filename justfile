@@ -214,6 +214,7 @@ deploy-api:
     docker build -t sybil-api:latest .
     docker save sybil-api:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'docker stop sybil-api sybil-polymarket 2>/dev/null; docker rm sybil-api sybil-polymarket 2>/dev/null; true'
+    ssh {{SERVER}} 'docker run --rm -v polymarket-data:/data alpine rm -f /data/polymarket_mapping.json'
     ssh {{SERVER}} 'docker run -d --name sybil-api --restart unless-stopped \
         -p 3000:3000 \
         -e SYBIL_DEV_MODE=true -e SYBIL_BLOCK_INTERVAL_MS=2000 -e RUST_LOG=info \
@@ -221,7 +222,7 @@ deploy-api:
     ssh {{SERVER}} 'docker run -d --name sybil-polymarket --restart unless-stopped \
         -v polymarket-data:/data -e RUST_LOG=sybil_polymarket=info \
         --entrypoint sybil-polymarket sybil-api:latest \
-        --sybil-url http://172.17.0.1:3000 --max-events 50 --mm-half-spread 0.02 \
+        --sybil-url http://172.17.0.1:3000 --max-events 50 --mm-half-spread 0.01 \
         --mm-budget-dollars 5000 --mm-initial-balance-dollars 1000000 \
         --mapping-store-path /data/polymarket_mapping.json --sync-interval-secs 120'
 
@@ -231,10 +232,11 @@ deploy-arena key:
     docker save sybil-arena:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'docker stop sybil-arena 2>/dev/null; docker rm sybil-arena 2>/dev/null; true'
     ssh {{SERVER}} 'docker run -d --name sybil-arena --restart unless-stopped \
-        -v arena-data:/data -e PYTHONUNBUFFERED=1 \
+        -v arena-data:/data -v polymarket-data:/polymarket-data:ro -e PYTHONUNBUFFERED=1 \
         sybil-arena:latest \
         --sybil-url http://172.17.0.1:3000 --api-key {{key}} \
-        --max-markets 20 --model minimax/minimax-m2.7 --db-path /data/decisions.db'
+        --max-markets 20 --model minimax/minimax-m2.7 --db-path /data/decisions.db \
+        --mapping-path /polymarket-data/polymarket_mapping.json'
 
 # Deploy arena dashboard (arena image must be loaded already)
 deploy-dashboard:
@@ -258,3 +260,48 @@ deploy-logs service="sybil-api":
 # SSH into server
 deploy-shell:
     ssh {{SERVER}}
+
+# Live system status (containers, blocks, traders, fills)
+status:
+    #!/usr/bin/env bash
+    set -e
+    S="root@172.104.31.54"
+    echo "=== Containers ==="
+    ssh $S 'docker ps --format "table {{.Names}}\t{{.Status}}"'
+    echo ""
+    echo "=== Recent Blocks ==="
+    ssh $S 'timeout 8 curl -sN http://localhost:3000/v1/blocks/stream 2>/dev/null' | head -4 | while read -r line; do
+        echo "$line" | python3 -c "
+import sys,json
+for l in sys.stdin:
+    l=l.strip()
+    if l.startswith('data: '):
+        b=json.loads(l[6:])
+        f='<<<' if b['fill_count']>0 else ''
+        print(f'  Block {b[\"height\"]}: {b[\"order_count\"]} orders, {b[\"fill_count\"]} fills, {len(b[\"rejections\"])} rej, welfare=\${b[\"total_welfare_nanos\"]/1e9:.2f} {f}')
+" 2>/dev/null
+    done
+    echo ""
+    echo "=== Trader Activity ==="
+    LOGS=$(ssh $S 'docker logs sybil-arena 2>&1' | grep -v httpx)
+    echo "  LLM calls:     $(echo "$LOGS" | grep -c 'LLM response' || echo 0)"
+    echo "  Parse failures: $(echo "$LOGS" | grep -c 'Failed to parse' || echo 0)"
+    echo "  Trade orders:   $(echo "$LOGS" | grep -c 'Buy' || echo 0)"
+    echo "  HOLDs:          $(echo "$LOGS" | grep -c 'HOLD' || echo 0)"
+    echo ""
+    echo "=== Balances ==="
+    for id in 11 12 13; do
+        ssh $S "curl -s http://localhost:3000/v1/accounts/$id" 2>/dev/null | python3 -c "
+import sys,json
+try:
+    a=json.load(sys.stdin); print(f'  Account {a[\"id\"]}: \${a[\"balance_nanos\"]/1e9:.2f}')
+except: pass
+"
+    done
+    echo ""
+    echo "=== News Pipeline ==="
+    echo "  Polls: $(echo "$LOGS" | grep -c 'Poll:' || echo 0)"
+    echo "  Articles gated: $(echo "$LOGS" | grep -c '✓' || echo 0)"
+    echo ""
+    echo "=== Recent Decisions ==="
+    echo "$LOGS" | grep 'FV=' | tail -10

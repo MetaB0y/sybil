@@ -55,7 +55,18 @@ class DecisionDB:
                     balance REAL,
                     portfolio_value REAL,
                     pnl REAL,
-                    positions TEXT
+                    positions TEXT,
+                    total_fills INTEGER DEFAULT 0
+                );
+
+                CREATE TABLE IF NOT EXISTS token_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trader_name TEXT,
+                    timestamp TEXT,
+                    prompt_tokens INTEGER,
+                    completion_tokens INTEGER,
+                    model TEXT,
+                    duration_s REAL
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_decisions_trader
@@ -143,12 +154,13 @@ class DecisionDB:
         portfolio_value: float,
         pnl: float,
         positions: dict,
+        total_fills: int = 0,
     ) -> int:
         with self._lock:
             cur = self.conn.execute(
                 """INSERT INTO portfolio_snapshots
-                   (trader_name, timestamp, balance, portfolio_value, pnl, positions)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                   (trader_name, timestamp, balance, portfolio_value, pnl, positions, total_fills)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
                     trader_name,
                     datetime.now(timezone.utc).isoformat(),
@@ -156,10 +168,35 @@ class DecisionDB:
                     portfolio_value,
                     pnl,
                     json.dumps(positions),
+                    total_fills,
                 ),
             )
             self.conn.commit()
             return cur.lastrowid
+
+    def log_token_usage(
+        self,
+        trader_name: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        model: str,
+        duration_s: float,
+    ):
+        with self._lock:
+            self.conn.execute(
+                """INSERT INTO token_usage
+                   (trader_name, timestamp, prompt_tokens, completion_tokens, model, duration_s)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    trader_name,
+                    datetime.now(timezone.utc).isoformat(),
+                    prompt_tokens,
+                    completion_tokens,
+                    model,
+                    duration_s,
+                ),
+            )
+            self.conn.commit()
 
     def close(self):
         self.conn.close()

@@ -156,7 +156,20 @@ class LiveLlmTrader(BaseAgent):
             extra_body={"reasoning": {"max_tokens": 1024}},
         )
         text = resp.choices[0].message.content or ""
-        return text, time.monotonic() - t0
+        duration = time.monotonic() - t0
+        # Log token usage for cost tracking
+        if resp.usage:
+            log.info(
+                "[%s] tokens: prompt=%d completion=%d (%.1fs)",
+                self.name, resp.usage.prompt_tokens,
+                resp.usage.completion_tokens, duration,
+            )
+            if self.db:
+                self.db.log_token_usage(
+                    self.name, resp.usage.prompt_tokens,
+                    resp.usage.completion_tokens, self.model_name, duration,
+                )
+        return text, duration
 
     def _format_recent_trades(self, market_id: int) -> str:
         records = self.trade_log.get(market_id, [])
@@ -287,7 +300,7 @@ Available actions:
 Analyze {analyze_word} and decide your trade. Be concise. Respond in this EXACT format (structured fields FIRST):
 
 FAIR_VALUE: [Your probability estimate, 0.01-0.99]
-ORDERS: [HOLD, or action like BUY_YES 10 @ 0.55. Set limit 1-2c above Polymarket price to ensure fill. Only trade if |FV - poly price| > $0.03]
+ORDERS: [HOLD, or action like BUY_YES 10 @ 0.55. Set limit price at your fair value. Only trade if |FV - poly price| > $0.02]
 MOTIVATION: [1 sentence]
 ANALYSIS: [2-3 sentences max]"""
 

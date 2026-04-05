@@ -100,12 +100,18 @@ async def snapshot_portfolios(traders, db: DecisionDB, interval_s: float = 300):
                     if history:
                         yes_p = history[-1].yes_price
                         pv += pos.get("YES", 0) * yes_p + pos.get("NO", 0) * (1 - yes_p)
+                # Count total fills for this trader
+                total_fills = sum(
+                    len(recs) for recs in getattr(trader, "trade_log", {}).values()
+                    if recs
+                )
                 db.log_snapshot(
                     trader_name=trader.name,
                     balance=balance,
                     portfolio_value=pv,
                     pnl=pv - 500.0,  # starting balance
                     positions=positions,
+                    total_fills=total_fills,
                 )
             except Exception as e:
                 log.warning("Snapshot error for %s: %s", trader.name, e)
