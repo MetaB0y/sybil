@@ -41,12 +41,18 @@ pub async fn state_root(
 
 /// POST /v1/simulation/pause
 pub async fn pause(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {
+    if !state.dev_mode {
+        return Err(AppError::dev_mode_required());
+    }
     state.sequencer.pause_block_production().await?;
     Ok(Json(serde_json::json!({"status": "paused"})))
 }
 
 /// POST /v1/simulation/resume
 pub async fn resume(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {
+    if !state.dev_mode {
+        return Err(AppError::dev_mode_required());
+    }
     state.sequencer.resume_block_production().await?;
     Ok(Json(serde_json::json!({"status": "resumed"})))
 }

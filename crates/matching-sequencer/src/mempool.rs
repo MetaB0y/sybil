@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use matching_engine::MarketId;
 
@@ -34,7 +34,7 @@ impl Default for MempoolConfig {
 /// and keeps block production on schedule regardless of order volume.
 pub struct Mempool {
     /// Single-market orders, keyed by their market.
-    market_pools: HashMap<MarketId, Vec<OrderSubmission>>,
+    market_pools: BTreeMap<MarketId, Vec<OrderSubmission>>,
     /// Multi-market orders (bundles, spreads).
     bundle_pool: Vec<OrderSubmission>,
     /// Max orders drained per market per block.
@@ -48,7 +48,7 @@ pub struct Mempool {
 impl Mempool {
     pub fn new(config: MempoolConfig) -> Self {
         Self {
-            market_pools: HashMap::new(),
+            market_pools: BTreeMap::new(),
             bundle_pool: Vec::new(),
             per_market_limit: config.per_market_limit,
             bundle_limit: config.bundle_limit,

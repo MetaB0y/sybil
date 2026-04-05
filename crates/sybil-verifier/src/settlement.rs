@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use matching_engine::{Fill, MarketId, Order};
+use matching_engine::{compute_fill_settlement, MarketId, Order};
 
 use crate::types::{AccountSnapshot, BlockWitness};
 use crate::violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
@@ -43,7 +43,7 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
         stats.accounts_checked += 1;
     }
 
-    // Apply each fill
+    // Apply each fill using the shared settlement function
     for fill in &witness.fills {
         if fill.fill_qty == 0 {
             continue;
@@ -60,7 +60,13 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
         balances.entry(account_id).or_insert(0);
         positions.entry(account_id).or_default();
 
-        settle_fill(account_id, order, fill, &mut balances, &mut positions);
+        if let Some(delta) = compute_fill_settlement(order, fill) {
+            *balances.get_mut(&account_id).unwrap() += delta.balance_delta;
+            let pos = positions.get_mut(&account_id).unwrap();
+            for (market, outcome, qty_delta) in delta.position_deltas {
+                *pos.entry((market, outcome)).or_insert(0) += qty_delta;
+            }
+        }
     }
 
     // Non-negative balance/position assertions (ZK invariants)
@@ -176,119 +182,6 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
         valid: violations.is_empty(),
         violations,
         stats,
-    }
-}
-
-/// Re-implement `settle_fill` matching the sequencer's logic exactly.
-fn settle_fill(
-    account_id: u64,
-    order: &Order,
-    fill: &Fill,
-    balances: &mut HashMap<u64, i64>,
-    positions: &mut HashMap<u64, HashMap<(MarketId, u8), i64>>,
-) {
-    let num_markets = order.num_markets as usize;
-    let num_states = order.num_states as usize;
-
-    let balance = balances.get_mut(&account_id).unwrap();
-    let pos = positions.get_mut(&account_id).unwrap();
-
-    if num_markets == 1 && num_states == 2 {
-        let market = order.markets[0];
-        let yes_payoff = order.payoffs[0];
-        let no_payoff = order.payoffs[1];
-
-        if yes_payoff > 0 && no_payoff == 0 {
-            // Buying YES
-            let cost = (fill.fill_price as i128 * fill.fill_qty as i128) as i64;
-            *balance -= cost;
-            *pos.entry((market, 0)).or_insert(0) += fill.fill_qty as i64;
-        } else if yes_payoff == 0 && no_payoff > 0 {
-            // Buying NO
-            let cost = (fill.fill_price as i128 * fill.fill_qty as i128) as i64;
-            *balance -= cost;
-            *pos.entry((market, 1)).or_insert(0) += fill.fill_qty as i64;
-        } else if yes_payoff < 0 && no_payoff == 0 {
-            // Selling YES
-            let revenue = (fill.fill_price as i128 * fill.fill_qty as i128) as i64;
-            *balance += revenue;
-            *pos.entry((market, 0)).or_insert(0) -= fill.fill_qty as i64;
-        } else if yes_payoff == 0 && no_payoff < 0 {
-            // Selling NO
-            let revenue = (fill.fill_price as i128 * fill.fill_qty as i128) as i64;
-            *balance += revenue;
-            *pos.entry((market, 1)).or_insert(0) -= fill.fill_qty as i64;
-        } else {
-            settle_generic(account_id, order, fill, balances, positions);
-        }
-    } else {
-        settle_generic(account_id, order, fill, balances, positions);
-    }
-}
-
-/// Generic settlement for arbitrary payoff vectors (matches sequencer's `settle_generic`).
-fn settle_generic(
-    account_id: u64,
-    order: &Order,
-    fill: &Fill,
-    balances: &mut HashMap<u64, i64>,
-    positions: &mut HashMap<u64, HashMap<(MarketId, u8), i64>>,
-) {
-    let balance = balances.get_mut(&account_id).unwrap();
-    let pos = positions.get_mut(&account_id).unwrap();
-
-    // Debit the cost
-    let cost = (fill.fill_price as i128 * fill.fill_qty as i128) as i64;
-    *balance -= cost;
-
-    let num_markets = order.num_markets as usize;
-    let num_states = order.num_states as usize;
-
-    if num_markets == 1 {
-        let market = order.markets[0];
-        let yes_payoff = order.payoffs[0] as i64;
-        let no_payoff = order.payoffs[1] as i64;
-
-        if yes_payoff != 0 {
-            *pos.entry((market, 0)).or_insert(0) += yes_payoff * fill.fill_qty as i64;
-        }
-        if no_payoff != 0 {
-            *pos.entry((market, 1)).or_insert(0) += no_payoff * fill.fill_qty as i64;
-        }
-    } else {
-        // Multi-market: same marginal payoff logic as sequencer
-        for m_idx in 0..num_markets {
-            let market = order.markets[m_idx];
-            let stride = 1usize << m_idx;
-
-            let mut yes_sum: i64 = 0;
-            let mut yes_count: usize = 0;
-            let mut no_sum: i64 = 0;
-            let mut no_count: usize = 0;
-
-            for s in 0..num_states {
-                let outcome = (s / stride) % 2;
-                let payoff = order.payoffs[s] as i64;
-                if outcome == 0 {
-                    yes_sum += payoff;
-                    yes_count += 1;
-                } else {
-                    no_sum += payoff;
-                    no_count += 1;
-                }
-            }
-
-            if yes_count > 0 && yes_sum != 0 {
-                let yes_per_unit = yes_sum;
-                *pos.entry((market, 0)).or_insert(0) +=
-                    yes_per_unit * fill.fill_qty as i64 / yes_count as i64;
-            }
-            if no_count > 0 && no_sum != 0 {
-                let no_per_unit = no_sum;
-                *pos.entry((market, 1)).or_insert(0) +=
-                    no_per_unit * fill.fill_qty as i64 / no_count as i64;
-            }
-        }
     }
 }
 
