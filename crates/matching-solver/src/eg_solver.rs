@@ -482,9 +482,9 @@ impl Default for EgSolver {
     }
 }
 
-impl crate::decomposed::ComponentSolver for EgSolver {
-    fn solve_component(&self, problem: &Problem) -> PipelineResult {
-        self.solve(problem)
+impl crate::Solver for EgSolver {
+    fn solve(&self, problem: &Problem) -> PipelineResult {
+        EgSolver::solve(self, problem)
     }
     fn name(&self) -> &str {
         "EG"

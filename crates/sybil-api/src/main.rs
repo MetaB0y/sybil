@@ -83,7 +83,7 @@ async fn main() {
     // Initialize sequencer
     let accounts = AccountStore::new();
     let oracle = Arc::new(AdminOracle::new());
-    let sequencer = BlockSequencer::new(accounts, markets, vec![], oracle);
+    let sequencer = BlockSequencer::with_default_solver(accounts, markets, vec![], oracle);
     let block_interval = Duration::from_millis(config.block_interval_ms);
     let handle =
         SequencerHandle::spawn_with_interval(sequencer, MempoolConfig::default(), block_interval);

@@ -17,7 +17,7 @@ pub async fn test_app(dev_mode: bool) -> (Router, SequencerHandle) {
     let accounts = AccountStore::new();
     let markets = MarketSet::new();
     let oracle = Arc::new(AdminOracle::new());
-    let sequencer = BlockSequencer::new(accounts, markets, vec![], oracle);
+    let sequencer = BlockSequencer::with_default_solver(accounts, markets, vec![], oracle);
     let handle = SequencerHandle::spawn(sequencer, MempoolConfig::default());
     let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()

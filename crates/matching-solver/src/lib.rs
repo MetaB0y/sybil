@@ -8,6 +8,7 @@
 
 // Internal modules
 pub mod result;
+pub mod solver;
 pub mod verifier;
 pub mod viz;
 
@@ -36,6 +37,9 @@ pub use result::{
     CombineStats, IterationStats, PipelineResult, PipelineTimings, PriceDiscoveryResult,
     SolverContribution, UcpStats,
 };
+
+// Solver trait
+pub use solver::Solver;
 
 // Visualization
 pub use viz::VizSnapshot;

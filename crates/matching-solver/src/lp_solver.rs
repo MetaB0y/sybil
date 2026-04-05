@@ -253,9 +253,9 @@ impl Default for LpSolver {
     }
 }
 
-impl crate::decomposed::ComponentSolver for LpSolver {
-    fn solve_component(&self, problem: &Problem) -> PipelineResult {
-        self.solve(problem)
+impl crate::Solver for LpSolver {
+    fn solve(&self, problem: &Problem) -> PipelineResult {
+        LpSolver::solve(self, problem)
     }
     fn name(&self) -> &str {
         "LP"

@@ -918,6 +918,32 @@ impl Default for MilpSolver {
     }
 }
 
+impl crate::Solver for MilpSolver {
+    fn solve(&self, problem: &Problem) -> crate::PipelineResult {
+        let milp_result = self.solve_with_status(problem);
+
+        let mut pr = crate::PipelineResult::empty();
+        pr.result = milp_result.result;
+        pr.price_discovery = Some(crate::PriceDiscoveryResult {
+            prices: milp_result.clearing_prices,
+            total_fills: pr.result.fills.len(),
+            total_welfare: pr.result.total_welfare,
+        });
+        pr.total_time_secs = milp_result.solve_time_secs;
+        pr.group_minting_arb_orders = milp_result.arbitrage_orders;
+
+        if pr.result.total_welfare < 0 {
+            pr.result = crate::MatchingResult::new();
+        }
+
+        pr
+    }
+
+    fn name(&self) -> &str {
+        "MILP"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

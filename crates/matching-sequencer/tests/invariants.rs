@@ -113,7 +113,7 @@ fn make_sequencer() -> (BlockSequencer, MarketSet) {
     }
     let markets = make_markets();
     let oracle = Arc::new(AdminOracle::new());
-    let seq = BlockSequencer::new(accounts, markets.clone(), vec![], oracle);
+    let seq = BlockSequencer::with_default_solver(accounts, markets.clone(), vec![], oracle);
     (seq, markets)
 }
 

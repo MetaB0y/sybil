@@ -24,10 +24,11 @@ use crate::MatchingResult;
 // ============================================================================
 
 /// A solver that can solve a single component sub-problem.
-pub trait ComponentSolver: Send + Sync {
-    fn solve_component(&self, problem: &Problem) -> PipelineResult;
-    fn name(&self) -> &str;
-}
+/// Now a supertrait of `Solver` — any `Solver` is automatically a `ComponentSolver`.
+pub trait ComponentSolver: crate::Solver {}
+
+/// Blanket impl: every `Solver` is a `ComponentSolver`.
+impl<T: crate::Solver> ComponentSolver for T {}
 
 // ============================================================================
 // DecomposedSolver
@@ -69,7 +70,7 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
 
         // Single component → delegate directly (zero overhead)
         if num_components <= 1 {
-            return self.inner.solve_component(problem);
+            return self.inner.solve(problem);
         }
 
         // Step 2: Assign orders to components (drop cross-component)
@@ -177,7 +178,7 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
     }
 
     /// Solve all components, using rayon parallelism when the `parallel` feature is enabled.
-    fn solve_components_parallel(
+    fn solves_parallel(
         &self,
         problem: &Problem,
         market_to_component: &HashMap<MarketId, usize>,
@@ -196,7 +197,7 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
             if sub.orders.is_empty() {
                 PipelineResult::empty()
             } else {
-                self.inner.solve_component(&sub)
+                self.inner.solve(&sub)
             }
         };
 
@@ -230,7 +231,7 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
                 .insert(comp, problem.mm_constraints[mm_idx].max_capital);
         }
 
-        self.solve_components_parallel(
+        self.solves_parallel(
             problem,
             market_to_component,
             num_components,
@@ -321,7 +322,7 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
             let iter_start = Instant::now();
 
             // Solve each component with current budget allocation
-            let results = self.solve_components_parallel(
+            let results = self.solves_parallel(
                 problem,
                 market_to_component,
                 num_components,
@@ -434,6 +435,15 @@ impl<S: ComponentSolver> DecomposedSolver<S> {
 }
 
 // ============================================================================
+impl<S: ComponentSolver + 'static> crate::Solver for DecomposedSolver<S> {
+    fn solve(&self, problem: &Problem) -> PipelineResult {
+        DecomposedSolver::solve(self, problem)
+    }
+    fn name(&self) -> &str {
+        "Decomposed"
+    }
+}
+
 // Component partitioning
 // ============================================================================
 
@@ -882,8 +892,8 @@ mod tests {
     struct TestLpSolver;
 
     #[cfg(feature = "lp")]
-    impl ComponentSolver for TestLpSolver {
-        fn solve_component(&self, problem: &Problem) -> PipelineResult {
+    impl crate::Solver for TestLpSolver {
+        fn solve(&self, problem: &Problem) -> PipelineResult {
             crate::LpSolver::new().solve(problem)
         }
         fn name(&self) -> &str {

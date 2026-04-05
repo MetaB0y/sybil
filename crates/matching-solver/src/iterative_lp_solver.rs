@@ -304,9 +304,9 @@ impl Default for IterLpSolver {
     }
 }
 
-impl crate::decomposed::ComponentSolver for IterLpSolver {
-    fn solve_component(&self, problem: &Problem) -> PipelineResult {
-        self.solve(problem)
+impl crate::Solver for IterLpSolver {
+    fn solve(&self, problem: &Problem) -> PipelineResult {
+        IterLpSolver::solve(self, problem)
     }
     fn name(&self) -> &str {
         "IterLP"

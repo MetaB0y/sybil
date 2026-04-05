@@ -550,10 +550,9 @@ impl Default for ConicSolver {
     }
 }
 
-#[cfg(feature = "lp")]
-impl crate::decomposed::ComponentSolver for ConicSolver {
-    fn solve_component(&self, problem: &Problem) -> PipelineResult {
-        self.solve(problem)
+impl crate::Solver for ConicSolver {
+    fn solve(&self, problem: &Problem) -> PipelineResult {
+        ConicSolver::solve(self, problem)
     }
     fn name(&self) -> &str {
         "Conic"
