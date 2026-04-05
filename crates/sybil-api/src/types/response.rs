@@ -41,6 +41,12 @@ pub struct MarketResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at_ms: Option<u64>,
     pub volume_nanos: u64,
+    /// Reference price from external system (e.g., Polymarket), display only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference_price_nanos: Option<u64>,
+    /// External URL (e.g., Polymarket link).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_url: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -177,4 +183,16 @@ pub struct PositionDeltaResponse {
     pub market_id: u32,
     pub outcome: String,
     pub delta: i64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PendingOrderResponse {
+    pub order_id: u64,
+    pub account_id: u64,
+    pub market_id: u32,
+    pub side: String,
+    pub limit_price_nanos: u64,
+    pub remaining_quantity: u64,
+    pub created_at_block: u64,
+    pub expires_at_block: u64,
 }

@@ -14,7 +14,7 @@ use crate::error::SequencerError;
 use crate::market_info::{AccountFillRecord, MarketMetadata, MarketSearchQuery, PricePoint};
 use crate::mempool::{Mempool, MempoolConfig};
 use crate::portfolio::{self, PortfolioSummary};
-use crate::sequencer::{BlockSequencer, OrderSubmission};
+use crate::sequencer::{BlockSequencer, OrderSubmission, PendingOrderInfo};
 
 /// Messages sent from handles to the actor.
 pub enum Message {
@@ -122,6 +122,14 @@ pub enum Message {
     SearchMarkets {
         query: MarketSearchQuery,
         respond_to: oneshot::Sender<Vec<MarketSearchResult>>,
+    },
+    GetPendingOrders {
+        account_id: Option<AccountId>,
+        respond_to: oneshot::Sender<Vec<PendingOrderInfo>>,
+    },
+    GetMarketOrderBook {
+        market_id: MarketId,
+        respond_to: oneshot::Sender<Vec<PendingOrderInfo>>,
     },
     PauseBlockProduction {
         respond_to: oneshot::Sender<()>,
@@ -430,6 +438,20 @@ impl SequencerActor {
             Message::SearchMarkets { query, respond_to } => {
                 let results = self.handle_search_markets(query);
                 let _ = respond_to.send(results);
+            }
+            Message::GetPendingOrders {
+                account_id,
+                respond_to,
+            } => {
+                let orders = self.sequencer.pending_orders_info(account_id);
+                let _ = respond_to.send(orders);
+            }
+            Message::GetMarketOrderBook {
+                market_id,
+                respond_to,
+            } => {
+                let orders = self.sequencer.market_orderbook(market_id);
+                let _ = respond_to.send(orders);
             }
             Message::PauseBlockProduction { respond_to } => {
                 self.pause_count = self.pause_count.saturating_add(1);
@@ -966,6 +988,38 @@ impl SequencerHandle {
                 market_id,
                 limit,
                 offset,
+                respond_to: tx,
+            })
+            .await
+            .map_err(|_| SequencerError::ActorGone)?;
+        rx.await.map_err(|_| SequencerError::ActorGone)
+    }
+
+    /// Get pending orders, optionally filtered by account.
+    pub async fn get_pending_orders(
+        &self,
+        account_id: Option<AccountId>,
+    ) -> Result<Vec<PendingOrderInfo>, SequencerError> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(Message::GetPendingOrders {
+                account_id,
+                respond_to: tx,
+            })
+            .await
+            .map_err(|_| SequencerError::ActorGone)?;
+        rx.await.map_err(|_| SequencerError::ActorGone)
+    }
+
+    /// Get the order book for a specific market.
+    pub async fn get_market_order_book(
+        &self,
+        market_id: MarketId,
+    ) -> Result<Vec<PendingOrderInfo>, SequencerError> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(Message::GetMarketOrderBook {
+                market_id,
                 respond_to: tx,
             })
             .await

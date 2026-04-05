@@ -33,8 +33,13 @@ use crate::types::response::*;
         routes::markets::resolve_market,
         routes::markets::get_price_history,
         routes::markets::search_markets,
+        routes::markets::set_reference_prices,
+        routes::markets::set_market_metadata,
         routes::orders::submit_orders,
         routes::orders::submit_signed_order,
+        routes::orders::get_account_orders,
+        routes::orders::get_market_orderbook,
+        routes::orders::get_all_pending_orders,
         routes::blocks::get_latest_block,
         routes::blocks::get_block_by_height,
         routes::blocks::stream_blocks,
@@ -49,6 +54,8 @@ use crate::types::response::*;
         ResolveMarketRequest,
         SubmitOrderRequest,
         SubmitSignedOrderRequest,
+        SetReferencePricesRequest,
+        SetMarketMetadataRequest,
         SignedOrderData,
         OrderSpec,
         MarketSearchParams,
@@ -71,6 +78,7 @@ use crate::types::response::*;
         PriceHistoryResponse,
         PricePointResponse,
         AccountFillResponse,
+        PendingOrderResponse,
         PositionDeltaResponse,
     )),
     info(
@@ -176,6 +184,10 @@ pub fn create_router(state: AppState) -> Router {
             "/v1/accounts/{id}/fills",
             axum::routing::get(routes::accounts::get_account_fills),
         )
+        .route(
+            "/v1/accounts/{id}/orders",
+            axum::routing::get(routes::orders::get_account_orders),
+        )
         // Markets — search MUST come before {id} to avoid path param capture
         .route(
             "/v1/markets/search",
@@ -214,6 +226,22 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/v1/orders/signed",
             axum::routing::post(routes::orders::submit_signed_order),
+        )
+        .route(
+            "/v1/orders/pending",
+            axum::routing::get(routes::orders::get_all_pending_orders),
+        )
+        .route(
+            "/v1/markets/{id}/orderbook",
+            axum::routing::get(routes::orders::get_market_orderbook),
+        )
+        .route(
+            "/v1/markets/prices/reference",
+            axum::routing::post(routes::markets::set_reference_prices),
+        )
+        .route(
+            "/v1/markets/{id}/metadata",
+            axum::routing::post(routes::markets::set_market_metadata),
         )
         // Blocks
         .route(

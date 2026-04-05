@@ -7,8 +7,10 @@ use matching_sequencer::MarketMetadata;
 use crate::convert::prices_to_response;
 use crate::state::AppState;
 use crate::types::error::AppError;
+use crate::state::MarketExtra;
 use crate::types::request::{
     CreateMarketGroupRequest, CreateMarketRequest, MarketSearchParams, ResolveMarketRequest,
+    SetMarketMetadataRequest, SetReferencePricesRequest,
 };
 use crate::types::response::*;
 
@@ -21,6 +23,8 @@ fn build_market_response(
     status: &matching_sequencer::MarketStatus,
     metadata: Option<&MarketMetadata>,
     volume: u64,
+    reference_price_nanos: Option<u64>,
+    external_url: Option<String>,
 ) -> MarketResponse {
     MarketResponse {
         market_id,
@@ -43,6 +47,8 @@ fn build_market_response(
         expiry_timestamp_ms: metadata.map(|m| m.expiry_timestamp_ms).filter(|&v| v != 0),
         created_at_ms: metadata.map(|m| m.created_at_ms).filter(|&v| v != 0),
         volume_nanos: volume,
+        reference_price_nanos,
+        external_url,
     }
 }
 
@@ -61,6 +67,9 @@ pub async fn list_markets(
     let prices = state.sequencer.get_market_prices().await?;
     let statuses = state.sequencer.get_all_market_statuses().await?;
 
+    let ref_prices = state.reference_prices.read().await;
+    let market_extra = state.market_extra.read().await;
+
     let mut response = Vec::new();
     for m in markets.iter() {
         let market_prices = prices.get(&m.id);
@@ -77,7 +86,9 @@ pub async fn list_markets(
             market_prices.and_then(|p| p.get(1).copied()),
             &status,
             metadata.as_ref(),
-            0, // volume not tracked in list (would need separate query)
+            0,
+            ref_prices.get(&m.id.0).copied(),
+            market_extra.get(&m.id.0).and_then(|e| e.external_url.clone()),
         ));
     }
 
@@ -108,6 +119,8 @@ pub async fn get_market(
     let market_prices = prices.get(&mid);
     let status = state.sequencer.get_market_status(mid).await?;
     let metadata = state.sequencer.get_market_metadata(mid).await?;
+    let ref_price = state.reference_prices.read().await.get(&id).copied();
+    let ext_url = state.market_extra.read().await.get(&id).and_then(|e| e.external_url.clone());
 
     Ok(Json(build_market_response(
         market.id.0,
@@ -117,6 +130,8 @@ pub async fn get_market(
         &status,
         metadata.as_ref(),
         0,
+        ref_price,
+        ext_url,
     )))
 }
 
@@ -381,21 +396,75 @@ pub async fn search_markets(
     };
 
     let results = state.sequencer.search_markets(query).await?;
+    let ref_prices = state.reference_prices.read().await;
+    let market_extra = state.market_extra.read().await;
 
     let response: Vec<MarketResponse> = results
         .into_iter()
         .map(|r| {
+            let mid = r.market_id.0;
             build_market_response(
-                r.market_id.0,
+                mid,
                 r.name,
                 r.yes_price_nanos,
                 r.no_price_nanos,
                 &r.status,
                 r.metadata.as_ref(),
                 r.volume_nanos,
+                ref_prices.get(&mid).copied(),
+                market_extra.get(&mid).and_then(|e| e.external_url.clone()),
             )
         })
         .collect();
 
     Ok(Json(response))
+}
+
+/// POST /v1/markets/prices/reference — set reference prices from external system (dev mode)
+#[utoipa::path(
+    post,
+    path = "/v1/markets/prices/reference",
+    request_body = SetReferencePricesRequest,
+    responses(
+        (status = 200, description = "Prices updated"),
+    )
+)]
+pub async fn set_reference_prices(
+    State(state): State<AppState>,
+    Json(req): Json<SetReferencePricesRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    if !state.dev_mode {
+        return Err(AppError::dev_mode_required());
+    }
+    let mut prices = state.reference_prices.write().await;
+    for (market_id, price) in req.prices {
+        prices.insert(market_id, price);
+    }
+    Ok(Json(serde_json::json!({"updated": true})))
+}
+
+/// POST /v1/markets/{id}/metadata — set external metadata for a market (dev mode)
+#[utoipa::path(
+    post,
+    path = "/v1/markets/{id}/metadata",
+    params(("id" = u32, Path, description = "Market ID")),
+    request_body = SetMarketMetadataRequest,
+    responses(
+        (status = 200, description = "Metadata updated"),
+    )
+)]
+pub async fn set_market_metadata(
+    State(state): State<AppState>,
+    Path(id): Path<u32>,
+    Json(req): Json<SetMarketMetadataRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    if !state.dev_mode {
+        return Err(AppError::dev_mode_required());
+    }
+    let mut extra = state.market_extra.write().await;
+    let entry = extra.entry(id).or_insert_with(MarketExtra::default);
+    if let Some(url) = req.external_url {
+        entry.external_url = Some(url);
+    }
+    Ok(Json(serde_json::json!({"updated": true})))
 }

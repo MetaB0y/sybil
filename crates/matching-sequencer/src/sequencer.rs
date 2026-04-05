@@ -48,6 +48,54 @@ struct PendingOrder {
     created_at: u64,
 }
 
+/// Public view of a pending order for API exposure.
+#[derive(Clone, Debug)]
+pub struct PendingOrderInfo {
+    pub order_id: u64,
+    pub account_id: AccountId,
+    pub market_ids: Vec<MarketId>,
+    pub side: &'static str,
+    pub limit_price: Nanos,
+    pub remaining_qty: u64,
+    pub created_at_block: u64,
+    pub expires_at_block: u64,
+}
+
+impl PendingOrderInfo {
+    fn from_pending(po: &PendingOrder, _current_height: u64, ttl: u64) -> Self {
+        let market_ids: Vec<_> = po.order.active_markets().collect();
+        let side = classify_order_side(&po.order);
+        Self {
+            order_id: po.order.id,
+            account_id: po.account_id,
+            market_ids,
+            side,
+            limit_price: po.order.limit_price,
+            remaining_qty: po.order.max_fill,
+            created_at_block: po.created_at,
+            expires_at_block: po.created_at + ttl,
+        }
+    }
+}
+
+/// Classify an order's side from its payoff structure.
+fn classify_order_side(order: &Order) -> &'static str {
+    if order.num_markets != 1 || order.num_states != 2 {
+        return if order.is_seller() { "Sell" } else { "Custom" };
+    }
+    // Binary market: state 0 = YES wins, state 1 = NO wins
+    let p0 = order.payoffs[0]; // payoff when YES
+    let p1 = order.payoffs[1]; // payoff when NO
+    match (p0, p1) {
+        (1, 0) => "BuyYes",
+        (0, 1) => "BuyNo",
+        (-1, 0) => "SellYes",
+        (0, -1) => "SellNo",
+        _ if order.is_seller() => "Sell",
+        _ => "Custom",
+    }
+}
+
 /// Snapshot participating accounts into verifier-compatible format.
 fn snapshot_accounts(
     accounts: &AccountStore,
@@ -325,6 +373,27 @@ impl BlockSequencer {
             .skip(offset)
             .take(limit)
             .cloned()
+            .collect()
+    }
+
+    /// Get pending orders, optionally filtered by account.
+    pub fn pending_orders_info(
+        &self,
+        account_id_filter: Option<AccountId>,
+    ) -> Vec<PendingOrderInfo> {
+        self.pending_orders
+            .iter()
+            .filter(|po| account_id_filter.is_none_or(|aid| po.account_id == aid))
+            .map(|po| PendingOrderInfo::from_pending(po, self.height, self.order_ttl))
+            .collect()
+    }
+
+    /// Get pending orders for a specific market.
+    pub fn market_orderbook(&self, market_id: MarketId) -> Vec<PendingOrderInfo> {
+        self.pending_orders
+            .iter()
+            .filter(|po| po.order.active_markets().any(|m| m == market_id))
+            .map(|po| PendingOrderInfo::from_pending(po, self.height, self.order_ttl))
             .collect()
     }
 

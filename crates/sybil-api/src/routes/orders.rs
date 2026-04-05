@@ -1,9 +1,10 @@
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::Json;
 
 use matching_engine::mm_constraint::{MmConstraint, MmId, MmSide};
+use matching_engine::MarketId;
 use matching_sequencer::crypto::{PublicKey, SignedOrder};
-use matching_sequencer::{AccountId, OrderSubmission};
+use matching_sequencer::{AccountId, OrderSubmission, PendingOrderInfo};
 use p256::ecdsa::{Signature, VerifyingKey};
 use p256::Sec1Point;
 
@@ -11,7 +12,7 @@ use crate::convert::{order_spec_to_order, signed_order_data_to_order};
 use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::request::{OrderSpec, SubmitOrderRequest, SubmitSignedOrderRequest};
-use crate::types::response::OrderAcceptedResponse;
+use crate::types::response::{OrderAcceptedResponse, PendingOrderResponse};
 
 /// Derive the MmSide from an OrderSpec for capital calculation.
 fn mm_side_from_spec(spec: &OrderSpec) -> MmSide {
@@ -113,4 +114,79 @@ pub async fn submit_signed_order(
     state.sequencer.submit_signed_order(signed).await?;
 
     Ok(Json(OrderAcceptedResponse { accepted: true }))
+}
+
+fn to_pending_response(info: &PendingOrderInfo) -> PendingOrderResponse {
+    let market_id = info.market_ids.first().map(|m| m.0).unwrap_or(0);
+    PendingOrderResponse {
+        order_id: info.order_id,
+        account_id: info.account_id.0,
+        market_id,
+        side: info.side.to_string(),
+        limit_price_nanos: info.limit_price,
+        remaining_quantity: info.remaining_qty,
+        created_at_block: info.created_at_block,
+        expires_at_block: info.expires_at_block,
+    }
+}
+
+/// GET /v1/accounts/{id}/orders — pending orders for an account
+#[utoipa::path(
+    get,
+    path = "/v1/accounts/{id}/orders",
+    params(("id" = u64, Path, description = "Account ID")),
+    responses(
+        (status = 200, description = "Pending orders", body = Vec<PendingOrderResponse>),
+    )
+)]
+pub async fn get_account_orders(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+) -> Result<Json<Vec<PendingOrderResponse>>, AppError> {
+    let orders = state
+        .sequencer
+        .get_pending_orders(Some(AccountId(id)))
+        .await?;
+    Ok(Json(orders.iter().map(to_pending_response).collect()))
+}
+
+/// GET /v1/markets/{id}/orderbook — all pending orders for a market (dev mode)
+#[utoipa::path(
+    get,
+    path = "/v1/markets/{id}/orderbook",
+    params(("id" = u32, Path, description = "Market ID")),
+    responses(
+        (status = 200, description = "Market order book", body = Vec<PendingOrderResponse>),
+    )
+)]
+pub async fn get_market_orderbook(
+    State(state): State<AppState>,
+    Path(id): Path<u32>,
+) -> Result<Json<Vec<PendingOrderResponse>>, AppError> {
+    if !state.dev_mode {
+        return Err(AppError::dev_mode_required());
+    }
+    let orders = state
+        .sequencer
+        .get_market_order_book(MarketId::new(id))
+        .await?;
+    Ok(Json(orders.iter().map(to_pending_response).collect()))
+}
+
+/// GET /v1/orders/pending — all pending orders (dev mode)
+#[utoipa::path(
+    get,
+    path = "/v1/orders/pending",
+    responses(
+        (status = 200, description = "All pending orders", body = Vec<PendingOrderResponse>),
+    )
+)]
+pub async fn get_all_pending_orders(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<PendingOrderResponse>>, AppError> {
+    if !state.dev_mode {
+        return Err(AppError::dev_mode_required());
+    }
+    let orders = state.sequencer.get_pending_orders(None).await?;
+    Ok(Json(orders.iter().map(to_pending_response).collect()))
 }

@@ -26,7 +26,9 @@ pub use market_info::{
 pub use mempool::MempoolConfig;
 pub use portfolio::{PortfolioSummary, PositionValue};
 pub use scenario::Scenario;
-pub use sequencer::{BatchResult, BatchSequencer, BlockSequencer, OrderSubmission};
+pub use sequencer::{
+    BatchResult, BatchSequencer, BlockSequencer, OrderSubmission, PendingOrderInfo,
+};
 pub use simulation::{SimulationResult, SimulationRunner};
 
 // Re-export oracle types needed by consumers (e.g. sybil-api)

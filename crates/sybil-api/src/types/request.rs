@@ -186,3 +186,16 @@ pub struct SignedOrderData {
     /// Maximum fill quantity.
     pub max_fill: u64,
 }
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct SetReferencePricesRequest {
+    /// Map of market_id -> reference price in nanos.
+    pub prices: std::collections::HashMap<u32, u64>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct SetMarketMetadataRequest {
+    /// External URL (e.g., Polymarket link).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_url: Option<String>,
+}
