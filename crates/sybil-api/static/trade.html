@@ -202,16 +202,16 @@
           </div>
 
           <table>
-            <thead><tr><th>#</th><th>Market</th><th>Yes</th><th>No</th><th></th><th>Volume</th></tr></thead>
+            <thead><tr><th>#</th><th>Market</th><th>Ref</th><th>Yes</th><th>No</th><th></th></tr></thead>
             <tbody>
               <template x-for="m in displayMarkets" :key="m.market_id">
                 <tr class="clickable" @click="selectMarket(m)">
                   <td class="dim" x-text="m.market_id"></td>
-                  <td x-text="m.name.length > 60 ? m.name.slice(0, 57) + '...' : m.name"></td>
+                  <td x-text="m.name.length > 55 ? m.name.slice(0, 52) + '...' : m.name"></td>
+                  <td class="price blue" x-text="m.reference_price_nanos ? (m.reference_price_nanos / 1e9).toFixed(2) : '-'"></td>
                   <td class="price green" x-text="fmt(m.yes_price_nanos)"></td>
                   <td class="price red" x-text="fmt(m.no_price_nanos)"></td>
-                  <td><span class="bar-bg"><span class="bar-fill" :style="'width:' + pct(m.yes_price_nanos) + '%'"></span></span></td>
-                  <td class="dim price" x-text="'$' + dollars(m.volume_nanos)"></td>
+                  <td><span class="bar-bg"><span class="bar-fill" :style="'width:' + pct(m.reference_price_nanos || m.yes_price_nanos) + '%'"></span></span></td>
                 </tr>
               </template>
             </tbody>
@@ -225,17 +225,37 @@
         <div>
           <span class="back" @click="selectedMarket = null">&larr; Back to markets</span>
 
-          <h2 style="color: var(--text); font-size: 15px; text-transform: none;" x-text="selectedMarket.name"></h2>
-          <p class="dim" style="margin: 8px 0;" x-text="selectedMarket.description || ''"></p>
-          <p class="dim" style="font-size: 11px;" x-show="selectedMarket.resolution_criteria" x-text="'Resolution: ' + (selectedMarket.resolution_criteria || '')"></p>
+          <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div>
+              <h2 style="color: var(--text); font-size: 15px; text-transform: none;" x-text="selectedMarket.name"></h2>
+              <p class="dim" style="margin: 8px 0;" x-text="selectedMarket.description || ''"></p>
+              <p class="dim" style="font-size: 11px;" x-show="selectedMarket.resolution_criteria" x-text="'Resolution: ' + (selectedMarket.resolution_criteria || '')"></p>
+            </div>
+            <div style="text-align: right;">
+              <a x-show="selectedMarket.external_url" :href="selectedMarket.external_url"
+                 target="_blank" style="color: var(--blue); font-size: 11px; text-decoration: none;">
+                Polymarket &nearr;
+              </a>
+              <div style="margin-top: 4px;">
+                <span style="font-size: 11px; padding: 2px 6px; border-radius: 3px;"
+                      :class="selectedMarket.status === 'active' ? 'green' : selectedMarket.status === 'proposed' ? 'yellow' : 'dim'"
+                      :style="'background: rgba(' + (selectedMarket.status === 'active' ? '74,222,128' : selectedMarket.status === 'proposed' ? '251,191,36' : '107,107,128') + ',0.15)'"
+                      x-text="selectedMarket.status"></span>
+              </div>
+            </div>
+          </div>
 
           <div class="stats" style="margin-top: 16px;">
+            <div class="stat" x-show="selectedMarket.reference_price_nanos">
+              <div class="label">Reference Price</div>
+              <div class="value blue" x-text="selectedMarket.reference_price_nanos ? '$' + (selectedMarket.reference_price_nanos / 1e9).toFixed(3) : '-'"></div>
+            </div>
             <div class="stat">
-              <div class="label">YES Price</div>
+              <div class="label">Clearing YES</div>
               <div class="value green" x-text="fmt(selectedMarket.yes_price_nanos)"></div>
             </div>
             <div class="stat">
-              <div class="label">NO Price</div>
+              <div class="label">Clearing NO</div>
               <div class="value red" x-text="fmt(selectedMarket.no_price_nanos)"></div>
             </div>
             <div class="stat">
@@ -253,28 +273,85 @@
           </div>
 
           <!-- Order form -->
-          <div class="order-form">
-            <div class="field">
-              <label>Side</label>
-              <div class="side-toggle">
-                <div class="side-btn" :class="orderSide === 'BuyYes' ? 'yes' : 'inactive'" @click="orderSide = 'BuyYes'">Buy Yes</div>
-                <div class="side-btn" :class="orderSide === 'BuyNo' ? 'no' : 'inactive'" @click="orderSide = 'BuyNo'">Buy No</div>
+          <div style="display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start;">
+            <div class="order-form">
+              <div class="field">
+                <label>Side</label>
+                <div class="side-toggle">
+                  <div class="side-btn" :class="orderSide === 'BuyYes' ? 'yes' : 'inactive'" @click="orderSide = 'BuyYes'">Buy Yes</div>
+                  <div class="side-btn" :class="orderSide === 'BuyNo' ? 'no' : 'inactive'" @click="orderSide = 'BuyNo'">Buy No</div>
+                </div>
               </div>
+              <div class="field">
+                <label>Price ($)
+                  <span x-show="selectedMarket.reference_price_nanos" class="blue" style="cursor: pointer; margin-left: 8px;"
+                        @click="orderPrice = Math.round((orderSide === 'BuyYes'
+                          ? selectedMarket.reference_price_nanos / 1e9 + 0.02
+                          : (1 - selectedMarket.reference_price_nanos / 1e9) + 0.02) * 100) / 100">
+                    [quick fill]
+                  </span>
+                </label>
+                <input type="number" x-model.number="orderPrice" min="0.01" max="0.99" step="0.01">
+                <div class="dim" style="font-size: 11px; margin-top: 2px;"
+                     x-show="selectedMarket.reference_price_nanos"
+                     x-text="'MM quoting ~$' + (selectedMarket.reference_price_nanos / 1e9).toFixed(3) + ' YES / $' + (1 - selectedMarket.reference_price_nanos / 1e9).toFixed(3) + ' NO (±1¢ spread)'">
+                </div>
+              </div>
+              <div class="field">
+                <label>Quantity</label>
+                <input type="number" x-model.number="orderQty" min="1" step="1">
+              </div>
+              <div class="cost-preview" x-text="'Cost: $' + (orderPrice * orderQty).toFixed(2) + ' (max)'"></div>
+              <button class="submit-btn" :class="orderSide === 'BuyYes' ? 'yes' : 'no'"
+                      @click="submitOrder()" :disabled="submitting">
+                <span x-text="submitting ? 'Submitting...' : (orderSide === 'BuyYes' ? 'Buy Yes' : 'Buy No') + ' — ' + orderQty + ' @ $' + orderPrice.toFixed(2)"></span>
+              </button>
+              <p class="dim" style="font-size: 11px; margin-top: 8px;" x-text="hasKey ? 'Signed with P256 key' : 'Unsigned (dev mode)'"></p>
             </div>
-            <div class="field">
-              <label>Price ($)</label>
-              <input type="number" x-model.number="orderPrice" min="0.01" max="0.99" step="0.01">
+
+            <!-- Pending orders + orderbook -->
+            <div style="flex: 1; min-width: 300px;">
+              <template x-if="pendingOrders.length > 0">
+                <div style="margin-bottom: 16px;">
+                  <h2>Your Pending Orders</h2>
+                  <table>
+                    <thead><tr><th>Side</th><th>Qty</th><th>Price</th><th>Expires</th></tr></thead>
+                    <tbody>
+                      <template x-for="o in pendingOrders" :key="o.order_id">
+                        <tr>
+                          <td :class="o.side === 'BuyYes' ? 'green' : o.side === 'BuyNo' ? 'red' : 'dim'" x-text="o.side"></td>
+                          <td class="price" x-text="o.remaining_quantity"></td>
+                          <td class="price" x-text="'$' + (o.limit_price_nanos / 1e9).toFixed(3)"></td>
+                          <td class="dim" x-text="'#' + o.expires_at_block"></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </template>
+
+              <template x-if="orderbook.length > 0">
+                <div>
+                  <h2>Order Book</h2>
+                  <table>
+                    <thead><tr><th>Side</th><th>Qty</th><th>Price</th><th>Account</th></tr></thead>
+                    <tbody>
+                      <template x-for="o in orderbook" :key="o.order_id">
+                        <tr>
+                          <td :class="o.side === 'BuyYes' ? 'green' : o.side === 'BuyNo' ? 'red' : 'dim'" x-text="o.side"></td>
+                          <td class="price" x-text="o.remaining_quantity"></td>
+                          <td class="price" x-text="'$' + (o.limit_price_nanos / 1e9).toFixed(3)"></td>
+                          <td class="dim" x-text="'#' + o.account_id"></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </template>
+              <template x-if="orderbook.length === 0 && pendingOrders.length === 0">
+                <p class="dim" style="font-size: 12px;">No pending orders. MM provides liquidity each block.</p>
+              </template>
             </div>
-            <div class="field">
-              <label>Quantity</label>
-              <input type="number" x-model.number="orderQty" min="1" step="1">
-            </div>
-            <div class="cost-preview" x-text="'Cost: $' + (orderPrice * orderQty).toFixed(2) + ' (max)'"></div>
-            <button class="submit-btn" :class="orderSide === 'BuyYes' ? 'yes' : 'no'"
-                    @click="submitOrder()" :disabled="submitting">
-              <span x-text="submitting ? 'Submitting...' : (orderSide === 'BuyYes' ? 'Buy Yes' : 'Buy No') + ' — ' + orderQty + ' @ $' + orderPrice.toFixed(2)"></span>
-            </button>
-            <p class="dim" style="font-size: 11px; margin-top: 8px;" x-text="hasKey ? 'Signed with P256 key' : 'Unsigned (dev mode)'"></p>
           </div>
 
           <!-- Fills for this market -->
@@ -495,6 +572,8 @@ function tradingApp() {
     portfolio: null,
     allFills: [],
     marketFills: [],
+    pendingOrders: [],
+    orderbook: [],
 
     // Computed
     get displayMarkets() {
@@ -699,12 +778,37 @@ function tradingApp() {
 
     selectMarket(m) {
       this.selectedMarket = m;
-      // Set default price to current YES price
-      const yesPrice = m.yes_price_nanos ? m.yes_price_nanos / 1e9 : 0.50;
-      this.orderPrice = Math.round(yesPrice * 100) / 100 || 0.50;
+      // Set default price: prefer reference price, fall back to clearing
+      const refPrice = m.reference_price_nanos ? m.reference_price_nanos / 1e9 : null;
+      const yesPrice = refPrice || (m.yes_price_nanos ? m.yes_price_nanos / 1e9 : 0.50);
+      this.orderPrice = Math.round((yesPrice + 0.02) * 100) / 100 || 0.50;
       this.orderSide = 'BuyYes';
       this.marketFills = [];
+      this.pendingOrders = [];
+      this.orderbook = [];
       this.fetchFills(m.market_id);
+      this.fetchPendingOrders(m.market_id);
+      this.fetchOrderbook(m.market_id);
+    },
+
+    async fetchPendingOrders(marketId) {
+      if (!this.accountId) return;
+      try {
+        const resp = await fetch('/v1/accounts/' + this.accountId + '/orders');
+        if (resp.ok) {
+          const all = await resp.json();
+          this.pendingOrders = all.filter(o => o.market_id === marketId);
+        }
+      } catch {}
+    },
+
+    async fetchOrderbook(marketId) {
+      try {
+        const resp = await fetch('/v1/markets/' + marketId + '/orderbook');
+        if (resp.ok) {
+          this.orderbook = await resp.json();
+        }
+      } catch {}
     },
 
     selectMarketById(id) {
@@ -834,9 +938,13 @@ function tradingApp() {
                 const block = JSON.parse(line.slice(5).trim());
                 this.health.height = block.height;
                 // Refresh portfolio on fills
-                if (block.fill_count > 0 && this.accountId) {
+                if (this.accountId) {
                   this.fetchPortfolio();
-                  if (this.selectedMarket) this.fetchFills(this.selectedMarket.market_id);
+                  if (this.selectedMarket) {
+                    this.fetchFills(this.selectedMarket.market_id);
+                    this.fetchPendingOrders(this.selectedMarket.market_id);
+                    this.fetchOrderbook(this.selectedMarket.market_id);
+                  }
                 }
               } catch {}
             }

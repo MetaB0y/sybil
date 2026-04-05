@@ -132,6 +132,22 @@ impl SybilClient {
         Ok(result.accepted)
     }
 
+    /// Push reference prices to sybil-api (display only, not matching logic).
+    pub async fn set_reference_prices(
+        &self,
+        prices: &std::collections::HashMap<u32, u64>,
+    ) -> Result<(), Error> {
+        let body = serde_json::json!({ "prices": prices });
+        let resp = self
+            .http
+            .post(self.url("/v1/markets/prices/reference"))
+            .json(&body)
+            .send()
+            .await?;
+        let _ = self.check_response(resp).await?;
+        Ok(())
+    }
+
     // === Blocks (SSE) ===
 
     /// Stream blocks via SSE. Returns an async iterator of `BlockResponse`.

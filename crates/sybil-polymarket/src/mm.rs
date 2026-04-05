@@ -161,6 +161,7 @@ impl MmActor {
         let mut orders = Vec::new();
         let half_spread = self.config.mm_half_spread;
         let quote_size_dollars = self.config.mm_quote_size_dollars;
+        let mut ref_prices = std::collections::HashMap::new();
 
         for market in &self.active_markets {
             // Get reference price from Polymarket
@@ -168,6 +169,12 @@ impl MmActor {
                 Some(&p) if p > 0.0 && p < 1.0 => p,
                 _ => continue, // No price or invalid
             };
+
+            // Collect reference price for display
+            ref_prices.insert(
+                market.sybil_market_id,
+                (mid * NANOS_PER_DOLLAR as f64) as u64,
+            );
 
             // Check staleness
             if now.saturating_sub(snapshot.last_updated_ms) > stale_threshold_ms {
@@ -230,6 +237,11 @@ impl MmActor {
             Err(e) => {
                 warn!(block = block.height, error = %e, "order submission failed");
             }
+        }
+
+        // Push reference prices (best-effort, don't block on failure)
+        if !ref_prices.is_empty() {
+            let _ = self.sybil_client.set_reference_prices(&ref_prices).await;
         }
     }
 }
