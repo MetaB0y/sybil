@@ -424,7 +424,9 @@ impl<S: crate::Solver> DecomposedSolver<S> {
 }
 
 // ============================================================================
+/// `'static` bound required for `Arc<dyn Solver>` usage and rayon parallelism.
 impl<S: crate::Solver + 'static> crate::Solver for DecomposedSolver<S> {
+    /// Forwards to the inherent `DecomposedSolver::solve` method.
     fn solve(&self, problem: &Problem) -> PipelineResult {
         DecomposedSolver::solve(self, problem)
     }

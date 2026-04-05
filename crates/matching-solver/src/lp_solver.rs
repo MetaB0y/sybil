@@ -254,6 +254,8 @@ impl Default for LpSolver {
 }
 
 impl crate::Solver for LpSolver {
+    /// Forwards to the inherent `LpSolver::solve` method.
+    /// Explicit path needed to disambiguate from this trait method.
     fn solve(&self, problem: &Problem) -> PipelineResult {
         LpSolver::solve(self, problem)
     }

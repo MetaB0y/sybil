@@ -3,15 +3,17 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use matching_engine::{MarketGroup, MarketId, MarketSet, Nanos};
-use sybil_oracle::{MarketStatus, Oracle, ResolutionAction, ResolutionRecord};
+use matching_engine::{MarketId, Nanos};
+use sybil_oracle::{MarketStatus, Oracle, ResolutionAction};
 
-use crate::account::AccountStore;
 use crate::error::SequencerError;
 use crate::market_info::MarketMetadata;
-use crate::settlement;
 
 /// Manages market lifecycle: status tracking, oracle resolution, metadata.
+///
+/// Does NOT own accounts or market_groups — those remain on BlockSequencer.
+/// Resolution works in two steps: lifecycle decides (via oracle), caller executes
+/// (settles positions, updates groups). This avoids borrow checker awkwardness.
 pub struct MarketLifecycle {
     /// Oracle-managed lifecycle status per market.
     market_statuses: HashMap<MarketId, MarketStatus>,
@@ -49,46 +51,35 @@ impl MarketLifecycle {
         self.market_metadata.get(&market_id)
     }
 
-    /// Resolve a market through the oracle.
+    /// Consult the oracle and update status. Returns the action for the caller to execute.
     ///
-    /// Takes mutable borrows of accounts and market_groups as parameters
-    /// to avoid holding them inside this struct (which would conflict with
-    /// borrow checker when produce_block() needs both).
+    /// The caller (BlockSequencer) is responsible for acting on the result:
+    /// - `SettleNow` → settle positions, remove from market groups
+    /// - `Propose` → no action needed (status already updated here)
+    /// - `Reject` → returned as error
     pub fn resolve_market(
         &mut self,
         market_id: MarketId,
         payout_nanos: Nanos,
-        accounts: &mut AccountStore,
-        markets: &MarketSet,
-        market_groups: &mut Vec<MarketGroup>,
         timestamp_ms: u64,
-    ) -> Result<ResolutionRecord, SequencerError> {
-        // Verify market exists
-        if markets.get(market_id).is_none() {
-            return Err(SequencerError::MarketNotFound);
-        }
-
+    ) -> Result<ResolutionAction, SequencerError> {
         let current_status = self.market_status(market_id);
         let action = self
             .oracle
             .resolve(market_id, payout_nanos, &current_status, timestamp_ms)
             .map_err(|e| SequencerError::OracleError(e.to_string()))?;
 
-        match action {
+        // Update status based on oracle decision
+        match &action {
             ResolutionAction::SettleNow {
-                market_id,
-                payout_nanos,
-                record,
+                market_id, record, ..
             } => {
-                settlement::resolve_market(accounts, market_id, payout_nanos);
-                market_groups.retain(|g| !g.markets.contains(&market_id));
                 self.market_statuses.insert(
-                    market_id,
+                    *market_id,
                     MarketStatus::Resolved {
                         record: record.clone(),
                     },
                 );
-                Ok(record)
             }
             ResolutionAction::Propose {
                 proposal,
@@ -98,15 +89,14 @@ impl MarketLifecycle {
                 self.market_statuses.insert(
                     market_id,
                     MarketStatus::Proposed {
-                        proposal,
+                        proposal: proposal.clone(),
                         challenge_deadline_ms: deadline,
                     },
                 );
-                Err(SequencerError::OracleError(
-                    "resolution proposed but not yet settled".to_string(),
-                ))
             }
-            ResolutionAction::Reject { reason } => Err(SequencerError::OracleError(reason)),
+            ResolutionAction::Reject { .. } => {}
         }
+
+        Ok(action)
     }
 }

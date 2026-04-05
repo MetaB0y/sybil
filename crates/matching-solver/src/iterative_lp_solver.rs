@@ -305,6 +305,7 @@ impl Default for IterLpSolver {
 }
 
 impl crate::Solver for IterLpSolver {
+    /// Forwards to the inherent `IterLpSolver::solve` method.
     fn solve(&self, problem: &Problem) -> PipelineResult {
         IterLpSolver::solve(self, problem)
     }

@@ -919,6 +919,9 @@ impl Default for MilpSolver {
 }
 
 impl crate::Solver for MilpSolver {
+    /// Wraps `solve_with_status()` into the common `PipelineResult`.
+    /// Discards MILP-specific fields (status, gap%, objective_welfare).
+    /// Use `solve_with_status()` on the concrete type when you need those.
     fn solve(&self, problem: &Problem) -> crate::PipelineResult {
         let milp_result = self.solve_with_status(problem);
 

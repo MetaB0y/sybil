@@ -551,6 +551,7 @@ impl Default for ConicSolver {
 }
 
 impl crate::Solver for ConicSolver {
+    /// Forwards to the inherent `ConicSolver::solve` method.
     fn solve(&self, problem: &Problem) -> PipelineResult {
         ConicSolver::solve(self, problem)
     }

@@ -420,14 +420,36 @@ impl BlockSequencer {
         payout_nanos: Nanos,
         timestamp_ms: u64,
     ) -> Result<ResolutionRecord, SequencerError> {
-        self.lifecycle.resolve_market(
-            market_id,
-            payout_nanos,
-            &mut self.accounts,
-            &self.markets,
-            &mut self.market_groups,
-            timestamp_ms,
-        )
+        if self.markets.get(market_id).is_none() {
+            return Err(SequencerError::MarketNotFound);
+        }
+
+        // Lifecycle decides (consults oracle, updates status)
+        let action = self
+            .lifecycle
+            .resolve_market(market_id, payout_nanos, timestamp_ms)?;
+
+        // Sequencer executes the side effects
+        match action {
+            sybil_oracle::ResolutionAction::SettleNow {
+                market_id,
+                payout_nanos,
+                record,
+            } => {
+                settlement::resolve_market(&mut self.accounts, market_id, payout_nanos);
+                self.market_groups
+                    .retain(|g| !g.markets.contains(&market_id));
+                Ok(record)
+            }
+            sybil_oracle::ResolutionAction::Propose { .. } => {
+                Err(SequencerError::OracleError(
+                    "resolution proposed but not yet settled".to_string(),
+                ))
+            }
+            sybil_oracle::ResolutionAction::Reject { reason } => {
+                Err(SequencerError::OracleError(reason))
+            }
+        }
     }
 
     /// Core sync method: produce one block from the given submissions.

@@ -483,6 +483,7 @@ impl Default for EgSolver {
 }
 
 impl crate::Solver for EgSolver {
+    /// Forwards to the inherent `EgSolver::solve` method.
     fn solve(&self, problem: &Problem) -> PipelineResult {
         EgSolver::solve(self, problem)
     }

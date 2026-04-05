@@ -7,6 +7,7 @@ use matching_engine::{Fill, MarketId, Nanos, Order};
 use crate::market_info::PricePoint;
 
 /// Tracks clearing prices, price history, and per-market trading volume.
+#[derive(Default)]
 pub struct PriceTracker {
     /// Persisted clearing prices across blocks (fallback when no trades happen).
     last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
@@ -41,20 +42,21 @@ impl PriceTracker {
         markets_with_fills: &HashSet<MarketId>,
         active_markets: &HashSet<MarketId>,
     ) -> HashMap<MarketId, Vec<Nanos>> {
-        let mut clearing_prices = self.last_clearing_prices.clone();
+        // Update stored prices in-place with fresh solver output
         if let Some(ref pd) = price_discovery {
             for (market_id, prices) in &pd.prices {
                 if markets_with_fills.contains(market_id) {
-                    clearing_prices.insert(*market_id, prices.clone());
+                    self.last_clearing_prices
+                        .insert(*market_id, prices.clone());
                 }
             }
         }
-        self.last_clearing_prices = clearing_prices.clone();
 
-        // Filter to active markets only
-        clearing_prices
-            .into_iter()
+        // Return active-market view (one allocation, no full clone)
+        self.last_clearing_prices
+            .iter()
             .filter(|(m, _)| active_markets.contains(m))
+            .map(|(m, p)| (*m, p.clone()))
             .collect()
     }
 
