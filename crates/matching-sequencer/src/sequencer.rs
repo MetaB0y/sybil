@@ -9,7 +9,7 @@ use sybil_oracle::{MarketStatus, Oracle, ResolutionRecord};
 use sybil_verifier::{
     AccountSnapshot, BlockWitness, WitnessBlockHeader, WitnessOrder, WitnessRejection,
 };
-use tracing::debug;
+use tracing::{debug, error};
 
 use crate::account::{AccountId, AccountStore};
 use crate::block::{compute_state_root, hash_header, Block, BlockHeader, BlockProduction};
@@ -1058,6 +1058,20 @@ impl BlockSequencer {
             total_volume,
             orders_filled,
         };
+
+        // Verify the block using the full 4-layer verifier.
+        // TODO: This runs inline for now. Eventually a separate prover node
+        // will consume the BlockWitness and generate ZK proofs asynchronously.
+        let verification = sybil_verifier::verify_full(&witness, /* diagnostics */ false);
+        if !verification.valid {
+            error!(
+                violations = verification.violations.len(),
+                "block #{} FAILED verification", self.height
+            );
+            for v in &verification.violations {
+                error!(kind = ?v.kind, details = %v.details, "verification violation");
+            }
+        }
 
         BlockProduction {
             block,
