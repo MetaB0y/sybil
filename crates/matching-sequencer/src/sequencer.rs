@@ -807,22 +807,22 @@ impl BlockSequencer {
         // than trust the solver's synthetic arb orders, we observe the
         // imbalance directly and adjust the MINT account to restore balance.
         //
-        // The MINT account's balance adjustment uses clearing prices (which
-        // the verifier can independently check for complementarity).
+        // The sum INCLUDES MINT's existing positions so that each block only
+        // adjusts by the incremental imbalance (not the cumulative total).
+        // The balance adjustment uses clearing prices (verifier can check
+        // p_YES + p_NO = $1).
         {
-            // First pass: compute imbalances (excluding MINT's own positions).
+            // First pass: compute imbalances across ALL accounts (including MINT).
             let mut mint_adjustments: Vec<(MarketId, i64)> = Vec::new();
             for market in self.markets.iter() {
                 let total_yes: i64 = self
                     .accounts
                     .iter()
-                    .filter(|(&id, _)| id != crate::account::AccountId::MINT)
                     .map(|(_, a)| a.position(market.id, 0))
                     .sum();
                 let total_no: i64 = self
                     .accounts
                     .iter()
-                    .filter(|(&id, _)| id != crate::account::AccountId::MINT)
                     .map(|(_, a)| a.position(market.id, 1))
                     .sum();
                 let diff = total_yes - total_no;
@@ -842,17 +842,17 @@ impl BlockSequencer {
                         let yes_price = clearing_prices
                             .get(&market_id)
                             .and_then(|p| p.first().copied())
-                            .unwrap_or(0) as i64;
+                            .unwrap_or(0);
                         *mint.positions.entry((market_id, 0)).or_insert(0) -= diff;
-                        mint.balance += yes_price * diff;
+                        mint.balance += (yes_price as i128 * diff as i128) as i64;
                     } else {
                         // More NO than YES → MINT shorts NO, receives no_price revenue
                         let no_price = clearing_prices
                             .get(&market_id)
                             .and_then(|p| p.get(1).copied())
-                            .unwrap_or(0) as i64;
+                            .unwrap_or(0);
                         *mint.positions.entry((market_id, 1)).or_insert(0) += diff;
-                        mint.balance += no_price * diff.abs();
+                        mint.balance += (no_price as i128 * diff.unsigned_abs() as i128) as i64;
                     }
                 }
             }
@@ -1813,6 +1813,86 @@ mod tests {
             bp.block.fills.is_empty(),
             "Bankrupt MM should not generate fills"
         );
+    }
+
+    /// Verify that group minting maintains position balance across multiple blocks.
+    ///
+    /// This is the key test for the MINT account mechanism: when the MM buys
+    /// YES on all markets in a group, group minting creates YES without NO
+    /// counterparties. The sequencer must derive the minting and adjust MINT
+    /// so that total_yes == total_no for every market, every block.
+    #[test]
+    fn test_group_minting_position_balance_multi_block() {
+        use matching_engine::{simple_yes_buy, MarketGroup};
+
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("A");
+        let m1 = markets.add_binary("B");
+        let m2 = markets.add_binary("C");
+
+        let mut group = MarketGroup::new("Election");
+        group.add_market(m0);
+        group.add_market(m1);
+        group.add_market(m2);
+
+        let mut accounts = AccountStore::new();
+        let buyer = accounts.create_account(1_000_000 * NANOS_PER_DOLLAR as i64);
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![group.clone()],
+            oracle,
+        );
+
+        // Run 5 blocks, each with BuyYes on all 3 group markets.
+        // Group minting will fire each time. MINT must stay balanced.
+        for block_num in 0..5 {
+            let sub = OrderSubmission {
+                account_id: buyer,
+                orders: vec![
+                    simple_yes_buy(&markets, 0, m0, 400_000_000, 100),
+                    simple_yes_buy(&markets, 0, m1, 350_000_000, 100),
+                    simple_yes_buy(&markets, 0, m2, 300_000_000, 100),
+                ],
+                mm_constraint: None,
+            };
+
+            let bp = seq.produce_block(vec![sub], (block_num + 1) * 1000);
+
+            // The position balance check inside produce_block should not fire,
+            // but let's verify explicitly:
+            for &mid in &[m0, m1, m2] {
+                let total_yes: i64 = seq.accounts.iter().map(|(_, a)| a.position(mid, 0)).sum();
+                let total_no: i64 = seq.accounts.iter().map(|(_, a)| a.position(mid, 1)).sum();
+                assert_eq!(
+                    total_yes, total_no,
+                    "Position imbalance in market {:?} at block {}: YES={} NO={}",
+                    mid, block_num, total_yes, total_no
+                );
+            }
+
+            // Money conservation: total balance should only change by resolution payouts
+            // (none here), so it should equal the initial deposit.
+            let total_balance: i64 = seq.accounts.iter().map(|(_, a)| a.balance).sum();
+            assert_eq!(
+                total_balance,
+                1_000_000 * NANOS_PER_DOLLAR as i64,
+                "Money conservation violated at block {}",
+                block_num
+            );
+
+            // Verify MINT exists and has positions
+            if !bp.block.fills.is_empty() {
+                let mint = seq.accounts.get(crate::account::AccountId::MINT).unwrap();
+                // MINT should have non-zero balance (revenue from selling)
+                // and negative positions (shorts from minting)
+                assert!(
+                    !mint.positions.is_empty(),
+                    "MINT should hold positions after group minting"
+                );
+            }
+        }
     }
 
     #[test]
