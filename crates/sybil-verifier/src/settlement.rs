@@ -69,9 +69,103 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
         }
     }
 
-    // Non-negative balance/position assertions (ZK invariants)
+    // Derive minting adjustments — same logic as sequencer.
+    //
+    // After settling real fills, some markets may have more YES than NO
+    // (or vice versa) due to group minting. We observe the imbalance
+    // and adjust MINT (id = u64::MAX) to restore position balance.
+    // The sum INCLUDES MINT's existing positions so each block only
+    // adjusts by the incremental imbalance.
+    //
+    // Proof that MINT expected P&L = 0: see design/mint-pnl.typ and
+    // lean/FisherClearing/Duality/MintingSimplex.lean (Theorem 1).
+    {
+        const MINT_ID: u64 = u64::MAX;
+
+        // Only derive MINT adjustments when the MINT account is present
+        // in the pre-state (i.e., the sequencer is tracking minting).
+        let mint_in_witness = witness.pre_state.iter().any(|s| s.id == MINT_ID)
+            || witness.post_state.iter().any(|s| s.id == MINT_ID);
+
+        // Collect all markets with any positions
+        let all_markets: std::collections::HashSet<MarketId> = positions
+            .values()
+            .flat_map(|pm| pm.keys().map(|(m, _)| *m))
+            .collect();
+
+        if mint_in_witness {
+            let mut mint_adjustments: Vec<(MarketId, i64)> = Vec::new();
+            for &market_id in &all_markets {
+                let total_yes: i64 = positions
+                    .values()
+                    .map(|pm| pm.get(&(market_id, 0)).copied().unwrap_or(0))
+                    .sum();
+                let total_no: i64 = positions
+                    .values()
+                    .map(|pm| pm.get(&(market_id, 1)).copied().unwrap_or(0))
+                    .sum();
+                let diff = total_yes - total_no;
+                if diff != 0 {
+                    mint_adjustments.push((market_id, diff));
+                }
+            }
+
+            if !mint_adjustments.is_empty() {
+                balances.entry(MINT_ID).or_insert(0);
+                positions.entry(MINT_ID).or_default();
+
+                let mint_balance = balances.get_mut(&MINT_ID).unwrap();
+                let mint_positions = positions.get_mut(&MINT_ID).unwrap();
+
+                for (market_id, diff) in mint_adjustments {
+                    if diff > 0 {
+                        // More YES than NO → MINT shorts YES, receives yes_price revenue
+                        let yes_price = witness
+                            .clearing_prices
+                            .get(&market_id)
+                            .and_then(|p| p.first().copied())
+                            .unwrap_or(0);
+                        if yes_price == 0 {
+                            violations.push(Violation {
+                                kind: ViolationKind::MintingWithoutClearingPrice,
+                                details: format!(
+                                    "Market {:?}: position imbalance {} but no YES clearing price",
+                                    market_id, diff
+                                ),
+                            });
+                        }
+                        *mint_positions.entry((market_id, 0)).or_insert(0) -= diff;
+                        *mint_balance += (yes_price as i128 * diff as i128) as i64;
+                    } else {
+                        // More NO than YES → MINT shorts NO, receives no_price revenue
+                        let no_price = witness
+                            .clearing_prices
+                            .get(&market_id)
+                            .and_then(|p| p.get(1).copied())
+                            .unwrap_or(0);
+                        if no_price == 0 {
+                            violations.push(Violation {
+                                kind: ViolationKind::MintingWithoutClearingPrice,
+                                details: format!(
+                                    "Market {:?}: position imbalance {} but no NO clearing price",
+                                    market_id, diff
+                                ),
+                            });
+                        }
+                        *mint_positions.entry((market_id, 1)).or_insert(0) += diff;
+                        *mint_balance +=
+                            (no_price as i128 * diff.unsigned_abs() as i128) as i64;
+                    }
+                }
+            }
+        }
+    }
+
+    // Non-negative balance/position assertions (ZK invariants).
+    // MINT (u64::MAX) is exempt — it holds short positions by design.
+    const MINT_ID: u64 = u64::MAX;
     for (&account_id, &balance) in &balances {
-        if balance < 0 {
+        if balance < 0 && account_id != MINT_ID {
             violations.push(Violation {
                 kind: ViolationKind::NegativeBalance,
                 details: format!(
@@ -82,6 +176,9 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
         }
     }
     for (&account_id, pos_map) in &positions {
+        if account_id == MINT_ID {
+            continue; // MINT holds short (negative) positions by design
+        }
         for (&(market, outcome), &qty) in pos_map {
             if qty < 0 {
                 violations.push(Violation {
@@ -478,5 +575,211 @@ mod tests {
             .violations
             .iter()
             .any(|v| v.kind == ViolationKind::NegativePosition));
+    }
+
+    #[test]
+    fn test_mint_derivation_buy_yes() {
+        // When MINT is in the witness, the verifier derives minting adjustments.
+        // Account 0 buys 10 YES at $0.50 → MINT shorts 10 YES, receives $5.
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("M0");
+
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
+        let fill = Fill::new(1, 10, 500_000_000);
+
+        let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
+        let fill_cost = 500_000_000i64 * 10; // $5
+        let mint_revenue = fill_cost; // MINT receives yes_price * diff
+
+        let mut clearing_prices = HashMap::new();
+        clearing_prices.insert(m0, vec![500_000_000, 500_000_000]);
+
+        let mint_id = u64::MAX;
+        let pre_state = vec![
+            AccountSnapshot {
+                id: 0,
+                balance: initial_balance,
+                positions: vec![],
+            },
+            AccountSnapshot {
+                id: mint_id,
+                balance: 0,
+                positions: vec![],
+            },
+        ];
+
+        let post_state = vec![
+            AccountSnapshot {
+                id: 0,
+                balance: initial_balance - fill_cost,
+                positions: vec![(m0, 0, 10)],
+            },
+            AccountSnapshot {
+                id: mint_id,
+                balance: mint_revenue,
+                positions: vec![(m0, 0, -10)],
+            },
+        ];
+
+        let witness = BlockWitness {
+            header: empty_header(),
+            previous_header: None,
+            orders: vec![WitnessOrder {
+                order,
+                account_id: 0,
+                is_mm: false,
+            }],
+            rejections: vec![],
+            fills: vec![fill],
+            clearing_prices,
+            total_welfare: 0,
+            minting_cost: 0,
+            mm_constraints: vec![],
+            market_groups: vec![],
+            pre_state,
+            post_state,
+            resolved_markets: vec![],
+        };
+
+        let result = verify_settlement(&witness);
+        assert!(result.valid, "Violations: {:?}", result.violations);
+    }
+
+    #[test]
+    fn test_mint_wrong_balance_detected() {
+        // MINT with incorrect balance in post_state should fail verification.
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("M0");
+
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
+        let fill = Fill::new(1, 10, 500_000_000);
+
+        let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
+        let fill_cost = 500_000_000i64 * 10;
+
+        let mut clearing_prices = HashMap::new();
+        clearing_prices.insert(m0, vec![500_000_000, 500_000_000]);
+
+        let mint_id = u64::MAX;
+        let pre_state = vec![
+            AccountSnapshot {
+                id: 0,
+                balance: initial_balance,
+                positions: vec![],
+            },
+            AccountSnapshot {
+                id: mint_id,
+                balance: 0,
+                positions: vec![],
+            },
+        ];
+
+        let post_state = vec![
+            AccountSnapshot {
+                id: 0,
+                balance: initial_balance - fill_cost,
+                positions: vec![(m0, 0, 10)],
+            },
+            AccountSnapshot {
+                id: mint_id,
+                balance: 999, // WRONG — should be fill_cost
+                positions: vec![(m0, 0, -10)],
+            },
+        ];
+
+        let witness = BlockWitness {
+            header: empty_header(),
+            previous_header: None,
+            orders: vec![WitnessOrder {
+                order,
+                account_id: 0,
+                is_mm: false,
+            }],
+            rejections: vec![],
+            fills: vec![fill],
+            clearing_prices,
+            total_welfare: 0,
+            minting_cost: 0,
+            mm_constraints: vec![],
+            market_groups: vec![],
+            pre_state,
+            post_state,
+            resolved_markets: vec![],
+        };
+
+        let result = verify_settlement(&witness);
+        assert!(!result.valid);
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::SettlementBalanceMismatch));
+    }
+
+    #[test]
+    fn test_minting_without_clearing_price() {
+        // Position imbalance with no clearing prices → MintingWithoutClearingPrice
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("M0");
+
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
+        let fill = Fill::new(1, 10, 500_000_000);
+
+        let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
+        let fill_cost = 500_000_000i64 * 10;
+        let mint_id = u64::MAX;
+
+        let pre_state = vec![
+            AccountSnapshot {
+                id: 0,
+                balance: initial_balance,
+                positions: vec![],
+            },
+            AccountSnapshot {
+                id: mint_id,
+                balance: 0,
+                positions: vec![],
+            },
+        ];
+
+        // No clearing prices — verifier will flag MintingWithoutClearingPrice
+        let post_state = vec![
+            AccountSnapshot {
+                id: 0,
+                balance: initial_balance - fill_cost,
+                positions: vec![(m0, 0, 10)],
+            },
+            AccountSnapshot {
+                id: mint_id,
+                balance: 0,
+                positions: vec![(m0, 0, -10)],
+            },
+        ];
+
+        let witness = BlockWitness {
+            header: empty_header(),
+            previous_header: None,
+            orders: vec![WitnessOrder {
+                order,
+                account_id: 0,
+                is_mm: false,
+            }],
+            rejections: vec![],
+            fills: vec![fill],
+            clearing_prices: HashMap::new(), // empty!
+            total_welfare: 0,
+            minting_cost: 0,
+            mm_constraints: vec![],
+            market_groups: vec![],
+            pre_state,
+            post_state,
+            resolved_markets: vec![],
+        };
+
+        let result = verify_settlement(&witness);
+        assert!(!result.valid);
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::MintingWithoutClearingPrice));
     }
 }

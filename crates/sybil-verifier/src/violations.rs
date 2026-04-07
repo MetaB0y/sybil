@@ -63,6 +63,9 @@ pub enum ViolationKind {
     SettlementOverflow,
     /// Account present in post-state but not in pre-state (or vice versa).
     SettlementAccountMismatch,
+    /// Position imbalance exists but no clearing price for the market.
+    /// MINT cannot be priced without clearing prices.
+    MintingWithoutClearingPrice,
 
     // === Layer 3: Block verification ===
     /// Recomputed state root does not match header.

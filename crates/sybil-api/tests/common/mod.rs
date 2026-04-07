@@ -26,6 +26,8 @@ pub async fn test_app(dev_mode: bool) -> (Router, SequencerHandle) {
         sequencer: handle.clone(),
         dev_mode,
         prometheus,
+        reference_prices: Default::default(),
+        market_extra: Default::default(),
     };
     (create_router(state), handle)
 }

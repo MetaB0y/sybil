@@ -844,7 +844,7 @@ impl BlockSequencer {
                         let yes_price = clearing_prices
                             .get(&market_id)
                             .and_then(|p| p.first().copied())
-                            .unwrap_or(0);
+                            .expect("clearing price must exist for market with position imbalance");
                         *mint.positions.entry((market_id, 0)).or_insert(0) -= diff;
                         mint.balance += (yes_price as i128 * diff as i128) as i64;
                     } else {
@@ -852,7 +852,7 @@ impl BlockSequencer {
                         let no_price = clearing_prices
                             .get(&market_id)
                             .and_then(|p| p.get(1).copied())
-                            .unwrap_or(0);
+                            .expect("clearing price must exist for market with position imbalance");
                         *mint.positions.entry((market_id, 1)).or_insert(0) += diff;
                         mint.balance += (no_price as i128 * diff.unsigned_abs() as i128) as i64;
                     }
@@ -1061,17 +1061,10 @@ impl BlockSequencer {
             orders_filled,
         };
 
-        // Verify the block using the verifier (match + settlement + orders).
+        // Verify the block using all 4 verification layers.
         // TODO: This runs inline for now. Eventually a separate prover node
         // will consume the BlockWitness and generate ZK proofs asynchronously.
-        // NOTE: Block integrity (state root) is skipped because the verifier
-        // doesn't yet understand MINT account adjustments. The sequencer's
-        // state root includes MINT, but the verifier re-derives state without
-        // minting, producing a different hash. Enable verify_full() once the
-        // verifier's settlement model includes minting derivation.
-        let mut verification = sybil_verifier::verify_match(&witness, /* diagnostics */ false);
-        verification.merge(sybil_verifier::verify_settlement(&witness));
-        verification.merge(sybil_verifier::verify_orders(&witness));
+        let verification = sybil_verifier::verify_full(&witness, /* diagnostics */ false);
         if !verification.valid {
             error!(
                 violations = verification.violations.len(),

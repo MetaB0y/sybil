@@ -1,10 +1,18 @@
-"""Live LLM-driven trader for Polymarket-mirrored markets.
+"""Live LLM-driven trader with Kelly-based position sizing.
 
-Adapted from sim/llm_trader.py — removes SimulatedClock and server pause/resume.
-Articles come from NewsFeed (real-time RSS) instead of pre-loaded files.
+Architecture (inspired by terminator2):
+- LLM provides FAIR_VALUE estimates (probability analysis)
+- Kelly criterion sizes positions mechanically (1/3 Kelly)
+- Position management runs every block (active selling when edge shrinks)
+- LLM is only called when new articles arrive; sizing is continuous
+
+Key invariant: if MINT expected P&L = 0 (design/mint-pnl.typ), then
+all capital flows are zero-sum among traders. Kelly sizing ensures
+long-run growth while 1/3 scaling prevents ruin.
 """
 
 import logging
+import math
 import re
 import time
 from dataclasses import dataclass, field
@@ -20,6 +28,17 @@ from .db import DecisionDB
 from .news_feed import LiveArticle, NewsFeed
 
 log = logging.getLogger(__name__)
+
+
+# --------------------------------------------------------------------------- #
+# Kelly sizing parameters
+# --------------------------------------------------------------------------- #
+KELLY_FRACTION = 1 / 3       # 1/3 Kelly — prevents ruin
+MIN_EDGE = 0.02              # 2 cent minimum edge to trade
+EXIT_EDGE = 0.005            # Below 0.5 cent edge → exit position
+MAX_POSITION_FRAC = 0.30     # Max 30% of portfolio in any one market
+MIN_CASH_FRAC = 0.20         # Keep at least 20% cash
+REBALANCE_INTERVAL_S = 30.0  # Check positions every 30s even without articles
 
 
 # --------------------------------------------------------------------------- #
@@ -50,7 +69,7 @@ class TradeRecord:
 
 
 # --------------------------------------------------------------------------- #
-# Helpers (copied from sim/llm_trader.py)
+# Helpers
 # --------------------------------------------------------------------------- #
 def _describe_order(order: OrderSpec) -> str:
     price = order.limit_price_nanos / NANOS_PER_DOLLAR
@@ -65,34 +84,115 @@ def _describe_order(order: OrderSpec) -> str:
     return str(order)
 
 
+def kelly_target(
+    fair_value: float,
+    market_price: float,
+    portfolio_value: float,
+    kelly_frac: float = KELLY_FRACTION,
+    max_position_frac: float = MAX_POSITION_FRAC,
+) -> tuple[int, int]:
+    """Compute Kelly-optimal target positions (target_yes, target_no).
+
+    Returns the number of YES and NO shares to hold. Exactly one will
+    be positive; the other will be zero.
+
+    Uses fractional Kelly (default 1/3) to prevent ruin.
+    """
+    edge = fair_value - market_price
+    if abs(edge) < MIN_EDGE:
+        return (0, 0)
+
+    if edge > 0:
+        # Bullish: buy YES
+        full_kelly = edge / (1 - market_price) if market_price < 1 else 0
+        bet_value = full_kelly * kelly_frac * portfolio_value
+        bet_value = min(bet_value, max_position_frac * portfolio_value)
+        target_yes = int(bet_value / market_price) if market_price > 0 else 0
+        return (max(target_yes, 0), 0)
+    else:
+        # Bearish: buy NO
+        full_kelly = abs(edge) / market_price if market_price > 0 else 0
+        bet_value = full_kelly * kelly_frac * portfolio_value
+        bet_value = min(bet_value, max_position_frac * portfolio_value)
+        no_price = 1 - market_price
+        target_no = int(bet_value / no_price) if no_price > 0 else 0
+        return (0, max(target_no, 0))
+
+
+def position_orders(
+    market_id: int,
+    target_yes: int,
+    target_no: int,
+    current_yes: int,
+    current_no: int,
+    fair_value: float,
+    market_price: float,
+    available_cash: float,
+) -> list[OrderSpec]:
+    """Generate orders to move from current to target positions.
+
+    Sells use market_price (willing to exit at current price).
+    Buys use fair_value as limit (willing to pay up to FV).
+    """
+    orders: list[OrderSpec] = []
+
+    # Exit wrong-side positions first (frees cash)
+    if target_yes == 0 and current_yes > 0:
+        # Sell all YES — use market price (willing to exit at market)
+        orders.append(SellYes.at_price(market_id, market_price, current_yes))
+    if target_no == 0 and current_no > 0:
+        orders.append(SellNo.at_price(market_id, 1 - market_price, current_no))
+
+    # Trim oversized positions
+    if target_yes > 0 and current_yes > target_yes:
+        excess = current_yes - target_yes
+        orders.append(SellYes.at_price(market_id, market_price, excess))
+    if target_no > 0 and current_no > target_no:
+        excess = current_no - target_no
+        orders.append(SellNo.at_price(market_id, 1 - market_price, excess))
+
+    # Scale into target (buy)
+    if target_yes > current_yes:
+        deficit = target_yes - current_yes
+        cost_per_share = market_price
+        affordable = int(available_cash / cost_per_share) if cost_per_share > 0 else 0
+        qty = min(deficit, affordable)
+        if qty > 0:
+            # Limit at fair_value — willing to pay up to our estimate
+            orders.append(BuyYes.at_price(market_id, fair_value, qty))
+
+    if target_no > current_no:
+        deficit = target_no - current_no
+        cost_per_share = 1 - market_price
+        affordable = int(available_cash / cost_per_share) if cost_per_share > 0 else 0
+        qty = min(deficit, affordable)
+        if qty > 0:
+            orders.append(BuyNo.at_price(market_id, 1 - fair_value, qty))
+
+    return orders
+
+
 # --------------------------------------------------------------------------- #
-# System prompt (from sim/llm_trader.py, verbatim)
+# System prompt — simplified, no ORDERS
 # --------------------------------------------------------------------------- #
 SYSTEM_PROMPT = """\
-You are trading in a prediction market using Frequent Batch Auctions.
-All orders in a batch are matched simultaneously at a single clearing price — no order book, no first-come advantage. Batches clear every ~10 minutes. Orders persist for 3 batches (TTL=3).
+You are analyzing news articles for a prediction market. Your job is to estimate the probability of the event occurring, given the evidence.
 
-Pricing:
-- YES + NO = $1.00 always. If YES=$0.80, NO=$0.20.
-- BUY_YES costs the YES price; BUY_NO costs the NO price
-- Your limit price is the WORST price you'd accept — you'll pay the clearing price, not your limit
+You will be given:
+- A market question
+- Current market price (from Polymarket)
+- Your previous fair value estimate (if any)
+- Your current portfolio
+- One or more news articles
 
-Direction:
-- FAIR_VALUE > YES price → BUY_YES or SELL_NO (bullish)
-- FAIR_VALUE < YES price → BUY_NO or SELL_YES (bearish)
-- SELL_NO = bullish (selling cheap NO). SELL_YES = bearish (selling expensive YES).
+Respond with your probability estimate and brief reasoning. Be concise.
 
-Trading:
-- Deploy at most 10-20% of your cash per trade. Only exception: edge >30 cents, then up to 40%. This is a long day — prices will move, and you want cash for better opportunities later.
-- Keep at least 20-30% cash in reserve at all times.
-- Sell when your thesis weakens or counter-evidence appears. HOLD if already positioned and no new edge.
-- Extreme FAIR_VALUE (>0.85) requires extraordinary evidence. Most events have genuine uncertainty — reflect that. Update based on the full picture, not just the latest article.
-
-Evidence discipline:
-- Base your FAIR_VALUE on the article(s) provided, the current market price, and your prior fair value estimate.
-- If the article contains no NEW information relevant to the market question, keep your FV near your PRIOR fair value — do not reset to the market price. Irrelevant news is not a reason to change your view.
-- Only revise your FV significantly when an article provides DIRECT evidence for or against the market question. Tangential news warrants at most a 1-2 cent adjustment.
-- Do NOT inject outside knowledge. But DO maintain conviction from previous evidence unless new information contradicts it.
+Key principles:
+- Base your estimate on the article evidence + prior fair value, not just the market price
+- If the article contains no NEW information, keep your estimate near your prior fair value
+- Only revise significantly for DIRECT evidence — tangential news warrants at most 1-2 cent adjustment
+- Official actions > direct quotes > analysis > speculation > rumors
+- Most events have genuine uncertainty — avoid extreme probabilities unless evidence is extraordinary
 
 Always respond in English regardless of article language."""
 
@@ -101,7 +201,13 @@ Always respond in English regardless of article language."""
 # LiveLlmTrader
 # --------------------------------------------------------------------------- #
 class LiveLlmTrader(BaseAgent):
-    """LLM trader for live deployment — no SimulatedClock, no server pause."""
+    """LLM-driven analysis + Kelly-based execution.
+
+    The LLM provides fair value estimates. Position sizing uses
+    fractional Kelly criterion (1/3 Kelly by default). Positions
+    are rebalanced every block based on current fair values and
+    market prices — active selling when edge disappears.
+    """
 
     def __init__(
         self,
@@ -128,6 +234,7 @@ class LiveLlmTrader(BaseAgent):
 
         self._llm_client: openai.AsyncOpenAI | None = None
         self._last_llm_call: float = 0.0
+        self._last_rebalance: float = 0.0
         self._observed_first_block = False
 
         # Per-market state
@@ -152,12 +259,11 @@ class LiveLlmTrader(BaseAgent):
             model=self.model_name,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=4096,
+            max_tokens=2048,
             extra_body={"reasoning": {"max_tokens": 1024}},
         )
         text = resp.choices[0].message.content or ""
         duration = time.monotonic() - t0
-        # Log token usage for cost tracking
         if resp.usage:
             log.info(
                 "[%s] tokens: prompt=%d completion=%d (%.1fs)",
@@ -180,64 +286,68 @@ class LiveLlmTrader(BaseAgent):
             t = rec.timestamp.strftime("%H:%M")
             if not rec.orders:
                 lines.append(f"- [{t}] FV={rec.fair_value:.2f} | {rec.motivation}")
-                lines.append("  HOLD")
             else:
                 order_desc = ", ".join(_describe_order(o) for o in rec.orders)
-                lines.append(f"- [{t}] FV={rec.fair_value:.2f} | {rec.motivation}")
-                lines.append(f"  Submitted: {order_desc}")
-            lines.append("")
+                lines.append(f"- [{t}] FV={rec.fair_value:.2f} → {order_desc} | {rec.motivation}")
         return "\n".join(lines).rstrip()
+
+    def _get_market_price(self, market_id: int, block: Block) -> float:
+        """Get the best available price for a market (Polymarket > Sybil)."""
+        poly_price = self.news_feed.polymarket_prices.get_price(market_id)
+        prices = self.filter_markets(block)
+        if market_id in prices:
+            yes_nanos, _ = prices[market_id]
+            sybil_price = yes_nanos / NANOS_PER_DOLLAR
+        else:
+            sybil_price = 0.0
+        ref = poly_price if poly_price and poly_price > 0 else sybil_price
+        return ref if ref > 0 else 0.0
+
+    def _portfolio_value(self, block: Block) -> float:
+        """Estimate total portfolio value (cash + positions at market prices)."""
+        pv = self.current_balance
+        for (mid, outcome), qty in self.positions.items():
+            if qty == 0:
+                continue
+            price = self._get_market_price(mid, block)
+            if price <= 0:
+                continue
+            if outcome == "YES":
+                pv += qty * price
+            else:
+                pv += qty * (1 - price)
+        return max(pv, 0.01)  # avoid division by zero
 
     def _build_prompt(
         self, articles: list[LiveArticle], market: Market, block: Block
     ) -> str:
         market_id = market.id
-
-        # Get Polymarket reference price (the "real" market consensus)
-        poly_price = self.news_feed.polymarket_prices.get_price(market_id)
-
-        # Get Sybil clearing price
-        prices = self.filter_markets(block)
-        if market_id in prices:
-            yes_nanos, _ = prices[market_id]
-            sybil_yes = yes_nanos / NANOS_PER_DOLLAR
-        else:
-            sybil_yes = 0.0
-
-        # Use Polymarket price as primary reference, Sybil as secondary
-        # The MM quotes around poly_price, so that's the actionable price
-        yes_price = poly_price if poly_price and poly_price > 0 else sybil_yes
+        yes_price = self._get_market_price(market_id, block)
         if yes_price <= 0:
-            return ""  # No price data at all — skip
-        no_price = 1 - yes_price
+            return ""
 
-        # Price info line
+        # Price context
+        poly_price = self.news_feed.polymarket_prices.get_price(market_id)
         if poly_price and poly_price > 0:
-            price_line = (
-                f"- Polymarket consensus: YES=${poly_price:.4f} | NO=${1 - poly_price:.4f} "
-                f"(this is the deep-market reference price)"
-            )
-            if sybil_yes > 0 and abs(sybil_yes - poly_price) > 0.01:
-                price_line += f"\n- Sybil clearing price: YES=${sybil_yes:.4f} (may differ due to low liquidity)"
+            price_line = f"- Polymarket consensus: YES=${poly_price:.4f} | NO=${1 - poly_price:.4f}"
         else:
-            price_line = f"- YES price: ${yes_price:.4f} | NO price: ${no_price:.4f}"
+            price_line = f"- YES price: ${yes_price:.4f} | NO price: ${1 - yes_price:.4f}"
 
-        # Price trend
         history = self.price_history.get(market_id, [])
         recent_prices = [s.yes_price for s in history[-5:]]
         if recent_prices:
-            price_line += f"\n- Recent Sybil prices: {', '.join(f'{p:.4f}' for p in recent_prices)}"
+            price_line += f"\n- Recent prices: {', '.join(f'{p:.4f}' for p in recent_prices)}"
 
+        # Portfolio context
         balance = self.current_balance
         yes_shares = self.get_position(market_id, "YES")
         no_shares = self.get_position(market_id, "NO")
-        portfolio_value = balance + yes_shares * yes_price + no_shares * no_price
-        cash_pct = (balance / portfolio_value * 100) if portfolio_value > 0 else 100
+        pv = self._portfolio_value(block)
 
         last_fv = self.fair_values.get(market_id)
         last_fv_line = f"\n- Your last fair value estimate: {last_fv:.2f}" if last_fv else ""
 
-        # Market context from Polymarket metadata
+        # Market context
         context = ""
         if market.description:
             context += f"\n{market.description[:500]}"
@@ -260,24 +370,6 @@ class LiveLlmTrader(BaseAgent):
                 parts.append(f'[{idx}] From {art.source}: "{art.title}"\n{text}\n')
             article_section = "\n".join(parts)
 
-        # Available actions — use poly price for cost estimates
-        actions = []
-        if balance >= 0.01:
-            max_yes = int(balance / yes_price) if yes_price > 0 else 0
-            max_no = int(balance / no_price) if no_price > 0 else 0
-            actions.append(f"- BUY_YES <qty> @ <price>: costs ~${yes_price:.2f}/share (up to ~{max_yes} shares)")
-            actions.append(f"- BUY_NO <qty> @ <price>: costs ~${no_price:.2f}/share (up to ~{max_no} shares)")
-        else:
-            actions.append("- BUY_YES / BUY_NO: not available (no cash)")
-        if yes_shares > 0:
-            actions.append(f"- SELL_YES <qty> @ <price>: sell {yes_shares} YES shares")
-        if no_shares > 0:
-            actions.append(f"- SELL_NO <qty> @ <price>: sell {no_shares} NO shares")
-        actions.append("- HOLD: do nothing")
-        actions_block = "\n".join(actions)
-
-        analyze_word = "these articles" if len(articles) > 1 else "this article"
-
         return f"""{SYSTEM_PROMPT}
 
 {self.persona}
@@ -286,35 +378,21 @@ Market: "{market.name}"{context}
 
 Current state:
 {price_line}
-- Your portfolio: ${balance:.2f} cash ({cash_pct:.0f}% of portfolio), {yes_shares} YES shares, {no_shares} NO shares
-- Estimated portfolio value: ~${portfolio_value:.2f}{last_fv_line}
+- Your portfolio: ${balance:.2f} cash, {yes_shares} YES shares, {no_shares} NO shares (~${pv:.0f} total){last_fv_line}
 
 Recent trades:
 {self._format_recent_trades(market_id)}
 
 {article_section}
 
-Available actions:
-{actions_block}
-
-Analyze {analyze_word} and decide your trade. Be concise. Respond in this EXACT format (structured fields FIRST):
+Analyze and respond in this EXACT format:
 
 FAIR_VALUE: [Your probability estimate, 0.01-0.99]
-ORDERS: [HOLD, or action like BUY_YES 10 @ 0.55. Set limit price at your fair value. Only trade if |FV - poly price| > $0.02]
-MOTIVATION: [1 sentence]
-ANALYSIS: [2-3 sentences max]"""
+MOTIVATION: [1 sentence — why this fair value]
+ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
 
-    def _parse_orders(
-        self, text: str, market_id: int
-    ) -> tuple[str, float, list[OrderSpec], str] | None:
-        """Parse structured LLM output. Adapted from sim/llm_trader.py."""
-        KEYWORDS = r"\nANALYSIS:|\nFAIR_VALUE:|\nEDGE:|\nORDERS:|\nMOTIVATION:|\Z"
-
-        analysis_match = re.search(
-            rf"ANALYSIS:\s*(.*?)(?={KEYWORDS})", text, re.DOTALL,
-        )
-        analysis = analysis_match.group(1).strip() if analysis_match else ""
-
+    def _parse_fair_value(self, text: str) -> tuple[float, str, str] | None:
+        """Parse FAIR_VALUE and MOTIVATION from LLM output."""
         fv_match = re.search(r"FAIR_VALUE:\s*([\d.]+)", text)
         if not fv_match:
             log.warning("Failed to parse FAIR_VALUE from LLM output")
@@ -324,88 +402,87 @@ ANALYSIS: [2-3 sentences max]"""
             log.warning("FAIR_VALUE out of range: %s", fair_value)
             return None
 
+        KEYWORDS = r"\nANALYSIS:|\nFAIR_VALUE:|\nEDGE:|\nORDERS:|\nMOTIVATION:|\Z"
+
         motiv_match = re.search(
             rf"MOTIVATION:\s*(.*?)(?={KEYWORDS})", text, re.DOTALL,
         )
         motivation = motiv_match.group(1).strip() if motiv_match else ""
 
-        orders_match = re.search(
-            rf"ORDERS:\s*(.*?)(?={KEYWORDS})", text, re.DOTALL,
+        analysis_match = re.search(
+            rf"ANALYSIS:\s*(.*?)(?={KEYWORDS})", text, re.DOTALL,
         )
-        orders_text = orders_match.group(1).strip() if orders_match else ""
+        analysis = analysis_match.group(1).strip() if analysis_match else ""
 
-        orders: list[OrderSpec] = []
-        if "HOLD" in orders_text.upper() and not re.search(r"(BUY|SELL)", orders_text.upper()):
-            return (analysis, fair_value, [], motivation)
+        return (fair_value, motivation, analysis)
 
-        order_map = {
-            "BUY_YES": BuyYes,
-            "BUY_NO": BuyNo,
-            "SELL_YES": SellYes,
-            "SELL_NO": SellNo,
-        }
-        for m in re.finditer(
-            r"(BUY_YES|BUY_NO|SELL_YES|SELL_NO)\s+(\d+)\s*@\s*\$?([\d.]+)", orders_text
-        ):
-            side = m.group(1)
-            qty = int(m.group(2))
-            price = float(m.group(3))
-            cls = order_map[side]
-            if qty > 0:
-                orders.append(cls.at_price(market_id, price, qty))
+    def _rebalance_all(self, block: Block) -> list[OrderSpec]:
+        """Rebalance all positions using Kelly targets.
 
-        return (analysis, fair_value, orders, motivation)
-
-    def _validate_orders(
-        self, orders: list[OrderSpec], market_id: int, block: Block
-    ) -> list[OrderSpec]:
-        """Clip orders to affordable/held amounts. Adapted from sim/llm_trader.py."""
-        # Use Polymarket price as reference for validation when Sybil price is 0
-        poly_price = self.news_feed.polymarket_prices.get_price(market_id)
-        prices = self.filter_markets(block)
-        if market_id in prices:
-            yes_nanos, _ = prices[market_id]
-            yes_price = yes_nanos / NANOS_PER_DOLLAR
-        else:
-            yes_price = 0.0
-        if yes_price <= 0 and poly_price and poly_price > 0:
-            yes_price = poly_price
-        if yes_price <= 0:
-            return []
-        no_price = 1 - yes_price
-
-        yes_held = self.get_position(market_id, "YES")
-        no_held = self.get_position(market_id, "NO")
+        Runs every block. For each market with a fair_value:
+        - Compute Kelly target from fair_value vs market_price
+        - Generate orders to move toward target
+        - Sell positions where edge has disappeared
+        """
+        pv = self._portfolio_value(block)
         cash = self.current_balance
-        portfolio_value = cash + yes_held * yes_price + no_held * no_price
-        max_order_value = portfolio_value * 0.25
+        min_cash = MIN_CASH_FRAC * pv
 
-        valid: list[OrderSpec] = []
-        for order in orders:
-            price = order.limit_price_nanos / NANOS_PER_DOLLAR
-            price = max(0.01, min(0.99, price))
-            qty = order.quantity
+        all_orders: list[OrderSpec] = []
 
-            if isinstance(order, SellYes):
-                qty = min(qty, yes_held)
-                yes_held -= qty
-            elif isinstance(order, SellNo):
-                qty = min(qty, no_held)
-                no_held -= qty
-            elif isinstance(order, (BuyYes, BuyNo)):
-                max_qty_by_conc = int(max_order_value / price) if price > 0 else 0
-                qty = min(qty, max_qty_by_conc)
-                cost = qty * price
-                if cost > cash:
-                    qty = int(cash / price) if price > 0 else 0
-                cash -= qty * price
+        # Process all markets where we have a fair value or a position
+        markets_to_check = set(self.fair_values.keys())
+        for (mid, _outcome), qty in self.positions.items():
+            if qty > 0:
+                markets_to_check.add(mid)
 
-            if qty <= 0:
+        for market_id in markets_to_check:
+            market_price = self._get_market_price(market_id, block)
+            if market_price <= 0:
                 continue
-            cls = type(order)
-            valid.append(cls.at_price(market_id, price, qty))
 
-        return valid
+            current_yes = self.get_position(market_id, "YES")
+            current_no = self.get_position(market_id, "NO")
+            fv = self.fair_values.get(market_id)
+
+            if fv is None:
+                # No fair value → exit any positions (shouldn't hold what we can't value)
+                if current_yes > 0:
+                    all_orders.append(
+                        SellYes.at_price(market_id, market_price, current_yes)
+                    )
+                if current_no > 0:
+                    all_orders.append(
+                        SellNo.at_price(market_id, 1 - market_price, current_no)
+                    )
+                continue
+
+            edge = abs(fv - market_price)
+
+            # If edge is below exit threshold, close position
+            if edge < EXIT_EDGE:
+                target_yes, target_no = 0, 0
+            else:
+                target_yes, target_no = kelly_target(fv, market_price, pv)
+
+            # Available cash for buying (respect min cash reserve)
+            available_cash = max(0, cash - min_cash)
+
+            orders = position_orders(
+                market_id, target_yes, target_no,
+                current_yes, current_no,
+                fv, market_price, available_cash,
+            )
+
+            # Deduct estimated buy costs from available cash
+            for o in orders:
+                if isinstance(o, (BuyYes, BuyNo)):
+                    cost = o.quantity * (o.limit_price_nanos / NANOS_PER_DOLLAR)
+                    cash -= cost
+
+            all_orders.extend(orders)
+
+        return all_orders
 
     async def on_block(self, block: Block) -> list[OrderSpec]:
         all_orders: list[OrderSpec] = []
@@ -418,7 +495,6 @@ ANALYSIS: [2-3 sentences max]"""
             self.price_history.setdefault(market_id, []).append(
                 PriceSnapshot(block.height, now, yes_price)
             )
-            # Cap history at 500 entries per market
             if len(self.price_history[market_id]) > 500:
                 self.price_history[market_id] = self.price_history[market_id][-500:]
 
@@ -427,123 +503,83 @@ ANALYSIS: [2-3 sentences max]"""
             self._observed_first_block = True
             return []
 
-        # Rate limit
-        elapsed = time.monotonic() - self._last_llm_call
-        if elapsed < self.min_llm_interval_s and self._last_llm_call > 0:
-            return []
-
-        # Check for new articles across all tracked markets
-        for market_id in list(self.market_ids or []):
-            articles = await self.news_feed.drain(market_id)
-            if not articles:
-                continue
-
-            market = self.markets_info.get(market_id)
-            if not market:
-                continue
-
-            # Get reference price: prefer Polymarket, fall back to Sybil clearing
-            poly_price = self.news_feed.polymarket_prices.get_price(market_id)
-            if market_id in prices:
-                yes_nanos, _ = prices[market_id]
-                sybil_price = yes_nanos / NANOS_PER_DOLLAR
-            else:
-                sybil_price = 0.0
-            ref_price = poly_price if poly_price and poly_price > 0 else sybil_price
-            if ref_price <= 0:
-                log.info("[%s] Skipping %s — no price data", self.name, market.name[:30])
-                continue
-
-            titles = "; ".join(f'"{a.title[:40]}"' for a in articles)
-            log.info("[%s] %d article(s) for %s (poly=%.2f): %s",
-                     self.name, len(articles), market.name[:30],
-                     poly_price or 0, titles)
-
-            prompt = self._build_prompt(articles, market, block)
-            if not prompt:
-                continue
-
-            try:
-                raw_text, llm_duration_s = await self._call_llm_raw(prompt)
-                self._last_llm_call = time.monotonic()
-                log.info("[%s] LLM response (%.1fs):\n%s", self.name, llm_duration_s, raw_text)
-            except Exception as e:
-                log.warning("[%s] LLM call failed: %s", self.name, e)
-                continue
-
-            parsed = self._parse_orders(raw_text, market_id)
-            if parsed is None:
-                log.warning("[%s] Failed to parse LLM output", self.name)
-                continue
-
-            analysis, fair_value, orders, motivation = parsed
-            orders = self._validate_orders(orders, market_id, block)
-
-            # Directional consistency filter (use reference price)
-            consistent = []
-            for o in orders:
-                if isinstance(o, (BuyYes, SellNo)) and fair_value < ref_price:
+        # Check for new articles → LLM analysis → update fair values
+        elapsed_llm = time.monotonic() - self._last_llm_call
+        if elapsed_llm >= self.min_llm_interval_s or self._last_llm_call == 0:
+            for market_id in list(self.market_ids or []):
+                articles = await self.news_feed.drain(market_id)
+                if not articles:
                     continue
-                if isinstance(o, (BuyNo, SellYes)) and fair_value > ref_price:
+
+                market = self.markets_info.get(market_id)
+                if not market:
                     continue
-                consistent.append(o)
-            orders = consistent
 
-            # Update fair value
-            self.fair_values[market_id] = fair_value
+                ref_price = self._get_market_price(market_id, block)
+                if ref_price <= 0:
+                    continue
 
-            # Log trade
-            record = TradeRecord(
-                market_id=market_id,
-                articles=articles,
-                analysis=analysis,
-                fair_value=fair_value,
-                orders=orders,
-                motivation=motivation,
-                raw_llm_response=raw_text,
-                llm_duration_s=llm_duration_s,
-                block_height=block.height,
-                timestamp=now,
-                balance=self.current_balance,
-                yes_pos=self.get_position(market_id, "YES"),
-                no_pos=self.get_position(market_id, "NO"),
-            )
-            self.trade_log.setdefault(market_id, []).append(record)
+                titles = "; ".join(f'"{a.title[:40]}"' for a in articles)
+                log.info("[%s] %d article(s) for %s (price=%.2f): %s",
+                         self.name, len(articles), market.name[:30], ref_price, titles)
 
-            # DB logging
-            if self.db:
-                order_dicts = [
-                    {"side": type(o).__name__, "qty": o.quantity,
-                     "price": o.limit_price_nanos / NANOS_PER_DOLLAR}
-                    for o in orders
-                ]
-                article_urls = [
-                    {"title": a.title, "url": a.url, "source": a.source}
-                    for a in articles
-                ]
-                self.db.log_decision(
-                    trader_name=self.name,
-                    market_id=market_id,
-                    market_name=market.name,
-                    analysis=analysis,
-                    fair_value=fair_value,
-                    market_price=ref_price,
-                    orders=order_dicts,
-                    motivation=motivation,
-                    raw_llm_response=raw_text,
-                    llm_duration_s=llm_duration_s,
-                    balance=self.current_balance,
-                    yes_pos=self.get_position(market_id, "YES"),
-                    no_pos=self.get_position(market_id, "NO"),
-                    article_urls=article_urls,
-                )
+                prompt = self._build_prompt(articles, market, block)
+                if not prompt:
+                    continue
 
-            if orders:
-                order_desc = ", ".join(_describe_order(o) for o in orders)
-                log.info("[%s] %s: FV=%.2f -> %s", self.name, market.name[:30], fair_value, order_desc)
-            else:
-                log.info("[%s] %s: FV=%.2f -> HOLD", self.name, market.name[:30], fair_value)
+                try:
+                    raw_text, llm_duration_s = await self._call_llm_raw(prompt)
+                    self._last_llm_call = time.monotonic()
+                    log.info("[%s] LLM response (%.1fs):\n%s", self.name, llm_duration_s, raw_text)
+                except Exception as e:
+                    log.warning("[%s] LLM call failed: %s", self.name, e)
+                    continue
 
-            all_orders.extend(orders)
+                parsed = self._parse_fair_value(raw_text)
+                if parsed is None:
+                    log.warning("[%s] Failed to parse LLM output", self.name)
+                    continue
+
+                fair_value, motivation, analysis = parsed
+                old_fv = self.fair_values.get(market_id)
+                self.fair_values[market_id] = fair_value
+
+                log.info("[%s] %s: FV %.2f→%.2f (market=%.2f, edge=%.2f) | %s",
+                         self.name, market.name[:30],
+                         old_fv or 0, fair_value, ref_price,
+                         fair_value - ref_price, motivation)
+
+                # DB logging
+                if self.db:
+                    article_urls = [
+                        {"title": a.title, "url": a.url, "source": a.source}
+                        for a in articles
+                    ]
+                    self.db.log_decision(
+                        trader_name=self.name,
+                        market_id=market_id,
+                        market_name=market.name,
+                        analysis=analysis,
+                        fair_value=fair_value,
+                        market_price=ref_price,
+                        orders=[],  # filled in after rebalance
+                        motivation=motivation,
+                        raw_llm_response=raw_text,
+                        llm_duration_s=llm_duration_s,
+                        balance=self.current_balance,
+                        yes_pos=self.get_position(market_id, "YES"),
+                        no_pos=self.get_position(market_id, "NO"),
+                        article_urls=article_urls,
+                    )
+
+        # Rebalance positions using Kelly targets (runs every block)
+        elapsed_rebal = time.monotonic() - self._last_rebalance
+        if elapsed_rebal >= REBALANCE_INTERVAL_S or self._last_rebalance == 0:
+            rebalance_orders = self._rebalance_all(block)
+            if rebalance_orders:
+                order_desc = ", ".join(_describe_order(o) for o in rebalance_orders)
+                log.info("[%s] Kelly rebalance: %s", self.name, order_desc)
+            all_orders.extend(rebalance_orders)
+            self._last_rebalance = time.monotonic()
 
         return all_orders
