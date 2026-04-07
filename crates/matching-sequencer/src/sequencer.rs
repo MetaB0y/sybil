@@ -12,7 +12,7 @@ use sybil_verifier::{
 use tracing::{debug, error};
 
 use crate::account::{AccountId, AccountStore};
-use crate::block::{compute_state_root, hash_header, Block, BlockHeader, BlockProduction};
+use crate::block::{hash_header, Block, BlockHeader, BlockProduction};
 use crate::error::{Rejection, RejectionReason, SequencerError};
 use crate::market_info::{AccountFillRecord, MarketMetadata, PricePoint};
 use crate::settlement;
@@ -985,8 +985,12 @@ impl BlockSequencer {
             }
         }
 
-        // Compute state root and build header
-        let state_root = compute_state_root(&self.accounts);
+        // Compute state root from the post-state snapshot (same data the
+        // verifier will hash). Using the full AccountStore would include
+        // accounts not in the witness, causing state root mismatch.
+        // TODO: Once the witness includes all accounts (needed for full-state
+        // ZK proofs), switch back to compute_state_root(&self.accounts).
+        let state_root = sybil_verifier::block::compute_state_root(&post_state);
         let parent_hash = self
             .last_header
             .as_ref()
@@ -1104,6 +1108,7 @@ pub type BatchSequencer = BlockSequencer;
 mod tests {
     use super::*;
     use crate::account::AccountStore;
+    use crate::block::compute_state_root;
     use crate::error::RejectionReason;
     use crate::validation::{validate_order, validate_order_with_reservation};
     use matching_engine::{outcome_buy, outcome_sell, MarketId, MarketSet, MmId, NANOS_PER_DOLLAR};
@@ -1606,7 +1611,6 @@ mod tests {
         );
 
         let bp1 = seq.produce_block(vec![], 0);
-        let root1 = bp1.block.header.state_root;
 
         // Submit an order that will change state
         let sub = OrderSubmission {
@@ -1616,15 +1620,15 @@ mod tests {
         };
         let bp2 = seq.produce_block(vec![sub], 0);
 
-        // State root should reflect the updated account state
-        // (even if the order didn't fill, state root is computed after settlement)
-        assert_eq!(
-            bp2.block.header.state_root,
-            compute_state_root(&seq.accounts)
-        );
-        // First and second blocks should have the same state root since no fills happened
-        // (only pending orders changed, which aren't in the state root)
-        assert_eq!(root1, bp2.block.header.state_root);
+        // State root matches the witness post-state (what verifier will check)
+        let expected_root =
+            sybil_verifier::block::compute_state_root(&bp2.witness.post_state);
+        assert_eq!(bp2.block.header.state_root, expected_root);
+
+        // Second block includes more accounts in the witness, so state root
+        // changes even without fills (the account that submitted the order
+        // is now a participating account).
+        assert_ne!(bp1.block.header.state_root, bp2.block.header.state_root);
     }
 
     // --- Complete-set self-trade prevention ---
