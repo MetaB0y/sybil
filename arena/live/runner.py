@@ -21,6 +21,7 @@ from sybil_client.types import NANOS_PER_DOLLAR
 from .db import DecisionDB
 from .news_feed import NewsFeed
 from .personas import PERSONAS
+from .strategy import FlatStrategy, KellyStrategy
 from .trader import LiveLlmTrader
 
 log = logging.getLogger(__name__)
@@ -162,30 +163,39 @@ async def run_live(config: LiveConfig):
         markets_info = {m.id: m for m in active}
         market_ids = [m.id for m in active]
 
-        # 2. Create accounts
+        # 2. Create accounts — each persona gets two bots (Kelly + Flat)
+        strategies = [
+            ("Kelly", KellyStrategy()),
+            ("Flat", FlatStrategy()),
+        ]
+
         traders = []
         for persona_key in config.personas:
             if persona_key not in PERSONAS:
                 log.warning("Unknown persona: %s, skipping", persona_key)
                 continue
             persona = PERSONAS[persona_key]
-            account = await client.create_account(int(config.initial_balance * NANOS_PER_DOLLAR))
-            log.info("Created account %d for %s ($%.0f)", account.id, persona["name"], config.initial_balance)
 
-            trader = LiveLlmTrader(
-                client=client,
-                account_id=account.id,
-                news_feed=None,  # set below after feed creation
-                api_key=config.api_key,
-                persona=persona["persona"],
-                model_name=config.model_name,
-                market_ids=market_ids,
-                markets_info=markets_info,
-                db=db,
-                min_llm_interval_s=config.min_llm_interval,
-                name=persona["name"],
-            )
-            traders.append(trader)
+            for strat_label, strategy in strategies:
+                account = await client.create_account(int(config.initial_balance * NANOS_PER_DOLLAR))
+                bot_name = f"{persona['name']} ({strat_label})"
+                log.info("Created account %d for %s ($%.0f)", account.id, bot_name, config.initial_balance)
+
+                trader = LiveLlmTrader(
+                    client=client,
+                    account_id=account.id,
+                    news_feed=None,  # set below after feed creation
+                    api_key=config.api_key,
+                    persona=persona["persona"],
+                    strategy=strategy,
+                    model_name=config.model_name,
+                    market_ids=market_ids,
+                    markets_info=markets_info,
+                    db=db,
+                    min_llm_interval_s=config.min_llm_interval,
+                    name=bot_name,
+                )
+                traders.append(trader)
 
         # 3. Create noise traders
         noise_traders = []
