@@ -31,6 +31,15 @@ def get_conn(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+def extract_strategy(trader_name: str) -> str:
+    """Extract strategy label from trader name like 'News Trader (Kelly)'."""
+    if "(Kelly)" in trader_name:
+        return "Kelly"
+    elif "(Flat)" in trader_name:
+        return "Flat"
+    return "Unknown"
+
+
 # --------------------------------------------------------------------------- #
 # Page config
 # --------------------------------------------------------------------------- #
@@ -44,6 +53,7 @@ with st.sidebar:
     db_path = st.text_input("DB Path", value=DB_DEFAULT)
     auto_refresh = st.checkbox("Auto-refresh (30s)", value=True)
     time_range = st.selectbox("Time range", ["1h", "6h", "24h", "All"], index=2)
+    strategy_filter = st.selectbox("Strategy", ["All", "Kelly", "Flat"], index=0)
 
     if auto_refresh:
         st.markdown(
@@ -64,6 +74,7 @@ if time_range in time_filters:
     time_clause = f"WHERE timestamp > '{cutoff}'"
     time_clause_snap = f"WHERE timestamp > '{cutoff}'"
 else:
+    cutoff = None
     time_clause = ""
     time_clause_snap = ""
 
@@ -71,9 +82,14 @@ else:
 # Trader filter
 # --------------------------------------------------------------------------- #
 traders_df = pd.read_sql_query(
-    "SELECT DISTINCT trader_name FROM decisions ORDER BY trader_name", conn
+    "SELECT DISTINCT trader_name FROM portfolio_snapshots "
+    "UNION SELECT DISTINCT trader_name FROM decisions ORDER BY 1", conn
 )
 all_traders = traders_df["trader_name"].tolist() if not traders_df.empty else []
+
+# Apply strategy filter
+if strategy_filter != "All":
+    all_traders = [t for t in all_traders if f"({strategy_filter})" in t]
 
 with st.sidebar:
     selected_traders = st.multiselect("Traders", all_traders, default=all_traders)
@@ -83,7 +99,194 @@ if not selected_traders:
 trader_filter = ",".join(f"'{t}'" for t in selected_traders)
 
 # --------------------------------------------------------------------------- #
-# 1. Portfolio Summary
+# 1. Strategy Comparison (headline section)
+# --------------------------------------------------------------------------- #
+st.header("Strategy Comparison: Kelly vs Flat")
+
+snap_all = pd.read_sql_query(
+    "SELECT trader_name, balance, portfolio_value, pnl, positions, timestamp "
+    "FROM portfolio_snapshots WHERE id IN ("
+    "  SELECT MAX(id) FROM portfolio_snapshots GROUP BY trader_name"
+    ") ORDER BY trader_name", conn
+)
+
+if snap_all.empty:
+    st.info("Waiting for portfolio snapshots to compare strategies...")
+else:
+    snap_all["strategy"] = snap_all["trader_name"].apply(extract_strategy)
+
+    # Aggregate by strategy
+    strat_agg = snap_all.groupby("strategy").agg(
+        traders=("trader_name", "count"),
+        total_pnl=("pnl", "sum"),
+        avg_pnl=("pnl", "mean"),
+        total_value=("portfolio_value", "sum"),
+        avg_cash=("balance", "mean"),
+    ).reset_index()
+
+    # Count positions per strategy
+    for idx, row in strat_agg.iterrows():
+        strategy_traders = snap_all[snap_all["strategy"] == row["strategy"]]
+        total_positions = 0
+        for _, t in strategy_traders.iterrows():
+            positions = json.loads(t["positions"]) if t["positions"] else {}
+            total_positions += sum(
+                1 for mid_pos in positions.values()
+                for qty in mid_pos.values() if qty != 0
+            )
+        strat_agg.at[idx, "positions"] = total_positions
+
+    # Get average edge from decisions
+    dec_edge = pd.read_sql_query(
+        "SELECT trader_name, AVG(ABS(fair_value - market_price)) as avg_edge "
+        "FROM decisions GROUP BY trader_name", conn
+    )
+    if not dec_edge.empty:
+        dec_edge["strategy"] = dec_edge["trader_name"].apply(extract_strategy)
+        edge_by_strat = dec_edge.groupby("strategy")["avg_edge"].mean().reset_index()
+        strat_agg = strat_agg.merge(edge_by_strat, on="strategy", how="left")
+    else:
+        strat_agg["avg_edge"] = 0.0
+
+    # Display
+    display_strat = strat_agg[["strategy", "traders", "total_pnl", "avg_pnl", "positions", "avg_edge"]].copy()
+    display_strat.columns = ["Strategy", "Traders", "Total PnL", "Avg PnL", "Positions", "Avg Edge"]
+    display_strat["Total PnL"] = display_strat["Total PnL"].apply(lambda x: f"${x:+.2f}")
+    display_strat["Avg PnL"] = display_strat["Avg PnL"].apply(lambda x: f"${x:+.2f}")
+    display_strat["Positions"] = display_strat["Positions"].astype(int)
+    display_strat["Avg Edge"] = display_strat["Avg Edge"].apply(lambda x: f"{x:.3f}")
+    st.dataframe(display_strat, use_container_width=True, hide_index=True)
+
+    # Quick metric cards
+    kelly_pnl = snap_all[snap_all["strategy"] == "Kelly"]["pnl"].sum()
+    flat_pnl = snap_all[snap_all["strategy"] == "Flat"]["pnl"].sum()
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Kelly Total PnL", f"${kelly_pnl:+.2f}")
+    col2.metric("Flat Total PnL", f"${flat_pnl:+.2f}")
+    leader = "Kelly" if kelly_pnl > flat_pnl else "Flat" if flat_pnl > kelly_pnl else "Tied"
+    col3.metric("Leader", leader, delta=f"${abs(kelly_pnl - flat_pnl):.2f}")
+
+# --------------------------------------------------------------------------- #
+# 2. PnL Over Time (strategy overlay)
+# --------------------------------------------------------------------------- #
+st.header("PnL Over Time — Kelly vs Flat")
+
+pnl_query = (
+    f"SELECT trader_name, timestamp, portfolio_value, pnl "
+    f"FROM portfolio_snapshots "
+    f"WHERE trader_name IN ({trader_filter})"
+    + (f" AND timestamp > '{cutoff}'" if cutoff else "")
+    + " ORDER BY timestamp"
+)
+pnl_df = pd.read_sql_query(pnl_query, conn)
+
+if pnl_df.empty:
+    st.info("No data for PnL chart yet.")
+else:
+    pnl_df["timestamp"] = pd.to_datetime(pnl_df["timestamp"])
+    pnl_df["strategy"] = pnl_df["trader_name"].apply(extract_strategy)
+
+    # Strategy aggregate PnL over time
+    strat_pnl = pnl_df.groupby(["timestamp", "strategy"])["pnl"].sum().reset_index()
+
+    if not strat_pnl.empty:
+        strat_chart = (
+            alt.Chart(strat_pnl)
+            .mark_line(strokeWidth=3)
+            .encode(
+                x=alt.X("timestamp:T", title="Time"),
+                y=alt.Y("pnl:Q", title="Total PnL ($)"),
+                color=alt.Color("strategy:N", title="Strategy",
+                                scale=alt.Scale(domain=["Kelly", "Flat"],
+                                                range=["#e45756", "#4c78a8"])),
+                tooltip=["strategy", "timestamp:T", "pnl:Q"],
+            )
+            .properties(height=300)
+            .interactive()
+        )
+        st.altair_chart(strat_chart, use_container_width=True)
+
+    # Per-trader detail (collapsible)
+    with st.expander("Per-trader breakdown"):
+        trader_chart = (
+            alt.Chart(pnl_df)
+            .mark_line(point=True)
+            .encode(
+                x=alt.X("timestamp:T", title="Time"),
+                y=alt.Y("portfolio_value:Q", title="Portfolio Value ($)"),
+                color=alt.Color("trader_name:N", title="Trader"),
+                strokeDash=alt.StrokeDash(
+                    "strategy:N",
+                    scale=alt.Scale(domain=["Kelly", "Flat"],
+                                    range=[[1, 0], [5, 5]]),
+                    title="Strategy",
+                ),
+                tooltip=["trader_name", "timestamp:T", "portfolio_value:Q", "pnl:Q"],
+            )
+            .properties(height=350)
+            .interactive()
+        )
+        st.altair_chart(trader_chart, use_container_width=True)
+
+# --------------------------------------------------------------------------- #
+# 3. Fair Value Drift Monitor (conviction loop early warning)
+# --------------------------------------------------------------------------- #
+st.header("Fair Value Drift Monitor")
+
+fv_query = (
+    f"SELECT trader_name, market_name, market_id, fair_value, market_price, timestamp "
+    f"FROM decisions "
+    f"WHERE trader_name IN ({trader_filter})"
+    + (f" AND timestamp > '{cutoff}'" if cutoff else "")
+    + " ORDER BY timestamp"
+)
+fv_df = pd.read_sql_query(fv_query, conn)
+
+if fv_df.empty:
+    st.info("No decisions yet to monitor.")
+else:
+    # Get latest FV per (trader, market)
+    latest_fv = fv_df.groupby(["trader_name", "market_name", "market_id"]).agg(
+        current_fv=("fair_value", "last"),
+        current_mkt=("market_price", "last"),
+        n_decisions=("fair_value", "count"),
+    ).reset_index()
+
+    # Get last 5 FVs as trend
+    def fv_trend(group):
+        vals = group["fair_value"].tail(5).tolist()
+        return " -> ".join(f"{v:.2f}" for v in vals)
+
+    trends = fv_df.groupby(["trader_name", "market_name"]).apply(
+        fv_trend, include_groups=False
+    ).reset_index(name="fv_trend")
+
+    latest_fv = latest_fv.merge(trends, on=["trader_name", "market_name"], how="left")
+
+    # Flag extreme FVs
+    latest_fv["warning"] = latest_fv["current_fv"].apply(
+        lambda fv: "EXTREME" if fv > 0.85 or fv < 0.15 else ""
+    )
+    latest_fv["strategy"] = latest_fv["trader_name"].apply(extract_strategy)
+    latest_fv["edge"] = (latest_fv["current_fv"] - latest_fv["current_mkt"]).abs()
+
+    # Show warnings first
+    warnings = latest_fv[latest_fv["warning"] != ""]
+    if not warnings.empty:
+        st.warning(f"{len(warnings)} extreme fair value(s) detected — possible conviction loop")
+
+    display_fv = latest_fv[["trader_name", "market_name", "current_fv", "current_mkt",
+                            "edge", "fv_trend", "n_decisions", "warning"]].copy()
+    display_fv.columns = ["Trader", "Market", "FV", "Mkt Price", "Edge", "FV Trend", "Decisions", "Warning"]
+    display_fv = display_fv.sort_values(["Warning", "Edge"], ascending=[True, False])
+    display_fv["FV"] = display_fv["FV"].apply(lambda x: f"{x:.2f}")
+    display_fv["Mkt Price"] = display_fv["Mkt Price"].apply(lambda x: f"{x:.2f}")
+    display_fv["Edge"] = display_fv["Edge"].apply(lambda x: f"{x:.3f}")
+
+    st.dataframe(display_fv, use_container_width=True, hide_index=True)
+
+# --------------------------------------------------------------------------- #
+# 4. Portfolio Summary
 # --------------------------------------------------------------------------- #
 st.header("Portfolio Summary")
 
@@ -101,28 +304,20 @@ snap_df = pd.read_sql_query(snap_query, conn)
 if snap_df.empty:
     st.info("No portfolio snapshots yet. Bots may not have started.")
 else:
-    display_df = snap_df[["trader_name", "balance", "portfolio_value", "pnl", "timestamp"]].copy()
-    display_df.columns = ["Trader", "Cash", "Portfolio Value", "PnL", "Last Updated"]
+    snap_df["strategy"] = snap_df["trader_name"].apply(extract_strategy)
+    display_df = snap_df[["trader_name", "strategy", "balance", "portfolio_value", "pnl", "timestamp"]].copy()
+    display_df.columns = ["Trader", "Strategy", "Cash", "Portfolio Value", "PnL", "Last Updated"]
     display_df["Cash"] = display_df["Cash"].apply(lambda x: f"${x:.2f}")
     display_df["Portfolio Value"] = display_df["Portfolio Value"].apply(lambda x: f"${x:.2f}")
     display_df["PnL"] = display_df["PnL"].apply(lambda x: f"${x:+.2f}")
     st.dataframe(display_df, use_container_width=True, hide_index=True)
 
 # --------------------------------------------------------------------------- #
-# 2. Recent Decisions
+# 5. Recent Decisions
 # --------------------------------------------------------------------------- #
 st.header("Recent Decisions")
 
-dec_query = f"""
-    SELECT trader_name, market_name, fair_value, market_price, orders,
-           motivation, analysis, llm_duration_s, timestamp, balance
-    FROM decisions
-    {time_clause.replace('WHERE', 'WHERE' if not selected_traders else f'WHERE trader_name IN ({trader_filter}) AND') if time_clause else f'WHERE trader_name IN ({trader_filter})'}
-    ORDER BY id DESC
-    LIMIT 50
-"""
-# Simplify the query
-if time_clause:
+if cutoff:
     dec_query = f"""
         SELECT trader_name, market_name, fair_value, market_price, orders,
                motivation, analysis, llm_duration_s, timestamp, balance, article_urls
@@ -151,6 +346,7 @@ else:
             f"{o['side']} {o['qty']}@${o['price']:.2f}" for o in orders
         ) if orders else "HOLD"
 
+        strategy = extract_strategy(row["trader_name"])
         ts = row["timestamp"][:16] if row["timestamp"] else ""
         header = f"**{row['trader_name']}** | {row['market_name'][:50]} | FV={row['fair_value']:.2f} vs Mkt={row['market_price']:.2f} (edge={edge:.2f}) | {orders_str}"
 
@@ -159,7 +355,6 @@ else:
             st.markdown(f"**Motivation:** {row['motivation']}")
             st.markdown(f"**LLM latency:** {row['llm_duration_s']:.1f}s | **Balance:** ${row['balance']:.2f}")
 
-            # Show linked articles with clickable URLs
             article_urls = json.loads(row["article_urls"]) if row.get("article_urls") else []
             if article_urls:
                 st.markdown("**Sources:**")
@@ -167,51 +362,11 @@ else:
                     st.markdown(f"- [{art['title'][:80]}]({art['url']}) ({art['source']})")
 
 # --------------------------------------------------------------------------- #
-# 3. PnL Chart
-# --------------------------------------------------------------------------- #
-st.header("Portfolio Value Over Time")
-
-if time_clause_snap:
-    pnl_query = f"""
-        SELECT trader_name, timestamp, portfolio_value, pnl
-        FROM portfolio_snapshots
-        WHERE trader_name IN ({trader_filter}) AND timestamp > '{cutoff}'
-        ORDER BY timestamp
-    """
-else:
-    pnl_query = f"""
-        SELECT trader_name, timestamp, portfolio_value, pnl
-        FROM portfolio_snapshots
-        WHERE trader_name IN ({trader_filter})
-        ORDER BY timestamp
-    """
-
-pnl_df = pd.read_sql_query(pnl_query, conn)
-
-if pnl_df.empty:
-    st.info("No data for PnL chart yet.")
-else:
-    pnl_df["timestamp"] = pd.to_datetime(pnl_df["timestamp"])
-    chart = (
-        alt.Chart(pnl_df)
-        .mark_line(point=True)
-        .encode(
-            x=alt.X("timestamp:T", title="Time"),
-            y=alt.Y("portfolio_value:Q", title="Portfolio Value ($)"),
-            color=alt.Color("trader_name:N", title="Trader"),
-            tooltip=["trader_name", "timestamp:T", "portfolio_value:Q", "pnl:Q"],
-        )
-        .properties(height=350)
-        .interactive()
-    )
-    st.altair_chart(chart, use_container_width=True)
-
-# --------------------------------------------------------------------------- #
-# 4. News Feed
+# 6. News Feed
 # --------------------------------------------------------------------------- #
 st.header("News Feed")
 
-if time_clause:
+if cutoff:
     art_query = f"""
         SELECT title, source, url, fetched_at, matched_market_ids
         FROM articles
@@ -232,16 +387,15 @@ else:
         title = row["title"] or "(no title)"
         url = row["url"] or ""
         if url:
-            st.markdown(f"- **{ts}** [{row['source']}] [{title}]({url}) → {len(market_ids)} market(s)")
+            st.markdown(f"- **{ts}** [{row['source']}] [{title}]({url}) -> {len(market_ids)} market(s)")
         else:
-            st.markdown(f"- **{ts}** [{row['source']}] {title} → {len(market_ids)} market(s)")
+            st.markdown(f"- **{ts}** [{row['source']}] {title} -> {len(market_ids)} market(s)")
 
 # --------------------------------------------------------------------------- #
-# 5. Token Usage / Cost
+# 7. Token Usage / Cost
 # --------------------------------------------------------------------------- #
 st.header("LLM Cost Tracker")
 
-# Check if token_usage table exists
 has_token_table = conn.execute(
     "SELECT name FROM sqlite_master WHERE type='table' AND name='token_usage'"
 ).fetchone()
@@ -254,13 +408,12 @@ if has_token_table:
                SUM(completion_tokens) as total_completion,
                AVG(duration_s) as avg_latency_s
         FROM token_usage
-        {f"WHERE timestamp > '{cutoff}'" if time_clause else ""}
+        {f"WHERE timestamp > '{cutoff}'" if cutoff else ""}
         GROUP BY trader_name
     """
     token_df = pd.read_sql_query(token_query, conn)
 
     if not token_df.empty:
-        # MiniMax M2.7 pricing: $0.70/M input, $0.70/M output (OpenRouter)
         token_df["est_cost"] = (
             token_df["total_prompt"] * 0.70 / 1_000_000
             + token_df["total_completion"] * 0.70 / 1_000_000
@@ -270,10 +423,9 @@ if has_token_table:
         token_df["Avg Latency (s)"] = token_df["Avg Latency (s)"].apply(lambda x: f"{x:.1f}")
         st.dataframe(token_df, use_container_width=True, hide_index=True)
 
-        # Total cost
         total_cost_row = conn.execute(
             f"SELECT SUM(prompt_tokens), SUM(completion_tokens) FROM token_usage"
-            + (f" WHERE timestamp > '{cutoff}'" if time_clause else "")
+            + (f" WHERE timestamp > '{cutoff}'" if cutoff else "")
         ).fetchone()
         if total_cost_row[0]:
             total_cost = (total_cost_row[0] + total_cost_row[1]) * 0.70 / 1_000_000
@@ -284,7 +436,7 @@ else:
     st.info("Token usage tracking not available (older DB schema).")
 
 # --------------------------------------------------------------------------- #
-# 6. Stats
+# 8. Stats
 # --------------------------------------------------------------------------- #
 st.header("Stats")
 col1, col2, col3 = st.columns(3)
