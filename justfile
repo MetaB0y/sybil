@@ -261,6 +261,10 @@ deploy-logs service="sybil-api":
 deploy-shell:
     ssh {{SERVER}}
 
+# Arena bot status — text dashboard (readable by CLI / LLM)
+arena-status hours="24":
+    ssh {{SERVER}} 'docker exec sybil-arena-dashboard uv run python -m live.status --hours {{hours}}'
+
 # Live system status (containers, blocks, traders, fills)
 status:
     #!/usr/bin/env bash

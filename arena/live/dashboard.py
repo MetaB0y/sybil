@@ -32,12 +32,17 @@ def get_conn(db_path: str) -> sqlite3.Connection:
 
 
 def extract_strategy(trader_name: str) -> str:
-    """Extract strategy label from trader name like 'News Trader (Kelly)'."""
+    """Extract strategy label from trader name like 'News Trader (Kelly)'.
+
+    Old bots (before strategy split) and noise traders get labeled separately.
+    """
     if "(Kelly)" in trader_name:
         return "Kelly"
     elif "(Flat)" in trader_name:
         return "Flat"
-    return "Unknown"
+    elif trader_name.startswith("Noise"):
+        return "Noise"
+    return "Legacy"
 
 
 # --------------------------------------------------------------------------- #
@@ -53,7 +58,7 @@ with st.sidebar:
     db_path = st.text_input("DB Path", value=DB_DEFAULT)
     auto_refresh = st.checkbox("Auto-refresh (30s)", value=True)
     time_range = st.selectbox("Time range", ["1h", "6h", "24h", "All"], index=2)
-    strategy_filter = st.selectbox("Strategy", ["All", "Kelly", "Flat"], index=0)
+    strategy_filter = st.selectbox("Strategy", ["All", "Kelly", "Flat", "Legacy", "Noise"], index=0)
 
     if auto_refresh:
         st.markdown(
@@ -115,56 +120,63 @@ if snap_all.empty:
 else:
     snap_all["strategy"] = snap_all["trader_name"].apply(extract_strategy)
 
-    # Aggregate by strategy
-    strat_agg = snap_all.groupby("strategy").agg(
-        traders=("trader_name", "count"),
-        total_pnl=("pnl", "sum"),
-        avg_pnl=("pnl", "mean"),
-        total_value=("portfolio_value", "sum"),
-        avg_cash=("balance", "mean"),
-    ).reset_index()
+    # Only compare Kelly vs Flat (exclude Noise/Legacy)
+    snap_competing = snap_all[snap_all["strategy"].isin(["Kelly", "Flat"])]
 
-    # Count positions per strategy
-    for idx, row in strat_agg.iterrows():
-        strategy_traders = snap_all[snap_all["strategy"] == row["strategy"]]
-        total_positions = 0
-        for _, t in strategy_traders.iterrows():
-            positions = json.loads(t["positions"]) if t["positions"] else {}
-            total_positions += sum(
-                1 for mid_pos in positions.values()
-                for qty in mid_pos.values() if qty != 0
-            )
-        strat_agg.at[idx, "positions"] = total_positions
-
-    # Get average edge from decisions
-    dec_edge = pd.read_sql_query(
-        "SELECT trader_name, AVG(ABS(fair_value - market_price)) as avg_edge "
-        "FROM decisions GROUP BY trader_name", conn
-    )
-    if not dec_edge.empty:
-        dec_edge["strategy"] = dec_edge["trader_name"].apply(extract_strategy)
-        edge_by_strat = dec_edge.groupby("strategy")["avg_edge"].mean().reset_index()
-        strat_agg = strat_agg.merge(edge_by_strat, on="strategy", how="left")
+    if snap_competing.empty:
+        st.info("No Kelly or Flat bots found yet. Waiting for new bots to report...")
     else:
-        strat_agg["avg_edge"] = 0.0
+        # Aggregate by strategy
+        strat_agg = snap_competing.groupby("strategy").agg(
+            traders=("trader_name", "count"),
+            total_pnl=("pnl", "sum"),
+            avg_pnl=("pnl", "mean"),
+            total_value=("portfolio_value", "sum"),
+            avg_cash=("balance", "mean"),
+        ).reset_index()
 
-    # Display
-    display_strat = strat_agg[["strategy", "traders", "total_pnl", "avg_pnl", "positions", "avg_edge"]].copy()
-    display_strat.columns = ["Strategy", "Traders", "Total PnL", "Avg PnL", "Positions", "Avg Edge"]
-    display_strat["Total PnL"] = display_strat["Total PnL"].apply(lambda x: f"${x:+.2f}")
-    display_strat["Avg PnL"] = display_strat["Avg PnL"].apply(lambda x: f"${x:+.2f}")
-    display_strat["Positions"] = display_strat["Positions"].astype(int)
-    display_strat["Avg Edge"] = display_strat["Avg Edge"].apply(lambda x: f"{x:.3f}")
-    st.dataframe(display_strat, use_container_width=True, hide_index=True)
+        # Count positions per strategy
+        for idx, row in strat_agg.iterrows():
+            strategy_traders = snap_competing[snap_competing["strategy"] == row["strategy"]]
+            total_positions = 0
+            for _, t in strategy_traders.iterrows():
+                positions = json.loads(t["positions"]) if t["positions"] else {}
+                total_positions += sum(
+                    1 for mid_pos in positions.values()
+                    for qty in mid_pos.values() if qty != 0
+                )
+            strat_agg.at[idx, "positions"] = total_positions
 
-    # Quick metric cards
-    kelly_pnl = snap_all[snap_all["strategy"] == "Kelly"]["pnl"].sum()
-    flat_pnl = snap_all[snap_all["strategy"] == "Flat"]["pnl"].sum()
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Kelly Total PnL", f"${kelly_pnl:+.2f}")
-    col2.metric("Flat Total PnL", f"${flat_pnl:+.2f}")
-    leader = "Kelly" if kelly_pnl > flat_pnl else "Flat" if flat_pnl > kelly_pnl else "Tied"
-    col3.metric("Leader", leader, delta=f"${abs(kelly_pnl - flat_pnl):.2f}")
+        # Get average edge from decisions (only Kelly/Flat)
+        dec_edge = pd.read_sql_query(
+            "SELECT trader_name, AVG(ABS(fair_value - market_price)) as avg_edge "
+            "FROM decisions GROUP BY trader_name", conn
+        )
+        if not dec_edge.empty:
+            dec_edge["strategy"] = dec_edge["trader_name"].apply(extract_strategy)
+            dec_edge = dec_edge[dec_edge["strategy"].isin(["Kelly", "Flat"])]
+            edge_by_strat = dec_edge.groupby("strategy")["avg_edge"].mean().reset_index()
+            strat_agg = strat_agg.merge(edge_by_strat, on="strategy", how="left")
+        else:
+            strat_agg["avg_edge"] = 0.0
+
+        # Display
+        display_strat = strat_agg[["strategy", "traders", "total_pnl", "avg_pnl", "positions", "avg_edge"]].copy()
+        display_strat.columns = ["Strategy", "Traders", "Total PnL", "Avg PnL", "Positions", "Avg Edge"]
+        display_strat["Total PnL"] = display_strat["Total PnL"].apply(lambda x: f"${x:+.2f}")
+        display_strat["Avg PnL"] = display_strat["Avg PnL"].apply(lambda x: f"${x:+.2f}")
+        display_strat["Positions"] = display_strat["Positions"].astype(int)
+        display_strat["Avg Edge"] = display_strat["Avg Edge"].apply(lambda x: f"{x:.3f}")
+        st.dataframe(display_strat, use_container_width=True, hide_index=True)
+
+        # Quick metric cards
+        kelly_pnl = snap_competing[snap_competing["strategy"] == "Kelly"]["pnl"].sum()
+        flat_pnl = snap_competing[snap_competing["strategy"] == "Flat"]["pnl"].sum()
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Kelly Total PnL", f"${kelly_pnl:+.2f}")
+        col2.metric("Flat Total PnL", f"${flat_pnl:+.2f}")
+        leader = "Kelly" if kelly_pnl > flat_pnl else "Flat" if flat_pnl > kelly_pnl else "Tied"
+        col3.metric("Leader", leader, delta=f"${abs(kelly_pnl - flat_pnl):.2f}")
 
 # --------------------------------------------------------------------------- #
 # 2. PnL Over Time (strategy overlay)
@@ -263,10 +275,13 @@ else:
 
     latest_fv = latest_fv.merge(trends, on=["trader_name", "market_name"], how="left")
 
-    # Flag extreme FVs
-    latest_fv["warning"] = latest_fv["current_fv"].apply(
-        lambda fv: "EXTREME" if fv > 0.85 or fv < 0.15 else ""
-    )
+    # Flag divergent FVs: extreme FV where market disagrees (possible conviction loop)
+    def _check_divergence(row):
+        fv, mkt = row["current_fv"], row["current_mkt"]
+        fv_extreme = fv > 0.85 or fv < 0.15
+        mkt_agrees = (mkt > 0.80 and fv > 0.85) or (mkt < 0.20 and fv < 0.15)
+        return "DIVERGENT" if fv_extreme and not mkt_agrees else ""
+    latest_fv["warning"] = latest_fv.apply(_check_divergence, axis=1)
     latest_fv["strategy"] = latest_fv["trader_name"].apply(extract_strategy)
     latest_fv["edge"] = (latest_fv["current_fv"] - latest_fv["current_mkt"]).abs()
 
