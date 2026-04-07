@@ -800,23 +800,59 @@ impl BlockSequencer {
             &self.order_account_map,
         );
 
-        // Settle arb fills from group minting against the system mint account.
-        // The solver creates synthetic arb orders to balance positions after
-        // group minting (which creates YES without NO). Their fills are already
-        // in `fills` but weren't settled above because arb order IDs aren't in
-        // problem.orders or order_account_map. Settle them against MINT.
+        // Derive minting from position imbalance — solver-independent.
+        //
+        // After settling real fills, some markets may have more YES than NO
+        // (or vice versa) due to minting/group-minting in the solver. Rather
+        // than trust the solver's synthetic arb orders, we observe the
+        // imbalance directly and adjust the MINT account to restore balance.
+        //
+        // The MINT account's balance adjustment uses clearing prices (which
+        // the verifier can independently check for complementarity).
         {
-            let arb_orders = &pipeline_result.group_minting_arb_orders;
-            if !arb_orders.is_empty() {
-                let mint_account = self
+            // First pass: compute imbalances (excluding MINT's own positions).
+            let mut mint_adjustments: Vec<(MarketId, i64)> = Vec::new();
+            for market in self.markets.iter() {
+                let total_yes: i64 = self
+                    .accounts
+                    .iter()
+                    .filter(|(&id, _)| id != crate::account::AccountId::MINT)
+                    .map(|(_, a)| a.position(market.id, 0))
+                    .sum();
+                let total_no: i64 = self
+                    .accounts
+                    .iter()
+                    .filter(|(&id, _)| id != crate::account::AccountId::MINT)
+                    .map(|(_, a)| a.position(market.id, 1))
+                    .sum();
+                let diff = total_yes - total_no;
+                if diff != 0 {
+                    mint_adjustments.push((market.id, diff));
+                }
+            }
+            // Second pass: apply adjustments to MINT account.
+            if !mint_adjustments.is_empty() {
+                let mint = self
                     .accounts
                     .get_mut(crate::account::AccountId::MINT)
                     .expect("mint account must exist");
-                for arb_order in arb_orders {
-                    for fill in &fills {
-                        if fill.order_id == arb_order.id && fill.fill_qty > 0 {
-                            settlement::settle_fill(mint_account, arb_order, fill);
-                        }
+                for (market_id, diff) in mint_adjustments {
+                    if diff > 0 {
+                        // More YES than NO → MINT shorts YES, receives yes_price revenue
+                        let yes_price = clearing_prices
+                            .get(&market_id)
+                            .and_then(|p| p.first().copied())
+                            .unwrap_or(0) as i64;
+                        *mint.positions.entry((market_id, 0)).or_insert(0) -= diff;
+                        mint.balance += yes_price * diff;
+                    } else {
+                        // More NO than YES → MINT shorts NO, receives no_price revenue
+                        let no_price = clearing_prices
+                            .get(&market_id)
+                            .and_then(|p| p.get(1).copied())
+                            .unwrap_or(0) as i64;
+                        *mint.positions.entry((market_id, 1)).or_insert(0) += diff;
+                        mint.balance += no_price * diff.abs();
                     }
                 }
             }
