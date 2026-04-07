@@ -127,41 +127,45 @@ impl GammaClient {
             .map_err(|e| Error::PolymarketApi(format!("bad midpoint '{}': {}", mid.mid, e)))
     }
 
-    /// Fetch midpoints for multiple tokens in one request via CLOB REST.
+    /// Fetch midpoints for multiple tokens via CLOB REST, batching to stay under payload limits.
     pub async fn fetch_midpoints(&self, token_ids: &[String]) -> Result<Vec<(String, f64)>, Error> {
         if token_ids.is_empty() {
             return Ok(vec![]);
         }
 
         let url = format!("{}/midpoints", self.clob_url);
-        let body: Vec<serde_json::Value> = token_ids
-            .iter()
-            .map(|id| serde_json::json!({ "token_id": id }))
-            .collect();
+        let mut all_results = Vec::with_capacity(token_ids.len());
 
-        let resp = self.http.post(&url).json(&body).send().await?;
+        // Polymarket rejects large payloads. Batch into chunks of 200 tokens.
+        for chunk in token_ids.chunks(200) {
+            let body: Vec<serde_json::Value> = chunk
+                .iter()
+                .map(|id| serde_json::json!({ "token_id": id }))
+                .collect();
 
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(Error::PolymarketApi(format!(
-                "POST /midpoints returned {}: {}",
-                status, text
-            )));
-        }
+            let resp = self.http.post(&url).json(&body).send().await?;
 
-        // Response is array of {mid: "0.55"} in same order as request
-        let mids: Vec<MidpointResponse> = resp.json().await?;
-        let mut result = Vec::with_capacity(mids.len());
-        for (i, mid) in mids.iter().enumerate() {
-            if let Some(token_id) = token_ids.get(i) {
-                match mid.mid.parse::<f64>() {
-                    Ok(p) => result.push((token_id.clone(), p)),
-                    Err(e) => warn!(token_id, error = %e, "skipping bad midpoint"),
+            if !resp.status().is_success() {
+                let status = resp.status().as_u16();
+                let text = resp.text().await.unwrap_or_default();
+                return Err(Error::PolymarketApi(format!(
+                    "POST /midpoints returned {}: {}",
+                    status, text
+                )));
+            }
+
+            // Response is array of {mid: "0.55"} in same order as request
+            let mids: Vec<MidpointResponse> = resp.json().await?;
+            for (i, mid) in mids.iter().enumerate() {
+                if let Some(token_id) = chunk.get(i) {
+                    match mid.mid.parse::<f64>() {
+                        Ok(p) => all_results.push((token_id.clone(), p)),
+                        Err(e) => warn!(token_id, error = %e, "skipping bad midpoint"),
+                    }
                 }
             }
         }
 
-        Ok(result)
+        Ok(all_results)
     }
 }

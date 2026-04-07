@@ -267,7 +267,7 @@ status:
     set -e
     S="root@172.104.31.54"
     echo "=== Containers ==="
-    ssh $S 'docker ps --format "table {{.Names}}\t{{.Status}}"'
+    ssh $S 'docker ps --format "table {{{{.Names}}}}\t{{{{.Status}}}}"'
     echo ""
     echo "=== Recent Blocks ==="
     ssh $S 'timeout 8 curl -sN http://localhost:3000/v1/blocks/stream 2>/dev/null' | head -4 | while read -r line; do

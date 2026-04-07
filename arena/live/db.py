@@ -17,15 +17,20 @@ class DecisionDB:
 
     def _create_tables(self):
         with self._lock:
-            # Migrate: add article_urls column if missing (added after initial schema)
-            try:
-                self.conn.execute("SELECT article_urls FROM decisions LIMIT 0")
-            except sqlite3.OperationalError:
+            # Migrate: add columns that were added after some databases were created.
+            # ALTER TABLE is a no-op if the table doesn't exist yet (CREATE TABLE handles it).
+            for table, column, coltype in [
+                ("decisions", "article_urls", "TEXT"),
+                ("portfolio_snapshots", "total_fills", "INTEGER DEFAULT 0"),
+            ]:
                 try:
-                    self.conn.execute("ALTER TABLE decisions ADD COLUMN article_urls TEXT")
-                    self.conn.commit()
+                    self.conn.execute(f"SELECT {column} FROM {table} LIMIT 0")
                 except sqlite3.OperationalError:
-                    pass  # table doesn't exist yet, CREATE TABLE below will handle it
+                    try:
+                        self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+                        self.conn.commit()
+                    except sqlite3.OperationalError:
+                        pass
 
             self.conn.executescript("""
                 CREATE TABLE IF NOT EXISTS articles (

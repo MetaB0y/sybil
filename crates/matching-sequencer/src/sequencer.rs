@@ -792,13 +792,35 @@ impl BlockSequencer {
         // Snapshot total balance before settlement
         let pre_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
 
-        // Settle all fills
+        // Settle all fills (real orders against their accounts)
         settlement::settle_batch(
             &mut self.accounts,
             &fills,
             &problem.orders,
             &self.order_account_map,
         );
+
+        // Settle arb fills from group minting against the system mint account.
+        // The solver creates synthetic arb orders to balance positions after
+        // group minting (which creates YES without NO). Their fills are already
+        // in `fills` but weren't settled above because arb order IDs aren't in
+        // problem.orders or order_account_map. Settle them against MINT.
+        {
+            let arb_orders = &pipeline_result.group_minting_arb_orders;
+            if !arb_orders.is_empty() {
+                let mint_account = self
+                    .accounts
+                    .get_mut(crate::account::AccountId::MINT)
+                    .expect("mint account must exist");
+                for arb_order in arb_orders {
+                    for fill in &fills {
+                        if fill.order_id == arb_order.id && fill.fill_qty > 0 {
+                            settlement::settle_fill(mint_account, arb_order, fill);
+                        }
+                    }
+                }
+            }
+        }
 
         // Record price history, volume, and account fills via sub-structs
         {

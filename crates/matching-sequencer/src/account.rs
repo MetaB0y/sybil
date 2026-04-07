@@ -5,6 +5,12 @@ use matching_engine::MarketId;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct AccountId(pub u64);
 
+impl AccountId {
+    /// Reserved system account for minting/burning operations.
+    /// Holds the counterparty positions from group minting arb orders.
+    pub const MINT: AccountId = AccountId(u64::MAX);
+}
+
 #[derive(Clone)]
 pub struct Account {
     pub id: AccountId,
@@ -40,7 +46,12 @@ pub struct AccountStore {
 
 impl AccountStore {
     pub fn new() -> Self {
-        Self::default()
+        let mut store = Self::default();
+        // Create the system mint account (zero balance, holds arb positions).
+        store
+            .accounts
+            .insert(AccountId::MINT, Account::new(AccountId::MINT, 0));
+        store
     }
 
     pub fn create_account(&mut self, balance: i64) -> AccountId {
