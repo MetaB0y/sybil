@@ -21,7 +21,7 @@ from sybil_client.types import NANOS_PER_DOLLAR, Market
 
 from .db import DecisionDB
 from .news_feed import LiveArticle, NewsFeed
-from .strategy import KellyStrategy, SizingStrategy, position_orders
+from .strategy import RESOLVED_HIGH, RESOLVED_LOW, KellyStrategy, SizingStrategy, position_orders
 
 log = logging.getLogger(__name__)
 
@@ -334,7 +334,7 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
             fv = self.fair_values.get(market_id)
 
             if fv is None:
-                # No fair value → exit positions
+                # No fair value or drawdown → exit positions
                 from sybil_client import SellNo, SellYes
                 if current_yes > 0:
                     all_orders.append(SellYes.at_price(market_id, market_price, current_yes))
@@ -396,6 +396,14 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
 
                 ref_price = self._get_market_price(market_id, block)
                 if ref_price <= 0:
+                    continue
+
+                # Skip resolved markets — don't waste LLM calls
+                if ref_price >= RESOLVED_HIGH or ref_price <= RESOLVED_LOW:
+                    if market_id in self.fair_values:
+                        log.info("[%s] %s resolved (price=%.2f), clearing FV",
+                                 self.name, market.name[:30], ref_price)
+                        del self.fair_values[market_id]
                     continue
 
                 titles = "; ".join(f'"{a.title[:40]}"' for a in articles)

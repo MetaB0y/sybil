@@ -152,64 +152,108 @@ fn convert_rejection_reason(r: &RejectionReason) -> sybil_verifier::RejectionRea
     }
 }
 
-/// Check if an MM's accepted orders form a complete set in any market group.
-/// A complete set = buying all N outcomes of a group = minting opportunity = self-trade.
+/// Per-order self-trade prevention (STP) for market groups.
 ///
-/// Returns the set of order indices (into `orders`) that should be rejected.
+/// Tracks buy-side outcome coverage per account across a batch. When an order
+/// would complete coverage of all N outcomes in a group (enabling minting
+/// self-trade), that specific order is rejected. Earlier orders are kept.
+///
+/// Applied to ALL accounts, not just MMs — same principle as traditional
+/// exchange STP (CME, Nasdaq, etc.) but adapted for batch auctions.
 ///
 /// Coverage rules:
-/// - BuyYes on market_i (payoffs[0]>0, payoffs[1]=0) → covers outcome i
-/// - BuyNo on market_i (payoffs[0]=0, payoffs[1]>0) → covers all outcomes EXCEPT i
-/// - SellYes/SellNo → does NOT contribute (reduces exposure, not a buy)
-///
-/// BuyYes+BuyNo on the SAME market is fine (normal MM, spread prevents self-trade).
-/// Only cross-market coverage within a group is checked.
-fn detect_complete_set_orders(orders: &[Order], market_groups: &[MarketGroup]) -> HashSet<usize> {
-    let mut reject_indices = HashSet::new();
+/// - BuyYes on market_i → covers outcome i
+/// - BuyNo on market_i → covers all outcomes EXCEPT i (in the group)
+/// - SellYes/SellNo → does NOT contribute (reduces exposure)
+struct GroupCoverageTracker {
+    /// market_id → (group_index, group_size)
+    market_to_group: HashMap<MarketId, (usize, usize)>,
+    /// (account_id, group_index) → set of covered outcome market_ids
+    coverage: HashMap<(AccountId, usize), HashSet<MarketId>>,
+    /// group_index → list of market_ids in the group
+    group_markets: Vec<Vec<MarketId>>,
+}
 
-    for group in market_groups {
-        let group_set: HashSet<MarketId> = group.markets.iter().copied().collect();
-        let n = group.markets.len();
-        if n == 0 {
-            continue;
+impl GroupCoverageTracker {
+    fn new(market_groups: &[MarketGroup]) -> Self {
+        let mut market_to_group = HashMap::new();
+        let mut group_markets = Vec::with_capacity(market_groups.len());
+        for (gi, group) in market_groups.iter().enumerate() {
+            let markets: Vec<MarketId> = group.markets.clone();
+            let n = markets.len();
+            for &mid in &markets {
+                market_to_group.insert(mid, (gi, n));
+            }
+            group_markets.push(markets);
         }
-
-        let mut covered: HashSet<MarketId> = HashSet::new();
-        let mut group_order_indices: Vec<usize> = Vec::new();
-
-        for (i, order) in orders.iter().enumerate() {
-            if order.num_markets != 1 || order.num_states != 2 {
-                continue;
-            }
-            let market = order.markets[0];
-            if !group_set.contains(&market) {
-                continue;
-            }
-
-            let (yes_pay, no_pay) = (order.payoffs[0], order.payoffs[1]);
-            if yes_pay > 0 && no_pay == 0 {
-                // BuyYes → covers this outcome
-                covered.insert(market);
-                group_order_indices.push(i);
-            } else if yes_pay == 0 && no_pay > 0 {
-                // BuyNo → covers all OTHER outcomes in group
-                for &gm in &group.markets {
-                    if gm != market {
-                        covered.insert(gm);
-                    }
-                }
-                group_order_indices.push(i);
-            }
-            // SellYes/SellNo: do not contribute to coverage
-        }
-
-        if covered.len() == n {
-            // Complete set detected — reject all buy-side group orders
-            reject_indices.extend(group_order_indices);
+        Self {
+            market_to_group,
+            coverage: HashMap::new(),
+            group_markets,
         }
     }
 
-    reject_indices
+    /// Check if accepting this order would complete a group set for the account.
+    /// Returns true if the order should be REJECTED (would complete self-trade).
+    fn would_complete_set(&self, account_id: AccountId, order: &Order) -> bool {
+        if order.num_markets != 1 || order.num_states != 2 {
+            return false;
+        }
+        let market = order.markets[0];
+        let Some(&(gi, n)) = self.market_to_group.get(&market) else {
+            return false;
+        };
+
+        let (yes_pay, no_pay) = (order.payoffs[0], order.payoffs[1]);
+
+        // Compute what this order would add to coverage
+        let mut new_coverage: HashSet<MarketId> = HashSet::new();
+        if yes_pay > 0 && no_pay == 0 {
+            new_coverage.insert(market);
+        } else if yes_pay == 0 && no_pay > 0 {
+            for &gm in &self.group_markets[gi] {
+                if gm != market {
+                    new_coverage.insert(gm);
+                }
+            }
+        } else {
+            return false; // Sell or mixed — not a coverage concern
+        }
+
+        let key = (account_id, gi);
+        let existing = self.coverage.get(&key);
+        let total = match existing {
+            Some(set) => set.union(&new_coverage).count(),
+            None => new_coverage.len(),
+        };
+
+        total >= n
+    }
+
+    /// Record that this order was accepted — update coverage for the account.
+    fn record(&mut self, account_id: AccountId, order: &Order) {
+        if order.num_markets != 1 || order.num_states != 2 {
+            return;
+        }
+        let market = order.markets[0];
+        let Some(&(gi, _)) = self.market_to_group.get(&market) else {
+            return;
+        };
+
+        let (yes_pay, no_pay) = (order.payoffs[0], order.payoffs[1]);
+        let key = (account_id, gi);
+        let set = self.coverage.entry(key).or_default();
+
+        if yes_pay > 0 && no_pay == 0 {
+            set.insert(market);
+        } else if yes_pay == 0 && no_pay > 0 {
+            for &gm in &self.group_markets[gi] {
+                if gm != market {
+                    set.insert(gm);
+                }
+            }
+        }
+    }
 }
 
 /// Block-producing sequencer. Core sync layer.
@@ -543,6 +587,7 @@ impl BlockSequencer {
 
         // Phase 2: Process new submissions
         let mut reserved_balance: HashMap<AccountId, i64> = HashMap::new();
+        let mut stp = GroupCoverageTracker::new(&self.market_groups);
 
         for mut sub in submissions {
             let account_id = sub.account_id;
@@ -576,8 +621,10 @@ impl BlockSequencer {
             }
 
             let mut accepted_orders: Vec<Order> = Vec::new();
+            // Track original submission index → assigned order ID for MM constraint rebuild
+            let mut submission_idx_to_order_id: HashMap<usize, u64> = HashMap::new();
 
-            for mut order in sub.orders {
+            for (sub_idx, mut order) in sub.orders.into_iter().enumerate() {
                 // Skip orders for resolved/inactive markets
                 let order_markets_active =
                     order.active_markets().all(|m| active_markets.contains(&m));
@@ -590,6 +637,22 @@ impl BlockSequencer {
                 order.id = order_id;
 
                 if is_mm {
+                    // STP: reject if this order would complete a group set
+                    if stp.would_complete_set(account_id, &order) {
+                        witness_rejections.push(WitnessRejection {
+                            order: order.clone(),
+                            account_id: account_id.0,
+                            reason: sybil_verifier::RejectionReason::CompleteSetFormation,
+                        });
+                        rejections.push(Rejection {
+                            order_id,
+                            account_id,
+                            reason: RejectionReason::CompleteSetFormation,
+                        });
+                        continue;
+                    }
+                    stp.record(account_id, &order);
+                    submission_idx_to_order_id.insert(sub_idx, order_id);
                     self.order_account_map.insert(order_id, account_id);
                     self.order_created_at.insert(order_id, self.height);
                     mm_order_ids_set.insert(order_id);
@@ -609,6 +672,21 @@ impl BlockSequencer {
                     match validate_order_with_reservation(&order, account, reserved, &acct_reserved)
                     {
                         Ok(cost) => {
+                            // STP: reject if this order would complete a group set
+                            if stp.would_complete_set(account_id, &order) {
+                                witness_rejections.push(WitnessRejection {
+                                    order: order.clone(),
+                                    account_id: account_id.0,
+                                    reason: sybil_verifier::RejectionReason::CompleteSetFormation,
+                                });
+                                rejections.push(Rejection {
+                                    order_id,
+                                    account_id,
+                                    reason: RejectionReason::CompleteSetFormation,
+                                });
+                                continue;
+                            }
+                            stp.record(account_id, &order);
                             self.order_account_map.insert(order_id, account_id);
                             self.order_created_at.insert(order_id, self.height);
                             if cost > 0 {
@@ -641,54 +719,20 @@ impl BlockSequencer {
                 }
             }
 
-            // Reject MM orders that form a complete set in any market group.
-            // A complete set = buying all N outcomes = self-trade via minting.
-            let rejected_ids: HashSet<u64> = if is_mm {
-                let reject_idx = detect_complete_set_orders(&accepted_orders, &self.market_groups);
-                let ids: HashSet<u64> = reject_idx.iter().map(|&i| accepted_orders[i].id).collect();
-                for &idx in &reject_idx {
-                    let order = &accepted_orders[idx];
-                    self.order_account_map.remove(&order.id);
-                    self.order_created_at.remove(&order.id);
-                    mm_order_ids_set.remove(&order.id);
-                    witness_orders.retain(|wo| wo.order.id != order.id);
-                    witness_rejections.push(WitnessRejection {
-                        order: order.clone(),
-                        account_id: account_id.0,
-                        reason: sybil_verifier::RejectionReason::CompleteSetFormation,
-                    });
-                    rejections.push(Rejection {
-                        order_id: order.id,
-                        account_id,
-                        reason: RejectionReason::CompleteSetFormation,
-                    });
-                }
-                ids
-            } else {
-                HashSet::new()
-            };
-
-            // Rebuild MmConstraint with assigned IDs (excluding rejected orders)
+            // Rebuild MmConstraint with assigned IDs (STP rejections already excluded)
             if let Some(mm_constraint) = sub.mm_constraint {
                 let old_order_ids = &mm_constraint.order_ids;
                 let old_sides = &mm_constraint.order_sides;
 
-                let old_to_new: HashMap<u64, u64> = old_order_ids
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, &old_id)| accepted_orders.get(i).map(|o| (old_id, o.id)))
-                    .collect();
-
                 let mut new_constraint =
                     MmConstraint::new(mm_constraint.mm_id, mm_constraint.max_capital);
 
-                for &old_id in old_order_ids {
-                    if let (Some(&new_id), Some(&side)) =
-                        (old_to_new.get(&old_id), old_sides.get(&old_id))
-                    {
-                        if !rejected_ids.contains(&new_id) {
-                            new_constraint.add_order(new_id, side);
-                        }
+                for (sub_idx, old_id) in old_order_ids.iter().enumerate() {
+                    if let (Some(&new_id), Some(&side)) = (
+                        submission_idx_to_order_id.get(&sub_idx),
+                        old_sides.get(old_id),
+                    ) {
+                        new_constraint.add_order(new_id, side);
                     }
                 }
 
@@ -697,11 +741,7 @@ impl BlockSequencer {
                 }
             }
 
-            all_orders.extend(
-                accepted_orders
-                    .into_iter()
-                    .filter(|o| !rejected_ids.contains(&o.id)),
-            );
+            all_orders.extend(accepted_orders);
         }
 
         let order_ids: Vec<u64> = all_orders.iter().map(|o| o.id).collect();
@@ -1670,8 +1710,8 @@ mod tests {
         };
 
         let bp = seq.produce_block(vec![sub], 1000);
-        // All 3 group orders should be rejected as CompleteSetFormation
-        assert_eq!(bp.block.rejections.len(), 3);
+        // Per-order STP: only the 3rd order (completing the set) is rejected
+        assert_eq!(bp.block.rejections.len(), 1);
         assert!(bp.block.fills.is_empty());
     }
 
@@ -1736,7 +1776,7 @@ mod tests {
     #[test]
     fn test_mm_buyno_complete_set_rejected() {
         // 3-market group: BuyNo on M0 covers {M1,M2}, BuyNo on M1 covers {M0,M2}
-        // Union = {M0,M1,M2} = complete set
+        // Union = {M0,M1,M2} = complete set — 2nd order completes it
         let (markets, m0, m1, _m2, group) = setup_group();
         let mut accounts = AccountStore::new();
         let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
@@ -1751,8 +1791,8 @@ mod tests {
         let sub = OrderSubmission {
             account_id: aid,
             orders: vec![
-                outcome_buy(&markets, 0, m0, 1, 800_000_000, 10), // BuyNo M0
-                outcome_buy(&markets, 0, m1, 1, 800_000_000, 10), // BuyNo M1
+                outcome_buy(&markets, 0, m0, 1, 800_000_000, 10), // BuyNo M0 → covers {M1,M2}
+                outcome_buy(&markets, 0, m1, 1, 800_000_000, 10), // BuyNo M1 → would cover {M0,M2}, completing set
             ],
             mm_constraint: Some(constraint),
         };
@@ -1760,8 +1800,8 @@ mod tests {
         let bp = seq.produce_block(vec![sub], 1000);
         assert_eq!(
             bp.block.rejections.len(),
-            2,
-            "BuyNo complete set should be rejected"
+            1,
+            "Per-order STP: only the completing BuyNo rejected"
         );
     }
 

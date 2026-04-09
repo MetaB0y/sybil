@@ -66,6 +66,30 @@ pub struct Config {
     #[arg(long, default_value = "100000.0", env = "MM_INITIAL_BALANCE_DOLLARS")]
     pub mm_initial_balance_dollars: f64,
 
+    /// MM risk aversion (Avellaneda-Stoikov γ). Higher = more aggressive inventory skewing.
+    #[arg(long, default_value = "0.05", env = "MM_GAMMA")]
+    pub mm_gamma: f64,
+
+    /// Max position per market (shares). At limit, only unwind side is quoted.
+    #[arg(long, default_value = "5000", env = "MM_MAX_POSITION")]
+    pub mm_max_position: u64,
+
+    /// Max total dollar exposure across all markets. Budget → 0 as exposure approaches this.
+    #[arg(long, default_value = "50000.0", env = "MM_MAX_EXPOSURE_DOLLARS")]
+    pub mm_max_exposure_dollars: f64,
+
+    /// Rolling window (blocks) for variance estimation.
+    #[arg(long, default_value = "30", env = "MM_VOL_WINDOW")]
+    pub mm_vol_window: usize,
+
+    /// Minimum half-spread (floor). Below this, adverse selection eats all profit.
+    #[arg(long, default_value = "0.005", env = "MM_MIN_SPREAD")]
+    pub mm_min_spread: f64,
+
+    /// Blocks between position syncs via GET /v1/accounts/{id}.
+    #[arg(long, default_value = "50", env = "MM_SYNC_INTERVAL_BLOCKS")]
+    pub mm_sync_interval_blocks: u64,
+
     /// REST price poll interval in seconds (WebSocket fallback).
     #[arg(long, default_value = "5", env = "REST_POLL_INTERVAL_SECS")]
     pub rest_poll_interval_secs: u64,

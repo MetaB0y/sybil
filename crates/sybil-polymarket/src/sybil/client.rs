@@ -59,6 +59,16 @@ impl SybilClient {
         Ok(resp.json().await?)
     }
 
+    pub async fn get_account(&self, account_id: u64) -> Result<AccountResponse, Error> {
+        let resp = self
+            .http
+            .get(self.url(&format!("/v1/accounts/{}", account_id)))
+            .send()
+            .await?;
+        let resp = self.check_response(resp).await?;
+        Ok(resp.json().await?)
+    }
+
     pub async fn fund_account(
         &self,
         account_id: u64,

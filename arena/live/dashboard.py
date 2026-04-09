@@ -18,7 +18,10 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from . import queries
+try:
+    from . import queries
+except ImportError:
+    import queries  # type: ignore[no-redef]  # Streamlit runs file directly
 
 DB_DEFAULT = os.environ.get(
     "ARENA_DB_PATH",
@@ -268,7 +271,21 @@ else:
     st.metric("Total Estimated Cost", f"${total * 0.70 / 1_000_000:.4f}")
 
 # --------------------------------------------------------------------------- #
-# 8. Stats
+# 8. Market Maker (MtM)
+# --------------------------------------------------------------------------- #
+st.header("Market Maker")
+mm = queries.get_mm_mtm()
+if mm:
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Value", f"${mm['total']:,.0f}", delta=f"${mm['pnl']:+,.0f}")
+    col2.metric("Cash", f"${mm['cash']:,.0f}")
+    col3.metric("Position Value", f"${mm['position_value']:,.0f}")
+    col4.metric("Positions", mm["positions"])
+else:
+    st.info("MM data unavailable (Sybil API unreachable)")
+
+# --------------------------------------------------------------------------- #
+# 9. Stats
 # --------------------------------------------------------------------------- #
 st.header("Stats")
 stats = queries.get_stats(conn)

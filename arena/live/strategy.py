@@ -17,6 +17,10 @@ from sybil_client import BuyNo, BuyYes, OrderSpec, SellNo, SellYes
 
 log = logging.getLogger(__name__)
 
+# Markets at or beyond these prices are effectively resolved — exit all positions.
+RESOLVED_HIGH = 0.95
+RESOLVED_LOW = 0.05
+
 
 # --------------------------------------------------------------------------- #
 # Base
@@ -80,6 +84,10 @@ class KellyStrategy(SizingStrategy):
         current_yes: int,
         current_no: int,
     ) -> tuple[int, int]:
+        # Resolved market → exit everything
+        if market_price >= RESOLVED_HIGH or market_price <= RESOLVED_LOW:
+            return (0, 0)
+
         edge = fair_value - market_price
 
         # Below exit threshold → close everything
@@ -91,17 +99,17 @@ class KellyStrategy(SizingStrategy):
             return (current_yes, current_no)
 
         if edge > 0:
-            full_kelly = edge / (1 - market_price) if market_price < 1 else 0
+            full_kelly = edge / (1 - market_price)
             bet_value = full_kelly * self.kelly_fraction * portfolio_value
             bet_value = min(bet_value, self.max_position_frac * portfolio_value)
-            target_yes = int(bet_value / market_price) if market_price > 0 else 0
+            target_yes = int(bet_value / market_price)
             return (max(target_yes, 0), 0)
         else:
-            full_kelly = abs(edge) / market_price if market_price > 0 else 0
+            full_kelly = abs(edge) / market_price
             bet_value = full_kelly * self.kelly_fraction * portfolio_value
             bet_value = min(bet_value, self.max_position_frac * portfolio_value)
             no_price = 1 - market_price
-            target_no = int(bet_value / no_price) if no_price > 0 else 0
+            target_no = int(bet_value / no_price)
             return (0, max(target_no, 0))
 
 
@@ -151,6 +159,10 @@ class FlatStrategy(SizingStrategy):
         current_yes: int,
         current_no: int,
     ) -> tuple[int, int]:
+        # Resolved market → exit everything
+        if market_price >= RESOLVED_HIGH or market_price <= RESOLVED_LOW:
+            return (0, 0)
+
         edge = fair_value - market_price
 
         # Hard exit rule: market has moved strongly against our position

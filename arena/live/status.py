@@ -11,7 +11,10 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from . import queries
+try:
+    from . import queries
+except ImportError:
+    import queries  # type: ignore[no-redef]
 
 
 def run(db_path: str | None = None, hours: int = 24):
@@ -45,10 +48,11 @@ def run(db_path: str | None = None, hours: int = 24):
 
     # Also show Legacy/Noise totals
     snaps = queries.get_latest_snapshots(conn)
-    for label in ["Legacy", "Noise"]:
-        group = snaps[snaps["strategy"] == label]
-        if not group.empty:
-            print(f"  {label:8s}  traders={len(group)}  PnL=${group['pnl'].sum():+8.2f}")
+    if not snaps.empty and "strategy" in snaps.columns:
+        for label in ["Legacy", "Noise"]:
+            group = snaps[snaps["strategy"] == label]
+            if not group.empty:
+                print(f"  {label:8s}  traders={len(group)}  PnL=${group['pnl'].sum():+8.2f}")
     print()
 
     # --- Portfolio Summary ---
@@ -100,6 +104,13 @@ def run(db_path: str | None = None, hours: int = 24):
         cost = total_tokens * 0.70 / 1_000_000
         print(f"--- LLM Cost ---")
         print(f"  Total calls: {int(cost_df['calls'].sum())}  tokens: {int(total_tokens):,}  est. cost: ${cost:.4f}\n")
+
+    # --- Market Maker ---
+    mm = queries.get_mm_mtm()
+    if mm:
+        print(f"--- Market Maker (MtM) ---")
+        print(f"  Cash: ${mm['cash']:,.2f}  Positions: ${mm['position_value']:,.2f}  ({mm['positions']} markets)")
+        print(f"  Total: ${mm['total']:,.2f}  PnL: ${mm['pnl']:+,.2f} ({mm['return_pct']:+.4f}%)\n")
 
     # --- Stats ---
     stats = queries.get_stats(conn)
