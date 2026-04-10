@@ -9,3 +9,6 @@ matching-engine = { path = "../matching-engine" }
 blake3 = "1"
 serde = { version = "1", features = ["derive"] }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = "1.6"
