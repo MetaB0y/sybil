@@ -4,6 +4,7 @@ use matching_engine::{Fill, MarketId, Nanos};
 use matching_solver::PipelineResult;
 use sybil_verifier::BlockWitness;
 
+use crate::admin_event::AdminEvent;
 use crate::account::AccountStore;
 use crate::error::Rejection;
 
@@ -32,6 +33,7 @@ pub struct BlockHeader {
 pub struct Block {
     pub header: BlockHeader,
     pub order_ids: Vec<u64>,
+    pub admin_events: Vec<AdminEvent>,
     pub fills: Vec<Fill>,
     pub clearing_prices: HashMap<MarketId, Vec<Nanos>>,
     pub rejections: Vec<Rejection>,
@@ -45,6 +47,12 @@ pub struct Block {
 /// Canonical encoding: sorted by AccountId, each account encodes
 /// balance then sorted (MarketId, outcome) -> position pairs.
 /// All integers are little-endian i64/u64.
+///
+/// NOTE: This is a flat hash over all accounts — O(n) per block. For the validium
+/// proof pipeline, replace with an authenticated data structure (Merkle tree / MMR)
+/// so we can produce per-account inclusion proofs and incremental state roots.
+/// Candidate: commonware-storage qmdb (LayerZero research + Commonware productionization).
+/// See: https://commonware.xyz/blogs/qmdb
 pub fn compute_state_root(accounts: &AccountStore) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new();
 

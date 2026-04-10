@@ -22,6 +22,8 @@ pub struct BlockWitness {
     pub orders: Vec<WitnessOrder>,
     /// Orders rejected (with reasons).
     pub rejections: Vec<WitnessRejection>,
+    /// Administrative state changes applied between blocks.
+    pub admin_events: Vec<AdminEventWitness>,
 
     // -- Solver output --
     pub fills: Vec<Fill>,
@@ -87,6 +89,24 @@ pub enum RejectionReason {
     AccountNotFound,
     /// MM orders form a complete set within a market group (self-trade via minting).
     CompleteSetFormation,
+}
+
+/// Administrative state change recorded in a block witness.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AdminEventWitness {
+    CreateAccount {
+        account_id: u64,
+        initial_balance: i64,
+    },
+    Deposit {
+        account_id: u64,
+        amount: i64,
+    },
+    MarketResolved {
+        market_id: MarketId,
+        payout_nanos: Nanos,
+        affected_accounts: Vec<u64>,
+    },
 }
 
 /// Snapshot of a single account's state at a point in time.

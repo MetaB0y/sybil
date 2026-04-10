@@ -534,6 +534,7 @@ mod tests {
             previous_header: None,
             orders,
             rejections: vec![],
+            admin_events: vec![],
             fills,
             clearing_prices: HashMap::new(),
             total_welfare,

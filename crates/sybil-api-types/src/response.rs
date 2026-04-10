@@ -93,6 +93,25 @@ pub struct FillResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AdminEventResponse {
+    CreateAccount {
+        account_id: u64,
+        initial_balance_nanos: i64,
+    },
+    Deposit {
+        account_id: u64,
+        amount_nanos: i64,
+    },
+    MarketResolved {
+        market_id: u32,
+        payout_nanos: u64,
+        affected_accounts: Vec<u64>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RejectionResponse {
     pub order_id: u64,
     pub account_id: u64,
@@ -108,6 +127,8 @@ pub struct BlockResponse {
     pub order_count: u32,
     pub fill_count: u32,
     pub timestamp_ms: u64,
+    #[serde(default)]
+    pub admin_events: Vec<AdminEventResponse>,
     #[serde(default)]
     pub fills: Vec<FillResponse>,
     #[serde(default)]

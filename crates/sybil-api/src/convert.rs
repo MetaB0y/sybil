@@ -12,6 +12,33 @@ use matching_sequencer::Account;
 use crate::types::request::{OrderSpec, SignedOrderData};
 use crate::types::response::*;
 
+fn admin_event_to_response(event: &matching_sequencer::AdminEvent) -> AdminEventResponse {
+    match event {
+        matching_sequencer::AdminEvent::CreateAccount {
+            account_id,
+            initial_balance,
+        } => AdminEventResponse::CreateAccount {
+            account_id: account_id.0,
+            initial_balance_nanos: *initial_balance,
+        },
+        matching_sequencer::AdminEvent::Deposit { account_id, amount } => {
+            AdminEventResponse::Deposit {
+                account_id: account_id.0,
+                amount_nanos: *amount,
+            }
+        }
+        matching_sequencer::AdminEvent::MarketResolved {
+            market_id,
+            payout_nanos,
+            affected_accounts,
+        } => AdminEventResponse::MarketResolved {
+            market_id: market_id.0,
+            payout_nanos: *payout_nanos,
+            affected_accounts: affected_accounts.iter().map(|id| id.0).collect(),
+        },
+    }
+}
+
 /// Convert an Account to an AccountResponse.
 pub fn account_to_response(account: &Account) -> AccountResponse {
     let positions: Vec<PositionResponse> = account
@@ -56,6 +83,11 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
         .collect();
 
     let rejections = block.rejections.iter().map(rejection_to_response).collect();
+    let admin_events = block
+        .admin_events
+        .iter()
+        .map(admin_event_to_response)
+        .collect();
 
     BlockResponse {
         height: block.header.height,
@@ -64,6 +96,7 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
         order_count: block.header.order_count,
         fill_count: block.header.fill_count,
         timestamp_ms: block.header.timestamp_ms,
+        admin_events,
         fills,
         clearing_prices_nanos,
         rejections,

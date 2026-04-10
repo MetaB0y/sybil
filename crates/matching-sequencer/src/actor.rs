@@ -319,7 +319,7 @@ impl SequencerActor {
                 initial_balance,
                 respond_to,
             } => {
-                let account_id = self.sequencer.accounts.create_account(initial_balance);
+                let account_id = self.sequencer.create_account(initial_balance);
                 let account = self.sequencer.accounts.get(account_id).cloned().unwrap();
                 let _ = respond_to.send(account);
             }
@@ -328,18 +328,7 @@ impl SequencerActor {
                 amount,
                 respond_to,
             } => {
-                let result = match self.sequencer.accounts.get_mut(account_id) {
-                    Some(account) => {
-                        account.balance += amount;
-                        account.total_deposited += amount;
-                        Ok(account.clone())
-                    }
-                    None => Err(SequencerError::Rejected(crate::error::Rejection {
-                        order_id: 0,
-                        account_id,
-                        reason: crate::error::RejectionReason::AccountNotFound,
-                    })),
-                };
+                let result = self.sequencer.fund_account(account_id, amount);
                 let _ = respond_to.send(result);
             }
             Message::RegisterPubkey {
@@ -1093,6 +1082,7 @@ impl SequencerHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::admin_event::AdminEvent;
     use crate::account::AccountStore;
     use matching_engine::{outcome_buy, MarketSet, NANOS_PER_DOLLAR};
     use std::sync::Arc;
@@ -1298,6 +1288,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_admin_events_emitted_for_create_and_fund() {
+        let (seq, _) = make_test_sequencer();
+        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+
+        let account = handle
+            .create_account(50 * NANOS_PER_DOLLAR as i64)
+            .await
+            .unwrap();
+        handle
+            .fund_account(account.id, 25 * NANOS_PER_DOLLAR as i64)
+            .await
+            .unwrap();
+
+        let block = handle.produce_block().await.unwrap();
+        assert_eq!(block.admin_events.len(), 2);
+
+        match &block.admin_events[0] {
+            AdminEvent::CreateAccount {
+                account_id,
+                initial_balance,
+            } => {
+                assert_eq!(*account_id, account.id);
+                assert_eq!(*initial_balance, 50 * NANOS_PER_DOLLAR as i64);
+            }
+            other => panic!("expected CreateAccount event, got {:?}", other),
+        }
+
+        match &block.admin_events[1] {
+            AdminEvent::Deposit { account_id, amount } => {
+                assert_eq!(*account_id, account.id);
+                assert_eq!(*amount, 25 * NANOS_PER_DOLLAR as i64);
+            }
+            other => panic!("expected Deposit event, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
     async fn test_fund_nonexistent_account() {
         let (seq, _) = make_test_sequencer();
         let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
@@ -1397,6 +1424,40 @@ mod tests {
         let record = handle.resolve_market(m0, NANOS_PER_DOLLAR).await.unwrap();
         assert_eq!(record.payout_nanos, NANOS_PER_DOLLAR);
         assert_eq!(record.market_id, m0);
+    }
+
+    #[tokio::test]
+    async fn test_admin_event_emitted_for_market_resolution() {
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("Test");
+        accounts.get_mut(aid).unwrap().positions.insert((m0, 0), 10);
+
+        let seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets,
+            vec![],
+            Arc::new(AdminOracle::new()),
+        );
+        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+
+        handle.resolve_market(m0, NANOS_PER_DOLLAR).await.unwrap();
+        let block = handle.produce_block().await.unwrap();
+
+        assert_eq!(block.admin_events.len(), 1);
+        match &block.admin_events[0] {
+            AdminEvent::MarketResolved {
+                market_id,
+                payout_nanos,
+                affected_accounts,
+            } => {
+                assert_eq!(*market_id, m0);
+                assert_eq!(*payout_nanos, NANOS_PER_DOLLAR);
+                assert_eq!(affected_accounts, &vec![aid]);
+            }
+            other => panic!("expected MarketResolved event, got {:?}", other),
+        }
     }
 
     #[tokio::test]

@@ -1,3 +1,4 @@
+pub mod admin_event;
 pub mod account;
 pub mod actor;
 pub mod agent;
@@ -19,6 +20,7 @@ pub mod simulation;
 pub mod store;
 pub mod validation;
 
+pub use admin_event::AdminEvent;
 pub use account::{Account, AccountId, AccountStore};
 pub use actor::{MarketSearchResult, SequencerHandle};
 pub use block::{Block, BlockProduction};

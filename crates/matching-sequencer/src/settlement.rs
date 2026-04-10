@@ -60,8 +60,13 @@ pub fn apply_minting(mint: &mut Account, adjustments: &[MintAdjustment]) {
 /// - `yes_payout_nanos = NANOS_PER_DOLLAR` → YES wins (traditional binary)
 /// - `yes_payout_nanos = 0` → NO wins (traditional binary)
 /// - `yes_payout_nanos = 700_000_000` → YES pays $0.70, NO pays $0.30
-pub fn resolve_market(accounts: &mut AccountStore, market: MarketId, yes_payout_nanos: Nanos) {
+pub fn resolve_market(
+    accounts: &mut AccountStore,
+    market: MarketId,
+    yes_payout_nanos: Nanos,
+) -> Vec<AccountId> {
     let no_payout_nanos = NANOS_PER_DOLLAR - yes_payout_nanos;
+    let mut affected_accounts = Vec::new();
 
     // Collect account IDs first to avoid borrow issues
     let account_ids: Vec<AccountId> = accounts.iter().map(|(&id, _)| id).collect();
@@ -91,6 +96,10 @@ pub fn resolve_market(accounts: &mut AccountStore, market: MarketId, yes_payout_
         let yes_pos = account.positions.remove(&(market, 0)).unwrap_or(0);
         let no_pos = account.positions.remove(&(market, 1)).unwrap_or(0);
 
+        if yes_pos != 0 || no_pos != 0 {
+            affected_accounts.push(account_id);
+        }
+
         if yes_pos != 0 {
             account.balance += (yes_pos as i128 * yes_payout_nanos as i128) as i64;
         }
@@ -105,6 +114,8 @@ pub fn resolve_market(accounts: &mut AccountStore, market: MarketId, yes_payout_
         "RESOLVE market {:?} DONE: post_balance={} delta={} total_final={}",
         market, post_total_balance, balance_delta, post_total_balance
     );
+
+    affected_accounts
 }
 
 #[cfg(test)]
