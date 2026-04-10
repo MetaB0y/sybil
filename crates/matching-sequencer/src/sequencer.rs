@@ -117,6 +117,31 @@ fn snapshot_accounts(accounts: &AccountStore) -> Vec<AccountSnapshot> {
     snapshots
 }
 
+/// Build the witness state snapshots around the system-event boundary.
+///
+/// `pre_state` represents block-start state, so accounts touched by pending
+/// system events use their captured baseline. Created accounts are omitted.
+/// `post_system_state` is the live account store after system events.
+fn build_witness_phase_snapshots(
+    accounts: &AccountStore,
+    system_account_baselines: &HashMap<AccountId, Option<Account>>,
+) -> (Vec<AccountSnapshot>, Vec<AccountSnapshot>) {
+    let mut pre_state: Vec<AccountSnapshot> = accounts
+        .iter()
+        .filter_map(
+            |(account_id, account)| match system_account_baselines.get(account_id) {
+                Some(Some(baseline)) => Some(snapshot_account(baseline)),
+                Some(None) => None,
+                None => Some(snapshot_account(account)),
+            },
+        )
+        .collect();
+    pre_state.sort_by_key(|snapshot| snapshot.id);
+
+    let post_system_state = snapshot_accounts(accounts);
+    (pre_state, post_system_state)
+}
+
 /// Convert sequencer `RejectionReason` to verifier `RejectionReason`.
 fn convert_rejection_reason(r: &RejectionReason) -> sybil_verifier::RejectionReason {
     match r {
@@ -967,22 +992,8 @@ impl BlockSequencer {
             .fold(0u64, |acc, v| acc.saturating_add(v));
         let orders_filled = pipeline_result.result.orders_filled;
 
-        // Snapshot the full block-start state. Accounts created by pending
-        // system events are omitted; accounts touched by system events use
-        // their captured block-start baseline instead of the live account.
-        let mut pre_state: Vec<AccountSnapshot> = self
-            .accounts
-            .iter()
-            .filter_map(
-                |(account_id, account)| match system_account_baselines.get(account_id) {
-                    Some(Some(baseline)) => Some(snapshot_account(baseline)),
-                    Some(None) => None,
-                    None => Some(snapshot_account(account)),
-                },
-            )
-            .collect();
-        pre_state.sort_by_key(|snapshot| snapshot.id);
-        let post_system_state = snapshot_accounts(&self.accounts);
+        let (pre_state, post_system_state) =
+            build_witness_phase_snapshots(&self.accounts, &system_account_baselines);
 
         // Snapshot total balance before settlement
         let pre_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
