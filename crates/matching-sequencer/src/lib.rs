@@ -8,6 +8,7 @@ pub mod fill_recorder;
 pub mod market_info;
 pub mod market_lifecycle;
 pub mod mempool;
+pub mod order_book;
 pub mod metrics;
 pub mod portfolio;
 pub mod price_tracker;

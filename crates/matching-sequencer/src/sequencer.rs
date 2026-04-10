@@ -17,9 +17,7 @@ use crate::market_lifecycle::MarketLifecycle;
 use crate::error::{Rejection, RejectionReason, SequencerError};
 use crate::market_info::{AccountFillRecord, MarketMetadata, PricePoint};
 use crate::settlement;
-use crate::validation::{
-    sell_reservations, validate_order_with_reservation, PositionKey,
-};
+use crate::order_book::OrderBook;
 
 /// An order submission from a participant.
 #[derive(Clone, Debug)]
@@ -41,14 +39,6 @@ pub struct BatchResult {
     pub orders_filled: usize,
 }
 
-/// A pending order that persists across batches until filled or expired.
-struct PendingOrder {
-    order: Order,
-    account_id: AccountId,
-    /// Block height when this order was created.
-    created_at: u64,
-}
-
 /// Public view of a pending order for API exposure.
 #[derive(Clone, Debug)]
 pub struct PendingOrderInfo {
@@ -63,18 +53,18 @@ pub struct PendingOrderInfo {
 }
 
 impl PendingOrderInfo {
-    fn from_pending(po: &PendingOrder, _current_height: u64, ttl: u64) -> Self {
-        let market_ids: Vec<_> = po.order.active_markets().collect();
-        let side = classify_order_side(&po.order);
+    fn from_resting(order: &Order, account_id: AccountId, created_at: u64, ttl: u64) -> Self {
+        let market_ids: Vec<_> = order.active_markets().collect();
+        let side = classify_order_side(order);
         Self {
-            order_id: po.order.id,
-            account_id: po.account_id,
+            order_id: order.id,
+            account_id,
             market_ids,
             side,
-            limit_price: po.order.limit_price,
-            remaining_qty: po.order.max_fill,
-            created_at_block: po.created_at,
-            expires_at_block: po.created_at + ttl,
+            limit_price: order.limit_price,
+            remaining_qty: order.max_fill,
+            created_at_block: created_at,
+            expires_at_block: created_at + ttl,
         }
     }
 }
@@ -266,16 +256,11 @@ pub struct BlockSequencer {
     pub accounts: AccountStore,
     /// Pluggable solver for matching optimization.
     solver: Arc<dyn Solver>,
-    order_account_map: HashMap<u64, AccountId>,
     next_order_id: u64,
-    /// Orders that weren't filled in the previous block.
-    pending_orders: Vec<PendingOrder>,
+    /// Resting orders with tracked balance/position reservations.
+    order_book: OrderBook,
     /// Current block height.
     height: u64,
-    /// Maximum number of blocks an order persists (default: 5).
-    order_ttl: u64,
-    /// Track when each order was originally created: order_id -> block height.
-    order_created_at: HashMap<u64, u64>,
     /// Markets available for trading.
     markets: MarketSet,
     /// Market groups (multi-outcome event constraints).
@@ -303,12 +288,9 @@ impl BlockSequencer {
         Self {
             accounts,
             solver,
-            order_account_map: HashMap::new(),
             next_order_id: 1,
-            pending_orders: Vec::new(),
+            order_book: OrderBook::new(3),
             height: 0,
-            order_ttl: 3,
-            order_created_at: HashMap::new(),
             markets,
             market_groups,
             last_header: None,
@@ -360,12 +342,9 @@ impl BlockSequencer {
         Self {
             accounts,
             solver,
-            order_account_map: HashMap::new(),
             next_order_id,
-            pending_orders: Vec::new(), // TODO: Tier 2 — persist pending orders
+            order_book: OrderBook::new(3), // TODO: Tier 2 — persist order book
             height,
-            order_ttl: 3,
-            order_created_at: HashMap::new(),
             markets,
             market_groups,
             last_header,
@@ -483,19 +462,21 @@ impl BlockSequencer {
         &self,
         account_id_filter: Option<AccountId>,
     ) -> Vec<PendingOrderInfo> {
-        self.pending_orders
-            .iter()
-            .filter(|po| account_id_filter.is_none_or(|aid| po.account_id == aid))
-            .map(|po| PendingOrderInfo::from_pending(po, self.height, self.order_ttl))
+        let ttl = self.order_book.ttl();
+        self.order_book
+            .resting_orders_full()
+            .filter(|(_, aid, _)| account_id_filter.is_none_or(|filter| *aid == filter))
+            .map(|(order, aid, created_at)| PendingOrderInfo::from_resting(order, aid, created_at, ttl))
             .collect()
     }
 
     /// Get pending orders for a specific market.
     pub fn market_orderbook(&self, market_id: MarketId) -> Vec<PendingOrderInfo> {
-        self.pending_orders
-            .iter()
-            .filter(|po| po.order.active_markets().any(|m| m == market_id))
-            .map(|po| PendingOrderInfo::from_pending(po, self.height, self.order_ttl))
+        let ttl = self.order_book.ttl();
+        self.order_book
+            .resting_orders_full()
+            .filter(|(order, _, _)| order.active_markets().any(|m| m == market_id))
+            .map(|(order, aid, created_at)| PendingOrderInfo::from_resting(order, aid, created_at, ttl))
             .collect()
     }
 
@@ -582,66 +563,23 @@ impl BlockSequencer {
             .map(|(&id, _)| id)
             .collect();
 
-        // Track reserved balance and positions across BOTH phases.
-        // Shared state ensures pending orders' commitments are visible to new orders.
-        let mut reserved_balance: HashMap<AccountId, i64> = HashMap::new();
-        let mut reserved_positions: HashMap<(AccountId, PositionKey), i64> = HashMap::new();
+        // ── Order Book: expire stale, remove orders for resolved markets ──
+        self.order_book.expire(self.height);
+        self.order_book.revalidate(&self.accounts, &active_markets);
 
-        // Phase 1: Re-validate and include pending orders
-        let pending = std::mem::take(&mut self.pending_orders);
-        for pending_order in pending {
-            // Skip expired orders
-            if self.height - pending_order.created_at > self.order_ttl {
-                continue;
-            }
-
-            // Skip orders for resolved/removed markets
-            let order_markets_active = pending_order
-                .order
-                .active_markets()
-                .all(|m| active_markets.contains(&m));
-            if !order_markets_active {
-                continue;
-            }
-
-            // Re-validate against current account state
-            let Some(account) = self.accounts.get(pending_order.account_id) else {
-                continue;
-            };
-
-            // Skip if account is bankrupt
-            if account.balance <= 0 {
-                continue;
-            }
-
-            // Build per-account position reservations view
-            let acct_reserved: HashMap<PositionKey, i64> = reserved_positions
-                .iter()
-                .filter(|((aid, _), _)| *aid == pending_order.account_id)
-                .map(|((_, key), &qty)| (*key, qty))
-                .collect();
-
-            let reserved = *reserved_balance.get(&pending_order.account_id).unwrap_or(&0);
-            if let Ok(cost) = validate_order_with_reservation(&pending_order.order, account, reserved, &acct_reserved) {
-                if cost > 0 {
-                    *reserved_balance.entry(pending_order.account_id).or_insert(0) += cost;
-                }
-                // Track position reservations for sells
-                for (key, qty) in sell_reservations(&pending_order.order) {
-                    *reserved_positions
-                        .entry((pending_order.account_id, key))
-                        .or_insert(0) += qty;
-                }
-                witness_orders.push(WitnessOrder {
-                    order: pending_order.order.clone(),
-                    account_id: pending_order.account_id.0,
-                    is_mm: false,
-                });
-                all_orders.push(pending_order.order);
-            }
+        // Build batch-local account map from resting orders
+        let mut order_account_map: HashMap<u64, AccountId> = HashMap::new();
+        for (order, account_id) in self.order_book.resting_orders() {
+            order_account_map.insert(order.id, account_id);
+            witness_orders.push(WitnessOrder {
+                order: order.clone(),
+                account_id: account_id.0,
+                is_mm: false,
+            });
+            all_orders.push(order.clone());
         }
 
-        // Phase 2: Process new submissions (reserved_balance carries over from Phase 1)
+        // ── Process new submissions ──
         let mut stp = GroupCoverageTracker::new(&self.market_groups);
 
         for mut sub in submissions {
@@ -666,21 +604,17 @@ impl BlockSequencer {
             let is_mm = sub.mm_constraint.is_some();
 
             // Cap MM budget to account balance — prevents cumulative overdraft.
-            // Flash liquidity skips per-order validation, but the solver's budget
-            // must never exceed what the account can actually afford.
             if let Some(ref mut mm_c) = sub.mm_constraint {
                 if account.balance <= 0 {
-                    continue; // bankrupt: skip entire MM submission
+                    continue;
                 }
                 mm_c.max_capital = mm_c.max_capital.min(account.balance as u64);
             }
 
             let mut accepted_orders: Vec<Order> = Vec::new();
-            // Track original submission index → assigned order ID for MM constraint rebuild
             let mut submission_idx_to_order_id: HashMap<usize, u64> = HashMap::new();
 
             for (sub_idx, mut order) in sub.orders.into_iter().enumerate() {
-                // Skip orders for resolved/inactive markets
                 let order_markets_active =
                     order.active_markets().all(|m| active_markets.contains(&m));
                 if !order_markets_active {
@@ -692,7 +626,7 @@ impl BlockSequencer {
                 order.id = order_id;
 
                 if is_mm {
-                    // STP: reject if this order would complete a group set
+                    // MM orders: STP check, flash liquidity (skip balance validation)
                     if stp.would_complete_set(account_id, &order) {
                         witness_rejections.push(WitnessRejection {
                             order: order.clone(),
@@ -708,8 +642,7 @@ impl BlockSequencer {
                     }
                     stp.record(account_id, &order);
                     submission_idx_to_order_id.insert(sub_idx, order_id);
-                    self.order_account_map.insert(order_id, account_id);
-                    self.order_created_at.insert(order_id, self.height);
+                    order_account_map.insert(order_id, account_id);
                     mm_order_ids_set.insert(order_id);
                     witness_orders.push(WitnessOrder {
                         order: order.clone(),
@@ -718,45 +651,38 @@ impl BlockSequencer {
                     });
                     accepted_orders.push(order);
                 } else {
-                    let reserved = *reserved_balance.get(&account_id).unwrap_or(&0);
-                    let acct_reserved: HashMap<PositionKey, i64> = reserved_positions
-                        .iter()
-                        .filter(|((aid, _), _)| *aid == account_id)
-                        .map(|((_, key), &qty)| (*key, qty))
-                        .collect();
-                    match validate_order_with_reservation(&order, account, reserved, &acct_reserved)
-                    {
-                        Ok(cost) => {
-                            // STP: reject if this order would complete a group set
-                            if stp.would_complete_set(account_id, &order) {
+                    // Non-MM orders: validate + reserve via OrderBook
+                    match self.order_book.accept(order.clone(), account_id, account, self.height) {
+                        Ok(accepted) => {
+                            if stp.would_complete_set(account_id, &accepted.order) {
+                                // Undo the book acceptance — release reservations
+                                // (settle with a "fully filled" phantom to release)
+                                let phantom_fill = Fill {
+                                    order_id: accepted.order.id,
+                                    fill_qty: accepted.order.max_fill,
+                                    fill_price: 0,
+                                };
+                                self.order_book.settle(&[phantom_fill], &HashSet::new());
                                 witness_rejections.push(WitnessRejection {
-                                    order: order.clone(),
+                                    order: accepted.order.clone(),
                                     account_id: account_id.0,
                                     reason: sybil_verifier::RejectionReason::CompleteSetFormation,
                                 });
                                 rejections.push(Rejection {
-                                    order_id,
+                                    order_id: accepted.order.id,
                                     account_id,
                                     reason: RejectionReason::CompleteSetFormation,
                                 });
                                 continue;
                             }
-                            stp.record(account_id, &order);
-                            self.order_account_map.insert(order_id, account_id);
-                            self.order_created_at.insert(order_id, self.height);
-                            if cost > 0 {
-                                *reserved_balance.entry(account_id).or_insert(0) += cost;
-                            }
-                            // Track position reservations for sells
-                            for (key, qty) in sell_reservations(&order) {
-                                *reserved_positions.entry((account_id, key)).or_insert(0) += qty;
-                            }
+                            stp.record(account_id, &accepted.order);
+                            order_account_map.insert(accepted.order.id, account_id);
                             witness_orders.push(WitnessOrder {
-                                order: order.clone(),
+                                order: accepted.order.clone(),
                                 account_id: account_id.0,
                                 is_mm: false,
                             });
-                            accepted_orders.push(order);
+                            accepted_orders.push(accepted.order);
                         }
                         Err(reason) => {
                             witness_rejections.push(WitnessRejection {
@@ -774,7 +700,7 @@ impl BlockSequencer {
                 }
             }
 
-            // Rebuild MmConstraint with assigned IDs (STP rejections already excluded)
+            // Rebuild MmConstraint with assigned IDs
             if let Some(mm_constraint) = sub.mm_constraint {
                 let old_order_ids = &mm_constraint.order_ids;
                 let old_sides = &mm_constraint.order_sides;
@@ -882,7 +808,7 @@ impl BlockSequencer {
         // Snapshot pre-state (before settlement).
         // Include MINT account so the verifier can track minting adjustments.
         let mut participating_accounts: HashSet<AccountId> =
-            self.order_account_map.values().copied().collect();
+            order_account_map.values().copied().collect();
         participating_accounts.insert(crate::account::AccountId::MINT);
         let pre_state = snapshot_accounts(&self.accounts, &participating_accounts);
 
@@ -894,7 +820,7 @@ impl BlockSequencer {
             &mut self.accounts,
             &fills,
             &problem.orders,
-            &self.order_account_map,
+            &order_account_map,
         );
 
         // Derive minting from position imbalance — solver-independent.
@@ -969,7 +895,7 @@ impl BlockSequencer {
             self.fill_recorder.record_fills(
                 &fills,
                 &order_map,
-                &self.order_account_map,
+                &order_account_map,
                 self.height,
                 timestamp_ms,
             );
@@ -1045,40 +971,8 @@ impl BlockSequencer {
         // Snapshot post-state (after settlement)
         let post_state = snapshot_accounts(&self.accounts, &participating_accounts);
 
-        // Persist unfilled non-MM orders (with reduced qty for partial fills)
-        let mut filled_qty_map: HashMap<u64, u64> = HashMap::new();
-        for f in &fills {
-            if f.fill_qty > 0 {
-                *filled_qty_map.entry(f.order_id).or_insert(0) += f.fill_qty;
-            }
-        }
-
-        let mm_order_ids: HashSet<u64> = problem
-            .mm_constraints
-            .iter()
-            .flat_map(|mm| mm.order_ids.iter().copied())
-            .collect();
-
-        for order in &problem.orders {
-            if mm_order_ids.contains(&order.id) {
-                continue;
-            }
-            let filled = filled_qty_map.get(&order.id).copied().unwrap_or(0);
-            if filled >= order.max_fill {
-                continue; // fully filled
-            }
-            if let Some(&account_id) = self.order_account_map.get(&order.id) {
-                let created_at = *self.order_created_at.get(&order.id).unwrap_or(&self.height);
-
-                let mut remainder = order.clone();
-                remainder.max_fill -= filled;
-                self.pending_orders.push(PendingOrder {
-                    order: remainder,
-                    account_id,
-                    created_at,
-                });
-            }
-        }
+        // Update order book: release filled orders' reservations, adjust partial fills
+        self.order_book.settle(&fills, &mm_order_ids_set);
 
         // Compute state root from the post-state snapshot (same data the
         // verifier will hash). Using the full AccountStore would include
@@ -1483,9 +1377,10 @@ mod tests {
         let result = run_batch(&mut seq, vec![sub], &markets, &[]);
         assert_eq!(result.rejections.len(), 0);
 
-        assert_eq!(seq.pending_orders.len(), 1);
-        assert_eq!(seq.pending_orders[0].account_id, aid);
-        assert_eq!(seq.pending_orders[0].created_at, 1);
+        assert_eq!(seq.order_book.len(), 1);
+        let (_, resting_aid, resting_created) = seq.order_book.resting_orders_full().next().unwrap();
+        assert_eq!(resting_aid, aid);
+        assert_eq!(resting_created, 1);
     }
 
     #[test]
@@ -1499,7 +1394,7 @@ mod tests {
             mm_constraint: None,
         };
         run_batch(&mut seq, vec![sub1], &markets, &[]);
-        assert_eq!(seq.pending_orders.len(), 1);
+        assert_eq!(seq.order_book.len(), 1);
 
         let result = run_batch(&mut seq, vec![], &markets, &[]);
         assert!(result.orders_submitted >= 1);
@@ -1509,7 +1404,7 @@ mod tests {
     fn test_expired_orders_removed() {
         let (markets, m0) = setup();
         let (mut seq, aid) = make_sequencer(100 * NANOS_PER_DOLLAR as i64);
-        seq.order_ttl = 2;
+        seq.order_book.set_ttl(2);
 
         let sub = OrderSubmission {
             account_id: aid,
@@ -1517,16 +1412,16 @@ mod tests {
             mm_constraint: None,
         };
         run_batch(&mut seq, vec![sub], &markets, &[]);
-        assert_eq!(seq.pending_orders.len(), 1);
+        assert_eq!(seq.order_book.len(), 1);
 
         run_batch(&mut seq, vec![], &markets, &[]);
-        assert_eq!(seq.pending_orders.len(), 1);
+        assert_eq!(seq.order_book.len(), 1);
 
         run_batch(&mut seq, vec![], &markets, &[]);
-        assert_eq!(seq.pending_orders.len(), 1);
+        assert_eq!(seq.order_book.len(), 1);
 
         run_batch(&mut seq, vec![], &markets, &[]);
-        assert_eq!(seq.pending_orders.len(), 0);
+        assert_eq!(seq.order_book.len(), 0);
     }
 
     #[test]
@@ -1546,13 +1441,13 @@ mod tests {
             mm_constraint: None,
         };
         run_batch(&mut seq, vec![sub], &markets, &[]);
-        assert_eq!(seq.pending_orders.len(), 2);
+        assert_eq!(seq.order_book.len(), 2);
 
         let mut reduced_markets = MarketSet::new();
         reduced_markets.add_binary("Market B");
 
         run_batch(&mut seq, vec![], &reduced_markets, &[]);
-        assert_eq!(seq.pending_orders.len(), 1);
+        assert_eq!(seq.order_book.len(), 1);
     }
 
     #[test]
@@ -1566,13 +1461,13 @@ mod tests {
             mm_constraint: None,
         };
         run_batch(&mut seq, vec![sub], &markets, &[]);
-        assert_eq!(seq.pending_orders.len(), 1);
+        assert_eq!(seq.order_book.len(), 1);
 
         let account = seq.accounts.get_mut(aid).unwrap();
         account.balance = 0;
 
         run_batch(&mut seq, vec![], &markets, &[]);
-        assert_eq!(seq.pending_orders.len(), 0);
+        assert_eq!(seq.order_book.len(), 0);
     }
 
     #[test]
@@ -1591,7 +1486,7 @@ mod tests {
         };
 
         run_batch(&mut seq, vec![sub], &markets, &[]);
-        assert_eq!(seq.pending_orders.len(), 0);
+        assert_eq!(seq.order_book.len(), 0);
     }
 
     // --- Fill settlement integration ---
