@@ -15,6 +15,7 @@ pub mod scenario;
 pub mod sequencer;
 pub mod settlement;
 pub mod simulation;
+pub mod store;
 pub mod validation;
 
 pub use account::{Account, AccountId, AccountStore};

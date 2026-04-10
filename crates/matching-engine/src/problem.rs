@@ -20,7 +20,7 @@ use crate::{MarketId, MarketSet, MmConstraint, Order};
 /// ```
 ///
 /// The solver enforces: sum of P(market_i YES) = 1 for each group.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct MarketGroup {
     /// Name of this group (e.g., "2024 Election")
     pub name: String,

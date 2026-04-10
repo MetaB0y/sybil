@@ -70,28 +70,104 @@ async fn main() {
         "Starting Sybil API server"
     );
 
-    // Initialize markets (empty by default, use --seed-markets to add)
-    let mut markets = MarketSet::new();
-    for name in &config.seed_markets {
-        if !name.is_empty() {
-            markets.add_binary(name);
+    // Open persistent store (if data_dir configured)
+    let store = if !config.data_dir.is_empty() {
+        let data_dir = std::path::Path::new(&config.data_dir);
+        std::fs::create_dir_all(data_dir).expect("failed to create data dir");
+        let db_path = data_dir.join("sybil.redb");
+        match matching_sequencer::store::Store::open(&db_path) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                tracing::error!(error = %e, "failed to open store, starting in-memory");
+                None
+            }
         }
-    }
+    } else {
+        None
+    };
 
-    let num_markets = markets.len();
-
-    // Initialize sequencer
-    let accounts = AccountStore::new();
+    // Try to restore state from store
     let oracle = Arc::new(AdminOracle::new());
-    let sequencer = BlockSequencer::with_default_solver(accounts, markets, vec![], oracle);
+    let restored = store.as_ref().and_then(|s| match s.load_state() {
+        Ok(state) => state,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to restore state, starting fresh");
+            None
+        }
+    });
+
     let block_interval = Duration::from_millis(config.block_interval_ms);
-    let handle =
-        SequencerHandle::spawn_with_interval(sequencer, MempoolConfig::default(), block_interval);
+
+    let handle = if let Some(state) = restored {
+        tracing::info!(
+            height = state.height,
+            markets = state.markets.len(),
+            accounts = state.accounts.iter().count(),
+            groups = state.market_groups.len(),
+            "Restored from persistent store"
+        );
+
+        let mut sequencer = BlockSequencer::restore(
+            state.accounts,
+            state.markets,
+            state.market_groups,
+            oracle,
+            state.height,
+            state.last_header,
+            state.next_order_id,
+            state.pubkey_registry,
+            state.market_statuses,
+            state.market_metadata,
+            state.last_clearing_prices,
+        );
+
+        // Add any seed markets not already present
+        for name in &config.seed_markets {
+            if !name.is_empty()
+                && !sequencer
+                    .markets()
+                    .iter()
+                    .any(|m| m.name == *name)
+            {
+                sequencer.markets_mut().add_binary(name);
+            }
+        }
+
+        SequencerHandle::spawn_with_store(
+            sequencer,
+            MempoolConfig::default(),
+            block_interval,
+            store,
+        )
+    } else {
+        // Fresh start
+        let mut markets = MarketSet::new();
+        for name in &config.seed_markets {
+            if !name.is_empty() {
+                markets.add_binary(name);
+            }
+        }
+        let num_markets = markets.len();
+
+        let accounts = AccountStore::new();
+        let sequencer = BlockSequencer::with_default_solver(accounts, markets, vec![], oracle);
+
+        tracing::info!(
+            num_markets,
+            "Starting fresh (no persistent state)"
+        );
+
+        SequencerHandle::spawn_with_store(
+            sequencer,
+            MempoolConfig::default(),
+            block_interval,
+            store,
+        )
+    };
 
     tracing::info!(
-        num_markets,
         block_interval_ms = config.block_interval_ms,
-        "Sequencer started with seed markets"
+        "Sequencer started"
     );
 
     // Build app

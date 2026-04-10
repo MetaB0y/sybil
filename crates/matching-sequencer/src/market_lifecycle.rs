@@ -43,6 +43,10 @@ impl MarketLifecycle {
         &self.market_statuses
     }
 
+    pub fn set_market_status(&mut self, market_id: MarketId, status: MarketStatus) {
+        self.market_statuses.insert(market_id, status);
+    }
+
     pub fn set_market_metadata(&mut self, market_id: MarketId, metadata: MarketMetadata) {
         self.market_metadata.insert(market_id, metadata);
     }

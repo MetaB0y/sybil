@@ -1,7 +1,7 @@
 use matching_engine::{MarketId, Nanos};
 
 /// Metadata for a market (sequencer-layer, not in matching-engine).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct MarketMetadata {
     pub description: String,
     pub category: String,

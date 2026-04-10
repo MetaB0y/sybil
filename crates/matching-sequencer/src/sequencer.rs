@@ -13,11 +13,12 @@ use tracing::{debug, error};
 
 use crate::account::{AccountId, AccountStore};
 use crate::block::{hash_header, Block, BlockHeader, BlockProduction};
+use crate::market_lifecycle::MarketLifecycle;
 use crate::error::{Rejection, RejectionReason, SequencerError};
 use crate::market_info::{AccountFillRecord, MarketMetadata, PricePoint};
 use crate::settlement;
 use crate::validation::{
-    sell_reservations, validate_order, validate_order_with_reservation, PositionKey,
+    sell_reservations, validate_order_with_reservation, PositionKey,
 };
 
 /// An order submission from a participant.
@@ -334,6 +335,47 @@ impl BlockSequencer {
         )
     }
 
+    /// Restore from persisted state.
+    pub fn restore(
+        accounts: AccountStore,
+        markets: MarketSet,
+        market_groups: Vec<MarketGroup>,
+        oracle: Arc<dyn Oracle>,
+        height: u64,
+        last_header: Option<BlockHeader>,
+        next_order_id: u64,
+        pubkey_registry: HashMap<crate::crypto::PublicKey, AccountId>,
+        market_statuses: HashMap<MarketId, MarketStatus>,
+        market_metadata: HashMap<MarketId, MarketMetadata>,
+        last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
+    ) -> Self {
+        let solver: Arc<dyn Solver> = Arc::new(matching_solver::LpSolver::new());
+        let mut lifecycle = MarketLifecycle::new(oracle);
+        for (market_id, status) in market_statuses {
+            lifecycle.set_market_status(market_id, status);
+        }
+        for (market_id, meta) in market_metadata {
+            lifecycle.set_market_metadata(market_id, meta);
+        }
+        Self {
+            accounts,
+            solver,
+            order_account_map: HashMap::new(),
+            next_order_id,
+            pending_orders: Vec::new(), // TODO: Tier 2 — persist pending orders
+            height,
+            order_ttl: 3,
+            order_created_at: HashMap::new(),
+            markets,
+            market_groups,
+            last_header,
+            price_tracker: crate::price_tracker::PriceTracker::with_clearing_prices(last_clearing_prices),
+            fill_recorder: crate::fill_recorder::FillRecorder::new(), // TODO: Tier 3 — persist fill history
+            lifecycle,
+            pubkey_registry,
+        }
+    }
+
     pub fn height(&self) -> u64 {
         self.height
     }
@@ -356,6 +398,14 @@ impl BlockSequencer {
 
     pub fn last_header(&self) -> Option<&BlockHeader> {
         self.last_header.as_ref()
+    }
+
+    pub fn next_order_id(&self) -> u64 {
+        self.next_order_id
+    }
+
+    pub fn pubkey_registry(&self) -> &HashMap<crate::crypto::PublicKey, AccountId> {
+        &self.pubkey_registry
     }
 
     /// Get the oracle-tracked status for a market. Returns `Active` if not explicitly set.
@@ -532,7 +582,9 @@ impl BlockSequencer {
             .map(|(&id, _)| id)
             .collect();
 
-        // Track reserved positions per account to prevent double-selling
+        // Track reserved balance and positions across BOTH phases.
+        // Shared state ensures pending orders' commitments are visible to new orders.
+        let mut reserved_balance: HashMap<AccountId, i64> = HashMap::new();
         let mut reserved_positions: HashMap<(AccountId, PositionKey), i64> = HashMap::new();
 
         // Phase 1: Re-validate and include pending orders
@@ -569,7 +621,11 @@ impl BlockSequencer {
                 .map(|((_, key), &qty)| (*key, qty))
                 .collect();
 
-            if validate_order(&pending_order.order, account, &acct_reserved).is_ok() {
+            let reserved = *reserved_balance.get(&pending_order.account_id).unwrap_or(&0);
+            if let Ok(cost) = validate_order_with_reservation(&pending_order.order, account, reserved, &acct_reserved) {
+                if cost > 0 {
+                    *reserved_balance.entry(pending_order.account_id).or_insert(0) += cost;
+                }
                 // Track position reservations for sells
                 for (key, qty) in sell_reservations(&pending_order.order) {
                     *reserved_positions
@@ -585,8 +641,7 @@ impl BlockSequencer {
             }
         }
 
-        // Phase 2: Process new submissions
-        let mut reserved_balance: HashMap<AccountId, i64> = HashMap::new();
+        // Phase 2: Process new submissions (reserved_balance carries over from Phase 1)
         let mut stp = GroupCoverageTracker::new(&self.market_groups);
 
         for mut sub in submissions {

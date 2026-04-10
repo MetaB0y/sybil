@@ -1,15 +1,15 @@
 use matching_engine::{MarketId, Nanos};
 
 /// Unique identifier for a resolution proposal.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ProposalId(pub u64);
 
 /// Unique identifier for a challenge.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ChallengeId(pub u64);
 
 /// How the resolution was sourced.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum OracleSource {
     /// Admin-initiated resolution (dev mode, governance multisig, etc.)
     Admin,
@@ -23,7 +23,7 @@ pub enum OracleSource {
 ///
 /// This is NOT stored inside `matching-engine`'s `Market` struct — it's
 /// managed by the sequencer alongside the market.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum MarketStatus {
     /// Market is open for trading.
     Active,
@@ -81,7 +81,7 @@ impl MarketStatus {
 }
 
 /// A proposal to resolve a market.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ResolutionProposal {
     pub id: ProposalId,
     pub market_id: MarketId,
@@ -93,7 +93,7 @@ pub struct ResolutionProposal {
 }
 
 /// A challenge against a resolution proposal.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Challenge {
     pub id: ChallengeId,
     /// Account ID of the challenger (plain u64 to avoid sequencer dependency).
@@ -107,7 +107,7 @@ pub struct Challenge {
 }
 
 /// Immutable record of a completed resolution.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ResolutionRecord {
     pub market_id: MarketId,
     /// Payout per YES share in nanos (0 to NANOS_PER_DOLLAR).

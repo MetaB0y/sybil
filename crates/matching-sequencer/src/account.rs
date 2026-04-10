@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use matching_engine::MarketId;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct AccountId(pub u64);
 
 impl AccountId {
@@ -11,7 +11,7 @@ impl AccountId {
     pub const MINT: AccountId = AccountId(u64::MAX);
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Account {
     pub id: AccountId,
     /// Balance in nanos, signed (can go negative during settlement if needed)
@@ -75,5 +75,15 @@ impl AccountStore {
 
     pub fn iter(&self) -> impl Iterator<Item = (&AccountId, &Account)> {
         self.accounts.iter()
+    }
+
+    /// Next account ID that will be assigned.
+    pub fn next_id(&self) -> u64 {
+        self.next_id
+    }
+
+    /// Restore from persisted state.
+    pub fn restore(accounts: HashMap<AccountId, Account>, next_id: u64) -> Self {
+        Self { accounts, next_id }
     }
 }

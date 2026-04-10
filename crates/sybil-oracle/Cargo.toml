@@ -6,4 +6,5 @@ description = "Pluggable oracle/resolution system for Sybil prediction markets"
 
 [dependencies]
 matching-engine = { path = "../matching-engine" }
+serde = { version = "1.0", features = ["derive"] }
 thiserror = { workspace = true }

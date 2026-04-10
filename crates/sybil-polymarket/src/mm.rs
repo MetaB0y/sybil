@@ -262,8 +262,8 @@ impl MmActor {
         for pos in &account.positions {
             if let Some(ms) = self.state.markets.get_mut(&pos.market_id) {
                 match pos.outcome.as_str() {
-                    "YES" => ms.yes_position = pos.quantity as i64,
-                    "NO" => ms.no_position = pos.quantity as i64,
+                    "YES" => ms.yes_position = pos.quantity,
+                    "NO" => ms.no_position = pos.quantity,
                     _ => {}
                 }
             }
@@ -385,12 +385,14 @@ impl MmActor {
                 });
             }
 
-            // SellYes (ask) — safe for groups (STP only tracks buys)
-            if yes_ask > 0.01 && yes_ask < 0.99 {
+            // SellYes (ask) — only to unwind existing YES inventory (no shorts)
+            if ms.yes_position > 0 && yes_ask > 0.01 && yes_ask < 0.99 {
+                let max_sell = ms.yes_position as u64;
+                let desired = (sell_size / yes_ask).max(1.0) as u64;
                 orders.push(OrderSpec::SellYes {
                     market_id: ms.sybil_market_id,
                     limit_price_nanos: (yes_ask * NANOS_PER_DOLLAR as f64) as u64,
-                    quantity: (sell_size / yes_ask).max(1.0) as u64,
+                    quantity: desired.min(max_sell),
                 });
             }
 
@@ -407,11 +409,14 @@ impl MmActor {
                     });
                 }
 
-                if no_ask > 0.01 && no_ask < 0.99 {
+                // SellNo — only to unwind existing NO inventory (no shorts)
+                if ms.no_position > 0 && no_ask > 0.01 && no_ask < 0.99 {
+                    let max_sell = ms.no_position as u64;
+                    let desired = (sell_size / no_ask).max(1.0) as u64;
                     orders.push(OrderSpec::SellNo {
                         market_id: ms.sybil_market_id,
                         limit_price_nanos: (no_ask * NANOS_PER_DOLLAR as f64) as u64,
-                        quantity: (sell_size / no_ask).max(1.0) as u64,
+                        quantity: desired.min(max_sell),
                     });
                 }
             }

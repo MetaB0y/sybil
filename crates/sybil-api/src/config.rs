@@ -18,4 +18,8 @@ pub struct ApiConfig {
     /// Seed markets to create on startup (comma-separated names).
     #[arg(long, env = "SYBIL_SEED_MARKETS", value_delimiter = ',')]
     pub seed_markets: Vec<String>,
+
+    /// Data directory for persistent storage. Empty = in-memory only (no persistence).
+    #[arg(long, default_value = "", env = "SYBIL_DATA_DIR")]
+    pub data_dir: String,
 }

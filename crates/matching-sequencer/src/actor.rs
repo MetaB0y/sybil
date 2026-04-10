@@ -168,6 +168,8 @@ struct SequencerActor {
     /// Reference-counted pause: block production halts when > 0.
     /// Multiple callers can pause independently; blocks resume only when all have resumed.
     pause_count: u32,
+    /// Persistent store (None = in-memory only).
+    store: Option<crate::store::Store>,
 }
 
 impl SequencerActor {
@@ -176,6 +178,7 @@ impl SequencerActor {
         mempool: Mempool,
         receiver: mpsc::Receiver<Message>,
         block_interval: Duration,
+        store: Option<crate::store::Store>,
     ) -> Self {
         let (block_broadcast, _) = broadcast::channel(64);
         Self {
@@ -187,6 +190,7 @@ impl SequencerActor {
             block_broadcast,
             block_interval,
             pause_count: 0,
+            store,
         }
     }
 
@@ -231,6 +235,22 @@ impl SequencerActor {
         metrics::gauge!("sybil_volume_nanos").set(block.total_volume as f64);
         metrics::gauge!("sybil_mempool_size").set(mempool_size as f64);
         metrics::histogram!("sybil_solve_time_seconds").record(bp.pipeline.total_time_secs);
+
+        // Persist state (Tier 1: accounts, markets, groups, header, counters)
+        if let Some(ref store) = self.store {
+            if let Err(e) = store.save_block(
+                &self.sequencer.accounts,
+                self.sequencer.markets(),
+                self.sequencer.market_groups(),
+                &self.sequencer.lifecycle,
+                &block.header,
+                self.sequencer.next_order_id(),
+                self.sequencer.pubkey_registry(),
+                self.sequencer.last_clearing_prices(),
+            ) {
+                tracing::error!(error = %e, "failed to persist block");
+            }
+        }
 
         // Store in history (ring buffer)
         if self.block_history.len() >= BLOCK_HISTORY_CAPACITY {
@@ -621,9 +641,19 @@ impl SequencerHandle {
         mempool_config: MempoolConfig,
         block_interval: Duration,
     ) -> Self {
+        Self::spawn_with_store(sequencer, mempool_config, block_interval, None)
+    }
+
+    /// Spawn with a custom block interval and optional persistent store.
+    pub fn spawn_with_store(
+        sequencer: BlockSequencer,
+        mempool_config: MempoolConfig,
+        block_interval: Duration,
+        store: Option<crate::store::Store>,
+    ) -> Self {
         let (sender, receiver) = mpsc::channel(256);
         let mempool = Mempool::new(mempool_config);
-        let actor = SequencerActor::new(sequencer, mempool, receiver, block_interval);
+        let actor = SequencerActor::new(sequencer, mempool, receiver, block_interval, store);
         tokio::spawn(actor.run());
         Self { sender }
     }

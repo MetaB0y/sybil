@@ -26,6 +26,16 @@ impl PriceTracker {
         }
     }
 
+    /// Restore from persisted clearing prices (Tier 1).
+    /// Price history and volumes are Tier 3 — rebuilt over time.
+    pub fn with_clearing_prices(last_clearing_prices: HashMap<MarketId, Vec<Nanos>>) -> Self {
+        Self {
+            last_clearing_prices,
+            price_history: HashMap::new(),
+            market_volumes: HashMap::new(),
+        }
+    }
+
     /// Current clearing prices. Single source of truth — replaces actor's `last_prices` cache.
     pub fn last_clearing_prices(&self) -> &HashMap<MarketId, Vec<Nanos>> {
         &self.last_clearing_prices

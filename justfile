@@ -216,8 +216,9 @@ deploy-api:
     ssh {{SERVER}} 'docker stop sybil-api sybil-polymarket 2>/dev/null; docker rm sybil-api sybil-polymarket 2>/dev/null; true'
     ssh {{SERVER}} 'docker run --rm -v polymarket-data:/data alpine rm -f /data/polymarket_mapping.json'
     ssh {{SERVER}} 'docker run -d --name sybil-api --restart unless-stopped \
-        -p 3000:3000 \
+        -p 3000:3000 -v sybil-data:/data \
         -e SYBIL_DEV_MODE=true -e SYBIL_BLOCK_INTERVAL_MS=2000 -e RUST_LOG=info \
+        -e SYBIL_DATA_DIR=/data \
         sybil-api:latest'
     ssh {{SERVER}} 'docker run -d --name sybil-polymarket --restart unless-stopped \
         -v polymarket-data:/data -e RUST_LOG=sybil_polymarket=info \

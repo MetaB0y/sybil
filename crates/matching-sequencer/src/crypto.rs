@@ -23,6 +23,18 @@ impl Hash for PublicKey {
     }
 }
 
+impl PublicKey {
+    /// Serialize to compressed SEC1 bytes (33 bytes).
+    pub fn compressed_bytes(&self) -> Vec<u8> {
+        self.0.to_sec1_point(true).as_bytes().to_vec()
+    }
+
+    /// Deserialize from compressed SEC1 bytes.
+    pub fn from_compressed_bytes(bytes: &[u8]) -> Option<Self> {
+        VerifyingKey::from_sec1_bytes(bytes).ok().map(PublicKey)
+    }
+}
+
 /// An order with a P256 ECDSA signature.
 pub struct SignedOrder {
     pub order: Order,

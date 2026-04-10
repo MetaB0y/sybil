@@ -13,7 +13,7 @@ use crate::types::MarketId;
 /// The engine only deals with binary markets. For multi-outcome scenarios
 /// (e.g., 3-candidate elections), create multiple binary markets and group
 /// them at the solver layer using `OutcomeGroup`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Market {
     pub id: MarketId,
     pub name: String,
@@ -42,7 +42,7 @@ impl Market {
 }
 
 /// A collection of markets.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct MarketSet {
     markets: HashMap<MarketId, Market>,
     next_id: u32,
@@ -96,6 +96,11 @@ impl MarketSet {
         self.markets.values()
     }
 
+    /// Iterate over all (id, market) pairs.
+    pub fn iter_with_ids(&self) -> impl Iterator<Item = (&MarketId, &Market)> {
+        self.markets.iter()
+    }
+
     /// Number of markets in the set.
     pub fn len(&self) -> usize {
         self.markets.len()
@@ -104,6 +109,16 @@ impl MarketSet {
     /// Check if the set is empty.
     pub fn is_empty(&self) -> bool {
         self.markets.is_empty()
+    }
+
+    /// Next market ID that will be assigned.
+    pub fn next_id(&self) -> u32 {
+        self.next_id
+    }
+
+    /// Restore from persisted state.
+    pub fn restore(markets: HashMap<MarketId, Market>, next_id: u32) -> Self {
+        Self { markets, next_id }
     }
 
     /// Calculate total number of atomic states for a set of markets.
