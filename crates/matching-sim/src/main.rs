@@ -742,6 +742,7 @@ fn witness_from_problem(problem: &Problem, result: &PipelineResult) -> BlockWitn
         mm_constraints: problem.mm_constraints.clone(),
         market_groups: problem.market_groups.clone(),
         pre_state: vec![],
+        post_system_state: vec![],
         post_state: vec![],
         resolved_markets: vec![],
     }
@@ -1367,6 +1368,7 @@ fn witness_from_milp(problem: &Problem, result: &matching_solver::MilpResult) ->
         mm_constraints: problem.mm_constraints.clone(),
         market_groups: problem.market_groups.clone(),
         pre_state: vec![],
+        post_system_state: vec![],
         post_state: vec![],
         resolved_markets: vec![],
     }

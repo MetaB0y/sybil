@@ -1115,7 +1115,8 @@ impl BlockSequencer {
             minting_cost: 0,
             mm_constraints: problem.mm_constraints.clone(),
             market_groups: problem.market_groups.clone(),
-            pre_state,
+            pre_state: pre_state.clone(),
+            post_system_state: pre_state,
             post_state,
             resolved_markets,
         };

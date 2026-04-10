@@ -318,7 +318,8 @@ mod tests {
             minting_cost: 0,
             mm_constraints: vec![],
             market_groups: vec![],
-            pre_state,
+            pre_state: pre_state.clone(),
+            post_system_state: pre_state,
             post_state,
             resolved_markets: vec![],
         };
@@ -368,7 +369,8 @@ mod tests {
             minting_cost: 0,
             mm_constraints: vec![],
             market_groups: vec![],
-            pre_state,
+            pre_state: pre_state.clone(),
+            post_system_state: pre_state,
             post_state,
             resolved_markets: vec![],
         };
@@ -418,7 +420,8 @@ mod tests {
             minting_cost: 0,
             mm_constraints: vec![],
             market_groups: vec![],
-            pre_state,
+            pre_state: pre_state.clone(),
+            post_system_state: pre_state,
             post_state,
             resolved_markets: vec![],
         };
@@ -453,7 +456,8 @@ mod tests {
             minting_cost: 0,
             mm_constraints: vec![],
             market_groups: vec![],
-            pre_state,
+            pre_state: pre_state.clone(),
+            post_system_state: pre_state,
             post_state,
             resolved_markets: vec![],
         };
@@ -504,7 +508,8 @@ mod tests {
             minting_cost: 0,
             mm_constraints: vec![],
             market_groups: vec![],
-            pre_state,
+            pre_state: pre_state.clone(),
+            post_system_state: pre_state,
             post_state,
             resolved_markets: vec![],
         };
@@ -559,7 +564,8 @@ mod tests {
             minting_cost: 0,
             mm_constraints: vec![],
             market_groups: vec![],
-            pre_state,
+            pre_state: pre_state.clone(),
+            post_system_state: pre_state,
             post_state,
             resolved_markets: vec![],
         };
@@ -636,7 +642,8 @@ mod tests {
             minting_cost: 0,
             mm_constraints: vec![],
             market_groups: vec![],
-            pre_state,
+            pre_state: pre_state.clone(),
+            post_system_state: pre_state,
             post_state,
             resolved_markets: vec![],
         };
@@ -707,7 +714,8 @@ mod tests {
             minting_cost: 0,
             mm_constraints: vec![],
             market_groups: vec![],
-            pre_state,
+            pre_state: pre_state.clone(),
+            post_system_state: pre_state,
             post_state,
             resolved_markets: vec![],
         };
@@ -780,7 +788,8 @@ mod tests {
             minting_cost: 0,
             mm_constraints: vec![],
             market_groups: vec![],
-            pre_state,
+            pre_state: pre_state.clone(),
+            post_system_state: pre_state,
             post_state,
             resolved_markets: vec![],
         };

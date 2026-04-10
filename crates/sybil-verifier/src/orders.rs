@@ -217,6 +217,7 @@ mod tests {
             mm_constraints: vec![],
             market_groups: vec![],
             pre_state,
+            post_system_state: vec![],
             post_state: vec![],
             resolved_markets: vec![],
         }

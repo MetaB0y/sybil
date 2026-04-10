@@ -240,6 +240,7 @@ mod tests {
             mm_constraints: vec![],
             market_groups: vec![],
             pre_state: vec![],
+            post_system_state: vec![],
             post_state,
             resolved_markets: vec![],
         };
@@ -270,6 +271,7 @@ mod tests {
             mm_constraints: vec![],
             market_groups: vec![],
             pre_state: vec![],
+            post_system_state: vec![],
             post_state,
             resolved_markets: vec![],
         };
@@ -317,6 +319,7 @@ mod tests {
             mm_constraints: vec![],
             market_groups: vec![],
             pre_state: vec![],
+            post_system_state: vec![],
             post_state,
             resolved_markets: vec![],
         };
@@ -355,6 +358,7 @@ mod tests {
             mm_constraints: vec![],
             market_groups: vec![],
             pre_state: vec![],
+            post_system_state: vec![],
             post_state,
             resolved_markets: vec![],
         };
