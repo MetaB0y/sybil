@@ -190,6 +190,7 @@ mod tests {
     use super::*;
     use crate::types::{WitnessBlockHeader, WitnessOrder, WitnessRejection};
     use matching_engine::{outcome_buy, outcome_sell, MarketSet, NANOS_PER_DOLLAR};
+    use proptest::prelude::*;
     use std::collections::HashMap;
 
     fn empty_header() -> WitnessBlockHeader {
@@ -460,5 +461,167 @@ mod tests {
             .violations
             .iter()
             .any(|v| v.kind == ViolationKind::FalseRejection));
+    }
+
+    proptest! {
+        #[test]
+        fn prop_buy_validation_is_monotone_in_balance(
+            low_balance in 0i64..=5_000_000_000,
+            extra_balance in 0i64..=5_000_000_000,
+            limit_price in prop_oneof![Just(100_000_000u64), Just(300_000_000u64), Just(500_000_000u64)],
+            max_fill in 1u64..=10,
+        ) {
+            let mut markets = MarketSet::new();
+            let m0 = markets.add_binary("M0");
+            let order = outcome_buy(&markets, 1, m0, 0, limit_price, max_fill);
+
+            let low_state = vec![AccountSnapshot {
+                id: 0,
+                balance: low_balance,
+                total_deposited: 0,
+                positions: vec![],
+                events_digest: [0u8; 32],
+            }];
+            let high_state = vec![AccountSnapshot {
+                id: 0,
+                balance: low_balance.saturating_add(extra_balance).saturating_add(1),
+                total_deposited: 0,
+                positions: vec![],
+                events_digest: [0u8; 32],
+            }];
+
+            let low_result = verify_orders(&make_witness_with_orders(
+                vec![WitnessOrder { order: order.clone(), account_id: 0, is_mm: false }],
+                vec![],
+                low_state.clone(),
+                low_state,
+            ));
+            let high_result = verify_orders(&make_witness_with_orders(
+                vec![WitnessOrder { order, account_id: 0, is_mm: false }],
+                vec![],
+                high_state.clone(),
+                high_state,
+            ));
+
+            prop_assert!(!low_result.valid || high_result.valid);
+        }
+
+        #[test]
+        fn prop_sell_validation_is_monotone_in_position(
+            position in 0i64..=20,
+            extra_position in 0i64..=20,
+            max_fill in 1u64..=10,
+        ) {
+            let mut markets = MarketSet::new();
+            let m0 = markets.add_binary("M0");
+            let order = outcome_sell(&markets, 1, m0, 0, 500_000_000, max_fill);
+
+            let low_state = vec![AccountSnapshot {
+                id: 0,
+                balance: NANOS_PER_DOLLAR as i64,
+                total_deposited: 0,
+                positions: vec![(m0, 0, position)],
+                events_digest: [0u8; 32],
+            }];
+            let high_state = vec![AccountSnapshot {
+                id: 0,
+                balance: NANOS_PER_DOLLAR as i64,
+                total_deposited: 0,
+                positions: vec![(m0, 0, position + extra_position + 1)],
+                events_digest: [0u8; 32],
+            }];
+
+            let low_result = verify_orders(&make_witness_with_orders(
+                vec![WitnessOrder { order: order.clone(), account_id: 0, is_mm: false }],
+                vec![],
+                low_state.clone(),
+                low_state,
+            ));
+            let high_result = verify_orders(&make_witness_with_orders(
+                vec![WitnessOrder { order, account_id: 0, is_mm: false }],
+                vec![],
+                high_state.clone(),
+                high_state,
+            ));
+
+            prop_assert!(!low_result.valid || high_result.valid);
+        }
+
+        #[test]
+        fn prop_reservation_can_only_reduce_later_buy_capacity(
+            limit_price_1 in prop_oneof![Just(100_000_000u64), Just(300_000_000u64), Just(500_000_000u64)],
+            limit_price_2 in prop_oneof![Just(100_000_000u64), Just(300_000_000u64), Just(500_000_000u64)],
+            max_fill_1 in 1u64..=5,
+            max_fill_2 in 1u64..=5,
+        ) {
+            let mut markets = MarketSet::new();
+            let m0 = markets.add_binary("M0");
+            let order1 = outcome_buy(&markets, 1, m0, 0, limit_price_1, max_fill_1);
+            let order2 = outcome_buy(&markets, 2, m0, 0, limit_price_2, max_fill_2);
+
+            let cost1 = limit_price_1 as i64 * max_fill_1 as i64;
+            let cost2 = limit_price_2 as i64 * max_fill_2 as i64;
+            let state = vec![AccountSnapshot {
+                id: 0,
+                balance: cost1 + cost2 - 1,
+                total_deposited: 0,
+                positions: vec![],
+                events_digest: [0u8; 32],
+            }];
+
+            let combined_result = verify_orders(&make_witness_with_orders(
+                vec![
+                    WitnessOrder { order: order1, account_id: 0, is_mm: false },
+                    WitnessOrder { order: order2.clone(), account_id: 0, is_mm: false },
+                ],
+                vec![],
+                state.clone(),
+                state.clone(),
+            ));
+            let second_only_result = verify_orders(&make_witness_with_orders(
+                vec![WitnessOrder { order: order2, account_id: 0, is_mm: false }],
+                vec![],
+                state.clone(),
+                state,
+            ));
+
+            prop_assert!(second_only_result.valid);
+            prop_assert!(combined_result.violations.iter().any(|v| v.kind == ViolationKind::InsufficientBalance));
+        }
+
+        #[test]
+        fn prop_insufficient_position_rejection_metadata_matches_snapshot(
+            available in 0i64..=20,
+            max_fill in 1u64..=10,
+        ) {
+            let mut markets = MarketSet::new();
+            let m0 = markets.add_binary("M0");
+            let order = outcome_sell(&markets, 1, m0, 0, 500_000_000, max_fill);
+            let state = vec![AccountSnapshot {
+                id: 0,
+                balance: NANOS_PER_DOLLAR as i64,
+                total_deposited: 0,
+                positions: vec![(m0, 0, available)],
+                events_digest: [0u8; 32],
+            }];
+
+            let result = verify_orders(&make_witness_with_orders(
+                vec![],
+                vec![WitnessRejection {
+                    order,
+                    account_id: 0,
+                    reason: RejectionReason::InsufficientPosition {
+                        market: m0,
+                        outcome: 0,
+                        required: max_fill as i64,
+                        available,
+                    },
+                }],
+                state.clone(),
+                state,
+            ));
+
+            prop_assert!(result.valid, "violations: {:?}", result.violations);
+        }
     }
 }
