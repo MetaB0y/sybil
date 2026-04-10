@@ -6,9 +6,9 @@
 //! # Verification Layers
 //!
 //! 1. **Match verification** — per-fill checks + market-level invariants
-//! 2. **Settlement verification** — re-derive post-state from pre-state + fills
+//! 2. **Settlement verification** — re-derive post-state from post-system state + fills
 //! 3. **Block verification** — state root, parent hash, height, counts
-//! 4. **Order verification** — pre-state balance/position checks, rejection correctness
+//! 4. **Order verification** — post-system balance/position checks, rejection correctness
 //!
 //! # Usage
 //!
@@ -42,7 +42,7 @@ pub fn verify_match(witness: &BlockWitness, diagnostics: bool) -> VerificationRe
     match_verifier::verify_match(witness, diagnostics)
 }
 
-/// Verify that `pre_state + fills → post_state`.
+/// Verify that `post_system_state + fills → post_state`.
 pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
     settlement::verify_settlement(witness)
 }
@@ -52,7 +52,7 @@ pub fn verify_block(witness: &BlockWitness) -> VerificationResult {
     block::verify_block(witness)
 }
 
-/// Verify order validation (balance/position checks, rejection correctness).
+/// Verify order validation (post-system balance/position checks, rejection correctness).
 pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
     orders::verify_orders(witness)
 }

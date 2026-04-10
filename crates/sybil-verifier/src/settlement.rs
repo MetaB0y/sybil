@@ -1,6 +1,6 @@
 //! Layer 2: Settlement verification.
 //!
-//! Re-derives post-state from pre-state + fills and compares against
+//! Re-derives post-state from post-system-state + fills and compares against
 //! the claimed post-state. Uses the same settlement logic as the sequencer.
 
 use std::collections::HashMap;
@@ -10,7 +10,7 @@ use matching_engine::{compute_fill_settlement, derive_minting, MarketId, Order};
 use crate::types::{AccountSnapshot, BlockWitness};
 use crate::violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
 
-/// Verify that `pre_state + fills → post_state`.
+/// Verify that `post_system_state + fills → post_state`.
 pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
     let mut violations = Vec::new();
     let mut stats = VerificationStats::default();
@@ -29,11 +29,11 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
         .map(|wo| (wo.order.id, wo.account_id))
         .collect();
 
-    // Clone pre-state into working state
+    // Clone post-system state into working state
     let mut balances: HashMap<u64, i64> = HashMap::new();
     let mut positions: HashMap<u64, HashMap<(MarketId, u8), i64>> = HashMap::new();
 
-    for snap in &witness.pre_state {
+    for snap in &witness.post_system_state {
         balances.insert(snap.id, snap.balance);
         let mut pos_map: HashMap<(MarketId, u8), i64> = HashMap::new();
         for &(market, outcome, qty) in &snap.positions {
@@ -82,7 +82,7 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
     {
         const MINT_ID: u64 = u64::MAX;
 
-        let mint_in_witness = witness.pre_state.iter().any(|s| s.id == MINT_ID)
+        let mint_in_witness = witness.post_system_state.iter().any(|s| s.id == MINT_ID)
             || witness.post_state.iter().any(|s| s.id == MINT_ID);
 
         if mint_in_witness {
@@ -121,7 +121,9 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
                             kind: ViolationKind::MintingWithoutClearingPrice,
                             details: format!(
                                 "Market {:?}: position imbalance {} but no {} clearing price",
-                                adj.market_id, adj.position_delta.abs(), side
+                                adj.market_id,
+                                adj.position_delta.abs(),
+                                side
                             ),
                         });
                     }
@@ -320,6 +322,54 @@ mod tests {
             market_groups: vec![],
             pre_state: pre_state.clone(),
             post_system_state: pre_state,
+            post_state,
+            resolved_markets: vec![],
+        };
+
+        let result = verify_settlement(&witness);
+        assert!(result.valid, "Violations: {:?}", result.violations);
+    }
+
+    #[test]
+    fn test_settlement_starts_from_post_system_state() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("M0");
+
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
+        let fill = Fill::new(1, 10, 500_000_000);
+
+        let post_system_state = vec![AccountSnapshot {
+            id: 0,
+            balance: 100 * NANOS_PER_DOLLAR as i64,
+            positions: vec![],
+            events_digest: [0u8; 32],
+        }];
+
+        let post_state = vec![AccountSnapshot {
+            id: 0,
+            balance: 95 * NANOS_PER_DOLLAR as i64,
+            positions: vec![(m0, 0, 10)],
+            events_digest: [0u8; 32],
+        }];
+
+        let witness = BlockWitness {
+            header: empty_header(),
+            previous_header: None,
+            orders: vec![WitnessOrder {
+                order,
+                account_id: 0,
+                is_mm: false,
+            }],
+            rejections: vec![],
+            system_events: vec![],
+            fills: vec![fill],
+            clearing_prices: HashMap::new(),
+            total_welfare: 0,
+            minting_cost: 0,
+            mm_constraints: vec![],
+            market_groups: vec![],
+            pre_state: vec![],
+            post_system_state,
             post_state,
             resolved_markets: vec![],
         };

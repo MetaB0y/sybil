@@ -14,11 +14,11 @@ use tracing::{debug, error};
 
 use crate::account::{Account, AccountId, AccountStore};
 use crate::block::{hash_header, Block, BlockHeader, BlockProduction};
-use crate::market_lifecycle::MarketLifecycle;
 use crate::error::{Rejection, RejectionReason, SequencerError};
 use crate::market_info::{AccountFillRecord, MarketMetadata, PricePoint};
-use crate::settlement;
+use crate::market_lifecycle::MarketLifecycle;
 use crate::order_book::OrderBook;
+use crate::settlement;
 use crate::system_event::SystemEvent;
 
 /// An order submission from a participant.
@@ -305,6 +305,9 @@ pub struct BlockSequencer {
     pubkey_registry: HashMap<crate::crypto::PublicKey, AccountId>,
     /// Administrative state changes that should be included in the next block.
     pending_system_events: Vec<SystemEvent>,
+    /// Block-start baselines for accounts touched by pending system events.
+    /// `None` means the account did not exist before the first system event.
+    pending_system_account_baselines: HashMap<AccountId, Option<Account>>,
 }
 
 impl BlockSequencer {
@@ -329,6 +332,7 @@ impl BlockSequencer {
             lifecycle: crate::market_lifecycle::MarketLifecycle::new(oracle),
             pubkey_registry: HashMap::new(),
             pending_system_events: Vec::new(),
+            pending_system_account_baselines: HashMap::new(),
         }
     }
 
@@ -379,11 +383,14 @@ impl BlockSequencer {
             markets,
             market_groups,
             last_header,
-            price_tracker: crate::price_tracker::PriceTracker::with_clearing_prices(last_clearing_prices),
+            price_tracker: crate::price_tracker::PriceTracker::with_clearing_prices(
+                last_clearing_prices,
+            ),
             fill_recorder: crate::fill_recorder::FillRecorder::new(), // TODO: Tier 3 — persist fill history
             lifecycle,
             pubkey_registry,
             pending_system_events: Vec::new(),
+            pending_system_account_baselines: HashMap::new(),
         }
     }
 
@@ -489,8 +496,26 @@ impl BlockSequencer {
         self.pubkey_registry.get(pubkey).copied()
     }
 
+    fn capture_system_account_baseline(&mut self, account_id: AccountId) {
+        if self
+            .pending_system_account_baselines
+            .contains_key(&account_id)
+        {
+            return;
+        }
+        self.pending_system_account_baselines
+            .insert(account_id, self.accounts.get(account_id).cloned());
+    }
+
+    fn capture_missing_system_account(&mut self, account_id: AccountId) {
+        self.pending_system_account_baselines
+            .entry(account_id)
+            .or_insert(None);
+    }
+
     pub fn create_account(&mut self, initial_balance: i64) -> AccountId {
         let account_id = self.accounts.create_account(initial_balance);
+        self.capture_missing_system_account(account_id);
         self.record_system_event(SystemEvent::CreateAccount {
             account_id,
             initial_balance,
@@ -503,6 +528,7 @@ impl BlockSequencer {
         account_id: AccountId,
         amount: i64,
     ) -> Result<Account, SequencerError> {
+        self.capture_system_account_baseline(account_id);
         let account = self.accounts.get_mut(account_id).ok_or({
             SequencerError::Rejected(Rejection {
                 order_id: 0,
@@ -531,7 +557,9 @@ impl BlockSequencer {
         self.order_book
             .resting_orders_full()
             .filter(|(_, aid, _)| account_id_filter.is_none_or(|filter| *aid == filter))
-            .map(|(order, aid, created_at)| PendingOrderInfo::from_resting(order, aid, created_at, ttl))
+            .map(|(order, aid, created_at)| {
+                PendingOrderInfo::from_resting(order, aid, created_at, ttl)
+            })
             .collect()
     }
 
@@ -541,7 +569,9 @@ impl BlockSequencer {
         self.order_book
             .resting_orders_full()
             .filter(|(order, _, _)| order.active_markets().any(|m| m == market_id))
-            .map(|(order, aid, created_at)| PendingOrderInfo::from_resting(order, aid, created_at, ttl))
+            .map(|(order, aid, created_at)| {
+                PendingOrderInfo::from_resting(order, aid, created_at, ttl)
+            })
             .collect()
     }
 
@@ -573,6 +603,18 @@ impl BlockSequencer {
                 payout_nanos,
                 record,
             } => {
+                let affected_accounts: Vec<AccountId> = self
+                    .accounts
+                    .iter()
+                    .filter_map(|(&account_id, account)| {
+                        let yes_pos = account.position(market_id, 0);
+                        let no_pos = account.position(market_id, 1);
+                        (yes_pos != 0 || no_pos != 0).then_some(account_id)
+                    })
+                    .collect();
+                for account_id in &affected_accounts {
+                    self.capture_system_account_baseline(*account_id);
+                }
                 let affected_accounts =
                     settlement::resolve_market(&mut self.accounts, market_id, payout_nanos);
                 self.record_system_event(SystemEvent::MarketResolved {
@@ -608,6 +650,7 @@ impl BlockSequencer {
         self.height += 1;
         tracing::Span::current().record("height", self.height);
         let system_events = std::mem::take(&mut self.pending_system_events);
+        let system_account_baselines = std::mem::take(&mut self.pending_system_account_baselines);
 
         for event in &system_events {
             match event {
@@ -616,16 +659,17 @@ impl BlockSequencer {
                     initial_balance,
                 } => {
                     if let Some(account) = self.accounts.get_mut(*account_id) {
-                        let encoded =
-                            crate::digest::encode_create_account_event(*initial_balance, self.height);
+                        let encoded = crate::digest::encode_create_account_event(
+                            *initial_balance,
+                            self.height,
+                        );
                         account.events_digest =
                             crate::digest::update_digest(&account.events_digest, &encoded);
                     }
                 }
                 SystemEvent::Deposit { account_id, amount } => {
                     if let Some(account) = self.accounts.get_mut(*account_id) {
-                        let encoded =
-                            crate::digest::encode_deposit_event(*amount, self.height);
+                        let encoded = crate::digest::encode_deposit_event(*amount, self.height);
                         account.events_digest =
                             crate::digest::update_digest(&account.events_digest, &encoded);
                     }
@@ -765,16 +809,16 @@ impl BlockSequencer {
                     accepted_orders.push(order);
                 } else {
                     // Non-MM orders: validate + reserve via OrderBook
-                    match self.order_book.accept(order.clone(), account_id, account, self.height) {
+                    match self
+                        .order_book
+                        .accept(order.clone(), account_id, account, self.height)
+                    {
                         Ok(accepted) => {
                             if stp.would_complete_set(account_id, &accepted.order) {
                                 // Undo the book acceptance — release reservations
                                 // (settle with a "fully filled" phantom to release)
-                                let phantom_fill = Fill::new(
-                                    accepted.order.id,
-                                    accepted.order.max_fill,
-                                    0,
-                                );
+                                let phantom_fill =
+                                    Fill::new(accepted.order.id, accepted.order.max_fill, 0);
                                 self.order_book.settle(&[phantom_fill], &HashSet::new());
                                 witness_rejections.push(WitnessRejection {
                                     order: accepted.order.clone(),
@@ -942,7 +986,46 @@ impl BlockSequencer {
                 }
             }
         }
-        let pre_state = snapshot_accounts(&self.accounts, &participating_accounts);
+        let mut pre_state: Vec<AccountSnapshot> = participating_accounts
+            .iter()
+            .filter_map(
+                |account_id| match system_account_baselines.get(account_id) {
+                    Some(Some(account)) => Some(AccountSnapshot {
+                        id: account_id.0,
+                        balance: account.balance,
+                        positions: {
+                            let mut positions: Vec<_> = account
+                                .positions
+                                .iter()
+                                .filter(|(_, &qty)| qty != 0)
+                                .map(|(&(market, outcome), &qty)| (market, outcome, qty))
+                                .collect();
+                            positions.sort_by_key(|&(market, outcome, _)| (market.0, outcome));
+                            positions
+                        },
+                        events_digest: account.events_digest,
+                    }),
+                    Some(None) => None,
+                    None => self.accounts.get(*account_id).map(|account| {
+                        let mut positions: Vec<_> = account
+                            .positions
+                            .iter()
+                            .filter(|(_, &qty)| qty != 0)
+                            .map(|(&(market, outcome), &qty)| (market, outcome, qty))
+                            .collect();
+                        positions.sort_by_key(|&(market, outcome, _)| (market.0, outcome));
+                        AccountSnapshot {
+                            id: account_id.0,
+                            balance: account.balance,
+                            positions,
+                            events_digest: account.events_digest,
+                        }
+                    }),
+                },
+            )
+            .collect();
+        pre_state.sort_by_key(|snapshot| snapshot.id);
+        let post_system_state = snapshot_accounts(&self.accounts, &participating_accounts);
 
         // Snapshot total balance before settlement
         let pre_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
@@ -957,10 +1040,16 @@ impl BlockSequencer {
                 .markets
                 .iter()
                 .map(|market| {
-                    let total_yes: i64 =
-                        self.accounts.iter().map(|(_, a)| a.position(market.id, 0)).sum();
-                    let total_no: i64 =
-                        self.accounts.iter().map(|(_, a)| a.position(market.id, 1)).sum();
+                    let total_yes: i64 = self
+                        .accounts
+                        .iter()
+                        .map(|(_, a)| a.position(market.id, 0))
+                        .sum();
+                    let total_no: i64 = self
+                        .accounts
+                        .iter()
+                        .map(|(_, a)| a.position(market.id, 1))
+                        .sum();
                     (market.id, total_yes, total_no)
                 })
                 .collect();
@@ -1115,8 +1204,8 @@ impl BlockSequencer {
             minting_cost: 0,
             mm_constraints: problem.mm_constraints.clone(),
             market_groups: problem.market_groups.clone(),
-            pre_state: pre_state.clone(),
-            post_system_state: pre_state,
+            pre_state,
+            post_system_state,
             post_state,
             resolved_markets,
         };
@@ -1469,7 +1558,8 @@ mod tests {
         assert_eq!(result.rejections.len(), 0);
 
         assert_eq!(seq.order_book.len(), 1);
-        let (_, resting_aid, resting_created) = seq.order_book.resting_orders_full().next().unwrap();
+        let (_, resting_aid, resting_created) =
+            seq.order_book.resting_orders_full().next().unwrap();
         assert_eq!(resting_aid, aid);
         assert_eq!(resting_created, 1);
     }
@@ -1662,8 +1752,14 @@ mod tests {
         seq.produce_block(vec![buy_sub, sell_sub], 1000);
 
         assert_ne!(seq.accounts.get(buyer_id).unwrap().events_digest, [0u8; 32]);
-        assert_ne!(seq.accounts.get(seller_id).unwrap().events_digest, [0u8; 32]);
-        assert_eq!(seq.accounts.get(untouched_id).unwrap().events_digest, [0u8; 32]);
+        assert_ne!(
+            seq.accounts.get(seller_id).unwrap().events_digest,
+            [0u8; 32]
+        );
+        assert_eq!(
+            seq.accounts.get(untouched_id).unwrap().events_digest,
+            [0u8; 32]
+        );
     }
 
     // --- Block height counter ---
@@ -1719,6 +1815,92 @@ mod tests {
     }
 
     #[test]
+    fn test_create_account_uses_post_system_state_for_orders() {
+        let (markets, m0) = setup();
+        let accounts = AccountStore::new();
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            Arc::new(AdminOracle::new()),
+        );
+
+        let aid = seq.create_account(10 * NANOS_PER_DOLLAR as i64);
+        let sub = OrderSubmission {
+            account_id: aid,
+            orders: vec![outcome_buy(&markets, 0, m0, 0, 500_000_000, 1)],
+            mm_constraint: None,
+        };
+
+        let bp = seq.produce_block(vec![sub], 0);
+
+        assert!(bp
+            .witness
+            .pre_state
+            .iter()
+            .all(|snapshot| snapshot.id != aid.0));
+        let post_system = bp
+            .witness
+            .post_system_state
+            .iter()
+            .find(|snapshot| snapshot.id == aid.0)
+            .expect("created account should exist after system events");
+        assert_eq!(post_system.balance, 10 * NANOS_PER_DOLLAR as i64);
+
+        let verification = sybil_verifier::verify_full(&bp.witness, false);
+        assert!(
+            verification.valid,
+            "Violations: {:?}",
+            verification.violations
+        );
+    }
+
+    #[test]
+    fn test_deposit_keeps_block_start_pre_state() {
+        let (markets, m0) = setup();
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(0);
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            Arc::new(AdminOracle::new()),
+        );
+
+        seq.fund_account(aid, 10 * NANOS_PER_DOLLAR as i64).unwrap();
+        let sub = OrderSubmission {
+            account_id: aid,
+            orders: vec![outcome_buy(&markets, 0, m0, 0, 500_000_000, 1)],
+            mm_constraint: None,
+        };
+
+        let bp = seq.produce_block(vec![sub], 0);
+
+        let pre_state = bp
+            .witness
+            .pre_state
+            .iter()
+            .find(|snapshot| snapshot.id == aid.0)
+            .expect("funded account should exist at block start");
+        assert_eq!(pre_state.balance, 0);
+
+        let post_system = bp
+            .witness
+            .post_system_state
+            .iter()
+            .find(|snapshot| snapshot.id == aid.0)
+            .expect("funded account should exist after system events");
+        assert_eq!(post_system.balance, 10 * NANOS_PER_DOLLAR as i64);
+
+        let verification = sybil_verifier::verify_full(&bp.witness, false);
+        assert!(
+            verification.valid,
+            "Violations: {:?}",
+            verification.violations
+        );
+    }
+
+    #[test]
     fn test_state_root_in_block() {
         let (markets, m0) = setup();
         let mut accounts = AccountStore::new();
@@ -1741,8 +1923,7 @@ mod tests {
         let bp2 = seq.produce_block(vec![sub], 0);
 
         // State root matches the witness post-state (what verifier will check)
-        let expected_root =
-            sybil_verifier::block::compute_state_root(&bp2.witness.post_state);
+        let expected_root = sybil_verifier::block::compute_state_root(&bp2.witness.post_state);
         assert_eq!(bp2.block.header.state_root, expected_root);
 
         // Second block includes more accounts in the witness, so state root

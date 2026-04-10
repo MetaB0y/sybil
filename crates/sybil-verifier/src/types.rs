@@ -38,7 +38,7 @@ pub struct BlockWitness {
     pub market_groups: Vec<MarketGroup>,
 
     // -- Account state --
-    /// Account snapshots before fill settlement, sorted by id.
+    /// Account snapshots at block start, before any system events, sorted by id.
     pub pre_state: Vec<AccountSnapshot>,
     /// Account snapshots after system events and before fills, sorted by id.
     pub post_system_state: Vec<AccountSnapshot>,

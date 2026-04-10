@@ -1,6 +1,6 @@
 //! Layer 4: Order validation verification.
 //!
-//! Checks that accepted orders have valid pre-state coverage (balance for
+//! Checks that accepted orders have valid post-system coverage (balance for
 //! buys, position for sells), that rejections are correct, and that
 //! intra-batch double-spends are detected.
 
@@ -14,9 +14,13 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
     let mut violations = Vec::new();
     let stats = VerificationStats::default();
 
-    // Build pre-state lookup
-    let pre_state: HashMap<u64, &AccountSnapshot> =
-        witness.pre_state.iter().map(|s| (s.id, s)).collect();
+    // Build post-system-state lookup. Orders are validated after system
+    // events for the block have been applied, but before any fills settle.
+    let post_system_state: HashMap<u64, &AccountSnapshot> = witness
+        .post_system_state
+        .iter()
+        .map(|s| (s.id, s))
+        .collect();
 
     // Track cumulative balance reservations per account (intra-batch)
     let mut reserved_balance: HashMap<u64, i64> = HashMap::new();
@@ -28,8 +32,8 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
             continue;
         }
 
-        let Some(snap) = pre_state.get(&wo.account_id) else {
-            // Account not found in pre-state — this is suspicious but the
+        let Some(snap) = post_system_state.get(&wo.account_id) else {
+            // Account not found in post-system state — this is suspicious but the
             // sequencer might handle it differently. Skip for now.
             continue;
         };
@@ -66,7 +70,7 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
                         let outcome = s as u8;
                         let sell_qty = (-order.payoffs[s] as i64) * order.max_fill as i64;
 
-                        // Look up position in pre-state snapshot
+                        // Look up position in post-system-state snapshot
                         let available = snap
                             .positions
                             .iter()
@@ -92,15 +96,15 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
 
     // Verify rejections are correct
     for rej in &witness.rejections {
-        let Some(snap) = pre_state.get(&rej.account_id) else {
-            // AccountNotFound rejections are valid if account isn't in pre-state
+        let Some(snap) = post_system_state.get(&rej.account_id) else {
+            // AccountNotFound rejections are valid if account isn't in post-system state
             match &rej.reason {
                 RejectionReason::AccountNotFound => continue,
                 _ => {
                     violations.push(Violation {
                         kind: ViolationKind::IncorrectRejectionReason,
                         details: format!(
-                            "Order {} (account {}): rejected for {:?} but account not in pre-state",
+                            "Order {} (account {}): rejected for {:?} but account not in post-system state",
                             rej.order.id, rej.account_id, rej.reason
                         ),
                     });
@@ -158,11 +162,11 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
                 }
             }
             RejectionReason::AccountNotFound => {
-                // Account exists in pre-state but rejected as not found
+                // Account exists in post-system state but rejected as not found
                 violations.push(Violation {
                     kind: ViolationKind::FalseRejection,
                     details: format!(
-                        "Order {} (account {}): rejected as AccountNotFound but account exists in pre-state",
+                        "Order {} (account {}): rejected as AccountNotFound but account exists in post-system state",
                         rej.order.id, rej.account_id
                     ),
                 });
@@ -203,6 +207,7 @@ mod tests {
         orders: Vec<WitnessOrder>,
         rejections: Vec<WitnessRejection>,
         pre_state: Vec<AccountSnapshot>,
+        post_system_state: Vec<AccountSnapshot>,
     ) -> BlockWitness {
         BlockWitness {
             header: empty_header(),
@@ -217,7 +222,7 @@ mod tests {
             mm_constraints: vec![],
             market_groups: vec![],
             pre_state,
-            post_system_state: vec![],
+            post_system_state,
             post_state: vec![],
             resolved_markets: vec![],
         }
@@ -243,6 +248,7 @@ mod tests {
                 is_mm: false,
             }],
             vec![],
+            pre_state.clone(),
             pre_state,
         );
 
@@ -271,6 +277,7 @@ mod tests {
                 is_mm: false,
             }],
             vec![],
+            pre_state.clone(),
             pre_state,
         );
 
@@ -313,6 +320,7 @@ mod tests {
                 },
             ],
             vec![],
+            pre_state.clone(),
             pre_state,
         );
 
@@ -346,7 +354,36 @@ mod tests {
                 is_mm: true,
             }],
             vec![],
+            pre_state.clone(),
             pre_state,
+        );
+
+        let result = verify_orders(&witness);
+        assert!(result.valid, "Violations: {:?}", result.violations);
+    }
+
+    #[test]
+    fn test_validates_against_post_system_state() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("M0");
+
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
+        let post_system_state = vec![AccountSnapshot {
+            id: 0,
+            balance: 10 * NANOS_PER_DOLLAR as i64,
+            positions: vec![],
+            events_digest: [0u8; 32],
+        }];
+
+        let witness = make_witness_with_orders(
+            vec![WitnessOrder {
+                order,
+                account_id: 0,
+                is_mm: false,
+            }],
+            vec![],
+            vec![],
+            post_system_state,
         );
 
         let result = verify_orders(&witness);
@@ -374,6 +411,7 @@ mod tests {
                 is_mm: false,
             }],
             vec![],
+            pre_state.clone(),
             pre_state,
         );
 
@@ -405,6 +443,7 @@ mod tests {
                 account_id: 0,
                 reason: RejectionReason::AccountNotFound,
             }],
+            pre_state.clone(),
             pre_state,
         );
 
