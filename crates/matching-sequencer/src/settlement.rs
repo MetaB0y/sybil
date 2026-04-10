@@ -3,6 +3,7 @@ use matching_engine::{
 };
 
 use crate::account::{Account, AccountId, AccountStore};
+use crate::digest;
 
 /// Settle a single fill: update the account's balance and positions.
 ///
@@ -18,7 +19,7 @@ pub fn settle_fill(account: &mut Account, order: &Order, fill: &Fill) {
 }
 
 /// Settle all fills from a batch result. Each fill carries its own `account_id`.
-pub fn settle_batch(accounts: &mut AccountStore, fills: &[Fill], orders: &[Order]) {
+pub fn settle_batch(accounts: &mut AccountStore, fills: &[Fill], orders: &[Order], block_height: u64) {
     // Build order lookup
     let order_map: std::collections::HashMap<u64, &Order> =
         orders.iter().map(|o| (o.id, o)).collect();
@@ -37,17 +38,23 @@ pub fn settle_batch(accounts: &mut AccountStore, fills: &[Fill], orders: &[Order
         };
 
         settle_fill(account, order, fill);
+        let event = digest::encode_fill_event(fill.order_id, fill.fill_qty, fill.fill_price, block_height);
+        account.events_digest = digest::update_digest(&account.events_digest, &event);
     }
 }
 
 /// Apply minting adjustments to the MINT account.
-pub fn apply_minting(mint: &mut Account, adjustments: &[MintAdjustment]) {
+pub fn apply_minting(mint: &mut Account, adjustments: &[MintAdjustment], block_height: u64) {
     for adj in adjustments {
         *mint
             .positions
             .entry((adj.market_id, adj.outcome))
             .or_insert(0) += adj.position_delta;
         mint.balance += adj.balance_delta;
+    }
+    if !adjustments.is_empty() {
+        let event = digest::encode_mint_event(adjustments, block_height);
+        mint.events_digest = digest::update_digest(&mint.events_digest, &event);
     }
 }
 

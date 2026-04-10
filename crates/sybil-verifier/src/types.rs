@@ -110,10 +110,12 @@ pub enum AdminEventWitness {
 }
 
 /// Snapshot of a single account's state at a point in time.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AccountSnapshot {
     pub id: u64,
     pub balance: i64,
     /// Sorted by `(market, outcome)`.
     pub positions: Vec<(MarketId, u8, i64)>,
+    #[serde(default)]
+    pub events_digest: [u8; 32],
 }

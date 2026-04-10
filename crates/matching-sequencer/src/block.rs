@@ -75,6 +75,8 @@ pub fn compute_state_root(accounts: &AccountStore) -> [u8; 32] {
             hasher.update(&[outcome]);
             hasher.update(&qty.to_le_bytes());
         }
+
+        hasher.update(&account.events_digest);
     }
 
     *hasher.finalize().as_bytes()
@@ -121,6 +123,18 @@ mod tests {
         let root1 = compute_state_root(&accounts);
 
         accounts.get_mut(a0).unwrap().balance = 200;
+        let root2 = compute_state_root(&accounts);
+
+        assert_ne!(root1, root2);
+    }
+
+    #[test]
+    fn test_state_root_changes_on_events_digest_only() {
+        let mut accounts = AccountStore::new();
+        let a0 = accounts.create_account(100);
+
+        let root1 = compute_state_root(&accounts);
+        accounts.get_mut(a0).unwrap().events_digest = [7u8; 32];
         let root2 = compute_state_root(&accounts);
 
         assert_ne!(root1, root2);

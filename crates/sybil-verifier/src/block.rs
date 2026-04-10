@@ -125,6 +125,8 @@ pub fn compute_state_root(accounts: &[AccountSnapshot]) -> [u8; 32] {
             hasher.update(&[outcome]);
             hasher.update(&qty.to_le_bytes());
         }
+
+        hasher.update(&account.events_digest);
     }
 
     *hasher.finalize().as_bytes()
@@ -179,11 +181,13 @@ mod tests {
                 id: 0,
                 balance: 100,
                 positions: vec![(MarketId::new(0), 0, 10)],
+                events_digest: [0u8; 32],
             },
             AccountSnapshot {
                 id: 1,
                 balance: 200,
                 positions: vec![(MarketId::new(0), 1, 5)],
+                events_digest: [0u8; 32],
             },
         ];
 
@@ -198,11 +202,13 @@ mod tests {
             id: 0,
             balance: 100,
             positions: vec![],
+            events_digest: [0u8; 32],
         }];
         let accounts2 = vec![AccountSnapshot {
             id: 0,
             balance: 200,
             positions: vec![],
+            events_digest: [0u8; 32],
         }];
 
         assert_ne!(
@@ -217,6 +223,7 @@ mod tests {
             id: 0,
             balance: 100,
             positions: vec![],
+            events_digest: [0u8; 32],
         }];
         let state_root = compute_state_root(&post_state);
 
@@ -247,6 +254,7 @@ mod tests {
             id: 0,
             balance: 100,
             positions: vec![],
+            events_digest: [0u8; 32],
         }];
 
         let witness = BlockWitness {
@@ -280,6 +288,7 @@ mod tests {
             id: 0,
             balance: 100,
             positions: vec![],
+            events_digest: [0u8; 32],
         }];
         let state_root = compute_state_root(&post_state);
 

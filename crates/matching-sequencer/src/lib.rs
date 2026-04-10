@@ -4,6 +4,7 @@ pub mod actor;
 pub mod agent;
 pub mod block;
 pub mod crypto;
+pub mod digest;
 pub mod error;
 pub mod fill_recorder;
 pub mod market_info;

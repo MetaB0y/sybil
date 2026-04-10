@@ -109,6 +109,7 @@ fn snapshot_accounts(
                     id: aid.0,
                     balance: a.balance,
                     positions,
+                    events_digest: a.events_digest,
                 }
             })
         })
@@ -608,6 +609,47 @@ impl BlockSequencer {
         tracing::Span::current().record("height", self.height);
         let admin_events = std::mem::take(&mut self.pending_admin_events);
 
+        for event in &admin_events {
+            match event {
+                AdminEvent::CreateAccount {
+                    account_id,
+                    initial_balance,
+                } => {
+                    if let Some(account) = self.accounts.get_mut(*account_id) {
+                        let encoded =
+                            crate::digest::encode_create_account_event(*initial_balance, self.height);
+                        account.events_digest =
+                            crate::digest::update_digest(&account.events_digest, &encoded);
+                    }
+                }
+                AdminEvent::Deposit { account_id, amount } => {
+                    if let Some(account) = self.accounts.get_mut(*account_id) {
+                        let encoded =
+                            crate::digest::encode_deposit_event(*amount, self.height);
+                        account.events_digest =
+                            crate::digest::update_digest(&account.events_digest, &encoded);
+                    }
+                }
+                AdminEvent::MarketResolved {
+                    market_id,
+                    payout_nanos,
+                    affected_accounts,
+                } => {
+                    let encoded = crate::digest::encode_resolution_event(
+                        *market_id,
+                        *payout_nanos,
+                        self.height,
+                    );
+                    for account_id in affected_accounts {
+                        if let Some(account) = self.accounts.get_mut(*account_id) {
+                            account.events_digest =
+                                crate::digest::update_digest(&account.events_digest, &encoded);
+                        }
+                    }
+                }
+            }
+        }
+
         let mut all_orders: Vec<Order> = Vec::new();
         let mut all_mm_constraints: Vec<MmConstraint> = Vec::new();
         let mut rejections: Vec<Rejection> = Vec::new();
@@ -906,7 +948,7 @@ impl BlockSequencer {
         let pre_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
 
         // Settle all fills (real orders against their accounts)
-        settlement::settle_batch(&mut self.accounts, &fills, &problem.orders);
+        settlement::settle_batch(&mut self.accounts, &fills, &problem.orders, self.height);
 
         // Derive minting from position imbalance — solver-independent.
         // Uses shared pure function from matching-engine (same code as verifier).
@@ -929,7 +971,7 @@ impl BlockSequencer {
                     .accounts
                     .get_mut(crate::account::AccountId::MINT)
                     .expect("mint account must exist");
-                settlement::apply_minting(mint, &mint_adjustments);
+                settlement::apply_minting(mint, &mint_adjustments, self.height);
             }
         }
 
@@ -1582,6 +1624,45 @@ mod tests {
             assert!(seller.balance > 10 * NANOS_PER_DOLLAR as i64);
             assert!(seller.position(m0, 0) < 50);
         }
+    }
+
+    #[test]
+    fn test_fill_updates_only_participating_account_digests() {
+        let (markets, m0) = setup();
+
+        let mut accounts = AccountStore::new();
+        let buyer_id = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let seller_id = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+        let untouched_id = accounts.create_account(50 * NANOS_PER_DOLLAR as i64);
+        accounts
+            .get_mut(seller_id)
+            .unwrap()
+            .positions
+            .insert((m0, 0), 50);
+
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            Arc::new(AdminOracle::new()),
+        );
+
+        let buy_sub = OrderSubmission {
+            account_id: buyer_id,
+            orders: vec![outcome_buy(&markets, 0, m0, 0, 600_000_000, 10)],
+            mm_constraint: None,
+        };
+        let sell_sub = OrderSubmission {
+            account_id: seller_id,
+            orders: vec![outcome_sell(&markets, 0, m0, 0, 400_000_000, 10)],
+            mm_constraint: None,
+        };
+
+        seq.produce_block(vec![buy_sub, sell_sub], 1000);
+
+        assert_ne!(seq.accounts.get(buyer_id).unwrap().events_digest, [0u8; 32]);
+        assert_ne!(seq.accounts.get(seller_id).unwrap().events_digest, [0u8; 32]);
+        assert_eq!(seq.accounts.get(untouched_id).unwrap().events_digest, [0u8; 32]);
     }
 
     // --- Block height counter ---

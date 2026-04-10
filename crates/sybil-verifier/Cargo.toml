@@ -7,4 +7,5 @@ description = "Comprehensive block verification for prediction market matching â
 [dependencies]
 matching-engine = { path = "../matching-engine" }
 blake3 = "1"
+serde = { version = "1", features = ["derive"] }
 thiserror = { workspace = true }

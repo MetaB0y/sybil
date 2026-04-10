@@ -21,6 +21,8 @@ pub struct Account {
     /// Total amount deposited (initial balance + all fund_account calls).
     /// Used for PnL calculation: PnL = portfolio_value - total_deposited.
     pub total_deposited: i64,
+    #[serde(default)]
+    pub events_digest: [u8; 32],
 }
 
 impl Account {
@@ -30,6 +32,7 @@ impl Account {
             balance,
             positions: HashMap::new(),
             total_deposited: balance,
+            events_digest: [0u8; 32],
         }
     }
 
@@ -77,6 +80,10 @@ impl AccountStore {
         self.accounts.iter()
     }
 
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&AccountId, &mut Account)> {
+        self.accounts.iter_mut()
+    }
+
     /// Next account ID that will be assigned.
     pub fn next_id(&self) -> u64 {
         self.next_id
@@ -85,5 +92,16 @@ impl AccountStore {
     /// Restore from persisted state.
     pub fn restore(accounts: HashMap<AccountId, Account>, next_id: u64) -> Self {
         Self { accounts, next_id }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_account_has_zero_events_digest() {
+        let account = Account::new(AccountId(7), 100);
+        assert_eq!(account.events_digest, [0u8; 32]);
     }
 }

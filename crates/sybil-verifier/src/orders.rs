@@ -232,6 +232,7 @@ mod tests {
             id: 0,
             balance: 10 * NANOS_PER_DOLLAR as i64,
             positions: vec![],
+            events_digest: [0u8; 32],
         }];
 
         let witness = make_witness_with_orders(
@@ -259,6 +260,7 @@ mod tests {
             id: 0,
             balance: 3 * NANOS_PER_DOLLAR as i64,
             positions: vec![],
+            events_digest: [0u8; 32],
         }];
 
         let witness = make_witness_with_orders(
@@ -293,6 +295,7 @@ mod tests {
             id: 0,
             balance: 8 * NANOS_PER_DOLLAR as i64,
             positions: vec![],
+            events_digest: [0u8; 32],
         }];
 
         let witness = make_witness_with_orders(
@@ -332,6 +335,7 @@ mod tests {
             id: 0,
             balance: 0,
             positions: vec![],
+            events_digest: [0u8; 32],
         }];
 
         let witness = make_witness_with_orders(
@@ -359,6 +363,7 @@ mod tests {
             id: 0,
             balance: NANOS_PER_DOLLAR as i64,
             positions: vec![(m0, 0, 5)],
+            events_digest: [0u8; 32],
         }];
 
         let witness = make_witness_with_orders(
@@ -389,6 +394,7 @@ mod tests {
             id: 0,
             balance: 100 * NANOS_PER_DOLLAR as i64,
             positions: vec![],
+            events_digest: [0u8; 32],
         }];
 
         let witness = make_witness_with_orders(

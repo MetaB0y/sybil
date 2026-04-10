@@ -292,12 +292,14 @@ mod tests {
             id: 0,
             balance: initial_balance,
             positions: vec![],
+            events_digest: [0u8; 32],
         }];
 
         let post_state = vec![AccountSnapshot {
             id: 0,
             balance: initial_balance - expected_cost,
             positions: vec![(m0, 0, 10)],
+            events_digest: [0u8; 32],
         }];
 
         let witness = BlockWitness {
@@ -340,12 +342,14 @@ mod tests {
             id: 0,
             balance: initial_balance,
             positions: vec![(m0, 0, 10)],
+            events_digest: [0u8; 32],
         }];
 
         let post_state = vec![AccountSnapshot {
             id: 0,
             balance: initial_balance + expected_revenue,
             positions: vec![(m0, 0, 5)],
+            events_digest: [0u8; 32],
         }];
 
         let witness = BlockWitness {
@@ -387,6 +391,7 @@ mod tests {
             id: 0,
             balance: initial_balance,
             positions: vec![],
+            events_digest: [0u8; 32],
         }];
 
         // Wrong balance in post-state
@@ -394,6 +399,7 @@ mod tests {
             id: 0,
             balance: initial_balance, // Should be initial_balance - cost
             positions: vec![(m0, 0, 10)],
+            events_digest: [0u8; 32],
         }];
 
         let witness = BlockWitness {
@@ -431,6 +437,7 @@ mod tests {
             id: 0,
             balance: 100_000_000_000,
             positions: vec![],
+            events_digest: [0u8; 32],
         }];
         let post_state = pre_state.clone();
 
@@ -471,12 +478,14 @@ mod tests {
             id: 0,
             balance: initial_balance,
             positions: vec![],
+            events_digest: [0u8; 32],
         }];
 
         let post_state = vec![AccountSnapshot {
             id: 0,
             balance: expected_balance,
             positions: vec![(m0, 0, 10)],
+            events_digest: [0u8; 32],
         }];
 
         let witness = BlockWitness {
@@ -524,12 +533,14 @@ mod tests {
             id: 0,
             balance: initial_balance,
             positions: vec![], // no YES position
+            events_digest: [0u8; 32],
         }];
 
         let post_state = vec![AccountSnapshot {
             id: 0,
             balance: initial_balance + expected_revenue,
             positions: vec![(m0, 0, -5)],
+            events_digest: [0u8; 32],
         }];
 
         let witness = BlockWitness {
@@ -584,11 +595,13 @@ mod tests {
                 id: 0,
                 balance: initial_balance,
                 positions: vec![],
+                events_digest: [0u8; 32],
             },
             AccountSnapshot {
                 id: mint_id,
                 balance: 0,
                 positions: vec![],
+                events_digest: [0u8; 32],
             },
         ];
 
@@ -597,11 +610,13 @@ mod tests {
                 id: 0,
                 balance: initial_balance - fill_cost,
                 positions: vec![(m0, 0, 10)],
+                events_digest: [0u8; 32],
             },
             AccountSnapshot {
                 id: mint_id,
                 balance: mint_revenue,
                 positions: vec![(m0, 0, -10)],
+                events_digest: [0u8; 32],
             },
         ];
 
@@ -651,11 +666,13 @@ mod tests {
                 id: 0,
                 balance: initial_balance,
                 positions: vec![],
+                events_digest: [0u8; 32],
             },
             AccountSnapshot {
                 id: mint_id,
                 balance: 0,
                 positions: vec![],
+                events_digest: [0u8; 32],
             },
         ];
 
@@ -664,11 +681,13 @@ mod tests {
                 id: 0,
                 balance: initial_balance - fill_cost,
                 positions: vec![(m0, 0, 10)],
+                events_digest: [0u8; 32],
             },
             AccountSnapshot {
                 id: mint_id,
                 balance: 999, // WRONG — should be fill_cost
                 positions: vec![(m0, 0, -10)],
+                events_digest: [0u8; 32],
             },
         ];
 
@@ -719,11 +738,13 @@ mod tests {
                 id: 0,
                 balance: initial_balance,
                 positions: vec![],
+                events_digest: [0u8; 32],
             },
             AccountSnapshot {
                 id: mint_id,
                 balance: 0,
                 positions: vec![],
+                events_digest: [0u8; 32],
             },
         ];
 
@@ -733,11 +754,13 @@ mod tests {
                 id: 0,
                 balance: initial_balance - fill_cost,
                 positions: vec![(m0, 0, 10)],
+                events_digest: [0u8; 32],
             },
             AccountSnapshot {
                 id: mint_id,
                 balance: 0,
                 positions: vec![(m0, 0, -10)],
+                events_digest: [0u8; 32],
             },
         ];
 
