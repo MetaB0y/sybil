@@ -7,12 +7,11 @@ use matching_engine::{
 use matching_solver::{PipelineResult, Solver};
 use sybil_oracle::{MarketStatus, Oracle, ResolutionRecord};
 use sybil_verifier::{
-    AccountSnapshot, AdminEventWitness, BlockWitness, WitnessBlockHeader, WitnessOrder,
+    AccountSnapshot, BlockWitness, SystemEventWitness, WitnessBlockHeader, WitnessOrder,
     WitnessRejection,
 };
 use tracing::{debug, error};
 
-use crate::admin_event::AdminEvent;
 use crate::account::{Account, AccountId, AccountStore};
 use crate::block::{hash_header, Block, BlockHeader, BlockProduction};
 use crate::market_lifecycle::MarketLifecycle;
@@ -20,6 +19,7 @@ use crate::error::{Rejection, RejectionReason, SequencerError};
 use crate::market_info::{AccountFillRecord, MarketMetadata, PricePoint};
 use crate::settlement;
 use crate::order_book::OrderBook;
+use crate::system_event::SystemEvent;
 
 /// An order submission from a participant.
 #[derive(Clone, Debug)]
@@ -146,24 +146,24 @@ fn convert_rejection_reason(r: &RejectionReason) -> sybil_verifier::RejectionRea
     }
 }
 
-fn convert_admin_event(event: &AdminEvent) -> AdminEventWitness {
+fn convert_system_event(event: &SystemEvent) -> SystemEventWitness {
     match event {
-        AdminEvent::CreateAccount {
+        SystemEvent::CreateAccount {
             account_id,
             initial_balance,
-        } => AdminEventWitness::CreateAccount {
+        } => SystemEventWitness::CreateAccount {
             account_id: account_id.0,
             initial_balance: *initial_balance,
         },
-        AdminEvent::Deposit { account_id, amount } => AdminEventWitness::Deposit {
+        SystemEvent::Deposit { account_id, amount } => SystemEventWitness::Deposit {
             account_id: account_id.0,
             amount: *amount,
         },
-        AdminEvent::MarketResolved {
+        SystemEvent::MarketResolved {
             market_id,
             payout_nanos,
             affected_accounts,
-        } => AdminEventWitness::MarketResolved {
+        } => SystemEventWitness::MarketResolved {
             market_id: *market_id,
             payout_nanos: *payout_nanos,
             affected_accounts: affected_accounts.iter().map(|id| id.0).collect(),
@@ -304,7 +304,7 @@ pub struct BlockSequencer {
     /// P256 public key to account mapping.
     pubkey_registry: HashMap<crate::crypto::PublicKey, AccountId>,
     /// Administrative state changes that should be included in the next block.
-    pending_admin_events: Vec<AdminEvent>,
+    pending_system_events: Vec<SystemEvent>,
 }
 
 impl BlockSequencer {
@@ -328,7 +328,7 @@ impl BlockSequencer {
             fill_recorder: crate::fill_recorder::FillRecorder::new(),
             lifecycle: crate::market_lifecycle::MarketLifecycle::new(oracle),
             pubkey_registry: HashMap::new(),
-            pending_admin_events: Vec::new(),
+            pending_system_events: Vec::new(),
         }
     }
 
@@ -383,7 +383,7 @@ impl BlockSequencer {
             fill_recorder: crate::fill_recorder::FillRecorder::new(), // TODO: Tier 3 — persist fill history
             lifecycle,
             pubkey_registry,
-            pending_admin_events: Vec::new(),
+            pending_system_events: Vec::new(),
         }
     }
 
@@ -491,7 +491,7 @@ impl BlockSequencer {
 
     pub fn create_account(&mut self, initial_balance: i64) -> AccountId {
         let account_id = self.accounts.create_account(initial_balance);
-        self.record_admin_event(AdminEvent::CreateAccount {
+        self.record_system_event(SystemEvent::CreateAccount {
             account_id,
             initial_balance,
         });
@@ -514,12 +514,12 @@ impl BlockSequencer {
         account.balance += amount;
         account.total_deposited += amount;
         let updated = account.clone();
-        self.record_admin_event(AdminEvent::Deposit { account_id, amount });
+        self.record_system_event(SystemEvent::Deposit { account_id, amount });
         Ok(updated)
     }
 
-    pub fn record_admin_event(&mut self, event: AdminEvent) {
-        self.pending_admin_events.push(event);
+    pub fn record_system_event(&mut self, event: SystemEvent) {
+        self.pending_system_events.push(event);
     }
 
     /// Get pending orders, optionally filtered by account.
@@ -575,7 +575,7 @@ impl BlockSequencer {
             } => {
                 let affected_accounts =
                     settlement::resolve_market(&mut self.accounts, market_id, payout_nanos);
-                self.record_admin_event(AdminEvent::MarketResolved {
+                self.record_system_event(SystemEvent::MarketResolved {
                     market_id,
                     payout_nanos,
                     affected_accounts,
@@ -607,11 +607,11 @@ impl BlockSequencer {
     ) -> BlockProduction {
         self.height += 1;
         tracing::Span::current().record("height", self.height);
-        let admin_events = std::mem::take(&mut self.pending_admin_events);
+        let system_events = std::mem::take(&mut self.pending_system_events);
 
-        for event in &admin_events {
+        for event in &system_events {
             match event {
-                AdminEvent::CreateAccount {
+                SystemEvent::CreateAccount {
                     account_id,
                     initial_balance,
                 } => {
@@ -622,7 +622,7 @@ impl BlockSequencer {
                             crate::digest::update_digest(&account.events_digest, &encoded);
                     }
                 }
-                AdminEvent::Deposit { account_id, amount } => {
+                SystemEvent::Deposit { account_id, amount } => {
                     if let Some(account) = self.accounts.get_mut(*account_id) {
                         let encoded =
                             crate::digest::encode_deposit_event(*amount, self.height);
@@ -630,7 +630,7 @@ impl BlockSequencer {
                             crate::digest::update_digest(&account.events_digest, &encoded);
                     }
                 }
-                AdminEvent::MarketResolved {
+                SystemEvent::MarketResolved {
                     market_id,
                     payout_nanos,
                     affected_accounts,
@@ -929,13 +929,13 @@ impl BlockSequencer {
         let mut participating_accounts: HashSet<AccountId> =
             order_account_map.values().copied().collect();
         participating_accounts.insert(crate::account::AccountId::MINT);
-        for event in &admin_events {
+        for event in &system_events {
             match event {
-                AdminEvent::CreateAccount { account_id, .. }
-                | AdminEvent::Deposit { account_id, .. } => {
+                SystemEvent::CreateAccount { account_id, .. }
+                | SystemEvent::Deposit { account_id, .. } => {
                     participating_accounts.insert(*account_id);
                 }
-                AdminEvent::MarketResolved {
+                SystemEvent::MarketResolved {
                     affected_accounts, ..
                 } => {
                     participating_accounts.extend(affected_accounts.iter().copied());
@@ -1108,7 +1108,7 @@ impl BlockSequencer {
             previous_header,
             orders: witness_orders,
             rejections: witness_rejections,
-            admin_events: admin_events.iter().map(convert_admin_event).collect(),
+            system_events: system_events.iter().map(convert_system_event).collect(),
             fills: fills.clone(),
             clearing_prices: clearing_prices.clone(),
             total_welfare,
@@ -1136,7 +1136,7 @@ impl BlockSequencer {
         let block = Block {
             header,
             order_ids,
-            admin_events,
+            system_events,
             fills,
             clearing_prices,
             rejections,

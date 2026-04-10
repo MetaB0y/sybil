@@ -209,7 +209,7 @@ mod tests {
             previous_header: None,
             orders,
             rejections,
-            admin_events: vec![],
+            system_events: vec![],
             fills: vec![],
             clearing_prices: HashMap::new(),
             total_welfare: 0,

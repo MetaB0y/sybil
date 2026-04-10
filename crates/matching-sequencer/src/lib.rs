@@ -1,4 +1,3 @@
-pub mod admin_event;
 pub mod account;
 pub mod actor;
 pub mod agent;
@@ -19,9 +18,9 @@ pub mod sequencer;
 pub mod settlement;
 pub mod simulation;
 pub mod store;
+pub mod system_event;
 pub mod validation;
 
-pub use admin_event::AdminEvent;
 pub use account::{Account, AccountId, AccountStore};
 pub use actor::{MarketSearchResult, SequencerHandle};
 pub use block::{Block, BlockProduction};
@@ -37,6 +36,7 @@ pub use sequencer::{
     BatchResult, BatchSequencer, BlockSequencer, OrderSubmission, PendingOrderInfo,
 };
 pub use simulation::{SimulationResult, SimulationRunner};
+pub use system_event::SystemEvent;
 
 // Re-export oracle types needed by consumers (e.g. sybil-api)
 pub use sybil_oracle::{AdminOracle, MarketStatus, Oracle, ResolutionRecord};

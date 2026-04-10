@@ -12,26 +12,26 @@ use matching_sequencer::Account;
 use crate::types::request::{OrderSpec, SignedOrderData};
 use crate::types::response::*;
 
-fn admin_event_to_response(event: &matching_sequencer::AdminEvent) -> AdminEventResponse {
+fn system_event_to_response(event: &matching_sequencer::SystemEvent) -> SystemEventResponse {
     match event {
-        matching_sequencer::AdminEvent::CreateAccount {
+        matching_sequencer::SystemEvent::CreateAccount {
             account_id,
             initial_balance,
-        } => AdminEventResponse::CreateAccount {
+        } => SystemEventResponse::CreateAccount {
             account_id: account_id.0,
             initial_balance_nanos: *initial_balance,
         },
-        matching_sequencer::AdminEvent::Deposit { account_id, amount } => {
-            AdminEventResponse::Deposit {
+        matching_sequencer::SystemEvent::Deposit { account_id, amount } => {
+            SystemEventResponse::Deposit {
                 account_id: account_id.0,
                 amount_nanos: *amount,
             }
         }
-        matching_sequencer::AdminEvent::MarketResolved {
+        matching_sequencer::SystemEvent::MarketResolved {
             market_id,
             payout_nanos,
             affected_accounts,
-        } => AdminEventResponse::MarketResolved {
+        } => SystemEventResponse::MarketResolved {
             market_id: market_id.0,
             payout_nanos: *payout_nanos,
             affected_accounts: affected_accounts.iter().map(|id| id.0).collect(),
@@ -83,10 +83,10 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
         .collect();
 
     let rejections = block.rejections.iter().map(rejection_to_response).collect();
-    let admin_events = block
-        .admin_events
+    let system_events = block
+        .system_events
         .iter()
-        .map(admin_event_to_response)
+        .map(system_event_to_response)
         .collect();
 
     BlockResponse {
@@ -96,7 +96,7 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
         order_count: block.header.order_count,
         fill_count: block.header.fill_count,
         timestamp_ms: block.header.timestamp_ms,
-        admin_events,
+        system_events,
         fills,
         clearing_prices_nanos,
         rejections,

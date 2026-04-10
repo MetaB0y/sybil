@@ -22,8 +22,8 @@ pub struct BlockWitness {
     pub orders: Vec<WitnessOrder>,
     /// Orders rejected (with reasons).
     pub rejections: Vec<WitnessRejection>,
-    /// Administrative state changes applied between blocks.
-    pub admin_events: Vec<AdminEventWitness>,
+    /// System state changes applied between blocks.
+    pub system_events: Vec<SystemEventWitness>,
 
     // -- Solver output --
     pub fills: Vec<Fill>,
@@ -91,9 +91,9 @@ pub enum RejectionReason {
     CompleteSetFormation,
 }
 
-/// Administrative state change recorded in a block witness.
+/// System state change recorded in a block witness.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AdminEventWitness {
+pub enum SystemEventWitness {
     CreateAccount {
         account_id: u64,
         initial_balance: i64,

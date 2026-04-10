@@ -94,7 +94,7 @@ pub struct FillResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum AdminEventResponse {
+pub enum SystemEventResponse {
     CreateAccount {
         account_id: u64,
         initial_balance_nanos: i64,
@@ -128,7 +128,7 @@ pub struct BlockResponse {
     pub fill_count: u32,
     pub timestamp_ms: u64,
     #[serde(default)]
-    pub admin_events: Vec<AdminEventResponse>,
+    pub system_events: Vec<SystemEventResponse>,
     #[serde(default)]
     pub fills: Vec<FillResponse>,
     #[serde(default)]

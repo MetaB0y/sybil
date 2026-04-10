@@ -81,7 +81,7 @@ A Merkle tree over everything that happened in this block, built fresh each bloc
 
 Current groundwork already landed:
 - `Fill` carries `account_id`
-- Blocks carry `admin_events`
+- Blocks carry `system_events`
 - Each account carries `events_digest`, so range-inactivity proofs can often use state snapshots instead of scanning every block event
 
 **What it proves**:
@@ -212,14 +212,14 @@ Stability: ALPHA. Worth prototyping against, but we should be prepared to implem
 | Component | Current | After Phase 1 | After Phase 2 |
 |-----------|---------|---------------|---------------|
 | `BlockHeader` | state_root, parent_hash | + events_root | same |
-| `Block` | orders, fills, prices, rejections | + admin_events | same |
+| `Block` | orders, fills, prices, rejections | + system_events | same |
 | `compute_state_root()` | flat BLAKE3 over all accounts + `events_digest` | same | Merkle tree root |
 | `Fill` struct | order_id, qty, price, account_id | same | same |
 | `Account` | balance, positions, total_deposited, events_digest | same | same |
 | `AccountStore` | HashMap | same | authenticated KV |
 | `store.rs` | redb tables | + events tree storage | + state tree storage |
 | Verifier Layer 3 | checks state_root, parent_hash | + checks events_root | state root via Merkle |
-| `BlockWitness` | full pre/post state snapshots + admin_events | same | Merkle paths for touched accounts |
+| `BlockWitness` | full pre/post state snapshots + system_events | same | Merkle paths for touched accounts |
 | API | no proof endpoints | same | + proof endpoints (Phase 3) |
 
 ## Resolved Decisions

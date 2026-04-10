@@ -4,9 +4,9 @@ use matching_engine::{Fill, MarketId, Nanos};
 use matching_solver::PipelineResult;
 use sybil_verifier::BlockWitness;
 
-use crate::admin_event::AdminEvent;
 use crate::account::AccountStore;
 use crate::error::Rejection;
+use crate::system_event::SystemEvent;
 
 /// Named result of [`BlockSequencer::produce_block`].
 pub struct BlockProduction {
@@ -33,7 +33,7 @@ pub struct BlockHeader {
 pub struct Block {
     pub header: BlockHeader,
     pub order_ids: Vec<u64>,
-    pub admin_events: Vec<AdminEvent>,
+    pub system_events: Vec<SystemEvent>,
     pub fills: Vec<Fill>,
     pub clearing_prices: HashMap<MarketId, Vec<Nanos>>,
     pub rejections: Vec<Rejection>,

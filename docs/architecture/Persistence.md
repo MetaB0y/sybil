@@ -63,7 +63,7 @@ Queryable history reconstructable from blocks, but expensive to rebuild:
 - **Fill history**: Per-account fill records (FillRecorder)
 - **Price history**: Per-market clearing price timeseries (PriceTracker)
 - **Block ring buffer**: Last 100 full blocks for SSE catch-up
-  Full blocks now include `admin_events` alongside fills/rejections.
+  Full blocks now include `system_events` alongside fills/rejections.
 - **Volume/welfare aggregates**
 
 ## Crash Recovery Semantics

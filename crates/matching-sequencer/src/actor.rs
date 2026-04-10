@@ -1082,7 +1082,7 @@ impl SequencerHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::admin_event::AdminEvent;
+    use crate::system_event::SystemEvent;
     use crate::account::AccountStore;
     use matching_engine::{outcome_buy, MarketSet, NANOS_PER_DOLLAR};
     use std::sync::Arc;
@@ -1288,7 +1288,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_admin_events_emitted_for_create_and_fund() {
+    async fn test_system_events_emitted_for_create_and_fund() {
         let (seq, _) = make_test_sequencer();
         let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
 
@@ -1302,10 +1302,10 @@ mod tests {
             .unwrap();
 
         let block = handle.produce_block().await.unwrap();
-        assert_eq!(block.admin_events.len(), 2);
+        assert_eq!(block.system_events.len(), 2);
 
-        match &block.admin_events[0] {
-            AdminEvent::CreateAccount {
+        match &block.system_events[0] {
+            SystemEvent::CreateAccount {
                 account_id,
                 initial_balance,
             } => {
@@ -1315,8 +1315,8 @@ mod tests {
             other => panic!("expected CreateAccount event, got {:?}", other),
         }
 
-        match &block.admin_events[1] {
-            AdminEvent::Deposit { account_id, amount } => {
+        match &block.system_events[1] {
+            SystemEvent::Deposit { account_id, amount } => {
                 assert_eq!(*account_id, account.id);
                 assert_eq!(*amount, 25 * NANOS_PER_DOLLAR as i64);
             }
@@ -1427,7 +1427,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_admin_event_emitted_for_market_resolution() {
+    async fn test_system_event_emitted_for_market_resolution() {
         let mut accounts = AccountStore::new();
         let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
         let mut markets = MarketSet::new();
@@ -1445,9 +1445,9 @@ mod tests {
         handle.resolve_market(m0, NANOS_PER_DOLLAR).await.unwrap();
         let block = handle.produce_block().await.unwrap();
 
-        assert_eq!(block.admin_events.len(), 1);
-        match &block.admin_events[0] {
-            AdminEvent::MarketResolved {
+        assert_eq!(block.system_events.len(), 1);
+        match &block.system_events[0] {
+            SystemEvent::MarketResolved {
                 market_id,
                 payout_nanos,
                 affected_accounts,
