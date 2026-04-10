@@ -116,6 +116,8 @@ pub enum SystemEventWitness {
 pub struct AccountSnapshot {
     pub id: u64,
     pub balance: i64,
+    #[serde(default)]
+    pub total_deposited: i64,
     /// Sorted by `(market, outcome)`.
     pub positions: Vec<(MarketId, u8, i64)>,
     #[serde(default)]

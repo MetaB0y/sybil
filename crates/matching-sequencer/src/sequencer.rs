@@ -108,6 +108,7 @@ fn snapshot_accounts(
                 AccountSnapshot {
                     id: aid.0,
                     balance: a.balance,
+                    total_deposited: a.total_deposited,
                     positions,
                     events_digest: a.events_digest,
                 }
@@ -993,6 +994,7 @@ impl BlockSequencer {
                     Some(Some(account)) => Some(AccountSnapshot {
                         id: account_id.0,
                         balance: account.balance,
+                        total_deposited: account.total_deposited,
                         positions: {
                             let mut positions: Vec<_> = account
                                 .positions
@@ -1017,6 +1019,7 @@ impl BlockSequencer {
                         AccountSnapshot {
                             id: account_id.0,
                             balance: account.balance,
+                            total_deposited: account.total_deposited,
                             positions,
                             events_digest: account.events_digest,
                         }

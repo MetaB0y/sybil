@@ -45,7 +45,7 @@ pub struct Block {
 /// Compute a deterministic state root from accounts.
 ///
 /// Canonical encoding: sorted by AccountId, each account encodes
-/// balance then sorted (MarketId, outcome) -> position pairs.
+/// balance, total_deposited, then sorted (MarketId, outcome) -> position pairs.
 /// All integers are little-endian i64/u64.
 ///
 /// NOTE: This is a flat hash over all accounts — O(n) per block. For the validium
@@ -65,6 +65,8 @@ pub fn compute_state_root(accounts: &AccountStore) -> [u8; 32] {
         hasher.update(&id.0.to_le_bytes());
         // Balance
         hasher.update(&account.balance.to_le_bytes());
+        // Total deposited
+        hasher.update(&account.total_deposited.to_le_bytes());
 
         // Sorted positions
         let mut positions: Vec<_> = account.positions.iter().collect();
@@ -135,6 +137,18 @@ mod tests {
 
         let root1 = compute_state_root(&accounts);
         accounts.get_mut(a0).unwrap().events_digest = [7u8; 32];
+        let root2 = compute_state_root(&accounts);
+
+        assert_ne!(root1, root2);
+    }
+
+    #[test]
+    fn test_state_root_changes_on_total_deposited_only() {
+        let mut accounts = AccountStore::new();
+        let a0 = accounts.create_account(100);
+
+        let root1 = compute_state_root(&accounts);
+        accounts.get_mut(a0).unwrap().total_deposited = 150;
         let root2 = compute_state_root(&accounts);
 
         assert_ne!(root1, root2);

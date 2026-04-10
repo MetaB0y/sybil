@@ -237,6 +237,7 @@ mod tests {
         let pre_state = vec![AccountSnapshot {
             id: 0,
             balance: 10 * NANOS_PER_DOLLAR as i64,
+            total_deposited: 0,
             positions: vec![],
             events_digest: [0u8; 32],
         }];
@@ -266,6 +267,7 @@ mod tests {
         let pre_state = vec![AccountSnapshot {
             id: 0,
             balance: 3 * NANOS_PER_DOLLAR as i64,
+            total_deposited: 0,
             positions: vec![],
             events_digest: [0u8; 32],
         }];
@@ -302,6 +304,7 @@ mod tests {
         let pre_state = vec![AccountSnapshot {
             id: 0,
             balance: 8 * NANOS_PER_DOLLAR as i64,
+            total_deposited: 0,
             positions: vec![],
             events_digest: [0u8; 32],
         }];
@@ -343,6 +346,7 @@ mod tests {
         let pre_state = vec![AccountSnapshot {
             id: 0,
             balance: 0,
+            total_deposited: 0,
             positions: vec![],
             events_digest: [0u8; 32],
         }];
@@ -371,6 +375,7 @@ mod tests {
         let post_system_state = vec![AccountSnapshot {
             id: 0,
             balance: 10 * NANOS_PER_DOLLAR as i64,
+            total_deposited: 0,
             positions: vec![],
             events_digest: [0u8; 32],
         }];
@@ -400,6 +405,7 @@ mod tests {
         let pre_state = vec![AccountSnapshot {
             id: 0,
             balance: NANOS_PER_DOLLAR as i64,
+            total_deposited: 0,
             positions: vec![(m0, 0, 5)],
             events_digest: [0u8; 32],
         }];
@@ -432,6 +438,7 @@ mod tests {
         let pre_state = vec![AccountSnapshot {
             id: 0,
             balance: 100 * NANOS_PER_DOLLAR as i64,
+            total_deposited: 0,
             positions: vec![],
             events_digest: [0u8; 32],
         }];

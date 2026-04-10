@@ -105,7 +105,8 @@ pub fn verify_block(witness: &BlockWitness) -> VerificationResult {
 ///
 /// Must produce the exact same hash as `matching-sequencer`'s
 /// `compute_state_root`. Canonical encoding: sorted by account id,
-/// each account encodes balance then sorted (market, outcome) -> qty.
+/// each account encodes balance, total_deposited, then sorted
+/// (market, outcome) -> qty.
 pub fn compute_state_root(accounts: &[AccountSnapshot]) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new();
 
@@ -118,6 +119,8 @@ pub fn compute_state_root(accounts: &[AccountSnapshot]) -> [u8; 32] {
         hasher.update(&account.id.to_le_bytes());
         // Balance
         hasher.update(&account.balance.to_le_bytes());
+        // Total deposited
+        hasher.update(&account.total_deposited.to_le_bytes());
 
         // Positions (already sorted by (market, outcome) in AccountSnapshot)
         for &(market, outcome, qty) in &account.positions {
@@ -180,12 +183,14 @@ mod tests {
             AccountSnapshot {
                 id: 0,
                 balance: 100,
+                total_deposited: 100,
                 positions: vec![(MarketId::new(0), 0, 10)],
                 events_digest: [0u8; 32],
             },
             AccountSnapshot {
                 id: 1,
                 balance: 200,
+                total_deposited: 200,
                 positions: vec![(MarketId::new(0), 1, 5)],
                 events_digest: [0u8; 32],
             },
@@ -201,12 +206,37 @@ mod tests {
         let accounts1 = vec![AccountSnapshot {
             id: 0,
             balance: 100,
+            total_deposited: 100,
             positions: vec![],
             events_digest: [0u8; 32],
         }];
         let accounts2 = vec![AccountSnapshot {
             id: 0,
             balance: 200,
+            total_deposited: 100,
+            positions: vec![],
+            events_digest: [0u8; 32],
+        }];
+
+        assert_ne!(
+            compute_state_root(&accounts1),
+            compute_state_root(&accounts2)
+        );
+    }
+
+    #[test]
+    fn test_state_root_changes_on_total_deposited_only() {
+        let accounts1 = vec![AccountSnapshot {
+            id: 0,
+            balance: 100,
+            total_deposited: 100,
+            positions: vec![],
+            events_digest: [0u8; 32],
+        }];
+        let accounts2 = vec![AccountSnapshot {
+            id: 0,
+            balance: 100,
+            total_deposited: 150,
             positions: vec![],
             events_digest: [0u8; 32],
         }];
@@ -222,6 +252,7 @@ mod tests {
         let post_state = vec![AccountSnapshot {
             id: 0,
             balance: 100,
+            total_deposited: 100,
             positions: vec![],
             events_digest: [0u8; 32],
         }];
@@ -254,6 +285,7 @@ mod tests {
         let post_state = vec![AccountSnapshot {
             id: 0,
             balance: 100,
+            total_deposited: 100,
             positions: vec![],
             events_digest: [0u8; 32],
         }];
@@ -289,6 +321,7 @@ mod tests {
         let post_state = vec![AccountSnapshot {
             id: 0,
             balance: 100,
+            total_deposited: 100,
             positions: vec![],
             events_digest: [0u8; 32],
         }];
