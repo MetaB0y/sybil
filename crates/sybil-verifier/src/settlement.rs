@@ -5,46 +5,60 @@
 
 use std::collections::HashMap;
 
-use matching_engine::{compute_fill_settlement, derive_minting, MarketId, Order};
+use matching_engine::{compute_fill_settlement, derive_minting, Fill, MarketId, Order};
 
-use crate::types::{AccountSnapshot, BlockWitness};
+use crate::types::{AccountSnapshot, BlockWitness, WitnessOrder};
 use crate::violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
 
-/// Verify that `post_system_state + fills → post_state`.
-pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
-    let mut violations = Vec::new();
-    let mut stats = VerificationStats::default();
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct DerivedAccountState {
+    balance: i64,
+    positions: HashMap<(MarketId, u8), i64>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct DerivedSettlement {
+    accounts: HashMap<u64, DerivedAccountState>,
+    violations: Vec<Violation>,
+    accounts_checked: usize,
+}
+
+fn derive_post_state(
+    post_system_state: &[AccountSnapshot],
+    orders: &[WitnessOrder],
+    fills: &[Fill],
+    clearing_prices: &HashMap<MarketId, Vec<u64>>,
+) -> DerivedSettlement {
+    let mut result = DerivedSettlement::default();
 
     // Build order map
-    let order_map: HashMap<u64, &Order> = witness
-        .orders
-        .iter()
-        .map(|wo| (wo.order.id, &wo.order))
-        .collect();
+    let order_map: HashMap<u64, &Order> =
+        orders.iter().map(|wo| (wo.order.id, &wo.order)).collect();
 
     // Build order→account mapping (fallback for fills with account_id == 0)
-    let order_account: HashMap<u64, u64> = witness
-        .orders
+    let order_account: HashMap<u64, u64> = orders
         .iter()
         .map(|wo| (wo.order.id, wo.account_id))
         .collect();
 
     // Clone post-system state into working state
-    let mut balances: HashMap<u64, i64> = HashMap::new();
-    let mut positions: HashMap<u64, HashMap<(MarketId, u8), i64>> = HashMap::new();
-
-    for snap in &witness.post_system_state {
-        balances.insert(snap.id, snap.balance);
+    for snap in post_system_state {
         let mut pos_map: HashMap<(MarketId, u8), i64> = HashMap::new();
         for &(market, outcome, qty) in &snap.positions {
             pos_map.insert((market, outcome), qty);
         }
-        positions.insert(snap.id, pos_map);
-        stats.accounts_checked += 1;
+        result.accounts.insert(
+            snap.id,
+            DerivedAccountState {
+                balance: snap.balance,
+                positions: pos_map,
+            },
+        );
+        result.accounts_checked += 1;
     }
 
     // Apply each fill using the shared settlement function
-    for fill in &witness.fills {
+    for fill in fills {
         if fill.fill_qty == 0 {
             continue;
         }
@@ -63,12 +77,11 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
         };
 
         // Ensure account exists in our working state
-        balances.entry(account_id).or_insert(0);
-        positions.entry(account_id).or_default();
+        let account = result.accounts.entry(account_id).or_default();
 
         if let Some(delta) = compute_fill_settlement(order, fill) {
-            *balances.get_mut(&account_id).unwrap() += delta.balance_delta;
-            let pos = positions.get_mut(&account_id).unwrap();
+            account.balance += delta.balance_delta;
+            let pos = &mut account.positions;
             for (market, outcome, qty_delta) in delta.position_deltas {
                 *pos.entry((market, outcome)).or_insert(0) += qty_delta;
             }
@@ -82,42 +95,43 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
     {
         const MINT_ID: u64 = u64::MAX;
 
-        let mint_in_witness = witness.post_system_state.iter().any(|s| s.id == MINT_ID)
-            || witness.post_state.iter().any(|s| s.id == MINT_ID);
+        let mint_in_witness = post_system_state.iter().any(|s| s.id == MINT_ID);
 
         if mint_in_witness {
             // Collect all markets with any positions
-            let all_markets: std::collections::HashSet<MarketId> = positions
+            let all_markets: std::collections::HashSet<MarketId> = result
+                .accounts
                 .values()
-                .flat_map(|pm| pm.keys().map(|(m, _)| *m))
+                .flat_map(|account| account.positions.keys().map(|(m, _)| *m))
                 .collect();
 
             let market_totals: Vec<(MarketId, i64, i64)> = all_markets
                 .iter()
                 .map(|&market_id| {
-                    let total_yes: i64 = positions
+                    let total_yes: i64 = result
+                        .accounts
                         .values()
-                        .map(|pm| pm.get(&(market_id, 0)).copied().unwrap_or(0))
+                        .map(|account| account.positions.get(&(market_id, 0)).copied().unwrap_or(0))
                         .sum();
-                    let total_no: i64 = positions
+                    let total_no: i64 = result
+                        .accounts
                         .values()
-                        .map(|pm| pm.get(&(market_id, 1)).copied().unwrap_or(0))
+                        .map(|account| account.positions.get(&(market_id, 1)).copied().unwrap_or(0))
                         .sum();
                     (market_id, total_yes, total_no)
                 })
                 .collect();
 
-            let adjustments = derive_minting(&market_totals, &witness.clearing_prices);
+            let adjustments = derive_minting(&market_totals, clearing_prices);
 
             if !adjustments.is_empty() {
-                balances.entry(MINT_ID).or_insert(0);
-                positions.entry(MINT_ID).or_default();
+                let mint = result.accounts.entry(MINT_ID).or_default();
 
                 // Check for missing clearing prices (balance_delta == 0 with non-zero position)
                 for adj in &adjustments {
                     if adj.balance_delta == 0 {
                         let side = if adj.outcome == 0 { "YES" } else { "NO" };
-                        violations.push(Violation {
+                        result.violations.push(Violation {
                             kind: ViolationKind::MintingWithoutClearingPrice,
                             details: format!(
                                 "Market {:?}: position imbalance {} but no {} clearing price",
@@ -129,37 +143,52 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
                     }
                 }
 
-                let mint_balance = balances.get_mut(&MINT_ID).unwrap();
-                let mint_positions = positions.get_mut(&MINT_ID).unwrap();
                 for adj in &adjustments {
-                    *mint_positions
+                    *mint
+                        .positions
                         .entry((adj.market_id, adj.outcome))
                         .or_insert(0) += adj.position_delta;
-                    *mint_balance += adj.balance_delta;
+                    mint.balance += adj.balance_delta;
                 }
             }
         }
     }
 
+    result
+}
+
+/// Verify that `post_system_state + fills → post_state`.
+pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
+    let mut violations = Vec::new();
+    let mut stats = VerificationStats::default();
+    let derived = derive_post_state(
+        &witness.post_system_state,
+        &witness.orders,
+        &witness.fills,
+        &witness.clearing_prices,
+    );
+    stats.accounts_checked = derived.accounts_checked;
+    violations.extend(derived.violations.clone());
+
     // Non-negative balance/position assertions (ZK invariants).
     // MINT (u64::MAX) is exempt — it holds short positions by design.
     const MINT_ID: u64 = u64::MAX;
-    for (&account_id, &balance) in &balances {
-        if balance < 0 && account_id != MINT_ID {
+    for (&account_id, account) in &derived.accounts {
+        if account.balance < 0 && account_id != MINT_ID {
             violations.push(Violation {
                 kind: ViolationKind::NegativeBalance,
                 details: format!(
                     "Account {}: derived balance {} < 0 after settlement",
-                    account_id, balance
+                    account_id, account.balance
                 ),
             });
         }
     }
-    for (&account_id, pos_map) in &positions {
+    for (&account_id, account) in &derived.accounts {
         if account_id == MINT_ID {
             continue; // MINT holds short (negative) positions by design
         }
-        for (&(market, outcome), &qty) in pos_map {
+        for (&(market, outcome), &qty) in &account.positions {
             if qty < 0 {
                 violations.push(Violation {
                     kind: ViolationKind::NegativePosition,
@@ -177,15 +206,16 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
         witness.post_state.iter().map(|s| (s.id, s)).collect();
 
     // Check every account that should be in the post-state
-    let all_ids: std::collections::HashSet<u64> = balances
+    let all_ids: std::collections::HashSet<u64> = derived
+        .accounts
         .keys()
         .chain(post_map.keys().copied().collect::<Vec<_>>().iter())
         .copied()
         .collect();
 
     for &account_id in &all_ids {
-        let derived_balance = balances.get(&account_id).copied().unwrap_or(0);
-        let derived_positions = positions.get(&account_id);
+        let derived_account = derived.accounts.get(&account_id);
+        let derived_balance = derived_account.map(|account| account.balance).unwrap_or(0);
 
         if let Some(claimed) = post_map.get(&account_id) {
             // Check balance
@@ -201,7 +231,9 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
 
             // Check positions
             let empty_map = HashMap::new();
-            let derived_pos = derived_positions.unwrap_or(&empty_map);
+            let derived_pos = derived_account
+                .map(|account| &account.positions)
+                .unwrap_or(&empty_map);
 
             // Build claimed positions map
             let claimed_pos: HashMap<(MarketId, u8), i64> = claimed
@@ -239,8 +271,8 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
         } else {
             // Account in derived state but not in claimed post-state
             // Only flag if it has non-zero balance or positions
-            let has_positions = derived_positions
-                .map(|p| p.values().any(|&v| v != 0))
+            let has_positions = derived_account
+                .map(|account| account.positions.values().any(|&v| v != 0))
                 .unwrap_or(false);
 
             if derived_balance != 0 || has_positions {
