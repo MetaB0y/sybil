@@ -19,7 +19,12 @@ pub fn settle_fill(account: &mut Account, order: &Order, fill: &Fill) {
 }
 
 /// Settle all fills from a batch result. Each fill carries its own `account_id`.
-pub fn settle_batch(accounts: &mut AccountStore, fills: &[Fill], orders: &[Order], block_height: u64) {
+pub fn settle_batch(
+    accounts: &mut AccountStore,
+    fills: &[Fill],
+    orders: &[Order],
+    block_height: u64,
+) {
     // Build order lookup
     let order_map: std::collections::HashMap<u64, &Order> =
         orders.iter().map(|o| (o.id, o)).collect();
@@ -38,7 +43,8 @@ pub fn settle_batch(accounts: &mut AccountStore, fills: &[Fill], orders: &[Order
         };
 
         settle_fill(account, order, fill);
-        let event = digest::encode_fill_event(fill.order_id, fill.fill_qty, fill.fill_price, block_height);
+        let event =
+            digest::encode_fill_event(fill.order_id, fill.fill_qty, fill.fill_price, block_height);
         account.events_digest = digest::update_digest(&account.events_digest, &event);
     }
 }
@@ -130,6 +136,9 @@ mod tests {
     use super::*;
     use crate::account::AccountStore;
     use matching_engine::{outcome_buy, outcome_sell, MarketSet, NANOS_PER_DOLLAR};
+    use proptest::prelude::*;
+    use std::collections::HashMap;
+    use sybil_verifier::{AccountSnapshot, BlockWitness, WitnessBlockHeader, WitnessOrder};
 
     fn setup() -> (MarketSet, AccountStore) {
         let mut markets = MarketSet::new();
@@ -137,6 +146,42 @@ mod tests {
         let mut accounts = AccountStore::new();
         accounts.create_account(100 * NANOS_PER_DOLLAR as i64); // $100
         (markets, accounts)
+    }
+
+    fn snapshot_accounts(accounts: &AccountStore) -> Vec<AccountSnapshot> {
+        let mut snapshots: Vec<_> = accounts
+            .iter()
+            .map(|(&id, account)| {
+                let mut positions: Vec<_> = account
+                    .positions
+                    .iter()
+                    .filter(|(_, &qty)| qty != 0)
+                    .map(|(&(market, outcome), &qty)| (market, outcome, qty))
+                    .collect();
+                positions.sort_by_key(|&(market, outcome, _)| (market.0, outcome));
+
+                AccountSnapshot {
+                    id: id.0,
+                    balance: account.balance,
+                    total_deposited: account.total_deposited,
+                    positions,
+                    events_digest: account.events_digest,
+                }
+            })
+            .collect();
+        snapshots.sort_by_key(|snapshot| snapshot.id);
+        snapshots
+    }
+
+    fn empty_header() -> WitnessBlockHeader {
+        WitnessBlockHeader {
+            height: 1,
+            parent_hash: [0u8; 32],
+            state_root: [0u8; 32],
+            order_count: 0,
+            fill_count: 0,
+            timestamp_ms: 0,
+        }
     }
 
     #[test]
@@ -254,5 +299,125 @@ mod tests {
         assert_eq!(account.balance, expected);
         assert_eq!(account.position(m0, 0), 0);
         assert_eq!(account.position(m0, 1), 0);
+    }
+
+    proptest! {
+        #[test]
+        fn prop_zero_fill_does_not_mutate_store(
+            balance in 0i64..=10_000_000_000,
+            limit_price in prop_oneof![Just(100_000_000u64), Just(300_000_000u64), Just(500_000_000u64)],
+            max_fill in 1u64..=10,
+        ) {
+            let mut markets = MarketSet::new();
+            let m0 = markets.add_binary("M0");
+            let mut accounts = AccountStore::new();
+            let aid = accounts.create_account(balance);
+
+            let order = outcome_buy(&markets, 1, m0, 0, limit_price, max_fill);
+            let mut fill = Fill::new(order.id, 0, limit_price);
+            fill.account_id = aid.0;
+
+            let before = snapshot_accounts(&accounts);
+            settle_batch(&mut accounts, &[fill], &[order], 1);
+            let after = snapshot_accounts(&accounts);
+
+            prop_assert_eq!(before, after);
+        }
+
+        #[test]
+        fn prop_settle_batch_matches_verifier_for_simple_buys(
+            balance in 1_000_000_000i64..=20_000_000_000,
+            limit_price in prop_oneof![Just(100_000_000u64), Just(300_000_000u64), Just(500_000_000u64), Just(700_000_000u64)],
+            fill_qty in 1u64..=5,
+        ) {
+            let mut markets = MarketSet::new();
+            let m0 = markets.add_binary("M0");
+            let mut accounts = AccountStore::new();
+            let required_balance = (limit_price as i64 * fill_qty as i64) + 1_000_000_000;
+            let aid = accounts.create_account(balance.max(required_balance));
+
+            let order = outcome_buy(&markets, 1, m0, 0, limit_price, fill_qty);
+            let witness_order = WitnessOrder {
+                order: order.clone(),
+                account_id: aid.0,
+                is_mm: false,
+            };
+            let mut fill = Fill::new(order.id, fill_qty, limit_price);
+            fill.account_id = aid.0;
+
+            let post_system_state = snapshot_accounts(&accounts);
+            settle_batch(&mut accounts, &[fill.clone()], &[order], 7);
+            let mut clearing_prices = HashMap::new();
+            clearing_prices.insert(
+                m0,
+                vec![limit_price, NANOS_PER_DOLLAR - limit_price],
+            );
+            let mint_adjustments =
+                matching_engine::derive_minting(&[(m0, fill_qty as i64, 0)], &clearing_prices);
+            let mint = accounts.get_mut(AccountId::MINT).unwrap();
+            apply_minting(mint, &mint_adjustments, 7);
+            let post_state = snapshot_accounts(&accounts);
+
+            let witness = BlockWitness {
+                header: empty_header(),
+                previous_header: None,
+                orders: vec![witness_order],
+                rejections: vec![],
+                system_events: vec![],
+                fills: vec![fill],
+                clearing_prices,
+                total_welfare: 0,
+                minting_cost: 0,
+                mm_constraints: vec![],
+                market_groups: vec![],
+                pre_state: post_system_state.clone(),
+                post_system_state,
+                post_state,
+                resolved_markets: vec![],
+            };
+
+            let result = sybil_verifier::verify_settlement(&witness);
+            prop_assert!(result.valid, "violations: {:?}", result.violations);
+        }
+
+        #[test]
+        fn prop_fill_order_is_irrelevant_for_distinct_accounts_and_markets(
+            balance_a in 1_000_000_000i64..=10_000_000_000,
+            balance_b in 1_000_000_000i64..=10_000_000_000,
+            qty_a in 1u64..=5,
+            qty_b in 1u64..=5,
+            price_a in prop_oneof![Just(100_000_000u64), Just(300_000_000u64), Just(500_000_000u64)],
+            price_b in prop_oneof![Just(200_000_000u64), Just(400_000_000u64), Just(600_000_000u64)],
+        ) {
+            let mut markets = MarketSet::new();
+            let m0 = markets.add_binary("M0");
+            let m1 = markets.add_binary("M1");
+
+            let mut accounts_ab = AccountStore::new();
+            let aid_a = accounts_ab.create_account(balance_a);
+            let aid_b = accounts_ab.create_account(balance_b);
+            let mut accounts_ba = AccountStore::new();
+            let aid_a_2 = accounts_ba.create_account(balance_a);
+            let aid_b_2 = accounts_ba.create_account(balance_b);
+
+            let order_a = outcome_buy(&markets, 1, m0, 0, price_a, qty_a);
+            let order_b = outcome_buy(&markets, 2, m1, 0, price_b, qty_b);
+            let orders = vec![order_a.clone(), order_b.clone()];
+
+            let mut fill_a = Fill::new(order_a.id, qty_a, price_a);
+            fill_a.account_id = aid_a.0;
+            let mut fill_b = Fill::new(order_b.id, qty_b, price_b);
+            fill_b.account_id = aid_b.0;
+
+            let mut fill_a_2 = Fill::new(order_a.id, qty_a, price_a);
+            fill_a_2.account_id = aid_a_2.0;
+            let mut fill_b_2 = Fill::new(order_b.id, qty_b, price_b);
+            fill_b_2.account_id = aid_b_2.0;
+
+            settle_batch(&mut accounts_ab, &[fill_a, fill_b], &orders, 1);
+            settle_batch(&mut accounts_ba, &[fill_b_2, fill_a_2], &orders, 1);
+
+            prop_assert_eq!(snapshot_accounts(&accounts_ab), snapshot_accounts(&accounts_ba));
+        }
     }
 }

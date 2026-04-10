@@ -299,6 +299,7 @@ mod tests {
     use super::*;
     use crate::types::{WitnessBlockHeader, WitnessOrder};
     use matching_engine::{outcome_buy, outcome_sell, Fill, MarketSet, NANOS_PER_DOLLAR};
+    use proptest::prelude::*;
 
     fn empty_header() -> WitnessBlockHeader {
         WitnessBlockHeader {
@@ -309,6 +310,27 @@ mod tests {
             fill_count: 0,
             timestamp_ms: 0,
         }
+    }
+
+    fn derived_from_snapshots(
+        post_system_state: &[AccountSnapshot],
+    ) -> HashMap<u64, DerivedAccountState> {
+        post_system_state
+            .iter()
+            .map(|snapshot| {
+                (
+                    snapshot.id,
+                    DerivedAccountState {
+                        balance: snapshot.balance,
+                        positions: snapshot
+                            .positions
+                            .iter()
+                            .map(|&(market, outcome, qty)| ((market, outcome), qty))
+                            .collect(),
+                    },
+                )
+            })
+            .collect()
     }
 
     #[test]
@@ -907,5 +929,124 @@ mod tests {
             .violations
             .iter()
             .any(|v| v.kind == ViolationKind::MintingWithoutClearingPrice));
+    }
+
+    proptest! {
+        #[test]
+        fn prop_derive_post_state_is_identity_without_fills_or_minting(
+            balances in prop::collection::vec(-1_000i64..=1_000, 0..6)
+        ) {
+            let post_system_state: Vec<AccountSnapshot> = balances
+                .iter()
+                .enumerate()
+                .map(|(id, balance)| AccountSnapshot {
+                    id: id as u64,
+                    balance: *balance,
+                    total_deposited: 0,
+                    positions: vec![],
+                    events_digest: [0u8; 32],
+                })
+                .collect();
+
+            let derived = derive_post_state(&post_system_state, &[], &[], &HashMap::new());
+            prop_assert_eq!(derived.accounts, derived_from_snapshots(&post_system_state));
+            prop_assert!(derived.violations.is_empty());
+        }
+
+        #[test]
+        fn prop_zero_fill_is_a_no_op(
+            balance in 0i64..=10_000,
+            limit_price in prop_oneof![Just(100_000_000u64), Just(300_000_000u64), Just(500_000_000u64), Just(700_000_000u64)],
+            max_fill in 1u64..=10,
+        ) {
+            let mut markets = MarketSet::new();
+            let m0 = markets.add_binary("M0");
+
+            let order = outcome_buy(&markets, 1, m0, 0, limit_price, max_fill);
+            let witness_order = WitnessOrder {
+                order: order.clone(),
+                account_id: 0,
+                is_mm: false,
+            };
+            let mut fill = Fill::new(order.id, 0, limit_price);
+            fill.account_id = 0;
+
+            let post_system_state = vec![AccountSnapshot {
+                id: 0,
+                balance,
+                total_deposited: 0,
+                positions: vec![],
+                events_digest: [0u8; 32],
+            }];
+
+            let derived = derive_post_state(
+                &post_system_state,
+                &[witness_order],
+                &[fill],
+                &HashMap::new(),
+            );
+            prop_assert_eq!(derived.accounts, derived_from_snapshots(&post_system_state));
+            prop_assert!(derived.violations.is_empty());
+        }
+
+        #[test]
+        fn prop_fill_order_is_irrelevant_for_distinct_accounts_and_markets(
+            balance_a in 1_000_000_000i64..=10_000_000_000,
+            balance_b in 1_000_000_000i64..=10_000_000_000,
+            qty_a in 1u64..=5,
+            qty_b in 1u64..=5,
+            price_a in prop_oneof![Just(100_000_000u64), Just(300_000_000u64), Just(500_000_000u64)],
+            price_b in prop_oneof![Just(200_000_000u64), Just(400_000_000u64), Just(600_000_000u64)],
+        ) {
+            let mut markets = MarketSet::new();
+            let m0 = markets.add_binary("M0");
+            let m1 = markets.add_binary("M1");
+
+            let order_a = outcome_buy(&markets, 1, m0, 0, price_a, qty_a);
+            let order_b = outcome_buy(&markets, 2, m1, 0, price_b, qty_b);
+            let orders = vec![
+                WitnessOrder { order: order_a.clone(), account_id: 0, is_mm: false },
+                WitnessOrder { order: order_b.clone(), account_id: 1, is_mm: false },
+            ];
+
+            let post_system_state = vec![
+                AccountSnapshot {
+                    id: 0,
+                    balance: balance_a,
+                    total_deposited: 0,
+                    positions: vec![],
+                    events_digest: [0u8; 32],
+                },
+                AccountSnapshot {
+                    id: 1,
+                    balance: balance_b,
+                    total_deposited: 0,
+                    positions: vec![],
+                    events_digest: [0u8; 32],
+                },
+            ];
+
+            let mut fill_a = Fill::new(order_a.id, qty_a, price_a);
+            fill_a.account_id = 0;
+            let mut fill_b = Fill::new(order_b.id, qty_b, price_b);
+            fill_b.account_id = 1;
+
+            let derived_ab = derive_post_state(
+                &post_system_state,
+                &orders,
+                &[fill_a.clone(), fill_b.clone()],
+                &HashMap::new(),
+            );
+            let derived_ba = derive_post_state(
+                &post_system_state,
+                &orders,
+                &[fill_b, fill_a],
+                &HashMap::new(),
+            );
+
+            prop_assert_eq!(derived_ab.accounts, derived_ba.accounts);
+            prop_assert!(derived_ab.violations.is_empty());
+            prop_assert!(derived_ba.violations.is_empty());
+        }
     }
 }
