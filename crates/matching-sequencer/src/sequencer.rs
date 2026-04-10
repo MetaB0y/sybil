@@ -1244,6 +1244,7 @@ mod tests {
     use crate::error::RejectionReason;
     use crate::validation::{validate_order, validate_order_with_reservation};
     use matching_engine::{outcome_buy, outcome_sell, MarketId, MarketSet, MmId, NANOS_PER_DOLLAR};
+    use proptest::prelude::*;
     use sybil_oracle::AdminOracle;
 
     fn setup() -> (MarketSet, MarketId) {
@@ -1277,6 +1278,15 @@ mod tests {
         seq.markets = old_markets;
         seq.market_groups = old_groups;
         batch_result_from_block(&bp.block, bp.pipeline)
+    }
+
+    fn snapshot_by_id(
+        snapshots: &[AccountSnapshot],
+        account_id: AccountId,
+    ) -> Option<&AccountSnapshot> {
+        snapshots
+            .iter()
+            .find(|snapshot| snapshot.id == account_id.0)
     }
 
     // --- Validation tests ---
@@ -1861,6 +1871,121 @@ mod tests {
             "Violations: {:?}",
             verification.violations
         );
+    }
+
+    proptest! {
+        #[test]
+        fn prop_phase_builder_is_identity_without_system_baselines(
+            balances in prop::collection::vec(0i64..=10_000i64, 0..6)
+        ) {
+            let mut accounts = AccountStore::new();
+            for balance in balances {
+                accounts.create_account(balance);
+            }
+
+            let (pre_state, post_system_state) =
+                build_witness_phase_snapshots(&accounts, &HashMap::new());
+
+            prop_assert_eq!(pre_state, post_system_state);
+        }
+
+        #[test]
+        fn prop_created_account_is_only_in_post_system_state(
+            initial_balances in prop::collection::vec(0i64..=10_000i64, 0..5),
+            created_balance in 0i64..=10_000i64,
+        ) {
+            let mut accounts = AccountStore::new();
+            for balance in initial_balances {
+                accounts.create_account(balance);
+            }
+            let created_account = accounts.create_account(created_balance);
+
+            let mut baselines = HashMap::new();
+            baselines.insert(created_account, None);
+
+            let (pre_state, post_system_state) =
+                build_witness_phase_snapshots(&accounts, &baselines);
+
+            prop_assert!(snapshot_by_id(&pre_state, created_account).is_none());
+            let created_snapshot = snapshot_by_id(&post_system_state, created_account)
+                .expect("created account must exist after system events");
+            prop_assert_eq!(created_snapshot.balance, created_balance);
+        }
+
+        #[test]
+        fn prop_baselined_account_uses_block_start_snapshot(
+            initial_balance in 0i64..=10_000i64,
+            funded_balance in 0i64..=20_000i64,
+            initial_position in 0i64..=20,
+            final_position in 0i64..=20,
+        ) {
+            let mut accounts = AccountStore::new();
+            let account_id = accounts.create_account(initial_balance);
+            {
+                let account = accounts.get_mut(account_id).unwrap();
+                account.positions.insert((MarketId::new(0), 0), initial_position);
+            }
+
+            let baseline = accounts.get(account_id).unwrap().clone();
+            {
+                let account = accounts.get_mut(account_id).unwrap();
+                account.balance = funded_balance;
+                account.total_deposited = baseline.total_deposited + 5;
+                account.positions.insert((MarketId::new(0), 0), final_position);
+            }
+
+            let mut baselines = HashMap::new();
+            baselines.insert(account_id, Some(baseline.clone()));
+
+            let (pre_state, post_system_state) =
+                build_witness_phase_snapshots(&accounts, &baselines);
+
+            let pre_snapshot =
+                snapshot_by_id(&pre_state, account_id).expect("baseline should appear in pre-state");
+            let post_snapshot = snapshot_by_id(&post_system_state, account_id)
+                .expect("live account should appear in post-system state");
+
+            prop_assert_eq!(pre_snapshot.balance, baseline.balance);
+            prop_assert_eq!(pre_snapshot.total_deposited, baseline.total_deposited);
+            prop_assert_eq!(
+                pre_snapshot.positions.iter().find(|&&(market, outcome, _)| market == MarketId::new(0) && outcome == 0).map(|&(_, _, qty)| qty).unwrap_or(0),
+                initial_position
+            );
+            prop_assert_eq!(post_snapshot.balance, funded_balance);
+            prop_assert_eq!(post_snapshot.total_deposited, baseline.total_deposited + 5);
+            prop_assert_eq!(
+                post_snapshot.positions.iter().find(|&&(market, outcome, _)| market == MarketId::new(0) && outcome == 0).map(|&(_, _, qty)| qty).unwrap_or(0),
+                final_position
+            );
+        }
+
+        #[test]
+        fn prop_baseline_insertion_order_does_not_change_phase_snapshots(
+            balance_a in 0i64..=10_000i64,
+            balance_b in 0i64..=10_000i64,
+            created_balance in 0i64..=10_000i64,
+        ) {
+            let mut accounts = AccountStore::new();
+            let account_a = accounts.create_account(balance_a);
+            let account_b = accounts.create_account(balance_b);
+            let baseline_b = accounts.get(account_b).unwrap().clone();
+            let created_account = accounts.create_account(created_balance);
+
+            let mut baselines_ab = HashMap::new();
+            baselines_ab.insert(created_account, None);
+            baselines_ab.insert(account_b, Some(baseline_b.clone()));
+
+            let mut baselines_ba = HashMap::new();
+            baselines_ba.insert(account_b, Some(baseline_b));
+            baselines_ba.insert(created_account, None);
+
+            let (pre_ab, post_ab) = build_witness_phase_snapshots(&accounts, &baselines_ab);
+            let (pre_ba, post_ba) = build_witness_phase_snapshots(&accounts, &baselines_ba);
+
+            prop_assert!(snapshot_by_id(&pre_ab, account_a).is_some());
+            prop_assert_eq!(pre_ab, pre_ba);
+            prop_assert_eq!(post_ab, post_ba);
+        }
     }
 
     #[test]
