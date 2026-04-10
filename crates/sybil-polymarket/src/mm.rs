@@ -112,6 +112,102 @@ impl MmState {
 }
 
 // --------------------------------------------------------------------------- //
+// QuoteEngine — pure pricing logic, no IO
+// --------------------------------------------------------------------------- //
+
+/// Inputs to the quoting engine for one market.
+#[derive(Clone, Debug)]
+pub struct QuoteInput {
+    pub market_id: u32,
+    pub mid: f64,
+    pub sigma_sq: f64,
+    pub net_inventory: f64,
+    pub yes_position: i64,
+    pub no_position: i64,
+    pub in_group: bool,
+}
+
+/// Configuration for quote generation.
+#[derive(Clone, Debug)]
+pub struct QuoteConfig {
+    pub gamma: f64,
+    pub base_spread: f64,
+    pub min_spread: f64,
+    pub max_position: i64,
+    pub quote_size_dollars: f64,
+}
+
+/// Generate orders for one market. Pure function — no IO, no state mutation.
+pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpec> {
+    let mut orders = Vec::new();
+
+    // Avellaneda-Stoikov reservation price
+    let r = (input.mid - input.net_inventory * config.gamma * input.sigma_sq).clamp(0.02, 0.98);
+
+    // Adaptive spread: wider when volatile
+    let vol_spread = config.base_spread * (1.0 + input.sigma_sq * 200.0);
+    let edge_room = r.min(1.0 - r);
+    let half_spread = vol_spread.clamp(config.min_spread, (edge_room - 0.01).max(config.min_spread));
+
+    // Position limits
+    let at_yes_limit = input.yes_position >= config.max_position;
+    let at_no_limit = input.no_position >= config.max_position;
+
+    // Inventory-adjusted sizing
+    let inv_ratio = (input.net_inventory.abs() / config.max_position as f64).min(1.0);
+    let buy_size = config.quote_size_dollars * (1.0 - inv_ratio * 0.8);
+    let sell_size = config.quote_size_dollars * (1.0 + inv_ratio * 0.5);
+
+    // ── YES side ──
+    let yes_bid = r - half_spread;
+    let yes_ask = r + half_spread;
+
+    if !at_yes_limit && yes_bid > 0.01 && yes_bid < 0.99 {
+        orders.push(OrderSpec::BuyYes {
+            market_id: input.market_id,
+            limit_price_nanos: (yes_bid * NANOS_PER_DOLLAR as f64) as u64,
+            quantity: (buy_size / yes_bid).max(1.0) as u64,
+        });
+    }
+
+    if input.yes_position > 0 && yes_ask > 0.01 && yes_ask < 0.99 {
+        let max_sell = input.yes_position as u64;
+        let desired = (sell_size / yes_ask).max(1.0) as u64;
+        orders.push(OrderSpec::SellYes {
+            market_id: input.market_id,
+            limit_price_nanos: (yes_ask * NANOS_PER_DOLLAR as f64) as u64,
+            quantity: desired.min(max_sell),
+        });
+    }
+
+    // ── NO side (standalone markets only) ──
+    if !input.in_group {
+        let no_bid = (1.0 - r) - half_spread;
+        let no_ask = (1.0 - r) + half_spread;
+
+        if !at_no_limit && no_bid > 0.01 && no_bid < 0.99 {
+            orders.push(OrderSpec::BuyNo {
+                market_id: input.market_id,
+                limit_price_nanos: (no_bid * NANOS_PER_DOLLAR as f64) as u64,
+                quantity: (buy_size / no_bid).max(1.0) as u64,
+            });
+        }
+
+        if input.no_position > 0 && no_ask > 0.01 && no_ask < 0.99 {
+            let max_sell = input.no_position as u64;
+            let desired = (sell_size / no_ask).max(1.0) as u64;
+            orders.push(OrderSpec::SellNo {
+                market_id: input.market_id,
+                limit_price_nanos: (no_ask * NANOS_PER_DOLLAR as f64) as u64,
+                quantity: desired.min(max_sell),
+            });
+        }
+    }
+
+    orders
+}
+
+// --------------------------------------------------------------------------- //
 // MmActor
 // --------------------------------------------------------------------------- //
 
@@ -301,15 +397,9 @@ impl MmActor {
     async fn on_block(&mut self, block: &BlockResponse) {
         let snapshot = self.price_rx.borrow().clone();
         let now = now_ms();
-        let stale_threshold_ms = 30_000;
 
         // 1. Periodic position sync
-        if block.height.saturating_sub(self.state.last_sync_block) >= self.config.mm_sync_interval_blocks
-            || self.state.last_sync_block == 0
-        {
-            self.sync_positions().await;
-            self.state.last_sync_block = block.height;
-        }
+        self.maybe_sync_positions(block.height).await;
 
         // 2. Dynamic budget
         let budget_nanos = self.compute_budget(&snapshot);
@@ -318,139 +408,88 @@ impl MmActor {
             return;
         }
 
-        // 3. Build orders for each market
-        let gamma = self.config.mm_gamma;
-        let base_spread = self.config.mm_half_spread;
-        let min_spread = self.config.mm_min_spread;
-        let max_pos = self.config.mm_max_position as i64;
-        let quote_size = self.config.mm_quote_size_dollars;
+        // 3. Generate quotes (pure) for each market
+        let quote_config = QuoteConfig {
+            gamma: self.config.mm_gamma,
+            base_spread: self.config.mm_half_spread,
+            min_spread: self.config.mm_min_spread,
+            max_position: self.config.mm_max_position as i64,
+            quote_size_dollars: self.config.mm_quote_size_dollars,
+        };
 
         let mut orders = Vec::new();
         let mut ref_prices = HashMap::new();
+        let stale = now.saturating_sub(snapshot.last_updated_ms) > 30_000;
 
-        // Collect market IDs to iterate (can't borrow self.state.markets mutably in loop)
         let market_ids: Vec<u32> = self.state.markets.keys().copied().collect();
-
         for market_id in market_ids {
             let ms = self.state.markets.get_mut(&market_id).unwrap();
 
-            // Get reference price from Polymarket
             let mid = match snapshot.midpoints.get(&ms.yes_token_id) {
                 Some(&p) if p > 0.01 && p < 0.99 => p,
                 _ => continue,
             };
 
-            // Reference price for Sybil display
             ref_prices.insert(ms.sybil_market_id, (mid * NANOS_PER_DOLLAR as f64) as u64);
 
-            // Staleness check
-            if now.saturating_sub(snapshot.last_updated_ms) > stale_threshold_ms {
+            if stale {
                 continue;
             }
 
-            // Update price history
             ms.push_price(mid);
 
-            // Variance
-            let sigma_sq = ms.variance();
-
-            // Reservation price (Avellaneda-Stoikov)
-            let q = ms.net_inventory();
-            let r = (mid - q * gamma * sigma_sq).clamp(0.02, 0.98);
-
-            // Adaptive spread: wider when volatile
-            let vol_spread = base_spread * (1.0 + sigma_sq * 200.0);
-            let edge_room = r.min(1.0 - r);
-            let half_spread = vol_spread.clamp(min_spread, (edge_room - 0.01).max(min_spread));
-
-            // Position limits
-            let at_yes_limit = ms.yes_position >= max_pos;
-            let at_no_limit = ms.no_position >= max_pos;
-
-            // Inventory-adjusted sizing: shrink buys when loaded, grow sells
-            let inv_ratio = (q.abs() / max_pos as f64).min(1.0);
-            let buy_size = quote_size * (1.0 - inv_ratio * 0.8);
-            let sell_size = quote_size * (1.0 + inv_ratio * 0.5);
-
-            // ----- YES side -----
-            let yes_bid = r - half_spread;
-            let yes_ask = r + half_spread;
-
-            // BuyYes (bid)
-            if !at_yes_limit && yes_bid > 0.01 && yes_bid < 0.99 {
-                orders.push(OrderSpec::BuyYes {
-                    market_id: ms.sybil_market_id,
-                    limit_price_nanos: (yes_bid * NANOS_PER_DOLLAR as f64) as u64,
-                    quantity: (buy_size / yes_bid).max(1.0) as u64,
-                });
-            }
-
-            // SellYes (ask) — only to unwind existing YES inventory (no shorts)
-            if ms.yes_position > 0 && yes_ask > 0.01 && yes_ask < 0.99 {
-                let max_sell = ms.yes_position as u64;
-                let desired = (sell_size / yes_ask).max(1.0) as u64;
-                orders.push(OrderSpec::SellYes {
-                    market_id: ms.sybil_market_id,
-                    limit_price_nanos: (yes_ask * NANOS_PER_DOLLAR as f64) as u64,
-                    quantity: desired.min(max_sell),
-                });
-            }
-
-            // ----- NO side (standalone markets only) -----
-            if !ms.in_group {
-                let no_bid = (1.0 - r) - half_spread;
-                let no_ask = (1.0 - r) + half_spread;
-
-                if !at_no_limit && no_bid > 0.01 && no_bid < 0.99 {
-                    orders.push(OrderSpec::BuyNo {
-                        market_id: ms.sybil_market_id,
-                        limit_price_nanos: (no_bid * NANOS_PER_DOLLAR as f64) as u64,
-                        quantity: (buy_size / no_bid).max(1.0) as u64,
-                    });
-                }
-
-                // SellNo — only to unwind existing NO inventory (no shorts)
-                if ms.no_position > 0 && no_ask > 0.01 && no_ask < 0.99 {
-                    let max_sell = ms.no_position as u64;
-                    let desired = (sell_size / no_ask).max(1.0) as u64;
-                    orders.push(OrderSpec::SellNo {
-                        market_id: ms.sybil_market_id,
-                        limit_price_nanos: (no_ask * NANOS_PER_DOLLAR as f64) as u64,
-                        quantity: desired.min(max_sell),
-                    });
-                }
-            }
+            let input = QuoteInput {
+                market_id: ms.sybil_market_id,
+                mid,
+                sigma_sq: ms.variance(),
+                net_inventory: ms.net_inventory(),
+                yes_position: ms.yes_position,
+                no_position: ms.no_position,
+                in_group: ms.in_group,
+            };
+            orders.extend(generate_quotes(&input, &quote_config));
         }
 
+        // 4. Submit (IO)
+        self.submit_orders(&orders, budget_nanos, block.height).await;
+
+        // 5. Push reference prices (IO)
+        if !ref_prices.is_empty() {
+            let _ = self.sybil_client.set_reference_prices(&ref_prices).await;
+        }
+    }
+
+    async fn maybe_sync_positions(&mut self, block_height: u64) {
+        if block_height.saturating_sub(self.state.last_sync_block) >= self.config.mm_sync_interval_blocks
+            || self.state.last_sync_block == 0
+        {
+            self.sync_positions().await;
+            self.state.last_sync_block = block_height;
+        }
+    }
+
+    async fn submit_orders(&self, orders: &[OrderSpec], budget_nanos: u64, block_height: u64) {
         if orders.is_empty() {
             return;
         }
-
-        // 4. Submit
         let req = SubmitOrderRequest {
             account_id: self.account_id,
-            orders: orders.clone(),
+            orders: orders.to_vec(),
             mm_budget_nanos: Some(budget_nanos),
         };
-
         match self.sybil_client.submit_orders(&req).await {
             Ok(accepted) => {
                 debug!(
-                    block = block.height,
-                    order_count = req.orders.len(),
+                    block = block_height,
+                    order_count = orders.len(),
                     accepted,
                     budget_dollars = budget_nanos as f64 / NANOS_PER_DOLLAR as f64,
                     "submitted MM orders"
                 );
             }
             Err(e) => {
-                warn!(block = block.height, error = %e, "order submission failed");
+                warn!(block = block_height, error = %e, "order submission failed");
             }
-        }
-
-        // 5. Push reference prices
-        if !ref_prices.is_empty() {
-            let _ = self.sybil_client.set_reference_prices(&ref_prices).await;
         }
     }
 }
@@ -460,4 +499,139 @@ fn now_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn default_config() -> QuoteConfig {
+        QuoteConfig {
+            gamma: 0.05,
+            base_spread: 0.02,
+            min_spread: 0.005,
+            max_position: 5000,
+            quote_size_dollars: 100.0,
+        }
+    }
+
+    fn default_input(mid: f64) -> QuoteInput {
+        QuoteInput {
+            market_id: 1,
+            mid,
+            sigma_sq: 0.0005,
+            net_inventory: 0.0,
+            yes_position: 0,
+            no_position: 0,
+            in_group: false,
+        }
+    }
+
+    #[test]
+    fn symmetric_quotes_at_midpoint() {
+        let orders = generate_quotes(&default_input(0.5), &default_config());
+        // Should have BuyYes + BuyNo (no sells since no position)
+        assert!(orders.iter().any(|o| matches!(o, OrderSpec::BuyYes { .. })));
+        assert!(orders.iter().any(|o| matches!(o, OrderSpec::BuyNo { .. })));
+        assert!(!orders.iter().any(|o| matches!(o, OrderSpec::SellYes { .. })));
+        assert!(!orders.iter().any(|o| matches!(o, OrderSpec::SellNo { .. })));
+    }
+
+    #[test]
+    fn inventory_skews_reservation_price() {
+        let config = default_config();
+        // Long YES → reservation price below mid → tighter YES bid, wider YES ask
+        let mut long_yes = default_input(0.5);
+        long_yes.net_inventory = 1000.0;
+        long_yes.yes_position = 1000;
+        let orders = generate_quotes(&long_yes, &config);
+
+        let yes_bid = orders.iter().find_map(|o| match o {
+            OrderSpec::BuyYes { limit_price_nanos, .. } => Some(*limit_price_nanos),
+            _ => None,
+        });
+        // With long inventory, reservation price < mid, so bid should be below 0.48
+        assert!(yes_bid.is_some());
+        assert!(yes_bid.unwrap() < 480_000_000);
+    }
+
+    #[test]
+    fn at_position_limit_no_buy() {
+        let config = default_config();
+        let mut input = default_input(0.5);
+        input.yes_position = 5000; // at max_position
+        let orders = generate_quotes(&input, &config);
+        // At YES limit → no BuyYes
+        assert!(!orders.iter().any(|o| matches!(o, OrderSpec::BuyYes { .. })));
+    }
+
+    #[test]
+    fn group_market_suppresses_no_side() {
+        let config = default_config();
+        let mut input = default_input(0.5);
+        input.in_group = true;
+        let orders = generate_quotes(&input, &config);
+        // In group → no BuyNo/SellNo
+        assert!(!orders.iter().any(|o| matches!(o, OrderSpec::BuyNo { .. })));
+        assert!(!orders.iter().any(|o| matches!(o, OrderSpec::SellNo { .. })));
+    }
+
+    #[test]
+    fn sell_only_when_holding_position() {
+        let config = default_config();
+        let mut input = default_input(0.5);
+        input.yes_position = 100;
+        input.no_position = 50;
+        let orders = generate_quotes(&input, &config);
+        // Should have SellYes (holding YES) and SellNo (holding NO, standalone)
+        assert!(orders.iter().any(|o| matches!(o, OrderSpec::SellYes { .. })));
+        assert!(orders.iter().any(|o| matches!(o, OrderSpec::SellNo { .. })));
+    }
+
+    #[test]
+    fn sell_quantity_capped_to_position() {
+        let config = default_config();
+        let mut input = default_input(0.5);
+        input.yes_position = 3; // very small position
+        let orders = generate_quotes(&input, &config);
+        let sell_qty = orders.iter().find_map(|o| match o {
+            OrderSpec::SellYes { quantity, .. } => Some(*quantity),
+            _ => None,
+        });
+        assert!(sell_qty.is_some());
+        assert!(sell_qty.unwrap() <= 3);
+    }
+
+    #[test]
+    fn edge_price_suppresses_yes_bid() {
+        let config = default_config();
+        // Price near 0 → reservation clamps to 0.02, YES bid likely below threshold
+        let orders = generate_quotes(&default_input(0.005), &config);
+        // YES bid should be suppressed (too low), but NO side may still generate
+        assert!(!orders.iter().any(|o| matches!(o, OrderSpec::BuyYes { .. })));
+    }
+
+    #[test]
+    fn high_variance_widens_spread() {
+        let config = default_config();
+        let mut low_vol = default_input(0.5);
+        low_vol.sigma_sq = 0.0001;
+        let mut high_vol = default_input(0.5);
+        high_vol.sigma_sq = 0.01;
+
+        let low_orders = generate_quotes(&low_vol, &config);
+        let high_orders = generate_quotes(&high_vol, &config);
+
+        let low_bid = low_orders.iter().find_map(|o| match o {
+            OrderSpec::BuyYes { limit_price_nanos, .. } => Some(*limit_price_nanos),
+            _ => None,
+        }).unwrap();
+        let high_bid = high_orders.iter().find_map(|o| match o {
+            OrderSpec::BuyYes { limit_price_nanos, .. } => Some(*limit_price_nanos),
+            _ => None,
+        }).unwrap();
+
+        // Higher volatility → wider spread → lower bid
+        assert!(high_bid < low_bid);
+    }
 }

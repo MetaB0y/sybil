@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use matching_engine::{compute_fill_settlement, MarketId, Order};
+use matching_engine::{compute_fill_settlement, derive_minting, MarketId, Order};
 
 use crate::types::{AccountSnapshot, BlockWitness};
 use crate::violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
@@ -69,93 +69,65 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
         }
     }
 
-    // Derive minting adjustments — same logic as sequencer.
-    //
-    // After settling real fills, some markets may have more YES than NO
-    // (or vice versa) due to group minting. We observe the imbalance
-    // and adjust MINT (id = u64::MAX) to restore position balance.
-    // The sum INCLUDES MINT's existing positions so each block only
-    // adjusts by the incremental imbalance.
+    // Derive minting adjustments — shared pure function from matching-engine.
     //
     // Proof that MINT expected P&L = 0: see design/mint-pnl.typ and
     // lean/FisherClearing/Duality/MintingSimplex.lean (Theorem 1).
     {
         const MINT_ID: u64 = u64::MAX;
 
-        // Only derive MINT adjustments when the MINT account is present
-        // in the pre-state (i.e., the sequencer is tracking minting).
         let mint_in_witness = witness.pre_state.iter().any(|s| s.id == MINT_ID)
             || witness.post_state.iter().any(|s| s.id == MINT_ID);
 
-        // Collect all markets with any positions
-        let all_markets: std::collections::HashSet<MarketId> = positions
-            .values()
-            .flat_map(|pm| pm.keys().map(|(m, _)| *m))
-            .collect();
-
         if mint_in_witness {
-            let mut mint_adjustments: Vec<(MarketId, i64)> = Vec::new();
-            for &market_id in &all_markets {
-                let total_yes: i64 = positions
-                    .values()
-                    .map(|pm| pm.get(&(market_id, 0)).copied().unwrap_or(0))
-                    .sum();
-                let total_no: i64 = positions
-                    .values()
-                    .map(|pm| pm.get(&(market_id, 1)).copied().unwrap_or(0))
-                    .sum();
-                let diff = total_yes - total_no;
-                if diff != 0 {
-                    mint_adjustments.push((market_id, diff));
-                }
-            }
+            // Collect all markets with any positions
+            let all_markets: std::collections::HashSet<MarketId> = positions
+                .values()
+                .flat_map(|pm| pm.keys().map(|(m, _)| *m))
+                .collect();
 
-            if !mint_adjustments.is_empty() {
+            let market_totals: Vec<(MarketId, i64, i64)> = all_markets
+                .iter()
+                .map(|&market_id| {
+                    let total_yes: i64 = positions
+                        .values()
+                        .map(|pm| pm.get(&(market_id, 0)).copied().unwrap_or(0))
+                        .sum();
+                    let total_no: i64 = positions
+                        .values()
+                        .map(|pm| pm.get(&(market_id, 1)).copied().unwrap_or(0))
+                        .sum();
+                    (market_id, total_yes, total_no)
+                })
+                .collect();
+
+            let adjustments = derive_minting(&market_totals, &witness.clearing_prices);
+
+            if !adjustments.is_empty() {
                 balances.entry(MINT_ID).or_insert(0);
                 positions.entry(MINT_ID).or_default();
 
+                // Check for missing clearing prices (balance_delta == 0 with non-zero position)
+                for adj in &adjustments {
+                    if adj.balance_delta == 0 {
+                        let side = if adj.outcome == 0 { "YES" } else { "NO" };
+                        violations.push(Violation {
+                            kind: ViolationKind::MintingWithoutClearingPrice,
+                            details: format!(
+                                "Market {:?}: position imbalance {} but no {} clearing price",
+                                adj.market_id, adj.position_delta.abs(), side
+                            ),
+                        });
+                    }
+                }
+
                 let mint_balance = balances.get_mut(&MINT_ID).unwrap();
                 let mint_positions = positions.get_mut(&MINT_ID).unwrap();
-
-                for (market_id, diff) in mint_adjustments {
-                    if diff > 0 {
-                        // More YES than NO → MINT shorts YES, receives yes_price revenue
-                        let yes_price = witness
-                            .clearing_prices
-                            .get(&market_id)
-                            .and_then(|p| p.first().copied())
-                            .unwrap_or(0);
-                        if yes_price == 0 {
-                            violations.push(Violation {
-                                kind: ViolationKind::MintingWithoutClearingPrice,
-                                details: format!(
-                                    "Market {:?}: position imbalance {} but no YES clearing price",
-                                    market_id, diff
-                                ),
-                            });
-                        }
-                        *mint_positions.entry((market_id, 0)).or_insert(0) -= diff;
-                        *mint_balance += (yes_price as i128 * diff as i128) as i64;
-                    } else {
-                        // More NO than YES → MINT shorts NO, receives no_price revenue
-                        let no_price = witness
-                            .clearing_prices
-                            .get(&market_id)
-                            .and_then(|p| p.get(1).copied())
-                            .unwrap_or(0);
-                        if no_price == 0 {
-                            violations.push(Violation {
-                                kind: ViolationKind::MintingWithoutClearingPrice,
-                                details: format!(
-                                    "Market {:?}: position imbalance {} but no NO clearing price",
-                                    market_id, diff
-                                ),
-                            });
-                        }
-                        *mint_positions.entry((market_id, 1)).or_insert(0) += diff;
-                        *mint_balance +=
-                            (no_price as i128 * diff.unsigned_abs() as i128) as i64;
-                    }
+                for adj in &adjustments {
+                    *mint_positions
+                        .entry((adj.market_id, adj.outcome))
+                        .or_insert(0) += adj.position_delta;
+                    *mint_balance += adj.balance_delta;
                 }
             }
         }

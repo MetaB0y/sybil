@@ -824,60 +824,27 @@ impl BlockSequencer {
         );
 
         // Derive minting from position imbalance — solver-independent.
-        //
-        // After settling real fills, some markets may have more YES than NO
-        // (or vice versa) due to minting/group-minting in the solver. Rather
-        // than trust the solver's synthetic arb orders, we observe the
-        // imbalance directly and adjust the MINT account to restore balance.
-        //
-        // The sum INCLUDES MINT's existing positions so that each block only
-        // adjusts by the incremental imbalance (not the cumulative total).
-        // The balance adjustment uses clearing prices (verifier can check
-        // p_YES + p_NO = $1).
+        // Uses shared pure function from matching-engine (same code as verifier).
         {
-            // First pass: compute imbalances across ALL accounts (including MINT).
-            let mut mint_adjustments: Vec<(MarketId, i64)> = Vec::new();
-            for market in self.markets.iter() {
-                let total_yes: i64 = self
-                    .accounts
-                    .iter()
-                    .map(|(_, a)| a.position(market.id, 0))
-                    .sum();
-                let total_no: i64 = self
-                    .accounts
-                    .iter()
-                    .map(|(_, a)| a.position(market.id, 1))
-                    .sum();
-                let diff = total_yes - total_no;
-                if diff != 0 {
-                    mint_adjustments.push((market.id, diff));
-                }
-            }
-            // Second pass: apply adjustments to MINT account.
+            let market_totals: Vec<(MarketId, i64, i64)> = self
+                .markets
+                .iter()
+                .map(|market| {
+                    let total_yes: i64 =
+                        self.accounts.iter().map(|(_, a)| a.position(market.id, 0)).sum();
+                    let total_no: i64 =
+                        self.accounts.iter().map(|(_, a)| a.position(market.id, 1)).sum();
+                    (market.id, total_yes, total_no)
+                })
+                .collect();
+            let mint_adjustments =
+                matching_engine::derive_minting(&market_totals, &clearing_prices);
             if !mint_adjustments.is_empty() {
                 let mint = self
                     .accounts
                     .get_mut(crate::account::AccountId::MINT)
                     .expect("mint account must exist");
-                for (market_id, diff) in mint_adjustments {
-                    if diff > 0 {
-                        // More YES than NO → MINT shorts YES, receives yes_price revenue
-                        let yes_price = clearing_prices
-                            .get(&market_id)
-                            .and_then(|p| p.first().copied())
-                            .expect("clearing price must exist for market with position imbalance");
-                        *mint.positions.entry((market_id, 0)).or_insert(0) -= diff;
-                        mint.balance += (yes_price as i128 * diff as i128) as i64;
-                    } else {
-                        // More NO than YES → MINT shorts NO, receives no_price revenue
-                        let no_price = clearing_prices
-                            .get(&market_id)
-                            .and_then(|p| p.get(1).copied())
-                            .expect("clearing price must exist for market with position imbalance");
-                        *mint.positions.entry((market_id, 1)).or_insert(0) += diff;
-                        mint.balance += (no_price as i128 * diff.unsigned_abs() as i128) as i64;
-                    }
-                }
+                settlement::apply_minting(mint, &mint_adjustments);
             }
         }
 

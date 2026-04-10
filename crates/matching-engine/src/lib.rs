@@ -41,7 +41,7 @@ pub use order::{
 };
 pub use order_builder::OrderBuilder;
 pub use problem::{MarketGroup, Problem, ProblemSummary};
-pub use settlement::{compute_fill_settlement, SettlementDelta};
+pub use settlement::{compute_fill_settlement, derive_minting, MintAdjustment, SettlementDelta};
 pub use state::{state_index, state_to_outcomes, StateSpace};
 pub use types::conversions::{dollars_to_nanos, nanos_to_dollars, nanos_to_price, price_to_nanos};
 pub use types::{MarketId, Nanos, Qty, Side, NANOS_PER_DOLLAR};

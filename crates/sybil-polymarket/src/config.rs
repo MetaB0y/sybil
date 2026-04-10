@@ -87,7 +87,7 @@ pub struct Config {
     pub mm_min_spread: f64,
 
     /// Blocks between position syncs via GET /v1/accounts/{id}.
-    #[arg(long, default_value = "50", env = "MM_SYNC_INTERVAL_BLOCKS")]
+    #[arg(long, default_value = "5", env = "MM_SYNC_INTERVAL_BLOCKS")]
     pub mm_sync_interval_blocks: u64,
 
     /// REST price poll interval in seconds (WebSocket fallback).

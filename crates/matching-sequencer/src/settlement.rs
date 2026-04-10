@@ -1,4 +1,6 @@
-use matching_engine::{compute_fill_settlement, Fill, MarketId, Nanos, Order, NANOS_PER_DOLLAR};
+use matching_engine::{
+    compute_fill_settlement, Fill, MarketId, MintAdjustment, Nanos, Order, NANOS_PER_DOLLAR,
+};
 
 use crate::account::{Account, AccountId, AccountStore};
 
@@ -42,6 +44,17 @@ pub fn settle_batch(
         };
 
         settle_fill(account, order, fill);
+    }
+}
+
+/// Apply minting adjustments to the MINT account.
+pub fn apply_minting(mint: &mut Account, adjustments: &[MintAdjustment]) {
+    for adj in adjustments {
+        *mint
+            .positions
+            .entry((adj.market_id, adj.outcome))
+            .or_insert(0) += adj.position_delta;
+        mint.balance += adj.balance_delta;
     }
 }
 

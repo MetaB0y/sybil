@@ -52,7 +52,7 @@ Written in a single transaction after each block (~70KB, 2-second interval).
 
 State for seamless order continuity across restarts:
 
-- **Pending orders**: Orders with TTL surviving across blocks. Currently lost on crash.
+- **Order book**: The `OrderBook` component owns all resting orders and their balance/position reservations. Persisting it preserves resting orders + committed capital across restarts. Natural serialization boundary — one struct, one table.
 - **Mempool**: In-flight submissions not yet in a block. Low priority (clients resubmit).
 - **MM state**: Per-market inventory, price history for variance estimation.
 

@@ -1,9 +1,12 @@
 //! Shared settlement logic: pure functions computing balance and position
-//! deltas from fills. Used by both the sequencer (to apply fills) and the
-//! verifier (to re-derive post-state for ZK verification).
+//! deltas from fills and minting adjustments. Used by both the sequencer
+//! (to apply fills) and the verifier (to re-derive post-state for ZK
+//! verification).
+
+use std::collections::HashMap;
 
 use crate::order::{Fill, Order};
-use crate::types::MarketId;
+use crate::types::{MarketId, Nanos};
 
 /// Balance and position changes resulting from settling one fill.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -164,6 +167,76 @@ fn compute_generic_settlement(
     })
 }
 
+// ---------------------------------------------------------------------------
+// Minting
+// ---------------------------------------------------------------------------
+
+/// An adjustment to the MINT account for one market, restoring YES/NO balance.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MintAdjustment {
+    pub market_id: MarketId,
+    /// Which outcome MINT shorts (0 = YES, 1 = NO).
+    pub outcome: u8,
+    /// Position delta for MINT (negative = short).
+    pub position_delta: i64,
+    /// Balance delta for MINT (clearing_price × quantity). Zero if no clearing price.
+    pub balance_delta: i64,
+}
+
+/// Derive minting adjustments from position imbalances.
+///
+/// Pure function: takes pre-computed per-market position totals (summed across
+/// ALL accounts including MINT) and clearing prices. Returns adjustments that
+/// would restore `total_yes == total_no` for each market.
+///
+/// The sum must include MINT's existing positions so each block only adjusts
+/// by the incremental imbalance, not the cumulative total.
+///
+/// If a market has an imbalance but no clearing price, the adjustment has
+/// `balance_delta = 0` — the caller decides how to handle (sequencer panics,
+/// verifier records a violation).
+pub fn derive_minting(
+    market_totals: &[(MarketId, i64, i64)],
+    clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
+) -> Vec<MintAdjustment> {
+    let mut adjustments = Vec::new();
+
+    for &(market_id, total_yes, total_no) in market_totals {
+        let diff = total_yes - total_no;
+        if diff == 0 {
+            continue;
+        }
+
+        if diff > 0 {
+            // More YES than NO → MINT shorts YES, receives yes_price revenue
+            let yes_price = clearing_prices
+                .get(&market_id)
+                .and_then(|p| p.first().copied())
+                .unwrap_or(0);
+            adjustments.push(MintAdjustment {
+                market_id,
+                outcome: 0,
+                position_delta: -diff,
+                balance_delta: (yes_price as i128 * diff as i128) as i64,
+            });
+        } else {
+            // More NO than YES → MINT shorts NO, receives no_price revenue
+            let no_price = clearing_prices
+                .get(&market_id)
+                .and_then(|p| p.get(1).copied())
+                .unwrap_or(0);
+            adjustments.push(MintAdjustment {
+                market_id,
+                outcome: 1,
+                position_delta: diff, // negative: MINT shorts NO
+                balance_delta: (no_price as i128 * diff.unsigned_abs() as i128) as i64,
+            });
+        }
+    }
+
+    adjustments
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,5 +373,72 @@ mod tests {
         // Should not panic — i128 intermediate handles the multiplication
         let delta = compute_fill_settlement(&order, &fill);
         assert!(delta.is_some());
+    }
+
+    // --- Minting tests ---
+
+    #[test]
+    fn test_minting_no_imbalance() {
+        let m0 = MarketId(0);
+        let totals = vec![(m0, 100, 100)];
+        let prices = HashMap::new();
+        assert!(derive_minting(&totals, &prices).is_empty());
+    }
+
+    #[test]
+    fn test_minting_yes_surplus() {
+        let m0 = MarketId(0);
+        let totals = vec![(m0, 150, 100)]; // 50 more YES than NO
+        let mut prices = HashMap::new();
+        prices.insert(m0, vec![400_000_000, 600_000_000]); // 0.40 / 0.60
+
+        let adj = derive_minting(&totals, &prices);
+        assert_eq!(adj.len(), 1);
+        assert_eq!(adj[0].market_id, m0);
+        assert_eq!(adj[0].outcome, 0); // shorts YES
+        assert_eq!(adj[0].position_delta, -50);
+        assert_eq!(adj[0].balance_delta, 400_000_000i64 * 50); // yes_price * qty
+    }
+
+    #[test]
+    fn test_minting_no_surplus() {
+        let m0 = MarketId(0);
+        let totals = vec![(m0, 100, 180)]; // 80 more NO than YES
+        let mut prices = HashMap::new();
+        prices.insert(m0, vec![700_000_000, 300_000_000]);
+
+        let adj = derive_minting(&totals, &prices);
+        assert_eq!(adj.len(), 1);
+        assert_eq!(adj[0].outcome, 1); // shorts NO
+        assert_eq!(adj[0].position_delta, -80); // total_yes - total_no = -80
+        assert_eq!(adj[0].balance_delta, 300_000_000i64 * 80); // no_price * |diff|
+    }
+
+    #[test]
+    fn test_minting_multiple_markets() {
+        let m0 = MarketId(0);
+        let m1 = MarketId(1);
+        let totals = vec![
+            (m0, 110, 100), // YES surplus = 10
+            (m1, 100, 100), // balanced
+        ];
+        let mut prices = HashMap::new();
+        prices.insert(m0, vec![500_000_000, 500_000_000]);
+
+        let adj = derive_minting(&totals, &prices);
+        assert_eq!(adj.len(), 1); // only m0
+        assert_eq!(adj[0].market_id, m0);
+    }
+
+    #[test]
+    fn test_minting_missing_price_gives_zero_balance() {
+        let m0 = MarketId(0);
+        let totals = vec![(m0, 150, 100)];
+        let prices = HashMap::new(); // no prices
+
+        let adj = derive_minting(&totals, &prices);
+        assert_eq!(adj.len(), 1);
+        assert_eq!(adj[0].position_delta, -50);
+        assert_eq!(adj[0].balance_delta, 0); // no price → zero revenue
     }
 }

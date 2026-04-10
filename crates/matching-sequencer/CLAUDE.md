@@ -35,6 +35,7 @@ SimulationRunner / SequencerHandle (async)
 | `SequencerActor` | Async wrapper with message-passing, mempool, SSE broadcasts |
 | `Block` / `BlockHeader` | Immutable output with fills, prices, state root, parent hash |
 | `Account` / `AccountStore` | Balance + positions per account |
+| `OrderBook` | Resting orders with tracked balance/position reservations |
 | `OrderSubmission` | Request to include orders in next batch |
 | `SimulationRunner` | Multi-batch orchestration with agents |
 
@@ -44,13 +45,15 @@ SimulationRunner / SequencerHandle (async)
 BlockSequencer::produce_block(submissions, timestamp_ms) → (Block, PipelineResult, BlockWitness)
 ```
 
-1. Re-validate pending orders (TTL check)
-2. Validate new submissions (balance reservation)
-3. Merge into `Problem`
-4. `Pipeline::solve(&problem)`
-5. `settle_fill()` for each fill
-6. Persist unfilled non-MM orders
-7. Compute state root, build Block
+1. `order_book.expire()` — remove stale resting orders
+2. `order_book.revalidate()` — remove orders for resolved markets, bankrupt accounts
+3. Collect resting orders from book
+4. Accept new non-MM submissions via `order_book.accept()` (validates + reserves)
+5. Accept MM submissions (flash liquidity, bypass book, STP check only)
+6. Build `Problem`, `Pipeline::solve(&problem)`
+7. `settle_fill()` for each fill, derive minting from position imbalance
+8. `order_book.settle()` — release filled, adjust partial, keep unfilled
+9. Compute state root, build Block
 
 ## Settlement Logic
 
@@ -78,11 +81,14 @@ BlockSequencer::produce_block(submissions, timestamp_ms) → (Block, PipelineRes
 
 Agents implement: `submit_orders(view: &MarketView, account: &Account) → AgentSubmission`
 
-## Pending Orders
+## Order Book
 
-- Unfilled non-MM orders persist across batches
-- Expire after `order_ttl` batches (default 3)
-- Re-validated on reinclusion
+- `OrderBook` is the single source of truth for committed capital
+- Unfilled non-MM orders become resting orders with tracked reservations
+- Balance reserved at acceptance time (buys), positions reserved (sells)
+- Expire after TTL blocks (default 3), reservations released
+- Re-validated each block (market resolution, account solvency)
+- MM orders bypass the book entirely (flash liquidity, one-shot)
 
 ## Mempool
 
@@ -107,6 +113,7 @@ Agents implement: `submit_orders(view: &MarketView, account: &Account) → Agent
 | `account.rs` | Account, AccountStore |
 | `block.rs` | Block, BlockHeader |
 | `mempool.rs` | Order buffering |
+| `order_book.rs` | OrderBook: resting orders + reservations |
 | `agent/*.rs` | Informed, Noise, MM agents |
 | `validation.rs` | Order validation rules |
 

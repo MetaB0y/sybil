@@ -8,7 +8,7 @@ use matching_engine::{MarketGroup, MarketId, MarketSet, Nanos};
 use sybil_oracle::{MarketStatus, ResolutionRecord};
 
 use crate::account::{Account, AccountId};
-use crate::block::Block;
+use crate::block::{Block, BlockProduction};
 use crate::crypto::{verify_signed_order, PublicKey, SignedOrder};
 use crate::error::SequencerError;
 use crate::market_info::{AccountFillRecord, MarketMetadata, MarketSearchQuery, PricePoint};
@@ -160,7 +160,7 @@ struct SequencerActor {
     receiver: mpsc::Receiver<Message>,
     latest_block: Option<Block>,
     /// Recent block history (ring buffer, last N blocks).
-    block_history: Vec<Block>,
+    block_history: std::collections::VecDeque<Block>,
     /// Broadcast channel for new blocks (SSE).
     block_broadcast: broadcast::Sender<Block>,
     /// Interval between block production ticks.
@@ -186,7 +186,7 @@ impl SequencerActor {
             mempool,
             receiver,
             latest_block: None,
-            block_history: Vec::new(),
+            block_history: std::collections::VecDeque::new(),
             block_broadcast,
             block_interval,
             pause_count: 0,
@@ -212,6 +212,7 @@ impl SequencerActor {
         }
     }
 
+    /// Block production tick: functional core (produce_block) then imperative shell.
     fn on_tick(&mut self) {
         if self.pause_count > 0 {
             return;
@@ -223,45 +224,64 @@ impl SequencerActor {
 
         let mempool_size = self.mempool.len();
         let submissions = self.mempool.drain();
+
+        // ── Functional core ──
         let bp = self.sequencer.produce_block(submissions, timestamp_ms);
-        let block = bp.block;
 
-        // Record block production metrics
-        metrics::counter!("sybil_blocks_produced").increment(1);
-        metrics::gauge!("sybil_block_height").set(block.header.height as f64);
-        metrics::histogram!("sybil_orders_per_block").record(block.header.order_count as f64);
-        metrics::histogram!("sybil_fills_per_block").record(block.header.fill_count as f64);
-        metrics::gauge!("sybil_welfare_nanos").set(block.total_welfare as f64);
-        metrics::gauge!("sybil_volume_nanos").set(block.total_volume as f64);
-        metrics::gauge!("sybil_mempool_size").set(mempool_size as f64);
-        metrics::histogram!("sybil_solve_time_seconds").record(bp.pipeline.total_time_secs);
+        // ── Imperative shell: persist → metrics → history → broadcast → cache ──
+        // Persist first: if this fails, in-memory state has already advanced but
+        // disk lags by one block. On crash, that block is lost. This is option (A):
+        // in-memory is authoritative, disk is best-effort.
+        // Future options: (B) snapshot/rollback, (C) produce_block returns diff.
+        self.persist_block(&bp);
+        self.record_metrics(&bp, mempool_size);
+        self.push_to_history(bp.block.clone());
+        let _ = self.block_broadcast.send(bp.block.clone());
+        self.latest_block = Some(bp.block);
+    }
 
-        // Persist state (Tier 1: accounts, markets, groups, header, counters)
+    /// Persist block state to redb. Logs on failure, continues.
+    fn persist_block(&self, bp: &BlockProduction) {
         if let Some(ref store) = self.store {
             if let Err(e) = store.save_block(
                 &self.sequencer.accounts,
                 self.sequencer.markets(),
                 self.sequencer.market_groups(),
                 &self.sequencer.lifecycle,
-                &block.header,
+                &bp.block.header,
                 self.sequencer.next_order_id(),
                 self.sequencer.pubkey_registry(),
                 self.sequencer.last_clearing_prices(),
             ) {
-                tracing::error!(error = %e, "failed to persist block");
+                metrics::counter!("sybil_persistence_failures").increment(1);
+                tracing::error!(
+                    error = %e,
+                    height = bp.block.header.height,
+                    "PERSISTENCE FAILED — block produced but not persisted; \
+                     crash recovery may lose this block"
+                );
             }
         }
+    }
 
-        // Store in history (ring buffer)
+    /// Record Prometheus metrics for a produced block.
+    fn record_metrics(&self, bp: &BlockProduction, mempool_size: usize) {
+        metrics::counter!("sybil_blocks_produced").increment(1);
+        metrics::gauge!("sybil_block_height").set(bp.block.header.height as f64);
+        metrics::histogram!("sybil_orders_per_block").record(bp.block.header.order_count as f64);
+        metrics::histogram!("sybil_fills_per_block").record(bp.block.header.fill_count as f64);
+        metrics::gauge!("sybil_welfare_nanos").set(bp.block.total_welfare as f64);
+        metrics::gauge!("sybil_volume_nanos").set(bp.block.total_volume as f64);
+        metrics::gauge!("sybil_mempool_size").set(mempool_size as f64);
+        metrics::histogram!("sybil_solve_time_seconds").record(bp.pipeline.total_time_secs);
+    }
+
+    /// Append block to ring buffer, evicting oldest if at capacity.
+    fn push_to_history(&mut self, block: Block) {
         if self.block_history.len() >= BLOCK_HISTORY_CAPACITY {
-            self.block_history.remove(0);
+            self.block_history.pop_front();
         }
-        self.block_history.push(block.clone());
-
-        // Broadcast to SSE subscribers (ignore if no receivers)
-        let _ = self.block_broadcast.send(block.clone());
-
-        self.latest_block = Some(block);
+        self.block_history.push_back(block);
     }
 
     fn handle(&mut self, msg: Message) {
