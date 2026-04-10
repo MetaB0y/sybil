@@ -122,8 +122,11 @@ pub fn compute_state_root(accounts: &[AccountSnapshot]) -> [u8; 32] {
         // Total deposited
         hasher.update(&account.total_deposited.to_le_bytes());
 
-        // Positions (already sorted by (market, outcome) in AccountSnapshot)
-        for &(market, outcome, qty) in &account.positions {
+        // Positions should already be sorted, but sort again to ensure
+        // canonical hashing even if a caller constructs a snapshot manually.
+        let mut positions = account.positions.clone();
+        positions.sort_by_key(|&(market, outcome, _)| (market.0, outcome));
+        for (market, outcome, qty) in positions {
             hasher.update(&market.0.to_le_bytes());
             hasher.update(&[outcome]);
             hasher.update(&qty.to_le_bytes());
@@ -164,6 +167,7 @@ mod tests {
     use super::*;
     use crate::types::WitnessBlockHeader;
     use matching_engine::MarketId;
+    use proptest::prelude::*;
     use std::collections::HashMap;
 
     fn genesis_header(state_root: [u8; 32]) -> WitnessBlockHeader {
@@ -415,5 +419,151 @@ mod tests {
             timestamp_ms: 1000,
         };
         assert_eq!(hash_header(&header), hash_header(&header));
+    }
+
+    fn position_set_strategy() -> impl Strategy<Value = Vec<(u8, u8, i16)>> {
+        prop::collection::btree_map(
+            (0u8..6, 0u8..2),
+            (-20i16..=20i16).prop_filter("qty must be non-zero", |qty| *qty != 0),
+            0..12,
+        )
+        .prop_map(|map| {
+            map.into_iter()
+                .map(|((market, outcome), qty)| (market, outcome, qty))
+                .collect::<Vec<_>>()
+        })
+    }
+
+    proptest! {
+        #[test]
+        fn prop_state_root_invariant_to_position_order(
+            balance in -1_000i64..=1_000,
+            total_deposited in 0i64..=2_000,
+            events_digest in prop::array::uniform32(any::<u8>()),
+            positions in position_set_strategy(),
+        ) {
+            let mut reversed_positions = positions.clone();
+            reversed_positions.reverse();
+
+            let account_a = AccountSnapshot {
+                id: 7,
+                balance,
+                total_deposited,
+                positions: positions
+                    .iter()
+                    .map(|(market, outcome, qty)| (MarketId::new(*market as u32), *outcome, *qty as i64))
+                    .collect(),
+                events_digest,
+            };
+            let account_b = AccountSnapshot {
+                id: 7,
+                balance,
+                total_deposited,
+                positions: reversed_positions
+                    .iter()
+                    .map(|(market, outcome, qty)| (MarketId::new(*market as u32), *outcome, *qty as i64))
+                    .collect(),
+                events_digest,
+            };
+
+            prop_assert_eq!(
+                compute_state_root(&[account_a]),
+                compute_state_root(&[account_b]),
+            );
+        }
+
+        #[test]
+        fn prop_state_root_changes_when_balance_changes(
+            balance in -1_000i64..=1_000,
+            total_deposited in 0i64..=2_000,
+            positions in position_set_strategy(),
+            events_digest in prop::array::uniform32(any::<u8>()),
+        ) {
+            let positions: Vec<_> = positions
+                .iter()
+                .map(|(market, outcome, qty)| (MarketId::new(*market as u32), *outcome, *qty as i64))
+                .collect();
+
+            let before = AccountSnapshot {
+                id: 0,
+                balance,
+                total_deposited,
+                positions: positions.clone(),
+                events_digest,
+            };
+            let after = AccountSnapshot {
+                id: 0,
+                balance: balance.saturating_add(1),
+                total_deposited,
+                positions,
+                events_digest,
+            };
+
+            prop_assert_ne!(compute_state_root(&[before]), compute_state_root(&[after]));
+        }
+
+        #[test]
+        fn prop_state_root_changes_when_total_deposited_changes(
+            balance in -1_000i64..=1_000,
+            total_deposited in 0i64..=2_000,
+            positions in position_set_strategy(),
+            events_digest in prop::array::uniform32(any::<u8>()),
+        ) {
+            let positions: Vec<_> = positions
+                .iter()
+                .map(|(market, outcome, qty)| (MarketId::new(*market as u32), *outcome, *qty as i64))
+                .collect();
+
+            let before = AccountSnapshot {
+                id: 0,
+                balance,
+                total_deposited,
+                positions: positions.clone(),
+                events_digest,
+            };
+            let after = AccountSnapshot {
+                id: 0,
+                balance,
+                total_deposited: total_deposited.saturating_add(1),
+                positions,
+                events_digest,
+            };
+
+            prop_assert_ne!(compute_state_root(&[before]), compute_state_root(&[after]));
+        }
+
+        #[test]
+        fn prop_state_root_changes_when_events_digest_changes(
+            balance in -1_000i64..=1_000,
+            total_deposited in 0i64..=2_000,
+            positions in position_set_strategy(),
+            seed in any::<u8>(),
+        ) {
+            let positions: Vec<_> = positions
+                .iter()
+                .map(|(market, outcome, qty)| (MarketId::new(*market as u32), *outcome, *qty as i64))
+                .collect();
+
+            let before_digest = [seed; 32];
+            let mut after_digest = before_digest;
+            after_digest[0] = after_digest[0].wrapping_add(1);
+
+            let before = AccountSnapshot {
+                id: 0,
+                balance,
+                total_deposited,
+                positions: positions.clone(),
+                events_digest: before_digest,
+            };
+            let after = AccountSnapshot {
+                id: 0,
+                balance,
+                total_deposited,
+                positions,
+                events_digest: after_digest,
+            };
+
+            prop_assert_ne!(compute_state_root(&[before]), compute_state_root(&[after]));
+        }
     }
 }

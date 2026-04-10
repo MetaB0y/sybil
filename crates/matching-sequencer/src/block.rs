@@ -101,6 +101,8 @@ mod tests {
     use super::*;
     use crate::account::AccountStore;
     use matching_engine::MarketId;
+    use proptest::prelude::*;
+    use sybil_verifier::AccountSnapshot;
 
     #[test]
     fn test_state_root_deterministic() {
@@ -214,5 +216,60 @@ mod tests {
             ..h1.clone()
         };
         assert_ne!(hash_header(&h1), hash_header(&h2));
+    }
+
+    fn snapshot_accounts(accounts: &AccountStore) -> Vec<AccountSnapshot> {
+        let mut snapshots: Vec<_> = accounts
+            .iter()
+            .map(|(&id, account)| {
+                let mut positions: Vec<_> = account
+                    .positions
+                    .iter()
+                    .filter(|(_, &qty)| qty != 0)
+                    .map(|(&(market, outcome), &qty)| (market, outcome, qty))
+                    .collect();
+                positions.sort_by_key(|&(market, outcome, _)| (market.0, outcome));
+
+                AccountSnapshot {
+                    id: id.0,
+                    balance: account.balance,
+                    total_deposited: account.total_deposited,
+                    positions,
+                    events_digest: account.events_digest,
+                }
+            })
+            .collect();
+        snapshots.sort_by_key(|snapshot| snapshot.id);
+        snapshots
+    }
+
+    proptest! {
+        #[test]
+        fn prop_sequencer_and_verifier_state_roots_agree(
+            balances in prop::collection::vec(-1_000i64..=1_000, 0..6),
+            digests in prop::collection::vec(prop::array::uniform32(any::<u8>()), 0..6),
+        ) {
+            let len = balances.len().min(digests.len());
+            let mut accounts = AccountStore::new();
+
+            for index in 0..len {
+                let account_id = accounts.create_account(balances[index]);
+                let account = accounts.get_mut(account_id).unwrap();
+                account.total_deposited = balances[index].saturating_add(index as i64);
+                account.events_digest = digests[index];
+
+                if index % 2 == 0 {
+                    account.positions.insert((MarketId::new(index as u32), 0), index as i64 + 1);
+                } else {
+                    account.positions.insert((MarketId::new(index as u32), 1), -((index as i64) + 1));
+                }
+            }
+
+            let snapshots = snapshot_accounts(&accounts);
+            prop_assert_eq!(
+                compute_state_root(&accounts),
+                sybil_verifier::block::compute_state_root(&snapshots),
+            );
+        }
     }
 }
