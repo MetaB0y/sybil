@@ -45,6 +45,7 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
             order_id: f.order_id,
             fill_qty: f.fill_qty,
             fill_price_nanos: f.fill_price,
+            account_id: f.account_id,
         })
         .collect();
 

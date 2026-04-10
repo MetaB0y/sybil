@@ -87,6 +87,8 @@ pub struct FillResponse {
     pub order_id: u64,
     pub fill_qty: u64,
     pub fill_price_nanos: u64,
+    #[serde(default)]
+    pub account_id: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

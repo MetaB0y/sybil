@@ -25,7 +25,6 @@ impl FillRecorder {
         &mut self,
         fills: &[Fill],
         orders: &HashMap<u64, &Order>,
-        order_account_map: &HashMap<u64, AccountId>,
         height: u64,
         timestamp_ms: u64,
     ) {
@@ -33,9 +32,7 @@ impl FillRecorder {
             if fill.fill_qty == 0 {
                 continue;
             }
-            let Some(&account_id) = order_account_map.get(&fill.order_id) else {
-                continue;
-            };
+            let account_id = AccountId(fill.account_id);
             let Some(order) = orders.get(&fill.order_id) else {
                 continue;
             };

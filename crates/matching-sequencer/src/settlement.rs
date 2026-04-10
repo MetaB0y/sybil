@@ -17,13 +17,8 @@ pub fn settle_fill(account: &mut Account, order: &Order, fill: &Fill) {
     }
 }
 
-/// Settle all fills from a batch result, mapping order IDs to accounts.
-pub fn settle_batch(
-    accounts: &mut AccountStore,
-    fills: &[Fill],
-    orders: &[Order],
-    order_account_map: &std::collections::HashMap<u64, AccountId>,
-) {
+/// Settle all fills from a batch result. Each fill carries its own `account_id`.
+pub fn settle_batch(accounts: &mut AccountStore, fills: &[Fill], orders: &[Order]) {
     // Build order lookup
     let order_map: std::collections::HashMap<u64, &Order> =
         orders.iter().map(|o| (o.id, o)).collect();
@@ -33,9 +28,7 @@ pub fn settle_batch(
             continue;
         }
 
-        let Some(&account_id) = order_account_map.get(&fill.order_id) else {
-            continue;
-        };
+        let account_id = AccountId(fill.account_id);
         let Some(order) = order_map.get(&fill.order_id) else {
             continue;
         };

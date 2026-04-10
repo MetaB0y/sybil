@@ -657,11 +657,11 @@ impl BlockSequencer {
                             if stp.would_complete_set(account_id, &accepted.order) {
                                 // Undo the book acceptance — release reservations
                                 // (settle with a "fully filled" phantom to release)
-                                let phantom_fill = Fill {
-                                    order_id: accepted.order.id,
-                                    fill_qty: accepted.order.max_fill,
-                                    fill_price: 0,
-                                };
+                                let phantom_fill = Fill::new(
+                                    accepted.order.id,
+                                    accepted.order.max_fill,
+                                    0,
+                                );
                                 self.order_book.settle(&[phantom_fill], &HashSet::new());
                                 witness_rejections.push(WitnessRejection {
                                     order: accepted.order.clone(),
@@ -797,7 +797,13 @@ impl BlockSequencer {
             &active_markets,
         );
 
-        let fills = pipeline_result.result.fills.clone();
+        let mut fills = pipeline_result.result.fills.clone();
+        // Enrich fills with account_id so downstream consumers don't need order_account_map
+        for fill in &mut fills {
+            if let Some(&aid) = order_account_map.get(&fill.order_id) {
+                fill.account_id = aid.0;
+            }
+        }
         let total_welfare = pipeline_result.result.total_welfare;
         let total_volume: u64 = fills
             .iter()
@@ -816,12 +822,7 @@ impl BlockSequencer {
         let pre_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
 
         // Settle all fills (real orders against their accounts)
-        settlement::settle_batch(
-            &mut self.accounts,
-            &fills,
-            &problem.orders,
-            &order_account_map,
-        );
+        settlement::settle_batch(&mut self.accounts, &fills, &problem.orders);
 
         // Derive minting from position imbalance — solver-independent.
         // Uses shared pure function from matching-engine (same code as verifier).
@@ -859,13 +860,8 @@ impl BlockSequencer {
                 self.height,
                 timestamp_ms,
             );
-            self.fill_recorder.record_fills(
-                &fills,
-                &order_map,
-                &order_account_map,
-                self.height,
-                timestamp_ms,
-            );
+            self.fill_recorder
+                .record_fills(&fills, &order_map, self.height, timestamp_ms);
         }
 
         // Verify position balance after settlement
@@ -1064,7 +1060,6 @@ pub type BatchSequencer = BlockSequencer;
 mod tests {
     use super::*;
     use crate::account::AccountStore;
-    use crate::block::compute_state_root;
     use crate::error::RejectionReason;
     use crate::validation::{validate_order, validate_order_with_reservation};
     use matching_engine::{outcome_buy, outcome_sell, MarketId, MarketSet, MmId, NANOS_PER_DOLLAR};

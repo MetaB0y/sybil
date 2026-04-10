@@ -434,6 +434,7 @@ mod tests {
             order_id,
             fill_qty: 5,
             fill_price: NANOS_PER_DOLLAR / 2,
+            account_id: 0,
         }];
         book.settle(&fills, &HashSet::new());
 
@@ -459,6 +460,7 @@ mod tests {
             order_id,
             fill_qty: 4,
             fill_price: NANOS_PER_DOLLAR / 2,
+            account_id: 0,
         }];
         book.settle(&fills, &HashSet::new());
 

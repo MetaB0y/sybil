@@ -22,7 +22,7 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
         .map(|wo| (wo.order.id, &wo.order))
         .collect();
 
-    // Build order→account mapping
+    // Build order→account mapping (fallback for fills with account_id == 0)
     let order_account: HashMap<u64, u64> = witness
         .orders
         .iter()
@@ -49,8 +49,14 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
             continue;
         }
 
-        let Some(&account_id) = order_account.get(&fill.order_id) else {
-            continue;
+        // Prefer fill.account_id (enriched by sequencer), fall back to order map
+        let account_id = if fill.account_id != 0 {
+            fill.account_id
+        } else {
+            match order_account.get(&fill.order_id) {
+                Some(&id) => id,
+                None => continue,
+            }
         };
         let Some(order) = order_map.get(&fill.order_id) else {
             continue;

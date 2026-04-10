@@ -4,7 +4,7 @@
 //! This unified representation handles: simple limits, spreads, butterflies,
 //! iron condors, ratio spreads, baskets, and any other derivative structure.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::types::{MarketId, Nanos, Qty};
 
@@ -242,11 +242,15 @@ impl std::fmt::Display for Order {
 }
 
 /// Result of matching: how much of an order was filled.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Fill {
     pub order_id: u64,
     pub fill_qty: Qty,
     pub fill_price: Nanos,
+    /// Account that placed the order. Populated by the sequencer after solving;
+    /// 0 when created by the solver (which has no account context).
+    #[serde(default)]
+    pub account_id: u64,
 }
 
 impl Fill {
@@ -255,6 +259,7 @@ impl Fill {
             order_id,
             fill_qty,
             fill_price,
+            account_id: 0,
         }
     }
 
