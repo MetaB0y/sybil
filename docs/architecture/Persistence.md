@@ -2,7 +2,7 @@
 tags: [infrastructure, storage]
 layer: sequencer
 status: active
-last_verified: 2026-04-09
+last_verified: 2026-04-10
 ---
 
 # Persistence
@@ -36,7 +36,7 @@ Authoritative state needed to resume the exchange after crash:
 
 | Table | Key | Value |
 |-------|-----|-------|
-| `accounts` | AccountId (u64) | Account (balance, positions, total_deposited) |
+| `accounts` | AccountId (u64) | Account (balance, positions, total_deposited, events_digest) |
 | `markets` | MarketId (u32) | Market (name) |
 | `market_meta` | MarketId (u32) | MarketMetadata (description, tags, status) |
 | `market_statuses` | MarketId (u32) | MarketStatus (Active, Resolved, etc.) |
@@ -63,6 +63,7 @@ Queryable history reconstructable from blocks, but expensive to rebuild:
 - **Fill history**: Per-account fill records (FillRecorder)
 - **Price history**: Per-market clearing price timeseries (PriceTracker)
 - **Block ring buffer**: Last 100 full blocks for SSE catch-up
+  Full blocks now include `admin_events` alongside fills/rejections.
 - **Volume/welfare aggregates**
 
 ## Crash Recovery Semantics

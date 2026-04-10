@@ -84,6 +84,7 @@ The matching problem itself has an elegant mathematical structure: without marke
 - [[State Root and Parent Hash]] — cryptographic chaining
 - [[Block Witness]] — the ZK audit trail
 - [[Four-Layer Verification]] — 37 independent correctness checks across 4 layers
+- [[Proof Architecture]] — authenticated data for arbitrary account-level proofs
 - [[ZK Integration Path]] — the road to on-chain proofs
 
 ## API and Oracle

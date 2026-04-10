@@ -29,6 +29,7 @@ Several architectural choices were made specifically for ZK-friendliness. [[Nano
 > `crates/matching-sequencer/src/block.rs` — block structure designed for ZK witness
 
 ## See Also
+- [[Proof Architecture]] — authenticated data layer for arbitrary account-level proofs
 - [[Four-Layer Verification]] — the checks that become the circuit
 - [[Block Witness]] — the circuit's input
 - [[State Root and Parent Hash]] — anchors the on-chain proof chain

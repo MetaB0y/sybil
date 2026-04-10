@@ -503,7 +503,7 @@ impl BlockSequencer {
         account_id: AccountId,
         amount: i64,
     ) -> Result<Account, SequencerError> {
-        let account = self.accounts.get_mut(account_id).ok_or_else(|| {
+        let account = self.accounts.get_mut(account_id).ok_or({
             SequencerError::Rejected(Rejection {
                 order_id: 0,
                 account_id,

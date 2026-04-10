@@ -1,3 +1,9 @@
+// TODO: Consider commonware-cryptography's secp256r1 module for namespace-scoped
+// signatures (prevents cross-deployment replay) and batch verification.
+// See: https://commonware.xyz/ — same P256/secp256r1 curve, adds context string
+// to signing so a signature from deployment A can't be replayed on deployment B.
+// Not urgent but a real security improvement for multi-environment setups.
+
 use std::hash::{Hash, Hasher};
 
 use crate::error::SequencerError;
