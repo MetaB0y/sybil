@@ -408,23 +408,12 @@ impl MmActor {
             return;
         }
 
-        // 3. Generate quotes (pure) for each market
-        let quote_config = QuoteConfig {
-            gamma: self.config.mm_gamma,
-            base_spread: self.config.mm_half_spread,
-            min_spread: self.config.mm_min_spread,
-            max_position: self.config.mm_max_position as i64,
-            quote_size_dollars: self.config.mm_quote_size_dollars,
-        };
-
-        let mut orders = Vec::new();
-        let mut ref_prices = HashMap::new();
+        // 3. Update state (mutation pass): push prices, collect reference prices
         let stale = now.saturating_sub(snapshot.last_updated_ms) > 30_000;
+        let mut ref_prices = HashMap::new();
+        let mut quote_inputs = Vec::new();
 
-        let market_ids: Vec<u32> = self.state.markets.keys().copied().collect();
-        for market_id in market_ids {
-            let ms = self.state.markets.get_mut(&market_id).unwrap();
-
+        for ms in self.state.markets.values_mut() {
             let mid = match snapshot.midpoints.get(&ms.yes_token_id) {
                 Some(&p) if p > 0.01 && p < 0.99 => p,
                 _ => continue,
@@ -438,7 +427,7 @@ impl MmActor {
 
             ms.push_price(mid);
 
-            let input = QuoteInput {
+            quote_inputs.push(QuoteInput {
                 market_id: ms.sybil_market_id,
                 mid,
                 sigma_sq: ms.variance(),
@@ -446,14 +435,26 @@ impl MmActor {
                 yes_position: ms.yes_position,
                 no_position: ms.no_position,
                 in_group: ms.in_group,
-            };
-            orders.extend(generate_quotes(&input, &quote_config));
+            });
         }
 
-        // 4. Submit (IO)
+        // 4. Generate quotes (pure pass): no mutation, no IO
+        let quote_config = QuoteConfig {
+            gamma: self.config.mm_gamma,
+            base_spread: self.config.mm_half_spread,
+            min_spread: self.config.mm_min_spread,
+            max_position: self.config.mm_max_position as i64,
+            quote_size_dollars: self.config.mm_quote_size_dollars,
+        };
+        let orders: Vec<OrderSpec> = quote_inputs
+            .iter()
+            .flat_map(|input| generate_quotes(input, &quote_config))
+            .collect();
+
+        // 5. Submit (IO)
         self.submit_orders(&orders, budget_nanos, block.height).await;
 
-        // 5. Push reference prices (IO)
+        // 6. Push reference prices (IO)
         if !ref_prices.is_empty() {
             let _ = self.sybil_client.set_reference_prices(&ref_prices).await;
         }
