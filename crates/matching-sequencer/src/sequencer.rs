@@ -89,31 +89,29 @@ fn classify_order_side(order: &Order) -> &'static str {
     }
 }
 
-/// Snapshot participating accounts into verifier-compatible format.
-fn snapshot_accounts(
-    accounts: &AccountStore,
-    account_ids: &HashSet<AccountId>,
-) -> Vec<AccountSnapshot> {
-    let mut snapshots: Vec<AccountSnapshot> = account_ids
+fn snapshot_account(account: &Account) -> AccountSnapshot {
+    let mut positions: Vec<_> = account
+        .positions
         .iter()
-        .filter_map(|&aid| {
-            accounts.get(aid).map(|a| {
-                let mut positions: Vec<_> = a
-                    .positions
-                    .iter()
-                    .filter(|(_, &qty)| qty != 0)
-                    .map(|(&(m, o), &q)| (m, o, q))
-                    .collect();
-                positions.sort_by_key(|&(m, o, _)| (m.0, o));
-                AccountSnapshot {
-                    id: aid.0,
-                    balance: a.balance,
-                    total_deposited: a.total_deposited,
-                    positions,
-                    events_digest: a.events_digest,
-                }
-            })
-        })
+        .filter(|(_, &qty)| qty != 0)
+        .map(|(&(market, outcome), &qty)| (market, outcome, qty))
+        .collect();
+    positions.sort_by_key(|&(market, outcome, _)| (market.0, outcome));
+
+    AccountSnapshot {
+        id: account.id.0,
+        balance: account.balance,
+        total_deposited: account.total_deposited,
+        positions,
+        events_digest: account.events_digest,
+    }
+}
+
+/// Snapshot the full account store into verifier-compatible format.
+fn snapshot_accounts(accounts: &AccountStore) -> Vec<AccountSnapshot> {
+    let mut snapshots: Vec<AccountSnapshot> = accounts
+        .iter()
+        .map(|(_, account)| snapshot_account(account))
         .collect();
     snapshots.sort_by_key(|s| s.id);
     snapshots
@@ -969,66 +967,22 @@ impl BlockSequencer {
             .fold(0u64, |acc, v| acc.saturating_add(v));
         let orders_filled = pipeline_result.result.orders_filled;
 
-        // Snapshot pre-state (before settlement).
-        // Include MINT account so the verifier can track minting adjustments.
-        let mut participating_accounts: HashSet<AccountId> =
-            order_account_map.values().copied().collect();
-        participating_accounts.insert(crate::account::AccountId::MINT);
-        for event in &system_events {
-            match event {
-                SystemEvent::CreateAccount { account_id, .. }
-                | SystemEvent::Deposit { account_id, .. } => {
-                    participating_accounts.insert(*account_id);
-                }
-                SystemEvent::MarketResolved {
-                    affected_accounts, ..
-                } => {
-                    participating_accounts.extend(affected_accounts.iter().copied());
-                }
-            }
-        }
-        let mut pre_state: Vec<AccountSnapshot> = participating_accounts
+        // Snapshot the full block-start state. Accounts created by pending
+        // system events are omitted; accounts touched by system events use
+        // their captured block-start baseline instead of the live account.
+        let mut pre_state: Vec<AccountSnapshot> = self
+            .accounts
             .iter()
             .filter_map(
-                |account_id| match system_account_baselines.get(account_id) {
-                    Some(Some(account)) => Some(AccountSnapshot {
-                        id: account_id.0,
-                        balance: account.balance,
-                        total_deposited: account.total_deposited,
-                        positions: {
-                            let mut positions: Vec<_> = account
-                                .positions
-                                .iter()
-                                .filter(|(_, &qty)| qty != 0)
-                                .map(|(&(market, outcome), &qty)| (market, outcome, qty))
-                                .collect();
-                            positions.sort_by_key(|&(market, outcome, _)| (market.0, outcome));
-                            positions
-                        },
-                        events_digest: account.events_digest,
-                    }),
+                |(account_id, account)| match system_account_baselines.get(account_id) {
+                    Some(Some(baseline)) => Some(snapshot_account(baseline)),
                     Some(None) => None,
-                    None => self.accounts.get(*account_id).map(|account| {
-                        let mut positions: Vec<_> = account
-                            .positions
-                            .iter()
-                            .filter(|(_, &qty)| qty != 0)
-                            .map(|(&(market, outcome), &qty)| (market, outcome, qty))
-                            .collect();
-                        positions.sort_by_key(|&(market, outcome, _)| (market.0, outcome));
-                        AccountSnapshot {
-                            id: account_id.0,
-                            balance: account.balance,
-                            total_deposited: account.total_deposited,
-                            positions,
-                            events_digest: account.events_digest,
-                        }
-                    }),
+                    None => Some(snapshot_account(account)),
                 },
             )
             .collect();
         pre_state.sort_by_key(|snapshot| snapshot.id);
-        let post_system_state = snapshot_accounts(&self.accounts, &participating_accounts);
+        let post_system_state = snapshot_accounts(&self.accounts);
 
         // Snapshot total balance before settlement
         let pre_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
@@ -1150,17 +1104,12 @@ impl BlockSequencer {
         }
 
         // Snapshot post-state (after settlement)
-        let post_state = snapshot_accounts(&self.accounts, &participating_accounts);
+        let post_state = snapshot_accounts(&self.accounts);
 
         // Update order book: release filled orders' reservations, adjust partial fills
         self.order_book.settle(&fills, &mm_order_ids_set);
 
-        // Compute state root from the post-state snapshot (same data the
-        // verifier will hash). Using the full AccountStore would include
-        // accounts not in the witness, causing state root mismatch.
-        // TODO: Once the witness includes all accounts (needed for full-state
-        // ZK proofs), switch back to compute_state_root(&self.accounts).
-        let state_root = sybil_verifier::block::compute_state_root(&post_state);
+        let state_root = crate::block::compute_state_root(&self.accounts);
         let parent_hash = self
             .last_header
             .as_ref()
@@ -1929,10 +1878,33 @@ mod tests {
         let expected_root = sybil_verifier::block::compute_state_root(&bp2.witness.post_state);
         assert_eq!(bp2.block.header.state_root, expected_root);
 
-        // Second block includes more accounts in the witness, so state root
-        // changes even without fills (the account that submitted the order
-        // is now a participating account).
-        assert_ne!(bp1.block.header.state_root, bp2.block.header.state_root);
+        // An unfilled order does not change account state, so the state root
+        // stays stable across blocks now that the witness includes all accounts.
+        assert_eq!(bp1.block.header.state_root, bp2.block.header.state_root);
+    }
+
+    #[test]
+    fn test_witness_includes_untouched_accounts() {
+        let (markets, _) = setup();
+        let mut accounts = AccountStore::new();
+        accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        accounts.create_account(200 * NANOS_PER_DOLLAR as i64);
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets,
+            vec![],
+            Arc::new(AdminOracle::new()),
+        );
+
+        let bp = seq.produce_block(vec![], 0);
+
+        assert_eq!(bp.witness.pre_state.len(), 3);
+        assert_eq!(bp.witness.post_system_state.len(), 3);
+        assert_eq!(bp.witness.post_state.len(), 3);
+        assert_eq!(
+            bp.block.header.state_root,
+            crate::block::compute_state_root(&seq.accounts)
+        );
     }
 
     // --- Complete-set self-trade prevention ---
