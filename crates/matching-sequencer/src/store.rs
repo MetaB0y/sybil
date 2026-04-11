@@ -32,10 +32,12 @@ use sybil_oracle::MarketStatus;
 use tracing::{debug, info, warn};
 
 use crate::account::{Account, AccountId, AccountStore};
+use crate::account_storage::{
+    AccountStateStore, CommittedAccountState, RecoveryAccountState, TransitionAccountStorage,
+};
 use crate::block::BlockHeader;
 use crate::market_info::MarketMetadata;
 use crate::market_lifecycle::MarketLifecycle;
-use crate::qmdb_accounts::QmdbAccounts;
 
 // ---------------------------------------------------------------------------
 // Table definitions
@@ -90,7 +92,7 @@ const KEY_NEXT_ORDER_ID: &str = "next_order_id";
 /// Persistent store for sequencer state. Wraps a redb database.
 pub struct Store {
     db: Database,
-    qmdb_accounts: QmdbAccounts,
+    account_state_store: Box<dyn AccountStateStore>,
 }
 
 /// State restored from the store on startup.
@@ -113,7 +115,8 @@ impl Store {
         let db = Database::create(path)?;
         let qmdb_path = path.with_extension("qmdb");
         std::fs::create_dir_all(&qmdb_path)?;
-        let qmdb_accounts = QmdbAccounts::open(&qmdb_path)?;
+        let account_state_store =
+            Box::new(TransitionAccountStorage::open(&qmdb_path)?) as Box<dyn AccountStateStore>;
 
         // Ensure all tables exist (redb creates on first write, but this
         // makes the schema explicit).
@@ -130,7 +133,10 @@ impl Store {
         txn.commit()?;
 
         info!(?path, "store opened");
-        Ok(Self { db, qmdb_accounts })
+        Ok(Self {
+            db,
+            account_state_store,
+        })
     }
 
     /// Save the sequencer state after a block. Single ACID transaction.
@@ -147,8 +153,12 @@ impl Store {
     ) -> Result<(), StoreError> {
         // Persist accounts first. If this succeeds and redb fails, redb remains the
         // recovery fallback because we still dual-write accounts into redb below.
-        self.qmdb_accounts
-            .persist(accounts, header.height, accounts.next_id())
+        self.account_state_store
+            .persist(CommittedAccountState {
+                accounts,
+                height: header.height,
+                next_account_id: accounts.next_id(),
+            })
             .await?;
 
         let txn = self.db.begin_write()?;
@@ -262,26 +272,14 @@ impl Store {
             .unwrap_or(1);
 
         let redb_accounts = load_redb_accounts(&txn)?;
-        let qmdb_accounts = self.qmdb_accounts.load().await?;
-        let accounts_map = if qmdb_accounts.accounts.is_empty() {
-            if !redb_accounts.is_empty() {
-                warn!("qmdb account snapshot missing, falling back to redb accounts");
-            }
-            redb_accounts
-        } else if qmdb_accounts.height == Some(height)
-            && qmdb_accounts.next_account_id.unwrap_or(next_account_id) == next_account_id
-        {
-            qmdb_accounts.accounts
-        } else {
-            warn!(
-                redb_height = height,
-                qmdb_height = ?qmdb_accounts.height,
-                redb_next_account_id = next_account_id,
-                qmdb_next_account_id = ?qmdb_accounts.next_account_id,
-                "qmdb account snapshot did not match redb metadata, falling back to redb accounts"
-            );
-            redb_accounts
-        };
+        let accounts_map = self
+            .account_state_store
+            .recover(RecoveryAccountState {
+                fallback_accounts: redb_accounts,
+                height,
+                next_account_id,
+            })
+            .await?;
         let num_accounts = accounts_map.len();
         let accounts = AccountStore::restore(accounts_map, next_account_id);
 
