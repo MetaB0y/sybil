@@ -117,6 +117,43 @@ fn snapshot_accounts(accounts: &AccountStore) -> Vec<AccountSnapshot> {
     snapshots
 }
 
+fn market_position_totals(accounts: &AccountStore, market_id: MarketId) -> (i64, i64) {
+    accounts.iter().fold((0, 0), |(total_yes, total_no), (_, account)| {
+        (
+            total_yes + account.position(market_id, 0),
+            total_no + account.position(market_id, 1),
+        )
+    })
+}
+
+fn expected_balance_delta_from_fills(fills: &[Fill], order_map: &HashMap<u64, &Order>) -> i64 {
+    fills.iter().fold(0, |net_delta, fill| {
+        if fill.fill_qty == 0 {
+            return net_delta;
+        }
+
+        let Some(order) = order_map.get(&fill.order_id) else {
+            return net_delta;
+        };
+
+        let has_positive = order.payoffs[..order.num_states as usize]
+            .iter()
+            .any(|&p| p > 0);
+        let has_negative = order.payoffs[..order.num_states as usize]
+            .iter()
+            .any(|&p| p < 0);
+        let cost = (fill.fill_price as i128 * fill.fill_qty as i128) as i64;
+
+        if has_positive && !has_negative {
+            net_delta - cost
+        } else if has_negative && !has_positive {
+            net_delta + cost
+        } else {
+            net_delta
+        }
+    })
+}
+
 /// Build the witness state snapshots around the system-event boundary.
 ///
 /// `pre_state` represents block-start state, so accounts touched by pending
@@ -1032,10 +1069,10 @@ impl BlockSequencer {
             }
         }
 
+        let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
+
         // Record price history, volume, and account fills via sub-structs
         {
-            let order_map: HashMap<u64, &Order> =
-                problem.orders.iter().map(|o| (o.id, o)).collect();
             self.price_tracker.record_block(
                 &fills,
                 &order_map,
@@ -1049,20 +1086,15 @@ impl BlockSequencer {
 
         // Verify position balance after settlement
         for market in self.markets.iter() {
-            let mut total_yes: i64 = 0;
-            let mut total_no: i64 = 0;
-            for (_, account) in self.accounts.iter() {
-                total_yes += account.position(market.id, 0);
-                total_no += account.position(market.id, 1);
-            }
+            let (total_yes, total_no) = market_position_totals(&self.accounts, market.id);
             if total_yes != total_no {
-                eprintln!(
-                    "POSITION IMBALANCE block #{} market {:?}: YES={} NO={} diff={}",
-                    self.height,
-                    market.id,
+                error!(
+                    height = self.height,
+                    market = ?market.id,
                     total_yes,
                     total_no,
-                    total_yes - total_no
+                    diff = total_yes - total_no,
+                    "post-settlement position imbalance"
                 );
             }
         }
@@ -1075,41 +1107,14 @@ impl BlockSequencer {
         // balance_delta should be negative (money locked in positions)
         // and equal to -(net new pairs) * NANOS_PER_DOLLAR
         if balance_delta != 0 {
-            // Compute net position change per market to verify
-            let mut net_position_value: i64 = 0;
-            for fill in &fills {
-                if fill.fill_qty == 0 {
-                    continue;
-                }
-                let cost = fill.fill_price as i128 * fill.fill_qty as i128;
-                if let Some(&order) = problem
-                    .orders
-                    .iter()
-                    .find(|o| o.id == fill.order_id)
-                    .as_ref()
-                {
-                    let has_positive = order.payoffs[..order.num_states as usize]
-                        .iter()
-                        .any(|&p| p > 0);
-                    let has_negative = order.payoffs[..order.num_states as usize]
-                        .iter()
-                        .any(|&p| p < 0);
-                    if has_positive && !has_negative {
-                        // Buy: balance decreases
-                        net_position_value -= cost as i64;
-                    } else if has_negative && !has_positive {
-                        // Sell: balance increases
-                        net_position_value += cost as i64;
-                    }
-                }
-            }
-            if balance_delta != net_position_value {
-                eprintln!(
-                    "MONEY LEAK block #{}: balance_delta={} expected={} diff={}",
-                    self.height,
+            let expected_balance_delta = expected_balance_delta_from_fills(&fills, &order_map);
+            if balance_delta != expected_balance_delta {
+                error!(
+                    height = self.height,
                     balance_delta,
-                    net_position_value,
-                    balance_delta - net_position_value
+                    expected_balance_delta,
+                    diff = balance_delta - expected_balance_delta,
+                    "post-settlement balance delta mismatch"
                 );
             }
         }
@@ -1262,6 +1267,39 @@ mod tests {
             BlockSequencer::with_default_solver(accounts, markets, vec![], oracle),
             aid,
         )
+    }
+
+    #[test]
+    fn test_market_position_totals_sums_all_accounts() {
+        let (mut markets, m0) = setup();
+        let mut accounts = AccountStore::new();
+        let aid0 = accounts.create_account(0);
+        let aid1 = accounts.create_account(0);
+
+        accounts.get_mut(aid0).unwrap().positions.insert((m0, 0), 7);
+        accounts.get_mut(aid0).unwrap().positions.insert((m0, 1), 2);
+        accounts.get_mut(aid1).unwrap().positions.insert((m0, 0), -3);
+        accounts.get_mut(aid1).unwrap().positions.insert((m0, 1), 5);
+
+        let totals = market_position_totals(&accounts, m0);
+        assert_eq!(totals, (4, 7));
+
+        let m1 = markets.add_binary("Unused");
+        let unused_totals = market_position_totals(&accounts, m1);
+        assert_eq!(unused_totals, (0, 0));
+    }
+
+    #[test]
+    fn test_expected_balance_delta_from_fills_respects_order_side() {
+        let (markets, m0) = setup();
+        let buy = outcome_buy(&markets, 1, m0, 0, 300_000_000, 4);
+        let sell = outcome_sell(&markets, 2, m0, 0, 700_000_000, 2);
+        let order_map = HashMap::from([(buy.id, &buy), (sell.id, &sell)]);
+
+        let fills = vec![Fill::new(buy.id, 4, 300_000_000), Fill::new(sell.id, 2, 700_000_000)];
+
+        let expected_delta = expected_balance_delta_from_fills(&fills, &order_map);
+        assert_eq!(expected_delta, -(300_000_000i64 * 4) + (700_000_000i64 * 2));
     }
 
     /// Helper: run a batch through the block sequencer, returning BatchResult.
