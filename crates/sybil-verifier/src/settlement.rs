@@ -94,62 +94,57 @@ fn derive_post_state(
     // lean/FisherClearing/Duality/MintingSimplex.lean (Theorem 1).
     {
         const MINT_ID: u64 = u64::MAX;
+        // Collect all markets with any positions after applying fills.
+        let all_markets: std::collections::HashSet<MarketId> = result
+            .accounts
+            .values()
+            .flat_map(|account| account.positions.keys().map(|(m, _)| *m))
+            .collect();
 
-        let mint_in_witness = post_system_state.iter().any(|s| s.id == MINT_ID);
+        let market_totals: Vec<(MarketId, i64, i64)> = all_markets
+            .iter()
+            .map(|&market_id| {
+                let total_yes: i64 = result
+                    .accounts
+                    .values()
+                    .map(|account| account.positions.get(&(market_id, 0)).copied().unwrap_or(0))
+                    .sum();
+                let total_no: i64 = result
+                    .accounts
+                    .values()
+                    .map(|account| account.positions.get(&(market_id, 1)).copied().unwrap_or(0))
+                    .sum();
+                (market_id, total_yes, total_no)
+            })
+            .collect();
 
-        if mint_in_witness {
-            // Collect all markets with any positions
-            let all_markets: std::collections::HashSet<MarketId> = result
-                .accounts
-                .values()
-                .flat_map(|account| account.positions.keys().map(|(m, _)| *m))
-                .collect();
+        let adjustments = derive_minting(&market_totals, clearing_prices);
 
-            let market_totals: Vec<(MarketId, i64, i64)> = all_markets
-                .iter()
-                .map(|&market_id| {
-                    let total_yes: i64 = result
-                        .accounts
-                        .values()
-                        .map(|account| account.positions.get(&(market_id, 0)).copied().unwrap_or(0))
-                        .sum();
-                    let total_no: i64 = result
-                        .accounts
-                        .values()
-                        .map(|account| account.positions.get(&(market_id, 1)).copied().unwrap_or(0))
-                        .sum();
-                    (market_id, total_yes, total_no)
-                })
-                .collect();
+        if !adjustments.is_empty() {
+            let mint = result.accounts.entry(MINT_ID).or_default();
 
-            let adjustments = derive_minting(&market_totals, clearing_prices);
-
-            if !adjustments.is_empty() {
-                let mint = result.accounts.entry(MINT_ID).or_default();
-
-                // Check for missing clearing prices (balance_delta == 0 with non-zero position)
-                for adj in &adjustments {
-                    if adj.balance_delta == 0 {
-                        let side = if adj.outcome == 0 { "YES" } else { "NO" };
-                        result.violations.push(Violation {
-                            kind: ViolationKind::MintingWithoutClearingPrice,
-                            details: format!(
-                                "Market {:?}: position imbalance {} but no {} clearing price",
-                                adj.market_id,
-                                adj.position_delta.abs(),
-                                side
-                            ),
-                        });
-                    }
+            // Check for missing clearing prices (balance_delta == 0 with non-zero position)
+            for adj in &adjustments {
+                if adj.balance_delta == 0 {
+                    let side = if adj.outcome == 0 { "YES" } else { "NO" };
+                    result.violations.push(Violation {
+                        kind: ViolationKind::MintingWithoutClearingPrice,
+                        details: format!(
+                            "Market {:?}: position imbalance {} but no {} clearing price",
+                            adj.market_id,
+                            adj.position_delta.abs(),
+                            side
+                        ),
+                    });
                 }
+            }
 
-                for adj in &adjustments {
-                    *mint
-                        .positions
-                        .entry((adj.market_id, adj.outcome))
-                        .or_insert(0) += adj.position_delta;
-                    mint.balance += adj.balance_delta;
-                }
+            for adj in &adjustments {
+                *mint
+                    .positions
+                    .entry((adj.market_id, adj.outcome))
+                    .or_insert(0) += adj.position_delta;
+                mint.balance += adj.balance_delta;
             }
         }
     }
@@ -343,6 +338,9 @@ mod tests {
 
         let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
         let expected_cost = 500_000_000i64 * 10;
+        let mint_id = u64::MAX;
+        let mut clearing_prices = HashMap::new();
+        clearing_prices.insert(m0, vec![500_000_000, 500_000_000]);
 
         let pre_state = vec![AccountSnapshot {
             id: 0,
@@ -352,13 +350,22 @@ mod tests {
             events_digest: [0u8; 32],
         }];
 
-        let post_state = vec![AccountSnapshot {
-            id: 0,
-            balance: initial_balance - expected_cost,
-            total_deposited: 0,
-            positions: vec![(m0, 0, 10)],
-            events_digest: [0u8; 32],
-        }];
+        let post_state = vec![
+            AccountSnapshot {
+                id: 0,
+                balance: initial_balance - expected_cost,
+                total_deposited: 0,
+                positions: vec![(m0, 0, 10)],
+                events_digest: [0u8; 32],
+            },
+            AccountSnapshot {
+                id: mint_id,
+                balance: expected_cost,
+                total_deposited: 0,
+                positions: vec![(m0, 0, -10)],
+                events_digest: [0u8; 32],
+            },
+        ];
 
         let witness = BlockWitness {
             header: empty_header(),
@@ -371,7 +378,7 @@ mod tests {
             rejections: vec![],
             system_events: vec![],
             fills: vec![fill],
-            clearing_prices: HashMap::new(),
+            clearing_prices,
             total_welfare: 0,
             minting_cost: 0,
             mm_constraints: vec![],
@@ -394,6 +401,10 @@ mod tests {
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
         let fill = Fill::new(1, 10, 500_000_000);
 
+        let mint_id = u64::MAX;
+        let mut clearing_prices = HashMap::new();
+        clearing_prices.insert(m0, vec![500_000_000, 500_000_000]);
+
         let post_system_state = vec![AccountSnapshot {
             id: 0,
             balance: 100 * NANOS_PER_DOLLAR as i64,
@@ -402,13 +413,22 @@ mod tests {
             events_digest: [0u8; 32],
         }];
 
-        let post_state = vec![AccountSnapshot {
-            id: 0,
-            balance: 95 * NANOS_PER_DOLLAR as i64,
-            total_deposited: 0,
-            positions: vec![(m0, 0, 10)],
-            events_digest: [0u8; 32],
-        }];
+        let post_state = vec![
+            AccountSnapshot {
+                id: 0,
+                balance: 95 * NANOS_PER_DOLLAR as i64,
+                total_deposited: 0,
+                positions: vec![(m0, 0, 10)],
+                events_digest: [0u8; 32],
+            },
+            AccountSnapshot {
+                id: mint_id,
+                balance: 5 * NANOS_PER_DOLLAR as i64,
+                total_deposited: 0,
+                positions: vec![(m0, 0, -10)],
+                events_digest: [0u8; 32],
+            },
+        ];
 
         let witness = BlockWitness {
             header: empty_header(),
@@ -421,7 +441,7 @@ mod tests {
             rejections: vec![],
             system_events: vec![],
             fills: vec![fill],
-            clearing_prices: HashMap::new(),
+            clearing_prices,
             total_welfare: 0,
             minting_cost: 0,
             mm_constraints: vec![],
@@ -446,6 +466,9 @@ mod tests {
 
         let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
         let expected_revenue = 500_000_000i64 * 5;
+        let mint_id = u64::MAX;
+        let mut clearing_prices = HashMap::new();
+        clearing_prices.insert(m0, vec![500_000_000, 500_000_000]);
 
         let pre_state = vec![AccountSnapshot {
             id: 0,
@@ -455,13 +478,22 @@ mod tests {
             events_digest: [0u8; 32],
         }];
 
-        let post_state = vec![AccountSnapshot {
-            id: 0,
-            balance: initial_balance + expected_revenue,
-            total_deposited: 0,
-            positions: vec![(m0, 0, 5)],
-            events_digest: [0u8; 32],
-        }];
+        let post_state = vec![
+            AccountSnapshot {
+                id: 0,
+                balance: initial_balance + expected_revenue,
+                total_deposited: 0,
+                positions: vec![(m0, 0, 5)],
+                events_digest: [0u8; 32],
+            },
+            AccountSnapshot {
+                id: mint_id,
+                balance: expected_revenue,
+                total_deposited: 0,
+                positions: vec![(m0, 0, -5)],
+                events_digest: [0u8; 32],
+            },
+        ];
 
         let witness = BlockWitness {
             header: empty_header(),
@@ -474,7 +506,7 @@ mod tests {
             rejections: vec![],
             system_events: vec![],
             fills: vec![fill],
-            clearing_prices: HashMap::new(),
+            clearing_prices,
             total_welfare: 0,
             minting_cost: 0,
             mm_constraints: vec![],
@@ -697,7 +729,6 @@ mod tests {
 
     #[test]
     fn test_mint_derivation_buy_yes() {
-        // When MINT is in the witness, the verifier derives minting adjustments.
         // Account 0 buys 10 YES at $0.50 → MINT shorts 10 YES, receives $5.
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
@@ -765,6 +796,72 @@ mod tests {
             market_groups: vec![],
             pre_state: pre_state.clone(),
             post_system_state: pre_state,
+            post_state,
+            resolved_markets: vec![],
+        };
+
+        let result = verify_settlement(&witness);
+        assert!(result.valid, "Violations: {:?}", result.violations);
+    }
+
+    #[test]
+    fn test_mint_derivation_does_not_require_mint_in_post_system_state() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("M0");
+
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
+        let fill = Fill::new(1, 10, 500_000_000);
+
+        let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
+        let fill_cost = 500_000_000i64 * 10;
+        let mint_id = u64::MAX;
+
+        let mut clearing_prices = HashMap::new();
+        clearing_prices.insert(m0, vec![500_000_000, 500_000_000]);
+
+        let post_system_state = vec![AccountSnapshot {
+            id: 0,
+            balance: initial_balance,
+            total_deposited: 0,
+            positions: vec![],
+            events_digest: [0u8; 32],
+        }];
+
+        let post_state = vec![
+            AccountSnapshot {
+                id: 0,
+                balance: initial_balance - fill_cost,
+                total_deposited: 0,
+                positions: vec![(m0, 0, 10)],
+                events_digest: [0u8; 32],
+            },
+            AccountSnapshot {
+                id: mint_id,
+                balance: fill_cost,
+                total_deposited: 0,
+                positions: vec![(m0, 0, -10)],
+                events_digest: [0u8; 32],
+            },
+        ];
+
+        let witness = BlockWitness {
+            header: empty_header(),
+            previous_header: None,
+            orders: vec![WitnessOrder {
+                order,
+                account_id: 0,
+                is_mm: false,
+            }],
+            rejections: vec![],
+            system_events: vec![],
+            fills: vec![fill],
+            clearing_prices,
+            total_welfare: 0,
+            minting_cost: 0,
+            mm_constraints: vec![],
+            market_groups: vec![],
+            pre_state: vec![],
+            post_system_state,
             post_state,
             resolved_markets: vec![],
         };
@@ -1030,18 +1127,21 @@ mod tests {
             fill_a.account_id = 0;
             let mut fill_b = Fill::new(order_b.id, qty_b, price_b);
             fill_b.account_id = 1;
+            let mut clearing_prices = HashMap::new();
+            clearing_prices.insert(m0, vec![price_a, NANOS_PER_DOLLAR - price_a]);
+            clearing_prices.insert(m1, vec![price_b, NANOS_PER_DOLLAR - price_b]);
 
             let derived_ab = derive_post_state(
                 &post_system_state,
                 &orders,
                 &[fill_a.clone(), fill_b.clone()],
-                &HashMap::new(),
+                &clearing_prices,
             );
             let derived_ba = derive_post_state(
                 &post_system_state,
                 &orders,
                 &[fill_b, fill_a],
-                &HashMap::new(),
+                &clearing_prices,
             );
 
             prop_assert_eq!(derived_ab.accounts, derived_ba.accounts);
