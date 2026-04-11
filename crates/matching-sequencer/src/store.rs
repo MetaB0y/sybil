@@ -4,10 +4,12 @@
 //! On crash, we resume from the last committed block. Anything in-flight (mempool,
 //! current solve) is lost — clients resubmit within seconds.
 //!
-//! Account persistence is in transition: we dual-write accounts to qmdb and redb.
-//! This gives us a real authenticated-state boundary to exercise now, while redb
-//! remains the crash-recovery fallback until we finish removing the cross-store
-//! consistency gap.
+//! The account-state boundary is explicit:
+//! - qmdb stores account snapshots
+//! - redb stores metadata plus the commit fence that declares which qmdb slot
+//!   is committed
+//!
+//! Recovery trusts the redb fence, never "latest qmdb state".
 //!
 //! Uses MessagePack (rmp-serde) for values: self-describing, binary-stable across
 //! schema changes. Adding fields with `#[serde(default)]` is backward-compatible.
@@ -31,9 +33,10 @@ use redb::{Database, ReadableTable, TableDefinition};
 use sybil_oracle::MarketStatus;
 use tracing::{debug, info, warn};
 
-use crate::account::{Account, AccountId, AccountStore};
+use crate::account::{AccountId, AccountStore};
 use crate::account_storage::{
-    AccountStateStore, CommittedAccountState, RecoveryAccountState, TransitionAccountStorage,
+    AccountSnapshotSlot, AccountStateStore, CommittedAccountState, RecoveryAccountState,
+    TransitionAccountStorage,
 };
 use crate::block::BlockHeader;
 use crate::market_info::MarketMetadata;
@@ -42,9 +45,6 @@ use crate::market_lifecycle::MarketLifecycle;
 // ---------------------------------------------------------------------------
 // Table definitions
 // ---------------------------------------------------------------------------
-
-/// Account state: account_id (u64) → msgpack(Account)
-const ACCOUNTS: TableDefinition<u64, &[u8]> = TableDefinition::new("accounts");
 
 /// Markets: market_id (u32) → msgpack(Market)
 const MARKETS: TableDefinition<u32, &[u8]> = TableDefinition::new("markets");
@@ -71,10 +71,15 @@ const CLEARING_PRICES: TableDefinition<u32, &[u8]> = TableDefinition::new("clear
 const COUNTERS: TableDefinition<&str, u64> = TableDefinition::new("counters");
 
 // Counter keys
+const KEY_STORE_LAYOUT_VERSION: &str = "store_layout_version";
 const KEY_HEIGHT: &str = "height";
 const KEY_NEXT_ACCOUNT_ID: &str = "next_account_id";
 const KEY_NEXT_MARKET_ID: &str = "next_market_id";
 const KEY_NEXT_ORDER_ID: &str = "next_order_id";
+const KEY_ACCOUNT_STATE_HEIGHT: &str = "account_state_height";
+const KEY_ACCOUNT_STATE_SLOT: &str = "account_state_slot";
+
+const STORE_LAYOUT_VERSION: u64 = 1;
 
 // TODO: Tier 2 tables
 // const PENDING_ORDERS: TableDefinition<u64, &[u8]> = TableDefinition::new("pending_orders");
@@ -121,7 +126,6 @@ impl Store {
         // Ensure all tables exist (redb creates on first write, but this
         // makes the schema explicit).
         let txn = db.begin_write()?;
-        txn.open_table(ACCOUNTS)?;
         txn.open_table(MARKETS)?;
         txn.open_table(MARKET_META)?;
         txn.open_table(MARKET_STATUSES)?;
@@ -131,6 +135,8 @@ impl Store {
         txn.open_table(COUNTERS)?;
         txn.open_table(CLEARING_PRICES)?;
         txn.commit()?;
+
+        initialize_or_validate_layout(&db)?;
 
         info!(?path, "store opened");
         Ok(Self {
@@ -151,26 +157,23 @@ impl Store {
         pubkey_registry: &HashMap<crate::crypto::PublicKey, AccountId>,
         last_clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
     ) -> Result<(), StoreError> {
-        // Persist accounts first. If this succeeds and redb fails, redb remains the
-        // recovery fallback because we still dual-write accounts into redb below.
+        let current_fence = read_account_state_fence(&self.db)?;
+        let next_slot = current_fence
+            .map(|fence| fence.slot.inactive())
+            .unwrap_or(AccountSnapshotSlot::A);
+
+        // Persist the inactive qmdb slot first. It becomes committed only when the
+        // redb transaction below flips the fence to point at it.
         self.account_state_store
             .persist(CommittedAccountState {
                 accounts,
                 height: header.height,
                 next_account_id: accounts.next_id(),
+                slot: next_slot,
             })
             .await?;
 
         let txn = self.db.begin_write()?;
-
-        // Accounts (transition fallback while qmdb becomes authoritative)
-        {
-            let mut table = txn.open_table(ACCOUNTS)?;
-            for (id, account) in accounts.iter() {
-                let bytes = rmp_serde::to_vec(account)?;
-                table.insert(id.0, bytes.as_slice())?;
-            }
-        }
 
         // Markets
         {
@@ -241,6 +244,8 @@ impl Store {
             table.insert(KEY_NEXT_ACCOUNT_ID, accounts.next_id())?;
             table.insert(KEY_NEXT_MARKET_ID, markets.next_id() as u64)?;
             table.insert(KEY_NEXT_ORDER_ID, next_order_id)?;
+            table.insert(KEY_ACCOUNT_STATE_HEIGHT, header.height)?;
+            table.insert(KEY_ACCOUNT_STATE_SLOT, next_slot.encode())?;
         }
 
         txn.commit()?;
@@ -258,6 +263,15 @@ impl Store {
             Some(v) => v.value(),
             None => return Ok(None), // Fresh store
         };
+        let account_state_height = required_counter(&counters, KEY_ACCOUNT_STATE_HEIGHT)?;
+        let account_state_slot =
+            AccountSnapshotSlot::decode(required_counter(&counters, KEY_ACCOUNT_STATE_SLOT)?)?;
+        if account_state_height != height {
+            return Err(StoreError::CorruptLayout(format!(
+                "metadata height mismatch: height={} account_state_height={}",
+                height, account_state_height
+            )));
+        }
         let next_account_id = counters
             .get(KEY_NEXT_ACCOUNT_ID)?
             .map(|v| v.value())
@@ -271,13 +285,12 @@ impl Store {
             .map(|v| v.value())
             .unwrap_or(1);
 
-        let redb_accounts = load_redb_accounts(&txn)?;
         let accounts_map = self
             .account_state_store
             .recover(RecoveryAccountState {
-                fallback_accounts: redb_accounts,
-                height,
+                height: account_state_height,
                 next_account_id,
+                slot: account_state_slot,
             })
             .await?;
         let num_accounts = accounts_map.len();
@@ -421,17 +434,72 @@ pub enum StoreError {
     Io(#[from] std::io::Error),
     #[error("qmdb: {0}")]
     Qmdb(String),
+    #[error("unsupported store layout: {0}")]
+    UnsupportedLayout(String),
+    #[error("corrupt store layout: {0}")]
+    CorruptLayout(String),
 }
 
-fn load_redb_accounts(
-    txn: &redb::ReadTransaction,
-) -> Result<HashMap<AccountId, Account>, StoreError> {
-    let mut accounts = HashMap::new();
-    let table = txn.open_table(ACCOUNTS)?;
-    for entry in table.iter()? {
-        let (_, value) = entry?;
-        let account: Account = rmp_serde::from_slice(value.value())?;
-        accounts.insert(account.id, account);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AccountStateFence {
+    height: u64,
+    slot: AccountSnapshotSlot,
+}
+
+fn initialize_or_validate_layout(db: &Database) -> Result<(), StoreError> {
+    let txn = db.begin_read()?;
+    let counters = txn.open_table(COUNTERS)?;
+    match counters.get(KEY_STORE_LAYOUT_VERSION)? {
+        Some(value) => {
+            let version = value.value();
+            if version != STORE_LAYOUT_VERSION {
+                return Err(StoreError::UnsupportedLayout(format!(
+                    "expected layout version {}, found {}",
+                    STORE_LAYOUT_VERSION, version
+                )));
+            }
+        }
+        None => {
+            let has_existing_state = counters.get(KEY_HEIGHT)?.is_some()
+                || counters.get(KEY_ACCOUNT_STATE_HEIGHT)?.is_some();
+            drop(counters);
+            drop(txn);
+
+            if has_existing_state {
+                return Err(StoreError::UnsupportedLayout(
+                    "legacy store layout detected; this account-state layout requires a fresh store"
+                        .to_string(),
+                ));
+            }
+
+            let txn = db.begin_write()?;
+            let mut counters = txn.open_table(COUNTERS)?;
+            counters.insert(KEY_STORE_LAYOUT_VERSION, STORE_LAYOUT_VERSION)?;
+            drop(counters);
+            txn.commit()?;
+        }
     }
-    Ok(accounts)
+    Ok(())
+}
+
+fn read_account_state_fence(db: &Database) -> Result<Option<AccountStateFence>, StoreError> {
+    let txn = db.begin_read()?;
+    let counters = txn.open_table(COUNTERS)?;
+    let Some(height) = counters.get(KEY_ACCOUNT_STATE_HEIGHT)?.map(|value| value.value()) else {
+        return Ok(None);
+    };
+    let slot = required_counter(&counters, KEY_ACCOUNT_STATE_SLOT)?;
+    Ok(Some(AccountStateFence {
+        height,
+        slot: AccountSnapshotSlot::decode(slot)?,
+    }))
+}
+
+fn required_counter(
+    counters: &redb::ReadOnlyTable<&str, u64>,
+    key: &'static str,
+) -> Result<u64, StoreError> {
+    counters.get(key)?.map(|value| value.value()).ok_or_else(|| {
+        StoreError::CorruptLayout(format!("missing required counter `{key}`"))
+    })
 }

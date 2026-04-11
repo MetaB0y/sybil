@@ -15,6 +15,7 @@ use futures::StreamExt;
 use tokio::sync::{mpsc as tokio_mpsc, oneshot};
 
 use crate::account::{Account, AccountId, AccountStore};
+use crate::account_storage::AccountSnapshotSlot;
 use crate::store::StoreError;
 
 const CHUNK_SIZE: usize = 32;
@@ -50,10 +51,12 @@ pub struct QmdbAccounts {
 
 enum Command {
     ReplaceSnapshot {
+        slot: AccountSnapshotSlot,
         snapshot: PersistedAccountSnapshot,
         respond_to: oneshot::Sender<Result<(), StoreError>>,
     },
     LoadSnapshot {
+        slot: AccountSnapshotSlot,
         respond_to: oneshot::Sender<Result<LoadedAccountSnapshot, StoreError>>,
     },
 }
@@ -100,6 +103,7 @@ impl QmdbAccounts {
 
     pub async fn persist(
         &self,
+        slot: AccountSnapshotSlot,
         accounts: &AccountStore,
         height: u64,
         next_account_id: u64,
@@ -112,6 +116,7 @@ impl QmdbAccounts {
         let (respond_to, response) = oneshot::channel();
         self.sender
             .send(Command::ReplaceSnapshot {
+                slot,
                 snapshot,
                 respond_to,
             })
@@ -122,10 +127,10 @@ impl QmdbAccounts {
             .map_err(|_| StoreError::Qmdb("qmdb account response channel dropped".to_string()))?
     }
 
-    pub async fn load(&self) -> Result<LoadedAccountSnapshot, StoreError> {
+    pub async fn load(&self, slot: AccountSnapshotSlot) -> Result<LoadedAccountSnapshot, StoreError> {
         let (respond_to, response) = oneshot::channel();
         self.sender
-            .send(Command::LoadSnapshot { respond_to })
+            .send(Command::LoadSnapshot { slot, respond_to })
             .await
             .map_err(|_| StoreError::Qmdb("qmdb account service unavailable".to_string()))?;
         response
@@ -138,13 +143,14 @@ async fn run(mut db: AccountDb, mut receiver: tokio_mpsc::Receiver<Command>) {
     while let Some(command) = receiver.recv().await {
         match command {
             Command::ReplaceSnapshot {
+                slot,
                 snapshot,
                 respond_to,
             } => {
-                let _ = respond_to.send(replace_snapshot(&mut db, snapshot).await);
+                let _ = respond_to.send(replace_snapshot(&mut db, slot, snapshot).await);
             }
-            Command::LoadSnapshot { respond_to } => {
-                let _ = respond_to.send(load_snapshot(&db).await);
+            Command::LoadSnapshot { slot, respond_to } => {
+                let _ = respond_to.send(load_snapshot(&db, slot).await);
             }
         }
     }
@@ -181,19 +187,20 @@ async fn open_db(context: commonware_tokio::Context) -> Result<AccountDb, StoreE
 
 async fn replace_snapshot(
     db: &mut AccountDb,
+    slot: AccountSnapshotSlot,
     snapshot: PersistedAccountSnapshot,
 ) -> Result<(), StoreError> {
-    let current_entries = collect_entries(db).await?;
+    let current_entries = collect_entries(db, slot).await?;
     let mut desired = HashMap::new();
     for account in snapshot.accounts {
         desired.insert(
-            encode_account_key(account.id),
+            encode_account_key(slot, account.id),
             rmp_serde::to_vec(&account)?,
         );
     }
-    desired.insert(HEIGHT_KEY.to_vec(), snapshot.height.to_le_bytes().to_vec());
+    desired.insert(encode_height_key(slot), snapshot.height.to_le_bytes().to_vec());
     desired.insert(
-        NEXT_ACCOUNT_ID_KEY.to_vec(),
+        encode_next_account_id_key(slot),
         snapshot.next_account_id.to_le_bytes().to_vec(),
     );
 
@@ -234,22 +241,25 @@ async fn replace_snapshot(
     Ok(())
 }
 
-async fn load_snapshot(db: &AccountDb) -> Result<LoadedAccountSnapshot, StoreError> {
+async fn load_snapshot(
+    db: &AccountDb,
+    slot: AccountSnapshotSlot,
+) -> Result<LoadedAccountSnapshot, StoreError> {
     let mut accounts = HashMap::new();
     let mut height = None;
     let mut next_account_id = None;
 
-    for (key, value) in collect_entries(db).await? {
-        if key == HEIGHT_KEY {
+    for (key, value) in collect_entries(db, slot).await? {
+        if key == encode_height_key(slot) {
             height = Some(decode_u64(&value, "height")?);
             continue;
         }
-        if key == NEXT_ACCOUNT_ID_KEY {
+        if key == encode_next_account_id_key(slot) {
             next_account_id = Some(decode_u64(&value, "next_account_id")?);
             continue;
         }
 
-        let Some(account_id) = decode_account_key(&key) else {
+        let Some(account_id) = decode_account_key(slot, &key) else {
             continue;
         };
         let account: Account = rmp_serde::from_slice(&value)?;
@@ -269,9 +279,13 @@ async fn load_snapshot(db: &AccountDb) -> Result<LoadedAccountSnapshot, StoreErr
     })
 }
 
-async fn collect_entries(db: &AccountDb) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StoreError> {
+async fn collect_entries(
+    db: &AccountDb,
+    slot: AccountSnapshotSlot,
+) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StoreError> {
+    let prefix = slot_prefix(slot);
     let stream = db
-        .stream_range(Vec::new())
+        .stream_range(prefix.clone())
         .await
         .map_err(|error| StoreError::Qmdb(format!("failed to stream qmdb entries: {error}")))?;
     futures::pin_mut!(stream);
@@ -280,24 +294,48 @@ async fn collect_entries(db: &AccountDb) -> Result<Vec<(Vec<u8>, Vec<u8>)>, Stor
     while let Some(item) = stream.next().await {
         let (key, value) = item
             .map_err(|error| StoreError::Qmdb(format!("failed to read qmdb entry: {error}")))?;
+        if !key.starts_with(&prefix) {
+            break;
+        }
         entries.push((key, value));
     }
     Ok(entries)
 }
 
-fn encode_account_key(account_id: AccountId) -> Vec<u8> {
-    let mut key = Vec::with_capacity(9);
+fn slot_prefix(slot: AccountSnapshotSlot) -> Vec<u8> {
+    vec![b's', slot.encode() as u8, b':']
+}
+
+fn encode_account_key(slot: AccountSnapshotSlot, account_id: AccountId) -> Vec<u8> {
+    let mut key = Vec::with_capacity(12);
+    key.extend_from_slice(&slot_prefix(slot));
     key.push(ACCOUNT_KEY_PREFIX);
     key.extend_from_slice(&account_id.0.to_be_bytes());
     key
 }
 
-fn decode_account_key(key: &[u8]) -> Option<AccountId> {
-    if key.len() != 9 || key[0] != ACCOUNT_KEY_PREFIX {
+fn encode_height_key(slot: AccountSnapshotSlot) -> Vec<u8> {
+    let mut key = slot_prefix(slot);
+    key.extend_from_slice(HEIGHT_KEY);
+    key
+}
+
+fn encode_next_account_id_key(slot: AccountSnapshotSlot) -> Vec<u8> {
+    let mut key = slot_prefix(slot);
+    key.extend_from_slice(NEXT_ACCOUNT_ID_KEY);
+    key
+}
+
+fn decode_account_key(slot: AccountSnapshotSlot, key: &[u8]) -> Option<AccountId> {
+    let prefix = slot_prefix(slot);
+    if key.len() != prefix.len() + 9
+        || !key.starts_with(&prefix)
+        || key[prefix.len()] != ACCOUNT_KEY_PREFIX
+    {
         return None;
     }
     let mut raw = [0u8; 8];
-    raw.copy_from_slice(&key[1..]);
+    raw.copy_from_slice(&key[prefix.len() + 1..]);
     Some(AccountId(u64::from_be_bytes(raw)))
 }
 
