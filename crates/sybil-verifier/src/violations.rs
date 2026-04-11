@@ -88,6 +88,8 @@ pub enum ViolationKind {
     InsufficientPosition,
     /// Intra-batch double-spend detected.
     IntraBatchDoubleSpend,
+    /// Accepted order references an account missing from post-system-state.
+    AcceptedOrderMissingAccount,
     /// A rejection is incorrect — order would have been valid.
     FalseRejection,
     /// A rejection reason does not match the actual validation failure.

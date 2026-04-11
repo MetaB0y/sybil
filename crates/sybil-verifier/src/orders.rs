@@ -33,8 +33,13 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
         }
 
         let Some(snap) = post_system_state.get(&wo.account_id) else {
-            // Account not found in post-system state — this is suspicious but the
-            // sequencer might handle it differently. Skip for now.
+            violations.push(Violation {
+                kind: ViolationKind::AcceptedOrderMissingAccount,
+                details: format!(
+                    "Order {} (account {}): accepted order missing from post-system state",
+                    wo.order.id, wo.account_id
+                ),
+            });
             continue;
         };
 
@@ -394,6 +399,31 @@ mod tests {
 
         let result = verify_orders(&witness);
         assert!(result.valid, "Violations: {:?}", result.violations);
+    }
+
+    #[test]
+    fn test_missing_post_system_account_is_violation_for_accepted_order() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("M0");
+
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
+        let witness = make_witness_with_orders(
+            vec![WitnessOrder {
+                order,
+                account_id: 42,
+                is_mm: false,
+            }],
+            vec![],
+            vec![],
+            vec![],
+        );
+
+        let result = verify_orders(&witness);
+        assert!(!result.valid);
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::AcceptedOrderMissingAccount));
     }
 
     #[test]
