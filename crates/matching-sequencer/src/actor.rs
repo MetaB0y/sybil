@@ -260,6 +260,7 @@ impl SequencerActor {
                     prepared.next_sequencer().pubkey_registry(),
                     prepared.next_sequencer().last_clearing_prices(),
                 )
+                .await
                 .map_err(|error| SequencerError::Persistence(error.to_string()))?;
         }
         Ok(())

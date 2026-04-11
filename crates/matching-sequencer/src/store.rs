@@ -1,8 +1,13 @@
-//! Block-boundary persistence via redb.
+//! Block-boundary persistence via redb plus a qmdb-backed account snapshot.
 //!
 //! Philosophy: snapshot core state after each block in a single ACID transaction.
 //! On crash, we resume from the last committed block. Anything in-flight (mempool,
 //! current solve) is lost — clients resubmit within seconds.
+//!
+//! Account persistence is in transition: we dual-write accounts to qmdb and redb.
+//! This gives us a real authenticated-state boundary to exercise now, while redb
+//! remains the crash-recovery fallback until we finish removing the cross-store
+//! consistency gap.
 //!
 //! Uses MessagePack (rmp-serde) for values: self-describing, binary-stable across
 //! schema changes. Adding fields with `#[serde(default)]` is backward-compatible.
@@ -30,6 +35,7 @@ use crate::account::{Account, AccountId, AccountStore};
 use crate::block::BlockHeader;
 use crate::market_info::MarketMetadata;
 use crate::market_lifecycle::MarketLifecycle;
+use crate::qmdb_accounts::QmdbAccounts;
 
 // ---------------------------------------------------------------------------
 // Table definitions
@@ -84,6 +90,7 @@ const KEY_NEXT_ORDER_ID: &str = "next_order_id";
 /// Persistent store for sequencer state. Wraps a redb database.
 pub struct Store {
     db: Database,
+    qmdb_accounts: QmdbAccounts,
 }
 
 /// State restored from the store on startup.
@@ -104,6 +111,9 @@ impl Store {
     /// Open (or create) a store at the given path.
     pub fn open(path: &Path) -> Result<Self, StoreError> {
         let db = Database::create(path)?;
+        let qmdb_path = path.with_extension("qmdb");
+        std::fs::create_dir_all(&qmdb_path)?;
+        let qmdb_accounts = QmdbAccounts::open(&qmdb_path)?;
 
         // Ensure all tables exist (redb creates on first write, but this
         // makes the schema explicit).
@@ -120,11 +130,11 @@ impl Store {
         txn.commit()?;
 
         info!(?path, "store opened");
-        Ok(Self { db })
+        Ok(Self { db, qmdb_accounts })
     }
 
     /// Save the sequencer state after a block. Single ACID transaction.
-    pub fn save_block(
+    pub async fn save_block(
         &self,
         accounts: &AccountStore,
         markets: &MarketSet,
@@ -135,9 +145,15 @@ impl Store {
         pubkey_registry: &HashMap<crate::crypto::PublicKey, AccountId>,
         last_clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
     ) -> Result<(), StoreError> {
+        // Persist accounts first. If this succeeds and redb fails, redb remains the
+        // recovery fallback because we still dual-write accounts into redb below.
+        self.qmdb_accounts
+            .persist(accounts, header.height, accounts.next_id())
+            .await?;
+
         let txn = self.db.begin_write()?;
 
-        // Accounts
+        // Accounts (transition fallback while qmdb becomes authoritative)
         {
             let mut table = txn.open_table(ACCOUNTS)?;
             for (id, account) in accounts.iter() {
@@ -223,7 +239,7 @@ impl Store {
     }
 
     /// Load state from the store. Returns None if the store is empty (fresh start).
-    pub fn load_state(&self) -> Result<Option<RestoredState>, StoreError> {
+    pub async fn load_state(&self) -> Result<Option<RestoredState>, StoreError> {
         let txn = self.db.begin_read()?;
 
         // Check if we have any data
@@ -245,16 +261,27 @@ impl Store {
             .map(|v| v.value())
             .unwrap_or(1);
 
-        // Accounts
-        let mut accounts_map = HashMap::new();
-        {
-            let table = txn.open_table(ACCOUNTS)?;
-            for entry in table.iter()? {
-                let (_, value) = entry?;
-                let account: Account = rmp_serde::from_slice(value.value())?;
-                accounts_map.insert(account.id, account);
+        let redb_accounts = load_redb_accounts(&txn)?;
+        let qmdb_accounts = self.qmdb_accounts.load().await?;
+        let accounts_map = if qmdb_accounts.accounts.is_empty() {
+            if !redb_accounts.is_empty() {
+                warn!("qmdb account snapshot missing, falling back to redb accounts");
             }
-        }
+            redb_accounts
+        } else if qmdb_accounts.height == Some(height)
+            && qmdb_accounts.next_account_id.unwrap_or(next_account_id) == next_account_id
+        {
+            qmdb_accounts.accounts
+        } else {
+            warn!(
+                redb_height = height,
+                qmdb_height = ?qmdb_accounts.height,
+                redb_next_account_id = next_account_id,
+                qmdb_next_account_id = ?qmdb_accounts.next_account_id,
+                "qmdb account snapshot did not match redb metadata, falling back to redb accounts"
+            );
+            redb_accounts
+        };
         let num_accounts = accounts_map.len();
         let accounts = AccountStore::restore(accounts_map, next_account_id);
 
@@ -392,4 +419,21 @@ pub enum StoreError {
     MsgpackEncode(#[from] rmp_serde::encode::Error),
     #[error("msgpack decode: {0}")]
     MsgpackDecode(#[from] rmp_serde::decode::Error),
+    #[error("filesystem: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("qmdb: {0}")]
+    Qmdb(String),
+}
+
+fn load_redb_accounts(
+    txn: &redb::ReadTransaction,
+) -> Result<HashMap<AccountId, Account>, StoreError> {
+    let mut accounts = HashMap::new();
+    let table = txn.open_table(ACCOUNTS)?;
+    for entry in table.iter()? {
+        let (_, value) = entry?;
+        let account: Account = rmp_serde::from_slice(value.value())?;
+        accounts.insert(account.id, account);
+    }
+    Ok(accounts)
 }

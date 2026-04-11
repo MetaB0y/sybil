@@ -88,13 +88,17 @@ async fn main() {
 
     // Try to restore state from store
     let oracle = Arc::new(AdminOracle::new());
-    let restored = store.as_ref().and_then(|s| match s.load_state() {
-        Ok(state) => state,
-        Err(e) => {
-            tracing::error!(error = %e, "failed to restore state, starting fresh");
-            None
+    let restored = if let Some(store) = store.as_ref() {
+        match store.load_state().await {
+            Ok(state) => state,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to restore state, starting fresh");
+                None
+            }
         }
-    });
+    } else {
+        None
+    };
 
     let block_interval = Duration::from_millis(config.block_interval_ms);
 

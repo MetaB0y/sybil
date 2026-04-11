@@ -13,6 +13,7 @@ pub mod order_book;
 pub mod metrics;
 pub mod portfolio;
 pub mod price_tracker;
+mod qmdb_accounts;
 pub mod scenario;
 pub mod sequencer;
 pub mod settlement;
