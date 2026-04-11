@@ -35,8 +35,8 @@ use tracing::{debug, info, warn};
 
 use crate::account::{AccountId, AccountStore};
 use crate::account_storage::{
-    AccountSnapshotSlot, AccountStateStore, CommittedAccountState, RecoveryAccountState,
-    TransitionAccountStorage,
+    AccountSnapshotSlot, AccountStateStore, CommittedAccountState, FencedAccountStorage,
+    RecoveryAccountState,
 };
 use crate::block::BlockHeader;
 use crate::market_info::MarketMetadata;
@@ -121,7 +121,7 @@ impl Store {
         let qmdb_path = path.with_extension("qmdb");
         std::fs::create_dir_all(&qmdb_path)?;
         let account_state_store =
-            Box::new(TransitionAccountStorage::open(&qmdb_path)?) as Box<dyn AccountStateStore>;
+            Box::new(FencedAccountStorage::open(&qmdb_path)?) as Box<dyn AccountStateStore>;
 
         // Ensure all tables exist (redb creates on first write, but this
         // makes the schema explicit).
@@ -485,7 +485,10 @@ fn initialize_or_validate_layout(db: &Database) -> Result<(), StoreError> {
 fn read_account_state_fence(db: &Database) -> Result<Option<AccountStateFence>, StoreError> {
     let txn = db.begin_read()?;
     let counters = txn.open_table(COUNTERS)?;
-    let Some(height) = counters.get(KEY_ACCOUNT_STATE_HEIGHT)?.map(|value| value.value()) else {
+    let Some(height) = counters
+        .get(KEY_ACCOUNT_STATE_HEIGHT)?
+        .map(|value| value.value())
+    else {
         return Ok(None);
     };
     let slot = required_counter(&counters, KEY_ACCOUNT_STATE_SLOT)?;
@@ -499,7 +502,109 @@ fn required_counter(
     counters: &redb::ReadOnlyTable<&str, u64>,
     key: &'static str,
 ) -> Result<u64, StoreError> {
-    counters.get(key)?.map(|value| value.value()).ok_or_else(|| {
-        StoreError::CorruptLayout(format!("missing required counter `{key}`"))
-    })
+    counters
+        .get(key)?
+        .map(|value| value.value())
+        .ok_or_else(|| StoreError::CorruptLayout(format!("missing required counter `{key}`")))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
+
+    use matching_engine::MarketSet;
+    use redb::{Database, TableDefinition};
+
+    use super::*;
+    use crate::account::AccountStore;
+    use crate::block::BlockHeader;
+    use crate::market_lifecycle::MarketLifecycle;
+    use crate::AdminOracle;
+
+    static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_db_path(prefix: &str) -> PathBuf {
+        let unique = NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "sybil-{prefix}-{}-{unique}.redb",
+            std::process::id()
+        ))
+    }
+
+    fn sample_header(height: u64) -> BlockHeader {
+        BlockHeader {
+            height,
+            parent_hash: [height as u8; 32],
+            state_root: [height as u8; 32],
+            order_count: 0,
+            fill_count: 0,
+            timestamp_ms: height * 1000,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_store_restores_latest_committed_accounts() {
+        let path = temp_db_path("store-restore");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+        let lifecycle = MarketLifecycle::new(oracle);
+        let markets = MarketSet::new();
+
+        let mut accounts = AccountStore::new();
+        let account_id = accounts.create_account(100);
+        store
+            .save_block(
+                &accounts,
+                &markets,
+                &[],
+                &lifecycle,
+                &sample_header(1),
+                1,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .await
+            .unwrap();
+
+        accounts.get_mut(account_id).unwrap().balance = 200;
+        store
+            .save_block(
+                &accounts,
+                &markets,
+                &[],
+                &lifecycle,
+                &sample_header(2),
+                1,
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .await
+            .unwrap();
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        assert_eq!(restored.height, 2);
+        assert_eq!(restored.accounts.get(account_id).unwrap().balance, 200);
+    }
+
+    #[test]
+    fn test_open_rejects_legacy_store_layout() {
+        const TEST_COUNTERS: TableDefinition<&str, u64> = TableDefinition::new("counters");
+
+        let path = temp_db_path("legacy-layout");
+        let db = Database::create(&path).unwrap();
+        let txn = db.begin_write().unwrap();
+        let mut counters = txn.open_table(TEST_COUNTERS).unwrap();
+        counters.insert(KEY_HEIGHT, 1).unwrap();
+        drop(counters);
+        txn.commit().unwrap();
+        drop(db);
+
+        match Store::open(&path) {
+            Ok(_) => panic!("expected legacy store layout to be rejected"),
+            Err(StoreError::UnsupportedLayout(_)) => {}
+            Err(error) => panic!("expected unsupported layout error, got {error:?}"),
+        }
+    }
 }
