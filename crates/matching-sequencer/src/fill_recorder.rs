@@ -8,7 +8,7 @@ use crate::account::AccountId;
 use crate::market_info::AccountFillRecord;
 
 /// Records fill history per account.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct FillRecorder {
     account_fills: HashMap<AccountId, Vec<AccountFillRecord>>,
 }

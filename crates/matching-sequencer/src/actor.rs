@@ -14,7 +14,7 @@ use crate::error::SequencerError;
 use crate::market_info::{AccountFillRecord, MarketMetadata, MarketSearchQuery, PricePoint};
 use crate::mempool::{Mempool, MempoolConfig};
 use crate::portfolio::{self, PortfolioSummary};
-use crate::sequencer::{BlockSequencer, OrderSubmission, PendingOrderInfo};
+use crate::sequencer::{BlockSequencer, OrderSubmission, PendingOrderInfo, PreparedBlock};
 
 /// Messages sent from handles to the actor.
 pub enum Message {
@@ -38,7 +38,7 @@ pub enum Message {
     },
     /// Force-produce a block immediately (for testing).
     ProduceBlock {
-        respond_to: oneshot::Sender<Block>,
+        respond_to: oneshot::Sender<Result<Block, SequencerError>>,
     },
     // --- New messages for API support ---
     CreateAccount {
@@ -200,11 +200,11 @@ impl SequencerActor {
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    self.on_tick();
+                    self.on_tick().await;
                 }
                 msg = self.receiver.recv() => {
                     match msg {
-                        Some(msg) => self.handle(msg),
+                        Some(msg) => self.handle(msg).await,
                         None => break, // all handles dropped
                     }
                 }
@@ -213,7 +213,7 @@ impl SequencerActor {
     }
 
     /// Block production tick: functional core (produce_block) then imperative shell.
-    fn on_tick(&mut self) {
+    async fn on_tick(&mut self) {
         if self.pause_count > 0 {
             return;
         }
@@ -226,42 +226,43 @@ impl SequencerActor {
         let submissions = self.mempool.drain();
 
         // ── Functional core ──
-        let bp = self.sequencer.produce_block(submissions, timestamp_ms);
+        let prepared = self.sequencer.prepare_block(submissions.clone(), timestamp_ms);
 
-        // ── Imperative shell: persist → metrics → history → broadcast → cache ──
-        // Persist first: if this fails, in-memory state has already advanced but
-        // disk lags by one block. On crash, that block is lost. This is option (A):
-        // in-memory is authoritative, disk is best-effort.
-        // Future options: (B) snapshot/rollback, (C) produce_block returns diff.
-        self.persist_block(&bp);
+        if let Err(error) = self.persist_block(&prepared).await {
+            metrics::counter!("sybil_persistence_failures").increment(1);
+            tracing::error!(error = %error, "prepared block discarded before commit");
+            for submission in submissions {
+                if let Err(requeue_error) = self.mempool.submit(submission) {
+                    tracing::error!(error = %requeue_error, "failed to requeue submission after persistence failure");
+                }
+            }
+            return;
+        }
+
+        let bp = self.sequencer.commit_prepared_block(prepared);
         self.record_metrics(&bp, mempool_size);
         self.push_to_history(bp.block.clone());
         let _ = self.block_broadcast.send(bp.block.clone());
         self.latest_block = Some(bp.block);
     }
 
-    /// Persist block state to redb. Logs on failure, continues.
-    fn persist_block(&self, bp: &BlockProduction) {
+    /// Persist a prepared block before the live sequencer state advances.
+    async fn persist_block(&self, prepared: &PreparedBlock) -> Result<(), SequencerError> {
         if let Some(ref store) = self.store {
-            if let Err(e) = store.save_block(
-                &self.sequencer.accounts,
-                self.sequencer.markets(),
-                self.sequencer.market_groups(),
-                &self.sequencer.lifecycle,
-                &bp.block.header,
-                self.sequencer.next_order_id(),
-                self.sequencer.pubkey_registry(),
-                self.sequencer.last_clearing_prices(),
-            ) {
-                metrics::counter!("sybil_persistence_failures").increment(1);
-                tracing::error!(
-                    error = %e,
-                    height = bp.block.header.height,
-                    "PERSISTENCE FAILED — block produced but not persisted; \
-                     crash recovery may lose this block"
-                );
-            }
+            store
+                .save_block(
+                    &prepared.next_sequencer().accounts,
+                    prepared.next_sequencer().markets(),
+                    prepared.next_sequencer().market_groups(),
+                    &prepared.next_sequencer().lifecycle,
+                    &prepared.production().block.header,
+                    prepared.next_sequencer().next_order_id(),
+                    prepared.next_sequencer().pubkey_registry(),
+                    prepared.next_sequencer().last_clearing_prices(),
+                )
+                .map_err(|error| SequencerError::Persistence(error.to_string()))?;
         }
+        Ok(())
     }
 
     /// Record Prometheus metrics for a produced block.
@@ -284,7 +285,7 @@ impl SequencerActor {
         self.block_history.push_back(block);
     }
 
-    fn handle(&mut self, msg: Message) {
+    async fn handle(&mut self, msg: Message) {
         match msg {
             Message::SubmitOrder {
                 submission,
@@ -312,8 +313,12 @@ impl SequencerActor {
                 let _ = respond_to.send(root);
             }
             Message::ProduceBlock { respond_to } => {
-                self.on_tick();
-                let _ = respond_to.send(self.latest_block.clone().unwrap());
+                self.on_tick().await;
+                let result = self
+                    .latest_block
+                    .clone()
+                    .ok_or_else(|| SequencerError::Persistence("no block committed".to_string()));
+                let _ = respond_to.send(result);
             }
             Message::CreateAccount {
                 initial_balance,
@@ -736,7 +741,7 @@ impl SequencerHandle {
             .send(Message::ProduceBlock { respond_to: tx })
             .await
             .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
+        rx.await.map_err(|_| SequencerError::ActorGone)?
     }
 
     /// Create a new account with the given initial balance (in nanos).

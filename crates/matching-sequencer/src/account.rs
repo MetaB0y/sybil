@@ -41,7 +41,7 @@ impl Account {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct AccountStore {
     accounts: HashMap<AccountId, Account>,
     next_id: u64,

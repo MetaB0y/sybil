@@ -14,6 +14,7 @@ use crate::market_info::MarketMetadata;
 /// Does NOT own accounts or market_groups — those remain on BlockSequencer.
 /// Resolution works in two steps: lifecycle decides (via oracle), caller executes
 /// (settles positions, updates groups). This avoids borrow checker awkwardness.
+#[derive(Clone)]
 pub struct MarketLifecycle {
     /// Oracle-managed lifecycle status per market.
     market_statuses: HashMap<MarketId, MarketStatus>,

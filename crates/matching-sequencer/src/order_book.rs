@@ -33,6 +33,7 @@ struct RestingOrder {
 }
 
 /// The order book: resting orders + aggregate reservations.
+#[derive(Clone)]
 pub struct OrderBook {
     orders: Vec<RestingOrder>,
     /// Per-account reserved balance (sum of buy costs for resting orders).

@@ -58,4 +58,7 @@ pub enum SequencerError {
     /// Oracle error during resolution.
     #[error("oracle error: {0}")]
     OracleError(String),
+    /// Block persistence failed before the prepared block could be committed.
+    #[error("block persistence failed: {0}")]
+    Persistence(String),
 }

@@ -54,6 +54,21 @@ pub struct PendingOrderInfo {
     pub expires_at_block: u64,
 }
 
+pub struct PreparedBlock {
+    next_sequencer: BlockSequencer,
+    production: BlockProduction,
+}
+
+impl PreparedBlock {
+    pub fn production(&self) -> &BlockProduction {
+        &self.production
+    }
+
+    pub fn next_sequencer(&self) -> &BlockSequencer {
+        &self.next_sequencer
+    }
+}
+
 impl PendingOrderInfo {
     fn from_resting(order: &Order, account_id: AccountId, created_at: u64, ttl: u64) -> Self {
         let market_ids: Vec<_> = order.active_markets().collect();
@@ -341,6 +356,7 @@ impl GroupCoverageTracker {
 /// Manages accounts, assigns order IDs, validates, solves, settles, and
 /// produces blocks. The actor layer calls `produce_block()` on each timer tick.
 /// Simulations can use this directly without the actor.
+#[derive(Clone)]
 pub struct BlockSequencer {
     pub accounts: AccountStore,
     /// Pluggable solver for matching optimization.
@@ -696,14 +712,47 @@ impl BlockSequencer {
         }
     }
 
-    /// Core sync method: produce one block from the given submissions.
+    /// Prepare one block from the given submissions without mutating live sequencer state.
     ///
-    /// Same logic as the old `run_batch()`: validate → merge pending → build
-    /// Problem → solve → settle → persist unfilled → compute state root → build Block.
+    /// The returned [`PreparedBlock`] can either be committed atomically or discarded.
+    #[tracing::instrument(skip_all, fields(height))]
+    pub fn prepare_block(
+        &self,
+        submissions: Vec<OrderSubmission>,
+        timestamp_ms: u64,
+    ) -> PreparedBlock {
+        let mut next_sequencer = self.clone();
+        let production = next_sequencer.produce_block_in_place(submissions, timestamp_ms);
+        PreparedBlock {
+            next_sequencer,
+            production,
+        }
+    }
+
+    pub fn commit_prepared_block(&mut self, prepared: PreparedBlock) -> BlockProduction {
+        let PreparedBlock {
+            next_sequencer,
+            production,
+        } = prepared;
+        *self = next_sequencer;
+        production
+    }
+
+    /// Core sync method: prepare + immediately commit a block in-memory.
     ///
-    /// Returns the block, pipeline result, and a `BlockWitness` for verification.
+    /// Direct callers such as simulations keep the previous semantics. The actor
+    /// can instead call [`Self::prepare_block`] and commit only after persistence succeeds.
     #[tracing::instrument(skip_all, fields(height))]
     pub fn produce_block(
+        &mut self,
+        submissions: Vec<OrderSubmission>,
+        timestamp_ms: u64,
+    ) -> BlockProduction {
+        let prepared = self.prepare_block(submissions, timestamp_ms);
+        self.commit_prepared_block(prepared)
+    }
+
+    fn produce_block_in_place(
         &mut self,
         submissions: Vec<OrderSubmission>,
         timestamp_ms: u64,

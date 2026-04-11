@@ -7,7 +7,7 @@ use matching_engine::{Fill, MarketId, Nanos, Order};
 use crate::market_info::PricePoint;
 
 /// Tracks clearing prices, price history, and per-market trading volume.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct PriceTracker {
     /// Persisted clearing prices across blocks (fallback when no trades happen).
     last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
