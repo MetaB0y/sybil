@@ -2,7 +2,7 @@
 tags: [infrastructure, storage]
 layer: sequencer
 status: active
-last_verified: 2026-04-10
+last_verified: 2026-04-12
 ---
 
 # Persistence
@@ -11,95 +11,146 @@ Sybil persists exchange state to survive crashes without losing accounts, market
 
 ## Philosophy
 
-**Block-boundary snapshots, not event sourcing.** Each block is an atomic unit (orders → solve → fills → settlement → new state). After each block, we write the complete state to disk in a single ACID transaction. On crash, we load the last committed state and resume. Anything in-flight (mempool, current solve) is lost — clients resubmit within seconds.
+**Block-boundary snapshots, not event sourcing.** Each block is the transactional unit. After a block is prepared and accepted for commit, we persist the committed state and resume from that point on restart. Anything in-flight at crash time (mempool contents, current solve, transient actor state) is discarded and rebuilt by normal client behavior.
 
-This is inspired by [[Block Lifecycle]] — the block is the natural transactional boundary. See also absurd's "step-based checkpointing" pattern: once a step completes, its result is persisted and never re-executes.
+This follows [[Block Lifecycle]]: the block is the natural checkpoint. We do not replay a long event log at startup and we do not attempt to preserve partial progress inside a block.
 
-## Storage: redb
+## Storage Split: redb + qmdb
 
-We use [redb](https://github.com/cberner/redb) — a pure-Rust embedded key-value store with ACID transactions and crash recovery.
+Sybil currently uses two storage engines with distinct authority boundaries:
 
-**Why redb over alternatives:**
-- **Simplest API**: `table.insert(key, value)` maps directly to our HashMaps
-- **ACID**: One write transaction per block = one fsync per 2 seconds
-- **Crash recovery**: Rolls back to last committed transaction on unclean shutdown
-- **Pure Rust**: No C dependencies (unlike SQLite)
-- **Data model fit**: Our state is key-value, not relational
+- **qmdb** stores account snapshots.
+- **redb** stores block metadata, market data, counters, and the authoritative commit fence that says which qmdb snapshot is committed.
 
-**Serialization**: MessagePack via rmp-serde. Self-describing and binary-stable across schema changes — adding fields with `#[serde(default)]` is backward-compatible. No migration code needed.
+This is intentionally not "one transaction across two databases". There is no journal and no cross-db transaction. Instead, redb is the only commit point:
 
-## Three Tiers
+1. Write the next account snapshot into the inactive qmdb slot.
+2. Commit the redb transaction that stores the new block metadata and flips the authoritative fence to that slot.
+3. Recover strictly from the fence recorded in redb.
 
-### Tier 1: Core State (implemented)
+Anything written to qmdb without a corresponding redb fence flip is treated as uncommitted and ignored.
 
-Authoritative state needed to resume the exchange after crash:
+### Why This Split Makes Sense Today
 
-| Table | Key | Value |
-|-------|-----|-------|
-| `accounts` | AccountId (u64) | Account (balance, positions, total_deposited, events_digest) |
-| `markets` | MarketId (u32) | Market (name) |
-| `market_meta` | MarketId (u32) | MarketMetadata (description, tags, status) |
-| `market_statuses` | MarketId (u32) | MarketStatus (Active, Resolved, etc.) |
-| `market_groups` | group_idx (u32) | MarketGroup (name, market_ids) |
-| `block_headers` | height (u64) | BlockHeader (hash, state_root, counts, timestamp) |
-| `pubkey_registry` | compressed P256 (33 bytes) | AccountId (u64) |
-| `clearing_prices` | MarketId (u32) | Vec\<Nanos\> (last clearing prices per market) |
-| `counters` | name (&str) | value (u64) |
+- **qmdb fit**: accounts are the large authenticated keyspace and the part most likely to evolve toward proof-oriented storage.
+- **redb fit**: metadata, counters, block headers, and fence coordination remain simple inside one ACID write transaction.
+- **Simple crash model**: one authoritative fence, one authoritative slot, no ambiguity about "latest".
+- **Honest semantics**: we do not pretend to have cross-db atomicity that the system does not actually provide.
 
-Written in a single transaction after each block (~70KB, 2-second interval).
+**Serialization**: structured values are stored with `rmp-serde` MessagePack. That keeps values self-describing and tolerant of additive schema changes via `#[serde(default)]`.
 
-### Tier 2: Order State (TODO)
+## Tier 1: Core State
 
-State for seamless order continuity across restarts:
+Authoritative state needed to resume the exchange after a crash:
 
-- **Order book**: The `OrderBook` component owns all resting orders and their balance/position reservations. Persisting it preserves resting orders + committed capital across restarts. Natural serialization boundary — one struct, one table.
-- **Mempool**: In-flight submissions not yet in a block. Low priority (clients resubmit).
-- **MM state**: Per-market inventory, price history for variance estimation.
+| Engine | Namespace / Table | Role |
+|--------|--------------------|------|
+| `qmdb` | slot-prefixed account snapshot keys | `Account` rows plus slot-local `height` and `next_account_id` |
+| `redb` | `markets` | market definitions |
+| `redb` | `market_meta` | market metadata |
+| `redb` | `market_statuses` | market status driven by oracle/system logic |
+| `redb` | `market_groups` | market groups |
+| `redb` | `block_headers` | canonical block header by height |
+| `redb` | `pubkey_registry` | compressed pubkey to account id |
+| `redb` | `clearing_prices` | last clearing price vector per market |
+| `redb` | `counters` | next IDs, store layout version, and the authoritative account-state fence |
 
-### Tier 3: Derived Views (TODO)
+The account snapshot uses two logical qmdb slots, `A` and `B`. Only one slot is committed at a time; redb records which one.
 
-Queryable history reconstructable from blocks, but expensive to rebuild:
+## Tier 2: Order State
 
-- **Fill history**: Per-account fill records (FillRecorder)
-- **Price history**: Per-market clearing price timeseries (PriceTracker)
-- **Block ring buffer**: Last 100 full blocks for SSE catch-up
-  Full blocks now include `system_events` alongside fills/rejections.
-- **Volume/welfare aggregates**
+Still not persisted today:
 
-## Crash Recovery Semantics
+- **Order book**: resting orders and their reservations
+- **Mempool**: in-flight submissions not yet included in a block
+- **MM runtime state**: inventory, short-term price history, and variance estimation state
+
+Persisting these would improve continuity across restarts, but they are not required for correctness of committed balances and positions.
+
+## Tier 3: Derived Views
+
+Also not persisted today:
+
+- **Fill history**
+- **Price history**
+- **Block ring buffer for SSE catch-up**
+- **Derived aggregates such as volume or welfare summaries**
+
+These are reconstructable or refreshable, but expensive or inconvenient to rebuild.
+
+## Recovery Order
+
+Startup recovery is intentionally fence-driven:
+
+1. Open redb and validate `store_layout_version`.
+2. Read the canonical block height and canonical account-state fence from redb.
+3. Read only the fenced qmdb slot.
+4. Reject the store as corrupt if the fenced qmdb slot's `height` or `next_account_id` does not match redb.
+5. Restore the in-memory sequencer state from those committed structures.
+
+Recovery never scans qmdb looking for "the newest" snapshot. The fence is the authority.
+
+## Invariants
+
+The current model relies on explicit invariants:
+
+- `store_layout_version` must exist and match the binary's expected layout.
+- If `height` exists, then `account_state_height` and `account_state_slot` must also exist.
+- `height == account_state_height`.
+- The qmdb slot named by `account_state_slot` must contain matching `height` and `next_account_id`.
+- Recovery trusts redb's fence, not qmdb recency.
+
+When any of these fail, startup should reject the store as unsupported or corrupt rather than guessing.
+
+## Crash Cases
+
+- **Crash before qmdb finishes writing the inactive slot**: redb fence is unchanged, so recovery uses the previous committed slot.
+- **Crash after qmdb finishes but before redb commits**: the new qmdb snapshot exists but is ignored as uncommitted.
+- **Crash after redb commits**: the new slot is authoritative and recovery uses it.
+
+This is the whole reason the commit fence lives in redb.
+
+## Preserved vs Lost
 
 **Preserved on crash:**
+
 - All account balances and positions
-- All markets, groups, metadata, statuses
-- Block chain (headers)
-- P256 pubkey registry
-- Counter state (next IDs)
+- All markets, groups, metadata, and statuses
+- Block headers
+- Pubkey registry
+- Counter state and next IDs
 
 **Lost on crash:**
-- Mempool (pending submissions) — clients resubmit
-- Pending orders (TTL 3 blocks = 6 seconds) — acceptable loss
-- Fill/price history — Tier 3 will fix this
-- Block ring buffer — SSE subscribers reconnect
-- Reference prices — Polymarket mirror re-pushes within seconds
+
+- Mempool contents
+- Resting orders and reservations
+- Fill and price history caches
+- SSE ring buffer contents
+- Transient external feed state such as recently pushed reference prices
 
 ## How to Add New Persisted State
 
-1. Define a new `TableDefinition` in `store.rs`
-2. Add serialization in `save_block()` (inside the write transaction)
-3. Add deserialization in `load_state()` (to `RestoredState`)
-4. Wire into `BlockSequencer::restore()` if needed
-5. Add `#[derive(Serialize, Deserialize)]` to any new types
+1. Decide which store is authoritative for the new state.
+2. If it is metadata, counters, or coordination state, prefer redb.
+3. If it is large authenticated per-key state, consider qmdb.
+4. Add serialization in `save_block()` and deserialization in `load_state()`.
+5. If the new state participates in crash recovery, document its invariants explicitly.
+6. Wire it into `BlockSequencer::restore()` if needed.
+
+Do not add state to both stores unless there is a clear authority boundary and recovery rule.
 
 ## Files
 
 | File | Role |
 |------|------|
-| `crates/matching-sequencer/src/store.rs` | Store struct, save/load, table definitions |
-| `crates/sybil-api/src/main.rs` | Opens store, loads or creates fresh state |
+| `crates/matching-sequencer/src/store.rs` | redb metadata store, layout checks, authoritative commit fence |
+| `crates/matching-sequencer/src/account_storage.rs` | account snapshot boundary and fenced recovery contract |
+| `crates/matching-sequencer/src/qmdb_accounts.rs` | qmdb-backed account snapshot implementation |
+| `crates/sybil-api/src/main.rs` | opens store and restores or bootstraps state |
 | `crates/sybil-api/src/config.rs` | `--data-dir` / `SYBIL_DATA_DIR` config |
 
 ## Related Notes
 
 - [[Block Lifecycle]] — the transactional unit we persist at
-- [[Settlement]] — what state changes each block
-- [[State Root and Parent Hash]] — integrity verification of persisted state
+- [[Settlement]] — what mutates committed state
+- [[State Root and Parent Hash]] — integrity verification of committed state

@@ -11,6 +11,20 @@
 //!
 //! Recovery trusts the redb fence, never "latest qmdb state".
 //!
+//! Transaction boundary:
+//! 1. Write the next account snapshot into the inactive qmdb slot
+//! 2. Commit redb metadata and flip the authoritative fence to that slot
+//!
+//! There is intentionally no cross-db transaction or journal. The redb commit
+//! is the only commit point. Anything written to qmdb without a matching redb
+//! fence flip is treated as uncommitted and ignored during recovery.
+//!
+//! Recovery invariants:
+//! - `store_layout_version` must exist and match this binary
+//! - if `height` exists, `account_state_height` and `account_state_slot` must exist
+//! - `height == account_state_height`
+//! - the fenced qmdb slot must contain matching `height` and `next_account_id`
+//!
 //! Uses MessagePack (rmp-serde) for values: self-describing, binary-stable across
 //! schema changes. Adding fields with `#[serde(default)]` is backward-compatible.
 //!
@@ -240,12 +254,19 @@ impl Store {
         // Counters
         {
             let mut table = txn.open_table(COUNTERS)?;
-            table.insert(KEY_HEIGHT, header.height)?;
-            table.insert(KEY_NEXT_ACCOUNT_ID, accounts.next_id())?;
-            table.insert(KEY_NEXT_MARKET_ID, markets.next_id() as u64)?;
-            table.insert(KEY_NEXT_ORDER_ID, next_order_id)?;
-            table.insert(KEY_ACCOUNT_STATE_HEIGHT, header.height)?;
-            table.insert(KEY_ACCOUNT_STATE_SLOT, next_slot.encode())?;
+            write_core_counters(
+                &mut table,
+                PersistedCoreCounters {
+                    height: header.height,
+                    next_account_id: accounts.next_id(),
+                    next_market_id: markets.next_id() as u64,
+                    next_order_id,
+                    account_state_fence: AccountStateFence {
+                        height: header.height,
+                        slot: next_slot,
+                    },
+                },
+            )?;
         }
 
         txn.commit()?;
@@ -256,45 +277,16 @@ impl Store {
     /// Load state from the store. Returns None if the store is empty (fresh start).
     pub async fn load_state(&self) -> Result<Option<RestoredState>, StoreError> {
         let txn = self.db.begin_read()?;
-
-        // Check if we have any data
-        let counters = txn.open_table(COUNTERS)?;
-        let height = match counters.get(KEY_HEIGHT)? {
-            Some(v) => v.value(),
-            None => return Ok(None), // Fresh store
+        let Some(recovery_metadata) = read_recovery_metadata(&txn)? else {
+            return Ok(None);
         };
-        let account_state_height = required_counter(&counters, KEY_ACCOUNT_STATE_HEIGHT)?;
-        let account_state_slot =
-            AccountSnapshotSlot::decode(required_counter(&counters, KEY_ACCOUNT_STATE_SLOT)?)?;
-        if account_state_height != height {
-            return Err(StoreError::CorruptLayout(format!(
-                "metadata height mismatch: height={} account_state_height={}",
-                height, account_state_height
-            )));
-        }
-        let next_account_id = counters
-            .get(KEY_NEXT_ACCOUNT_ID)?
-            .map(|v| v.value())
-            .unwrap_or(0);
-        let next_market_id = counters
-            .get(KEY_NEXT_MARKET_ID)?
-            .map(|v| v.value())
-            .unwrap_or(0) as u32;
-        let next_order_id = counters
-            .get(KEY_NEXT_ORDER_ID)?
-            .map(|v| v.value())
-            .unwrap_or(1);
 
         let accounts_map = self
             .account_state_store
-            .recover(RecoveryAccountState {
-                height: account_state_height,
-                next_account_id,
-                slot: account_state_slot,
-            })
+            .recover(recovery_metadata.account_state)
             .await?;
         let num_accounts = accounts_map.len();
-        let accounts = AccountStore::restore(accounts_map, next_account_id);
+        let accounts = AccountStore::restore(accounts_map, recovery_metadata.next_account_id);
 
         // Markets
         let markets = {
@@ -305,7 +297,7 @@ impl Store {
                 let market: matching_engine::Market = rmp_serde::from_slice(value.value())?;
                 market_map.insert(market.id, market);
             }
-            MarketSet::restore(market_map, next_market_id)
+            MarketSet::restore(market_map, recovery_metadata.next_market_id)
         };
 
         // Market groups
@@ -347,7 +339,7 @@ impl Store {
         // Last block header
         let last_header = {
             let table = txn.open_table(BLOCK_HEADERS)?;
-            match table.get(height)? {
+            match table.get(recovery_metadata.height)? {
                 Some(value) => {
                     let header: BlockHeader = rmp_serde::from_slice(value.value())?;
                     Some(header)
@@ -385,7 +377,7 @@ impl Store {
         };
 
         info!(
-            height,
+            height = recovery_metadata.height,
             accounts = num_accounts,
             markets = markets.len(),
             groups = market_groups.len(),
@@ -399,9 +391,9 @@ impl Store {
             market_groups,
             market_statuses,
             market_metadata,
-            height,
+            height: recovery_metadata.height,
             last_header,
-            next_order_id,
+            next_order_id: recovery_metadata.next_order_id,
             pubkey_registry,
             last_clearing_prices,
         }))
@@ -444,6 +436,24 @@ pub enum StoreError {
 struct AccountStateFence {
     height: u64,
     slot: AccountSnapshotSlot,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PersistedCoreCounters {
+    height: u64,
+    next_account_id: u64,
+    next_market_id: u64,
+    next_order_id: u64,
+    account_state_fence: AccountStateFence,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RecoveryMetadata {
+    height: u64,
+    next_account_id: u64,
+    next_market_id: u32,
+    next_order_id: u64,
+    account_state: RecoveryAccountState,
 }
 
 fn initialize_or_validate_layout(db: &Database) -> Result<(), StoreError> {
@@ -496,6 +506,67 @@ fn read_account_state_fence(db: &Database) -> Result<Option<AccountStateFence>, 
         height,
         slot: AccountSnapshotSlot::decode(slot)?,
     }))
+}
+
+fn read_recovery_metadata(
+    txn: &redb::ReadTransaction,
+) -> Result<Option<RecoveryMetadata>, StoreError> {
+    let counters = txn.open_table(COUNTERS)?;
+    let Some(height) = counters.get(KEY_HEIGHT)?.map(|value| value.value()) else {
+        return Ok(None);
+    };
+
+    let next_account_id = counters
+        .get(KEY_NEXT_ACCOUNT_ID)?
+        .map(|value| value.value())
+        .unwrap_or(0);
+    let account_state_height = required_counter(&counters, KEY_ACCOUNT_STATE_HEIGHT)?;
+    let account_state_slot =
+        AccountSnapshotSlot::decode(required_counter(&counters, KEY_ACCOUNT_STATE_SLOT)?)?;
+
+    if account_state_height != height {
+        return Err(StoreError::CorruptLayout(format!(
+            "metadata height mismatch: height={} account_state_height={}",
+            height, account_state_height
+        )));
+    }
+
+    Ok(Some(RecoveryMetadata {
+        height,
+        next_account_id,
+        next_market_id: counters
+            .get(KEY_NEXT_MARKET_ID)?
+            .map(|value| value.value())
+            .unwrap_or(0) as u32,
+        next_order_id: counters
+            .get(KEY_NEXT_ORDER_ID)?
+            .map(|value| value.value())
+            .unwrap_or(1),
+        account_state: RecoveryAccountState {
+            height: account_state_height,
+            next_account_id,
+            slot: account_state_slot,
+        },
+    }))
+}
+
+fn write_core_counters(
+    counters: &mut redb::Table<&str, u64>,
+    persisted: PersistedCoreCounters,
+) -> Result<(), StoreError> {
+    counters.insert(KEY_HEIGHT, persisted.height)?;
+    counters.insert(KEY_NEXT_ACCOUNT_ID, persisted.next_account_id)?;
+    counters.insert(KEY_NEXT_MARKET_ID, persisted.next_market_id)?;
+    counters.insert(KEY_NEXT_ORDER_ID, persisted.next_order_id)?;
+    counters.insert(
+        KEY_ACCOUNT_STATE_HEIGHT,
+        persisted.account_state_fence.height,
+    )?;
+    counters.insert(
+        KEY_ACCOUNT_STATE_SLOT,
+        persisted.account_state_fence.slot.encode(),
+    )?;
+    Ok(())
 }
 
 fn required_counter(

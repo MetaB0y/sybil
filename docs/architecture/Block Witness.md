@@ -3,7 +3,7 @@ tags: [zk]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-04-10
+last_verified: 2026-04-12
 ---
 
 The Block Witness is a complete audit trail produced alongside every block. It contains everything an independent party needs to verify that the block was produced correctly — without trusting the sequencer or having access to its internal state. It is the input to the [[Four-Layer Verification|4-layer verification pipeline]] and, in the future, to the [[ZK Integration Path|ZK prover]].
@@ -15,7 +15,7 @@ Today, the witness is used by `matching-sim` for offline verification in tests a
 ## Key Properties
 - Self-contained: everything needed for independent block verification
 - Pre-state + fills → post-state is independently reproducible
-- Contains: orders, rejections, admin events, fills, clearing prices, welfare, MM constraints, market groups, account snapshots
+- Contains: orders, rejections, system events, fills, clearing prices, welfare, MM constraints, market groups, account snapshots
 - Input to [[Four-Layer Verification]] (today) and [[ZK Integration Path|ZK prover]] (future)
 - Produced alongside every block by the sequencer
 

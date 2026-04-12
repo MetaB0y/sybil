@@ -7,6 +7,10 @@ use crate::account::{Account, AccountId, AccountStore};
 use crate::qmdb_accounts::QmdbAccounts;
 use crate::store::StoreError;
 
+/// Logical slot for a committed qmdb account snapshot.
+///
+/// We keep two slots and flip the redb fence between them. Only the slot named
+/// by redb is authoritative during recovery.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AccountSnapshotSlot {
     A,
@@ -39,6 +43,7 @@ impl AccountSnapshotSlot {
     }
 }
 
+/// Account snapshot metadata written before a redb fence flip.
 pub struct CommittedAccountState<'a> {
     pub accounts: &'a AccountStore,
     pub height: u64,
@@ -46,12 +51,19 @@ pub struct CommittedAccountState<'a> {
     pub slot: AccountSnapshotSlot,
 }
 
+/// Account snapshot metadata that recovery expects to find in the fenced slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RecoveryAccountState {
     pub height: u64,
     pub next_account_id: u64,
     pub slot: AccountSnapshotSlot,
 }
 
+/// Boundary for the authoritative account snapshot store.
+///
+/// Implementations must treat `recover()` as fence-driven: the caller chooses
+/// the committed snapshot via external metadata, and the implementation must not
+/// silently "pick the latest" state on its own.
 pub trait AccountStateStore: Send + Sync {
     fn persist<'a>(
         &'a self,
