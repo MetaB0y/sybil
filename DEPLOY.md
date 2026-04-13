@@ -122,6 +122,11 @@ kamal accessory restart polymarket
   - `SYBIL_DEV_MODE=true` (required for market creation)
   - `SYBIL_BLOCK_INTERVAL_MS=2000`
 
+For the ad-hoc SSH `just deploy-api` path, `sybil-api` runs on Docker bridge networking
+while the OTEL collector is exposed on the host. Set
+`OTEL_EXPORTER_OTLP_ENDPOINT=http://172.17.0.1:4317` so traces reach the host-published
+collector instead of container-local `localhost`.
+
 ### sybil-polymarket
 
 - **Connects to**: `http://host.docker.internal:3000`

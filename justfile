@@ -218,6 +218,7 @@ deploy-api:
     ssh {{SERVER}} 'docker run -d --name sybil-api --restart unless-stopped \
         -p 3000:3000 -v sybil-data:/data \
         -e SYBIL_DEV_MODE=true -e SYBIL_BLOCK_INTERVAL_MS=2000 -e RUST_LOG=info \
+        -e OTEL_EXPORTER_OTLP_ENDPOINT=http://172.17.0.1:4317 \
         -e SYBIL_DATA_DIR=/data \
         sybil-api:latest'
     ssh {{SERVER}} 'docker run -d --name sybil-polymarket --restart unless-stopped \
