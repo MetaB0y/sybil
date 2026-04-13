@@ -226,7 +226,9 @@ impl SequencerActor {
         let submissions = self.mempool.drain();
 
         // ── Functional core ──
-        let prepared = self.sequencer.prepare_block(submissions.clone(), timestamp_ms);
+        let prepared = self
+            .sequencer
+            .prepare_block(submissions.clone(), timestamp_ms);
 
         if let Err(error) = self.persist_block(&prepared).await {
             metrics::counter!("sybil_persistence_failures").increment(1);
@@ -1088,8 +1090,8 @@ impl SequencerHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::system_event::SystemEvent;
     use crate::account::AccountStore;
+    use crate::system_event::SystemEvent;
     use matching_engine::{outcome_buy, MarketSet, NANOS_PER_DOLLAR};
     use std::sync::Arc;
     use sybil_oracle::AdminOracle;

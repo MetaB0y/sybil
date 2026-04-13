@@ -14,6 +14,7 @@ use tracing::{debug, error};
 
 use crate::account::{Account, AccountId, AccountStore};
 use crate::block::{hash_header, Block, BlockHeader, BlockProduction};
+use crate::canonical_state::{snapshot_account, CanonicalState};
 use crate::error::{Rejection, RejectionReason, SequencerError};
 use crate::market_info::{AccountFillRecord, MarketMetadata, PricePoint};
 use crate::market_lifecycle::MarketLifecycle;
@@ -104,34 +105,6 @@ fn classify_order_side(order: &Order) -> &'static str {
     }
 }
 
-fn snapshot_account(account: &Account) -> AccountSnapshot {
-    let mut positions: Vec<_> = account
-        .positions
-        .iter()
-        .filter(|(_, &qty)| qty != 0)
-        .map(|(&(market, outcome), &qty)| (market, outcome, qty))
-        .collect();
-    positions.sort_by_key(|&(market, outcome, _)| (market.0, outcome));
-
-    AccountSnapshot {
-        id: account.id.0,
-        balance: account.balance,
-        total_deposited: account.total_deposited,
-        positions,
-        events_digest: account.events_digest,
-    }
-}
-
-/// Snapshot the full account store into verifier-compatible format.
-fn snapshot_accounts(accounts: &AccountStore) -> Vec<AccountSnapshot> {
-    let mut snapshots: Vec<AccountSnapshot> = accounts
-        .iter()
-        .map(|(_, account)| snapshot_account(account))
-        .collect();
-    snapshots.sort_by_key(|s| s.id);
-    snapshots
-}
-
 fn market_position_totals(accounts: &AccountStore, market_id: MarketId) -> (i64, i64) {
     accounts
         .iter()
@@ -202,19 +175,17 @@ fn build_witness_phase_snapshots(
     accounts: &AccountStore,
     system_account_baselines: &HashMap<AccountId, Option<Account>>,
 ) -> (Vec<AccountSnapshot>, Vec<AccountSnapshot>) {
-    let mut pre_state: Vec<AccountSnapshot> = accounts
-        .iter()
-        .filter_map(
-            |(account_id, account)| match system_account_baselines.get(account_id) {
+    let pre_state =
+        CanonicalState::from_snapshot_iter(accounts.iter().filter_map(|(account_id, account)| {
+            match system_account_baselines.get(account_id) {
                 Some(Some(baseline)) => Some(snapshot_account(baseline)),
                 Some(None) => None,
                 None => Some(snapshot_account(account)),
-            },
-        )
-        .collect();
-    pre_state.sort_by_key(|snapshot| snapshot.id);
+            }
+        }))
+        .into_snapshots();
 
-    let post_system_state = snapshot_accounts(accounts);
+    let post_system_state = CanonicalState::from_accounts(accounts).into_snapshots();
     (pre_state, post_system_state)
 }
 
@@ -1178,12 +1149,12 @@ impl BlockSequencer {
         }
 
         // Snapshot post-state (after settlement)
-        let post_state = snapshot_accounts(&self.accounts);
+        let post_state = CanonicalState::from_accounts(&self.accounts);
 
         // Update order book: release filled orders' reservations, adjust partial fills
         self.order_book.settle(&fills, &mm_order_ids_set);
 
-        let state_root = crate::block::compute_state_root(&self.accounts);
+        let state_root = post_state.state_root();
         let parent_hash = self
             .last_header
             .as_ref()
@@ -1232,7 +1203,7 @@ impl BlockSequencer {
             market_groups: problem.market_groups.clone(),
             pre_state,
             post_system_state,
-            post_state,
+            post_state: post_state.into_snapshots(),
             resolved_markets,
         };
 

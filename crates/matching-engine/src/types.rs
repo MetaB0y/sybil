@@ -17,7 +17,9 @@ pub type Nanos = u64;
 pub type Qty = u64;
 
 /// Market identifier
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, Serialize, Deserialize)]
+#[derive(
+    Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, Serialize, Deserialize,
+)]
 pub struct MarketId(pub u32);
 
 impl MarketId {

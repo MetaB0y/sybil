@@ -127,12 +127,7 @@ async fn main() {
 
         // Add any seed markets not already present
         for name in &config.seed_markets {
-            if !name.is_empty()
-                && !sequencer
-                    .markets()
-                    .iter()
-                    .any(|m| m.name == *name)
-            {
+            if !name.is_empty() && !sequencer.markets().iter().any(|m| m.name == *name) {
                 sequencer.markets_mut().add_binary(name);
             }
         }
@@ -156,10 +151,7 @@ async fn main() {
         let accounts = AccountStore::new();
         let sequencer = BlockSequencer::with_default_solver(accounts, markets, vec![], oracle);
 
-        tracing::info!(
-            num_markets,
-            "Starting fresh (no persistent state)"
-        );
+        tracing::info!(num_markets, "Starting fresh (no persistent state)");
 
         SequencerHandle::spawn_with_store(
             sequencer,

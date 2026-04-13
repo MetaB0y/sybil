@@ -30,14 +30,8 @@ const ACCOUNT_KEY_PREFIX: u8 = b'a';
 const HEIGHT_KEY: &[u8] = b"meta:height";
 const NEXT_ACCOUNT_ID_KEY: &[u8] = b"meta:next_account_id";
 
-type AccountDb = OrderedVariableDb<
-    commonware_tokio::Context,
-    Vec<u8>,
-    Vec<u8>,
-    Sha256,
-    OneCap,
-    CHUNK_SIZE,
->;
+type AccountDb =
+    OrderedVariableDb<commonware_tokio::Context, Vec<u8>, Vec<u8>, Sha256, OneCap, CHUNK_SIZE>;
 
 pub struct LoadedAccountSnapshot {
     pub accounts: HashMap<AccountId, Account>,
@@ -109,7 +103,10 @@ impl QmdbAccounts {
         next_account_id: u64,
     ) -> Result<(), StoreError> {
         let snapshot = PersistedAccountSnapshot {
-            accounts: accounts.iter().map(|(_, account)| account.clone()).collect(),
+            accounts: accounts
+                .iter()
+                .map(|(_, account)| account.clone())
+                .collect(),
             height,
             next_account_id,
         };
@@ -127,7 +124,10 @@ impl QmdbAccounts {
             .map_err(|_| StoreError::Qmdb("qmdb account response channel dropped".to_string()))?
     }
 
-    pub async fn load(&self, slot: AccountSnapshotSlot) -> Result<LoadedAccountSnapshot, StoreError> {
+    pub async fn load(
+        &self,
+        slot: AccountSnapshotSlot,
+    ) -> Result<LoadedAccountSnapshot, StoreError> {
         let (respond_to, response) = oneshot::channel();
         self.sender
             .send(Command::LoadSnapshot { slot, respond_to })
@@ -198,7 +198,10 @@ async fn replace_snapshot(
             rmp_serde::to_vec(&account)?,
         );
     }
-    desired.insert(encode_height_key(slot), snapshot.height.to_le_bytes().to_vec());
+    desired.insert(
+        encode_height_key(slot),
+        snapshot.height.to_le_bytes().to_vec(),
+    );
     desired.insert(
         encode_next_account_id_key(slot),
         snapshot.next_account_id.to_le_bytes().to_vec(),
@@ -292,8 +295,8 @@ async fn collect_entries(
 
     let mut entries = Vec::new();
     while let Some(item) = stream.next().await {
-        let (key, value) = item
-            .map_err(|error| StoreError::Qmdb(format!("failed to read qmdb entry: {error}")))?;
+        let (key, value) =
+            item.map_err(|error| StoreError::Qmdb(format!("failed to read qmdb entry: {error}")))?;
         if !key.starts_with(&prefix) {
             break;
         }

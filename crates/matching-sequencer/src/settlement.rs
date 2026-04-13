@@ -109,10 +109,11 @@ pub fn resolve_market(
 mod tests {
     use super::*;
     use crate::account::AccountStore;
+    use crate::canonical_state::CanonicalState;
     use matching_engine::{outcome_buy, outcome_sell, MarketSet, NANOS_PER_DOLLAR};
     use proptest::prelude::*;
     use std::collections::HashMap;
-    use sybil_verifier::{AccountSnapshot, BlockWitness, WitnessBlockHeader, WitnessOrder};
+    use sybil_verifier::{BlockWitness, WitnessBlockHeader, WitnessOrder};
 
     fn setup() -> (MarketSet, AccountStore) {
         let mut markets = MarketSet::new();
@@ -122,29 +123,8 @@ mod tests {
         (markets, accounts)
     }
 
-    fn snapshot_accounts(accounts: &AccountStore) -> Vec<AccountSnapshot> {
-        let mut snapshots: Vec<_> = accounts
-            .iter()
-            .map(|(&id, account)| {
-                let mut positions: Vec<_> = account
-                    .positions
-                    .iter()
-                    .filter(|(_, &qty)| qty != 0)
-                    .map(|(&(market, outcome), &qty)| (market, outcome, qty))
-                    .collect();
-                positions.sort_by_key(|&(market, outcome, _)| (market.0, outcome));
-
-                AccountSnapshot {
-                    id: id.0,
-                    balance: account.balance,
-                    total_deposited: account.total_deposited,
-                    positions,
-                    events_digest: account.events_digest,
-                }
-            })
-            .collect();
-        snapshots.sort_by_key(|snapshot| snapshot.id);
-        snapshots
+    fn snapshot_accounts(accounts: &AccountStore) -> Vec<sybil_verifier::AccountSnapshot> {
+        CanonicalState::from_accounts(accounts).into_snapshots()
     }
 
     fn empty_header() -> WitnessBlockHeader {

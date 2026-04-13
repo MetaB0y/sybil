@@ -72,13 +72,19 @@ mod tests {
     #[test]
     fn test_digest_deterministic() {
         let event = encode_fill_event(7, 10, 500_000_000, 12);
-        assert_eq!(update_digest(&[0u8; 32], &event), update_digest(&[0u8; 32], &event));
+        assert_eq!(
+            update_digest(&[0u8; 32], &event),
+            update_digest(&[0u8; 32], &event)
+        );
     }
 
     #[test]
     fn test_digest_sensitive_to_event_bytes() {
         let fill = encode_fill_event(7, 10, 500_000_000, 12);
         let deposit = encode_deposit_event(500_000_000, 12);
-        assert_ne!(update_digest(&[0u8; 32], &fill), update_digest(&[0u8; 32], &deposit));
+        assert_ne!(
+            update_digest(&[0u8; 32], &fill),
+            update_digest(&[0u8; 32], &deposit)
+        );
     }
 }

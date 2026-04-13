@@ -89,8 +89,7 @@ impl OrderBook {
         let reserved = self.reserved_balance(account_id);
         let acct_positions = self.acct_position_reservations(account_id);
 
-        let cost =
-            validate_order_with_reservation(&order, account, reserved, &acct_positions)?;
+        let cost = validate_order_with_reservation(&order, account, reserved, &acct_positions)?;
 
         // Reserve balance
         if cost > 0 {
@@ -114,10 +113,7 @@ impl OrderBook {
             reserved_positions: pos_reservations,
         });
 
-        Ok(Accepted {
-            order,
-            account_id,
-        })
+        Ok(Accepted { order, account_id })
     }
 
     /// Remove expired orders and release their reservations.
@@ -142,11 +138,7 @@ impl OrderBook {
     /// after fills/withdrawals, insufficient position after sells).
     ///
     /// Also removes orders for markets that are no longer active.
-    pub fn revalidate(
-        &mut self,
-        accounts: &AccountStore,
-        active_markets: &HashSet<MarketId>,
-    ) {
+    pub fn revalidate(&mut self, accounts: &AccountStore, active_markets: &HashSet<MarketId>) {
         // We must re-validate carefully: removing one order releases its reservations,
         // which may make subsequent orders valid again. But for simplicity and safety,
         // we validate conservatively: remove anything that's invalid given current
@@ -157,7 +149,10 @@ impl OrderBook {
 
         for (i, ro) in self.orders.iter().enumerate() {
             // Market still active?
-            let markets_active = ro.order.active_markets().all(|m| active_markets.contains(&m));
+            let markets_active = ro
+                .order
+                .active_markets()
+                .all(|m| active_markets.contains(&m));
             if !markets_active {
                 to_remove.push(i);
                 continue;
@@ -299,7 +294,9 @@ impl OrderBook {
                         let new_qty = (qty as f64 * ratio).ceil() as i64;
                         let released = qty - new_qty;
                         if released > 0 {
-                            if let Some(v) = self.position_reservations.get_mut(&(ro.account_id, key)) {
+                            if let Some(v) =
+                                self.position_reservations.get_mut(&(ro.account_id, key))
+                            {
                                 *v -= released;
                             }
                         }

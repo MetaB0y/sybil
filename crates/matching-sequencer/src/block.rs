@@ -5,6 +5,7 @@ use matching_solver::PipelineResult;
 use sybil_verifier::BlockWitness;
 
 use crate::account::AccountStore;
+use crate::canonical_state::CanonicalState;
 use crate::error::Rejection;
 use crate::system_event::SystemEvent;
 
@@ -54,38 +55,7 @@ pub struct Block {
 /// Candidate: commonware-storage qmdb (LayerZero research + Commonware productionization).
 /// See: https://commonware.xyz/blogs/qmdb
 pub fn compute_state_root(accounts: &AccountStore) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-
-    // Collect and sort accounts by id
-    let mut account_list: Vec<_> = accounts.iter().collect();
-    account_list.sort_by_key(|(id, _)| id.0);
-
-    for (id, account) in account_list {
-        // AccountId
-        hasher.update(&id.0.to_le_bytes());
-        // Balance
-        hasher.update(&account.balance.to_le_bytes());
-        // Total deposited
-        hasher.update(&account.total_deposited.to_le_bytes());
-
-        // Sorted positions
-        let mut positions: Vec<_> = account
-            .positions
-            .iter()
-            .filter(|(_, &qty)| qty != 0)
-            .collect();
-        positions.sort_by_key(|&(&(market, outcome), _)| (market.0, outcome));
-
-        for (&(market, outcome), &qty) in &positions {
-            hasher.update(&market.0.to_le_bytes());
-            hasher.update(&[outcome]);
-            hasher.update(&qty.to_le_bytes());
-        }
-
-        hasher.update(&account.events_digest);
-    }
-
-    *hasher.finalize().as_bytes()
+    CanonicalState::from_accounts(accounts).state_root()
 }
 
 /// Compute blake3 hash of a block header for chaining.
@@ -104,6 +74,7 @@ pub fn hash_header(header: &BlockHeader) -> [u8; 32] {
 mod tests {
     use super::*;
     use crate::account::AccountStore;
+    use crate::canonical_state::CanonicalState;
     use matching_engine::MarketId;
     use proptest::prelude::*;
     use sybil_verifier::AccountSnapshot;
@@ -257,31 +228,6 @@ mod tests {
         assert_ne!(hash_header(&h1), hash_header(&h2));
     }
 
-    fn snapshot_accounts(accounts: &AccountStore) -> Vec<AccountSnapshot> {
-        let mut snapshots: Vec<_> = accounts
-            .iter()
-            .map(|(&id, account)| {
-                let mut positions: Vec<_> = account
-                    .positions
-                    .iter()
-                    .filter(|(_, &qty)| qty != 0)
-                    .map(|(&(market, outcome), &qty)| (market, outcome, qty))
-                    .collect();
-                positions.sort_by_key(|&(market, outcome, _)| (market.0, outcome));
-
-                AccountSnapshot {
-                    id: id.0,
-                    balance: account.balance,
-                    total_deposited: account.total_deposited,
-                    positions,
-                    events_digest: account.events_digest,
-                }
-            })
-            .collect();
-        snapshots.sort_by_key(|snapshot| snapshot.id);
-        snapshots
-    }
-
     proptest! {
         #[test]
         fn prop_sequencer_and_verifier_state_roots_agree(
@@ -304,7 +250,7 @@ mod tests {
                 }
             }
 
-            let snapshots = snapshot_accounts(&accounts);
+            let snapshots = CanonicalState::from_accounts(&accounts).into_snapshots();
             prop_assert_eq!(
                 compute_state_root(&accounts),
                 sybil_verifier::block::compute_state_root(&snapshots),

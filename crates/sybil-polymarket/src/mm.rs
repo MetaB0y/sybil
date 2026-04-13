@@ -48,7 +48,13 @@ struct MarketState {
 }
 
 impl MarketState {
-    fn new(sybil_market_id: u32, yes_token_id: String, in_group: bool, initial_mid: f64, vol_window: usize) -> Self {
+    fn new(
+        sybil_market_id: u32,
+        yes_token_id: String,
+        in_group: bool,
+        initial_mid: f64,
+        vol_window: usize,
+    ) -> Self {
         let mut price_history = VecDeque::with_capacity(vol_window + 1);
         price_history.push_back(initial_mid);
         Self {
@@ -81,7 +87,12 @@ impl MarketState {
             return DEFAULT_VARIANCE;
         }
         let mean: f64 = self.price_history.iter().sum::<f64>() / n as f64;
-        let var = self.price_history.iter().map(|p| (p - mean).powi(2)).sum::<f64>() / (n - 1) as f64;
+        let var = self
+            .price_history
+            .iter()
+            .map(|p| (p - mean).powi(2))
+            .sum::<f64>()
+            / (n - 1) as f64;
         var.max(DEFAULT_VARIANCE)
     }
 
@@ -147,7 +158,8 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
     // Adaptive spread: wider when volatile
     let vol_spread = config.base_spread * (1.0 + input.sigma_sq * 200.0);
     let edge_room = r.min(1.0 - r);
-    let half_spread = vol_spread.clamp(config.min_spread, (edge_room - 0.01).max(config.min_spread));
+    let half_spread =
+        vol_spread.clamp(config.min_spread, (edge_room - 0.01).max(config.min_spread));
 
     // Position limits
     let at_yes_limit = input.yes_position >= config.max_position;
@@ -380,10 +392,19 @@ impl MmActor {
             return (self.config.mm_budget_dollars * NANOS_PER_DOLLAR as f64) as u64;
         }
 
-        let total_exposure: f64 = self.state.markets.values().map(|ms| {
-            let mid = snapshot.midpoints.get(&ms.yes_token_id).copied().unwrap_or(0.5);
-            ms.exposure(mid)
-        }).sum();
+        let total_exposure: f64 = self
+            .state
+            .markets
+            .values()
+            .map(|ms| {
+                let mid = snapshot
+                    .midpoints
+                    .get(&ms.yes_token_id)
+                    .copied()
+                    .unwrap_or(0.5);
+                ms.exposure(mid)
+            })
+            .sum();
 
         let ratio = (total_exposure / max_exposure).min(1.0);
         let scale = (1.0 - ratio).powi(2); // Quadratic decay
@@ -452,7 +473,8 @@ impl MmActor {
             .collect();
 
         // 5. Submit (IO)
-        self.submit_orders(&orders, budget_nanos, block.height).await;
+        self.submit_orders(&orders, budget_nanos, block.height)
+            .await;
 
         // 6. Push reference prices (IO)
         if !ref_prices.is_empty() {
@@ -461,7 +483,8 @@ impl MmActor {
     }
 
     async fn maybe_sync_positions(&mut self, block_height: u64) {
-        if block_height.saturating_sub(self.state.last_sync_block) >= self.config.mm_sync_interval_blocks
+        if block_height.saturating_sub(self.state.last_sync_block)
+            >= self.config.mm_sync_interval_blocks
             || self.state.last_sync_block == 0
         {
             self.sync_positions().await;
@@ -534,7 +557,9 @@ mod tests {
         // Should have BuyYes + BuyNo (no sells since no position)
         assert!(orders.iter().any(|o| matches!(o, OrderSpec::BuyYes { .. })));
         assert!(orders.iter().any(|o| matches!(o, OrderSpec::BuyNo { .. })));
-        assert!(!orders.iter().any(|o| matches!(o, OrderSpec::SellYes { .. })));
+        assert!(!orders
+            .iter()
+            .any(|o| matches!(o, OrderSpec::SellYes { .. })));
         assert!(!orders.iter().any(|o| matches!(o, OrderSpec::SellNo { .. })));
     }
 
@@ -548,7 +573,9 @@ mod tests {
         let orders = generate_quotes(&long_yes, &config);
 
         let yes_bid = orders.iter().find_map(|o| match o {
-            OrderSpec::BuyYes { limit_price_nanos, .. } => Some(*limit_price_nanos),
+            OrderSpec::BuyYes {
+                limit_price_nanos, ..
+            } => Some(*limit_price_nanos),
             _ => None,
         });
         // With long inventory, reservation price < mid, so bid should be below 0.48
@@ -585,7 +612,9 @@ mod tests {
         input.no_position = 50;
         let orders = generate_quotes(&input, &config);
         // Should have SellYes (holding YES) and SellNo (holding NO, standalone)
-        assert!(orders.iter().any(|o| matches!(o, OrderSpec::SellYes { .. })));
+        assert!(orders
+            .iter()
+            .any(|o| matches!(o, OrderSpec::SellYes { .. })));
         assert!(orders.iter().any(|o| matches!(o, OrderSpec::SellNo { .. })));
     }
 
@@ -623,14 +652,24 @@ mod tests {
         let low_orders = generate_quotes(&low_vol, &config);
         let high_orders = generate_quotes(&high_vol, &config);
 
-        let low_bid = low_orders.iter().find_map(|o| match o {
-            OrderSpec::BuyYes { limit_price_nanos, .. } => Some(*limit_price_nanos),
-            _ => None,
-        }).unwrap();
-        let high_bid = high_orders.iter().find_map(|o| match o {
-            OrderSpec::BuyYes { limit_price_nanos, .. } => Some(*limit_price_nanos),
-            _ => None,
-        }).unwrap();
+        let low_bid = low_orders
+            .iter()
+            .find_map(|o| match o {
+                OrderSpec::BuyYes {
+                    limit_price_nanos, ..
+                } => Some(*limit_price_nanos),
+                _ => None,
+            })
+            .unwrap();
+        let high_bid = high_orders
+            .iter()
+            .find_map(|o| match o {
+                OrderSpec::BuyYes {
+                    limit_price_nanos, ..
+                } => Some(*limit_price_nanos),
+                _ => None,
+            })
+            .unwrap();
 
         // Higher volatility → wider spread → lower bid
         assert!(high_bid < low_bid);
