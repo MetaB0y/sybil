@@ -45,12 +45,14 @@ impl PriceTracker {
     ///
     /// Fresh prices from the solver replace stored prices only for markets that
     /// had actual fills. Markets without activity keep their last known price.
-    /// Returns the merged clearing prices filtered to active markets.
+    /// Returns the merged clearing prices for active markets plus any market
+    /// still present in account state.
     pub fn merge_prices(
         &mut self,
         price_discovery: &Option<matching_solver::PriceDiscoveryResult>,
         markets_with_fills: &HashSet<MarketId>,
         active_markets: &HashSet<MarketId>,
+        position_markets: &HashSet<MarketId>,
     ) -> HashMap<MarketId, Vec<Nanos>> {
         // Update stored prices in-place with fresh solver output
         if let Some(ref pd) = price_discovery {
@@ -64,7 +66,7 @@ impl PriceTracker {
         // Return active-market view (one allocation, no full clone)
         self.last_clearing_prices
             .iter()
-            .filter(|(m, _)| active_markets.contains(m))
+            .filter(|(m, _)| active_markets.contains(m) || position_markets.contains(m))
             .map(|(m, p)| (*m, p.clone()))
             .collect()
     }

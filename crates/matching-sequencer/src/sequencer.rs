@@ -133,12 +133,36 @@ fn snapshot_accounts(accounts: &AccountStore) -> Vec<AccountSnapshot> {
 }
 
 fn market_position_totals(accounts: &AccountStore, market_id: MarketId) -> (i64, i64) {
-    accounts.iter().fold((0, 0), |(total_yes, total_no), (_, account)| {
-        (
-            total_yes + account.position(market_id, 0),
-            total_no + account.position(market_id, 1),
-        )
-    })
+    accounts
+        .iter()
+        .fold((0, 0), |(total_yes, total_no), (_, account)| {
+            (
+                total_yes + account.position(market_id, 0),
+                total_no + account.position(market_id, 1),
+            )
+        })
+}
+
+fn markets_in_positions(accounts: &AccountStore) -> HashSet<MarketId> {
+    let mut markets = HashSet::new();
+    for (_, account) in accounts.iter() {
+        for &(market_id, _) in account.positions.keys() {
+            markets.insert(market_id);
+        }
+    }
+    markets
+}
+
+fn minting_market_totals(accounts: &AccountStore) -> Vec<(MarketId, i64, i64)> {
+    let mut totals: Vec<_> = markets_in_positions(accounts)
+        .into_iter()
+        .map(|market_id| {
+            let (total_yes, total_no) = market_position_totals(accounts, market_id);
+            (market_id, total_yes, total_no)
+        })
+        .collect();
+    totals.sort_by_key(|(market_id, _, _)| market_id.0);
+    totals
 }
 
 fn expected_balance_delta_from_fills(fills: &[Fill], order_map: &HashMap<u64, &Order>) -> i64 {
@@ -1062,6 +1086,7 @@ impl BlockSequencer {
             &pipeline_result.price_discovery,
             &markets_with_fills,
             &active_markets,
+            &markets_in_positions(&self.accounts),
         );
 
         let mut fills = pipeline_result.result.fills.clone();
@@ -1090,23 +1115,7 @@ impl BlockSequencer {
         // Derive minting from position imbalance — solver-independent.
         // Uses shared pure function from matching-engine (same code as verifier).
         {
-            let market_totals: Vec<(MarketId, i64, i64)> = self
-                .markets
-                .iter()
-                .map(|market| {
-                    let total_yes: i64 = self
-                        .accounts
-                        .iter()
-                        .map(|(_, a)| a.position(market.id, 0))
-                        .sum();
-                    let total_no: i64 = self
-                        .accounts
-                        .iter()
-                        .map(|(_, a)| a.position(market.id, 1))
-                        .sum();
-                    (market.id, total_yes, total_no)
-                })
-                .collect();
+            let market_totals = minting_market_totals(&self.accounts);
             let mint_adjustments =
                 matching_engine::derive_minting(&market_totals, &clearing_prices);
             if !mint_adjustments.is_empty() {
@@ -1327,7 +1336,11 @@ mod tests {
 
         accounts.get_mut(aid0).unwrap().positions.insert((m0, 0), 7);
         accounts.get_mut(aid0).unwrap().positions.insert((m0, 1), 2);
-        accounts.get_mut(aid1).unwrap().positions.insert((m0, 0), -3);
+        accounts
+            .get_mut(aid1)
+            .unwrap()
+            .positions
+            .insert((m0, 0), -3);
         accounts.get_mut(aid1).unwrap().positions.insert((m0, 1), 5);
 
         let totals = market_position_totals(&accounts, m0);
@@ -1345,10 +1358,70 @@ mod tests {
         let sell = outcome_sell(&markets, 2, m0, 0, 700_000_000, 2);
         let order_map = HashMap::from([(buy.id, &buy), (sell.id, &sell)]);
 
-        let fills = vec![Fill::new(buy.id, 4, 300_000_000), Fill::new(sell.id, 2, 700_000_000)];
+        let fills = vec![
+            Fill::new(buy.id, 4, 300_000_000),
+            Fill::new(sell.id, 2, 700_000_000),
+        ];
 
         let expected_delta = expected_balance_delta_from_fills(&fills, &order_map);
         assert_eq!(expected_delta, -(300_000_000i64 * 4) + (700_000_000i64 * 2));
+    }
+
+    #[test]
+    fn test_minting_market_totals_include_markets_only_present_in_positions() {
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(0);
+        let orphaned_market = MarketId::new(777);
+
+        accounts
+            .get_mut(aid)
+            .expect("account should exist")
+            .positions
+            .insert((orphaned_market, 1), 9);
+
+        let totals = minting_market_totals(&accounts);
+
+        assert_eq!(totals, vec![(orphaned_market, 0, 9)]);
+    }
+
+    #[test]
+    fn test_block_minting_uses_position_markets_outside_catalog() {
+        let mut markets = MarketSet::new();
+        let active_market = markets.add_binary("Active");
+        let orphaned_market = MarketId::new(active_market.0 + 1);
+
+        let mut accounts = AccountStore::new();
+        let holder = accounts.create_account(0);
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::with_default_solver(accounts, markets, vec![], oracle);
+        seq.price_tracker = crate::price_tracker::PriceTracker::with_clearing_prices(
+            HashMap::from([(orphaned_market, vec![400_000_000, 600_000_000])]),
+        );
+
+        seq.accounts
+            .get_mut(holder)
+            .expect("holder should exist")
+            .positions
+            .insert((orphaned_market, 1), 7);
+
+        let bp = seq.produce_block(vec![], 1_000);
+
+        let mint = seq
+            .accounts
+            .get(crate::account::AccountId::MINT)
+            .expect("mint should exist");
+        assert_eq!(mint.position(orphaned_market, 1), -7);
+        assert_eq!(
+            bp.block.clearing_prices.get(&orphaned_market),
+            Some(&vec![400_000_000, 600_000_000])
+        );
+
+        let verification = sybil_verifier::verify_full(&bp.witness, false);
+        assert!(
+            verification.valid,
+            "Violations: {:?}",
+            verification.violations
+        );
     }
 
     /// Helper: run a batch through the block sequencer, returning BatchResult.
