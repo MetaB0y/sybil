@@ -73,6 +73,11 @@ struct FinalizedBlockState {
     post_state: CanonicalState,
 }
 
+struct WitnessArtifacts {
+    header: BlockHeader,
+    witness: BlockWitness,
+}
+
 impl PreparedBlock {
     pub fn production(&self) -> &BlockProduction {
         &self.production
@@ -850,6 +855,64 @@ impl BlockSequencer {
         FinalizedBlockState { post_state }
     }
 
+    fn assemble_witness_artifacts(
+        &self,
+        post_state: CanonicalState,
+        order_count: u32,
+        timestamp_ms: u64,
+        previous_header: Option<WitnessBlockHeader>,
+        witness_orders: Vec<WitnessOrder>,
+        witness_rejections: Vec<WitnessRejection>,
+        system_events: &[SystemEvent],
+        fills: &[Fill],
+        clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
+        total_welfare: i64,
+        problem: &Problem,
+        pre_state: Vec<AccountSnapshot>,
+        post_system_state: Vec<AccountSnapshot>,
+        resolved_markets: Vec<MarketId>,
+    ) -> WitnessArtifacts {
+        let header = BlockHeader {
+            height: self.height,
+            parent_hash: self
+                .last_header
+                .as_ref()
+                .map(hash_header)
+                .unwrap_or([0u8; 32]),
+            state_root: post_state.state_root(),
+            order_count,
+            fill_count: fills.len() as u32,
+            timestamp_ms,
+        };
+
+        let witness = BlockWitness {
+            header: WitnessBlockHeader {
+                height: header.height,
+                parent_hash: header.parent_hash,
+                state_root: header.state_root,
+                order_count: header.order_count,
+                fill_count: header.fill_count,
+                timestamp_ms: header.timestamp_ms,
+            },
+            previous_header,
+            orders: witness_orders,
+            rejections: witness_rejections,
+            system_events: system_events.iter().map(convert_system_event).collect(),
+            fills: fills.to_vec(),
+            clearing_prices: clearing_prices.clone(),
+            total_welfare,
+            minting_cost: 0,
+            mm_constraints: problem.mm_constraints.clone(),
+            market_groups: problem.market_groups.clone(),
+            pre_state,
+            post_system_state,
+            post_state: post_state.into_snapshots(),
+            resolved_markets,
+        };
+
+        WitnessArtifacts { header, witness }
+    }
+
     fn produce_block_in_place(
         &mut self,
         submissions: Vec<OrderSubmission>,
@@ -1157,23 +1220,6 @@ impl BlockSequencer {
         // Update order book: release filled orders' reservations, adjust partial fills
         self.order_book.settle(&fills, &mm_order_ids_set);
 
-        let state_root = post_state.state_root();
-        let parent_hash = self
-            .last_header
-            .as_ref()
-            .map(hash_header)
-            .unwrap_or([0u8; 32]);
-
-        let header = BlockHeader {
-            height: self.height,
-            parent_hash,
-            state_root,
-            order_count: orders_submitted as u32,
-            fill_count: fills.len() as u32,
-            timestamp_ms,
-        };
-
-        // Build witness
         let previous_header = self.last_header.as_ref().map(|h| WitnessBlockHeader {
             height: h.height,
             parent_hash: h.parent_hash,
@@ -1183,32 +1229,22 @@ impl BlockSequencer {
             timestamp_ms: h.timestamp_ms,
         });
 
-        let witness_header = WitnessBlockHeader {
-            height: header.height,
-            parent_hash: header.parent_hash,
-            state_root: header.state_root,
-            order_count: header.order_count,
-            fill_count: header.fill_count,
-            timestamp_ms: header.timestamp_ms,
-        };
-
-        let witness = BlockWitness {
-            header: witness_header,
+        let WitnessArtifacts { header, witness } = self.assemble_witness_artifacts(
+            post_state,
+            orders_submitted as u32,
+            timestamp_ms,
             previous_header,
-            orders: witness_orders,
-            rejections: witness_rejections,
-            system_events: system_events.iter().map(convert_system_event).collect(),
-            fills: fills.clone(),
-            clearing_prices: clearing_prices.clone(),
+            witness_orders,
+            witness_rejections,
+            &system_events,
+            &fills,
+            &clearing_prices,
             total_welfare,
-            minting_cost: 0,
-            mm_constraints: problem.mm_constraints.clone(),
-            market_groups: problem.market_groups.clone(),
+            &problem,
             pre_state,
             post_system_state,
-            post_state: post_state.into_snapshots(),
             resolved_markets,
-        };
+        );
 
         self.last_header = Some(header.clone());
 
