@@ -60,6 +60,19 @@ pub struct PreparedBlock {
     production: BlockProduction,
 }
 
+struct SolvedBatch {
+    pipeline_result: PipelineResult,
+    fills: Vec<Fill>,
+    clearing_prices: HashMap<MarketId, Vec<Nanos>>,
+    total_welfare: i64,
+    total_volume: u64,
+    orders_filled: usize,
+}
+
+struct FinalizedBlockState {
+    post_state: CanonicalState,
+}
+
 impl PreparedBlock {
     pub fn production(&self) -> &BlockProduction {
         &self.production
@@ -714,6 +727,129 @@ impl BlockSequencer {
         self.commit_prepared_block(prepared)
     }
 
+    fn solve_batch_phase(
+        &mut self,
+        problem: &Problem,
+        order_account_map: &HashMap<u64, AccountId>,
+        active_markets: &HashSet<MarketId>,
+    ) -> SolvedBatch {
+        let pipeline_result = self.solver.solve(problem);
+
+        let markets_with_fills: HashSet<MarketId> = {
+            let order_map: HashMap<u64, &Order> =
+                problem.orders.iter().map(|o| (o.id, o)).collect();
+            pipeline_result
+                .result
+                .fills
+                .iter()
+                .filter(|f| f.fill_qty > 0)
+                .filter_map(|f| order_map.get(&f.order_id))
+                .flat_map(|o| o.active_markets())
+                .collect()
+        };
+
+        let position_markets = CanonicalState::from_accounts(&self.accounts)
+            .market_position_totals()
+            .markets();
+        let clearing_prices = self.price_tracker.merge_prices(
+            &pipeline_result.price_discovery,
+            &markets_with_fills,
+            &active_markets,
+            &position_markets,
+        );
+
+        let mut fills = pipeline_result.result.fills.clone();
+        for fill in &mut fills {
+            if let Some(&aid) = order_account_map.get(&fill.order_id) {
+                fill.account_id = aid.0;
+            }
+        }
+
+        let total_welfare = pipeline_result.result.total_welfare;
+        let total_volume = fills
+            .iter()
+            .map(|f| f.fill_price.saturating_mul(f.fill_qty))
+            .fold(0u64, |acc, v| acc.saturating_add(v));
+        let orders_filled = pipeline_result.result.orders_filled;
+
+        SolvedBatch {
+            pipeline_result,
+            fills,
+            clearing_prices,
+            total_welfare,
+            total_volume,
+            orders_filled,
+        }
+    }
+
+    fn finalize_block_state_phase(
+        &mut self,
+        fills: &[Fill],
+        problem: &Problem,
+        clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
+        timestamp_ms: u64,
+    ) -> FinalizedBlockState {
+        let pre_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
+
+        settlement::settle_batch(&mut self.accounts, fills, &problem.orders, self.height);
+
+        let market_totals = CanonicalState::from_accounts(&self.accounts)
+            .market_position_totals()
+            .minting_inputs();
+        let mint_adjustments = matching_engine::derive_minting(&market_totals, clearing_prices);
+        if !mint_adjustments.is_empty() {
+            let mint = self
+                .accounts
+                .get_mut(crate::account::AccountId::MINT)
+                .expect("mint account must exist");
+            settlement::apply_minting(mint, &mint_adjustments, self.height);
+        }
+
+        let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
+        self.price_tracker.record_block(
+            fills,
+            &order_map,
+            clearing_prices,
+            self.height,
+            timestamp_ms,
+        );
+        self.fill_recorder
+            .record_fills(fills, &order_map, self.height, timestamp_ms);
+
+        let post_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
+        let balance_delta = post_total_balance - pre_total_balance;
+        if balance_delta != 0 {
+            let expected_balance_delta = expected_balance_delta_from_fills(fills, &order_map);
+            if balance_delta != expected_balance_delta {
+                error!(
+                    height = self.height,
+                    balance_delta,
+                    expected_balance_delta,
+                    diff = balance_delta - expected_balance_delta,
+                    "post-settlement balance delta mismatch"
+                );
+            }
+        }
+
+        let post_state = CanonicalState::from_accounts(&self.accounts);
+        let post_position_totals = post_state.market_position_totals();
+        for market in self.markets.iter() {
+            let (total_yes, total_no) = post_position_totals.totals_for(market.id);
+            if total_yes != total_no {
+                error!(
+                    height = self.height,
+                    market = ?market.id,
+                    total_yes,
+                    total_no,
+                    diff = total_yes - total_no,
+                    "post-settlement position imbalance"
+                );
+            }
+        }
+
+        FinalizedBlockState { post_state }
+    }
+
     fn produce_block_in_place(
         &mut self,
         submissions: Vec<OrderSubmission>,
@@ -1001,129 +1137,22 @@ impl BlockSequencer {
         problem.mm_constraints = all_mm_constraints;
         problem.market_groups = self.market_groups.clone();
 
-        // Solve using injected solver (welfare-optimal)
-        let pipeline_result = self.solver.solve(&problem);
-
-        // Extract clearing prices: use fresh prices from solver where trades happened,
-        // fall back to last known prices for markets with no activity this block.
-        // Collect markets that had fills this block (check the actual fills, not market_solutions).
-        let markets_with_fills: HashSet<MarketId> = {
-            let order_map: HashMap<u64, &Order> =
-                problem.orders.iter().map(|o| (o.id, o)).collect();
-            pipeline_result
-                .result
-                .fills
-                .iter()
-                .filter(|f| f.fill_qty > 0)
-                .filter_map(|f| order_map.get(&f.order_id))
-                .flat_map(|o| o.active_markets())
-                .collect()
-        };
-
-        let position_markets = CanonicalState::from_accounts(&self.accounts)
-            .market_position_totals()
-            .markets();
-        let clearing_prices = self.price_tracker.merge_prices(
-            &pipeline_result.price_discovery,
-            &markets_with_fills,
-            &active_markets,
-            &position_markets,
-        );
-
-        let mut fills = pipeline_result.result.fills.clone();
-        // Enrich fills with account_id so downstream consumers don't need order_account_map
-        for fill in &mut fills {
-            if let Some(&aid) = order_account_map.get(&fill.order_id) {
-                fill.account_id = aid.0;
-            }
-        }
-        let total_welfare = pipeline_result.result.total_welfare;
-        let total_volume: u64 = fills
-            .iter()
-            .map(|f| f.fill_price.saturating_mul(f.fill_qty))
-            .fold(0u64, |acc, v| acc.saturating_add(v));
-        let orders_filled = pipeline_result.result.orders_filled;
+        // Phase 1: solve the batch and derive fill/cross-market pricing outputs.
+        let SolvedBatch {
+            pipeline_result,
+            fills,
+            clearing_prices,
+            total_welfare,
+            total_volume,
+            orders_filled,
+        } = self.solve_batch_phase(&problem, &order_account_map, &active_markets);
 
         let (pre_state, post_system_state) =
             build_witness_phase_snapshots(&self.accounts, &system_account_baselines);
 
-        // Snapshot total balance before settlement
-        let pre_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
-
-        // Settle all fills (real orders against their accounts)
-        settlement::settle_batch(&mut self.accounts, &fills, &problem.orders, self.height);
-
-        // Derive minting from position imbalance — solver-independent.
-        // Uses shared pure function from matching-engine (same code as verifier).
-        {
-            let market_totals = CanonicalState::from_accounts(&self.accounts)
-                .market_position_totals()
-                .minting_inputs();
-            let mint_adjustments =
-                matching_engine::derive_minting(&market_totals, &clearing_prices);
-            if !mint_adjustments.is_empty() {
-                let mint = self
-                    .accounts
-                    .get_mut(crate::account::AccountId::MINT)
-                    .expect("mint account must exist");
-                settlement::apply_minting(mint, &mint_adjustments, self.height);
-            }
-        }
-
-        let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
-
-        // Record price history, volume, and account fills via sub-structs
-        {
-            self.price_tracker.record_block(
-                &fills,
-                &order_map,
-                &clearing_prices,
-                self.height,
-                timestamp_ms,
-            );
-            self.fill_recorder
-                .record_fills(&fills, &order_map, self.height, timestamp_ms);
-        }
-
-        // Verify money conservation: balance change = net position change
-        let post_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
-        let balance_delta = post_total_balance - pre_total_balance;
-        // For each market, net new positions = new pairs minted - pairs burned
-        // Each new pair costs $1 (NANOS_PER_DOLLAR)
-        // balance_delta should be negative (money locked in positions)
-        // and equal to -(net new pairs) * NANOS_PER_DOLLAR
-        if balance_delta != 0 {
-            let expected_balance_delta = expected_balance_delta_from_fills(&fills, &order_map);
-            if balance_delta != expected_balance_delta {
-                error!(
-                    height = self.height,
-                    balance_delta,
-                    expected_balance_delta,
-                    diff = balance_delta - expected_balance_delta,
-                    "post-settlement balance delta mismatch"
-                );
-            }
-        }
-
-        // Snapshot post-state (after settlement + minting) once; reuse it for
-        // verifier witness, state root, and invariant checks.
-        let post_state = CanonicalState::from_accounts(&self.accounts);
-        let post_position_totals = post_state.market_position_totals();
-
-        // Verify position balance after settlement
-        for market in self.markets.iter() {
-            let (total_yes, total_no) = post_position_totals.totals_for(market.id);
-            if total_yes != total_no {
-                error!(
-                    height = self.height,
-                    market = ?market.id,
-                    total_yes,
-                    total_no,
-                    diff = total_yes - total_no,
-                    "post-settlement position imbalance"
-                );
-            }
-        }
+        // Phase 2: apply fills, derive minting, and validate the finalized account state.
+        let FinalizedBlockState { post_state } =
+            self.finalize_block_state_phase(&fills, &problem, &clearing_prices, timestamp_ms);
 
         // Update order book: release filled orders' reservations, adjust partial fills
         self.order_book.settle(&fills, &mm_order_ids_set);
