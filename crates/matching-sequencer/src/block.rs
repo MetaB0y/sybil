@@ -69,7 +69,11 @@ pub fn compute_state_root(accounts: &AccountStore) -> [u8; 32] {
         hasher.update(&account.total_deposited.to_le_bytes());
 
         // Sorted positions
-        let mut positions: Vec<_> = account.positions.iter().collect();
+        let mut positions: Vec<_> = account
+            .positions
+            .iter()
+            .filter(|(_, &qty)| qty != 0)
+            .collect();
         positions.sort_by_key(|&(&(market, outcome), _)| (market.0, outcome));
 
         for (&(market, outcome), &qty) in &positions {
@@ -185,6 +189,41 @@ mod tests {
         assert_eq!(
             compute_state_root(&accounts1),
             compute_state_root(&accounts2)
+        );
+    }
+
+    #[test]
+    fn test_state_root_ignores_zero_quantity_positions() {
+        let m0 = MarketId::new(0);
+
+        let mut accounts = AccountStore::new();
+        let a0 = accounts.create_account(100);
+        accounts.get_mut(a0).unwrap().positions.insert((m0, 0), 0);
+
+        let mut snapshot: Vec<_> = accounts
+            .iter()
+            .map(|(&id, account)| {
+                let mut positions: Vec<_> = account
+                    .positions
+                    .iter()
+                    .filter(|(_, &qty)| qty != 0)
+                    .map(|(&(market, outcome), &qty)| (market, outcome, qty))
+                    .collect();
+                positions.sort_by_key(|&(market, outcome, _)| (market.0, outcome));
+                AccountSnapshot {
+                    id: id.0,
+                    balance: account.balance,
+                    total_deposited: account.total_deposited,
+                    positions,
+                    events_digest: account.events_digest,
+                }
+            })
+            .collect();
+        snapshot.sort_by_key(|account| account.id);
+
+        assert_eq!(
+            compute_state_root(&accounts),
+            sybil_verifier::block::compute_state_root(&snapshot)
         );
     }
 
