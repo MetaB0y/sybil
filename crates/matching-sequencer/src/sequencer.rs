@@ -105,39 +105,6 @@ fn classify_order_side(order: &Order) -> &'static str {
     }
 }
 
-fn market_position_totals(accounts: &AccountStore, market_id: MarketId) -> (i64, i64) {
-    accounts
-        .iter()
-        .fold((0, 0), |(total_yes, total_no), (_, account)| {
-            (
-                total_yes + account.position(market_id, 0),
-                total_no + account.position(market_id, 1),
-            )
-        })
-}
-
-fn markets_in_positions(accounts: &AccountStore) -> HashSet<MarketId> {
-    let mut markets = HashSet::new();
-    for (_, account) in accounts.iter() {
-        for &(market_id, _) in account.positions.keys() {
-            markets.insert(market_id);
-        }
-    }
-    markets
-}
-
-fn minting_market_totals(accounts: &AccountStore) -> Vec<(MarketId, i64, i64)> {
-    let mut totals: Vec<_> = markets_in_positions(accounts)
-        .into_iter()
-        .map(|market_id| {
-            let (total_yes, total_no) = market_position_totals(accounts, market_id);
-            (market_id, total_yes, total_no)
-        })
-        .collect();
-    totals.sort_by_key(|(market_id, _, _)| market_id.0);
-    totals
-}
-
 fn expected_balance_delta_from_fills(fills: &[Fill], order_map: &HashMap<u64, &Order>) -> i64 {
     fills.iter().fold(0, |net_delta, fill| {
         if fill.fill_qty == 0 {
@@ -1053,11 +1020,14 @@ impl BlockSequencer {
                 .collect()
         };
 
+        let position_markets = CanonicalState::from_accounts(&self.accounts)
+            .market_position_totals()
+            .markets();
         let clearing_prices = self.price_tracker.merge_prices(
             &pipeline_result.price_discovery,
             &markets_with_fills,
             &active_markets,
-            &markets_in_positions(&self.accounts),
+            &position_markets,
         );
 
         let mut fills = pipeline_result.result.fills.clone();
@@ -1086,7 +1056,9 @@ impl BlockSequencer {
         // Derive minting from position imbalance — solver-independent.
         // Uses shared pure function from matching-engine (same code as verifier).
         {
-            let market_totals = minting_market_totals(&self.accounts);
+            let market_totals = CanonicalState::from_accounts(&self.accounts)
+                .market_position_totals()
+                .minting_inputs();
             let mint_adjustments =
                 matching_engine::derive_minting(&market_totals, &clearing_prices);
             if !mint_adjustments.is_empty() {
@@ -1113,21 +1085,6 @@ impl BlockSequencer {
                 .record_fills(&fills, &order_map, self.height, timestamp_ms);
         }
 
-        // Verify position balance after settlement
-        for market in self.markets.iter() {
-            let (total_yes, total_no) = market_position_totals(&self.accounts, market.id);
-            if total_yes != total_no {
-                error!(
-                    height = self.height,
-                    market = ?market.id,
-                    total_yes,
-                    total_no,
-                    diff = total_yes - total_no,
-                    "post-settlement position imbalance"
-                );
-            }
-        }
-
         // Verify money conservation: balance change = net position change
         let post_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
         let balance_delta = post_total_balance - pre_total_balance;
@@ -1148,8 +1105,25 @@ impl BlockSequencer {
             }
         }
 
-        // Snapshot post-state (after settlement)
+        // Snapshot post-state (after settlement + minting) once; reuse it for
+        // verifier witness, state root, and invariant checks.
         let post_state = CanonicalState::from_accounts(&self.accounts);
+        let post_position_totals = post_state.market_position_totals();
+
+        // Verify position balance after settlement
+        for market in self.markets.iter() {
+            let (total_yes, total_no) = post_position_totals.totals_for(market.id);
+            if total_yes != total_no {
+                error!(
+                    height = self.height,
+                    market = ?market.id,
+                    total_yes,
+                    total_no,
+                    diff = total_yes - total_no,
+                    "post-settlement position imbalance"
+                );
+            }
+        }
 
         // Update order book: release filled orders' reservations, adjust partial fills
         self.order_book.settle(&fills, &mm_order_ids_set);
@@ -1314,11 +1288,15 @@ mod tests {
             .insert((m0, 0), -3);
         accounts.get_mut(aid1).unwrap().positions.insert((m0, 1), 5);
 
-        let totals = market_position_totals(&accounts, m0);
+        let totals = CanonicalState::from_accounts(&accounts)
+            .market_position_totals()
+            .totals_for(m0);
         assert_eq!(totals, (4, 7));
 
         let m1 = markets.add_binary("Unused");
-        let unused_totals = market_position_totals(&accounts, m1);
+        let unused_totals = CanonicalState::from_accounts(&accounts)
+            .market_position_totals()
+            .totals_for(m1);
         assert_eq!(unused_totals, (0, 0));
     }
 
@@ -1350,7 +1328,9 @@ mod tests {
             .positions
             .insert((orphaned_market, 1), 9);
 
-        let totals = minting_market_totals(&accounts);
+        let totals = CanonicalState::from_accounts(&accounts)
+            .market_position_totals()
+            .minting_inputs();
 
         assert_eq!(totals, vec![(orphaned_market, 0, 9)]);
     }
