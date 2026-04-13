@@ -2180,6 +2180,63 @@ mod tests {
     }
 
     #[test]
+    fn test_resolution_followed_by_empty_block_still_verifies() {
+        let (markets, m0) = setup();
+        let mut accounts = AccountStore::new();
+        let yes_buyer = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+        let no_buyer = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            Arc::new(AdminOracle::new()),
+        );
+
+        let opening_block = seq.produce_block(
+            vec![
+                OrderSubmission {
+                    account_id: yes_buyer,
+                    orders: vec![outcome_buy(&markets, 0, m0, 0, 600_000_000, 1)],
+                    mm_constraint: None,
+                },
+                OrderSubmission {
+                    account_id: no_buyer,
+                    orders: vec![outcome_buy(&markets, 0, m0, 1, 500_000_000, 1)],
+                    mm_constraint: None,
+                },
+            ],
+            1_000,
+        );
+        let opening_verification = sybil_verifier::verify_full(&opening_block.witness, false);
+        assert!(
+            opening_verification.valid,
+            "Violations: {:?}",
+            opening_verification.violations
+        );
+
+        assert_ne!(seq.accounts.get(yes_buyer).unwrap().position(m0, 0), 0);
+        assert_ne!(seq.accounts.get(no_buyer).unwrap().position(m0, 1), 0);
+
+        seq.resolve_market(m0, NANOS_PER_DOLLAR, 2_000)
+            .expect("resolution should succeed");
+
+        assert_eq!(seq.accounts.get(yes_buyer).unwrap().position(m0, 0), 0);
+        assert_eq!(seq.accounts.get(no_buyer).unwrap().position(m0, 1), 0);
+
+        let resolution_block = seq.produce_block(vec![], 3_000);
+        let resolution_verification = sybil_verifier::verify_full(&resolution_block.witness, false);
+        assert!(
+            resolution_verification.valid,
+            "Violations: {:?}",
+            resolution_verification.violations
+        );
+        assert_eq!(
+            resolution_block.block.header.state_root,
+            sybil_verifier::block::compute_state_root(&resolution_block.witness.post_state)
+        );
+    }
+
+    #[test]
     fn test_witness_includes_untouched_accounts() {
         let (markets, _) = setup();
         let mut accounts = AccountStore::new();
