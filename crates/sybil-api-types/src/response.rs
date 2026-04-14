@@ -83,6 +83,12 @@ pub struct OrderAcceptedResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CancelOrderResponse {
+    pub cancelled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct FillResponse {
     pub order_id: u64,
     pub fill_qty: u64,

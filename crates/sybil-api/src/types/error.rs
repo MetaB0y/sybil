@@ -96,6 +96,9 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::UnknownSigner => {
                 AppError::not_found("No account registered for this public key")
             }
+            matching_sequencer::SequencerError::SignerAccountMismatch => {
+                AppError::forbidden("Signed account does not match signer public key")
+            }
             matching_sequencer::SequencerError::MempoolFull => Self {
                 status: StatusCode::SERVICE_UNAVAILABLE,
                 body: ErrorBody {
@@ -115,6 +118,12 @@ impl From<matching_sequencer::SequencerError> for AppError {
             }
             matching_sequencer::SequencerError::BlockNotFound => {
                 AppError::not_found("Block not found")
+            }
+            matching_sequencer::SequencerError::OrderNotFound => {
+                AppError::not_found("Pending order not found")
+            }
+            matching_sequencer::SequencerError::OrderOwnershipMismatch => {
+                AppError::forbidden("Pending order does not belong to account")
             }
             matching_sequencer::SequencerError::OracleError(ref msg) => {
                 AppError::bad_request(format!("Oracle error: {}", msg))

@@ -37,6 +37,7 @@ use crate::types::response::*;
         routes::markets::set_market_metadata,
         routes::orders::submit_orders,
         routes::orders::submit_signed_order,
+        routes::orders::cancel_signed_order,
         routes::orders::get_account_orders,
         routes::orders::get_market_orderbook,
         routes::orders::get_all_pending_orders,
@@ -54,6 +55,7 @@ use crate::types::response::*;
         ResolveMarketRequest,
         SubmitOrderRequest,
         SubmitSignedOrderRequest,
+        CancelSignedOrderRequest,
         SetReferencePricesRequest,
         SetMarketMetadataRequest,
         SignedOrderData,
@@ -67,6 +69,7 @@ use crate::types::response::*;
         MarketPriceResponse,
         CreateMarketResponse,
         OrderAcceptedResponse,
+        CancelOrderResponse,
         FillResponse,
         RejectionResponse,
         BlockResponse,
@@ -226,6 +229,10 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/v1/orders/signed",
             axum::routing::post(routes::orders::submit_signed_order),
+        )
+        .route(
+            "/v1/orders/cancel/signed",
+            axum::routing::post(routes::orders::cancel_signed_order),
         )
         .route(
             "/v1/orders/pending",

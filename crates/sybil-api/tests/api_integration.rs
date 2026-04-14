@@ -6,9 +6,14 @@
 mod common;
 
 use axum::http::StatusCode;
+use p256::ecdsa::signature::Signer;
+use p256::ecdsa::{Signature, SigningKey};
 use serde_json::{json, Value};
 
 use common::{get, post_json, test_app};
+use matching_engine::outcome_buy;
+use matching_engine::MarketSet;
+use matching_sequencer::crypto::{canonical_cancel_bytes, canonical_order_bytes};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -16,6 +21,51 @@ use common::{get, post_json, test_app};
 
 fn parse_json(body: &[u8]) -> Value {
     serde_json::from_slice(body).expect("response body is valid JSON")
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    hex::encode(bytes)
+}
+
+fn new_signing_key() -> SigningKey {
+    SigningKey::from_bytes((&[7u8; 32]).into()).expect("fixed signing key")
+}
+
+fn signed_buy_yes_payload(
+    _account_id: u64,
+    market_id: u32,
+    limit_price_nanos: u64,
+    quantity: u64,
+    key: &SigningKey,
+) -> Value {
+    let mut markets = MarketSet::new();
+    let mid = markets.add_binary("Test");
+    assert_eq!(mid.0, market_id);
+    let order = outcome_buy(&markets, 0, mid, 0, limit_price_nanos, quantity);
+    let signature: Signature = key.sign(&canonical_order_bytes(&order));
+    json!({
+        "signer_pubkey_hex": to_hex(key.verifying_key().to_sec1_point(true).as_bytes()),
+        "order": {
+            "market_ids": [market_id],
+            "payoffs": [1, 0],
+            "limit_price_nanos": limit_price_nanos,
+            "max_fill": quantity
+        },
+        "signature_hex": to_hex(signature.to_bytes().as_slice())
+    })
+}
+
+fn signed_cancel_payload(account_id: u64, order_id: u64, key: &SigningKey) -> Value {
+    let signature: Signature = key.sign(&canonical_cancel_bytes(
+        matching_sequencer::AccountId(account_id),
+        order_id,
+    ));
+    json!({
+        "account_id": account_id,
+        "order_id": order_id,
+        "signer_pubkey_hex": to_hex(key.verifying_key().to_sec1_point(true).as_bytes()),
+        "signature_hex": to_hex(signature.to_bytes().as_slice())
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -261,6 +311,85 @@ async fn submit_order_invalid_price_400() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn signed_cancel_removes_pending_order() {
+    let (app, handle) = test_app(true).await;
+
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 100_000_000_000u64 }),
+    )
+    .await;
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+    post_json(app.clone(), "/v1/markets", json!({ "name": "Test" })).await;
+
+    let key = new_signing_key();
+    let public_key_hex = to_hex(key.verifying_key().to_sec1_point(true).as_bytes());
+    let (status, _) = post_json(
+        app.clone(),
+        &format!("/v1/accounts/{}/keys", account_id),
+        json!({ "public_key_hex": public_key_hex }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let order_payload = signed_buy_yes_payload(account_id, 0, 500_000_000, 3, &key);
+    let (status, _) = post_json(app.clone(), "/v1/orders/signed", order_payload).await;
+    assert_eq!(status, StatusCode::OK);
+
+    handle.produce_block().await.unwrap();
+
+    let (status, body) = get(app.clone(), &format!("/v1/accounts/{}/orders", account_id)).await;
+    assert_eq!(status, StatusCode::OK);
+    let pending = parse_json(&body);
+    let order_id = pending.as_array().unwrap()[0]["order_id"].as_u64().unwrap();
+
+    let cancel_payload = signed_cancel_payload(account_id, order_id, &key);
+    let (status, body) = post_json(app.clone(), "/v1/orders/cancel/signed", cancel_payload).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(parse_json(&body)["cancelled"].as_bool().unwrap());
+
+    let (status, body) = get(app, &format!("/v1/accounts/{}/orders", account_id)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(parse_json(&body).as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn signed_cancel_rejects_wrong_account_claim() {
+    let (app, handle) = test_app(true).await;
+
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 100_000_000_000u64 }),
+    )
+    .await;
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+    post_json(app.clone(), "/v1/markets", json!({ "name": "Test" })).await;
+
+    let key = new_signing_key();
+    let public_key_hex = to_hex(key.verifying_key().to_sec1_point(true).as_bytes());
+    post_json(
+        app.clone(),
+        &format!("/v1/accounts/{}/keys", account_id),
+        json!({ "public_key_hex": public_key_hex }),
+    )
+    .await;
+
+    let order_payload = signed_buy_yes_payload(account_id, 0, 500_000_000, 3, &key);
+    post_json(app.clone(), "/v1/orders/signed", order_payload).await;
+    handle.produce_block().await.unwrap();
+
+    let (_, body) = get(app.clone(), &format!("/v1/accounts/{}/orders", account_id)).await;
+    let pending = parse_json(&body);
+    let order_id = pending.as_array().unwrap()[0]["order_id"].as_u64().unwrap();
+
+    let cancel_payload = signed_cancel_payload(account_id + 1, order_id, &key);
+    let (status, _) = post_json(app, "/v1/orders/cancel/signed", cancel_payload).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 // ---------------------------------------------------------------------------

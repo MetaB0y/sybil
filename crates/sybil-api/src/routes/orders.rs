@@ -3,7 +3,7 @@ use axum::Json;
 
 use matching_engine::mm_constraint::{MmConstraint, MmId, MmSide};
 use matching_engine::MarketId;
-use matching_sequencer::crypto::{PublicKey, SignedOrder};
+use matching_sequencer::crypto::{PublicKey, SignedCancel, SignedOrder};
 use matching_sequencer::{AccountId, OrderSubmission, PendingOrderInfo};
 use p256::ecdsa::{Signature, VerifyingKey};
 use p256::Sec1Point;
@@ -11,8 +11,10 @@ use p256::Sec1Point;
 use crate::convert::{order_spec_to_order, signed_order_data_to_order};
 use crate::state::AppState;
 use crate::types::error::AppError;
-use crate::types::request::{OrderSpec, SubmitOrderRequest, SubmitSignedOrderRequest};
-use crate::types::response::{OrderAcceptedResponse, PendingOrderResponse};
+use crate::types::request::{
+    CancelSignedOrderRequest, OrderSpec, SubmitOrderRequest, SubmitSignedOrderRequest,
+};
+use crate::types::response::{CancelOrderResponse, OrderAcceptedResponse, PendingOrderResponse};
 
 /// Derive the MmSide from an OrderSpec for capital calculation.
 fn mm_side_from_spec(spec: &OrderSpec) -> MmSide {
@@ -25,6 +27,23 @@ fn mm_side_from_spec(spec: &OrderSpec) -> MmSide {
         // Capital = price * qty, which is the max possible cost.
         _ => MmSide::BuyYes,
     }
+}
+
+fn parse_signer_public_key(public_key_hex: &str) -> Result<PublicKey, AppError> {
+    let key_bytes = hex::decode(public_key_hex)
+        .map_err(|_| AppError::bad_request("Invalid hex encoding for public key"))?;
+    let sec1_point = Sec1Point::from_bytes(&key_bytes)
+        .map_err(|_| AppError::bad_request("Invalid P256 encoded point"))?;
+    let verifying_key = VerifyingKey::from_sec1_point(&sec1_point)
+        .map_err(|_| AppError::bad_request("Invalid P256 public key"))?;
+    Ok(PublicKey(verifying_key))
+}
+
+fn parse_signature(signature_hex: &str) -> Result<Signature, AppError> {
+    let sig_bytes = hex::decode(signature_hex)
+        .map_err(|_| AppError::bad_request("Invalid hex encoding for signature"))?;
+    Signature::from_slice(&sig_bytes)
+        .map_err(|_| AppError::bad_request("Invalid P256 ECDSA signature"))
 }
 
 /// POST /v1/orders
@@ -88,32 +107,48 @@ pub async fn submit_signed_order(
     State(state): State<AppState>,
     Json(req): Json<SubmitSignedOrderRequest>,
 ) -> Result<Json<OrderAcceptedResponse>, AppError> {
-    // Parse public key
-    let key_bytes = hex::decode(&req.signer_pubkey_hex)
-        .map_err(|_| AppError::bad_request("Invalid hex encoding for public key"))?;
-    let sec1_point = Sec1Point::from_bytes(&key_bytes)
-        .map_err(|_| AppError::bad_request("Invalid P256 encoded point"))?;
-    let verifying_key = VerifyingKey::from_sec1_point(&sec1_point)
-        .map_err(|_| AppError::bad_request("Invalid P256 public key"))?;
-
-    // Parse signature
-    let sig_bytes = hex::decode(&req.signature_hex)
-        .map_err(|_| AppError::bad_request("Invalid hex encoding for signature"))?;
-    let signature = Signature::from_slice(&sig_bytes)
-        .map_err(|_| AppError::bad_request("Invalid P256 ECDSA signature"))?;
-
-    // Build the order
+    let signer = parse_signer_public_key(&req.signer_pubkey_hex)?;
+    let signature = parse_signature(&req.signature_hex)?;
     let order = signed_order_data_to_order(&req.order).map_err(AppError::bad_request)?;
-
     let signed = SignedOrder {
         order,
-        signer: PublicKey(verifying_key),
+        signer,
         signature,
     };
 
     state.sequencer.submit_signed_order(signed).await?;
 
     Ok(Json(OrderAcceptedResponse { accepted: true }))
+}
+
+/// POST /v1/orders/cancel/signed
+#[utoipa::path(
+    post,
+    path = "/v1/orders/cancel/signed",
+    request_body = CancelSignedOrderRequest,
+    responses(
+        (status = 200, description = "Signed cancel accepted", body = CancelOrderResponse),
+        (status = 400, description = "Invalid signature payload"),
+        (status = 403, description = "Signer or owner mismatch"),
+        (status = 404, description = "Unknown signer or pending order not found")
+    )
+)]
+pub async fn cancel_signed_order(
+    State(state): State<AppState>,
+    Json(req): Json<CancelSignedOrderRequest>,
+) -> Result<Json<CancelOrderResponse>, AppError> {
+    let signer = parse_signer_public_key(&req.signer_pubkey_hex)?;
+    let signature = parse_signature(&req.signature_hex)?;
+    let signed = SignedCancel {
+        account_id: AccountId(req.account_id),
+        order_id: req.order_id,
+        signer,
+        signature,
+    };
+
+    state.sequencer.cancel_signed_order(signed).await?;
+
+    Ok(Json(CancelOrderResponse { cancelled: true }))
 }
 
 fn to_pending_response(info: &PendingOrderInfo) -> PendingOrderResponse {

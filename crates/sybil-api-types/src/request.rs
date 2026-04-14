@@ -188,6 +188,19 @@ pub struct SubmitSignedOrderRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CancelSignedOrderRequest {
+    /// Account ID claiming ownership of the order being cancelled.
+    pub account_id: u64,
+    /// The pending order to cancel.
+    pub order_id: u64,
+    /// Hex-encoded compressed P256 public key of the signer.
+    pub signer_pubkey_hex: String,
+    /// Hex-encoded P256 ECDSA signature over the canonical cancel payload.
+    pub signature_hex: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SignedOrderData {
     /// Market IDs this order spans.
     pub market_ids: Vec<u32>,
