@@ -276,6 +276,86 @@ async fn market_search_by_tag() {
     assert_eq!(results[0]["name"].as_str().unwrap(), "Rain?");
 }
 
+#[tokio::test]
+async fn list_markets_reports_traded_volume() {
+    let (app, handle) = test_app(true).await;
+
+    let balance = 100_000_000_000u64;
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": balance }),
+    )
+    .await;
+    let acct_a = parse_json(&body)["account_id"].as_u64().unwrap();
+
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": balance }),
+    )
+    .await;
+    let acct_b = parse_json(&body)["account_id"].as_u64().unwrap();
+
+    let (_, body) = post_json(app.clone(), "/v1/markets", json!({ "name": "Volume test" })).await;
+    let market_id = parse_json(&body)["market_id"].as_u64().unwrap();
+
+    let (status, _) = post_json(
+        app.clone(),
+        "/v1/orders",
+        json!({
+            "account_id": acct_a,
+            "orders": [{
+                "type": "BuyYes",
+                "market_id": market_id,
+                "limit_price_nanos": 600_000_000u64,
+                "quantity": 10
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = post_json(
+        app.clone(),
+        "/v1/orders",
+        json!({
+            "account_id": acct_b,
+            "orders": [{
+                "type": "BuyNo",
+                "market_id": market_id,
+                "limit_price_nanos": 500_000_000u64,
+                "quantity": 10
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let block = handle.produce_block().await.unwrap();
+    assert!(!block.fills.is_empty());
+
+    let (status, body) = get(app.clone(), "/v1/markets").await;
+    assert_eq!(status, StatusCode::OK);
+    let markets = parse_json(&body).as_array().unwrap().clone();
+    let market = markets
+        .iter()
+        .find(|market| market["market_id"].as_u64().unwrap() == market_id)
+        .expect("market should be returned");
+    assert!(
+        market["volume_nanos"].as_u64().unwrap() > 0,
+        "list endpoint should expose traded volume"
+    );
+
+    let (status, body) = get(app, &format!("/v1/markets/{market_id}")).await;
+    assert_eq!(status, StatusCode::OK);
+    let market = parse_json(&body);
+    assert!(
+        market["volume_nanos"].as_u64().unwrap() > 0,
+        "detail endpoint should expose traded volume"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // D. Order validation
 // ---------------------------------------------------------------------------

@@ -81,6 +81,9 @@ const PUBKEY_REGISTRY: TableDefinition<&[u8], u64> = TableDefinition::new("pubke
 /// Last clearing prices: market_id (u32) → msgpack(Vec<Nanos>)
 const CLEARING_PRICES: TableDefinition<u32, &[u8]> = TableDefinition::new("clearing_prices");
 
+/// Cumulative market volumes: market_id (u32) -> total traded volume in nanos.
+const MARKET_VOLUMES: TableDefinition<u32, u64> = TableDefinition::new("market_volumes");
+
 /// Scalar counters: name → value
 const COUNTERS: TableDefinition<&str, u64> = TableDefinition::new("counters");
 
@@ -126,6 +129,7 @@ pub struct RestoredState {
     pub next_order_id: u64,
     pub pubkey_registry: HashMap<crate::crypto::PublicKey, AccountId>,
     pub last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
+    pub market_volumes: HashMap<MarketId, u64>,
 }
 
 impl Store {
@@ -148,6 +152,7 @@ impl Store {
         txn.open_table(PUBKEY_REGISTRY)?;
         txn.open_table(COUNTERS)?;
         txn.open_table(CLEARING_PRICES)?;
+        txn.open_table(MARKET_VOLUMES)?;
         txn.commit()?;
 
         initialize_or_validate_layout(&db)?;
@@ -170,6 +175,7 @@ impl Store {
         next_order_id: u64,
         pubkey_registry: &HashMap<crate::crypto::PublicKey, AccountId>,
         last_clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
+        market_volumes: &HashMap<MarketId, u64>,
     ) -> Result<(), StoreError> {
         let current_fence = read_account_state_fence(&self.db)?;
         let next_slot = current_fence
@@ -248,6 +254,14 @@ impl Store {
             for (&market_id, prices) in last_clearing_prices {
                 let bytes = rmp_serde::to_vec(prices)?;
                 table.insert(market_id.0, bytes.as_slice())?;
+            }
+        }
+
+        // Market volumes
+        {
+            let mut table = txn.open_table(MARKET_VOLUMES)?;
+            for (&market_id, &volume) in market_volumes {
+                table.insert(market_id.0, volume)?;
             }
         }
 
@@ -376,6 +390,16 @@ impl Store {
             prices
         };
 
+        let market_volumes = {
+            let table = txn.open_table(MARKET_VOLUMES)?;
+            let mut volumes = HashMap::new();
+            for entry in table.iter()? {
+                let (key, value) = entry?;
+                volumes.insert(MarketId(key.value()), value.value());
+            }
+            volumes
+        };
+
         info!(
             height = recovery_metadata.height,
             accounts = num_accounts,
@@ -396,6 +420,7 @@ impl Store {
             next_order_id: recovery_metadata.next_order_id,
             pubkey_registry,
             last_clearing_prices,
+            market_volumes,
         }))
     }
 }
@@ -635,6 +660,7 @@ mod tests {
                 1,
                 &HashMap::new(),
                 &HashMap::new(),
+                &HashMap::new(),
             )
             .await
             .unwrap();
@@ -650,6 +676,7 @@ mod tests {
                 1,
                 &HashMap::new(),
                 &HashMap::new(),
+                &HashMap::new(),
             )
             .await
             .unwrap();
@@ -657,6 +684,38 @@ mod tests {
         let restored = store.load_state().await.unwrap().unwrap();
         assert_eq!(restored.height, 2);
         assert_eq!(restored.accounts.get(account_id).unwrap().balance, 200);
+    }
+
+    #[tokio::test]
+    async fn test_store_restores_market_volumes() {
+        let path = temp_db_path("store-market-volumes");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+        let lifecycle = MarketLifecycle::new(oracle);
+        let mut markets = MarketSet::new();
+        let market_id = markets.add_binary("Will it rain?");
+
+        let volumes = HashMap::from([(market_id, 42_000_000_000u64)]);
+        store
+            .save_block(
+                &AccountStore::new(),
+                &markets,
+                &[],
+                &lifecycle,
+                &sample_header(1),
+                1,
+                &HashMap::new(),
+                &HashMap::new(),
+                &volumes,
+            )
+            .await
+            .unwrap();
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        assert_eq!(
+            restored.market_volumes.get(&market_id),
+            Some(&42_000_000_000)
+        );
     }
 
     #[test]

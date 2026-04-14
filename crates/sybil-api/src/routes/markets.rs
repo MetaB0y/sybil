@@ -77,6 +77,7 @@ pub async fn list_markets(
 
     let mut response = Vec::new();
     for m in markets.iter() {
+        let volume = state.sequencer.get_market_volume(m.id).await?;
         let market_prices = prices.get(&m.id);
         let status = statuses
             .get(&m.id)
@@ -92,7 +93,7 @@ pub async fn list_markets(
             &status,
             metadata.as_ref(),
             MarketExtraInfo {
-                volume: 0,
+                volume,
                 reference_price_nanos: ref_prices.get(&m.id.0).copied(),
                 external_url: market_extra
                     .get(&m.id.0)
@@ -128,6 +129,7 @@ pub async fn get_market(
     let market_prices = prices.get(&mid);
     let status = state.sequencer.get_market_status(mid).await?;
     let metadata = state.sequencer.get_market_metadata(mid).await?;
+    let volume = state.sequencer.get_market_volume(mid).await?;
     let ref_price = state.reference_prices.read().await.get(&id).copied();
     let ext_url = state
         .market_extra
@@ -144,7 +146,7 @@ pub async fn get_market(
         &status,
         metadata.as_ref(),
         MarketExtraInfo {
-            volume: 0,
+            volume,
             reference_price_nanos: ref_price,
             external_url: ext_url,
         },

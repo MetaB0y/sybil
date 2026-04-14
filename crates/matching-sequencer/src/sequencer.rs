@@ -422,6 +422,7 @@ impl BlockSequencer {
         market_statuses: HashMap<MarketId, MarketStatus>,
         market_metadata: HashMap<MarketId, MarketMetadata>,
         last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
+        market_volumes: HashMap<MarketId, u64>,
     ) -> Self {
         let solver: Arc<dyn Solver> = Arc::new(matching_solver::LpSolver::new());
         let mut lifecycle = MarketLifecycle::new(oracle);
@@ -440,8 +441,9 @@ impl BlockSequencer {
             markets,
             market_groups,
             last_header,
-            price_tracker: crate::price_tracker::PriceTracker::with_clearing_prices(
+            price_tracker: crate::price_tracker::PriceTracker::with_state(
                 last_clearing_prices,
+                market_volumes,
             ),
             fill_recorder: crate::fill_recorder::FillRecorder::new(), // TODO: Tier 3 — persist fill history
             lifecycle,
@@ -515,6 +517,10 @@ impl BlockSequencer {
 
     pub fn market_volume(&self, market_id: MarketId) -> u64 {
         self.price_tracker.market_volume(market_id)
+    }
+
+    pub fn market_volumes(&self) -> &HashMap<MarketId, u64> {
+        self.price_tracker.market_volumes()
     }
 
     pub fn account_fills(
@@ -1425,8 +1431,9 @@ mod tests {
         let holder = accounts.create_account(0);
         let oracle = Arc::new(AdminOracle::new());
         let mut seq = BlockSequencer::with_default_solver(accounts, markets, vec![], oracle);
-        seq.price_tracker = crate::price_tracker::PriceTracker::with_clearing_prices(
+        seq.price_tracker = crate::price_tracker::PriceTracker::with_state(
             HashMap::from([(orphaned_market, vec![400_000_000, 600_000_000])]),
+            HashMap::new(),
         );
 
         seq.accounts

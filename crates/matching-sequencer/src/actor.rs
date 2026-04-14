@@ -98,6 +98,10 @@ pub enum Message {
     GetMarketPrices {
         respond_to: oneshot::Sender<HashMap<MarketId, Vec<Nanos>>>,
     },
+    GetMarketVolume {
+        market_id: MarketId,
+        respond_to: oneshot::Sender<u64>,
+    },
     // --- New messages for enriched API ---
     GetPortfolio {
         account_id: AccountId,
@@ -267,6 +271,7 @@ impl SequencerActor {
                     prepared.next_sequencer().next_order_id(),
                     prepared.next_sequencer().pubkey_registry(),
                     prepared.next_sequencer().last_clearing_prices(),
+                    prepared.next_sequencer().market_volumes(),
                 )
                 .await
                 .map_err(|error| SequencerError::Persistence(error.to_string()))?;
@@ -419,6 +424,12 @@ impl SequencerActor {
             }
             Message::GetMarketPrices { respond_to } => {
                 let _ = respond_to.send(self.sequencer.last_clearing_prices().clone());
+            }
+            Message::GetMarketVolume {
+                market_id,
+                respond_to,
+            } => {
+                let _ = respond_to.send(self.sequencer.market_volume(market_id));
             }
             Message::GetPortfolio {
                 account_id,
@@ -1098,6 +1109,18 @@ impl SequencerHandle {
         self.sender
             .send(Message::SearchMarkets {
                 query,
+                respond_to: tx,
+            })
+            .await
+            .map_err(|_| SequencerError::ActorGone)?;
+        rx.await.map_err(|_| SequencerError::ActorGone)
+    }
+
+    pub async fn get_market_volume(&self, market_id: MarketId) -> Result<u64, SequencerError> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(Message::GetMarketVolume {
+                market_id,
                 respond_to: tx,
             })
             .await

@@ -26,13 +26,16 @@ impl PriceTracker {
         }
     }
 
-    /// Restore from persisted clearing prices (Tier 1).
-    /// Price history and volumes are Tier 3 — rebuilt over time.
-    pub fn with_clearing_prices(last_clearing_prices: HashMap<MarketId, Vec<Nanos>>) -> Self {
+    /// Restore from persisted clearing prices and market volumes.
+    /// Price history remains a derived view rebuilt over time.
+    pub fn with_state(
+        last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
+        market_volumes: HashMap<MarketId, u64>,
+    ) -> Self {
         Self {
             last_clearing_prices,
             price_history: HashMap::new(),
-            market_volumes: HashMap::new(),
+            market_volumes,
         }
     }
 
@@ -132,5 +135,10 @@ impl PriceTracker {
     /// Get cumulative volume for a market.
     pub fn market_volume(&self, market_id: MarketId) -> u64 {
         self.market_volumes.get(&market_id).copied().unwrap_or(0)
+    }
+
+    /// Persisted per-market cumulative volume view.
+    pub fn market_volumes(&self) -> &HashMap<MarketId, u64> {
+        &self.market_volumes
     }
 }

@@ -123,6 +123,7 @@ async fn main() {
             state.market_statuses,
             state.market_metadata,
             state.last_clearing_prices,
+            state.market_volumes,
         );
 
         // Add any seed markets not already present
