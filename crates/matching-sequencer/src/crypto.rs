@@ -209,7 +209,7 @@ mod tests {
 
         let signed = SignedOrder {
             order,
-            signer: PublicKey(key2.verifying_key().clone()),
+            signer: PublicKey(*key2.verifying_key()),
             signature: sig,
         };
 

@@ -6,7 +6,7 @@ use matching_sequencer::MarketMetadata;
 
 use crate::convert::prices_to_response;
 use crate::state::AppState;
-use crate::state::MarketExtra;
+use crate::state::MarketRefData;
 use crate::types::error::AppError;
 use crate::types::request::{
     CreateMarketGroupRequest, CreateMarketRequest, MarketSearchParams, ResolveMarketRequest,
@@ -14,46 +14,52 @@ use crate::types::request::{
 };
 use crate::types::response::*;
 
-/// Optional market data from external sources (reference prices, URLs, volume).
-struct MarketExtraInfo {
-    volume: u64,
+struct BuildMarketResponseArgs<'a> {
+    market_id: u32,
+    name: String,
+    yes_price_nanos: Option<u64>,
+    no_price_nanos: Option<u64>,
+    status: &'a matching_sequencer::MarketStatus,
+    metadata: Option<&'a MarketMetadata>,
+    volume_nanos: u64,
     reference_price_nanos: Option<u64>,
     external_url: Option<String>,
 }
 
 /// Helper to build a MarketResponse with optional metadata.
-fn build_market_response(
-    market_id: u32,
-    name: String,
-    yes_price: Option<u64>,
-    no_price: Option<u64>,
-    status: &matching_sequencer::MarketStatus,
-    metadata: Option<&MarketMetadata>,
-    extra: MarketExtraInfo,
-) -> MarketResponse {
+fn build_market_response(args: BuildMarketResponseArgs<'_>) -> MarketResponse {
     MarketResponse {
-        market_id,
-        name,
-        yes_price_nanos: yes_price,
-        no_price_nanos: no_price,
-        status: status.as_str().to_string(),
-        payout_nanos: status.payout_nanos(),
-        challenge_deadline_ms: status.challenge_deadline_ms(),
-        description: metadata
+        market_id: args.market_id,
+        name: args.name,
+        yes_price_nanos: args.yes_price_nanos,
+        no_price_nanos: args.no_price_nanos,
+        status: args.status.as_str().to_string(),
+        payout_nanos: args.status.payout_nanos(),
+        challenge_deadline_ms: args.status.challenge_deadline_ms(),
+        description: args
+            .metadata
             .map(|m| m.description.clone())
             .filter(|s| !s.is_empty()),
-        category: metadata
+        category: args
+            .metadata
             .map(|m| m.category.clone())
             .filter(|s| !s.is_empty()),
-        tags: metadata.map(|m| m.tags.clone()).filter(|v| !v.is_empty()),
-        resolution_criteria: metadata
+        tags: args
+            .metadata
+            .map(|m| m.tags.clone())
+            .filter(|v| !v.is_empty()),
+        resolution_criteria: args
+            .metadata
             .map(|m| m.resolution_criteria.clone())
             .filter(|s| !s.is_empty()),
-        expiry_timestamp_ms: metadata.map(|m| m.expiry_timestamp_ms).filter(|&v| v != 0),
-        created_at_ms: metadata.map(|m| m.created_at_ms).filter(|&v| v != 0),
-        volume_nanos: extra.volume,
-        reference_price_nanos: extra.reference_price_nanos,
-        external_url: extra.external_url,
+        expiry_timestamp_ms: args
+            .metadata
+            .map(|m| m.expiry_timestamp_ms)
+            .filter(|&v| v != 0),
+        created_at_ms: args.metadata.map(|m| m.created_at_ms).filter(|&v| v != 0),
+        volume_nanos: args.volume_nanos,
+        reference_price_nanos: args.reference_price_nanos,
+        external_url: args.external_url,
     }
 }
 
@@ -83,13 +89,10 @@ pub async fn list_markets(
     .await?;
 
     let ref_prices = state.reference_prices.read().await;
-    let market_extra = state.market_extra.read().await;
+    let market_ref_data = state.market_ref_data.read().await;
 
-    let _build_span = tracing::info_span!(
-        "list_markets.build_response",
-        markets = markets.len()
-    )
-    .entered();
+    let _build_span =
+        tracing::info_span!("list_markets.build_response", markets = markets.len()).entered();
     let response: Vec<MarketResponse> = markets
         .iter()
         .map(|m| {
@@ -98,21 +101,19 @@ pub async fn list_markets(
                 .get(&m.id)
                 .cloned()
                 .unwrap_or(matching_sequencer::MarketStatus::Active);
-            build_market_response(
-                m.id.0,
-                m.name.clone(),
-                market_prices.and_then(|p| p.first().copied()),
-                market_prices.and_then(|p| p.get(1).copied()),
-                &status,
-                metadata.get(&m.id),
-                MarketExtraInfo {
-                    volume: volumes.get(&m.id).copied().unwrap_or(0),
-                    reference_price_nanos: ref_prices.get(&m.id.0).copied(),
-                    external_url: market_extra
-                        .get(&m.id.0)
-                        .and_then(|e| e.external_url.clone()),
-                },
-            )
+            build_market_response(BuildMarketResponseArgs {
+                market_id: m.id.0,
+                name: m.name.clone(),
+                yes_price_nanos: market_prices.and_then(|p| p.first().copied()),
+                no_price_nanos: market_prices.and_then(|p| p.get(1).copied()),
+                status: &status,
+                metadata: metadata.get(&m.id),
+                volume_nanos: volumes.get(&m.id).copied().unwrap_or(0),
+                reference_price_nanos: ref_prices.get(&m.id.0).copied(),
+                external_url: market_ref_data
+                    .get(&m.id.0)
+                    .and_then(|ref_data| ref_data.external_url.clone()),
+            })
         })
         .collect();
 
@@ -196,30 +197,30 @@ pub async fn get_market(
 
     let prices = state.sequencer.get_market_prices().await?;
     let market_prices = prices.get(&mid);
-    let status = state.sequencer.get_market_status(mid).await?;
-    let metadata = state.sequencer.get_market_metadata(mid).await?;
-    let volume = state.sequencer.get_market_volume(mid).await?;
+    let (status, metadata, volume) = tokio::try_join!(
+        state.sequencer.get_market_status(mid),
+        state.sequencer.get_market_metadata(mid),
+        state.sequencer.get_market_volume(mid),
+    )?;
     let ref_price = state.reference_prices.read().await.get(&id).copied();
     let ext_url = state
-        .market_extra
+        .market_ref_data
         .read()
         .await
         .get(&id)
-        .and_then(|e| e.external_url.clone());
+        .and_then(|ref_data| ref_data.external_url.clone());
 
-    Ok(Json(build_market_response(
-        market.id.0,
-        market.name.clone(),
-        market_prices.and_then(|p| p.first().copied()),
-        market_prices.and_then(|p| p.get(1).copied()),
-        &status,
-        metadata.as_ref(),
-        MarketExtraInfo {
-            volume,
-            reference_price_nanos: ref_price,
-            external_url: ext_url,
-        },
-    )))
+    Ok(Json(build_market_response(BuildMarketResponseArgs {
+        market_id: market.id.0,
+        name: market.name.clone(),
+        yes_price_nanos: market_prices.and_then(|p| p.first().copied()),
+        no_price_nanos: market_prices.and_then(|p| p.get(1).copied()),
+        status: &status,
+        metadata: metadata.as_ref(),
+        volume_nanos: volume,
+        reference_price_nanos: ref_price,
+        external_url: ext_url,
+    })))
 }
 
 /// POST /v1/markets
@@ -484,25 +485,25 @@ pub async fn search_markets(
 
     let results = state.sequencer.search_markets(query).await?;
     let ref_prices = state.reference_prices.read().await;
-    let market_extra = state.market_extra.read().await;
+    let market_ref_data = state.market_ref_data.read().await;
 
     let response: Vec<MarketResponse> = results
         .into_iter()
         .map(|r| {
             let mid = r.market_id.0;
-            build_market_response(
-                mid,
-                r.name,
-                r.yes_price_nanos,
-                r.no_price_nanos,
-                &r.status,
-                r.metadata.as_ref(),
-                MarketExtraInfo {
-                    volume: r.volume_nanos,
-                    reference_price_nanos: ref_prices.get(&mid).copied(),
-                    external_url: market_extra.get(&mid).and_then(|e| e.external_url.clone()),
-                },
-            )
+            build_market_response(BuildMarketResponseArgs {
+                market_id: mid,
+                name: r.name,
+                yes_price_nanos: r.yes_price_nanos,
+                no_price_nanos: r.no_price_nanos,
+                status: &r.status,
+                metadata: r.metadata.as_ref(),
+                volume_nanos: r.volume_nanos,
+                reference_price_nanos: ref_prices.get(&mid).copied(),
+                external_url: market_ref_data
+                    .get(&mid)
+                    .and_then(|ref_data| ref_data.external_url.clone()),
+            })
         })
         .collect();
 
@@ -550,8 +551,8 @@ pub async fn set_market_metadata(
     if !state.dev_mode {
         return Err(AppError::dev_mode_required());
     }
-    let mut extra = state.market_extra.write().await;
-    let entry = extra.entry(id).or_insert_with(MarketExtra::default);
+    let mut ref_data = state.market_ref_data.write().await;
+    let entry = ref_data.entry(id).or_insert_with(MarketRefData::default);
     if let Some(url) = req.external_url {
         entry.external_url = Some(url);
     }

@@ -7,9 +7,9 @@ use tokio::sync::RwLock;
 
 use crate::config::ApiConfig;
 
-/// Extra metadata for markets, set by external systems (e.g., Polymarket mirror).
+/// Reference market data mirrored from external systems (e.g., Polymarket).
 #[derive(Clone, Debug, Default)]
-pub struct MarketExtra {
+pub struct MarketRefData {
     pub external_url: Option<String>,
 }
 
@@ -22,8 +22,8 @@ pub struct AppState {
     /// Reference prices from external systems (e.g., Polymarket).
     /// Keyed by market_id (u32). Display-only — not part of matching logic.
     pub reference_prices: Arc<RwLock<HashMap<u32, u64>>>,
-    /// Extra metadata per market (external URLs, etc.).
-    pub market_extra: Arc<RwLock<HashMap<u32, MarketExtra>>>,
+    /// Reference data per market (external URLs, etc.).
+    pub market_ref_data: Arc<RwLock<HashMap<u32, MarketRefData>>>,
 }
 
 impl AppState {
@@ -37,7 +37,7 @@ impl AppState {
             dev_mode: config.dev_mode,
             prometheus,
             reference_prices: Arc::new(RwLock::new(HashMap::new())),
-            market_extra: Arc::new(RwLock::new(HashMap::new())),
+            market_ref_data: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }

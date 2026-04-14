@@ -131,14 +131,6 @@ async fn http_metrics(req: Request<axum::body::Body>, next: Next) -> Response {
     metrics::counter!("sybil_http_requests_total", "method" => method.to_string(), "path" => path.clone(), "status" => status.to_string()).increment(1);
     metrics::histogram!("sybil_http_request_duration_seconds", "method" => method.to_string(), "path" => path.clone()).record(duration_secs);
 
-    tracing::info!(
-        http.method = %method,
-        http.path = %path,
-        http.status = status,
-        http.duration_ms = format_args!("{:.1}", duration_secs * 1000.0),
-        "request"
-    );
-
     response
 }
 

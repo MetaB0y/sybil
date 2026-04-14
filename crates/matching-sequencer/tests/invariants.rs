@@ -101,7 +101,7 @@ const INITIAL_BALANCE: i64 = 1000 * NANOS_PER_DOLLAR as i64;
 fn make_markets() -> MarketSet {
     let mut ms = MarketSet::new();
     for i in 0..N_MARKETS {
-        ms.add_binary(&format!("Market {}", i));
+        ms.add_binary(format!("Market {}", i));
     }
     ms
 }

@@ -27,7 +27,7 @@ pub async fn test_app(dev_mode: bool) -> (Router, SequencerHandle) {
         dev_mode,
         prometheus,
         reference_prices: Default::default(),
-        market_extra: Default::default(),
+        market_ref_data: Default::default(),
     };
     (create_router(state), handle)
 }

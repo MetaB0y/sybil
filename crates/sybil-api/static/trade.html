@@ -602,7 +602,7 @@ function tradingApp() {
     balance: 0,
     hasKey: false,
     pubKeyHex: '',
-    _privateKey: null, // CryptoKey (non-extractable in memory)
+    _privateKey: null, // CryptoKey (extractable; JWK goes to localStorage)
 
     // Registration
     showLogin: false,

@@ -5,6 +5,7 @@ docs/node_modules
 comparison*.json
 .DS_Store
 .venv/
+.claude/
 *.swp
 *.swo
 arena/markets/*/runs/
