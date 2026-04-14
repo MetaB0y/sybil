@@ -227,7 +227,7 @@ function dashboard() {
       try {
         const [h, m, g, ...portfolios] = await Promise.all([
           fetch('/v1/health').then(r => r.json()),
-          fetch('/v1/markets').then(r => r.json()),
+          fetch('/v1/markets/summary').then(r => r.json()),
           fetch('/v1/markets/groups').then(r => r.json()),
           ...[0, 1, 2, 3].map(id =>
             fetch('/v1/accounts/' + id + '/portfolio')

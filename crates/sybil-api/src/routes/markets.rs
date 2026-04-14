@@ -65,20 +65,31 @@ fn build_market_response(
         (status = 200, description = "List of markets", body = Vec<MarketResponse>)
     )
 )]
+#[tracing::instrument(skip_all, name = "list_markets.handler")]
 pub async fn list_markets(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<MarketResponse>>, AppError> {
-    let (markets, prices, statuses, volumes, metadata) = tokio::try_join!(
-        state.sequencer.list_markets(),
-        state.sequencer.get_market_prices(),
-        state.sequencer.get_all_market_statuses(),
-        state.sequencer.get_all_market_volumes(),
-        state.sequencer.get_all_market_metadata(),
-    )?;
+    use tracing::Instrument;
+    let (markets, prices, statuses, volumes, metadata) = async {
+        tokio::try_join!(
+            state.sequencer.list_markets(),
+            state.sequencer.get_market_prices(),
+            state.sequencer.get_all_market_statuses(),
+            state.sequencer.get_all_market_volumes(),
+            state.sequencer.get_all_market_metadata(),
+        )
+    }
+    .instrument(tracing::info_span!("list_markets.fetch"))
+    .await?;
 
     let ref_prices = state.reference_prices.read().await;
     let market_extra = state.market_extra.read().await;
 
+    let _build_span = tracing::info_span!(
+        "list_markets.build_response",
+        markets = markets.len()
+    )
+    .entered();
     let response: Vec<MarketResponse> = markets
         .iter()
         .map(|m| {
@@ -102,6 +113,61 @@ pub async fn list_markets(
                         .and_then(|e| e.external_url.clone()),
                 },
             )
+        })
+        .collect();
+
+    Ok(Json(response))
+}
+
+/// GET /v1/markets/summary
+///
+/// Minimal market data for dashboard polling — drops metadata strings
+/// (description, tags, resolution criteria, external URL). ~5-10x smaller
+/// wire size than /v1/markets.
+#[utoipa::path(
+    get,
+    path = "/v1/markets/summary",
+    responses(
+        (status = 200, description = "Slim list of markets", body = Vec<MarketSummaryResponse>)
+    )
+)]
+#[tracing::instrument(skip_all, name = "list_markets_summary.handler")]
+pub async fn list_markets_summary(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<MarketSummaryResponse>>, AppError> {
+    use tracing::Instrument;
+    let (markets, prices, statuses, volumes) = async {
+        tokio::try_join!(
+            state.sequencer.list_markets(),
+            state.sequencer.get_market_prices(),
+            state.sequencer.get_all_market_statuses(),
+            state.sequencer.get_all_market_volumes(),
+        )
+    }
+    .instrument(tracing::info_span!("list_markets_summary.fetch"))
+    .await?;
+
+    let _build_span = tracing::info_span!(
+        "list_markets_summary.build_response",
+        markets = markets.len()
+    )
+    .entered();
+    let response: Vec<MarketSummaryResponse> = markets
+        .iter()
+        .map(|m| {
+            let market_prices = prices.get(&m.id);
+            let status = statuses
+                .get(&m.id)
+                .cloned()
+                .unwrap_or(matching_sequencer::MarketStatus::Active);
+            MarketSummaryResponse {
+                market_id: m.id.0,
+                name: m.name.clone(),
+                yes_price_nanos: market_prices.and_then(|p| p.first().copied()),
+                no_price_nanos: market_prices.and_then(|p| p.get(1).copied()),
+                volume_nanos: volumes.get(&m.id).copied().unwrap_or(0),
+                status: status.as_str().to_string(),
+            }
         })
         .collect();
 

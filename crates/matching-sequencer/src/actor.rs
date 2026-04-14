@@ -904,6 +904,7 @@ impl SequencerHandle {
     }
 
     /// List all markets.
+    #[tracing::instrument(skip_all)]
     pub async fn list_markets(&self) -> Result<MarketSet, SequencerError> {
         let (tx, rx) = oneshot::channel();
         self.sender
@@ -989,6 +990,7 @@ impl SequencerHandle {
     }
 
     /// Get all explicitly tracked market statuses.
+    #[tracing::instrument(skip_all)]
     pub async fn get_all_market_statuses(
         &self,
     ) -> Result<HashMap<MarketId, MarketStatus>, SequencerError> {
@@ -1024,6 +1026,7 @@ impl SequencerHandle {
     }
 
     /// Get last known clearing prices for all markets.
+    #[tracing::instrument(skip_all)]
     pub async fn get_market_prices(&self) -> Result<HashMap<MarketId, Vec<Nanos>>, SequencerError> {
         let (tx, rx) = oneshot::channel();
         self.sender
@@ -1185,6 +1188,7 @@ impl SequencerHandle {
         rx.await.map_err(|_| SequencerError::ActorGone)
     }
 
+    #[tracing::instrument(skip_all)]
     pub async fn get_all_market_volumes(
         &self,
     ) -> Result<HashMap<MarketId, u64>, SequencerError> {
@@ -1196,6 +1200,7 @@ impl SequencerHandle {
         rx.await.map_err(|_| SequencerError::ActorGone)
     }
 
+    #[tracing::instrument(skip_all)]
     pub async fn get_all_market_metadata(
         &self,
     ) -> Result<HashMap<MarketId, MarketMetadata>, SequencerError> {

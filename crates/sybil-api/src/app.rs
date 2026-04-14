@@ -6,6 +6,8 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
 use tower_http::cors::CorsLayer;
+use tower_http::trace::{DefaultOnResponse, TraceLayer};
+use tracing::Level;
 use utoipa::OpenApi;
 
 use crate::routes;
@@ -25,6 +27,7 @@ use crate::types::response::*;
         routes::accounts::get_portfolio,
         routes::accounts::get_account_fills,
         routes::markets::list_markets,
+        routes::markets::list_markets_summary,
         routes::markets::get_market,
         routes::markets::create_market,
         routes::markets::list_market_groups,
@@ -64,6 +67,7 @@ use crate::types::response::*;
         AccountResponse,
         PositionResponse,
         MarketResponse,
+        MarketSummaryResponse,
         MarketGroupResponse,
         MarketPricesResponse,
         MarketPriceResponse,
@@ -191,10 +195,14 @@ pub fn create_router(state: AppState) -> Router {
             "/v1/accounts/{id}/orders",
             axum::routing::get(routes::orders::get_account_orders),
         )
-        // Markets — search MUST come before {id} to avoid path param capture
+        // Markets — search & summary MUST come before {id} to avoid path param capture
         .route(
             "/v1/markets/search",
             axum::routing::get(routes::markets::search_markets),
+        )
+        .route(
+            "/v1/markets/summary",
+            axum::routing::get(routes::markets::list_markets_summary),
         )
         .route(
             "/v1/markets",
@@ -268,6 +276,17 @@ pub fn create_router(state: AppState) -> Router {
             axum::routing::get(routes::blocks::get_block_by_height),
         )
         .layer(middleware::from_fn(http_metrics))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(|req: &Request<axum::body::Body>| {
+                    tracing::info_span!(
+                        "http.request",
+                        method = %req.method(),
+                        path = %req.uri().path(),
+                    )
+                })
+                .on_response(DefaultOnResponse::new().level(Level::INFO)),
+        )
         .layer(CorsLayer::permissive())
         .with_state(state)
 }

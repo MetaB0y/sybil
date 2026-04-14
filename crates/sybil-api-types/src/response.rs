@@ -55,6 +55,18 @@ pub struct MarketResponse {
     pub external_url: Option<String>,
 }
 
+/// Minimal market data for high-throughput dashboards (drops strings & metadata).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MarketSummaryResponse {
+    pub market_id: u32,
+    pub name: String,
+    pub yes_price_nanos: Option<u64>,
+    pub no_price_nanos: Option<u64>,
+    pub volume_nanos: u64,
+    pub status: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MarketGroupResponse {
