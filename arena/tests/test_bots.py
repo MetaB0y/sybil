@@ -1,9 +1,12 @@
 """Tests for trading bots."""
 
+from unittest.mock import AsyncMock
+
 import pytest
 
+from bots.base import BaseAgent
 from bots.informed import FixedProbabilityModel, ProbabilityModel
-from sybil_client.types import Block, BuyNo, BuyYes
+from sybil_client.types import Account, AccountFill, Block, BuyNo, BuyYes
 
 
 class TestProbabilityModel:
@@ -117,3 +120,47 @@ class TestPriceConversion:
         yes_nanos = 650_000_000
         no_nanos = 350_000_000
         assert yes_nanos + no_nanos == 1_000_000_000
+
+
+class _DummyAgent(BaseAgent):
+    async def on_block(self, block: Block):
+        return []
+
+
+@pytest.mark.anyio
+async def test_base_agent_update_state_fetches_all_fill_pages():
+    client = AsyncMock()
+    client.get_account.return_value = Account(id=7, balance_nanos=50_000_000_000, positions=[])
+    first_page = [
+        AccountFill(
+            order_id=i,
+            fill_qty=1,
+            fill_price_nanos=500_000_000,
+            block_height=1,
+            timestamp_ms=i,
+        )
+        for i in range(1, 101)
+    ]
+    client.get_account_fills.side_effect = [
+        first_page,
+        [
+            AccountFill(order_id=101, fill_qty=1, fill_price_nanos=520_000_000, block_height=2, timestamp_ms=101),
+        ],
+    ]
+    agent = _DummyAgent(client=client, account_id=7, name="Dummy")
+
+    block = Block(
+        height=1,
+        parent_hash="",
+        state_root="",
+        fills=[],
+        clearing_prices={},
+        total_welfare=0,
+        total_volume=0,
+        orders_filled=0,
+    )
+    await agent._update_state(block)
+
+    assert agent._last_fill_count == 101
+    assert len(agent._fill_history) == 101
+    assert client.get_account_fills.await_count == 2

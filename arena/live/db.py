@@ -22,6 +22,7 @@ class DecisionDB:
             for table, column, coltype in [
                 ("decisions", "article_urls", "TEXT"),
                 ("portfolio_snapshots", "total_fills", "INTEGER DEFAULT 0"),
+                ("portfolio_snapshots", "total_orders", "INTEGER DEFAULT 0"),
             ]:
                 try:
                     self.conn.execute(f"SELECT {column} FROM {table} LIMIT 0")
@@ -72,7 +73,8 @@ class DecisionDB:
                     portfolio_value REAL,
                     pnl REAL,
                     positions TEXT,
-                    total_fills INTEGER DEFAULT 0
+                    total_fills INTEGER DEFAULT 0,
+                    total_orders INTEGER DEFAULT 0
                 );
 
                 CREATE TABLE IF NOT EXISTS token_usage (
@@ -174,12 +176,13 @@ class DecisionDB:
         pnl: float,
         positions: dict,
         total_fills: int = 0,
+        total_orders: int = 0,
     ) -> int:
         with self._lock:
             cur = self.conn.execute(
                 """INSERT INTO portfolio_snapshots
-                   (trader_name, timestamp, balance, portfolio_value, pnl, positions, total_fills)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   (trader_name, timestamp, balance, portfolio_value, pnl, positions, total_fills, total_orders)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     trader_name,
                     datetime.now(timezone.utc).isoformat(),
@@ -188,6 +191,7 @@ class DecisionDB:
                     pnl,
                     json.dumps(positions),
                     total_fills,
+                    total_orders,
                 ),
             )
             self.conn.commit()

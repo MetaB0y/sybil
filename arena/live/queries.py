@@ -33,12 +33,22 @@ def check_divergence(fv: float, mkt: float) -> str:
 
 def get_latest_snapshots(conn: sqlite3.Connection) -> pd.DataFrame:
     """Latest portfolio snapshot per trader."""
-    df = pd.read_sql_query(
-        "SELECT trader_name, balance, portfolio_value, pnl, positions, timestamp "
-        "FROM portfolio_snapshots WHERE id IN ("
-        "  SELECT MAX(id) FROM portfolio_snapshots GROUP BY trader_name"
-        ") ORDER BY trader_name", conn
-    )
+    try:
+        df = pd.read_sql_query(
+            "SELECT trader_name, balance, portfolio_value, pnl, positions, total_fills, total_orders, timestamp "
+            "FROM portfolio_snapshots WHERE id IN ("
+            "  SELECT MAX(id) FROM portfolio_snapshots GROUP BY trader_name"
+            ") ORDER BY trader_name", conn
+        )
+    except Exception:
+        df = pd.read_sql_query(
+            "SELECT trader_name, balance, portfolio_value, pnl, positions, timestamp "
+            "FROM portfolio_snapshots WHERE id IN ("
+            "  SELECT MAX(id) FROM portfolio_snapshots GROUP BY trader_name"
+            ") ORDER BY trader_name", conn
+        )
+        df["total_fills"] = 0
+        df["total_orders"] = 0
     if not df.empty:
         df["strategy"] = df["trader_name"].apply(extract_strategy)
     return df

@@ -88,31 +88,23 @@ async def snapshot_portfolios(traders, db: DecisionDB, interval_s: float = 300):
         await asyncio.sleep(interval_s)
         for trader in traders:
             try:
+                portfolio = await trader.client.get_portfolio(trader.account_id)
                 positions = {}
                 for (mid, outcome), qty in trader.positions.items():
                     if qty != 0:
                         positions.setdefault(str(mid), {})[outcome] = qty
-                balance = trader.current_balance
-                # Simple portfolio value (balance + positions at last known prices)
-                pv = balance
-                for mid_str, pos in positions.items():
-                    mid = int(mid_str)
-                    history = getattr(trader, "price_history", {}).get(mid, [])
-                    if history:
-                        yes_p = history[-1].yes_price
-                        pv += pos.get("YES", 0) * yes_p + pos.get("NO", 0) * (1 - yes_p)
-                # Count total fills for this trader
-                total_fills = sum(
-                    len(recs) for recs in getattr(trader, "trade_log", {}).values()
-                    if recs
-                )
+                balance = portfolio.balance_dollars
+                pv = portfolio.portfolio_value_dollars
+                total_fills = len(getattr(trader, "_fill_history", []))
+                total_orders = getattr(trader, "total_orders_submitted", 0)
                 db.log_snapshot(
                     trader_name=trader.name,
                     balance=balance,
                     portfolio_value=pv,
-                    pnl=pv - 500.0,  # starting balance
+                    pnl=portfolio.pnl_dollars,
                     positions=positions,
                     total_fills=total_fills,
+                    total_orders=total_orders,
                 )
             except Exception as e:
                 log.warning("Snapshot error for %s: %s", trader.name, e)

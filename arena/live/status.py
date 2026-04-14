@@ -62,7 +62,7 @@ def run(db_path: str | None = None, hours: int = 24):
             pos = json.loads(r["positions"]) if r["positions"] else {}
             n = sum(1 for mp in pos.values() for q in mp.values() if q != 0)
             print(f"  {r['trader_name']:30s}  cash=${r['balance']:8.2f}  value=${r['portfolio_value']:8.2f}"
-                  f"  PnL=${r['pnl']:+7.2f}  pos={n}")
+                  f"  PnL=${r['pnl']:+7.2f}  pos={n}  orders={int(r['total_orders'])}  fills={int(r['total_fills'])}")
         print()
 
     # --- FV Drift ---

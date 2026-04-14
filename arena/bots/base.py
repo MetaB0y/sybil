@@ -53,6 +53,10 @@ class BaseAgent(ABC):
         """Called when one of our orders is filled. Override if needed."""
         pass
 
+    async def on_orders_submitted(self, block: Block, orders: list[OrderSpec]) -> None:
+        """Called after a batch of orders is accepted by the API."""
+        pass
+
     async def run(self) -> None:
         """Main loop - stream blocks and react."""
         self._running = True
@@ -76,13 +80,17 @@ class BaseAgent(ABC):
                 # Log and submit orders
                 self.block_log.append((block.height, orders))
                 if orders:
-                    self.last_orders = orders
-                    self.total_orders_submitted += len(orders)
                     try:
-                        await self.client.submit_orders(
+                        accepted = await self.client.submit_orders(
                             self.account_id, orders,
                             mm_budget_nanos=self.mm_budget_nanos,
                         )
+                        if accepted:
+                            self.last_orders = orders
+                            self.total_orders_submitted += len(orders)
+                            await self.on_orders_submitted(block, orders)
+                        else:
+                            print(f"[{self.name}] Order submission was not accepted")
                     except Exception as e:
                         print(f"[{self.name}] Order submission failed: {e}")
                     blocks_traded += 1
@@ -107,14 +115,20 @@ class BaseAgent(ABC):
             }
             self.balance_history.append(account.balance_dollars)
 
-            # Fetch only this agent's new fills
-            new_fills = await self.client.get_account_fills(
-                self.account_id, limit=20, offset=self._last_fill_count
-            )
-            self._fill_history.extend(new_fills)
-            for fill in new_fills:
-                await self.on_fill(fill.order_id, fill.fill_qty, fill.fill_price)
-            self._last_fill_count += len(new_fills)
+            # Fetch all fills we haven't seen yet.
+            page_size = 100
+            while True:
+                new_fills = await self.client.get_account_fills(
+                    self.account_id, limit=page_size, offset=self._last_fill_count
+                )
+                if not new_fills:
+                    break
+                self._fill_history.extend(new_fills)
+                for fill in new_fills:
+                    await self.on_fill(fill.order_id, fill.fill_qty, fill.fill_price)
+                self._last_fill_count += len(new_fills)
+                if len(new_fills) < page_size:
+                    break
 
         except Exception as e:
             print(f"[{self.name}] Failed to update state: {e}")

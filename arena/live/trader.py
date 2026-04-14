@@ -72,6 +72,28 @@ def _describe_order(order: OrderSpec) -> str:
     return str(order)
 
 
+def _order_to_log_dict(order: OrderSpec) -> dict:
+    from sybil_client import BuyNo, BuyYes, SellNo, SellYes
+
+    if isinstance(order, BuyYes):
+        side = "BUY_YES"
+    elif isinstance(order, BuyNo):
+        side = "BUY_NO"
+    elif isinstance(order, SellYes):
+        side = "SELL_YES"
+    elif isinstance(order, SellNo):
+        side = "SELL_NO"
+    else:
+        side = type(order).__name__.upper()
+
+    return {
+        "market_id": getattr(order, "market_id", None),
+        "side": side,
+        "qty": getattr(order, "quantity", 0),
+        "price": getattr(order, "limit_price_nanos", 0) / NANOS_PER_DOLLAR,
+    }
+
+
 # --------------------------------------------------------------------------- #
 # System prompt
 # --------------------------------------------------------------------------- #
@@ -142,6 +164,66 @@ class LiveLlmTrader(BaseAgent):
         self.price_history: dict[int, list[PriceSnapshot]] = {}
         self.trade_log: dict[int, list[TradeRecord]] = {}
         self.fair_values: dict[int, float] = {}
+        self._pending_order_logs: list[dict] = []
+
+    def _record_trade(
+        self,
+        market_id: int,
+        market_name: str,
+        fair_value: float,
+        orders: list[OrderSpec],
+        motivation: str,
+        analysis: str,
+        raw_llm_response: str,
+        llm_duration_s: float,
+        market_price: float,
+        block_height: int,
+        timestamp: datetime,
+        articles: list[LiveArticle] | None = None,
+    ) -> None:
+        yes_pos = self.get_position(market_id, "YES")
+        no_pos = self.get_position(market_id, "NO")
+        record = TradeRecord(
+            market_id=market_id,
+            articles=articles or [],
+            analysis=analysis,
+            fair_value=fair_value,
+            orders=orders,
+            motivation=motivation,
+            raw_llm_response=raw_llm_response,
+            llm_duration_s=llm_duration_s,
+            block_height=block_height,
+            timestamp=timestamp,
+            balance=self.current_balance,
+            yes_pos=yes_pos,
+            no_pos=no_pos,
+        )
+        records = self.trade_log.setdefault(market_id, [])
+        records.append(record)
+        if len(records) > 200:
+            self.trade_log[market_id] = records[-200:]
+
+        if self.db:
+            article_urls = [
+                {"title": a.title, "url": a.url, "source": a.source}
+                for a in (articles or [])
+            ]
+            self.db.log_decision(
+                trader_name=self.name,
+                market_id=market_id,
+                market_name=market_name,
+                analysis=analysis,
+                fair_value=fair_value,
+                market_price=market_price,
+                orders=[_order_to_log_dict(order) for order in orders],
+                motivation=motivation,
+                raw_llm_response=raw_llm_response,
+                llm_duration_s=llm_duration_s,
+                balance=self.current_balance,
+                yes_pos=yes_pos,
+                no_pos=no_pos,
+                article_urls=article_urls,
+            )
 
     # -- LLM --
 
@@ -369,6 +451,7 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
         all_orders: list[OrderSpec] = []
         prices = self.filter_markets(block)
         now = datetime.now(timezone.utc)
+        self._pending_order_logs = []
 
         for market_id, (yes_nanos, _) in prices.items():
             yes_price = yes_nanos / NANOS_PER_DOLLAR
@@ -436,27 +519,20 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
                          old_fv or 0, fair_value, ref_price,
                          fair_value - ref_price, motivation)
 
-                if self.db:
-                    article_urls = [
-                        {"title": a.title, "url": a.url, "source": a.source}
-                        for a in articles
-                    ]
-                    self.db.log_decision(
-                        trader_name=self.name,
-                        market_id=market_id,
-                        market_name=market.name,
-                        analysis=analysis,
-                        fair_value=fair_value,
-                        market_price=ref_price,
-                        orders=[],
-                        motivation=motivation,
-                        raw_llm_response=raw_text,
-                        llm_duration_s=llm_duration_s,
-                        balance=self.current_balance,
-                        yes_pos=self.get_position(market_id, "YES"),
-                        no_pos=self.get_position(market_id, "NO"),
-                        article_urls=article_urls,
-                    )
+                self._record_trade(
+                    market_id=market_id,
+                    market_name=market.name,
+                    fair_value=fair_value,
+                    orders=[],
+                    motivation=motivation,
+                    analysis=analysis,
+                    raw_llm_response=raw_text,
+                    llm_duration_s=llm_duration_s,
+                    market_price=ref_price,
+                    block_height=block.height,
+                    timestamp=now,
+                    articles=articles,
+                )
 
         # Position management via strategy
         elapsed_rebal = time.monotonic() - self._last_rebalance
@@ -465,7 +541,46 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
             if rebalance_orders:
                 order_desc = ", ".join(_describe_order(o) for o in rebalance_orders)
                 log.info("[%s] %s rebalance: %s", self.name, self.strategy.name, order_desc)
+                orders_by_market: dict[int, list[OrderSpec]] = {}
+                for order in rebalance_orders:
+                    orders_by_market.setdefault(order.market_id, []).append(order)
+                for market_id, market_orders in orders_by_market.items():
+                    market = self.markets_info.get(market_id)
+                    market_name = market.name if market else str(market_id)
+                    market_price = self._get_market_price(market_id, block)
+                    fair_value = self.fair_values.get(market_id, market_price)
+                    if market_id in self.fair_values:
+                        motivation = f"{self.strategy.name} rebalance to target position"
+                    else:
+                        motivation = f"{self.strategy.name} exit without an active fair value"
+                    self._pending_order_logs.append({
+                        "market_id": market_id,
+                        "market_name": market_name,
+                        "fair_value": fair_value,
+                        "orders": market_orders,
+                        "motivation": motivation,
+                        "market_price": market_price,
+                        "block_height": block.height,
+                        "timestamp": now,
+                    })
             all_orders.extend(rebalance_orders)
             self._last_rebalance = time.monotonic()
 
         return all_orders
+
+    async def on_orders_submitted(self, block: Block, orders: list[OrderSpec]) -> None:
+        for entry in self._pending_order_logs:
+            self._record_trade(
+                market_id=entry["market_id"],
+                market_name=entry["market_name"],
+                fair_value=entry["fair_value"],
+                orders=entry["orders"],
+                motivation=entry["motivation"],
+                analysis="",
+                raw_llm_response="",
+                llm_duration_s=0.0,
+                market_price=entry["market_price"],
+                block_height=entry["block_height"],
+                timestamp=entry["timestamp"],
+            )
+        self._pending_order_logs = []

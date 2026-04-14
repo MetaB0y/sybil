@@ -186,8 +186,10 @@ if snaps_all.empty:
 else:
     filtered = snaps_all[snaps_all["trader_name"].isin(selected_traders)]
     if not filtered.empty:
-        d = filtered[["trader_name", "strategy", "balance", "portfolio_value", "pnl", "timestamp"]].copy()
-        d.columns = ["Trader", "Strategy", "Cash", "Portfolio Value", "PnL", "Last Updated"]
+        d = filtered[["trader_name", "strategy", "balance", "portfolio_value", "pnl",
+                      "total_orders", "total_fills", "timestamp"]].copy()
+        d.columns = ["Trader", "Strategy", "Cash", "Portfolio Value", "PnL",
+                     "Orders", "Fills", "Last Updated"]
         d["Cash"] = d["Cash"].apply(lambda x: f"${x:.2f}")
         d["Portfolio Value"] = d["Portfolio Value"].apply(lambda x: f"${x:.2f}")
         d["PnL"] = d["PnL"].apply(lambda x: f"${x:+.2f}")
