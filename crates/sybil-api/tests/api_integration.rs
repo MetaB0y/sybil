@@ -11,7 +11,6 @@ use p256::ecdsa::{Signature, SigningKey};
 use serde_json::{json, Value};
 
 use common::{get, post_json, test_app};
-use matching_engine::outcome_buy;
 use matching_engine::MarketSet;
 use matching_sequencer::crypto::{canonical_cancel_bytes, canonical_order_bytes};
 
@@ -38,16 +37,43 @@ fn signed_buy_yes_payload(
     quantity: u64,
     key: &SigningKey,
 ) -> Value {
+    signed_order_payload(market_id, &[1, 0], limit_price_nanos, quantity, key)
+}
+
+fn signed_sell_yes_payload(
+    market_id: u32,
+    limit_price_nanos: u64,
+    quantity: u64,
+    key: &SigningKey,
+) -> Value {
+    signed_order_payload(market_id, &[-1, 0], limit_price_nanos, quantity, key)
+}
+
+fn signed_order_payload(
+    market_id: u32,
+    payoffs: &[i8],
+    limit_price_nanos: u64,
+    quantity: u64,
+    key: &SigningKey,
+) -> Value {
     let mut markets = MarketSet::new();
     let mid = markets.add_binary("Test");
     assert_eq!(mid.0, market_id);
-    let order = outcome_buy(&markets, 0, mid, 0, limit_price_nanos, quantity);
+    let mut order = matching_engine::Order::new(0);
+    order.markets[0] = mid;
+    order.num_markets = 1;
+    order.num_states = 2;
+    order.limit_price = limit_price_nanos;
+    order.max_fill = quantity;
+    for (idx, payoff) in payoffs.iter().enumerate() {
+        order.payoffs[idx] = *payoff;
+    }
     let signature: Signature = key.sign(&canonical_order_bytes(&order));
     json!({
         "signer_pubkey_hex": to_hex(key.verifying_key().to_sec1_point(true).as_bytes()),
         "order": {
             "market_ids": [market_id],
-            "payoffs": [1, 0],
+            "payoffs": payoffs,
             "limit_price_nanos": limit_price_nanos,
             "max_fill": quantity
         },
@@ -390,6 +416,73 @@ async fn signed_cancel_rejects_wrong_account_claim() {
     let cancel_payload = signed_cancel_payload(account_id + 1, order_id, &key);
     let (status, _) = post_json(app, "/v1/orders/cancel/signed", cancel_payload).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn signed_sell_order_creates_pending_resting_order() {
+    let (app, handle) = test_app(true).await;
+
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 100_000_000_000u64 }),
+    )
+    .await;
+    let seller = parse_json(&body)["account_id"].as_u64().unwrap();
+
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 100_000_000_000u64 }),
+    )
+    .await;
+    let buyer = parse_json(&body)["account_id"].as_u64().unwrap();
+
+    post_json(app.clone(), "/v1/markets", json!({ "name": "Test" })).await;
+
+    post_json(
+        app.clone(),
+        "/v1/orders",
+        json!({
+            "account_id": seller,
+            "orders": [{ "type": "BuyYes", "market_id": 0, "limit_price_nanos": 600_000_000u64, "quantity": 3 }]
+        }),
+    )
+    .await;
+    post_json(
+        app.clone(),
+        "/v1/orders",
+        json!({
+            "account_id": buyer,
+            "orders": [{ "type": "BuyNo", "market_id": 0, "limit_price_nanos": 500_000_000u64, "quantity": 3 }]
+        }),
+    )
+    .await;
+    handle.produce_block().await.unwrap();
+
+    let key = new_signing_key();
+    let public_key_hex = to_hex(key.verifying_key().to_sec1_point(true).as_bytes());
+    let (status, _) = post_json(
+        app.clone(),
+        &format!("/v1/accounts/{}/keys", seller),
+        json!({ "public_key_hex": public_key_hex }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let payload = signed_sell_yes_payload(0, 550_000_000, 2, &key);
+    let (status, _) = post_json(app.clone(), "/v1/orders/signed", payload).await;
+    assert_eq!(status, StatusCode::OK);
+    handle.produce_block().await.unwrap();
+
+    let (status, body) = get(app, &format!("/v1/accounts/{}/orders", seller)).await;
+    assert_eq!(status, StatusCode::OK);
+    let pending = parse_json(&body);
+    assert_eq!(pending.as_array().unwrap().len(), 1);
+    assert_eq!(
+        pending.as_array().unwrap()[0]["side"].as_str().unwrap(),
+        "SellYes"
+    );
 }
 
 // ---------------------------------------------------------------------------
