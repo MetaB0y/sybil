@@ -63,17 +63,23 @@
   .order-form input { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 8px; color: var(--text); font-family: inherit; font-size: 13px; width: 100%; }
   .order-form input:focus { outline: none; border-color: var(--blue); }
   .side-toggle { display: flex; gap: 0; }
+  .side-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .side-btn { flex: 1; padding: 8px; text-align: center; cursor: pointer; border: 1px solid var(--border); font-size: 12px; font-weight: 600; }
   .side-btn:first-child { border-radius: 4px 0 0 4px; }
   .side-btn:last-child { border-radius: 0 4px 4px 0; }
   .side-btn.yes { background: var(--green); color: #000; border-color: var(--green); }
   .side-btn.no { background: var(--red); color: #000; border-color: var(--red); }
+  .side-btn.sell-yes { background: rgba(74,222,128,0.18); color: var(--green); border-color: rgba(74,222,128,0.4); }
+  .side-btn.sell-no { background: rgba(248,113,113,0.18); color: var(--red); border-color: rgba(248,113,113,0.4); }
   .side-btn.inactive { background: var(--surface); color: var(--dim); }
   .cost-preview { color: var(--yellow); font-size: 12px; margin-top: 4px; }
   .submit-btn { width: 100%; padding: 10px; border: none; border-radius: 4px; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; margin-top: 8px; }
   .submit-btn.yes { background: var(--green); color: #000; }
   .submit-btn.no { background: var(--red); color: #000; }
   .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .secondary-btn { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 6px 10px; font-family: inherit; font-size: 11px; cursor: pointer; }
+  .secondary-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .warning-box { background: rgba(251,191,36,0.10); border: 1px solid rgba(251,191,36,0.35); color: var(--yellow); border-radius: 6px; padding: 10px 12px; font-size: 12px; margin-top: 10px; }
 
   /* Toast */
   .toast { position: fixed; top: 20px; right: 20px; padding: 12px 20px; border-radius: 6px; font-size: 13px; z-index: 1000; animation: fadeIn 0.3s; }
@@ -182,7 +188,7 @@
     <div>
       <div class="tabs">
         <div class="tab" :class="view === 'markets' && 'active'" @click="view = 'markets'; selectedMarket = null;">Markets</div>
-        <div class="tab" :class="view === 'portfolio' && 'active'" @click="view = 'portfolio'; fetchPortfolio();">Portfolio</div>
+        <div class="tab" :class="view === 'portfolio' && 'active'" @click="view = 'portfolio'; fetchPortfolio(); fetchPendingOrders(); fetchFills();">Portfolio</div>
       </div>
 
       <!-- Markets view -->
@@ -269,6 +275,10 @@
                 <span x-show="myPosition(selectedMarket.market_id, 'YES') && myPosition(selectedMarket.market_id, 'NO')"> / </span>
                 <span x-show="myPosition(selectedMarket.market_id, 'NO')" class="red" x-text="myPosition(selectedMarket.market_id, 'NO') + ' NO'"></span>
               </div>
+              <div style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap;">
+                <button class="secondary-btn" x-show="myPosition(selectedMarket.market_id, 'YES')" @click="prefillCloseFromPosition({ market_id: selectedMarket.market_id, outcome: 'YES', quantity: myPosition(selectedMarket.market_id, 'YES') })" :disabled="!hasKey">Close YES</button>
+                <button class="secondary-btn" x-show="myPosition(selectedMarket.market_id, 'NO')" @click="prefillCloseFromPosition({ market_id: selectedMarket.market_id, outcome: 'NO', quantity: myPosition(selectedMarket.market_id, 'NO') })" :disabled="!hasKey">Close NO</button>
+              </div>
             </div>
           </div>
 
@@ -277,36 +287,41 @@
             <div class="order-form">
               <div class="field">
                 <label>Side</label>
-                <div class="side-toggle">
-                  <div class="side-btn" :class="orderSide === 'BuyYes' ? 'yes' : 'inactive'" @click="orderSide = 'BuyYes'">Buy Yes</div>
-                  <div class="side-btn" :class="orderSide === 'BuyNo' ? 'no' : 'inactive'" @click="orderSide = 'BuyNo'">Buy No</div>
+                <div class="side-grid">
+                  <div class="side-btn" :class="orderSide === 'BuyYes' ? 'yes' : 'inactive'" @click="setOrderSide('BuyYes')">Buy Yes</div>
+                  <div class="side-btn" :class="orderSide === 'BuyNo' ? 'no' : 'inactive'" @click="setOrderSide('BuyNo')">Buy No</div>
+                  <div class="side-btn" :class="orderSide === 'SellYes' ? 'sell-yes' : 'inactive'" @click="setOrderSide('SellYes')">Sell Yes</div>
+                  <div class="side-btn" :class="orderSide === 'SellNo' ? 'sell-no' : 'inactive'" @click="setOrderSide('SellNo')">Sell No</div>
                 </div>
               </div>
               <div class="field">
                 <label>Price ($)
                   <span x-show="selectedMarket.reference_price_nanos" class="blue" style="cursor: pointer; margin-left: 8px;"
-                        @click="orderPrice = Math.round((orderSide === 'BuyYes'
-                          ? selectedMarket.reference_price_nanos / 1e9 + 0.02
-                          : (1 - selectedMarket.reference_price_nanos / 1e9) + 0.02) * 100) / 100">
+                        @click="orderPrice = quickPriceForSide(selectedMarket, orderSide)">
                     [quick fill]
                   </span>
                 </label>
                 <input type="number" x-model.number="orderPrice" min="0.01" max="0.99" step="0.01">
                 <div class="dim" style="font-size: 11px; margin-top: 2px;"
                      x-show="selectedMarket.reference_price_nanos"
-                     x-text="'MM quoting ~$' + (selectedMarket.reference_price_nanos / 1e9).toFixed(3) + ' YES / $' + (1 - selectedMarket.reference_price_nanos / 1e9).toFixed(3) + ' NO (±1¢ spread)'">
+                     x-text="'Reference ~$' + referenceYesPrice(selectedMarket).toFixed(3) + ' YES / $' + referenceNoPrice(selectedMarket).toFixed(3) + ' NO'">
                 </div>
               </div>
               <div class="field">
                 <label>Quantity</label>
                 <input type="number" x-model.number="orderQty" min="1" step="1">
               </div>
-              <div class="cost-preview" x-text="'Cost: $' + (orderPrice * orderQty).toFixed(2) + ' (max)'"></div>
-              <button class="submit-btn" :class="orderSide === 'BuyYes' ? 'yes' : 'no'"
-                      @click="submitOrder()" :disabled="submitting">
-                <span x-text="submitting ? 'Submitting...' : (orderSide === 'BuyYes' ? 'Buy Yes' : 'Buy No') + ' — ' + orderQty + ' @ $' + orderPrice.toFixed(2)"></span>
+              <div class="cost-preview" x-text="orderSummary()"></div>
+              <button class="submit-btn" :class="sideClass(orderSide)"
+                      @click="submitOrder()" :disabled="submitting || !canSubmitOrder()">
+                <span x-text="submitting ? 'Submitting...' : orderButtonLabel()"></span>
               </button>
-              <p class="dim" style="font-size: 11px; margin-top: 8px;" x-text="hasKey ? 'Signed with P256 key' : 'Unsigned (dev mode)'"></p>
+              <p class="dim" style="font-size: 11px; margin-top: 8px;" x-text="hasKey ? 'Signed with browser P256 key' : 'Trading disabled until this browser has the account signing key'"></p>
+              <template x-if="!hasKey">
+                <div class="warning-box">
+                  This browser does not have the signing key for this account. You can inspect markets and portfolio, but cannot trade or cancel orders.
+                </div>
+              </template>
             </div>
 
             <!-- Pending orders + orderbook -->
@@ -315,14 +330,17 @@
                 <div style="margin-bottom: 16px;">
                   <h2>Your Pending Orders</h2>
                   <table>
-                    <thead><tr><th>Side</th><th>Qty</th><th>Price</th><th>Expires</th></tr></thead>
+                    <thead><tr><th>Side</th><th>Qty</th><th>Price</th><th>Expires</th><th></th></tr></thead>
                     <tbody>
                       <template x-for="o in pendingOrders" :key="o.order_id">
                         <tr>
-                          <td :class="o.side === 'BuyYes' ? 'green' : o.side === 'BuyNo' ? 'red' : 'dim'" x-text="o.side"></td>
+                          <td :class="sideTone(o.side)" x-text="humanSide(o.side)"></td>
                           <td class="price" x-text="o.remaining_quantity"></td>
                           <td class="price" x-text="'$' + (o.limit_price_nanos / 1e9).toFixed(3)"></td>
                           <td class="dim" x-text="'#' + o.expires_at_block"></td>
+                          <td style="text-align: right;">
+                            <button class="secondary-btn" @click="cancelPendingOrder(o)" :disabled="!hasKey || submitting">Cancel</button>
+                          </td>
                         </tr>
                       </template>
                     </tbody>
@@ -338,7 +356,7 @@
                     <tbody>
                       <template x-for="o in orderbook" :key="o.order_id">
                         <tr>
-                          <td :class="o.side === 'BuyYes' ? 'green' : o.side === 'BuyNo' ? 'red' : 'dim'" x-text="o.side"></td>
+                          <td :class="sideTone(o.side)" x-text="humanSide(o.side)"></td>
                           <td class="price" x-text="o.remaining_quantity"></td>
                           <td class="price" x-text="'$' + (o.limit_price_nanos / 1e9).toFixed(3)"></td>
                           <td class="dim" x-text="'#' + o.account_id"></td>
@@ -361,10 +379,10 @@
               <table>
                 <thead><tr><th>Block</th><th>Side</th><th>Qty</th><th>Price</th></tr></thead>
                 <tbody>
-                  <template x-for="f in marketFills" :key="f.block_height + '-' + f.fill_price_nanos">
+                  <template x-for="f in marketFills" :key="f.block_height + '-' + f.order_id + '-' + f.market_id + '-' + f.outcome">
                     <tr>
                       <td class="dim" x-text="'#' + f.block_height"></td>
-                      <td :class="f.outcome === 'YES' ? 'green' : 'red'" x-text="f.outcome"></td>
+                      <td :class="sideTone(f.side_label)" x-text="f.side_label"></td>
                       <td class="price" x-text="f.quantity"></td>
                       <td class="price" x-text="'$' + (f.fill_price_nanos / 1e9).toFixed(4)"></td>
                     </tr>
@@ -410,7 +428,7 @@
             <template x-if="!hasKey">
               <div>
                 <span class="key-badge none">No signing key</span>
-                <span class="dim" style="font-size: 11px; margin-left: 8px;">Orders submitted unsigned (dev mode)</span>
+                <span class="dim" style="font-size: 11px; margin-left: 8px;">Read-only on this browser until the signing key is restored</span>
               </div>
             </template>
           </div>
@@ -418,7 +436,7 @@
           <!-- Add funds -->
           <div style="margin-bottom: 16px;">
             <button style="background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 6px 12px; color: var(--text); font-family: inherit; font-size: 12px; cursor: pointer;"
-                    @click="addFunds()">+ Add $500</button>
+                    @click="addFunds()">+ Add Demo Funds</button>
           </div>
 
           <!-- Positions -->
@@ -426,14 +444,17 @@
             <div>
               <h2>Positions</h2>
               <table>
-                <thead><tr><th>Market</th><th>Side</th><th>Qty</th><th>Value</th></tr></thead>
+                <thead><tr><th>Market</th><th>Side</th><th>Qty</th><th>Value</th><th></th></tr></thead>
                 <tbody>
                   <template x-for="p in portfolio.positions" :key="p.market_id + p.outcome">
-                    <tr class="clickable" @click="selectMarketById(p.market_id)">
+                    <tr class="clickable">
                       <td x-text="marketName(p.market_id)"></td>
                       <td :class="p.outcome === 'YES' ? 'green' : 'red'" x-text="p.outcome"></td>
                       <td class="price" x-text="p.quantity"></td>
                       <td class="price dim" x-text="'$' + (p.value_nanos / 1e9).toFixed(2)"></td>
+                      <td style="text-align: right;">
+                        <button class="secondary-btn" @click.stop="prefillCloseFromPosition(p)" :disabled="!hasKey">Close</button>
+                      </td>
                     </tr>
                   </template>
                 </tbody>
@@ -444,17 +465,41 @@
             <p class="dim">No positions yet. Go trade!</p>
           </template>
 
+          <h2>Pending Orders</h2>
+          <template x-if="allPendingOrders.length > 0">
+            <table>
+              <thead><tr><th>Market</th><th>Side</th><th>Qty</th><th>Price</th><th>Expires</th><th></th></tr></thead>
+              <tbody>
+                <template x-for="o in allPendingOrders" :key="o.order_id">
+                  <tr>
+                    <td x-text="marketName(o.market_id)"></td>
+                    <td :class="sideTone(o.side)" x-text="humanSide(o.side)"></td>
+                    <td class="price" x-text="o.remaining_quantity"></td>
+                    <td class="price" x-text="'$' + (o.limit_price_nanos / 1e9).toFixed(3)"></td>
+                    <td class="dim" x-text="'#' + o.expires_at_block"></td>
+                    <td style="text-align: right;">
+                      <button class="secondary-btn" @click="cancelPendingOrder(o)" :disabled="!hasKey || submitting">Cancel</button>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </template>
+          <template x-if="allPendingOrders.length === 0">
+            <p class="dim">No pending orders.</p>
+          </template>
+
           <!-- Fill history -->
           <h2>Fill History</h2>
           <template x-if="allFills.length > 0">
             <table>
               <thead><tr><th>Block</th><th>Market</th><th>Side</th><th>Qty</th><th>Price</th></tr></thead>
               <tbody>
-                <template x-for="f in allFills" :key="f.block_height + '-' + f.fill_price_nanos + '-' + f.market_id">
+                <template x-for="f in allFills" :key="f.block_height + '-' + f.order_id + '-' + f.market_id + '-' + f.outcome">
                   <tr>
                     <td class="dim" x-text="'#' + f.block_height"></td>
                     <td x-text="marketName(f.market_id)"></td>
-                    <td :class="f.outcome === 'YES' ? 'green' : 'red'" x-text="f.outcome"></td>
+                    <td :class="sideTone(f.side_label)" x-text="f.side_label"></td>
                     <td class="price" x-text="f.quantity"></td>
                     <td class="price" x-text="'$' + (f.fill_price_nanos / 1e9).toFixed(4)"></td>
                   </tr>
@@ -510,6 +555,14 @@ function canonicalOrderBytes(marketIds, payoffs, limitPrice, maxFill) {
   return new Uint8Array(buf, 0, off);
 }
 
+function canonicalCancelBytes(accountId, orderId) {
+  const buf = new ArrayBuffer(16);
+  const view = new DataView(buf);
+  writeBigUint64LE(view, 0, BigInt(accountId));
+  writeBigUint64LE(view, 8, BigInt(orderId));
+  return new Uint8Array(buf);
+}
+
 function writeBigUint64LE(view, offset, val) {
   view.setUint32(offset, Number(val & 0xFFFFFFFFn), true);
   view.setUint32(offset + 4, Number(val >> 32n), true);
@@ -517,6 +570,15 @@ function writeBigUint64LE(view, offset, val) {
 
 function toHex(buf) {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function parseApiError(resp) {
+  try {
+    const body = await resp.json();
+    return body.details ? `${body.error}: ${body.details}` : body.error;
+  } catch {
+    return await resp.text();
+  }
 }
 
 // Compress a 65-byte uncompressed P256 public key to 33 bytes
@@ -572,6 +634,7 @@ function tradingApp() {
     portfolio: null,
     allFills: [],
     marketFills: [],
+    allPendingOrders: [],
     pendingOrders: [],
     orderbook: [],
 
@@ -605,6 +668,74 @@ function tradingApp() {
       if (!this.portfolio || !this.portfolio.positions) return 0;
       const p = this.portfolio.positions.find(p => p.market_id === marketId && p.outcome === outcome);
       return p ? p.quantity : 0;
+    },
+    sideClass(side) {
+      return side === 'BuyYes' || side === 'SellYes' ? 'yes' : 'no';
+    },
+    sideTone(side) {
+      const normalized = String(side || '').replace(/\s+/g, '').toLowerCase();
+      if (normalized.endsWith('yes')) return 'green';
+      if (normalized.endsWith('no')) return 'red';
+      return 'dim';
+    },
+    humanSide(side) {
+      return side
+        .replace('Buy', 'Buy ')
+        .replace('Sell', 'Sell ');
+    },
+    referenceYesPrice(market) {
+      if (!market) return 0.5;
+      return market.reference_price_nanos ? market.reference_price_nanos / 1e9 : (market.yes_price_nanos ? market.yes_price_nanos / 1e9 : 0.5);
+    },
+    referenceNoPrice(market) {
+      return Math.max(0.01, Math.min(0.99, 1 - this.referenceYesPrice(market)));
+    },
+    quickPriceForSide(market, side) {
+      const yes = this.referenceYesPrice(market);
+      const no = this.referenceNoPrice(market);
+      const buyPad = 0.02;
+      const sellPad = 0.02;
+      const raw = side === 'BuyYes' ? yes + buyPad
+        : side === 'BuyNo' ? no + buyPad
+        : side === 'SellYes' ? yes - sellPad
+        : no - sellPad;
+      return Math.round(Math.max(0.01, Math.min(0.99, raw)) * 100) / 100;
+    },
+    orderSummary() {
+      const notion = (this.orderPrice || 0) * (this.orderQty || 0);
+      const prefix = this.orderSide.startsWith('Sell') ? 'Proceeds' : 'Cost';
+      return `${prefix}: $${notion.toFixed(2)} (${this.humanSide(this.orderSide)})`;
+    },
+    orderButtonLabel() {
+      return `${this.humanSide(this.orderSide)} — ${this.orderQty} @ $${(this.orderPrice || 0).toFixed(2)}`;
+    },
+    canSubmitOrder() {
+      return !!(this.hasKey && this._privateKey && this.selectedMarket && this.orderQty > 0 && this.orderPrice > 0 && this.orderPrice < 1);
+    },
+    setOrderSide(side) {
+      this.orderSide = side;
+      if (this.selectedMarket) {
+        this.orderPrice = this.quickPriceForSide(this.selectedMarket, side);
+      }
+    },
+    normalizeFills(fills) {
+      const rows = [];
+      for (const fill of fills) {
+        const deltas = fill.position_deltas || [];
+        for (const delta of deltas) {
+          if (!delta || !delta.delta) continue;
+          const quantity = Math.abs(delta.delta);
+          const sideLabel = delta.delta > 0 ? `Buy ${delta.outcome}` : `Sell ${delta.outcome}`;
+          rows.push({
+            ...fill,
+            market_id: delta.market_id,
+            outcome: delta.outcome,
+            quantity,
+            side_label: sideLabel,
+          });
+        }
+      }
+      return rows;
     },
     showToast(msg, type = 'success') {
       this.toast = { msg, type };
@@ -717,6 +848,12 @@ function tradingApp() {
       this._privateKey = null;
       this.hasKey = false;
       this.pubKeyHex = '';
+      this.portfolio = null;
+      this.allFills = [];
+      this.marketFills = [];
+      this.allPendingOrders = [];
+      this.pendingOrders = [];
+      this.selectedMarket = null;
       localStorage.removeItem('sybil_account_id');
       localStorage.removeItem('sybil_display_name');
       localStorage.removeItem('sybil_private_key_jwk');
@@ -737,6 +874,8 @@ function tradingApp() {
 
         if (this.accountId) {
           await this.fetchPortfolio();
+          await this.fetchPendingOrders();
+          await this.fetchFills();
         }
 
         // Update selected market data
@@ -766,7 +905,7 @@ function tradingApp() {
         const url = '/v1/accounts/' + this.accountId + '/fills?limit=50' + (marketId != null ? '&market_id=' + marketId : '');
         const resp = await fetch(url);
         if (resp.ok) {
-          const fills = await resp.json();
+          const fills = this.normalizeFills(await resp.json());
           if (marketId != null) {
             this.marketFills = fills;
           } else {
@@ -778,26 +917,26 @@ function tradingApp() {
 
     selectMarket(m) {
       this.selectedMarket = m;
-      // Set default price: prefer reference price, fall back to clearing
-      const refPrice = m.reference_price_nanos ? m.reference_price_nanos / 1e9 : null;
-      const yesPrice = refPrice || (m.yes_price_nanos ? m.yes_price_nanos / 1e9 : 0.50);
-      this.orderPrice = Math.round((yesPrice + 0.02) * 100) / 100 || 0.50;
       this.orderSide = 'BuyYes';
+      this.orderPrice = this.quickPriceForSide(m, this.orderSide);
       this.marketFills = [];
       this.pendingOrders = [];
       this.orderbook = [];
       this.fetchFills(m.market_id);
-      this.fetchPendingOrders(m.market_id);
+      this.fetchPendingOrders();
       this.fetchOrderbook(m.market_id);
     },
 
-    async fetchPendingOrders(marketId) {
+    async fetchPendingOrders() {
       if (!this.accountId) return;
       try {
         const resp = await fetch('/v1/accounts/' + this.accountId + '/orders');
         if (resp.ok) {
           const all = await resp.json();
-          this.pendingOrders = all.filter(o => o.market_id === marketId);
+          this.allPendingOrders = all;
+          this.pendingOrders = this.selectedMarket
+            ? all.filter(o => o.market_id === this.selectedMarket.market_id)
+            : [];
         }
       } catch {}
     },
@@ -816,62 +955,43 @@ function tradingApp() {
       if (m) { this.view = 'markets'; this.selectMarket(m); }
     },
 
+    prefillCloseFromPosition(position) {
+      const side = position.outcome === 'YES' ? 'SellYes' : 'SellNo';
+      const market = this.markets.find(m => m.market_id === position.market_id);
+      if (!market) return;
+      this.view = 'markets';
+      this.selectMarket(market);
+      this.orderQty = Math.abs(position.quantity);
+      this.setOrderSide(side);
+    },
+
     // Trading
     async submitOrder() {
-      if (!this.selectedMarket || !this.accountId) return;
+      if (!this.selectedMarket || !this.accountId || !this.canSubmitOrder()) {
+        this.showToast('Trading requires the signing key stored in this browser.', 'error');
+        return;
+      }
       this.submitting = true;
 
       const priceNanos = Math.round(this.orderPrice * 1e9);
       const marketId = this.selectedMarket.market_id;
 
       try {
-        if (this.hasKey && this._privateKey) {
-          // Signed order via P256
-          await this.submitSignedOrder(marketId, priceNanos, this.orderQty);
-        } else {
-          // Unsigned (dev mode)
-          await this.submitUnsignedOrder(marketId, priceNanos, this.orderQty);
-        }
+        await this.submitSignedOrder(marketId, priceNanos, this.orderQty);
       } finally {
         this.submitting = false;
       }
     },
 
-    async submitUnsignedOrder(marketId, priceNanos, qty) {
-      const body = {
-        account_id: this.accountId,
-        orders: [{
-          type: this.orderSide,
-          market_id: marketId,
-          limit_price_nanos: priceNanos,
-          quantity: qty,
-        }],
-      };
-      const resp = await fetch('/v1/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (resp.ok) {
-        this.showToast(this.orderSide + ' ' + qty + ' @ $' + this.orderPrice.toFixed(2) + ' submitted!');
-        this.fetchFills(marketId);
-        this.fetchPortfolio();
-      } else {
-        const err = await resp.text();
-        this.showToast('Error: ' + err, 'error');
-      }
-    },
-
     async submitSignedOrder(marketId, priceNanos, qty) {
-      // Build payoffs: BuyYes = [1, 0], BuyNo = [0, 1] for binary market
-      // State 0 = YES wins (outcome 0), State 1 = NO wins (outcome 1)
-      const payoffs = this.orderSide === 'BuyYes' ? [1, 0] : [0, 1];
+      const payoffs = this.orderSide === 'BuyYes' ? [1, 0]
+        : this.orderSide === 'BuyNo' ? [0, 1]
+        : this.orderSide === 'SellYes' ? [-1, 0]
+        : [0, -1];
       const marketIds = [marketId];
 
-      // Build canonical bytes (must match Rust crypto.rs)
       const canonical = canonicalOrderBytes(marketIds, payoffs, priceNanos, qty);
 
-      // Sign with P256 (SubtleCrypto produces P1363 r||s format, 64 bytes)
       const sigBuf = await crypto.subtle.sign(
         { name: 'ECDSA', hash: 'SHA-256' },
         this._privateKey,
@@ -895,12 +1015,51 @@ function tradingApp() {
         body: JSON.stringify(body),
       });
       if (resp.ok) {
-        this.showToast(this.orderSide + ' ' + qty + ' @ $' + this.orderPrice.toFixed(2) + ' signed & submitted!');
+        this.showToast(this.humanSide(this.orderSide) + ' ' + qty + ' @ $' + this.orderPrice.toFixed(2) + ' submitted!');
+        this.fetchPendingOrders();
         this.fetchFills(marketId);
+        this.fetchFills();
         this.fetchPortfolio();
       } else {
-        const err = await resp.text();
-        this.showToast('Signature error: ' + err, 'error');
+        this.showToast(await parseApiError(resp), 'error');
+      }
+    },
+
+    async cancelPendingOrder(order) {
+      if (!this.hasKey || !this._privateKey) {
+        this.showToast('This browser cannot sign cancellation for this account.', 'error');
+        return;
+      }
+
+      this.submitting = true;
+      try {
+        const canonical = canonicalCancelBytes(this.accountId, order.order_id);
+        const sigBuf = await crypto.subtle.sign(
+          { name: 'ECDSA', hash: 'SHA-256' },
+          this._privateKey,
+          canonical,
+        );
+
+        const resp = await fetch('/v1/orders/cancel/signed', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            account_id: this.accountId,
+            order_id: order.order_id,
+            signer_pubkey_hex: this.pubKeyHex,
+            signature_hex: toHex(sigBuf),
+          }),
+        });
+
+        if (resp.ok) {
+          this.showToast('Cancelled order #' + order.order_id);
+          this.fetchPendingOrders();
+          this.fetchPortfolio();
+        } else {
+          this.showToast(await parseApiError(resp), 'error');
+        }
+      } finally {
+        this.submitting = false;
       }
     },
 
@@ -912,10 +1071,10 @@ function tradingApp() {
         body: JSON.stringify({ amount_nanos: 500_000_000_000 }),
       });
       if (resp.ok) {
-        this.showToast('Added $500');
+        this.showToast('Added demo funds');
         this.fetchPortfolio();
       } else {
-        this.showToast('Failed to add funds', 'error');
+        this.showToast(await parseApiError(resp), 'error');
       }
     },
 
@@ -940,9 +1099,10 @@ function tradingApp() {
                 // Refresh portfolio on fills
                 if (this.accountId) {
                   this.fetchPortfolio();
+                  this.fetchPendingOrders();
+                  this.fetchFills();
                   if (this.selectedMarket) {
                     this.fetchFills(this.selectedMarket.market_id);
-                    this.fetchPendingOrders(this.selectedMarket.market_id);
                     this.fetchOrderbook(this.selectedMarket.market_id);
                   }
                 }
@@ -981,6 +1141,10 @@ function tradingApp() {
       }
 
       this.poll();
+      if (this.accountId) {
+        this.fetchPendingOrders();
+        this.fetchFills();
+      }
       setInterval(() => this.poll(), 5000);
       this.streamBlocks();
     },
