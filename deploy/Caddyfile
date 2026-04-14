@@ -1,0 +1,14 @@
+{
+    email val@sybil.exchange
+}
+
+172-104-31-54.nip.io {
+    encode zstd gzip
+
+    @sse path /v1/blocks/stream
+    reverse_proxy @sse 172.17.0.1:3000 {
+        flush_interval -1
+    }
+
+    reverse_proxy 172.17.0.1:3000
+}

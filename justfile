@@ -240,6 +240,17 @@ deploy-arena key:
         --max-markets 20 --model minimax/minimax-m2.7 --db-path /data/decisions.db \
         --mapping-path /polymarket-data/polymarket_mapping.json'
 
+# Deploy Caddy HTTPS reverse proxy (nip.io + Let's Encrypt) in front of sybil-api
+deploy-caddy:
+    scp deploy/Caddyfile {{SERVER}}:/root/Caddyfile
+    ssh {{SERVER}} 'mkdir -p /opt/caddy && mv /root/Caddyfile /opt/caddy/Caddyfile'
+    ssh {{SERVER}} 'docker stop caddy 2>/dev/null; docker rm caddy 2>/dev/null; true'
+    ssh {{SERVER}} 'docker run -d --name caddy --restart unless-stopped \
+        -p 80:80 -p 443:443 \
+        -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile:ro \
+        -v caddy-data:/data -v caddy-config:/config \
+        caddy:latest'
+
 # Deploy arena dashboard (arena image must be loaded already)
 deploy-dashboard:
     ssh {{SERVER}} 'docker stop sybil-arena-dashboard 2>/dev/null; docker rm sybil-arena-dashboard 2>/dev/null; true'
