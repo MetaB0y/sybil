@@ -621,6 +621,7 @@ function tradingApp() {
     markets: [],
     groups: [],
     selectedGroup: null,
+    groupPreferenceInitialized: false,
     selectedMarket: null,
     searchQuery: '',
 
@@ -739,6 +740,14 @@ function tradingApp() {
     },
     showToast(msg, type = 'success') {
       this.toast = { msg, type };
+    },
+    applyDefaultGroup() {
+      if (this.groupPreferenceInitialized) return;
+      const featured = this.groups.find(g => g.name === 'featured');
+      if (featured) {
+        this.selectedGroup = 'featured';
+      }
+      this.groupPreferenceInitialized = true;
     },
 
     // Auth
@@ -871,6 +880,7 @@ function tradingApp() {
         this.health = h;
         this.markets = m.sort((a, b) => (b.volume_nanos || 0) - (a.volume_nanos || 0));
         this.groups = g;
+        this.applyDefaultGroup();
 
         if (this.accountId) {
           await this.fetchPortfolio();

@@ -83,6 +83,16 @@ kamal accessory boot --all            # start all (metrics, grafana, etc.)
 
 ## Operations
 
+### Alpha market curation
+
+The built-in alpha trading UI treats the market group named `featured` as the curated shelf.
+If that group exists, `/trade` defaults to showing only those markets. If it does not exist,
+the UI falls back to all active markets.
+
+Use the existing market-group API to manage this shelf. No separate admin subsystem is required
+for Milestone 1; operators curate the alpha surface by keeping `featured` aligned with the
+markets that are safe and useful to expose.
+
 ### View logs
 
 ```bash
