@@ -632,6 +632,21 @@ impl BlockSequencer {
             .collect()
     }
 
+    /// Cancel a resting order owned by `account_id`.
+    pub fn cancel_pending_order(
+        &mut self,
+        account_id: AccountId,
+        order_id: u64,
+    ) -> Result<(), SequencerError> {
+        match self.order_book.cancel(account_id, order_id) {
+            Ok(()) => Ok(()),
+            Err(crate::order_book::CancelError::NotFound) => Err(SequencerError::OrderNotFound),
+            Err(crate::order_book::CancelError::WrongOwner) => {
+                Err(SequencerError::OrderOwnershipMismatch)
+            }
+        }
+    }
+
     /// Resolve a market through the oracle.
     ///
     /// `payout_nanos`: YES payout per share in nanos (0 to NANOS_PER_DOLLAR).

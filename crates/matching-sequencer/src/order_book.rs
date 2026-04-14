@@ -50,6 +50,12 @@ pub struct Accepted {
     pub account_id: AccountId,
 }
 
+#[derive(Debug)]
+pub(crate) enum CancelError {
+    NotFound,
+    WrongOwner,
+}
+
 impl OrderBook {
     pub fn new(ttl: u64) -> Self {
         Self {
@@ -231,6 +237,29 @@ impl OrderBook {
     /// Number of resting orders.
     pub fn len(&self) -> usize {
         self.orders.len()
+    }
+
+    /// Remove a resting order by ID and release its reservations.
+    pub(crate) fn cancel(
+        &mut self,
+        account_id: AccountId,
+        order_id: u64,
+    ) -> Result<(), CancelError> {
+        let Some(index) = self.orders.iter().position(|ro| ro.order.id == order_id) else {
+            return Err(CancelError::NotFound);
+        };
+
+        if self.orders[index].account_id != account_id {
+            return Err(CancelError::WrongOwner);
+        }
+
+        let ro = self.orders.remove(index);
+        Self::release_reservations(
+            &mut self.balance_reservations,
+            &mut self.position_reservations,
+            &ro,
+        );
+        Ok(())
     }
 
     /// After solving: remove filled orders, adjust partially-filled orders,
@@ -471,5 +500,22 @@ mod tests {
         // Check remaining order has max_fill = 6
         let (remaining_order, _) = book.resting_orders().next().unwrap();
         assert_eq!(remaining_order.max_fill, 6);
+    }
+
+    #[test]
+    fn cancel_releases_reservations() {
+        let (mut accounts, markets, m0) = setup();
+        let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+        let mut book = OrderBook::new(3);
+        let account = accounts.get(aid).unwrap();
+
+        let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
+        let accepted = book.accept(order, aid, account, 1).unwrap();
+        assert!(book.reserved_balance(aid) > 0);
+
+        book.cancel(aid, accepted.order.id).unwrap();
+
+        assert_eq!(book.reserved_balance(aid), 0);
+        assert_eq!(book.len(), 0);
     }
 }

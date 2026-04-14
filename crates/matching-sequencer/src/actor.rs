@@ -9,7 +9,9 @@ use sybil_oracle::{MarketStatus, ResolutionRecord};
 
 use crate::account::{Account, AccountId};
 use crate::block::{Block, BlockProduction};
-use crate::crypto::{verify_signed_order, PublicKey, SignedOrder};
+use crate::crypto::{
+    verify_signed_cancel, verify_signed_order, PublicKey, SignedCancel, SignedOrder,
+};
 use crate::error::SequencerError;
 use crate::market_info::{AccountFillRecord, MarketMetadata, MarketSearchQuery, PricePoint};
 use crate::mempool::{Mempool, MempoolConfig};
@@ -24,6 +26,10 @@ pub enum Message {
     },
     SubmitSignedOrder {
         signed: SignedOrder,
+        respond_to: oneshot::Sender<Result<(), SequencerError>>,
+    },
+    CancelSignedOrder {
+        signed: SignedCancel,
         respond_to: oneshot::Sender<Result<(), SequencerError>>,
     },
     GetLatestBlock {
@@ -301,6 +307,10 @@ impl SequencerActor {
                 let result = self.handle_signed_order(signed);
                 let _ = respond_to.send(result);
             }
+            Message::CancelSignedOrder { signed, respond_to } => {
+                let result = self.handle_signed_cancel(signed);
+                let _ = respond_to.send(result);
+            }
             Message::GetLatestBlock { respond_to } => {
                 let _ = respond_to.send(self.latest_block.clone());
             }
@@ -513,6 +523,22 @@ impl SequencerActor {
         self.mempool.submit(submission)
     }
 
+    fn handle_signed_cancel(&mut self, signed: SignedCancel) -> Result<(), SequencerError> {
+        verify_signed_cancel(&signed)?;
+
+        let account_id = self
+            .sequencer
+            .lookup_pubkey(&signed.signer)
+            .ok_or(SequencerError::UnknownSigner)?;
+
+        if account_id != signed.account_id {
+            return Err(SequencerError::SignerAccountMismatch);
+        }
+
+        self.sequencer
+            .cancel_pending_order(signed.account_id, signed.order_id)
+    }
+
     fn handle_search_markets(&self, query: MarketSearchQuery) -> Vec<MarketSearchResult> {
         let markets = self.sequencer.markets();
         let mut results: Vec<MarketSearchResult> = Vec::new();
@@ -693,6 +719,19 @@ impl SequencerHandle {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(Message::SubmitSignedOrder {
+                signed,
+                respond_to: tx,
+            })
+            .await
+            .map_err(|_| SequencerError::ActorGone)?;
+        rx.await.map_err(|_| SequencerError::ActorGone)?
+    }
+
+    /// Submit a P256-signed request to cancel a resting order.
+    pub async fn cancel_signed_order(&self, signed: SignedCancel) -> Result<(), SequencerError> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(Message::CancelSignedOrder {
                 signed,
                 respond_to: tx,
             })
@@ -1366,6 +1405,71 @@ mod tests {
         // Produce block and verify the order was included
         let block = handle.produce_block().await.unwrap();
         assert!(block.header.order_count >= 1);
+    }
+
+    #[tokio::test]
+    async fn test_cancel_signed_order_by_owner() {
+        let (seq, aid) = make_test_sequencer();
+        let mut ms = MarketSet::new();
+        let m0 = ms.add_binary("Test");
+        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        let pubkey = PublicKey(signing_key.verifying_key().clone());
+        handle.register_pubkey(aid, pubkey).await.unwrap();
+
+        handle
+            .submit_order(OrderSubmission {
+                account_id: aid,
+                orders: vec![outcome_buy(&ms, 1, m0, 0, 500_000_000, 1)],
+                mm_constraint: None,
+            })
+            .await
+            .unwrap();
+        handle.produce_block().await.unwrap();
+
+        let pending = handle.get_pending_orders(Some(aid)).await.unwrap();
+        assert_eq!(pending.len(), 1);
+
+        let cancel = crate::crypto::sign_cancel(aid, pending[0].order_id, &signing_key);
+        handle.cancel_signed_order(cancel).await.unwrap();
+
+        let pending = handle.get_pending_orders(Some(aid)).await.unwrap();
+        assert!(pending.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_cancel_signed_order_rejects_wrong_account_claim() {
+        let (seq, aid) = make_test_sequencer();
+        let other = AccountId(aid.0 + 1);
+        let mut ms = MarketSet::new();
+        let m0 = ms.add_binary("Test");
+        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        let pubkey = PublicKey(signing_key.verifying_key().clone());
+        handle.register_pubkey(aid, pubkey).await.unwrap();
+
+        handle
+            .submit_order(OrderSubmission {
+                account_id: aid,
+                orders: vec![outcome_buy(&ms, 1, m0, 0, 500_000_000, 1)],
+                mm_constraint: None,
+            })
+            .await
+            .unwrap();
+        handle.produce_block().await.unwrap();
+
+        let pending = handle.get_pending_orders(Some(aid)).await.unwrap();
+        let cancel = crate::crypto::sign_cancel(other, pending[0].order_id, &signing_key);
+        let error = handle.cancel_signed_order(cancel).await.unwrap_err();
+        assert!(matches!(error, SequencerError::SignerAccountMismatch));
     }
 
     #[tokio::test]

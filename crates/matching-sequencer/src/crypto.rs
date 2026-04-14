@@ -48,6 +48,14 @@ pub struct SignedOrder {
     pub signature: Signature,
 }
 
+/// A resting-order cancellation authenticated by a P256 signature.
+pub struct SignedCancel {
+    pub account_id: crate::account::AccountId,
+    pub order_id: u64,
+    pub signer: PublicKey,
+    pub signature: Signature,
+}
+
 /// Deterministic canonical byte encoding of an Order for signing.
 ///
 /// Layout (all integers little-endian):
@@ -100,9 +108,31 @@ pub fn canonical_order_bytes(order: &Order) -> Vec<u8> {
     buf
 }
 
+/// Deterministic canonical byte encoding of a cancel request for signing.
+///
+/// Layout (all integers little-endian):
+/// - account_id: u64
+/// - order_id: u64
+pub fn canonical_cancel_bytes(account_id: crate::account::AccountId, order_id: u64) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(16);
+    buf.extend_from_slice(&account_id.0.to_le_bytes());
+    buf.extend_from_slice(&order_id.to_le_bytes());
+    buf
+}
+
 /// Verify a signed order's P256 ECDSA signature.
 pub fn verify_signed_order(signed: &SignedOrder) -> Result<(), SequencerError> {
     let msg = canonical_order_bytes(&signed.order);
+    signed
+        .signer
+        .0
+        .verify(&msg, &signed.signature)
+        .map_err(|_| SequencerError::InvalidSignature)
+}
+
+/// Verify a signed cancel request's P256 ECDSA signature.
+pub fn verify_signed_cancel(signed: &SignedCancel) -> Result<(), SequencerError> {
+    let msg = canonical_cancel_bytes(signed.account_id, signed.order_id);
     signed
         .signer
         .0
@@ -116,6 +146,22 @@ pub fn sign_order(order: &Order, key: &SigningKey) -> SignedOrder {
     let signature: Signature = key.sign(&msg);
     SignedOrder {
         order: order.clone(),
+        signer: PublicKey(*key.verifying_key()),
+        signature,
+    }
+}
+
+/// Sign a cancel request with a P256 signing key (for testing / client use).
+pub fn sign_cancel(
+    account_id: crate::account::AccountId,
+    order_id: u64,
+    key: &SigningKey,
+) -> SignedCancel {
+    let msg = canonical_cancel_bytes(account_id, order_id);
+    let signature: Signature = key.sign(&msg);
+    SignedCancel {
+        account_id,
+        order_id,
         signer: PublicKey(*key.verifying_key()),
         signature,
     }
@@ -193,6 +239,28 @@ mod tests {
     }
 
     #[test]
+    fn test_sign_verify_cancel_roundtrip() {
+        let key =
+            <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(&mut crypto_rng());
+        let signed = sign_cancel(crate::account::AccountId(7), 42, &key);
+
+        assert!(verify_signed_cancel(&signed).is_ok());
+    }
+
+    #[test]
+    fn test_tampered_cancel_rejected() {
+        let key =
+            <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(&mut crypto_rng());
+        let mut signed = sign_cancel(crate::account::AccountId(7), 42, &key);
+        signed.order_id = 99;
+
+        assert!(matches!(
+            verify_signed_cancel(&signed),
+            Err(SequencerError::InvalidSignature)
+        ));
+    }
+
+    #[test]
     fn test_canonical_encoding_deterministic() {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("Test");
@@ -233,5 +301,13 @@ mod tests {
             canonical_order_bytes(&order1),
             canonical_order_bytes(&order2)
         );
+    }
+
+    #[test]
+    fn test_canonical_cancel_encoding_deterministic() {
+        let bytes1 = canonical_cancel_bytes(crate::account::AccountId(3), 17);
+        let bytes2 = canonical_cancel_bytes(crate::account::AccountId(3), 17);
+
+        assert_eq!(bytes1, bytes2);
     }
 }

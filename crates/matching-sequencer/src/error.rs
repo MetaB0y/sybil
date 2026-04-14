@@ -40,6 +40,9 @@ pub enum SequencerError {
     /// No account registered for this public key.
     #[error("unknown signer public key")]
     UnknownSigner,
+    /// The signed account_id does not match the signer registry mapping.
+    #[error("signed account does not match signer public key")]
+    SignerAccountMismatch,
     /// Mempool capacity exceeded.
     #[error("mempool full")]
     MempoolFull,
@@ -55,6 +58,12 @@ pub enum SequencerError {
     /// The requested block was not found.
     #[error("block not found")]
     BlockNotFound,
+    /// The requested pending order was not found.
+    #[error("pending order not found")]
+    OrderNotFound,
+    /// The requested pending order does not belong to the caller.
+    #[error("pending order does not belong to account")]
+    OrderOwnershipMismatch,
     /// Oracle error during resolution.
     #[error("oracle error: {0}")]
     OracleError(String),
