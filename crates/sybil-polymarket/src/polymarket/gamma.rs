@@ -1,8 +1,70 @@
+use std::collections::HashMap;
+
 use reqwest::Client;
 use tracing::{debug, warn};
 
 use super::types::{GammaEvent, MidpointResponse};
 use crate::error::Error;
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(untagged)]
+enum MidpointsResponse {
+    Array(Vec<MidpointResponse>),
+    Map(HashMap<String, serde_json::Value>),
+}
+
+fn parse_midpoint_value(token_id: &str, value: &serde_json::Value) -> Result<Option<f64>, Error> {
+    match value {
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::String(raw) => {
+            if raw.is_empty() {
+                Ok(None)
+            } else {
+                raw.parse::<f64>().map(Some).map_err(|e| {
+                    Error::PolymarketApi(format!("bad midpoint '{raw}' for {token_id}: {e}"))
+                })
+            }
+        }
+        serde_json::Value::Number(number) => number.as_f64().map(Some).ok_or_else(|| {
+            Error::PolymarketApi(format!("bad midpoint number for {token_id}: {number}"))
+        }),
+        other => Err(Error::PolymarketApi(format!(
+            "unsupported midpoint payload for {token_id}: {other}"
+        ))),
+    }
+}
+
+fn decode_midpoints_response(body: &str, chunk: &[String]) -> Result<Vec<(String, f64)>, Error> {
+    let response: MidpointsResponse = serde_json::from_str(body)?;
+    let mut all_results = Vec::with_capacity(chunk.len());
+
+    match response {
+        MidpointsResponse::Array(mids) => {
+            for (i, mid) in mids.iter().enumerate() {
+                if let Some(token_id) = chunk.get(i) {
+                    match mid.mid.parse::<f64>() {
+                        Ok(price) => all_results.push((token_id.clone(), price)),
+                        Err(error) => warn!(token_id, error = %error, "skipping bad midpoint"),
+                    }
+                }
+            }
+        }
+        MidpointsResponse::Map(mids) => {
+            for token_id in chunk {
+                let Some(value) = mids.get(token_id) else {
+                    continue;
+                };
+                match parse_midpoint_value(token_id, value) {
+                    Ok(Some(price)) => all_results.push((token_id.clone(), price)),
+                    Ok(None) => {}
+                    Err(error) => warn!(token_id, error = %error, "skipping bad midpoint"),
+                }
+            }
+        }
+    }
+
+    Ok(all_results)
+}
 
 /// Read-only client for the Polymarket Gamma API.
 pub struct GammaClient {
@@ -154,18 +216,37 @@ impl GammaClient {
                 )));
             }
 
-            // Response is array of {mid: "0.55"} in same order as request
-            let mids: Vec<MidpointResponse> = resp.json().await?;
-            for (i, mid) in mids.iter().enumerate() {
-                if let Some(token_id) = chunk.get(i) {
-                    match mid.mid.parse::<f64>() {
-                        Ok(p) => all_results.push((token_id.clone(), p)),
-                        Err(e) => warn!(token_id, error = %e, "skipping bad midpoint"),
-                    }
-                }
-            }
+            let text = resp.text().await?;
+            all_results.extend(decode_midpoints_response(&text, chunk)?);
         }
 
         Ok(all_results)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_midpoints_response;
+
+    #[test]
+    fn decode_midpoints_array_response() {
+        let chunk = vec!["1".to_string(), "2".to_string()];
+        let decoded =
+            decode_midpoints_response(r#"[{"mid":"0.55"},{"mid":"0.42"}]"#, &chunk).unwrap();
+        assert_eq!(
+            decoded,
+            vec![("1".to_string(), 0.55), ("2".to_string(), 0.42)]
+        );
+    }
+
+    #[test]
+    fn decode_midpoints_map_response() {
+        let chunk = vec!["1".to_string(), "2".to_string(), "3".to_string()];
+        let decoded =
+            decode_midpoints_response(r#"{"1":"0.55","2":0.42,"3":null}"#, &chunk).unwrap();
+        assert_eq!(
+            decoded,
+            vec![("1".to_string(), 0.55), ("2".to_string(), 0.42)]
+        );
     }
 }

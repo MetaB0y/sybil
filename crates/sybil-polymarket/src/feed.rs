@@ -116,7 +116,11 @@ impl FeedActor {
                     backoff_secs = 1;
                 }
                 Err(e) => {
-                    warn!(error = %e, "WebSocket failed, falling back to REST");
+                    if e.is_expected_websocket_disconnect() {
+                        info!(error = %e, "WebSocket disconnected, refreshing via REST before reconnect");
+                    } else {
+                        warn!(error = %e, "WebSocket failed, falling back to REST");
+                    }
                     self.poll_rest_once().await;
                     backoff_secs = (backoff_secs * 2).min(60);
                 }

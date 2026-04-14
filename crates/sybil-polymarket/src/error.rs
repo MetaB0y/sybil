@@ -29,3 +29,17 @@ pub enum Error {
     #[error("Channel send error: {0}")]
     Channel(String),
 }
+
+impl Error {
+    pub fn is_expected_websocket_disconnect(&self) -> bool {
+        match self {
+            Self::WebSocket(message) => {
+                let message = message.to_ascii_lowercase();
+                message.contains("without closing handshake")
+                    || message.contains("connection reset")
+                    || message.contains("broken pipe")
+            }
+            _ => false,
+        }
+    }
+}
