@@ -502,6 +502,10 @@ impl BlockSequencer {
         self.lifecycle.market_metadata(market_id)
     }
 
+    pub fn market_metadata_all(&self) -> &HashMap<MarketId, MarketMetadata> {
+        self.lifecycle.market_metadata_all()
+    }
+
     pub fn last_clearing_prices(&self) -> &HashMap<MarketId, Vec<Nanos>> {
         self.price_tracker.last_clearing_prices()
     }

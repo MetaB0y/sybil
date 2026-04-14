@@ -60,27 +60,27 @@
   <div class="stats">
     <div class="stat">
       <div class="label">Markets</div>
-      <div class="value" x-text="markets.length"></div>
+      <div class="value" x-text="loaded ? markets.length : '…'"></div>
     </div>
     <div class="stat">
       <div class="label">Groups</div>
-      <div class="value" x-text="groups.length"></div>
+      <div class="value" x-text="loaded ? groups.length : '…'"></div>
     </div>
     <div class="stat">
       <div class="label">MM Balance</div>
-      <div class="value" :class="mmPnl >= 0 ? 'green' : 'red'" x-text="'$' + mmBalance"></div>
+      <div class="value" :class="mmPnl >= 0 ? 'green' : 'red'" x-text="portfolio ? '$' + mmBalance : '…'"></div>
     </div>
     <div class="stat">
       <div class="label">MM PnL</div>
-      <div class="value" :class="mmPnl >= 0 ? 'green' : 'red'" x-text="(mmPnl >= 0 ? '+$' : '-$') + Math.abs(mmPnl).toLocaleString()"></div>
+      <div class="value" :class="mmPnl >= 0 ? 'green' : 'red'" x-text="portfolio ? ((mmPnl >= 0 ? '+$' : '-$') + Math.abs(mmPnl).toLocaleString()) : '…'"></div>
     </div>
     <div class="stat">
       <div class="label">Positions</div>
-      <div class="value" x-text="mmPositions"></div>
+      <div class="value" x-text="portfolio ? mmPositions : '…'"></div>
     </div>
     <div class="stat">
       <div class="label">Last Block Volume</div>
-      <div class="value" x-text="'$' + lastVolume"></div>
+      <div class="value" x-text="recentBlocks.length ? '$' + lastVolume : '…'"></div>
     </div>
   </div>
 
@@ -171,6 +171,7 @@ function dashboard() {
     recentBlocks: [],
     selectedGroup: null,
     mmAccountId: 0,
+    loaded: false,
 
     get filteredMarkets() {
       if (!this.selectedGroup) return this.markets;
@@ -224,29 +225,34 @@ function dashboard() {
 
     async poll() {
       try {
-        const [h, m, g] = await Promise.all([
+        const [h, m, g, ...portfolios] = await Promise.all([
           fetch('/v1/health').then(r => r.json()),
           fetch('/v1/markets').then(r => r.json()),
           fetch('/v1/markets/groups').then(r => r.json()),
+          ...[0, 1, 2, 3].map(id =>
+            fetch('/v1/accounts/' + id + '/portfolio')
+              .then(r => r.ok ? r.json() : null)
+              .catch(() => null)
+          ),
         ]);
         this.health = h;
         this.markets = m.sort((a, b) => (b.volume_nanos || 0) - (a.volume_nanos || 0));
         this.groups = g;
+        this.loaded = true;
 
-        // Find MM account — scan first few accounts, pick the one with most positions
-        let bestPortfolio = null;
-        for (const id of [0, 1, 2, 3]) {
-          try {
-            const resp = await fetch('/v1/accounts/' + id + '/portfolio');
-            if (!resp.ok) continue;
-            const p = await resp.json();
-            if (!bestPortfolio || (p.positions || []).length > (bestPortfolio.positions || []).length) {
-              bestPortfolio = p;
-              this.mmAccountId = id;
-            }
-          } catch {}
+        // Pick the account with the most positions as the MM.
+        let best = null, bestIdx = 0;
+        portfolios.forEach((p, i) => {
+          if (!p) return;
+          if (!best || (p.positions || []).length > (best.positions || []).length) {
+            best = p;
+            bestIdx = i;
+          }
+        });
+        if (best) {
+          this.portfolio = best;
+          this.mmAccountId = bestIdx;
         }
-        if (bestPortfolio) this.portfolio = bestPortfolio;
       } catch (e) {
         console.error('poll failed:', e);
       }

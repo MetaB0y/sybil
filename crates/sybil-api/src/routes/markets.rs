@@ -68,39 +68,42 @@ fn build_market_response(
 pub async fn list_markets(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<MarketResponse>>, AppError> {
-    let markets = state.sequencer.list_markets().await?;
-    let prices = state.sequencer.get_market_prices().await?;
-    let statuses = state.sequencer.get_all_market_statuses().await?;
+    let (markets, prices, statuses, volumes, metadata) = tokio::try_join!(
+        state.sequencer.list_markets(),
+        state.sequencer.get_market_prices(),
+        state.sequencer.get_all_market_statuses(),
+        state.sequencer.get_all_market_volumes(),
+        state.sequencer.get_all_market_metadata(),
+    )?;
 
     let ref_prices = state.reference_prices.read().await;
     let market_extra = state.market_extra.read().await;
 
-    let mut response = Vec::new();
-    for m in markets.iter() {
-        let volume = state.sequencer.get_market_volume(m.id).await?;
-        let market_prices = prices.get(&m.id);
-        let status = statuses
-            .get(&m.id)
-            .cloned()
-            .unwrap_or(matching_sequencer::MarketStatus::Active);
-        let metadata = state.sequencer.get_market_metadata(m.id).await?;
-
-        response.push(build_market_response(
-            m.id.0,
-            m.name.clone(),
-            market_prices.and_then(|p| p.first().copied()),
-            market_prices.and_then(|p| p.get(1).copied()),
-            &status,
-            metadata.as_ref(),
-            MarketExtraInfo {
-                volume,
-                reference_price_nanos: ref_prices.get(&m.id.0).copied(),
-                external_url: market_extra
-                    .get(&m.id.0)
-                    .and_then(|e| e.external_url.clone()),
-            },
-        ));
-    }
+    let response: Vec<MarketResponse> = markets
+        .iter()
+        .map(|m| {
+            let market_prices = prices.get(&m.id);
+            let status = statuses
+                .get(&m.id)
+                .cloned()
+                .unwrap_or(matching_sequencer::MarketStatus::Active);
+            build_market_response(
+                m.id.0,
+                m.name.clone(),
+                market_prices.and_then(|p| p.first().copied()),
+                market_prices.and_then(|p| p.get(1).copied()),
+                &status,
+                metadata.get(&m.id),
+                MarketExtraInfo {
+                    volume: volumes.get(&m.id).copied().unwrap_or(0),
+                    reference_price_nanos: ref_prices.get(&m.id.0).copied(),
+                    external_url: market_extra
+                        .get(&m.id.0)
+                        .and_then(|e| e.external_url.clone()),
+                },
+            )
+        })
+        .collect();
 
     Ok(Json(response))
 }

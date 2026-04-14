@@ -102,6 +102,12 @@ pub enum Message {
         market_id: MarketId,
         respond_to: oneshot::Sender<u64>,
     },
+    GetAllMarketVolumes {
+        respond_to: oneshot::Sender<HashMap<MarketId, u64>>,
+    },
+    GetAllMarketMetadata {
+        respond_to: oneshot::Sender<HashMap<MarketId, MarketMetadata>>,
+    },
     // --- New messages for enriched API ---
     GetPortfolio {
         account_id: AccountId,
@@ -475,6 +481,12 @@ impl SequencerActor {
                 respond_to,
             } => {
                 let _ = respond_to.send(self.sequencer.market_volume(market_id));
+            }
+            Message::GetAllMarketVolumes { respond_to } => {
+                let _ = respond_to.send(self.sequencer.market_volumes().clone());
+            }
+            Message::GetAllMarketMetadata { respond_to } => {
+                let _ = respond_to.send(self.sequencer.market_metadata_all().clone());
             }
             Message::GetPortfolio {
                 account_id,
@@ -1168,6 +1180,28 @@ impl SequencerHandle {
                 market_id,
                 respond_to: tx,
             })
+            .await
+            .map_err(|_| SequencerError::ActorGone)?;
+        rx.await.map_err(|_| SequencerError::ActorGone)
+    }
+
+    pub async fn get_all_market_volumes(
+        &self,
+    ) -> Result<HashMap<MarketId, u64>, SequencerError> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(Message::GetAllMarketVolumes { respond_to: tx })
+            .await
+            .map_err(|_| SequencerError::ActorGone)?;
+        rx.await.map_err(|_| SequencerError::ActorGone)
+    }
+
+    pub async fn get_all_market_metadata(
+        &self,
+    ) -> Result<HashMap<MarketId, MarketMetadata>, SequencerError> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(Message::GetAllMarketMetadata { respond_to: tx })
             .await
             .map_err(|_| SequencerError::ActorGone)?;
         rx.await.map_err(|_| SequencerError::ActorGone)

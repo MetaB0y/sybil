@@ -56,6 +56,10 @@ impl MarketLifecycle {
         self.market_metadata.get(&market_id)
     }
 
+    pub fn market_metadata_all(&self) -> &HashMap<MarketId, MarketMetadata> {
+        &self.market_metadata
+    }
+
     /// Consult the oracle and update status. Returns the action for the caller to execute.
     ///
     /// The caller (BlockSequencer) is responsible for acting on the result:
