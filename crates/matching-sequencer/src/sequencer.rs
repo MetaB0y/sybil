@@ -13,7 +13,7 @@ use sybil_verifier::{
 use tracing::{debug, error};
 
 use crate::account::{Account, AccountId, AccountStore};
-use crate::block::{hash_header, Block, BlockHeader, BlockProduction};
+use crate::block::{hash_header, Block, BlockFlowMetrics, BlockHeader, BlockProduction};
 use crate::canonical_state::{snapshot_account, CanonicalState};
 use crate::error::{Rejection, RejectionReason, SequencerError};
 use crate::market_info::{AccountFillRecord, MarketMetadata, PricePoint};
@@ -986,6 +986,12 @@ impl BlockSequencer {
             }
         }
 
+        let fresh_submissions = submissions.len();
+        let fresh_orders_received: usize = submissions
+            .iter()
+            .map(|submission| submission.orders.len())
+            .sum();
+
         let mut all_orders: Vec<Order> = Vec::new();
         let mut all_mm_constraints: Vec<MmConstraint> = Vec::new();
         let mut rejections: Vec<Rejection> = Vec::new();
@@ -1027,6 +1033,7 @@ impl BlockSequencer {
             });
             all_orders.push(order.clone());
         }
+        let carried_resting_orders = all_orders.len();
 
         // ── Process new submissions ──
         let mut stp = GroupCoverageTracker::new(&self.market_groups);
@@ -1174,6 +1181,8 @@ impl BlockSequencer {
             all_orders.extend(accepted_orders);
         }
 
+        let fresh_orders_accepted = all_orders.len().saturating_sub(carried_resting_orders);
+        let rejected_orders = rejections.len();
         let order_ids: Vec<u64> = all_orders.iter().map(|o| o.id).collect();
         let orders_submitted = all_orders.len() + rejections.len();
 
@@ -1240,6 +1249,7 @@ impl BlockSequencer {
 
         // Update order book: release filled orders' reservations, adjust partial fills
         self.order_book.settle(&fills, &mm_order_ids_set);
+        let pending_orders_after = self.order_book.len();
 
         let previous_header = self.last_header.as_ref().map(|h| WitnessBlockHeader {
             height: h.height,
@@ -1310,6 +1320,14 @@ impl BlockSequencer {
             block,
             pipeline: pipeline_result,
             witness,
+            flow_metrics: BlockFlowMetrics {
+                fresh_submissions,
+                fresh_orders_received,
+                carried_resting_orders,
+                fresh_orders_accepted,
+                rejected_orders,
+                pending_orders_after,
+            },
         }
     }
 }

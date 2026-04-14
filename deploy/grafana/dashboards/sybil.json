@@ -61,12 +61,27 @@
       }
     },
     {
-      "title": "Orders per Block",
+      "title": "Pending Orders",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [{ "expr": "sybil_pending_orders", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 5000 }] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Order Flow per Block",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
       "targets": [
-        { "expr": "rate(sybil_orders_per_block_sum[1m]) / rate(sybil_orders_per_block_count[1m])", "legendFormat": "avg orders/block", "refId": "A" }
+        { "expr": "rate(sybil_batch_orders_per_block_sum[1m]) / rate(sybil_batch_orders_per_block_count[1m])", "legendFormat": "batch orders", "refId": "A" },
+        { "expr": "rate(sybil_fresh_orders_per_block_sum[1m]) / rate(sybil_fresh_orders_per_block_count[1m])", "legendFormat": "fresh orders", "refId": "B" },
+        { "expr": "rate(sybil_carried_resting_orders_per_block_sum[1m]) / rate(sybil_carried_resting_orders_per_block_count[1m])", "legendFormat": "carried resting", "refId": "C" },
+        { "expr": "rate(sybil_fresh_accepted_orders_per_block_sum[1m]) / rate(sybil_fresh_accepted_orders_per_block_count[1m])", "legendFormat": "fresh accepted", "refId": "D" },
+        { "expr": "rate(sybil_rejections_per_block_sum[1m]) / rate(sybil_rejections_per_block_count[1m])", "legendFormat": "rejections", "refId": "E" }
       ],
       "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] }
     },
@@ -117,6 +132,27 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
       "datasource": { "type": "tempo" },
       "targets": [{ "queryType": "nativeSearch", "serviceName": "sybil-api", "refId": "A" }]
+    },
+    {
+      "title": "Submission Outcomes",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [
+        { "expr": "sum(rate(sybil_order_submissions_total[5m])) by (source, result)", "legendFormat": "{{source}} {{result}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 15 } }, "overrides": [] }
+    },
+    {
+      "title": "Orders Received Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [
+        { "expr": "sum(rate(sybil_orders_received_total[5m])) by (source, result)", "legendFormat": "{{source}} {{result}}", "refId": "A" },
+        { "expr": "sum(rate(sybil_order_cancels_total[5m])) by (source, result)", "legendFormat": "cancel {{source}} {{result}}", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 15 } }, "overrides": [] }
     }
   ],
   "schemaVersion": 39,

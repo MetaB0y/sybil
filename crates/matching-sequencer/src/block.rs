@@ -14,6 +14,17 @@ pub struct BlockProduction {
     pub block: Block,
     pub pipeline: PipelineResult,
     pub witness: BlockWitness,
+    pub flow_metrics: BlockFlowMetrics,
+}
+
+/// Per-block flow composition for metrics and observability.
+pub struct BlockFlowMetrics {
+    pub fresh_submissions: usize,
+    pub fresh_orders_received: usize,
+    pub carried_resting_orders: usize,
+    pub fresh_orders_accepted: usize,
+    pub rejected_orders: usize,
+    pub pending_orders_after: usize,
 }
 
 /// Header of a sequencer block.

@@ -283,12 +283,53 @@ impl SequencerActor {
     fn record_metrics(&self, bp: &BlockProduction, mempool_size: usize) {
         metrics::counter!("sybil_blocks_produced").increment(1);
         metrics::gauge!("sybil_block_height").set(bp.block.header.height as f64);
+        // Backward-compatible alias: this is the full solver batch size, not fresh intake.
         metrics::histogram!("sybil_orders_per_block").record(bp.block.header.order_count as f64);
+        metrics::histogram!("sybil_batch_orders_per_block")
+            .record(bp.block.header.order_count as f64);
+        metrics::histogram!("sybil_fresh_submissions_per_block")
+            .record(bp.flow_metrics.fresh_submissions as f64);
+        metrics::histogram!("sybil_fresh_orders_per_block")
+            .record(bp.flow_metrics.fresh_orders_received as f64);
+        metrics::histogram!("sybil_carried_resting_orders_per_block")
+            .record(bp.flow_metrics.carried_resting_orders as f64);
+        metrics::histogram!("sybil_fresh_accepted_orders_per_block")
+            .record(bp.flow_metrics.fresh_orders_accepted as f64);
+        metrics::histogram!("sybil_rejections_per_block")
+            .record(bp.flow_metrics.rejected_orders as f64);
         metrics::histogram!("sybil_fills_per_block").record(bp.block.header.fill_count as f64);
         metrics::gauge!("sybil_welfare_nanos").set(bp.block.total_welfare as f64);
         metrics::gauge!("sybil_volume_nanos").set(bp.block.total_volume as f64);
         metrics::gauge!("sybil_mempool_size").set(mempool_size as f64);
+        metrics::gauge!("sybil_pending_orders").set(bp.flow_metrics.pending_orders_after as f64);
         metrics::histogram!("sybil_solve_time_seconds").record(bp.pipeline.total_time_secs);
+    }
+
+    fn record_submission_metrics(
+        &self,
+        source: &'static str,
+        order_count: usize,
+        result: &Result<(), SequencerError>,
+    ) {
+        let outcome = if result.is_ok() {
+            "accepted"
+        } else {
+            "rejected"
+        };
+        metrics::counter!("sybil_order_submissions_total", "source" => source, "result" => outcome)
+            .increment(1);
+        metrics::counter!("sybil_orders_received_total", "source" => source, "result" => outcome)
+            .increment(order_count as u64);
+    }
+
+    fn record_cancel_metrics(&self, source: &'static str, result: &Result<(), SequencerError>) {
+        let outcome = if result.is_ok() {
+            "accepted"
+        } else {
+            "rejected"
+        };
+        metrics::counter!("sybil_order_cancels_total", "source" => source, "result" => outcome)
+            .increment(1);
     }
 
     /// Append block to ring buffer, evicting oldest if at capacity.
@@ -305,15 +346,19 @@ impl SequencerActor {
                 submission,
                 respond_to,
             } => {
+                let order_count = submission.orders.len();
                 let result = self.mempool.submit(submission);
+                self.record_submission_metrics("unsigned", order_count, &result);
                 let _ = respond_to.send(result);
             }
             Message::SubmitSignedOrder { signed, respond_to } => {
                 let result = self.handle_signed_order(signed);
+                self.record_submission_metrics("signed", 1, &result);
                 let _ = respond_to.send(result);
             }
             Message::CancelSignedOrder { signed, respond_to } => {
                 let result = self.handle_signed_cancel(signed);
+                self.record_cancel_metrics("signed", &result);
                 let _ = respond_to.send(result);
             }
             Message::GetLatestBlock { respond_to } => {
