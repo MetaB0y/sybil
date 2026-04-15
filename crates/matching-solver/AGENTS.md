@@ -1,61 +1,61 @@
-# matching-solver
+# AGENTS.md
 
-FBA (Frequent Batch Auction) solver for prediction markets.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this crate.
 
 ## Purpose
 
-Solves the matching problem: given orders and liquidity, find clearing prices and fills
-that maximize welfare while respecting constraints.
+The **matching-solver** crate is the core optimization engine for welfare-maximizing order matching in Frequent Batch Auctions (FBA). It solves an NP-hard problem via convex programs.
 
-## Architecture
+**Key metric**: `welfare = Σ (limit_price - clearing_price) × fill_qty`
 
-The solver operates in phases via the `Pipeline`:
+## Architecture Notes
 
-1. **Price Discovery** (`LocalSolver`): Find clearing prices per market
-2. **Negrisk Arbitrage** (`NegriskSolver`): Exploit price inconsistencies
-3. **MM Allocation** (`MmAllocator`): Respect market maker budget constraints
-4. **Partial Solvers**: MILP and other optional solvers for alternative solutions
+Before modifying this crate, read these vault notes (`docs/architecture/`):
+- [[Solver Landscape]] — comparison of all solver approaches
+- [[LP Solver]] / [[EG Solver]] / [[Conic Solver]] / [[MILP Solver]] / [[Decomposed Solver]] — per-solver design
+- [[The LP Core]] — the LP formulation all solvers build on
+- [[MM Budget Constraint]] — how market maker budgets interact with solving
+- [[LP Duality and Clearing Prices]] — dual variables as clearing prices
+- [[Welfare Maximization]] — objective function design and tradeoffs
 
-## Key Components
+## Solver Types
 
-### LocalSolver (`local_solver.rs`)
-Per-market price discovery. Finds where supply/demand curves cross.
-This IS the FBA clearing logic for single markets.
+| Solver | File | Feature | Purpose |
+|--------|------|---------|---------|
+| **LpSolver** | `lp_solver.rs` | `lp` | LP via HiGHS with entropy smoothing. Best welfare across all presets. |
+| **EgSolver** | `eg_solver.rs` | `lp` | Eisenberg-Gale / Fisher market formulation. |
+| **ConicSolver** | `conic_solver.rs` | `conic` | Conic EG via Clarabel. |
+| **IterLpSolver** | `iterative_lp_solver.rs` | `lp` | Iterative LP with EG μ-boosted MM weights. |
+| **MilpSolver** | `milp.rs` | `milp` | MIQCQP via SCIP (russcip). Exact optimal with timeout. |
+| **DecomposedSolver** | `decomposed.rs` | `lp` (+`parallel`) | Per-market-group decomposition with mirror descent budget coordination. Wraps any ComponentSolver. |
 
-### NegriskSolver (`specialized/negrisk.rs`)
-Detects and exploits arbitrage when prices for mutually exclusive outcomes
-don't sum to exactly $1. Creates welfare-adding fills instead of adjusting prices.
+All solvers return a `PipelineResult` which contains `MatchingResult` (fills + welfare), clearing prices, and timing data.
 
-### MmAllocator (`mm_allocator.rs`)
-Handles market maker budget constraints. Uses Lagrangian relaxation
-to activate orders while respecting per-MM budgets.
+## Key Files
 
-### MilpSolver (`milp.rs`, feature-gated)
-Optimal ILP formulation of the matching problem:
-- Provably optimal welfare (given time budget)
-- Feature-gated behind `milp` (requires HiGHS)
+| File | Purpose |
+|------|---------|
+| `lib.rs` | Crate root, `MatchingResult` type |
+| `result.rs` | `PipelineResult`, `PriceDiscoveryResult`, timing/stats types |
+| `lp_solver.rs` | LP-based solver via HiGHS |
+| `eg_solver.rs` | Eisenberg-Gale solver |
+| `conic_solver.rs` | Conic solver via Clarabel |
+| `milp.rs` | SCIP-based MIQCQP solver |
+| `verifier.rs` | Result verification for ZK integration |
+| `decomposed.rs` | Per-market-group decomposition with rayon parallelism (`parallel` feature) |
+| `viz.rs` | Visualization snapshots and ASCII output |
 
-### GreedySolver (`greedy.rs`)
-Simple heuristic that fills orders by welfare potential.
-Used as fallback or for comparison.
+## Testing
 
-### Pipeline (`pipeline.rs`)
-Configurable pipeline combining the above components.
-Use `Pipeline::with_negrisk()` for the recommended configuration.
-
-## Usage
-
-```rust
-use matching_solver::Pipeline;
-
-let pipeline = Pipeline::with_negrisk();
-let result = pipeline.solve(&problem);
+```bash
+cargo test -p matching-solver                           # Basic tests
+cargo test -p matching-solver --features lp,conic,milp  # All solvers
 ```
 
-## Dependencies
+## Design Principles
 
-- `matching-engine`: Core types
-
-## Optional Features
-
-- `milp`: Enable MILP solver for optimal (but slow) solutions
+- **All integer arithmetic**: Prices/quantities in nanos (1 dollar = 1,000,000,000 nanos)
+- **Payoff vectors**: Orders are payoff vectors over market states (single-market binary for now)
+- **Welfare maximization**: Objective is `Σ (limit_price - clearing_price) * fill_qty`
+- **Group minting**: LP/EG/Conic handle cross-market arbitrage via gmint variables
+- **Verification**: `verifier.rs` validates solver output for correctness (ZK-ready)
