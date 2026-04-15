@@ -11,6 +11,7 @@ path = "src/bin/sybil_sim.rs"
 [dependencies]
 matching-engine = { path = "../matching-engine" }
 matching-solver = { path = "../matching-solver", features = ["lp"] }
+sybil-canonical = { path = "../sybil-canonical" }
 sybil-oracle = { path = "../sybil-oracle" }
 sybil-verifier = { path = "../sybil-verifier" }
 rand = { workspace = true }

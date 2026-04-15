@@ -1,0 +1,13 @@
+[package]
+name = "sybil-canonical"
+version = "0.1.0"
+edition = "2021"
+description = "Canonical signable payloads shared across Sybil clients"
+
+[dependencies]
+borsh = { version = "1.6.1", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+hex = "0.4"
+insta = "1.47.2"

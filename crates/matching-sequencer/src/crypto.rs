@@ -7,9 +7,13 @@
 use std::hash::{Hash, Hasher};
 
 use crate::error::SequencerError;
-use matching_engine::{ConditionDir, Order, MAX_MARKETS_PER_ORDER, MAX_STATES};
+use matching_engine::Order;
 use p256::ecdsa::signature::{Signer, Verifier};
 use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
+use sybil_canonical::{
+    ConditionDir as CanonicalConditionDir, MarketId as CanonicalMarketId, Order as CanonicalOrder,
+    PriceCondition as CanonicalPriceCondition,
+};
 
 /// A P256 public key (secp256r1 / passkey-compatible).
 #[derive(Clone, Debug)]
@@ -56,56 +60,40 @@ pub struct SignedCancel {
     pub signature: Signature,
 }
 
+fn to_canonical_order(order: &Order) -> CanonicalOrder {
+    let mut markets = [CanonicalMarketId::NONE; sybil_canonical::MAX_MARKETS_PER_ORDER];
+    for (dst, src) in markets.iter_mut().zip(order.markets.iter()) {
+        *dst = CanonicalMarketId(src.0);
+    }
+
+    let condition = order
+        .condition
+        .as_ref()
+        .map(|condition| CanonicalPriceCondition {
+            market: CanonicalMarketId(condition.market.0),
+            threshold: condition.threshold,
+            direction: match condition.direction {
+                matching_engine::ConditionDir::Above => CanonicalConditionDir::Above,
+                matching_engine::ConditionDir::Below => CanonicalConditionDir::Below,
+            },
+        });
+
+    CanonicalOrder {
+        markets,
+        num_markets: order.num_markets,
+        payoffs: order.payoffs,
+        num_states: order.num_states,
+        limit_price: order.limit_price,
+        max_fill: order.max_fill,
+        condition,
+    }
+}
+
 /// Deterministic canonical byte encoding of an Order for signing.
-///
-/// Layout (all integers little-endian):
-/// - markets: 5 × u32 (MarketId.0)
-/// - num_markets: u8
-/// - payoffs: 32 × i8
-/// - num_states: u8
-/// - limit_price: u64
-/// - max_fill: u64
-/// - condition present: u8 (0 or 1)
-///   if present:
-///   - condition.market: u32
-///   - condition.threshold: u64
-///   - condition.direction: u8 (0=Above, 1=Below)
 ///
 /// NOTE: `id` is excluded because the sequencer assigns IDs after submission.
 pub fn canonical_order_bytes(order: &Order) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(128);
-
-    // Markets (fixed-size array)
-    for i in 0..MAX_MARKETS_PER_ORDER {
-        buf.extend_from_slice(&order.markets[i].0.to_le_bytes());
-    }
-    buf.push(order.num_markets);
-
-    // Payoffs (fixed-size array)
-    for i in 0..MAX_STATES {
-        buf.push(order.payoffs[i] as u8);
-    }
-    buf.push(order.num_states);
-
-    // Price and fill
-    buf.extend_from_slice(&order.limit_price.to_le_bytes());
-    buf.extend_from_slice(&order.max_fill.to_le_bytes());
-
-    // Condition
-    match &order.condition {
-        None => buf.push(0),
-        Some(cond) => {
-            buf.push(1);
-            buf.extend_from_slice(&cond.market.0.to_le_bytes());
-            buf.extend_from_slice(&cond.threshold.to_le_bytes());
-            buf.push(match cond.direction {
-                ConditionDir::Above => 0,
-                ConditionDir::Below => 1,
-            });
-        }
-    }
-
-    buf
+    sybil_canonical::canonical_order_bytes(&to_canonical_order(order))
 }
 
 /// Deterministic canonical byte encoding of a cancel request for signing.
@@ -114,10 +102,7 @@ pub fn canonical_order_bytes(order: &Order) -> Vec<u8> {
 /// - account_id: u64
 /// - order_id: u64
 pub fn canonical_cancel_bytes(account_id: crate::account::AccountId, order_id: u64) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(16);
-    buf.extend_from_slice(&account_id.0.to_le_bytes());
-    buf.extend_from_slice(&order_id.to_le_bytes());
-    buf
+    sybil_canonical::canonical_cancel_bytes(account_id.0, order_id)
 }
 
 /// Verify a signed order's P256 ECDSA signature.

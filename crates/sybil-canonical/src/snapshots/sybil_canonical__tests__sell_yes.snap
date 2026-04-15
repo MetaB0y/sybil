@@ -1,0 +1,5 @@
+---
+source: crates/sybil-canonical/src/lib.rs
+expression: "hex::encode(canonical_order_bytes(&order))"
+---
+07000000ffffffffffffffffffffffffffffffff01ff000000000000000000000000000000000000000000000000000000000000000240fc541900000000030000000000000000

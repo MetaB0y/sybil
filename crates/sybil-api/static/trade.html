@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sybil — Trade</title>
+<script type="module">
+import * as borsh from 'https://esm.sh/borsh@2.0.0';
+window.borsh = borsh;
+window.borshReady = Promise.resolve(borsh);
+window.dispatchEvent(new Event('borsh-ready'));
+</script>
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
 <style>
   :root { --bg: #0a0a0f; --surface: #12121a; --border: #1e1e2e; --text: #e0e0e8; --dim: #6b6b80; --green: #4ade80; --red: #f87171; --blue: #60a5fa; --yellow: #fbbf24; }
@@ -522,50 +528,81 @@
 const MAX_MARKETS = 5;
 const MAX_STATES = 32;
 const MARKET_NONE = 0xFFFFFFFF;
+const CONDITION_DIR_SCHEMA = {
+  enum: [
+    { struct: { Above: {} } },
+    { struct: { Below: {} } },
+  ],
+};
+const PRICE_CONDITION_SCHEMA = {
+  struct: {
+    market: 'u32',
+    threshold: 'u64',
+    direction: CONDITION_DIR_SCHEMA,
+  },
+};
+const ORDER_SCHEMA = {
+  struct: {
+    markets: { array: { type: 'u32', len: MAX_MARKETS } },
+    num_markets: 'u8',
+    payoffs: { array: { type: 'i8', len: MAX_STATES } },
+    num_states: 'u8',
+    limit_price: 'u64',
+    max_fill: 'u64',
+    condition: { option: PRICE_CONDITION_SCHEMA },
+  },
+};
+const CANCEL_SCHEMA = {
+  struct: {
+    account_id: 'u64',
+    order_id: 'u64',
+  },
+};
 
-function canonicalOrderBytes(marketIds, payoffs, limitPrice, maxFill) {
-  const buf = new ArrayBuffer(MAX_MARKETS * 4 + 1 + MAX_STATES + 1 + 8 + 8 + 1);
-  const view = new DataView(buf);
-  let off = 0;
-
-  // 5 x u32 LE market IDs
-  for (let i = 0; i < MAX_MARKETS; i++) {
-    view.setUint32(off, i < marketIds.length ? marketIds[i] : MARKET_NONE, true);
-    off += 4;
-  }
-  // num_markets: u8
-  view.setUint8(off++, marketIds.length);
-
-  // 32 x i8 payoffs
-  for (let i = 0; i < MAX_STATES; i++) {
-    view.setInt8(off++, i < payoffs.length ? payoffs[i] : 0);
-  }
-  // num_states: u8
-  const numStates = 1 << marketIds.length;
-  view.setUint8(off++, numStates);
-
-  // limit_price: u64 LE
-  writeBigUint64LE(view, off, BigInt(limitPrice)); off += 8;
-  // max_fill: u64 LE
-  writeBigUint64LE(view, off, BigInt(maxFill)); off += 8;
-
-  // condition: u8 (0 = none)
-  view.setUint8(off++, 0);
-
-  return new Uint8Array(buf, 0, off);
+async function getBorsh() {
+  if (window.borsh) return window.borsh;
+  if (window.borshReady) return window.borshReady;
+  return new Promise(resolve => {
+    window.addEventListener('borsh-ready', () => resolve(window.borsh), { once: true });
+  });
 }
 
-function canonicalCancelBytes(accountId, orderId) {
-  const buf = new ArrayBuffer(16);
-  const view = new DataView(buf);
-  writeBigUint64LE(view, 0, BigInt(accountId));
-  writeBigUint64LE(view, 8, BigInt(orderId));
-  return new Uint8Array(buf);
+function padMarketIds(marketIds) {
+  return Array.from({ length: MAX_MARKETS }, (_, i) => marketIds[i] ?? MARKET_NONE);
 }
 
-function writeBigUint64LE(view, offset, val) {
-  view.setUint32(offset, Number(val & 0xFFFFFFFFn), true);
-  view.setUint32(offset + 4, Number(val >> 32n), true);
+function padPayoffs(payoffs) {
+  return Array.from({ length: MAX_STATES }, (_, i) => payoffs[i] ?? 0);
+}
+
+function encodeCondition(condition) {
+  if (!condition) return null;
+  return {
+    market: condition.market,
+    threshold: BigInt(condition.threshold),
+    direction: condition.direction === 'Above' ? { Above: {} } : { Below: {} },
+  };
+}
+
+async function canonicalOrderBytes(marketIds, payoffs, limitPrice, maxFill, condition = null) {
+  const borsh = await getBorsh();
+  return borsh.serialize(ORDER_SCHEMA, {
+    markets: padMarketIds(marketIds),
+    num_markets: marketIds.length,
+    payoffs: padPayoffs(payoffs),
+    num_states: 1 << marketIds.length,
+    limit_price: BigInt(limitPrice),
+    max_fill: BigInt(maxFill),
+    condition: encodeCondition(condition),
+  });
+}
+
+async function canonicalCancelBytes(accountId, orderId) {
+  const borsh = await getBorsh();
+  return borsh.serialize(CANCEL_SCHEMA, {
+    account_id: BigInt(accountId),
+    order_id: BigInt(orderId),
+  });
 }
 
 function toHex(buf) {
@@ -1000,7 +1037,7 @@ function tradingApp() {
         : [0, -1];
       const marketIds = [marketId];
 
-      const canonical = canonicalOrderBytes(marketIds, payoffs, priceNanos, qty);
+      const canonical = await canonicalOrderBytes(marketIds, payoffs, priceNanos, qty);
 
       const sigBuf = await crypto.subtle.sign(
         { name: 'ECDSA', hash: 'SHA-256' },
@@ -1043,7 +1080,7 @@ function tradingApp() {
 
       this.submitting = true;
       try {
-        const canonical = canonicalCancelBytes(this.accountId, order.order_id);
+        const canonical = await canonicalCancelBytes(this.accountId, order.order_id);
         const sigBuf = await crypto.subtle.sign(
           { name: 'ECDSA', hash: 'SHA-256' },
           this._privateKey,
