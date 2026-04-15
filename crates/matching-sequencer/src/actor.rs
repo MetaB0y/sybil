@@ -1,11 +1,13 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use tokio::sync::{broadcast, mpsc, oneshot};
+use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort, SupervisionEvent};
+use tokio::sync::broadcast;
 use tokio::time::{interval_at, Instant};
 
 use matching_engine::{MarketGroup, MarketId, MarketSet, Nanos};
-use sybil_oracle::{MarketStatus, ResolutionRecord};
+use sybil_oracle::{MarketStatus, Oracle, ResolutionRecord};
 
 use crate::account::{Account, AccountId};
 use crate::block::{Block, BlockProduction};
@@ -18,141 +20,67 @@ use crate::mempool::{Mempool, MempoolConfig};
 use crate::portfolio::{self, PortfolioSummary};
 use crate::sequencer::{BlockSequencer, OrderSubmission, PendingOrderInfo, PreparedBlock};
 
-/// Messages sent from handles to the actor.
-pub enum Message {
-    SubmitOrder {
-        submission: OrderSubmission,
-        respond_to: oneshot::Sender<Result<(), SequencerError>>,
-    },
-    SubmitSignedOrder {
-        signed: SignedOrder,
-        respond_to: oneshot::Sender<Result<(), SequencerError>>,
-    },
-    CancelSignedOrder {
-        signed: SignedCancel,
-        respond_to: oneshot::Sender<Result<(), SequencerError>>,
-    },
-    GetLatestBlock {
-        respond_to: oneshot::Sender<Option<Block>>,
-    },
-    GetAccount {
-        account_id: AccountId,
-        respond_to: oneshot::Sender<Option<Account>>,
-    },
-    GetStateRoot {
-        respond_to: oneshot::Sender<[u8; 32]>,
-    },
-    /// Force-produce a block immediately (for testing).
-    ProduceBlock {
-        respond_to: oneshot::Sender<Result<Block, SequencerError>>,
-    },
-    // --- New messages for API support ---
-    CreateAccount {
-        initial_balance: i64,
-        respond_to: oneshot::Sender<Account>,
-    },
-    FundAccount {
-        account_id: AccountId,
-        amount: i64,
-        respond_to: oneshot::Sender<Result<Account, SequencerError>>,
-    },
-    RegisterPubkey {
-        account_id: AccountId,
-        pubkey: PublicKey,
-        respond_to: oneshot::Sender<Result<(), SequencerError>>,
-    },
-    ListMarkets {
-        respond_to: oneshot::Sender<MarketSet>,
-    },
-    CreateMarket {
-        name: String,
-        respond_to: oneshot::Sender<MarketId>,
-    },
-    CreateMarketGroup {
-        name: String,
-        market_ids: Vec<MarketId>,
-        respond_to: oneshot::Sender<MarketGroup>,
-    },
-    ListMarketGroups {
-        respond_to: oneshot::Sender<Vec<MarketGroup>>,
-    },
-    ResolveMarket {
-        market_id: MarketId,
-        payout_nanos: Nanos,
-        respond_to: oneshot::Sender<Result<ResolutionRecord, SequencerError>>,
-    },
-    GetMarketStatus {
-        market_id: MarketId,
-        respond_to: oneshot::Sender<MarketStatus>,
-    },
-    GetAllMarketStatuses {
-        respond_to: oneshot::Sender<HashMap<MarketId, MarketStatus>>,
-    },
-    GetBlock {
-        height: u64,
-        respond_to: oneshot::Sender<Result<Block, SequencerError>>,
-    },
-    SubscribeBlocks {
-        respond_to: oneshot::Sender<broadcast::Receiver<Block>>,
-    },
-    GetMarketPrices {
-        respond_to: oneshot::Sender<HashMap<MarketId, Vec<Nanos>>>,
-    },
-    GetMarketVolume {
-        market_id: MarketId,
-        respond_to: oneshot::Sender<u64>,
-    },
-    GetAllMarketVolumes {
-        respond_to: oneshot::Sender<HashMap<MarketId, u64>>,
-    },
-    GetAllMarketMetadata {
-        respond_to: oneshot::Sender<HashMap<MarketId, MarketMetadata>>,
-    },
-    // --- New messages for enriched API ---
-    GetPortfolio {
-        account_id: AccountId,
-        respond_to: oneshot::Sender<Result<PortfolioSummary, SequencerError>>,
-    },
-    CreateMarketWithMetadata {
-        name: String,
-        metadata: MarketMetadata,
-        respond_to: oneshot::Sender<MarketId>,
-    },
-    GetMarketMetadata {
-        market_id: MarketId,
-        respond_to: oneshot::Sender<Option<MarketMetadata>>,
-    },
-    GetPriceHistory {
-        market_id: MarketId,
-        from_ms: Option<u64>,
-        to_ms: Option<u64>,
-        respond_to: oneshot::Sender<Vec<PricePoint>>,
-    },
-    GetAccountFills {
-        account_id: AccountId,
-        market_id: Option<MarketId>,
-        limit: usize,
-        offset: usize,
-        respond_to: oneshot::Sender<Vec<AccountFillRecord>>,
-    },
-    SearchMarkets {
-        query: MarketSearchQuery,
-        respond_to: oneshot::Sender<Vec<MarketSearchResult>>,
-    },
-    GetPendingOrders {
-        account_id: Option<AccountId>,
-        respond_to: oneshot::Sender<Vec<PendingOrderInfo>>,
-    },
-    GetMarketOrderBook {
-        market_id: MarketId,
-        respond_to: oneshot::Sender<Vec<PendingOrderInfo>>,
-    },
-    PauseBlockProduction {
-        respond_to: oneshot::Sender<()>,
-    },
-    ResumeBlockProduction {
-        respond_to: oneshot::Sender<()>,
-    },
+/// Messages sent from handles to the sequencer actor.
+pub enum SequencerMsg {
+    Tick,
+    SubmitOrder(OrderSubmission, RpcReplyPort<Result<(), SequencerError>>),
+    SubmitSignedOrder(SignedOrder, RpcReplyPort<Result<(), SequencerError>>),
+    CancelSignedOrder(SignedCancel, RpcReplyPort<Result<(), SequencerError>>),
+    GetLatestBlock(RpcReplyPort<Option<Block>>),
+    GetAccount(AccountId, RpcReplyPort<Option<Account>>),
+    GetStateRoot(RpcReplyPort<[u8; 32]>),
+    ProduceBlock(RpcReplyPort<Result<Block, SequencerError>>),
+    CreateAccount(i64, RpcReplyPort<Account>),
+    FundAccount(
+        AccountId,
+        i64,
+        RpcReplyPort<Result<Account, SequencerError>>,
+    ),
+    RegisterPubkey(
+        AccountId,
+        PublicKey,
+        RpcReplyPort<Result<(), SequencerError>>,
+    ),
+    ListMarkets(RpcReplyPort<MarketSet>),
+    CreateMarket(String, RpcReplyPort<MarketId>),
+    CreateMarketGroup(String, Vec<MarketId>, RpcReplyPort<MarketGroup>),
+    ListMarketGroups(RpcReplyPort<Vec<MarketGroup>>),
+    ResolveMarket(
+        MarketId,
+        Nanos,
+        RpcReplyPort<Result<ResolutionRecord, SequencerError>>,
+    ),
+    GetMarketStatus(MarketId, RpcReplyPort<MarketStatus>),
+    GetAllMarketStatuses(RpcReplyPort<HashMap<MarketId, MarketStatus>>),
+    GetBlock(u64, RpcReplyPort<Result<Block, SequencerError>>),
+    GetMarketPrices(RpcReplyPort<HashMap<MarketId, Vec<Nanos>>>),
+    GetMarketVolume(MarketId, RpcReplyPort<u64>),
+    GetAllMarketVolumes(RpcReplyPort<HashMap<MarketId, u64>>),
+    GetAllMarketMetadata(RpcReplyPort<HashMap<MarketId, MarketMetadata>>),
+    GetPortfolio(
+        AccountId,
+        RpcReplyPort<Result<PortfolioSummary, SequencerError>>,
+    ),
+    CreateMarketWithMetadata(String, MarketMetadata, RpcReplyPort<MarketId>),
+    GetMarketMetadata(MarketId, RpcReplyPort<Option<MarketMetadata>>),
+    GetPriceHistory(
+        MarketId,
+        Option<u64>,
+        Option<u64>,
+        RpcReplyPort<Vec<PricePoint>>,
+    ),
+    GetAccountFills(
+        AccountId,
+        Option<MarketId>,
+        usize,
+        usize,
+        RpcReplyPort<Vec<AccountFillRecord>>,
+    ),
+    SearchMarkets(MarketSearchQuery, RpcReplyPort<Vec<MarketSearchResult>>),
+    GetPendingOrders(Option<AccountId>, RpcReplyPort<Vec<PendingOrderInfo>>),
+    GetMarketOrderBook(MarketId, RpcReplyPort<Vec<PendingOrderInfo>>),
+    PauseBlockProduction(RpcReplyPort<()>),
+    ResumeBlockProduction(RpcReplyPort<()>),
 }
 
 /// A market search result enriched with metadata, prices, and volume.
@@ -169,66 +97,28 @@ pub struct MarketSearchResult {
 
 const BLOCK_HISTORY_CAPACITY: usize = 100;
 
-/// The sequencer actor. Runs in a tokio task, produces blocks on a timer.
-struct SequencerActor {
+struct SequencerActor;
+
+struct SequencerActorArgs {
     sequencer: BlockSequencer,
-    mempool: Mempool,
-    receiver: mpsc::Receiver<Message>,
-    latest_block: Option<Block>,
-    /// Recent block history (ring buffer, last N blocks).
-    block_history: std::collections::VecDeque<Block>,
-    /// Broadcast channel for new blocks (SSE).
-    block_broadcast: broadcast::Sender<Block>,
-    /// Interval between block production ticks.
+    mempool_config: MempoolConfig,
     block_interval: Duration,
-    /// Reference-counted pause: block production halts when > 0.
-    /// Multiple callers can pause independently; blocks resume only when all have resumed.
-    pause_count: u32,
-    /// Persistent store (None = in-memory only).
-    store: Option<crate::store::Store>,
+    store: Option<Arc<crate::store::Store>>,
+    block_broadcast: broadcast::Sender<Block>,
 }
 
-impl SequencerActor {
-    fn new(
-        sequencer: BlockSequencer,
-        mempool: Mempool,
-        receiver: mpsc::Receiver<Message>,
-        block_interval: Duration,
-        store: Option<crate::store::Store>,
-    ) -> Self {
-        let (block_broadcast, _) = broadcast::channel(64);
-        Self {
-            sequencer,
-            mempool,
-            receiver,
-            latest_block: None,
-            block_history: std::collections::VecDeque::new(),
-            block_broadcast,
-            block_interval,
-            pause_count: 0,
-            store,
-        }
-    }
+struct SequencerActorState {
+    sequencer: BlockSequencer,
+    mempool: Mempool,
+    latest_block: Option<Block>,
+    block_history: VecDeque<Block>,
+    block_broadcast: broadcast::Sender<Block>,
+    block_interval: Duration,
+    pause_count: u32,
+    store: Option<Arc<crate::store::Store>>,
+}
 
-    async fn run(mut self) {
-        let mut ticker = interval_at(Instant::now() + self.block_interval, self.block_interval);
-
-        loop {
-            tokio::select! {
-                _ = ticker.tick() => {
-                    self.on_tick().await;
-                }
-                msg = self.receiver.recv() => {
-                    match msg {
-                        Some(msg) => self.handle(msg).await,
-                        None => break, // all handles dropped
-                    }
-                }
-            }
-        }
-    }
-
-    /// Block production tick: functional core (produce_block) then imperative shell.
+impl SequencerActorState {
     async fn on_tick(&mut self) {
         if self.pause_count > 0 {
             return;
@@ -241,7 +131,6 @@ impl SequencerActor {
         let mempool_size = self.mempool.len();
         let submissions = self.mempool.drain();
 
-        // ── Functional core ──
         let prepared = self
             .sequencer
             .prepare_block(submissions.clone(), timestamp_ms);
@@ -264,7 +153,6 @@ impl SequencerActor {
         self.latest_block = Some(bp.block);
     }
 
-    /// Persist a prepared block before the live sequencer state advances.
     async fn persist_block(&self, prepared: &PreparedBlock) -> Result<(), SequencerError> {
         if let Some(ref store) = self.store {
             store
@@ -285,11 +173,9 @@ impl SequencerActor {
         Ok(())
     }
 
-    /// Record Prometheus metrics for a produced block.
     fn record_metrics(&self, bp: &BlockProduction, mempool_size: usize) {
         metrics::counter!("sybil_blocks_produced").increment(1);
         metrics::gauge!("sybil_block_height").set(bp.block.header.height as f64);
-        // Backward-compatible alias: this is the full solver batch size, not fresh intake.
         metrics::histogram!("sybil_orders_per_block").record(bp.block.header.order_count as f64);
         metrics::histogram!("sybil_batch_orders_per_block")
             .record(bp.block.header.order_count as f64);
@@ -338,7 +224,6 @@ impl SequencerActor {
             .increment(1);
     }
 
-    /// Append block to ring buffer, evicting oldest if at capacity.
     fn push_to_history(&mut self, block: Block) {
         if self.block_history.len() >= BLOCK_HISTORY_CAPACITY {
             self.block_history.pop_front();
@@ -346,242 +231,14 @@ impl SequencerActor {
         self.block_history.push_back(block);
     }
 
-    async fn handle(&mut self, msg: Message) {
-        match msg {
-            Message::SubmitOrder {
-                submission,
-                respond_to,
-            } => {
-                let order_count = submission.orders.len();
-                let result = self.mempool.submit(submission);
-                self.record_submission_metrics("unsigned", order_count, &result);
-                let _ = respond_to.send(result);
-            }
-            Message::SubmitSignedOrder { signed, respond_to } => {
-                let result = self.handle_signed_order(signed);
-                self.record_submission_metrics("signed", 1, &result);
-                let _ = respond_to.send(result);
-            }
-            Message::CancelSignedOrder { signed, respond_to } => {
-                let result = self.handle_signed_cancel(signed);
-                self.record_cancel_metrics("signed", &result);
-                let _ = respond_to.send(result);
-            }
-            Message::GetLatestBlock { respond_to } => {
-                let _ = respond_to.send(self.latest_block.clone());
-            }
-            Message::GetAccount {
-                account_id,
-                respond_to,
-            } => {
-                let account = self.sequencer.accounts.get(account_id).cloned();
-                let _ = respond_to.send(account);
-            }
-            Message::GetStateRoot { respond_to } => {
-                let root = crate::block::compute_state_root(&self.sequencer.accounts);
-                let _ = respond_to.send(root);
-            }
-            Message::ProduceBlock { respond_to } => {
-                self.on_tick().await;
-                let result = self
-                    .latest_block
-                    .clone()
-                    .ok_or_else(|| SequencerError::Persistence("no block committed".to_string()));
-                let _ = respond_to.send(result);
-            }
-            Message::CreateAccount {
-                initial_balance,
-                respond_to,
-            } => {
-                let account_id = self.sequencer.create_account(initial_balance);
-                let account = self.sequencer.accounts.get(account_id).cloned().unwrap();
-                let _ = respond_to.send(account);
-            }
-            Message::FundAccount {
-                account_id,
-                amount,
-                respond_to,
-            } => {
-                let result = self.sequencer.fund_account(account_id, amount);
-                let _ = respond_to.send(result);
-            }
-            Message::RegisterPubkey {
-                account_id,
-                pubkey,
-                respond_to,
-            } => {
-                let result = self.handle_register_pubkey(account_id, pubkey);
-                let _ = respond_to.send(result);
-            }
-            Message::ListMarkets { respond_to } => {
-                let _ = respond_to.send(self.sequencer.markets().clone());
-            }
-            Message::CreateMarket { name, respond_to } => {
-                let market_id = self.sequencer.markets_mut().add_binary(name);
-                let _ = respond_to.send(market_id);
-            }
-            Message::CreateMarketGroup {
-                name,
-                market_ids,
-                respond_to,
-            } => {
-                let mut group = MarketGroup::new(&name);
-                for mid in &market_ids {
-                    group.add_market(*mid);
-                }
-                self.sequencer.market_groups_mut().push(group.clone());
-                let _ = respond_to.send(group);
-            }
-            Message::ListMarketGroups { respond_to } => {
-                let _ = respond_to.send(self.sequencer.market_groups().to_vec());
-            }
-            Message::ResolveMarket {
-                market_id,
-                payout_nanos,
-                respond_to,
-            } => {
-                let timestamp_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
-                let result = self
-                    .sequencer
-                    .resolve_market(market_id, payout_nanos, timestamp_ms);
-                let _ = respond_to.send(result);
-            }
-            Message::GetMarketStatus {
-                market_id,
-                respond_to,
-            } => {
-                let status = self.sequencer.market_status(market_id);
-                let _ = respond_to.send(status);
-            }
-            Message::GetAllMarketStatuses { respond_to } => {
-                let statuses = self.sequencer.market_statuses().clone();
-                let _ = respond_to.send(statuses);
-            }
-            Message::GetBlock { height, respond_to } => {
-                let block = self
-                    .block_history
-                    .iter()
-                    .find(|b| b.header.height == height)
-                    .cloned();
-                let result = block.ok_or(SequencerError::BlockNotFound);
-                let _ = respond_to.send(result);
-            }
-            Message::SubscribeBlocks { respond_to } => {
-                let rx = self.block_broadcast.subscribe();
-                let _ = respond_to.send(rx);
-            }
-            Message::GetMarketPrices { respond_to } => {
-                let _ = respond_to.send(self.sequencer.last_clearing_prices().clone());
-            }
-            Message::GetMarketVolume {
-                market_id,
-                respond_to,
-            } => {
-                let _ = respond_to.send(self.sequencer.market_volume(market_id));
-            }
-            Message::GetAllMarketVolumes { respond_to } => {
-                let _ = respond_to.send(self.sequencer.market_volumes().clone());
-            }
-            Message::GetAllMarketMetadata { respond_to } => {
-                let _ = respond_to.send(self.sequencer.market_metadata_all().clone());
-            }
-            Message::GetPortfolio {
-                account_id,
-                respond_to,
-            } => {
-                let result = match self.sequencer.accounts.get(account_id) {
-                    Some(account) => Ok(portfolio::compute_portfolio(
-                        account,
-                        self.sequencer.last_clearing_prices(),
-                    )),
-                    None => Err(SequencerError::Rejected(crate::error::Rejection {
-                        order_id: 0,
-                        account_id,
-                        reason: crate::error::RejectionReason::AccountNotFound,
-                    })),
-                };
-                let _ = respond_to.send(result);
-            }
-            Message::CreateMarketWithMetadata {
-                name,
-                metadata,
-                respond_to,
-            } => {
-                let market_id = self.sequencer.markets_mut().add_binary(name);
-                self.sequencer.set_market_metadata(market_id, metadata);
-                let _ = respond_to.send(market_id);
-            }
-            Message::GetMarketMetadata {
-                market_id,
-                respond_to,
-            } => {
-                let metadata = self.sequencer.market_metadata(market_id).cloned();
-                let _ = respond_to.send(metadata);
-            }
-            Message::GetPriceHistory {
-                market_id,
-                from_ms,
-                to_ms,
-                respond_to,
-            } => {
-                let history = self.sequencer.price_history(market_id, from_ms, to_ms);
-                let _ = respond_to.send(history);
-            }
-            Message::GetAccountFills {
-                account_id,
-                market_id,
-                limit,
-                offset,
-                respond_to,
-            } => {
-                let fills = self
-                    .sequencer
-                    .account_fills(account_id, market_id, limit, offset);
-                let _ = respond_to.send(fills);
-            }
-            Message::SearchMarkets { query, respond_to } => {
-                let results = self.handle_search_markets(query);
-                let _ = respond_to.send(results);
-            }
-            Message::GetPendingOrders {
-                account_id,
-                respond_to,
-            } => {
-                let orders = self.sequencer.pending_orders_info(account_id);
-                let _ = respond_to.send(orders);
-            }
-            Message::GetMarketOrderBook {
-                market_id,
-                respond_to,
-            } => {
-                let orders = self.sequencer.market_orderbook(market_id);
-                let _ = respond_to.send(orders);
-            }
-            Message::PauseBlockProduction { respond_to } => {
-                self.pause_count = self.pause_count.saturating_add(1);
-                let _ = respond_to.send(());
-            }
-            Message::ResumeBlockProduction { respond_to } => {
-                self.pause_count = self.pause_count.saturating_sub(1);
-                let _ = respond_to.send(());
-            }
-        }
-    }
-
     fn handle_signed_order(&mut self, signed: SignedOrder) -> Result<(), SequencerError> {
-        // Verify signature
         verify_signed_order(&signed)?;
 
-        // Look up account by pubkey
         let account_id = self
             .sequencer
             .lookup_pubkey(&signed.signer)
             .ok_or(SequencerError::UnknownSigner)?;
 
-        // Create an OrderSubmission and route to mempool
         let submission = OrderSubmission {
             account_id,
             orders: vec![signed.order],
@@ -616,14 +273,12 @@ impl SequencerActor {
             let metadata = self.sequencer.market_metadata(mid);
             let status = self.sequencer.market_status(mid);
 
-            // Filter by status
             if let Some(ref status_filter) = query.status {
                 if status.as_str() != status_filter.as_str() {
                     continue;
                 }
             }
 
-            // Filter by text (name + description)
             if let Some(ref text) = query.text {
                 let text_lower = text.to_lowercase();
                 let name_matches = market.name.to_lowercase().contains(&text_lower);
@@ -636,7 +291,6 @@ impl SequencerActor {
                 }
             }
 
-            // Filter by tags
             if let Some(ref filter_tags) = query.tags {
                 let has_match = metadata
                     .as_ref()
@@ -647,7 +301,6 @@ impl SequencerActor {
                 }
             }
 
-            // Filter by category
             if let Some(ref cat) = query.category {
                 let matches = metadata
                     .as_ref()
@@ -663,7 +316,6 @@ impl SequencerActor {
             let no_price = market_prices.and_then(|p| p.get(1).copied());
             let volume = self.sequencer.market_volume(mid);
 
-            // Filter by price range
             if let Some(min_p) = query.min_yes_price {
                 if yes_price.unwrap_or(0) < min_p {
                     continue;
@@ -675,7 +327,6 @@ impl SequencerActor {
                 }
             }
 
-            // Filter by volume
             if let Some(min_vol) = query.min_volume {
                 if volume < min_vol {
                     continue;
@@ -693,7 +344,6 @@ impl SequencerActor {
             });
         }
 
-        // Sort
         if let Some(ref sort_field) = query.sort_by {
             match sort_field {
                 crate::market_info::MarketSortField::Volume => {
@@ -719,7 +369,6 @@ impl SequencerActor {
             }
         }
 
-        // Paginate
         let offset = query.offset.unwrap_or(0);
         let limit = query.limit.unwrap_or(100);
         results.into_iter().skip(offset).take(limit).collect()
@@ -734,19 +383,429 @@ impl SequencerActor {
     }
 }
 
+#[ractor::async_trait]
+impl Actor for SequencerActor {
+    type Msg = SequencerMsg;
+    type State = SequencerActorState;
+    type Arguments = SequencerActorArgs;
+
+    async fn pre_start(
+        &self,
+        _myself: ActorRef<Self::Msg>,
+        args: Self::Arguments,
+    ) -> Result<Self::State, ActorProcessingErr> {
+        Ok(SequencerActorState {
+            sequencer: args.sequencer,
+            mempool: Mempool::new(args.mempool_config),
+            latest_block: None,
+            block_history: VecDeque::new(),
+            block_broadcast: args.block_broadcast,
+            block_interval: args.block_interval,
+            pause_count: 0,
+            store: args.store,
+        })
+    }
+
+    async fn post_start(
+        &self,
+        myself: ActorRef<Self::Msg>,
+        state: &mut Self::State,
+    ) -> Result<(), ActorProcessingErr> {
+        let actor = myself.clone();
+        let block_interval = state.block_interval;
+        tokio::spawn(async move {
+            let mut ticker = interval_at(Instant::now() + block_interval, block_interval);
+            loop {
+                ticker.tick().await;
+                if actor.send_message(SequencerMsg::Tick).is_err() {
+                    break;
+                }
+            }
+        });
+        Ok(())
+    }
+
+    async fn handle(
+        &self,
+        _myself: ActorRef<Self::Msg>,
+        message: Self::Msg,
+        state: &mut Self::State,
+    ) -> Result<(), ActorProcessingErr> {
+        match message {
+            SequencerMsg::Tick => {
+                state.on_tick().await;
+            }
+            SequencerMsg::SubmitOrder(submission, reply) => {
+                let order_count = submission.orders.len();
+                let result = state.mempool.submit(submission);
+                state.record_submission_metrics("unsigned", order_count, &result);
+                let _ = reply.send(result);
+            }
+            SequencerMsg::SubmitSignedOrder(signed, reply) => {
+                let result = state.handle_signed_order(signed);
+                state.record_submission_metrics("signed", 1, &result);
+                let _ = reply.send(result);
+            }
+            SequencerMsg::CancelSignedOrder(signed, reply) => {
+                let result = state.handle_signed_cancel(signed);
+                state.record_cancel_metrics("signed", &result);
+                let _ = reply.send(result);
+            }
+            SequencerMsg::GetLatestBlock(reply) => {
+                let _ = reply.send(state.latest_block.clone());
+            }
+            SequencerMsg::GetAccount(account_id, reply) => {
+                let _ = reply.send(state.sequencer.accounts.get(account_id).cloned());
+            }
+            SequencerMsg::GetStateRoot(reply) => {
+                let root = crate::block::compute_state_root(&state.sequencer.accounts);
+                let _ = reply.send(root);
+            }
+            SequencerMsg::ProduceBlock(reply) => {
+                state.on_tick().await;
+                let result = state
+                    .latest_block
+                    .clone()
+                    .ok_or_else(|| SequencerError::Persistence("no block committed".to_string()));
+                let _ = reply.send(result);
+            }
+            SequencerMsg::CreateAccount(initial_balance, reply) => {
+                let account_id = state.sequencer.create_account(initial_balance);
+                let account = state
+                    .sequencer
+                    .accounts
+                    .get(account_id)
+                    .cloned()
+                    .expect("created account should exist");
+                let _ = reply.send(account);
+            }
+            SequencerMsg::FundAccount(account_id, amount, reply) => {
+                let _ = reply.send(state.sequencer.fund_account(account_id, amount));
+            }
+            SequencerMsg::RegisterPubkey(account_id, pubkey, reply) => {
+                let _ = reply.send(state.handle_register_pubkey(account_id, pubkey));
+            }
+            SequencerMsg::ListMarkets(reply) => {
+                let _ = reply.send(state.sequencer.markets().clone());
+            }
+            SequencerMsg::CreateMarket(name, reply) => {
+                let _ = reply.send(state.sequencer.markets_mut().add_binary(name));
+            }
+            SequencerMsg::CreateMarketGroup(name, market_ids, reply) => {
+                let mut group = MarketGroup::new(&name);
+                for mid in &market_ids {
+                    group.add_market(*mid);
+                }
+                state.sequencer.market_groups_mut().push(group.clone());
+                let _ = reply.send(group);
+            }
+            SequencerMsg::ListMarketGroups(reply) => {
+                let _ = reply.send(state.sequencer.market_groups().to_vec());
+            }
+            SequencerMsg::ResolveMarket(market_id, payout_nanos, reply) => {
+                let timestamp_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                let _ = reply.send(state.sequencer.resolve_market(
+                    market_id,
+                    payout_nanos,
+                    timestamp_ms,
+                ));
+            }
+            SequencerMsg::GetMarketStatus(market_id, reply) => {
+                let _ = reply.send(state.sequencer.market_status(market_id));
+            }
+            SequencerMsg::GetAllMarketStatuses(reply) => {
+                let _ = reply.send(state.sequencer.market_statuses().clone());
+            }
+            SequencerMsg::GetBlock(height, reply) => {
+                let block = state
+                    .block_history
+                    .iter()
+                    .find(|b| b.header.height == height)
+                    .cloned();
+                let _ = reply.send(block.ok_or(SequencerError::BlockNotFound));
+            }
+            SequencerMsg::GetMarketPrices(reply) => {
+                let _ = reply.send(state.sequencer.last_clearing_prices().clone());
+            }
+            SequencerMsg::GetMarketVolume(market_id, reply) => {
+                let _ = reply.send(state.sequencer.market_volume(market_id));
+            }
+            SequencerMsg::GetAllMarketVolumes(reply) => {
+                let _ = reply.send(state.sequencer.market_volumes().clone());
+            }
+            SequencerMsg::GetAllMarketMetadata(reply) => {
+                let _ = reply.send(state.sequencer.market_metadata_all().clone());
+            }
+            SequencerMsg::GetPortfolio(account_id, reply) => {
+                let result = match state.sequencer.accounts.get(account_id) {
+                    Some(account) => Ok(portfolio::compute_portfolio(
+                        account,
+                        state.sequencer.last_clearing_prices(),
+                    )),
+                    None => Err(SequencerError::Rejected(crate::error::Rejection {
+                        order_id: 0,
+                        account_id,
+                        reason: crate::error::RejectionReason::AccountNotFound,
+                    })),
+                };
+                let _ = reply.send(result);
+            }
+            SequencerMsg::CreateMarketWithMetadata(name, metadata, reply) => {
+                let market_id = state.sequencer.markets_mut().add_binary(name);
+                state.sequencer.set_market_metadata(market_id, metadata);
+                let _ = reply.send(market_id);
+            }
+            SequencerMsg::GetMarketMetadata(market_id, reply) => {
+                let _ = reply.send(state.sequencer.market_metadata(market_id).cloned());
+            }
+            SequencerMsg::GetPriceHistory(market_id, from_ms, to_ms, reply) => {
+                let _ = reply.send(state.sequencer.price_history(market_id, from_ms, to_ms));
+            }
+            SequencerMsg::GetAccountFills(account_id, market_id, limit, offset, reply) => {
+                let _ = reply.send(
+                    state
+                        .sequencer
+                        .account_fills(account_id, market_id, limit, offset),
+                );
+            }
+            SequencerMsg::SearchMarkets(query, reply) => {
+                let _ = reply.send(state.handle_search_markets(query));
+            }
+            SequencerMsg::GetPendingOrders(account_id, reply) => {
+                let _ = reply.send(state.sequencer.pending_orders_info(account_id));
+            }
+            SequencerMsg::GetMarketOrderBook(market_id, reply) => {
+                let _ = reply.send(state.sequencer.market_orderbook(market_id));
+            }
+            SequencerMsg::PauseBlockProduction(reply) => {
+                state.pause_count = state.pause_count.saturating_add(1);
+                let _ = reply.send(());
+            }
+            SequencerMsg::ResumeBlockProduction(reply) => {
+                state.pause_count = state.pause_count.saturating_sub(1);
+                let _ = reply.send(());
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+struct SequencerHandleInner {
+    actor: Arc<RwLock<Option<ActorRef<SequencerMsg>>>>,
+    block_broadcast: broadcast::Sender<Block>,
+}
+
+struct SequencerSupervisor;
+
+struct SequencerSupervisorArgs {
+    mempool_config: MempoolConfig,
+    block_interval: Duration,
+    store: Option<Arc<crate::store::Store>>,
+    oracle: Arc<dyn Oracle>,
+    handle: SequencerHandleInner,
+}
+
+struct SequencerSupervisorState {
+    current_actor: Option<ActorRef<SequencerMsg>>,
+    mempool_config: MempoolConfig,
+    block_interval: Duration,
+    store: Option<Arc<crate::store::Store>>,
+    oracle: Arc<dyn Oracle>,
+    handle: SequencerHandleInner,
+}
+
+enum SequencerSupervisorMsg {
+    AdoptChild(ActorRef<SequencerMsg>),
+}
+
+impl SequencerSupervisorState {
+    fn publish_actor(&self, actor: Option<ActorRef<SequencerMsg>>) {
+        *self
+            .handle
+            .actor
+            .write()
+            .expect("sequencer actor ref lock poisoned") = actor;
+    }
+
+    async fn spawn_child(
+        &mut self,
+        myself: ActorRef<SequencerSupervisorMsg>,
+        sequencer: BlockSequencer,
+    ) -> Result<(), ActorProcessingErr> {
+        let args = SequencerActorArgs {
+            sequencer,
+            mempool_config: self.mempool_config.clone(),
+            block_interval: self.block_interval,
+            store: self.store.clone(),
+            block_broadcast: self.handle.block_broadcast.clone(),
+        };
+        let (child, _) =
+            <SequencerActor as Actor>::spawn_linked(None, SequencerActor, args, myself.get_cell())
+                .await
+                .map_err(|error| ActorProcessingErr::from(error.to_string()))?;
+        self.current_actor = Some(child.clone());
+        self.publish_actor(Some(child));
+        Ok(())
+    }
+
+    async fn restart_from_store(&mut self, myself: ActorRef<SequencerSupervisorMsg>) {
+        self.current_actor = None;
+        self.publish_actor(None);
+
+        let Some(store) = self.store.clone() else {
+            tracing::error!(
+                "sequencer actor exited without a persistent store; restart unavailable"
+            );
+            return;
+        };
+
+        let restored = match store.load_state().await {
+            Ok(state) => state,
+            Err(error) => {
+                tracing::error!(error = %error, "failed to load sequencer snapshot for restart");
+                return;
+            }
+        };
+
+        let Some(state) = restored else {
+            tracing::error!("no persisted sequencer snapshot available for restart");
+            return;
+        };
+
+        let sequencer = BlockSequencer::restore(
+            state.accounts,
+            state.markets,
+            state.market_groups,
+            self.oracle.clone(),
+            state.height,
+            state.last_header,
+            state.next_order_id,
+            state.pubkey_registry,
+            state.market_statuses,
+            state.market_metadata,
+            state.last_clearing_prices,
+            state.market_volumes,
+        );
+
+        match self.spawn_child(myself, sequencer).await {
+            Ok(()) => tracing::warn!("sequencer actor restarted from persistent snapshot"),
+            Err(error) => {
+                tracing::error!(error = %error, "failed to restart sequencer actor from snapshot");
+            }
+        }
+    }
+}
+
+#[ractor::async_trait]
+impl Actor for SequencerSupervisor {
+    type Msg = SequencerSupervisorMsg;
+    type State = SequencerSupervisorState;
+    type Arguments = SequencerSupervisorArgs;
+
+    async fn pre_start(
+        &self,
+        _myself: ActorRef<Self::Msg>,
+        args: Self::Arguments,
+    ) -> Result<Self::State, ActorProcessingErr> {
+        Ok(SequencerSupervisorState {
+            current_actor: None,
+            mempool_config: args.mempool_config,
+            block_interval: args.block_interval,
+            store: args.store,
+            oracle: args.oracle,
+            handle: args.handle,
+        })
+    }
+
+    async fn handle(
+        &self,
+        _myself: ActorRef<Self::Msg>,
+        message: Self::Msg,
+        state: &mut Self::State,
+    ) -> Result<(), ActorProcessingErr> {
+        match message {
+            SequencerSupervisorMsg::AdoptChild(actor) => {
+                state.current_actor = Some(actor.clone());
+                state.publish_actor(Some(actor));
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_supervisor_evt(
+        &self,
+        myself: ActorRef<Self::Msg>,
+        message: SupervisionEvent,
+        state: &mut Self::State,
+    ) -> Result<(), ActorProcessingErr> {
+        let Some(current_actor) = state.current_actor.as_ref() else {
+            return Ok(());
+        };
+
+        match message {
+            SupervisionEvent::ActorStarted(actor) if actor.get_id() == current_actor.get_id() => {
+                tracing::info!("sequencer actor started under supervisor");
+            }
+            SupervisionEvent::ActorFailed(actor, error)
+                if actor.get_id() == current_actor.get_id() =>
+            {
+                tracing::error!(error = %error, "sequencer actor failed; attempting restart");
+                state.restart_from_store(myself).await;
+            }
+            SupervisionEvent::ActorTerminated(actor, _, reason)
+                if actor.get_id() == current_actor.get_id() =>
+            {
+                if let Some(reason) = reason.as_deref() {
+                    tracing::warn!(reason, "sequencer actor terminated; attempting restart");
+                } else {
+                    tracing::warn!("sequencer actor terminated; attempting restart");
+                }
+                state.restart_from_store(myself).await;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
 /// Cloneable handle to the sequencer actor.
 #[derive(Clone)]
 pub struct SequencerHandle {
-    sender: mpsc::Sender<Message>,
+    inner: SequencerHandleInner,
 }
 
 impl SequencerHandle {
-    /// Spawn a new sequencer actor and return a handle.
+    async fn actor_ref(&self) -> Result<ActorRef<SequencerMsg>, SequencerError> {
+        self.inner
+            .actor
+            .read()
+            .expect("sequencer actor ref lock poisoned")
+            .clone()
+            .ok_or(SequencerError::ActorGone)
+    }
+
+    async fn rpc<T>(
+        &self,
+        build_message: impl FnOnce(RpcReplyPort<T>) -> SequencerMsg,
+    ) -> Result<T, SequencerError>
+    where
+        T: Send + 'static,
+    {
+        let actor = self.actor_ref().await?;
+        match actor.call(build_message, None).await {
+            Ok(ractor::rpc::CallResult::Success(value)) => Ok(value),
+            _ => Err(SequencerError::ActorGone),
+        }
+    }
+
     pub fn spawn(sequencer: BlockSequencer, mempool_config: MempoolConfig) -> Self {
         Self::spawn_with_interval(sequencer, mempool_config, Duration::from_secs(1))
     }
 
-    /// Spawn with a custom block production interval.
     pub fn spawn_with_interval(
         sequencer: BlockSequencer,
         mempool_config: MempoolConfig,
@@ -755,358 +814,207 @@ impl SequencerHandle {
         Self::spawn_with_store(sequencer, mempool_config, block_interval, None)
     }
 
-    /// Spawn with a custom block interval and optional persistent store.
     pub fn spawn_with_store(
         sequencer: BlockSequencer,
         mempool_config: MempoolConfig,
         block_interval: Duration,
         store: Option<crate::store::Store>,
     ) -> Self {
-        let (sender, receiver) = mpsc::channel(256);
-        let mempool = Mempool::new(mempool_config);
-        let actor = SequencerActor::new(sequencer, mempool, receiver, block_interval, store);
-        tokio::spawn(actor.run());
-        Self { sender }
+        let oracle = sequencer.oracle();
+        let store = store.map(Arc::new);
+        let (block_broadcast, _) = broadcast::channel(64);
+        let inner = SequencerHandleInner {
+            actor: Arc::new(RwLock::new(None)),
+            block_broadcast: block_broadcast.clone(),
+        };
+        let supervisor_args = SequencerSupervisorArgs {
+            mempool_config: mempool_config.clone(),
+            block_interval,
+            store: store.clone(),
+            oracle,
+            handle: inner.clone(),
+        };
+        let (supervisor, _) =
+            ractor::ActorRuntime::spawn_instant(None, SequencerSupervisor, supervisor_args)
+                .expect("failed to spawn sequencer supervisor");
+        let actor_args = SequencerActorArgs {
+            sequencer,
+            mempool_config,
+            block_interval,
+            store,
+            block_broadcast,
+        };
+        let (child, _) = ractor::ActorRuntime::spawn_linked_instant(
+            None,
+            SequencerActor,
+            actor_args,
+            supervisor.get_cell(),
+        )
+        .expect("failed to spawn sequencer actor");
+        *inner
+            .actor
+            .write()
+            .expect("sequencer actor ref lock poisoned") = Some(child.clone());
+        supervisor
+            .send_message(SequencerSupervisorMsg::AdoptChild(child))
+            .expect("failed to hand child actor to supervisor");
+        Self { inner }
     }
 
-    /// Submit an unsigned order submission.
     pub async fn submit_order(&self, submission: OrderSubmission) -> Result<(), SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::SubmitOrder {
-                submission,
-                respond_to: tx,
-            })
-            .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)?
+        self.rpc(|reply| SequencerMsg::SubmitOrder(submission, reply))
+            .await?
     }
 
-    /// Submit a P256-signed order.
     pub async fn submit_signed_order(&self, signed: SignedOrder) -> Result<(), SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::SubmitSignedOrder {
-                signed,
-                respond_to: tx,
-            })
-            .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)?
+        self.rpc(|reply| SequencerMsg::SubmitSignedOrder(signed, reply))
+            .await?
     }
 
-    /// Submit a P256-signed request to cancel a resting order.
     pub async fn cancel_signed_order(&self, signed: SignedCancel) -> Result<(), SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::CancelSignedOrder {
-                signed,
-                respond_to: tx,
-            })
-            .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)?
+        self.rpc(|reply| SequencerMsg::CancelSignedOrder(signed, reply))
+            .await?
     }
 
-    /// Get the latest produced block.
     pub async fn get_latest_block(&self) -> Result<Option<Block>, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::GetLatestBlock { respond_to: tx })
-            .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
+        self.rpc(SequencerMsg::GetLatestBlock).await
     }
 
-    /// Get an account by ID.
     pub async fn get_account(
         &self,
         account_id: AccountId,
     ) -> Result<Option<Account>, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::GetAccount {
-                account_id,
-                respond_to: tx,
-            })
+        self.rpc(|reply| SequencerMsg::GetAccount(account_id, reply))
             .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
     }
 
-    /// Get the current state root.
     pub async fn get_state_root(&self) -> Result<[u8; 32], SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::GetStateRoot { respond_to: tx })
-            .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
+        self.rpc(SequencerMsg::GetStateRoot).await
     }
 
-    /// Force-produce a block immediately (for testing).
     pub async fn produce_block(&self) -> Result<Block, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::ProduceBlock { respond_to: tx })
-            .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)?
+        self.rpc(SequencerMsg::ProduceBlock).await?
     }
 
-    /// Create a new account with the given initial balance (in nanos).
     pub async fn create_account(&self, initial_balance: i64) -> Result<Account, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::CreateAccount {
-                initial_balance,
-                respond_to: tx,
-            })
+        self.rpc(|reply| SequencerMsg::CreateAccount(initial_balance, reply))
             .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
     }
 
-    /// Fund an existing account by the given amount (in nanos).
     pub async fn fund_account(
         &self,
         account_id: AccountId,
         amount: i64,
     ) -> Result<Account, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::FundAccount {
-                account_id,
-                amount,
-                respond_to: tx,
-            })
-            .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)?
+        self.rpc(|reply| SequencerMsg::FundAccount(account_id, amount, reply))
+            .await?
     }
 
-    /// Register a P256 public key for an account.
     pub async fn register_pubkey(
         &self,
         account_id: AccountId,
         pubkey: PublicKey,
     ) -> Result<(), SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::RegisterPubkey {
-                account_id,
-                pubkey,
-                respond_to: tx,
-            })
-            .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)?
+        self.rpc(|reply| SequencerMsg::RegisterPubkey(account_id, pubkey, reply))
+            .await?
     }
 
-    /// List all markets.
     #[tracing::instrument(skip_all)]
     pub async fn list_markets(&self) -> Result<MarketSet, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::ListMarkets { respond_to: tx })
-            .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
+        self.rpc(SequencerMsg::ListMarkets).await
     }
 
-    /// Create a new binary market.
     pub async fn create_market(&self, name: String) -> Result<MarketId, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::CreateMarket {
-                name,
-                respond_to: tx,
-            })
+        self.rpc(|reply| SequencerMsg::CreateMarket(name, reply))
             .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
     }
 
-    /// Create a market group (mutually exclusive markets).
     pub async fn create_market_group(
         &self,
         name: String,
         market_ids: Vec<MarketId>,
     ) -> Result<MarketGroup, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::CreateMarketGroup {
-                name,
-                market_ids,
-                respond_to: tx,
-            })
+        self.rpc(|reply| SequencerMsg::CreateMarketGroup(name, market_ids, reply))
             .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
     }
 
-    /// List all market groups.
     pub async fn list_market_groups(&self) -> Result<Vec<MarketGroup>, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::ListMarketGroups { respond_to: tx })
-            .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
+        self.rpc(SequencerMsg::ListMarketGroups).await
     }
 
-    /// Resolve a market with the given YES payout (0 to NANOS_PER_DOLLAR).
     pub async fn resolve_market(
         &self,
         market_id: MarketId,
         payout_nanos: Nanos,
     ) -> Result<ResolutionRecord, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::ResolveMarket {
-                market_id,
-                payout_nanos,
-                respond_to: tx,
-            })
-            .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)?
+        self.rpc(|reply| SequencerMsg::ResolveMarket(market_id, payout_nanos, reply))
+            .await?
     }
 
-    /// Get the oracle-tracked status for a market.
     pub async fn get_market_status(
         &self,
         market_id: MarketId,
     ) -> Result<MarketStatus, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::GetMarketStatus {
-                market_id,
-                respond_to: tx,
-            })
+        self.rpc(|reply| SequencerMsg::GetMarketStatus(market_id, reply))
             .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
     }
 
-    /// Get all explicitly tracked market statuses.
     #[tracing::instrument(skip_all)]
     pub async fn get_all_market_statuses(
         &self,
     ) -> Result<HashMap<MarketId, MarketStatus>, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::GetAllMarketStatuses { respond_to: tx })
-            .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
+        self.rpc(SequencerMsg::GetAllMarketStatuses).await
     }
 
-    /// Get a block by height.
     pub async fn get_block(&self, height: u64) -> Result<Block, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::GetBlock {
-                height,
-                respond_to: tx,
-            })
-            .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)?
+        self.rpc(|reply| SequencerMsg::GetBlock(height, reply))
+            .await?
     }
 
-    /// Subscribe to new block events (for SSE streaming).
     pub async fn subscribe_blocks(&self) -> Result<broadcast::Receiver<Block>, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::SubscribeBlocks { respond_to: tx })
-            .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
+        Ok(self.inner.block_broadcast.subscribe())
     }
 
-    /// Get last known clearing prices for all markets.
     #[tracing::instrument(skip_all)]
     pub async fn get_market_prices(&self) -> Result<HashMap<MarketId, Vec<Nanos>>, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::GetMarketPrices { respond_to: tx })
-            .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
+        self.rpc(SequencerMsg::GetMarketPrices).await
     }
 
-    /// Get portfolio summary for an account.
     pub async fn get_portfolio(
         &self,
         account_id: AccountId,
     ) -> Result<PortfolioSummary, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::GetPortfolio {
-                account_id,
-                respond_to: tx,
-            })
-            .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)?
+        self.rpc(|reply| SequencerMsg::GetPortfolio(account_id, reply))
+            .await?
     }
 
-    /// Create a market with metadata.
     pub async fn create_market_with_metadata(
         &self,
         name: String,
         metadata: MarketMetadata,
     ) -> Result<MarketId, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::CreateMarketWithMetadata {
-                name,
-                metadata,
-                respond_to: tx,
-            })
+        self.rpc(|reply| SequencerMsg::CreateMarketWithMetadata(name, metadata, reply))
             .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
     }
 
-    /// Get metadata for a market.
     pub async fn get_market_metadata(
         &self,
         market_id: MarketId,
     ) -> Result<Option<MarketMetadata>, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::GetMarketMetadata {
-                market_id,
-                respond_to: tx,
-            })
+        self.rpc(|reply| SequencerMsg::GetMarketMetadata(market_id, reply))
             .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
     }
 
-    /// Get price history for a market.
     pub async fn get_price_history(
         &self,
         market_id: MarketId,
         from_ms: Option<u64>,
         to_ms: Option<u64>,
     ) -> Result<Vec<PricePoint>, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::GetPriceHistory {
-                market_id,
-                from_ms,
-                to_ms,
-                respond_to: tx,
-            })
+        self.rpc(|reply| SequencerMsg::GetPriceHistory(market_id, from_ms, to_ms, reply))
             .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
     }
 
-    /// Get fill history for an account.
     pub async fn get_account_fills(
         &self,
         account_id: AccountId,
@@ -1114,122 +1022,57 @@ impl SequencerHandle {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<AccountFillRecord>, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::GetAccountFills {
-                account_id,
-                market_id,
-                limit,
-                offset,
-                respond_to: tx,
-            })
+        self.rpc(|reply| SequencerMsg::GetAccountFills(account_id, market_id, limit, offset, reply))
             .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
     }
 
-    /// Get pending orders, optionally filtered by account.
     pub async fn get_pending_orders(
         &self,
         account_id: Option<AccountId>,
     ) -> Result<Vec<PendingOrderInfo>, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::GetPendingOrders {
-                account_id,
-                respond_to: tx,
-            })
+        self.rpc(|reply| SequencerMsg::GetPendingOrders(account_id, reply))
             .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
     }
 
-    /// Get the order book for a specific market.
     pub async fn get_market_order_book(
         &self,
         market_id: MarketId,
     ) -> Result<Vec<PendingOrderInfo>, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::GetMarketOrderBook {
-                market_id,
-                respond_to: tx,
-            })
+        self.rpc(|reply| SequencerMsg::GetMarketOrderBook(market_id, reply))
             .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
     }
 
-    /// Search markets by various criteria.
     pub async fn search_markets(
         &self,
         query: MarketSearchQuery,
     ) -> Result<Vec<MarketSearchResult>, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::SearchMarkets {
-                query,
-                respond_to: tx,
-            })
+        self.rpc(|reply| SequencerMsg::SearchMarkets(query, reply))
             .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
     }
 
     pub async fn get_market_volume(&self, market_id: MarketId) -> Result<u64, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::GetMarketVolume {
-                market_id,
-                respond_to: tx,
-            })
+        self.rpc(|reply| SequencerMsg::GetMarketVolume(market_id, reply))
             .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn get_all_market_volumes(
-        &self,
-    ) -> Result<HashMap<MarketId, u64>, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::GetAllMarketVolumes { respond_to: tx })
-            .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
+    pub async fn get_all_market_volumes(&self) -> Result<HashMap<MarketId, u64>, SequencerError> {
+        self.rpc(SequencerMsg::GetAllMarketVolumes).await
     }
 
     #[tracing::instrument(skip_all)]
     pub async fn get_all_market_metadata(
         &self,
     ) -> Result<HashMap<MarketId, MarketMetadata>, SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::GetAllMarketMetadata { respond_to: tx })
-            .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
+        self.rpc(SequencerMsg::GetAllMarketMetadata).await
     }
 
-    /// Pause block production (for simulation freeze during LLM calls).
     pub async fn pause_block_production(&self) -> Result<(), SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::PauseBlockProduction { respond_to: tx })
-            .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
+        self.rpc(SequencerMsg::PauseBlockProduction).await
     }
 
-    /// Resume block production after a pause.
     pub async fn resume_block_production(&self) -> Result<(), SequencerError> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(Message::ResumeBlockProduction { respond_to: tx })
-            .await
-            .map_err(|_| SequencerError::ActorGone)?;
-        rx.await.map_err(|_| SequencerError::ActorGone)
+        self.rpc(SequencerMsg::ResumeBlockProduction).await
     }
 }
 
@@ -1329,15 +1172,10 @@ mod tests {
         let (seq, _) = make_test_sequencer();
         let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
 
-        // Produce a block to verify actor is running
         handle.produce_block().await.unwrap();
-
-        // Drop the handle -- actor should shut down
         drop(handle);
 
-        // Give actor time to notice
         tokio::time::sleep(Duration::from_millis(50)).await;
-        // No panic or hang = success
     }
 
     #[tokio::test]
@@ -1351,7 +1189,6 @@ mod tests {
 
         let block2 = handle.produce_block().await.unwrap();
         assert_eq!(block2.header.height, 2);
-        // Parent hash should be hash of block1's header
         let expected = crate::block::hash_header(&block1.header);
         assert_eq!(block2.header.parent_hash, expected);
     }
@@ -1363,7 +1200,6 @@ mod tests {
         let seller = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("Test");
-        // Give seller a position
         accounts
             .get_mut(seller)
             .unwrap()
@@ -1380,7 +1216,6 @@ mod tests {
 
         let root_before = handle.get_state_root().await.unwrap();
 
-        // Submit matching buy and sell
         let buy_sub = OrderSubmission {
             account_id: buyer,
             orders: vec![outcome_buy(&markets, 0, m0, 0, 600_000_000, 5)],
@@ -1410,8 +1245,6 @@ mod tests {
         }
     }
 
-    // --- Tests for new actor messages ---
-
     #[tokio::test]
     async fn test_create_account() {
         let (seq, _) = make_test_sequencer();
@@ -1423,7 +1256,6 @@ mod tests {
             .unwrap();
         assert_eq!(account.balance, 50 * NANOS_PER_DOLLAR as i64);
 
-        // Verify we can retrieve it
         let fetched = handle.get_account(account.id).await.unwrap();
         assert!(fetched.is_some());
         assert_eq!(fetched.unwrap().balance, 50 * NANOS_PER_DOLLAR as i64);
@@ -1494,22 +1326,18 @@ mod tests {
         let m0 = ms.add_binary("Test");
         let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
 
-        // Generate a P256 key
         let signing_key =
             <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
                 &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
             );
         let pubkey = PublicKey(signing_key.verifying_key().clone());
 
-        // Register the key
         handle.register_pubkey(aid, pubkey).await.unwrap();
 
-        // Sign and submit an order
         let order = outcome_buy(&ms, 0, m0, 0, 500_000_000, 1);
         let signed = crate::crypto::sign_order(&order, &signing_key);
         handle.submit_signed_order(signed).await.unwrap();
 
-        // Produce block and verify the order was included
         let block = handle.produce_block().await.unwrap();
         assert!(block.header.order_count >= 1);
     }
@@ -1604,7 +1432,7 @@ mod tests {
         let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
 
         let markets = handle.list_markets().await.unwrap();
-        assert_eq!(markets.len(), 1); // "Test" from make_test_sequencer
+        assert_eq!(markets.len(), 1);
 
         let new_id = handle
             .create_market("New Market".to_string())
@@ -1715,7 +1543,6 @@ mod tests {
 
         let mut rx = handle.subscribe_blocks().await.unwrap();
 
-        // Produce a block -- subscriber should receive it
         handle.produce_block().await.unwrap();
 
         let block = rx.recv().await.unwrap();

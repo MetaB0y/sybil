@@ -60,6 +60,10 @@ impl MarketLifecycle {
         &self.market_metadata
     }
 
+    pub fn oracle(&self) -> Arc<dyn Oracle> {
+        self.oracle.clone()
+    }
+
     /// Consult the oracle and update status. Returns the action for the caller to execute.
     ///
     /// The caller (BlockSequencer) is responsible for acting on the result:

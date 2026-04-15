@@ -494,6 +494,10 @@ impl BlockSequencer {
         self.lifecycle.market_statuses()
     }
 
+    pub fn oracle(&self) -> Arc<dyn Oracle> {
+        self.lifecycle.oracle()
+    }
+
     pub fn set_market_metadata(&mut self, market_id: MarketId, metadata: MarketMetadata) {
         self.lifecycle.set_market_metadata(market_id, metadata);
     }

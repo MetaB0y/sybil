@@ -29,6 +29,7 @@ commonware-storage = "2026.3.0"
 futures = "0.3"
 getrandom = "0.4"
 p256 = { version = "0.14.0-rc.7", features = ["ecdsa"] }
+ractor = { version = "0.15.12", default-features = false, features = ["async-trait", "tokio_runtime"] }
 thiserror = { workspace = true }
 tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
 tracing = "0.1"
