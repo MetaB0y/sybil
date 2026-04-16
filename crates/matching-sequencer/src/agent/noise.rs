@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::RngExt;
 
 use matching_engine::{outcome_buy, outcome_sell, MarketSet, Nanos, NANOS_PER_DOLLAR};
 
@@ -15,7 +15,7 @@ pub struct NoiseTrader {
     max_qty: u64,
     /// Random noise range around the last price (in nanos)
     price_noise: Nanos,
-    rng: Box<dyn rand::RngCore + Send>,
+    rng: Box<dyn rand::Rng + Send>,
 }
 
 impl NoiseTrader {
@@ -26,7 +26,7 @@ impl NoiseTrader {
         activity_rate: f64,
         max_qty: u64,
         price_noise: Nanos,
-        rng: Box<dyn rand::RngCore + Send>,
+        rng: Box<dyn rand::Rng + Send>,
     ) -> Self {
         Self {
             name,

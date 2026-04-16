@@ -8,6 +8,9 @@ use commonware_codec::RangeCfg;
 use commonware_cryptography::Sha256;
 use commonware_runtime::buffer::paged::CacheRef;
 use commonware_runtime::{tokio as commonware_tokio, Runner as _};
+use commonware_storage::journal::contiguous::variable::Config as VConfig;
+use commonware_storage::merkle::mmr::Family as MmrFamily;
+use commonware_storage::merkle::mmr::journaled::Config as MmrConfig;
 use commonware_storage::qmdb::current::ordered::variable::Db as OrderedVariableDb;
 use commonware_storage::qmdb::current::VariableConfig;
 use commonware_storage::translator::OneCap;
@@ -31,7 +34,7 @@ const HEIGHT_KEY: &[u8] = b"meta:height";
 const NEXT_ACCOUNT_ID_KEY: &[u8] = b"meta:next_account_id";
 
 type AccountDb =
-    OrderedVariableDb<commonware_tokio::Context, Vec<u8>, Vec<u8>, Sha256, OneCap, CHUNK_SIZE>;
+    OrderedVariableDb<MmrFamily, commonware_tokio::Context, Vec<u8>, Vec<u8>, Sha256, OneCap, CHUNK_SIZE>;
 
 pub struct LoadedAccountSnapshot {
     pub accounts: HashMap<AccountId, Account>,
@@ -157,27 +160,33 @@ async fn run(mut db: AccountDb, mut receiver: tokio_mpsc::Receiver<Command>) {
 }
 
 async fn open_db(context: commonware_tokio::Context) -> Result<AccountDb, StoreError> {
+    let page_cache = CacheRef::from_pooler(
+        &context,
+        NonZeroU16::new(PAGE_SIZE).unwrap(),
+        NonZeroUsize::new(PAGE_CACHE_PAGES).unwrap(),
+    );
     let config = VariableConfig {
-        mmr_journal_partition: "accounts-mmr-journal".to_string(),
-        mmr_items_per_blob: NonZeroU64::new(ITEMS_PER_BLOB).unwrap(),
-        mmr_write_buffer: NonZeroUsize::new(WRITE_BUFFER_BYTES).unwrap(),
-        mmr_metadata_partition: "accounts-mmr-metadata".to_string(),
-        log_partition: "accounts-log".to_string(),
-        log_write_buffer: NonZeroUsize::new(WRITE_BUFFER_BYTES).unwrap(),
-        log_compression: None,
-        log_codec_config: (
-            (RangeCfg::from(0..=MAX_KEY_BYTES), ()),
-            (RangeCfg::from(0..=MAX_VALUE_BYTES), ()),
-        ),
-        log_items_per_blob: NonZeroU64::new(ITEMS_PER_BLOB).unwrap(),
-        grafted_mmr_metadata_partition: "accounts-grafted-mmr-metadata".to_string(),
+        merkle_config: MmrConfig {
+            journal_partition: "accounts-mmr-journal".to_string(),
+            items_per_blob: NonZeroU64::new(ITEMS_PER_BLOB).unwrap(),
+            write_buffer: NonZeroUsize::new(WRITE_BUFFER_BYTES).unwrap(),
+            metadata_partition: "accounts-mmr-metadata".to_string(),
+            thread_pool: None,
+            page_cache: page_cache.clone(),
+        },
+        journal_config: VConfig {
+            partition: "accounts-log".to_string(),
+            write_buffer: NonZeroUsize::new(WRITE_BUFFER_BYTES).unwrap(),
+            compression: None,
+            codec_config: (
+                (RangeCfg::from(0..=MAX_KEY_BYTES), ()),
+                (RangeCfg::from(0..=MAX_VALUE_BYTES), ()),
+            ),
+            items_per_section: NonZeroU64::new(ITEMS_PER_BLOB).unwrap(),
+            page_cache,
+        },
+        grafted_metadata_partition: "accounts-grafted-mmr-metadata".to_string(),
         translator: OneCap::default(),
-        thread_pool: None,
-        page_cache: CacheRef::from_pooler(
-            &context,
-            NonZeroU16::new(PAGE_SIZE).unwrap(),
-            NonZeroUsize::new(PAGE_CACHE_PAGES).unwrap(),
-        ),
     };
 
     AccountDb::init(context, config)
@@ -213,19 +222,19 @@ async fn replace_snapshot(
     for (key, value) in current_entries {
         match desired.remove(&key) {
             Some(desired_value) if desired_value != value => {
-                batch.write(key, Some(desired_value));
+                batch = batch.write(key, Some(desired_value));
                 has_changes = true;
             }
             Some(_) => {}
             None => {
-                batch.write(key, None);
+                batch = batch.write(key, None);
                 has_changes = true;
             }
         }
     }
 
     for (key, value) in desired {
-        batch.write(key, Some(value));
+        batch = batch.write(key, Some(value));
         has_changes = true;
     }
 
@@ -233,12 +242,11 @@ async fn replace_snapshot(
         return Ok(());
     }
 
-    let finalized = batch
-        .merkleize(None)
+    let merkleized = batch
+        .merkleize(db, None)
         .await
-        .map_err(|error| StoreError::Qmdb(format!("failed to merkleize qmdb batch: {error}")))?
-        .finalize();
-    db.apply_batch(finalized)
+        .map_err(|error| StoreError::Qmdb(format!("failed to merkleize qmdb batch: {error}")))?;
+    db.apply_batch(merkleized)
         .await
         .map_err(|error| StoreError::Qmdb(format!("failed to apply qmdb batch: {error}")))?;
     Ok(())

@@ -15,10 +15,11 @@ COPY crates/matching-sequencer/Cargo.toml crates/matching-sequencer/
 COPY crates/sybil-api/Cargo.toml crates/sybil-api/
 COPY crates/sybil-oracle/Cargo.toml crates/sybil-oracle/
 COPY crates/sybil-verifier/Cargo.toml crates/sybil-verifier/
+COPY crates/sybil-canonical/Cargo.toml crates/sybil-canonical/
 COPY crates/sybil-polymarket/Cargo.toml crates/sybil-polymarket/
 
 # Create dummy source files to cache dependency compilation
-RUN for crate in matching-engine matching-solver matching-scenarios matching-sim matching-sequencer sybil-api sybil-oracle sybil-verifier sybil-polymarket; do \
+RUN for crate in matching-engine matching-solver matching-scenarios matching-sim matching-sequencer sybil-api sybil-oracle sybil-verifier sybil-canonical sybil-polymarket; do \
         mkdir -p crates/$crate/src && echo "" > crates/$crate/src/lib.rs; \
     done && \
     mkdir -p crates/sybil-api/src && echo "fn main() {}" > crates/sybil-api/src/main.rs && \

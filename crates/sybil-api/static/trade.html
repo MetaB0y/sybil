@@ -6,9 +6,7 @@
 <title>Sybil — Trade</title>
 <script type="module">
 import * as borsh from 'https://esm.sh/borsh@2.0.0';
-window.borsh = borsh;
 window.borshReady = Promise.resolve(borsh);
-window.dispatchEvent(new Event('borsh-ready'));
 </script>
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
 <style>
@@ -182,12 +180,19 @@ window.dispatchEvent(new Event('borsh-ready'));
           <strong :class="balance >= 0 ? 'green' : 'red'" x-text="'$' + Math.round(balance / 1e9).toLocaleString()"></strong>
           <span class="key-badge" :class="hasKey ? 'registered' : 'none'" x-text="hasKey ? 'P256' : 'no key'"></span>
           <span>block <strong x-text="health.height || '...'"></strong></span>
-          <span class="live" x-show="health.status === 'ok'">live</span>
+          <span class="live" x-show="health.status === 'ok' && pollErrors === 0">live</span>
+          <span style="color: var(--red);" x-show="pollErrors >= 3" x-text="'stale (' + pollErrors + ' failures)'"></span>
           <span style="color: var(--dim); cursor: pointer;" @click="logout()">logout</span>
         </div>
       </template>
     </div>
   </header>
+
+  <template x-if="!window.crypto?.subtle">
+    <div style="background: #3b1f1f; border: 1px solid var(--red); padding: 10px 16px; margin-bottom: 12px; border-radius: 4px; font-size: 12px; color: var(--red);">
+      WebCrypto unavailable — signing keys require HTTPS. Access via the nip.io domain or localhost.
+    </div>
+  </template>
 
   <!-- Tabs -->
   <template x-if="accountId">
@@ -530,8 +535,8 @@ const MAX_STATES = 32;
 const MARKET_NONE = 0xFFFFFFFF;
 const CONDITION_DIR_SCHEMA = {
   enum: [
-    { struct: { Above: {} } },
-    { struct: { Below: {} } },
+    { struct: { Above: { struct: {} } } },
+    { struct: { Below: { struct: {} } } },
   ],
 };
 const PRICE_CONDITION_SCHEMA = {
@@ -559,12 +564,51 @@ const CANCEL_SCHEMA = {
   },
 };
 
+// Test vectors from Rust insta snapshots (crates/sybil-canonical/src/lib.rs).
+// If these fail, the JS borsh schema has drifted from the Rust schema.
+const CANONICAL_TEST_VECTORS = [
+  {
+    name: 'buy_yes',
+    input: { marketIds: [7], payoffs: [1, 0], limitPrice: 550_000_000, maxFill: 10, condition: null },
+    expectedHex: '07000000ffffffffffffffffffffffffffffffff010100000000000000000000000000000000000000000000000000000000000000028055c820000000000a0000000000000000',
+  },
+  {
+    name: 'sell_yes',
+    input: { marketIds: [7], payoffs: [-1, 0], limitPrice: 425_000_000, maxFill: 3, condition: null },
+    expectedHex: '07000000ffffffffffffffffffffffffffffffff01ff000000000000000000000000000000000000000000000000000000000000000240fc541900000000030000000000000000',
+  },
+  {
+    name: 'conditional',
+    input: {
+      marketIds: [5], payoffs: [1, 0], limitPrice: 610_000_000, maxFill: 9,
+      condition: { market: 11, threshold: 490_000_000, direction: 'Above' },
+    },
+    expectedHex: '05000000ffffffffffffffffffffffffffffffff0101000000000000000000000000000000000000000000000000000000000000000280dc5b24000000000900000000000000010b00000080ce341d0000000000',
+  },
+];
+
 async function getBorsh() {
-  if (window.borsh) return window.borsh;
-  if (window.borshReady) return window.borshReady;
-  return new Promise(resolve => {
-    window.addEventListener('borsh-ready', () => resolve(window.borsh), { once: true });
-  });
+  return window.borshReady;
+}
+
+async function verifyCanonicalSchemas() {
+  const borsh = await getBorsh();
+  const errors = [];
+  for (const tv of CANONICAL_TEST_VECTORS) {
+    try {
+      const bytes = await canonicalOrderBytes(
+        tv.input.marketIds, tv.input.payoffs,
+        tv.input.limitPrice, tv.input.maxFill, tv.input.condition,
+      );
+      const got = toHex(bytes);
+      if (got !== tv.expectedHex) {
+        errors.push(`${tv.name}: expected ${tv.expectedHex.slice(0, 20)}… got ${got.slice(0, 20)}…`);
+      }
+    } catch (e) {
+      errors.push(`${tv.name}: ${e.message}`);
+    }
+  }
+  return errors;
 }
 
 function padMarketIds(marketIds) {
@@ -653,6 +697,7 @@ function tradingApp() {
     view: 'markets',
     toast: null,
     health: {},
+    pollErrors: 0,
 
     // Markets
     markets: [],
@@ -711,15 +756,18 @@ function tradingApp() {
       return side === 'BuyYes' || side === 'SellYes' ? 'yes' : 'no';
     },
     sideTone(side) {
-      const normalized = String(side || '').replace(/\s+/g, '').toLowerCase();
-      if (normalized.endsWith('yes')) return 'green';
-      if (normalized.endsWith('no')) return 'red';
+      const s = String(side || '');
+      if (s.includes('Yes') || s.includes('YES')) return 'green';
+      if (s.includes('No') || s.includes('NO')) return 'red';
       return 'dim';
     },
     humanSide(side) {
-      return side
-        .replace('Buy', 'Buy ')
-        .replace('Sell', 'Sell ');
+      const s = String(side || '');
+      if (s === 'BuyYes') return 'Buy Yes';
+      if (s === 'BuyNo') return 'Buy No';
+      if (s === 'SellYes') return 'Sell Yes';
+      if (s === 'SellNo') return 'Sell No';
+      return s.replace(/([a-z])([A-Z])/g, '$1 $2');
     },
     referenceYesPrice(market) {
       if (!market) return 0.5;
@@ -792,6 +840,10 @@ function tradingApp() {
       this.creating = true;
       this.regError = '';
       try {
+        if (!crypto.subtle) {
+          this.regError = 'HTTPS required for key generation. Use the nip.io domain instead of raw IP.';
+          return;
+        }
         const nanos = Math.round(parseFloat(this.regBalance) * 1e9);
         const resp = await fetch('/v1/accounts', {
           method: 'POST',
@@ -806,10 +858,12 @@ function tradingApp() {
         localStorage.setItem('sybil_account_id', this.accountId);
         localStorage.setItem('sybil_display_name', this.displayName);
 
-        // Generate P256 keypair and register
-        await this.generateAndRegisterKey();
-
-        this.showToast('Account #' + this.accountId + ' created!');
+        const keyErr = await this.generateAndRegisterKey();
+        if (keyErr) {
+          this.showToast('Account #' + this.accountId + ' created but key failed: ' + keyErr, 'error');
+        } else {
+          this.showToast('Account #' + this.accountId + ' created with signing key!');
+        }
       } catch (e) {
         this.regError = 'Error: ' + e.message;
       } finally {
@@ -818,30 +872,31 @@ function tradingApp() {
     },
 
     async generateAndRegisterKey() {
+      if (!crypto.subtle) {
+        return 'WebCrypto unavailable — HTTPS required';
+      }
       try {
         const keyPair = await crypto.subtle.generateKey(
           { name: 'ECDSA', namedCurve: 'P-256' },
-          true,  // extractable for JWK export
+          true,
           ['sign']
         );
 
-        // Export public key as raw (uncompressed: 04 || x || y, 65 bytes)
         const rawPub = await crypto.subtle.exportKey('raw', keyPair.publicKey);
         const compressed = compressPublicKey(rawPub);
         const pubHex = toHex(compressed);
 
-        // Register with server
         const resp = await fetch('/v1/accounts/' + this.accountId + '/keys', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ public_key_hex: pubHex }),
         });
         if (!resp.ok) {
-          console.warn('Key registration failed:', await resp.text());
-          return;
+          const errText = await resp.text();
+          console.warn('Key registration failed:', errText);
+          return 'Server rejected key: ' + errText;
         }
 
-        // Store private key as JWK in localStorage
         const jwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey);
         localStorage.setItem('sybil_private_key_jwk', JSON.stringify(jwk));
         localStorage.setItem('sybil_public_key_hex', pubHex);
@@ -849,8 +904,10 @@ function tradingApp() {
         this._privateKey = keyPair.privateKey;
         this.hasKey = true;
         this.pubKeyHex = pubHex;
+        return null;
       } catch (e) {
         console.error('P256 key generation failed:', e);
+        return e.message;
       }
     },
 
@@ -867,6 +924,9 @@ function tradingApp() {
         this.pubKeyHex = pubHex;
       } catch (e) {
         console.warn('Failed to load stored key:', e);
+        localStorage.removeItem('sybil_private_key_jwk');
+        localStorage.removeItem('sybil_public_key_hex');
+        this.showToast('Stored signing key is corrupt — generate a new one', 'error');
       }
     },
 
@@ -883,7 +943,8 @@ function tradingApp() {
         this.displayName = 'Trader';
         localStorage.setItem('sybil_account_id', this.accountId);
         localStorage.setItem('sybil_display_name', this.displayName);
-        this.showToast('Logged in as #' + this.accountId);
+        await this.loadStoredKey();
+        this.showToast('Logged in as #' + this.accountId + (this.hasKey ? '' : ' (no signing key in this browser)'));
       } catch (e) {
         this.regError = 'Error: ' + e.message;
       }
@@ -911,7 +972,7 @@ function tradingApp() {
       try {
         const [h, m, g] = await Promise.all([
           fetch('/v1/health').then(r => r.json()),
-          fetch('/v1/markets').then(r => r.json()),
+          fetch('/v1/markets/summary').then(r => r.json()),
           fetch('/v1/markets/groups').then(r => r.json()),
         ]);
         this.health = h;
@@ -920,9 +981,7 @@ function tradingApp() {
         this.applyDefaultGroup();
 
         if (this.accountId) {
-          await this.fetchPortfolio();
-          await this.fetchPendingOrders();
-          await this.fetchFills();
+          await Promise.all([this.fetchPortfolio(), this.fetchPendingOrders(), this.fetchFills()]);
         }
 
         // Update selected market data
@@ -930,7 +989,9 @@ function tradingApp() {
           const updated = this.markets.find(m => m.market_id === this.selectedMarket.market_id);
           if (updated) this.selectedMarket = updated;
         }
+        this.pollErrors = 0;
       } catch (e) {
+        this.pollErrors++;
         console.error('poll failed:', e);
       }
     },
@@ -962,13 +1023,17 @@ function tradingApp() {
       } catch {}
     },
 
-    selectMarket(m) {
+    async selectMarket(m) {
       this.selectedMarket = m;
       this.orderSide = 'BuyYes';
       this.orderPrice = this.quickPriceForSide(m, this.orderSide);
       this.marketFills = [];
       this.pendingOrders = [];
       this.orderbook = [];
+      try {
+        const resp = await fetch('/v1/markets/' + m.market_id);
+        if (resp.ok) this.selectedMarket = await resp.json();
+      } catch {}
       this.fetchFills(m.market_id);
       this.fetchPendingOrders();
       this.fetchOrderbook(m.market_id);
@@ -1019,12 +1084,11 @@ function tradingApp() {
         return;
       }
       this.submitting = true;
-
-      const priceNanos = Math.round(this.orderPrice * 1e9);
-      const marketId = this.selectedMarket.market_id;
-
       try {
-        await this.submitSignedOrder(marketId, priceNanos, this.orderQty);
+        const priceNanos = Math.round(this.orderPrice * 1e9);
+        await this.submitSignedOrder(this.selectedMarket.market_id, priceNanos, this.orderQty);
+      } catch (e) {
+        this.showToast('Order failed: ' + e.message, 'error');
       } finally {
         this.submitting = false;
       }
@@ -1105,6 +1169,8 @@ function tradingApp() {
         } else {
           this.showToast(await parseApiError(resp), 'error');
         }
+      } catch (e) {
+        this.showToast('Cancel failed: ' + e.message, 'error');
       } finally {
         this.submitting = false;
       }
@@ -1112,20 +1178,40 @@ function tradingApp() {
 
     async addFunds() {
       if (!this.accountId) return;
-      const resp = await fetch('/v1/accounts/' + this.accountId + '/fund', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount_nanos: 500_000_000_000 }),
-      });
-      if (resp.ok) {
-        this.showToast('Added demo funds');
-        this.fetchPortfolio();
-      } else {
-        this.showToast(await parseApiError(resp), 'error');
+      try {
+        const resp = await fetch('/v1/accounts/' + this.accountId + '/fund', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ amount_nanos: 500_000_000_000 }),
+        });
+        if (resp.ok) {
+          this.showToast('Added demo funds');
+          this.fetchPortfolio();
+        } else {
+          this.showToast(await parseApiError(resp), 'error');
+        }
+      } catch (e) {
+        this.showToast('Add funds failed: ' + e.message, 'error');
       }
     },
 
     // SSE
+    _refreshTimer: null,
+    scheduleRefresh() {
+      if (this._refreshTimer) return;
+      this._refreshTimer = setTimeout(() => {
+        this._refreshTimer = null;
+        if (!this.accountId) return;
+        this.fetchPortfolio();
+        this.fetchPendingOrders();
+        this.fetchFills();
+        if (this.selectedMarket) {
+          this.fetchFills(this.selectedMarket.market_id);
+          this.fetchOrderbook(this.selectedMarket.market_id);
+        }
+      }, 500);
+    },
+
     async streamBlocks() {
       try {
         const resp = await fetch('/v1/blocks/stream');
@@ -1143,16 +1229,7 @@ function tradingApp() {
               try {
                 const block = JSON.parse(line.slice(5).trim());
                 this.health.height = block.height;
-                // Refresh portfolio on fills
-                if (this.accountId) {
-                  this.fetchPortfolio();
-                  this.fetchPendingOrders();
-                  this.fetchFills();
-                  if (this.selectedMarket) {
-                    this.fetchFills(this.selectedMarket.market_id);
-                    this.fetchOrderbook(this.selectedMarket.market_id);
-                  }
-                }
+                this.scheduleRefresh();
               } catch {}
             }
           }
@@ -1165,7 +1242,13 @@ function tradingApp() {
 
     // Init
     async start() {
-      // Restore session
+      verifyCanonicalSchemas().then(errors => {
+        if (errors.length > 0) {
+          console.error('CANONICAL SCHEMA DRIFT:', errors);
+          this.showToast('Schema mismatch — signing will produce wrong bytes. ' + errors[0], 'error');
+        }
+      });
+
       const storedId = localStorage.getItem('sybil_account_id');
       if (storedId) {
         this.accountId = parseInt(storedId);

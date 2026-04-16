@@ -292,7 +292,7 @@ impl Scenario {
 
 /// Generate N independent binary events with deterministic random true probabilities.
 fn make_random_binary_events(n: usize, seed: u64) -> Vec<EventDef> {
-    use rand::Rng;
+    use rand::RngExt;
     use rand::SeedableRng;
     use rand_chacha::ChaCha8Rng;
 

@@ -15,6 +15,6 @@ members = [
 ]
 
 [workspace.dependencies]
-rand = "0.9"
-rand_chacha = "0.9"
+rand = "0.10"
+rand_chacha = "0.10"
 thiserror = "2"

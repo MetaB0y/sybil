@@ -21,7 +21,7 @@ comfy-table = "7"
 blake3 = "1"
 serde = { version = "1.0", features = ["derive"] }
 rmp-serde = "1"
-redb = "2"
+redb = "4"
 commonware-codec = "2026.3.0"
 commonware-cryptography = "2026.3.0"
 commonware-runtime = "2026.3.0"

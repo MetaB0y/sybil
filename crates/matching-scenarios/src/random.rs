@@ -1,7 +1,7 @@
 //! Random hard instance generation with binary markets.
 
 use rand::rngs::StdRng;
-use rand::Rng;
+use rand::RngExt;
 use rand::SeedableRng;
 
 use matching_engine::{

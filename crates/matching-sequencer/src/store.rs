@@ -43,7 +43,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use matching_engine::{MarketGroup, MarketId, MarketSet, Nanos};
-use redb::{Database, ReadableTable, TableDefinition};
+use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 use sybil_oracle::MarketStatus;
 use tracing::{debug, info, warn};
 

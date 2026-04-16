@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use matching_engine::{MarketGroup, MarketId, MarketSet, MmId, Nanos, NANOS_PER_DOLLAR};
+use rand::RngExt;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use sybil_oracle::AdminOracle;
@@ -47,8 +48,6 @@ pub struct SimulationResult {
 impl SimulationRunner {
     /// Create a simulation from a scenario definition.
     pub fn from_scenario(scenario: &Scenario) -> Self {
-        use rand::Rng;
-
         let mut rng = ChaCha8Rng::seed_from_u64(scenario.seed);
         let mut accounts = AccountStore::new();
         let mut markets = MarketSet::new();
