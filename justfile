@@ -275,11 +275,15 @@ deploy-monitoring: deploy-network
     ssh {{SERVER}} 'docker run -d --name victoriametrics --network {{NETWORK}} --restart unless-stopped \
         -p 8428:8428 -v vmdata:/storage \
         -v /opt/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro \
+        --health-cmd "wget -qO- http://localhost:8428/-/healthy || exit 1" \
+        --health-interval 5s --health-timeout 3s --health-retries 5 \
         victoriametrics/victoria-metrics:v1.101.0 \
         -storageDataPath=/storage -promscrape.config=/etc/prometheus/prometheus.yml -retentionPeriod=30d'
     ssh {{SERVER}} 'docker run -d --name tempo --network {{NETWORK}} --restart unless-stopped \
         -p 4317:4317 -p 3200:3200 -v tempodata:/var/tempo \
         -v /opt/monitoring/tempo.yml:/etc/tempo.yml:ro \
+        --health-cmd "wget -qO- http://localhost:3200/ready || exit 1" \
+        --health-interval 5s --health-timeout 3s --health-retries 5 \
         grafana/tempo:2.4.1 \
         -config.file=/etc/tempo.yml'
     ssh {{SERVER}} 'docker run -d --name grafana --network {{NETWORK}} --restart unless-stopped \
@@ -289,6 +293,8 @@ deploy-monitoring: deploy-network
         -e GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer \
         -v /opt/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro \
         -v /opt/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro \
+        --health-cmd "wget -qO- http://localhost:3000/api/health || exit 1" \
+        --health-interval 5s --health-timeout 3s --health-retries 5 \
         grafana/grafana:11.0.0'
 
 # Deploy everything (api + polymarket + arena + dashboard + monitoring)
