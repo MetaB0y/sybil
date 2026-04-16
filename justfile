@@ -208,63 +208,69 @@ polymarket-dev port="3001" max_events="10":
 # ── Deploy (SSH) ──────────────────────────────────────────────────────────
 
 SERVER := "root@172.104.31.54"
+NETWORK := "sybil"
+
+# Create Docker network on server (idempotent)
+deploy-network:
+    ssh {{SERVER}} 'docker network create {{NETWORK}} 2>/dev/null || true'
 
 # Build and deploy sybil-api + polymarket mirror to server
-deploy-api:
+deploy-api: deploy-network
     docker build -t sybil-api:latest .
     docker save sybil-api:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'docker stop sybil-api sybil-polymarket 2>/dev/null; docker rm sybil-api sybil-polymarket 2>/dev/null; true'
     ssh {{SERVER}} 'docker run --rm -v polymarket-data:/data alpine rm -f /data/polymarket_mapping.json'
-    ssh {{SERVER}} 'docker run -d --name sybil-api --restart unless-stopped \
+    ssh {{SERVER}} 'docker run -d --name sybil-api --network {{NETWORK}} --restart unless-stopped \
         -p 3000:3000 -v sybil-data:/data \
         -e SYBIL_DEV_MODE=true -e SYBIL_BLOCK_INTERVAL_MS=2000 -e RUST_LOG=info \
-        -e OTEL_EXPORTER_OTLP_ENDPOINT=http://172.17.0.1:4317 \
+        -e OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4317 \
         -e SYBIL_DATA_DIR=/data \
         sybil-api:latest'
-    ssh {{SERVER}} 'docker run -d --name sybil-polymarket --restart unless-stopped \
+    ssh {{SERVER}} 'docker run -d --name sybil-polymarket --network {{NETWORK}} --restart unless-stopped \
         -v polymarket-data:/data -e RUST_LOG=sybil_polymarket=info \
         --entrypoint sybil-polymarket sybil-api:latest \
-        --sybil-url http://172.17.0.1:3000 --max-events 50 --mm-half-spread 0.01 \
+        --sybil-url http://sybil-api:3000 --max-events 50 --mm-half-spread 0.01 \
         --mm-budget-dollars 5000 --mm-initial-balance-dollars 1000000 \
         --mapping-store-path /data/polymarket_mapping.json --sync-interval-secs 120'
 
 # Build and deploy arena bots (pass OpenRouter key)
-deploy-arena key:
+deploy-arena key: deploy-network
     cd arena && docker build -t sybil-arena:latest .
     docker save sybil-arena:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'docker stop sybil-arena 2>/dev/null; docker rm sybil-arena 2>/dev/null; true'
-    ssh {{SERVER}} 'docker run -d --name sybil-arena --restart unless-stopped \
+    ssh {{SERVER}} 'docker run -d --name sybil-arena --network {{NETWORK}} --restart unless-stopped \
         -v arena-data:/data -v polymarket-data:/polymarket-data:ro -e PYTHONUNBUFFERED=1 \
         sybil-arena:latest \
-        --sybil-url http://172.17.0.1:3000 --api-key {{key}} \
+        --sybil-url http://sybil-api:3000 --api-key {{key}} \
         --max-markets 20 --model minimax/minimax-m2.7 --db-path /data/decisions.db \
         --mapping-path /polymarket-data/polymarket_mapping.json'
 
 # Deploy Caddy HTTPS reverse proxy (nip.io + Let's Encrypt) in front of sybil-api
-deploy-caddy:
+deploy-caddy: deploy-network
     scp deploy/Caddyfile {{SERVER}}:/root/Caddyfile
     ssh {{SERVER}} 'mkdir -p /opt/caddy && mv /root/Caddyfile /opt/caddy/Caddyfile'
     ssh {{SERVER}} 'docker stop caddy 2>/dev/null; docker rm caddy 2>/dev/null; true'
-    ssh {{SERVER}} 'docker run -d --name caddy --restart unless-stopped \
+    ssh {{SERVER}} 'docker run -d --name caddy --network {{NETWORK}} --restart unless-stopped \
         -p 80:80 -p 443:443 \
         -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile:ro \
         -v caddy-data:/data -v caddy-config:/config \
         caddy:latest'
 
 # Deploy arena dashboard (arena image must be loaded already)
-deploy-dashboard:
+deploy-dashboard: deploy-network
     ssh {{SERVER}} 'docker stop sybil-arena-dashboard 2>/dev/null; docker rm sybil-arena-dashboard 2>/dev/null; true'
-    ssh {{SERVER}} 'docker run -d --name sybil-arena-dashboard --restart unless-stopped \
+    ssh {{SERVER}} 'docker run -d --name sybil-arena-dashboard --network {{NETWORK}} --restart unless-stopped \
         -v arena-data:/data -p 8501:8501 -e PYTHONUNBUFFERED=1 \
         --entrypoint uv sybil-arena:latest \
         run streamlit run live/dashboard.py \
         --server.port=8501 --server.address=0.0.0.0 --server.headless=true'
 
-# Deploy everything (api + polymarket + arena + dashboard)
+# Deploy everything (api + polymarket + arena + dashboard + monitoring)
 deploy-all key:
     just deploy-api
     just deploy-arena {{key}}
     just deploy-dashboard
+    just deploy-monitoring
 
 # Tail logs from a container on the server
 deploy-logs service="sybil-api":

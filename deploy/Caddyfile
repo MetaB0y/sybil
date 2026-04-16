@@ -7,7 +7,7 @@
 
     # SSE and WebSocket block streams: no timeout, flush immediately
     @streaming path /v1/blocks/stream
-    reverse_proxy @streaming 172.17.0.1:3000 {
+    reverse_proxy @streaming sybil-api:3000 {
         flush_interval -1
         transport http {
             read_timeout  0
@@ -15,7 +15,7 @@
         }
     }
 
-    reverse_proxy 172.17.0.1:3000 {
+    reverse_proxy sybil-api:3000 {
         transport http {
             # Generous timeouts for order submission / LP solve under load
             dial_timeout    5s
