@@ -133,6 +133,10 @@ services:
 
 volumes:
   vmdata:
+    name: vmdata
   tempodata:
+    name: tempo-data
   polymarket-data:
+    name: polymarket-data
   arena-data:
+    name: arena-data

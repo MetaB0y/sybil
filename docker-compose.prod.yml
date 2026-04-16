@@ -44,5 +44,8 @@ services:
 
 volumes:
   sybil-data:
+    name: sybil-data
   caddy-data:
+    name: caddy-data
   caddy-config:
+    name: caddy-config
