@@ -72,6 +72,17 @@ impl AppError {
         }
     }
 
+    pub fn service_unavailable(error: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            body: ErrorBody {
+                error: error.into(),
+                code: "SERVICE_UNAVAILABLE".to_string(),
+                details: None,
+            },
+        }
+    }
+
     pub fn dev_mode_required() -> Self {
         Self::forbidden("This endpoint requires dev mode (--dev-mode)")
     }
@@ -99,14 +110,9 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::SignerAccountMismatch => {
                 AppError::forbidden("Signed account does not match signer public key")
             }
-            matching_sequencer::SequencerError::MempoolFull => Self {
-                status: StatusCode::SERVICE_UNAVAILABLE,
-                body: ErrorBody {
-                    error: "Mempool full".to_string(),
-                    code: "MEMPOOL_FULL".to_string(),
-                    details: None,
-                },
-            },
+            matching_sequencer::SequencerError::MempoolFull => {
+                AppError::service_unavailable("Mempool full")
+            }
             matching_sequencer::SequencerError::ActorGone => {
                 AppError::internal("Sequencer actor shut down")
             }

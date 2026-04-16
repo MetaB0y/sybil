@@ -1,6 +1,5 @@
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
 use axum::Json;
 use serde_json;
 
@@ -21,7 +20,9 @@ use crate::types::response::{HealthResponse, StateRootResponse};
         (status = 503, description = "Sequencer unavailable", body = HealthResponse),
     )
 )]
-pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
+pub async fn health(
+    State(state): State<AppState>,
+) -> (StatusCode, Json<HealthResponse>) {
     match state.sequencer.get_latest_block().await {
         Ok(block) => (
             StatusCode::OK,
@@ -29,8 +30,7 @@ pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
                 status: "ok".to_string(),
                 height: block.map(|b| b.header.height),
             }),
-        )
-            .into_response(),
+        ),
         Err(err) => {
             tracing::warn!(error = %err, "health check: sequencer unavailable");
             (
@@ -40,7 +40,6 @@ pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
                     height: None,
                 }),
             )
-                .into_response()
         }
     }
 }

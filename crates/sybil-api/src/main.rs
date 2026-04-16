@@ -68,7 +68,6 @@ async fn main() {
         "Starting Sybil API server"
     );
 
-    // Open persistent store (if data_dir configured)
     let store = if !config.data_dir.is_empty() {
         let data_dir = std::path::Path::new(&config.data_dir);
         std::fs::create_dir_all(data_dir).expect("failed to create data dir");
@@ -84,7 +83,6 @@ async fn main() {
         None
     };
 
-    // Try to restore state from store
     let oracle = Arc::new(AdminOracle::new());
     let restored = if let Some(store) = store.as_ref() {
         match store.load_state().await {
@@ -138,7 +136,6 @@ async fn main() {
 
         SequencerHandle::spawn_with_store(sequencer, store)
     } else {
-        // Fresh start
         let mut markets = MarketSet::new();
         for name in &config.seed_markets {
             if !name.is_empty() {
@@ -161,11 +158,8 @@ async fn main() {
         "Sequencer started"
     );
 
-    // Build app
     let state = AppState::new(handle, &config, prometheus_handle);
     let app = create_router(state);
-
-    // Start server
     let addr = format!("0.0.0.0:{}", config.port);
     let listener = TcpListener::bind(&addr).await.unwrap();
     tracing::info!("Listening on {}", addr);
