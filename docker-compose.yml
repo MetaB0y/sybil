@@ -88,7 +88,7 @@ services:
       - "-promscrape.config=/etc/prometheus/prometheus.yml"
       - "-retentionPeriod=30d"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8428/-/healthy"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8428/-/healthy"]
       interval: 5s
       timeout: 3s
       retries: 5
