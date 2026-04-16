@@ -18,9 +18,38 @@ use crate::canonical_state::{snapshot_account, CanonicalState};
 use crate::error::{Rejection, RejectionReason, SequencerError};
 use crate::market_info::{AccountFillRecord, MarketMetadata, PricePoint};
 use crate::market_lifecycle::MarketLifecycle;
+use crate::mempool::MempoolConfig;
 use crate::order_book::OrderBook;
 use crate::settlement;
 use crate::system_event::SystemEvent;
+
+/// Default order TTL in blocks. At 500ms block intervals this is ~1 year (GTC).
+pub const DEFAULT_ORDER_TTL_BLOCKS: u64 = 63_072_000;
+
+/// All tunable parameters for a [`BlockSequencer`] and its surrounding actor.
+///
+/// Construct via [`SequencerConfig::default()`] for sensible defaults, then
+/// override individual fields as needed.
+#[derive(Clone, Debug)]
+pub struct SequencerConfig {
+    /// Order time-to-live in blocks. Orders not filled within this many blocks
+    /// are expired from the order book. Default is ~1 year (GTC behaviour).
+    pub order_ttl_blocks: u64,
+    /// Block production interval. Drives the actor tick loop.
+    pub block_interval: std::time::Duration,
+    /// Mempool capacity limits.
+    pub mempool: MempoolConfig,
+}
+
+impl Default for SequencerConfig {
+    fn default() -> Self {
+        Self {
+            order_ttl_blocks: DEFAULT_ORDER_TTL_BLOCKS,
+            block_interval: std::time::Duration::from_secs(1),
+            mempool: MempoolConfig::default(),
+        }
+    }
+}
 
 /// An order submission from a participant.
 #[derive(Clone, Debug)]
@@ -365,6 +394,8 @@ pub struct BlockSequencer {
     /// Block-start baselines for accounts touched by pending system events.
     /// `None` means the account did not exist before the first system event.
     pending_system_account_baselines: HashMap<AccountId, Option<Account>>,
+    /// Runtime configuration for this sequencer and its surrounding actor.
+    pub config: SequencerConfig,
 }
 
 impl BlockSequencer {
@@ -374,12 +405,14 @@ impl BlockSequencer {
         market_groups: Vec<MarketGroup>,
         oracle: Arc<dyn Oracle>,
         solver: Arc<dyn Solver>,
+        config: SequencerConfig,
     ) -> Self {
+        let order_book = OrderBook::new(config.order_ttl_blocks);
         Self {
             accounts,
             solver,
             next_order_id: 1,
-            order_book: OrderBook::new(3),
+            order_book,
             height: 0,
             markets,
             market_groups,
@@ -390,6 +423,7 @@ impl BlockSequencer {
             pubkey_registry: HashMap::new(),
             pending_system_events: Vec::new(),
             pending_system_account_baselines: HashMap::new(),
+            config,
         }
     }
 
@@ -399,6 +433,7 @@ impl BlockSequencer {
         markets: MarketSet,
         market_groups: Vec<MarketGroup>,
         oracle: Arc<dyn Oracle>,
+        config: SequencerConfig,
     ) -> Self {
         Self::new(
             accounts,
@@ -406,6 +441,7 @@ impl BlockSequencer {
             market_groups,
             oracle,
             Arc::new(matching_solver::LpSolver::new()),
+            config,
         )
     }
 
@@ -423,6 +459,7 @@ impl BlockSequencer {
         market_metadata: HashMap<MarketId, MarketMetadata>,
         last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
         market_volumes: HashMap<MarketId, u64>,
+        config: SequencerConfig,
     ) -> Self {
         let solver: Arc<dyn Solver> = Arc::new(matching_solver::LpSolver::new());
         let mut lifecycle = MarketLifecycle::new(oracle);
@@ -432,11 +469,12 @@ impl BlockSequencer {
         for (market_id, meta) in market_metadata {
             lifecycle.set_market_metadata(market_id, meta);
         }
+        let order_book = OrderBook::new(config.order_ttl_blocks); // TODO: Tier 2 — persist order book
         Self {
             accounts,
             solver,
             next_order_id,
-            order_book: OrderBook::new(3), // TODO: Tier 2 — persist order book
+            order_book,
             height,
             markets,
             market_groups,
@@ -450,11 +488,16 @@ impl BlockSequencer {
             pubkey_registry,
             pending_system_events: Vec::new(),
             pending_system_account_baselines: HashMap::new(),
+            config,
         }
     }
 
     pub fn height(&self) -> u64 {
         self.height
+    }
+
+    pub fn order_ttl_blocks(&self) -> u64 {
+        self.config.order_ttl_blocks
     }
 
     pub fn markets(&self) -> &MarketSet {
@@ -1379,7 +1422,13 @@ mod tests {
         let markets = MarketSet::new();
         let oracle = Arc::new(AdminOracle::new());
         (
-            BlockSequencer::with_default_solver(accounts, markets, vec![], oracle),
+            BlockSequencer::with_default_solver(
+                accounts,
+                markets,
+                vec![],
+                oracle,
+                SequencerConfig::default(),
+            ),
             aid,
         )
     }
@@ -1456,7 +1505,7 @@ mod tests {
         let mut accounts = AccountStore::new();
         let holder = accounts.create_account(0);
         let oracle = Arc::new(AdminOracle::new());
-        let mut seq = BlockSequencer::with_default_solver(accounts, markets, vec![], oracle);
+        let mut seq = BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, SequencerConfig::default());
         seq.price_tracker = crate::price_tracker::PriceTracker::with_state(
             HashMap::from([(orphaned_market, vec![400_000_000, 600_000_000])]),
             HashMap::new(),
@@ -1887,6 +1936,7 @@ mod tests {
             MarketSet::new(),
             vec![],
             Arc::new(AdminOracle::new()),
+            SequencerConfig::default(),
         );
 
         let buy_sub = OrderSubmission {
@@ -1933,6 +1983,7 @@ mod tests {
             markets.clone(),
             vec![],
             Arc::new(AdminOracle::new()),
+            SequencerConfig::default(),
         );
 
         let buy_sub = OrderSubmission {
@@ -1984,6 +2035,7 @@ mod tests {
             markets.clone(),
             vec![],
             Arc::new(AdminOracle::new()),
+            SequencerConfig::default(),
         );
 
         let bp = seq.produce_block(vec![], 1000);
@@ -2001,6 +2053,7 @@ mod tests {
             markets.clone(),
             vec![],
             Arc::new(AdminOracle::new()),
+            SequencerConfig::default(),
         );
 
         let bp1 = seq.produce_block(vec![], 1000);
@@ -2020,6 +2073,7 @@ mod tests {
             markets.clone(),
             vec![],
             Arc::new(AdminOracle::new()),
+            SequencerConfig::default(),
         );
 
         let aid = seq.create_account(10 * NANOS_PER_DOLLAR as i64);
@@ -2062,6 +2116,7 @@ mod tests {
             markets.clone(),
             vec![],
             Arc::new(AdminOracle::new()),
+            SequencerConfig::default(),
         );
 
         seq.fund_account(aid, 10 * NANOS_PER_DOLLAR as i64).unwrap();
@@ -2222,6 +2277,7 @@ mod tests {
             markets.clone(),
             vec![],
             Arc::new(AdminOracle::new()),
+            SequencerConfig::default(),
         );
 
         let bp1 = seq.produce_block(vec![], 0);
@@ -2254,6 +2310,7 @@ mod tests {
             markets.clone(),
             vec![],
             Arc::new(AdminOracle::new()),
+            SequencerConfig::default(),
         );
 
         let opening_block = seq.produce_block(
@@ -2311,6 +2368,7 @@ mod tests {
             markets,
             vec![],
             Arc::new(AdminOracle::new()),
+            SequencerConfig::default(),
         );
 
         let bp = seq.produce_block(vec![], 0);
@@ -2345,7 +2403,7 @@ mod tests {
         let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
         let oracle = Arc::new(AdminOracle::new());
         let mut seq =
-            BlockSequencer::with_default_solver(accounts, markets.clone(), vec![group], oracle);
+            BlockSequencer::with_default_solver(accounts, markets.clone(), vec![group], oracle, SequencerConfig::default());
 
         let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
         constraint.add_order(0, matching_engine::MmSide::BuyYes);
@@ -2375,7 +2433,7 @@ mod tests {
         let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
         let oracle = Arc::new(AdminOracle::new());
         let mut seq =
-            BlockSequencer::with_default_solver(accounts, markets.clone(), vec![group], oracle);
+            BlockSequencer::with_default_solver(accounts, markets.clone(), vec![group], oracle, SequencerConfig::default());
 
         // Only quote 2 of 3 outcomes — not a complete set
         let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
@@ -2435,7 +2493,7 @@ mod tests {
         let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
         let oracle = Arc::new(AdminOracle::new());
         let mut seq =
-            BlockSequencer::with_default_solver(accounts, markets.clone(), vec![group], oracle);
+            BlockSequencer::with_default_solver(accounts, markets.clone(), vec![group], oracle, SequencerConfig::default());
 
         let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
         constraint.add_order(0, matching_engine::MmSide::BuyNo);
@@ -2469,7 +2527,7 @@ mod tests {
         let counter = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
         let oracle = Arc::new(AdminOracle::new());
         let mut seq =
-            BlockSequencer::with_default_solver(accounts, markets.clone(), vec![], oracle);
+            BlockSequencer::with_default_solver(accounts, markets.clone(), vec![], oracle, SequencerConfig::default());
 
         // Give counterparty YES positions to sell
         seq.accounts
@@ -2510,7 +2568,7 @@ mod tests {
         let aid = accounts.create_account(0); // zero balance
         let oracle = Arc::new(AdminOracle::new());
         let mut seq =
-            BlockSequencer::with_default_solver(accounts, MarketSet::new(), vec![], oracle);
+            BlockSequencer::with_default_solver(accounts, MarketSet::new(), vec![], oracle, SequencerConfig::default());
 
         let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
         constraint.add_order(0, matching_engine::MmSide::BuyYes);
@@ -2556,6 +2614,7 @@ mod tests {
             markets.clone(),
             vec![group.clone()],
             oracle,
+            SequencerConfig::default(),
         );
 
         // Run 5 blocks, each with BuyYes on all 3 group markets.
@@ -2616,7 +2675,7 @@ mod tests {
         let counter_id = accounts.create_account(100_000 * NANOS_PER_DOLLAR as i64);
         let oracle = Arc::new(AdminOracle::new());
         let mut seq =
-            BlockSequencer::with_default_solver(accounts, markets.clone(), vec![], oracle);
+            BlockSequencer::with_default_solver(accounts, markets.clone(), vec![], oracle, SequencerConfig::default());
 
         // Give counterparty massive YES position to sell
         seq.accounts

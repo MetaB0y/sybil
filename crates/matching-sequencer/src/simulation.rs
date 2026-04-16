@@ -14,7 +14,7 @@ use crate::agent::noise::NoiseTrader;
 use crate::agent::{Agent, MarketView};
 use crate::metrics::{self, AgentPnL, BatchMetrics};
 use crate::scenario::{EventMarketMap, NewsItem, NewsVisibility, PublicBeliefs, Scenario};
-use crate::sequencer::{batch_result_from_block, BlockSequencer, OrderSubmission};
+use crate::sequencer::{batch_result_from_block, BlockSequencer, OrderSubmission, SequencerConfig};
 use crate::settlement;
 
 pub struct SimulationRunner {
@@ -157,8 +157,13 @@ impl SimulationRunner {
         }
 
         let oracle = Arc::new(AdminOracle::new());
-        let sequencer =
-            BlockSequencer::with_default_solver(accounts, markets, market_groups, oracle);
+        let sequencer = BlockSequencer::with_default_solver(
+            accounts,
+            markets,
+            market_groups,
+            oracle,
+            SequencerConfig::default(),
+        );
 
         Self {
             sequencer,

@@ -6,7 +6,7 @@ use crate::error::SequencerError;
 use crate::sequencer::OrderSubmission;
 
 /// Configuration for mempool capacity limits.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MempoolConfig {
     /// Max orders drained per market per block.
     pub per_market_limit: usize,

@@ -1,6 +1,5 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
 
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort, SupervisionEvent};
 use tokio::sync::broadcast;
@@ -16,9 +15,9 @@ use crate::crypto::{
 };
 use crate::error::SequencerError;
 use crate::market_info::{AccountFillRecord, MarketMetadata, MarketSearchQuery, PricePoint};
-use crate::mempool::{Mempool, MempoolConfig};
+use crate::mempool::Mempool;
 use crate::portfolio::{self, PortfolioSummary};
-use crate::sequencer::{BlockSequencer, OrderSubmission, PendingOrderInfo, PreparedBlock};
+use crate::sequencer::{BlockSequencer, OrderSubmission, PendingOrderInfo, PreparedBlock, SequencerConfig};
 
 /// Messages sent from handles to the sequencer actor.
 pub enum SequencerMsg {
@@ -101,8 +100,6 @@ struct SequencerActor;
 
 struct SequencerActorArgs {
     sequencer: BlockSequencer,
-    mempool_config: MempoolConfig,
-    block_interval: Duration,
     store: Option<Arc<crate::store::Store>>,
     block_broadcast: broadcast::Sender<Block>,
 }
@@ -113,7 +110,6 @@ struct SequencerActorState {
     latest_block: Option<Block>,
     block_history: VecDeque<Block>,
     block_broadcast: broadcast::Sender<Block>,
-    block_interval: Duration,
     pause_count: u32,
     store: Option<Arc<crate::store::Store>>,
 }
@@ -394,13 +390,13 @@ impl Actor for SequencerActor {
         _myself: ActorRef<Self::Msg>,
         args: Self::Arguments,
     ) -> Result<Self::State, ActorProcessingErr> {
+        let mempool = Mempool::new(args.sequencer.config.mempool.clone());
         Ok(SequencerActorState {
             sequencer: args.sequencer,
-            mempool: Mempool::new(args.mempool_config),
+            mempool,
             latest_block: None,
             block_history: VecDeque::new(),
             block_broadcast: args.block_broadcast,
-            block_interval: args.block_interval,
             pause_count: 0,
             store: args.store,
         })
@@ -412,7 +408,7 @@ impl Actor for SequencerActor {
         state: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         let actor = myself.clone();
-        let block_interval = state.block_interval;
+        let block_interval = state.sequencer.config.block_interval;
         tokio::spawn(async move {
             let mut ticker = interval_at(Instant::now() + block_interval, block_interval);
             loop {
@@ -602,8 +598,7 @@ struct SequencerHandleInner {
 struct SequencerSupervisor;
 
 struct SequencerSupervisorArgs {
-    mempool_config: MempoolConfig,
-    block_interval: Duration,
+    config: SequencerConfig,
     store: Option<Arc<crate::store::Store>>,
     oracle: Arc<dyn Oracle>,
     handle: SequencerHandleInner,
@@ -611,8 +606,7 @@ struct SequencerSupervisorArgs {
 
 struct SequencerSupervisorState {
     current_actor: Option<ActorRef<SequencerMsg>>,
-    mempool_config: MempoolConfig,
-    block_interval: Duration,
+    config: SequencerConfig,
     store: Option<Arc<crate::store::Store>>,
     oracle: Arc<dyn Oracle>,
     handle: SequencerHandleInner,
@@ -638,8 +632,6 @@ impl SequencerSupervisorState {
     ) -> Result<(), ActorProcessingErr> {
         let args = SequencerActorArgs {
             sequencer,
-            mempool_config: self.mempool_config.clone(),
-            block_interval: self.block_interval,
             store: self.store.clone(),
             block_broadcast: self.handle.block_broadcast.clone(),
         };
@@ -689,6 +681,7 @@ impl SequencerSupervisorState {
             state.market_metadata,
             state.last_clearing_prices,
             state.market_volumes,
+            self.config.clone(),
         );
 
         match self.spawn_child(myself, sequencer).await {
@@ -713,8 +706,7 @@ impl Actor for SequencerSupervisor {
     ) -> Result<Self::State, ActorProcessingErr> {
         Ok(SequencerSupervisorState {
             current_actor: None,
-            mempool_config: args.mempool_config,
-            block_interval: args.block_interval,
+            config: args.config,
             store: args.store,
             oracle: args.oracle,
             handle: args.handle,
@@ -802,25 +794,18 @@ impl SequencerHandle {
         }
     }
 
-    pub fn spawn(sequencer: BlockSequencer, mempool_config: MempoolConfig) -> Self {
-        Self::spawn_with_interval(sequencer, mempool_config, Duration::from_secs(1))
-    }
-
-    pub fn spawn_with_interval(
-        sequencer: BlockSequencer,
-        mempool_config: MempoolConfig,
-        block_interval: Duration,
-    ) -> Self {
-        Self::spawn_with_store(sequencer, mempool_config, block_interval, None)
+    /// Spawn with default config (1-second block interval, default mempool).
+    /// Prefer [`spawn_with_store`] for production use.
+    pub fn spawn(sequencer: BlockSequencer) -> Self {
+        Self::spawn_with_store(sequencer, None)
     }
 
     pub fn spawn_with_store(
         sequencer: BlockSequencer,
-        mempool_config: MempoolConfig,
-        block_interval: Duration,
         store: Option<crate::store::Store>,
     ) -> Self {
         let oracle = sequencer.oracle();
+        let config = sequencer.config.clone();
         let store = store.map(Arc::new);
         let (block_broadcast, _) = broadcast::channel(64);
         let inner = SequencerHandleInner {
@@ -828,8 +813,7 @@ impl SequencerHandle {
             block_broadcast: block_broadcast.clone(),
         };
         let supervisor_args = SequencerSupervisorArgs {
-            mempool_config: mempool_config.clone(),
-            block_interval,
+            config,
             store: store.clone(),
             oracle,
             handle: inner.clone(),
@@ -839,8 +823,6 @@ impl SequencerHandle {
                 .expect("failed to spawn sequencer supervisor");
         let actor_args = SequencerActorArgs {
             sequencer,
-            mempool_config,
-            block_interval,
             store,
             block_broadcast,
         };
@@ -1080,9 +1062,11 @@ impl SequencerHandle {
 mod tests {
     use super::*;
     use crate::account::AccountStore;
+    use crate::sequencer::SequencerConfig;
     use crate::system_event::SystemEvent;
     use matching_engine::{outcome_buy, MarketSet, NANOS_PER_DOLLAR};
     use std::sync::Arc;
+    use std::time::Duration;
     use sybil_oracle::AdminOracle;
 
     fn make_test_sequencer() -> (BlockSequencer, AccountId) {
@@ -1092,7 +1076,13 @@ mod tests {
         markets.add_binary("Test");
         let oracle = Arc::new(AdminOracle::new());
         (
-            BlockSequencer::with_default_solver(accounts, markets, vec![], oracle),
+            BlockSequencer::with_default_solver(
+                accounts,
+                markets,
+                vec![],
+                oracle,
+                SequencerConfig::default(),
+            ),
             aid,
         )
     }
@@ -1100,7 +1090,7 @@ mod tests {
     #[tokio::test]
     async fn test_spawn_and_produce_block() {
         let (seq, _) = make_test_sequencer();
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         let block = handle.produce_block().await.unwrap();
         assert_eq!(block.header.height, 1);
@@ -1112,7 +1102,7 @@ mod tests {
         let mut ms = MarketSet::new();
         let m0 = ms.add_binary("Test");
 
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         let sub = OrderSubmission {
             account_id: aid,
@@ -1130,7 +1120,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_state_root() {
         let (seq, _) = make_test_sequencer();
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         let root = handle.get_state_root().await.unwrap();
         assert_ne!(root, [0u8; 32]); // non-empty accounts -> non-zero root
@@ -1139,7 +1129,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_account() {
         let (seq, aid) = make_test_sequencer();
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         let account = handle.get_account(aid).await.unwrap();
         assert!(account.is_some());
@@ -1149,7 +1139,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_latest_block_none_initially() {
         let (seq, _) = make_test_sequencer();
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         let block = handle.get_latest_block().await.unwrap();
         assert!(block.is_none());
@@ -1158,7 +1148,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_latest_block_after_produce() {
         let (seq, _) = make_test_sequencer();
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         handle.produce_block().await.unwrap();
 
@@ -1170,7 +1160,7 @@ mod tests {
     #[tokio::test]
     async fn test_graceful_shutdown() {
         let (seq, _) = make_test_sequencer();
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         handle.produce_block().await.unwrap();
         drop(handle);
@@ -1181,7 +1171,7 @@ mod tests {
     #[tokio::test]
     async fn test_block_chain_via_actor() {
         let (seq, _) = make_test_sequencer();
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         let block1 = handle.produce_block().await.unwrap();
         assert_eq!(block1.header.height, 1);
@@ -1211,8 +1201,9 @@ mod tests {
             markets.clone(),
             vec![],
             Arc::new(AdminOracle::new()),
+            SequencerConfig::default(),
         );
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         let root_before = handle.get_state_root().await.unwrap();
 
@@ -1248,7 +1239,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_account() {
         let (seq, _) = make_test_sequencer();
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         let account = handle
             .create_account(50 * NANOS_PER_DOLLAR as i64)
@@ -1264,7 +1255,7 @@ mod tests {
     #[tokio::test]
     async fn test_fund_account() {
         let (seq, aid) = make_test_sequencer();
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         let account = handle
             .fund_account(aid, 25 * NANOS_PER_DOLLAR as i64)
@@ -1276,7 +1267,7 @@ mod tests {
     #[tokio::test]
     async fn test_system_events_emitted_for_create_and_fund() {
         let (seq, _) = make_test_sequencer();
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         let account = handle
             .create_account(50 * NANOS_PER_DOLLAR as i64)
@@ -1313,7 +1304,7 @@ mod tests {
     #[tokio::test]
     async fn test_fund_nonexistent_account() {
         let (seq, _) = make_test_sequencer();
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         let result = handle.fund_account(AccountId(999), 100).await;
         assert!(result.is_err());
@@ -1324,7 +1315,7 @@ mod tests {
         let (seq, aid) = make_test_sequencer();
         let mut ms = MarketSet::new();
         let m0 = ms.add_binary("Test");
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         let signing_key =
             <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
@@ -1347,7 +1338,7 @@ mod tests {
         let (seq, aid) = make_test_sequencer();
         let mut ms = MarketSet::new();
         let m0 = ms.add_binary("Test");
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         let signing_key =
             <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
@@ -1382,7 +1373,7 @@ mod tests {
         let other = AccountId(aid.0 + 1);
         let mut ms = MarketSet::new();
         let m0 = ms.add_binary("Test");
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         let signing_key =
             <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
@@ -1410,7 +1401,7 @@ mod tests {
     #[tokio::test]
     async fn test_register_pubkey_duplicate() {
         let (seq, aid) = make_test_sequencer();
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         let signing_key =
             <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
@@ -1429,7 +1420,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_and_create_markets() {
         let (seq, _) = make_test_sequencer();
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         let markets = handle.list_markets().await.unwrap();
         assert_eq!(markets.len(), 1);
@@ -1446,7 +1437,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_and_list_market_groups() {
         let (seq, _) = make_test_sequencer();
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         let m1 = handle.create_market("A wins".to_string()).await.unwrap();
         let m2 = handle.create_market("B wins".to_string()).await.unwrap();
@@ -1465,7 +1456,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_market() {
         let (seq, _aid) = make_test_sequencer();
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         let m0 = MarketId::new(0);
         let record = handle.resolve_market(m0, NANOS_PER_DOLLAR).await.unwrap();
@@ -1486,8 +1477,9 @@ mod tests {
             markets,
             vec![],
             Arc::new(AdminOracle::new()),
+            SequencerConfig::default(),
         );
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         handle.resolve_market(m0, NANOS_PER_DOLLAR).await.unwrap();
         let block = handle.produce_block().await.unwrap();
@@ -1510,7 +1502,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_nonexistent_market() {
         let (seq, _) = make_test_sequencer();
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         let result = handle
             .resolve_market(MarketId::new(999), NANOS_PER_DOLLAR)
@@ -1521,7 +1513,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_block_by_height() {
         let (seq, _) = make_test_sequencer();
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         handle.produce_block().await.unwrap();
         handle.produce_block().await.unwrap();
@@ -1539,7 +1531,7 @@ mod tests {
     #[tokio::test]
     async fn test_subscribe_blocks() {
         let (seq, _) = make_test_sequencer();
-        let handle = SequencerHandle::spawn(seq, MempoolConfig::default());
+        let handle = SequencerHandle::spawn(seq);
 
         let mut rx = handle.subscribe_blocks().await.unwrap();
 

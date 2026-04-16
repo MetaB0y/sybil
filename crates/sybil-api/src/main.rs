@@ -9,9 +9,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
 use matching_engine::MarketSet;
-use matching_sequencer::{
-    AccountStore, AdminOracle, BlockSequencer, MempoolConfig, SequencerHandle,
-};
+use matching_sequencer::{AccountStore, AdminOracle, BlockSequencer, SequencerConfig, SequencerHandle};
 
 use sybil_api::app::create_router;
 use sybil_api::config::ApiConfig;
@@ -100,7 +98,11 @@ async fn main() {
         None
     };
 
-    let block_interval = Duration::from_millis(config.block_interval_ms);
+    let seq_config = SequencerConfig {
+        order_ttl_blocks: config.order_ttl_blocks,
+        block_interval: Duration::from_millis(config.block_interval_ms),
+        ..SequencerConfig::default()
+    };
 
     let handle = if let Some(state) = restored {
         tracing::info!(
@@ -124,6 +126,7 @@ async fn main() {
             state.market_metadata,
             state.last_clearing_prices,
             state.market_volumes,
+            seq_config,
         );
 
         // Add any seed markets not already present
@@ -133,12 +136,7 @@ async fn main() {
             }
         }
 
-        SequencerHandle::spawn_with_store(
-            sequencer,
-            MempoolConfig::default(),
-            block_interval,
-            store,
-        )
+        SequencerHandle::spawn_with_store(sequencer, store)
     } else {
         // Fresh start
         let mut markets = MarketSet::new();
@@ -148,22 +146,18 @@ async fn main() {
             }
         }
         let num_markets = markets.len();
-
         let accounts = AccountStore::new();
-        let sequencer = BlockSequencer::with_default_solver(accounts, markets, vec![], oracle);
+        let sequencer =
+            BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, seq_config);
 
         tracing::info!(num_markets, "Starting fresh (no persistent state)");
 
-        SequencerHandle::spawn_with_store(
-            sequencer,
-            MempoolConfig::default(),
-            block_interval,
-            store,
-        )
+        SequencerHandle::spawn_with_store(sequencer, store)
     };
 
     tracing::info!(
         block_interval_ms = config.block_interval_ms,
+        order_ttl_blocks = config.order_ttl_blocks,
         "Sequencer started"
     );
 
