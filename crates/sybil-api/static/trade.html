@@ -1128,6 +1128,7 @@ function tradingApp() {
       if (resp.ok) {
         this.showToast(this.humanSide(this.orderSide) + ' ' + qty + ' @ $' + this.orderPrice.toFixed(2) + ' submitted!');
         this.fetchPendingOrders();
+        this.fetchOrderbook(marketId);
         this.fetchFills(marketId);
         this.fetchFills();
         this.fetchPortfolio();
