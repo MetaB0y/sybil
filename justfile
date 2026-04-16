@@ -265,6 +265,32 @@ deploy-dashboard: deploy-network
         run streamlit run live/dashboard.py \
         --server.port=8501 --server.address=0.0.0.0 --server.headless=true'
 
+# Deploy observability stack (VictoriaMetrics + Tempo + Grafana)
+deploy-monitoring: deploy-network
+    scp deploy/prometheus.yml {{SERVER}}:/root/prometheus.yml
+    scp deploy/tempo.yml {{SERVER}}:/root/tempo.yml
+    scp -r deploy/grafana {{SERVER}}:/root/grafana
+    ssh {{SERVER}} 'mkdir -p /opt/monitoring && mv /root/prometheus.yml /root/tempo.yml /opt/monitoring/ && rm -rf /opt/monitoring/grafana && mv /root/grafana /opt/monitoring/grafana'
+    ssh {{SERVER}} 'docker stop victoriametrics tempo grafana 2>/dev/null; docker rm victoriametrics tempo grafana 2>/dev/null; true'
+    ssh {{SERVER}} 'docker run -d --name victoriametrics --network {{NETWORK}} --restart unless-stopped \
+        -p 8428:8428 -v vmdata:/storage \
+        -v /opt/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro \
+        victoriametrics/victoria-metrics:v1.101.0 \
+        -storageDataPath=/storage -promscrape.config=/etc/prometheus/prometheus.yml -retentionPeriod=30d'
+    ssh {{SERVER}} 'docker run -d --name tempo --network {{NETWORK}} --restart unless-stopped \
+        -p 4317:4317 -p 3200:3200 -v tempodata:/var/tempo \
+        -v /opt/monitoring/tempo.yml:/etc/tempo.yml:ro \
+        grafana/tempo:2.4.1 \
+        -config.file=/etc/tempo.yml'
+    ssh {{SERVER}} 'docker run -d --name grafana --network {{NETWORK}} --restart unless-stopped \
+        -p 3001:3000 \
+        -e GF_SECURITY_ADMIN_PASSWORD=admin \
+        -e GF_AUTH_ANONYMOUS_ENABLED=true \
+        -e GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer \
+        -v /opt/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro \
+        -v /opt/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro \
+        grafana/grafana:11.0.0'
+
 # Deploy everything (api + polymarket + arena + dashboard + monitoring)
 deploy-all key:
     just deploy-api
