@@ -1,6 +1,6 @@
 services:
   sybil-api:
-    build: .
+    image: sybil-api:latest
     ports:
       - "3000:3000"
     environment:
@@ -24,7 +24,7 @@ services:
       start_period: 10s
 
   sybil-polymarket:
-    build: .
+    image: sybil-api:latest
     entrypoint: ["sybil-polymarket"]
     command:
       - "--sybil-url=http://sybil-api:3000"
@@ -43,7 +43,7 @@ services:
     restart: unless-stopped
 
   sybil-arena:
-    build: ./arena
+    image: sybil-arena:latest
     command:
       - "--sybil-url=http://sybil-api:3000"
       - "--api-key=${OPENROUTER_API_KEY}"
@@ -60,7 +60,7 @@ services:
     restart: unless-stopped
 
   sybil-arena-dashboard:
-    build: ./arena
+    image: sybil-arena:latest
     entrypoint: ["uv", "run", "streamlit", "run", "live/dashboard.py"]
     command:
       - "--server.port=8501"
@@ -82,7 +82,7 @@ services:
       - "8428:8428"
     volumes:
       - vmdata:/storage
-      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     command:
       - "-storageDataPath=/storage"
       - "-promscrape.config=/etc/prometheus/prometheus.yml"
@@ -96,10 +96,10 @@ services:
   tempo:
     image: grafana/tempo:2.4.1
     ports:
-      - "4317:4317"   # OTLP gRPC
-      - "3200:3200"   # Tempo query API
+      - "4317:4317"
+      - "3200:3200"
     volumes:
-      - ./deploy/tempo.yml:/etc/tempo.yml
+      - ./deploy/tempo.yml:/etc/tempo.yml:ro
       - tempodata:/var/tempo
     command:
       - "-config.file=/etc/tempo.yml"
@@ -118,8 +118,8 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
     volumes:
-      - ./deploy/grafana/provisioning:/etc/grafana/provisioning
-      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       victoriametrics:
         condition: service_healthy

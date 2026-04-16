@@ -206,103 +206,44 @@ polymarket-dev port="3001" max_events="10":
     cargo run --release -p sybil-polymarket -- --sybil-url http://localhost:{{port}} --max-events {{max_events}} --mm-half-spread 0.03
 
 # ── Deploy (SSH) ──────────────────────────────────────────────────────────
+# Production uses the same docker-compose.yml as local dev, with
+# docker-compose.prod.yml layered on top (persistence, prod params, Caddy).
+# docker-compose.override.yml (build contexts) is NOT shipped to the server.
 
 SERVER := "root@172.104.31.54"
-NETWORK := "sybil"
+COMPOSE_PROD := "docker compose -f docker-compose.yml -f docker-compose.prod.yml"
 
-# Create Docker network on server (idempotent)
-deploy-network:
-    ssh {{SERVER}} 'docker network create {{NETWORK}} 2>/dev/null || true'
+# Sync compose configs + deploy/ directory to server
+deploy-sync:
+    ssh {{SERVER}} 'mkdir -p /opt/sybil'
+    scp docker-compose.yml docker-compose.prod.yml {{SERVER}}:/opt/sybil/
+    scp -r deploy {{SERVER}}:/opt/sybil/
 
-# Build and deploy sybil-api + polymarket mirror to server
-deploy-api: deploy-network
-    docker build -t sybil-api:latest .
+# Build and deploy sybil-api + polymarket mirror
+deploy-api: deploy-sync
+    docker compose build sybil-api
     docker save sybil-api:latest | ssh {{SERVER}} docker load
-    ssh {{SERVER}} 'docker stop sybil-api sybil-polymarket 2>/dev/null; docker rm sybil-api sybil-polymarket 2>/dev/null; true'
-    ssh {{SERVER}} 'docker run --rm -v polymarket-data:/data alpine rm -f /data/polymarket_mapping.json'
-    ssh {{SERVER}} 'docker run -d --name sybil-api --network {{NETWORK}} --restart unless-stopped \
-        -p 3000:3000 -v sybil-data:/data \
-        -e SYBIL_DEV_MODE=true -e SYBIL_BLOCK_INTERVAL_MS=2000 -e RUST_LOG=info \
-        -e OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4317 \
-        -e SYBIL_DATA_DIR=/data \
-        sybil-api:latest'
-    ssh {{SERVER}} 'docker run -d --name sybil-polymarket --network {{NETWORK}} --restart unless-stopped \
-        -v polymarket-data:/data -e RUST_LOG=sybil_polymarket=info \
-        --entrypoint sybil-polymarket sybil-api:latest \
-        --sybil-url http://sybil-api:3000 --max-events 50 --mm-half-spread 0.01 \
-        --mm-budget-dollars 5000 --mm-initial-balance-dollars 1000000 \
-        --mapping-store-path /data/polymarket_mapping.json --sync-interval-secs 120'
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-api sybil-polymarket'
 
-# Build and deploy arena bots (pass OpenRouter key)
-deploy-arena key: deploy-network
-    cd arena && docker build -t sybil-arena:latest .
+# Build and deploy arena bots + dashboard (pass OpenRouter key)
+deploy-arena key: deploy-sync
+    docker compose build sybil-arena
     docker save sybil-arena:latest | ssh {{SERVER}} docker load
-    ssh {{SERVER}} 'docker stop sybil-arena 2>/dev/null; docker rm sybil-arena 2>/dev/null; true'
-    ssh {{SERVER}} 'docker run -d --name sybil-arena --network {{NETWORK}} --restart unless-stopped \
-        -v arena-data:/data -v polymarket-data:/polymarket-data:ro -e PYTHONUNBUFFERED=1 \
-        sybil-arena:latest \
-        --sybil-url http://sybil-api:3000 --api-key {{key}} \
-        --max-markets 20 --model minimax/minimax-m2.7 --db-path /data/decisions.db \
-        --mapping-path /polymarket-data/polymarket_mapping.json'
-
-# Deploy Caddy HTTPS reverse proxy (nip.io + Let's Encrypt) in front of sybil-api
-deploy-caddy: deploy-network
-    scp deploy/Caddyfile {{SERVER}}:/root/Caddyfile
-    ssh {{SERVER}} 'mkdir -p /opt/caddy && mv /root/Caddyfile /opt/caddy/Caddyfile'
-    ssh {{SERVER}} 'docker stop caddy 2>/dev/null; docker rm caddy 2>/dev/null; true'
-    ssh {{SERVER}} 'docker run -d --name caddy --network {{NETWORK}} --restart unless-stopped \
-        -p 80:80 -p 443:443 \
-        -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile:ro \
-        -v caddy-data:/data -v caddy-config:/config \
-        caddy:latest'
-
-# Deploy arena dashboard (arena image must be loaded already)
-deploy-dashboard: deploy-network
-    ssh {{SERVER}} 'docker stop sybil-arena-dashboard 2>/dev/null; docker rm sybil-arena-dashboard 2>/dev/null; true'
-    ssh {{SERVER}} 'docker run -d --name sybil-arena-dashboard --network {{NETWORK}} --restart unless-stopped \
-        -v arena-data:/data -p 8501:8501 -e PYTHONUNBUFFERED=1 \
-        --entrypoint uv sybil-arena:latest \
-        run streamlit run live/dashboard.py \
-        --server.port=8501 --server.address=0.0.0.0 --server.headless=true'
+    ssh {{SERVER}} 'cd /opt/sybil && OPENROUTER_API_KEY={{key}} {{COMPOSE_PROD}} up -d sybil-arena sybil-arena-dashboard'
 
 # Deploy observability stack (VictoriaMetrics + Tempo + Grafana)
-deploy-monitoring: deploy-network
-    scp deploy/prometheus.yml {{SERVER}}:/root/prometheus.yml
-    scp deploy/tempo.yml {{SERVER}}:/root/tempo.yml
-    scp -r deploy/grafana {{SERVER}}:/root/grafana
-    ssh {{SERVER}} 'mkdir -p /opt/monitoring && mv /root/prometheus.yml /root/tempo.yml /opt/monitoring/ && rm -rf /opt/monitoring/grafana && mv /root/grafana /opt/monitoring/grafana'
-    ssh {{SERVER}} 'docker stop victoriametrics tempo grafana 2>/dev/null; docker rm victoriametrics tempo grafana 2>/dev/null; true'
-    ssh {{SERVER}} 'docker run -d --name victoriametrics --network {{NETWORK}} --restart unless-stopped \
-        -p 8428:8428 -v vmdata:/storage \
-        -v /opt/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro \
-        --health-cmd "wget -qO- http://localhost:8428/-/healthy || exit 1" \
-        --health-interval 5s --health-timeout 3s --health-retries 5 \
-        victoriametrics/victoria-metrics:v1.101.0 \
-        -storageDataPath=/storage -promscrape.config=/etc/prometheus/prometheus.yml -retentionPeriod=30d'
-    ssh {{SERVER}} 'docker run -d --name tempo --network {{NETWORK}} --restart unless-stopped \
-        -p 4317:4317 -p 3200:3200 -v tempodata:/var/tempo \
-        -v /opt/monitoring/tempo.yml:/etc/tempo.yml:ro \
-        --health-cmd "wget -qO- http://localhost:3200/ready || exit 1" \
-        --health-interval 5s --health-timeout 3s --health-retries 5 \
-        grafana/tempo:2.4.1 \
-        -config.file=/etc/tempo.yml'
-    ssh {{SERVER}} 'docker run -d --name grafana --network {{NETWORK}} --restart unless-stopped \
-        -p 3001:3000 \
-        -e GF_SECURITY_ADMIN_PASSWORD=admin \
-        -e GF_AUTH_ANONYMOUS_ENABLED=true \
-        -e GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer \
-        -v /opt/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro \
-        -v /opt/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro \
-        --health-cmd "wget -qO- http://localhost:3000/api/health || exit 1" \
-        --health-interval 5s --health-timeout 3s --health-retries 5 \
-        grafana/grafana:11.0.0'
+deploy-monitoring: deploy-sync
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d victoriametrics tempo grafana'
 
-# Deploy everything (api + polymarket + arena + dashboard + monitoring)
-deploy-all key:
-    just deploy-api
-    just deploy-arena {{key}}
-    just deploy-dashboard
-    just deploy-monitoring
+# Deploy Caddy HTTPS reverse proxy
+deploy-caddy: deploy-sync
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d caddy'
+
+# Deploy everything
+deploy-all key: deploy-sync
+    docker compose build
+    docker save sybil-api:latest sybil-arena:latest | ssh {{SERVER}} docker load
+    ssh {{SERVER}} 'cd /opt/sybil && OPENROUTER_API_KEY={{key}} {{COMPOSE_PROD}} up -d --remove-orphans'
 
 # Tail logs from a container on the server
 deploy-logs service="sybil-api":

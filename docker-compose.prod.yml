@@ -1,0 +1,48 @@
+# Production overrides: persistence, tuned params, Caddy.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+services:
+  sybil-api:
+    volumes:
+      - sybil-data:/data
+    environment:
+      SYBIL_DATA_DIR: "/data"
+
+  sybil-polymarket:
+    command:
+      - "--sybil-url=http://sybil-api:3000"
+      - "--max-events=50"
+      - "--mm-half-spread=0.01"
+      - "--mm-budget-dollars=5000"
+      - "--mm-initial-balance-dollars=1000000"
+      - "--mapping-store-path=/data/polymarket_mapping.json"
+      - "--sync-interval-secs=120"
+
+  sybil-arena:
+    volumes:
+      - polymarket-data:/polymarket-data:ro
+    command:
+      - "--sybil-url=http://sybil-api:3000"
+      - "--api-key=${OPENROUTER_API_KEY}"
+      - "--max-markets=20"
+      - "--model=minimax/minimax-m2.7"
+      - "--db-path=/data/decisions.db"
+      - "--mapping-path=/polymarket-data/polymarket_mapping.json"
+
+  caddy:
+    image: caddy:latest
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      sybil-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  sybil-data:
+  caddy-data:
+  caddy-config:

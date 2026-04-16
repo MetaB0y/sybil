@@ -1,0 +1,14 @@
+# Local dev: adds build contexts so `docker compose build` works.
+# Auto-loaded by `docker compose up` — not shipped to server.
+services:
+  sybil-api:
+    build: .
+
+  sybil-polymarket:
+    build: .
+
+  sybil-arena:
+    build: ./arena
+
+  sybil-arena-dashboard:
+    build: ./arena
