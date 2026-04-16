@@ -9,12 +9,19 @@ services:
       SYBIL_BLOCK_INTERVAL_MS: "2000"
       RUST_LOG: "info"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+    restart: unless-stopped
+    stop_grace_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/v1/health"]
       interval: 5s
       timeout: 3s
       retries: 10
-      start_period: 5s
+      start_period: 10s
 
   sybil-polymarket:
     build: .

@@ -1,4 +1,6 @@
 use axum::extract::State;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::Json;
 use serde_json;
 
@@ -7,19 +9,40 @@ use crate::types::error::AppError;
 use crate::types::response::{HealthResponse, StateRootResponse};
 
 /// GET /v1/health
+///
+/// Returns 200 when the sequencer is running, 503 when it is unavailable.
+/// Downstream services and Docker healthchecks should treat any non-200 as
+/// unhealthy and stop routing traffic.
 #[utoipa::path(
     get,
     path = "/v1/health",
     responses(
-        (status = 200, description = "System health", body = HealthResponse)
+        (status = 200, description = "Sequencer healthy", body = HealthResponse),
+        (status = 503, description = "Sequencer unavailable", body = HealthResponse),
     )
 )]
-pub async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse>, AppError> {
-    let block = state.sequencer.get_latest_block().await?;
-    Ok(Json(HealthResponse {
-        status: "ok".to_string(),
-        height: block.map(|b| b.header.height),
-    }))
+pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
+    match state.sequencer.get_latest_block().await {
+        Ok(block) => (
+            StatusCode::OK,
+            Json(HealthResponse {
+                status: "ok".to_string(),
+                height: block.map(|b| b.header.height),
+            }),
+        )
+            .into_response(),
+        Err(err) => {
+            tracing::warn!(error = %err, "health check: sequencer unavailable");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(HealthResponse {
+                    status: "unhealthy".to_string(),
+                    height: None,
+                }),
+            )
+                .into_response()
+        }
+    }
 }
 
 /// GET /v1/state-root
