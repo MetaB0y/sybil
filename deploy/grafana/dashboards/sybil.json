@@ -9,7 +9,7 @@
       "title": "Block Height",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{ "expr": "sybil_block_height", "refId": "A" }],
       "fieldConfig": {
         "defaults": { "unit": "none", "thresholds": { "steps": [{ "color": "green", "value": null }] } },
@@ -20,7 +20,7 @@
       "title": "Blocks Produced",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{ "expr": "sybil_blocks_produced", "refId": "A" }],
       "fieldConfig": {
         "defaults": { "unit": "none", "thresholds": { "steps": [{ "color": "blue", "value": null }] } },
@@ -31,7 +31,7 @@
       "title": "Welfare (nanos)",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{ "expr": "sybil_welfare_nanos", "refId": "A" }],
       "fieldConfig": {
         "defaults": { "unit": "none", "thresholds": { "steps": [{ "color": "purple", "value": null }] } },
@@ -42,7 +42,7 @@
       "title": "Volume (nanos)",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{ "expr": "sybil_volume_nanos", "refId": "A" }],
       "fieldConfig": {
         "defaults": { "unit": "none", "thresholds": { "steps": [{ "color": "orange", "value": null }] } },
@@ -53,7 +53,7 @@
       "title": "Mempool Size",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{ "expr": "sybil_mempool_size", "refId": "A" }],
       "fieldConfig": {
         "defaults": { "unit": "none", "thresholds": { "steps": [{ "color": "yellow", "value": null }, { "color": "red", "value": 1000 }] } },
@@ -64,7 +64,7 @@
       "title": "Pending Orders",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{ "expr": "sybil_pending_orders", "refId": "A" }],
       "fieldConfig": {
         "defaults": { "unit": "none", "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 5000 }] } },
@@ -75,7 +75,7 @@
       "title": "Order Flow per Block",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
-      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
         { "expr": "rate(sybil_batch_orders_per_block_sum[1m]) / rate(sybil_batch_orders_per_block_count[1m])", "legendFormat": "batch orders", "refId": "A" },
         { "expr": "rate(sybil_fresh_orders_per_block_sum[1m]) / rate(sybil_fresh_orders_per_block_count[1m])", "legendFormat": "fresh orders", "refId": "B" },
@@ -89,7 +89,7 @@
       "title": "Fills per Block",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
-      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
         { "expr": "rate(sybil_fills_per_block_sum[1m]) / rate(sybil_fills_per_block_count[1m])", "legendFormat": "avg fills/block", "refId": "A" }
       ],
@@ -99,7 +99,7 @@
       "title": "Solve Time",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
-      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
         { "expr": "rate(sybil_solve_time_seconds_sum[1m]) / rate(sybil_solve_time_seconds_count[1m])", "legendFormat": "avg solve time", "refId": "A" },
         { "expr": "histogram_quantile(0.99, rate(sybil_solve_time_seconds_bucket[5m]))", "legendFormat": "p99", "refId": "B" }
@@ -110,7 +110,7 @@
       "title": "HTTP Request Rate",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
-      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
         { "expr": "sum(rate(sybil_http_requests_total[1m])) by (path)", "legendFormat": "{{path}}", "refId": "A" }
       ],
@@ -120,7 +120,7 @@
       "title": "HTTP Latency by Endpoint",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
-      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
         { "expr": "histogram_quantile(0.95, sum(rate(sybil_http_request_duration_seconds_bucket[5m])) by (le, path))", "legendFormat": "p95 {{path}}", "refId": "A" }
       ],
@@ -130,14 +130,14 @@
       "title": "Traces",
       "type": "traces",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
-      "datasource": { "type": "tempo" },
+      "datasource": { "type": "tempo", "uid": "tempo" },
       "targets": [{ "queryType": "nativeSearch", "serviceName": "sybil-api", "refId": "A" }]
     },
     {
       "title": "Submission Outcomes",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
-      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
         { "expr": "sum(rate(sybil_order_submissions_total[5m])) by (source, result)", "legendFormat": "{{source}} {{result}}", "refId": "A" }
       ],
@@ -147,7 +147,7 @@
       "title": "Orders Received Rate",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
-      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
         { "expr": "sum(rate(sybil_orders_received_total[5m])) by (source, result)", "legendFormat": "{{source}} {{result}}", "refId": "A" },
         { "expr": "sum(rate(sybil_order_cancels_total[5m])) by (source, result)", "legendFormat": "cancel {{source}} {{result}}", "refId": "B" }
