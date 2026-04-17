@@ -64,7 +64,7 @@ This RFC collects them in one place and pins the rules.
   struct definitions: a field reorder changes bytes silently. We want sort
   rules explicit at the spec level, not implicit in Rust declaration order.
 - **SSZ.** Good ZK fit, but introduces Merkleization rules orthogonal to our
-  [[State Root and Parent Hash|state root Merkle tree]]. Taking SSZ means either
+  [[State Root Schema|state root Merkle tree]]. Taking SSZ means either
   adopting its tree shape or fighting it. Net overhead > benefit.
 - **Canonical CBOR.** Framing + type tags built in, but the spec surface is
   large and we'd leverage ~none of the ecosystem.
@@ -308,8 +308,8 @@ improvement.
 
 ## See also
 
-- [[State Root and Parent Hash]] — what the state root commits to and how the Merkle
-  tree (Phase 2) hashes canonical account bytes
+- [[State Root Schema]] — consumes this spec to define Phase 1 and Phase 2 state roots
+- [[State Root and Parent Hash]] — concept introduction
 - [[Block Witness]] — the witness uses this spec for canonical witness bytes
 - [[Proof Architecture]] — authenticated data layer consuming these encodings
 - [[Nanos and Integer Arithmetic]] — motivates the integer-only rule

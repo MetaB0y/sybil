@@ -245,7 +245,8 @@ deferred item encodings are pinned.
 ## See also
 
 - [[Canonical Serialization]] — the byte spec this doc builds on
-- [[State Root and Parent Hash]] — the commitment pre-existing in the header
+- [[State Root Schema]] — normative spec for the `state_root` field
+- [[State Root and Parent Hash]] — concept intro for state root and chaining
 - [[Proof Architecture]] — events_root + authenticated data layer
 - [[Four-Layer Verification]] — current consumer of the witness
 - [[ZK Integration Path]] — future consumer (the prover)
