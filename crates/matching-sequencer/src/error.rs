@@ -67,6 +67,9 @@ pub enum SequencerError {
     /// Oracle error during resolution.
     #[error("oracle error: {0}")]
     OracleError(String),
+    /// Market lifecycle transition is not valid in the current state.
+    #[error("invalid market state: {0}")]
+    InvalidMarketState(String),
     /// Block persistence failed before the prepared block could be committed.
     #[error("block persistence failed: {0}")]
     Persistence(String),

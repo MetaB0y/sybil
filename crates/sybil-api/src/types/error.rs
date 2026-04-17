@@ -143,6 +143,9 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::OracleError(ref msg) => {
                 AppError::bad_request(format!("Oracle error: {}", msg))
             }
+            matching_sequencer::SequencerError::InvalidMarketState(ref msg) => {
+                AppError::conflict(format!("Invalid market state: {msg}"))
+            }
             matching_sequencer::SequencerError::Persistence(ref msg) => {
                 AppError::internal(format!("Persistence error: {msg}"))
             }

@@ -250,6 +250,56 @@ async fn create_market_with_metadata() {
 }
 
 #[tokio::test]
+async fn resolved_market_rejects_new_orders() {
+    let (app, _) = test_app(true).await;
+
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/markets",
+        json!({ "name": "Will it resolve?" }),
+    )
+    .await;
+    let market_id = parse_json(&body)["market_id"].as_u64().unwrap();
+
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 10_000_000_000u64 }),
+    )
+    .await;
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+
+    let (status, _) = post_json(
+        app.clone(),
+        &format!("/v1/markets/{market_id}/resolve"),
+        json!({ "payout_nanos": 1_000_000_000u64 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = post_json(
+        app,
+        "/v1/orders",
+        json!({
+            "account_id": account_id,
+            "orders": [{
+                "type": "BuyYes",
+                "market_id": market_id,
+                "limit_price_nanos": 600_000_000u64,
+                "quantity": 1
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let resp = parse_json(&body);
+    assert!(resp["error"]
+        .as_str()
+        .unwrap()
+        .contains("Invalid market state"));
+}
+
+#[tokio::test]
 async fn market_search_by_tag() {
     let (app, _) = test_app(true).await;
 
