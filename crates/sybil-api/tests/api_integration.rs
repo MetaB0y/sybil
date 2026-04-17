@@ -300,6 +300,59 @@ async fn resolved_market_rejects_new_orders() {
 }
 
 #[tokio::test]
+async fn order_visible_immediately_after_submit() {
+    let (app, _) = test_app(true).await;
+
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/markets",
+        json!({ "name": "Fast admit?" }),
+    )
+    .await;
+    let market_id = parse_json(&body)["market_id"].as_u64().unwrap();
+
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 10_000_000_000u64 }),
+    )
+    .await;
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+
+    let (status, body) = post_json(
+        app.clone(),
+        "/v1/orders",
+        json!({
+            "account_id": account_id,
+            "orders": [{
+                "type": "BuyYes",
+                "market_id": market_id,
+                "limit_price_nanos": 500_000_000u64,
+                "quantity": 10
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "submit failed: {}", String::from_utf8_lossy(&body));
+
+    // No block has been produced — with the mempool-free admit path the order
+    // must already be visible on the resting book.
+    let (status, body) = get(app, &format!("/v1/accounts/{account_id}/orders")).await;
+    assert_eq!(status, StatusCode::OK);
+    let pending = parse_json(&body);
+    let pending = pending.as_array().unwrap();
+    assert_eq!(
+        pending.len(),
+        1,
+        "expected order visible without waiting for a block, got {pending:?}"
+    );
+    assert_eq!(pending[0]["account_id"].as_u64().unwrap(), account_id);
+    assert_eq!(pending[0]["market_id"].as_u64().unwrap(), market_id);
+    assert_eq!(pending[0]["side"].as_str().unwrap(), "BuyYes");
+    assert_eq!(pending[0]["remaining_quantity"].as_u64().unwrap(), 10);
+}
+
+#[tokio::test]
 async fn market_search_by_tag() {
     let (app, _) = test_app(true).await;
 

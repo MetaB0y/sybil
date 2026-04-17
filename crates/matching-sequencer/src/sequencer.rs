@@ -60,6 +60,25 @@ pub struct OrderSubmission {
     pub mm_constraint: Option<MmConstraint>,
 }
 
+/// Result of [`BlockSequencer::try_admit_direct`].
+///
+/// A submission that targets a single market with a single non-MM order can
+/// be inserted into the resting order book immediately, becoming visible to
+/// clients and to the next block's solver without a mempool wait. MM bundles
+/// and multi-market / multi-order submissions still need the block-time
+/// solver path (STP, flash liquidity, bundle atomicity), so the caller is
+/// asked to defer them via its existing buffering path.
+pub enum AdmitOutcome {
+    /// Submission was fully admitted into the resting book.
+    Admitted { order_id: u64 },
+    /// Submission is not eligible for direct admission; caller should route
+    /// it through the existing pre-block buffer.
+    Deferred(OrderSubmission),
+    /// Submission was rejected synchronously (bad market, missing account,
+    /// insufficient balance, ...).
+    Rejected(SequencerError),
+}
+
 /// Result of a single batch — thin view over a Block for simulation compatibility.
 pub struct BatchResult {
     pub pipeline_result: PipelineResult,
@@ -675,6 +694,91 @@ impl BlockSequencer {
 
     pub fn record_system_event(&mut self, event: SystemEvent) {
         self.pending_system_events.push(event);
+    }
+
+    /// Try to admit a submission directly into the resting order book so it
+    /// is visible to clients and participates in the next block's solve,
+    /// bypassing the pre-block buffer.
+    ///
+    /// Eligible submissions are single-order, single-market, non-MM ones:
+    /// the resting book's `accept` path already performs the full validation
+    /// + reservation dance that `prepare_block` would do at block time, so
+    /// we can run it now and return an HTTP-level Accept/Reject synchronously.
+    ///
+    /// MM-constrained, multi-order, and multi-market submissions are returned
+    /// as `Deferred` — the caller still has to buffer them and feed them to
+    /// `prepare_block` at block time, because they rely on batch-local state
+    /// (STP across the whole bundle, MM flash liquidity) that the resting
+    /// book doesn't model.
+    pub fn try_admit_direct(&mut self, submission: OrderSubmission) -> AdmitOutcome {
+        for order in &submission.orders {
+            for market_id in order.active_markets() {
+                if self.markets.get(market_id).is_none() {
+                    return AdmitOutcome::Rejected(SequencerError::MarketNotFound);
+                }
+                let status = self.market_status(market_id);
+                if !status.is_tradeable() {
+                    return AdmitOutcome::Rejected(SequencerError::InvalidMarketState(
+                        format!("market {} is {}", market_id.0, status.as_str()),
+                    ));
+                }
+            }
+        }
+
+        let eligible = submission.mm_constraint.is_none()
+            && submission.orders.len() == 1
+            && submission.orders[0].num_markets == 1;
+        if !eligible {
+            return AdmitOutcome::Deferred(submission);
+        }
+
+        let account_id = submission.account_id;
+        let Some(account) = self.accounts.get(account_id) else {
+            return AdmitOutcome::Rejected(SequencerError::Rejected(Rejection {
+                order_id: 0,
+                account_id,
+                reason: RejectionReason::AccountNotFound,
+            }));
+        };
+
+        let mut order = submission.orders.into_iter().next().expect("len == 1");
+        let order_id = self.next_order_id;
+        self.next_order_id += 1;
+        order.id = order_id;
+
+        // STP (self-trade prevention): reject orders that would complete a
+        // market-group set together with this account's other non-MM orders
+        // admitted in the current block. Matches the block-local semantics of
+        // the solver's STP pass — preserved here because admitted orders now
+        // skip that pass.
+        let mut stp = GroupCoverageTracker::new(&self.market_groups);
+        let height = self.height;
+        for (resting_order, resting_aid, created_at) in self.order_book.resting_orders_full() {
+            if resting_aid == account_id && created_at == height {
+                stp.record(resting_aid, resting_order);
+            }
+        }
+        if stp.would_complete_set(account_id, &order) {
+            return AdmitOutcome::Rejected(SequencerError::Rejected(Rejection {
+                order_id,
+                account_id,
+                reason: RejectionReason::CompleteSetFormation,
+            }));
+        }
+
+        match self
+            .order_book
+            .accept(order, account_id, account, self.height)
+        {
+            Ok(accepted) => AdmitOutcome::Admitted {
+                order_id: accepted.order.id,
+            },
+            Err(reason) => AdmitOutcome::Rejected(SequencerError::Rejected(Rejection {
+                order_id,
+                account_id,
+                reason,
+            })),
+        }
     }
 
     /// Get pending orders, optionally filtered by account.

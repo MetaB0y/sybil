@@ -287,8 +287,7 @@ impl SequencerActorState {
             mm_constraint: None,
         };
 
-        self.ensure_submission_markets_tradeable(&submission)?;
-        self.mempool.submit(submission)
+        self.admit_or_defer(submission)
     }
 
     fn handle_signed_cancel(&mut self, signed: SignedCancel) -> Result<(), SequencerError> {
@@ -417,28 +416,16 @@ impl SequencerActorState {
         results.into_iter().skip(offset).take(limit).collect()
     }
 
-    fn ensure_submission_markets_tradeable(
-        &self,
-        submission: &OrderSubmission,
-    ) -> Result<(), SequencerError> {
-        for order in &submission.orders {
-            for market_id in order.active_markets() {
-                if self.sequencer.markets().get(market_id).is_none() {
-                    return Err(SequencerError::MarketNotFound);
-                }
-
-                let status = self.sequencer.market_status(market_id);
-                if !status.is_tradeable() {
-                    return Err(SequencerError::InvalidMarketState(format!(
-                        "market {} is {}",
-                        market_id.0,
-                        status.as_str()
-                    )));
-                }
-            }
+    /// Admit a submission: fast path if it fits straight into the resting
+    /// book (single-market, non-MM, single order), otherwise route it to the
+    /// pre-block buffer. Returns `Err` for synchronous rejections so the
+    /// caller can surface them to the client.
+    fn admit_or_defer(&mut self, submission: OrderSubmission) -> Result<(), SequencerError> {
+        match self.sequencer.try_admit_direct(submission) {
+            crate::sequencer::AdmitOutcome::Admitted { .. } => Ok(()),
+            crate::sequencer::AdmitOutcome::Deferred(sub) => self.mempool.submit(sub),
+            crate::sequencer::AdmitOutcome::Rejected(err) => Err(err),
         }
-
-        Ok(())
     }
 
     fn handle_register_pubkey(
@@ -504,9 +491,7 @@ impl Actor for SequencerActor {
             }
             SequencerMsg::SubmitOrder(submission, reply) => {
                 let order_count = submission.orders.len();
-                let result = state
-                    .ensure_submission_markets_tradeable(&submission)
-                    .and_then(|()| state.mempool.submit(submission));
+                let result = state.admit_or_defer(submission);
                 state.record_submission_metrics("unsigned", order_count, &result);
                 let _ = reply.send(result);
             }
