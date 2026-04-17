@@ -15,7 +15,6 @@ use crate::crypto::{
 };
 use crate::error::SequencerError;
 use crate::market_info::{AccountFillRecord, MarketMetadata, MarketSearchQuery, PricePoint};
-use crate::mempool::Mempool;
 use crate::portfolio::{self, PortfolioSummary};
 use crate::sequencer::{BlockSequencer, OrderSubmission, PendingOrderInfo, PreparedBlock, SequencerConfig};
 
@@ -96,6 +95,12 @@ pub struct MarketSearchResult {
 
 const BLOCK_HISTORY_CAPACITY: usize = 100;
 
+/// Cap on buffered MM / multi-market submissions waiting for the next block.
+/// Matches the previous `MempoolConfig::max_total` default — plenty of head
+/// room for single-market-maker setups, small enough that a runaway client
+/// hits backpressure before exhausting memory.
+const MAX_PENDING_BUNDLES: usize = 10_000;
+
 struct SequencerActor;
 
 struct SequencerActorArgs {
@@ -106,7 +111,6 @@ struct SequencerActorArgs {
 
 struct SequencerActorState {
     sequencer: BlockSequencer,
-    mempool: Mempool,
     latest_block: Option<Block>,
     block_history: VecDeque<Block>,
     block_broadcast: broadcast::Sender<Block>,
@@ -117,7 +121,7 @@ struct SequencerActorState {
 impl SequencerActorState {
     #[tracing::instrument(
         skip_all,
-        fields(height = tracing::field::Empty, mempool_size = tracing::field::Empty)
+        fields(height = tracing::field::Empty, pending_bundles = tracing::field::Empty)
     )]
     async fn on_tick(&mut self) {
         if self.pause_count > 0 {
@@ -128,28 +132,24 @@ impl SequencerActorState {
             .unwrap_or_default()
             .as_millis() as u64;
 
-        let mempool_size = self.mempool.len();
-        tracing::Span::current().record("mempool_size", mempool_size);
-        let submissions = self.mempool.drain();
+        let pending_bundles = self.sequencer.pending_bundles_len();
+        tracing::Span::current().record("pending_bundles", pending_bundles);
 
-        let prepared = self
-            .sequencer
-            .prepare_block(submissions.clone(), timestamp_ms);
+        let prepared = self.sequencer.prepare_block(Vec::new(), timestamp_ms);
         tracing::Span::current().record("height", prepared.production().block.header.height);
 
         if let Err(error) = self.persist_block(&prepared).await {
             metrics::counter!("sybil_persistence_failures").increment(1);
-            tracing::error!(error = %error, "prepared block discarded before commit");
-            for submission in submissions {
-                if let Err(requeue_error) = self.mempool.submit(submission) {
-                    tracing::error!(error = %requeue_error, "failed to requeue submission after persistence failure");
-                }
-            }
+            // The live sequencer still holds the pending bundles — the drain
+            // happened on the clone. The next tick will retry, and the
+            // PENDING_BUNDLES redb table wasn't cleared because save_block's
+            // transaction rolled back atomically.
+            tracing::error!(error = %error, "prepared block discarded before commit; pending bundles retained for retry");
             return;
         }
 
         let bp = self.sequencer.commit_prepared_block(prepared);
-        self.record_metrics(&bp, mempool_size);
+        self.record_metrics(&bp, pending_bundles);
         self.push_to_history(bp.block.clone());
         let _ = self.block_broadcast.send(bp.block.clone());
         self.latest_block = Some(bp.block);
@@ -165,7 +165,7 @@ impl SequencerActorState {
         Ok(())
     }
 
-    fn record_metrics(&self, bp: &BlockProduction, mempool_size: usize) {
+    fn record_metrics(&self, bp: &BlockProduction, pending_bundles_before: usize) {
         metrics::counter!("sybil_blocks_produced").increment(1);
         metrics::gauge!("sybil_block_height").set(bp.block.header.height as f64);
         metrics::histogram!("sybil_orders_per_block").record(bp.block.header.order_count as f64);
@@ -184,7 +184,7 @@ impl SequencerActorState {
         metrics::histogram!("sybil_fills_per_block").record(bp.block.header.fill_count as f64);
         metrics::gauge!("sybil_welfare_nanos").set(bp.block.total_welfare as f64);
         metrics::gauge!("sybil_volume_nanos").set(bp.block.total_volume as f64);
-        metrics::gauge!("sybil_mempool_size").set(mempool_size as f64);
+        metrics::gauge!("sybil_pending_bundles").set(pending_bundles_before as f64);
         metrics::gauge!("sybil_pending_orders").set(bp.flow_metrics.pending_orders_after as f64);
         metrics::histogram!("sybil_solve_time_seconds").record(bp.pipeline.total_time_secs);
 
@@ -273,7 +273,10 @@ impl SequencerActorState {
         self.block_history.push_back(block);
     }
 
-    fn handle_signed_order(&mut self, signed: SignedOrder) -> Result<(), SequencerError> {
+    async fn handle_signed_order(
+        &mut self,
+        signed: SignedOrder,
+    ) -> Result<(), SequencerError> {
         verify_signed_order(&signed)?;
 
         let account_id = self
@@ -287,7 +290,7 @@ impl SequencerActorState {
             mm_constraint: None,
         };
 
-        self.admit_or_defer(submission)
+        self.admit_or_defer(submission).await
     }
 
     fn handle_signed_cancel(&mut self, signed: SignedCancel) -> Result<(), SequencerError> {
@@ -417,13 +420,29 @@ impl SequencerActorState {
     }
 
     /// Admit a submission: fast path if it fits straight into the resting
-    /// book (single-market, non-MM, single order), otherwise route it to the
-    /// pre-block buffer. Returns `Err` for synchronous rejections so the
-    /// caller can surface them to the client.
-    fn admit_or_defer(&mut self, submission: OrderSubmission) -> Result<(), SequencerError> {
+    /// book (single-market, non-MM, single order), otherwise buffer it on
+    /// the sequencer's pending queue and durably log it so a crash between
+    /// here and the next block commit doesn't drop it. Returns `Err` for
+    /// synchronous rejections so the caller can surface them to the client.
+    async fn admit_or_defer(
+        &mut self,
+        submission: OrderSubmission,
+    ) -> Result<(), SequencerError> {
+        if self.sequencer.pending_bundles_len() >= MAX_PENDING_BUNDLES {
+            return Err(SequencerError::MempoolFull);
+        }
         match self.sequencer.try_admit_direct(submission) {
             crate::sequencer::AdmitOutcome::Admitted { .. } => Ok(()),
-            crate::sequencer::AdmitOutcome::Deferred(sub) => self.mempool.submit(sub),
+            crate::sequencer::AdmitOutcome::Deferred(sub) => {
+                if let Some(store) = &self.store {
+                    store
+                        .append_pending_bundle(&sub)
+                        .await
+                        .map_err(|err| SequencerError::Persistence(err.to_string()))?;
+                }
+                self.sequencer.push_pending_bundle(sub);
+                Ok(())
+            }
             crate::sequencer::AdmitOutcome::Rejected(err) => Err(err),
         }
     }
@@ -448,10 +467,8 @@ impl Actor for SequencerActor {
         _myself: ActorRef<Self::Msg>,
         args: Self::Arguments,
     ) -> Result<Self::State, ActorProcessingErr> {
-        let mempool = Mempool::new(args.sequencer.config.mempool.clone());
         Ok(SequencerActorState {
             sequencer: args.sequencer,
-            mempool,
             latest_block: None,
             block_history: VecDeque::new(),
             block_broadcast: args.block_broadcast,
@@ -491,12 +508,12 @@ impl Actor for SequencerActor {
             }
             SequencerMsg::SubmitOrder(submission, reply) => {
                 let order_count = submission.orders.len();
-                let result = state.admit_or_defer(submission);
+                let result = state.admit_or_defer(submission).await;
                 state.record_submission_metrics("unsigned", order_count, &result);
                 let _ = reply.send(result);
             }
             SequencerMsg::SubmitSignedOrder(signed, reply) => {
-                let result = state.handle_signed_order(signed);
+                let result = state.handle_signed_order(signed).await;
                 state.record_submission_metrics("signed", 1, &result);
                 let _ = reply.send(result);
             }
@@ -839,7 +856,7 @@ impl SequencerHandle {
         }
     }
 
-    /// Spawn with default config (1-second block interval, default mempool).
+    /// Spawn with default config (1-second block interval).
     /// Prefer [`spawn_with_store`] for production use.
     pub fn spawn(sequencer: BlockSequencer) -> Self {
         Self::spawn_with_store(sequencer, None)

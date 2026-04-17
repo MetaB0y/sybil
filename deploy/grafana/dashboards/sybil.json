@@ -50,11 +50,11 @@
       }
     },
     {
-      "title": "Mempool Size",
+      "title": "Pending Bundles",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
-      "targets": [{ "expr": "sybil_mempool_size", "refId": "A" }],
+      "targets": [{ "expr": "sybil_pending_bundles", "refId": "A" }],
       "fieldConfig": {
         "defaults": { "unit": "none", "thresholds": { "steps": [{ "color": "yellow", "value": null }, { "color": "red", "value": 1000 }] } },
         "overrides": []

@@ -13,12 +13,12 @@
 //!     .with_order(order_id_3);
 //! ```
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::types::{Nanos, Qty};
 
 /// Unique identifier for a market maker.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MmId(pub u64);
 
 impl MmId {
@@ -28,7 +28,7 @@ impl MmId {
 }
 
 /// Side of an MM order for capital calculation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MmSide {
     /// Selling YES tokens (capital = (1 - price) * qty)
     SellYes,
@@ -75,7 +75,7 @@ impl MmSide {
 ///
 /// The MM can submit orders across multiple markets, but the total capital
 /// used (computed at clearing prices) must not exceed the budget.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MmConstraint {
     /// Unique ID for this market maker
     pub mm_id: MmId,

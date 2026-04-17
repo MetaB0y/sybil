@@ -10,7 +10,6 @@ pub mod error;
 pub mod fill_recorder;
 pub mod market_info;
 pub mod market_lifecycle;
-pub mod mempool;
 pub mod metrics;
 pub mod order_book;
 pub mod portfolio;
@@ -32,7 +31,6 @@ pub use error::{Rejection, RejectionReason, SequencerError};
 pub use market_info::{
     AccountFillRecord, MarketMetadata, MarketSearchQuery, MarketSortField, PricePoint,
 };
-pub use mempool::MempoolConfig;
 pub use portfolio::{PortfolioSummary, PositionValue};
 pub use scenario::Scenario;
 pub use sequencer::{

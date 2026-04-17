@@ -1,8 +1,9 @@
 //! Block-boundary persistence via redb plus a qmdb-backed account snapshot.
 //!
 //! Philosophy: snapshot core state after each block in a single ACID transaction.
-//! On crash, we resume from the last committed block. Anything in-flight (mempool,
-//! current solve) is lost — clients resubmit within seconds.
+//! On crash, we resume from the last committed block plus any bundle submissions
+//! that were admitted after it (replayed from the `PENDING_BUNDLES` table). The
+//! in-progress solve is lost but its inputs are durable.
 //!
 //! The account-state boundary is explicit:
 //! - qmdb stores account snapshots
@@ -96,6 +97,14 @@ const RESTING_ORDERS: TableDefinition<&str, &[u8]> = TableDefinition::new("resti
 
 const KEY_RESTING_ORDERS_SNAPSHOT: &str = "snapshot";
 
+/// Pending bundle submissions: monotonic seq (u64) → msgpack(OrderSubmission).
+/// Append-only buffer for MM / multi-market / multi-order submissions that
+/// must wait for the block-time solver path. Each admit appends one row.
+/// Cleared atomically inside `save_block` when the bundles get consumed into
+/// a committed block. On restart, the table is replayed into the actor's
+/// in-memory pending queue so nothing submitted with a 200 OK is lost.
+const PENDING_BUNDLES: TableDefinition<u64, &[u8]> = TableDefinition::new("pending_bundles");
+
 // Counter keys
 const KEY_STORE_LAYOUT_VERSION: &str = "store_layout_version";
 const KEY_HEIGHT: &str = "height";
@@ -139,6 +148,11 @@ pub struct RestoredState {
     pub last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
     pub market_volumes: HashMap<MarketId, u64>,
     pub resting_orders: Vec<RestingOrder>,
+    /// Bundle / MM / multi-market submissions that were admitted after the
+    /// last committed block. The actor replays these into its in-memory
+    /// pending queue so nothing acknowledged with a 200 OK is dropped by a
+    /// crash.
+    pub pending_bundles: Vec<crate::sequencer::OrderSubmission>,
 }
 
 /// Borrowed view of sequencer state needed to persist one block.
@@ -179,6 +193,7 @@ impl Store {
         txn.open_table(CLEARING_PRICES)?;
         txn.open_table(MARKET_VOLUMES)?;
         txn.open_table(RESTING_ORDERS)?;
+        txn.open_table(PENDING_BUNDLES)?;
         txn.commit()?;
 
         initialize_or_validate_layout(&db)?;
@@ -285,6 +300,15 @@ impl Store {
             let mut table = txn.open_table(RESTING_ORDERS)?;
             let bytes = rmp_serde::to_vec(&snapshot.resting_orders)?;
             table.insert(KEY_RESTING_ORDERS_SNAPSHOT, bytes.as_slice())?;
+        }
+
+        // Clear the pending-bundles buffer: everything admitted up to this
+        // block has now been consumed (or rejected and logged into the
+        // block's witness), so the recovery replay set resets atomically
+        // with the rest of the block commit.
+        {
+            let mut table = txn.open_table(PENDING_BUNDLES)?;
+            table.retain(|_, _| false)?;
         }
 
         // Counters
@@ -430,6 +454,16 @@ impl Store {
             }
         };
 
+        let pending_bundles: Vec<crate::sequencer::OrderSubmission> = {
+            let table = txn.open_table(PENDING_BUNDLES)?;
+            let mut out = Vec::new();
+            for entry in table.iter()? {
+                let (_, value) = entry?;
+                out.push(rmp_serde::from_slice(value.value())?);
+            }
+            out
+        };
+
         info!(
             height = recovery_metadata.height,
             accounts = num_accounts,
@@ -437,6 +471,7 @@ impl Store {
             groups = market_groups.len(),
             clearing_prices = last_clearing_prices.len(),
             resting_orders = resting_orders.len(),
+            pending_bundles = pending_bundles.len(),
             "state restored from store"
         );
 
@@ -453,7 +488,39 @@ impl Store {
             last_clearing_prices,
             market_volumes,
             resting_orders,
+            pending_bundles,
         }))
+    }
+
+    /// Append one pending bundle submission to the durable recovery log.
+    ///
+    /// Called by the actor on every admit that routes to the in-memory
+    /// pending queue (MM-constrained, multi-order, or multi-market orders).
+    /// The row is cleared atomically inside `save_block` when the bundle is
+    /// consumed into a committed block. The next-seq is derived from the
+    /// current table max so restart-then-admit doesn't collide with the
+    /// replayed rows that are still in memory.
+    pub async fn append_pending_bundle(
+        &self,
+        submission: &crate::sequencer::OrderSubmission,
+    ) -> Result<(), StoreError> {
+        let bytes = rmp_serde::to_vec(submission)?;
+        let txn = self.db.begin_write()?;
+        let next_seq = {
+            let table = txn.open_table(PENDING_BUNDLES)?;
+            let last_key = table
+                .iter()?
+                .next_back()
+                .transpose()?
+                .map(|(k, _)| k.value());
+            last_key.map(|k| k + 1).unwrap_or(0)
+        };
+        {
+            let mut table = txn.open_table(PENDING_BUNDLES)?;
+            table.insert(next_seq, bytes.as_slice())?;
+        }
+        txn.commit()?;
+        Ok(())
     }
 }
 
@@ -914,5 +981,72 @@ mod tests {
             Err(StoreError::UnsupportedLayout(_)) => {}
             Err(error) => panic!("expected unsupported layout error, got {error:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_store_roundtrips_pending_bundles() {
+        use crate::sequencer::OrderSubmission;
+        use matching_engine::{
+            mm_constraint::{MmConstraint, MmId, MmSide},
+            outcome_buy, MarketSet, NANOS_PER_DOLLAR,
+        };
+
+        let path = temp_db_path("store-pending-bundles");
+        let store = Store::open(&path).unwrap();
+
+        let mut markets = MarketSet::new();
+        let market_id = markets.add_binary("Test");
+
+        let oracle = Arc::new(AdminOracle::new());
+        let lifecycle = MarketLifecycle::new(oracle);
+        let accounts = AccountStore::new();
+        let env = TestEnv::new();
+
+        // Commit a baseline block so `load_state()` has something to return.
+        store
+            .save_block(env.snapshot(
+                &accounts,
+                &markets,
+                &lifecycle,
+                &sample_header(1),
+                1,
+                None,
+                Vec::new(),
+            ))
+            .await
+            .unwrap();
+
+        let order = outcome_buy(&markets, 7, market_id, 0, NANOS_PER_DOLLAR / 2, 3);
+        let mut constraint = MmConstraint::new(MmId(1), 5 * NANOS_PER_DOLLAR);
+        constraint.add_order(7, MmSide::BuyYes);
+        let sub = OrderSubmission {
+            account_id: AccountId(42),
+            orders: vec![order],
+            mm_constraint: Some(constraint),
+        };
+
+        store.append_pending_bundle(&sub).await.unwrap();
+        store.append_pending_bundle(&sub).await.unwrap();
+
+        let restored_before = store.load_state().await.unwrap().unwrap();
+        assert_eq!(restored_before.pending_bundles.len(), 2);
+        assert_eq!(restored_before.pending_bundles[0].account_id, AccountId(42));
+
+        // save_block must clear the pending table atomically with the commit.
+        store
+            .save_block(env.snapshot(
+                &accounts,
+                &markets,
+                &lifecycle,
+                &sample_header(2),
+                1,
+                None,
+                Vec::new(),
+            ))
+            .await
+            .unwrap();
+
+        let restored_after = store.load_state().await.unwrap().unwrap();
+        assert!(restored_after.pending_bundles.is_empty());
     }
 }

@@ -18,7 +18,6 @@ use crate::canonical_state::{snapshot_account, CanonicalState};
 use crate::error::{Rejection, RejectionReason, SequencerError};
 use crate::market_info::{AccountFillRecord, MarketMetadata, PricePoint};
 use crate::market_lifecycle::MarketLifecycle;
-use crate::mempool::MempoolConfig;
 use crate::order_book::OrderBook;
 use crate::settlement;
 use crate::store::{RestoredState, SequencerSnapshot};
@@ -38,8 +37,6 @@ pub struct SequencerConfig {
     pub order_ttl_blocks: u64,
     /// Block production interval. Drives the actor tick loop.
     pub block_interval: std::time::Duration,
-    /// Mempool capacity limits.
-    pub mempool: MempoolConfig,
 }
 
 impl Default for SequencerConfig {
@@ -47,13 +44,12 @@ impl Default for SequencerConfig {
         Self {
             order_ttl_blocks: DEFAULT_ORDER_TTL_BLOCKS,
             block_interval: std::time::Duration::from_secs(1),
-            mempool: MempoolConfig::default(),
         }
     }
 }
 
 /// An order submission from a participant.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct OrderSubmission {
     pub account_id: AccountId,
     pub orders: Vec<Order>,
@@ -414,6 +410,12 @@ pub struct BlockSequencer {
     /// Block-start baselines for accounts touched by pending system events.
     /// `None` means the account did not exist before the first system event.
     pending_system_account_baselines: HashMap<AccountId, Option<Account>>,
+    /// Buffered submissions that couldn't be admitted into the resting book
+    /// at submit time (MM-constrained, multi-order, multi-market). Drained
+    /// by the clone inside `prepare_block` and consumed by the solver. The
+    /// durable counterpart lives in the `PENDING_BUNDLES` redb table so a
+    /// crash between admit and the next block commit doesn't drop them.
+    pending_bundles: Vec<OrderSubmission>,
     /// Runtime configuration for this sequencer and its surrounding actor.
     pub config: SequencerConfig,
 }
@@ -443,6 +445,7 @@ impl BlockSequencer {
             pubkey_registry: HashMap::new(),
             pending_system_events: Vec::new(),
             pending_system_account_baselines: HashMap::new(),
+            pending_bundles: Vec::new(),
             config,
         }
     }
@@ -498,6 +501,7 @@ impl BlockSequencer {
             pubkey_registry: state.pubkey_registry,
             pending_system_events: Vec::new(),
             pending_system_account_baselines: HashMap::new(),
+            pending_bundles: state.pending_bundles,
             config,
         }
     }
@@ -885,6 +889,12 @@ impl BlockSequencer {
 
     /// Prepare one block from the given submissions without mutating live sequencer state.
     ///
+    /// Any submissions buffered on `self.pending_bundles` (from the admit
+    /// path for MM / multi-market orders) are drained into the same solver
+    /// input ahead of the caller-supplied batch. The drain happens on the
+    /// clone, so if the prepared block is discarded the live sequencer
+    /// still holds the bundles and the next tick retries them.
+    ///
     /// The returned [`PreparedBlock`] can either be committed atomically or discarded.
     #[tracing::instrument(skip_all, fields(height))]
     pub fn prepare_block(
@@ -893,11 +903,28 @@ impl BlockSequencer {
         timestamp_ms: u64,
     ) -> PreparedBlock {
         let mut next_sequencer = self.clone();
-        let production = next_sequencer.produce_block_in_place(submissions, timestamp_ms);
+        let mut all_submissions = std::mem::take(&mut next_sequencer.pending_bundles);
+        all_submissions.extend(submissions);
+        let production = next_sequencer.produce_block_in_place(all_submissions, timestamp_ms);
         PreparedBlock {
             next_sequencer,
             production,
         }
+    }
+
+    /// Buffer a submission that couldn't be admitted directly into the
+    /// resting book. The bundle is added to `self.pending_bundles` and will
+    /// be handed to the solver on the next `prepare_block` call.
+    ///
+    /// Persistence of this bundle is the caller's responsibility (usually
+    /// the actor, via `Store::append_pending_bundle`) so durability decisions
+    /// stay out of the sync core.
+    pub fn push_pending_bundle(&mut self, submission: OrderSubmission) {
+        self.pending_bundles.push(submission);
+    }
+
+    pub fn pending_bundles_len(&self) -> usize {
+        self.pending_bundles.len()
     }
 
     #[tracing::instrument(
@@ -2012,6 +2039,7 @@ mod tests {
             last_clearing_prices: seq_a.last_clearing_prices().clone(),
             market_volumes: seq_a.market_volumes().clone(),
             resting_orders: seq_a.order_book.snapshot(),
+            pending_bundles: Vec::new(),
         };
 
         let mut seq_b = BlockSequencer::restore(state, oracle, SequencerConfig::default());
