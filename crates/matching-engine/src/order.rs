@@ -18,7 +18,7 @@ pub const MAX_MARKETS_PER_ORDER: usize = 5;
 pub const MAX_STATES: usize = 32;
 
 /// Simple price-based condition for order activation.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PriceCondition {
     pub market: MarketId,
     pub threshold: Nanos,
@@ -26,7 +26,7 @@ pub struct PriceCondition {
 }
 
 /// Direction for conditional activation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConditionDir {
     /// Activate if clearing_price > threshold
     Above,
@@ -48,7 +48,7 @@ pub enum ConditionDir {
 /// - markets: [A, B, NONE, NONE, NONE]
 /// - num_states: 4
 /// - payoffs depend on state indexing convention
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Order {
     pub id: u64,
 

@@ -14,22 +14,24 @@
 use std::collections::{HashMap, HashSet};
 
 use matching_engine::{Fill, MarketId, Order};
+use serde::{Deserialize, Serialize};
 
 use crate::account::{AccountId, AccountStore};
 use crate::error::RejectionReason;
 use crate::validation::{sell_reservations, validate_order_with_reservation, PositionKey};
 
-/// A resting order in the book.
-#[derive(Clone, Debug)]
-struct RestingOrder {
-    order: Order,
-    account_id: AccountId,
+/// A resting order in the book. Public for persistence; mutation still goes
+/// through `OrderBook` methods to keep reservation aggregates consistent.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RestingOrder {
+    pub order: Order,
+    pub account_id: AccountId,
     /// Block height when this order was first accepted.
-    created_at: u64,
+    pub created_at: u64,
     /// Balance reserved by this order (buy cost). 0 for sells.
-    reserved_balance: i64,
+    pub reserved_balance: i64,
     /// Position reservations for this order (sell quantities).
-    reserved_positions: Vec<(PositionKey, i64)>,
+    pub reserved_positions: Vec<(PositionKey, i64)>,
 }
 
 /// The order book: resting orders + aggregate reservations.
@@ -62,6 +64,35 @@ impl OrderBook {
             orders: Vec::new(),
             balance_reservations: HashMap::new(),
             position_reservations: HashMap::new(),
+            ttl,
+        }
+    }
+
+    /// Snapshot all resting orders for persistence. Reservation aggregates are
+    /// derivable from the per-order reservations, so only the order list is stored.
+    pub fn snapshot(&self) -> Vec<RestingOrder> {
+        self.orders.clone()
+    }
+
+    /// Rebuild an order book from a persisted snapshot. Reservation aggregates
+    /// are reconstructed by summing per-order reservations.
+    pub fn restore(orders: Vec<RestingOrder>, ttl: u64) -> Self {
+        let mut balance_reservations: HashMap<AccountId, i64> = HashMap::new();
+        let mut position_reservations: HashMap<(AccountId, PositionKey), i64> = HashMap::new();
+        for ro in &orders {
+            if ro.reserved_balance > 0 {
+                *balance_reservations.entry(ro.account_id).or_insert(0) += ro.reserved_balance;
+            }
+            for &(key, qty) in &ro.reserved_positions {
+                *position_reservations
+                    .entry((ro.account_id, key))
+                    .or_insert(0) += qty;
+            }
+        }
+        Self {
+            orders,
+            balance_reservations,
+            position_reservations,
             ttl,
         }
     }

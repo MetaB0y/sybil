@@ -157,6 +157,7 @@ impl SequencerActorState {
 
     async fn persist_block(&self, prepared: &PreparedBlock) -> Result<(), SequencerError> {
         if let Some(ref store) = self.store {
+            let resting_orders = prepared.next_sequencer().order_book_snapshot();
             store
                 .save_block(
                     &prepared.next_sequencer().accounts,
@@ -168,6 +169,7 @@ impl SequencerActorState {
                     prepared.next_sequencer().pubkey_registry(),
                     prepared.next_sequencer().last_clearing_prices(),
                     prepared.next_sequencer().market_volumes(),
+                    &resting_orders,
                 )
                 .await
                 .map_err(|error| SequencerError::Persistence(error.to_string()))?;
@@ -737,6 +739,7 @@ impl SequencerSupervisorState {
             state.market_metadata,
             state.last_clearing_prices,
             state.market_volumes,
+            state.resting_orders,
             self.config.clone(),
         );
 

@@ -122,6 +122,7 @@ async fn main() {
             markets = state.markets.len(),
             accounts = state.accounts.iter().count(),
             groups = state.market_groups.len(),
+            resting_orders = state.resting_orders.len(),
             "Restored from persistent store"
         );
 
@@ -138,6 +139,7 @@ async fn main() {
             state.market_metadata,
             state.last_clearing_prices,
             state.market_volumes,
+            state.resting_orders,
             seq_config,
         );
 

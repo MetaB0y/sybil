@@ -446,6 +446,7 @@ impl BlockSequencer {
     }
 
     /// Restore from persisted state.
+    #[allow(clippy::too_many_arguments)]
     pub fn restore(
         accounts: AccountStore,
         markets: MarketSet,
@@ -459,6 +460,7 @@ impl BlockSequencer {
         market_metadata: HashMap<MarketId, MarketMetadata>,
         last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
         market_volumes: HashMap<MarketId, u64>,
+        resting_orders: Vec<crate::order_book::RestingOrder>,
         config: SequencerConfig,
     ) -> Self {
         let solver: Arc<dyn Solver> = Arc::new(matching_solver::LpSolver::new());
@@ -469,7 +471,7 @@ impl BlockSequencer {
         for (market_id, meta) in market_metadata {
             lifecycle.set_market_metadata(market_id, meta);
         }
-        let order_book = OrderBook::new(config.order_ttl_blocks); // TODO: Tier 2 — persist order book
+        let order_book = OrderBook::restore(resting_orders, config.order_ttl_blocks);
         Self {
             accounts,
             solver,
@@ -498,6 +500,11 @@ impl BlockSequencer {
 
     pub fn order_ttl_blocks(&self) -> u64 {
         self.config.order_ttl_blocks
+    }
+
+    /// Snapshot of the resting order book for persistence.
+    pub fn order_book_snapshot(&self) -> Vec<crate::order_book::RestingOrder> {
+        self.order_book.snapshot()
     }
 
     pub fn markets(&self) -> &MarketSet {
@@ -1841,6 +1848,102 @@ mod tests {
 
         let result = run_batch(&mut seq, vec![], &markets, &[]);
         assert!(result.orders_submitted >= 1);
+    }
+
+    #[test]
+    fn test_resting_orders_survive_restart_and_match() {
+        let (markets, m0) = setup();
+
+        let mut accounts = AccountStore::new();
+        let aid_a = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let aid_b = accounts.create_account(0);
+        accounts
+            .get_mut(aid_b)
+            .unwrap()
+            .positions
+            .insert((m0, 0), 10);
+
+        let oracle: Arc<dyn Oracle> = Arc::new(AdminOracle::new());
+        let mut seq_a = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            oracle.clone(),
+            SequencerConfig::default(),
+        );
+
+        let sub = OrderSubmission {
+            account_id: aid_a,
+            orders: vec![outcome_buy(&markets, 0, m0, 0, 700_000_000, 5)],
+            mm_constraint: None,
+        };
+        seq_a.produce_block(vec![sub], 1_000);
+        assert_eq!(
+            seq_a.order_book.len(),
+            1,
+            "expected unfilled buy to rest in book"
+        );
+        let reserved_before = seq_a.order_book.reserved_balance(aid_a);
+        assert!(reserved_before > 0);
+
+        // Snapshot all restore-relevant state from the running sequencer,
+        // mirroring what the store would persist + reload.
+        let resting_orders = seq_a.order_book_snapshot();
+        let height = seq_a.height();
+        let last_header = seq_a.last_header().cloned();
+        let next_order_id = seq_a.next_order_id();
+        let pubkey_registry = seq_a.pubkey_registry().clone();
+        let last_clearing_prices = seq_a.last_clearing_prices().clone();
+        let market_volumes = seq_a.market_volumes().clone();
+        let restored_accounts = seq_a.accounts.clone();
+
+        let mut seq_b = BlockSequencer::restore(
+            restored_accounts,
+            markets.clone(),
+            vec![],
+            oracle,
+            height,
+            last_header,
+            next_order_id,
+            pubkey_registry,
+            HashMap::new(),
+            HashMap::new(),
+            last_clearing_prices,
+            market_volumes,
+            resting_orders,
+            SequencerConfig::default(),
+        );
+        assert_eq!(
+            seq_b.order_book.len(),
+            1,
+            "restored order book should contain A's resting buy"
+        );
+        assert_eq!(
+            seq_b.order_book.reserved_balance(aid_a),
+            reserved_before,
+            "balance reservation should be reconstructed"
+        );
+
+        // A matching sell from B should clear A's resting buy in the next batch.
+        let sell = outcome_sell(&markets, 1_000, m0, 0, 300_000_000, 5);
+        let sub_b = OrderSubmission {
+            account_id: aid_b,
+            orders: vec![sell],
+            mm_constraint: None,
+        };
+        let bp = seq_b.produce_block(vec![sub_b], 2_000);
+
+        let total_fill_qty: u64 = bp.block.fills.iter().map(|f| f.fill_qty).sum();
+        assert!(
+            total_fill_qty > 0,
+            "expected restored resting buy to match the new sell, got fills={:?}",
+            bp.block.fills
+        );
+        assert_eq!(
+            seq_b.order_book.reserved_balance(aid_a),
+            0,
+            "A's reservation should be released after the fill"
+        );
     }
 
     #[test]

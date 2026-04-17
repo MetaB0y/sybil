@@ -55,6 +55,7 @@ use crate::account_storage::{
 use crate::block::BlockHeader;
 use crate::market_info::MarketMetadata;
 use crate::market_lifecycle::MarketLifecycle;
+use crate::order_book::RestingOrder;
 
 // ---------------------------------------------------------------------------
 // Table definitions
@@ -87,6 +88,12 @@ const MARKET_VOLUMES: TableDefinition<u32, u64> = TableDefinition::new("market_v
 /// Scalar counters: name → value
 const COUNTERS: TableDefinition<&str, u64> = TableDefinition::new("counters");
 
+/// Resting order book snapshot: single row keyed "snapshot" → msgpack(Vec<RestingOrder>).
+/// Rewritten atomically each block.
+const RESTING_ORDERS: TableDefinition<&str, &[u8]> = TableDefinition::new("resting_orders");
+
+const KEY_RESTING_ORDERS_SNAPSHOT: &str = "snapshot";
+
 // Counter keys
 const KEY_STORE_LAYOUT_VERSION: &str = "store_layout_version";
 const KEY_HEIGHT: &str = "height";
@@ -98,8 +105,7 @@ const KEY_ACCOUNT_STATE_SLOT: &str = "account_state_slot";
 
 const STORE_LAYOUT_VERSION: u64 = 1;
 
-// TODO: Tier 2 tables
-// const PENDING_ORDERS: TableDefinition<u64, &[u8]> = TableDefinition::new("pending_orders");
+// TODO: Tier 2 tables (remaining)
 // const MM_STATE: TableDefinition<u32, &[u8]> = TableDefinition::new("mm_state");
 
 // TODO: Tier 3 tables
@@ -130,6 +136,7 @@ pub struct RestoredState {
     pub pubkey_registry: HashMap<crate::crypto::PublicKey, AccountId>,
     pub last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
     pub market_volumes: HashMap<MarketId, u64>,
+    pub resting_orders: Vec<RestingOrder>,
 }
 
 impl Store {
@@ -153,6 +160,7 @@ impl Store {
         txn.open_table(COUNTERS)?;
         txn.open_table(CLEARING_PRICES)?;
         txn.open_table(MARKET_VOLUMES)?;
+        txn.open_table(RESTING_ORDERS)?;
         txn.commit()?;
 
         initialize_or_validate_layout(&db)?;
@@ -165,6 +173,7 @@ impl Store {
     }
 
     /// Save the sequencer state after a block. Single ACID transaction.
+    #[allow(clippy::too_many_arguments)]
     pub async fn save_block(
         &self,
         accounts: &AccountStore,
@@ -176,6 +185,7 @@ impl Store {
         pubkey_registry: &HashMap<crate::crypto::PublicKey, AccountId>,
         last_clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
         market_volumes: &HashMap<MarketId, u64>,
+        resting_orders: &[RestingOrder],
     ) -> Result<(), StoreError> {
         let current_fence = read_account_state_fence(&self.db)?;
         let next_slot = current_fence
@@ -263,6 +273,13 @@ impl Store {
             for (&market_id, &volume) in market_volumes {
                 table.insert(market_id.0, volume)?;
             }
+        }
+
+        // Resting order book snapshot
+        {
+            let mut table = txn.open_table(RESTING_ORDERS)?;
+            let bytes = rmp_serde::to_vec(resting_orders)?;
+            table.insert(KEY_RESTING_ORDERS_SNAPSHOT, bytes.as_slice())?;
         }
 
         // Counters
@@ -400,12 +417,21 @@ impl Store {
             volumes
         };
 
+        let resting_orders: Vec<RestingOrder> = {
+            let table = txn.open_table(RESTING_ORDERS)?;
+            match table.get(KEY_RESTING_ORDERS_SNAPSHOT)? {
+                Some(value) => rmp_serde::from_slice(value.value())?,
+                None => Vec::new(),
+            }
+        };
+
         info!(
             height = recovery_metadata.height,
             accounts = num_accounts,
             markets = markets.len(),
             groups = market_groups.len(),
             clearing_prices = last_clearing_prices.len(),
+            resting_orders = resting_orders.len(),
             "state restored from store"
         );
 
@@ -421,6 +447,7 @@ impl Store {
             pubkey_registry,
             last_clearing_prices,
             market_volumes,
+            resting_orders,
         }))
     }
 }
@@ -661,6 +688,7 @@ mod tests {
                 &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
+                &[],
             )
             .await
             .unwrap();
@@ -677,6 +705,7 @@ mod tests {
                 &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
+                &[],
             )
             .await
             .unwrap();
@@ -707,6 +736,7 @@ mod tests {
                 &HashMap::new(),
                 &HashMap::new(),
                 &volumes,
+                &[],
             )
             .await
             .unwrap();
@@ -716,6 +746,119 @@ mod tests {
             restored.market_volumes.get(&market_id),
             Some(&42_000_000_000)
         );
+    }
+
+    #[tokio::test]
+    async fn test_store_restores_resting_orders() {
+        use crate::order_book::OrderBook;
+        use matching_engine::{outcome_buy, MarketSet, NANOS_PER_DOLLAR};
+
+        let path = temp_db_path("store-resting-orders");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+        let lifecycle = MarketLifecycle::new(oracle);
+
+        let mut markets = MarketSet::new();
+        let market_id = markets.add_binary("Test");
+
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+
+        let mut book = OrderBook::new(10);
+        let order = outcome_buy(&markets, 1, market_id, 0, NANOS_PER_DOLLAR / 2, 5);
+        book.accept(order, aid, accounts.get(aid).unwrap(), 1)
+            .unwrap();
+        let expected_reserved = book.reserved_balance(aid);
+        assert!(expected_reserved > 0);
+        let snapshot = book.snapshot();
+        assert_eq!(snapshot.len(), 1);
+
+        store
+            .save_block(
+                &accounts,
+                &markets,
+                &[],
+                &lifecycle,
+                &sample_header(1),
+                2,
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &snapshot,
+            )
+            .await
+            .unwrap();
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        assert_eq!(restored.resting_orders.len(), 1);
+        assert_eq!(restored.resting_orders[0].account_id, aid);
+        assert_eq!(restored.resting_orders[0].order.id, 1);
+        assert_eq!(
+            restored.resting_orders[0].reserved_balance,
+            expected_reserved
+        );
+        assert_eq!(restored.resting_orders[0].created_at, 1);
+
+        let rebuilt = OrderBook::restore(restored.resting_orders, 10);
+        assert_eq!(rebuilt.reserved_balance(aid), expected_reserved);
+        assert_eq!(rebuilt.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_store_clears_resting_orders_when_snapshot_empty() {
+        use crate::order_book::OrderBook;
+        use matching_engine::{outcome_buy, MarketSet, NANOS_PER_DOLLAR};
+
+        let path = temp_db_path("store-resting-orders-empty");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+        let lifecycle = MarketLifecycle::new(oracle);
+
+        let mut markets = MarketSet::new();
+        let market_id = markets.add_binary("Test");
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+
+        // Block 1: save with a resting order.
+        let mut book = OrderBook::new(10);
+        let order = outcome_buy(&markets, 1, market_id, 0, NANOS_PER_DOLLAR / 2, 5);
+        book.accept(order, aid, accounts.get(aid).unwrap(), 1)
+            .unwrap();
+        store
+            .save_block(
+                &accounts,
+                &markets,
+                &[],
+                &lifecycle,
+                &sample_header(1),
+                2,
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &book.snapshot(),
+            )
+            .await
+            .unwrap();
+
+        // Block 2: save with an empty snapshot (order filled/cancelled/expired).
+        store
+            .save_block(
+                &accounts,
+                &markets,
+                &[],
+                &lifecycle,
+                &sample_header(2),
+                2,
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &[],
+            )
+            .await
+            .unwrap();
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        assert!(restored.resting_orders.is_empty());
     }
 
     #[test]
