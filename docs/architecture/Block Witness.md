@@ -1,29 +1,252 @@
 ---
-tags: [zk]
+tags: [zk, spec]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-04-12
+last_verified: 2026-04-17
 ---
 
-The Block Witness is a complete audit trail produced alongside every block. It contains everything an independent party needs to verify that the block was produced correctly — without trusting the sequencer or having access to its internal state. It is the input to the [[Four-Layer Verification|4-layer verification pipeline]] and, in the future, to the [[ZK Integration Path|ZK prover]].
+# Block Witness
 
-A witness captures the full state transition: pre-state (all account snapshots before this batch), post-state (after settlement), the complete list of orders submitted, any rejections with reasons, any `system_events` applied between blocks, all fills with quantities, prices, and `account_id`, clearing prices per market, total welfare, MM constraints, and market group definitions. Account snapshots now also include `events_digest`, the per-account running hash used for lightweight inactivity proofs. With this data, any verifier can independently re-run settlement from pre-state + fills and confirm the post-state matches. It can check that fills respect order limits, that prices satisfy complementarity (YES + NO = $1), that MM budgets aren't exceeded, that the state root is correct, and that no orders were falsely rejected.
+The Block Witness is the self-contained input to block verification. The
+sequencer produces one per block. The [[Four-Layer Verification]] logic
+consumes it today; the [[ZK Integration Path|ZK circuit]] will consume it
+tomorrow. Everything else in this doc follows from two invariants:
 
-Today, the witness is used by `matching-sim` for offline verification in tests and benchmarks. The verification logic runs the same checks that would eventually be compiled into a SNARK circuit via OpenVM. By designing the witness as a self-contained verification input now, the system ensures that every invariant the ZK circuit will enforce is already being tested on every batch in development.
+1. **Self-contained.** Given a witness and its parent header (or nothing, for
+   genesis), any third party can re-run settlement and verify every claim the
+   block makes — without access to sequencer state, mempool, or history
+   beyond the parent.
+2. **Reproducible.** `apply_fills(pre_state, system_events, fills) == post_state`,
+   and `compute_state_root(post_state) == header.state_root`. If either
+   equation fails, the witness is invalid.
 
-## Key Properties
-- Self-contained: everything needed for independent block verification
-- Pre-state + fills → post-state is independently reproducible
-- Contains: orders, rejections, system events, fills, clearing prices, welfare, MM constraints, market groups, account snapshots
-- Input to [[Four-Layer Verification]] (today) and [[ZK Integration Path|ZK prover]] (future)
-- Produced alongside every block by the sequencer
+## Rust type
 
-## Where This Lives
-> `crates/sybil-verifier/src/types.rs` — `BlockWitness`, `AccountSnapshot`, `WitnessBlockHeader`
+`crates/sybil-verifier/src/types.rs::BlockWitness` holds 13 fields:
 
-## See Also
-- [[Four-Layer Verification]] — the checks run against the witness
-- [[Block Lifecycle]] — witness produced in the final step
-- [[State Root and Parent Hash]] — the commitments the witness validates
-- [[ZK Integration Path]] — witness becomes ZK prover input
+| Field | Purpose |
+|---|---|
+| `header` | block header being verified |
+| `previous_header` | parent header (or `None` for genesis) |
+| `orders` | orders accepted into this batch, with account mapping |
+| `rejections` | orders rejected, with reasons |
+| `system_events` | state changes applied between blocks (deposit, create, resolve) |
+| `fills` | solver output |
+| `clearing_prices` | per-market clearing prices produced by the solver |
+| `total_welfare` | sum of `(limit_price - clearing_price) * fill_qty` |
+| `minting_cost` | minting cost not captured in fill welfare (MILP only) |
+| `mm_constraints` | MM budget constraints active this batch |
+| `market_groups` | market group definitions (for complete-set logic) |
+| `pre_state` | account snapshots at block start |
+| `post_system_state` | after system events, before fills |
+| `post_state` | after fills — what the header's `state_root` commits to |
+| `resolved_markets` | markets resolved/voided; orders/fills must not reference |
+
+The sequencer builds this in `matching-sequencer::sequencer` at the end of
+each block. Tests and `matching-sim` run the 4-layer verifier over it.
+
+## ZK public/private partition
+
+In a SNARK, witness fields split into **public inputs** (available to every
+verifier, checked against on-chain commitments) and **private inputs** (only
+seen inside the circuit, never exposed).
+
+| Field | Public or private |
+|---|---|
+| `header` | public |
+| `previous_header` | public (just its hash, really) |
+| `clearing_prices` | public |
+| `resolved_markets` | public |
+| `total_welfare`, `minting_cost` | public |
+| `header.order_count`, `header.fill_count` | public |
+| `orders` (individual) | private |
+| `rejections` | private |
+| `system_events` (individual) | private (shape is public via events_root) |
+| `fills` (individual) | private (shape is public via events_root) |
+| `mm_constraints`, `market_groups` | private |
+| `pre_state`, `post_system_state`, `post_state` | private |
+
+Rationale: the public side is "what was the market's observable outcome" —
+clearing prices, how many orders, welfare. The private side is "which
+specific users did what" — individual orders, fills, balances. Selective-reveal
+ZK proofs (see [[Proof Architecture]] and future "Selective Reveal ZK" doc)
+let an account-holder reveal their own slice without exposing anyone else's.
+
+The `events_root` (proposed in [[Proof Architecture]] Phase 1) is a public
+commitment over the private event list, which is how external verifiers can
+prove "fill F happened in block N" without seeing the whole witness.
+
+## Canonical witness bytes
+
+Under [[Canonical Serialization]] v1. The witness encodes as a fixed outer
+layout with variable-length sections, each prefixed with `count:u64`.
+
+```
+witness_v1_bytes =
+    version:u8 = 0x01
+ || header_bytes                                              (88 bytes, see Canonical Serialization)
+ || previous_header_tag:u8                                    (0x00 = none, 0x01 = present)
+ || previous_header_bytes?                                    (88 bytes if present)
+ || section[orders]
+ || section[rejections]
+ || section[system_events]
+ || section[fills]
+ || section[clearing_prices]                                  (see below)
+ || total_welfare:i64
+ || minting_cost:i64
+ || section[mm_constraints]
+ || section[market_groups]
+ || section[pre_state]
+ || section[post_system_state]
+ || section[post_state]
+ || section[resolved_markets]
+```
+
+Where `section[T]` = `count:u64 || item_bytes<T> * count`, items in canonical
+sort order (specified below). `section[clearing_prices]` is the only irregular
+one because it's a map:
+
+```
+clearing_prices_section =
+    market_count:u64
+ || (market_id:u32 || outcome_count:u32 || price:u64 * outcome_count) * market_count
+```
+
+with markets sorted by `market_id` ascending and prices in outcome order.
+
+**Item encodings** (all defined in [[Canonical Serialization]]; deferred items
+carry a TODO there too):
+
+| Section | Item encoding | Sort order |
+|---|---|---|
+| `orders` | `WitnessOrder` (TODO, see Canonical Serialization §composites) | by `order.order_id` ascending |
+| `rejections` | `WitnessRejection` (TODO) | by `order.order_id` ascending |
+| `system_events` | `SystemEventWitness` (tag-dispatched like events registry) | by emission order |
+| `fills` | `Fill` (see Canonical Serialization) | solver output order (stable) |
+| `mm_constraints`, `market_groups` | TODO | by first market_id ascending |
+| `pre_state`, `post_system_state`, `post_state` | `AccountSnapshot` (see Canonical Serialization) | by `id` ascending |
+| `resolved_markets` | `market_id:u32` | by `market_id` ascending |
+
+Once every item encoding is pinned, `witness_root = BLAKE3("sybil/witness/v1" || witness_v1_bytes)`.
+
+## `witness_root` in the block header
+
+Today the block header commits to `state_root` and `parent_hash`. It does
+**not** commit to the witness. That means the sequencer could produce an
+internally consistent block (state_root valid) while feeding a different
+witness to downstream verifiers. The verifier would catch the mismatch
+(post_state must rehash to state_root), but the witness itself is not
+cryptographically anchored.
+
+**Proposal — BlockHeader v2.** Extend the header:
+
+```
+BlockHeader v2 =
+    height:u64
+ || parent_hash:[u8; 32]
+ || state_root:[u8; 32]
+ || events_root:[u8; 32]          (new — see Proof Architecture Phase 1)
+ || witness_root:[u8; 32]          (new — this doc)
+ || order_count:u32
+ || fill_count:u32
+ || timestamp_ms:u64
+```
+
+Chaining hash uses a domain-separation prefix `"sybil/block-header/v2"` so v2
+chains don't collide with v1 chains. Migration: hard fork at a chosen height,
+same as the [[Canonical Serialization]] version-bump pattern.
+
+This makes the witness a first-class part of the commitment chain. Anyone who
+trusts the header transitively trusts the witness, and the sequencer can no
+longer equivocate about what happened in a block without changing the header
+(and thereby the on-chain state-root chain).
+
+## Versioning
+
+- **v1 witness** is the shape in this doc. Implementations MUST reject
+  witness bytes whose first byte is not `0x01`.
+- **v2 witness** will bump the leading byte to `0x02` and may rearrange
+  sections. Verifiers dispatch on the version byte.
+- **Adding a field** to the witness that affects correctness = new version.
+  Adding a purely-observational field (e.g., timing info for debugging) that
+  the verifier ignores = no version bump, but the verifier MUST skip unknown
+  trailing bytes gracefully.
+
+## Size budget
+
+Order-of-magnitude estimate for a mid-sized block (1k orders, 2k fills, 500
+accounts touched with ~5 positions each):
+
+| Section | ~Bytes |
+|---|---|
+| Header + prev_header | 176 |
+| 1k orders (est. 64B each) | 64,000 |
+| 2k fills (52B each) | 104,000 |
+| 3× account snapshots × 500 × ~80B | 120,000 |
+| Other | ~10,000 |
+| **Total** | **~300 KB** |
+
+At 1 block per 2s, that's ~13 GB/day of witness data. Most of it is highly
+compressible (canonical bytes are regular). Whether to post the full witness
+to DA or just the `witness_root` + a compressed events summary is decided in
+the Data Availability RFC (sibling, M3 · Validium Foundations). See also the
+open-questions section below.
+
+## Relation to events and state roots
+
+Three hash roots in play, each with a different scope:
+
+| Root | Scope | Primary consumer |
+|---|---|---|
+| `state_root` | all accounts' post-settlement state | on-chain settlement contract; escape hatch |
+| `events_root` | everything that happened in this block | external verifiers asking "did F happen" |
+| `witness_root` | the full audit package | prover; anyone reconstructing the block |
+
+They're complementary. A minimal on-chain commitment would include only
+`state_root` (chain-valid) + `witness_root` (auditable) and use `events_root`
+as a caller-supplied input to prove derived claims. Exact layout is decided
+in [[Proof Architecture]] and the Data Availability RFC (sibling, M3).
+
+## Test vectors
+
+Minimal genesis witness: zero accounts, zero orders, zero fills. Expected
+`state_root` is the BLAKE3 of empty input (see [[Canonical Serialization]]
+test vector 1). With the genesis header in [[Canonical Serialization]] test
+vector 4, expected `witness_root = BLAKE3("sybil/witness/v1" ||
+witness_v1_bytes)` — concrete hex lands in a follow-up test file once the
+deferred item encodings are pinned.
+
+## Open questions
+
+1. **Full witness on DA or just root?** Posting 13 GB/day to Celestia is
+   viable; posting it to Arweave is not. Two tiers of DA (root on L1, full
+   witness on a cheaper layer) is probably the answer but needs the Data
+   Availability RFC (sibling, M3) to close.
+2. **Should the witness be split into public/private Rust structs?** The
+   partition table in §3 lives only in prose today. Enforcing it at the type
+   level (a `WitnessPublic` + `WitnessPrivate` pair, combined into
+   `BlockWitness` for the sequencer's convenience) would make ZK compilation
+   mechanical. Good idea; worth a dedicated follow-up.
+3. **`post_system_state` redundancy.** It's recoverable from `pre_state +
+   system_events`. Keeping it in the witness is convenient for the verifier
+   but inflates bytes and proof-generation time. Could be dropped once the
+   verifier is robust.
+4. **Item encodings for Order / MmConstraint / MarketGroup.** Deferred from
+   [[Canonical Serialization]] v1. Until these land, `witness_root` cannot be
+   computed from spec — a gap to close before the events tree ships.
+
+## Where this lives
+
+> `crates/sybil-verifier/src/types.rs` — `BlockWitness`, `WitnessBlockHeader`, `AccountSnapshot`
+> `crates/matching-sequencer/src/block.rs` — `produce_block` builds the witness; `hash_header` is the current (v1) header hash
+> `crates/sybil-verifier/src/block.rs` — `verify_block` runs Layer 3 checks against the witness
+
+## See also
+
+- [[Canonical Serialization]] — the byte spec this doc builds on
+- [[State Root and Parent Hash]] — the commitment pre-existing in the header
+- [[Proof Architecture]] — events_root + authenticated data layer
+- [[Four-Layer Verification]] — current consumer of the witness
+- [[ZK Integration Path]] — future consumer (the prover)
+- [[Block Lifecycle]] — where in block production the witness is built
