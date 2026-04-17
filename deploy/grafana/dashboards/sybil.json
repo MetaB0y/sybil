@@ -153,11 +153,148 @@
         { "expr": "sum(rate(sybil_order_cancels_total[5m])) by (source, result)", "legendFormat": "cancel {{source}} {{result}}", "refId": "B" }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 15 } }, "overrides": [] }
+    },
+    {
+      "title": "Block Rate",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 36 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "rate(sybil_blocks_produced[1m])", "refId": "A" }],
+      "options": { "graphMode": "area" },
+      "fieldConfig": {
+        "defaults": { "unit": "cps", "thresholds": { "steps": [{ "color": "blue", "value": null }] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Rejection Rate",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 36 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{
+        "expr": "sum(rate(sybil_order_submissions_total{result=\"rejected\"}[5m])) / clamp_min(sum(rate(sybil_order_submissions_total[5m])), 0.0001)",
+        "refId": "A"
+      }],
+      "options": { "graphMode": "area" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "orange", "value": 0.25 },
+            { "color": "red", "value": 0.5 }
+          ] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Orders Filled (ratio)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 36 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{
+        "expr": "rate(sybil_fills_per_block_sum[5m]) / clamp_min(rate(sybil_orders_per_block_sum[5m]), 0.0001)",
+        "refId": "A"
+      }],
+      "options": { "graphMode": "area" },
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "thresholds": { "steps": [{ "color": "purple", "value": null }] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Market Fills Rate",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 36 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sum(rate(sybil_market_fills_total[1m]))", "refId": "A" }],
+      "options": { "graphMode": "area" },
+      "fieldConfig": {
+        "defaults": { "unit": "cps", "thresholds": { "steps": [{ "color": "teal", "value": null }] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Solve Time Quantiles",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(sybil_solve_time_seconds_bucket[5m])) by (le))", "legendFormat": "p50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum(rate(sybil_solve_time_seconds_bucket[5m])) by (le))", "legendFormat": "p95", "refId": "B" },
+        { "expr": "histogram_quantile(0.99, sum(rate(sybil_solve_time_seconds_bucket[5m])) by (le))", "legendFormat": "p99", "refId": "C" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "drawStyle": "line", "fillOpacity": 10 },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "red", "value": 0.1 }
+          ] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Per-Market Volume (cumulative)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sybil_market_volume_nanos{market_id=~\"$market\"}", "legendFormat": "market {{market_id}}", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "none" } } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Per-Market Clearing Price (outcome 0)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 48 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sybil_market_clearing_price_nanos{market_id=~\"$market\", outcome=\"0\"}", "legendFormat": "market {{market_id}}", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "custom": { "drawStyle": "line", "fillOpacity": 5 } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Per-Market Fills Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 48 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sum by (market_id) (rate(sybil_market_fills_total{market_id=~\"$market\"}[1m]))", "legendFormat": "market {{market_id}}", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "cps", "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "normal" } } },
+        "overrides": []
+      }
     }
   ],
   "schemaVersion": 39,
   "tags": ["sybil"],
-  "templating": { "list": [] },
+  "templating": {
+    "list": [
+      {
+        "name": "market",
+        "label": "Market",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+        "query": { "query": "label_values(sybil_market_volume_nanos, market_id)", "refId": "market" },
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all", "selected": false }
+      }
+    ]
+  },
   "time": { "from": "now-30m", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
