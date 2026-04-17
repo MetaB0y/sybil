@@ -24,6 +24,7 @@ The **parent hash** is the BLAKE3 hash of the previous block's header. Each bloc
 > `crates/matching-sequencer/src/block.rs` — `BlockHeader` with `state_root` and `parent_hash`
 
 ## See Also
+- [[Canonical Serialization]] — byte-level spec for what gets hashed
 - [[Block Lifecycle]] — state root computation is the final step
 - [[Block Witness]] — captures pre/post state for verification
 - [[Four-Layer Verification]] — Layer 3 verifies state root and parent hash

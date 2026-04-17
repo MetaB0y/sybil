@@ -33,4 +33,5 @@ Several architectural choices were made specifically for ZK-friendliness. [[Nano
 - [[Four-Layer Verification]] — the checks that become the circuit
 - [[Block Witness]] — the circuit's input
 - [[State Root and Parent Hash]] — anchors the on-chain proof chain
+- [[Canonical Serialization]] — byte layout the circuit consumes
 - [[Nanos and Integer Arithmetic]] — ZK-friendly arithmetic

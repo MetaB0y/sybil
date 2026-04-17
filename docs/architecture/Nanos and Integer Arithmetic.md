@@ -27,3 +27,4 @@ A u64 in nanos can represent values up to about $18.4 billion, which is ample fo
 - [[Settlement]] — where i128 intermediates prevent overflow
 - [[ZK Integration Path]] — why integer arithmetic matters for proofs
 - [[Four-Layer Verification]] — verification requires deterministic arithmetic
+- [[Canonical Serialization]] — how these integers are turned into bytes
