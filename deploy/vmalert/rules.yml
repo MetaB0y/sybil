@@ -1,0 +1,46 @@
+groups:
+  - name: sybil
+    interval: 30s
+    rules:
+      - alert: SolveTimeHigh
+        expr: histogram_quantile(0.99, sum(rate(sybil_solve_time_seconds_bucket[5m])) by (le)) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          component: sequencer
+        annotations:
+          summary: "Solver p99 latency above 100ms"
+          description: "Solver p99 has been above 100ms for 2m ({{ $value | humanizeDuration }})."
+
+      - alert: RejectionRateHigh
+        expr: |
+          sum(rate(sybil_order_submissions_total{result="rejected"}[5m]))
+          / clamp_min(sum(rate(sybil_order_submissions_total[5m])), 0.0001)
+          > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: sequencer
+        annotations:
+          summary: "Order rejection rate above 50%"
+          description: "More than half of submitted orders are being rejected over the last 5m (current ratio: {{ $value | humanizePercentage }})."
+
+      - alert: SequencerDown
+        expr: up{job="sybil-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: sequencer
+        annotations:
+          summary: "sybil-api scrape target is down"
+          description: "VictoriaMetrics has not been able to scrape sybil-api for 1m."
+
+      - alert: BlockProductionStalled
+        expr: rate(sybil_blocks_produced[2m]) == 0 and up{job="sybil-api"} == 1
+        for: 2m
+        labels:
+          severity: critical
+          component: sequencer
+        annotations:
+          summary: "No blocks produced in the last 2m"
+          description: "sybil-api is up but has not produced any blocks for 2m — block production may be stalled."
