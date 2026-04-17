@@ -15,7 +15,12 @@ use sybil_api::app::create_router;
 use sybil_api::config::ApiConfig;
 use sybil_api::state::AppState;
 
-fn init_telemetry() -> metrics_exporter_prometheus::PrometheusHandle {
+struct Telemetry {
+    prometheus_handle: metrics_exporter_prometheus::PrometheusHandle,
+    tracer_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
+}
+
+fn init_telemetry() -> Telemetry {
     // Prometheus metrics recorder
     let prometheus_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
         .install_recorder()
@@ -23,7 +28,7 @@ fn init_telemetry() -> metrics_exporter_prometheus::PrometheusHandle {
 
     // OpenTelemetry trace exporter (OTLP over gRPC)
     // Respects OTEL_EXPORTER_OTLP_ENDPOINT env var (default: http://localhost:4317)
-    let otel_layer = match opentelemetry_otlp::SpanExporter::builder()
+    let (otel_layer, tracer_provider) = match opentelemetry_otlp::SpanExporter::builder()
         .with_tonic()
         .build()
     {
@@ -38,11 +43,14 @@ fn init_telemetry() -> metrics_exporter_prometheus::PrometheusHandle {
                 .build();
             opentelemetry::global::set_tracer_provider(provider.clone());
             let tracer = provider.tracer("sybil-api");
-            Some(tracing_opentelemetry::layer().with_tracer(tracer))
+            (
+                Some(tracing_opentelemetry::layer().with_tracer(tracer)),
+                Some(provider),
+            )
         }
         Err(e) => {
             eprintln!("OpenTelemetry OTLP exporter unavailable, traces will not be exported: {e}");
-            None
+            (None, None)
         }
     };
 
@@ -53,12 +61,18 @@ fn init_telemetry() -> metrics_exporter_prometheus::PrometheusHandle {
         .with(otel_layer)
         .init();
 
-    prometheus_handle
+    Telemetry {
+        prometheus_handle,
+        tracer_provider,
+    }
 }
 
 #[tokio::main]
 async fn main() {
-    let prometheus_handle = init_telemetry();
+    let Telemetry {
+        prometheus_handle,
+        tracer_provider,
+    } = init_telemetry();
 
     let config = ApiConfig::parse();
 
@@ -172,6 +186,12 @@ async fn main() {
         .with_graceful_shutdown(shutdown_signal())
         .await
         .unwrap();
+
+    if let Some(provider) = tracer_provider {
+        if let Err(e) = provider.shutdown() {
+            tracing::warn!(error = %e, "failed to flush OpenTelemetry spans on shutdown");
+        }
+    }
 
     tracing::info!("Server shut down cleanly");
 }

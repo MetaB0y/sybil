@@ -115,6 +115,10 @@ struct SequencerActorState {
 }
 
 impl SequencerActorState {
+    #[tracing::instrument(
+        skip_all,
+        fields(height = tracing::field::Empty, mempool_size = tracing::field::Empty)
+    )]
     async fn on_tick(&mut self) {
         if self.pause_count > 0 {
             return;
@@ -125,11 +129,13 @@ impl SequencerActorState {
             .as_millis() as u64;
 
         let mempool_size = self.mempool.len();
+        tracing::Span::current().record("mempool_size", mempool_size);
         let submissions = self.mempool.drain();
 
         let prepared = self
             .sequencer
             .prepare_block(submissions.clone(), timestamp_ms);
+        tracing::Span::current().record("height", prepared.production().block.header.height);
 
         if let Err(error) = self.persist_block(&prepared).await {
             metrics::counter!("sybil_persistence_failures").increment(1);

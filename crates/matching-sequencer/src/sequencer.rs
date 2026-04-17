@@ -781,6 +781,10 @@ impl BlockSequencer {
         }
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(height = prepared.production().block.header.height)
+    )]
     pub fn commit_prepared_block(&mut self, prepared: PreparedBlock) -> BlockProduction {
         let PreparedBlock {
             next_sequencer,
@@ -804,6 +808,14 @@ impl BlockSequencer {
         self.commit_prepared_block(prepared)
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+            height = self.height,
+            orders = problem.orders.len(),
+            active_markets = active_markets.len()
+        )
+    )]
     fn solve_batch_phase(
         &mut self,
         problem: &Problem,
@@ -859,6 +871,10 @@ impl BlockSequencer {
         }
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(height = self.height, fills = fills.len())
+    )]
     fn finalize_block_state_phase(
         &mut self,
         fills: &[Fill],

@@ -19,6 +19,10 @@ pub fn settle_fill(account: &mut Account, order: &Order, fill: &Fill) {
 }
 
 /// Settle all fills from a batch result. Each fill carries its own `account_id`.
+#[tracing::instrument(
+    skip_all,
+    fields(height = block_height, fills = fills.len(), orders = orders.len())
+)]
 pub fn settle_batch(
     accounts: &mut AccountStore,
     fills: &[Fill],
