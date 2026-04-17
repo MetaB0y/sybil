@@ -20,18 +20,24 @@ use crate::account::{AccountId, AccountStore};
 use crate::error::RejectionReason;
 use crate::validation::{sell_reservations, validate_order_with_reservation, PositionKey};
 
-/// A resting order in the book. Public for persistence; mutation still goes
-/// through `OrderBook` methods to keep reservation aggregates consistent.
+/// A resting order in the book.
+///
+/// The struct is public (and serde-serializable) so it can cross the persistence
+/// boundary, but fields are crate-private: external code receives `RestingOrder`
+/// values as opaque records and must go through `OrderBook` methods to mutate
+/// the book. Invariants (`reserved_balance >= 0`, all reservation qtys `>= 0`,
+/// aggregates equal to the sum of per-order reservations) are only enforced by
+/// the construction paths in this module.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RestingOrder {
-    pub order: Order,
-    pub account_id: AccountId,
+    pub(crate) order: Order,
+    pub(crate) account_id: AccountId,
     /// Block height when this order was first accepted.
-    pub created_at: u64,
+    pub(crate) created_at: u64,
     /// Balance reserved by this order (buy cost). 0 for sells.
-    pub reserved_balance: i64,
+    pub(crate) reserved_balance: i64,
     /// Position reservations for this order (sell quantities).
-    pub reserved_positions: Vec<(PositionKey, i64)>,
+    pub(crate) reserved_positions: Vec<(PositionKey, i64)>,
 }
 
 /// The order book: resting orders + aggregate reservations.
@@ -75,11 +81,25 @@ impl OrderBook {
     }
 
     /// Rebuild an order book from a persisted snapshot. Reservation aggregates
-    /// are reconstructed by summing per-order reservations.
+    /// are reconstructed by summing per-order reservations. Orders whose
+    /// reservations violate invariants (negative balance, negative qty) are
+    /// dropped with a warning rather than trusted blindly.
     pub fn restore(orders: Vec<RestingOrder>, ttl: u64) -> Self {
         let mut balance_reservations: HashMap<AccountId, i64> = HashMap::new();
         let mut position_reservations: HashMap<(AccountId, PositionKey), i64> = HashMap::new();
-        for ro in &orders {
+        let mut valid_orders = Vec::with_capacity(orders.len());
+        for ro in orders {
+            if ro.reserved_balance < 0
+                || ro.reserved_positions.iter().any(|(_, qty)| *qty < 0)
+            {
+                tracing::warn!(
+                    order_id = ro.order.id,
+                    account_id = ?ro.account_id,
+                    reserved_balance = ro.reserved_balance,
+                    "dropping resting order with invalid reservation during restore"
+                );
+                continue;
+            }
             if ro.reserved_balance > 0 {
                 *balance_reservations.entry(ro.account_id).or_insert(0) += ro.reserved_balance;
             }
@@ -88,9 +108,10 @@ impl OrderBook {
                     .entry((ro.account_id, key))
                     .or_insert(0) += qty;
             }
+            valid_orders.push(ro);
         }
         Self {
-            orders,
+            orders: valid_orders,
             balance_reservations,
             position_reservations,
             ttl,
@@ -531,6 +552,34 @@ mod tests {
         // Check remaining order has max_fill = 6
         let (remaining_order, _) = book.resting_orders().next().unwrap();
         assert_eq!(remaining_order.max_fill, 6);
+    }
+
+    #[test]
+    fn restore_drops_orders_with_negative_balance_reservation() {
+        let bad = RestingOrder {
+            order: Order::new(42),
+            account_id: AccountId(1),
+            created_at: 0,
+            reserved_balance: -100,
+            reserved_positions: vec![],
+        };
+        let book = OrderBook::restore(vec![bad], 10);
+        assert_eq!(book.len(), 0);
+        assert_eq!(book.reserved_balance(AccountId(1)), 0);
+    }
+
+    #[test]
+    fn restore_rebuilds_aggregates_from_valid_orders() {
+        let ro = RestingOrder {
+            order: Order::new(1),
+            account_id: AccountId(7),
+            created_at: 0,
+            reserved_balance: 500,
+            reserved_positions: vec![],
+        };
+        let book = OrderBook::restore(vec![ro], 10);
+        assert_eq!(book.len(), 1);
+        assert_eq!(book.reserved_balance(AccountId(7)), 500);
     }
 
     #[test]

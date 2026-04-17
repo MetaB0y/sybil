@@ -126,22 +126,7 @@ async fn main() {
             "Restored from persistent store"
         );
 
-        let mut sequencer = BlockSequencer::restore(
-            state.accounts,
-            state.markets,
-            state.market_groups,
-            oracle,
-            state.height,
-            state.last_header,
-            state.next_order_id,
-            state.pubkey_registry,
-            state.market_statuses,
-            state.market_metadata,
-            state.last_clearing_prices,
-            state.market_volumes,
-            state.resting_orders,
-            seq_config,
-        );
+        let mut sequencer = BlockSequencer::restore(state, oracle, seq_config);
 
         // Add any seed markets not already present
         for name in &config.seed_markets {

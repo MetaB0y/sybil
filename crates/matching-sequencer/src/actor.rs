@@ -157,20 +157,8 @@ impl SequencerActorState {
 
     async fn persist_block(&self, prepared: &PreparedBlock) -> Result<(), SequencerError> {
         if let Some(ref store) = self.store {
-            let resting_orders = prepared.next_sequencer().order_book_snapshot();
             store
-                .save_block(
-                    &prepared.next_sequencer().accounts,
-                    prepared.next_sequencer().markets(),
-                    prepared.next_sequencer().market_groups(),
-                    &prepared.next_sequencer().lifecycle,
-                    &prepared.production().block.header,
-                    prepared.next_sequencer().next_order_id(),
-                    prepared.next_sequencer().pubkey_registry(),
-                    prepared.next_sequencer().last_clearing_prices(),
-                    prepared.next_sequencer().market_volumes(),
-                    &resting_orders,
-                )
+                .save_block(prepared.next_sequencer().snapshot())
                 .await
                 .map_err(|error| SequencerError::Persistence(error.to_string()))?;
         }
@@ -726,22 +714,8 @@ impl SequencerSupervisorState {
             return;
         };
 
-        let sequencer = BlockSequencer::restore(
-            state.accounts,
-            state.markets,
-            state.market_groups,
-            self.oracle.clone(),
-            state.height,
-            state.last_header,
-            state.next_order_id,
-            state.pubkey_registry,
-            state.market_statuses,
-            state.market_metadata,
-            state.last_clearing_prices,
-            state.market_volumes,
-            state.resting_orders,
-            self.config.clone(),
-        );
+        let sequencer =
+            BlockSequencer::restore(state, self.oracle.clone(), self.config.clone());
 
         match self.spawn_child(myself, sequencer).await {
             Ok(()) => tracing::warn!("sequencer actor restarted from persistent snapshot"),
@@ -859,6 +833,16 @@ impl SequencerHandle {
         Self::spawn_with_store(sequencer, None)
     }
 
+    /// Spawn the sequencer actor with an attached persistent store.
+    ///
+    /// The store is used for:
+    ///   1. Persisting each committed block's state (write-through on every block).
+    ///   2. Reloading state when the supervisor restarts the actor after a crash.
+    ///
+    /// It is **not** used to hydrate the `sequencer` argument. The caller is
+    /// responsible for calling [`Store::load_state`] and passing the result to
+    /// [`BlockSequencer::restore`] before invoking this function — see
+    /// `crates/sybil-api/src/main.rs` for the canonical hydration + spawn pattern.
     pub fn spawn_with_store(
         sequencer: BlockSequencer,
         store: Option<crate::store::Store>,

@@ -21,6 +21,7 @@ use crate::market_lifecycle::MarketLifecycle;
 use crate::mempool::MempoolConfig;
 use crate::order_book::OrderBook;
 use crate::settlement;
+use crate::store::{RestoredState, SequencerSnapshot};
 use crate::system_event::SystemEvent;
 
 /// Default order TTL in blocks. At 500ms block intervals this is ~1 year (GTC).
@@ -446,48 +447,36 @@ impl BlockSequencer {
     }
 
     /// Restore from persisted state.
-    #[allow(clippy::too_many_arguments)]
     pub fn restore(
-        accounts: AccountStore,
-        markets: MarketSet,
-        market_groups: Vec<MarketGroup>,
+        state: RestoredState,
         oracle: Arc<dyn Oracle>,
-        height: u64,
-        last_header: Option<BlockHeader>,
-        next_order_id: u64,
-        pubkey_registry: HashMap<crate::crypto::PublicKey, AccountId>,
-        market_statuses: HashMap<MarketId, MarketStatus>,
-        market_metadata: HashMap<MarketId, MarketMetadata>,
-        last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
-        market_volumes: HashMap<MarketId, u64>,
-        resting_orders: Vec<crate::order_book::RestingOrder>,
         config: SequencerConfig,
     ) -> Self {
         let solver: Arc<dyn Solver> = Arc::new(matching_solver::LpSolver::new());
         let mut lifecycle = MarketLifecycle::new(oracle);
-        for (market_id, status) in market_statuses {
+        for (market_id, status) in state.market_statuses {
             lifecycle.set_market_status(market_id, status);
         }
-        for (market_id, meta) in market_metadata {
+        for (market_id, meta) in state.market_metadata {
             lifecycle.set_market_metadata(market_id, meta);
         }
-        let order_book = OrderBook::restore(resting_orders, config.order_ttl_blocks);
+        let order_book = OrderBook::restore(state.resting_orders, config.order_ttl_blocks);
         Self {
-            accounts,
+            accounts: state.accounts,
             solver,
-            next_order_id,
+            next_order_id: state.next_order_id,
             order_book,
-            height,
-            markets,
-            market_groups,
-            last_header,
+            height: state.height,
+            markets: state.markets,
+            market_groups: state.market_groups,
+            last_header: state.last_header,
             price_tracker: crate::price_tracker::PriceTracker::with_state(
-                last_clearing_prices,
-                market_volumes,
+                state.last_clearing_prices,
+                state.market_volumes,
             ),
             fill_recorder: crate::fill_recorder::FillRecorder::new(), // TODO: Tier 3 — persist fill history
             lifecycle,
-            pubkey_registry,
+            pubkey_registry: state.pubkey_registry,
             pending_system_events: Vec::new(),
             pending_system_account_baselines: HashMap::new(),
             config,
@@ -502,9 +491,28 @@ impl BlockSequencer {
         self.config.order_ttl_blocks
     }
 
-    /// Snapshot of the resting order book for persistence.
-    pub fn order_book_snapshot(&self) -> Vec<crate::order_book::RestingOrder> {
-        self.order_book.snapshot()
+    /// Snapshot of all state needed to persist the most recently produced block.
+    ///
+    /// Call this on the `next_sequencer` returned by `prepare_block` (or on a
+    /// live `BlockSequencer` after `produce_block`) — it panics if no block has
+    /// been produced yet, since there's no header to associate the snapshot with.
+    pub fn snapshot(&self) -> SequencerSnapshot<'_> {
+        let header = self
+            .last_header
+            .as_ref()
+            .expect("snapshot called before any block was produced");
+        SequencerSnapshot {
+            accounts: &self.accounts,
+            markets: &self.markets,
+            market_groups: &self.market_groups,
+            lifecycle: &self.lifecycle,
+            header,
+            next_order_id: self.next_order_id,
+            pubkey_registry: &self.pubkey_registry,
+            last_clearing_prices: self.price_tracker.last_clearing_prices(),
+            market_volumes: self.price_tracker.market_volumes(),
+            resting_orders: self.order_book.snapshot(),
+        }
     }
 
     pub fn markets(&self) -> &MarketSet {
@@ -1886,33 +1894,23 @@ mod tests {
         let reserved_before = seq_a.order_book.reserved_balance(aid_a);
         assert!(reserved_before > 0);
 
-        // Snapshot all restore-relevant state from the running sequencer,
-        // mirroring what the store would persist + reload.
-        let resting_orders = seq_a.order_book_snapshot();
-        let height = seq_a.height();
-        let last_header = seq_a.last_header().cloned();
-        let next_order_id = seq_a.next_order_id();
-        let pubkey_registry = seq_a.pubkey_registry().clone();
-        let last_clearing_prices = seq_a.last_clearing_prices().clone();
-        let market_volumes = seq_a.market_volumes().clone();
-        let restored_accounts = seq_a.accounts.clone();
+        // Build a RestoredState as the store would, then restore into seq_b.
+        let state = RestoredState {
+            accounts: seq_a.accounts.clone(),
+            markets: markets.clone(),
+            market_groups: vec![],
+            market_statuses: HashMap::new(),
+            market_metadata: HashMap::new(),
+            height: seq_a.height(),
+            last_header: seq_a.last_header().cloned(),
+            next_order_id: seq_a.next_order_id(),
+            pubkey_registry: seq_a.pubkey_registry().clone(),
+            last_clearing_prices: seq_a.last_clearing_prices().clone(),
+            market_volumes: seq_a.market_volumes().clone(),
+            resting_orders: seq_a.order_book.snapshot(),
+        };
 
-        let mut seq_b = BlockSequencer::restore(
-            restored_accounts,
-            markets.clone(),
-            vec![],
-            oracle,
-            height,
-            last_header,
-            next_order_id,
-            pubkey_registry,
-            HashMap::new(),
-            HashMap::new(),
-            last_clearing_prices,
-            market_volumes,
-            resting_orders,
-            SequencerConfig::default(),
-        );
+        let mut seq_b = BlockSequencer::restore(state, oracle, SequencerConfig::default());
         assert_eq!(
             seq_b.order_book.len(),
             1,

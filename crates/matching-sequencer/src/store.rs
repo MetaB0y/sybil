@@ -31,10 +31,12 @@
 //! # Persistence Tiers
 //!
 //! **Tier 1 (implemented)**: Core state — accounts, markets, groups, block headers,
-//! counters, pubkeys. Sufficient for crash recovery.
+//! counters, pubkeys, clearing prices, market volumes. Sufficient for crash recovery.
 //!
-//! **Tier 2 (TODO)**: Order state — pending orders, mempool, MM inventory/variance.
-//! Needed for seamless order continuity across restarts.
+//! **Tier 2 (partial)**: Order state.
+//! - Resting order book: implemented (see `RESTING_ORDERS` table).
+//! - Mempool: intentionally not persisted (short-lived by design; clients resubmit).
+//! - MM inventory / variance: TODO.
 //!
 //! **Tier 3 (TODO)**: Derived views — fill history, price history, block ring buffer.
 //! Reconstructable from blocks but expensive to rebuild.
@@ -139,6 +141,22 @@ pub struct RestoredState {
     pub resting_orders: Vec<RestingOrder>,
 }
 
+/// Borrowed view of sequencer state needed to persist one block.
+/// Constructed by `BlockSequencer::snapshot()` and consumed by `Store::save_block`.
+pub struct SequencerSnapshot<'a> {
+    pub accounts: &'a AccountStore,
+    pub markets: &'a MarketSet,
+    pub market_groups: &'a [MarketGroup],
+    pub lifecycle: &'a MarketLifecycle,
+    pub header: &'a BlockHeader,
+    pub next_order_id: u64,
+    pub pubkey_registry: &'a HashMap<crate::crypto::PublicKey, AccountId>,
+    pub last_clearing_prices: &'a HashMap<MarketId, Vec<Nanos>>,
+    pub market_volumes: &'a HashMap<MarketId, u64>,
+    /// Owned because the snapshot clones the live book — cheap for bounded sizes.
+    pub resting_orders: Vec<RestingOrder>,
+}
+
 impl Store {
     /// Open (or create) a store at the given path.
     pub fn open(path: &Path) -> Result<Self, StoreError> {
@@ -173,19 +191,9 @@ impl Store {
     }
 
     /// Save the sequencer state after a block. Single ACID transaction.
-    #[allow(clippy::too_many_arguments)]
     pub async fn save_block(
         &self,
-        accounts: &AccountStore,
-        markets: &MarketSet,
-        market_groups: &[MarketGroup],
-        lifecycle: &MarketLifecycle,
-        header: &BlockHeader,
-        next_order_id: u64,
-        pubkey_registry: &HashMap<crate::crypto::PublicKey, AccountId>,
-        last_clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
-        market_volumes: &HashMap<MarketId, u64>,
-        resting_orders: &[RestingOrder],
+        snapshot: SequencerSnapshot<'_>,
     ) -> Result<(), StoreError> {
         let current_fence = read_account_state_fence(&self.db)?;
         let next_slot = current_fence
@@ -196,9 +204,9 @@ impl Store {
         // redb transaction below flips the fence to point at it.
         self.account_state_store
             .persist(CommittedAccountState {
-                accounts,
-                height: header.height,
-                next_account_id: accounts.next_id(),
+                accounts: snapshot.accounts,
+                height: snapshot.header.height,
+                next_account_id: snapshot.accounts.next_id(),
                 slot: next_slot,
             })
             .await?;
@@ -208,7 +216,7 @@ impl Store {
         // Markets
         {
             let mut table = txn.open_table(MARKETS)?;
-            for (id, market) in markets.iter_with_ids() {
+            for (id, market) in snapshot.markets.iter_with_ids() {
                 let bytes = rmp_serde::to_vec(market)?;
                 table.insert(id.0, bytes.as_slice())?;
             }
@@ -218,25 +226,22 @@ impl Store {
         {
             let mut meta_table = txn.open_table(MARKET_META)?;
             let mut status_table = txn.open_table(MARKET_STATUSES)?;
-            for (&market_id, status) in lifecycle.market_statuses() {
+            for (&market_id, status) in snapshot.lifecycle.market_statuses() {
                 let bytes = rmp_serde::to_vec(status)?;
                 status_table.insert(market_id.0, bytes.as_slice())?;
             }
-            // Metadata for all markets we know about
-            for (id, _) in markets.iter_with_ids() {
-                if let Some(meta) = lifecycle.market_metadata(*id) {
+            for (id, _) in snapshot.markets.iter_with_ids() {
+                if let Some(meta) = snapshot.lifecycle.market_metadata(*id) {
                     let bytes = rmp_serde::to_vec(meta)?;
                     meta_table.insert(id.0, bytes.as_slice())?;
                 }
             }
         }
 
-        // Market groups
+        // Market groups (groups can be added but not removed; overwrite by index)
         {
             let mut table = txn.open_table(MARKET_GROUPS)?;
-            // Clear old groups (groups can be added but not removed, so this is fine)
-            // Actually, just overwrite by index
-            for (i, group) in market_groups.iter().enumerate() {
+            for (i, group) in snapshot.market_groups.iter().enumerate() {
                 let bytes = rmp_serde::to_vec(group)?;
                 table.insert(i as u32, bytes.as_slice())?;
             }
@@ -245,14 +250,14 @@ impl Store {
         // Block header
         {
             let mut table = txn.open_table(BLOCK_HEADERS)?;
-            let bytes = rmp_serde::to_vec(header)?;
-            table.insert(header.height, bytes.as_slice())?;
+            let bytes = rmp_serde::to_vec(snapshot.header)?;
+            table.insert(snapshot.header.height, bytes.as_slice())?;
         }
 
         // Pubkey registry
         {
             let mut table = txn.open_table(PUBKEY_REGISTRY)?;
-            for (pubkey, account_id) in pubkey_registry {
+            for (pubkey, account_id) in snapshot.pubkey_registry {
                 let point = pubkey.compressed_bytes();
                 table.insert(point.as_slice(), account_id.0)?;
             }
@@ -261,7 +266,7 @@ impl Store {
         // Clearing prices
         {
             let mut table = txn.open_table(CLEARING_PRICES)?;
-            for (&market_id, prices) in last_clearing_prices {
+            for (&market_id, prices) in snapshot.last_clearing_prices {
                 let bytes = rmp_serde::to_vec(prices)?;
                 table.insert(market_id.0, bytes.as_slice())?;
             }
@@ -270,7 +275,7 @@ impl Store {
         // Market volumes
         {
             let mut table = txn.open_table(MARKET_VOLUMES)?;
-            for (&market_id, &volume) in market_volumes {
+            for (&market_id, &volume) in snapshot.market_volumes {
                 table.insert(market_id.0, volume)?;
             }
         }
@@ -278,7 +283,7 @@ impl Store {
         // Resting order book snapshot
         {
             let mut table = txn.open_table(RESTING_ORDERS)?;
-            let bytes = rmp_serde::to_vec(resting_orders)?;
+            let bytes = rmp_serde::to_vec(&snapshot.resting_orders)?;
             table.insert(KEY_RESTING_ORDERS_SNAPSHOT, bytes.as_slice())?;
         }
 
@@ -288,12 +293,12 @@ impl Store {
             write_core_counters(
                 &mut table,
                 PersistedCoreCounters {
-                    height: header.height,
-                    next_account_id: accounts.next_id(),
-                    next_market_id: markets.next_id() as u64,
-                    next_order_id,
+                    height: snapshot.header.height,
+                    next_account_id: snapshot.accounts.next_id(),
+                    next_market_id: snapshot.markets.next_id() as u64,
+                    next_order_id: snapshot.next_order_id,
                     account_state_fence: AccountStateFence {
-                        height: header.height,
+                        height: snapshot.header.height,
                         slot: next_slot,
                     },
                 },
@@ -301,7 +306,7 @@ impl Store {
         }
 
         txn.commit()?;
-        debug!(height = header.height, "block persisted");
+        debug!(height = snapshot.header.height, "block persisted");
         Ok(())
     }
 
@@ -667,6 +672,49 @@ mod tests {
         }
     }
 
+    /// Owns the empty defaults for `SequencerSnapshot` references so test code
+    /// doesn't have to repeat the ceremony on every call site.
+    struct TestEnv {
+        empty_pk: HashMap<crate::crypto::PublicKey, AccountId>,
+        empty_prices: HashMap<MarketId, Vec<Nanos>>,
+        empty_volumes: HashMap<MarketId, u64>,
+    }
+
+    impl TestEnv {
+        fn new() -> Self {
+            Self {
+                empty_pk: HashMap::new(),
+                empty_prices: HashMap::new(),
+                empty_volumes: HashMap::new(),
+            }
+        }
+
+        #[allow(clippy::too_many_arguments)]
+        fn snapshot<'a>(
+            &'a self,
+            accounts: &'a AccountStore,
+            markets: &'a MarketSet,
+            lifecycle: &'a MarketLifecycle,
+            header: &'a BlockHeader,
+            next_order_id: u64,
+            market_volumes: Option<&'a HashMap<MarketId, u64>>,
+            resting_orders: Vec<RestingOrder>,
+        ) -> SequencerSnapshot<'a> {
+            SequencerSnapshot {
+                accounts,
+                markets,
+                market_groups: &[],
+                lifecycle,
+                header,
+                next_order_id,
+                pubkey_registry: &self.empty_pk,
+                last_clearing_prices: &self.empty_prices,
+                market_volumes: market_volumes.unwrap_or(&self.empty_volumes),
+                resting_orders,
+            }
+        }
+    }
+
     #[tokio::test]
     async fn test_store_restores_latest_committed_accounts() {
         let path = temp_db_path("store-restore");
@@ -674,39 +722,34 @@ mod tests {
         let oracle = Arc::new(AdminOracle::new());
         let lifecycle = MarketLifecycle::new(oracle);
         let markets = MarketSet::new();
+        let env = TestEnv::new();
 
         let mut accounts = AccountStore::new();
         let account_id = accounts.create_account(100);
         store
-            .save_block(
+            .save_block(env.snapshot(
                 &accounts,
                 &markets,
-                &[],
                 &lifecycle,
                 &sample_header(1),
                 1,
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
-                &[],
-            )
+                None,
+                vec![],
+            ))
             .await
             .unwrap();
 
         accounts.get_mut(account_id).unwrap().balance = 200;
         store
-            .save_block(
+            .save_block(env.snapshot(
                 &accounts,
                 &markets,
-                &[],
                 &lifecycle,
                 &sample_header(2),
                 1,
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
-                &[],
-            )
+                None,
+                vec![],
+            ))
             .await
             .unwrap();
 
@@ -723,21 +766,20 @@ mod tests {
         let lifecycle = MarketLifecycle::new(oracle);
         let mut markets = MarketSet::new();
         let market_id = markets.add_binary("Will it rain?");
+        let env = TestEnv::new();
+        let accounts = AccountStore::new();
 
         let volumes = HashMap::from([(market_id, 42_000_000_000u64)]);
         store
-            .save_block(
-                &AccountStore::new(),
+            .save_block(env.snapshot(
+                &accounts,
                 &markets,
-                &[],
                 &lifecycle,
                 &sample_header(1),
                 1,
-                &HashMap::new(),
-                &HashMap::new(),
-                &volumes,
-                &[],
-            )
+                Some(&volumes),
+                vec![],
+            ))
             .await
             .unwrap();
 
@@ -757,6 +799,7 @@ mod tests {
         let store = Store::open(&path).unwrap();
         let oracle = Arc::new(AdminOracle::new());
         let lifecycle = MarketLifecycle::new(oracle);
+        let env = TestEnv::new();
 
         let mut markets = MarketSet::new();
         let market_id = markets.add_binary("Test");
@@ -774,18 +817,15 @@ mod tests {
         assert_eq!(snapshot.len(), 1);
 
         store
-            .save_block(
+            .save_block(env.snapshot(
                 &accounts,
                 &markets,
-                &[],
                 &lifecycle,
                 &sample_header(1),
                 2,
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
-                &snapshot,
-            )
+                None,
+                snapshot,
+            ))
             .await
             .unwrap();
 
@@ -813,6 +853,7 @@ mod tests {
         let store = Store::open(&path).unwrap();
         let oracle = Arc::new(AdminOracle::new());
         let lifecycle = MarketLifecycle::new(oracle);
+        let env = TestEnv::new();
 
         let mut markets = MarketSet::new();
         let market_id = markets.add_binary("Test");
@@ -825,35 +866,29 @@ mod tests {
         book.accept(order, aid, accounts.get(aid).unwrap(), 1)
             .unwrap();
         store
-            .save_block(
+            .save_block(env.snapshot(
                 &accounts,
                 &markets,
-                &[],
                 &lifecycle,
                 &sample_header(1),
                 2,
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
-                &book.snapshot(),
-            )
+                None,
+                book.snapshot(),
+            ))
             .await
             .unwrap();
 
         // Block 2: save with an empty snapshot (order filled/cancelled/expired).
         store
-            .save_block(
+            .save_block(env.snapshot(
                 &accounts,
                 &markets,
-                &[],
                 &lifecycle,
                 &sample_header(2),
                 2,
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
-                &[],
-            )
+                None,
+                vec![],
+            ))
             .await
             .unwrap();
 
