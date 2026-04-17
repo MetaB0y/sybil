@@ -191,6 +191,56 @@ impl SequencerActorState {
         metrics::gauge!("sybil_mempool_size").set(mempool_size as f64);
         metrics::gauge!("sybil_pending_orders").set(bp.flow_metrics.pending_orders_after as f64);
         metrics::histogram!("sybil_solve_time_seconds").record(bp.pipeline.total_time_secs);
+
+        self.record_per_market_metrics(bp);
+    }
+
+    // Cardinality note: bounded by active markets this block (those with clearing
+    // prices). Fine for MVP scale (tens of markets). Revisit top-N bucketing if
+    // we ever exceed ~1000 concurrently active markets.
+    fn record_per_market_metrics(&self, bp: &BlockProduction) {
+        let order_to_market: HashMap<u64, MarketId> = bp
+            .witness
+            .orders
+            .iter()
+            .filter_map(|wo| wo.order.active_markets().next().map(|m| (wo.order.id, m)))
+            .collect();
+
+        let mut fills_per_market: HashMap<MarketId, u64> = HashMap::new();
+        for fill in &bp.block.fills {
+            if fill.fill_qty == 0 {
+                continue;
+            }
+            if let Some(&market_id) = order_to_market.get(&fill.order_id) {
+                *fills_per_market.entry(market_id).or_default() += 1;
+            }
+        }
+        for (market_id, count) in fills_per_market {
+            metrics::counter!(
+                "sybil_market_fills_total",
+                "market_id" => market_id.0.to_string()
+            )
+            .increment(count);
+        }
+
+        let market_volumes = self.sequencer.market_volumes();
+        for (market_id, prices) in &bp.block.clearing_prices {
+            for (outcome, &price) in prices.iter().enumerate() {
+                metrics::gauge!(
+                    "sybil_market_clearing_price_nanos",
+                    "market_id" => market_id.0.to_string(),
+                    "outcome" => outcome.to_string()
+                )
+                .set(price as f64);
+            }
+            if let Some(&volume) = market_volumes.get(market_id) {
+                metrics::gauge!(
+                    "sybil_market_volume_nanos",
+                    "market_id" => market_id.0.to_string()
+                )
+                .set(volume as f64);
+            }
+        }
     }
 
     fn record_submission_metrics(
