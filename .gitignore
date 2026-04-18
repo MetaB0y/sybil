@@ -1,6 +1,10 @@
 **/target
 **/__pycache__
 docs/node_modules
+apps/composition-demo/node_modules/
+apps/composition-demo/.vite/
+apps/composition-demo/dist/
+apps/composition-demo/*.tsbuildinfo
 .env
 comparison*.json
 .DS_Store
@@ -21,3 +25,6 @@ lean/.lake/
 *.ilean
 arena/live/decisions.db
 arena/live/__pycache__/
+arena/live/*/generated_registry.json
+arena/live/*/source_snapshot.json
+arena/live/*/state.json
