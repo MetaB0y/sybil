@@ -53,9 +53,14 @@ pub struct OrderBook {
 }
 
 /// An accepted order returned from `accept()`, for witness tracking.
+///
+/// `resting_order` is a clone of the `RestingOrder` that was pushed into
+/// the book — useful when the caller needs to durably log the admission
+/// (e.g. the admit-log WAL) without re-deriving the reservation fields.
 pub struct Accepted {
     pub order: Order,
     pub account_id: AccountId,
+    pub resting_order: RestingOrder,
 }
 
 #[derive(Debug)]
@@ -118,6 +123,39 @@ impl OrderBook {
         }
     }
 
+    /// Reinsert a pre-validated `RestingOrder` (replay path).
+    ///
+    /// Used by the admit-log recovery: the order was already validated and
+    /// reserved at original admit time, so we trust the payload and just
+    /// append it + update the reservation aggregates. Orders with negative
+    /// reservations are dropped with a warning, matching `restore`'s behavior.
+    pub fn reinsert_for_replay(&mut self, resting: RestingOrder) {
+        if resting.reserved_balance < 0
+            || resting.reserved_positions.iter().any(|(_, qty)| *qty < 0)
+        {
+            tracing::warn!(
+                order_id = resting.order.id,
+                account_id = ?resting.account_id,
+                reserved_balance = resting.reserved_balance,
+                "dropping replayed admit with invalid reservation"
+            );
+            return;
+        }
+        if resting.reserved_balance > 0 {
+            *self
+                .balance_reservations
+                .entry(resting.account_id)
+                .or_insert(0) += resting.reserved_balance;
+        }
+        for &(key, qty) in &resting.reserved_positions {
+            *self
+                .position_reservations
+                .entry((resting.account_id, key))
+                .or_insert(0) += qty;
+        }
+        self.orders.push(resting);
+    }
+
     /// Current reserved balance for an account.
     pub fn reserved_balance(&self, account_id: AccountId) -> i64 {
         self.balance_reservations
@@ -163,15 +201,20 @@ impl OrderBook {
                 .or_insert(0) += qty;
         }
 
-        self.orders.push(RestingOrder {
+        let resting = RestingOrder {
             order: order.clone(),
             account_id,
             created_at: current_height,
             reserved_balance: cost,
             reserved_positions: pos_reservations,
-        });
+        };
+        self.orders.push(resting.clone());
 
-        Ok(Accepted { order, account_id })
+        Ok(Accepted {
+            order,
+            account_id,
+            resting_order: resting,
+        })
     }
 
     /// Remove expired orders and release their reservations.

@@ -65,8 +65,13 @@ pub struct OrderSubmission {
 /// solver path (STP, flash liquidity, bundle atomicity), so the caller is
 /// asked to defer them via its existing buffering path.
 pub enum AdmitOutcome {
-    /// Submission was fully admitted into the resting book.
-    Admitted { order_id: u64 },
+    /// Submission was fully admitted into the resting book. `resting_order`
+    /// is a clone of the row that was pushed — the actor serializes it into
+    /// the admit-log WAL so the admit survives a crash before the next block.
+    Admitted {
+        order_id: u64,
+        resting_order: crate::order_book::RestingOrder,
+    },
     /// Submission is not eligible for direct admission; caller should route
     /// it through the existing pre-block buffer.
     Deferred(OrderSubmission),
@@ -482,7 +487,16 @@ impl BlockSequencer {
         for (market_id, meta) in state.market_metadata {
             lifecycle.set_market_metadata(market_id, meta);
         }
-        let order_book = OrderBook::restore(state.resting_orders, config.order_ttl_blocks);
+        let mut order_book =
+            OrderBook::restore(state.resting_orders, config.order_ttl_blocks);
+        // Replay the admit-log WAL on top of the snapshot: every non-MM
+        // admit since the last committed block is durable on its own row
+        // and must be re-inserted before the sequencer starts taking new
+        // traffic, so nothing acknowledged with a 200 OK is dropped by a
+        // crash.
+        for resting in state.admit_log {
+            order_book.reinsert_for_replay(resting);
+        }
         Self {
             accounts: state.accounts,
             solver,
@@ -776,6 +790,7 @@ impl BlockSequencer {
         {
             Ok(accepted) => AdmitOutcome::Admitted {
                 order_id: accepted.order.id,
+                resting_order: accepted.resting_order,
             },
             Err(reason) => AdmitOutcome::Rejected(SequencerError::Rejected(Rejection {
                 order_id,
@@ -2040,6 +2055,7 @@ mod tests {
             market_volumes: seq_a.market_volumes().clone(),
             resting_orders: seq_a.order_book.snapshot(),
             pending_bundles: Vec::new(),
+            admit_log: Vec::new(),
         };
 
         let mut seq_b = BlockSequencer::restore(state, oracle, SequencerConfig::default());

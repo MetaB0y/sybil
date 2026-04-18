@@ -105,6 +105,16 @@ const KEY_RESTING_ORDERS_SNAPSHOT: &str = "snapshot";
 /// in-memory pending queue so nothing submitted with a 200 OK is lost.
 const PENDING_BUNDLES: TableDefinition<u64, &[u8]> = TableDefinition::new("pending_bundles");
 
+/// Admit log: monotonic seq (u64) → msgpack(RestingOrder).
+/// Append-only log of non-MM single-market admissions that entered the
+/// resting book after the last committed block. Each admit appends one row
+/// before the 200 OK returns, so a crash between admit and the next block
+/// commit doesn't drop orders from `try_admit_direct`. Cleared atomically
+/// inside `save_block` when those admissions become part of the next
+/// `RESTING_ORDERS` snapshot; restart loads the snapshot and then replays
+/// this table on top.
+const ADMIT_LOG: TableDefinition<u64, &[u8]> = TableDefinition::new("admit_log");
+
 // Counter keys
 const KEY_STORE_LAYOUT_VERSION: &str = "store_layout_version";
 const KEY_HEIGHT: &str = "height";
@@ -153,6 +163,10 @@ pub struct RestoredState {
     /// pending queue so nothing acknowledged with a 200 OK is dropped by a
     /// crash.
     pub pending_bundles: Vec<crate::sequencer::OrderSubmission>,
+    /// Non-MM single-market admissions that went into the resting book
+    /// after the last committed block. On restart these are re-inserted
+    /// on top of `resting_orders` before the sequencer starts processing.
+    pub admit_log: Vec<RestingOrder>,
 }
 
 /// Borrowed view of sequencer state needed to persist one block.
@@ -194,6 +208,7 @@ impl Store {
         txn.open_table(MARKET_VOLUMES)?;
         txn.open_table(RESTING_ORDERS)?;
         txn.open_table(PENDING_BUNDLES)?;
+        txn.open_table(ADMIT_LOG)?;
         txn.commit()?;
 
         initialize_or_validate_layout(&db)?;
@@ -308,6 +323,14 @@ impl Store {
         // with the rest of the block commit.
         {
             let mut table = txn.open_table(PENDING_BUNDLES)?;
+            table.retain(|_, _| false)?;
+        }
+
+        // Same story for the admit log: non-MM admits from the last cycle
+        // are now encoded in the RESTING_ORDERS snapshot above, so drop
+        // the incremental log atomically in this txn.
+        {
+            let mut table = txn.open_table(ADMIT_LOG)?;
             table.retain(|_, _| false)?;
         }
 
@@ -464,6 +487,16 @@ impl Store {
             out
         };
 
+        let admit_log: Vec<RestingOrder> = {
+            let table = txn.open_table(ADMIT_LOG)?;
+            let mut out = Vec::new();
+            for entry in table.iter()? {
+                let (_, value) = entry?;
+                out.push(rmp_serde::from_slice(value.value())?);
+            }
+            out
+        };
+
         info!(
             height = recovery_metadata.height,
             accounts = num_accounts,
@@ -472,6 +505,7 @@ impl Store {
             clearing_prices = last_clearing_prices.len(),
             resting_orders = resting_orders.len(),
             pending_bundles = pending_bundles.len(),
+            admit_log = admit_log.len(),
             "state restored from store"
         );
 
@@ -489,6 +523,7 @@ impl Store {
             market_volumes,
             resting_orders,
             pending_bundles,
+            admit_log,
         }))
     }
 
@@ -517,6 +552,35 @@ impl Store {
         };
         {
             let mut table = txn.open_table(PENDING_BUNDLES)?;
+            table.insert(next_seq, bytes.as_slice())?;
+        }
+        txn.commit()?;
+        Ok(())
+    }
+
+    /// Append one `RestingOrder` to the admit-log WAL.
+    ///
+    /// Called by the actor right after `try_admit_direct` inserts a non-MM
+    /// admit into the live resting book; the 200 OK only returns once this
+    /// row is committed to redb. Rows are cleared atomically by `save_block`
+    /// once the admit is rolled into the next `RESTING_ORDERS` snapshot.
+    pub async fn append_admit_log(
+        &self,
+        resting: &RestingOrder,
+    ) -> Result<(), StoreError> {
+        let bytes = rmp_serde::to_vec(resting)?;
+        let txn = self.db.begin_write()?;
+        let next_seq = {
+            let table = txn.open_table(ADMIT_LOG)?;
+            let last_key = table
+                .iter()?
+                .next_back()
+                .transpose()?
+                .map(|(k, _)| k.value());
+            last_key.map(|k| k + 1).unwrap_or(0)
+        };
+        {
+            let mut table = txn.open_table(ADMIT_LOG)?;
             table.insert(next_seq, bytes.as_slice())?;
         }
         txn.commit()?;
@@ -981,6 +1045,81 @@ mod tests {
             Err(StoreError::UnsupportedLayout(_)) => {}
             Err(error) => panic!("expected unsupported layout error, got {error:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_store_roundtrips_admit_log_and_replays_on_restore() {
+        use crate::order_book::OrderBook;
+        use crate::sequencer::{BlockSequencer, SequencerConfig};
+        use matching_engine::{outcome_buy, MarketSet, NANOS_PER_DOLLAR};
+
+        let path = temp_db_path("store-admit-log");
+        let store = Store::open(&path).unwrap();
+
+        let mut markets = MarketSet::new();
+        let market_id = markets.add_binary("Test");
+
+        let oracle = Arc::new(AdminOracle::new());
+        let lifecycle = MarketLifecycle::new(oracle.clone());
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+        let env = TestEnv::new();
+
+        // Baseline block with no admits, so load_state has a metadata row.
+        store
+            .save_block(env.snapshot(
+                &accounts,
+                &markets,
+                &lifecycle,
+                &sample_header(1),
+                1,
+                None,
+                Vec::new(),
+            ))
+            .await
+            .unwrap();
+
+        // Simulate a non-MM admit: build what `OrderBook::accept` would
+        // produce, then append to the WAL directly.
+        let mut book = OrderBook::new(10);
+        let order = outcome_buy(&markets, 1, market_id, 0, NANOS_PER_DOLLAR / 2, 5);
+        let accepted = book
+            .accept(order, aid, accounts.get(aid).unwrap(), 1)
+            .unwrap();
+        store
+            .append_admit_log(&accepted.resting_order)
+            .await
+            .unwrap();
+
+        // Load + restore: the order must live again in the book, with its
+        // reservation correctly accounted for.
+        let restored = store.load_state().await.unwrap().unwrap();
+        assert_eq!(restored.admit_log.len(), 1);
+        assert!(restored.resting_orders.is_empty());
+
+        let seq = BlockSequencer::restore(restored, oracle, SequencerConfig::default());
+        assert_eq!(
+            seq.pending_orders_info(Some(aid)).len(),
+            1,
+            "replayed admit must be visible on the restored resting book"
+        );
+
+        // save_block clears the admit log atomically.
+        store
+            .save_block(env.snapshot(
+                &accounts,
+                &markets,
+                &lifecycle,
+                &sample_header(2),
+                2,
+                None,
+                Vec::new(),
+            ))
+            .await
+            .unwrap();
+
+        let restored_after = store.load_state().await.unwrap().unwrap();
+        assert!(restored_after.admit_log.is_empty());
     }
 
     #[tokio::test]

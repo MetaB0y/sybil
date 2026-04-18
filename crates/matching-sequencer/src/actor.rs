@@ -421,9 +421,11 @@ impl SequencerActorState {
 
     /// Admit a submission: fast path if it fits straight into the resting
     /// book (single-market, non-MM, single order), otherwise buffer it on
-    /// the sequencer's pending queue and durably log it so a crash between
-    /// here and the next block commit doesn't drop it. Returns `Err` for
-    /// synchronous rejections so the caller can surface them to the client.
+    /// the sequencer's pending queue. Either way the submission is durably
+    /// logged before this returns `Ok`, so a crash before the next block
+    /// commit doesn't drop anything acknowledged with a 200 OK. Returns
+    /// `Err` for synchronous rejections so the caller can surface them to
+    /// the client.
     async fn admit_or_defer(
         &mut self,
         submission: OrderSubmission,
@@ -432,7 +434,31 @@ impl SequencerActorState {
             return Err(SequencerError::MempoolFull);
         }
         match self.sequencer.try_admit_direct(submission) {
-            crate::sequencer::AdmitOutcome::Admitted { .. } => Ok(()),
+            crate::sequencer::AdmitOutcome::Admitted {
+                order_id,
+                resting_order,
+            } => {
+                if let Some(store) = &self.store {
+                    if let Err(err) = store.append_admit_log(&resting_order).await {
+                        // Durability lost — rollback the in-memory admit so
+                        // the 200 OK contract holds. If cancel somehow fails
+                        // (shouldn't: we just pushed the order), log loudly
+                        // and leave the order in-book as a degraded state.
+                        if let Err(cancel_err) = self
+                            .sequencer
+                            .cancel_pending_order(resting_order.account_id, order_id)
+                        {
+                            tracing::error!(
+                                error = %cancel_err,
+                                order_id,
+                                "admit-log persist failed and rollback could not cancel the order"
+                            );
+                        }
+                        return Err(SequencerError::Persistence(err.to_string()));
+                    }
+                }
+                Ok(())
+            }
             crate::sequencer::AdmitOutcome::Deferred(sub) => {
                 if let Some(store) = &self.store {
                     store
