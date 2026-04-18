@@ -108,14 +108,6 @@ pub struct MarketSearchResult {
     pub status: MarketStatus,
 }
 
-const BLOCK_HISTORY_CAPACITY: usize = 100;
-
-/// Cap on buffered MM / multi-market submissions waiting for the next block.
-/// Matches the previous `MempoolConfig::max_total` default — plenty of head
-/// room for single-market-maker setups, small enough that a runaway client
-/// hits backpressure before exhausting memory.
-const MAX_PENDING_BUNDLES: usize = 10_000;
-
 struct SequencerActor;
 
 struct SequencerActorArgs {
@@ -282,7 +274,7 @@ impl SequencerActorState {
     }
 
     fn push_to_history(&mut self, block: Block) {
-        if self.block_history.len() >= BLOCK_HISTORY_CAPACITY {
+        if self.block_history.len() >= self.sequencer.config.block_history_capacity {
             self.block_history.pop_front();
         }
         self.block_history.push_back(block);
@@ -439,7 +431,7 @@ impl SequencerActorState {
     /// `Err` for synchronous rejections so the caller can surface them to
     /// the client.
     async fn admit_or_defer(&mut self, submission: OrderSubmission) -> Result<(), SequencerError> {
-        if self.sequencer.pending_bundles_len() >= MAX_PENDING_BUNDLES {
+        if self.sequencer.pending_bundles_len() >= self.sequencer.config.max_pending_bundles {
             return Err(SequencerError::MempoolFull);
         }
         match self.sequencer.try_admit_direct(submission) {

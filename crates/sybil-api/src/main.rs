@@ -116,7 +116,8 @@ async fn main() {
     let seq_config = SequencerConfig {
         order_ttl_blocks: config.order_ttl_blocks,
         block_interval: Duration::from_millis(config.block_interval_ms),
-        ..SequencerConfig::default()
+        max_pending_bundles: config.max_pending_bundles,
+        block_history_capacity: config.block_history_capacity,
     };
 
     let handle = if let Some(state) = restored {
