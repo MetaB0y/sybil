@@ -23,6 +23,14 @@ pub struct ApiConfig {
     #[arg(long, default_value = "63072000", env = "SYBIL_ORDER_TTL_BLOCKS")]
     pub order_ttl_blocks: u64,
 
+    /// Cap on buffered MM / multi-market submissions waiting for the next block.
+    #[arg(long, default_value = "10000", env = "SYBIL_MAX_PENDING_BUNDLES")]
+    pub max_pending_bundles: usize,
+
+    /// In-memory ring-buffer size for recent blocks served by history endpoints.
+    #[arg(long, default_value = "100", env = "SYBIL_BLOCK_HISTORY_CAPACITY")]
+    pub block_history_capacity: usize,
+
     /// Data directory for persistent storage. Empty = in-memory only (no persistence).
     #[arg(long, default_value = "", env = "SYBIL_DATA_DIR")]
     pub data_dir: String,

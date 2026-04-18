@@ -37,6 +37,12 @@ pub struct SequencerConfig {
     pub order_ttl_blocks: u64,
     /// Block production interval. Drives the actor tick loop.
     pub block_interval: std::time::Duration,
+    /// Cap on buffered MM / multi-market submissions waiting for the next
+    /// block. A runaway client hits backpressure before exhausting memory.
+    pub max_pending_bundles: usize,
+    /// In-memory ring buffer size for recent blocks (served by the `/blocks`
+    /// history endpoint). Bounds memory use per sequencer.
+    pub block_history_capacity: usize,
 }
 
 impl Default for SequencerConfig {
@@ -44,6 +50,8 @@ impl Default for SequencerConfig {
         Self {
             order_ttl_blocks: DEFAULT_ORDER_TTL_BLOCKS,
             block_interval: std::time::Duration::from_secs(1),
+            max_pending_bundles: 10_000,
+            block_history_capacity: 100,
         }
     }
 }
