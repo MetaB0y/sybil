@@ -1,5 +1,5 @@
 use axum::extract::ws::WebSocketUpgrade;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::response::sse::{Event, Sse};
 use axum::response::Response;
 use axum::Json;
@@ -63,15 +63,31 @@ pub async fn stream_blocks(
 }
 
 /// GET /v1/blocks/ws
+///
+/// WebSocket stream of committed blocks. See
+/// `docs/architecture/WebSocket Block Stream.md` for the message schema,
+/// backpressure policy, and reconnect semantics.
+///
+/// Query parameters:
+/// - `from_block=<height>` — replay every block from `height` up to the
+///   current head before switching to live. Used by clients to resume
+///   after a `lagged` close without gaps.
 #[utoipa::path(
     get,
     path = "/v1/blocks/ws",
+    params(
+        ("from_block" = Option<u64>, Query, description = "Replay from this block height")
+    ),
     responses(
         (status = 101, description = "WebSocket upgrade for block streaming")
     )
 )]
-pub async fn ws_blocks(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+pub async fn ws_blocks(
+    ws: WebSocketUpgrade,
+    Query(query): Query<crate::ws::WsQuery>,
+    State(state): State<AppState>,
+) -> Response {
     ws.on_upgrade(move |socket| async move {
-        crate::ws::handle_block_ws(socket, &state.sequencer).await;
+        crate::ws::handle_block_ws(socket, &state.sequencer, query).await;
     })
 }

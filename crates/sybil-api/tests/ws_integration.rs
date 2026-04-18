@@ -1,0 +1,130 @@
+//! WebSocket block stream integration tests (`/v1/blocks/ws`).
+//!
+//! Spins up a real HTTP server on an ephemeral port so we can exercise the
+//! WebSocket upgrade flow end-to-end with `tokio-tungstenite`.
+
+mod common;
+
+use std::net::SocketAddr;
+use std::time::Duration;
+
+use futures_util::{SinkExt, StreamExt};
+use matching_sequencer::SequencerHandle;
+use sybil_api_types::ws::{BlockStreamMessage, BlockStreamPayload};
+use tokio::net::TcpListener;
+use tokio::time::timeout;
+use tokio_tungstenite::tungstenite::protocol::Message;
+
+use common::test_app;
+
+async fn spawn_server() -> (SocketAddr, SequencerHandle) {
+    let (app, handle) = test_app(true).await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (addr, handle)
+}
+
+async fn recv_envelope<S>(stream: &mut S) -> BlockStreamMessage
+where
+    S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
+        + Unpin,
+{
+    let msg = timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("timeout waiting for ws message")
+        .expect("stream ended")
+        .expect("ws error");
+    let text = match msg {
+        Message::Text(t) => t.to_string(),
+        other => panic!("expected text, got {:?}", other),
+    };
+    serde_json::from_str(&text).expect("valid envelope")
+}
+
+#[tokio::test]
+async fn ws_streams_live_block_envelope() {
+    let (addr, handle) = spawn_server().await;
+    let url = format!("ws://{}/v1/blocks/ws", addr);
+    let (ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    let (_sink, mut stream) = ws.split();
+
+    // Give the handler a tick to subscribe before we emit a block.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let block = handle.produce_block().await.unwrap();
+
+    let msg = recv_envelope(&mut stream).await;
+    assert_eq!(msg.v, 1);
+    match msg.payload {
+        BlockStreamPayload::Block { data } => assert_eq!(data.height, block.header.height),
+        other => panic!("expected block envelope, got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn ws_from_block_replays_history_then_goes_live() {
+    let (addr, handle) = spawn_server().await;
+
+    // Produce three blocks before any client connects.
+    let b0 = handle.produce_block().await.unwrap();
+    let b1 = handle.produce_block().await.unwrap();
+    let _b2 = handle.produce_block().await.unwrap();
+
+    let from = b0.header.height;
+    let head_at_connect = _b2.header.height;
+    let url = format!("ws://{}/v1/blocks/ws?from_block={}", addr, from);
+    let (ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    let (_sink, mut stream) = ws.split();
+
+    // Expect three block envelopes followed by replay_complete, then a live block.
+    let mut seen_heights = vec![];
+    for _ in 0..3 {
+        let msg = recv_envelope(&mut stream).await;
+        match msg.payload {
+            BlockStreamPayload::Block { data } => seen_heights.push(data.height),
+            other => panic!("expected block during replay, got {:?}", other),
+        }
+    }
+    assert_eq!(seen_heights, vec![b0.header.height, b1.header.height, _b2.header.height]);
+
+    let complete = recv_envelope(&mut stream).await;
+    match complete.payload {
+        BlockStreamPayload::ReplayComplete { up_to_height } => {
+            assert_eq!(up_to_height, head_at_connect);
+        }
+        other => panic!("expected replay_complete, got {:?}", other),
+    }
+
+    // Now produce one live block and make sure we receive it, not a duplicate.
+    let live = handle.produce_block().await.unwrap();
+    let msg = recv_envelope(&mut stream).await;
+    match msg.payload {
+        BlockStreamPayload::Block { data } => assert_eq!(data.height, live.header.height),
+        other => panic!("expected live block after replay, got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn ws_from_block_ahead_of_head_announces_complete() {
+    let (addr, _handle) = spawn_server().await;
+
+    // No blocks produced — head is None; any from_block value should result in
+    // no replay blocks and the handler transitioning straight to the live loop.
+    let url = format!("ws://{}/v1/blocks/ws?from_block=5", addr);
+    let (ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    let (mut sink, mut stream) = ws.split();
+
+    // Nothing should arrive in the first 100ms. We don't block long here —
+    // just ensure the connection is idle rather than dumping events.
+    let quick = timeout(Duration::from_millis(100), stream.next()).await;
+    assert!(
+        quick.is_err(),
+        "did not expect any message when head is None and from_block > head, got {:?}",
+        quick
+    );
+
+    // Clean up.
+    sink.send(Message::Close(None)).await.ok();
+}

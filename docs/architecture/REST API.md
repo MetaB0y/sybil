@@ -28,5 +28,6 @@ The API is stateless — all state lives in the `SequencerActor`. When an order 
 ## See Also
 - [[Order Types]] — the `OrderSpec` enum submitted via the API
 - [[SSE Block Stream]] — real-time block push via `/v1/blocks/stream`
+- [[WebSocket Block Stream]] — production block stream at `/v1/blocks/ws` with replay + backpressure
 - [[P256 Authentication]] — signed order submission
 - [[Block Lifecycle]] — what happens after an order enters the system

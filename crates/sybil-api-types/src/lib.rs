@@ -7,9 +7,11 @@
 
 pub mod request;
 pub mod response;
+pub mod ws;
 
 pub use request::*;
 pub use response::*;
+pub use ws::*;
 
 /// 1 dollar = 1,000,000,000 nanos.
 pub const NANOS_PER_DOLLAR: u64 = 1_000_000_000;

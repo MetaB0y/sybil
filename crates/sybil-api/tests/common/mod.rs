@@ -1,3 +1,8 @@
+// Helpers shared across integration tests. Each test file compiles as a
+// separate crate, so any helper not used by a given file trips dead_code —
+// narrow the allow to the specific helpers so a genuinely unused addition
+// still warns.
+
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -32,6 +37,7 @@ pub async fn test_app(dev_mode: bool) -> (Router, SequencerHandle) {
 }
 
 /// Send a GET request and return (status, body bytes).
+#[allow(dead_code)]
 pub async fn get(app: Router, uri: &str) -> (StatusCode, Vec<u8>) {
     let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
     let resp = app.oneshot(req).await.unwrap();
@@ -47,6 +53,7 @@ pub async fn get(app: Router, uri: &str) -> (StatusCode, Vec<u8>) {
 }
 
 /// Send a POST request with JSON body and return (status, body bytes).
+#[allow(dead_code)]
 pub async fn post_json(app: Router, uri: &str, body: serde_json::Value) -> (StatusCode, Vec<u8>) {
     let req = Request::builder()
         .method(Method::POST)
