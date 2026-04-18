@@ -64,6 +64,7 @@ pub struct OrderSubmission {
 /// and multi-market / multi-order submissions still need the block-time
 /// solver path (STP, flash liquidity, bundle atomicity), so the caller is
 /// asked to defer them via its existing buffering path.
+#[derive(Debug)]
 pub enum AdmitOutcome {
     /// Submission was fully admitted into the resting book. `resting_order`
     /// is a clone of the row that was pushed — the actor serializes it into
@@ -764,18 +765,8 @@ impl BlockSequencer {
         self.next_order_id += 1;
         order.id = order_id;
 
-        // STP (self-trade prevention): reject orders that would complete a
-        // market-group set together with this account's other non-MM orders
-        // admitted in the current block. Matches the block-local semantics of
-        // the solver's STP pass — preserved here because admitted orders now
-        // skip that pass.
         let mut stp = GroupCoverageTracker::new(&self.market_groups);
-        let height = self.height;
-        for (resting_order, resting_aid, created_at) in self.order_book.resting_orders_full() {
-            if resting_aid == account_id && created_at == height {
-                stp.record(resting_aid, resting_order);
-            }
-        }
+        self.seed_group_coverage_for_account(&mut stp, account_id);
         if stp.would_complete_set(account_id, &order) {
             return AdmitOutcome::Rejected(SequencerError::Rejected(Rejection {
                 order_id,
@@ -797,6 +788,38 @@ impl BlockSequencer {
                 account_id,
                 reason,
             })),
+        }
+    }
+
+    /// Seed an STP tracker with every resting/pending-bundle order belonging
+    /// to `account_id`. Used at admit time so a single order can't complete a
+    /// coverage set against the account's prior-block resting orders or against
+    /// bundles still staged in `pending_bundles`.
+    fn seed_group_coverage_for_account(
+        &self,
+        stp: &mut GroupCoverageTracker,
+        account_id: AccountId,
+    ) {
+        for (order, aid) in self.order_book.resting_orders() {
+            if aid == account_id {
+                stp.record(aid, order);
+            }
+        }
+        for bundle in &self.pending_bundles {
+            if bundle.account_id == account_id {
+                for order in &bundle.orders {
+                    stp.record(account_id, order);
+                }
+            }
+        }
+    }
+
+    /// Seed an STP tracker with every account's resting coverage. Used inside
+    /// `prepare_block` before the submission loop so cross-block coverage
+    /// participates in the same check the loop applies to fresh orders.
+    fn seed_group_coverage_from_all_resting(&self, stp: &mut GroupCoverageTracker) {
+        for (order, aid) in self.order_book.resting_orders() {
+            stp.record(aid, order);
         }
     }
 
@@ -1264,7 +1287,11 @@ impl BlockSequencer {
         let carried_resting_orders = all_orders.len();
 
         // ── Process new submissions ──
+        // Seed STP from existing resting orders across all accounts so
+        // cross-block coverage participates in the same complete-set check
+        // the loop applies to fresh orders.
         let mut stp = GroupCoverageTracker::new(&self.market_groups);
+        self.seed_group_coverage_from_all_resting(&mut stp);
 
         for mut sub in submissions {
             let account_id = sub.account_id;
@@ -2973,6 +3000,211 @@ mod tests {
                 block_num,
                 mm_acct.balance
             );
+        }
+    }
+
+    // --- Cross-block STP (SYB-110) ---
+
+    fn make_grouped_sequencer(
+        balance: i64,
+    ) -> (BlockSequencer, AccountId, MarketSet, MarketId, MarketId) {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("A");
+        let m1 = markets.add_binary("B");
+        let mut group = MarketGroup::new("Event");
+        group.add_market(m0);
+        group.add_market(m1);
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(balance);
+        let oracle = Arc::new(AdminOracle::new());
+        let seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![group],
+            oracle,
+            SequencerConfig::default(),
+        );
+        (seq, aid, markets, m0, m1)
+    }
+
+    fn single_order_sub(account_id: AccountId, order: Order) -> OrderSubmission {
+        OrderSubmission {
+            account_id,
+            orders: vec![order],
+            mm_constraint: None,
+        }
+    }
+
+    #[test]
+    fn cross_block_stp_rejects_set_formation_across_blocks() {
+        let (mut seq, aid, markets, m0, m1) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
+
+        let first = single_order_sub(aid, outcome_buy(&markets, 0, m0, 0, 400_000_000, 10));
+        let outcome = seq.try_admit_direct(first);
+        assert!(matches!(outcome, AdmitOutcome::Admitted { .. }));
+
+        seq.produce_block(vec![], 1000);
+        assert_eq!(seq.height, 1);
+
+        let second = single_order_sub(aid, outcome_buy(&markets, 0, m1, 0, 400_000_000, 10));
+        let outcome = seq.try_admit_direct(second);
+        match outcome {
+            AdmitOutcome::Rejected(SequencerError::Rejected(r)) => {
+                assert!(matches!(r.reason, RejectionReason::CompleteSetFormation));
+            }
+            other => panic!("expected CompleteSetFormation rejection, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cross_block_stp_allows_after_cancel() {
+        let (mut seq, aid, markets, m0, m1) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
+
+        let first = single_order_sub(aid, outcome_buy(&markets, 0, m0, 0, 400_000_000, 10));
+        let first_id = match seq.try_admit_direct(first) {
+            AdmitOutcome::Admitted { order_id, .. } => order_id,
+            other => panic!("expected Admitted, got {:?}", other),
+        };
+
+        seq.produce_block(vec![], 1000);
+
+        seq.cancel_pending_order(aid, first_id).expect("cancel ok");
+
+        let second = single_order_sub(aid, outcome_buy(&markets, 0, m1, 0, 400_000_000, 10));
+        let outcome = seq.try_admit_direct(second);
+        assert!(
+            matches!(outcome, AdmitOutcome::Admitted { .. }),
+            "expected Admitted after cancel, got {:?}",
+            outcome
+        );
+    }
+
+    #[test]
+    fn cross_block_stp_rejects_buyno_combination_across_blocks() {
+        let (markets, m0, m1, _m2, group) = setup_group();
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![group],
+            oracle,
+            SequencerConfig::default(),
+        );
+
+        let first = single_order_sub(aid, outcome_buy(&markets, 0, m0, 1, 800_000_000, 10));
+        assert!(matches!(
+            seq.try_admit_direct(first),
+            AdmitOutcome::Admitted { .. }
+        ));
+
+        seq.produce_block(vec![], 1000);
+
+        let second = single_order_sub(aid, outcome_buy(&markets, 0, m1, 1, 800_000_000, 10));
+        match seq.try_admit_direct(second) {
+            AdmitOutcome::Rejected(SequencerError::Rejected(r)) => {
+                assert!(matches!(r.reason, RejectionReason::CompleteSetFormation));
+            }
+            other => panic!("expected CompleteSetFormation rejection, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cross_block_stp_sells_do_not_contribute() {
+        let (mut seq, aid, markets, m0, m1) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
+
+        seq.accounts.get_mut(aid).unwrap().positions.insert((m0, 0), 50);
+
+        let sell_first = single_order_sub(aid, outcome_sell(&markets, 0, m0, 0, 400_000_000, 10));
+        assert!(matches!(
+            seq.try_admit_direct(sell_first),
+            AdmitOutcome::Admitted { .. }
+        ));
+
+        seq.produce_block(vec![], 1000);
+
+        let buy_other = single_order_sub(aid, outcome_buy(&markets, 0, m1, 0, 400_000_000, 10));
+        assert!(
+            matches!(seq.try_admit_direct(buy_other), AdmitOutcome::Admitted { .. }),
+            "sell on m0 + buy on m1 is only partial coverage — must be admitted"
+        );
+    }
+
+    #[test]
+    fn cross_block_stp_mm_path_sees_prior_resting() {
+        // Account first places a non-MM BuyYes m0 through the admit path, then in
+        // a later block submits an MM bundle that includes BuyYes m1. The MM
+        // bundle's STP check (inside prepare_block) must see the prior-block
+        // resting order and reject the completing leg.
+        let (mut seq, aid, markets, m0, m1) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
+
+        let first = single_order_sub(aid, outcome_buy(&markets, 0, m0, 0, 400_000_000, 10));
+        assert!(matches!(
+            seq.try_admit_direct(first),
+            AdmitOutcome::Admitted { .. }
+        ));
+        seq.produce_block(vec![], 1000);
+
+        let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
+        constraint.add_order(0, matching_engine::MmSide::BuyYes);
+        let mm_sub = OrderSubmission {
+            account_id: aid,
+            orders: vec![outcome_buy(&markets, 0, m1, 0, 400_000_000, 10)],
+            mm_constraint: Some(constraint),
+        };
+
+        let bp = seq.produce_block(vec![mm_sub], 2000);
+        assert_eq!(
+            bp.block.rejections.len(),
+            1,
+            "MM completing leg should be rejected because prior-block resting covers m0"
+        );
+        assert!(matches!(
+            bp.block.rejections[0].reason,
+            RejectionReason::CompleteSetFormation
+        ));
+    }
+
+    #[test]
+    fn cross_block_stp_pending_bundle_contributes_to_admit_check() {
+        // A multi-order non-MM bundle stays in pending_bundles (not single-order
+        // so try_admit_direct defers it). A later single-order admit must see the
+        // bundled coverage and reject if it would complete the set.
+        let (markets, m0, m1, m2, group) = setup_group();
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![group],
+            oracle,
+            SequencerConfig::default(),
+        );
+
+        let bundle = OrderSubmission {
+            account_id: aid,
+            orders: vec![
+                outcome_buy(&markets, 0, m0, 0, 400_000_000, 10),
+                outcome_buy(&markets, 0, m1, 0, 400_000_000, 10),
+            ],
+            mm_constraint: None,
+        };
+        match seq.try_admit_direct(bundle) {
+            AdmitOutcome::Deferred(sub) => seq.push_pending_bundle(sub),
+            other => panic!("expected Deferred for multi-order bundle, got {:?}", other),
+        }
+
+        let completing = single_order_sub(aid, outcome_buy(&markets, 0, m2, 0, 400_000_000, 10));
+        match seq.try_admit_direct(completing) {
+            AdmitOutcome::Rejected(SequencerError::Rejected(r)) => {
+                assert!(matches!(r.reason, RejectionReason::CompleteSetFormation));
+            }
+            other => panic!(
+                "expected CompleteSetFormation rejection from pending-bundle coverage, got {:?}",
+                other
+            ),
         }
     }
 }
