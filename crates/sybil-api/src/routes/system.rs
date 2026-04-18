@@ -20,9 +20,7 @@ use crate::types::response::{HealthResponse, StateRootResponse};
         (status = 503, description = "Sequencer unavailable", body = HealthResponse),
     )
 )]
-pub async fn health(
-    State(state): State<AppState>,
-) -> (StatusCode, Json<HealthResponse>) {
+pub async fn health(State(state): State<AppState>) -> (StatusCode, Json<HealthResponse>) {
     match state.sequencer.get_latest_block().await {
         Ok(block) => (
             StatusCode::OK,

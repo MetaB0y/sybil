@@ -1,13 +1,15 @@
-use matching_engine::{MarketId, Nanos, NANOS_PER_DOLLAR};
+//! Thin facade over [`crate::policy::evaluate_admin_immediate`].
+//!
+//! Kept so the ~30 existing call sites (sequencer.rs, tests, examples) compile
+//! unchanged. New code should wire the sequencer through feeds + templates.
+
+use matching_engine::{MarketId, Nanos};
 
 use crate::error::OracleError;
+use crate::policy::{evaluate_admin_immediate, PolicyOutcome};
 use crate::traits::{Oracle, ResolutionAction};
-use crate::types::{MarketStatus, OracleSource, ResolutionRecord};
+use crate::types::MarketStatus;
 
-/// Trivial admin oracle: resolves markets immediately with no challenge window.
-///
-/// Validates that the payout is within [0, NANOS_PER_DOLLAR] and that the
-/// market is not already resolved. Returns `SettleNow` on success.
 pub struct AdminOracle;
 
 impl AdminOracle {
@@ -30,32 +32,14 @@ impl Oracle for AdminOracle {
         current_status: &MarketStatus,
         timestamp_ms: u64,
     ) -> Result<ResolutionAction, OracleError> {
-        // Validate payout range
-        if payout_nanos > NANOS_PER_DOLLAR {
-            return Err(OracleError::InvalidPayout(payout_nanos));
+        match evaluate_admin_immediate(market_id, payout_nanos, current_status, timestamp_ms)? {
+            PolicyOutcome::Settle { record } => Ok(ResolutionAction::SettleNow {
+                market_id,
+                payout_nanos,
+                record,
+            }),
+            PolicyOutcome::Reject { reason } => Ok(ResolutionAction::Reject { reason }),
         }
-
-        // Check current state
-        match current_status {
-            MarketStatus::Resolved { .. } => return Err(OracleError::AlreadyResolved),
-            MarketStatus::Voided => return Err(OracleError::InvalidState),
-            _ => {}
-        }
-
-        let record = ResolutionRecord {
-            market_id,
-            payout_nanos,
-            resolved_by: OracleSource::Admin,
-            resolved_at_ms: timestamp_ms,
-            proposal: None,
-            challenge: None,
-        };
-
-        Ok(ResolutionAction::SettleNow {
-            market_id,
-            payout_nanos,
-            record,
-        })
     }
 
     fn name(&self) -> &str {
@@ -66,7 +50,8 @@ impl Oracle for AdminOracle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matching_engine::MarketId;
+    use crate::types::{OracleSource, ResolutionRecord};
+    use matching_engine::{MarketId, NANOS_PER_DOLLAR};
 
     #[test]
     fn test_admin_resolve_yes_wins() {

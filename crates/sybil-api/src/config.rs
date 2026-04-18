@@ -26,4 +26,19 @@ pub struct ApiConfig {
     /// Data directory for persistent storage. Empty = in-memory only (no persistence).
     #[arg(long, default_value = "", env = "SYBIL_DATA_DIR")]
     pub data_dir: String,
+
+    /// Path to the P256 signing key used by the admin feed. The file stores
+    /// the raw 32-byte SEC1 scalar, hex-encoded. Empty = generate a fresh
+    /// ephemeral key at startup (dev-mode convenience; will NOT persist
+    /// across restarts).
+    #[arg(long, default_value = "", env = "SYBIL_ADMIN_FEED_KEY_PATH")]
+    pub admin_feed_key_path: String,
+
+    /// Hex-encoded compressed SEC1 P256 pubkey (33 bytes) for the
+    /// Polymarket-mirror resolution feed. When set, the server registers a
+    /// `polymarket_mirror` feed and installs a matching `polymarket_mirror`
+    /// resolution template. When unset, Polymarket-mirrored markets still
+    /// work for trading but can only be resolved via the admin path.
+    #[arg(long, default_value = "", env = "SYBIL_POLYMARKET_FEED_PUBKEY_HEX")]
+    pub polymarket_feed_pubkey_hex: String,
 }

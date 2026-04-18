@@ -1,5 +1,15 @@
 use matching_engine::{MarketId, Nanos};
 
+/// Per-market resolution configuration.
+///
+/// References a template by name. The template's policy then drives how
+/// attestations are evaluated. Stored inside `MarketMetadata` so it persists
+/// via the existing `MARKET_META` table without a layout bump.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ResolutionConfig {
+    pub template: String,
+}
+
 /// Metadata for a market (sequencer-layer, not in matching-engine).
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct MarketMetadata {
@@ -10,6 +20,22 @@ pub struct MarketMetadata {
     /// 0 = no expiry
     pub expiry_timestamp_ms: u64,
     pub created_at_ms: u64,
+    /// Which resolution template this market uses. `None` = default
+    /// (`admin_immediate`) — keeps legacy markets resolvable without
+    /// migration.
+    #[serde(default)]
+    pub resolution_config: Option<ResolutionConfig>,
+}
+
+impl MarketMetadata {
+    /// Template this market resolves under; falls back to the default admin
+    /// template when no config is set.
+    pub fn effective_template(&self) -> &str {
+        self.resolution_config
+            .as_ref()
+            .map(|c| c.template.as_str())
+            .unwrap_or("admin_immediate")
+    }
 }
 
 /// A single price observation for a market at a given block.

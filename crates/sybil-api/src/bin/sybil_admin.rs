@@ -293,7 +293,13 @@ async fn main() -> Result<(), CliError> {
             } => {
                 let payout_nanos = resolve_payout(yes, no, payout_nanos)?;
                 let response = client
-                    .resolve_market(market_id, &ResolveMarketRequest { payout_nanos })
+                    .resolve_market(
+                        market_id,
+                        &ResolveMarketRequest {
+                            payout_nanos,
+                            attestation: None,
+                        },
+                    )
                     .await?;
                 print_json(&response)?;
             }

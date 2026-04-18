@@ -9,7 +9,10 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
 use matching_engine::MarketSet;
-use matching_sequencer::{AccountStore, AdminOracle, BlockSequencer, SequencerConfig, SequencerHandle};
+use matching_sequencer::{
+    AccountStore, AdminOracle, BlockSequencer, SequencerConfig, SequencerHandle,
+};
+use sybil_oracle::{FeedPubkey, ResolutionPolicy, ResolutionTemplate, TemplateId};
 
 use sybil_api::app::create_router;
 use sybil_api::config::ApiConfig;
@@ -159,6 +162,13 @@ async fn main() {
         "Sequencer started"
     );
 
+    // Fail fast: without the admin feed + templates installed, attestation-
+    // based resolution is silently broken. Better to crash at startup than
+    // to discover it when operators go to resolve a market.
+    if let Err(err) = bootstrap_oracle_feeds(&handle, &config).await {
+        panic!("failed to bootstrap oracle feeds: {err}");
+    }
+
     let state = AppState::new(handle, &config, prometheus_handle);
     let app = create_router(state);
     let addr = format!("0.0.0.0:{}", config.port);
@@ -181,6 +191,116 @@ async fn main() {
     }
 
     tracing::info!("Server shut down cleanly");
+}
+
+/// Register the admin data feed, optionally register the Polymarket-mirror
+/// feed from its configured pubkey, and install the matching resolution
+/// templates. Idempotent on re-start (registrations dedupe on pubkey).
+async fn bootstrap_oracle_feeds(
+    handle: &SequencerHandle,
+    config: &ApiConfig,
+) -> Result<(), String> {
+    let admin_pubkey_bytes = load_or_generate_admin_pubkey(&config.admin_feed_key_path)
+        .map_err(|e| format!("admin feed key: {e}"))?;
+
+    let admin_feed_id = handle
+        .register_feed(FeedPubkey(admin_pubkey_bytes), "admin".to_string())
+        .await
+        .map_err(|e| format!("register admin feed: {e}"))?;
+
+    handle
+        .install_template(ResolutionTemplate {
+            id: TemplateId("admin_immediate".to_string()),
+            policy: ResolutionPolicy::Immediate {
+                feed_id: admin_feed_id,
+            },
+        })
+        .await
+        .map_err(|e| format!("install admin_immediate template: {e}"))?;
+
+    tracing::info!(
+        feed_id = admin_feed_id.0,
+        "admin feed registered and admin_immediate template installed"
+    );
+
+    if !config.polymarket_feed_pubkey_hex.is_empty() {
+        let pk_bytes = hex::decode(&config.polymarket_feed_pubkey_hex)
+            .map_err(|e| format!("decode polymarket_feed_pubkey_hex: {e}"))?;
+        if pk_bytes.len() != 33 {
+            return Err(format!(
+                "polymarket_feed_pubkey_hex must decode to 33 bytes, got {}",
+                pk_bytes.len()
+            ));
+        }
+        let pm_feed_id = handle
+            .register_feed(FeedPubkey(pk_bytes), "polymarket_mirror".to_string())
+            .await
+            .map_err(|e| format!("register polymarket_mirror feed: {e}"))?;
+        handle
+            .install_template(ResolutionTemplate {
+                id: TemplateId("polymarket_mirror".to_string()),
+                policy: ResolutionPolicy::Immediate {
+                    feed_id: pm_feed_id,
+                },
+            })
+            .await
+            .map_err(|e| format!("install polymarket_mirror template: {e}"))?;
+        tracing::info!(
+            feed_id = pm_feed_id.0,
+            "polymarket_mirror feed registered and template installed"
+        );
+    }
+
+    Ok(())
+}
+
+/// Load a P256 admin feed key from disk or generate a fresh one. On disk the
+/// key is stored as the raw 32-byte SEC1 scalar, hex-encoded (matching the
+/// format the polymarket signer uses).
+///
+/// Returns the compressed SEC1 pubkey bytes.
+fn load_or_generate_admin_pubkey(key_path: &str) -> Result<Vec<u8>, String> {
+    use p256::ecdsa::SigningKey;
+    use p256::elliptic_curve::rand_core::UnwrapErr;
+
+    if key_path.is_empty() {
+        let key = <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+            &mut UnwrapErr(getrandom::SysRng),
+        );
+        let pubkey = matching_sequencer::PublicKey(*key.verifying_key());
+        tracing::warn!(
+            "SYBIL_ADMIN_FEED_KEY_PATH empty; generated ephemeral admin key (will not persist across restarts)"
+        );
+        return Ok(pubkey.compressed_bytes());
+    }
+
+    let path = std::path::Path::new(key_path);
+    if path.exists() {
+        let hex_str =
+            std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+        let bytes =
+            hex::decode(hex_str.trim()).map_err(|e| format!("decode {}: {e}", path.display()))?;
+        let key = SigningKey::from_slice(&bytes)
+            .map_err(|e| format!("parse SEC1 scalar at {}: {e}", path.display()))?;
+        let pubkey = matching_sequencer::PublicKey(*key.verifying_key());
+        Ok(pubkey.compressed_bytes())
+    } else {
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("create dir {}: {e}", parent.display()))?;
+            }
+        }
+        let key = <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+            &mut UnwrapErr(getrandom::SysRng),
+        );
+        let scalar_bytes = key.to_bytes();
+        std::fs::write(path, hex::encode(scalar_bytes))
+            .map_err(|e| format!("write {}: {e}", path.display()))?;
+        let pubkey = matching_sequencer::PublicKey(*key.verifying_key());
+        tracing::info!(path = %path.display(), "generated new admin feed key");
+        Ok(pubkey.compressed_bytes())
+    }
 }
 
 /// Resolves on SIGTERM (Docker `docker stop`) or Ctrl-C.

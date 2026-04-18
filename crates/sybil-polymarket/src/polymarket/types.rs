@@ -123,6 +123,12 @@ pub struct GammaMarket {
     pub end_date: Option<String>,
     #[serde(default)]
     pub resolution_source: Option<String>,
+    /// True once Polymarket has settled the market. Paired with `outcome_prices`
+    /// pinned to 0/1 to derive the YES payout.
+    #[serde(default)]
+    pub umared: Option<bool>,
+    #[serde(default)]
+    pub resolved_by: Option<String>,
 }
 
 impl GammaMarket {
@@ -157,6 +163,34 @@ impl GammaMarket {
             return Ok(vec![]);
         }
         serde_json::from_str(&self.outcomes).map_err(Error::Json)
+    }
+
+    /// Returns the resolved YES payout in nanos if Polymarket has settled the
+    /// market unambiguously (binary; outcome_prices pinned to {0.0, 1.0}).
+    /// Returns `None` for anything ambiguous — non-binary, UMA-challenged,
+    /// voided, or not yet resolved. SYB-23 intentionally only mirrors these
+    /// clean cases.
+    pub fn resolved_payout(&self) -> Option<u64> {
+        if !self.closed {
+            return None;
+        }
+        let prices = self.parsed_outcome_prices().ok()?;
+        if prices.len() != 2 {
+            return None;
+        }
+        let yes = prices[0];
+        let no = prices[1];
+        // Require crisp binary outcome: one side = 1.0, other = 0.0, tolerating
+        // rounding within 1e-6.
+        let clean_yes = (yes - 1.0).abs() < 1e-6 && no.abs() < 1e-6;
+        let clean_no = yes.abs() < 1e-6 && (no - 1.0).abs() < 1e-6;
+        if clean_yes {
+            Some(sybil_api_types::NANOS_PER_DOLLAR)
+        } else if clean_no {
+            Some(0)
+        } else {
+            None
+        }
     }
 
     /// Best estimate of the current YES price.
@@ -250,6 +284,8 @@ mod tests {
             description: None,
             end_date: None,
             resolution_source: None,
+            umared: None,
+            resolved_by: None,
         };
 
         let ids = market.parsed_token_ids().unwrap();
@@ -285,6 +321,8 @@ mod tests {
             description: None,
             end_date: None,
             resolution_source: None,
+            umared: None,
+            resolved_by: None,
         };
 
         assert!(market.parsed_token_ids().unwrap().is_empty());

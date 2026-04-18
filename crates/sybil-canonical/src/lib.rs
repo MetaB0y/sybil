@@ -45,6 +45,16 @@ struct CancelRequest {
     order_id: u64,
 }
 
+/// Canonical, stable byte layout of a resolution attestation. Mirrors
+/// `sybil_oracle::ResolutionAttestation` without importing it (keeps this
+/// crate dependency-light).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct ResolutionAttestation {
+    pub market_id: MarketId,
+    pub payout_nanos: u64,
+    pub nonce: u64,
+}
+
 pub fn canonical_order_bytes(order: &Order) -> Vec<u8> {
     borsh::to_vec(order).expect("canonical order serialization should not fail")
 }
@@ -55,6 +65,10 @@ pub fn canonical_cancel_bytes(account_id: u64, order_id: u64) -> Vec<u8> {
         order_id,
     })
     .expect("canonical cancel serialization should not fail")
+}
+
+pub fn canonical_attestation_bytes(att: &ResolutionAttestation) -> Vec<u8> {
+    borsh::to_vec(att).expect("canonical attestation serialization should not fail")
 }
 
 #[cfg(test)]
@@ -111,6 +125,19 @@ mod tests {
     fn bundle_snapshot() {
         let order = order_with(&[1, 2, 4], &[0, 0, 0, 0, 0, 0, 0, 1], 300_000_000, 2, None);
         insta::assert_snapshot!("bundle", hex::encode(canonical_order_bytes(&order)));
+    }
+
+    #[test]
+    fn attestation_snapshot() {
+        let att = ResolutionAttestation {
+            market_id: MarketId(7),
+            payout_nanos: 1_000_000_000,
+            nonce: 1_700_000_000_000,
+        };
+        insta::assert_snapshot!(
+            "attestation",
+            hex::encode(canonical_attestation_bytes(&att))
+        );
     }
 
     #[test]

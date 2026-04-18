@@ -303,12 +303,7 @@ async fn resolved_market_rejects_new_orders() {
 async fn order_visible_immediately_after_submit() {
     let (app, _) = test_app(true).await;
 
-    let (_, body) = post_json(
-        app.clone(),
-        "/v1/markets",
-        json!({ "name": "Fast admit?" }),
-    )
-    .await;
+    let (_, body) = post_json(app.clone(), "/v1/markets", json!({ "name": "Fast admit?" })).await;
     let market_id = parse_json(&body)["market_id"].as_u64().unwrap();
 
     let (_, body) = post_json(
@@ -333,7 +328,12 @@ async fn order_visible_immediately_after_submit() {
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "submit failed: {}", String::from_utf8_lossy(&body));
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "submit failed: {}",
+        String::from_utf8_lossy(&body)
+    );
 
     // No block has been produced — with the mempool-free admit path the order
     // must already be visible on the resting book.

@@ -3,39 +3,39 @@ tags: [concept]
 layer: oracle
 crate: sybil-oracle
 status: current
-last_verified: 2026-03-15
+last_verified: 2026-04-18
 ---
 
-The oracle system determines when and how prediction markets resolve. It is a pluggable authorization layer: the oracle decides what happens (resolve now, propose with challenge window, reject), and the sequencer executes the decision. The oracle does not perform settlement, fetch external data, or handle bond escrow — it makes resolution decisions based on the information presented to it.
+> **Full architecture and roadmap: [[Oracle System]].** This note captures the *current* (SYB-23) minimal state. The design doc is the source of truth for planned variants (Optimistic, Quorum, Predicate, External), bond escrow, liveness, and bridge feeds.
 
-The lifecycle follows a state machine: **Active** → **Proposed** (with a challenge window) → either **Challenged** (escalated to L1 adjudication) or **Resolved** (unchallenged). An oracle can also bypass the proposal phase and resolve immediately (`SettleNow`) — the `AdminOracle` reference implementation does this for dev/testing. The challenge mechanism provides a safety net: if someone disagrees with a proposed resolution, they can post a bond and an alternative payout, escalating to a higher-tier adjudication process. L1 adjudication is a human panel that reviews the evidence and makes a binding resolution decision. Bond escrow is not handled by the oracle crate — it's a sequencer-side concern, since the oracle's role is purely to make resolution decisions.
+The oracle system determines when and how prediction markets resolve. A resolution is a signed attestation from a registered `DataFeed`, evaluated by the market's declared `ResolutionPolicy`. The sequencer verifies signatures and runs policy state-machine logic; all external I/O (Polymarket mirror, future LLM resolver, future UMA bridge) lives in untrusted signers whose only channel into the enclave is a signed attestation.
 
-Three oracle source tiers are defined. **Admin** (L0) is for dev mode and governance multisig — immediate resolution, no challenge window. **AutomatedL0** is for future price feeds and API oracles — automated data sources that can propose resolutions subject to challenge. **AdjudicationL1** is a human adjudication panel for disputed resolutions. The `Oracle` trait abstracts over all tiers: `resolve()` returns a `ResolutionAction` (SettleNow, Propose, or Reject), `challenge()` returns a `ChallengeAction` (Escalate or Reject), and `check_finalization()` determines whether a challenge window has elapsed without challenges.
+As of SYB-23 the only policy variant is `Immediate { feed_id }`: one attestation from the named feed settles the market with no challenge window. The `admin_immediate` template (default for markets without an explicit template) and the `polymarket_mirror` template (for Polymarket-mirrored markets) both use this variant.
+
+State transitions today: `Active → Resolved`. The `Proposed`, `Challenged`, and `Voided` states are reserved — cost nothing, documented as future policy states for when `Optimistic` and `External` ship.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Active
-    Active --> Proposed : oracle.resolve() → Propose
-    Active --> Resolved : oracle.resolve() → SettleNow
-    Proposed --> Resolved : challenge window elapsed, no challenges
-    Proposed --> Challenged : bond + alternative payout posted
-    Challenged --> Resolved : L1 adjudication panel rules
+    Active --> Resolved : signed attestation from registered feed
 ```
 
-## Key Properties
-- State machine: Active → Proposed → Challenged/Resolved
-- Oracle decides, sequencer executes — clean separation of concerns
-- Three source tiers: Admin (dev), AutomatedL0 (feeds), AdjudicationL1 (human panel)
-- Challenge mechanism with bond + alternative payout
-- `Oracle` trait: `resolve()`, `challenge()`, `check_finalization()`
-- Oracle does NOT settle, fetch data, or handle bonds
+## Key Properties (SYB-23)
+- State machine today: Active → Resolved
+- Sequencer verifies signatures + runs policy; external signers do all I/O
+- Shipped policy variants: `Immediate { feed_id }`
+- Shipped templates: `admin_immediate`, `polymarket_mirror`
+- Reserved states (`Proposed`, `Challenged`, `Voided`) and enum arms tracked in [[Oracle System]]
 
 ## Where This Lives
-> `crates/sybil-oracle/src/traits.rs` — `Oracle` trait, `ResolutionAction`, `ChallengeAction`
-> `crates/sybil-oracle/src/types.rs` — `MarketStatus`, `ResolutionProposal`, `Challenge`
-> `crates/sybil-oracle/src/admin.rs` — `AdminOracle` reference implementation
+> `crates/sybil-oracle/src/{feed,attestation,policy,registry,template}.rs` — primitives
+> `crates/sybil-oracle/src/traits.rs` — `Oracle` trait (legacy admin path)
+> `crates/matching-sequencer/src/market_lifecycle.rs` — policy dispatch
+> `crates/matching-sequencer/src/crypto.rs` — attestation sign/verify
 
 ## See Also
+- [[Oracle System]] — full architecture, policy variants, deferred-feature migration path
 - [[Market Resolution]] — how resolution payouts are determined
 - [[Settlement]] — the sequencer-side execution of resolution decisions
 - [[Block Lifecycle]] — oracle resolutions integrated into block production
+- [[P256 Authentication]] — the shared sign/verify primitive

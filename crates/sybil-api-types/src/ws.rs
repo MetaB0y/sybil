@@ -86,7 +86,10 @@ mod tests {
             payload: BlockStreamPayload::ReplayComplete { up_to_height: 100 },
         })
         .unwrap();
-        assert_eq!(json, r#"{"v":1,"type":"replay_complete","up_to_height":100}"#);
+        assert_eq!(
+            json,
+            r#"{"v":1,"type":"replay_complete","up_to_height":100}"#
+        );
     }
 
     #[test]

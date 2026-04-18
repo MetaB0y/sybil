@@ -1,5 +1,7 @@
 use matching_engine::{MarketId, Nanos};
 
+use crate::feed::FeedId;
+
 /// Unique identifier for a resolution proposal.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ProposalId(pub u64);
@@ -13,16 +15,20 @@ pub struct ChallengeId(pub u64);
 pub enum OracleSource {
     /// Admin-initiated resolution (dev mode, governance multisig, etc.)
     Admin,
+    /// Signed attestation from a registered data feed.
+    DataFeed(FeedId),
     /// Automated L0 oracle (future: price feeds, API oracles).
     AutomatedL0,
-    /// Human adjudication panel (L1 escalation).
-    AdjudicationL1,
 }
 
 /// Market lifecycle status tracked by the sequencer.
 ///
 /// This is NOT stored inside `matching-engine`'s `Market` struct — it's
 /// managed by the sequencer alongside the market.
+///
+/// `Proposed`, `Challenged`, and `Voided` are reserved for future policy
+/// variants (`Optimistic`, `External`, etc.). The current `Immediate` policy
+/// only ever transitions `Active -> Resolved`.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum MarketStatus {
     /// Market is open for trading.
@@ -32,7 +38,7 @@ pub enum MarketStatus {
         proposal: ResolutionProposal,
         challenge_deadline_ms: u64,
     },
-    /// A challenge has been filed; awaiting L1 adjudication.
+    /// A challenge has been filed; awaiting adjudication.
     Challenged {
         proposal: ResolutionProposal,
         challenge: Challenge,

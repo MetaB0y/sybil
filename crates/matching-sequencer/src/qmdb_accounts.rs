@@ -9,8 +9,8 @@ use commonware_cryptography::Sha256;
 use commonware_runtime::buffer::paged::CacheRef;
 use commonware_runtime::{tokio as commonware_tokio, Runner as _};
 use commonware_storage::journal::contiguous::variable::Config as VConfig;
-use commonware_storage::merkle::mmr::Family as MmrFamily;
 use commonware_storage::merkle::mmr::journaled::Config as MmrConfig;
+use commonware_storage::merkle::mmr::Family as MmrFamily;
 use commonware_storage::qmdb::current::ordered::variable::Db as OrderedVariableDb;
 use commonware_storage::qmdb::current::VariableConfig;
 use commonware_storage::translator::OneCap;
@@ -33,8 +33,15 @@ const ACCOUNT_KEY_PREFIX: u8 = b'a';
 const HEIGHT_KEY: &[u8] = b"meta:height";
 const NEXT_ACCOUNT_ID_KEY: &[u8] = b"meta:next_account_id";
 
-type AccountDb =
-    OrderedVariableDb<MmrFamily, commonware_tokio::Context, Vec<u8>, Vec<u8>, Sha256, OneCap, CHUNK_SIZE>;
+type AccountDb = OrderedVariableDb<
+    MmrFamily,
+    commonware_tokio::Context,
+    Vec<u8>,
+    Vec<u8>,
+    Sha256,
+    OneCap,
+    CHUNK_SIZE,
+>;
 
 pub struct LoadedAccountSnapshot {
     pub accounts: HashMap<AccountId, Account>,

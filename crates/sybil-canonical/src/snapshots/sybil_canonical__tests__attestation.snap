@@ -1,0 +1,5 @@
+---
+source: crates/sybil-canonical/src/lib.rs
+expression: "hex::encode(canonical_attestation_bytes(&att))"
+---
+0700000000ca9a3b000000000068e5cf8b010000

@@ -182,6 +182,35 @@ pub struct ResolveMarketResponse {
     pub challenge_deadline_ms: Option<u64>,
 }
 
+/// Detailed view of a market's resolution state. Unresolved markets return
+/// `status = "active"` (or `proposed`/`challenged` for future policies) with
+/// `payout_nanos = None`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ResolutionResponse {
+    pub market_id: u32,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payout_nanos: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_at_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_by_feed_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_by_feed_name: Option<String>,
+    pub template: String,
+}
+
+/// Registered data feed view, returned by GET/POST /v1/feeds.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RegisteredFeedResponse {
+    pub feed_id: u64,
+    pub pubkey_hex: String,
+    pub name: String,
+    pub created_at_ms: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateMarketResponse {

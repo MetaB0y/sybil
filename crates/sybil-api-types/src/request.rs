@@ -47,6 +47,10 @@ pub struct CreateMarketRequest {
     /// Optional expiry timestamp in ms (0 = no expiry).
     #[serde(default)]
     pub expiry_timestamp_ms: Option<u64>,
+    /// Resolution template id to use for this market (e.g. "admin_immediate",
+    /// "polymarket_mirror"). `None` -> `admin_immediate`.
+    #[serde(default)]
+    pub resolution_template: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,6 +70,33 @@ pub struct ResolveMarketRequest {
     /// 1_000_000_000 = YES wins ($1), 0 = NO wins, 700_000_000 = $0.70 fractional.
     #[cfg_attr(feature = "openapi", schema(example = 1_000_000_000u64))]
     pub payout_nanos: u64,
+    /// Optional signed attestation. When provided, the market's resolution
+    /// template drives verification; dev_mode is not required. When omitted,
+    /// the server falls back to the legacy unsigned admin path, which
+    /// requires dev_mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attestation: Option<SignedAttestationDto>,
+}
+
+/// Wire form of a signed resolution attestation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SignedAttestationDto {
+    /// Hex-encoded compressed SEC1 P256 public key (33 bytes).
+    pub pubkey_hex: String,
+    /// Hex-encoded P256 ECDSA signature over the canonical attestation bytes.
+    pub signature_hex: String,
+    /// Nonce the signer chose (typically `timestamp_ms`).
+    pub nonce: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RegisterFeedRequest {
+    /// Hex-encoded compressed P256 public key (33 bytes).
+    pub pubkey_hex: String,
+    /// Human-readable name (e.g. "admin", "polymarket_mirror").
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

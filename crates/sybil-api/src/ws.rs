@@ -140,9 +140,7 @@ async fn replay(socket: &mut WebSocket, handle: &SequencerHandle, from: u64) -> 
     while h <= head {
         let block = match handle.get_block(h).await {
             Ok(b) => b,
-            Err(e) => {
-                return ReplayOutcome::Error(format!("replay failed at height {h}: {e}"))
-            }
+            Err(e) => return ReplayOutcome::Error(format!("replay failed at height {h}: {e}")),
         };
         if !send_block(socket, &block).await {
             return ReplayOutcome::ClientGone;

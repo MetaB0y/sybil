@@ -94,9 +94,7 @@ impl OrderBook {
         let mut position_reservations: HashMap<(AccountId, PositionKey), i64> = HashMap::new();
         let mut valid_orders = Vec::with_capacity(orders.len());
         for ro in orders {
-            if ro.reserved_balance < 0
-                || ro.reserved_positions.iter().any(|(_, qty)| *qty < 0)
-            {
+            if ro.reserved_balance < 0 || ro.reserved_positions.iter().any(|(_, qty)| *qty < 0) {
                 tracing::warn!(
                     order_id = ro.order.id,
                     account_id = ?ro.account_id,

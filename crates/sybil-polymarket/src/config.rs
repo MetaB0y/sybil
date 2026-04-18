@@ -97,4 +97,15 @@ pub struct Config {
     /// Path to persist mapping store (empty = in-memory only).
     #[arg(long, default_value = "", env = "MAPPING_STORE_PATH")]
     pub mapping_store_path: String,
+
+    /// Path to the P256 signing key used to attest to resolutions. Empty
+    /// disables the ResolutionActor (mirrored markets won't auto-resolve).
+    /// The key's compressed SEC1 pubkey must be registered on sybil-api as
+    /// the `polymarket_mirror` feed (see `--polymarket-feed-pubkey-hex`).
+    #[arg(long, default_value = "", env = "SIGNER_KEY_PATH")]
+    pub signer_key_path: String,
+
+    /// Resolution poll interval in seconds.
+    #[arg(long, default_value = "120", env = "RESOLUTION_POLL_INTERVAL_SECS")]
+    pub resolution_poll_interval_secs: u64,
 }

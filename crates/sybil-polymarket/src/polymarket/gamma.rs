@@ -164,6 +164,54 @@ impl GammaClient {
         Ok(all_events)
     }
 
+    /// Fetch closed (potentially resolved) events. Used by the resolution
+    /// actor to reconcile mirrored markets against Polymarket settlement.
+    pub async fn fetch_closed_events(&self, max_events: usize) -> Result<Vec<GammaEvent>, Error> {
+        let mut all_events = Vec::new();
+        let mut offset = 0;
+        let page_size = 100;
+
+        loop {
+            let url = format!("{}/events", self.gamma_url);
+            let resp = self
+                .http
+                .get(&url)
+                .query(&[
+                    ("closed", "true"),
+                    ("limit", &page_size.to_string()),
+                    ("offset", &offset.to_string()),
+                    ("order", "endDate"),
+                    ("ascending", "false"),
+                ])
+                .send()
+                .await?;
+
+            if !resp.status().is_success() {
+                let status = resp.status().as_u16();
+                let body = resp.text().await.unwrap_or_default();
+                return Err(Error::PolymarketApi(format!(
+                    "GET /events?closed=true returned {}: {}",
+                    status, body
+                )));
+            }
+
+            let events: Vec<GammaEvent> = resp.json().await?;
+            let page_len = events.len();
+            for event in events {
+                all_events.push(event);
+                if all_events.len() >= max_events {
+                    return Ok(all_events);
+                }
+            }
+            if page_len < page_size {
+                break;
+            }
+            offset += page_size;
+        }
+
+        Ok(all_events)
+    }
+
     /// Fetch midpoint price for a single token via CLOB REST.
     pub async fn fetch_midpoint(&self, token_id: &str) -> Result<f64, Error> {
         let url = format!("{}/midpoint", self.clob_url);

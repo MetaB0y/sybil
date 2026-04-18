@@ -116,7 +116,10 @@ impl SybilClient {
     }
 
     pub async fn resolve_market(&self, market_id: u32, payout_nanos: u64) -> Result<(), Error> {
-        let req = ResolveMarketRequest { payout_nanos };
+        let req = ResolveMarketRequest {
+            payout_nanos,
+            attestation: None,
+        };
         let resp = self
             .http
             .post(self.url(&format!("/v1/markets/{}/resolve", market_id)))
@@ -125,6 +128,45 @@ impl SybilClient {
             .await?;
         self.check_response(resp).await?;
         Ok(())
+    }
+
+    /// Resolve a market via a signed attestation. Does not require `--dev-mode`.
+    pub async fn resolve_market_attested(
+        &self,
+        market_id: u32,
+        payout_nanos: u64,
+        attestation: SignedAttestationDto,
+    ) -> Result<(), Error> {
+        let req = ResolveMarketRequest {
+            payout_nanos,
+            attestation: Some(attestation),
+        };
+        let resp = self
+            .http
+            .post(self.url(&format!("/v1/markets/{}/resolve", market_id)))
+            .json(&req)
+            .send()
+            .await?;
+        self.check_response(resp).await?;
+        Ok(())
+    }
+
+    /// Fetch the current resolution state for a market. Returns `None` when
+    /// the server reports 404 (e.g. market does not exist).
+    pub async fn get_market_resolution(
+        &self,
+        market_id: u32,
+    ) -> Result<Option<ResolutionResponse>, Error> {
+        let resp = self
+            .http
+            .get(self.url(&format!("/v1/markets/{}/resolution", market_id)))
+            .send()
+            .await?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        let resp = self.check_response(resp).await?;
+        Ok(Some(resp.json().await?))
     }
 
     // === Orders ===

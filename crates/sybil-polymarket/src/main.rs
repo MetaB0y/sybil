@@ -1,7 +1,8 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use clap::Parser;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, watch, RwLock};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
@@ -11,6 +12,8 @@ use sybil_polymarket::feed::{FeedActor, PriceSnapshot};
 use sybil_polymarket::mapping::MappingStore;
 use sybil_polymarket::mm::MmActor;
 use sybil_polymarket::polymarket::gamma::GammaClient;
+use sybil_polymarket::resolution::ResolutionActor;
+use sybil_polymarket::signer::ResolutionSigner;
 use sybil_polymarket::sybil::client::SybilClient;
 use sybil_polymarket::sync::SyncActor;
 
@@ -38,17 +41,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
 
     // Load or create mapping store
-    let mapping = if config.mapping_store_path.is_empty() {
+    let mapping_store = if config.mapping_store_path.is_empty() {
         MappingStore::new(None)
     } else {
         let path = PathBuf::from(&config.mapping_store_path);
         MappingStore::load(&path)?
     };
     info!(
-        events = mapping.event_count(),
-        markets = mapping.market_count(),
+        events = mapping_store.event_count(),
+        markets = mapping_store.market_count(),
         "loaded mapping store"
     );
+    let mapping = Arc::new(RwLock::new(mapping_store));
 
     // Clients
     let gamma_client = GammaClient::new(
@@ -63,6 +67,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.gamma_url.clone(),
         config.clob_url.clone(),
     );
+    let gamma_client_resolution = GammaClient::new(
+        http.clone(),
+        config.gamma_url.clone(),
+        config.clob_url.clone(),
+    );
+    let sybil_client_resolution = SybilClient::new(http.clone(), config.sybil_url.clone());
 
     // Wait for Sybil to be healthy
     info!(url = &config.sybil_url, "waiting for Sybil API...");
@@ -91,7 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Channels — size MM channel to fit all existing markets for bootstrap
-    let existing = mapping.all_markets();
+    let existing = mapping.read().await.all_markets();
     let mm_channel_size = (existing.len() + 256).max(256);
     let (feed_tx, feed_rx) = mpsc::channel(64);
     let (mm_tx, mm_rx) = mpsc::channel(mm_channel_size);
@@ -114,7 +124,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Bootstrap Feed with existing token subscriptions
-    let all_tokens = mapping.all_token_ids();
+    let all_tokens = mapping.read().await.all_token_ids();
     if !all_tokens.is_empty() {
         info!(
             count = all_tokens.len(),
@@ -136,12 +146,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_feed = config.clone();
     let config_mm = config.clone();
 
+    let mapping_for_sync = mapping.clone();
     let sync_handle = tokio::spawn(async move {
         let actor = SyncActor::new(
             config_sync,
             gamma_client,
             sybil_client_sync,
-            mapping,
+            mapping_for_sync,
             feed_tx,
             mm_tx,
         );
@@ -164,6 +175,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         actor.run(cancel_mm).await;
     });
 
+    // Resolution actor — or a no-op placeholder when no signer key is
+    // configured, so the select! below treats it uniformly. A panic in the
+    // real resolution actor needs to trip shutdown the same way sync/feed/mm
+    // do; otherwise Polymarket auto-resolution could stop silently while the
+    // process keeps looking healthy.
+    let resolution_handle: tokio::task::JoinHandle<()> = if config.signer_key_path.is_empty() {
+        info!("SIGNER_KEY_PATH not set; resolution actor disabled");
+        let cancel_idle = cancel.clone();
+        tokio::spawn(async move { cancel_idle.cancelled().await })
+    } else {
+        let signer =
+            ResolutionSigner::load_or_create(std::path::Path::new(&config.signer_key_path))?;
+        info!(
+            pubkey = signer.pubkey_hex(),
+            "loaded resolution signer; register this pubkey as the polymarket_mirror feed on sybil-api"
+        );
+        let config_res = config.clone();
+        let cancel_res = cancel.clone();
+        let mapping_for_res = mapping.clone();
+        tokio::spawn(async move {
+            let actor = ResolutionActor::new(
+                config_res,
+                gamma_client_resolution,
+                sybil_client_resolution,
+                mapping_for_res,
+                signer,
+            );
+            actor.run(cancel_res).await;
+        })
+    };
+
     // Wait for shutdown signal
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
@@ -182,6 +224,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         r = mm_handle => {
             if let Err(e) = r {
                 error!(error = %e, "MmActor panicked");
+            }
+        }
+        r = resolution_handle => {
+            if let Err(e) = r {
+                error!(error = %e, "ResolutionActor panicked");
+            } else {
+                error!("ResolutionActor exited unexpectedly");
             }
         }
     }

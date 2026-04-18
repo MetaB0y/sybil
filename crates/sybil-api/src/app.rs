@@ -34,10 +34,13 @@ use crate::types::response::*;
         routes::markets::create_market_group,
         routes::markets::get_prices,
         routes::markets::resolve_market,
+        routes::markets::get_resolution,
         routes::markets::get_price_history,
         routes::markets::search_markets,
         routes::markets::set_reference_prices,
         routes::markets::set_market_metadata,
+        routes::feeds::register_feed,
+        routes::feeds::list_feeds,
         routes::orders::submit_orders,
         routes::orders::submit_signed_order,
         routes::orders::cancel_signed_order,
@@ -56,6 +59,10 @@ use crate::types::response::*;
         CreateMarketRequest,
         CreateMarketGroupRequest,
         ResolveMarketRequest,
+        SignedAttestationDto,
+        RegisterFeedRequest,
+        RegisteredFeedResponse,
+        ResolutionResponse,
         SubmitOrderRequest,
         SubmitSignedOrderRequest,
         CancelSignedOrderRequest,
@@ -218,8 +225,17 @@ pub fn create_router(state: AppState) -> Router {
             axum::routing::post(routes::markets::resolve_market),
         )
         .route(
+            "/v1/markets/{id}/resolution",
+            axum::routing::get(routes::markets::get_resolution),
+        )
+        .route(
             "/v1/markets/{id}/prices/history",
             axum::routing::get(routes::markets::get_price_history),
+        )
+        // Feeds
+        .route(
+            "/v1/feeds",
+            axum::routing::get(routes::feeds::list_feeds).post(routes::feeds::register_feed),
         )
         // Orders
         .route(

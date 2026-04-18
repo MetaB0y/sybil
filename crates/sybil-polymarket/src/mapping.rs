@@ -130,6 +130,16 @@ impl MappingStore {
         self.condition_to_sybil.len()
     }
 
+    /// All (condition_id, sybil_market_id) pairs — used by the resolution
+    /// actor to reconcile settled Polymarket conditions against locally
+    /// mirrored markets.
+    pub fn all_condition_mappings(&self) -> Vec<(String, u32)> {
+        self.condition_to_sybil
+            .iter()
+            .map(|(c, id)| (c.clone(), *id))
+            .collect()
+    }
+
     /// Iterate all mapped markets: yields (sybil_market_id, yes_token_id, in_group).
     pub fn all_markets(&self) -> Vec<(u32, String, bool)> {
         let group_market_ids: std::collections::HashSet<u32> = self

@@ -10,18 +10,80 @@ use axum::http::{Method, Request, StatusCode};
 use axum::Router;
 use http_body_util::BodyExt;
 use matching_engine::MarketSet;
-use matching_sequencer::{AccountStore, AdminOracle, BlockSequencer, SequencerConfig, SequencerHandle};
+use matching_sequencer::{
+    AccountStore, AdminOracle, BlockSequencer, PublicKey, SequencerConfig, SequencerHandle,
+};
+use p256::ecdsa::SigningKey;
+use p256::elliptic_curve::rand_core::UnwrapErr;
 use sybil_api::app::create_router;
 use sybil_api::state::AppState;
+use sybil_oracle::{FeedId, FeedPubkey, ResolutionPolicy, ResolutionTemplate, TemplateId};
 use tower::ServiceExt;
 
-/// Create a test app with optional dev mode. Returns the router and sequencer handle.
+/// Create a test app with optional dev mode. Bootstraps an `admin` feed +
+/// `admin_immediate` template out of the box, mirroring production wiring.
+/// Returns (router, handle, admin signing key, admin feed id).
+#[allow(dead_code)]
+pub async fn test_app_with_bootstrap(
+    dev_mode: bool,
+) -> (Router, SequencerHandle, SigningKey, FeedId) {
+    let accounts = AccountStore::new();
+    let markets = MarketSet::new();
+    let oracle = Arc::new(AdminOracle::new());
+    let sequencer = BlockSequencer::with_default_solver(
+        accounts,
+        markets,
+        vec![],
+        oracle,
+        SequencerConfig::default(),
+    );
+    let handle = SequencerHandle::spawn(sequencer);
+
+    let admin_key = <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+        &mut UnwrapErr(getrandom::SysRng),
+    );
+    let admin_pubkey = PublicKey(*admin_key.verifying_key());
+    let admin_feed_id = handle
+        .register_feed(FeedPubkey(admin_pubkey.compressed_bytes()), "admin".into())
+        .await
+        .unwrap();
+    handle
+        .install_template(ResolutionTemplate {
+            id: TemplateId("admin_immediate".into()),
+            policy: ResolutionPolicy::Immediate {
+                feed_id: admin_feed_id,
+            },
+        })
+        .await
+        .unwrap();
+
+    let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .build_recorder()
+        .handle();
+    let state = AppState {
+        sequencer: handle.clone(),
+        dev_mode,
+        prometheus,
+        reference_prices: Default::default(),
+        market_ref_data: Default::default(),
+    };
+    (create_router(state), handle, admin_key, admin_feed_id)
+}
+
+/// Create a test app without the oracle bootstrap (legacy path used by older
+/// integration tests — the admin unsigned dev-mode resolve path still works).
+#[allow(dead_code)]
 pub async fn test_app(dev_mode: bool) -> (Router, SequencerHandle) {
     let accounts = AccountStore::new();
     let markets = MarketSet::new();
     let oracle = Arc::new(AdminOracle::new());
-    let sequencer =
-        BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, SequencerConfig::default());
+    let sequencer = BlockSequencer::with_default_solver(
+        accounts,
+        markets,
+        vec![],
+        oracle,
+        SequencerConfig::default(),
+    );
     let handle = SequencerHandle::spawn(sequencer);
     let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()

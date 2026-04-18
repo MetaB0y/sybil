@@ -25,6 +25,7 @@ Resolution flows through the [[Block Lifecycle]]: when the oracle resolves a mar
 > `crates/matching-sequencer/src/settlement.rs` — resolution settlement logic
 
 ## See Also
-- [[Oracle Lifecycle]] — how the resolution decision is made
+- [[Oracle System]] — signed-attestation architecture, feeds + policies, full roadmap
+- [[Oracle Lifecycle]] — current minimal state machine
 - [[Settlement]] — the mechanics of position-to-balance conversion
 - [[Binary Markets and Market Groups]] — the market structure being resolved

@@ -29,8 +29,7 @@ async fn spawn_server() -> (SocketAddr, SequencerHandle) {
 
 async fn recv_envelope<S>(stream: &mut S) -> BlockStreamMessage
 where
-    S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
-        + Unpin,
+    S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
 {
     let msg = timeout(Duration::from_secs(5), stream.next())
         .await
@@ -87,7 +86,10 @@ async fn ws_from_block_replays_history_then_goes_live() {
             other => panic!("expected block during replay, got {:?}", other),
         }
     }
-    assert_eq!(seen_heights, vec![b0.header.height, b1.header.height, _b2.header.height]);
+    assert_eq!(
+        seen_heights,
+        vec![b0.header.height, b1.header.height, _b2.header.height]
+    );
 
     let complete = recv_envelope(&mut stream).await;
     match complete.payload {

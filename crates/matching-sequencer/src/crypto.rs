@@ -12,8 +12,9 @@ use p256::ecdsa::signature::{Signer, Verifier};
 use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
 use sybil_canonical::{
     ConditionDir as CanonicalConditionDir, MarketId as CanonicalMarketId, Order as CanonicalOrder,
-    PriceCondition as CanonicalPriceCondition,
+    PriceCondition as CanonicalPriceCondition, ResolutionAttestation as CanonicalAttestation,
 };
+use sybil_oracle::{ResolutionAttestation, SignedAttestation};
 
 /// A P256 public key (secp256r1 / passkey-compatible).
 #[derive(Clone, Debug)]
@@ -133,6 +134,46 @@ pub fn sign_order(order: &Order, key: &SigningKey) -> SignedOrder {
         order: order.clone(),
         signer: PublicKey(*key.verifying_key()),
         signature,
+    }
+}
+
+fn to_canonical_attestation(att: &ResolutionAttestation) -> CanonicalAttestation {
+    CanonicalAttestation {
+        market_id: CanonicalMarketId(att.market_id.0),
+        payout_nanos: att.payout_nanos,
+        nonce: att.nonce,
+    }
+}
+
+/// Deterministic canonical byte encoding of a `ResolutionAttestation` for signing.
+pub fn canonical_attestation_bytes(att: &ResolutionAttestation) -> Vec<u8> {
+    sybil_canonical::canonical_attestation_bytes(&to_canonical_attestation(att))
+}
+
+/// Verify the signature on a [`SignedAttestation`]. Does NOT check that the
+/// signer is a registered feed — callers do that via the feed registry.
+pub fn verify_signed_attestation(signed: &SignedAttestation) -> Result<PublicKey, SequencerError> {
+    let pubkey = PublicKey::from_compressed_bytes(&signed.signer.0)
+        .ok_or(SequencerError::InvalidSignature)?;
+    let signature =
+        Signature::from_der(&signed.signature_der).map_err(|_| SequencerError::InvalidSignature)?;
+    let msg = canonical_attestation_bytes(&signed.attestation);
+    pubkey
+        .0
+        .verify(&msg, &signature)
+        .map_err(|_| SequencerError::InvalidSignature)?;
+    Ok(pubkey)
+}
+
+/// Sign a `ResolutionAttestation` with a P256 signing key (testing / signer use).
+pub fn sign_attestation(attestation: ResolutionAttestation, key: &SigningKey) -> SignedAttestation {
+    let msg = canonical_attestation_bytes(&attestation);
+    let signature: Signature = key.sign(&msg);
+    let pubkey = PublicKey(*key.verifying_key());
+    SignedAttestation {
+        attestation,
+        signer: sybil_oracle::FeedPubkey(pubkey.compressed_bytes()),
+        signature_der: signature.to_der().as_bytes().to_vec(),
     }
 }
 

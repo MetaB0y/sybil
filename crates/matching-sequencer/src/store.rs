@@ -47,7 +47,7 @@ use std::path::Path;
 
 use matching_engine::{MarketGroup, MarketId, MarketSet, Nanos};
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
-use sybil_oracle::MarketStatus;
+use sybil_oracle::{DataFeed, MarketStatus};
 use tracing::{debug, info, warn};
 
 use crate::account::{AccountId, AccountStore};
@@ -69,6 +69,11 @@ const MARKETS: TableDefinition<u32, &[u8]> = TableDefinition::new("markets");
 
 /// Market metadata: market_id (u32) → msgpack(MarketMetadata)
 const MARKET_META: TableDefinition<u32, &[u8]> = TableDefinition::new("market_meta");
+
+/// Data feeds: feed_id (u64) → msgpack(DataFeed). Holds every registered
+/// off-chain signer identity allowed to produce resolution attestations.
+/// The redb layout is additive (rmp-serde); no layout version bump needed.
+const DATA_FEEDS: TableDefinition<u64, &[u8]> = TableDefinition::new("data_feeds");
 
 /// Market statuses: market_id (u32) → msgpack(MarketStatus)
 const MARKET_STATUSES: TableDefinition<u32, &[u8]> = TableDefinition::new("market_statuses");
@@ -158,6 +163,8 @@ pub struct RestoredState {
     pub last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
     pub market_volumes: HashMap<MarketId, u64>,
     pub resting_orders: Vec<RestingOrder>,
+    /// All registered data feeds.
+    pub data_feeds: Vec<DataFeed>,
     /// Bundle / MM / multi-market submissions that were admitted after the
     /// last committed block. The actor replays these into its in-memory
     /// pending queue so nothing acknowledged with a 200 OK is dropped by a
@@ -209,6 +216,7 @@ impl Store {
         txn.open_table(RESTING_ORDERS)?;
         txn.open_table(PENDING_BUNDLES)?;
         txn.open_table(ADMIT_LOG)?;
+        txn.open_table(DATA_FEEDS)?;
         txn.commit()?;
 
         initialize_or_validate_layout(&db)?;
@@ -221,10 +229,7 @@ impl Store {
     }
 
     /// Save the sequencer state after a block. Single ACID transaction.
-    pub async fn save_block(
-        &self,
-        snapshot: SequencerSnapshot<'_>,
-    ) -> Result<(), StoreError> {
+    pub async fn save_block(&self, snapshot: SequencerSnapshot<'_>) -> Result<(), StoreError> {
         let current_fence = read_account_state_fence(&self.db)?;
         let next_slot = current_fence
             .map(|fence| fence.slot.inactive())
@@ -315,6 +320,15 @@ impl Store {
             let mut table = txn.open_table(RESTING_ORDERS)?;
             let bytes = rmp_serde::to_vec(&snapshot.resting_orders)?;
             table.insert(KEY_RESTING_ORDERS_SNAPSHOT, bytes.as_slice())?;
+        }
+
+        // Data feeds
+        {
+            let mut table = txn.open_table(DATA_FEEDS)?;
+            for feed in snapshot.lifecycle.feeds().iter() {
+                let bytes = rmp_serde::to_vec(feed)?;
+                table.insert(feed.id.0, bytes.as_slice())?;
+            }
         }
 
         // Clear the pending-bundles buffer: everything admitted up to this
@@ -477,6 +491,16 @@ impl Store {
             }
         };
 
+        let data_feeds: Vec<DataFeed> = {
+            let table = txn.open_table(DATA_FEEDS)?;
+            let mut out = Vec::new();
+            for entry in table.iter()? {
+                let (_, value) = entry?;
+                out.push(rmp_serde::from_slice(value.value())?);
+            }
+            out
+        };
+
         let pending_bundles: Vec<crate::sequencer::OrderSubmission> = {
             let table = txn.open_table(PENDING_BUNDLES)?;
             let mut out = Vec::new();
@@ -506,6 +530,7 @@ impl Store {
             resting_orders = resting_orders.len(),
             pending_bundles = pending_bundles.len(),
             admit_log = admit_log.len(),
+            data_feeds = data_feeds.len(),
             "state restored from store"
         );
 
@@ -522,6 +547,7 @@ impl Store {
             last_clearing_prices,
             market_volumes,
             resting_orders,
+            data_feeds,
             pending_bundles,
             admit_log,
         }))
@@ -564,10 +590,7 @@ impl Store {
     /// admit into the live resting book; the 200 OK only returns once this
     /// row is committed to redb. Rows are cleared atomically by `save_block`
     /// once the admit is rolled into the next `RESTING_ORDERS` snapshot.
-    pub async fn append_admit_log(
-        &self,
-        resting: &RestingOrder,
-    ) -> Result<(), StoreError> {
+    pub async fn append_admit_log(&self, resting: &RestingOrder) -> Result<(), StoreError> {
         let bytes = rmp_serde::to_vec(resting)?;
         let txn = self.db.begin_write()?;
         let next_seq = {
@@ -1120,6 +1143,42 @@ mod tests {
 
         let restored_after = store.load_state().await.unwrap().unwrap();
         assert!(restored_after.admit_log.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_store_roundtrips_data_feeds() {
+        use sybil_oracle::FeedPubkey;
+
+        let path = temp_db_path("store-data-feeds");
+        let store = Store::open(&path).unwrap();
+
+        let oracle = Arc::new(AdminOracle::new());
+        let mut lifecycle = MarketLifecycle::new(oracle);
+        lifecycle.register_feed(FeedPubkey(vec![1u8; 33]), "admin".into(), 100);
+        lifecycle.register_feed(FeedPubkey(vec![2u8; 33]), "polymarket_mirror".into(), 200);
+
+        let markets = MarketSet::new();
+        let accounts = AccountStore::new();
+        let env = TestEnv::new();
+
+        store
+            .save_block(env.snapshot(
+                &accounts,
+                &markets,
+                &lifecycle,
+                &sample_header(1),
+                1,
+                None,
+                Vec::new(),
+            ))
+            .await
+            .unwrap();
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        assert_eq!(restored.data_feeds.len(), 2);
+        let names: Vec<_> = restored.data_feeds.iter().map(|f| f.name.clone()).collect();
+        assert!(names.contains(&"admin".to_string()));
+        assert!(names.contains(&"polymarket_mirror".to_string()));
     }
 
     #[tokio::test]

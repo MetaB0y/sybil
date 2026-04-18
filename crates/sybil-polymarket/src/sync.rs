@@ -1,6 +1,8 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::mpsc;
+use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 use crate::config::Config;
@@ -17,7 +19,7 @@ pub struct SyncActor {
     config: Config,
     gamma_client: GammaClient,
     sybil_client: SybilClient,
-    mapping: MappingStore,
+    mapping: Arc<RwLock<MappingStore>>,
     feed_tx: mpsc::Sender<FeedMessage>,
     mm_tx: mpsc::Sender<MmMessage>,
 }
@@ -27,7 +29,7 @@ impl SyncActor {
         config: Config,
         gamma_client: GammaClient,
         sybil_client: SybilClient,
-        mapping: MappingStore,
+        mapping: Arc<RwLock<MappingStore>>,
         feed_tx: mpsc::Sender<FeedMessage>,
         mm_tx: mpsc::Sender<MmMessage>,
     ) -> Self {
@@ -50,14 +52,14 @@ impl SyncActor {
             }
 
             // Save mapping after each cycle
-            if let Err(e) = self.mapping.save() {
+            if let Err(e) = self.mapping.read().await.save() {
                 warn!(error = %e, "failed to save mapping");
             }
 
             tokio::select! {
                 _ = cancel.cancelled() => {
                     info!("SyncActor shutting down");
-                    let _ = self.mapping.save();
+                    let _ = self.mapping.read().await.save();
                     return;
                 }
                 _ = tokio::time::sleep(Duration::from_secs(self.config.sync_interval_secs)) => {}
@@ -75,16 +77,17 @@ impl SyncActor {
             )
             .await?;
 
+        let synced_before = self.mapping.read().await.event_count();
         info!(
             events = events.len(),
-            synced = self.mapping.event_count(),
+            synced = synced_before,
             "fetched events from Polymarket"
         );
 
         let mut new_token_ids = Vec::new();
 
         for event in &events {
-            if self.mapping.is_event_synced(&event.id) {
+            if self.mapping.read().await.is_event_synced(&event.id) {
                 continue;
             }
 
@@ -151,6 +154,7 @@ impl SyncActor {
                     tags: Some(vec!["polymarket".to_string()]),
                     resolution_criteria: poly_market.resolution_source.clone(),
                     expiry_timestamp_ms: None,
+                    resolution_template: Some("polymarket_mirror".to_string()),
                 };
 
                 match self.sybil_client.create_market(&req).await {
@@ -163,7 +167,7 @@ impl SyncActor {
                             "created market"
                         );
 
-                        self.mapping.register_market(
+                        self.mapping.write().await.register_market(
                             poly_market.condition_id.clone(),
                             token_ids.clone(),
                             sybil_id,
@@ -208,7 +212,7 @@ impl SyncActor {
                             markets = sybil_market_ids.len(),
                             "created market group"
                         );
-                        self.mapping.register_event(
+                        self.mapping.write().await.register_event(
                             event.id.clone(),
                             GroupInfo {
                                 group_name: event.title.clone(),
@@ -222,7 +226,7 @@ impl SyncActor {
                     }
                 }
             } else {
-                self.mapping.mark_event_synced(&event.id);
+                self.mapping.write().await.mark_event_synced(&event.id);
             }
         }
 
@@ -235,10 +239,5 @@ impl SyncActor {
         }
 
         Ok(())
-    }
-
-    /// Consume the actor and return the mapping store (for persistence on shutdown).
-    pub fn into_mapping(self) -> MappingStore {
-        self.mapping
     }
 }

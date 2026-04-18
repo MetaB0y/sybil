@@ -6,7 +6,9 @@ use tokio::sync::broadcast;
 use tokio::time::{interval_at, Instant};
 
 use matching_engine::{MarketGroup, MarketId, MarketSet, Nanos};
-use sybil_oracle::{MarketStatus, Oracle, ResolutionRecord};
+use sybil_oracle::{
+    DataFeed, FeedId, FeedPubkey, MarketStatus, Oracle, ResolutionRecord, SignedAttestation,
+};
 
 use crate::account::{Account, AccountId};
 use crate::block::{Block, BlockProduction};
@@ -16,7 +18,9 @@ use crate::crypto::{
 use crate::error::SequencerError;
 use crate::market_info::{AccountFillRecord, MarketMetadata, MarketSearchQuery, PricePoint};
 use crate::portfolio::{self, PortfolioSummary};
-use crate::sequencer::{BlockSequencer, OrderSubmission, PendingOrderInfo, PreparedBlock, SequencerConfig};
+use crate::sequencer::{
+    BlockSequencer, OrderSubmission, PendingOrderInfo, PreparedBlock, SequencerConfig,
+};
 
 /// Messages sent from handles to the sequencer actor.
 pub enum SequencerMsg {
@@ -48,6 +52,17 @@ pub enum SequencerMsg {
         Nanos,
         RpcReplyPort<Result<ResolutionRecord, SequencerError>>,
     ),
+    ResolveMarketAttested(
+        MarketId,
+        SignedAttestation,
+        RpcReplyPort<Result<ResolutionRecord, SequencerError>>,
+    ),
+    RegisterFeed(FeedPubkey, String, RpcReplyPort<FeedId>),
+    GetFeed(FeedId, RpcReplyPort<Option<DataFeed>>),
+    GetFeedByPubkey(FeedPubkey, RpcReplyPort<Option<DataFeed>>),
+    ListFeeds(RpcReplyPort<Vec<DataFeed>>),
+    InstallTemplate(sybil_oracle::ResolutionTemplate, RpcReplyPort<()>),
+    TemplateExists(String, RpcReplyPort<bool>),
     GetMarketStatus(MarketId, RpcReplyPort<MarketStatus>),
     GetAllMarketStatuses(RpcReplyPort<HashMap<MarketId, MarketStatus>>),
     GetBlock(u64, RpcReplyPort<Result<Block, SequencerError>>),
@@ -273,10 +288,7 @@ impl SequencerActorState {
         self.block_history.push_back(block);
     }
 
-    async fn handle_signed_order(
-        &mut self,
-        signed: SignedOrder,
-    ) -> Result<(), SequencerError> {
+    async fn handle_signed_order(&mut self, signed: SignedOrder) -> Result<(), SequencerError> {
         verify_signed_order(&signed)?;
 
         let account_id = self
@@ -426,10 +438,7 @@ impl SequencerActorState {
     /// commit doesn't drop anything acknowledged with a 200 OK. Returns
     /// `Err` for synchronous rejections so the caller can surface them to
     /// the client.
-    async fn admit_or_defer(
-        &mut self,
-        submission: OrderSubmission,
-    ) -> Result<(), SequencerError> {
+    async fn admit_or_defer(&mut self, submission: OrderSubmission) -> Result<(), SequencerError> {
         if self.sequencer.pending_bundles_len() >= MAX_PENDING_BUNDLES {
             return Err(SequencerError::MempoolFull);
         }
@@ -610,6 +619,49 @@ impl Actor for SequencerActor {
                     timestamp_ms,
                 ));
             }
+            SequencerMsg::ResolveMarketAttested(market_id, signed, reply) => {
+                let timestamp_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                let result = match crate::crypto::verify_signed_attestation(&signed) {
+                    Ok(_pubkey) => {
+                        state
+                            .sequencer
+                            .resolve_market_attested(market_id, &signed, timestamp_ms)
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            SequencerMsg::RegisterFeed(pubkey, name, reply) => {
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                let id = state.sequencer.register_feed(pubkey, name, now_ms);
+                let _ = reply.send(id);
+            }
+            SequencerMsg::GetFeed(id, reply) => {
+                let feed = state.sequencer.feed_by_id(id).cloned();
+                let _ = reply.send(feed);
+            }
+            SequencerMsg::GetFeedByPubkey(pubkey, reply) => {
+                let feed = state.sequencer.feed_by_pubkey(&pubkey).cloned();
+                let _ = reply.send(feed);
+            }
+            SequencerMsg::ListFeeds(reply) => {
+                let feeds: Vec<DataFeed> =
+                    state.sequencer.lifecycle.feeds().iter().cloned().collect();
+                let _ = reply.send(feeds);
+            }
+            SequencerMsg::InstallTemplate(template, reply) => {
+                state.sequencer.install_template(template);
+                let _ = reply.send(());
+            }
+            SequencerMsg::TemplateExists(id, reply) => {
+                let _ = reply.send(state.sequencer.template_exists(&id));
+            }
             SequencerMsg::GetMarketStatus(market_id, reply) => {
                 let _ = reply.send(state.sequencer.market_status(market_id));
             }
@@ -769,8 +821,7 @@ impl SequencerSupervisorState {
             return;
         };
 
-        let sequencer =
-            BlockSequencer::restore(state, self.oracle.clone(), self.config.clone());
+        let sequencer = BlockSequencer::restore(state, self.oracle.clone(), self.config.clone());
 
         match self.spawn_child(myself, sequencer).await {
             Ok(()) => tracing::warn!("sequencer actor restarted from persistent snapshot"),
@@ -898,10 +949,7 @@ impl SequencerHandle {
     /// responsible for calling [`Store::load_state`] and passing the result to
     /// [`BlockSequencer::restore`] before invoking this function — see
     /// `crates/sybil-api/src/main.rs` for the canonical hydration + spawn pattern.
-    pub fn spawn_with_store(
-        sequencer: BlockSequencer,
-        store: Option<crate::store::Store>,
-    ) -> Self {
+    pub fn spawn_with_store(sequencer: BlockSequencer, store: Option<crate::store::Store>) -> Self {
         let oracle = sequencer.oracle();
         let config = sequencer.config.clone();
         let store = store.map(Arc::new);
@@ -1029,6 +1077,53 @@ impl SequencerHandle {
     ) -> Result<ResolutionRecord, SequencerError> {
         self.rpc(|reply| SequencerMsg::ResolveMarket(market_id, payout_nanos, reply))
             .await?
+    }
+
+    pub async fn resolve_market_attested(
+        &self,
+        market_id: MarketId,
+        signed: SignedAttestation,
+    ) -> Result<ResolutionRecord, SequencerError> {
+        self.rpc(|reply| SequencerMsg::ResolveMarketAttested(market_id, signed, reply))
+            .await?
+    }
+
+    pub async fn register_feed(
+        &self,
+        pubkey: FeedPubkey,
+        name: String,
+    ) -> Result<FeedId, SequencerError> {
+        self.rpc(|reply| SequencerMsg::RegisterFeed(pubkey, name, reply))
+            .await
+    }
+
+    pub async fn get_feed(&self, id: FeedId) -> Result<Option<DataFeed>, SequencerError> {
+        self.rpc(|reply| SequencerMsg::GetFeed(id, reply)).await
+    }
+
+    pub async fn get_feed_by_pubkey(
+        &self,
+        pubkey: FeedPubkey,
+    ) -> Result<Option<DataFeed>, SequencerError> {
+        self.rpc(|reply| SequencerMsg::GetFeedByPubkey(pubkey, reply))
+            .await
+    }
+
+    pub async fn list_feeds(&self) -> Result<Vec<DataFeed>, SequencerError> {
+        self.rpc(SequencerMsg::ListFeeds).await
+    }
+
+    pub async fn install_template(
+        &self,
+        template: sybil_oracle::ResolutionTemplate,
+    ) -> Result<(), SequencerError> {
+        self.rpc(|reply| SequencerMsg::InstallTemplate(template, reply))
+            .await
+    }
+
+    pub async fn template_exists(&self, id: String) -> Result<bool, SequencerError> {
+        self.rpc(|reply| SequencerMsg::TemplateExists(id, reply))
+            .await
     }
 
     pub async fn get_market_status(

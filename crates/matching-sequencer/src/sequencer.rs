@@ -475,11 +475,7 @@ impl BlockSequencer {
     }
 
     /// Restore from persisted state.
-    pub fn restore(
-        state: RestoredState,
-        oracle: Arc<dyn Oracle>,
-        config: SequencerConfig,
-    ) -> Self {
+    pub fn restore(state: RestoredState, oracle: Arc<dyn Oracle>, config: SequencerConfig) -> Self {
         let solver: Arc<dyn Solver> = Arc::new(matching_solver::LpSolver::new());
         let mut lifecycle = MarketLifecycle::new(oracle);
         for (market_id, status) in state.market_statuses {
@@ -488,8 +484,10 @@ impl BlockSequencer {
         for (market_id, meta) in state.market_metadata {
             lifecycle.set_market_metadata(market_id, meta);
         }
-        let mut order_book =
-            OrderBook::restore(state.resting_orders, config.order_ttl_blocks);
+        for feed in state.data_feeds {
+            lifecycle.restore_feed(feed);
+        }
+        let mut order_book = OrderBook::restore(state.resting_orders, config.order_ttl_blocks);
         // Replay the admit-log WAL on top of the snapshot: every non-MM
         // admit since the last committed block is durable on its own row
         // and must be re-inserted before the sequencer starts taking new
@@ -737,9 +735,11 @@ impl BlockSequencer {
                 }
                 let status = self.market_status(market_id);
                 if !status.is_tradeable() {
-                    return AdmitOutcome::Rejected(SequencerError::InvalidMarketState(
-                        format!("market {} is {}", market_id.0, status.as_str()),
-                    ));
+                    return AdmitOutcome::Rejected(SequencerError::InvalidMarketState(format!(
+                        "market {} is {}",
+                        market_id.0,
+                        status.as_str()
+                    )));
                 }
             }
         }
@@ -923,6 +923,95 @@ impl BlockSequencer {
                 Err(SequencerError::OracleError(reason))
             }
         }
+    }
+
+    /// Resolve a market from a signed attestation via the market's template
+    /// policy. Signature verification is done by the caller (the sequencer
+    /// actor) before this is called; here the lifecycle re-checks that the
+    /// signer is the template's expected feed and then settles.
+    pub fn resolve_market_attested(
+        &mut self,
+        market_id: MarketId,
+        signed: &sybil_oracle::SignedAttestation,
+        timestamp_ms: u64,
+    ) -> Result<ResolutionRecord, SequencerError> {
+        if self.markets.get(market_id).is_none() {
+            return Err(SequencerError::MarketNotFound);
+        }
+
+        let action = self
+            .lifecycle
+            .resolve_from_attestation(market_id, signed, timestamp_ms)?;
+
+        match action {
+            sybil_oracle::ResolutionAction::SettleNow {
+                market_id,
+                payout_nanos,
+                record,
+            } => {
+                let affected_accounts: Vec<AccountId> = self
+                    .accounts
+                    .iter()
+                    .filter_map(|(&account_id, account)| {
+                        let yes_pos = account.position(market_id, 0);
+                        let no_pos = account.position(market_id, 1);
+                        (yes_pos != 0 || no_pos != 0).then_some(account_id)
+                    })
+                    .collect();
+                for account_id in &affected_accounts {
+                    self.capture_system_account_baseline(*account_id);
+                }
+                let affected_accounts =
+                    settlement::resolve_market(&mut self.accounts, market_id, payout_nanos);
+                self.record_system_event(SystemEvent::MarketResolved {
+                    market_id,
+                    payout_nanos,
+                    affected_accounts,
+                });
+                self.market_groups
+                    .retain(|g| !g.markets.contains(&market_id));
+                Ok(record)
+            }
+            sybil_oracle::ResolutionAction::Propose { .. } => Err(SequencerError::OracleError(
+                "resolution proposed but not yet settled".to_string(),
+            )),
+            sybil_oracle::ResolutionAction::Reject { reason } => {
+                Err(SequencerError::OracleError(reason))
+            }
+        }
+    }
+
+    /// Register a data feed (e.g. admin key, Polymarket mirror signer). Returns
+    /// the assigned [`sybil_oracle::FeedId`]. Idempotent on pubkey.
+    pub fn register_feed(
+        &mut self,
+        pubkey: sybil_oracle::FeedPubkey,
+        name: String,
+        now_ms: u64,
+    ) -> sybil_oracle::FeedId {
+        self.lifecycle.register_feed(pubkey, name, now_ms)
+    }
+
+    pub fn feed_by_id(&self, id: sybil_oracle::FeedId) -> Option<&sybil_oracle::DataFeed> {
+        self.lifecycle.feed_by_id(id)
+    }
+
+    pub fn feed_by_pubkey(
+        &self,
+        pubkey: &sybil_oracle::FeedPubkey,
+    ) -> Option<&sybil_oracle::DataFeed> {
+        self.lifecycle.feed_by_pubkey(pubkey)
+    }
+
+    pub fn install_template(&mut self, template: sybil_oracle::ResolutionTemplate) {
+        self.lifecycle.install_template(template);
+    }
+
+    /// Whether a template with this id has been installed. Used by the API
+    /// layer to reject market-creation requests that reference a missing
+    /// template, instead of deferring the error until resolve time.
+    pub fn template_exists(&self, id: &str) -> bool {
+        self.lifecycle.templates().get_str(id).is_some()
     }
 
     /// Prepare one block from the given submissions without mutating live sequencer state.
@@ -1709,7 +1798,13 @@ mod tests {
         let mut accounts = AccountStore::new();
         let holder = accounts.create_account(0);
         let oracle = Arc::new(AdminOracle::new());
-        let mut seq = BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, SequencerConfig::default());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets,
+            vec![],
+            oracle,
+            SequencerConfig::default(),
+        );
         seq.price_tracker = crate::price_tracker::PriceTracker::with_state(
             HashMap::from([(orphaned_market, vec![400_000_000, 600_000_000])]),
             HashMap::new(),
@@ -2081,6 +2176,7 @@ mod tests {
             last_clearing_prices: seq_a.last_clearing_prices().clone(),
             market_volumes: seq_a.market_volumes().clone(),
             resting_orders: seq_a.order_book.snapshot(),
+            data_feeds: Vec::new(),
             pending_bundles: Vec::new(),
             admit_log: Vec::new(),
         };
@@ -2694,8 +2790,13 @@ mod tests {
         let mut accounts = AccountStore::new();
         let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
         let oracle = Arc::new(AdminOracle::new());
-        let mut seq =
-            BlockSequencer::with_default_solver(accounts, markets.clone(), vec![group], oracle, SequencerConfig::default());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![group],
+            oracle,
+            SequencerConfig::default(),
+        );
 
         let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
         constraint.add_order(0, matching_engine::MmSide::BuyYes);
@@ -2724,8 +2825,13 @@ mod tests {
         let mut accounts = AccountStore::new();
         let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
         let oracle = Arc::new(AdminOracle::new());
-        let mut seq =
-            BlockSequencer::with_default_solver(accounts, markets.clone(), vec![group], oracle, SequencerConfig::default());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![group],
+            oracle,
+            SequencerConfig::default(),
+        );
 
         // Only quote 2 of 3 outcomes — not a complete set
         let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
@@ -2784,8 +2890,13 @@ mod tests {
         let mut accounts = AccountStore::new();
         let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
         let oracle = Arc::new(AdminOracle::new());
-        let mut seq =
-            BlockSequencer::with_default_solver(accounts, markets.clone(), vec![group], oracle, SequencerConfig::default());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![group],
+            oracle,
+            SequencerConfig::default(),
+        );
 
         let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
         constraint.add_order(0, matching_engine::MmSide::BuyNo);
@@ -2818,8 +2929,13 @@ mod tests {
         let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
         let counter = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
         let oracle = Arc::new(AdminOracle::new());
-        let mut seq =
-            BlockSequencer::with_default_solver(accounts, markets.clone(), vec![], oracle, SequencerConfig::default());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            oracle,
+            SequencerConfig::default(),
+        );
 
         // Give counterparty YES positions to sell
         seq.accounts
@@ -2859,8 +2975,13 @@ mod tests {
         let mut accounts = AccountStore::new();
         let aid = accounts.create_account(0); // zero balance
         let oracle = Arc::new(AdminOracle::new());
-        let mut seq =
-            BlockSequencer::with_default_solver(accounts, MarketSet::new(), vec![], oracle, SequencerConfig::default());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            MarketSet::new(),
+            vec![],
+            oracle,
+            SequencerConfig::default(),
+        );
 
         let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
         constraint.add_order(0, matching_engine::MmSide::BuyYes);
@@ -2966,8 +3087,13 @@ mod tests {
         let mm_id = accounts.create_account(1000 * NANOS_PER_DOLLAR as i64);
         let counter_id = accounts.create_account(100_000 * NANOS_PER_DOLLAR as i64);
         let oracle = Arc::new(AdminOracle::new());
-        let mut seq =
-            BlockSequencer::with_default_solver(accounts, markets.clone(), vec![], oracle, SequencerConfig::default());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            oracle,
+            SequencerConfig::default(),
+        );
 
         // Give counterparty massive YES position to sell
         seq.accounts
@@ -3114,7 +3240,11 @@ mod tests {
     fn cross_block_stp_sells_do_not_contribute() {
         let (mut seq, aid, markets, m0, m1) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
 
-        seq.accounts.get_mut(aid).unwrap().positions.insert((m0, 0), 50);
+        seq.accounts
+            .get_mut(aid)
+            .unwrap()
+            .positions
+            .insert((m0, 0), 50);
 
         let sell_first = single_order_sub(aid, outcome_sell(&markets, 0, m0, 0, 400_000_000, 10));
         assert!(matches!(
@@ -3126,7 +3256,10 @@ mod tests {
 
         let buy_other = single_order_sub(aid, outcome_buy(&markets, 0, m1, 0, 400_000_000, 10));
         assert!(
-            matches!(seq.try_admit_direct(buy_other), AdmitOutcome::Admitted { .. }),
+            matches!(
+                seq.try_admit_direct(buy_other),
+                AdmitOutcome::Admitted { .. }
+            ),
             "sell on m0 + buy on m1 is only partial coverage — must be admitted"
         );
     }

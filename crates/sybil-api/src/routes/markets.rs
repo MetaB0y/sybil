@@ -2,7 +2,8 @@ use axum::extract::{Path, Query, State};
 use axum::Json;
 
 use matching_engine::{MarketId, NANOS_PER_DOLLAR};
-use matching_sequencer::MarketMetadata;
+use matching_sequencer::{MarketMetadata, ResolutionConfig};
+use sybil_oracle::{FeedPubkey, ResolutionAttestation, SignedAttestation};
 
 use crate::convert::prices_to_response;
 use crate::state::AppState;
@@ -13,6 +14,7 @@ use crate::types::request::{
     SetMarketMetadataRequest, SetReferencePricesRequest,
 };
 use crate::types::response::*;
+use sybil_oracle::OracleSource;
 
 struct BuildMarketResponseArgs<'a> {
     market_id: u32,
@@ -241,11 +243,21 @@ pub async fn create_market(
         return Err(AppError::dev_mode_required());
     }
 
+    if let Some(template) = req.resolution_template.as_ref() {
+        if !state.sequencer.template_exists(template.clone()).await? {
+            return Err(AppError::bad_request(format!(
+                "Unknown resolution_template: {:?}. Install it before creating markets that reference it.",
+                template
+            )));
+        }
+    }
+
     let has_metadata = req.description.is_some()
         || req.category.is_some()
         || req.tags.is_some()
         || req.resolution_criteria.is_some()
-        || req.expiry_timestamp_ms.is_some();
+        || req.expiry_timestamp_ms.is_some()
+        || req.resolution_template.is_some();
 
     let market_id = if has_metadata {
         let now_ms = std::time::SystemTime::now()
@@ -260,6 +272,9 @@ pub async fn create_market(
             resolution_criteria: req.resolution_criteria.unwrap_or_default(),
             expiry_timestamp_ms: req.expiry_timestamp_ms.unwrap_or(0),
             created_at_ms: now_ms,
+            resolution_config: req
+                .resolution_template
+                .map(|template| ResolutionConfig { template }),
         };
         state
             .sequencer
@@ -359,10 +374,6 @@ pub async fn resolve_market(
     Path(id): Path<u32>,
     Json(req): Json<ResolveMarketRequest>,
 ) -> Result<Json<ResolveMarketResponse>, AppError> {
-    if !state.dev_mode {
-        return Err(AppError::dev_mode_required());
-    }
-
     if req.payout_nanos > NANOS_PER_DOLLAR {
         return Err(AppError::bad_request(format!(
             "Payout must be between 0 and {} nanos, got {}",
@@ -371,10 +382,34 @@ pub async fn resolve_market(
     }
 
     let mid = MarketId::new(id);
-    let _record = state
-        .sequencer
-        .resolve_market(mid, req.payout_nanos)
-        .await?;
+
+    match req.attestation {
+        Some(att_dto) => {
+            let pubkey_bytes = hex::decode(&att_dto.pubkey_hex)
+                .map_err(|_| AppError::bad_request("Invalid pubkey_hex"))?;
+            let signature_der = hex::decode(&att_dto.signature_hex)
+                .map_err(|_| AppError::bad_request("Invalid signature_hex"))?;
+            let signed = SignedAttestation {
+                attestation: ResolutionAttestation {
+                    market_id: mid,
+                    payout_nanos: req.payout_nanos,
+                    nonce: att_dto.nonce,
+                },
+                signer: FeedPubkey(pubkey_bytes),
+                signature_der,
+            };
+            let _record = state.sequencer.resolve_market_attested(mid, signed).await?;
+        }
+        None => {
+            if !state.dev_mode {
+                return Err(AppError::dev_mode_required());
+            }
+            let _record = state
+                .sequencer
+                .resolve_market(mid, req.payout_nanos)
+                .await?;
+        }
+    }
 
     let status = state.sequencer.get_market_status(mid).await?;
 
@@ -531,6 +566,70 @@ pub async fn set_reference_prices(
         prices.insert(market_id, price);
     }
     Ok(Json(serde_json::json!({"updated": true})))
+}
+
+/// GET /v1/markets/{id}/resolution
+#[utoipa::path(
+    get,
+    path = "/v1/markets/{id}/resolution",
+    params(("id" = u32, Path, description = "Market ID")),
+    responses(
+        (status = 200, description = "Resolution state", body = ResolutionResponse),
+        (status = 404, description = "Market not found"),
+    )
+)]
+pub async fn get_resolution(
+    State(state): State<AppState>,
+    Path(id): Path<u32>,
+) -> Result<Json<ResolutionResponse>, AppError> {
+    let markets = state.sequencer.list_markets().await?;
+    let mid = MarketId::new(id);
+    if markets.get(mid).is_none() {
+        return Err(AppError::not_found(format!("Market {} not found", id)));
+    }
+
+    let (status, metadata) = tokio::try_join!(
+        state.sequencer.get_market_status(mid),
+        state.sequencer.get_market_metadata(mid),
+    )?;
+
+    let template = metadata
+        .as_ref()
+        .map(|m| m.effective_template().to_string())
+        .unwrap_or_else(|| "admin_immediate".to_string());
+
+    let (payout, resolved_at, feed_id_opt) = match &status {
+        matching_sequencer::MarketStatus::Resolved { record } => {
+            let feed_id = match record.resolved_by {
+                OracleSource::DataFeed(fid) => Some(fid),
+                _ => None,
+            };
+            (
+                Some(record.payout_nanos),
+                Some(record.resolved_at_ms),
+                feed_id,
+            )
+        }
+        _ => (None, None, None),
+    };
+
+    let (feed_id_num, feed_name) = if let Some(fid) = feed_id_opt {
+        let feed = state.sequencer.get_feed(fid).await?;
+        let name = feed.as_ref().map(|f| f.name.clone());
+        (Some(fid.0), name)
+    } else {
+        (None, None)
+    };
+
+    Ok(Json(ResolutionResponse {
+        market_id: id,
+        status: status.as_str().to_string(),
+        payout_nanos: payout,
+        resolved_at_ms: resolved_at,
+        resolved_by_feed_id: feed_id_num,
+        resolved_by_feed_name: feed_name,
+        template,
+    }))
 }
 
 /// POST /v1/markets/{id}/metadata — set external metadata for a market (dev mode)

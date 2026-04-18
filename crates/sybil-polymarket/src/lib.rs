@@ -4,5 +4,7 @@ pub mod feed;
 pub mod mapping;
 pub mod mm;
 pub mod polymarket;
+pub mod resolution;
+pub mod signer;
 pub mod sybil;
 pub mod sync;
