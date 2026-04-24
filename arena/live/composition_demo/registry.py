@@ -1,19 +1,29 @@
-"""Static registry and formula helpers for the Iran composition demo.
+"""Graph registry and formula helpers for the composition demo.
 
-The MVP keeps composition metadata outside the Rust sequencer. Sybil markets
-remain ordinary binary markets; this registry explains how those markets relate.
+The demo models the product surface as:
+
+    data feeds -> measurements -> conditions -> propositions -> Sybil markets
+
+The Rust sequencer still sees ordinary binary markets. This module keeps the
+ontology, canonical identity, formula validation, and demo pricing metadata in
+Python until predicate-backed oracle resolution is wired into sybil-oracle.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 
-InstrumentKind = Literal["atom", "composition"]
+ObjectKind = Literal["feed", "measurement", "condition", "proposition"]
+InstrumentKind = Literal["condition", "proposition", "atom", "composition"]
 Formula = dict[str, Any]
 VALID_OPERATORS = {"AND", "OR", "NOT", "K_OF_N", "IF_THEN"}
+COMMUTATIVE_OPERATORS = {"AND", "OR"}
 DEFAULT_COMPATIBLE_OPS = ["AND", "OR", "NOT", "K_OF_N", "IF_THEN"]
+
 SEARCH_STOPWORDS = {
     "a",
     "an",
@@ -40,258 +50,240 @@ SEARCH_SYNONYMS = {
     "nominee": ["nomination", "primary"],
     "recession": ["gdp", "unemployment", "sahm", "drawdown"],
     "macro": ["gdp", "unemployment", "inflation", "fed", "cpi"],
-    "agi": ["ai", "benchmark", "frontiermath", "arc"],
-    "crypto": ["btc", "eth", "sol"],
+    "crypto": ["btc", "bitcoin", "eth", "ethereum", "sol"],
     "basket": ["threshold"],
+    "range": ["between"],
+    "invasion": ["troops", "strikes", "occupation"],
 }
 
 
 @dataclass
-class Instrument:
+class DataFeed:
     id: str
-    kind: InstrumentKind
+    name: str
+    domain: str
+    trust_tier: str
+    resolver_primitive: str
+    description: str
+    source_url: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["object_kind"] = "feed"
+        return data
+
+
+@dataclass
+class Measurement:
+    id: str
+    domain: str
+    measurement_kind: str
+    subject: str
+    unit: str
+    feed_ids: list[str]
+    aggregation_semantics: str
+    title: str
+    description: str
+    resolver_primitive: str
+    trust_tier: str = "demo"
+    quality: str = "seed"
+    canonical_key: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["object_kind"] = "measurement"
+        data["canonical_key"] = self.canonical_key or measurement_key(data)
+        return data
+
+
+@dataclass
+class Condition:
+    id: str
+    measurement_id: str
+    domain: str
     title: str
     short_name: str
     question: str
     description: str
-    oracle_path: str
-    formula: Formula | None = None
-    author: str = "Sybil seed"
+    observation_window: str
+    aggregation: str
+    predicate: dict[str, Any]
+    fair_value: float
+    resolver_primitive: str
+    quality: str = "seed"
+    aliases: list[dict[str, Any]] = field(default_factory=list)
     market_id: int | None = None
-    fair_value: float = 0.5
-    trust_tier: str = "demo"
-    tags: list[str] = field(default_factory=lambda: ["composition-demo", "iran"])
-    domain: str = "geopolitics"
-    atom_type: str = "binary_event"
-    subject: str = ""
-    metric: str = "event"
-    comparator: str = "occurs"
-    threshold: float | None = None
-    unit: str = ""
-    time_window: str = "before 2027"
-    resolver_primitive: str = "admin_immediate"
-    source: str = "seed"
-    source_url: str = ""
     canonical_key: str = ""
-    compatible_ops: list[str] = field(default_factory=lambda: list(DEFAULT_COMPATIBLE_OPS))
-    exclusivity_group: str | None = None
+    formula: Formula | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
-        if not data["canonical_key"]:
-            data["canonical_key"] = canonical_key_for(data)
-        if not data["subject"]:
-            data["subject"] = data["short_name"]
+        data["kind"] = "condition"
+        data["object_kind"] = "condition"
+        data["atom_type"] = self.predicate.get("op", "predicate")
+        data["template_id"] = "condition"
+        data["params"] = {
+            "measurement_id": self.measurement_id,
+            "observation_window": self.observation_window,
+            "aggregation": self.aggregation,
+            "predicate": self.predicate,
+        }
+        data["subject"] = self.title
+        data["metric"] = self.aggregation
+        data["comparator"] = self.predicate.get("op", "predicate")
+        data["threshold"] = self.predicate.get("threshold")
+        data["unit"] = self.predicate.get("unit", "")
+        data["time_window"] = self.observation_window
+        data["source"] = "graph"
+        data["oracle_path"] = f"{self.resolver_primitive}: {self.measurement_id}"
+        data["compatible_ops"] = list(DEFAULT_COMPATIBLE_OPS)
+        data["leaf_ids"] = []
+        data["canonical_key"] = self.canonical_key or condition_key(data)
+        data["tags"] = ["composition-demo", "graph", self.domain, "condition"]
+        data["author"] = "Sybil graph seed"
+        data["trust_tier"] = "graph-demo"
+        data["source_url"] = ""
+        data["exclusivity_group"] = f"{self.measurement_id}:{self.observation_window}:{self.aggregation}"
         return data
 
 
-ATOM_IDS = [
-    "troops_soil_1",
-    "troops_soil_1000",
-    "troops_duration_72h",
-    "formal_declaration",
-    "aumf_passed",
-    "strikes_50",
-    "strikes_7d",
-    "occupation_declared",
-]
+@dataclass
+class Proposition:
+    id: str
+    domain: str
+    title: str
+    short_name: str
+    question: str
+    description: str
+    formula: Formula
+    fair_value: float
+    quality: str = "seed"
+    market_id: int | None = None
+    canonical_key: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["kind"] = "proposition"
+        data["object_kind"] = "proposition"
+        data["atom_type"] = "composition"
+        data["template_id"] = "proposition"
+        data["params"] = {}
+        data["subject"] = self.title
+        data["metric"] = "formula"
+        data["comparator"] = "resolves_true"
+        data["threshold"] = None
+        data["unit"] = ""
+        data["time_window"] = "formula-defined"
+        data["resolver_primitive"] = "predicate_formula"
+        data["source"] = "graph"
+        data["oracle_path"] = "Formula over graph conditions"
+        data["compatible_ops"] = list(DEFAULT_COMPATIBLE_OPS)
+        data["leaf_ids"] = formula_conditions(self.formula)
+        data["canonical_key"] = self.canonical_key or proposition_key(self.formula)
+        data["tags"] = ["composition-demo", "graph", self.domain, "proposition"]
+        data["author"] = "Sybil graph seed"
+        data["trust_tier"] = "graph-demo"
+        data["source_url"] = ""
+        data["exclusivity_group"] = None
+        data["aliases"] = []
+        return data
 
 
-SEED_INSTRUMENTS: list[Instrument] = [
-    Instrument(
-        id="troops_soil_1",
-        kind="atom",
-        title="Any US troops touch Iranian soil",
-        short_name="Troops > 0",
-        question="Will any US military personnel enter Iranian sovereign territory before 2027?",
-        description="Low-bar troop-presence atom. A rescue helicopter landing or brief incursion can trigger it.",
-        oracle_path="Reuters/AP + Pentagon confirmation, admin demo resolver",
-        fair_value=0.42,
-    ),
-    Instrument(
-        id="troops_soil_1000",
-        kind="atom",
-        title="1,000+ US troops enter Iran",
-        short_name="Troops > 1k",
-        question="Will at least 1,000 US military personnel enter Iranian sovereign territory before 2027?",
-        description="Ground-force scale atom intended to distinguish a genuine operation from a brief incident.",
-        oracle_path="Reuters/AP + Pentagon troop-count reports, admin demo resolver",
-        fair_value=0.12,
-    ),
-    Instrument(
-        id="troops_duration_72h",
-        kind="atom",
-        title="US troops remain in Iran for 72h+",
-        short_name="72h presence",
-        question="Will US troops remain continuously on Iranian sovereign territory for at least 72 hours before 2027?",
-        description="Duration atom for sustained ground presence.",
-        oracle_path="Reuters/AP live reporting + Pentagon statements, admin demo resolver",
-        fair_value=0.10,
-    ),
-    Instrument(
-        id="formal_declaration",
-        kind="atom",
-        title="US formally declares war on Iran",
-        short_name="War declared",
-        question="Will the United States formally declare war on Iran before 2027?",
-        description="Clean legal atom based on official US government action.",
-        oracle_path="Congress.gov + White House records, admin demo resolver",
-        fair_value=0.04,
-    ),
-    Instrument(
-        id="aumf_passed",
-        kind="atom",
-        title="Congress passes Iran AUMF",
-        short_name="AUMF",
-        question="Will Congress pass an Authorization for Use of Military Force against Iran before 2027?",
-        description="Legal authorization atom; broader than a formal declaration of war.",
-        oracle_path="Congress.gov bill status, admin demo resolver",
-        fair_value=0.08,
-    ),
-    Instrument(
-        id="strikes_50",
-        kind="atom",
-        title="50+ US strikes on Iran",
-        short_name="50+ strikes",
-        question="Will the US conduct at least 50 kinetic strikes on targets in Iran before 2027?",
-        description="Large strike-campaign atom.",
-        oracle_path="Reuters/AP + Pentagon strike reports, admin demo resolver",
-        fair_value=0.22,
-    ),
-    Instrument(
-        id="strikes_7d",
-        kind="atom",
-        title="US strikes Iran for 7+ days",
-        short_name="7d strikes",
-        question="Will US strikes on Iran continue across at least 7 calendar days before 2027?",
-        description="Sustained-air-campaign atom.",
-        oracle_path="Reuters/AP daily strike chronology, admin demo resolver",
-        fair_value=0.18,
-    ),
-    Instrument(
-        id="occupation_declared",
-        kind="atom",
-        title="US declares occupation of Iranian territory",
-        short_name="Occupation",
-        question="Will the US declare occupation or control of Iranian territory before 2027?",
-        description="Strict territorial-control atom.",
-        oracle_path="White House/Pentagon official statements, admin demo resolver",
-        fair_value=0.03,
-    ),
-    Instrument(
-        id="iran_hawkish",
-        kind="composition",
-        title="US invades Iran - Hawkish definition",
-        short_name="Hawkish",
-        question="Will the US invade Iran before 2027 under a low-bar military-action definition?",
-        description="Counts any US troops on Iranian soil or a substantial strike campaign as invasion.",
-        oracle_path="Composition over seed atoms",
-        formula={"op": "OR", "args": [{"atom": "troops_soil_1"}, {"atom": "strikes_50"}]},
-        author="Sybil seed / hawkish",
-        fair_value=0.48,
-    ),
-    Instrument(
-        id="iran_mainstream",
-        kind="composition",
-        title="US invades Iran - Mainstream definition",
-        short_name="Mainstream",
-        question="Will the US invade Iran before 2027 under a mainstream media definition?",
-        description="Requires sustained ground presence, formal authorization, or a large sustained strike campaign.",
-        oracle_path="Composition over seed atoms",
-        formula={
-            "op": "OR",
-            "args": [
-                {
-                    "op": "AND",
-                    "args": [{"atom": "troops_soil_1000"}, {"atom": "troops_duration_72h"}],
-                },
-                {"atom": "formal_declaration"},
-                {"atom": "aumf_passed"},
-                {"op": "AND", "args": [{"atom": "strikes_50"}, {"atom": "strikes_7d"}]},
-            ],
-        },
-        author="Sybil seed / mainstream",
-        fair_value=0.16,
-    ),
-    Instrument(
-        id="iran_strict",
-        kind="composition",
-        title="US invades Iran - Strict definition",
-        short_name="Strict",
-        question="Will the US invade Iran before 2027 under a strict occupation definition?",
-        description="Requires a large sustained ground operation plus declared territorial occupation.",
-        oracle_path="Composition over seed atoms",
-        formula={
-            "op": "AND",
-            "args": [
-                {"atom": "troops_soil_1000"},
-                {"atom": "troops_duration_72h"},
-                {"atom": "occupation_declared"},
-            ],
-        },
-        author="Sybil seed / strict",
-        fair_value=0.04,
-    ),
-]
+def stable_id(prefix: str, key: str) -> str:
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+    return f"{prefix}_{digest}"
 
 
-def instruments_by_id(instruments: list[Instrument] | list[dict[str, Any]]) -> dict[str, Any]:
-    return {item.id if isinstance(item, Instrument) else item["id"]: item for item in instruments}
-
-
-def formula_atoms(formula: Formula | None) -> list[str]:
-    if not formula:
-        return []
-    if "atom" in formula:
-        return [formula["atom"]]
-    atoms: list[str] = []
-    for arg in formula.get("args", []):
-        atoms.extend(formula_atoms(arg))
-    return atoms
-
-
-def canonical_key_for(item: dict[str, Any]) -> str:
-    if item.get("template_id") and item.get("params"):
-        return f"{item['template_id']}:{json_like(item['params'])}"
-    parts = [
-        item.get("domain", ""),
-        item.get("atom_type", ""),
-        item.get("subject", "") or item.get("short_name", ""),
-        item.get("metric", ""),
-        item.get("comparator", ""),
-        str(item.get("threshold", "")),
-        item.get("unit", ""),
-        item.get("time_window", ""),
-        item.get("resolver_primitive", ""),
-    ]
-    return "|".join(slug_part(part) for part in parts if part is not None)
-
-
-def json_like(value: Any) -> str:
-    import json
-
+def canonical_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
 
 
-def slug_part(value: Any) -> str:
-    out = []
-    last_dash = False
-    for ch in str(value).lower():
-        if ch.isalnum():
-            out.append(ch)
-            last_dash = False
-        elif not last_dash:
-            out.append("-")
-            last_dash = True
-    return "".join(out).strip("-")
+def normalize_text(value: Any) -> str:
+    return " ".join(str(value).strip().lower().split())
+
+
+def normalized_scalar(value: Any) -> Any:
+    if isinstance(value, str):
+        stripped = " ".join(value.strip().split())
+        try:
+            numeric = float(stripped.replace(",", ""))
+            return int(numeric) if numeric.is_integer() else numeric
+        except ValueError:
+            return stripped.lower()
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
+def measurement_key(measurement: dict[str, Any]) -> str:
+    feed_ids = sorted(str(feed).lower() for feed in measurement.get("feed_ids", []))
+    payload = {
+        "kind": normalize_text(measurement.get("measurement_kind", measurement.get("kind", ""))),
+        "subject": normalize_text(measurement.get("subject", "")),
+        "unit": normalize_text(measurement.get("unit", "")),
+        "feeds": feed_ids,
+        "aggregation_semantics": normalize_text(measurement.get("aggregation_semantics", "")),
+    }
+    return f"measurement:{canonical_json(payload)}"
+
+
+def condition_key(condition: dict[str, Any]) -> str:
+    predicate = {
+        key: normalized_scalar(value)
+        for key, value in dict(condition.get("predicate") or {}).items()
+        if value is not None
+    }
+    payload = {
+        "measurement": condition.get("measurement_key") or condition.get("measurement_id"),
+        "window": normalize_text(condition.get("observation_window") or condition.get("time_window", "")),
+        "aggregation": normalize_text(condition.get("aggregation", condition.get("metric", ""))),
+        "predicate": predicate,
+    }
+    return f"condition:{canonical_json(payload)}"
+
+
+def normalize_formula(formula: Formula | None) -> Any:
+    if not isinstance(formula, dict):
+        return None
+    if "condition" in formula or "atom" in formula:
+        return {"condition": str(formula.get("condition") or formula.get("atom"))}
+    op = str(formula.get("op", "")).upper()
+    args = [normalize_formula(arg) for arg in formula.get("args", []) if isinstance(arg, dict)]
+    args = [arg for arg in args if arg is not None]
+    if op in COMMUTATIVE_OPERATORS:
+        args = sorted(args, key=canonical_json)
+    payload: dict[str, Any] = {"op": op, "args": args}
+    if op == "K_OF_N":
+        payload["k"] = int(formula.get("k", len(args)))
+    return payload
+
+
+def proposition_key(formula: Formula | None) -> str:
+    return f"proposition:{canonical_json(normalize_formula(formula))}"
+
+
+def formula_conditions(formula: Formula | None) -> list[str]:
+    if not isinstance(formula, dict):
+        return []
+    if "condition" in formula or "atom" in formula:
+        return [str(formula.get("condition") or formula.get("atom"))]
+    refs: list[str] = []
+    for arg in formula.get("args", []):
+        refs.extend(formula_conditions(arg))
+    return refs
+
+
+def formula_atoms(formula: Formula | None) -> list[str]:
+    """Compatibility alias for old callers."""
+    return formula_conditions(formula)
 
 
 def formula_to_text(formula: Formula | None) -> str:
     if not formula:
-        return "atomic"
-    if "atom" in formula:
-        return formula["atom"]
-    op = formula.get("op", "?")
+        return "condition"
+    if "condition" in formula or "atom" in formula:
+        return str(formula.get("condition") or formula.get("atom"))
+    op = str(formula.get("op", "?")).upper()
     args = [formula_to_text(arg) for arg in formula.get("args", [])]
     if op == "NOT" and args:
         return f"NOT({args[0]})"
@@ -303,16 +295,11 @@ def formula_to_text(formula: Formula | None) -> str:
 
 
 def estimate_formula_value(formula: Formula | None, values: dict[str, float]) -> float:
-    """Estimate a formula using a deliberately simple, transparent model.
-
-    This is not a pricing engine. It gives the demo MM a stable reference and
-    keeps the UI honest about the MVP boundary.
-    """
     if not formula:
         return 0.5
-    if "atom" in formula:
-        return values.get(formula["atom"], 0.5)
-    op = formula.get("op")
+    if "condition" in formula or "atom" in formula:
+        return values.get(str(formula.get("condition") or formula.get("atom")), 0.5)
+    op = str(formula.get("op", "")).upper()
     parts = [estimate_formula_value(arg, values) for arg in formula.get("args", [])]
     if not parts:
         return 0.5
@@ -329,10 +316,8 @@ def estimate_formula_value(formula: Formula | None, values: dict[str, float]) ->
     if op == "NOT":
         return clamp_probability(1.0 - parts[0])
     if op == "K_OF_N":
-        k = int(formula.get("k", len(parts)))
-        return estimate_k_of_n(parts, k)
+        return estimate_k_of_n(parts, int(formula.get("k", len(parts))))
     if op == "IF_THEN" and len(parts) >= 2:
-        # P(A -> B) = P(!A or B). Independence is only a demo prior here.
         return clamp_probability(1.0 - parts[0] * (1.0 - parts[1]))
     return clamp_probability(sum(parts) / len(parts))
 
@@ -359,8 +344,21 @@ def estimate_k_of_n(parts: list[float], k: int) -> float:
     return clamp_probability(sum(dist[k:]))
 
 
-def validate_formula(formula: Formula | None, instruments: list[dict[str, Any]]) -> dict[str, Any]:
-    ids = {item["id"] for item in instruments}
+def validate_formula(
+    formula: Formula | None,
+    instruments_or_conditions: list[dict[str, Any]],
+    implication_edges: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    condition_ids = {
+        item["id"]
+        for item in instruments_or_conditions
+        if item.get("object_kind") == "condition" or item.get("kind") in {"condition", "atom"}
+    }
+    proposition_keys = {
+        item.get("canonical_key")
+        for item in instruments_or_conditions
+        if item.get("object_kind") == "proposition" or item.get("kind") in {"proposition", "composition"}
+    }
     errors: list[str] = []
     refs: list[str] = []
 
@@ -368,11 +366,11 @@ def validate_formula(formula: Formula | None, instruments: list[dict[str, Any]])
         if not isinstance(node, dict):
             errors.append(f"{path}: formula node must be an object")
             return
-        if "atom" in node:
-            atom_id = str(node["atom"])
-            refs.append(atom_id)
-            if atom_id not in ids:
-                errors.append(f"{path}: unknown atom '{atom_id}'")
+        if "condition" in node or "atom" in node:
+            condition_id = str(node.get("condition") or node.get("atom"))
+            refs.append(condition_id)
+            if condition_id not in condition_ids:
+                errors.append(f"{path}: unknown condition '{condition_id}'")
             return
         op = str(node.get("op", "")).upper()
         args = node.get("args")
@@ -395,18 +393,44 @@ def validate_formula(formula: Formula | None, instruments: list[dict[str, Any]])
             walk(arg, f"{path}.args[{idx}]")
 
     walk(formula, "$")
+    key = proposition_key(formula)
+    warnings = implication_warnings(sorted(set(refs)), implication_edges or [])
     return {
         "valid": not errors,
         "errors": errors,
+        "warnings": warnings,
         "referenced_ids": sorted(set(refs)),
+        "referenced_conditions": sorted(set(refs)),
         "operator_count": count_operators(formula),
+        "canonical_key": key,
+        "duplicate": key in proposition_keys,
     }
 
 
+def implication_warnings(refs: list[str], edges: list[dict[str, Any]]) -> list[str]:
+    ref_set = set(refs)
+    warnings: list[str] = []
+    for edge in edges:
+        if edge.get("from") in ref_set and edge.get("to") in ref_set:
+            warnings.append(edge.get("label") or f"{edge['from']} implies {edge['to']}")
+    return warnings
+
+
 def count_operators(formula: Formula | None) -> int:
-    if not isinstance(formula, dict) or "atom" in formula:
+    if not isinstance(formula, dict) or "condition" in formula or "atom" in formula:
         return 0
     return 1 + sum(count_operators(arg) for arg in formula.get("args", []) if isinstance(arg, dict))
+
+
+def canonical_key_for(item: dict[str, Any]) -> str:
+    kind = item.get("object_kind") or item.get("kind")
+    if kind == "measurement":
+        return measurement_key(item)
+    if kind == "condition":
+        return condition_key(item)
+    if kind == "proposition" or item.get("formula"):
+        return proposition_key(item.get("formula"))
+    return f"{kind}:{normalize_text(item.get('id', item.get('title', '')))}"
 
 
 def search_instruments(
@@ -419,6 +443,10 @@ def search_instruments(
     template_id: str = "",
     quality: str = "",
     resolver_primitive: str = "",
+    object_kind: str = "",
+    measurement_kind: str = "",
+    measurement_id: str = "",
+    predicate_op: str = "",
     limit: int = 80,
 ) -> dict[str, Any]:
     q_tokens = query_tokens(query)
@@ -438,6 +466,14 @@ def search_instruments(
             continue
         if resolver_primitive and item.get("resolver_primitive") != resolver_primitive:
             continue
+        if object_kind and item.get("object_kind") != object_kind:
+            continue
+        if measurement_kind and item.get("measurement_kind") != measurement_kind:
+            continue
+        if measurement_id and item.get("measurement_id") != measurement_id:
+            continue
+        if predicate_op and item.get("predicate", {}).get("op") != predicate_op:
+            continue
         text = " ".join(
             str(item.get(key, ""))
             for key in [
@@ -455,6 +491,9 @@ def search_instruments(
                 "params",
                 "quality",
                 "aliases",
+                "measurement_id",
+                "measurement_kind",
+                "predicate",
             ]
         ).lower()
         score = 0.0
@@ -469,7 +508,7 @@ def search_instruments(
             continue
         if q_tokens:
             score += token_hits / max(1, len(q_tokens))
-            if item.get("kind") == "atom":
+            if item.get("kind") == "condition":
                 score += 0.4
             if item.get("quality") == "source_matched":
                 score += 0.35
@@ -483,11 +522,16 @@ def search_instruments(
         key=lambda item: (
             item.get("search_score", 0),
             item.get("quality") == "source_matched",
-            item.get("kind") == "atom",
+            item.get("kind") == "condition",
         ),
         reverse=True,
     )
-    facets = {
+    facets = build_facets(instruments)
+    return {"items": rows[:limit], "total": len(rows), "facets": facets}
+
+
+def build_facets(instruments: list[dict[str, Any]]) -> dict[str, list[str]]:
+    return {
         "domains": sorted({item.get("domain", "") for item in instruments if item.get("domain")}),
         "atom_types": sorted({item.get("atom_type", "") for item in instruments if item.get("atom_type")}),
         "sources": sorted({item.get("source", "") for item in instruments if item.get("source")}),
@@ -496,8 +540,15 @@ def search_instruments(
         "resolver_primitives": sorted(
             {item.get("resolver_primitive", "") for item in instruments if item.get("resolver_primitive")}
         ),
+        "object_kinds": sorted({item.get("object_kind", "") for item in instruments if item.get("object_kind")}),
+        "measurement_kinds": sorted(
+            {item.get("measurement_kind", "") for item in instruments if item.get("measurement_kind")}
+        ),
+        "measurement_ids": sorted({item.get("measurement_id", "") for item in instruments if item.get("measurement_id")}),
+        "predicate_ops": sorted(
+            {item.get("predicate", {}).get("op", "") for item in instruments if item.get("predicate", {}).get("op")}
+        ),
     }
-    return {"items": rows[:limit], "total": len(rows), "facets": facets}
 
 
 def query_tokens(query: str) -> list[str]:

@@ -79,6 +79,18 @@ h1 {
   font-size: 18px;
 }
 .hero-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.dev-controls {
+  max-width: 1540px;
+  margin: 0 auto 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(0, 0, 0, 0.18);
+}
+.dev-controls span { color: var(--muted); font-size: 13px; }
 .stats-strip {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -205,6 +217,40 @@ input, select {
   white-space: nowrap;
   font-size: 14px;
 }
+.meta.long {
+  grid-column: span 3;
+}
+.meta.long strong {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+.info {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 6px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--cyan);
+  font-size: 10px;
+  font-style: normal;
+  cursor: help;
+}
+.technical-details {
+  margin: 14px 0 22px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.12);
+}
+.technical-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 800;
+}
+.technical-details .metadata-grid { margin: 12px 0 0; }
 
 .formula-node {
   border: 1px solid rgba(229, 183, 105, 0.35);
@@ -284,6 +330,19 @@ input, select {
   border-bottom: 1px solid var(--line);
   padding: 8px 0;
 }
+.validation, .edge-row {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.edge-row {
+  grid-template-columns: 1fr 1fr;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.edge-row strong { color: var(--cyan); text-align: right; }
 .definitions { margin-top: 22px; display: grid; gap: 8px; }
 .toast {
   position: fixed;

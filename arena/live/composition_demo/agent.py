@@ -11,7 +11,7 @@ try:
 except ImportError:  # pragma: no cover - optional unless OPENROUTER_API_KEY is set.
     OpenAI = None  # type: ignore[assignment]
 
-from .registry import formula_atoms, formula_to_text, search_instruments, validate_formula
+from .registry import formula_conditions, formula_to_text, search_instruments, validate_formula
 from .store import NANOS_PER_DOLLAR
 
 MODEL = "deepseek/deepseek-v4-flash"
@@ -29,8 +29,8 @@ def discover(query: str, state: dict[str, Any]) -> dict[str, Any]:
         "recommendation_id": recommendation["id"] if recommendation else None,
         "ranked_ids": [item["id"] for item in visible],
         "actions": [
-            "Open the Explorer filters to inspect the atom universe.",
-            "Draft a composition from the top atoms if no existing market matches.",
+            "Open the Graph Explorer filters to inspect measurements and conditions.",
+            "Draft a proposition from the top conditions if no existing market matches.",
             "Check source and resolver primitive before approving a created market.",
         ],
     }
@@ -42,8 +42,8 @@ def build_discovery_answer(query: str, recommendation: dict[str, Any] | None, ra
     names = ", ".join(item["short_name"] for item in ranked)
     return (
         f"For '{query}', I would start with {recommendation['short_name']} "
-        f"({recommendation.get('domain', 'unknown')}/{recommendation.get('atom_type', recommendation['kind'])}). "
-        f"Nearby candidates: {names}. Use these as leaves for a new formula if no single instrument matches."
+        f"({recommendation.get('domain', 'unknown')}/{recommendation.get('object_kind', recommendation['kind'])}). "
+        f"Nearby candidates: {names}. Use these as leaves for a new formula if no single proposition matches."
     )
 
 
@@ -72,7 +72,7 @@ def propose_trade(payload: dict[str, Any], state: dict[str, Any]) -> dict[str, A
 
 def explain_instrument(instrument_id: str, state: dict[str, Any]) -> dict[str, Any]:
     item = find_instrument(state, instrument_id)
-    leaves = [find_instrument(state, leaf) for leaf in formula_atoms(item.get("formula"))]
+    leaves = [find_instrument(state, leaf) for leaf in formula_conditions(item.get("formula"))]
     return {
         "instrument_id": item["id"],
         "summary": item["description"],
@@ -103,29 +103,30 @@ def draft_with_llm(prompt: str, state: dict[str, Any]) -> dict[str, Any] | None:
     if OpenAI is None:
         return None
     domain = infer_domain(prompt)
-    atoms = [
+    conditions = [
         {
             "id": item["id"],
             "short_name": item["short_name"],
             "description": item["description"],
             "domain": item.get("domain"),
-            "atom_type": item.get("atom_type"),
+            "predicate": item.get("predicate"),
+            "measurement_id": item.get("measurement_id"),
             "source": item.get("source"),
         }
         for item in search_instruments(
             state["instruments"],
             query=expand_prompt(prompt),
             domain=domain,
-            kind="atom",
+            kind="condition",
             limit=80,
         )["items"]
     ]
     system = (
         "You draft prediction-market compositions. Return strict JSON only with keys: "
-        "title, short_name, question, description, formula. Formula uses {'atom': id} "
-        "or {'op':'AND'|'OR'|'NOT','args':[...]} and may only reference provided atom ids."
+        "title, short_name, question, description, formula. Formula leaves use {'condition': id} "
+        "or {'op':'AND'|'OR'|'NOT'|'K_OF_N'|'IF_THEN','args':[...]} and may only reference provided condition ids."
     )
-    user = f"Available atoms:\n{json.dumps(atoms)}\n\nUser request:\n{prompt}"
+    user = f"Available conditions:\n{json.dumps(conditions)}\n\nUser request:\n{prompt}"
     try:
         client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
@@ -154,26 +155,26 @@ def draft_with_llm(prompt: str, state: dict[str, Any]) -> dict[str, Any] | None:
 def deterministic_draft(prompt: str, state: dict[str, Any]) -> dict[str, Any]:
     lower = prompt.lower()
     domain = infer_domain(prompt)
-    atoms = search_instruments(
+    conditions = search_instruments(
         state["instruments"],
         query=expand_prompt(prompt),
         domain=domain,
-        kind="atom",
+        kind="condition",
         limit=24,
     )["items"]
-    atoms = pick_diverse_atoms(prompt, atoms)[:6]
-    if len(atoms) < 2:
-        atoms = [
+    conditions = pick_diverse_conditions(prompt, conditions)[:6]
+    if len(conditions) < 2:
+        conditions = [
             item
             for item in state["instruments"]
-            if item["kind"] == "atom" and (not domain or item.get("domain") == domain)
+            if item["kind"] == "condition" and (not domain or item.get("domain") == domain)
         ][:6]
-    if len(atoms) < 2:
-        atoms = [item for item in state["instruments"] if item["kind"] == "atom"][:6]
-    if not atoms:
-        raise ValueError("no atoms available to draft from")
+    if len(conditions) < 2:
+        conditions = [item for item in state["instruments"] if item["kind"] == "condition"][:6]
+    if not conditions:
+        raise ValueError("no conditions available to draft from")
 
-    args = [{"atom": item["id"]} for item in atoms[: min(4, len(atoms))]]
+    args = [{"condition": item["id"]} for item in conditions[: min(4, len(conditions))]]
     if ("all" in lower or "and" in lower or "parlay" in lower or "strict" in lower) and len(args) >= 2:
         formula = {"op": "AND", "args": args}
         short = "All selected"
@@ -190,7 +191,7 @@ def deterministic_draft(prompt: str, state: dict[str, Any]) -> dict[str, Any]:
         formula = {"op": "OR", "args": args}
         short = "Any selected"
         desc = "Agent draft paying if any selected condition resolves YES."
-    domain = domain or atoms[0].get("domain", "custom")
+    domain = domain or conditions[0].get("domain", "custom")
     return normalize_draft(
         {
             "title": f"{short} composition for {prompt[:56]}",
@@ -221,26 +222,26 @@ def infer_domain(prompt: str) -> str:
     return ""
 
 
-def pick_diverse_atoms(prompt: str, atoms: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def pick_diverse_conditions(prompt: str, conditions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     lower = prompt.lower()
     if "recession" in lower:
-        priorities = ["real gdp", "sahm", "unemployment", "drawdown", "vix", "fed funds"]
+        priorities = ["gdp", "sahm", "unemployment", "drawdown", "vix", "fed"]
         ranked: list[dict[str, Any]] = []
         used_indicators: set[str] = set()
         for priority in priorities:
-            for atom in atoms:
-                indicator = str(atom.get("params", {}).get("indicator", "")).lower()
+            for condition in conditions:
+                indicator = str(condition.get("short_name", condition.get("id", ""))).lower()
                 if priority in indicator and indicator not in used_indicators:
-                    ranked.append(atom)
+                    ranked.append(condition)
                     used_indicators.add(indicator)
                     break
-        for atom in atoms:
-            indicator = str(atom.get("params", {}).get("indicator", atom.get("id", ""))).lower()
+        for condition in conditions:
+            indicator = str(condition.get("short_name", condition.get("id", ""))).lower()
             if indicator not in used_indicators:
-                ranked.append(atom)
+                ranked.append(condition)
                 used_indicators.add(indicator)
         return ranked
-    return atoms
+    return conditions
 
 
 def expand_prompt(prompt: str) -> str:
@@ -262,12 +263,13 @@ def expand_prompt(prompt: str) -> str:
 def normalize_draft(data: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": data.get("id", ""),
-        "kind": "composition",
+        "kind": "proposition",
+        "object_kind": "proposition",
         "title": data["title"],
         "short_name": data.get("short_name") or data["title"][:24],
         "question": data["question"],
         "description": data["description"],
-        "oracle_path": "Composition over demo atoms",
+        "oracle_path": "Formula over graph conditions",
         "formula": data["formula"],
         "author": "Agent draft",
         "fair_value": 0.15,
@@ -281,13 +283,13 @@ def normalize_draft(data: dict[str, Any]) -> dict[str, Any]:
         "threshold": None,
         "unit": "",
         "time_window": "user-defined",
-        "resolver_primitive": "composition_resolution",
+        "resolver_primitive": "predicate_formula",
         "source": "agent",
         "source_url": "",
         "canonical_key": data.get("id", "") or data["title"],
         "compatible_ops": ["AND", "OR", "NOT", "K_OF_N", "IF_THEN"],
         "exclusivity_group": None,
-        "template_id": "composition",
+        "template_id": "proposition",
         "params": {},
         "quality": "agent_draft",
         "aliases": [],

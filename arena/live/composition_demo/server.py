@@ -16,14 +16,18 @@ from . import agent
 from .store import (
     DEFAULT_SYBIL_URL,
     add_instrument,
+    create_wizard_draft,
+    edit_wizard_draft,
     enrich_state,
     explorer_search,
     import_sources,
     load_state,
+    publish_wizard_draft,
     quote_once,
     seed_markets,
     submit_order,
     trigger_event,
+    validate_wizard_draft,
     validate_formula_payload,
 )
 
@@ -54,11 +58,20 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/seed":
                 self.respond(seed_markets(sybil_url))
             elif parsed.path == "/sources/import":
-                self.respond(import_sources(force=bool(body.get("force")), max_atoms=int(body.get("max_atoms", 300))))
+                import_sources(force=bool(body.get("force")), max_atoms=int(body.get("max_atoms", 110)))
+                self.respond(enrich_state(load_state(), sybil_url))
             elif parsed.path == "/explorer/search":
                 self.respond(explorer_search(body, sybil_url))
             elif parsed.path == "/formula/validate":
                 self.respond(validate_formula_payload(body))
+            elif parsed.path == "/wizard/draft":
+                self.respond(create_wizard_draft(body))
+            elif parsed.path == "/wizard/edit":
+                self.respond(edit_wizard_draft(body))
+            elif parsed.path == "/wizard/validate":
+                self.respond(validate_wizard_draft(body))
+            elif parsed.path == "/wizard/publish":
+                self.respond(publish_wizard_draft(body, sybil_url))
             elif parsed.path == "/quote":
                 self.respond(quote_once(sybil_url))
             elif parsed.path == "/event":

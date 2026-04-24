@@ -15,7 +15,7 @@ def main() -> None:
     counts = state.get("instrument_counts", {})
     print(
         f"Seeded {len(state['instruments'])} instruments "
-        f"({counts.get('atoms', 0)} atoms, {counts.get('compositions', 0)} compositions)"
+        f"({counts.get('conditions', 0)} conditions, {counts.get('propositions', 0)} propositions)"
     )
     for item in state["instruments"][:24]:
         print(f"  {item['id']:<24} market={item.get('market_id')} {item['short_name']}")

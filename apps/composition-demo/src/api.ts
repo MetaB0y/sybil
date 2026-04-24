@@ -1,4 +1,4 @@
-import type { DemoState, Discovery, Draft, Formula, FormulaValidation, SearchResult, TradeProposal } from "./types";
+import type { DemoState, Discovery, Draft, Formula, FormulaValidation, SearchResult, TradeProposal, WizardDraft } from "./types";
 
 export const DEMO_URL = import.meta.env.VITE_COMPOSITION_DEMO_URL || "http://localhost:8787";
 export const SYBIL_URL = import.meta.env.VITE_SYBIL_API_URL || "http://localhost:3001";
@@ -30,7 +30,7 @@ export function seedDemo(): Promise<DemoState> {
   });
 }
 
-export function importSources(force = false, max_atoms = 300): Promise<DemoState> {
+export function importSources(force = false, max_atoms = 110): Promise<DemoState> {
   return json<DemoState>(`${DEMO_URL}/sources/import`, {
     method: "POST",
     body: JSON.stringify({ sybil_url: SYBIL_URL, force, max_atoms }),
@@ -46,11 +46,53 @@ export function searchExplorer(params: {
   template_id?: string;
   quality?: string;
   resolver_primitive?: string;
+  object_kind?: string;
+  measurement_kind?: string;
+  measurement_id?: string;
+  predicate_op?: string;
   limit?: number;
 }): Promise<SearchResult> {
   return json<SearchResult>(`${DEMO_URL}/explorer/search`, {
     method: "POST",
     body: JSON.stringify({ sybil_url: SYBIL_URL, ...params }),
+  });
+}
+
+export function createWizardDraft(prompt: string): Promise<WizardDraft> {
+  return json<WizardDraft>(`${DEMO_URL}/wizard/draft`, {
+    method: "POST",
+    body: JSON.stringify({ sybil_url: SYBIL_URL, prompt }),
+  });
+}
+
+export function editWizardDraft(params: {
+  draft_id?: string;
+  draft?: WizardDraft;
+  operation: string;
+  condition_id?: string;
+  from_condition_id?: string;
+  to_condition_id?: string;
+  operator?: string;
+  k?: number;
+  formula?: Formula;
+}): Promise<WizardDraft> {
+  return json<WizardDraft>(`${DEMO_URL}/wizard/edit`, {
+    method: "POST",
+    body: JSON.stringify({ sybil_url: SYBIL_URL, ...params }),
+  });
+}
+
+export function validateWizardDraft(draft: WizardDraft): Promise<WizardDraft> {
+  return json<WizardDraft>(`${DEMO_URL}/wizard/validate`, {
+    method: "POST",
+    body: JSON.stringify({ sybil_url: SYBIL_URL, draft }),
+  });
+}
+
+export function publishWizardDraft(draft: WizardDraft): Promise<DemoState> {
+  return json<DemoState>(`${DEMO_URL}/wizard/publish`, {
+    method: "POST",
+    body: JSON.stringify({ sybil_url: SYBIL_URL, draft }),
   });
 }
 

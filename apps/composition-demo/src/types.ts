@@ -1,4 +1,4 @@
-export type Formula = { atom?: string; op?: string; args?: Formula[]; k?: number };
+export type Formula = { condition?: string; atom?: string; op?: string; args?: Formula[]; k?: number };
 
 export type Market = {
   market_id: number;
@@ -11,7 +11,8 @@ export type Market = {
 
 export type Instrument = {
   id: string;
-  kind: "atom" | "composition";
+  kind: "condition" | "proposition" | "atom" | "composition";
+  object_kind?: "condition" | "proposition" | "measurement" | "feed";
   title: string;
   short_name: string;
   question: string;
@@ -26,6 +27,12 @@ export type Instrument = {
   market?: Market;
   last_price?: number;
   domain?: string;
+  measurement_id?: string;
+  measurement_kind?: string;
+  measurement?: Measurement;
+  feed_ids?: string[];
+  aggregation_semantics?: string;
+  predicate?: Record<string, unknown>;
   atom_type?: string;
   subject?: string;
   metric?: string;
@@ -55,6 +62,12 @@ export type Instrument = {
 
 export type DemoState = {
   instruments: Instrument[];
+  feeds?: DataFeed[];
+  measurements?: Measurement[];
+  conditions?: Instrument[];
+  propositions?: Instrument[];
+  markets?: Array<{ instrument_id: string; market_id: number; kind: string; question: string }>;
+  implication_edges?: ImplicationEdge[];
   accounts: Record<string, number>;
   events: Array<{ event: string; timestamp: number }>;
   sybil_url: string;
@@ -64,7 +77,11 @@ export type DemoState = {
   source_errors?: string[];
   instrument_counts?: {
     atoms: number;
+    conditions?: number;
     compositions: number;
+    propositions?: number;
+    measurements?: number;
+    feeds?: number;
     seeded: number;
     quoted: number;
   };
@@ -77,6 +94,10 @@ export type Facets = {
   template_ids?: string[];
   qualities?: string[];
   resolver_primitives?: string[];
+  object_kinds?: string[];
+  measurement_kinds?: string[];
+  measurement_ids?: string[];
+  predicate_ops?: string[];
 };
 
 export type SearchResult = {
@@ -88,8 +109,12 @@ export type SearchResult = {
 export type FormulaValidation = {
   valid: boolean;
   errors: string[];
+  warnings?: string[];
   referenced_ids: string[];
+  referenced_conditions?: string[];
   operator_count: number;
+  canonical_key?: string;
+  duplicate?: boolean;
 };
 
 export type Discovery = {
@@ -110,3 +135,48 @@ export type TradeProposal = {
 };
 
 export type Draft = Omit<Instrument, "market_id" | "leaf_ids" | "market" | "last_price">;
+
+export type DataFeed = {
+  id: string;
+  name: string;
+  domain: string;
+  trust_tier: string;
+  resolver_primitive: string;
+  description: string;
+};
+
+export type Measurement = {
+  id: string;
+  object_kind: "measurement";
+  domain: string;
+  measurement_kind: string;
+  subject: string;
+  unit: string;
+  feed_ids: string[];
+  aggregation_semantics: string;
+  title: string;
+  description: string;
+  resolver_primitive: string;
+  canonical_key: string;
+};
+
+export type ImplicationEdge = {
+  from: string;
+  to: string;
+  type: string;
+  label: string;
+  no_arb: string;
+};
+
+export type WizardDraft = {
+  draft_id?: string;
+  title: string;
+  short_name?: string;
+  question?: string;
+  description?: string;
+  domain?: string;
+  formula: Formula;
+  validation?: FormulaValidation;
+  referenced_conditions?: Instrument[];
+  implication_edges?: ImplicationEdge[];
+};
