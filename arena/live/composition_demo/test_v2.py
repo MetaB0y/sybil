@@ -7,6 +7,7 @@ from .registry import condition_key, measurement_key, proposition_key, search_in
 from .sources import build_condition, build_universe, generate_implication_edges, split_kalshi_legs
 from .store import (
     add_condition_to_formula,
+    build_threshold_curves,
     draft_formula_from_prompt,
     edit_wizard_draft,
     enrich_draft,
@@ -52,6 +53,22 @@ class GraphUniverseTests(unittest.TestCase):
         self.assertEqual(diagnostics["status"], "ok", diagnostics["errors"])
         self.assertEqual(diagnostics["checks"]["legacy_atoms"], 0)
         self.assertGreaterEqual(diagnostics["checks"]["measurements"], 50)
+
+    def test_threshold_curves_group_same_measurement_conditions(self) -> None:
+        universe = build_universe({"polymarket_events": [], "kalshi_markets": [], "errors": []})
+        measurements = {item["id"]: item for item in universe["measurements"]}
+        enriched = []
+        for item in universe["instruments"]:
+            row = dict(item)
+            if row.get("measurement_id"):
+                row["measurement"] = measurements[row["measurement_id"]]
+            enriched.append(row)
+        curves = build_threshold_curves(enriched)
+        eth_curve = next(curve for curve in curves if curve["title"] == "Crypto / ETH/USD spot")
+        names = [item["short_name"] for item in eth_curve["conditions"]]
+        self.assertIn("ETH > 3000", names)
+        self.assertIn("ETH > 6000", names)
+        self.assertIn("3000 < ETH < 6000", names)
 
     def test_search_returns_conditions_not_flat_atoms(self) -> None:
         universe = build_universe({"polymarket_events": [], "kalshi_markets": [], "errors": []})

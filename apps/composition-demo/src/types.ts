@@ -76,6 +76,7 @@ export type DemoState = {
   propositions?: Instrument[];
   markets?: Array<{ instrument_id: string; market_id: number; kind: string; question: string }>;
   implication_edges?: ImplicationEdge[];
+  threshold_curves?: ThresholdCurve[];
   accounts: Record<string, number>;
   events: Array<{ event: string; timestamp: number }>;
   sybil_url: string;
@@ -220,6 +221,23 @@ export type ImplicationEdge = {
   type: string;
   label: string;
   no_arb: string;
+};
+
+export type ThresholdCurve = {
+  measurement_id: string;
+  title: string;
+  domain?: string;
+  window: string;
+  aggregation: string;
+  mm_note: string;
+  conditions: Array<{
+    condition_id: string;
+    short_name: string;
+    predicate: Record<string, unknown>;
+    fair_value: number;
+    market_price?: number;
+    market_id?: number | null;
+  }>;
 };
 
 export type WizardDraft = {

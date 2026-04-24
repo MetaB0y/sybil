@@ -260,6 +260,7 @@ def enrich_state(state: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL) -> d
     out["instruments"] = enriched
     out["conditions"] = [item for item in enriched if item.get("object_kind") == "condition"]
     out["propositions"] = [item for item in enriched if item.get("object_kind") == "proposition"]
+    out["threshold_curves"] = build_threshold_curves(enriched)
     out["markets"] = [
         {
             "instrument_id": item["id"],
@@ -288,6 +289,65 @@ def enrich_state(state: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL) -> d
         and int(state.get("last_quote", {}).get("markets_quoted", 0)),
     }
     return out
+
+
+def build_threshold_curves(enriched: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for item in enriched:
+        if item.get("object_kind") != "condition":
+            continue
+        predicate = item.get("predicate") or {}
+        if predicate.get("op") not in {">", "<", ">=", "<=", "between"}:
+            continue
+        key = (item.get("measurement_id", ""), item.get("observation_window", ""), item.get("aggregation", ""))
+        if not key[0]:
+            continue
+        groups.setdefault(key, []).append(item)
+
+    curves = []
+    for (measurement_id, window, aggregation), conditions in groups.items():
+        if len(conditions) < 2:
+            continue
+        measurement = conditions[0].get("measurement", {})
+        rows = []
+        for condition in sorted(conditions, key=threshold_sort_key):
+            predicate = condition.get("predicate") or {}
+            market = condition.get("market") or {}
+            rows.append(
+                {
+                    "condition_id": condition["id"],
+                    "short_name": condition["short_name"],
+                    "predicate": predicate,
+                    "fair_value": condition.get("model_value", condition.get("fair_value", 0.5)),
+                    "market_price": market.get("yes_price_nanos"),
+                    "market_id": condition.get("market_id"),
+                }
+            )
+        curves.append(
+            {
+                "measurement_id": measurement_id,
+                "title": measurement.get("display_title") or measurement.get("title") or conditions[0].get("measurement_id"),
+                "domain": conditions[0].get("domain"),
+                "window": window,
+                "aggregation": aggregation,
+                "conditions": rows,
+                "mm_note": "Quote this group as one monotone curve; do not treat each threshold as unrelated risk.",
+            }
+        )
+    curves.sort(key=lambda item: (item.get("domain", ""), item.get("title", "")))
+    return curves
+
+
+def threshold_sort_key(condition: dict[str, Any]) -> tuple[int, float, str]:
+    predicate = condition.get("predicate") or {}
+    op = predicate.get("op")
+    if op in {">", ">="}:
+        return (0, float(predicate.get("threshold", 0)), condition["id"])
+    if op == "between":
+        return (1, float(predicate.get("low", 0)), condition["id"])
+    if op in {"<", "<="}:
+        return (2, float(predicate.get("threshold", 0)), condition["id"])
+    return (3, 0.0, condition["id"])
 
 
 def ontology_diagnostics(state: dict[str, Any], enriched: list[dict[str, Any]]) -> dict[str, Any]:

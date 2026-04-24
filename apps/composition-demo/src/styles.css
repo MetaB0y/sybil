@@ -319,6 +319,57 @@ input, select {
   padding-top: 6px;
 }
 
+.curve-card {
+  margin-top: 18px;
+  border: 1px solid rgba(121, 227, 209, 0.28);
+  border-radius: 24px;
+  padding: 16px;
+  background: rgba(121, 227, 209, 0.055);
+}
+.curve-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+}
+.curve-head h3 {
+  margin: 4px 0 0;
+  font-size: 26px;
+  letter-spacing: -0.025em;
+}
+.curve-head span, .curve-card p {
+  color: var(--muted);
+  font-size: 13px;
+}
+.curve-rows {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+.curve-rows button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 58px;
+  text-align: left;
+  border-radius: 14px;
+}
+.curve-rows span {
+  display: grid;
+  gap: 4px;
+}
+.curve-rows b {
+  font-weight: 850;
+}
+.curve-rows small {
+  color: var(--muted);
+}
+.curve-rows strong {
+  color: var(--cyan);
+  font-size: 20px;
+}
+
 .graph-nav {
   margin-top: 18px;
   border: 1px solid var(--line);

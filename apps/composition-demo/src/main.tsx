@@ -103,6 +103,8 @@ function App() {
   const propositions = instruments.filter((item) => item.kind === "proposition" || item.kind === "composition");
   const conditions = instruments.filter((item) => item.kind === "condition" || item.kind === "atom");
   const selectedEdges = (state?.implication_edges || []).filter((edge) => edge.from === selected?.id || edge.to === selected?.id);
+  const selectedMeasurementId = selected?.object_kind === "measurement" ? selected.id : selected?.measurement_id || "";
+  const selectedCurve = (state?.threshold_curves || []).find((curve) => curve.measurement_id === selectedMeasurementId);
   const modeConfig = AGENT_MODES.find((item) => item.id === agentMode) || AGENT_MODES[0];
   const diagnostics = state?.ontology_diagnostics;
 
@@ -423,6 +425,7 @@ function App() {
                   ))}
                 </div>
               )}
+              {selectedCurve && <ThresholdCurveView curve={selectedCurve} select={setSelectedId} />}
 
               <GraphNavigator state={state} selected={selected} select={setSelectedId} />
 
@@ -520,6 +523,38 @@ function App() {
         </aside>
       </section>
     </main>
+  );
+}
+
+function ThresholdCurveView({
+  curve,
+  select,
+}: {
+  curve: NonNullable<DemoState["threshold_curves"]>[number];
+  select: (id: string) => void;
+}) {
+  return (
+    <div className="curve-card">
+      <div className="curve-head">
+        <div>
+          <div className="panel-label">Threshold Curve</div>
+          <h3>{curve.title}</h3>
+        </div>
+        <span>{curve.window} / {curve.aggregation}</span>
+      </div>
+      <div className="curve-rows">
+        {curve.conditions.map((item) => (
+          <button key={item.condition_id} onClick={() => select(item.condition_id)}>
+            <span>
+              <b>{item.short_name}</b>
+              <small>{predicateRecordText(item.predicate)}</small>
+            </span>
+            <strong>{nanosPct(item.market_price) || pct(item.fair_value)}</strong>
+          </button>
+        ))}
+      </div>
+      <p>{curve.mm_note}</p>
+    </div>
   );
 }
 
@@ -710,6 +745,10 @@ function isTradable(item?: Instrument | null): boolean {
 function predicateText(item: Instrument): string {
   const predicate = (item.predicate || item.params?.predicate) as Record<string, unknown> | undefined;
   if (!predicate) return item.object_kind === "measurement" || item.object_kind === "entity" || item.object_kind === "context" ? "not a yes/no statement" : "formula";
+  return predicateRecordText(predicate);
+}
+
+function predicateRecordText(predicate: Record<string, unknown>): string {
   if (predicate.op === "between") return `${predicate.low} < value < ${predicate.high}`;
   if (predicate.threshold !== undefined) return `value ${predicate.op} ${predicate.threshold}`;
   if (predicate.value !== undefined) return `value ${predicate.op} ${predicate.value}`;
