@@ -257,6 +257,55 @@ deploy-shell:
 arena-status hours="24":
     ssh {{SERVER}} 'docker exec sybil-arena-dashboard uv run python -m live.status --hours {{hours}}'
 
+# ── Composition Demo ───────────────────────────────────────────────────────
+
+# Start local composition-demo agent gateway (requires sybil-api separately)
+composition-demo-agent sybil_url="http://localhost:3001":
+    cd arena && uv run python -m live.composition_demo.server --sybil-url {{sybil_url}}
+
+# Seed Iran atom/composition markets into a dev-mode sybil-api
+composition-demo-seed sybil_url="http://localhost:3001":
+    cd arena && uv run python -m live.composition_demo.seed --sybil-url {{sybil_url}}
+
+# Run the reference MM quote loop for the composition demo
+composition-demo-mm sybil_url="http://localhost:3001":
+    cd arena && uv run python -m live.composition_demo.mm_loop --sybil-url {{sybil_url}}
+
+# Start the custom React/Vite composition demo UI
+composition-demo-ui:
+    cd apps/composition-demo && npm run dev
+
+# Run the full local composition demo stack: API + agent gateway + seeding + MM + UI
+composition-demo port="3001":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    sybil_url="http://localhost:{{port}}"
+    cleanup() {
+      jobs -pr | xargs -r kill
+    }
+    trap cleanup EXIT INT TERM
+
+    rm -f arena/live/composition_demo/state.json
+
+    cargo run -p sybil-api --bin sybil-api -- --dev-mode --port {{port}} &
+    api_pid=$!
+
+    for _ in $(seq 1 60); do
+      if curl -fsS "$sybil_url/v1/health" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 0.5
+    done
+
+    cd arena
+    uv run python -m live.composition_demo.server --sybil-url "$sybil_url" &
+    agent_pid=$!
+    uv run python -m live.composition_demo.seed --sybil-url "$sybil_url"
+    uv run python -m live.composition_demo.mm_loop --sybil-url "$sybil_url" &
+    mm_pid=$!
+    cd ../apps/composition-demo
+    npm run dev
+
 # Live system status (containers, blocks, traders, fills)
 status:
     ./scripts/status.sh
