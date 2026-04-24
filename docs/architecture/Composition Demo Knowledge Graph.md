@@ -772,6 +772,180 @@ NBA slate -> 2026-04-30 -> Knicks at Celtics -> box score -> Tatum points
 
 This is the right mental model for the composition demo knowledge graph.
 
+## First Product
+
+The first product should not be "browse the whole graph." The graph is infrastructure. The product should be an agentic trading and market-creation workspace that uses the graph to answer user intent:
+
+```text
+User intent -> graph search -> candidate markets -> explanation -> trade or create definition
+```
+
+The four strongest initial workflows are:
+
+1. **Hedge my exposure**
+
+   The user starts with a position, not a market:
+
+   ```text
+   I am long ETH and worried about downside in 2026.
+   ```
+
+   The agent should ask what loss state matters, then find contracts that pay in that state. It should distinguish direct hedges from proxies:
+
+   ```text
+   Direct: ETH < 2000
+   Direct basket: ETH < 2000 OR BTC < 70000
+   Proxy: VIX > 40, hard landing, crypto shock
+   ```
+
+   The main product risk is basis risk. The UI must be honest when a proxy might fail even if the user's portfolio loses money.
+
+2. **This news is underappreciated**
+
+   The user starts with a catalyst:
+
+   ```text
+   New Iran strike reports look underappreciated.
+   ```
+
+   The agent should map the news to a causal channel:
+
+   ```text
+   air campaign -> strike thresholds
+   ground escalation -> troop count/duration
+   legal escalation -> AUMF/declaration
+   market spillover -> VIX/oil/macro conditions
+   ```
+
+   This workflow needs careful explanation because "news is important" is not enough. The user must choose which future observable changes if the interpretation is right.
+
+3. **Interview me to find bets**
+
+   The user has views but not contracts:
+
+   ```text
+   I have views on macro and crypto.
+   ```
+
+   The agent should interview the user into measurable claims:
+
+   ```text
+   What would prove you right?
+   When should it resolve?
+   Which related outcome would falsify the thesis?
+   Is this a direct forecast or a proxy?
+   ```
+
+   This is a strong consumer/product wedge because the graph can turn vague conviction into precise conditions without exposing ontology internals.
+
+4. **I have alpha; how do I monetize it?**
+
+   The user starts with information:
+
+   ```text
+   I have alpha about BTC ETF flows.
+   ```
+
+   The agent should rank:
+
+   ```text
+   closest direct market
+   liquid proxy
+   custom market definition
+   no-trade if resolution does not capture the alpha
+   ```
+
+   The product must be strict here. A market can be available and still be the wrong expression of the alpha.
+
+Graph Explorer remains useful, but it is an internal/power-user tool. The primary surface should be the copilot and workspace. Explorer should answer "what does the graph contain?" The copilot should answer "what should I trade or create?"
+
+## Product Viability
+
+The idea is plausible, but not easy. The strongest argument is that prediction markets have a discovery and liquidity fragmentation problem. A graph can make markets deduplicated, composable, and easier to quote. Sybil's batch/flash-liquidity design is directionally aligned with this because market makers can quote many related contracts with bounded risk.
+
+The weakest argument is that the full knowledge graph is too large for a first product. Building a general future-facts graph across politics, sports, macro, crypto, AI, culture, and geopolitics is a large data company. If the UI exposes that scope too early, users will experience the ontology as complexity rather than leverage.
+
+The right first wedge is narrower:
+
+```text
+agentic search/create/trade over a curated graph
+```
+
+The graph should initially contain enough domains to demonstrate compositionality, but production traction probably requires one or two verticals where:
+
+- users already have strong opinions or exposures,
+- resolution sources are credible,
+- there are enough related markets for graph navigation to matter,
+- market makers can quote curves or correlated baskets,
+- the product can show a tradeable edge quickly.
+
+Crypto and macro hedging are the most natural early verticals. Sports is useful for graph modeling because entity/event/stat paths are intuitive, but it has heavy data/vendor and regulatory constraints. Politics/geopolitics are good for market-definition demos but can be resolution-dispute heavy.
+
+## Liquidity Feasibility
+
+Liquidity is feasible only if the graph helps market makers reuse capital. It is not feasible if the product creates hundreds of bespoke markets with no quoting surface.
+
+The most realistic path is:
+
+```text
+observation slot -> threshold curve -> batch quote -> shared MM risk budget
+```
+
+For example:
+
+```text
+ETH max in 2026 > 3000
+ETH max in 2026 > 6000
+ETH max in 2026 > 10000
+3000 < ETH max in 2026 < 6000
+```
+
+A market maker can quote the whole curve monotonically and let Sybil's batch solver fill only the subset that fits their budget. This is a real advantage over isolated order books.
+
+The next level is formula pricing:
+
+```text
+ETH > 3000 AND BTC > 100000
+```
+
+This can be quoted heuristically from leaves, correlations, and user flow. It should not be presented as mathematically enforced no-arb until the solver actually enforces those constraints.
+
+Full graph-wide no-arb is possible in principle, but it should not be the first liquidity milestone. The first milestone should be:
+
+- visible implication edges,
+- duplicate/equivalent definition detection,
+- threshold-curve grouping,
+- simple monotone quote repair,
+- MM budget reuse across related markets,
+- UI warnings for violations.
+
+## Hard VC Questions
+
+An investor will likely ask:
+
+- **Why now?** Existing prediction markets have struggled with liquidity and legal/regulatory ambiguity. The answer needs to be more than "better UI." The credible answer is compositional market creation plus batch/flash liquidity.
+- **Who is the first user?** "Everyone who predicts things" is too broad. A sharper answer is crypto/macro users who already have exposure and want hedges or proxy trades.
+- **Where does liquidity come from?** Retail flow alone is not enough. The product needs a market-maker story: graph-aware quote curves, bounded batch risk, and capital reuse across related markets.
+- **What prevents market fragmentation?** The answer is canonical measurement/condition/definition identity, duplicate detection, and source-market aliases as evidence rather than roots.
+- **How do you avoid oracle disputes?** The graph must force explicit measurement, source, window, aggregation, and predicate fields before publishing.
+- **Why will users trust agent suggestions?** The agent must show the reasoning path: exposure/news/alpha -> measurement -> condition -> market definition -> risks.
+- **Is this a data company?** Partly yes. The graph needs entity resolution, source metadata, and curated observation slots. The first product must constrain the domain enough that data quality is defensible.
+- **Can users understand compositions?** Only if the UI uses plain language. Terms like proposition, canonical key, resolver primitive, quality seed, and graph source should be hidden or explained in expert views.
+- **What is the moat?** Potential moats are liquidity, canonical market graph data, resolution infrastructure, market-maker tooling, and historical graph/trade data. The ontology alone is not a moat.
+- **What is the killer use case?** The best candidate is "I have exposure/news/alpha; find or create the market that expresses it, then trade it with visible liquidity."
+
+## Current Implementation Boundary
+
+The demo should stay honest about what is implemented:
+
+- The graph has curated feeds, entities, contexts, measurements, conditions, definitions, live-market links, and implication edges.
+- The agent has deterministic workflows for hedging, news/proxy trades, interview-style discovery, alpha expression, and draft creation.
+- The UI now leads with the copilot, keeps Graph Explorer as an advanced view, and exposes a tree-like navigator over domain/entity/event/measurement/condition.
+- Ontology diagnostics catch missing graph anchors, broken measurement links, invalid formulas, and legacy atom rows.
+- Liquidity is still demo-level: seeded fair values, simple formula estimates, and batch quote submission. It is not yet solver-enforced graph no-arb.
+
+The next practical milestone should be graph-aware market making for threshold curves. That is the smallest liquidity feature that uses the ontology for something economically meaningful.
+
 ## Open Questions
 
 - Should Sybil have one global entity namespace, or domain-specific namespaces linked by aliases?
