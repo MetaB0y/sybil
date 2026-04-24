@@ -24,7 +24,7 @@ body {
   font-family: "IBM Plex Sans Condensed", "Aptos", "Segoe UI", sans-serif;
 }
 
-button, textarea {
+button, textarea, input, select {
   font: inherit;
 }
 
@@ -79,6 +79,13 @@ h1 {
   font-size: 18px;
 }
 .hero-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.stats-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  max-width: 1540px;
+  margin: 0 auto 18px;
+}
 
 .shell {
   display: grid;
@@ -106,6 +113,13 @@ textarea {
   border: 1px solid var(--line);
   background: rgba(0, 0, 0, 0.28);
 }
+input, select {
+  color: var(--ink);
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: 14px;
+  padding: 10px 12px;
+}
 .agent-answer, .draft, .ticket, .formula-card {
   border: 1px solid var(--line);
   background: rgba(0, 0, 0, 0.22);
@@ -114,7 +128,7 @@ textarea {
   margin-top: 14px;
   color: #dcd2c2;
 }
-.rank-list, .trade-buttons, .hero-actions { display: grid; gap: 10px; }
+.rank-list, .trade-buttons { display: grid; gap: 10px; }
 .rank-card, .def {
   width: 100%;
   display: flex;
@@ -170,6 +184,27 @@ textarea {
 }
 .metric span { display: block; color: var(--muted); font-size: 12px; }
 .metric strong { display: block; margin-top: 8px; font-size: 22px; }
+.metadata-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 22px;
+}
+.meta {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.035);
+  border-radius: 16px;
+  min-width: 0;
+  padding: 11px;
+}
+.meta span, .filters span { display: block; color: var(--muted); font-size: 11px; margin-bottom: 5px; }
+.meta strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
 
 .formula-node {
   border: 1px solid rgba(229, 183, 105, 0.35);
@@ -190,6 +225,35 @@ textarea {
   grid-template-columns: repeat(4, 1fr);
   gap: 10px;
   margin-top: 20px;
+}
+.explorer {
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.16);
+}
+.explorer-head {
+  display: grid;
+  grid-template-columns: 1fr minmax(260px, 420px);
+  gap: 16px;
+  align-items: end;
+}
+.explorer-head h3 { margin: 4px 0 0; font-size: 28px; letter-spacing: -0.03em; }
+.filters {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin: 14px 0;
+}
+.filters select { width: 100%; }
+.atom-list {
+  max-height: 520px;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  padding-right: 4px;
 }
 .atom {
   min-height: 118px;
@@ -232,3 +296,10 @@ textarea {
 }
 .empty { color: var(--muted); padding: 80px; text-align: center; }
 
+@media (max-width: 1260px) {
+  body { min-width: 0; }
+  .hero, .shell { display: block; }
+  .panel, .stats-strip { margin-bottom: 16px; }
+  .stats-strip, .metrics, .metadata-grid, .filters, .atom-list { grid-template-columns: 1fr 1fr; }
+  .explorer-head { grid-template-columns: 1fr; }
+}

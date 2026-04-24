@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::time::Duration;
+use std::{env, str::FromStr};
 
 use clap::Parser;
 use opentelemetry::trace::TracerProvider;
@@ -28,6 +29,17 @@ fn init_telemetry() -> Telemetry {
     let prometheus_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
         .install_recorder()
         .expect("failed to install Prometheus metrics recorder");
+
+    if env_flag("OTEL_SDK_DISABLED") {
+        tracing_subscriber::registry()
+            .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+            .with(tracing_subscriber::fmt::layer())
+            .init();
+        return Telemetry {
+            prometheus_handle,
+            tracer_provider: None,
+        };
+    }
 
     // OpenTelemetry trace exporter (OTLP over gRPC)
     // Respects OTEL_EXPORTER_OTLP_ENDPOINT env var (default: http://localhost:4317)
@@ -68,6 +80,13 @@ fn init_telemetry() -> Telemetry {
         prometheus_handle,
         tracer_provider,
     }
+}
+
+fn env_flag(name: &str) -> bool {
+    env::var(name)
+        .ok()
+        .and_then(|value| bool::from_str(&value).ok())
+        .unwrap_or(false)
 }
 
 #[tokio::main]

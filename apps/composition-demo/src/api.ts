@@ -1,4 +1,4 @@
-import type { DemoState, Discovery, Draft, TradeProposal } from "./types";
+import type { DemoState, Discovery, Draft, Formula, FormulaValidation, SearchResult, TradeProposal } from "./types";
 
 export const DEMO_URL = import.meta.env.VITE_COMPOSITION_DEMO_URL || "http://localhost:8787";
 export const SYBIL_URL = import.meta.env.VITE_SYBIL_API_URL || "http://localhost:3001";
@@ -27,6 +27,37 @@ export function seedDemo(): Promise<DemoState> {
   return json<DemoState>(`${DEMO_URL}/seed`, {
     method: "POST",
     body: JSON.stringify({ sybil_url: SYBIL_URL }),
+  });
+}
+
+export function importSources(force = false, max_atoms = 300): Promise<DemoState> {
+  return json<DemoState>(`${DEMO_URL}/sources/import`, {
+    method: "POST",
+    body: JSON.stringify({ sybil_url: SYBIL_URL, force, max_atoms }),
+  });
+}
+
+export function searchExplorer(params: {
+  query?: string;
+  domain?: string;
+  atom_type?: string;
+  source?: string;
+  kind?: string;
+  template_id?: string;
+  quality?: string;
+  resolver_primitive?: string;
+  limit?: number;
+}): Promise<SearchResult> {
+  return json<SearchResult>(`${DEMO_URL}/explorer/search`, {
+    method: "POST",
+    body: JSON.stringify({ sybil_url: SYBIL_URL, ...params }),
+  });
+}
+
+export function validateFormula(formula: Formula): Promise<FormulaValidation> {
+  return json<FormulaValidation>(`${DEMO_URL}/formula/validate`, {
+    method: "POST",
+    body: JSON.stringify({ formula }),
   });
 }
 
@@ -107,4 +138,3 @@ export function nanosPct(nanos?: number): string {
   if (!nanos) return "-";
   return `${(nanos / 10_000_000).toFixed(1)}%`;
 }
-

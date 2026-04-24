@@ -263,7 +263,11 @@ arena-status hours="24":
 composition-demo-agent sybil_url="http://localhost:3001":
     cd arena && uv run python -m live.composition_demo.server --sybil-url {{sybil_url}}
 
-# Seed Iran atom/composition markets into a dev-mode sybil-api
+# Import Polymarket/Kalshi source metadata into the local composition registry
+composition-demo-import:
+    cd arena && uv run python -m live.composition_demo.import_sources --max-atoms 300
+
+# Seed imported atom/composition markets into a dev-mode sybil-api
 composition-demo-seed sybil_url="http://localhost:3001":
     cd arena && uv run python -m live.composition_demo.seed --sybil-url {{sybil_url}}
 
@@ -300,6 +304,7 @@ composition-demo port="3001":
     cd arena
     uv run python -m live.composition_demo.server --sybil-url "$sybil_url" &
     agent_pid=$!
+    uv run python -m live.composition_demo.import_sources --max-atoms 300
     uv run python -m live.composition_demo.seed --sybil-url "$sybil_url"
     uv run python -m live.composition_demo.mm_loop --sybil-url "$sybil_url" &
     mm_pid=$!

@@ -6,26 +6,37 @@ import {
   discover,
   draftComposition,
   getState,
+  importSources,
   nanosPct,
   pct,
   proposeTrade,
   quoteOnce,
+  searchExplorer,
   seedDemo,
   submitTrade,
   triggerEvent,
 } from "./api";
-import type { DemoState, Draft, Formula, Instrument, TradeProposal } from "./types";
+import type { DemoState, Draft, Formula, Instrument, SearchResult, TradeProposal } from "./types";
 import "./styles.css";
 
 function App() {
   const [state, setState] = useState<DemoState | null>(null);
-  const [selectedId, setSelectedId] = useState("iran_mainstream");
-  const [query, setQuery] = useState("I want to bet no on US invading Iran, but only if it means a real invasion.");
+  const [selectedId, setSelectedId] = useState("");
+  const [query, setQuery] = useState("I want a basket around 2028 election outcomes and macro conditions.");
   const [agentAnswer, setAgentAnswer] = useState("");
   const [rankedIds, setRankedIds] = useState<string[]>([]);
   const [proposal, setProposal] = useState<TradeProposal | null>(null);
-  const [draftPrompt, setDraftPrompt] = useState("Create a stricter definition where only sustained ground occupation counts.");
+  const [draftPrompt, setDraftPrompt] = useState("Build an AND composition from the most relevant election and macro atoms.");
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [explorerQuery, setExplorerQuery] = useState("election");
+  const [domain, setDomain] = useState("");
+  const [atomType, setAtomType] = useState("");
+  const [source, setSource] = useState("");
+  const [templateId, setTemplateId] = useState("");
+  const [quality, setQuality] = useState("");
+  const [resolverPrimitive, setResolverPrimitive] = useState("");
+  const [kind, setKind] = useState("");
+  const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [accountId, setAccountId] = useState<number | null>(() => {
     const raw = localStorage.getItem("compositionDemoAccount");
     return raw ? Number(raw) : null;
@@ -44,15 +55,41 @@ function App() {
   }, []);
 
   const instruments = state?.instruments || [];
-  const selected = instruments.find((item) => item.id === selectedId) || instruments.find((item) => item.kind === "composition");
+  const selected =
+    instruments.find((item) => item.id === selectedId) ||
+    searchResult?.items[0] ||
+    instruments.find((item) => item.kind === "composition") ||
+    instruments[0];
   const compositions = instruments.filter((item) => item.kind === "composition");
   const atoms = instruments.filter((item) => item.kind === "atom");
 
   const ranked = useMemo(() => {
-    if (!rankedIds.length) return compositions;
-    const byId = new Map(compositions.map((item) => [item.id, item]));
+    if (!rankedIds.length) return searchResult?.items.slice(0, 8) || compositions.slice(0, 8);
+    const byId = new Map(instruments.map((item) => [item.id, item]));
     return rankedIds.map((id) => byId.get(id)).filter(Boolean) as Instrument[];
-  }, [rankedIds, compositions]);
+  }, [rankedIds, instruments, searchResult, compositions]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      searchExplorer({
+        query: explorerQuery,
+        domain,
+        atom_type: atomType,
+        source,
+        template_id: templateId,
+        quality,
+        resolver_primitive: resolverPrimitive,
+        kind,
+        limit: 80,
+      })
+        .then((result) => {
+          setSearchResult(result);
+          if (!selectedId && result.items[0]) setSelectedId(result.items[0].id);
+        })
+        .catch(() => undefined);
+    }, 220);
+    return () => clearTimeout(timer);
+  }, [explorerQuery, domain, atomType, source, templateId, quality, resolverPrimitive, kind, selectedId]);
 
   async function runAgent() {
     setBusy("agent");
@@ -72,7 +109,19 @@ function App() {
     setBusy("seed");
     try {
       setState(await seedDemo());
-      setToast("Seeded Iran composition markets");
+      setToast("Seeded imported atom universe");
+    } catch (e) {
+      setToast(String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function runImport() {
+    setBusy("import");
+    try {
+      setState(await importSources(false, 300));
+      setToast("Built template atom universe + source aliases");
     } catch (e) {
       setToast(String(e));
     } finally {
@@ -183,17 +232,25 @@ function App() {
           <div className="eyebrow">Sybil composition engine MVP</div>
           <h1>Trade the definition, not a vague headline.</h1>
           <p>
-            An agentic UI for discovering, creating, and trading precise compositions over atomic Iran escalation clauses.
+            An agentic UI for exploring hundreds of typed atoms, composing precise conditions, and checking whether liquidity can follow.
           </p>
         </div>
         <div className="hero-actions">
-          <button onClick={runSeed} disabled={!!busy}>{busy === "seed" ? "Seeding..." : "Seed Markets"}</button>
+          <button onClick={runImport} disabled={!!busy}>{busy === "import" ? "Building..." : "Build Atom Rules"}</button>
+          <button onClick={runSeed} disabled={!!busy}>{busy === "seed" ? "Seeding..." : "Seed 300 Markets"}</button>
           <button onClick={runQuote} disabled={!!busy}>Quote Once</button>
           <button className="danger" onClick={runEvent} disabled={!!busy}>
             Simulate helicopter incident
           </button>
         </div>
       </header>
+
+      <section className="stats-strip">
+        <Metric label="Atoms" value={state?.instrument_counts?.atoms ?? atoms.length} />
+        <Metric label="Compositions" value={state?.instrument_counts?.compositions ?? compositions.length} />
+        <Metric label="Seeded" value={state?.instrument_counts?.seeded ?? 0} />
+        <Metric label="Quoted" value={state?.instrument_counts?.quoted ?? 0} />
+      </section>
 
       <section className="shell">
         <aside className="panel agent-panel">
@@ -252,7 +309,19 @@ function App() {
                 <Metric label="Market ID" value={selected.market_id ?? "-"} />
                 <Metric label="Model fair" value={pct(selected.model_value ?? selected.fair_value)} />
                 <Metric label="Volume" value={`$${Math.round((selected.market?.volume_nanos || 0) / 1_000_000_000)}`} />
-                <Metric label="Status" value={selected.market?.status || "unseeded"} />
+                <Metric label="Template" value={selected.template_id || selected.atom_type || selected.kind} />
+              </div>
+
+              <div className="metadata-grid">
+                <Meta label="Domain" value={selected.domain || "-"} />
+                <Meta label="Quality" value={selected.quality || "-"} />
+                <Meta label="Resolver" value={selected.resolver_primitive || selected.oracle_path} />
+                <Meta label="Time window" value={selected.time_window || "-"} />
+                <Meta label="Canonical key" value={selected.canonical_key || selected.id} />
+                <Meta label="Status" value={selected.market?.status || "unseeded"} />
+                <Meta label="Params" value={selected.params ? JSON.stringify(selected.params) : "-"} />
+                <Meta label="Aliases" value={selected.aliases?.length || 0} />
+                <Meta label="Source" value={selected.source || "-"} />
               </div>
 
               <div className="formula-card">
@@ -260,18 +329,36 @@ function App() {
                 <FormulaView formula={selected.formula || null} instruments={instruments} />
               </div>
 
-              <div className="atom-grid">
-                {atoms.map((atom) => (
+              <div className="explorer">
+                <div className="explorer-head">
+                  <div>
+                    <div className="panel-label">Atom Explorer</div>
+                    <h3>{searchResult?.total ?? atoms.length} matches</h3>
+                  </div>
+                  <input value={explorerQuery} onChange={(e) => setExplorerQuery(e.target.value)} placeholder="Search atoms, sources, metrics." />
+                </div>
+                <div className="filters">
+                  <Select label="Kind" value={kind} setValue={setKind} values={["", "atom", "composition"]} />
+                  <Select label="Domain" value={domain} setValue={setDomain} values={["", ...(state?.facets?.domains || searchResult?.facets.domains || [])]} />
+                  <Select label="Template" value={templateId} setValue={setTemplateId} values={["", ...(state?.facets?.template_ids || searchResult?.facets.template_ids || [])]} />
+                  <Select label="Quality" value={quality} setValue={setQuality} values={["", ...(state?.facets?.qualities || searchResult?.facets.qualities || [])]} />
+                  <Select label="Resolver" value={resolverPrimitive} setValue={setResolverPrimitive} values={["", ...(state?.facets?.resolver_primitives || searchResult?.facets.resolver_primitives || [])]} />
+                  <Select label="Source" value={source} setValue={setSource} values={["", ...(state?.facets?.sources || searchResult?.facets.sources || [])]} />
+                </div>
+                <div className="atom-list">
+                  {(searchResult?.items || atoms.slice(0, 80)).map((atom) => (
                   <button
                     key={atom.id}
-                    className={selected.leaf_ids?.includes(atom.id) ? "atom used" : "atom"}
+                    className={selected.leaf_ids?.includes(atom.id) || atom.id === selected.id ? "atom used" : "atom"}
                     onClick={() => setSelectedId(atom.id)}
                   >
                     <span>{atom.short_name}</span>
                     <strong>{nanosPct(atom.market?.yes_price_nanos) || pct(atom.fair_value)}</strong>
-                    <small>{atom.oracle_path}</small>
+                    <small>{atom.domain || "unknown"} / {atom.template_id || atom.atom_type || atom.kind} / {atom.quality || "seed"}</small>
+                    <small>{atom.question}</small>
                   </button>
-                ))}
+                  ))}
+                </div>
               </div>
             </>
           ) : (
@@ -309,10 +396,10 @@ function App() {
 
           <div className="definitions">
             <div className="panel-label">Known Compositions</div>
-            {compositions.map((item) => (
+            {compositions.slice(0, 18).map((item) => (
               <button key={item.id} onClick={() => setSelectedId(item.id)} className={item.id === selected?.id ? "def active" : "def"}>
                 <span>{item.short_name}</span>
-                <small>{item.author}</small>
+                <small>{item.source || item.author}</small>
               </button>
             ))}
           </div>
@@ -331,6 +418,40 @@ function Metric({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+function Meta({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="meta">
+      <span>{label}</span>
+      <strong title={String(value)}>{value}</strong>
+    </div>
+  );
+}
+
+function Select({
+  label,
+  value,
+  setValue,
+  values,
+}: {
+  label: string;
+  value: string;
+  setValue: (value: string) => void;
+  values: string[];
+}) {
+  return (
+    <label>
+      <span>{label}</span>
+      <select value={value} onChange={(e) => setValue(e.target.value)}>
+        {Array.from(new Set(values)).map((item) => (
+          <option key={item || "all"} value={item}>
+            {item || "all"}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function FormulaView({ formula, instruments }: { formula: Formula | null; instruments: Instrument[] }) {
   if (!formula) return <div className="formula-node atom-node">Atomic market</div>;
   if (formula.atom) {
@@ -339,7 +460,7 @@ function FormulaView({ formula, instruments }: { formula: Formula | null; instru
   }
   return (
     <div className="formula-node">
-      <div className="op">{formula.op}</div>
+      <div className="op">{formula.op}{formula.op === "K_OF_N" ? `:${formula.k}` : ""}</div>
       <div className="children">
         {(formula.args || []).map((arg, idx) => (
           <FormulaView key={idx} formula={arg} instruments={instruments} />

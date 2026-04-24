@@ -6,60 +6,32 @@ import json
 import os
 from typing import Any
 
-from openai import OpenAI
+try:
+    from openai import OpenAI
+except ImportError:  # pragma: no cover - optional unless OPENROUTER_API_KEY is set.
+    OpenAI = None  # type: ignore[assignment]
 
-from .registry import formula_atoms, formula_to_text
+from .registry import formula_atoms, formula_to_text, search_instruments, validate_formula
 from .store import NANOS_PER_DOLLAR
 
 MODEL = "deepseek/deepseek-v4-flash"
 
 
 def discover(query: str, state: dict[str, Any]) -> dict[str, Any]:
-    q = query.lower()
-    instruments = [i for i in state["instruments"] if i["kind"] == "composition"]
-    scored = []
-    for item in instruments:
-        text = " ".join(
-            [
-                item["title"],
-                item.get("short_name", ""),
-                item.get("description", ""),
-                item.get("question", ""),
-                formula_to_text(item.get("formula")),
-            ]
-        ).lower()
-        score = 0
-        for token in q.replace("?", " ").split():
-            if len(token) > 2 and token in text:
-                score += 2
-        if "strict" in q and "strict" in text:
-            score += 8
-        if ("normal" in q or "mainstream" in q or "spirit" in q) and "mainstream" in text:
-            score += 8
-        if ("technical" in q or "helicopter" in q or "low" in q) and "hawkish" in text:
-            score += 8
-        if "no" in q or "against" in q or "short" in q:
-            score += 1
-        scored.append((score, item))
-
-    ranked = [item for _, item in sorted(scored, key=lambda pair: pair[0], reverse=True)]
+    result = search_instruments(state["instruments"], query=query, limit=12)
+    ranked = result["items"]
     recommendation = ranked[0] if ranked else None
-    if recommendation and recommendation["id"] == "iran_hawkish" and "helicopter" not in q:
-        mainstream = next((i for i in ranked if i["id"] == "iran_mainstream"), recommendation)
-        recommendation = mainstream
 
-    visible = ranked[:5]
-    if recommendation:
-        visible = [recommendation] + [item for item in visible if item["id"] != recommendation["id"]]
+    visible = ranked[:8]
 
     return {
-        "answer": build_discovery_answer(query, recommendation, ranked[:3]),
+        "answer": build_discovery_answer(query, recommendation, ranked[:5]),
         "recommendation_id": recommendation["id"] if recommendation else None,
-        "ranked_ids": [item["id"] for item in visible[:5]],
+        "ranked_ids": [item["id"] for item in visible],
         "actions": [
-            "Inspect the formula tree before trading.",
-            "Use Mainstream if you mean ordinary-language invasion.",
-            "Use Hawkish only if brief military contact should count.",
+            "Open the Explorer filters to inspect the atom universe.",
+            "Draft a composition from the top atoms if no existing market matches.",
+            "Check source and resolver primitive before approving a created market.",
         ],
     }
 
@@ -69,9 +41,9 @@ def build_discovery_answer(query: str, recommendation: dict[str, Any] | None, ra
         return "I could not find a matching composition. Draft a new one from the creation panel."
     names = ", ".join(item["short_name"] for item in ranked)
     return (
-        f"For '{query}', I would start with {recommendation['short_name']}. "
-        f"It best matches the ordinary-language intent while alternatives ({names}) expose "
-        "how sensitive the trade is to the definition."
+        f"For '{query}', I would start with {recommendation['short_name']} "
+        f"({recommendation.get('domain', 'unknown')}/{recommendation.get('atom_type', recommendation['kind'])}). "
+        f"Nearby candidates: {names}. Use these as leaves for a new formula if no single instrument matches."
     )
 
 
@@ -121,19 +93,32 @@ def draft_composition(prompt: str, state: dict[str, Any]) -> dict[str, Any]:
     if os.environ.get("OPENROUTER_API_KEY"):
         drafted = draft_with_llm(prompt, state)
         if drafted:
-            return drafted
-    return deterministic_draft(prompt)
+            validation = validate_formula(drafted.get("formula"), state["instruments"])
+            if validation["valid"]:
+                return drafted
+    return deterministic_draft(prompt, state)
 
 
 def draft_with_llm(prompt: str, state: dict[str, Any]) -> dict[str, Any] | None:
+    if OpenAI is None:
+        return None
+    domain = infer_domain(prompt)
     atoms = [
         {
             "id": item["id"],
             "short_name": item["short_name"],
             "description": item["description"],
+            "domain": item.get("domain"),
+            "atom_type": item.get("atom_type"),
+            "source": item.get("source"),
         }
-        for item in state["instruments"]
-        if item["kind"] == "atom"
+        for item in search_instruments(
+            state["instruments"],
+            query=expand_prompt(prompt),
+            domain=domain,
+            kind="atom",
+            limit=80,
+        )["items"]
     ]
     system = (
         "You draft prediction-market compositions. Return strict JSON only with keys: "
@@ -166,42 +151,112 @@ def draft_with_llm(prompt: str, state: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
 
-def deterministic_draft(prompt: str) -> dict[str, Any]:
+def deterministic_draft(prompt: str, state: dict[str, Any]) -> dict[str, Any]:
     lower = prompt.lower()
-    if "occupation" in lower or "strict" in lower:
-        formula = {
-            "op": "AND",
-            "args": [
-                {"atom": "troops_soil_1000"},
-                {"atom": "troops_duration_72h"},
-                {"atom": "occupation_declared"},
-            ],
-        }
-        short = "Occupation-only"
-        desc = "A stricter user-drafted definition focused on sustained territorial occupation."
-    elif "strike" in lower or "air" in lower:
-        formula = {"op": "AND", "args": [{"atom": "strikes_50"}, {"atom": "strikes_7d"}]}
-        short = "Strike campaign"
-        desc = "A user-drafted definition focused on sustained US strikes rather than ground troops."
+    domain = infer_domain(prompt)
+    atoms = search_instruments(
+        state["instruments"],
+        query=expand_prompt(prompt),
+        domain=domain,
+        kind="atom",
+        limit=24,
+    )["items"]
+    atoms = pick_diverse_atoms(prompt, atoms)[:6]
+    if len(atoms) < 2:
+        atoms = [
+            item
+            for item in state["instruments"]
+            if item["kind"] == "atom" and (not domain or item.get("domain") == domain)
+        ][:6]
+    if len(atoms) < 2:
+        atoms = [item for item in state["instruments"] if item["kind"] == "atom"][:6]
+    if not atoms:
+        raise ValueError("no atoms available to draft from")
+
+    args = [{"atom": item["id"]} for item in atoms[: min(4, len(atoms))]]
+    if ("all" in lower or "and" in lower or "parlay" in lower or "strict" in lower) and len(args) >= 2:
+        formula = {"op": "AND", "args": args}
+        short = "All selected"
+        desc = "Agent draft requiring every selected condition to resolve YES."
+    elif ("at least" in lower or "k of" in lower or "basket" in lower or "recession" in lower) and len(args) >= 3:
+        formula = {"op": "K_OF_N", "k": 2, "args": args}
+        short = "Two-of basket"
+        desc = "Agent draft requiring at least two of the selected conditions."
+    elif ("if" in lower or "conditional" in lower) and len(args) >= 2:
+        formula = {"op": "IF_THEN", "args": args[:2]}
+        short = "Conditional"
+        desc = "Agent draft expressing a conditional relationship between two selected conditions."
     else:
-        formula = {
-            "op": "OR",
-            "args": [
-                {"op": "AND", "args": [{"atom": "troops_soil_1000"}, {"atom": "troops_duration_72h"}]},
-                {"atom": "formal_declaration"},
-            ],
-        }
-        short = "Ground or declared"
-        desc = "A user-drafted definition requiring sustained ground presence or a formal declaration."
+        formula = {"op": "OR", "args": args}
+        short = "Any selected"
+        desc = "Agent draft paying if any selected condition resolves YES."
+    domain = domain or atoms[0].get("domain", "custom")
     return normalize_draft(
         {
-            "title": f"US invades Iran - {short} definition",
+            "title": f"{short} composition for {prompt[:56]}",
             "short_name": short,
-            "question": f"Will the US invade Iran before 2027 under the {short.lower()} definition?",
+            "question": f"Will the {short.lower()} formula for '{prompt[:80]}' resolve YES?",
             "description": desc,
             "formula": formula,
+            "domain": domain,
+            "tags": ["composition-demo", domain, "agent-draft"],
         }
     )
+
+
+def infer_domain(prompt: str) -> str:
+    lower = prompt.lower()
+    rules = [
+        ("macro", ["macro", "recession", "inflation", "fed", "gdp", "unemployment", "sahm", "cpi", "vix"]),
+        ("politics", ["election", "president", "primary", "nomination", "senate", "house", "candidate"]),
+        ("geopolitics", ["iran", "ukraine", "taiwan", "war", "strike", "invasion", "conflict"]),
+        ("sports", ["nba", "sports", "team", "game", "player", "points", "rebounds", "assists", "parlay"]),
+        ("technology", ["ai", "agi", "benchmark", "frontier", "model", "lab", "openai", "anthropic"]),
+        ("crypto", ["crypto", "btc", "bitcoin", "eth", "ethereum", "sol", "solana", "hype"]),
+        ("culture", ["movie", "album", "music", "release", "drake", "taylor"]),
+    ]
+    for domain, needles in rules:
+        if any(needle in lower for needle in needles):
+            return domain
+    return ""
+
+
+def pick_diverse_atoms(prompt: str, atoms: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    lower = prompt.lower()
+    if "recession" in lower:
+        priorities = ["real gdp", "sahm", "unemployment", "drawdown", "vix", "fed funds"]
+        ranked: list[dict[str, Any]] = []
+        used_indicators: set[str] = set()
+        for priority in priorities:
+            for atom in atoms:
+                indicator = str(atom.get("params", {}).get("indicator", "")).lower()
+                if priority in indicator and indicator not in used_indicators:
+                    ranked.append(atom)
+                    used_indicators.add(indicator)
+                    break
+        for atom in atoms:
+            indicator = str(atom.get("params", {}).get("indicator", atom.get("id", ""))).lower()
+            if indicator not in used_indicators:
+                ranked.append(atom)
+                used_indicators.add(indicator)
+        return ranked
+    return atoms
+
+
+def expand_prompt(prompt: str) -> str:
+    lower = prompt.lower()
+    expansions = [prompt]
+    if "recession" in lower:
+        expansions.append("GDP unemployment Sahm drawdown VIX")
+    elif "macro" in lower:
+        expansions.append("GDP unemployment Sahm Fed funds CPI drawdown VIX")
+    if any(word in lower for word in ["nomination", "primary"]):
+        expansions.append("presidential nomination primary candidate contest")
+    if "agi" in lower:
+        expansions.append("AI benchmark FrontierMath ARC AGI SWE-bench")
+    if "iran" in lower or "invasion" in lower:
+        expansions.append("Iran troops strikes declaration AUMF occupation")
+    return " ".join(expansions)
 
 
 def normalize_draft(data: dict[str, Any]) -> dict[str, Any]:
@@ -217,7 +272,25 @@ def normalize_draft(data: dict[str, Any]) -> dict[str, Any]:
         "author": "Agent draft",
         "fair_value": 0.15,
         "trust_tier": "demo-draft",
-        "tags": ["composition-demo", "iran", "agent-draft"],
+        "tags": data.get("tags", ["composition-demo", "agent-draft"]),
+        "domain": data.get("domain", "custom"),
+        "atom_type": "composition",
+        "subject": data.get("short_name") or data["title"][:24],
+        "metric": "formula",
+        "comparator": "resolves_true",
+        "threshold": None,
+        "unit": "",
+        "time_window": "user-defined",
+        "resolver_primitive": "composition_resolution",
+        "source": "agent",
+        "source_url": "",
+        "canonical_key": data.get("id", "") or data["title"],
+        "compatible_ops": ["AND", "OR", "NOT", "K_OF_N", "IF_THEN"],
+        "exclusivity_group": None,
+        "template_id": "composition",
+        "params": {},
+        "quality": "agent_draft",
+        "aliases": [],
     }
 
 

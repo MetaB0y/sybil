@@ -1,3 +1,4 @@
 state.json
 state.tmp
-
+source_snapshot.json
+generated_registry.json

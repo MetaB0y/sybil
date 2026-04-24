@@ -11,22 +11,34 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from .registry import SEED_INSTRUMENTS, Instrument, estimate_formula_value, formula_atoms
+from .registry import (
+    SEED_INSTRUMENTS,
+    Instrument,
+    estimate_formula_value,
+    formula_atoms,
+    search_instruments,
+    validate_formula,
+)
+from .sources import import_universe
 
 NANOS_PER_DOLLAR = 1_000_000_000
 DEFAULT_STATE_PATH = Path(__file__).resolve().parent / "state.json"
 DEFAULT_SYBIL_URL = os.environ.get("SYBIL_API_URL", "http://localhost:3001")
+DEFAULT_MAX_ATOMS = int(os.environ.get("COMPOSITION_DEMO_ATOMS", "300"))
 
 
 def load_state(path: str | Path = DEFAULT_STATE_PATH) -> dict[str, Any]:
     p = Path(path)
     if not p.exists():
+        universe = import_universe(max_atoms=DEFAULT_MAX_ATOMS)
         return {
             "created_at": time.time(),
             "updated_at": time.time(),
-            "instruments": [item.to_dict() for item in SEED_INSTRUMENTS],
+            "instruments": universe.get("instruments") or [item.to_dict() for item in SEED_INSTRUMENTS],
             "accounts": {},
             "events": [],
+            "source_counts": universe.get("source_counts", {}),
+            "source_errors": universe.get("source_errors", []),
         }
     with p.open("r", encoding="utf-8") as f:
         return json.load(f)
@@ -102,8 +114,26 @@ def seed_markets(sybil_url: str = DEFAULT_SYBIL_URL) -> dict[str, Any]:
     return enrich_state(state, sybil_url)
 
 
+def import_sources(force: bool = False, max_atoms: int = DEFAULT_MAX_ATOMS) -> dict[str, Any]:
+    universe = import_universe(max_atoms=max_atoms, force=force)
+    state = load_state()
+    market_ids = {item["id"]: item.get("market_id") for item in state.get("instruments", [])}
+    instruments = universe.get("instruments", [])
+    for item in instruments:
+        if market_ids.get(item["id"]) is not None:
+            item["market_id"] = market_ids[item["id"]]
+    state["instruments"] = instruments
+    state["source_counts"] = universe.get("source_counts", {})
+    state["source_errors"] = universe.get("source_errors", [])
+    save_state(state)
+    return state
+
+
 def add_instrument(instrument: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL) -> dict[str, Any]:
     state = load_state()
+    validation = validate_formula(instrument.get("formula"), state["instruments"])
+    if not validation["valid"]:
+        raise ValueError("; ".join(validation["errors"]))
     existing_ids = {item["id"] for item in state["instruments"]}
     base_id = slugify(instrument.get("id") or instrument.get("short_name") or instrument["title"])
     candidate = base_id
@@ -115,8 +145,26 @@ def add_instrument(instrument: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_UR
     instrument.setdefault("kind", "composition")
     instrument.setdefault("author", "User draft")
     instrument.setdefault("trust_tier", "demo-draft")
-    instrument.setdefault("tags", ["composition-demo", "iran", "user-draft"])
+    instrument.setdefault("tags", ["composition-demo", "user-draft"])
     instrument.setdefault("oracle_path", "Composition over demo atoms")
+    instrument.setdefault("domain", "custom")
+    instrument.setdefault("atom_type", "composition")
+    instrument.setdefault("subject", instrument.get("short_name", instrument["title"]))
+    instrument.setdefault("metric", "formula")
+    instrument.setdefault("comparator", "resolves_true")
+    instrument.setdefault("threshold", None)
+    instrument.setdefault("unit", "")
+    instrument.setdefault("time_window", "user-defined")
+    instrument.setdefault("resolver_primitive", "composition_resolution")
+    instrument.setdefault("source", "user")
+    instrument.setdefault("source_url", "")
+    instrument.setdefault("canonical_key", candidate)
+    instrument.setdefault("compatible_ops", ["AND", "OR", "NOT", "K_OF_N", "IF_THEN"])
+    instrument.setdefault("exclusivity_group", None)
+    instrument.setdefault("template_id", "composition")
+    instrument.setdefault("params", {})
+    instrument.setdefault("quality", "user_draft")
+    instrument.setdefault("aliases", [])
     instrument["market_id"] = create_market(sybil_url, instrument)
     state["instruments"].append(instrument)
     save_state(state)
@@ -152,7 +200,35 @@ def enrich_state(state: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL) -> d
     out = dict(state)
     out["instruments"] = enriched
     out["sybil_url"] = sybil_url
+    out["facets"] = search_instruments(enriched, limit=0)["facets"]
+    out["instrument_counts"] = {
+        "atoms": len([item for item in enriched if item["kind"] == "atom"]),
+        "compositions": len([item for item in enriched if item["kind"] == "composition"]),
+        "seeded": len([item for item in enriched if item.get("market_id") is not None]),
+        "quoted": int(state.get("last_quote", {}).get("markets_quoted", 0)),
+    }
     return out
+
+
+def explorer_search(payload: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL) -> dict[str, Any]:
+    state = enrich_state(load_state(), sybil_url)
+    return search_instruments(
+        state["instruments"],
+        query=str(payload.get("query", "")),
+        domain=str(payload.get("domain", "")),
+        atom_type=str(payload.get("atom_type", "")),
+        source=str(payload.get("source", "")),
+        kind=str(payload.get("kind", "")),
+        template_id=str(payload.get("template_id", "")),
+        quality=str(payload.get("quality", "")),
+        resolver_primitive=str(payload.get("resolver_primitive", "")),
+        limit=int(payload.get("limit", 80)),
+    )
+
+
+def validate_formula_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    state = load_state()
+    return validate_formula(payload.get("formula"), state["instruments"])
 
 
 def get_markets_by_id(sybil_url: str) -> dict[int, dict[str, Any]]:
@@ -217,6 +293,7 @@ def quote_once(sybil_url: str = DEFAULT_SYBIL_URL) -> dict[str, Any]:
 
     orders = []
     taker_orders = []
+    markets_quoted = 0
     tick = int(state.get("quote_tick", 0))
     for item in state["instruments"]:
         mid = item.get("market_id")
@@ -225,6 +302,7 @@ def quote_once(sybil_url: str = DEFAULT_SYBIL_URL) -> dict[str, Any]:
         market = markets_by_id.get(int(mid))
         if not market or market.get("status", "").lower() != "active":
             continue
+        markets_quoted += 1
         fair = float(item.get("fair_value", item.get("model_value", 0.5)))
         if item["kind"] == "composition":
             values = {x["id"]: float(x.get("fair_value", 0.5)) for x in state["instruments"]}
@@ -289,13 +367,16 @@ def quote_once(sybil_url: str = DEFAULT_SYBIL_URL) -> dict[str, Any]:
             },
         )
     state["quote_tick"] = tick + 1
-    save_state(state)
-    return {
+    result = {
         "orders": len(orders),
         "taker_orders": min(len(taker_orders), 8),
+        "markets_quoted": markets_quoted,
         "mm_account_id": accounts.get("mm"),
         "noise_account_id": accounts.get("noise"),
     }
+    state["last_quote"] = dict(result, timestamp=time.time())
+    save_state(state)
+    return result
 
 
 def trigger_event(event: str, sybil_url: str = DEFAULT_SYBIL_URL) -> dict[str, Any]:

@@ -12,6 +12,38 @@ from typing import Any, Literal
 
 InstrumentKind = Literal["atom", "composition"]
 Formula = dict[str, Any]
+VALID_OPERATORS = {"AND", "OR", "NOT", "K_OF_N", "IF_THEN"}
+DEFAULT_COMPATIBLE_OPS = ["AND", "OR", "NOT", "K_OF_N", "IF_THEN"]
+SEARCH_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "any",
+    "be",
+    "build",
+    "by",
+    "for",
+    "from",
+    "in",
+    "is",
+    "it",
+    "market",
+    "of",
+    "or",
+    "the",
+    "to",
+    "will",
+    "with",
+}
+SEARCH_SYNONYMS = {
+    "nomination": ["primary", "nominee"],
+    "nominee": ["nomination", "primary"],
+    "recession": ["gdp", "unemployment", "sahm", "drawdown"],
+    "macro": ["gdp", "unemployment", "inflation", "fed", "cpi"],
+    "agi": ["ai", "benchmark", "frontiermath", "arc"],
+    "crypto": ["btc", "eth", "sol"],
+    "basket": ["threshold"],
+}
 
 
 @dataclass
@@ -29,9 +61,28 @@ class Instrument:
     fair_value: float = 0.5
     trust_tier: str = "demo"
     tags: list[str] = field(default_factory=lambda: ["composition-demo", "iran"])
+    domain: str = "geopolitics"
+    atom_type: str = "binary_event"
+    subject: str = ""
+    metric: str = "event"
+    comparator: str = "occurs"
+    threshold: float | None = None
+    unit: str = ""
+    time_window: str = "before 2027"
+    resolver_primitive: str = "admin_immediate"
+    source: str = "seed"
+    source_url: str = ""
+    canonical_key: str = ""
+    compatible_ops: list[str] = field(default_factory=lambda: list(DEFAULT_COMPATIBLE_OPS))
+    exclusivity_group: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        if not data["canonical_key"]:
+            data["canonical_key"] = canonical_key_for(data)
+        if not data["subject"]:
+            data["subject"] = data["short_name"]
+        return data
 
 
 ATOM_IDS = [
@@ -199,6 +250,42 @@ def formula_atoms(formula: Formula | None) -> list[str]:
     return atoms
 
 
+def canonical_key_for(item: dict[str, Any]) -> str:
+    if item.get("template_id") and item.get("params"):
+        return f"{item['template_id']}:{json_like(item['params'])}"
+    parts = [
+        item.get("domain", ""),
+        item.get("atom_type", ""),
+        item.get("subject", "") or item.get("short_name", ""),
+        item.get("metric", ""),
+        item.get("comparator", ""),
+        str(item.get("threshold", "")),
+        item.get("unit", ""),
+        item.get("time_window", ""),
+        item.get("resolver_primitive", ""),
+    ]
+    return "|".join(slug_part(part) for part in parts if part is not None)
+
+
+def json_like(value: Any) -> str:
+    import json
+
+    return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+
+
+def slug_part(value: Any) -> str:
+    out = []
+    last_dash = False
+    for ch in str(value).lower():
+        if ch.isalnum():
+            out.append(ch)
+            last_dash = False
+        elif not last_dash:
+            out.append("-")
+            last_dash = True
+    return "".join(out).strip("-")
+
+
 def formula_to_text(formula: Formula | None) -> str:
     if not formula:
         return "atomic"
@@ -208,6 +295,10 @@ def formula_to_text(formula: Formula | None) -> str:
     args = [formula_to_text(arg) for arg in formula.get("args", [])]
     if op == "NOT" and args:
         return f"NOT({args[0]})"
+    if op == "K_OF_N":
+        return f"K_OF_N({formula.get('k', '?')}; {', '.join(args)})"
+    if op == "IF_THEN" and len(args) >= 2:
+        return f"IF {args[0]} THEN {args[1]}"
     return f"{op}({', '.join(args)})"
 
 
@@ -239,10 +330,195 @@ def estimate_formula_value(formula: Formula | None, values: dict[str, float]) ->
         return clamp_probability(1.0 - parts[0])
     if op == "K_OF_N":
         k = int(formula.get("k", len(parts)))
-        return clamp_probability(sum(parts) / max(k, 1) / len(parts))
+        return estimate_k_of_n(parts, k)
+    if op == "IF_THEN" and len(parts) >= 2:
+        # P(A -> B) = P(!A or B). Independence is only a demo prior here.
+        return clamp_probability(1.0 - parts[0] * (1.0 - parts[1]))
     return clamp_probability(sum(parts) / len(parts))
 
 
 def clamp_probability(value: float) -> float:
     return max(0.01, min(0.99, value))
 
+
+def estimate_k_of_n(parts: list[float], k: int) -> float:
+    if k <= 0:
+        return 0.99
+    if k > len(parts):
+        return 0.01
+    dist = [1.0] + [0.0] * len(parts)
+    for p in parts:
+        next_dist = [0.0] * len(dist)
+        for yes_count, mass in enumerate(dist):
+            if mass == 0:
+                continue
+            next_dist[yes_count] += mass * (1.0 - p)
+            if yes_count + 1 < len(dist):
+                next_dist[yes_count + 1] += mass * p
+        dist = next_dist
+    return clamp_probability(sum(dist[k:]))
+
+
+def validate_formula(formula: Formula | None, instruments: list[dict[str, Any]]) -> dict[str, Any]:
+    ids = {item["id"] for item in instruments}
+    errors: list[str] = []
+    refs: list[str] = []
+
+    def walk(node: Formula | None, path: str) -> None:
+        if not isinstance(node, dict):
+            errors.append(f"{path}: formula node must be an object")
+            return
+        if "atom" in node:
+            atom_id = str(node["atom"])
+            refs.append(atom_id)
+            if atom_id not in ids:
+                errors.append(f"{path}: unknown atom '{atom_id}'")
+            return
+        op = str(node.get("op", "")).upper()
+        args = node.get("args")
+        if op not in VALID_OPERATORS:
+            errors.append(f"{path}: unsupported operator '{op or '?'}'")
+        if not isinstance(args, list):
+            errors.append(f"{path}: args must be a list")
+            return
+        if op == "NOT" and len(args) != 1:
+            errors.append(f"{path}: NOT requires exactly one argument")
+        if op == "IF_THEN" and len(args) != 2:
+            errors.append(f"{path}: IF_THEN requires exactly two arguments")
+        if op == "K_OF_N":
+            k = node.get("k")
+            if not isinstance(k, int) or k < 1 or k > len(args):
+                errors.append(f"{path}: K_OF_N requires integer k with 1 <= k <= n")
+        if op in {"AND", "OR"} and len(args) < 2:
+            errors.append(f"{path}: {op} requires at least two arguments")
+        for idx, arg in enumerate(args):
+            walk(arg, f"{path}.args[{idx}]")
+
+    walk(formula, "$")
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "referenced_ids": sorted(set(refs)),
+        "operator_count": count_operators(formula),
+    }
+
+
+def count_operators(formula: Formula | None) -> int:
+    if not isinstance(formula, dict) or "atom" in formula:
+        return 0
+    return 1 + sum(count_operators(arg) for arg in formula.get("args", []) if isinstance(arg, dict))
+
+
+def search_instruments(
+    instruments: list[dict[str, Any]],
+    query: str = "",
+    domain: str = "",
+    atom_type: str = "",
+    source: str = "",
+    kind: str = "",
+    template_id: str = "",
+    quality: str = "",
+    resolver_primitive: str = "",
+    limit: int = 80,
+) -> dict[str, Any]:
+    q_tokens = query_tokens(query)
+    rows = []
+    for item in instruments:
+        if domain and item.get("domain") != domain:
+            continue
+        if atom_type and item.get("atom_type") != atom_type:
+            continue
+        if source and item.get("source") != source:
+            continue
+        if kind and item.get("kind") != kind:
+            continue
+        if template_id and item.get("template_id") != template_id:
+            continue
+        if quality and item.get("quality") != quality:
+            continue
+        if resolver_primitive and item.get("resolver_primitive") != resolver_primitive:
+            continue
+        text = " ".join(
+            str(item.get(key, ""))
+            for key in [
+                "title",
+                "short_name",
+                "question",
+                "description",
+                "domain",
+                "atom_type",
+                "subject",
+                "metric",
+                "tags",
+                "source",
+                "template_id",
+                "params",
+                "quality",
+                "aliases",
+            ]
+        ).lower()
+        score = 0.0
+        token_hits = 0
+        for token in q_tokens:
+            if token in text:
+                score += 3.0
+                token_hits += 1
+            if text.startswith(token):
+                score += 2.0
+        if q_tokens and token_hits == 0:
+            continue
+        if q_tokens:
+            score += token_hits / max(1, len(q_tokens))
+            if item.get("kind") == "atom":
+                score += 0.4
+            if item.get("quality") == "source_matched":
+                score += 0.35
+        score += min(float(item.get("fair_value", 0.5)), 0.99) * 0.05
+        if not q_tokens:
+            score += 1.0
+        row = dict(item)
+        row["search_score"] = round(score, 4)
+        rows.append(row)
+    rows.sort(
+        key=lambda item: (
+            item.get("search_score", 0),
+            item.get("quality") == "source_matched",
+            item.get("kind") == "atom",
+        ),
+        reverse=True,
+    )
+    facets = {
+        "domains": sorted({item.get("domain", "") for item in instruments if item.get("domain")}),
+        "atom_types": sorted({item.get("atom_type", "") for item in instruments if item.get("atom_type")}),
+        "sources": sorted({item.get("source", "") for item in instruments if item.get("source")}),
+        "template_ids": sorted({item.get("template_id", "") for item in instruments if item.get("template_id")}),
+        "qualities": sorted({item.get("quality", "") for item in instruments if item.get("quality")}),
+        "resolver_primitives": sorted(
+            {item.get("resolver_primitive", "") for item in instruments if item.get("resolver_primitive")}
+        ),
+    }
+    return {"items": rows[:limit], "total": len(rows), "facets": facets}
+
+
+def query_tokens(query: str) -> list[str]:
+    raw = []
+    current = []
+    for ch in query.lower():
+        if ch.isalnum():
+            current.append(ch)
+        elif current:
+            raw.append("".join(current))
+            current = []
+    if current:
+        raw.append("".join(current))
+
+    tokens: list[str] = []
+    seen: set[str] = set()
+    for token in raw:
+        if len(token) <= 1 or token in SEARCH_STOPWORDS:
+            continue
+        for expanded in [token, *SEARCH_SYNONYMS.get(token, [])]:
+            if expanded not in seen:
+                seen.add(expanded)
+                tokens.append(expanded)
+    return tokens

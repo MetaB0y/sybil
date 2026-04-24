@@ -17,11 +17,14 @@ from .store import (
     DEFAULT_SYBIL_URL,
     add_instrument,
     enrich_state,
+    explorer_search,
+    import_sources,
     load_state,
     quote_once,
     seed_markets,
     submit_order,
     trigger_event,
+    validate_formula_payload,
 )
 
 
@@ -50,6 +53,12 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/seed":
                 self.respond(seed_markets(sybil_url))
+            elif parsed.path == "/sources/import":
+                self.respond(import_sources(force=bool(body.get("force")), max_atoms=int(body.get("max_atoms", 300))))
+            elif parsed.path == "/explorer/search":
+                self.respond(explorer_search(body, sybil_url))
+            elif parsed.path == "/formula/validate":
+                self.respond(validate_formula_payload(body))
             elif parsed.path == "/quote":
                 self.respond(quote_once(sybil_url))
             elif parsed.path == "/event":
@@ -57,6 +66,8 @@ class Handler(BaseHTTPRequestHandler):
             elif parsed.path == "/agent/discover":
                 self.respond(agent.discover(body.get("query", ""), enrich_state(load_state(), sybil_url)))
             elif parsed.path == "/agent/draft-composition":
+                self.respond(agent.draft_composition(body.get("prompt", ""), enrich_state(load_state(), sybil_url)))
+            elif parsed.path == "/agent/build-from-conditions":
                 self.respond(agent.draft_composition(body.get("prompt", ""), enrich_state(load_state(), sybil_url)))
             elif parsed.path == "/agent/explain-instrument":
                 self.respond(agent.explain_instrument(body.get("instrument_id", ""), enrich_state(load_state(), sybil_url)))
@@ -117,4 +128,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
