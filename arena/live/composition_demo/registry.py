@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 
-ObjectKind = Literal["feed", "measurement", "condition", "proposition"]
+ObjectKind = Literal["feed", "entity", "context", "measurement", "condition", "proposition"]
 InstrumentKind = Literal["condition", "proposition", "atom", "composition"]
 Formula = dict[str, Any]
 VALID_OPERATORS = {"AND", "OR", "NOT", "K_OF_N", "IF_THEN"}
@@ -74,6 +74,50 @@ class DataFeed:
 
 
 @dataclass
+class Entity:
+    id: str
+    kind: str
+    name: str
+    domain: str
+    aliases: list[str] = field(default_factory=list)
+    external_refs: dict[str, str] = field(default_factory=dict)
+    description: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["object_kind"] = "entity"
+        data["title"] = self.name
+        data["short_name"] = self.name
+        data["question"] = ""
+        data["source"] = "curated"
+        data["quality"] = "seed"
+        data["leaf_ids"] = []
+        return data
+
+
+@dataclass
+class Context:
+    id: str
+    kind: str
+    title: str
+    domain: str
+    description: str
+    entity_ids: list[str] = field(default_factory=list)
+    start: str = ""
+    end: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["object_kind"] = "context"
+        data["short_name"] = self.title
+        data["question"] = ""
+        data["source"] = "curated"
+        data["quality"] = "seed"
+        data["leaf_ids"] = []
+        return data
+
+
+@dataclass
 class Measurement:
     id: str
     domain: str
@@ -88,11 +132,16 @@ class Measurement:
     trust_tier: str = "demo"
     quality: str = "seed"
     canonical_key: str = ""
+    entity_ids: list[str] = field(default_factory=list)
+    context_id: str = ""
+    path: list[str] = field(default_factory=list)
+    display_title: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["object_kind"] = "measurement"
         data["canonical_key"] = self.canonical_key or measurement_key(data)
+        data["display_title"] = self.display_title or self.title
         return data
 
 
@@ -494,6 +543,10 @@ def search_instruments(
                 "measurement_id",
                 "measurement_kind",
                 "predicate",
+                "display_title",
+                "path",
+                "entity_ids",
+                "context_id",
             ]
         ).lower()
         score = 0.0
@@ -545,6 +598,8 @@ def build_facets(instruments: list[dict[str, Any]]) -> dict[str, list[str]]:
             {item.get("measurement_kind", "") for item in instruments if item.get("measurement_kind")}
         ),
         "measurement_ids": sorted({item.get("measurement_id", "") for item in instruments if item.get("measurement_id")}),
+        "entity_ids": sorted({entity for item in instruments for entity in item.get("entity_ids", [])}),
+        "context_ids": sorted({item.get("context_id", "") for item in instruments if item.get("context_id")}),
         "predicate_ops": sorted(
             {item.get("predicate", {}).get("op", "") for item in instruments if item.get("predicate", {}).get("op")}
         ),

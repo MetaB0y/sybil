@@ -12,7 +12,7 @@ export type Market = {
 export type Instrument = {
   id: string;
   kind: "condition" | "proposition" | "atom" | "composition";
-  object_kind?: "condition" | "proposition" | "measurement" | "feed";
+  object_kind?: "condition" | "proposition" | "measurement" | "feed" | "entity" | "context";
   title: string;
   short_name: string;
   question: string;
@@ -32,6 +32,12 @@ export type Instrument = {
   measurement?: Measurement;
   feed_ids?: string[];
   aggregation_semantics?: string;
+  entity_ids?: string[];
+  context_id?: string;
+  path?: string[];
+  display_title?: string;
+  entities?: Entity[];
+  context?: Context;
   predicate?: Record<string, unknown>;
   atom_type?: string;
   subject?: string;
@@ -63,6 +69,8 @@ export type Instrument = {
 export type DemoState = {
   instruments: Instrument[];
   feeds?: DataFeed[];
+  entities?: Entity[];
+  contexts?: Context[];
   measurements?: Measurement[];
   conditions?: Instrument[];
   propositions?: Instrument[];
@@ -81,6 +89,8 @@ export type DemoState = {
     compositions: number;
     propositions?: number;
     measurements?: number;
+    entities?: number;
+    contexts?: number;
     feeds?: number;
     seeded: number;
     quoted: number;
@@ -97,6 +107,8 @@ export type Facets = {
   object_kinds?: string[];
   measurement_kinds?: string[];
   measurement_ids?: string[];
+  entity_ids?: string[];
+  context_ids?: string[];
   predicate_ops?: string[];
 };
 
@@ -158,6 +170,36 @@ export type Measurement = {
   description: string;
   resolver_primitive: string;
   canonical_key: string;
+  entity_ids?: string[];
+  context_id?: string;
+  path?: string[];
+  display_title?: string;
+};
+
+export type Entity = {
+  id: string;
+  object_kind: "entity";
+  kind: string;
+  name: string;
+  title: string;
+  short_name: string;
+  domain: string;
+  aliases?: string[];
+  external_refs?: Record<string, string>;
+  description: string;
+};
+
+export type Context = {
+  id: string;
+  object_kind: "context";
+  kind: string;
+  title: string;
+  short_name: string;
+  domain: string;
+  description: string;
+  entity_ids?: string[];
+  start?: string;
+  end?: string;
 };
 
 export type ImplicationEdge = {

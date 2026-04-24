@@ -23,11 +23,27 @@ class GraphUniverseTests(unittest.TestCase):
 
     def test_build_universe_seeds_graph_counts(self) -> None:
         universe = build_universe({"polymarket_events": [], "kalshi_markets": [], "errors": []})
+        self.assertGreaterEqual(len(universe["entities"]), 20)
+        self.assertGreaterEqual(len(universe["contexts"]), 8)
         self.assertGreaterEqual(len(universe["feeds"]), 5)
         self.assertGreaterEqual(len(universe["measurements"]), 50)
         self.assertGreaterEqual(len(universe["conditions"]), 30)
         self.assertGreaterEqual(len(universe["propositions"]), 10)
         self.assertIn("implication_edges", universe)
+
+    def test_measurements_have_paths_and_entities(self) -> None:
+        universe = build_universe({"polymarket_events": [], "kalshi_markets": [], "errors": []})
+        for measurement in universe["measurements"]:
+            self.assertTrue(measurement.get("path"), measurement["subject"])
+            self.assertTrue(measurement.get("display_title"), measurement["subject"])
+            self.assertTrue(measurement.get("entity_ids"), measurement["subject"])
+
+    def test_sports_measurements_use_entity_context_paths(self) -> None:
+        universe = build_universe({"polymarket_events": [], "kalshi_markets": [], "errors": []})
+        tatum = next(item for item in universe["measurements"] if item["subject"] == "Jayson Tatum injury status vs Knicks 2026-04-30")
+        self.assertEqual(tatum["context_id"], "ctx_nba_nyk_bos_2026_04_30")
+        self.assertIn("jayson_tatum", tatum["entity_ids"])
+        self.assertEqual(tatum["display_title"], "NBA / Knicks at Celtics / Jayson Tatum / injury status")
 
     def test_search_returns_conditions_not_flat_atoms(self) -> None:
         universe = build_universe({"polymarket_events": [], "kalshi_markets": [], "errors": []})

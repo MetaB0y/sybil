@@ -54,7 +54,9 @@ function App() {
 
   const instruments = state?.instruments || [];
   const measurements = state?.measurements || [];
-  const allObjects = [...measurements, ...instruments] as Instrument[];
+  const entities = state?.entities || [];
+  const contexts = state?.contexts || [];
+  const allObjects = [...entities, ...contexts, ...measurements, ...instruments] as Instrument[];
   const selected =
     allObjects.find((item) => item.id === selectedId) ||
     searchResult?.items[0] ||
@@ -311,8 +313,9 @@ function App() {
 
               <div className="metadata-grid core-grid">
                 <Meta label="Domain" help="Topic area used for browsing." value={selected.domain || "-"} />
-                <Meta label="Measurement" help="The observable input variable behind this condition." value={selected.measurement?.subject || selected.subject || selected.measurement_kind || "-"} />
-                <Meta label="Window" help="When the measurement is observed." value={selected.time_window || selected.aggregation_semantics || "-"} />
+                <Meta label="Path" help="Where this object sits in the prediction graph." value={pathText(selected)} long />
+                <Meta label="Measurement" help="The observable input variable behind this condition." value={selected.measurement?.display_title || selected.display_title || selected.measurement?.subject || selected.subject || selected.measurement_kind || "-"} />
+                <Meta label="Context" help="The event or time window that scopes the observation." value={selected.context?.title || selected.time_window || selected.aggregation_semantics || "-"} />
                 <Meta label="Predicate" help="The yes/no rule applied to a measurement." value={predicateText(selected)} />
                 <Meta label="Data source" help="Where the demo expects the measurement to come from." value={sourceText(selected)} />
                 <Meta label="Market state" help="Created means sybil-api has a tradable market. Draft means only the demo registry knows about it." value={selected.market?.status || (selected.market_id ? "created" : "draft only")} />
@@ -356,7 +359,7 @@ function App() {
                   <input value={explorerQuery} onChange={(e) => setExplorerQuery(e.target.value)} placeholder="Search measurements, conditions, propositions." />
                 </div>
                 <div className="filters">
-                  <Select label="Show" value={objectKind} setValue={setObjectKind} values={["", "measurement", "condition", "proposition"]} />
+                  <Select label="Show" value={objectKind} setValue={setObjectKind} values={["", "entity", "context", "measurement", "condition", "proposition"]} />
                   <Select label="Domain" value={domain} setValue={setDomain} values={["", ...(state?.facets?.domains || searchResult?.facets.domains || [])]} />
                   <Select label="Measurement type" value={measurementKind} setValue={setMeasurementKind} values={["", ...(state?.facets?.measurement_kinds || searchResult?.facets.measurement_kinds || [])]} />
                   <Select label="Predicate" value={predicateOp} setValue={setPredicateOp} values={["", ...(state?.facets?.predicate_ops || searchResult?.facets.predicate_ops || [])]} />
@@ -368,8 +371,8 @@ function App() {
                     className={selected.leaf_ids?.includes(item.id) || item.id === selected.id ? "atom used" : "atom"}
                     onClick={() => setSelectedId(item.id)}
                   >
-                    <span>{item.short_name || item.title}</span>
-                    <strong>{item.object_kind === "measurement" ? "input" : nanosPct(item.market?.yes_price_nanos) || pct(item.fair_value)}</strong>
+                    <span>{item.display_title || item.short_name || item.title}</span>
+                    <strong>{item.object_kind === "measurement" ? "input" : item.object_kind === "entity" || item.object_kind === "context" ? "node" : nanosPct(item.market?.yes_price_nanos) || pct(item.fair_value)}</strong>
                     <small>{displayKind(item)} / {item.domain || "unknown"}</small>
                     <small>{item.question || item.description}</small>
                   </button>
@@ -493,6 +496,8 @@ function FormulaView({ formula, instruments }: { formula: Formula | null; instru
 
 function displayKind(item?: Instrument | null): string {
   if (!item) return "-";
+  if (item.object_kind === "entity") return "Entity";
+  if (item.object_kind === "context") return "Context";
   if (item.object_kind === "measurement") return "Measurement";
   if (item.kind === "condition" || item.object_kind === "condition") return "Condition";
   if (item.kind === "proposition" || item.kind === "composition" || item.object_kind === "proposition") return "Market definition";
@@ -500,12 +505,12 @@ function displayKind(item?: Instrument | null): string {
 }
 
 function isTradable(item?: Instrument | null): boolean {
-  return !!item && item.object_kind !== "measurement";
+  return !!item && !["measurement", "entity", "context", "feed"].includes(item.object_kind || "");
 }
 
 function predicateText(item: Instrument): string {
   const predicate = (item.predicate || item.params?.predicate) as Record<string, unknown> | undefined;
-  if (!predicate) return item.object_kind === "measurement" ? "not a yes/no statement" : "formula";
+  if (!predicate) return item.object_kind === "measurement" || item.object_kind === "entity" || item.object_kind === "context" ? "not a yes/no statement" : "formula";
   if (predicate.op === "between") return `${predicate.low} < value < ${predicate.high}`;
   if (predicate.threshold !== undefined) return `value ${predicate.op} ${predicate.threshold}`;
   if (predicate.value !== undefined) return `value ${predicate.op} ${predicate.value}`;
@@ -517,6 +522,14 @@ function sourceText(item: Instrument): string {
   if (item.measurement?.feed_ids?.length) return item.measurement.feed_ids.join(", ");
   if (item.source === "graph") return "curated graph";
   return item.source || "-";
+}
+
+function pathText(item: Instrument): string {
+  if (item.path?.length) return item.path.join(" / ");
+  if (item.measurement?.path?.length) return item.measurement.path.join(" / ");
+  if (item.object_kind === "entity") return `${item.domain || "domain"} / ${item.kind || "entity"} / ${item.title}`;
+  if (item.object_kind === "context") return `${item.domain || "domain"} / ${item.kind || "context"} / ${item.title}`;
+  return "-";
 }
 
 function qualityText(value?: string): string {

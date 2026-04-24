@@ -14,7 +14,9 @@ from typing import Any
 
 from .registry import (
     Condition,
+    Context,
     DataFeed,
+    Entity,
     Measurement,
     Proposition,
     canonical_json,
@@ -39,6 +41,8 @@ def import_universe(max_atoms: int = 110, force: bool = False) -> dict[str, Any]
         counts = cached.get("source_counts", {})
         if (
             cached.get("universe_version") == 4
+            and counts.get("entities", 0) >= 20
+            and counts.get("contexts", 0) >= 8
             and counts.get("measurements", 0) >= 50
             and counts.get("conditions", 0) + counts.get("propositions", 0) >= 80
         ):
@@ -61,6 +65,8 @@ def fetch_snapshot(force: bool = False) -> dict[str, Any]:
 
 def build_universe(snapshot: dict[str, Any], max_atoms: int = 110) -> dict[str, Any]:
     feeds = seed_feeds()
+    entities = seed_entities()
+    contexts = seed_contexts()
     measurements = seed_measurements(feeds)
     conditions = seed_conditions(measurements)
     attach_source_aliases(snapshot, conditions)
@@ -71,6 +77,8 @@ def build_universe(snapshot: dict[str, Any], max_atoms: int = 110) -> dict[str, 
         "universe_version": 4,
         "created_at": time.time(),
         "feeds": feeds,
+        "entities": entities,
+        "contexts": contexts,
         "measurements": measurements,
         "conditions": conditions,
         "propositions": propositions,
@@ -79,6 +87,8 @@ def build_universe(snapshot: dict[str, Any], max_atoms: int = 110) -> dict[str, 
         "implication_edges": implication_edges,
         "source_counts": {
             "feeds": len(feeds),
+            "entities": len(entities),
+            "contexts": len(contexts),
             "measurements": len(measurements),
             "conditions": len(conditions),
             "propositions": len(propositions),
@@ -100,6 +110,78 @@ def seed_feeds() -> list[dict[str, Any]]:
         DataFeed("election_wire", "AP/FEC election feed", "politics", "official", "source_result_signed", "Election calls and certified results.").to_dict(),
         DataFeed("wire", "Reuters/AP wire", "geopolitics", "trusted", "wire_service_or_admin", "Newswire event evidence.").to_dict(),
         DataFeed("sportsdata", "SportsDataIO demo", "sports", "signed", "sports_feed_signed", "Game and player stat feed.").to_dict(),
+    ]
+
+
+def seed_entities() -> list[dict[str, Any]]:
+    specs = [
+        ("eth", "asset", "ETH", "crypto", ["Ethereum"], {"coingecko": "ethereum"}),
+        ("btc", "asset", "BTC", "crypto", ["Bitcoin"], {"coingecko": "bitcoin"}),
+        ("sol", "asset", "SOL", "crypto", ["Solana"], {"coingecko": "solana"}),
+        ("crypto_market", "sector", "Crypto market", "crypto", [], {}),
+        ("stablecoins", "sector", "Stablecoins", "crypto", [], {}),
+        ("btc_spot_etfs", "fund_group", "BTC spot ETFs", "crypto", [], {}),
+        ("us_economy", "economy", "US economy", "macro", [], {}),
+        ("federal_reserve", "institution", "Federal Reserve", "macro", ["Fed"], {}),
+        ("sp500", "index", "S&P 500", "macro", ["SPX"], {}),
+        ("nasdaq100", "index", "Nasdaq 100", "macro", ["NDX"], {}),
+        ("vix", "index", "VIX", "macro", [], {}),
+        ("wti_crude", "commodity", "WTI crude oil", "macro", [], {}),
+        ("gold", "commodity", "Gold", "macro", [], {}),
+        ("dxy", "currency_index", "US Dollar Index", "macro", ["DXY"], {}),
+        ("democratic_party", "political_party", "Democratic Party", "politics", ["Democrats"], {}),
+        ("republican_party", "political_party", "Republican Party", "politics", ["GOP", "Republicans"], {}),
+        ("gavin_newsom", "person", "Gavin Newsom", "politics", [], {}),
+        ("gretchen_whitmer", "person", "Gretchen Whitmer", "politics", [], {}),
+        ("jd_vance", "person", "JD Vance", "politics", [], {}),
+        ("iran", "country", "Iran", "geopolitics", [], {}),
+        ("united_states", "country", "United States", "geopolitics", ["US", "USA"], {}),
+        ("strait_of_hormuz", "place", "Strait of Hormuz", "geopolitics", [], {}),
+        ("nba", "league", "NBA", "sports", [], {}),
+        ("boston_celtics", "team", "Boston Celtics", "sports", ["Celtics"], {}),
+        ("new_york_knicks", "team", "New York Knicks", "sports", ["Knicks"], {}),
+        ("jayson_tatum", "player", "Jayson Tatum", "sports", ["Tatum"], {}),
+        ("jaylen_brown", "player", "Jaylen Brown", "sports", ["Brown"], {}),
+        ("jalen_brunson", "player", "Jalen Brunson", "sports", ["Brunson"], {}),
+    ]
+    return [
+        Entity(
+            id=entity_id,
+            kind=kind,
+            name=name,
+            domain=domain,
+            aliases=aliases,
+            external_refs=external_refs,
+            description=f"{name} entity for composition-demo ontology.",
+        ).to_dict()
+        for entity_id, kind, name, domain, aliases, external_refs in specs
+    ]
+
+
+def seed_contexts() -> list[dict[str, Any]]:
+    specs = [
+        ("ctx_2026", "year", "2026", "macro", "Calendar year 2026.", [], "2026-01-01", "2026-12-31"),
+        ("ctx_2026_q1", "quarter", "2026 Q1", "macro", "First quarter of 2026.", [], "2026-01-01", "2026-03-31"),
+        ("ctx_2026_q2", "quarter", "2026 Q2", "macro", "Second quarter of 2026.", [], "2026-04-01", "2026-06-30"),
+        ("ctx_2026_q3", "quarter", "2026 Q3", "macro", "Third quarter of 2026.", [], "2026-07-01", "2026-09-30"),
+        ("ctx_2026_q4", "quarter", "2026 Q4", "macro", "Fourth quarter of 2026.", [], "2026-10-01", "2026-12-31"),
+        ("ctx_before_2027", "window", "Before 2027", "geopolitics", "Observation window ending before 2027.", [], "", "2026-12-31"),
+        ("ctx_2028_nomination", "election_cycle", "2028 presidential nominations", "politics", "US presidential nomination cycle.", ["democratic_party", "republican_party"], "", "2028-08-31"),
+        ("ctx_2028_general", "election", "2028 US general election", "politics", "US presidential and congressional general election.", ["democratic_party", "republican_party"], "2028-11-07", "2028-12-31"),
+        ("ctx_nba_nyk_bos_2026_04_30", "nba_game", "Knicks at Celtics, 2026-04-30", "sports", "NBA game context for seeded same-game markets.", ["nba", "new_york_knicks", "boston_celtics"], "2026-04-30", "2026-04-30"),
+    ]
+    return [
+        Context(
+            id=context_id,
+            kind=kind,
+            title=title,
+            domain=domain,
+            description=description,
+            entity_ids=entity_ids,
+            start=start,
+            end=end,
+        ).to_dict()
+        for context_id, kind, title, domain, description, entity_ids, start, end in specs
     ]
 
 
@@ -160,6 +242,7 @@ def seed_measurements(feeds: list[dict[str, Any]]) -> list[dict[str, Any]]:
     feed_domains = {feed["id"]: feed["domain"] for feed in feeds}
     for domain, kind, subject, unit, feed_ids, aggregation in specs:
         resolver = resolver_for_feed(feed_ids[0])
+        meta = measurement_metadata(subject, kind, domain)
         key = measurement_key(
             {
                 "measurement_kind": kind,
@@ -177,14 +260,156 @@ def seed_measurements(feeds: list[dict[str, Any]]) -> list[dict[str, Any]]:
             unit=unit,
             feed_ids=feed_ids,
             aggregation_semantics=aggregation,
-            title=subject,
-            description=f"Observable measurement for {subject}.",
+            title=meta["display_title"],
+            description=meta["description"],
             resolver_primitive=resolver,
             trust_tier="official" if domain in {"macro", "politics"} else "signed",
             canonical_key=key,
+            entity_ids=meta["entity_ids"],
+            context_id=meta["context_id"],
+            path=meta["path"],
+            display_title=meta["display_title"],
         ).to_dict()
         rows.append(row)
     return rows
+
+
+def measurement_metadata(subject: str, kind: str, domain: str) -> dict[str, Any]:
+    if subject == "Jayson Tatum points vs Knicks 2026-04-30":
+        return path_meta(
+            "NBA / Knicks at Celtics / Jayson Tatum / points",
+            ["nba", "ctx_nba_nyk_bos_2026_04_30", "jayson_tatum", "points"],
+            ["nba", "boston_celtics", "new_york_knicks", "jayson_tatum"],
+            "ctx_nba_nyk_bos_2026_04_30",
+            "Final box-score points for Jayson Tatum in Knicks at Celtics.",
+        )
+    if subject == "Jaylen Brown rebounds vs Knicks 2026-04-30":
+        return path_meta(
+            "NBA / Knicks at Celtics / Jaylen Brown / rebounds",
+            ["nba", "ctx_nba_nyk_bos_2026_04_30", "jaylen_brown", "rebounds"],
+            ["nba", "boston_celtics", "new_york_knicks", "jaylen_brown"],
+            "ctx_nba_nyk_bos_2026_04_30",
+            "Final box-score rebounds for Jaylen Brown in Knicks at Celtics.",
+        )
+    if subject == "Jalen Brunson assists vs Celtics 2026-04-30":
+        return path_meta(
+            "NBA / Knicks at Celtics / Jalen Brunson / assists",
+            ["nba", "ctx_nba_nyk_bos_2026_04_30", "jalen_brunson", "assists"],
+            ["nba", "boston_celtics", "new_york_knicks", "jalen_brunson"],
+            "ctx_nba_nyk_bos_2026_04_30",
+            "Final box-score assists for Jalen Brunson in Knicks at Celtics.",
+        )
+    if subject == "Jayson Tatum injury status vs Knicks 2026-04-30":
+        return path_meta(
+            "NBA / Knicks at Celtics / Jayson Tatum / injury status",
+            ["nba", "ctx_nba_nyk_bos_2026_04_30", "jayson_tatum", "injury_status"],
+            ["nba", "boston_celtics", "new_york_knicks", "jayson_tatum"],
+            "ctx_nba_nyk_bos_2026_04_30",
+            "Pre-game injury-report status for Jayson Tatum before Knicks at Celtics.",
+        )
+    if subject == "NBA Knicks at Celtics 2026-04-30 winner":
+        return path_meta(
+            "NBA / Knicks at Celtics / game winner",
+            ["nba", "ctx_nba_nyk_bos_2026_04_30", "game_winner"],
+            ["nba", "boston_celtics", "new_york_knicks"],
+            "ctx_nba_nyk_bos_2026_04_30",
+            "Final winner for Knicks at Celtics.",
+        )
+    if subject == "NBA Knicks at Celtics 2026-04-30 total points":
+        return path_meta(
+            "NBA / Knicks at Celtics / total points",
+            ["nba", "ctx_nba_nyk_bos_2026_04_30", "total_points"],
+            ["nba", "boston_celtics", "new_york_knicks"],
+            "ctx_nba_nyk_bos_2026_04_30",
+            "Combined final score for Knicks at Celtics.",
+        )
+
+    entity_map = {
+        "ETH/USD spot": ["eth"],
+        "ETH/USD 30-day realized volatility": ["eth"],
+        "BTC/USD spot": ["btc"],
+        "BTC market-cap dominance": ["btc", "crypto_market"],
+        "BTC spot ETF net flow": ["btc", "btc_spot_etfs"],
+        "SOL/USD spot": ["sol"],
+        "Total crypto market cap": ["crypto_market"],
+        "Stablecoin circulating supply": ["stablecoins", "crypto_market"],
+        "US real GDP growth": ["us_economy"],
+        "US unemployment rate": ["us_economy"],
+        "Sahm rule indicator": ["us_economy"],
+        "US CPI YoY": ["us_economy"],
+        "Fed funds target upper bound": ["federal_reserve"],
+        "US 10-year Treasury yield": ["us_economy"],
+        "US 2-year Treasury yield": ["us_economy"],
+        "US 10Y-2Y Treasury spread": ["us_economy"],
+        "S&P 500": ["sp500"],
+        "Nasdaq 100": ["nasdaq100"],
+        "VIX": ["vix"],
+        "WTI crude oil spot": ["wti_crude"],
+        "Gold spot": ["gold"],
+        "US Dollar Index DXY": ["dxy"],
+        "2028 Democratic presidential nominee": ["democratic_party"],
+        "2028 Republican presidential nominee": ["republican_party"],
+        "2028 US presidential winner": ["democratic_party", "republican_party"],
+        "2028 US House control": ["democratic_party", "republican_party"],
+        "2028 US Senate control": ["democratic_party", "republican_party"],
+        "2028 Democratic national primary polling": ["democratic_party"],
+        "2028 Republican national primary polling": ["republican_party"],
+        "US presidential approval": ["united_states"],
+        "2028 US presidential turnout": ["united_states"],
+        "2028 US presidential popular vote margin": ["democratic_party", "republican_party"],
+        "Iran US troop count": ["iran", "united_states"],
+        "Iran US troop presence duration": ["iran", "united_states"],
+        "Iran US strike count": ["iran", "united_states"],
+        "US Iran war authorization": ["iran", "united_states"],
+        "US control of Iranian territory": ["iran", "united_states"],
+        "US Iran sanctions package count": ["iran", "united_states"],
+        "Iran nuclear talks status": ["iran", "united_states"],
+        "Strait of Hormuz tanker incident count": ["strait_of_hormuz", "iran"],
+        "Iran-linked regional casualty count": ["iran"],
+    }
+    context = context_for_subject(subject)
+    entity_ids = entity_map.get(subject, ["us_economy"] if domain == "macro" else [])
+    return path_meta(
+        f"{domain.title()} / {subject}",
+        [domain, *entity_ids, kind],
+        entity_ids,
+        context,
+        f"Observable {kind} measurement for {subject}.",
+    )
+
+
+def path_meta(
+    display_title: str,
+    path: list[str],
+    entity_ids: list[str],
+    context_id: str,
+    description: str,
+) -> dict[str, Any]:
+    return {
+        "display_title": display_title,
+        "path": path,
+        "entity_ids": entity_ids,
+        "context_id": context_id,
+        "description": description,
+    }
+
+
+def context_for_subject(subject: str) -> str:
+    if "2026-Q1" in subject:
+        return "ctx_2026_q1"
+    if "2026-Q2" in subject:
+        return "ctx_2026_q2"
+    if "2026-Q3" in subject:
+        return "ctx_2026_q3"
+    if "2026-Q4" in subject:
+        return "ctx_2026_q4"
+    if subject.startswith("2028 Democratic") or subject.startswith("2028 Republican"):
+        return "ctx_2028_nomination"
+    if subject.startswith("2028 US"):
+        return "ctx_2028_general"
+    if subject.startswith("Iran") or subject.startswith("US Iran") or subject.startswith("US control") or subject.startswith("Strait"):
+        return "ctx_before_2027"
+    return "ctx_2026"
 
 
 def resolver_for_feed(feed_id: str) -> str:

@@ -36,6 +36,8 @@ def load_state(path: str | Path = DEFAULT_STATE_PATH) -> dict[str, Any]:
             "updated_at": time.time(),
             "universe_version": universe.get("universe_version", 4),
             "feeds": universe.get("feeds", []),
+            "entities": universe.get("entities", []),
+            "contexts": universe.get("contexts", []),
             "measurements": universe.get("measurements", []),
             "conditions": universe.get("conditions", []),
             "propositions": universe.get("propositions", []),
@@ -49,7 +51,7 @@ def load_state(path: str | Path = DEFAULT_STATE_PATH) -> dict[str, Any]:
         }
     with p.open("r", encoding="utf-8") as f:
         state = json.load(f)
-    if state.get("universe_version") != 4 or len(state.get("measurements", [])) < 50:
+    if state.get("universe_version") != 4 or len(state.get("measurements", [])) < 50 or not state.get("entities"):
         universe = import_universe(max_atoms=DEFAULT_MAX_ATOMS, force=True)
         market_ids = {item["id"]: item.get("market_id") for item in state.get("instruments", [])}
         for item in universe.get("instruments", []):
@@ -59,6 +61,8 @@ def load_state(path: str | Path = DEFAULT_STATE_PATH) -> dict[str, Any]:
             {
                 "universe_version": 4,
                 "feeds": universe.get("feeds", []),
+                "entities": universe.get("entities", []),
+                "contexts": universe.get("contexts", []),
                 "measurements": universe.get("measurements", []),
                 "conditions": universe.get("conditions", []),
                 "propositions": universe.get("propositions", []),
@@ -153,6 +157,8 @@ def import_sources(force: bool = False, max_atoms: int = DEFAULT_MAX_ATOMS) -> d
             item["market_id"] = market_ids[item["id"]]
     state["universe_version"] = universe.get("universe_version", 4)
     state["feeds"] = universe.get("feeds", [])
+    state["entities"] = universe.get("entities", [])
+    state["contexts"] = universe.get("contexts", [])
     state["measurements"] = universe.get("measurements", [])
     state["conditions"] = universe.get("conditions", [])
     state["propositions"] = universe.get("propositions", [])
@@ -222,6 +228,8 @@ def enrich_state(state: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL) -> d
 
     values = {item["id"]: float(item.get("fair_value", 0.5)) for item in state["instruments"]}
     measurements_by_id = {item["id"]: item for item in state.get("measurements", [])}
+    entities_by_id = {item["id"]: item for item in state.get("entities", [])}
+    contexts_by_id = {item["id"]: item for item in state.get("contexts", [])}
     enriched = []
     for item in state["instruments"]:
         row = dict(item)
@@ -235,6 +243,11 @@ def enrich_state(state: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL) -> d
         if row.get("measurement_id") and row["measurement_id"] in measurements_by_id:
             row["measurement"] = measurements_by_id[row["measurement_id"]]
             row["measurement_kind"] = measurements_by_id[row["measurement_id"]].get("measurement_kind")
+            row["entity_ids"] = measurements_by_id[row["measurement_id"]].get("entity_ids", [])
+            row["context_id"] = measurements_by_id[row["measurement_id"]].get("context_id", "")
+            row["path"] = measurements_by_id[row["measurement_id"]].get("path", [])
+            row["context"] = contexts_by_id.get(row.get("context_id", ""))
+            row["entities"] = [entities_by_id[entity_id] for entity_id in row.get("entity_ids", []) if entity_id in entities_by_id]
         if row["kind"] in {"proposition", "composition"}:
             row["leaf_ids"] = formula_conditions(row.get("formula"))
             row["model_value"] = estimate_formula_value(row.get("formula"), values)
@@ -257,6 +270,8 @@ def enrich_state(state: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL) -> d
         for item in enriched
         if item.get("market_id") is not None
     ]
+    out["entities"] = state.get("entities", [])
+    out["contexts"] = state.get("contexts", [])
     out["sybil_url"] = sybil_url
     out["facets"] = search_instruments(enriched, limit=0)["facets"]
     out["instrument_counts"] = {
@@ -265,6 +280,8 @@ def enrich_state(state: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL) -> d
         "compositions": len([item for item in enriched if item["kind"] == "proposition"]),
         "propositions": len([item for item in enriched if item["kind"] == "proposition"]),
         "measurements": len(out.get("measurements", [])),
+        "entities": len(out.get("entities", [])),
+        "contexts": len(out.get("contexts", [])),
         "feeds": len(out.get("feeds", [])),
         "seeded": len([item for item in enriched if item.get("market_id") is not None]),
         "quoted": len([item for item in enriched if item.get("market_id") is not None])
@@ -275,7 +292,7 @@ def enrich_state(state: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL) -> d
 
 def explorer_search(payload: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL) -> dict[str, Any]:
     state = enrich_state(load_state(), sybil_url)
-    rows = [*state.get("measurements", []), *state["instruments"]]
+    rows = [*state.get("entities", []), *state.get("contexts", []), *state.get("measurements", []), *state["instruments"]]
     return search_instruments(
         rows,
         query=str(payload.get("query", "")),
