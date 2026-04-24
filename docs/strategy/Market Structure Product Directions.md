@@ -7,9 +7,17 @@ last_verified: 2026-04-24
 
 # Market Structure Product Directions
 
-This document is a deliberately broad problem statement for Sybil's next product direction. It is meant to be read by someone outside the day-to-day codebase, including a strong reasoning model, and to preserve the uncertainty rather than prematurely collapse it into a product plan.
+This is a self-contained strategic problem statement for Sybil. It is written for a very strong external reasoning model or reviewer. The reader can be assumed to understand prediction markets, market microstructure, derivatives, RFQ, options, market making, privacy, and agentic UX. What the reader cannot know is our internal context: what Sybil has built, what strategic fork we are facing, what intuitions we are testing, and where we are uncertain.
 
-The current question is not "how do we make the composition demo less confusing?" The deeper question is:
+The goal is not to explain basic concepts. The goal is to put all relevant assumptions on the page so the reader can critique the strategic direction without guessing what we mean.
+
+Sybil is a prediction-market exchange project built around three core technical claims:
+
+1. **Private frequent batch auctions should improve prediction-market microstructure.** Public continuous order books create stale-quote sniping, copy-trading, and toxic flow around discrete information events. Batch clearing plus private order flow should reduce those losses and make informed participation less self-defeating.
+2. **Budget-constrained batch clearing enables flash liquidity.** Market makers should be able to quote many markets in the same batch against one shared risk budget, with the clearing engine deciding which fills are jointly feasible.
+3. **Agent-native and privacy-aware UX may support market types that public CLOB prediction markets cannot.** In particular: delayed-reveal sponsored markets, high-resolution event surfaces, scalar distributions, and long-tail structured event risk.
+
+The strategic question is:
 
 > Given Sybil's actual technical advantages — frequent batch auctions, privacy, verifiable clearing, budget-constrained market-maker clearing, and flash liquidity — what product experiences become possible that Polymarket, Kalshi, and sportsbook-style prediction markets cannot easily copy?
 
@@ -18,6 +26,41 @@ The attractive but dangerous answer is "markets for everything." The sharper que
 > Can Sybil support a much larger surface of real-world event exposure without degenerating into a graveyard of bespoke illiquid markets?
 
 This report lays out the terrain.
+
+## 0. What We Want The Reader To Help With
+
+The central uncertainty is whether these technical advantages point to a real product wedge or whether they tempt us into an incoherent "market for everything" direction.
+
+We want critique on:
+
+1. Whether measurements/compositions are actually a useful constraint on long-tail market creation, or whether they are elegant ontology work with weak commercial force.
+2. Whether flash liquidity plus FBA materially changes the economics of quoting many related markets, or whether pricing remains the binding bottleneck.
+3. Which product direction best uses Sybil's architecture:
+   - market-backed search/answers for future questions;
+   - thematic long-tail markets;
+   - scalar/distribution markets;
+   - high-resolution event clouds;
+   - private opportunity markets;
+   - RFQ for event risk;
+   - agent/MM infrastructure.
+4. What minimal demo would make the direction feel obviously compelling.
+5. What should be killed early because it is technically interesting but strategically weak.
+
+The reader should assume we are not emotionally attached to the current composition/measurement framing. We are trying to decide whether it is the right abstraction, a useful backend-only primitive, or a dead end.
+
+## 0.1 Project-Specific Terms
+
+Only the project-specific terms are defined here.
+
+**Flash liquidity** means market makers quote many markets in a batch while declaring one shared batch-local risk budget. The exchange's clearing problem chooses which quoted orders fill under that budget. This is meant to let the same maker capital cover much more surface than isolated per-market collateralization.
+
+**Measurement** means a reusable observable variable that can anchor many markets: ETH/USD max price in 2026, CPI YoY in a given month, a benchmark score, a troop count, a company's quarterly revenue, a player's season goal count. The point is not ontology for its own sake; the point is to create shared risk buckets and reusable resolution sources.
+
+**Condition** means a predicate over a measurement: ETH/USD max in 2026 > $6,000; CPI YoY > 4%; FrontierMath best score > 50%.
+
+**Composition** means a formula over conditions: CPI > 4% AND Fed funds > 5%; ETH > 6000 AND BTC > 150k; K_OF_N(2, [FrontierMath > 50%, SWE-bench > 80%, ARC-AGI > 85%]).
+
+**Opportunity market** means a sponsored private market where the sponsor gets the clearing price before the public. The sponsor pays for crowdsourced alpha and receives a delayed-reveal window.
 
 ## 1. Current Market Context
 
@@ -528,9 +571,9 @@ Why Sybil is differentiated:
 - measurements naturally define scalar variables;
 - agents can summarize the distribution as an answer.
 
-Potential Functionspace collaboration:
+Potential specialist collaboration:
 
-If Functionspace or similar tooling specializes in scalar/continuous prediction interfaces, a collaboration could be useful. Sybil supplies market structure and clearing; scalar specialists supply UX, modeling, or distribution-market primitives.
+If an external team specializes in scalar/continuous prediction interfaces, a collaboration could be useful. Sybil would supply market structure and clearing; the specialist would supply UX, modeling, or distribution-market primitives.
 
 Validation demo:
 
@@ -871,9 +914,9 @@ Failure:
 - users want browsing/feed instead;
 - every query creates a bespoke market.
 
-## 10. Demo Directions That Could Feel Compelling
+## 10. Validation Artifacts That Could Feel Compelling
 
-The current composition demo became overloaded because it exposed the machinery. A compelling demo should pick one strong claim and show it clearly.
+The validation artifact should pick one strong claim and show it clearly. It should not expose all machinery at once. The viewer should quickly understand what market structure advantage is being demonstrated.
 
 ### Demo A: One Box, Many Trade Expressions
 
@@ -967,7 +1010,7 @@ Avoid:
 - arbitrary user-created markets with no quoteability;
 - graph diagrams as consumer product;
 - mode buttons that ask users to classify their intent;
-- demos with many hardcoded but unpriced markets;
+- prototypes with many hardcoded but unpriced markets;
 - "bet on everything" without saying what is priceable.
 
 These create the impression that Sybil is a confusing market generator rather than a better market structure.
@@ -1019,7 +1062,7 @@ Cons:
 - depends on professional maker adoption;
 - may look like infrastructure, not a network.
 
-These paths can converge, but the first demo should not try to prove both. The safest sequence may be:
+These paths can converge, but the first validation artifact should not try to prove both. The safest sequence may be:
 
 1. Prove maker/economic advantage in one domain.
 2. Wrap it in a simple intent/search UI.
@@ -1027,7 +1070,7 @@ These paths can converge, but the first demo should not try to prove both. The s
 
 ## 13. Recommended Near-Term Focus
 
-The next build should not be a generic composition demo. It should be a tightly scoped experiment:
+The next build should not be a generic composition/product demo. It should be a tightly scoped experiment:
 
 > Pick one domain where measurement curves are real, build a high-density priceable surface, and show that flash-liquidity MMs can quote it better than isolated markets.
 
@@ -1097,7 +1140,7 @@ Cons:
 
 My current recommendation:
 
-> Use AI infrastructure/progress or crypto infrastructure for the next demo, not sports.
+> Use AI infrastructure/progress or crypto infrastructure for the next validation artifact, not sports.
 
 Sports is too occupied by bookmakers and legally fraught. It is useful for ontology testing, but not an obvious wedge.
 
@@ -1148,8 +1191,8 @@ The correct product is likely one of:
 3. a private opportunity-market system for sponsored alpha discovery;
 4. an agent/MM infrastructure layer for quoting structured event risk.
 
-The next demo should prove one of these in a narrow domain with real pricing discipline. The best demo will make a viewer think:
+The next validation artifact should prove one of these in a narrow domain with real pricing discipline. The best version will make a viewer think:
 
 > This could not exist on a public continuous order book.
 
-If the demo does not make that clear, it is probably not using Sybil's actual advantage.
+If it does not make that clear, it is probably not using Sybil's actual advantage.
