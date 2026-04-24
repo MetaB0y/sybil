@@ -780,6 +780,8 @@ The first product should not be "browse the whole graph." The graph is infrastru
 User intent -> graph search -> candidate markets -> explanation -> trade or create definition
 ```
 
+The dedicated clickable graph surface is specified in [[Composition Demo Graph View]]. That view should consume the same graph projection API that agents use for search and neighborhood expansion.
+
 The four strongest initial workflows are:
 
 1. **Hedge my exposure**

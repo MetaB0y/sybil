@@ -461,24 +461,27 @@ def graph_projection(payload: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL
     limit = max(20, min(600, int(payload.get("limit", 220))))
 
     nodes_by_id = {node["id"]: node for node in projection["nodes"]}
-    matched = []
+    matched: list[tuple[str, int]] = []
     for node in projection["nodes"]:
         if domain and node.get("domain") != domain:
             continue
         if kind and node.get("kind") != kind:
             continue
         search_text = str(node.get("search_text", "")).lower()
-        if tokens and not all(token in search_text for token in tokens):
+        token_hits = sum(1 for token in tokens if token in search_text)
+        if tokens and token_hits == 0:
             continue
-        matched.append(node["id"])
+        matched.append((node["id"], token_hits))
+    matched.sort(key=lambda item: item[1], reverse=True)
+    matched_ids = [node_id for node_id, _ in matched]
 
     if focus_id and focus_id in nodes_by_id:
         visible_ids = neighborhood_ids(focus_id, projection["edges"], depth)
-        if matched:
-            visible_ids |= set(matched)
-    elif matched:
-        visible_ids = set(matched)
-        for node_id in matched[:60]:
+        if matched_ids:
+            visible_ids |= set(matched_ids)
+    elif matched_ids:
+        visible_ids = set(matched_ids)
+        for node_id in matched_ids[:60]:
             visible_ids |= neighborhood_ids(node_id, projection["edges"], 1)
     else:
         visible_ids = set(node["id"] for node in projection["nodes"])
@@ -486,7 +489,7 @@ def graph_projection(payload: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL
     visible = [nodes_by_id[node_id] for node_id in visible_ids if node_id in nodes_by_id]
     visible.sort(key=lambda node: (kind_rank(node["kind"]), node.get("domain", ""), node.get("label", "")))
     if len(visible) > limit:
-        pinned = {focus_id, *matched[:30]}
+        pinned = {focus_id, *matched_ids[:30]}
         pinned_nodes = [node for node in visible if node["id"] in pinned]
         rest = [node for node in visible if node["id"] not in pinned]
         visible = [*pinned_nodes, *rest[: max(0, limit - len(pinned_nodes))]]
@@ -500,7 +503,7 @@ def graph_projection(payload: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL
         "nodes": visible,
         "edges": edges,
         "focus_id": focus_id if focus_id in nodes_by_id else "",
-        "matched_ids": [node_id for node_id in matched if node_id in visible_ids],
+        "matched_ids": [node_id for node_id in matched_ids if node_id in visible_ids],
         "facets": projection["facets"],
     }
 
