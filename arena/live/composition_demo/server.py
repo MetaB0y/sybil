@@ -21,6 +21,7 @@ from .store import (
     enrich_state,
     explorer_search,
     import_sources,
+    graph_projection,
     load_state,
     publish_wizard_draft,
     quote_once,
@@ -62,6 +63,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(enrich_state(load_state(), sybil_url))
             elif parsed.path == "/explorer/search":
                 self.respond(explorer_search(body, sybil_url))
+            elif parsed.path == "/graph":
+                self.respond(graph_projection(body, sybil_url))
             elif parsed.path == "/formula/validate":
                 self.respond(validate_formula_payload(body))
             elif parsed.path == "/wizard/draft":

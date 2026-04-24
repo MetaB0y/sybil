@@ -212,6 +212,134 @@ input, select {
 .draft h3, .ticket h3 { margin: 0 0 8px; }
 
 .main-panel { min-height: 720px; }
+.view-switch {
+  display: inline-flex;
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.18);
+  margin-bottom: 18px;
+}
+.view-switch button {
+  border-radius: 11px;
+  color: var(--muted);
+}
+.view-switch button.active {
+  color: #17120a;
+  background: var(--gold);
+  border-color: transparent;
+  font-weight: 900;
+}
+.graph-view {
+  display: grid;
+  gap: 14px;
+}
+.graph-toolbar {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) 160px 150px 100px;
+  gap: 10px;
+  align-items: end;
+}
+.graph-toolbar label span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 5px;
+}
+.graph-toolbar input, .graph-toolbar select {
+  width: 100%;
+}
+.graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.graph-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.legend-dot.entity { background: #e5b769; }
+.legend-dot.context { background: #d88be8; }
+.legend-dot.measurement { background: #79e3d1; }
+.legend-dot.condition { background: #8eb7ff; }
+.legend-dot.definition { background: #9ee26f; }
+.legend-dot.market { background: #ff735c; }
+.graph-canvas-wrap {
+  height: 680px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: rgba(0, 0, 0, 0.24);
+}
+.graph-canvas {
+  width: 1180px;
+  min-height: 680px;
+}
+.graph-edge {
+  stroke: rgba(246, 241, 232, 0.26);
+  stroke-width: 1.2;
+}
+.graph-edge.implication {
+  stroke: rgba(255, 115, 92, 0.6);
+  stroke-dasharray: 7 5;
+}
+.graph-edge.live_market {
+  stroke: rgba(158, 226, 111, 0.7);
+}
+.graph-edge.dim {
+  opacity: 0.08;
+}
+.graph-canvas marker path {
+  fill: rgba(246, 241, 232, 0.42);
+}
+.graph-node {
+  cursor: pointer;
+}
+.graph-node rect {
+  fill: rgba(24, 31, 31, 0.94);
+  stroke: rgba(246, 241, 232, 0.18);
+  stroke-width: 1;
+}
+.graph-node text {
+  fill: var(--ink);
+  font-size: 12px;
+  font-weight: 850;
+  pointer-events: none;
+}
+.graph-node .node-subtitle {
+  fill: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+.graph-node.entity rect { stroke: #e5b769; }
+.graph-node.context rect { stroke: #d88be8; }
+.graph-node.measurement rect { stroke: #79e3d1; }
+.graph-node.condition rect { stroke: #8eb7ff; }
+.graph-node.definition rect { stroke: #9ee26f; }
+.graph-node.market rect { stroke: #ff735c; }
+.graph-node.selected rect {
+  fill: rgba(229, 183, 105, 0.18);
+  stroke-width: 2.5;
+}
+.graph-node.dim {
+  opacity: 0.18;
+}
+.graph-summary {
+  display: flex;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
 .instrument-header {
   display: flex;
   justify-content: space-between;
@@ -571,6 +699,6 @@ input, select {
   body { min-width: 0; }
   .hero, .shell { display: block; }
   .panel, .stats-strip { margin-bottom: 16px; }
-  .stats-strip, .metrics, .metadata-grid, .filters, .atom-list, .graph-columns { grid-template-columns: 1fr 1fr; }
+  .stats-strip, .metrics, .metadata-grid, .filters, .atom-list, .graph-columns, .graph-toolbar { grid-template-columns: 1fr 1fr; }
   .explorer-head { grid-template-columns: 1fr; }
 }

@@ -125,6 +125,38 @@ export type SearchResult = {
   facets: Facets;
 };
 
+export type GraphNode = {
+  id: string;
+  kind: "entity" | "context" | "measurement" | "condition" | "definition" | "market";
+  label: string;
+  domain?: string;
+  summary?: string;
+  object_id: string;
+  object_kind: string;
+  path?: string[];
+  score?: number;
+};
+
+export type GraphEdge = {
+  from: string;
+  to: string;
+  type: string;
+  label: string;
+  strength?: number;
+};
+
+export type GraphProjection = {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  focus_id?: string;
+  matched_ids: string[];
+  facets: {
+    domains: string[];
+    kinds: string[];
+    edge_types: string[];
+  };
+};
+
 export type FormulaValidation = {
   valid: boolean;
   errors: string[];

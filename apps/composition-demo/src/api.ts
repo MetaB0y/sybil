@@ -1,4 +1,4 @@
-import type { DemoState, Discovery, Draft, Formula, FormulaValidation, SearchResult, TradeProposal, WizardDraft } from "./types";
+import type { DemoState, Discovery, Draft, Formula, FormulaValidation, GraphProjection, SearchResult, TradeProposal, WizardDraft } from "./types";
 
 export const DEMO_URL = import.meta.env.VITE_COMPOSITION_DEMO_URL || "http://localhost:8787";
 export const SYBIL_URL = import.meta.env.VITE_SYBIL_API_URL || "http://localhost:3001";
@@ -53,6 +53,20 @@ export function searchExplorer(params: {
   limit?: number;
 }): Promise<SearchResult> {
   return json<SearchResult>(`${DEMO_URL}/explorer/search`, {
+    method: "POST",
+    body: JSON.stringify({ sybil_url: SYBIL_URL, ...params }),
+  });
+}
+
+export function getGraph(params: {
+  query?: string;
+  domain?: string;
+  kind?: string;
+  focus_id?: string;
+  depth?: number;
+  limit?: number;
+}): Promise<GraphProjection> {
+  return json<GraphProjection>(`${DEMO_URL}/graph`, {
     method: "POST",
     body: JSON.stringify({ sybil_url: SYBIL_URL, ...params }),
   });

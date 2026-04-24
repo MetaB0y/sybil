@@ -4,6 +4,7 @@ import {
   createAccount,
   createWizardDraft,
   discover,
+  getGraph,
   getState,
   importSources,
   nanosPct,
@@ -15,7 +16,7 @@ import {
   seedDemo,
   submitTrade,
 } from "./api";
-import type { DemoState, Formula, Instrument, SearchResult, TradeProposal, WizardDraft } from "./types";
+import type { DemoState, Formula, GraphNode, GraphProjection, Instrument, SearchResult, TradeProposal, WizardDraft } from "./types";
 import "./styles.css";
 
 const AGENT_MODES = [
@@ -66,6 +67,12 @@ function App() {
   const [draftPrompt, setDraftPrompt] = useState("ETH between 3000 and 6000 by end of 2026.");
   const [draft, setDraft] = useState<WizardDraft | null>(null);
   const [explorerQuery, setExplorerQuery] = useState("ETH");
+  const [viewMode, setViewMode] = useState<"workspace" | "graph">("workspace");
+  const [graphQuery, setGraphQuery] = useState("");
+  const [graphDomain, setGraphDomain] = useState("");
+  const [graphKind, setGraphKind] = useState("");
+  const [graphDepth, setGraphDepth] = useState(2);
+  const [graphProjection, setGraphProjection] = useState<GraphProjection | null>(null);
   const [domain, setDomain] = useState("");
   const [objectKind, setObjectKind] = useState("");
   const [measurementKind, setMeasurementKind] = useState("");
@@ -133,6 +140,23 @@ function App() {
     }, 220);
     return () => clearTimeout(timer);
   }, [explorerQuery, domain, objectKind, measurementKind, measurementId, predicateOp, selectedId]);
+
+  useEffect(() => {
+    if (viewMode !== "graph") return;
+    const timer = setTimeout(() => {
+      getGraph({
+        query: graphQuery,
+        domain: graphDomain,
+        kind: graphKind,
+        focus_id: selected?.id || "",
+        depth: graphDepth,
+        limit: 260,
+      })
+        .then(setGraphProjection)
+        .catch((e) => setToast(String(e)));
+    }, 180);
+    return () => clearTimeout(timer);
+  }, [viewMode, graphQuery, graphDomain, graphKind, graphDepth, selected?.id]);
 
   async function runAgent() {
     setBusy("agent");
@@ -377,7 +401,25 @@ function App() {
         </aside>
 
         <section className="panel main-panel">
-          {selected ? (
+          <div className="view-switch">
+            <button className={viewMode === "workspace" ? "active" : ""} onClick={() => setViewMode("workspace")}>Workspace</button>
+            <button className={viewMode === "graph" ? "active" : ""} onClick={() => setViewMode("graph")}>Graph View</button>
+          </div>
+          {viewMode === "graph" ? (
+            <GraphView
+              projection={graphProjection}
+              selectedId={selected?.id || ""}
+              query={graphQuery}
+              setQuery={setGraphQuery}
+              domain={graphDomain}
+              setDomain={setGraphDomain}
+              kind={graphKind}
+              setKind={setGraphKind}
+              depth={graphDepth}
+              setDepth={setGraphDepth}
+              select={setSelectedId}
+            />
+          ) : selected ? (
             <>
               <div className="instrument-header">
                 <div>
@@ -524,6 +566,156 @@ function App() {
       </section>
     </main>
   );
+}
+
+function GraphView({
+  projection,
+  selectedId,
+  query,
+  setQuery,
+  domain,
+  setDomain,
+  kind,
+  setKind,
+  depth,
+  setDepth,
+  select,
+}: {
+  projection: GraphProjection | null;
+  selectedId: string;
+  query: string;
+  setQuery: (value: string) => void;
+  domain: string;
+  setDomain: (value: string) => void;
+  kind: string;
+  setKind: (value: string) => void;
+  depth: number;
+  setDepth: (value: number) => void;
+  select: (id: string) => void;
+}) {
+  const [hovered, setHovered] = useState("");
+  const nodes = projection?.nodes || [];
+  const edges = projection?.edges || [];
+  const layout = useMemo(() => layoutGraph(nodes), [nodes]);
+  const width = 1180;
+  const height = Math.max(720, ...Object.values(layout).map((item) => item.y + 80), 720);
+  const neighborIds = useMemo(() => {
+    if (!hovered) return new Set<string>();
+    const ids = new Set<string>([hovered]);
+    edges.forEach((edge) => {
+      if (edge.from === hovered) ids.add(edge.to);
+      if (edge.to === hovered) ids.add(edge.from);
+    });
+    return ids;
+  }, [hovered, edges]);
+
+  return (
+    <div className="graph-view">
+      <div className="graph-toolbar">
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search graph: ETH hedge, Iran, Tatum, recession..." />
+        <Select label="Domain" value={domain} setValue={setDomain} values={["", ...(projection?.facets.domains || [])]} />
+        <Select label="Kind" value={kind} setValue={setKind} values={["", ...(projection?.facets.kinds || [])]} />
+        <label>
+          <span>Depth</span>
+          <select value={depth} onChange={(e) => setDepth(Number(e.target.value))}>
+            {[1, 2, 3].map((value) => <option key={value} value={value}>{value}</option>)}
+          </select>
+        </label>
+      </div>
+      <div className="graph-legend">
+        {["entity", "context", "measurement", "condition", "definition", "market"].map((item) => (
+          <span key={item}><b className={`legend-dot ${item}`} />{graphKindLabel(item)}</span>
+        ))}
+      </div>
+      <div className="graph-canvas-wrap">
+        {!projection ? (
+          <div className="empty">Loading graph...</div>
+        ) : (
+          <svg className="graph-canvas" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Composition knowledge graph">
+            <defs>
+              <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+                <path d="M0,0 L0,6 L9,3 z" />
+              </marker>
+            </defs>
+            {edges.map((edge) => {
+              const from = layout[edge.from];
+              const to = layout[edge.to];
+              if (!from || !to) return null;
+              const active = !hovered || edge.from === hovered || edge.to === hovered;
+              return (
+                <line
+                  key={`${edge.from}-${edge.to}-${edge.type}`}
+                  className={active ? `graph-edge ${edge.type}` : "graph-edge dim"}
+                  x1={from.x + 76}
+                  y1={from.y}
+                  x2={to.x - 76}
+                  y2={to.y}
+                  markerEnd="url(#arrow)"
+                >
+                  <title>{edge.label}</title>
+                </line>
+              );
+            })}
+            {nodes.map((node) => {
+              const point = layout[node.id];
+              if (!point) return null;
+              const selected = node.id === selectedId || node.object_id === selectedId;
+              const active = !hovered || neighborIds.has(node.id);
+              return (
+                <g
+                  key={node.id}
+                  className={active ? `graph-node ${node.kind} ${selected ? "selected" : ""}` : `graph-node ${node.kind} dim`}
+                  transform={`translate(${point.x - 76}, ${point.y - 26})`}
+                  onMouseEnter={() => setHovered(node.id)}
+                  onMouseLeave={() => setHovered("")}
+                  onClick={() => select(node.object_kind === "market" ? node.object_id : node.id)}
+                >
+                  <rect width="152" height="52" rx="8" />
+                  <text x="10" y="20">{truncate(node.label, 24)}</text>
+                  <text x="10" y="38" className="node-subtitle">{graphKindLabel(node.kind)} / {node.domain || "demo"}</text>
+                  <title>{node.summary || node.label}</title>
+                </g>
+              );
+            })}
+          </svg>
+        )}
+      </div>
+      {projection && (
+        <div className="graph-summary">
+          <span>{projection.nodes.length} nodes</span>
+          <span>{projection.edges.length} edges</span>
+          <span>{projection.matched_ids.length} search matches</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function layoutGraph(nodes: GraphNode[]): Record<string, { x: number; y: number }> {
+  const columns = ["entity", "context", "measurement", "condition", "definition", "market"];
+  const grouped = new Map<string, GraphNode[]>();
+  columns.forEach((column) => grouped.set(column, []));
+  nodes.forEach((node) => grouped.get(node.kind)?.push(node));
+  grouped.forEach((items) => items.sort((a, b) => `${a.domain}:${a.label}`.localeCompare(`${b.domain}:${b.label}`)));
+  const layout: Record<string, { x: number; y: number }> = {};
+  columns.forEach((column, columnIndex) => {
+    const items = grouped.get(column) || [];
+    const x = 90 + columnIndex * 195;
+    items.forEach((node, rowIndex) => {
+      layout[node.id] = { x, y: 64 + rowIndex * 74 };
+    });
+  });
+  return layout;
+}
+
+function graphKindLabel(kind: string): string {
+  if (kind === "definition") return "Definition";
+  if (kind === "context") return "Event/window";
+  return kind.charAt(0).toUpperCase() + kind.slice(1);
+}
+
+function truncate(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max - 1)}...` : value;
 }
 
 function ThresholdCurveView({

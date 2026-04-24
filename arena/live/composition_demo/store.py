@@ -449,6 +449,224 @@ def explorer_search(payload: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL)
     )
 
 
+def graph_projection(payload: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL) -> dict[str, Any]:
+    state = enrich_state(load_state(), sybil_url)
+    projection = build_graph_projection(state)
+    query = str(payload.get("query", "")).strip().lower()
+    domain = str(payload.get("domain", "")).strip()
+    kind = str(payload.get("kind", "")).strip()
+    focus_id = str(payload.get("focus_id", "")).strip()
+    depth = max(0, min(3, int(payload.get("depth", 2))))
+    limit = max(20, min(600, int(payload.get("limit", 220))))
+
+    nodes_by_id = {node["id"]: node for node in projection["nodes"]}
+    matched = []
+    for node in projection["nodes"]:
+        if domain and node.get("domain") != domain:
+            continue
+        if kind and node.get("kind") != kind:
+            continue
+        if query and query not in str(node.get("search_text", "")).lower():
+            continue
+        matched.append(node["id"])
+
+    if focus_id and focus_id in nodes_by_id:
+        visible_ids = neighborhood_ids(focus_id, projection["edges"], depth)
+        if matched:
+            visible_ids |= set(matched)
+    elif matched:
+        visible_ids = set(matched)
+        for node_id in matched[:60]:
+            visible_ids |= neighborhood_ids(node_id, projection["edges"], 1)
+    else:
+        visible_ids = set(node["id"] for node in projection["nodes"])
+
+    visible = [nodes_by_id[node_id] for node_id in visible_ids if node_id in nodes_by_id]
+    visible.sort(key=lambda node: (kind_rank(node["kind"]), node.get("domain", ""), node.get("label", "")))
+    if len(visible) > limit:
+        pinned = {focus_id, *matched[:30]}
+        pinned_nodes = [node for node in visible if node["id"] in pinned]
+        rest = [node for node in visible if node["id"] not in pinned]
+        visible = [*pinned_nodes, *rest[: max(0, limit - len(pinned_nodes))]]
+    visible_ids = {node["id"] for node in visible}
+    edges = [edge for edge in projection["edges"] if edge["from"] in visible_ids and edge["to"] in visible_ids]
+
+    for node in visible:
+        node.pop("search_text", None)
+
+    return {
+        "nodes": visible,
+        "edges": edges,
+        "focus_id": focus_id if focus_id in nodes_by_id else "",
+        "matched_ids": [node_id for node_id in matched if node_id in visible_ids],
+        "facets": projection["facets"],
+    }
+
+
+def build_graph_projection(state: dict[str, Any]) -> dict[str, Any]:
+    nodes: dict[str, dict[str, Any]] = {}
+    edges: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    def add_node(node: dict[str, Any]) -> None:
+        node.setdefault("domain", "")
+        node.setdefault("summary", "")
+        node.setdefault("score", 1.0)
+        node["search_text"] = " ".join(
+            str(node.get(key, ""))
+            for key in ["id", "label", "kind", "domain", "summary", "path", "object_id", "object_kind"]
+        )
+        nodes[node["id"]] = node
+
+    def add_edge(source: str, target: str, edge_type: str, label: str, strength: float = 1.0) -> None:
+        if not source or not target or source == target:
+            return
+        key = (source, target, edge_type)
+        edges[key] = {"from": source, "to": target, "type": edge_type, "label": label, "strength": strength}
+
+    for entity in state.get("entities", []):
+        add_node(
+            {
+                "id": entity["id"],
+                "kind": "entity",
+                "label": entity.get("short_name") or entity.get("title") or entity["id"],
+                "domain": entity.get("domain", ""),
+                "summary": entity.get("description", ""),
+                "object_id": entity["id"],
+                "object_kind": "entity",
+                "path": [entity.get("domain", ""), entity.get("kind", ""), entity.get("title", "")],
+                "score": 0.7,
+            }
+        )
+
+    for context in state.get("contexts", []):
+        add_node(
+            {
+                "id": context["id"],
+                "kind": "context",
+                "label": context.get("short_name") or context.get("title") or context["id"],
+                "domain": context.get("domain", ""),
+                "summary": context.get("description", ""),
+                "object_id": context["id"],
+                "object_kind": "context",
+                "path": [context.get("domain", ""), context.get("kind", ""), context.get("title", "")],
+                "score": 0.75,
+            }
+        )
+        for entity_id in context.get("entity_ids", []):
+            add_edge(entity_id, context["id"], "entity_context", "participates in", 0.7)
+
+    for measurement in state.get("measurements", []):
+        add_node(
+            {
+                "id": measurement["id"],
+                "kind": "measurement",
+                "label": measurement.get("display_title") or measurement.get("title") or measurement["subject"],
+                "domain": measurement.get("domain", ""),
+                "summary": measurement.get("description", ""),
+                "object_id": measurement["id"],
+                "object_kind": "measurement",
+                "path": measurement.get("path", []),
+                "score": 0.9,
+            }
+        )
+        for entity_id in measurement.get("entity_ids", []):
+            add_edge(entity_id, measurement["id"], "entity_measurement", "has measurement", 0.9)
+        if measurement.get("context_id"):
+            add_edge(measurement["context_id"], measurement["id"], "context_measurement", "scopes measurement", 0.85)
+
+    for condition in state.get("conditions", []):
+        add_node(
+            {
+                "id": condition["id"],
+                "kind": "condition",
+                "label": condition.get("short_name") or condition.get("title") or condition["id"],
+                "domain": condition.get("domain", ""),
+                "summary": condition.get("question") or condition.get("description", ""),
+                "object_id": condition["id"],
+                "object_kind": "condition",
+                "path": condition.get("path", []),
+                "score": 1.0 + float(condition.get("fair_value", 0.5)) * 0.05,
+            }
+        )
+        add_edge(condition.get("measurement_id", ""), condition["id"], "measurement_condition", "predicate", 1.0)
+
+    for definition in state.get("propositions", []):
+        add_node(
+            {
+                "id": definition["id"],
+                "kind": "definition",
+                "label": definition.get("short_name") or definition.get("title") or definition["id"],
+                "domain": definition.get("domain", ""),
+                "summary": definition.get("question") or definition.get("description", ""),
+                "object_id": definition["id"],
+                "object_kind": "proposition",
+                "path": [definition.get("domain", ""), "definitions", definition.get("short_name", "")],
+                "score": 1.1 + float(definition.get("model_value", definition.get("fair_value", 0.5))) * 0.05,
+            }
+        )
+        for condition_id in definition.get("leaf_ids") or formula_conditions(definition.get("formula")):
+            add_edge(condition_id, definition["id"], "condition_definition", "used in definition", 0.9)
+        if definition.get("market_id") is not None:
+            market_node_id = f"market:{definition['market_id']}"
+            add_node(
+                {
+                    "id": market_node_id,
+                    "kind": "market",
+                    "label": f"Market {definition['market_id']}",
+                    "domain": definition.get("domain", ""),
+                    "summary": definition.get("question", ""),
+                    "object_id": definition["id"],
+                    "object_kind": "market",
+                    "path": [definition.get("domain", ""), "live markets", str(definition["market_id"])],
+                    "score": 1.0,
+                }
+            )
+            add_edge(definition["id"], market_node_id, "live_market", "published as", 0.8)
+
+    for edge in state.get("implication_edges", []):
+        add_edge(edge.get("from", ""), edge.get("to", ""), "implication", edge.get("no_arb") or edge.get("label", "implies"), 0.65)
+
+    facet_nodes = list(nodes.values())
+    return {
+        "nodes": facet_nodes,
+        "edges": list(edges.values()),
+        "facets": {
+            "domains": sorted({node.get("domain", "") for node in facet_nodes if node.get("domain")}),
+            "kinds": sorted({node.get("kind", "") for node in facet_nodes if node.get("kind")}),
+            "edge_types": sorted({edge.get("type", "") for edge in edges.values() if edge.get("type")}),
+        },
+    }
+
+
+def neighborhood_ids(focus_id: str, edges: list[dict[str, Any]], depth: int) -> set[str]:
+    visible = {focus_id}
+    frontier = {focus_id}
+    for _ in range(depth):
+        next_frontier: set[str] = set()
+        for edge in edges:
+            if edge["from"] in frontier:
+                next_frontier.add(edge["to"])
+            if edge["to"] in frontier:
+                next_frontier.add(edge["from"])
+        next_frontier -= visible
+        visible |= next_frontier
+        frontier = next_frontier
+        if not frontier:
+            break
+    return visible
+
+
+def kind_rank(kind: str) -> int:
+    return {
+        "entity": 0,
+        "context": 0,
+        "measurement": 1,
+        "condition": 2,
+        "definition": 3,
+        "market": 4,
+    }.get(kind, 9)
+
+
 def validate_formula_payload(payload: dict[str, Any]) -> dict[str, Any]:
     state = load_state()
     return validate_formula(payload.get("formula"), state["instruments"], state.get("implication_edges", []))

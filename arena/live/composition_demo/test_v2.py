@@ -7,6 +7,7 @@ from .registry import condition_key, measurement_key, proposition_key, search_in
 from .sources import build_condition, build_universe, generate_implication_edges, split_kalshi_legs
 from .store import (
     add_condition_to_formula,
+    build_graph_projection,
     build_threshold_curves,
     draft_formula_from_prompt,
     edit_wizard_draft,
@@ -69,6 +70,19 @@ class GraphUniverseTests(unittest.TestCase):
         self.assertIn("ETH > 3000", names)
         self.assertIn("ETH > 6000", names)
         self.assertIn("3000 < ETH < 6000", names)
+
+    def test_graph_projection_links_entities_to_definitions(self) -> None:
+        universe = build_universe({"polymarket_events": [], "kalshi_markets": [], "errors": []})
+        projection = build_graph_projection({**universe, "conditions": universe["conditions"], "propositions": universe["propositions"]})
+        node_kinds = {node["kind"] for node in projection["nodes"]}
+        self.assertIn("entity", node_kinds)
+        self.assertIn("measurement", node_kinds)
+        self.assertIn("condition", node_kinds)
+        self.assertIn("definition", node_kinds)
+        edge_types = {edge["type"] for edge in projection["edges"]}
+        self.assertIn("entity_measurement", edge_types)
+        self.assertIn("measurement_condition", edge_types)
+        self.assertIn("condition_definition", edge_types)
 
     def test_search_returns_conditions_not_flat_atoms(self) -> None:
         universe = build_universe({"polymarket_events": [], "kalshi_markets": [], "errors": []})
