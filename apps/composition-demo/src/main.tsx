@@ -104,6 +104,7 @@ function App() {
   const conditions = instruments.filter((item) => item.kind === "condition" || item.kind === "atom");
   const selectedEdges = (state?.implication_edges || []).filter((edge) => edge.from === selected?.id || edge.to === selected?.id);
   const modeConfig = AGENT_MODES.find((item) => item.id === agentMode) || AGENT_MODES[0];
+  const diagnostics = state?.ontology_diagnostics;
 
   const ranked = useMemo(() => {
     if (!rankedIds.length) return searchResult?.items.slice(0, 8) || propositions.slice(0, 8);
@@ -275,7 +276,10 @@ function App() {
           <button onClick={runImport} disabled={!!busy}>{busy === "import" ? "Building..." : "Rebuild demo graph"}</button>
           <button onClick={runSeed} disabled={!!busy}>{busy === "seed" ? "Creating..." : "Create Sybil markets"}</button>
           <button onClick={runQuote} disabled={!!busy}>Submit demo quotes</button>
-          <span>These are local demo maintenance actions. Normal market creation starts in the wizard.</span>
+          <span>
+            Graph health: {diagnostics?.status || "loading"}.
+            {diagnostics?.errors.length ? ` ${diagnostics.errors.length} ontology errors.` : " No ontology errors."}
+          </span>
         </section>
       )}
 
@@ -432,6 +436,11 @@ function App() {
                   <Meta label="Params" help="Raw predicate/formula metadata." value={selected.params ? JSON.stringify(selected.params) : "-"} long />
                   <Meta label="Aliases" help="External source markets matched as evidence, not ontology roots." value={selected.aliases?.length || 0} />
                 </div>
+                {diagnostics && (diagnostics.errors.length > 0 || diagnostics.warnings.length > 0) && (
+                  <div className="diagnostics">
+                    {[...diagnostics.errors, ...diagnostics.warnings].slice(0, 8).map((item) => <span key={item}>{item}</span>)}
+                  </div>
+                )}
               </details>
 
               <details className="explorer" open={false}>

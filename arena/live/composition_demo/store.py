@@ -274,8 +274,8 @@ def enrich_state(state: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL) -> d
     out["contexts"] = state.get("contexts", [])
     out["sybil_url"] = sybil_url
     out["facets"] = search_instruments(enriched, limit=0)["facets"]
+    out["ontology_diagnostics"] = ontology_diagnostics(out, enriched)
     out["instrument_counts"] = {
-        "atoms": len([item for item in enriched if item["kind"] == "condition"]),
         "conditions": len([item for item in enriched if item["kind"] == "condition"]),
         "compositions": len([item for item in enriched if item["kind"] == "proposition"]),
         "propositions": len([item for item in enriched if item["kind"] == "proposition"]),
@@ -288,6 +288,84 @@ def enrich_state(state: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL) -> d
         and int(state.get("last_quote", {}).get("markets_quoted", 0)),
     }
     return out
+
+
+def ontology_diagnostics(state: dict[str, Any], enriched: list[dict[str, Any]]) -> dict[str, Any]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    feeds = {item["id"] for item in state.get("feeds", [])}
+    entities = {item["id"] for item in state.get("entities", [])}
+    contexts = {item["id"] for item in state.get("contexts", [])}
+    measurements = {item["id"]: item for item in state.get("measurements", [])}
+    conditions = {item["id"]: item for item in enriched if item.get("object_kind") == "condition"}
+
+    for measurement in state.get("measurements", []):
+        prefix = f"measurement {measurement.get('id', '<missing>')}"
+        if not measurement.get("entity_ids"):
+            errors.append(f"{prefix} has no entity anchor")
+        for entity_id in measurement.get("entity_ids", []):
+            if entity_id not in entities:
+                errors.append(f"{prefix} references missing entity {entity_id}")
+        context_id = measurement.get("context_id")
+        if context_id and context_id not in contexts:
+            errors.append(f"{prefix} references missing context {context_id}")
+        if not measurement.get("path"):
+            errors.append(f"{prefix} has no display path")
+        if measurement.get("display_title") == measurement.get("subject") and " vs " in str(measurement.get("subject", "")).lower():
+            warnings.append(f"{prefix} has a flat sports title instead of a graph path")
+        for feed_id in measurement.get("feed_ids", []):
+            if feed_id not in feeds:
+                errors.append(f"{prefix} references missing feed {feed_id}")
+        if not measurement.get("canonical_key"):
+            errors.append(f"{prefix} has no canonical key")
+
+    for condition in conditions.values():
+        prefix = f"condition {condition.get('id', '<missing>')}"
+        measurement_id = condition.get("measurement_id")
+        if measurement_id not in measurements:
+            errors.append(f"{prefix} references missing measurement {measurement_id}")
+        if not condition.get("predicate"):
+            errors.append(f"{prefix} has no predicate")
+        if condition.get("object_kind") != "condition":
+            errors.append(f"{prefix} has inconsistent object_kind")
+        if not condition.get("canonical_key"):
+            errors.append(f"{prefix} has no canonical key")
+
+    for proposition in [item for item in enriched if item.get("object_kind") == "proposition"]:
+        validation = validate_formula(proposition.get("formula"), enriched, state.get("implication_edges", []))
+        if not validation["valid"]:
+            errors.append(f"definition {proposition.get('id', '<missing>')} has invalid formula: {'; '.join(validation['errors'])}")
+        for leaf_id in validation.get("referenced_ids", []):
+            if leaf_id not in conditions:
+                errors.append(f"definition {proposition.get('id', '<missing>')} references non-condition leaf {leaf_id}")
+
+    legacy_atoms = [item["id"] for item in enriched if item.get("kind") == "atom" or item.get("object_kind") == "atom"]
+    if legacy_atoms:
+        warnings.append(f"legacy atom rows present: {', '.join(legacy_atoms[:8])}")
+
+    duplicate_keys: dict[str, list[str]] = {}
+    for item in [*state.get("measurements", []), *conditions.values(), *state.get("propositions", [])]:
+        key = item.get("canonical_key")
+        if key:
+            duplicate_keys.setdefault(key, []).append(item.get("id", "unknown"))
+    duplicate_groups = [ids for ids in duplicate_keys.values() if len(ids) > 1]
+    if duplicate_groups:
+        warnings.append(f"{len(duplicate_groups)} canonical duplicate groups detected")
+
+    return {
+        "status": "ok" if not errors else "needs_attention",
+        "errors": errors[:50],
+        "warnings": warnings[:50],
+        "checks": {
+            "feeds": len(feeds),
+            "entities": len(entities),
+            "contexts": len(contexts),
+            "measurements": len(measurements),
+            "conditions": len(conditions),
+            "definitions": len([item for item in enriched if item.get("object_kind") == "proposition"]),
+            "legacy_atoms": len(legacy_atoms),
+        },
+    }
 
 
 def explorer_search(payload: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL) -> dict[str, Any]:

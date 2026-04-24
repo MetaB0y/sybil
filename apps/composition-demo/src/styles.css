@@ -307,6 +307,17 @@ input, select {
   font-weight: 800;
 }
 .technical-details .metadata-grid { margin: 12px 0 0; }
+.diagnostics {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  color: var(--red);
+  font-size: 13px;
+}
+.diagnostics span {
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+}
 
 .graph-nav {
   margin-top: 18px;

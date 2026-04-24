@@ -10,6 +10,7 @@ from .store import (
     draft_formula_from_prompt,
     edit_wizard_draft,
     enrich_draft,
+    ontology_diagnostics,
     replace_condition_in_formula,
 )
 
@@ -44,6 +45,13 @@ class GraphUniverseTests(unittest.TestCase):
         self.assertEqual(tatum["context_id"], "ctx_nba_nyk_bos_2026_04_30")
         self.assertIn("jayson_tatum", tatum["entity_ids"])
         self.assertEqual(tatum["display_title"], "NBA / Knicks at Celtics / Jayson Tatum / injury status")
+
+    def test_ontology_diagnostics_catches_no_seed_errors(self) -> None:
+        universe = build_universe({"polymarket_events": [], "kalshi_markets": [], "errors": []})
+        diagnostics = ontology_diagnostics(universe, universe["instruments"])
+        self.assertEqual(diagnostics["status"], "ok", diagnostics["errors"])
+        self.assertEqual(diagnostics["checks"]["legacy_atoms"], 0)
+        self.assertGreaterEqual(diagnostics["checks"]["measurements"], 50)
 
     def test_search_returns_conditions_not_flat_atoms(self) -> None:
         universe = build_universe({"polymarket_events": [], "kalshi_markets": [], "errors": []})

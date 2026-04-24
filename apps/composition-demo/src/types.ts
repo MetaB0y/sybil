@@ -83,8 +83,14 @@ export type DemoState = {
   facets?: Facets;
   source_counts?: Record<string, number>;
   source_errors?: string[];
+  ontology_diagnostics?: {
+    status: "ok" | "needs_attention";
+    errors: string[];
+    warnings: string[];
+    checks: Record<string, number>;
+  };
   instrument_counts?: {
-    atoms: number;
+    atoms?: number;
     conditions?: number;
     compositions: number;
     propositions?: number;
