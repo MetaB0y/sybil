@@ -7,10 +7,6 @@ last_verified: 2026-04-24
 
 # Market Structure Product Directions
 
-This is a self-contained strategic problem statement for Sybil. It is written for a very strong external reasoning model or reviewer. The reader can be assumed to understand prediction markets, market microstructure, derivatives, RFQ, options, market making, privacy, and agentic UX. What the reader cannot know is our internal context: what Sybil has built, what strategic fork we are facing, what intuitions we are testing, and where we are uncertain.
-
-The goal is not to explain basic concepts. The goal is to put all relevant assumptions on the page so the reader can critique the strategic direction without guessing what we mean.
-
 Sybil is a prediction-market exchange project built around three core technical claims:
 
 1. **Private frequent batch auctions should improve prediction-market microstructure.** Public continuous order books create stale-quote sniping, copy-trading, and toxic flow around discrete information events. Batch clearing plus private order flow should reduce those losses and make informed participation less self-defeating.
@@ -25,13 +21,11 @@ The attractive but dangerous answer is "markets for everything." The sharper que
 
 > Can Sybil support a much larger surface of real-world event exposure without degenerating into a graveyard of bespoke illiquid markets?
 
-This report lays out the terrain.
-
-## 0. What We Want The Reader To Help With
+## 0. Strategic Questions
 
 The central uncertainty is whether these technical advantages point to a real product wedge or whether they tempt us into an incoherent "market for everything" direction.
 
-We want critique on:
+The questions to answer:
 
 1. Whether measurements/compositions are actually a useful constraint on long-tail market creation, or whether they are elegant ontology work with weak commercial force.
 2. Whether flash liquidity plus FBA materially changes the economics of quoting many related markets, or whether pricing remains the binding bottleneck.
@@ -46,7 +40,7 @@ We want critique on:
 4. What minimal demo would make the direction feel obviously compelling.
 5. What should be killed early because it is technically interesting but strategically weak.
 
-The reader should assume we are not emotionally attached to the current composition/measurement framing. We are trying to decide whether it is the right abstraction, a useful backend-only primitive, or a dead end.
+The composition/measurement framing is not assumed to be correct. It may be the right abstraction, a useful backend-only primitive, or a dead end.
 
 ## 0.1 Project-Specific Terms
 
