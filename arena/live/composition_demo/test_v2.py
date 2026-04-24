@@ -26,12 +26,12 @@ class GraphUniverseTests(unittest.TestCase):
 
     def test_build_universe_seeds_graph_counts(self) -> None:
         universe = build_universe({"polymarket_events": [], "kalshi_markets": [], "errors": []})
-        self.assertGreaterEqual(len(universe["entities"]), 20)
-        self.assertGreaterEqual(len(universe["contexts"]), 8)
+        self.assertGreaterEqual(len(universe["entities"]), 40)
+        self.assertGreaterEqual(len(universe["contexts"]), 12)
         self.assertGreaterEqual(len(universe["feeds"]), 5)
-        self.assertGreaterEqual(len(universe["measurements"]), 50)
-        self.assertGreaterEqual(len(universe["conditions"]), 30)
-        self.assertGreaterEqual(len(universe["propositions"]), 10)
+        self.assertGreaterEqual(len(universe["measurements"]), 100)
+        self.assertGreaterEqual(len(universe["conditions"]), 120)
+        self.assertGreaterEqual(len(universe["propositions"]), 45)
         self.assertIn("implication_edges", universe)
 
     def test_measurements_have_paths_and_entities(self) -> None:
@@ -53,7 +53,7 @@ class GraphUniverseTests(unittest.TestCase):
         diagnostics = ontology_diagnostics(universe, universe["instruments"])
         self.assertEqual(diagnostics["status"], "ok", diagnostics["errors"])
         self.assertEqual(diagnostics["checks"]["legacy_atoms"], 0)
-        self.assertGreaterEqual(diagnostics["checks"]["measurements"], 50)
+        self.assertGreaterEqual(diagnostics["checks"]["measurements"], 100)
 
     def test_threshold_curves_group_same_measurement_conditions(self) -> None:
         universe = build_universe({"polymarket_events": [], "kalshi_markets": [], "errors": []})

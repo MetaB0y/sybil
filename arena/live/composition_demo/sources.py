@@ -43,8 +43,8 @@ def import_universe(max_atoms: int = 110, force: bool = False) -> dict[str, Any]
             cached.get("universe_version") == 4
             and counts.get("entities", 0) >= 20
             and counts.get("contexts", 0) >= 8
-            and counts.get("measurements", 0) >= 50
-            and counts.get("conditions", 0) + counts.get("propositions", 0) >= 80
+            and counts.get("measurements", 0) >= 100
+            and counts.get("conditions", 0) + counts.get("propositions", 0) >= 170
         ):
             return cached
 
@@ -110,6 +110,8 @@ def seed_feeds() -> list[dict[str, Any]]:
         DataFeed("election_wire", "AP/FEC election feed", "politics", "official", "source_result_signed", "Election calls and certified results.").to_dict(),
         DataFeed("wire", "Reuters/AP wire", "geopolitics", "trusted", "wire_service_or_admin", "Newswire event evidence.").to_dict(),
         DataFeed("sportsdata", "SportsDataIO demo", "sports", "signed", "sports_feed_signed", "Game and player stat feed.").to_dict(),
+        DataFeed("benchmark", "Benchmark registry demo", "technology", "trusted", "benchmark_result_signed", "AI benchmark and model-release evidence.").to_dict(),
+        DataFeed("vendor_wire", "Vendor/company wire", "technology", "trusted", "wire_service_or_admin", "Company filings, vendor reports, and press releases.").to_dict(),
     ]
 
 
@@ -140,9 +142,27 @@ def seed_entities() -> list[dict[str, Any]]:
         ("nba", "league", "NBA", "sports", [], {}),
         ("boston_celtics", "team", "Boston Celtics", "sports", ["Celtics"], {}),
         ("new_york_knicks", "team", "New York Knicks", "sports", ["Knicks"], {}),
+        ("los_angeles_lakers", "team", "Los Angeles Lakers", "sports", ["Lakers"], {}),
+        ("denver_nuggets", "team", "Denver Nuggets", "sports", ["Nuggets"], {}),
         ("jayson_tatum", "player", "Jayson Tatum", "sports", ["Tatum"], {}),
         ("jaylen_brown", "player", "Jaylen Brown", "sports", ["Brown"], {}),
         ("jalen_brunson", "player", "Jalen Brunson", "sports", ["Brunson"], {}),
+        ("nikola_jokic", "player", "Nikola Jokic", "sports", ["Jokic"], {}),
+        ("lebron_james", "player", "LeBron James", "sports", ["LeBron"], {}),
+        ("taiwan", "country", "Taiwan", "geopolitics", [], {}),
+        ("china", "country", "China", "geopolitics", ["PRC"], {}),
+        ("ukraine", "country", "Ukraine", "geopolitics", [], {}),
+        ("russia", "country", "Russia", "geopolitics", [], {}),
+        ("openai", "company", "OpenAI", "technology", [], {}),
+        ("anthropic", "company", "Anthropic", "technology", [], {}),
+        ("google_deepmind", "company", "Google DeepMind", "technology", ["DeepMind"], {}),
+        ("meta_ai", "company", "Meta AI", "technology", [], {}),
+        ("nvidia", "company", "NVIDIA", "technology", [], {}),
+        ("frontier_ai_benchmarks", "benchmark_group", "Frontier AI benchmarks", "technology", [], {}),
+        ("base_network", "network", "Base network", "crypto", ["Base"], {}),
+        ("defi_sector", "sector", "DeFi sector", "crypto", ["DeFi"], {}),
+        ("usdt", "stablecoin", "USDT", "crypto", ["Tether"], {}),
+        ("usdc", "stablecoin", "USDC", "crypto", [], {}),
     ]
     return [
         Entity(
@@ -169,6 +189,10 @@ def seed_contexts() -> list[dict[str, Any]]:
         ("ctx_2028_nomination", "election_cycle", "2028 presidential nominations", "politics", "US presidential nomination cycle.", ["democratic_party", "republican_party"], "", "2028-08-31"),
         ("ctx_2028_general", "election", "2028 US general election", "politics", "US presidential and congressional general election.", ["democratic_party", "republican_party"], "2028-11-07", "2028-12-31"),
         ("ctx_nba_nyk_bos_2026_04_30", "nba_game", "Knicks at Celtics, 2026-04-30", "sports", "NBA game context for seeded same-game markets.", ["nba", "new_york_knicks", "boston_celtics"], "2026-04-30", "2026-04-30"),
+        ("ctx_nba_lal_den_2026_05_02", "nba_game", "Lakers at Nuggets, 2026-05-02", "sports", "NBA game context for a second seeded same-game slate.", ["nba", "los_angeles_lakers", "denver_nuggets"], "2026-05-02", "2026-05-02"),
+        ("ctx_2026_ai_benchmarks", "benchmark_window", "2026 frontier AI benchmark window", "technology", "Public frontier AI benchmark results released during 2026.", ["frontier_ai_benchmarks", "openai", "anthropic", "google_deepmind", "meta_ai"], "2026-01-01", "2026-12-31"),
+        ("ctx_taiwan_2026", "security_window", "Taiwan Strait 2026", "geopolitics", "Taiwan Strait security observation window during 2026.", ["taiwan", "china", "united_states"], "2026-01-01", "2026-12-31"),
+        ("ctx_ukraine_2026", "conflict_window", "Ukraine war 2026", "geopolitics", "Russia-Ukraine war observation window during 2026.", ["ukraine", "russia", "united_states"], "2026-01-01", "2026-12-31"),
     ]
     return [
         Context(
@@ -238,6 +262,7 @@ def seed_measurements(feeds: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ("sports", "game_total", "NBA Knicks at Celtics 2026-04-30 total points", "points", ["sportsdata"], "final score total"),
         ("sports", "injury_status", "Jayson Tatum injury status vs Knicks 2026-04-30", "status", ["sportsdata"], "pre-game injury report"),
     ]
+    specs.extend(extra_measurement_specs())
     rows: list[dict[str, Any]] = []
     feed_domains = {feed["id"]: feed["domain"] for feed in feeds}
     for domain, kind, subject, unit, feed_ids, aggregation in specs:
@@ -272,6 +297,65 @@ def seed_measurements(feeds: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ).to_dict()
         rows.append(row)
     return rows
+
+
+def extra_measurement_specs() -> list[tuple[str, str, str, str, list[str], str]]:
+    return [
+        ("crypto", "yield", "ETH staking yield", "%", ["chainlink"], "daily close"),
+        ("crypto", "tvl", "Ethereum L2 total value locked", "USD", ["chainlink"], "daily close"),
+        ("crypto", "activity", "Base daily transaction count", "transactions", ["chainlink"], "daily count"),
+        ("crypto", "activity", "Solana daily active addresses", "addresses", ["chainlink"], "daily count"),
+        ("crypto", "network_security", "BTC network hashrate", "EH/s", ["chainlink"], "daily average"),
+        ("crypto", "tvl", "DeFi total value locked", "USD", ["chainlink"], "daily close"),
+        ("crypto", "flow", "Stablecoin transfer volume", "USD", ["chainlink"], "daily volume"),
+        ("crypto", "supply", "USDT circulating supply", "USD", ["chainlink"], "daily close"),
+        ("crypto", "supply", "USDC circulating supply", "USD", ["chainlink"], "daily close"),
+        ("crypto", "volume", "Centralized crypto exchange spot volume", "USD", ["chainlink"], "daily volume"),
+        ("macro", "economic_indicator", "US core PCE YoY", "%", ["fred"], "monthly released value"),
+        ("macro", "economic_indicator", "US retail sales YoY", "%", ["fred"], "monthly released value"),
+        ("macro", "economic_indicator", "US industrial production YoY", "%", ["fred"], "monthly released value"),
+        ("macro", "economic_indicator", "ISM manufacturing PMI", "index points", ["fred"], "monthly released value"),
+        ("macro", "economic_indicator", "US JOLTS job openings", "openings", ["fred"], "monthly released value"),
+        ("macro", "economic_indicator", "US housing starts", "starts", ["fred"], "monthly released value"),
+        ("macro", "economic_indicator", "Case-Shiller US home price index", "index points", ["fred"], "monthly released value"),
+        ("macro", "economic_indicator", "US M2 money supply", "USD", ["fred"], "monthly released value"),
+        ("macro", "credit_spread", "US high-yield credit spread", "bp", ["fred"], "daily close"),
+        ("macro", "commodity_price", "Brent crude oil spot", "USD/bbl", ["chainlink"], "daily close"),
+        ("politics", "election_outcome", "2028 US Electoral College winner", "party", ["election_wire"], "certified/called winner"),
+        ("politics", "election_margin", "2028 Democratic presidential popular vote share", "%", ["election_wire"], "certified share"),
+        ("politics", "election_margin", "2028 Republican presidential popular vote share", "%", ["election_wire"], "certified share"),
+        ("politics", "seat_count", "2028 Democratic Senate seat count", "seats", ["election_wire"], "certified count"),
+        ("politics", "seat_count", "2028 Republican Senate seat count", "seats", ["election_wire"], "certified count"),
+        ("politics", "seat_count", "2028 Democratic House seat count", "seats", ["election_wire"], "certified count"),
+        ("politics", "seat_count", "2028 Republican House seat count", "seats", ["election_wire"], "certified count"),
+        ("geopolitics", "security_event", "Taiwan Strait PLA aircraft incursions", "aircraft", ["wire"], "daily maximum"),
+        ("geopolitics", "security_event", "Taiwan Strait blockade status", "status", ["wire"], "confirmed status"),
+        ("geopolitics", "security_event", "Taiwan Strait missile launch count", "launches", ["wire"], "cumulative count"),
+        ("geopolitics", "diplomacy", "US Taiwan emergency authorization", "action", ["wire"], "official action"),
+        ("geopolitics", "diplomacy", "Russia Ukraine ceasefire status", "status", ["wire"], "confirmed status"),
+        ("geopolitics", "territorial_control", "Ukraine territory control change", "sq km", ["wire"], "net confirmed change"),
+        ("geopolitics", "security_event", "Ukraine long-range strike count", "strikes", ["wire"], "cumulative count"),
+        ("geopolitics", "commodity_event", "Hormuz closure duration", "hours", ["wire"], "max continuous duration"),
+        ("technology", "benchmark_score", "FrontierMath best public score", "%", ["benchmark"], "max public score"),
+        ("technology", "benchmark_score", "SWE-bench Verified best public score", "%", ["benchmark"], "max public score"),
+        ("technology", "benchmark_score", "ARC-AGI best public score", "%", ["benchmark"], "max public score"),
+        ("technology", "model_release", "OpenAI frontier model release", "release", ["benchmark", "vendor_wire"], "public release"),
+        ("technology", "model_release", "Anthropic frontier model release", "release", ["benchmark", "vendor_wire"], "public release"),
+        ("technology", "model_release", "Google DeepMind frontier model release", "release", ["benchmark", "vendor_wire"], "public release"),
+        ("technology", "compute_supply", "NVIDIA datacenter GPU shipments", "units", ["vendor_wire"], "quarterly shipments"),
+        ("technology", "capex", "US hyperscaler AI capex", "USD", ["vendor_wire"], "quarterly reported capex"),
+        ("technology", "incident", "Frontier AI public safety incident count", "incidents", ["wire"], "cumulative count"),
+        ("sports", "player_stat", "Jayson Tatum rebounds vs Knicks 2026-04-30", "rebounds", ["sportsdata"], "box score"),
+        ("sports", "player_stat", "Jayson Tatum assists vs Knicks 2026-04-30", "assists", ["sportsdata"], "box score"),
+        ("sports", "player_stat", "Jaylen Brown points vs Knicks 2026-04-30", "points", ["sportsdata"], "box score"),
+        ("sports", "player_stat", "Jalen Brunson points vs Celtics 2026-04-30", "points", ["sportsdata"], "box score"),
+        ("sports", "game_spread", "NBA Knicks at Celtics 2026-04-30 Celtics margin", "points", ["sportsdata"], "final margin"),
+        ("sports", "game_result", "NBA Lakers at Nuggets 2026-05-02 winner", "team", ["sportsdata"], "final score"),
+        ("sports", "player_stat", "Nikola Jokic assists vs Lakers 2026-05-02", "assists", ["sportsdata"], "box score"),
+        ("sports", "player_stat", "Nikola Jokic rebounds vs Lakers 2026-05-02", "rebounds", ["sportsdata"], "box score"),
+        ("sports", "player_stat", "LeBron James points vs Nuggets 2026-05-02", "points", ["sportsdata"], "box score"),
+        ("sports", "game_total", "NBA Lakers at Nuggets 2026-05-02 total points", "points", ["sportsdata"], "final score total"),
+    ]
 
 
 def measurement_metadata(subject: str, kind: str, domain: str) -> dict[str, Any]:
@@ -323,6 +407,54 @@ def measurement_metadata(subject: str, kind: str, domain: str) -> dict[str, Any]
             "ctx_nba_nyk_bos_2026_04_30",
             "Combined final score for Knicks at Celtics.",
         )
+    if subject == "NBA Knicks at Celtics 2026-04-30 Celtics margin":
+        return path_meta(
+            "NBA / Knicks at Celtics / Celtics margin",
+            ["nba", "ctx_nba_nyk_bos_2026_04_30", "celtics_margin"],
+            ["nba", "boston_celtics", "new_york_knicks"],
+            "ctx_nba_nyk_bos_2026_04_30",
+            "Final Celtics scoring margin against the Knicks.",
+        )
+    if " vs Knicks 2026-04-30" in subject or " vs Celtics 2026-04-30" in subject:
+        player_map = {"Jayson Tatum": "jayson_tatum", "Jaylen Brown": "jaylen_brown", "Jalen Brunson": "jalen_brunson"}
+        player = next((name for name in player_map if subject.startswith(name)), "")
+        if player:
+            stat = subject.split(" ", 2)[2].split(" vs ", 1)[0]
+            return path_meta(
+                f"NBA / Knicks at Celtics / {player} / {stat}",
+                ["nba", "ctx_nba_nyk_bos_2026_04_30", player_map[player], stat.replace(" ", "_")],
+                ["nba", "boston_celtics", "new_york_knicks", player_map[player]],
+                "ctx_nba_nyk_bos_2026_04_30",
+                f"Final box-score {stat} for {player} in Knicks at Celtics.",
+            )
+    if subject == "NBA Lakers at Nuggets 2026-05-02 winner":
+        return path_meta(
+            "NBA / Lakers at Nuggets / game winner",
+            ["nba", "ctx_nba_lal_den_2026_05_02", "game_winner"],
+            ["nba", "los_angeles_lakers", "denver_nuggets"],
+            "ctx_nba_lal_den_2026_05_02",
+            "Final winner for Lakers at Nuggets.",
+        )
+    if subject == "NBA Lakers at Nuggets 2026-05-02 total points":
+        return path_meta(
+            "NBA / Lakers at Nuggets / total points",
+            ["nba", "ctx_nba_lal_den_2026_05_02", "total_points"],
+            ["nba", "los_angeles_lakers", "denver_nuggets"],
+            "ctx_nba_lal_den_2026_05_02",
+            "Combined final score for Lakers at Nuggets.",
+        )
+    if " vs Lakers 2026-05-02" in subject or " vs Nuggets 2026-05-02" in subject:
+        player_map = {"Nikola Jokic": "nikola_jokic", "LeBron James": "lebron_james"}
+        player = next((name for name in player_map if subject.startswith(name)), "")
+        if player:
+            stat = subject.split(" ", 2)[2].split(" vs ", 1)[0]
+            return path_meta(
+                f"NBA / Lakers at Nuggets / {player} / {stat}",
+                ["nba", "ctx_nba_lal_den_2026_05_02", player_map[player], stat.replace(" ", "_")],
+                ["nba", "los_angeles_lakers", "denver_nuggets", player_map[player]],
+                "ctx_nba_lal_den_2026_05_02",
+                f"Final box-score {stat} for {player} in Lakers at Nuggets.",
+            )
 
     entity_map = {
         "ETH/USD spot": ["eth"],
@@ -330,6 +462,16 @@ def measurement_metadata(subject: str, kind: str, domain: str) -> dict[str, Any]
         "BTC/USD spot": ["btc"],
         "BTC market-cap dominance": ["btc", "crypto_market"],
         "BTC spot ETF net flow": ["btc", "btc_spot_etfs"],
+        "ETH staking yield": ["eth"],
+        "Ethereum L2 total value locked": ["eth", "base_network"],
+        "Base daily transaction count": ["base_network"],
+        "Solana daily active addresses": ["sol"],
+        "BTC network hashrate": ["btc"],
+        "DeFi total value locked": ["defi_sector", "crypto_market"],
+        "Stablecoin transfer volume": ["stablecoins", "crypto_market"],
+        "USDT circulating supply": ["usdt", "stablecoins"],
+        "USDC circulating supply": ["usdc", "stablecoins"],
+        "Centralized crypto exchange spot volume": ["crypto_market"],
         "SOL/USD spot": ["sol"],
         "Total crypto market cap": ["crypto_market"],
         "Stablecoin circulating supply": ["stablecoins", "crypto_market"],
@@ -347,6 +489,16 @@ def measurement_metadata(subject: str, kind: str, domain: str) -> dict[str, Any]
         "WTI crude oil spot": ["wti_crude"],
         "Gold spot": ["gold"],
         "US Dollar Index DXY": ["dxy"],
+        "US core PCE YoY": ["us_economy"],
+        "US retail sales YoY": ["us_economy"],
+        "US industrial production YoY": ["us_economy"],
+        "ISM manufacturing PMI": ["us_economy"],
+        "US JOLTS job openings": ["us_economy"],
+        "US housing starts": ["us_economy"],
+        "Case-Shiller US home price index": ["us_economy"],
+        "US M2 money supply": ["us_economy"],
+        "US high-yield credit spread": ["us_economy"],
+        "Brent crude oil spot": ["wti_crude"],
         "2028 Democratic presidential nominee": ["democratic_party"],
         "2028 Republican presidential nominee": ["republican_party"],
         "2028 US presidential winner": ["democratic_party", "republican_party"],
@@ -357,6 +509,13 @@ def measurement_metadata(subject: str, kind: str, domain: str) -> dict[str, Any]
         "US presidential approval": ["united_states"],
         "2028 US presidential turnout": ["united_states"],
         "2028 US presidential popular vote margin": ["democratic_party", "republican_party"],
+        "2028 US Electoral College winner": ["democratic_party", "republican_party"],
+        "2028 Democratic presidential popular vote share": ["democratic_party"],
+        "2028 Republican presidential popular vote share": ["republican_party"],
+        "2028 Democratic Senate seat count": ["democratic_party"],
+        "2028 Republican Senate seat count": ["republican_party"],
+        "2028 Democratic House seat count": ["democratic_party"],
+        "2028 Republican House seat count": ["republican_party"],
         "Iran US troop count": ["iran", "united_states"],
         "Iran US troop presence duration": ["iran", "united_states"],
         "Iran US strike count": ["iran", "united_states"],
@@ -366,6 +525,23 @@ def measurement_metadata(subject: str, kind: str, domain: str) -> dict[str, Any]
         "Iran nuclear talks status": ["iran", "united_states"],
         "Strait of Hormuz tanker incident count": ["strait_of_hormuz", "iran"],
         "Iran-linked regional casualty count": ["iran"],
+        "Taiwan Strait PLA aircraft incursions": ["taiwan", "china", "united_states"],
+        "Taiwan Strait blockade status": ["taiwan", "china", "united_states"],
+        "Taiwan Strait missile launch count": ["taiwan", "china", "united_states"],
+        "US Taiwan emergency authorization": ["taiwan", "china", "united_states"],
+        "Russia Ukraine ceasefire status": ["ukraine", "russia"],
+        "Ukraine territory control change": ["ukraine", "russia"],
+        "Ukraine long-range strike count": ["ukraine", "russia"],
+        "Hormuz closure duration": ["strait_of_hormuz", "iran"],
+        "FrontierMath best public score": ["frontier_ai_benchmarks"],
+        "SWE-bench Verified best public score": ["frontier_ai_benchmarks"],
+        "ARC-AGI best public score": ["frontier_ai_benchmarks"],
+        "OpenAI frontier model release": ["openai", "frontier_ai_benchmarks"],
+        "Anthropic frontier model release": ["anthropic", "frontier_ai_benchmarks"],
+        "Google DeepMind frontier model release": ["google_deepmind", "frontier_ai_benchmarks"],
+        "NVIDIA datacenter GPU shipments": ["nvidia"],
+        "US hyperscaler AI capex": ["nvidia"],
+        "Frontier AI public safety incident count": ["frontier_ai_benchmarks"],
     }
     context = context_for_subject(subject)
     entity_ids = entity_map.get(subject, ["us_economy"] if domain == "macro" else [])
@@ -407,8 +583,16 @@ def context_for_subject(subject: str) -> str:
         return "ctx_2028_nomination"
     if subject.startswith("2028 US"):
         return "ctx_2028_general"
+    if subject.startswith("Taiwan") or subject.startswith("US Taiwan"):
+        return "ctx_taiwan_2026"
+    if subject.startswith("Russia") or subject.startswith("Ukraine"):
+        return "ctx_ukraine_2026"
     if subject.startswith("Iran") or subject.startswith("US Iran") or subject.startswith("US control") or subject.startswith("Strait"):
         return "ctx_before_2027"
+    if subject.startswith("Hormuz"):
+        return "ctx_before_2027"
+    if any(token in subject for token in ["FrontierMath", "SWE-bench", "ARC-AGI", "OpenAI", "Anthropic", "Google DeepMind", "NVIDIA", "hyperscaler AI", "Frontier AI"]):
+        return "ctx_2026_ai_benchmarks"
     return "ctx_2026"
 
 
@@ -420,6 +604,8 @@ def resolver_for_feed(feed_id: str) -> str:
         "election_wire": "source_result_signed",
         "wire": "wire_service_or_admin",
         "sportsdata": "sports_feed_signed",
+        "benchmark": "benchmark_result_signed",
+        "vendor_wire": "wire_service_or_admin",
     }.get(feed_id, "admin_demo")
 
 
@@ -502,6 +688,7 @@ def seed_conditions(measurements: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ("Jalen Brunson assists vs Celtics 2026-04-30", "2026-04-30", "box_score", {"op": ">", "threshold": 5.5, "unit": "assists"}, 0.61, "Brunson assists > 5.5", "Will Jalen Brunson record over 5.5 assists vs the Celtics?"),
         ("Jalen Brunson assists vs Celtics 2026-04-30", "2026-04-30", "box_score", {"op": ">", "threshold": 9.5, "unit": "assists"}, 0.26, "Brunson assists > 9.5", "Will Jalen Brunson record over 9.5 assists vs the Celtics?"),
     ]
+    specs.extend(extra_condition_specs())
     rows: list[dict[str, Any]] = []
     for subject, window, aggregation, predicate, fair, short, question in specs:
         measurement = by_subject[subject]
@@ -531,6 +718,65 @@ def seed_conditions(measurements: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ).to_dict()
         rows.append(row)
     return rows
+
+
+def extra_condition_specs() -> list[tuple[str, str, str, dict[str, Any], float, str, str]]:
+    return [
+        ("ETH staking yield", "2026", "max", {"op": ">", "threshold": 5.0, "unit": "%"}, 0.22, "ETH staking > 5%", "Will ETH staking yield exceed 5% during 2026?"),
+        ("Ethereum L2 total value locked", "2026", "max", {"op": ">", "threshold": 80_000_000_000, "unit": "USD"}, 0.31, "ETH L2 TVL > 80B", "Will Ethereum L2 TVL exceed $80B during 2026?"),
+        ("Base daily transaction count", "2026", "max", {"op": ">", "threshold": 15_000_000, "unit": "transactions"}, 0.34, "Base tx > 15M", "Will Base process more than 15M transactions in one day during 2026?"),
+        ("Solana daily active addresses", "2026", "max", {"op": ">", "threshold": 8_000_000, "unit": "addresses"}, 0.28, "SOL active > 8M", "Will Solana daily active addresses exceed 8M during 2026?"),
+        ("BTC network hashrate", "2026", "max", {"op": ">", "threshold": 1200, "unit": "EH/s"}, 0.40, "BTC hashrate > 1200", "Will BTC network hashrate exceed 1200 EH/s during 2026?"),
+        ("DeFi total value locked", "2026", "max", {"op": ">", "threshold": 200_000_000_000, "unit": "USD"}, 0.26, "DeFi TVL > 200B", "Will DeFi TVL exceed $200B during 2026?"),
+        ("Stablecoin transfer volume", "2026", "max", {"op": ">", "threshold": 300_000_000_000, "unit": "USD"}, 0.37, "Stablecoin volume > 300B", "Will daily stablecoin transfer volume exceed $300B during 2026?"),
+        ("USDT circulating supply", "2026", "max", {"op": ">", "threshold": 200_000_000_000, "unit": "USD"}, 0.35, "USDT supply > 200B", "Will USDT supply exceed $200B during 2026?"),
+        ("USDC circulating supply", "2026", "max", {"op": ">", "threshold": 100_000_000_000, "unit": "USD"}, 0.30, "USDC supply > 100B", "Will USDC supply exceed $100B during 2026?"),
+        ("Centralized crypto exchange spot volume", "2026", "max", {"op": ">", "threshold": 250_000_000_000, "unit": "USD"}, 0.33, "CEX spot > 250B", "Will centralized crypto exchange spot volume exceed $250B in one day during 2026?"),
+        ("US core PCE YoY", "2026", "max", {"op": ">", "threshold": 3.0, "unit": "%"}, 0.32, "Core PCE > 3%", "Will US core PCE YoY exceed 3% during 2026?"),
+        ("US core PCE YoY", "2026", "min", {"op": "<", "threshold": 2.0, "unit": "%"}, 0.21, "Core PCE < 2%", "Will US core PCE YoY fall below 2% during 2026?"),
+        ("US retail sales YoY", "2026", "min", {"op": "<", "threshold": 0.0, "unit": "%"}, 0.25, "Retail sales < 0%", "Will US retail sales YoY turn negative during 2026?"),
+        ("US industrial production YoY", "2026", "min", {"op": "<", "threshold": -2.0, "unit": "%"}, 0.20, "Industrial prod < -2%", "Will US industrial production YoY fall below -2% during 2026?"),
+        ("ISM manufacturing PMI", "2026", "min", {"op": "<", "threshold": 45.0, "unit": "index points"}, 0.24, "ISM < 45", "Will ISM manufacturing PMI fall below 45 during 2026?"),
+        ("US JOLTS job openings", "2026", "min", {"op": "<", "threshold": 6_000_000, "unit": "openings"}, 0.27, "JOLTS < 6M", "Will US JOLTS openings fall below 6M during 2026?"),
+        ("US housing starts", "2026", "min", {"op": "<", "threshold": 1_000_000, "unit": "starts"}, 0.22, "Housing starts < 1M", "Will annualized US housing starts fall below 1M during 2026?"),
+        ("US high-yield credit spread", "2026", "max", {"op": ">", "threshold": 600, "unit": "bp"}, 0.26, "HY spread > 600bp", "Will US high-yield spreads exceed 600bp during 2026?"),
+        ("Brent crude oil spot", "2026", "max", {"op": ">", "threshold": 120, "unit": "USD/bbl"}, 0.18, "Brent > 120", "Will Brent crude exceed $120/bbl during 2026?"),
+        ("2028 US Electoral College winner", "2028 general", "winner", {"op": "=", "value": "Democratic Party"}, 0.47, "Dem EC winner", "Will Democrats win the 2028 Electoral College?"),
+        ("2028 Democratic presidential popular vote share", "2028 general", "final", {"op": ">", "threshold": 50.0, "unit": "%"}, 0.46, "Dem popular > 50%", "Will the Democratic presidential popular vote share exceed 50% in 2028?"),
+        ("2028 Republican presidential popular vote share", "2028 general", "final", {"op": ">", "threshold": 50.0, "unit": "%"}, 0.44, "GOP popular > 50%", "Will the Republican presidential popular vote share exceed 50% in 2028?"),
+        ("2028 Democratic Senate seat count", "2028 general", "final", {"op": ">=", "threshold": 51, "unit": "seats"}, 0.45, "Dem Senate >= 51", "Will Democrats hold at least 51 Senate seats after 2028?"),
+        ("2028 Republican Senate seat count", "2028 general", "final", {"op": ">=", "threshold": 51, "unit": "seats"}, 0.49, "GOP Senate >= 51", "Will Republicans hold at least 51 Senate seats after 2028?"),
+        ("2028 Democratic House seat count", "2028 general", "final", {"op": ">=", "threshold": 218, "unit": "seats"}, 0.52, "Dem House >= 218", "Will Democrats hold at least 218 House seats after 2028?"),
+        ("2028 Republican House seat count", "2028 general", "final", {"op": ">=", "threshold": 218, "unit": "seats"}, 0.46, "GOP House >= 218", "Will Republicans hold at least 218 House seats after 2028?"),
+        ("Taiwan Strait PLA aircraft incursions", "2026", "max", {"op": ">", "threshold": 100, "unit": "aircraft"}, 0.30, "Taiwan PLA aircraft > 100", "Will PLA aircraft incursions exceed 100 in one day during 2026?"),
+        ("Taiwan Strait blockade status", "2026", "confirmed", {"op": "=", "value": "blockade declared"}, 0.08, "Taiwan blockade", "Will a Taiwan Strait blockade be declared or confirmed during 2026?"),
+        ("Taiwan Strait missile launch count", "2026", "count", {"op": ">", "threshold": 10, "unit": "launches"}, 0.12, "Taiwan missiles > 10", "Will Taiwan Strait missile launches exceed 10 during 2026?"),
+        ("US Taiwan emergency authorization", "2026", "official", {"op": "=", "value": "emergency authorization"}, 0.16, "US Taiwan authorization", "Will the US issue emergency Taiwan security authorization during 2026?"),
+        ("Russia Ukraine ceasefire status", "2026", "confirmed", {"op": "=", "value": "ceasefire active"}, 0.28, "Ukraine ceasefire", "Will a Russia-Ukraine ceasefire be active during 2026?"),
+        ("Ukraine territory control change", "2026", "net", {"op": ">", "threshold": 5000, "unit": "sq km"}, 0.18, "Ukraine control change > 5k", "Will net Ukraine territory control change exceed 5,000 sq km during 2026?"),
+        ("Ukraine long-range strike count", "2026", "count", {"op": ">", "threshold": 100, "unit": "strikes"}, 0.31, "Ukraine strikes > 100", "Will Ukraine long-range strikes exceed 100 during 2026?"),
+        ("Hormuz closure duration", "before 2027", "max", {"op": ">", "threshold": 24, "unit": "hours"}, 0.10, "Hormuz closure > 24h", "Will the Strait of Hormuz be closed for over 24 hours before 2027?"),
+        ("FrontierMath best public score", "2026", "max", {"op": ">", "threshold": 50, "unit": "%"}, 0.34, "FrontierMath > 50%", "Will the best public FrontierMath score exceed 50% during 2026?"),
+        ("SWE-bench Verified best public score", "2026", "max", {"op": ">", "threshold": 80, "unit": "%"}, 0.29, "SWE-bench > 80%", "Will the best public SWE-bench Verified score exceed 80% during 2026?"),
+        ("ARC-AGI best public score", "2026", "max", {"op": ">", "threshold": 85, "unit": "%"}, 0.26, "ARC-AGI > 85%", "Will the best public ARC-AGI score exceed 85% during 2026?"),
+        ("OpenAI frontier model release", "2026", "public", {"op": "=", "value": "released"}, 0.62, "OpenAI frontier release", "Will OpenAI publicly release a frontier model during 2026?"),
+        ("Anthropic frontier model release", "2026", "public", {"op": "=", "value": "released"}, 0.58, "Anthropic frontier release", "Will Anthropic publicly release a frontier model during 2026?"),
+        ("Google DeepMind frontier model release", "2026", "public", {"op": "=", "value": "released"}, 0.49, "DeepMind frontier release", "Will Google DeepMind publicly release a frontier model during 2026?"),
+        ("NVIDIA datacenter GPU shipments", "2026", "quarterly", {"op": ">", "threshold": 1_000_000, "unit": "units"}, 0.36, "NVIDIA GPU > 1M", "Will NVIDIA datacenter GPU shipments exceed 1M in a quarter during 2026?"),
+        ("US hyperscaler AI capex", "2026", "quarterly", {"op": ">", "threshold": 100_000_000_000, "unit": "USD"}, 0.25, "AI capex > 100B", "Will US hyperscaler AI capex exceed $100B in a quarter during 2026?"),
+        ("Frontier AI public safety incident count", "2026", "count", {"op": ">", "threshold": 2, "unit": "incidents"}, 0.18, "AI incidents > 2", "Will public frontier AI safety incidents exceed 2 during 2026?"),
+        ("Jayson Tatum rebounds vs Knicks 2026-04-30", "2026-04-30", "box_score", {"op": ">", "threshold": 8.5, "unit": "rebounds"}, 0.42, "Tatum rebounds > 8.5", "Will Jayson Tatum record over 8.5 rebounds vs the Knicks?"),
+        ("Jayson Tatum assists vs Knicks 2026-04-30", "2026-04-30", "box_score", {"op": ">", "threshold": 5.5, "unit": "assists"}, 0.40, "Tatum assists > 5.5", "Will Jayson Tatum record over 5.5 assists vs the Knicks?"),
+        ("Jaylen Brown points vs Knicks 2026-04-30", "2026-04-30", "box_score", {"op": ">", "threshold": 24.5, "unit": "points"}, 0.51, "Brown points > 24.5", "Will Jaylen Brown score over 24.5 points vs the Knicks?"),
+        ("Jalen Brunson points vs Celtics 2026-04-30", "2026-04-30", "box_score", {"op": ">", "threshold": 28.5, "unit": "points"}, 0.50, "Brunson points > 28.5", "Will Jalen Brunson score over 28.5 points vs the Celtics?"),
+        ("NBA Knicks at Celtics 2026-04-30 Celtics margin", "2026-04-30", "margin", {"op": ">", "threshold": 5.5, "unit": "points"}, 0.46, "Celtics margin > 5.5", "Will the Celtics beat the Knicks by more than 5.5 points?"),
+        ("NBA Lakers at Nuggets 2026-05-02 winner", "2026-05-02", "winner", {"op": "=", "value": "Denver Nuggets"}, 0.60, "Nuggets win", "Will the Nuggets beat the Lakers on 2026-05-02?"),
+        ("NBA Lakers at Nuggets 2026-05-02 winner", "2026-05-02", "winner", {"op": "=", "value": "Los Angeles Lakers"}, 0.40, "Lakers win", "Will the Lakers beat the Nuggets on 2026-05-02?"),
+        ("Nikola Jokic assists vs Lakers 2026-05-02", "2026-05-02", "box_score", {"op": ">", "threshold": 9.5, "unit": "assists"}, 0.47, "Jokic assists > 9.5", "Will Nikola Jokic record over 9.5 assists vs the Lakers?"),
+        ("Nikola Jokic rebounds vs Lakers 2026-05-02", "2026-05-02", "box_score", {"op": ">", "threshold": 12.5, "unit": "rebounds"}, 0.53, "Jokic rebounds > 12.5", "Will Nikola Jokic record over 12.5 rebounds vs the Lakers?"),
+        ("LeBron James points vs Nuggets 2026-05-02", "2026-05-02", "box_score", {"op": ">", "threshold": 22.5, "unit": "points"}, 0.45, "LeBron points > 22.5", "Will LeBron James score over 22.5 points vs the Nuggets?"),
+        ("NBA Lakers at Nuggets 2026-05-02 total points", "2026-05-02", "total", {"op": ">", "threshold": 224.5, "unit": "points"}, 0.50, "LAL-DEN total > 224.5", "Will Lakers at Nuggets exceed 224.5 total points?"),
+    ]
 
 
 def seed_propositions(conditions: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -563,6 +809,7 @@ def seed_propositions(conditions: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ("Knicks upset script", "Knicks upset", "Will the Knicks win while Brunson clears assists?", "Upset game-script proposition.", {"op": "AND", "args": [leaf(by_short, "Knicks win"), leaf(by_short, "Brunson assists > 7.5")]}, "sports"),
         ("NBA star overs", "NBA star overs", "Will at least two seeded NBA player overs hit?", "K-of-N player stat parlay.", {"op": "K_OF_N", "k": 2, "args": [leaf(by_short, "Tatum points > 29.5"), leaf(by_short, "Brown rebounds > 6.5"), leaf(by_short, "Brunson assists > 7.5")]}, "sports"),
     ]
+    specs.extend(extra_proposition_specs(by_short))
     values = {item["id"]: float(item.get("fair_value", 0.5)) for item in conditions}
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -587,6 +834,35 @@ def seed_propositions(conditions: list[dict[str, Any]]) -> list[dict[str, Any]]:
             ).to_dict()
         )
     return rows
+
+
+def extra_proposition_specs(by_short: dict[str, dict[str, Any]]) -> list[tuple[str, str, str, str, dict[str, Any], str]]:
+    return [
+        ("Onchain activity breakout 2026", "Onchain breakout", "Will Ethereum/Base/Solana activity break out in 2026?", "K-of-N activity definition over L2 TVL, Base transactions, and Solana active addresses.", {"op": "K_OF_N", "k": 2, "args": [leaf(by_short, "ETH L2 TVL > 80B"), leaf(by_short, "Base tx > 15M"), leaf(by_short, "SOL active > 8M")]}, "crypto"),
+        ("Stablecoin expansion 2026", "Stablecoin expansion", "Will stablecoin supply and transfer activity expand sharply in 2026?", "Stablecoin liquidity definition over USDT, USDC, and transfer volume.", {"op": "K_OF_N", "k": 2, "args": [leaf(by_short, "USDT supply > 200B"), leaf(by_short, "USDC supply > 100B"), leaf(by_short, "Stablecoin volume > 300B")]}, "crypto"),
+        ("DeFi revival 2026", "DeFi revival", "Will DeFi TVL and Ethereum L2 activity both accelerate in 2026?", "DeFi revival definition joining TVL and L2 throughput.", {"op": "AND", "args": [leaf(by_short, "DeFi TVL > 200B"), leaf(by_short, "ETH L2 TVL > 80B"), leaf(by_short, "Base tx > 15M")]}, "crypto"),
+        ("Crypto infrastructure strength 2026", "Crypto infra strength", "Will crypto infrastructure show both network-security and market-activity strength?", "BTC hashrate plus exchange-volume definition.", {"op": "AND", "args": [leaf(by_short, "BTC hashrate > 1200"), leaf(by_short, "CEX spot > 250B")]}, "crypto"),
+        ("Sticky inflation 2026", "Sticky inflation", "Will core inflation stay hot while cuts are limited?", "Core PCE and Fed-rate composition.", {"op": "AND", "args": [leaf(by_short, "Core PCE > 3%"), leaf(by_short, "Fed > 5%")]}, "macro"),
+        ("Consumer slowdown 2026", "Consumer slowdown", "Will retail sales and labor demand both weaken in 2026?", "Retail sales plus JOLTS slowdown definition.", {"op": "AND", "args": [leaf(by_short, "Retail sales < 0%"), leaf(by_short, "JOLTS < 6M")]}, "macro"),
+        ("Manufacturing recession 2026", "Manufacturing recession", "Will manufacturing and industrial production both contract sharply in 2026?", "Industrial-cycle weakness definition.", {"op": "AND", "args": [leaf(by_short, "ISM < 45"), leaf(by_short, "Industrial prod < -2%")]}, "macro"),
+        ("Credit stress 2026", "Credit stress", "Will credit spreads and equity volatility both flash stress in 2026?", "Credit-plus-volatility stress definition.", {"op": "AND", "args": [leaf(by_short, "HY spread > 600bp"), leaf(by_short, "VIX > 40")]}, "macro"),
+        ("Oil shock 2026", "Oil shock", "Will oil prices spike while Hormuz disruption risk materializes?", "Oil price plus shipping disruption composition.", {"op": "OR", "args": [leaf(by_short, "Brent > 120"), leaf(by_short, "Hormuz closure > 24h")]}, "macro"),
+        ("Democratic popular and EC win 2028", "Dem popular+EC", "Will Democrats win both popular vote share over 50% and the Electoral College in 2028?", "Popular-vote and Electoral College definition.", {"op": "AND", "args": [leaf(by_short, "Dem popular > 50%"), leaf(by_short, "Dem EC winner")]}, "politics"),
+        ("Republican congressional majority 2028", "GOP Congress", "Will Republicans hold both House and Senate majorities after 2028?", "Congressional-control definition using seat-count conditions.", {"op": "AND", "args": [leaf(by_short, "GOP Senate >= 51"), leaf(by_short, "GOP House >= 218")]}, "politics"),
+        ("Democratic congressional majority 2028", "Dem Congress", "Will Democrats hold both House and Senate majorities after 2028?", "Congressional-control definition using seat-count conditions.", {"op": "AND", "args": [leaf(by_short, "Dem Senate >= 51"), leaf(by_short, "Dem House >= 218")]}, "politics"),
+        ("Taiwan blockade crisis 2026", "Taiwan blockade crisis", "Will a Taiwan Strait blockade or large missile event occur in 2026?", "Taiwan escalation definition over blockade and missile-launch conditions.", {"op": "OR", "args": [leaf(by_short, "Taiwan blockade"), leaf(by_short, "Taiwan missiles > 10")]}, "geopolitics"),
+        ("Taiwan military pressure 2026", "Taiwan pressure", "Will Taiwan face heavy PLA air activity plus US emergency authorization in 2026?", "Cross-strait military-pressure definition.", {"op": "AND", "args": [leaf(by_short, "Taiwan PLA aircraft > 100"), leaf(by_short, "US Taiwan authorization")]}, "geopolitics"),
+        ("Ukraine escalation 2026", "Ukraine escalation", "Will Ukraine see either major territory movement or heavy long-range strikes in 2026?", "Ukraine war escalation definition.", {"op": "OR", "args": [leaf(by_short, "Ukraine control change > 5k"), leaf(by_short, "Ukraine strikes > 100")]}, "geopolitics"),
+        ("Ukraine ceasefire without escalation 2026", "Ukraine ceasefire no spike", "Will a Ukraine ceasefire occur without major territory-change escalation?", "Conditional conflict-resolution definition.", {"op": "AND", "args": [leaf(by_short, "Ukraine ceasefire"), {"op": "NOT", "args": [leaf(by_short, "Ukraine control change > 5k")]}]}, "geopolitics"),
+        ("AI benchmark leap 2026", "AI benchmark leap", "Will public frontier AI benchmarks show a broad capability leap in 2026?", "K-of-N benchmark definition across math, coding, and ARC-style tasks.", {"op": "K_OF_N", "k": 2, "args": [leaf(by_short, "FrontierMath > 50%"), leaf(by_short, "SWE-bench > 80%"), leaf(by_short, "ARC-AGI > 85%")]}, "technology"),
+        ("Frontier model release race 2026", "Model release race", "Will at least two major labs publicly release frontier models in 2026?", "K-of-N release definition across major AI labs.", {"op": "K_OF_N", "k": 2, "args": [leaf(by_short, "OpenAI frontier release"), leaf(by_short, "Anthropic frontier release"), leaf(by_short, "DeepMind frontier release")]}, "technology"),
+        ("AI infrastructure boom 2026", "AI infra boom", "Will GPU shipments and hyperscaler capex both break high thresholds in 2026?", "AI infrastructure spending definition.", {"op": "AND", "args": [leaf(by_short, "NVIDIA GPU > 1M"), leaf(by_short, "AI capex > 100B")]}, "technology"),
+        ("AI boom with safety backlash 2026", "AI boom backlash", "Will AI benchmarks leap while public safety incidents rise?", "Capability-and-risk composition over benchmark and incident conditions.", {"op": "K_OF_N", "k": 3, "args": [leaf(by_short, "FrontierMath > 50%"), leaf(by_short, "SWE-bench > 80%"), leaf(by_short, "ARC-AGI > 85%"), leaf(by_short, "AI incidents > 2")]}, "technology"),
+        ("Celtics all-around game script", "Celtics full script", "Will the Celtics win with Tatum playmaking and Brown scoring?", "Same-game script definition across winner and player-stat leaves.", {"op": "AND", "args": [leaf(by_short, "Celtics win"), leaf(by_short, "Tatum assists > 5.5"), leaf(by_short, "Brown points > 24.5")]}, "sports"),
+        ("Tatum triple-threat game", "Tatum triple threat", "Will Tatum clear at least two seeded points/rebounds/assists thresholds?", "K-of-N player-stat definition for Jayson Tatum.", {"op": "K_OF_N", "k": 2, "args": [leaf(by_short, "Tatum points > 29.5"), leaf(by_short, "Tatum rebounds > 8.5"), leaf(by_short, "Tatum assists > 5.5")]}, "sports"),
+        ("Nuggets Jokic script", "Nuggets Jokic script", "Will the Nuggets win while Jokic clears assists and rebounds?", "Second-slate game-script definition.", {"op": "AND", "args": [leaf(by_short, "Nuggets win"), leaf(by_short, "Jokic assists > 9.5"), leaf(by_short, "Jokic rebounds > 12.5")]}, "sports"),
+        ("Lakers upset offense", "Lakers upset offense", "Will the Lakers win while LeBron clears points?", "Second-slate upset script.", {"op": "AND", "args": [leaf(by_short, "Lakers win"), leaf(by_short, "LeBron points > 22.5")]}, "sports"),
+    ]
 
 
 def leaf(by_short: dict[str, dict[str, Any]], short_name: str) -> dict[str, str]:

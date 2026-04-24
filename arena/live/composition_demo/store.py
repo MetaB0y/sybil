@@ -51,7 +51,7 @@ def load_state(path: str | Path = DEFAULT_STATE_PATH) -> dict[str, Any]:
         }
     with p.open("r", encoding="utf-8") as f:
         state = json.load(f)
-    if state.get("universe_version") != 4 or len(state.get("measurements", [])) < 50 or not state.get("entities"):
+    if state.get("universe_version") != 4 or len(state.get("measurements", [])) < 100 or not state.get("entities"):
         universe = import_universe(max_atoms=DEFAULT_MAX_ATOMS, force=True)
         market_ids = {item["id"]: item.get("market_id") for item in state.get("instruments", [])}
         for item in universe.get("instruments", []):
