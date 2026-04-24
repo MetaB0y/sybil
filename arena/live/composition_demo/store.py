@@ -16,6 +16,7 @@ from .registry import (
     canonical_key_for,
     estimate_formula_value,
     formula_conditions,
+    query_tokens,
     search_instruments,
     validate_formula,
 )
@@ -452,7 +453,7 @@ def explorer_search(payload: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL)
 def graph_projection(payload: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL) -> dict[str, Any]:
     state = enrich_state(load_state(), sybil_url)
     projection = build_graph_projection(state)
-    query = str(payload.get("query", "")).strip().lower()
+    tokens = query_tokens(str(payload.get("query", "")).strip())
     domain = str(payload.get("domain", "")).strip()
     kind = str(payload.get("kind", "")).strip()
     focus_id = str(payload.get("focus_id", "")).strip()
@@ -466,7 +467,8 @@ def graph_projection(payload: dict[str, Any], sybil_url: str = DEFAULT_SYBIL_URL
             continue
         if kind and node.get("kind") != kind:
             continue
-        if query and query not in str(node.get("search_text", "")).lower():
+        search_text = str(node.get("search_text", "")).lower()
+        if tokens and not all(token in search_text for token in tokens):
             continue
         matched.append(node["id"])
 
@@ -522,6 +524,25 @@ def build_graph_projection(state: dict[str, Any]) -> dict[str, Any]:
             return
         key = (source, target, edge_type)
         edges[key] = {"from": source, "to": target, "type": edge_type, "label": label, "strength": strength}
+
+    def add_market_node(item: dict[str, Any]) -> None:
+        if item.get("market_id") is None:
+            return
+        market_node_id = f"market:{item['market_id']}"
+        add_node(
+            {
+                "id": market_node_id,
+                "kind": "market",
+                "label": f"Market {item['market_id']}",
+                "domain": item.get("domain", ""),
+                "summary": item.get("question", ""),
+                "object_id": item["id"],
+                "object_kind": "market",
+                "path": [item.get("domain", ""), "live markets", str(item["market_id"])],
+                "score": 1.0,
+            }
+        )
+        add_edge(item["id"], market_node_id, "live_market", "published as", 0.8)
 
     for entity in state.get("entities", []):
         add_node(
@@ -589,6 +610,7 @@ def build_graph_projection(state: dict[str, Any]) -> dict[str, Any]:
             }
         )
         add_edge(condition.get("measurement_id", ""), condition["id"], "measurement_condition", "predicate", 1.0)
+        add_market_node(condition)
 
     for definition in state.get("propositions", []):
         add_node(
@@ -606,22 +628,7 @@ def build_graph_projection(state: dict[str, Any]) -> dict[str, Any]:
         )
         for condition_id in definition.get("leaf_ids") or formula_conditions(definition.get("formula")):
             add_edge(condition_id, definition["id"], "condition_definition", "used in definition", 0.9)
-        if definition.get("market_id") is not None:
-            market_node_id = f"market:{definition['market_id']}"
-            add_node(
-                {
-                    "id": market_node_id,
-                    "kind": "market",
-                    "label": f"Market {definition['market_id']}",
-                    "domain": definition.get("domain", ""),
-                    "summary": definition.get("question", ""),
-                    "object_id": definition["id"],
-                    "object_kind": "market",
-                    "path": [definition.get("domain", ""), "live markets", str(definition["market_id"])],
-                    "score": 1.0,
-                }
-            )
-            add_edge(definition["id"], market_node_id, "live_market", "published as", 0.8)
+        add_market_node(definition)
 
     for edge in state.get("implication_edges", []):
         add_edge(edge.get("from", ""), edge.get("to", ""), "implication", edge.get("no_arb") or edge.get("label", "implies"), 0.65)

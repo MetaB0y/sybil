@@ -271,7 +271,7 @@ function App() {
       setState(next);
       setSelectedId(next.instruments[next.instruments.length - 1].id);
       setDraft(null);
-      setToast("Published proposition market");
+      setToast("Published market definition");
     } catch (e) {
       setToast(String(e));
     } finally {
@@ -379,7 +379,7 @@ function App() {
           <div className="creator">
             <div className="panel-label">Market Creation Wizard</div>
             <textarea value={draftPrompt} onChange={(e) => setDraftPrompt(e.target.value)} />
-            <button onClick={makeDraft} disabled={!!busy}>{busy === "draft" ? "Drafting..." : "Draft proposition"}</button>
+            <button onClick={makeDraft} disabled={!!busy}>{busy === "draft" ? "Drafting..." : "Draft definition"}</button>
             {draft && (
               <div className="draft">
                 <h3>{draft.short_name || draft.title}</h3>
@@ -388,7 +388,7 @@ function App() {
                 {draft.validation && (
                   <div className="validation">
                     <span>{draft.validation.valid ? "Valid formula" : draft.validation.errors.join("; ")}</span>
-                    {draft.validation.duplicate && <span>Duplicate proposition exists</span>}
+                    {draft.validation.duplicate && <span>Duplicate definition exists</span>}
                     {draft.validation.warnings?.map((warning) => <span key={warning}>{warning}</span>)}
                   </div>
                 )}
@@ -550,11 +550,11 @@ function App() {
               </button>
             </div>
           ) : (
-            <p className="muted">The agent can propose a trade after you pick a condition or proposition. Nothing submits without confirmation.</p>
+            <p className="muted">The agent can propose a trade after you pick a condition or definition. Nothing submits without confirmation.</p>
           )}
 
           <div className="definitions">
-            <div className="panel-label">Known Propositions</div>
+            <div className="panel-label">Known Definitions</div>
             {propositions.slice(0, 18).map((item) => (
               <button key={item.id} onClick={() => setSelectedId(item.id)} className={item.id === selected?.id ? "def active" : "def"}>
                 <span>{item.short_name}</span>
@@ -893,12 +893,18 @@ function Select({
       <select value={value} onChange={(e) => setValue(e.target.value)}>
         {Array.from(new Set(values)).map((item) => (
           <option key={item || "all"} value={item}>
-            {item || "all"}
+            {selectLabel(item)}
           </option>
         ))}
       </select>
     </label>
   );
+}
+
+function selectLabel(value: string): string {
+  if (!value) return "all";
+  if (value === "proposition") return "definition";
+  return value;
 }
 
 function FormulaView({ formula, instruments }: { formula: Formula | null; instruments: Instrument[] }) {

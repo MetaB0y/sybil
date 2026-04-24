@@ -73,6 +73,7 @@ class GraphUniverseTests(unittest.TestCase):
 
     def test_graph_projection_links_entities_to_definitions(self) -> None:
         universe = build_universe({"polymarket_events": [], "kalshi_markets": [], "errors": []})
+        universe["conditions"][0]["market_id"] = 42
         projection = build_graph_projection({**universe, "conditions": universe["conditions"], "propositions": universe["propositions"]})
         node_kinds = {node["kind"] for node in projection["nodes"]}
         self.assertIn("entity", node_kinds)
@@ -83,6 +84,8 @@ class GraphUniverseTests(unittest.TestCase):
         self.assertIn("entity_measurement", edge_types)
         self.assertIn("measurement_condition", edge_types)
         self.assertIn("condition_definition", edge_types)
+        self.assertIn("live_market", edge_types)
+        self.assertTrue(any(node["id"] == "market:42" for node in projection["nodes"]))
 
     def test_search_returns_conditions_not_flat_atoms(self) -> None:
         universe = build_universe({"polymarket_events": [], "kalshi_markets": [], "errors": []})
