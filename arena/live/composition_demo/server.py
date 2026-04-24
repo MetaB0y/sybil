@@ -77,7 +77,7 @@ class Handler(BaseHTTPRequestHandler):
             elif parsed.path == "/event":
                 self.respond(trigger_event(body.get("event", "helicopter"), sybil_url))
             elif parsed.path == "/agent/discover":
-                self.respond(agent.discover(body.get("query", ""), enrich_state(load_state(), sybil_url)))
+                self.respond(agent.discover(body.get("query", ""), enrich_state(load_state(), sybil_url), body.get("mode", "")))
             elif parsed.path == "/agent/draft-composition":
                 self.respond(agent.draft_composition(body.get("prompt", ""), enrich_state(load_state(), sybil_url)))
             elif parsed.path == "/agent/build-from-conditions":

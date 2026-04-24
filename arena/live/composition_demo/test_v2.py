@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from .agent import deterministic_draft
+from .agent import deterministic_draft, discover
 from .registry import condition_key, measurement_key, proposition_key, search_instruments, validate_formula
 from .sources import build_condition, build_universe, generate_implication_edges, split_kalshi_legs
 from .store import (
@@ -64,6 +64,33 @@ class GraphUniverseTests(unittest.TestCase):
         names = " ".join(item["short_name"].lower() for item in leaves)
         self.assertIn("gdp", names)
         self.assertIn("sahm", names)
+
+    def test_agent_hedge_mode_finds_downside_markets(self) -> None:
+        universe = build_universe({"polymarket_events": [], "kalshi_markets": [], "errors": []})
+        result = discover("I am long ETH and worried about downside in 2026", universe, mode="hedge")
+        self.assertEqual(result["mode"], "hedge")
+        self.assertGreaterEqual(len(result["questions"]), 2)
+        names = " ".join(
+            item["short_name"].lower() for item in universe["instruments"] if item["id"] in set(result["ranked_ids"])
+        )
+        self.assertTrue("eth < 2000" in names or "crypto shock" in names, names)
+
+    def test_agent_news_mode_finds_proxy_markets(self) -> None:
+        universe = build_universe({"polymarket_events": [], "kalshi_markets": [], "errors": []})
+        result = discover("New Iran strike reports look underappreciated", universe, mode="news")
+        self.assertEqual(result["mode"], "news")
+        self.assertGreaterEqual(len(result["proxy_markets"]), 1)
+        names = " ".join(
+            item["short_name"].lower() for item in universe["instruments"] if item["id"] in set(result["ranked_ids"])
+        )
+        self.assertIn("iran", names)
+
+    def test_agent_interview_mode_asks_questions(self) -> None:
+        universe = build_universe({"polymarket_events": [], "kalshi_markets": [], "errors": []})
+        result = discover("I have opinions about macro and crypto", universe, mode="interview")
+        self.assertEqual(result["mode"], "interview")
+        self.assertGreaterEqual(len(result["questions"]), 3)
+        self.assertIn("measurable", result["answer"])
 
 
 class CanonicalKeyTests(unittest.TestCase):

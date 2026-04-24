@@ -130,10 +130,16 @@ export type FormulaValidation = {
 };
 
 export type Discovery = {
+  mode?: string;
   answer: string;
   recommendation_id: string | null;
   ranked_ids: string[];
   actions: string[];
+  questions?: string[];
+  thesis?: string;
+  proxy_markets?: string[];
+  hedge_markets?: string[];
+  creation_prompt?: string;
 };
 
 export type TradeProposal = {

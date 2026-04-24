@@ -117,10 +117,10 @@ export function triggerEvent(event: string): Promise<{ orders: number }> {
   });
 }
 
-export function discover(query: string): Promise<Discovery> {
+export function discover(query: string, mode?: string): Promise<Discovery> {
   return json<Discovery>(`${DEMO_URL}/agent/discover`, {
     method: "POST",
-    body: JSON.stringify({ sybil_url: SYBIL_URL, query }),
+    body: JSON.stringify({ sybil_url: SYBIL_URL, query, mode }),
   });
 }
 

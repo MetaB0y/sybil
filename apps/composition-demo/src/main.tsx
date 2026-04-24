@@ -18,11 +18,49 @@ import {
 import type { DemoState, Formula, Instrument, SearchResult, TradeProposal, WizardDraft } from "./types";
 import "./styles.css";
 
+const AGENT_MODES = [
+  {
+    id: "hedge",
+    label: "Hedge exposure",
+    prompt: "I am long ETH and worried about downside in 2026.",
+    help: "Find markets that pay in the bad state for an existing position.",
+  },
+  {
+    id: "news",
+    label: "Trade news",
+    prompt: "New Iran strike reports look underappreciated. What should reprice?",
+    help: "Turn a headline into direct or proxy markets.",
+  },
+  {
+    id: "interview",
+    label: "Find bets",
+    prompt: "I have opinions about macro and crypto. Interview me to find bets.",
+    help: "Ask follow-up questions until opinions become measurable claims.",
+  },
+  {
+    id: "alpha",
+    label: "Monetize alpha",
+    prompt: "I have alpha about BTC ETF flows. What is the best way to express it?",
+    help: "Map an information edge to the tightest tradable condition or proxy.",
+  },
+  {
+    id: "create",
+    label: "Create market",
+    prompt: "ETH above 3000 and BTC above 100000 in 2026.",
+    help: "Draft a new market definition from existing graph conditions.",
+  },
+] as const;
+
+type AgentMode = (typeof AGENT_MODES)[number]["id"];
+
 function App() {
   const [state, setState] = useState<DemoState | null>(null);
   const [selectedId, setSelectedId] = useState("");
-  const [query, setQuery] = useState("I want a basket around 2028 election outcomes and macro conditions.");
+  const [agentMode, setAgentMode] = useState<AgentMode>("hedge");
+  const [query, setQuery] = useState<string>(AGENT_MODES[0].prompt);
   const [agentAnswer, setAgentAnswer] = useState("");
+  const [agentActions, setAgentActions] = useState<string[]>([]);
+  const [agentQuestions, setAgentQuestions] = useState<string[]>([]);
   const [rankedIds, setRankedIds] = useState<string[]>([]);
   const [proposal, setProposal] = useState<TradeProposal | null>(null);
   const [draftPrompt, setDraftPrompt] = useState("ETH between 3000 and 6000 by end of 2026.");
@@ -65,12 +103,13 @@ function App() {
   const propositions = instruments.filter((item) => item.kind === "proposition" || item.kind === "composition");
   const conditions = instruments.filter((item) => item.kind === "condition" || item.kind === "atom");
   const selectedEdges = (state?.implication_edges || []).filter((edge) => edge.from === selected?.id || edge.to === selected?.id);
+  const modeConfig = AGENT_MODES.find((item) => item.id === agentMode) || AGENT_MODES[0];
 
   const ranked = useMemo(() => {
     if (!rankedIds.length) return searchResult?.items.slice(0, 8) || propositions.slice(0, 8);
-    const byId = new Map(instruments.map((item) => [item.id, item]));
+    const byId = new Map(allObjects.map((item) => [item.id, item]));
     return rankedIds.map((id) => byId.get(id)).filter(Boolean) as Instrument[];
-  }, [rankedIds, instruments, searchResult, propositions]);
+  }, [rankedIds, allObjects, searchResult, propositions]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -95,10 +134,13 @@ function App() {
   async function runAgent() {
     setBusy("agent");
     try {
-      const result = await discover(query);
+      const result = await discover(query, agentMode);
       setAgentAnswer(result.answer);
+      setAgentActions(result.actions || []);
+      setAgentQuestions(result.questions || []);
       setRankedIds(result.ranked_ids);
       if (result.recommendation_id) setSelectedId(result.recommendation_id);
+      if (result.creation_prompt && agentMode === "create") setDraftPrompt(result.creation_prompt);
     } catch (e) {
       setToast(String(e));
     } finally {
@@ -217,10 +259,10 @@ function App() {
       {toast && <button className="toast" onClick={() => setToast("")}>{toast}</button>}
       <header className="hero">
         <div>
-          <div className="eyebrow">Sybil composition engine MVP</div>
-          <h1>Trade the definition, not a vague headline.</h1>
+          <div className="eyebrow">Composition demo</div>
+          <h1>Ask for the trade you actually want.</h1>
           <p>
-            A measurement-first UI for creating predicate markets, composing conditions, and checking no-arb relationships before liquidity follows.
+            A copilot over a prediction knowledge graph: measurements become conditions, conditions become market definitions, and definitions become tradable Sybil markets.
           </p>
         </div>
         <div className="hero-actions">
@@ -246,12 +288,48 @@ function App() {
 
       <section className="shell">
         <aside className="panel agent-panel">
-          <div className="panel-label">Discovery Agent</div>
-          <textarea value={query} onChange={(e) => setQuery(e.target.value)} />
+          <div className="panel-label">Agent Copilot</div>
+          <div className="mode-tabs" role="tablist" aria-label="Agent mode">
+            {AGENT_MODES.map((mode) => (
+              <button
+                key={mode.id}
+                className={mode.id === agentMode ? "mode-tab active" : "mode-tab"}
+                title={mode.help}
+                onClick={() => {
+                  setAgentMode(mode.id);
+                  setQuery(mode.prompt);
+                  setAgentAnswer("");
+                  setAgentActions([]);
+                  setAgentQuestions([]);
+                }}
+              >
+                {mode.label}
+              </button>
+            ))}
+          </div>
+          <textarea value={query} onChange={(e) => setQuery(e.target.value)} placeholder={modeConfig.prompt} />
           <button className="primary" onClick={runAgent} disabled={!!busy}>
-            {busy === "agent" ? "Thinking..." : "Find the right proposition"}
+            {busy === "agent" ? "Thinking..." : modeConfig.label}
           </button>
-          <div className="agent-answer">{agentAnswer || "Ask in natural language. The agent ranks definitions and explains tradeoffs."}</div>
+          <div className="agent-answer">
+            {agentAnswer || "Describe the exposure, news, opinion, or alpha. The copilot ranks existing markets and tells you when a new definition is needed."}
+          </div>
+          {(agentQuestions.length > 0 || agentActions.length > 0) && (
+            <div className="agent-guidance">
+              {agentQuestions.length > 0 && (
+                <div>
+                  <strong>Questions to tighten the trade</strong>
+                  {agentQuestions.map((question) => <span key={question}>{question}</span>)}
+                </div>
+              )}
+              {agentActions.length > 0 && (
+                <div>
+                  <strong>Next checks</strong>
+                  {agentActions.map((action) => <span key={action}>{action}</span>)}
+                </div>
+              )}
+            </div>
+          )}
           <div className="rank-list">
             {ranked.slice(0, 4).map((item) => (
               <button
@@ -259,8 +337,11 @@ function App() {
                 className={item.id === selected?.id ? "rank-card active" : "rank-card"}
                 onClick={() => setSelectedId(item.id)}
               >
-                <span>{item.short_name}</span>
-                <strong>{nanosPct(item.market?.yes_price_nanos) || pct(item.model_value)}</strong>
+                <span>
+                  <b>{item.short_name || item.title}</b>
+                  <small>{displayKind(item)} / {pathText(item) === "-" ? item.domain || "unknown" : pathText(item)}</small>
+                </span>
+                <strong>{item.object_kind === "measurement" ? "input" : nanosPct(item.market?.yes_price_nanos) || pct(item.model_value)}</strong>
               </button>
             ))}
           </div>
@@ -350,13 +431,15 @@ function App() {
                 </div>
               </details>
 
-              <div className="explorer">
+              <details className="explorer" open={false}>
+                <summary>
+                  <span>
+                    <div className="panel-label">Advanced Graph Explorer</div>
+                    <strong>{searchResult?.total ?? conditions.length} matches</strong>
+                  </span>
+                </summary>
                 <div className="explorer-head">
-                  <div>
-                    <div className="panel-label">Explorer</div>
-                    <h3>{searchResult?.total ?? conditions.length} matches</h3>
-                  </div>
-                  <input value={explorerQuery} onChange={(e) => setExplorerQuery(e.target.value)} placeholder="Search measurements, conditions, propositions." />
+                  <input value={explorerQuery} onChange={(e) => setExplorerQuery(e.target.value)} placeholder="Search measurements, conditions, definitions." />
                 </div>
                 <div className="filters">
                   <Select label="Show" value={objectKind} setValue={setObjectKind} values={["", "entity", "context", "measurement", "condition", "proposition"]} />
@@ -378,7 +461,7 @@ function App() {
                   </button>
                   ))}
                 </div>
-              </div>
+              </details>
             </>
           ) : (
             <div className="empty">Seed the demo markets to begin.</div>
