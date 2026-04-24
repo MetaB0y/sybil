@@ -419,6 +419,9 @@ function App() {
                   ))}
                 </div>
               )}
+
+              <GraphNavigator state={state} selected={selected} select={setSelectedId} />
+
               <details className="technical-details">
                 <summary>Technical details</summary>
                 <div className="metadata-grid">
@@ -508,6 +511,110 @@ function App() {
         </aside>
       </section>
     </main>
+  );
+}
+
+function GraphNavigator({
+  state,
+  selected,
+  select,
+}: {
+  state: DemoState | null;
+  selected?: Instrument | null;
+  select: (id: string) => void;
+}) {
+  const domains = state?.facets?.domains || [];
+  const selectedDomain = selected?.domain || domains[0] || "";
+  const [domain, setDomain] = useState(selectedDomain);
+  const [anchorId, setAnchorId] = useState("");
+  const activeDomain = domain || selectedDomain;
+  const entities = (state?.entities || []).filter((item) => !activeDomain || item.domain === activeDomain);
+  const contexts = (state?.contexts || []).filter((item) => !activeDomain || item.domain === activeDomain);
+  const anchors = [
+    ...entities.map((item) => ({ id: item.id, title: item.short_name || item.title, kind: "Entity" })),
+    ...contexts.map((item) => ({ id: item.id, title: item.short_name || item.title, kind: "Event" })),
+  ];
+  const activeAnchor = anchorId || selected?.context_id || selected?.entity_ids?.[0] || "";
+  const measurements = (state?.measurements || []).filter((item) => {
+    if (activeDomain && item.domain !== activeDomain) return false;
+    if (!activeAnchor) return true;
+    return item.context_id === activeAnchor || item.entity_ids?.includes(activeAnchor);
+  });
+  const selectedMeasurementId =
+    selected?.object_kind === "measurement" ? selected.id : selected?.measurement_id || measurements[0]?.id || "";
+  const relatedConditions = (state?.conditions || []).filter((item) => item.measurement_id === selectedMeasurementId);
+  const relatedDefinitions = (state?.propositions || []).filter((item) => item.leaf_ids?.some((id) => relatedConditions.some((condition) => condition.id === id)));
+
+  return (
+    <div className="graph-nav">
+      <div className="graph-nav-head">
+        <div>
+          <div className="panel-label">Graph Navigator</div>
+          <h3>Browse by thing, event, and measured value</h3>
+        </div>
+        <span>{measurements.length} measurements</span>
+      </div>
+      <div className="domain-tabs">
+        {domains.map((item) => (
+          <button
+            key={item}
+            className={item === activeDomain ? "active" : ""}
+            onClick={() => {
+              setDomain(item);
+              setAnchorId("");
+            }}
+          >
+            {item}
+          </button>
+        ))}
+      </div>
+      <div className="graph-columns">
+        <div>
+          <strong>Entities and events</strong>
+          <div className="graph-list compact">
+            {anchors.slice(0, 18).map((item) => (
+              <button
+                key={item.id}
+                className={item.id === activeAnchor ? "active" : ""}
+                onClick={() => {
+                  setAnchorId(item.id);
+                  select(item.id);
+                }}
+              >
+                <span>{item.title}</span>
+                <small>{item.kind}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <strong>Measurements</strong>
+          <div className="graph-list">
+            {measurements.slice(0, 18).map((item) => (
+              <button
+                key={item.id}
+                className={item.id === selectedMeasurementId ? "active" : ""}
+                onClick={() => select(item.id)}
+              >
+                <span>{item.display_title || item.title}</span>
+                <small>{item.measurement_kind} / {item.unit}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <strong>Conditions and definitions</strong>
+          <div className="graph-list">
+            {[...relatedConditions, ...relatedDefinitions].slice(0, 18).map((item) => (
+              <button key={item.id} className={item.id === selected?.id ? "active" : ""} onClick={() => select(item.id)}>
+                <span>{item.short_name || item.title}</span>
+                <small>{displayKind(item)} / {item.object_kind === "condition" ? predicateText(item) : pct(item.model_value)}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
