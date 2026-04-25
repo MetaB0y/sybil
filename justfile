@@ -229,7 +229,7 @@ deploy-api: deploy-sync
 deploy-arena key: deploy-sync
     docker compose build sybil-arena
     docker save sybil-arena:latest | ssh {{SERVER}} docker load
-    ssh {{SERVER}} 'cd /opt/sybil && OPENROUTER_API_KEY={{key}} {{COMPOSE_PROD}} up -d sybil-arena sybil-arena-dashboard'
+    ssh {{SERVER}} 'cd /opt/sybil && OPENROUTER_API_KEY={{key}} {{COMPOSE_PROD}} up -d sybil-arena sybil-arena-dashboard caddy'
 
 # Deploy observability stack (VictoriaMetrics + Tempo + Grafana)
 deploy-monitoring: deploy-sync
@@ -247,7 +247,7 @@ deploy-all key: deploy-sync
 
 # Tail logs from a container on the server
 deploy-logs service="sybil-api":
-    ssh {{SERVER}} docker logs -f --tail 100 {{service}}
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} logs -f --tail 100 {{service}}'
 
 # SSH into server
 deploy-shell:
@@ -255,7 +255,7 @@ deploy-shell:
 
 # Arena bot status — text dashboard (readable by CLI / LLM)
 arena-status hours="24":
-    ssh {{SERVER}} 'docker exec sybil-arena-dashboard uv run python -m live.status --hours {{hours}}'
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} exec -T sybil-arena-dashboard uv run python -m live.status --hours {{hours}}'
 
 # Live system status (containers, blocks, traders, fills)
 status:

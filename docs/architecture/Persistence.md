@@ -1,7 +1,7 @@
 ---
 tags: [infrastructure, storage]
 layer: sequencer
-status: active
+status: current
 last_verified: 2026-04-12
 ---
 

@@ -5,14 +5,15 @@
 
 mod common;
 
-use axum::http::StatusCode;
+use axum::http::{header, StatusCode};
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
 use serde_json::{json, Value};
 
-use common::{get, post_json, test_app};
+use common::{get, post_json, post_json_with_headers, test_app, test_app_with_config};
 use matching_engine::MarketSet;
 use matching_sequencer::crypto::{canonical_cancel_bytes, canonical_order_bytes};
+use sybil_api::config::ApiConfig;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -28,6 +29,46 @@ fn to_hex(bytes: &[u8]) -> String {
 
 fn new_signing_key() -> SigningKey {
     SigningKey::from_bytes((&[7u8; 32]).into()).expect("fixed signing key")
+}
+
+#[tokio::test]
+async fn http_order_rate_limit_returns_429_before_handler_work() {
+    let (app, _) = test_app_with_config(ApiConfig {
+        dev_mode: true,
+        http_order_global_rps: 1,
+        http_order_global_burst: 1,
+        http_order_client_rps: 1,
+        http_order_client_burst: 1,
+        ..ApiConfig::default()
+    })
+    .await;
+
+    let payload = json!({
+        "account_id": 999,
+        "orders": [{
+            "type": "BuyYes",
+            "market_id": 999,
+            "limit_price_nanos": 500_000_000u64,
+            "quantity": 1
+        }]
+    });
+
+    let (status, _) = post_json(app.clone(), "/v1/orders", payload.clone()).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, headers, body) = post_json_with_headers(app, "/v1/orders", payload).await;
+    assert_eq!(
+        status,
+        StatusCode::TOO_MANY_REQUESTS,
+        "body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    assert_eq!(
+        headers
+            .get(header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok()),
+        Some("1")
+    );
 }
 
 fn signed_buy_yes_payload(

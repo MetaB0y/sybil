@@ -22,7 +22,7 @@ done
 echo ""
 
 echo "=== Trader Activity ==="
-LOGS=$(ssh "$S" 'docker logs sybil-arena 2>&1' | grep -v httpx)
+LOGS=$(ssh "$S" 'cd /opt/sybil && docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --tail 1000 sybil-arena 2>&1' | grep -v httpx)
 echo "  LLM calls:      $(echo "$LOGS" | grep -c 'LLM response' || echo 0)"
 echo "  Parse failures: $(echo "$LOGS" | grep -c 'Failed to parse' || echo 0)"
 echo "  Trade orders:   $(echo "$LOGS" | grep -c 'Buy' || echo 0)"

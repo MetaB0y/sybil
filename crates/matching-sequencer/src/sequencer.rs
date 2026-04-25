@@ -40,6 +40,24 @@ pub struct SequencerConfig {
     /// Cap on buffered MM / multi-market submissions waiting for the next
     /// block. A runaway client hits backpressure before exhausting memory.
     pub max_pending_bundles: usize,
+    /// Maximum number of orders accepted in one submission. Bounds request
+    /// amplification before the solver ever sees the payload.
+    pub max_orders_per_submission: usize,
+    /// Per-account sustained submission rate. Set generously: this is a guard
+    /// rail for runaway agents, not a normal trading throttle.
+    pub max_submissions_per_account_per_second: u32,
+    /// Per-account burst allowance for the submission rate limiter.
+    pub submission_burst_per_account: u32,
+    /// Global sustained order/cancel submission rate. This bounds coordinated
+    /// many-account floods and invalid signed traffic before account lookup.
+    pub max_global_submissions_per_second: u32,
+    /// Global burst allowance for the submission rate limiter.
+    pub global_submission_burst: u32,
+    /// Maximum resting non-MM orders per account, including non-MM orders
+    /// already staged in pending bundles.
+    pub max_open_orders_per_account: usize,
+    /// Maximum deferred MM / multi-market submissions per account.
+    pub max_pending_bundles_per_account: usize,
     /// In-memory ring buffer size for recent blocks (served by the `/blocks`
     /// history endpoint). Bounds memory use per sequencer.
     pub block_history_capacity: usize,
@@ -51,6 +69,13 @@ impl Default for SequencerConfig {
             order_ttl_blocks: DEFAULT_ORDER_TTL_BLOCKS,
             block_interval: std::time::Duration::from_secs(1),
             max_pending_bundles: 10_000,
+            max_orders_per_submission: 64,
+            max_submissions_per_account_per_second: 50,
+            submission_burst_per_account: 200,
+            max_global_submissions_per_second: 1_000,
+            global_submission_burst: 3_000,
+            max_open_orders_per_account: 1_000,
+            max_pending_bundles_per_account: 100,
             block_history_capacity: 100,
         }
     }
@@ -631,6 +656,27 @@ impl BlockSequencer {
 
     pub fn market_volumes(&self) -> &HashMap<MarketId, u64> {
         self.price_tracker.market_volumes()
+    }
+
+    pub fn open_orders_for_account(&self, account_id: AccountId) -> usize {
+        self.order_book.orders_for_account(account_id)
+    }
+
+    pub fn pending_bundles_for_account(&self, account_id: AccountId) -> usize {
+        self.pending_bundles
+            .iter()
+            .filter(|submission| submission.account_id == account_id)
+            .count()
+    }
+
+    pub fn pending_non_mm_orders_for_account(&self, account_id: AccountId) -> usize {
+        self.pending_bundles
+            .iter()
+            .filter(|submission| {
+                submission.account_id == account_id && submission.mm_constraint.is_none()
+            })
+            .map(|submission| submission.orders.len())
+            .sum()
     }
 
     pub fn account_fills(

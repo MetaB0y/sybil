@@ -154,7 +154,11 @@ impl SyncActor {
                     tags: Some(vec!["polymarket".to_string()]),
                     resolution_criteria: poly_market.resolution_source.clone(),
                     expiry_timestamp_ms: None,
-                    resolution_template: Some("polymarket_mirror".to_string()),
+                    resolution_template: if self.config.signer_key_path.is_empty() {
+                        None
+                    } else {
+                        Some("polymarket_mirror".to_string())
+                    },
                 };
 
                 match self.sybil_client.create_market(&req).await {
@@ -174,20 +178,28 @@ impl SyncActor {
                         );
                         sybil_market_ids.push(sybil_id);
 
-                        // Notify MM about the new market
-                        let initial_mid = poly_market.yes_price().unwrap_or(0.5);
-                        let _ = self
-                            .mm_tx
-                            .send(MmMessage::MarketMirrored {
-                                sybil_market_id: sybil_id,
-                                yes_token_id: token_ids[0].clone(),
-                                initial_mid,
-                                in_group: event.is_neg_risk(),
-                            })
-                            .await;
+                        if self.mapping.read().await.market_count() <= self.config.mm_max_markets {
+                            // Notify MM about the new market
+                            let initial_mid = poly_market.yes_price().unwrap_or(0.5);
+                            let _ = self
+                                .mm_tx
+                                .send(MmMessage::MarketMirrored {
+                                    sybil_market_id: sybil_id,
+                                    yes_token_id: token_ids[0].clone(),
+                                    initial_mid,
+                                    in_group: event.is_neg_risk(),
+                                })
+                                .await;
 
-                        // Collect token IDs for Feed subscription
-                        new_token_ids.extend(token_ids);
+                            // Collect token IDs for Feed subscription
+                            new_token_ids.extend(token_ids);
+                        } else {
+                            info!(
+                                sybil_id,
+                                limit = self.config.mm_max_markets,
+                                "created market but skipped live MM tracking"
+                            );
+                        }
                     }
                     Err(e) => {
                         warn!(
@@ -225,8 +237,13 @@ impl SyncActor {
                         warn!(event_id = &event.id, error = %e, "failed to create market group");
                     }
                 }
-            } else {
+            } else if !sybil_market_ids.is_empty() {
                 self.mapping.write().await.mark_event_synced(&event.id);
+            } else {
+                warn!(
+                    event_id = &event.id,
+                    "no Sybil markets created; leaving event unsynced for retry"
+                );
             }
         }
 

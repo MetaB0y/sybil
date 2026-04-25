@@ -117,6 +117,13 @@ async fn main() {
         order_ttl_blocks: config.order_ttl_blocks,
         block_interval: Duration::from_millis(config.block_interval_ms),
         max_pending_bundles: config.max_pending_bundles,
+        max_orders_per_submission: config.max_orders_per_submission,
+        max_submissions_per_account_per_second: config.max_submissions_per_account_per_second,
+        submission_burst_per_account: config.submission_burst_per_account,
+        max_global_submissions_per_second: config.max_global_submissions_per_second,
+        global_submission_burst: config.global_submission_burst,
+        max_open_orders_per_account: config.max_open_orders_per_account,
+        max_pending_bundles_per_account: config.max_pending_bundles_per_account,
         block_history_capacity: config.block_history_capacity,
     };
 
@@ -160,6 +167,8 @@ async fn main() {
     tracing::info!(
         block_interval_ms = config.block_interval_ms,
         order_ttl_blocks = config.order_ttl_blocks,
+        max_open_orders_per_account = config.max_open_orders_per_account,
+        max_global_submissions_per_second = config.max_global_submissions_per_second,
         "Sequencer started"
     );
 

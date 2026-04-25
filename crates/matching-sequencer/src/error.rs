@@ -46,6 +46,18 @@ pub enum SequencerError {
     /// Mempool capacity exceeded.
     #[error("mempool full")]
     MempoolFull,
+    /// Submission rate limit exceeded.
+    #[error("rate limited; retry after {retry_after_secs}s")]
+    RateLimited { retry_after_secs: u64 },
+    /// Submission contains too many orders.
+    #[error("too many orders in submission: {count} > {limit}")]
+    TooManyOrdersInSubmission { count: usize, limit: usize },
+    /// Account has too many resting or staged orders.
+    #[error("account {} has too many open orders: limit {}", .account_id.0, .limit)]
+    TooManyOpenOrders { account_id: AccountId, limit: usize },
+    /// Account has too many deferred bundles.
+    #[error("account {} has too many pending bundles: limit {}", .account_id.0, .limit)]
+    TooManyPendingBundles { account_id: AccountId, limit: usize },
     /// All handles dropped; the actor has shut down.
     #[error("sequencer actor shut down")]
     ActorGone,

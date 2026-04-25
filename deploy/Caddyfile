@@ -28,3 +28,9 @@
         health_status   200
     }
 }
+
+arena.172-104-31-54.nip.io {
+    encode zstd gzip
+
+    reverse_proxy sybil-arena-dashboard:8501
+}

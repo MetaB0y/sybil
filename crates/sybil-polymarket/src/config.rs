@@ -74,6 +74,10 @@ pub struct Config {
     #[arg(long, default_value = "5000", env = "MM_MAX_POSITION")]
     pub mm_max_position: u64,
 
+    /// Maximum mirrored markets the live MM should actively quote.
+    #[arg(long, default_value = "200", env = "MM_MAX_MARKETS")]
+    pub mm_max_markets: usize,
+
     /// Max total dollar exposure across all markets. Budget → 0 as exposure approaches this.
     #[arg(long, default_value = "50000.0", env = "MM_MAX_EXPOSURE_DOLLARS")]
     pub mm_max_exposure_dollars: f64,

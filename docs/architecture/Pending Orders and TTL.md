@@ -6,7 +6,7 @@ status: current
 last_verified: 2026-04-10
 ---
 
-Not every order fills in its first batch. When a trader's order isn't matched — perhaps the clearing price moved away from their limit, or there wasn't enough counterparty liquidity — the order doesn't disappear. Instead, it becomes a **resting order** in the [[Order Book]], automatically re-included in each subsequent [[Block Lifecycle|batch]] until it fills, expires, or is cancelled.
+Not every order fills in its first batch. When a trader's order isn't matched — perhaps the clearing price moved away from their limit, or there wasn't enough counterparty liquidity — the order doesn't disappear. Instead, it becomes a **resting order** in the order book, automatically re-included in each subsequent [[Block Lifecycle|batch]] until it fills, expires, or is cancelled.
 
 Each resting order has a configurable Time-To-Live (TTL) measured in blocks. A fresh order enters with TTL 3, and each block it goes unmatched counts against the TTL. When the order has been resting longer than the TTL, it expires and is removed. This prevents the system from accumulating unbounded stale orders while giving reasonable orders multiple chances to fill — a market that's temporarily illiquid might see liquidity arrive in the next few seconds.
 
@@ -38,6 +38,6 @@ This design ensures that the "available balance" (`balance - reserved`) is alway
 
 ## See Also
 - [[Block Lifecycle]] — resting orders are expired and revalidated at block start
-- [[Mempool]] — where new orders arrive before entering the order book
+- [[Mempool]] — deferred-submission buffering for orders that cannot be directly admitted
 - [[Frequent Batch Auctions]] — the batching context for order persistence
 - [[Persistence]] — Tier 2 will persist the order book across restarts

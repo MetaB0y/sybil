@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
 class LiveConfig:
     sybil_url: str = "http://172.104.31.54:3000"
     api_key: str = ""
-    model_name: str = "minimax/minimax-m2.7"
+    model_name: str = "deepseek/deepseek-v4-flash"
     initial_balance: float = 500.0
     max_markets: int = 20
     news_poll_interval: int = 300
@@ -242,27 +242,50 @@ async def run_live(config: LiveConfig):
 
         log.info("All systems running. Press Ctrl+C to stop.")
 
-        # Wait for shutdown signal
-        await stop_event.wait()
-        log.info("Stopping all tasks...")
+        stop_task = asyncio.create_task(stop_event.wait(), name="stop_signal")
+        watched_tasks = [stop_task, *tasks]
+        done, _ = await asyncio.wait(watched_tasks, return_when=asyncio.FIRST_COMPLETED)
+
+        failure: BaseException | None = None
+        if stop_task in done:
+            log.info("Stopping all tasks...")
+        else:
+            stop_event.set()
+            for task in done:
+                if task is stop_task:
+                    continue
+                exc = task.exception()
+                if exc is not None:
+                    log.error("Task %s failed: %s", task.get_name(), exc)
+                    failure = exc
+                else:
+                    log.error("Task %s exited unexpectedly", task.get_name())
+                    failure = RuntimeError(f"Task {task.get_name()} exited unexpectedly")
+            log.info("Stopping all tasks after worker failure...")
+            for t in traders:
+                t.stop()
+            for n in noise_traders:
+                n.stop()
 
         # Give traders a moment to finish current block processing
         await asyncio.sleep(3)
 
         # Cancel remaining tasks
-        for task in tasks:
+        for task in watched_tasks:
             task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*watched_tasks, return_exceptions=True)
 
         db.close()
         log.info("Shutdown complete.")
+        if failure is not None:
+            raise failure
 
 
 def main():
     parser = argparse.ArgumentParser(description="Live AI trading bots")
     parser.add_argument("--sybil-url", default="http://172.104.31.54:3000")
     parser.add_argument("--api-key", required=True, help="OpenRouter API key")
-    parser.add_argument("--model", default="minimax/minimax-m2.7")
+    parser.add_argument("--model", default="deepseek/deepseek-v4-flash")
     parser.add_argument("--max-markets", type=int, default=20)
     parser.add_argument("--balance", type=float, default=500.0, help="Initial balance per trader")
     parser.add_argument("--noise-count", type=int, default=5)

@@ -14,6 +14,7 @@ services:
       - "--mm-half-spread=0.01"
       - "--mm-budget-dollars=5000"
       - "--mm-initial-balance-dollars=1000000"
+      - "--mm-max-markets=40"
       - "--mapping-store-path=/data/polymarket_mapping.json"
       - "--sync-interval-secs=120"
 
@@ -24,7 +25,7 @@ services:
       - "--sybil-url=http://sybil-api:3000"
       - "--api-key=${OPENROUTER_API_KEY}"
       - "--max-markets=20"
-      - "--model=minimax/minimax-m2.7"
+      - "--model=deepseek/deepseek-v4-flash"
       - "--db-path=/data/decisions.db"
       - "--mapping-path=/polymarket-data/polymarket_mapping.json"
 
