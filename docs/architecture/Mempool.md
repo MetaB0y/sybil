@@ -3,37 +3,47 @@ tags: [infrastructure]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-03-15
+last_verified: 2026-04-26
 ---
 
-The mempool buffers incoming orders between batches. When the [[Block Lifecycle|1-second timer]] fires, the sequencer drains the mempool to assemble the next batch. Orders arrive via the [[REST API]] and are enqueued immediately without validation — validation happens at drain time, when the sequencer has the current state snapshot.
+The old broad mempool has been narrowed into a deferred-submission buffer. Simple single-market, non-MM orders are admitted directly into the [[Pending Orders and TTL|resting order book]] at submission time, after validation and capital reservation. That makes them visible immediately and eligible for the next [[Block Lifecycle|block]] without waiting in an unvalidated queue.
 
-The mempool is segregated into pools by order type: single-market orders, multi-market orders (bundles, spreads), and MM quotes. Each pool has configurable drain limits that cap how many orders enter a single batch (see `mempool.rs` for current defaults). Within each pool, orders are drained FIFO — first in, first out. These limits prevent any single batch from becoming too large for the solver to handle within the batch interval.
+Submissions that cannot be safely admitted one order at a time still use the deferred path: MM-constrained orders, multi-order bundles, and multi-market orders. They are durably appended to `PENDING_BUNDLES` and drained into the next block. This preserves batch-local semantics for flash liquidity, bundle atomicity, and group self-trade prevention.
 
-MM quotes receive special treatment: they are one-shot. A market maker's quotes are consumed entirely by each batch and never carry over. This means MMs must re-submit fresh quotes every batch if they want to remain in the market. Regular trader orders that don't fill become [[Pending Orders and TTL|pending orders]] and persist for future batches. The segregated pool design ensures that a flood of one order type (say, a bot spamming single-market buys) doesn't crowd out other types from the batch.
+Admission has lightweight backpressure before either path mutates state:
+
+- HTTP order-write endpoints have a global and per-client token bucket before JSON parsing and P256 signature work.
+- The sequencer actor has a global token bucket, bounding coordinated many-account submission floods.
+- Each account has its own token bucket, bounding runaway agents without affecting normal users.
+- Non-MM orders are capped per account across resting orders plus staged non-MM bundles.
+- Deferred bundles have both total and per-account caps.
+- A per-submission order-count cap prevents request amplification.
 
 ```mermaid
 graph TB
     API["REST API<br/>POST /v1/orders"]
-    API --> SM["Single-Market Pool<br/>per-market drain limit"]
-    API --> MM["Multi-Market Pool<br/>bundles · spreads"]
-    API --> MQ["MM Quotes Pool<br/>one-shot"]
-    SM & MM & MQ -->|"drain (FIFO)"| PROBLEM["Problem<br/>merged order set"]
-    PENDING["Pending Orders<br/>from prior batches"] -->|"re-validate"| PROBLEM
+    API --> LIMITS["Admission limits<br/>HTTP + sequencer"]
+    LIMITS --> DIRECT["Direct admit<br/>single-market non-MM"]
+    LIMITS --> DEFER["Deferred bundles<br/>MM · bundles · multi-market"]
+    DIRECT --> BOOK["Resting order book"]
+    DEFER --> PROBLEM["Next block problem"]
+    BOOK -->|"re-validate"| PROBLEM
 ```
 
 ## Key Properties
-- Segregated pools: single-market, multi-market/bundle, MM quotes
-- Configurable drain limits per pool type
-- FIFO within each pool
+- Simple single-market non-MM orders are validated, reserved, and visible immediately
+- Deferred buffer is only for MM / bundle / multi-market submissions
+- Deferred submissions are persisted before the API returns success
 - MM quotes are one-shot — never carried over to the next batch
-- No validation at enqueue time — validated during drain
-- Orders arrive from [[REST API]] endpoint `POST /v1/orders`
+- Admission backpressure is generous by default and only affects abnormal load
+- Orders arrive from [[REST API]] endpoints `POST /v1/orders` and `POST /v1/orders/signed`
 
 ## Where This Lives
-> `crates/matching-sequencer/src/mempool.rs` — pool segregation, drain limits, FIFO queues
+> `crates/matching-sequencer/src/actor.rs` — admission limits and deferred-buffer routing
+> `crates/matching-sequencer/src/sequencer.rs` — direct admit vs deferred submission decision
+> `crates/matching-sequencer/src/store.rs` — `PENDING_BUNDLES` and admit-log persistence
 
 ## See Also
-- [[Block Lifecycle]] — mempool drain is the first step
+- [[Block Lifecycle]] — deferred submissions are merged at block production
 - [[Pending Orders and TTL]] — unfilled orders that bypass the mempool on re-inclusion
-- [[REST API]] — how orders enter the mempool
+- [[REST API]] — how orders enter the sequencer

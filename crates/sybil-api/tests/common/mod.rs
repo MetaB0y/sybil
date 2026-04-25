@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use axum::body::Body;
-use axum::http::{Method, Request, StatusCode};
+use axum::http::{HeaderMap, Method, Request, StatusCode};
 use axum::Router;
 use http_body_util::BodyExt;
 use matching_engine::MarketSet;
@@ -16,6 +16,7 @@ use matching_sequencer::{
 use p256::ecdsa::SigningKey;
 use p256::elliptic_curve::rand_core::UnwrapErr;
 use sybil_api::app::create_router;
+use sybil_api::config::ApiConfig;
 use sybil_api::state::AppState;
 use sybil_oracle::{FeedId, FeedPubkey, ResolutionPolicy, ResolutionTemplate, TemplateId};
 use tower::ServiceExt;
@@ -60,13 +61,11 @@ pub async fn test_app_with_bootstrap(
     let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
         .handle();
-    let state = AppState {
-        sequencer: handle.clone(),
+    let config = ApiConfig {
         dev_mode,
-        prometheus,
-        reference_prices: Default::default(),
-        market_ref_data: Default::default(),
+        ..ApiConfig::default()
     };
+    let state = AppState::new(handle.clone(), &config, prometheus);
     (create_router(state), handle, admin_key, admin_feed_id)
 }
 
@@ -74,6 +73,16 @@ pub async fn test_app_with_bootstrap(
 /// integration tests — the admin unsigned dev-mode resolve path still works).
 #[allow(dead_code)]
 pub async fn test_app(dev_mode: bool) -> (Router, SequencerHandle) {
+    test_app_with_config(ApiConfig {
+        dev_mode,
+        ..ApiConfig::default()
+    })
+    .await
+}
+
+/// Create a test app with an explicit API config.
+#[allow(dead_code)]
+pub async fn test_app_with_config(config: ApiConfig) -> (Router, SequencerHandle) {
     let accounts = AccountStore::new();
     let markets = MarketSet::new();
     let oracle = Arc::new(AdminOracle::new());
@@ -88,13 +97,7 @@ pub async fn test_app(dev_mode: bool) -> (Router, SequencerHandle) {
     let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
         .handle();
-    let state = AppState {
-        sequencer: handle.clone(),
-        dev_mode,
-        prometheus,
-        reference_prices: Default::default(),
-        market_ref_data: Default::default(),
-    };
+    let state = AppState::new(handle.clone(), &config, prometheus);
     (create_router(state), handle)
 }
 
@@ -133,4 +136,30 @@ pub async fn post_json(app: Router, uri: &str, body: serde_json::Value) -> (Stat
         .to_bytes()
         .to_vec();
     (status, body)
+}
+
+/// Send a POST request with JSON body and return (status, headers, body bytes).
+#[allow(dead_code)]
+pub async fn post_json_with_headers(
+    app: Router,
+    uri: &str,
+    body: serde_json::Value,
+) -> (StatusCode, HeaderMap, Vec<u8>) {
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let status = resp.status();
+    let headers = resp.headers().clone();
+    let body = resp
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes()
+        .to_vec();
+    (status, headers, body)
 }

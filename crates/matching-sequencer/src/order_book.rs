@@ -332,6 +332,14 @@ impl OrderBook {
         self.orders.len()
     }
 
+    /// Number of resting orders owned by one account.
+    pub fn orders_for_account(&self, account_id: AccountId) -> usize {
+        self.orders
+            .iter()
+            .filter(|ro| ro.account_id == account_id)
+            .count()
+    }
+
     /// Remove a resting order by ID and release its reservations.
     pub(crate) fn cancel(
         &mut self,

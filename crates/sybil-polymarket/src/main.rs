@@ -101,7 +101,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Channels — size MM channel to fit all existing markets for bootstrap
-    let existing = mapping.read().await.all_markets();
+    let mut existing = mapping.read().await.all_markets();
+    existing.sort_by_key(|(sybil_market_id, _, _)| std::cmp::Reverse(*sybil_market_id));
+    if existing.len() > config.mm_max_markets {
+        info!(
+            total = existing.len(),
+            active = config.mm_max_markets,
+            "limiting MM bootstrap to newest mapped markets"
+        );
+        existing.truncate(config.mm_max_markets);
+    }
     let mm_channel_size = (existing.len() + 256).max(256);
     let (feed_tx, feed_rx) = mpsc::channel(64);
     let (mm_tx, mm_rx) = mpsc::channel(mm_channel_size);
@@ -113,18 +122,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             count = existing.len(),
             "bootstrapping MM with existing markets"
         );
-        for (sybil_market_id, yes_token_id, in_group) in existing {
+        for (sybil_market_id, yes_token_id, in_group) in &existing {
             let _ = mm_tx.try_send(sybil_polymarket::mm::MmMessage::MarketMirrored {
-                sybil_market_id,
-                yes_token_id,
+                sybil_market_id: *sybil_market_id,
+                yes_token_id: yes_token_id.clone(),
                 initial_mid: 0.5,
-                in_group,
+                in_group: *in_group,
             });
         }
     }
 
     // Bootstrap Feed with existing token subscriptions
-    let all_tokens = mapping.read().await.all_token_ids();
+    let all_tokens: Vec<String> = existing
+        .iter()
+        .map(|(_, yes_token_id, _)| yes_token_id.clone())
+        .collect();
     if !all_tokens.is_empty() {
         info!(
             count = all_tokens.len(),

@@ -1,6 +1,10 @@
 **/target
 **/__pycache__
 docs/node_modules
+**/node_modules/
+**/.vite/
+**/dist/
+*.tsbuildinfo
 .env
 comparison*.json
 .DS_Store

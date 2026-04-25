@@ -39,8 +39,9 @@
 //! - Mempool: intentionally not persisted (short-lived by design; clients resubmit).
 //! - MM inventory / variance: TODO.
 //!
-//! **Tier 3 (TODO)**: Derived views — fill history, price history, block ring buffer.
-//! Reconstructable from blocks but expensive to rebuild.
+//! **Tier 3 (partial)**: Derived views.
+//! - Fill history: implemented (see `FILL_HISTORY` table).
+//! - Price history and block ring buffer: TODO.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -56,7 +57,7 @@ use crate::account_storage::{
     RecoveryAccountState,
 };
 use crate::block::BlockHeader;
-use crate::market_info::MarketMetadata;
+use crate::market_info::{AccountFillRecord, MarketMetadata};
 use crate::market_lifecycle::MarketLifecycle;
 use crate::order_book::RestingOrder;
 
@@ -120,6 +121,11 @@ const PENDING_BUNDLES: TableDefinition<u64, &[u8]> = TableDefinition::new("pendi
 /// this table on top.
 const ADMIT_LOG: TableDefinition<u64, &[u8]> = TableDefinition::new("admit_log");
 
+/// Per-account fill history: account_id || block_height || order_id →
+/// msgpack(AccountFillRecord). The byte key keeps records clustered by
+/// account and ordered by block for efficient restoration and future scans.
+const FILL_HISTORY: TableDefinition<&[u8], &[u8]> = TableDefinition::new("fill_history");
+
 // Counter keys
 const KEY_STORE_LAYOUT_VERSION: &str = "store_layout_version";
 const KEY_HEIGHT: &str = "height";
@@ -131,11 +137,23 @@ const KEY_ACCOUNT_STATE_SLOT: &str = "account_state_slot";
 
 const STORE_LAYOUT_VERSION: u64 = 1;
 
+fn fill_history_key(account_id: AccountId, record: &AccountFillRecord) -> [u8; 24] {
+    let mut key = [0u8; 24];
+    key[0..8].copy_from_slice(&account_id.0.to_be_bytes());
+    key[8..16].copy_from_slice(&record.block_height.to_be_bytes());
+    key[16..24].copy_from_slice(&record.order_id.to_be_bytes());
+    key
+}
+
+fn account_id_from_fill_history_key(key: &[u8]) -> Option<AccountId> {
+    let account_bytes: [u8; 8] = key.get(0..8)?.try_into().ok()?;
+    Some(AccountId(u64::from_be_bytes(account_bytes)))
+}
+
 // TODO: Tier 2 tables (remaining)
 // const MM_STATE: TableDefinition<u32, &[u8]> = TableDefinition::new("mm_state");
 
-// TODO: Tier 3 tables
-// const FILL_HISTORY: TableDefinition<u64, &[u8]> = TableDefinition::new("fill_history");
+// TODO: Tier 3 tables (remaining)
 // const PRICE_HISTORY: TableDefinition<u64, &[u8]> = TableDefinition::new("price_history");
 // const BLOCKS_FULL: TableDefinition<u64, &[u8]> = TableDefinition::new("blocks_full");
 
@@ -174,6 +192,8 @@ pub struct RestoredState {
     /// after the last committed block. On restart these are re-inserted
     /// on top of `resting_orders` before the sequencer starts processing.
     pub admit_log: Vec<RestingOrder>,
+    /// Full fill history restored from redb.
+    pub account_fills: Vec<(AccountId, AccountFillRecord)>,
 }
 
 /// Borrowed view of sequencer state needed to persist one block.
@@ -188,6 +208,7 @@ pub struct SequencerSnapshot<'a> {
     pub pubkey_registry: &'a HashMap<crate::crypto::PublicKey, AccountId>,
     pub last_clearing_prices: &'a HashMap<MarketId, Vec<Nanos>>,
     pub market_volumes: &'a HashMap<MarketId, u64>,
+    pub account_fills: Vec<(AccountId, AccountFillRecord)>,
     /// Owned because the snapshot clones the live book — cheap for bounded sizes.
     pub resting_orders: Vec<RestingOrder>,
 }
@@ -216,6 +237,7 @@ impl Store {
         txn.open_table(RESTING_ORDERS)?;
         txn.open_table(PENDING_BUNDLES)?;
         txn.open_table(ADMIT_LOG)?;
+        txn.open_table(FILL_HISTORY)?;
         txn.open_table(DATA_FEEDS)?;
         txn.commit()?;
 
@@ -320,6 +342,17 @@ impl Store {
             let mut table = txn.open_table(RESTING_ORDERS)?;
             let bytes = rmp_serde::to_vec(&snapshot.resting_orders)?;
             table.insert(KEY_RESTING_ORDERS_SNAPSHOT, bytes.as_slice())?;
+        }
+
+        // Fill history. Records are cumulative; re-inserting the full
+        // snapshot is idempotent because the key is account/block/order.
+        {
+            let mut table = txn.open_table(FILL_HISTORY)?;
+            for (account_id, record) in &snapshot.account_fills {
+                let key = fill_history_key(*account_id, record);
+                let bytes = rmp_serde::to_vec(record)?;
+                table.insert(key.as_slice(), bytes.as_slice())?;
+            }
         }
 
         // Data feeds
@@ -521,6 +554,20 @@ impl Store {
             out
         };
 
+        let account_fills: Vec<(AccountId, AccountFillRecord)> = {
+            let table = txn.open_table(FILL_HISTORY)?;
+            let mut out = Vec::new();
+            for entry in table.iter()? {
+                let (key, value) = entry?;
+                let Some(account_id) = account_id_from_fill_history_key(key.value()) else {
+                    warn!("invalid fill history key in store, skipping");
+                    continue;
+                };
+                out.push((account_id, rmp_serde::from_slice(value.value())?));
+            }
+            out
+        };
+
         info!(
             height = recovery_metadata.height,
             accounts = num_accounts,
@@ -530,6 +577,7 @@ impl Store {
             resting_orders = resting_orders.len(),
             pending_bundles = pending_bundles.len(),
             admit_log = admit_log.len(),
+            account_fills = account_fills.len(),
             data_feeds = data_feeds.len(),
             "state restored from store"
         );
@@ -550,6 +598,7 @@ impl Store {
             data_feeds,
             pending_bundles,
             admit_log,
+            account_fills,
         }))
     }
 
@@ -864,7 +913,31 @@ mod tests {
                 pubkey_registry: &self.empty_pk,
                 last_clearing_prices: &self.empty_prices,
                 market_volumes: market_volumes.unwrap_or(&self.empty_volumes),
+                account_fills: Vec::new(),
                 resting_orders,
+            }
+        }
+
+        fn snapshot_with_fills<'a>(
+            &'a self,
+            accounts: &'a AccountStore,
+            markets: &'a MarketSet,
+            lifecycle: &'a MarketLifecycle,
+            header: &'a BlockHeader,
+            account_fills: Vec<(AccountId, AccountFillRecord)>,
+        ) -> SequencerSnapshot<'a> {
+            SequencerSnapshot {
+                accounts,
+                markets,
+                market_groups: &[],
+                lifecycle,
+                header,
+                next_order_id: 1,
+                pubkey_registry: &self.empty_pk,
+                last_clearing_prices: &self.empty_prices,
+                market_volumes: &self.empty_volumes,
+                account_fills,
+                resting_orders: Vec::new(),
             }
         }
     }
@@ -1048,6 +1121,109 @@ mod tests {
 
         let restored = store.load_state().await.unwrap().unwrap();
         assert!(restored.resting_orders.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_store_roundtrips_account_fill_history() {
+        let path = temp_db_path("store-fill-history");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+        let lifecycle = MarketLifecycle::new(oracle.clone());
+        let mut markets = MarketSet::new();
+        let market_id = markets.add_binary("Test");
+        let mut accounts = AccountStore::new();
+        let account_id = accounts.create_account(100);
+        let env = TestEnv::new();
+
+        let fill = AccountFillRecord {
+            order_id: 42,
+            fill_qty: 7,
+            fill_price: 600_000_000,
+            block_height: 1,
+            timestamp_ms: 1_000,
+            position_deltas: vec![(market_id, 0, 7)],
+        };
+
+        store
+            .save_block(env.snapshot_with_fills(
+                &accounts,
+                &markets,
+                &lifecycle,
+                &sample_header(1),
+                vec![(account_id, fill.clone())],
+            ))
+            .await
+            .unwrap();
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        assert_eq!(restored.account_fills, vec![(account_id, fill.clone())]);
+
+        let seq = crate::sequencer::BlockSequencer::restore(
+            restored,
+            oracle,
+            crate::sequencer::SequencerConfig::default(),
+        );
+        assert_eq!(
+            seq.account_fills(account_id, Some(market_id), 10, 0),
+            vec![fill]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_store_persists_fill_recorder_snapshot_from_committed_block() {
+        use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
+        use matching_engine::{outcome_buy, outcome_sell, NANOS_PER_DOLLAR};
+
+        let path = temp_db_path("store-fill-recorder-snapshot");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+
+        let mut markets = MarketSet::new();
+        let market_id = markets.add_binary("Test");
+        let mut accounts = AccountStore::new();
+        let buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let seller = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        accounts
+            .get_mut(seller)
+            .unwrap()
+            .positions
+            .insert((market_id, 0), 10);
+
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            oracle.clone(),
+            SequencerConfig::default(),
+        );
+        seq.produce_block(
+            vec![
+                OrderSubmission {
+                    account_id: buyer,
+                    orders: vec![outcome_buy(&markets, 0, market_id, 0, 700_000_000, 5)],
+                    mm_constraint: None,
+                },
+                OrderSubmission {
+                    account_id: seller,
+                    orders: vec![outcome_sell(&markets, 0, market_id, 0, 300_000_000, 5)],
+                    mm_constraint: None,
+                },
+            ],
+            1_000,
+        );
+
+        assert!(
+            !seq.account_fills(buyer, None, 10, 0).is_empty(),
+            "sanity check: block should record buyer fills before persistence"
+        );
+        store.save_block(seq.snapshot()).await.unwrap();
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        let restored_seq = BlockSequencer::restore(restored, oracle, SequencerConfig::default());
+        let fills = restored_seq.account_fills(buyer, Some(market_id), 10, 0);
+        assert_eq!(fills.len(), 1);
+        assert_eq!(fills[0].fill_qty, 5);
+        assert_eq!(fills[0].block_height, 1);
     }
 
     #[test]

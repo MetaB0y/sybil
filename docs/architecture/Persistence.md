@@ -1,8 +1,8 @@
 ---
 tags: [infrastructure, storage]
 layer: sequencer
-status: active
-last_verified: 2026-04-12
+status: current
+last_verified: 2026-04-26
 ---
 
 # Persistence
@@ -53,28 +53,36 @@ Authoritative state needed to resume the exchange after a crash:
 | `redb` | `block_headers` | canonical block header by height |
 | `redb` | `pubkey_registry` | compressed pubkey to account id |
 | `redb` | `clearing_prices` | last clearing price vector per market |
+| `redb` | `market_volumes` | cumulative traded volume per market |
 | `redb` | `counters` | next IDs, store layout version, and the authoritative account-state fence |
 
 The account snapshot uses two logical qmdb slots, `A` and `B`. Only one slot is committed at a time; redb records which one.
 
 ## Tier 2: Order State
 
-Still not persisted today:
+Persisted today:
 
-- **Order book**: resting orders and their reservations
-- **Mempool**: in-flight submissions not yet included in a block
+- **Order book**: resting orders and their reservations in `resting_orders`
+- **Deferred submissions**: MM / bundle / multi-market submissions in `pending_bundles`
+- **Admit log**: direct-admitted single-market orders accepted after the last committed block in `admit_log`
+
+Still not persisted:
+
 - **MM runtime state**: inventory, short-term price history, and variance estimation state
 
-Persisting these would improve continuity across restarts, but they are not required for correctness of committed balances and positions.
+The order state tables protect the API's 200 OK contract: anything acknowledged before a crash is either already in the committed order-book snapshot or replayed from an incremental log.
 
 ## Tier 3: Derived Views
 
-Also not persisted today:
+Persisted today:
 
-- **Fill history**
+- **Fill history**: per-account fill records in `fill_history`, keyed by `(account_id, block_height, order_id)`. See [[Fill History Persistence]].
+
+Still not persisted:
+
 - **Price history**
 - **Block ring buffer for SSE catch-up**
-- **Derived aggregates such as volume or welfare summaries**
+- **Derived aggregates such as welfare summaries**
 
 These are reconstructable or refreshable, but expensive or inconvenient to rebuild.
 
@@ -119,12 +127,13 @@ This is the whole reason the commit fence lives in redb.
 - Block headers
 - Pubkey registry
 - Counter state and next IDs
+- Resting orders and reservations
+- Direct-admit recovery log and deferred submissions admitted after the last committed block
+- Fill history
 
 **Lost on crash:**
 
-- Mempool contents
-- Resting orders and reservations
-- Fill and price history caches
+- Price history cache
 - SSE ring buffer contents
 - Transient external feed state such as recently pushed reference prices
 

@@ -138,7 +138,7 @@ class LiveLlmTrader(BaseAgent):
         api_key: str,
         persona: str,
         strategy: SizingStrategy | None = None,
-        model_name: str = "minimax/minimax-m2.7",
+        model_name: str = "deepseek/deepseek-v4-flash",
         market_ids: list[int] | None = None,
         markets_info: dict[int, Market] | None = None,
         db: DecisionDB | None = None,

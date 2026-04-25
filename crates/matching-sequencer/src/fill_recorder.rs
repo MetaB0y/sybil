@@ -20,6 +20,34 @@ impl FillRecorder {
         }
     }
 
+    pub fn restore(records: Vec<(AccountId, AccountFillRecord)>) -> Self {
+        let mut account_fills: HashMap<AccountId, Vec<AccountFillRecord>> = HashMap::new();
+        for (account_id, record) in records {
+            account_fills.entry(account_id).or_default().push(record);
+        }
+        for fills in account_fills.values_mut() {
+            fills.sort_by_key(|record| (record.block_height, record.order_id));
+        }
+        Self { account_fills }
+    }
+
+    pub fn snapshot(&self) -> Vec<(AccountId, AccountFillRecord)> {
+        let mut records: Vec<_> = self
+            .account_fills
+            .iter()
+            .flat_map(|(&account_id, fills)| {
+                fills
+                    .iter()
+                    .cloned()
+                    .map(move |record| (account_id, record))
+            })
+            .collect();
+        records.sort_by_key(|(account_id, record)| {
+            (account_id.0, record.block_height, record.order_id)
+        });
+        records
+    }
+
     /// Record fills from a block into per-account fill history.
     pub fn record_fills(
         &mut self,

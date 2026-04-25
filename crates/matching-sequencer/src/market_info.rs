@@ -50,7 +50,7 @@ pub struct PricePoint {
 }
 
 /// Record of a fill attributed to an account.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AccountFillRecord {
     pub order_id: u64,
     pub fill_qty: u64,

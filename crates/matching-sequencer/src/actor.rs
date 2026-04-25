@@ -123,6 +123,50 @@ struct SequencerActorState {
     block_broadcast: broadcast::Sender<Block>,
     pause_count: u32,
     store: Option<Arc<crate::store::Store>>,
+    global_submission_bucket: TokenBucket,
+    account_submission_buckets: HashMap<AccountId, TokenBucket>,
+}
+
+#[derive(Clone, Debug)]
+struct TokenBucket {
+    tokens: f64,
+    capacity: f64,
+    refill_per_second: f64,
+    last_refill: Instant,
+}
+
+impl TokenBucket {
+    fn new(refill_per_second: u32, capacity: u32, now: Instant) -> Self {
+        Self {
+            tokens: capacity as f64,
+            capacity: capacity as f64,
+            refill_per_second: refill_per_second as f64,
+            last_refill: now,
+        }
+    }
+
+    fn allow(&mut self, now: Instant) -> Result<(), u64> {
+        let elapsed = now.saturating_duration_since(self.last_refill);
+        self.last_refill = now;
+        self.tokens =
+            (self.tokens + elapsed.as_secs_f64() * self.refill_per_second).min(self.capacity);
+
+        if self.tokens >= 1.0 {
+            self.tokens -= 1.0;
+            Ok(())
+        } else {
+            Err(self.retry_after_secs())
+        }
+    }
+
+    fn retry_after_secs(&self) -> u64 {
+        if self.refill_per_second <= 0.0 {
+            return 1;
+        }
+        ((1.0 - self.tokens).max(0.0) / self.refill_per_second)
+            .ceil()
+            .max(1.0) as u64
+    }
 }
 
 impl SequencerActorState {
@@ -431,9 +475,7 @@ impl SequencerActorState {
     /// `Err` for synchronous rejections so the caller can surface them to
     /// the client.
     async fn admit_or_defer(&mut self, submission: OrderSubmission) -> Result<(), SequencerError> {
-        if self.sequencer.pending_bundles_len() >= self.sequencer.config.max_pending_bundles {
-            return Err(SequencerError::MempoolFull);
-        }
+        self.check_account_submission_limits(&submission)?;
         match self.sequencer.try_admit_direct(submission) {
             crate::sequencer::AdmitOutcome::Admitted {
                 order_id,
@@ -461,6 +503,7 @@ impl SequencerActorState {
                 Ok(())
             }
             crate::sequencer::AdmitOutcome::Deferred(sub) => {
+                self.check_deferred_submission_limits(&sub)?;
                 if let Some(store) = &self.store {
                     store
                         .append_pending_bundle(&sub)
@@ -472,6 +515,122 @@ impl SequencerActorState {
             }
             crate::sequencer::AdmitOutcome::Rejected(err) => Err(err),
         }
+    }
+
+    fn check_global_submission_rate(&mut self) -> Result<(), SequencerError> {
+        let now = Instant::now();
+        self.global_submission_bucket
+            .allow(now)
+            .map_err(|retry_after_secs| {
+                metrics::counter!(
+                    "sybil_admission_limit_rejections_total",
+                    "limit" => "global_rate"
+                )
+                .increment(1);
+                SequencerError::RateLimited { retry_after_secs }
+            })
+    }
+
+    fn check_account_submission_limits(
+        &mut self,
+        submission: &OrderSubmission,
+    ) -> Result<(), SequencerError> {
+        let config = &self.sequencer.config;
+        if self.sequencer.accounts.get(submission.account_id).is_none() {
+            return Err(SequencerError::Rejected(crate::error::Rejection {
+                order_id: 0,
+                account_id: submission.account_id,
+                reason: crate::error::RejectionReason::AccountNotFound,
+            }));
+        }
+
+        let order_count = submission.orders.len();
+        if order_count > config.max_orders_per_submission {
+            metrics::counter!(
+                "sybil_admission_limit_rejections_total",
+                "limit" => "orders_per_submission"
+            )
+            .increment(1);
+            return Err(SequencerError::TooManyOrdersInSubmission {
+                count: order_count,
+                limit: config.max_orders_per_submission,
+            });
+        }
+
+        let now = Instant::now();
+        let bucket = self
+            .account_submission_buckets
+            .entry(submission.account_id)
+            .or_insert_with(|| {
+                TokenBucket::new(
+                    config.max_submissions_per_account_per_second,
+                    config.submission_burst_per_account,
+                    now,
+                )
+            });
+        bucket.allow(now).map_err(|retry_after_secs| {
+            metrics::counter!(
+                "sybil_admission_limit_rejections_total",
+                "limit" => "account_rate"
+            )
+            .increment(1);
+            SequencerError::RateLimited { retry_after_secs }
+        })?;
+
+        if submission.mm_constraint.is_none() {
+            let open_orders = self
+                .sequencer
+                .open_orders_for_account(submission.account_id);
+            let staged_orders = self
+                .sequencer
+                .pending_non_mm_orders_for_account(submission.account_id);
+            if open_orders + staged_orders + order_count > config.max_open_orders_per_account {
+                metrics::counter!(
+                    "sybil_admission_limit_rejections_total",
+                    "limit" => "open_orders_per_account"
+                )
+                .increment(1);
+                return Err(SequencerError::TooManyOpenOrders {
+                    account_id: submission.account_id,
+                    limit: config.max_open_orders_per_account,
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    fn check_deferred_submission_limits(
+        &self,
+        submission: &OrderSubmission,
+    ) -> Result<(), SequencerError> {
+        let config = &self.sequencer.config;
+        if self.sequencer.pending_bundles_len() >= config.max_pending_bundles {
+            metrics::counter!(
+                "sybil_admission_limit_rejections_total",
+                "limit" => "pending_bundles_total"
+            )
+            .increment(1);
+            return Err(SequencerError::MempoolFull);
+        }
+
+        if self
+            .sequencer
+            .pending_bundles_for_account(submission.account_id)
+            >= config.max_pending_bundles_per_account
+        {
+            metrics::counter!(
+                "sybil_admission_limit_rejections_total",
+                "limit" => "pending_bundles_per_account"
+            )
+            .increment(1);
+            return Err(SequencerError::TooManyPendingBundles {
+                account_id: submission.account_id,
+                limit: config.max_pending_bundles_per_account,
+            });
+        }
+
+        Ok(())
     }
 
     fn handle_register_pubkey(
@@ -494,6 +653,12 @@ impl Actor for SequencerActor {
         _myself: ActorRef<Self::Msg>,
         args: Self::Arguments,
     ) -> Result<Self::State, ActorProcessingErr> {
+        let now = Instant::now();
+        let global_submission_bucket = TokenBucket::new(
+            args.sequencer.config.max_global_submissions_per_second,
+            args.sequencer.config.global_submission_burst,
+            now,
+        );
         Ok(SequencerActorState {
             sequencer: args.sequencer,
             latest_block: None,
@@ -501,6 +666,8 @@ impl Actor for SequencerActor {
             block_broadcast: args.block_broadcast,
             pause_count: 0,
             store: args.store,
+            global_submission_bucket,
+            account_submission_buckets: HashMap::new(),
         })
     }
 
@@ -535,17 +702,25 @@ impl Actor for SequencerActor {
             }
             SequencerMsg::SubmitOrder(submission, reply) => {
                 let order_count = submission.orders.len();
-                let result = state.admit_or_defer(submission).await;
+                let result = match state.check_global_submission_rate() {
+                    Ok(()) => state.admit_or_defer(submission).await,
+                    Err(err) => Err(err),
+                };
                 state.record_submission_metrics("unsigned", order_count, &result);
                 let _ = reply.send(result);
             }
             SequencerMsg::SubmitSignedOrder(signed, reply) => {
-                let result = state.handle_signed_order(signed).await;
+                let result = match state.check_global_submission_rate() {
+                    Ok(()) => state.handle_signed_order(signed).await,
+                    Err(err) => Err(err),
+                };
                 state.record_submission_metrics("signed", 1, &result);
                 let _ = reply.send(result);
             }
             SequencerMsg::CancelSignedOrder(signed, reply) => {
-                let result = state.handle_signed_cancel(signed);
+                let result = state
+                    .check_global_submission_rate()
+                    .and_then(|_| state.handle_signed_cancel(signed));
                 state.record_cancel_metrics("signed", &result);
                 let _ = reply.send(result);
             }
@@ -1255,19 +1430,17 @@ mod tests {
     use sybil_oracle::AdminOracle;
 
     fn make_test_sequencer() -> (BlockSequencer, AccountId) {
+        make_test_sequencer_with_config(SequencerConfig::default())
+    }
+
+    fn make_test_sequencer_with_config(config: SequencerConfig) -> (BlockSequencer, AccountId) {
         let mut accounts = AccountStore::new();
         let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
         let mut markets = MarketSet::new();
         markets.add_binary("Test");
         let oracle = Arc::new(AdminOracle::new());
         (
-            BlockSequencer::with_default_solver(
-                accounts,
-                markets,
-                vec![],
-                oracle,
-                SequencerConfig::default(),
-            ),
+            BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, config),
             aid,
         )
     }
@@ -1300,6 +1473,146 @@ mod tests {
         let block = handle.produce_block().await.unwrap();
         assert_eq!(block.header.height, 1);
         assert!(block.header.order_count >= 1);
+    }
+
+    #[tokio::test]
+    async fn per_account_submission_rate_limit_rejects_runaway_client() {
+        let config = SequencerConfig {
+            max_submissions_per_account_per_second: 1,
+            submission_burst_per_account: 1,
+            max_global_submissions_per_second: 1_000,
+            global_submission_burst: 1_000,
+            ..SequencerConfig::default()
+        };
+        let (seq, aid) = make_test_sequencer_with_config(config);
+        let mut ms = MarketSet::new();
+        let m0 = ms.add_binary("Test");
+        let handle = SequencerHandle::spawn(seq);
+
+        let sub = |qty| OrderSubmission {
+            account_id: aid,
+            orders: vec![outcome_buy(&ms, 0, m0, 0, 500_000_000, qty)],
+            mm_constraint: None,
+        };
+
+        handle.submit_order(sub(1)).await.unwrap();
+        let err = handle.submit_order(sub(1)).await.unwrap_err();
+        assert!(matches!(err, SequencerError::RateLimited { .. }));
+    }
+
+    #[tokio::test]
+    async fn global_submission_rate_limit_bounds_many_account_floods() {
+        let config = SequencerConfig {
+            max_global_submissions_per_second: 1,
+            global_submission_burst: 1,
+            max_submissions_per_account_per_second: 1_000,
+            submission_burst_per_account: 1_000,
+            ..SequencerConfig::default()
+        };
+        let mut accounts = AccountStore::new();
+        let a = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let b = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("Test");
+        let seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            Arc::new(AdminOracle::new()),
+            config,
+        );
+        let handle = SequencerHandle::spawn(seq);
+
+        let sub = |account_id| OrderSubmission {
+            account_id,
+            orders: vec![outcome_buy(&markets, 0, m0, 0, 500_000_000, 1)],
+            mm_constraint: None,
+        };
+
+        handle.submit_order(sub(a)).await.unwrap();
+        let err = handle.submit_order(sub(b)).await.unwrap_err();
+        assert!(matches!(err, SequencerError::RateLimited { .. }));
+    }
+
+    #[tokio::test]
+    async fn open_order_cap_rejects_excess_resting_orders() {
+        let config = SequencerConfig {
+            max_open_orders_per_account: 1,
+            ..SequencerConfig::default()
+        };
+        let (seq, aid) = make_test_sequencer_with_config(config);
+        let mut ms = MarketSet::new();
+        let m0 = ms.add_binary("Test");
+        let handle = SequencerHandle::spawn(seq);
+
+        let sub = |qty| OrderSubmission {
+            account_id: aid,
+            orders: vec![outcome_buy(&ms, 0, m0, 0, 500_000_000, qty)],
+            mm_constraint: None,
+        };
+
+        handle.submit_order(sub(1)).await.unwrap();
+        let err = handle.submit_order(sub(1)).await.unwrap_err();
+        assert!(matches!(
+            err,
+            SequencerError::TooManyOpenOrders { account_id, limit: 1 } if account_id == aid
+        ));
+    }
+
+    #[tokio::test]
+    async fn pending_bundle_cap_does_not_block_direct_orders() {
+        let config = SequencerConfig {
+            max_pending_bundles: 0,
+            ..SequencerConfig::default()
+        };
+        let (seq, aid) = make_test_sequencer_with_config(config);
+        let mut ms = MarketSet::new();
+        let m0 = ms.add_binary("Test");
+        let handle = SequencerHandle::spawn(seq);
+
+        let deferred = OrderSubmission {
+            account_id: aid,
+            orders: vec![
+                outcome_buy(&ms, 0, m0, 0, 500_000_000, 1),
+                outcome_buy(&ms, 0, m0, 1, 500_000_000, 1),
+            ],
+            mm_constraint: None,
+        };
+        let err = handle.submit_order(deferred).await.unwrap_err();
+        assert!(matches!(err, SequencerError::MempoolFull));
+
+        let direct = OrderSubmission {
+            account_id: aid,
+            orders: vec![outcome_buy(&ms, 0, m0, 0, 500_000_000, 1)],
+            mm_constraint: None,
+        };
+        handle.submit_order(direct).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn max_orders_per_submission_bounds_request_amplification() {
+        let config = SequencerConfig {
+            max_orders_per_submission: 1,
+            ..SequencerConfig::default()
+        };
+        let (seq, aid) = make_test_sequencer_with_config(config);
+        let mut ms = MarketSet::new();
+        let m0 = ms.add_binary("Test");
+        let handle = SequencerHandle::spawn(seq);
+
+        let sub = OrderSubmission {
+            account_id: aid,
+            orders: vec![
+                outcome_buy(&ms, 0, m0, 0, 500_000_000, 1),
+                outcome_buy(&ms, 0, m0, 1, 500_000_000, 1),
+            ],
+            mm_constraint: None,
+        };
+        let err = handle.submit_order(sub).await.unwrap_err();
+        assert!(matches!(
+            err,
+            SequencerError::TooManyOrdersInSubmission { count: 2, limit: 1 }
+        ));
     }
 
     #[tokio::test]

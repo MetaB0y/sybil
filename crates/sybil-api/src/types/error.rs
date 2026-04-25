@@ -1,4 +1,4 @@
-use axum::http::StatusCode;
+use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 
@@ -14,6 +14,7 @@ pub struct ErrorBody {
 pub struct AppError {
     pub status: StatusCode,
     pub body: ErrorBody,
+    pub retry_after_secs: Option<u64>,
 }
 
 impl AppError {
@@ -25,6 +26,7 @@ impl AppError {
                 code: "BAD_REQUEST".to_string(),
                 details: None,
             },
+            retry_after_secs: None,
         }
     }
 
@@ -36,6 +38,7 @@ impl AppError {
                 code: "NOT_FOUND".to_string(),
                 details: None,
             },
+            retry_after_secs: None,
         }
     }
 
@@ -47,6 +50,7 @@ impl AppError {
                 code: "FORBIDDEN".to_string(),
                 details: None,
             },
+            retry_after_secs: None,
         }
     }
 
@@ -58,6 +62,7 @@ impl AppError {
                 code: "INTERNAL_ERROR".to_string(),
                 details: None,
             },
+            retry_after_secs: None,
         }
     }
 
@@ -69,6 +74,7 @@ impl AppError {
                 code: "CONFLICT".to_string(),
                 details: None,
             },
+            retry_after_secs: None,
         }
     }
 
@@ -80,6 +86,7 @@ impl AppError {
                 code: "SERVICE_UNAVAILABLE".to_string(),
                 details: None,
             },
+            retry_after_secs: None,
         }
     }
 
@@ -91,6 +98,19 @@ impl AppError {
                 code: "MEMPOOL_FULL".to_string(),
                 details: None,
             },
+            retry_after_secs: None,
+        }
+    }
+
+    pub fn rate_limited(retry_after_secs: u64) -> Self {
+        Self {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            body: ErrorBody {
+                error: "Rate limited".to_string(),
+                code: "RATE_LIMITED".to_string(),
+                details: None,
+            },
+            retry_after_secs: Some(retry_after_secs),
         }
     }
 
@@ -102,7 +122,13 @@ impl AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let body = axum::Json(self.body);
-        (self.status, body).into_response()
+        let mut response = (self.status, body).into_response();
+        if let Some(retry_after_secs) = self.retry_after_secs {
+            if let Ok(value) = HeaderValue::from_str(&retry_after_secs.to_string()) {
+                response.headers_mut().insert(header::RETRY_AFTER, value);
+            }
+        }
+        response
     }
 }
 
@@ -122,6 +148,14 @@ impl From<matching_sequencer::SequencerError> for AppError {
                 AppError::forbidden("Signed account does not match signer public key")
             }
             matching_sequencer::SequencerError::MempoolFull => AppError::mempool_full(),
+            matching_sequencer::SequencerError::RateLimited { retry_after_secs } => {
+                AppError::rate_limited(*retry_after_secs)
+            }
+            matching_sequencer::SequencerError::TooManyOrdersInSubmission { .. }
+            | matching_sequencer::SequencerError::TooManyOpenOrders { .. }
+            | matching_sequencer::SequencerError::TooManyPendingBundles { .. } => {
+                AppError::rate_limited(1).with_details(format!("{}", err))
+            }
             matching_sequencer::SequencerError::ActorGone => {
                 AppError::internal("Sequencer actor shut down")
             }

@@ -12,6 +12,7 @@ use utoipa::OpenApi;
 
 use crate::routes;
 use crate::state::AppState;
+use crate::types::error::AppError;
 use crate::types::request::*;
 use crate::types::response::*;
 
@@ -139,6 +140,51 @@ async fn http_metrics(req: Request<axum::body::Body>, next: Next) -> Response {
     metrics::histogram!("sybil_http_request_duration_seconds", "method" => method.to_string(), "path" => path.clone()).record(duration_secs);
 
     response
+}
+
+fn order_rate_limit_client_key(req: &Request<axum::body::Body>) -> String {
+    req.headers()
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            req.headers()
+                .get("x-real-ip")
+                .and_then(|value| value.to_str().ok())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or("direct")
+        .to_string()
+}
+
+fn is_order_write_path(path: &str) -> bool {
+    matches!(
+        path,
+        "/v1/orders" | "/v1/orders/signed" | "/v1/orders/cancel/signed"
+    )
+}
+
+async fn order_rate_limit(
+    State(state): State<AppState>,
+    req: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    if req.method() == axum::http::Method::POST && is_order_write_path(req.uri().path()) {
+        let client_key = order_rate_limit_client_key(&req);
+        let allowed = state
+            .http_order_limiter
+            .lock()
+            .map(|mut limiter| limiter.allow(&client_key))
+            .unwrap_or(Err(1));
+        if let Err(retry_after_secs) = allowed {
+            metrics::counter!("sybil_http_order_rate_limited_total").increment(1);
+            return AppError::rate_limited(retry_after_secs).into_response();
+        }
+    }
+    next.run(req).await
 }
 
 pub fn create_router(state: AppState) -> Router {
@@ -283,6 +329,10 @@ pub fn create_router(state: AppState) -> Router {
             "/v1/blocks/{height}",
             axum::routing::get(routes::blocks::get_block_by_height),
         )
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            order_rate_limit,
+        ))
         .layer(middleware::from_fn(http_metrics))
         .layer(
             TraceLayer::new_for_http()

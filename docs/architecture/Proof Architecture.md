@@ -1,7 +1,7 @@
 ---
 tags: [zk, infrastructure]
 layer: verification
-status: design
+status: planned
 last_verified: 2026-04-10
 ---
 
