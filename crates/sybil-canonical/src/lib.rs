@@ -28,6 +28,15 @@ pub struct PriceCondition {
     pub direction: ConditionDir,
 }
 
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
+)]
+pub enum TimeInForce {
+    Gtc,
+    Ioc,
+    Gtd,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct Order {
     pub markets: [MarketId; MAX_MARKETS_PER_ORDER],
@@ -37,6 +46,8 @@ pub struct Order {
     pub limit_price: u64,
     pub max_fill: u64,
     pub condition: Option<PriceCondition>,
+    pub time_in_force: TimeInForce,
+    pub expires_at_block: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
@@ -90,6 +101,8 @@ mod tests {
             limit_price,
             max_fill,
             condition,
+            time_in_force: TimeInForce::Gtc,
+            expires_at_block: None,
         };
 
         for (idx, market) in markets.iter().copied().enumerate() {

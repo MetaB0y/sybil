@@ -106,12 +106,28 @@ pub struct SubmitOrderRequest {
     pub account_id: u64,
     /// Orders to submit.
     pub orders: Vec<OrderSpec>,
+    /// Time-in-force policy applied to all orders in this submission.
+    #[serde(default)]
+    pub time_in_force: TimeInForce,
+    /// Last eligible block height for GTD orders.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at_block: Option<u64>,
     /// If set, treat these orders as market maker orders with flash liquidity.
     /// The value is the MM's total capital budget in nanos.
     /// MM orders skip per-order balance validation; instead the solver enforces
     /// the portfolio-level budget constraint at clearing time.
     #[serde(default)]
     pub mm_budget_nanos: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "UPPERCASE")]
+pub enum TimeInForce {
+    #[default]
+    Gtc,
+    Ioc,
+    Gtd,
 }
 
 /// Tagged enum representing different order types.
@@ -213,6 +229,12 @@ pub struct SubmitSignedOrderRequest {
     pub signer_pubkey_hex: String,
     /// The order to submit.
     pub order: SignedOrderData,
+    /// Time-in-force policy covered by the P256 signature.
+    #[serde(default)]
+    pub time_in_force: TimeInForce,
+    /// Last eligible block height for GTD orders, covered by the P256 signature.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at_block: Option<u64>,
     /// Hex-encoded P256 ECDSA signature.
     pub signature_hex: String,
 }

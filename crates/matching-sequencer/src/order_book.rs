@@ -13,12 +13,16 @@
 
 use std::collections::{HashMap, HashSet};
 
-use matching_engine::{Fill, MarketId, Order};
+use matching_engine::{Fill, MarketId, Order, TimeInForce};
 use serde::{Deserialize, Serialize};
 
 use crate::account::{AccountId, AccountStore};
 use crate::error::RejectionReason;
 use crate::validation::{sell_reservations, validate_order_with_reservation, PositionKey};
+
+fn default_resting_expires_at_block() -> u64 {
+    u64::MAX
+}
 
 /// A resting order in the book.
 ///
@@ -34,6 +38,9 @@ pub struct RestingOrder {
     pub(crate) account_id: AccountId,
     /// Block height when this order was first accepted.
     pub(crate) created_at: u64,
+    /// Last block height where this order may participate.
+    #[serde(default = "default_resting_expires_at_block")]
+    pub(crate) expires_at_block: u64,
     /// Balance reserved by this order (buy cost). 0 for sells.
     pub(crate) reserved_balance: i64,
     /// Position reservations for this order (sell quantities).
@@ -203,6 +210,7 @@ impl OrderBook {
             order: order.clone(),
             account_id,
             created_at: current_height,
+            expires_at_block: order.effective_expires_at_block(current_height, self.ttl),
             reserved_balance: cost,
             reserved_positions: pos_reservations,
         };
@@ -218,7 +226,7 @@ impl OrderBook {
     /// Remove expired orders and release their reservations.
     pub fn expire(&mut self, current_height: u64) {
         self.orders.retain(|ro| {
-            if current_height - ro.created_at > self.ttl {
+            if current_height > ro.expires_at_block {
                 // Release reservations
                 Self::release_reservations(
                     &mut self.balance_reservations,
@@ -310,10 +318,10 @@ impl OrderBook {
     }
 
     /// Orders with full metadata (for API exposure).
-    pub fn resting_orders_full(&self) -> impl Iterator<Item = (&Order, AccountId, u64)> {
+    pub fn resting_orders_full(&self) -> impl Iterator<Item = (&Order, AccountId, u64, u64)> {
         self.orders
             .iter()
-            .map(|ro| (&ro.order, ro.account_id, ro.created_at))
+            .map(|ro| (&ro.order, ro.account_id, ro.created_at, ro.expires_at_block))
     }
 
     /// TTL value.
@@ -401,6 +409,15 @@ impl OrderBook {
                 continue;
             }
 
+            if matches!(ro.order.time_in_force, TimeInForce::Ioc) {
+                Self::release_reservations(
+                    &mut self.balance_reservations,
+                    &mut self.position_reservations,
+                    &ro,
+                );
+                continue;
+            }
+
             if filled > 0 {
                 // Partially filled — reduce order and reservations proportionally
                 let remaining = ro.order.max_fill - filled;
@@ -441,6 +458,7 @@ impl OrderBook {
                     order: remainder,
                     account_id: ro.account_id,
                     created_at: ro.created_at,
+                    expires_at_block: ro.expires_at_block,
                     reserved_balance: new_cost,
                     reserved_positions: new_pos_reservations,
                 });
@@ -604,11 +622,49 @@ mod tests {
     }
 
     #[test]
+    fn settle_ioc_unfilled_order_does_not_rest() {
+        let (mut accounts, markets, m0) = setup();
+        let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+        let mut book = OrderBook::new(3);
+        let account = accounts.get(aid).unwrap();
+
+        let mut order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
+        order.time_in_force = TimeInForce::Ioc;
+        book.accept(order, aid, account, 1).unwrap();
+
+        book.settle(&[], &HashSet::new());
+
+        assert_eq!(book.reserved_balance(aid), 0);
+        assert_eq!(book.len(), 0);
+    }
+
+    #[test]
+    fn gtd_expiry_uses_explicit_block_when_stricter_than_ttl() {
+        let (mut accounts, markets, m0) = setup();
+        let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+        let mut book = OrderBook::new(10);
+        let account = accounts.get(aid).unwrap();
+
+        let mut order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
+        order.time_in_force = TimeInForce::Gtd;
+        order.expires_at_block = Some(2);
+        book.accept(order, aid, account, 1).unwrap();
+
+        book.expire(2);
+        assert_eq!(book.len(), 1);
+
+        book.expire(3);
+        assert_eq!(book.len(), 0);
+        assert_eq!(book.reserved_balance(aid), 0);
+    }
+
+    #[test]
     fn restore_drops_orders_with_negative_balance_reservation() {
         let bad = RestingOrder {
             order: Order::new(42),
             account_id: AccountId(1),
             created_at: 0,
+            expires_at_block: 10,
             reserved_balance: -100,
             reserved_positions: vec![],
         };
@@ -623,6 +679,7 @@ mod tests {
             order: Order::new(1),
             account_id: AccountId(7),
             created_at: 0,
+            expires_at_block: 10,
             reserved_balance: 500,
             reserved_positions: vec![],
         };

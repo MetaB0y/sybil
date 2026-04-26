@@ -20,6 +20,7 @@ The sequencer message path is monitored by [[Actor Mailbox Monitoring]]. The API
 - All values in [[Nanos and Integer Arithmetic|nanos]] (u64)
 - Dev mode gates administrative endpoints
 - Order-write endpoints return `429 Too Many Requests` with `Retry-After` under abnormal load
+- Order submissions support GTC, IOC, and GTD time-in-force
 - Stateless API layer — all state in sequencer
 - CORS enabled for browser-based clients
 

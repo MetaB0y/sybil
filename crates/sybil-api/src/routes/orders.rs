@@ -8,7 +8,7 @@ use matching_sequencer::{AccountId, OrderSubmission, PendingOrderInfo};
 use p256::ecdsa::{Signature, VerifyingKey};
 use p256::Sec1Point;
 
-use crate::convert::{order_spec_to_order, signed_order_data_to_order};
+use crate::convert::{apply_time_in_force, order_spec_to_order, signed_order_data_to_order};
 use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::request::{
@@ -66,7 +66,9 @@ pub async fn submit_orders(
 
     let mut orders = Vec::with_capacity(req.orders.len());
     for spec in &req.orders {
-        let order = order_spec_to_order(spec, &markets).map_err(AppError::bad_request)?;
+        let mut order = order_spec_to_order(spec, &markets).map_err(AppError::bad_request)?;
+        apply_time_in_force(&mut order, req.time_in_force, req.expires_at_block)
+            .map_err(AppError::bad_request)?;
         orders.push(order);
     }
 
@@ -109,7 +111,9 @@ pub async fn submit_signed_order(
 ) -> Result<Json<OrderAcceptedResponse>, AppError> {
     let signer = parse_signer_public_key(&req.signer_pubkey_hex)?;
     let signature = parse_signature(&req.signature_hex)?;
-    let order = signed_order_data_to_order(&req.order).map_err(AppError::bad_request)?;
+    let mut order = signed_order_data_to_order(&req.order).map_err(AppError::bad_request)?;
+    apply_time_in_force(&mut order, req.time_in_force, req.expires_at_block)
+        .map_err(AppError::bad_request)?;
     let signed = SignedOrder {
         order,
         signer,

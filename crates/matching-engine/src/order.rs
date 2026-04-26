@@ -34,6 +34,18 @@ pub enum ConditionDir {
     Below,
 }
 
+/// Time-in-force policy for an order.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TimeInForce {
+    /// Good Till Cancelled, bounded by the sequencer's system TTL.
+    #[default]
+    Gtc,
+    /// Immediate Or Cancel in FBA terms: eligible for one batch, then removed.
+    Ioc,
+    /// Good Till block. `expires_at_block` is the last eligible block height.
+    Gtd,
+}
+
 /// An order represented as a payoff vector over atomic world states.
 ///
 /// # Example
@@ -76,6 +88,14 @@ pub struct Order {
 
     /// Optional price-threshold condition for activation.
     pub condition: Option<PriceCondition>,
+
+    /// How long the order may remain eligible.
+    #[serde(default)]
+    pub time_in_force: TimeInForce,
+
+    /// Last block height where the order is eligible. Used with GTD.
+    #[serde(default)]
+    pub expires_at_block: Option<u64>,
 }
 
 impl Order {
@@ -90,7 +110,28 @@ impl Order {
             limit_price: 0,
             max_fill: 0,
             condition: None,
+            time_in_force: TimeInForce::Gtc,
+            expires_at_block: None,
         }
+    }
+
+    /// Return the last block height where this order may participate, capped
+    /// by the sequencer's system TTL.
+    pub fn effective_expires_at_block(&self, created_at: u64, system_ttl_blocks: u64) -> u64 {
+        let system_expiry = created_at.saturating_add(system_ttl_blocks);
+        match self.time_in_force {
+            TimeInForce::Gtc => system_expiry,
+            TimeInForce::Ioc => created_at.saturating_add(1),
+            TimeInForce::Gtd => self
+                .expires_at_block
+                .unwrap_or(system_expiry)
+                .min(system_expiry),
+        }
+    }
+
+    /// Returns true if this order is not eligible for the given block height.
+    pub fn is_expired_at_block(&self, current_height: u64, created_at: u64, ttl: u64) -> bool {
+        current_height > self.effective_expires_at_block(created_at, ttl)
     }
 
     /// Check if this is a conditional order.

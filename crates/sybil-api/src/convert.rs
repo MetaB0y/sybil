@@ -3,13 +3,13 @@ use std::collections::HashMap;
 use matching_engine::order::{MAX_MARKETS_PER_ORDER, MAX_STATES};
 use matching_engine::{
     bundle_sell, bundle_yes, outcome_buy, outcome_sell, spread, MarketId, MarketSet, Nanos, Order,
-    NANOS_PER_DOLLAR,
+    TimeInForce, NANOS_PER_DOLLAR,
 };
 use matching_sequencer::block::Block;
 use matching_sequencer::error::Rejection;
 use matching_sequencer::Account;
 
-use crate::types::request::{OrderSpec, SignedOrderData};
+use crate::types::request::{OrderSpec, SignedOrderData, TimeInForce as ApiTimeInForce};
 use crate::types::response::*;
 
 fn system_event_to_response(event: &matching_sequencer::SystemEvent) -> SystemEventResponse {
@@ -331,6 +331,36 @@ pub fn signed_order_data_to_order(data: &SignedOrderData) -> Result<Order, Strin
     order.max_fill = data.max_fill;
 
     Ok(order)
+}
+
+pub fn apply_time_in_force(
+    order: &mut Order,
+    time_in_force: ApiTimeInForce,
+    expires_at_block: Option<u64>,
+) -> Result<(), String> {
+    order.time_in_force = match time_in_force {
+        ApiTimeInForce::Gtc => {
+            if expires_at_block.is_some() {
+                return Err("expires_at_block is only valid for GTD orders".to_string());
+            }
+            TimeInForce::Gtc
+        }
+        ApiTimeInForce::Ioc => {
+            if expires_at_block.is_some() {
+                return Err("expires_at_block is only valid for GTD orders".to_string());
+            }
+            TimeInForce::Ioc
+        }
+        ApiTimeInForce::Gtd => {
+            let Some(expires_at_block) = expires_at_block else {
+                return Err("GTD orders require expires_at_block".to_string());
+            };
+            order.expires_at_block = Some(expires_at_block);
+            TimeInForce::Gtd
+        }
+    };
+
+    Ok(())
 }
 
 fn validate_market(mid: MarketId, markets: &MarketSet) -> Result<(), String> {

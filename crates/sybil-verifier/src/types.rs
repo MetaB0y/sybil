@@ -91,6 +91,11 @@ pub enum RejectionReason {
     AccountNotFound,
     /// MM orders form a complete set within a market group (self-trade via minting).
     CompleteSetFormation,
+    /// Order time-in-force made it ineligible for the target batch.
+    Expired {
+        current_block: u64,
+        expires_at_block: u64,
+    },
 }
 
 /// System state change recorded in a block witness.

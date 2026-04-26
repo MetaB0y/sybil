@@ -34,6 +34,14 @@ are either reproducible from the witness (order book), irrelevant to balances
 (mempool), or live in separate commitments (markets are referenced by id
 inside positions, their full metadata is not part of state root).
 
+This matters for [[Order Types|time-in-force]]. The current verifier can check
+that an order included in a block was not expired at `header.height`, because
+time-in-force lives in the private witness order. It cannot, from the current
+state root alone, prove that a post-block IOC remainder was not kept in the
+off-chain resting book. Phase 2 should either include resting orders in the
+authenticated state tree or publish a separate order-book root when that
+property becomes bridge-critical.
+
 ## Phase 1 (current): flat canonical hash
 
 Implementation: `crates/sybil-verifier/src/block.rs::compute_state_root`.

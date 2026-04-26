@@ -10,10 +10,13 @@ Users submit orders through the [[REST API]] using the `OrderSpec` enum — a us
 
 The order types span from simple to fully custom. **BuyYes/BuyNo/SellYes/SellNo** are single-market limit orders — the bread and butter of prediction market trading. **Spread** orders simultaneously buy YES on one market and sell YES on another, expressing a relative-value view ("A is more likely than B"). **BundleYes/BundleSell** bet on conjunctions — "both A and B will happen" — across multiple markets. **Custom** is the escape hatch: the user specifies raw `market_ids`, `payoffs` arrays, and a limit price, constructing an arbitrary [[Payoff Vectors|payoff vector]] directly.
 
+Every order also carries a time-in-force policy. `GTC` is the default and may rest until cancelled or until the system TTL expires. `IOC` is immediate-or-cancel in FBA terms: eligible for one batch, then any unfilled remainder is cancelled. `GTD` is good-through-block: the client supplies `expires_at_block`, and the sequencer caps it by the system TTL. Signed orders include the time-in-force fields in their canonical bytes, so a relay cannot turn an IOC into a resting GTC order.
+
 The conversion to payoff vectors is the key architectural insight. The solver never sees "BuyYes" or "Spread" — it just sees vectors and limit prices. This means adding a new order type (say, a butterfly or a conditional) only requires writing a new conversion function, not modifying the solver. The order builder in `matching-engine` provides factory functions for common patterns: `simple_yes_buy`, `spread`, `bundle_yes`, `butterfly`, `conditional_buy`. Each produces the same `Order` struct with a payoff array — the solver is agnostic to how it was created.
 
 ## Key Properties
 - `OrderSpec` enum: BuyYes, BuyNo, SellYes, SellNo, Spread, BundleYes, BundleSell, Custom
+- Time-in-force: GTC, IOC, GTD with `expires_at_block`
 - Converted to [[Payoff Vectors]] at the API boundary
 - Solver is agnostic to order type — only sees payoff vectors + limit prices
 - Custom orders allow arbitrary payoff vector construction

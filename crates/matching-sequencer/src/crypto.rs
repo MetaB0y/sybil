@@ -13,6 +13,7 @@ use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
 use sybil_canonical::{
     ConditionDir as CanonicalConditionDir, MarketId as CanonicalMarketId, Order as CanonicalOrder,
     PriceCondition as CanonicalPriceCondition, ResolutionAttestation as CanonicalAttestation,
+    TimeInForce as CanonicalTimeInForce,
 };
 use sybil_oracle::{ResolutionAttestation, SignedAttestation};
 
@@ -87,6 +88,12 @@ fn to_canonical_order(order: &Order) -> CanonicalOrder {
         limit_price: order.limit_price,
         max_fill: order.max_fill,
         condition,
+        time_in_force: match order.time_in_force {
+            matching_engine::TimeInForce::Gtc => CanonicalTimeInForce::Gtc,
+            matching_engine::TimeInForce::Ioc => CanonicalTimeInForce::Ioc,
+            matching_engine::TimeInForce::Gtd => CanonicalTimeInForce::Gtd,
+        },
+        expires_at_block: order.expires_at_block,
     }
 }
 
@@ -257,6 +264,23 @@ mod tests {
 
         // Tamper with the order after signing
         signed.order.limit_price = 999_999_999;
+
+        assert!(matches!(
+            verify_signed_order(&signed),
+            Err(SequencerError::InvalidSignature)
+        ));
+    }
+
+    #[test]
+    fn test_time_in_force_is_signature_covered() {
+        let key =
+            <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(&mut crypto_rng());
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("Test");
+
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
+        let mut signed = sign_order(&order, &key);
+        signed.order.time_in_force = matching_engine::TimeInForce::Ioc;
 
         assert!(matches!(
             verify_signed_order(&signed),

@@ -60,7 +60,7 @@ seen inside the circuit, never exposed).
 | `resolved_markets` | public |
 | `total_welfare`, `minting_cost` | public |
 | `header.order_count`, `header.fill_count` | public |
-| `orders` (individual) | private |
+| `orders` (individual, including time-in-force) | private |
 | `rejections` | private |
 | `system_events` (individual) | private (shape is public via events_root) |
 | `fills` (individual) | private (shape is public via events_root) |
@@ -207,6 +207,13 @@ They're complementary. A minimal on-chain commitment would include only
 `state_root` (chain-valid) + `witness_root` (auditable) and use `events_root`
 as a caller-supplied input to prove derived claims. Exact layout is decided
 in [[Proof Architecture]] and the Data Availability RFC (sibling, M3).
+
+Order time-in-force lives in the private `orders` section. The verifier can
+check that an order included in a batch is eligible for `header.height`, but
+the current account-only `state_root` does not commit to the post-block
+resting order book. Full proof of "this IOC did not rest" requires the
+[[State Root Schema]] path where pending/resting orders become part of the
+committed state or are committed under a separate order-book root.
 
 ## Test vectors
 

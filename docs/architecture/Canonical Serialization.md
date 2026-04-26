@@ -161,7 +161,10 @@ output index.
 
 **TODO v1.1.** These only matter for the [[Block Witness]] canonical bytes and
 the ZK circuit. Not needed for state root. Encodings will be added in a
-follow-up RFC alongside the events tree.
+follow-up RFC alongside the events tree. The Rust signing path already uses
+`sybil-canonical::Order`, including `time_in_force` and `expires_at_block`, so
+P256 signed orders cover IOC/GTD semantics even before the full witness byte
+spec is frozen.
 
 ## Event encoding registry
 

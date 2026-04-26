@@ -6,9 +6,9 @@ status: current
 last_verified: 2026-04-10
 ---
 
-Not every order fills in its first batch. When a trader's order isn't matched — perhaps the clearing price moved away from their limit, or there wasn't enough counterparty liquidity — the order doesn't disappear. Instead, it becomes a **resting order** in the order book, automatically re-included in each subsequent [[Block Lifecycle|batch]] until it fills, expires, or is cancelled.
+Not every order fills in its first batch. When a trader's GTC or GTD order isn't matched — perhaps the clearing price moved away from their limit, or there wasn't enough counterparty liquidity — the unfilled remainder becomes a **resting order** in the order book, automatically re-included in each subsequent [[Block Lifecycle|batch]] until it fills, expires, or is cancelled.
 
-Each resting order has a configurable Time-To-Live (TTL) measured in blocks. A fresh order enters with TTL 3, and each block it goes unmatched counts against the TTL. When the order has been resting longer than the TTL, it expires and is removed. This prevents the system from accumulating unbounded stale orders while giving reasonable orders multiple chances to fill — a market that's temporarily illiquid might see liquidity arrive in the next few seconds.
+Each resting order has an `expires_at_block`. GTC orders derive it from the configurable system TTL. GTD orders use the user-specified block height, capped by the system TTL. IOC orders participate in one FBA batch only; after the solver runs, any unfilled remainder is removed instead of resting. This prevents the system from accumulating unbounded stale orders while giving durable orders multiple chances to fill.
 
 MM (market maker) quotes are explicitly excluded from the order book. MM quotes are one-shot: they bypass the book entirely and are consumed by the current batch. This design matches how professional market makers operate — they want to re-evaluate and re-quote every batch based on current conditions, not have stale quotes persist. Regular trader orders persist because retail users submit and expect fills over a reasonable time horizon.
 
@@ -20,14 +20,16 @@ The reservation lifecycle:
 1. **Accept**: validate order against account state + existing reservations → reserve capital
 2. **Expire**: remove orders past TTL → release their reservations
 3. **Revalidate**: after state changes (market resolution, bankruptcy) → remove invalid orders
-4. **Settle**: after solving → fully filled orders release all reservations, partial fills adjust proportionally
+4. **Settle**: after solving → fully filled orders release all reservations, partial fills adjust proportionally; IOC remainders release all reservations and leave the book
 
 This design ensures that the "available balance" (`balance - reserved`) is always accurate, regardless of how many orders are resting across how many blocks.
 
 ## Key Properties
 - Unfilled non-MM orders become resting orders in the OrderBook
+- IOC means "this FBA batch only", not continuous-book immediacy
+- GTD means "eligible through this block height", bounded by system TTL
 - Balance/position reservations tracked at acceptance time (single source of truth)
-- Configurable TTL in blocks (default 3)
+- Configurable TTL in blocks caps all resting orders
 - Re-validated each block (market resolution, account solvency)
 - MM quotes are one-shot — never enter the book
 - Partial fills adjust reservations proportionally

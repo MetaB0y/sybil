@@ -6,6 +6,8 @@
 
 use std::collections::HashMap;
 
+use matching_engine::TimeInForce;
+
 use crate::types::{AccountSnapshot, BlockWitness, RejectionReason};
 use crate::violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
 
@@ -27,6 +29,24 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
 
     // Verify accepted orders
     for wo in &witness.orders {
+        let order = &wo.order;
+        let expires_at_block = order.expires_at_block.unwrap_or(u64::MAX);
+        if matches!(order.time_in_force, TimeInForce::Gtd) && order.expires_at_block.is_none() {
+            violations.push(Violation {
+                kind: ViolationKind::TimeInForceViolation,
+                details: format!("Order {}: GTD missing expires_at_block", order.id),
+            });
+        }
+        if expires_at_block < witness.header.height {
+            violations.push(Violation {
+                kind: ViolationKind::TimeInForceViolation,
+                details: format!(
+                    "Order {}: expires_at_block {} < block height {}",
+                    order.id, expires_at_block, witness.header.height
+                ),
+            });
+        }
+
         // MM orders skip balance validation (matching sequencer behavior)
         if wo.is_mm {
             continue;
@@ -43,7 +63,6 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
             continue;
         };
 
-        let order = &wo.order;
         let num_states = order.num_states as usize;
         let has_positive = order.payoffs[..num_states].iter().any(|&p| p > 0);
         let has_negative = order.payoffs[..num_states].iter().any(|&p| p < 0);
@@ -180,6 +199,20 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
                 // Valid rejection: MM orders would form a complete set in a market group.
                 // No further validation needed — the sequencer detected self-trade potential.
             }
+            RejectionReason::Expired {
+                current_block,
+                expires_at_block,
+            } => {
+                if current_block <= expires_at_block {
+                    violations.push(Violation {
+                        kind: ViolationKind::IncorrectRejectionReason,
+                        details: format!(
+                            "Order {}: rejected as expired but current_block {} <= expires_at_block {}",
+                            rej.order.id, current_block, expires_at_block
+                        ),
+                    });
+                }
+            }
         }
     }
 
@@ -194,7 +227,7 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
 mod tests {
     use super::*;
     use crate::types::{WitnessBlockHeader, WitnessOrder, WitnessRejection};
-    use matching_engine::{outcome_buy, outcome_sell, MarketSet, NANOS_PER_DOLLAR};
+    use matching_engine::{outcome_buy, outcome_sell, MarketSet, TimeInForce, NANOS_PER_DOLLAR};
     use proptest::prelude::*;
     use std::collections::HashMap;
 
@@ -261,6 +294,86 @@ mod tests {
 
         let result = verify_orders(&witness);
         assert!(result.valid, "Violations: {:?}", result.violations);
+    }
+
+    #[test]
+    fn accepted_expired_gtd_order_is_violation() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("M0");
+        let mut order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 1);
+        order.time_in_force = TimeInForce::Gtd;
+        order.expires_at_block = Some(0);
+        let account = AccountSnapshot {
+            id: 0,
+            balance: 10 * NANOS_PER_DOLLAR as i64,
+            total_deposited: 0,
+            positions: vec![],
+            events_digest: [0u8; 32],
+        };
+
+        let witness = make_witness_with_orders(
+            vec![WitnessOrder {
+                order,
+                account_id: 0,
+                is_mm: false,
+            }],
+            vec![],
+            vec![account.clone()],
+            vec![account],
+        );
+
+        let result = verify_orders(&witness);
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::TimeInForceViolation));
+    }
+
+    #[test]
+    fn expired_rejection_is_valid_only_after_expiry() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("M0");
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 1);
+        let account = AccountSnapshot {
+            id: 0,
+            balance: 10 * NANOS_PER_DOLLAR as i64,
+            total_deposited: 0,
+            positions: vec![],
+            events_digest: [0u8; 32],
+        };
+
+        let valid = make_witness_with_orders(
+            vec![],
+            vec![WitnessRejection {
+                order: order.clone(),
+                account_id: 0,
+                reason: RejectionReason::Expired {
+                    current_block: 2,
+                    expires_at_block: 1,
+                },
+            }],
+            vec![account.clone()],
+            vec![account.clone()],
+        );
+        assert!(verify_orders(&valid).valid);
+
+        let invalid = make_witness_with_orders(
+            vec![],
+            vec![WitnessRejection {
+                order,
+                account_id: 0,
+                reason: RejectionReason::Expired {
+                    current_block: 1,
+                    expires_at_block: 1,
+                },
+            }],
+            vec![account.clone()],
+            vec![account],
+        );
+        assert!(verify_orders(&invalid)
+            .violations
+            .iter()
+            .any(|v| { v.kind == ViolationKind::IncorrectRejectionReason }));
     }
 
     #[test]

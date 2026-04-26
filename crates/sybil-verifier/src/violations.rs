@@ -90,6 +90,8 @@ pub enum ViolationKind {
     IntraBatchDoubleSpend,
     /// Accepted order references an account missing from post-system-state.
     AcceptedOrderMissingAccount,
+    /// Accepted order was not eligible at this block height.
+    TimeInForceViolation,
     /// A rejection is incorrect — order would have been valid.
     FalseRejection,
     /// A rejection reason does not match the actual validation failure.

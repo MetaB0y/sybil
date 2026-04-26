@@ -181,7 +181,12 @@ impl PreparedBlock {
 }
 
 impl PendingOrderInfo {
-    fn from_resting(order: &Order, account_id: AccountId, created_at: u64, ttl: u64) -> Self {
+    fn from_resting(
+        order: &Order,
+        account_id: AccountId,
+        created_at: u64,
+        expires_at_block: u64,
+    ) -> Self {
         let market_ids: Vec<_> = order.active_markets().collect();
         let side = classify_order_side(order);
         Self {
@@ -192,7 +197,7 @@ impl PendingOrderInfo {
             limit_price: order.limit_price,
             remaining_qty: order.max_fill,
             created_at_block: created_at,
-            expires_at_block: created_at + ttl,
+            expires_at_block,
         }
     }
 }
@@ -291,6 +296,13 @@ fn convert_rejection_reason(r: &RejectionReason) -> sybil_verifier::RejectionRea
         RejectionReason::CompleteSetFormation => {
             sybil_verifier::RejectionReason::CompleteSetFormation
         }
+        RejectionReason::Expired {
+            current_block,
+            expires_at_block,
+        } => sybil_verifier::RejectionReason::Expired {
+            current_block: *current_block,
+            expires_at_block: *expires_at_block,
+        },
     }
 }
 
@@ -827,6 +839,18 @@ impl BlockSequencer {
         let order_id = self.next_order_id;
         self.next_order_id += 1;
         order.id = order_id;
+        let next_batch_height = self.height.saturating_add(1);
+        let expires_at_block = order.effective_expires_at_block(self.height, self.order_book.ttl());
+        if next_batch_height > expires_at_block {
+            return AdmitOutcome::Rejected(SequencerError::Rejected(Rejection {
+                order_id,
+                account_id,
+                reason: RejectionReason::Expired {
+                    current_block: next_batch_height,
+                    expires_at_block,
+                },
+            }));
+        }
 
         let mut stp = GroupCoverageTracker::new(&self.market_groups);
         self.seed_group_coverage_for_account(&mut stp, account_id);
@@ -891,24 +915,22 @@ impl BlockSequencer {
         &self,
         account_id_filter: Option<AccountId>,
     ) -> Vec<PendingOrderInfo> {
-        let ttl = self.order_book.ttl();
         self.order_book
             .resting_orders_full()
-            .filter(|(_, aid, _)| account_id_filter.is_none_or(|filter| *aid == filter))
-            .map(|(order, aid, created_at)| {
-                PendingOrderInfo::from_resting(order, aid, created_at, ttl)
+            .filter(|(_, aid, _, _)| account_id_filter.is_none_or(|filter| *aid == filter))
+            .map(|(order, aid, created_at, expires_at_block)| {
+                PendingOrderInfo::from_resting(order, aid, created_at, expires_at_block)
             })
             .collect()
     }
 
     /// Get pending orders for a specific market.
     pub fn market_orderbook(&self, market_id: MarketId) -> Vec<PendingOrderInfo> {
-        let ttl = self.order_book.ttl();
         self.order_book
             .resting_orders_full()
-            .filter(|(order, _, _)| order.active_markets().any(|m| m == market_id))
-            .map(|(order, aid, created_at)| {
-                PendingOrderInfo::from_resting(order, aid, created_at, ttl)
+            .filter(|(order, _, _, _)| order.active_markets().any(|m| m == market_id))
+            .map(|(order, aid, created_at, expires_at_block)| {
+                PendingOrderInfo::from_resting(order, aid, created_at, expires_at_block)
             })
             .collect()
     }
@@ -1487,6 +1509,27 @@ impl BlockSequencer {
                 let order_id = self.next_order_id;
                 self.next_order_id += 1;
                 order.id = order_id;
+                let expires_at_block =
+                    order.effective_expires_at_block(self.height, self.order_book.ttl());
+                if self.height > expires_at_block {
+                    witness_rejections.push(WitnessRejection {
+                        order: order.clone(),
+                        account_id: account_id.0,
+                        reason: sybil_verifier::RejectionReason::Expired {
+                            current_block: self.height,
+                            expires_at_block,
+                        },
+                    });
+                    rejections.push(Rejection {
+                        order_id,
+                        account_id,
+                        reason: RejectionReason::Expired {
+                            current_block: self.height,
+                            expires_at_block,
+                        },
+                    });
+                    continue;
+                }
 
                 if is_mm {
                     // MM orders: STP check, flash liquidity (skip balance validation)
@@ -2166,7 +2209,7 @@ mod tests {
         assert_eq!(result.rejections.len(), 0);
 
         assert_eq!(seq.order_book.len(), 1);
-        let (_, resting_aid, resting_created) =
+        let (_, resting_aid, resting_created, _) =
             seq.order_book.resting_orders_full().next().unwrap();
         assert_eq!(resting_aid, aid);
         assert_eq!(resting_created, 1);
@@ -3267,6 +3310,56 @@ mod tests {
             "expected Admitted after cancel, got {:?}",
             outcome
         );
+    }
+
+    #[test]
+    fn direct_ioc_order_participates_once_and_never_rests() {
+        let (mut seq, aid, markets, m0, _) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
+        let mut order = outcome_buy(&markets, 0, m0, 0, 400_000_000, 10);
+        order.time_in_force = matching_engine::TimeInForce::Ioc;
+
+        assert!(matches!(
+            seq.try_admit_direct(single_order_sub(aid, order)),
+            AdmitOutcome::Admitted { .. }
+        ));
+
+        let bp = seq.produce_block(vec![], 1000);
+        assert_eq!(bp.flow_metrics.carried_resting_orders, 1);
+        assert_eq!(seq.pending_orders_info(Some(aid)).len(), 0);
+    }
+
+    #[test]
+    fn gtd_order_expires_after_requested_block() {
+        let (mut seq, aid, markets, m0, _) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
+        let mut order = outcome_buy(&markets, 0, m0, 0, 400_000_000, 10);
+        order.time_in_force = matching_engine::TimeInForce::Gtd;
+        order.expires_at_block = Some(1);
+
+        assert!(matches!(
+            seq.try_admit_direct(single_order_sub(aid, order)),
+            AdmitOutcome::Admitted { .. }
+        ));
+
+        seq.produce_block(vec![], 1000);
+        assert_eq!(seq.pending_orders_info(Some(aid)).len(), 1);
+
+        seq.produce_block(vec![], 2000);
+        assert_eq!(seq.pending_orders_info(Some(aid)).len(), 0);
+    }
+
+    #[test]
+    fn direct_gtd_order_rejects_when_it_cannot_reach_next_batch() {
+        let (mut seq, aid, markets, m0, _) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
+        let mut order = outcome_buy(&markets, 0, m0, 0, 400_000_000, 10);
+        order.time_in_force = matching_engine::TimeInForce::Gtd;
+        order.expires_at_block = Some(0);
+
+        match seq.try_admit_direct(single_order_sub(aid, order)) {
+            AdmitOutcome::Rejected(SequencerError::Rejected(rejection)) => {
+                assert!(matches!(rejection.reason, RejectionReason::Expired { .. }));
+            }
+            other => panic!("expected expired rejection, got {:?}", other),
+        }
     }
 
     #[test]

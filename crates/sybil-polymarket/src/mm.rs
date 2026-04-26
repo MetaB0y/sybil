@@ -499,6 +499,8 @@ impl MmActor {
         let req = SubmitOrderRequest {
             account_id: self.account_id,
             orders: orders.to_vec(),
+            time_in_force: TimeInForce::Ioc,
+            expires_at_block: None,
             mm_budget_nanos: Some(budget_nanos),
         };
         match self.sybil_client.submit_orders(&req).await {

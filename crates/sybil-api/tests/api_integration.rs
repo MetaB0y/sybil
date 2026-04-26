@@ -394,6 +394,82 @@ async fn order_visible_immediately_after_submit() {
 }
 
 #[tokio::test]
+async fn ioc_order_is_removed_after_one_batch() {
+    let (app, handle) = test_app(true).await;
+
+    let (_, body) = post_json(app.clone(), "/v1/markets", json!({ "name": "IOC" })).await;
+    let market_id = parse_json(&body)["market_id"].as_u64().unwrap();
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 10_000_000_000u64 }),
+    )
+    .await;
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+
+    let (status, body) = post_json(
+        app.clone(),
+        "/v1/orders",
+        json!({
+            "account_id": account_id,
+            "time_in_force": "IOC",
+            "orders": [{
+                "type": "BuyYes",
+                "market_id": market_id,
+                "limit_price_nanos": 500_000_000u64,
+                "quantity": 10
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "submit failed: {}",
+        String::from_utf8_lossy(&body)
+    );
+
+    handle.produce_block().await.unwrap();
+    let (status, body) = get(app, &format!("/v1/accounts/{account_id}/orders")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(parse_json(&body).as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn gtd_requires_expires_at_block() {
+    let (app, _) = test_app(true).await;
+
+    post_json(app.clone(), "/v1/markets", json!({ "name": "GTD" })).await;
+    post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 10_000_000_000u64 }),
+    )
+    .await;
+
+    let (status, body) = post_json(
+        app,
+        "/v1/orders",
+        json!({
+            "account_id": 0,
+            "time_in_force": "GTD",
+            "orders": [{
+                "type": "BuyYes",
+                "market_id": 0,
+                "limit_price_nanos": 500_000_000u64,
+                "quantity": 10
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(parse_json(&body)["error"]
+        .as_str()
+        .unwrap()
+        .contains("GTD orders require expires_at_block"));
+}
+
+#[tokio::test]
 async fn market_search_by_tag() {
     let (app, _) = test_app(true).await;
 
