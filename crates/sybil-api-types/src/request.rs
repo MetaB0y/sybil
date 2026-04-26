@@ -109,7 +109,7 @@ pub struct SubmitOrderRequest {
     /// Time-in-force policy applied to all orders in this submission.
     #[serde(default)]
     pub time_in_force: TimeInForce,
-    /// Last eligible block height for GTD orders.
+    /// Last eligible block height for explicit-expiry orders.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_at_block: Option<u64>,
     /// If set, treat these orders as market maker orders with flash liquidity.
@@ -229,10 +229,10 @@ pub struct SubmitSignedOrderRequest {
     pub signer_pubkey_hex: String,
     /// The order to submit.
     pub order: SignedOrderData,
-    /// Time-in-force policy covered by the P256 signature.
+    /// API time-in-force policy. Signed IOC/GTD orders commit to `expires_at_block`.
     #[serde(default)]
     pub time_in_force: TimeInForce,
-    /// Last eligible block height for GTD orders, covered by the P256 signature.
+    /// Last eligible block height, covered by the P256 signature. Required for signed IOC/GTD.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_at_block: Option<u64>,
     /// Hex-encoded P256 ECDSA signature.

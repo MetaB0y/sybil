@@ -13,7 +13,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use matching_engine::{Fill, MarketId, Order, TimeInForce};
+use matching_engine::{Fill, MarketId, Order};
 use serde::{Deserialize, Serialize};
 
 use crate::account::{AccountId, AccountStore};
@@ -375,7 +375,7 @@ impl OrderBook {
     /// release reservations for filled portions.
     ///
     /// `mm_order_ids` are excluded (MM orders never enter the book).
-    pub fn settle(&mut self, fills: &[Fill], mm_order_ids: &HashSet<u64>) {
+    pub fn settle(&mut self, fills: &[Fill], mm_order_ids: &HashSet<u64>, current_height: u64) {
         // Build fill-qty map
         let mut filled_qty: HashMap<u64, u64> = HashMap::new();
         for f in fills {
@@ -409,7 +409,7 @@ impl OrderBook {
                 continue;
             }
 
-            if matches!(ro.order.time_in_force, TimeInForce::Ioc) {
+            if current_height >= ro.expires_at_block {
                 Self::release_reservations(
                     &mut self.balance_reservations,
                     &mut self.position_reservations,
@@ -582,7 +582,7 @@ mod tests {
             fill_price: NANOS_PER_DOLLAR / 2,
             account_id: 0,
         }];
-        book.settle(&fills, &HashSet::new());
+        book.settle(&fills, &HashSet::new(), 1);
 
         assert_eq!(book.reserved_balance(aid), 0);
         assert_eq!(book.len(), 0);
@@ -608,7 +608,7 @@ mod tests {
             fill_price: NANOS_PER_DOLLAR / 2,
             account_id: 0,
         }];
-        book.settle(&fills, &HashSet::new());
+        book.settle(&fills, &HashSet::new(), 1);
 
         // Remaining: 6 of 10 = 60%
         assert_eq!(book.len(), 1);
@@ -629,10 +629,10 @@ mod tests {
         let account = accounts.get(aid).unwrap();
 
         let mut order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
-        order.time_in_force = TimeInForce::Ioc;
-        book.accept(order, aid, account, 1).unwrap();
+        order.expires_at_block = Some(1);
+        book.accept(order, aid, account, 0).unwrap();
 
-        book.settle(&[], &HashSet::new());
+        book.settle(&[], &HashSet::new(), 1);
 
         assert_eq!(book.reserved_balance(aid), 0);
         assert_eq!(book.len(), 0);
@@ -646,7 +646,6 @@ mod tests {
         let account = accounts.get(aid).unwrap();
 
         let mut order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
-        order.time_in_force = TimeInForce::Gtd;
         order.expires_at_block = Some(2);
         book.accept(order, aid, account, 1).unwrap();
 

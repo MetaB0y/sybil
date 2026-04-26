@@ -46,6 +46,14 @@ fn parse_signature(signature_hex: &str) -> Result<Signature, AppError> {
         .map_err(|_| AppError::bad_request("Invalid P256 ECDSA signature"))
 }
 
+async fn next_block_height(state: &AppState) -> Result<u64, AppError> {
+    let latest = state.sequencer.get_latest_block().await?;
+    Ok(latest
+        .map(|block| block.header.height)
+        .unwrap_or(0)
+        .saturating_add(1))
+}
+
 /// POST /v1/orders
 #[utoipa::path(
     post,
@@ -63,12 +71,18 @@ pub async fn submit_orders(
 ) -> Result<Json<OrderAcceptedResponse>, AppError> {
     // Get current markets for validation
     let markets = state.sequencer.list_markets().await?;
+    let ioc_expires_at_block = next_block_height(&state).await?;
 
     let mut orders = Vec::with_capacity(req.orders.len());
     for spec in &req.orders {
         let mut order = order_spec_to_order(spec, &markets).map_err(AppError::bad_request)?;
-        apply_time_in_force(&mut order, req.time_in_force, req.expires_at_block)
-            .map_err(AppError::bad_request)?;
+        apply_time_in_force(
+            &mut order,
+            req.time_in_force,
+            req.expires_at_block,
+            Some(ioc_expires_at_block),
+        )
+        .map_err(AppError::bad_request)?;
         orders.push(order);
     }
 
@@ -112,7 +126,7 @@ pub async fn submit_signed_order(
     let signer = parse_signer_public_key(&req.signer_pubkey_hex)?;
     let signature = parse_signature(&req.signature_hex)?;
     let mut order = signed_order_data_to_order(&req.order).map_err(AppError::bad_request)?;
-    apply_time_in_force(&mut order, req.time_in_force, req.expires_at_block)
+    apply_time_in_force(&mut order, req.time_in_force, req.expires_at_block, None)
         .map_err(AppError::bad_request)?;
     let signed = SignedOrder {
         order,

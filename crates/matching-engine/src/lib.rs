@@ -37,8 +37,7 @@ pub use book::{
 pub use market::{Market, MarketSet};
 pub use mm_constraint::{MmConstraint, MmId, MmSide};
 pub use order::{
-    ConditionDir, Fill, MarginalPayoff, Order, PriceCondition, TimeInForce, MAX_MARKETS_PER_ORDER,
-    MAX_STATES,
+    ConditionDir, Fill, MarginalPayoff, Order, PriceCondition, MAX_MARKETS_PER_ORDER, MAX_STATES,
 };
 pub use order_builder::OrderBuilder;
 pub use problem::{MarketGroup, Problem, ProblemSummary};

@@ -1568,7 +1568,11 @@ impl BlockSequencer {
                                 // (settle with a "fully filled" phantom to release)
                                 let phantom_fill =
                                     Fill::new(accepted.order.id, accepted.order.max_fill, 0);
-                                self.order_book.settle(&[phantom_fill], &HashSet::new());
+                                self.order_book.settle(
+                                    &[phantom_fill],
+                                    &HashSet::new(),
+                                    self.height,
+                                );
                                 witness_rejections.push(WitnessRejection {
                                     order: accepted.order.clone(),
                                     account_id: account_id.0,
@@ -1698,7 +1702,8 @@ impl BlockSequencer {
             self.finalize_block_state_phase(&fills, &problem, &clearing_prices, timestamp_ms);
 
         // Update order book: release filled orders' reservations, adjust partial fills
-        self.order_book.settle(&fills, &mm_order_ids_set);
+        self.order_book
+            .settle(&fills, &mm_order_ids_set, self.height);
         let pending_orders_after = self.order_book.len();
 
         let previous_header = self.last_header.as_ref().map(|h| WitnessBlockHeader {
@@ -3316,7 +3321,7 @@ mod tests {
     fn direct_ioc_order_participates_once_and_never_rests() {
         let (mut seq, aid, markets, m0, _) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
         let mut order = outcome_buy(&markets, 0, m0, 0, 400_000_000, 10);
-        order.time_in_force = matching_engine::TimeInForce::Ioc;
+        order.expires_at_block = Some(1);
 
         assert!(matches!(
             seq.try_admit_direct(single_order_sub(aid, order)),
@@ -3332,8 +3337,7 @@ mod tests {
     fn gtd_order_expires_after_requested_block() {
         let (mut seq, aid, markets, m0, _) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
         let mut order = outcome_buy(&markets, 0, m0, 0, 400_000_000, 10);
-        order.time_in_force = matching_engine::TimeInForce::Gtd;
-        order.expires_at_block = Some(1);
+        order.expires_at_block = Some(2);
 
         assert!(matches!(
             seq.try_admit_direct(single_order_sub(aid, order)),
@@ -3351,7 +3355,6 @@ mod tests {
     fn direct_gtd_order_rejects_when_it_cannot_reach_next_batch() {
         let (mut seq, aid, markets, m0, _) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
         let mut order = outcome_buy(&markets, 0, m0, 0, 400_000_000, 10);
-        order.time_in_force = matching_engine::TimeInForce::Gtd;
         order.expires_at_block = Some(0);
 
         match seq.try_admit_direct(single_order_sub(aid, order)) {
