@@ -2,7 +2,7 @@
 tags: [zk, infrastructure]
 layer: verification
 status: planned
-last_verified: 2026-04-10
+last_verified: 2026-04-26
 ---
 
 # Proof Architecture
@@ -31,8 +31,8 @@ Extended header:
 height | parent_hash | state_root | events_root | order_count | fill_count | timestamp_ms
 ```
 
-Two new guarantees from `events_root`:
-1. **State tree** (`state_root`): "after this block, account X has balance B and positions P" — inclusion proof against the state Merkle root.
+The extended header gives two authenticated roots:
+1. **State tree** (`state_root`): "after this block, this complete validium state leaf has value V" — inclusion or exclusion proof against the typed state root.
 2. **Events tree** (`events_root`): "fill F happened in block N" or "these are ALL fills in block N" — inclusion/completeness proof against the events Merkle root.
 
 Combined with `parent_hash` chaining, a prover can make claims spanning any range of blocks.
@@ -41,19 +41,27 @@ Combined with `parent_hash` chaining, a prover can make claims spanning any rang
 
 ### 1. State Tree
 
-A Merkle tree over all account state, recomputed (incrementally) each block.
+A typed authenticated key-value tree over complete validium state, updated
+incrementally each block. Phase 1 is still the account-only flat hash in
+[[State Root Schema]]; Phase 2 is one typed qmdb root.
 
-**Key**: `AccountId` (u64)
-**Value**: `hash(balance || total_deposited || sorted_positions || events_digest)`
+**Keys**: typed namespaces such as `acct/{account_id}`,
+`acct_resv/{account_id}`, `order/{order_id}`, `market/{market_id}`, and
+`sys/*`.
+
+**Values**: canonical Sybil bytes for each leaf type.
 
 **What it proves**:
 - Account X has balance B at block N (inclusion proof)
 - Account X does not exist at block N (non-inclusion proof, requires sparse or sorted tree)
-- The complete account set at block N (full tree)
+- Resting order Y is active or absent at block N
+- Market M has lifecycle/resolution state S
+- The complete validium state at block N (full tree)
 
 **Current implementation**: flat BLAKE3 hash over all accounts — O(n) per block, no per-account proofs. The hashed value already includes a per-account `events_digest`, a running BLAKE3 accumulator over fills and admin events that touched the account.
 
-**Target**: authenticated key-value store (e.g., sparse Merkle tree, qmdb). O(k log n) per block where k = accounts touched. Per-account Merkle paths are O(log n).
+**Target**: ordered qmdb authenticated key-value store using SHA-256 for the
+v2 state root. O(k log n) per block where k = state leaves touched.
 
 **Why this enables flexible proofs**:
 - PnL: state proof at block A + state proof at block B → `portfolio_value_B - total_deposited_B` (note: `total_deposited` is already on the Account struct)
@@ -166,22 +174,24 @@ Build a Merkle tree over block events and commit `events_root` in the block head
 
 ### Phase 2: Authenticated State Tree
 
-Replace `compute_state_root()` with an authenticated key-value store.
+Replace `compute_state_root()` with the typed qmdb state commitment specified
+in [[State Root Schema]].
 
-- Sparse Merkle tree or qmdb (LayerZero/Commonware collaboration, see https://commonware.xyz/blogs/qmdb)
-- Incremental updates: only rehash accounts touched by this block's fills
-- Per-account Merkle path generation
+- One typed qmdb keyspace for accounts, reservations, resting orders,
+  market lifecycle state, and system counters
+- SHA-256 state-root hash; v1 flat BLAKE3 roots remain historical
+- Inclusion and exclusion proof generation for typed leaves
 - State root computation becomes O(k log n) instead of O(n)
-- `AccountStore` backed by authenticated structure
-- Verifier's state root check adapts to new tree format
+- Verifier's state root check dispatches by root version or migration height
 
-This is the deeper change — it touches `AccountStore`, `compute_state_root()`, persistence (`store.rs`), and the verifier's Layer 3.
+This is the deeper change — it touches state storage, `compute_state_root()`,
+persistence, and the verifier's Layer 3.
 
 ### Phase 3: Proof API
 
 Expose endpoints for requesting authenticated data:
 
-- `GET /v1/proofs/state/{account_id}?height={N}` → state Merkle proof
+- `GET /v1/proofs/state/{key}?height={N}` → typed state inclusion/exclusion proof
 - `GET /v1/proofs/events?height={N}` → events tree for block N
 - `GET /v1/proofs/events/{account_id}?from={A}&to={B}` → account's events with Merkle proofs
 
@@ -189,7 +199,7 @@ The sequencer needs to retain enough history to serve these (state tree at each 
 
 ### Phase 4: Integration with ZK Pipeline
 
-The [[Block Witness]] evolves: instead of full `pre_state` / `post_state` snapshots, it includes Merkle paths for the accounts touched by this block's fills. The ZK circuit verifies the Merkle paths against the state root, applies settlement, and verifies the new state root.
+The [[Block Witness]] evolves: instead of full `pre_state` / `post_state` snapshots, it includes qmdb paths for the typed leaves touched by the block. The ZK circuit verifies the paths against the state root, applies settlement and order-book/market-state changes, and verifies the new state root.
 
 This is when the authenticated data layer and the validity proof pipeline converge.
 
@@ -203,9 +213,15 @@ Key properties:
 - Single Rust implementation (MIT/Apache 2.0), rapidly maturing
 - Available as `commonware-storage::qmdb`
 
-It's a natural fit for the state tree: accounts are keys, state is values, blocks produce updates. The MMR structure means we get historical state proofs for free — "account X had balance B at block 1000" without storing per-block snapshots.
+It's a natural fit for the state tree: typed state leaves are keys, canonical
+state values are values, and blocks produce updates. The MMR structure means
+we get historical state proofs within the retained journal window — "account
+X had balance B at block 1000" or "order Y was absent at block 1000" without
+storing a separate tree snapshot per height.
 
-Stability: ALPHA. Worth prototyping against, but we should be prepared to implement our own sparse Merkle tree if qmdb's API doesn't fit.
+Stability: ALPHA. It is already in the sequencer as the account snapshot
+store, so Phase 2 should reuse it unless the ZK/bridge implementation proves
+qmdb proof verification is too expensive.
 
 ## What Changes in Sybil
 
@@ -213,26 +229,29 @@ Stability: ALPHA. Worth prototyping against, but we should be prepared to implem
 |-----------|---------|---------------|---------------|
 | `BlockHeader` | state_root, parent_hash | + events_root | same |
 | `Block` | orders, fills, prices, rejections | + system_events | same |
-| `compute_state_root()` | flat BLAKE3 over all accounts + `events_digest` | same | Merkle tree root |
+| `compute_state_root()` | flat BLAKE3 over all accounts + `events_digest` | same | typed qmdb root |
 | `Fill` struct | order_id, qty, price, account_id | same | same |
 | `Account` | balance, positions, total_deposited, events_digest | same | same |
-| `AccountStore` | HashMap | same | authenticated KV |
-| `store.rs` | redb tables | + events tree storage | + state tree storage |
+| `AccountStore` | HashMap | same | mirrored into authenticated KV |
+| `store.rs` | redb tables + account qmdb snapshots | + events tree storage | typed state qmdb commitment |
 | Verifier Layer 3 | checks state_root, parent_hash | + checks events_root | state root via Merkle |
-| `BlockWitness` | full pre/post state snapshots + system_events | same | Merkle paths for touched accounts |
+| `BlockWitness` | full pre/post state snapshots + system_events | same | qmdb paths for touched state leaves |
 | API | no proof endpoints | same | + proof endpoints (Phase 3) |
 
 ## Resolved Decisions
 
 1. **Events tree structure**: flat list of leaves, sorted by canonical block order. Per-account indexing can be added later if scans become too expensive.
 
-2. **Hash function**: BLAKE3. It's already the system hash, fast in the sequencer, and acceptable for the data layer even if the eventual circuit uses a different hash internally.
+2. **Events hash function**: BLAKE3. It's already the event/header hash and remains acceptable for per-block event authentication.
 
-3. **Range inactivity compression**: implemented today as `events_digest` on `Account`. Equal digests at two trusted heights imply no account-level activity in between.
+3. **State-root v2 hash function**: SHA-256 via qmdb. This is the default for the complete typed state root because it matches the current qmdb instantiation and is easier to route through ZK/EVM verification paths.
+
+4. **Range inactivity compression**: implemented today as `events_digest` on `Account`. Equal digests at two trusted heights imply no account-level activity in between.
 
 ## Remaining Open Question
 
-1. **Historical state retention**: do we store state trees for all blocks, or just recent ones? qmdb's append-only model gives history for free. A standard Merkle tree would need per-block snapshots or a rollback mechanism.
+1. **Historical state retention**: how much qmdb journal history is retained locally and on DA. This is a DA/recovery policy question, not a state-root schema question.
+2. **Operator replacement**: state root commits to complete state, but state data must be available independently for a replacement operator. See SYB-116 and SYB-76.
 
 ## Related Notes
 

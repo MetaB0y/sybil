@@ -39,6 +39,16 @@ Anything written to qmdb without a corresponding redb fence flip is treated as u
 
 **Serialization**: structured values are stored with `rmp-serde` MessagePack. That keeps values self-describing and tolerant of additive schema changes via `#[serde(default)]`.
 
+### Commitment Direction
+
+This split is the current runtime persistence model, not the final
+cryptographic commitment model. [[State Root Schema]] Phase 2 promotes qmdb
+from account-snapshot storage to a typed global state commitment over
+accounts, reservations, resting orders, market lifecycle state, and system
+counters. redb can continue to own simple metadata and the crash-recovery
+fence, but the block header's production `state_root_v2` should come from the
+typed qmdb root, not from redb tables or MessagePack bytes.
+
 ## Tier 1: Core State
 
 Authoritative state needed to resume the exchange after a crash:

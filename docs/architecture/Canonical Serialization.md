@@ -2,7 +2,7 @@
 tags: [zk, serialization, spec]
 layer: verification
 status: current
-last_verified: 2026-04-17
+last_verified: 2026-04-26
 ---
 
 # Canonical Serialization
@@ -166,6 +166,29 @@ follow-up RFC alongside the events tree. The Rust signing path already uses
 cover resolved IOC/GTD expiry semantics even before the full witness byte spec
 is frozen.
 
+### State leaves for `state_root_v2` (deferred)
+
+[[State Root Schema]] fixes the v2 commitment shape: one typed qmdb root over
+accounts, reservations, active/resting orders, market lifecycle state, and
+system counters. Each committed value MUST begin with an ASCII domain string
+identifying the leaf type and version, followed by canonical fixed-width fields
+and deterministically sorted collections.
+
+Reserved domains:
+
+| Key family | Value domain |
+|---|---|
+| `acct/{account_id}` | `sybil/state/acct/v1` |
+| `acct_resv/{account_id}` | `sybil/state/acct-resv/v1` |
+| `order/{order_id}` | `sybil/state/order/v1` |
+| `market/{market_id}` | `sybil/state/market/v1` |
+| `sys/*` | `sybil/state/sys/v1` |
+
+The account leaf can reuse `AccountSnapshot` fields plus any withdrawal or
+nullifier metadata needed by the bridge. The non-account field layouts are
+intentionally deferred until the typed state writer is implemented; adding
+them is required before `state_root_v2` can ship.
+
 ## Event encoding registry
 
 Events are tag-dispatched single-byte sum types. The running
@@ -201,7 +224,7 @@ Canonical Bytes v1 has no version byte in individual encodings. Breaking
 changes are handled at the **hash-domain level**:
 
 - v1 state root: `BLAKE3(concat(sorted_account_bytes))`
-- v2 state root: `BLAKE3("sybil/state-root/v2" || concat(sorted_account_bytes))`
+- v2 state root: `SHA256("sybil/state-root/v2" || qmdb_root(typed_state_leaves))`
 
 This means existing hashes remain valid; only new hashes land under new
 domain separation strings. Verifiers pick the algorithm by block height (see

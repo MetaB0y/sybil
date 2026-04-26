@@ -3,14 +3,14 @@ tags: [zk, spec]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-04-17
+last_verified: 2026-04-26
 ---
 
 # State Root Schema
 
-Normative spec for the state root: what it commits to, how bytes are produced
-from accounts, and how the scheme evolves from the current flat hash
-(Phase 1) to an authenticated Merkle tree anchored in
+Normative spec for the state root: what it commits to, how bytes are produced,
+and how the scheme evolves from the current flat account hash (Phase 1) to a
+complete typed validium-state commitment anchored in
 [commonware-storage qmdb](https://commonware.xyz/blogs/qmdb) (Phase 2).
 
 [[State Root and Parent Hash]] is the concept introduction — one-page story
@@ -18,9 +18,9 @@ of *why* we have a state root and a parent hash. This doc is the *how*.
 
 ## What's committed to
 
-The state root is a 32-byte digest over **all account state after
-settlement, including system-event effects**. Specifically, the fields of
-`AccountSnapshot`:
+Phase 1 is the implementation shipping today. It is a 32-byte digest over
+**account state after settlement, including system-event effects**.
+Specifically, the fields of `AccountSnapshot`:
 
 - `id` (u64)
 - `balance` (i64)
@@ -28,19 +28,27 @@ settlement, including system-event effects**. Specifically, the fields of
 - `positions` — non-zero position triples `(market_id, outcome, qty)`
 - `events_digest` — per-account running BLAKE3 accumulator over events
 
-Anything not in `AccountSnapshot` is explicitly **not** covered: the mempool,
-the resting order book, market metadata, oracle state, sequencer clock. Those
-are either reproducible from the witness (order book), irrelevant to balances
-(mempool), or live in separate commitments (markets are referenced by id
-inside positions, their full metadata is not part of state root).
+Anything not in `AccountSnapshot` is explicitly **not covered by v1**: the
+resting order book, market metadata, oracle lifecycle state, and sequencer
+counters all live outside the root.
 
-This matters for [[Order Types|order expiry]]. The current verifier can check
-that an order included in a block was not expired at `header.height`, because
-the resolved `expires_at_block` lives in the private witness order. It cannot,
-from the current state root alone, prove that a post-block expired remainder
-was not kept in the off-chain resting book. Phase 2 should either include
-resting orders in the authenticated state tree or publish a separate
-order-book root when that property becomes bridge-critical.
+Phase 2 is the production target. It is a single typed qmdb root over the
+complete validium state needed to verify, recover, and restart the exchange:
+
+| Key family | Commits to |
+|---|---|
+| `acct/{account_id}` | balance, positions, total deposited, account event digest, withdrawal/nullifier metadata |
+| `acct_resv/{account_id}` | aggregate open reservations or equivalent data needed to derive withdrawable cash |
+| `order/{order_id}` | active resting order, owner, remaining quantity, expiry, and reservation metadata |
+| `market/{market_id}` | market lifecycle, resolution state, and compact metadata commitment |
+| `sys/*` | schema version, height marker, next ids, and global counters |
+
+This matters for [[Order Types|order expiry]]. In v1 the verifier can check
+that an included order was not expired at `header.height`, but cannot prove
+from `state_root` alone that a post-block expired remainder was not kept in
+the off-chain resting book. In v2, active resting orders are committed state,
+so order absence/existence becomes a state proof rather than a witness-only
+claim.
 
 ## Phase 1 (current): flat canonical hash
 
@@ -100,28 +108,28 @@ current code:
 So qmdb is shipping today as a storage layer. It's not yet the source of
 truth for the block header's `state_root`.
 
-## Phase 2 (target): promote qmdb's Merkle root to `state_root`
+## Phase 2 (target): typed global qmdb root
 
-The cheapest path to authenticated state is to reuse the MMR that qmdb
-already maintains. Write once, hash once.
+The cheapest complete path to authenticated state is to reuse the ordered
+qmdb MMR that already exists in the sequencer, but widen the keyspace from
+account snapshots to typed validium state. The production state root is one
+root, not one root per subsystem.
 
 ### Design
 
-1. After settlement, commit the batch to `QmdbAccounts` as today.
-2. Read the MMR root back from qmdb (the `merkleize` step already builds it;
-   we just need to surface it).
-3. Publish that MMR root in the block header as `state_root`.
-4. The per-account serialization inside qmdb stays
-   `rmp_serde` for now **but** is wrapped so that what qmdb commits to is
-   `BLAKE3("sybil/account/v1" || canonical_account_bytes)` — see §Encoding
-   alignment.
+1. After settlement, write every touched state leaf to qmdb under a typed key.
+2. Delete leaves that are no longer active, such as fully filled or expired
+   resting orders.
+3. Read the MMR root back from qmdb after `merkleize` / `apply_batch`.
+4. Publish `state_root_v2 = SHA256("sybil/state-root/v2" || qmdb_root)` in
+   the block header.
 
-Result: every persisted account ends up under an authenticated MMR whose
-root is the state root. Per-account inclusion proofs come for free from
-qmdb's MMR proof API. Historical proofs come for free from qmdb's
-append-only structure.
+Result: accounts, reservations, active orders, market lifecycle, and global
+counters share one authenticated commitment. Inclusion and exclusion proofs
+come from qmdb's ordered proof APIs. Historical proofs come from qmdb's
+append-only structure within the retained journal window.
 
-### Hasher: swap SHA-256 for BLAKE3
+### Hasher: SHA-256
 
 qmdb is generic over the hasher. The current alias:
 
@@ -132,83 +140,87 @@ type AccountDb = OrderedVariableDb<
 >;
 ```
 
-`commonware-cryptography` ships a BLAKE3 module
-(`commonware_cryptography::blake3`). Switching the hasher parameter aligns
-qmdb's MMR hash with the rest of the system's hashing (events digest,
-parent hash, v1 state root) and keeps a single hash in the ZK circuit.
-
-**Open question:** whether to keep SHA-256 to match RISC Zero / SP1's
-native-precompile story and thereby keep proving cheap. BLAKE3 circuit
-support is progressing but less mature. Decide in the proving-system
-selection issue (SYB-27).
+**Decision:** keep SHA-256 for `state_root_v2`. This matches the qmdb
+instantiation already wired into the sequencer, keeps the authenticated
+database on a conservative hash, and is easier to route through ZK/EVM
+verification paths than BLAKE3. Existing v1 roots, block parent hashes, and
+account `events_digest` remain BLAKE3; verifiers dispatch by root version or
+migration height.
 
 ### Encoding alignment
 
 Today's qmdb values are `rmp_serde`-serialized `Account` structs. For
-persistence that's fine — the store round-trips the Rust struct.
+persistence that's fine, but it is not acceptable as a public commitment
+format because serde field order is not a protocol.
 
-For a state-root commitment we need the on-disk bytes to be an artifact of
-the canonical spec, not of the serde derive order. Two paths:
+For v2, qmdb keys and values committed by `state_root_v2` MUST be canonical
+Sybil bytes under explicit type domains. Runtime storage may keep ergonomic
+MessagePack copies elsewhere, but the authenticated value is the canonical
+commitment value.
 
-**(a) Double-encode.** Keep qmdb values as `rmp_serde` for storage
-ergonomics; publish `BLAKE3("sybil/account/v1" || canonical_account_bytes)`
-as the MMR leaf value. qmdb then commits to the canonical digest, not the
-MessagePack blob. Storage size unchanged; one extra BLAKE3 per touched
-account per block (cheap).
-
-**(b) Replace the encoding.** Store canonical bytes directly in qmdb;
-drop `rmp_serde`. Saves the extra hash but ties the on-disk format to the
-canonical spec forever, so every encoding change is a storage migration.
-
-Recommendation: **path (a)**. It keeps storage changes cheap, lets the
-canonical spec evolve independently (via version bumps), and adds a thin
-BLAKE3 layer whose performance cost is far below settlement.
+The state leaf domain rules are defined in [[Canonical Serialization]].
+Every leaf starts with a type/version domain, for example
+`"sybil/state/acct/v1"` or `"sybil/state/order/v1"`, followed by fixed-width
+canonical fields and deterministically sorted collections. Exact byte-level
+field layouts for non-account v2 leaves are still implementation follow-ups;
+the key families and commitment shape are fixed here.
 
 ### Incremental update
 
 qmdb already does the right thing: `new_batch` / `write` / `merkleize` /
-`apply_batch`. The sequencer already calls this sequence on every
-boundary. The change is just:
+`apply_batch`. The sequencer already calls this sequence for account
+snapshots at block boundaries. The v2 change is:
 
+- Replace the account-only snapshot wrapper with a typed state writer.
+- Write every touched account, reservation, active/resting order,
+  market-state, and system leaf in the same block-boundary batch.
 - After `apply_batch`, ask qmdb for the resulting MMR root.
-- Write that root into `BlockHeader.state_root`.
+- Write the domain-wrapped root into `BlockHeader.state_root`.
 
 Cost per block: bounded by the number of touched accounts × hash-per-level
 — same ballpark as any Merkle KV store. No change to Big-O.
 
 ### Proof API
 
-qmdb exposes MMR proofs natively. Wrap them in a Sybil-facing endpoint:
+qmdb exposes current-value and exclusion proofs natively. Wrap them in a
+Sybil-facing endpoint for off-chain verifiers and ZK provers:
 
 ```
-GET /v1/proofs/state/{account_id}?height={N}
+GET /v1/proofs/state/{key}?height={N}
   → {
-      "account_id": 42,
+      "key": "acct/42",
       "block_height": N,
       "state_root": "0x...",
-      "leaf": "0x...",                         // BLAKE3 of canonical account bytes
-      "account_snapshot": { ... },              // canonical fields, optional
+      "leaf": "0x...",                         // canonical state leaf bytes or digest
+      "leaf_type": "acct/v1",
       "mmr_proof": { ... }                      // qmdb's native proof bytes
     }
 ```
 
-Verifier runs qmdb's proof verifier with the supplied hasher; then asserts
-`leaf == BLAKE3("sybil/account/v1" || canonical_account_bytes(snapshot))`.
+Verifier runs qmdb's proof verifier with SHA-256 and the supplied key/value
+or exclusion proof. For bridge withdrawals, the L1 contract should verify a
+ZK proof over the relevant qmdb membership/exclusion checks rather than
+reimplement qmdb proof verification directly in Solidity.
 
-For consumers that can't link qmdb (e.g., a Solidity verifier), we export
-either (a) a self-contained MMR proof verifier compiled via
-`commonware-storage` helpers, or (b) a ZK proof wrapping the verification.
-The choice depends on the ZK settlement architecture (SYB-27, SYB-30) and
-is out of scope for this RFC.
+The proof should expose withdrawable cash, not just raw balance. That is why
+reservations or equivalent open-exposure data are committed state.
 
 ## Alternatives considered
+
+### Account-only qmdb root
+
+Rejected as the production target. It is simple, but incomplete: it cannot
+prove active resting orders, reservations, market lifecycle state, or that an
+expired order is absent after a block. It remains the Phase 1 historical
+scheme only.
 
 ### Build a fresh Sparse Merkle Tree
 
 Cost: new dependency surface, duplicate storage, reimplement proof API,
 reimplement incremental updates. Benefit: decouples state root from
-qmdb's evolution. Rejected — qmdb is production today, actively maintained
-by Commonware, and gives us Merkle-for-free.
+qmdb's evolution and may produce simpler Solidity proofs. Rejected for the
+main v2 commitment because withdrawals are expected to use ZK proofs and qmdb
+already gives the sequencer an authenticated ordered key-value store.
 
 ### Verkle tree
 
@@ -219,20 +231,18 @@ bottleneck and the ZK circuit is recursive anyway.
 ### Keep qmdb for persistence only; build a separate commitment tree
 
 Two trees, two roots, two sets of invariants. Only justifiable if we need
-radically different hashing (e.g. Poseidon for ZK) on the commitment side
-while qmdb stays in its native form. That's a real possibility long-term;
-for Phase 2 we can get away with one tree.
+direct Solidity membership proofs that cannot economically verify qmdb
+semantics inside a ZK proof. Keep as a fallback if SYB-27/SYB-30 prove the
+ZK path too expensive or operationally fragile.
 
 ## Migration from Phase 1 to Phase 2
 
 Hard fork at a chosen block height `H`:
 
 - Blocks with `height < H` use `state_root_v1` (flat hash).
-- Block `H` uses `state_root_v2` — the qmdb MMR root (hashed with whichever
-  hasher we commit to in §Hasher) under domain prefix
-  `"sybil/state-root/v2"`. The v2 root is computed from the full account
-  set at end of settlement at block `H`; it does not chain back to the v1
-  root.
+- Block `H` uses `state_root_v2` — `SHA256("sybil/state-root/v2" ||
+  qmdb_root)`. The v2 root is computed from the complete typed state at end
+  of settlement at block `H`; it does not chain back to the v1 root.
 - Blocks with `height > H` continue with qmdb-rooted state.
 
 Verifiers dispatch on `header.height`: read block header, pick the
@@ -240,8 +250,8 @@ algorithm, re-verify. Both implementations retained in `sybil-verifier`
 during the migration window (forever, in practice — historical blocks need
 to remain verifiable).
 
-Domain-separation ensures no collision between v1 and v2 roots even if they
-cover the same account set.
+Domain separation and verifier dispatch ensure no collision between v1 and
+v2 roots even when they cover overlapping account data.
 
 ## Retention and historical proofs
 
@@ -249,42 +259,54 @@ Phase 1: current state only; historical proofs not supported without
 replay.
 
 Phase 2 (qmdb): qmdb is append-only by design, so historical state proofs
-come **for free** within the retained journal window. Retention is
-configured by `items_per_blob` / journal-partition pruning; the current
-sequencer keeps the full log. A future "prune to last N blocks" policy is
-a storage question, not a commitment-scheme question.
+come from the retained journal window. Retention is configured by
+`items_per_blob` / journal-partition pruning; the current sequencer keeps the
+full log. A future "prune to last N blocks" policy is a storage and DA
+recovery question, not a commitment-scheme question.
 
 ## Relation to events and witness roots
 
 | Root | Commits to | Primary consumer |
 |---|---|---|
-| `state_root` (this doc) | post-settlement account set | escape hatch, on-chain settlement |
+| `state_root` (this doc) | post-settlement complete validium state | ZK settlement, bridge claims, recovery checks |
 | `events_root` ([[Proof Architecture]]) | this block's event stream | external verifiers of "did F happen" |
 | `witness_root` ([[Block Witness]]) | the full audit package | provers, replayers |
 
 All three are expected to live in the extended block header
 (`BlockHeader v2`, defined in [[Block Witness]]).
 
+## Recovery boundary
+
+The state root is a commitment, not a data availability mechanism. If the
+operator disappears and users cannot obtain the state data, neither a qmdb
+root nor a ZK proof system can reconstruct it.
+
+The preferred recovery shape is DA-backed operator replacement: fetch
+published state snapshots/deltas, verify the reconstructed typed state
+against the latest accepted `state_root`, and start a replacement sequencer.
+Individual cash-only force exits are a conservative fallback because
+unresolved prediction-market positions cannot be cleanly unwound on L1
+without moving market resolution and settlement logic onto L1.
+
+Out of scope here:
+
+- DA provider and publication cadence: SYB-76.
+- Escape reconstruction tooling: SYB-80.
+- Operator replacement and encrypted emergency disclosure: SYB-116.
+- L1 vault/settlement contracts: SYB-31/SYB-32.
+
 ## Open questions
 
-1. **Hasher.** Keep SHA-256 (matches RISC Zero / SP1 native precompiles,
-   expensive-but-established ZK cost) or swap to BLAKE3 (system-wide
-   consistency, smaller native cost, less mature in-circuit). Defer to the
-   proving-system selection issue (SYB-27).
-2. **Leaf encoding path (a) vs (b).** Wrap-with-BLAKE3 (current
-   recommendation) or replace rmp_serde with canonical bytes directly.
-   Decision affects every future on-disk schema change.
-3. **Exposing qmdb's MMR root.** The `merkleize` API builds the root but
-   `QmdbAccounts` does not currently surface it. Needs a new method on
-   `AccountStateStore`. Small change; implementation issue, not a design
-   issue.
-4. **Solidity verifier.** Verifying an MMR proof on-chain is viable but
-   non-trivial. Needs an implementation plan in the ZK settlement RFC
-   (SYB-30) before we can commit to Phase 2 going on-chain.
-5. **Events tree co-habitation.** The events tree from
-   [[Proof Architecture]] is orthogonal but we should decide whether it
-   also lives in qmdb (simpler) or in a standalone Merkle structure
-   (separation of concerns).
+1. **Typed leaf encodings.** The key families are fixed here, but byte-level
+   encodings for account reservation, resting order, market lifecycle, and
+   system leaves must be pinned in [[Canonical Serialization]] before v2 is
+   implemented.
+2. **Exposing qmdb's MMR root and proofs.** The `merkleize` API builds the
+   root but the current `QmdbAccounts` wrapper does not surface it. The v2
+   implementation should replace that wrapper with a typed state wrapper.
+3. **Events tree co-habitation.** The events tree from
+   [[Proof Architecture]] is orthogonal. It may remain a separate per-block
+   tree even though long-lived state lives in qmdb.
 
 ## Test vectors
 
@@ -297,32 +319,32 @@ account_bytes = (72 bytes, see Canonical Serialization Vector 2)
 state_root_v1 = BLAKE3(account_bytes)
 ```
 
-**Phase 2 — concrete vectors depend on hasher choice (§Open question 1) and
-are committed alongside the first implementation PR.** The spec-level
-assertion is:
+**Phase 2 — concrete vectors land with the first implementation PR.** The
+spec-level assertion is:
 
 ```
-for each account A with id i:
-    leaf_i = H("sybil/account/v1" || canonical_account_bytes(A))
+for each typed state leaf L:
+    value_L = canonical_state_value_bytes(L)
 
-mmr_root = qmdb_mmr_root( {(key_i, leaf_i) for each i}, hasher = H )
-state_root_v2 = H("sybil/state-root/v2" || mmr_root)
+qmdb_root = qmdb_ordered_variable_root(
+    {(typed_key_L, value_L) for each active leaf},
+    hasher = SHA-256
+)
+state_root_v2 = SHA256("sybil/state-root/v2" || qmdb_root)
 ```
-
-where `H ∈ {SHA-256, BLAKE3}` per Open Question 1.
 
 ## Where this lives
 
 > `crates/sybil-verifier/src/block.rs` — `compute_state_root` (Phase 1)
 > `crates/matching-sequencer/src/block.rs` — writes `state_root` into the block header
 > `crates/matching-sequencer/src/canonical_state.rs` — canonical account ordering used by Phase 1
-> `crates/matching-sequencer/src/qmdb_accounts.rs` — qmdb wrapper (Phase 2 will surface its MMR root)
-> `crates/matching-sequencer/src/account_storage.rs` — `AccountStateStore` trait; Phase 2 extends this to return a commitment root
+> `crates/matching-sequencer/src/qmdb_accounts.rs` — current account-only qmdb wrapper (Phase 2 replaces or generalizes it)
+> `crates/matching-sequencer/src/account_storage.rs` — current account snapshot boundary; Phase 2 introduces a typed state commitment boundary
 
 ## See also
 
 - [[State Root and Parent Hash]] — the concept intro this doc normalizes
-- [[Canonical Serialization]] — byte-level rules for `canonical_account_bytes`
+- [[Canonical Serialization]] — byte-level rules for account bytes and future state leaf bytes
 - [[Block Witness]] — the witness the state root lives inside
 - [[Proof Architecture]] — events tree (complementary) and proof-composition patterns
 - [[ZK Integration Path]] — how the state root anchors the on-chain proof chain

@@ -3,7 +3,7 @@ tags: [zk, spec]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-04-17
+last_verified: 2026-04-26
 ---
 
 # Block Witness
@@ -60,7 +60,7 @@ seen inside the circuit, never exposed).
 | `resolved_markets` | public |
 | `total_welfare`, `minting_cost` | public |
 | `header.order_count`, `header.fill_count` | public |
-| `orders` (individual, including time-in-force) | private |
+| `orders` (individual, including expiry) | private |
 | `rejections` | private |
 | `system_events` (individual) | private (shape is public via events_root) |
 | `fills` (individual) | private (shape is public via events_root) |
@@ -199,7 +199,7 @@ Three hash roots in play, each with a different scope:
 
 | Root | Scope | Primary consumer |
 |---|---|---|
-| `state_root` | all accounts' post-settlement state | on-chain settlement contract; escape hatch |
+| `state_root` | v1: accounts; v2: complete typed validium state | ZK settlement, bridge claims, recovery checks |
 | `events_root` | everything that happened in this block | external verifiers asking "did F happen" |
 | `witness_root` | the full audit package | prover; anyone reconstructing the block |
 
@@ -209,11 +209,12 @@ as a caller-supplied input to prove derived claims. Exact layout is decided
 in [[Proof Architecture]] and the Data Availability RFC (sibling, M3).
 
 Order expiry lives in the private `orders` section. The verifier can check
-that an order included in a batch is eligible for `header.height`, but the
-current account-only `state_root` does not commit to the post-block resting
-order book. Full proof of "this expired order did not rest" requires the
-[[State Root Schema]] path where pending/resting orders become part of the
-committed state or are committed under a separate order-book root.
+that an order included in a batch is eligible for `header.height`. Under v1,
+the account-only `state_root` does not commit to the post-block resting
+order book, so "this expired order did not rest" is an implementation and
+witness property. Under the v2 [[State Root Schema]], active resting orders
+are typed state leaves, so presence or absence of an order is provable against
+`state_root`.
 
 ## Test vectors
 
