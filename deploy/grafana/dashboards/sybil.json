@@ -275,6 +275,27 @@
         "defaults": { "unit": "cps", "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "normal" } } },
         "overrides": []
       }
+    },
+    {
+      "title": "Actor Queue Depth",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 56 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sybil_actor_queue_depth", "legendFormat": "{{actor}}", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": { "drawStyle": "line", "fillOpacity": 10 },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "orange", "value": 1000 },
+            { "color": "red", "value": 5000 }
+          ] }
+        },
+        "overrides": []
+      }
     }
   ],
   "schemaVersion": 39,

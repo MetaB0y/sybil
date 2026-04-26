@@ -18,6 +18,7 @@ Admission has lightweight backpressure before either path mutates state:
 - Non-MM orders are capped per account across resting orders plus staged non-MM bundles.
 - Deferred bundles have both total and per-account caps.
 - A per-submission order-count cap prevents request amplification.
+- [[Actor Mailbox Monitoring]] exposes sequencer mailbox pressure after those admission checks, so coordinated floods that still enqueue faster than the actor drains become visible before latency or memory are the first symptoms.
 
 ```mermaid
 graph TB
@@ -45,5 +46,6 @@ graph TB
 
 ## See Also
 - [[Block Lifecycle]] — deferred submissions are merged at block production
+- [[Actor Mailbox Monitoring]] — queue-depth metrics and alerts for actor backpressure
 - [[Pending Orders and TTL]] — unfilled orders that bypass the mempool on re-inclusion
 - [[REST API]] — how orders enter the sequencer

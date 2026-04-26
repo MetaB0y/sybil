@@ -12,6 +12,8 @@ The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Accounts
 
 The API is stateless — all exchange state lives in the `SequencerActor`. Order-write endpoints first pass through a cheap HTTP token bucket keyed globally and by client address/header. This happens before JSON parsing and P256 signature verification, so malformed or invalid signed traffic cannot consume unbounded CPU. When an order submission arrives at `POST /v1/orders`, the API handler converts the [[Order Types|OrderSpec]] to the engine's internal representation and sends it to the sequencer via a channel. The sequencer either directly admits simple single-market orders into the resting book or defers MM / bundle / multi-market submissions via the [[Mempool|deferred-submission buffer]]. When a client queries `GET /v1/blocks/latest`, the API reads the latest sealed block from the sequencer's state. This actor-model architecture (inspired by Tokio actor patterns) means the API layer can be horizontally scaled without coordination — all instances talk to the same sequencer actor.
 
+The sequencer message path is monitored by [[Actor Mailbox Monitoring]]. The API exports `sybil_actor_queue_depth{actor="sequencer"}` from `/metrics`, with configurable warning and critical thresholds, so operator alerts distinguish actor backlog from solver latency or HTTP rejection pressure.
+
 ## Key Properties
 - Axum-based, async, with OpenAPI auto-generation
 - Actor model: API → message channel → `SequencerActor`
@@ -31,4 +33,5 @@ The API is stateless — all exchange state lives in the `SequencerActor`. Order
 - [[SSE Block Stream]] — real-time block push via `/v1/blocks/stream`
 - [[WebSocket Block Stream]] — production block stream at `/v1/blocks/ws` with replay + backpressure
 - [[P256 Authentication]] — signed order submission
+- [[Actor Mailbox Monitoring]] — sequencer queue-depth metric and alerts
 - [[Block Lifecycle]] — what happens after an order enters the system

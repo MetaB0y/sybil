@@ -44,3 +44,23 @@ groups:
         annotations:
           summary: "No blocks produced in the last 2m"
           description: "sybil-api is up but has not produced any blocks for 2m — block production may be stalled."
+
+      - alert: ActorMailboxQueueHigh
+        expr: max_over_time(sybil_actor_queue_depth[2m]) > 1000
+        for: 2m
+        labels:
+          severity: warning
+          component: sequencer
+        annotations:
+          summary: "Actor mailbox queue depth is high"
+          description: "{{ $labels.actor }} mailbox queue depth has exceeded 1000 for 2m (current depth: {{ $value }})."
+
+      - alert: ActorMailboxQueueCritical
+        expr: max_over_time(sybil_actor_queue_depth[1m]) > 5000
+        for: 1m
+        labels:
+          severity: critical
+          component: sequencer
+        annotations:
+          summary: "Actor mailbox queue depth is critical"
+          description: "{{ $labels.actor }} mailbox queue depth has exceeded 5000 for 1m (current depth: {{ $value }})."

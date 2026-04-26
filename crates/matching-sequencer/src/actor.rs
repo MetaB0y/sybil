@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort, SupervisionEvent};
@@ -21,6 +22,8 @@ use crate::portfolio::{self, PortfolioSummary};
 use crate::sequencer::{
     BlockSequencer, OrderSubmission, PendingOrderInfo, PreparedBlock, SequencerConfig,
 };
+
+const SEQUENCER_ACTOR_METRIC_NAME: &str = "sequencer";
 
 /// Messages sent from handles to the sequencer actor.
 pub enum SequencerMsg {
@@ -114,6 +117,7 @@ struct SequencerActorArgs {
     sequencer: BlockSequencer,
     store: Option<Arc<crate::store::Store>>,
     block_broadcast: broadcast::Sender<Block>,
+    mailbox_monitor: MailboxMonitor,
 }
 
 struct SequencerActorState {
@@ -125,6 +129,7 @@ struct SequencerActorState {
     store: Option<Arc<crate::store::Store>>,
     global_submission_bucket: TokenBucket,
     account_submission_buckets: HashMap<AccountId, TokenBucket>,
+    mailbox_monitor: MailboxMonitor,
 }
 
 #[derive(Clone, Debug)]
@@ -166,6 +171,134 @@ impl TokenBucket {
         ((1.0 - self.tokens).max(0.0) / self.refill_per_second)
             .ceil()
             .max(1.0) as u64
+    }
+}
+
+#[derive(Clone)]
+struct MailboxMonitor {
+    actor: &'static str,
+    depth: Arc<AtomicUsize>,
+    level: Arc<AtomicU8>,
+    warn_depth: usize,
+    error_depth: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MailboxPressureLevel {
+    Normal = 0,
+    Warn = 1,
+    Error = 2,
+}
+
+impl MailboxPressureLevel {
+    fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::Warn,
+            2 => Self::Error,
+            _ => Self::Normal,
+        }
+    }
+}
+
+impl MailboxMonitor {
+    fn new(actor: &'static str, warn_depth: usize, error_depth: usize) -> Self {
+        Self {
+            actor,
+            depth: Arc::new(AtomicUsize::new(0)),
+            level: Arc::new(AtomicU8::new(MailboxPressureLevel::Normal as u8)),
+            warn_depth,
+            error_depth,
+        }
+    }
+
+    fn queued(&self) {
+        let depth = self.depth.fetch_add(1, Ordering::Relaxed) + 1;
+        self.record(depth);
+    }
+
+    fn started(&self) {
+        let mut observed = self.depth.load(Ordering::Relaxed);
+        loop {
+            if observed == 0 {
+                self.record(0);
+                return;
+            }
+
+            match self.depth.compare_exchange_weak(
+                observed,
+                observed - 1,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => {
+                    self.record(observed - 1);
+                    return;
+                }
+                Err(next) => observed = next,
+            }
+        }
+    }
+
+    fn send_failed(&self) {
+        self.started();
+    }
+
+    fn reset(&self) {
+        self.depth.store(0, Ordering::Relaxed);
+        self.record(0);
+    }
+
+    #[cfg(test)]
+    fn depth(&self) -> usize {
+        self.depth.load(Ordering::Relaxed)
+    }
+
+    fn pressure_level(&self, depth: usize) -> MailboxPressureLevel {
+        if self.error_depth > 0 && depth >= self.error_depth {
+            MailboxPressureLevel::Error
+        } else if self.warn_depth > 0 && depth >= self.warn_depth {
+            MailboxPressureLevel::Warn
+        } else {
+            MailboxPressureLevel::Normal
+        }
+    }
+
+    fn record(&self, depth: usize) {
+        metrics::gauge!("sybil_actor_queue_depth", "actor" => self.actor).set(depth as f64);
+
+        let level = self.pressure_level(depth);
+        let previous =
+            MailboxPressureLevel::from_u8(self.level.swap(level as u8, Ordering::Relaxed));
+
+        if level == previous {
+            return;
+        }
+
+        match level {
+            MailboxPressureLevel::Error => {
+                tracing::error!(
+                    actor = self.actor,
+                    depth,
+                    error_depth = self.error_depth,
+                    "actor mailbox queue depth is critical"
+                );
+            }
+            MailboxPressureLevel::Warn => {
+                tracing::warn!(
+                    actor = self.actor,
+                    depth,
+                    warn_depth = self.warn_depth,
+                    "actor mailbox queue depth is high"
+                );
+            }
+            MailboxPressureLevel::Normal => {
+                tracing::info!(
+                    actor = self.actor,
+                    depth,
+                    "actor mailbox queue depth recovered"
+                );
+            }
+        }
     }
 }
 
@@ -668,6 +801,7 @@ impl Actor for SequencerActor {
             store: args.store,
             global_submission_bucket,
             account_submission_buckets: HashMap::new(),
+            mailbox_monitor: args.mailbox_monitor,
         })
     }
 
@@ -678,11 +812,14 @@ impl Actor for SequencerActor {
     ) -> Result<(), ActorProcessingErr> {
         let actor = myself.clone();
         let block_interval = state.sequencer.config.block_interval;
+        let mailbox_monitor = state.mailbox_monitor.clone();
         tokio::spawn(async move {
             let mut ticker = interval_at(Instant::now() + block_interval, block_interval);
             loop {
                 ticker.tick().await;
+                mailbox_monitor.queued();
                 if actor.send_message(SequencerMsg::Tick).is_err() {
+                    mailbox_monitor.send_failed();
                     break;
                 }
             }
@@ -696,6 +833,7 @@ impl Actor for SequencerActor {
         message: Self::Msg,
         state: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
+        state.mailbox_monitor.started();
         match message {
             SequencerMsg::Tick => {
                 state.on_tick().await;
@@ -913,6 +1051,7 @@ impl Actor for SequencerActor {
 struct SequencerHandleInner {
     actor: Arc<RwLock<Option<ActorRef<SequencerMsg>>>>,
     block_broadcast: broadcast::Sender<Block>,
+    mailbox_monitor: MailboxMonitor,
 }
 
 struct SequencerSupervisor;
@@ -938,6 +1077,7 @@ enum SequencerSupervisorMsg {
 
 impl SequencerSupervisorState {
     fn publish_actor(&self, actor: Option<ActorRef<SequencerMsg>>) {
+        self.handle.mailbox_monitor.reset();
         *self
             .handle
             .actor
@@ -954,6 +1094,7 @@ impl SequencerSupervisorState {
             sequencer,
             store: self.store.clone(),
             block_broadcast: self.handle.block_broadcast.clone(),
+            mailbox_monitor: self.handle.mailbox_monitor.clone(),
         };
         let (child, _) =
             <SequencerActor as Actor>::spawn_linked(None, SequencerActor, args, myself.get_cell())
@@ -1094,8 +1235,13 @@ impl SequencerHandle {
         T: Send + 'static,
     {
         let actor = self.actor_ref().await?;
+        self.inner.mailbox_monitor.queued();
         match actor.call(build_message, None).await {
             Ok(ractor::rpc::CallResult::Success(value)) => Ok(value),
+            Err(_) => {
+                self.inner.mailbox_monitor.send_failed();
+                Err(SequencerError::ActorGone)
+            }
             _ => Err(SequencerError::ActorGone),
         }
     }
@@ -1121,9 +1267,15 @@ impl SequencerHandle {
         let config = sequencer.config.clone();
         let store = store.map(Arc::new);
         let (block_broadcast, _) = broadcast::channel(64);
+        let mailbox_monitor = MailboxMonitor::new(
+            SEQUENCER_ACTOR_METRIC_NAME,
+            config.actor_queue_warn_depth,
+            config.actor_queue_error_depth,
+        );
         let inner = SequencerHandleInner {
             actor: Arc::new(RwLock::new(None)),
             block_broadcast: block_broadcast.clone(),
+            mailbox_monitor,
         };
         let supervisor_args = SequencerSupervisorArgs {
             config,
@@ -1138,6 +1290,7 @@ impl SequencerHandle {
             sequencer,
             store,
             block_broadcast,
+            mailbox_monitor: inner.mailbox_monitor.clone(),
         };
         let (child, _) = ractor::ActorRuntime::spawn_linked_instant(
             None,
@@ -1443,6 +1596,27 @@ mod tests {
             BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, config),
             aid,
         )
+    }
+
+    #[test]
+    fn mailbox_monitor_tracks_depth_without_underflow() {
+        let monitor = MailboxMonitor::new("test_actor", 2, 4);
+        assert_eq!(monitor.depth(), 0);
+
+        monitor.queued();
+        monitor.queued();
+        assert_eq!(monitor.depth(), 2);
+
+        monitor.started();
+        assert_eq!(monitor.depth(), 1);
+
+        monitor.started();
+        monitor.started();
+        assert_eq!(monitor.depth(), 0);
+
+        monitor.queued();
+        monitor.reset();
+        assert_eq!(monitor.depth(), 0);
     }
 
     #[tokio::test]

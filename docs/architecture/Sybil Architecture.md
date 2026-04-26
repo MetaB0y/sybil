@@ -79,6 +79,7 @@ The matching problem itself has an elegant mathematical structure: without marke
 ## Block Production and Verification
 - [[Block Lifecycle]] — from order submission to sealed block
 - [[Mempool]] — order buffering and drain limits
+- [[Actor Mailbox Monitoring]] — queue-depth observability for hot actors
 - [[Settlement]] — balance and position updates
 - [[Pending Orders and TTL]] — cross-batch order persistence
 - [[State Root and Parent Hash]] — cryptographic chaining

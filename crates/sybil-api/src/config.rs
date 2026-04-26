@@ -96,6 +96,14 @@ pub struct ApiConfig {
     #[arg(long, default_value = "100", env = "SYBIL_BLOCK_HISTORY_CAPACITY")]
     pub block_history_capacity: usize,
 
+    /// Sequencer actor queue depth that logs a warning.
+    #[arg(long, default_value = "1000", env = "SYBIL_ACTOR_QUEUE_WARN_DEPTH")]
+    pub actor_queue_warn_depth: usize,
+
+    /// Sequencer actor queue depth that logs an error and should page.
+    #[arg(long, default_value = "5000", env = "SYBIL_ACTOR_QUEUE_ERROR_DEPTH")]
+    pub actor_queue_error_depth: usize,
+
     /// Data directory for persistent storage. Empty = in-memory only (no persistence).
     #[arg(long, default_value = "", env = "SYBIL_DATA_DIR")]
     pub data_dir: String,
@@ -137,6 +145,8 @@ impl Default for ApiConfig {
             http_order_client_rps: 250,
             http_order_client_burst: 1_000,
             block_history_capacity: 100,
+            actor_queue_warn_depth: 1_000,
+            actor_queue_error_depth: 5_000,
             data_dir: String::new(),
             admin_feed_key_path: String::new(),
             polymarket_feed_pubkey_hex: String::new(),

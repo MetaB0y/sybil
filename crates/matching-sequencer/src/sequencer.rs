@@ -61,6 +61,12 @@ pub struct SequencerConfig {
     /// In-memory ring buffer size for recent blocks (served by the `/blocks`
     /// history endpoint). Bounds memory use per sequencer.
     pub block_history_capacity: usize,
+    /// Queue depth where actor mailbox pressure should be logged as a warning.
+    /// Set to 0 to disable warning logs.
+    pub actor_queue_warn_depth: usize,
+    /// Queue depth where actor mailbox pressure should be logged as an error.
+    /// Set to 0 to disable error logs.
+    pub actor_queue_error_depth: usize,
 }
 
 impl Default for SequencerConfig {
@@ -77,6 +83,8 @@ impl Default for SequencerConfig {
             max_open_orders_per_account: 1_000,
             max_pending_bundles_per_account: 100,
             block_history_capacity: 100,
+            actor_queue_warn_depth: 1_000,
+            actor_queue_error_depth: 5_000,
         }
     }
 }

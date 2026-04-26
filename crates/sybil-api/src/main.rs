@@ -125,6 +125,8 @@ async fn main() {
         max_open_orders_per_account: config.max_open_orders_per_account,
         max_pending_bundles_per_account: config.max_pending_bundles_per_account,
         block_history_capacity: config.block_history_capacity,
+        actor_queue_warn_depth: config.actor_queue_warn_depth,
+        actor_queue_error_depth: config.actor_queue_error_depth,
     };
 
     let handle = if let Some(state) = restored {
