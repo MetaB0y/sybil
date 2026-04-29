@@ -40,3 +40,25 @@ jobs:
 
       - name: Build Docker image
         run: docker build -t sybil-api:ci .
+
+  contracts:
+    name: Contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Check Solidity formatting
+        working-directory: contracts
+        run: forge fmt --check
+
+      - name: Build contracts
+        working-directory: contracts
+        run: forge build
+
+      - name: Test contracts
+        working-directory: contracts
+        run: forge test -vvv

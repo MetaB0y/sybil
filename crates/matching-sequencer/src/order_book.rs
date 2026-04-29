@@ -340,6 +340,11 @@ impl OrderBook {
         self.orders.len()
     }
 
+    /// Whether there are no resting orders.
+    pub fn is_empty(&self) -> bool {
+        self.orders.is_empty()
+    }
+
     /// Number of resting orders owned by one account.
     pub fn orders_for_account(&self, account_id: AccountId) -> usize {
         self.orders

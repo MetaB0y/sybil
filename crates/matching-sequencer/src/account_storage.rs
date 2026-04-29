@@ -7,6 +7,9 @@ use crate::account::{Account, AccountId, AccountStore};
 use crate::qmdb_accounts::QmdbAccounts;
 use crate::store::StoreError;
 
+type StoreFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, StoreError>> + Send + 'a>>;
+type RecoveredAccounts = HashMap<AccountId, Account>;
+
 /// Logical slot for a committed qmdb account snapshot.
 ///
 /// We keep two slots and flip the redb fence between them. Only the slot named
@@ -65,15 +68,9 @@ pub struct RecoveryAccountState {
 /// the committed snapshot via external metadata, and the implementation must not
 /// silently "pick the latest" state on its own.
 pub trait AccountStateStore: Send + Sync {
-    fn persist<'a>(
-        &'a self,
-        state: CommittedAccountState<'a>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>>;
+    fn persist<'a>(&'a self, state: CommittedAccountState<'a>) -> StoreFuture<'a, ()>;
 
-    fn recover<'a>(
-        &'a self,
-        state: RecoveryAccountState,
-    ) -> Pin<Box<dyn Future<Output = Result<HashMap<AccountId, Account>, StoreError>> + Send + 'a>>;
+    fn recover<'a>(&'a self, state: RecoveryAccountState) -> StoreFuture<'a, RecoveredAccounts>;
 }
 
 pub struct FencedAccountStorage {
@@ -89,10 +86,7 @@ impl FencedAccountStorage {
 }
 
 impl AccountStateStore for FencedAccountStorage {
-    fn persist<'a>(
-        &'a self,
-        state: CommittedAccountState<'a>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + 'a>> {
+    fn persist<'a>(&'a self, state: CommittedAccountState<'a>) -> StoreFuture<'a, ()> {
         Box::pin(async move {
             self.qmdb_accounts
                 .persist(
@@ -105,11 +99,7 @@ impl AccountStateStore for FencedAccountStorage {
         })
     }
 
-    fn recover<'a>(
-        &'a self,
-        state: RecoveryAccountState,
-    ) -> Pin<Box<dyn Future<Output = Result<HashMap<AccountId, Account>, StoreError>> + Send + 'a>>
-    {
+    fn recover<'a>(&'a self, state: RecoveryAccountState) -> StoreFuture<'a, RecoveredAccounts> {
         Box::pin(async move {
             let qmdb_accounts = self.qmdb_accounts.load(state.slot).await?;
 

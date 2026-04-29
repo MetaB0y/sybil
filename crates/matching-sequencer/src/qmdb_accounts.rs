@@ -193,7 +193,7 @@ async fn open_db(context: commonware_tokio::Context) -> Result<AccountDb, StoreE
             page_cache,
         },
         grafted_metadata_partition: "accounts-grafted-mmr-metadata".to_string(),
-        translator: OneCap::default(),
+        translator: OneCap,
     };
 
     AccountDb::init(context, config)

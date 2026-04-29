@@ -69,7 +69,7 @@ doc-open:
     cargo doc --workspace --no-deps --open
 
 # Check all (compile, test, lint, fmt)
-check-all: fmt-check lint test
+check-all: fmt-check lint test contracts-fmt-check contracts-build contracts-test
     @echo "All checks passed!"
 
 # Run benchmarks if any
@@ -168,8 +168,8 @@ docs-read note:
 docs-verify note:
     notesmd-cli frontmatter "{{note}}" --vault docs/architecture --edit --key last_verified --value "$(date +%Y-%m-%d)"
 
-# Pre-commit check (fmt + clippy, ~3s with warm cache)
-pre-commit:
+# Pre-commit check (Rust fmt/clippy + Solidity fmt)
+pre-commit: contracts-fmt-check
     cargo fmt --all -- --check
     cargo clippy --workspace --all-features
 
@@ -260,3 +260,21 @@ arena-status hours="24":
 # Live system status (containers, blocks, traders, fills)
 status:
     ./scripts/status.sh
+
+# ── Contracts ───────────────────────────────────────────────────────────────
+
+# Format Solidity contracts
+contracts-fmt:
+    cd contracts && forge fmt
+
+# Check Solidity formatting
+contracts-fmt-check:
+    cd contracts && forge fmt --check
+
+# Build Solidity contracts
+contracts-build:
+    cd contracts && forge build
+
+# Run Solidity tests
+contracts-test:
+    cd contracts && forge test

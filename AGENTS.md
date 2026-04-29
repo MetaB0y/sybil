@@ -29,6 +29,7 @@ sybil/
 │   ├── sim/                       #   Generic simulation framework (clock, news_trader, runner)
 │   ├── markets/                   #   Per-market config (iran/ with personas, sources, datasets)
 │   └── viz/                       #   Streamlit dashboards
+├── contracts/                     # Solidity + Foundry L1 settlement/vault contracts
 ├── viz/                           # Python: Streamlit visualization dashboard (Rust solver)
 ├── fuzz/                          # Cargo-fuzz targets (separate workspace)
 ├── design/                        # Historical design notes (superseded by docs/architecture/)
@@ -53,6 +54,7 @@ just test             # cargo test --workspace
 just lint             # cargo clippy --workspace --all-features
 just fmt              # cargo fmt --all
 just check-all        # fmt-check + lint + test (CI equivalent)
+just contracts-test   # forge test in contracts/
 just bench            # cargo bench --workspace
 just doc              # cargo doc --workspace --no-deps
 ```

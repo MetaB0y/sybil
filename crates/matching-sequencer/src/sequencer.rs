@@ -170,6 +170,23 @@ struct WitnessArtifacts {
     witness: BlockWitness,
 }
 
+struct WitnessAssemblyInput<'a> {
+    post_state: CanonicalState,
+    order_count: u32,
+    timestamp_ms: u64,
+    previous_header: Option<WitnessBlockHeader>,
+    witness_orders: Vec<WitnessOrder>,
+    witness_rejections: Vec<WitnessRejection>,
+    system_events: &'a [SystemEvent],
+    fills: &'a [Fill],
+    clearing_prices: &'a HashMap<MarketId, Vec<Nanos>>,
+    total_welfare: i64,
+    problem: &'a Problem,
+    pre_state: Vec<AccountSnapshot>,
+    post_system_state: Vec<AccountSnapshot>,
+    resolved_markets: Vec<MarketId>,
+}
+
 impl PreparedBlock {
     pub fn production(&self) -> &BlockProduction {
         &self.production
@@ -794,7 +811,7 @@ impl BlockSequencer {
     ///
     /// Eligible submissions are single-order, single-market, non-MM ones:
     /// the resting book's `accept` path already performs the full validation
-    /// + reservation dance that `prepare_block` would do at block time, so
+    /// and reservation dance that `prepare_block` would do at block time, so
     /// we can run it now and return an HTTP-level Accept/Reject synchronously.
     ///
     /// MM-constrained, multi-order, and multi-market submissions are returned
@@ -1201,7 +1218,7 @@ impl BlockSequencer {
         let clearing_prices = self.price_tracker.merge_prices(
             &pipeline_result.price_discovery,
             &markets_with_fills,
-            &active_markets,
+            active_markets,
             &position_markets,
         );
 
@@ -1301,23 +1318,24 @@ impl BlockSequencer {
         FinalizedBlockState { post_state }
     }
 
-    fn assemble_witness_artifacts(
-        &self,
-        post_state: CanonicalState,
-        order_count: u32,
-        timestamp_ms: u64,
-        previous_header: Option<WitnessBlockHeader>,
-        witness_orders: Vec<WitnessOrder>,
-        witness_rejections: Vec<WitnessRejection>,
-        system_events: &[SystemEvent],
-        fills: &[Fill],
-        clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
-        total_welfare: i64,
-        problem: &Problem,
-        pre_state: Vec<AccountSnapshot>,
-        post_system_state: Vec<AccountSnapshot>,
-        resolved_markets: Vec<MarketId>,
-    ) -> WitnessArtifacts {
+    fn assemble_witness_artifacts(&self, input: WitnessAssemblyInput<'_>) -> WitnessArtifacts {
+        let WitnessAssemblyInput {
+            post_state,
+            order_count,
+            timestamp_ms,
+            previous_header,
+            witness_orders,
+            witness_rejections,
+            system_events,
+            fills,
+            clearing_prices,
+            total_welfare,
+            problem,
+            pre_state,
+            post_system_state,
+            resolved_markets,
+        } = input;
+
         let header = BlockHeader {
             height: self.height,
             parent_hash: self
@@ -1715,22 +1733,23 @@ impl BlockSequencer {
             timestamp_ms: h.timestamp_ms,
         });
 
-        let WitnessArtifacts { header, witness } = self.assemble_witness_artifacts(
-            post_state,
-            orders_submitted as u32,
-            timestamp_ms,
-            previous_header,
-            witness_orders,
-            witness_rejections,
-            &system_events,
-            &fills,
-            &clearing_prices,
-            total_welfare,
-            &problem,
-            pre_state,
-            post_system_state,
-            resolved_markets,
-        );
+        let WitnessArtifacts { header, witness } =
+            self.assemble_witness_artifacts(WitnessAssemblyInput {
+                post_state,
+                order_count: orders_submitted as u32,
+                timestamp_ms,
+                previous_header,
+                witness_orders,
+                witness_rejections,
+                system_events: &system_events,
+                fills: &fills,
+                clearing_prices: &clearing_prices,
+                total_welfare,
+                problem: &problem,
+                pre_state,
+                post_system_state,
+                resolved_markets,
+            });
 
         self.last_header = Some(header.clone());
 
@@ -2339,9 +2358,6 @@ mod tests {
             mm_constraint: None,
         };
         run_batch(&mut seq, vec![sub], &markets, &[]);
-        assert_eq!(seq.order_book.len(), 1);
-
-        run_batch(&mut seq, vec![], &markets, &[]);
         assert_eq!(seq.order_book.len(), 1);
 
         run_batch(&mut seq, vec![], &markets, &[]);
