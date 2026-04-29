@@ -12,17 +12,18 @@ This note is the concept introduction. For the byte-level normative spec and the
 
 The **state root** is the compact commitment to post-settlement state. Today
 (`state_root_v2`) it is a SHA-256 digest over sorted typed leaves: account
-snapshots plus the bridge sidecar leaves needed for normal withdrawals. The
-production target in [[State Root Schema]] is a native qmdb root over complete
-typed validium state, including accounts, reservations, resting orders, market
-lifecycle state, and system counters. Anyone with the same committed state can
-independently compute the root and verify it matches — this is exactly what the
-[[Four-Layer Verification|block integrity verification layer]] does.
+snapshots, bridge sidecar leaves needed for normal withdrawals, active resting
+orders, and aggregate reservations. The production target in
+[[State Root Schema]] is a native qmdb root over complete typed validium state,
+including market lifecycle state and system counters. Anyone with the same
+committed state can independently compute the root and verify it matches —
+this is exactly what the [[Four-Layer Verification|block integrity verification
+layer]] does.
 
 The **parent hash** is the BLAKE3 hash of the previous block's header. Each block header includes the parent hash, creating a chain: block N's header hash becomes block N+1's parent hash. To verify any block, you need its predecessor. To verify the entire history, you start from the genesis block and walk forward. This is the same chaining structure used by blockchains, and it enables the [[ZK Integration Path|Validium architecture]]: the ZK prover attests that each state transition (from parent state root to new state root via the fills in this block) is correct, and the on-chain contract only needs to verify the proof and update the latest state root.
 
 ## Key Properties
-- State root v2 current: SHA-256 digest over sorted typed account + bridge leaves
+- State root v2 current: SHA-256 digest over sorted typed account, bridge, order, and reservation leaves
 - Native qmdb target: SHA-256 authenticated root over complete validium state
 - Parent hash: BLAKE3 hash of previous block's header
 - Deterministic serialization — anyone can reproduce the state root

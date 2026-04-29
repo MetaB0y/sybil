@@ -744,7 +744,7 @@ fn witness_from_problem(problem: &Problem, result: &PipelineResult) -> BlockWitn
         pre_state: vec![],
         post_system_state: vec![],
         post_state: vec![],
-        bridge_state: Default::default(),
+        state_sidecar: Default::default(),
         resolved_markets: vec![],
     }
 }
@@ -1371,7 +1371,7 @@ fn witness_from_milp(problem: &Problem, result: &matching_solver::MilpResult) ->
         pre_state: vec![],
         post_system_state: vec![],
         post_state: vec![],
-        bridge_state: Default::default(),
+        state_sidecar: Default::default(),
         resolved_markets: vec![],
     }
 }

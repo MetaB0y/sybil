@@ -44,8 +44,8 @@ pub struct BlockWitness {
     pub post_system_state: Vec<AccountSnapshot>,
     /// Account snapshots *after* settlement, sorted by id.
     pub post_state: Vec<AccountSnapshot>,
-    /// Bridge sidecar state after system events and settlement.
-    pub bridge_state: BridgeStateSnapshot,
+    /// Non-account state committed by the header's `state_root`.
+    pub state_sidecar: StateSidecarSnapshot,
 
     /// Markets that are resolved/voided — orders/fills must not reference these.
     pub resolved_markets: Vec<MarketId>,
@@ -148,6 +148,13 @@ pub struct AccountSnapshot {
     pub events_digest: [u8; 32],
 }
 
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct StateSidecarSnapshot {
+    pub bridge: BridgeStateSnapshot,
+    pub resting_orders: Vec<RestingOrderSnapshot>,
+    pub account_reservations: Vec<AccountReservationSnapshot>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BridgeStateSnapshot {
     pub deposit_cursor: u64,
@@ -166,4 +173,21 @@ pub struct WithdrawalSnapshot {
     pub amount_nanos: u64,
     pub expiry_height: u64,
     pub nullifier: [u8; 32],
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct RestingOrderSnapshot {
+    pub order: Order,
+    pub account_id: u64,
+    pub created_at: u64,
+    pub expires_at_block: u64,
+    pub reserved_balance: i64,
+    pub reserved_positions: Vec<(MarketId, u8, i64)>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AccountReservationSnapshot {
+    pub account_id: u64,
+    pub reserved_balance: i64,
+    pub reserved_positions: Vec<(MarketId, u8, i64)>,
 }

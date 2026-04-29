@@ -13,11 +13,13 @@ use sybil_verifier::{
 use tracing::{debug, error};
 
 use crate::account::{Account, AccountId, AccountStore};
-use crate::block::{hash_header, Block, BlockFlowMetrics, BlockHeader, BlockProduction};
+use crate::block::{
+    hash_header, state_sidecar_snapshot, Block, BlockFlowMetrics, BlockHeader, BlockProduction,
+};
 use crate::bridge::{
-    account_key, amount_token_units_to_i64_nanos, amount_token_units_to_nanos,
-    bridge_state_snapshot, BridgeBlockData, BridgeError, BridgeState, BridgeWithdrawalRequest,
-    L1Deposit, WithdrawalLeaf, DEFAULT_WITHDRAWAL_EXPIRY_BLOCKS,
+    account_key, amount_token_units_to_i64_nanos, amount_token_units_to_nanos, BridgeBlockData,
+    BridgeError, BridgeState, BridgeWithdrawalRequest, L1Deposit, WithdrawalLeaf,
+    DEFAULT_WITHDRAWAL_EXPIRY_BLOCKS,
 };
 use crate::canonical_state::{snapshot_account, CanonicalState};
 use crate::error::{Rejection, RejectionReason, SequencerError};
@@ -873,6 +875,10 @@ impl BlockSequencer {
         &self.bridge
     }
 
+    pub fn order_book(&self) -> &OrderBook {
+        &self.order_book
+    }
+
     pub fn bridge_account_key(&self, account_id: AccountId) -> Option<[u8; 32]> {
         self.accounts
             .get(account_id)
@@ -1569,15 +1575,15 @@ impl BlockSequencer {
                 .as_ref()
                 .map(hash_header)
                 .unwrap_or([0u8; 32]),
-            state_root: sybil_verifier::block::compute_state_root_with_bridge(
+            state_root: sybil_verifier::block::compute_state_root_with_sidecar(
                 post_state.as_snapshots(),
-                &bridge_state_snapshot(&self.bridge),
+                &state_sidecar_snapshot(&self.bridge, &self.order_book),
             ),
             order_count,
             fill_count: fills.len() as u32,
             timestamp_ms,
         };
-        let bridge_state = bridge_state_snapshot(&self.bridge);
+        let state_sidecar = state_sidecar_snapshot(&self.bridge, &self.order_book);
 
         let witness = BlockWitness {
             header: WitnessBlockHeader {
@@ -1601,7 +1607,7 @@ impl BlockSequencer {
             pre_state,
             post_system_state,
             post_state: post_state.into_snapshots(),
-            bridge_state,
+            state_sidecar,
             resolved_markets,
         };
 
@@ -3124,7 +3130,7 @@ mod tests {
 
         let bp1 = seq.produce_block(vec![], 0);
 
-        // Submit an order that will change state
+        // Submit an unfilled order that rests in the committed order book.
         let sub = OrderSubmission {
             account_id: aid,
             orders: vec![outcome_buy(&markets, 0, m0, 0, 500_000_000, 1)],
@@ -3133,15 +3139,15 @@ mod tests {
         let bp2 = seq.produce_block(vec![sub], 0);
 
         // State root matches the witness post-state (what verifier will check)
-        let expected_root = sybil_verifier::block::compute_state_root_with_bridge(
+        let expected_root = sybil_verifier::block::compute_state_root_with_sidecar(
             &bp2.witness.post_state,
-            &bp2.witness.bridge_state,
+            &bp2.witness.state_sidecar,
         );
         assert_eq!(bp2.block.header.state_root, expected_root);
 
-        // An unfilled order does not change account state, so the state root
-        // stays stable across blocks now that the witness includes all accounts.
-        assert_eq!(bp1.block.header.state_root, bp2.block.header.state_root);
+        // It does not change account balances/positions, but it does change
+        // committed order/reservation leaves.
+        assert_ne!(bp1.block.header.state_root, bp2.block.header.state_root);
     }
 
     #[test]
@@ -3198,9 +3204,9 @@ mod tests {
         );
         assert_eq!(
             resolution_block.block.header.state_root,
-            sybil_verifier::block::compute_state_root_with_bridge(
+            sybil_verifier::block::compute_state_root_with_sidecar(
                 &resolution_block.witness.post_state,
-                &resolution_block.witness.bridge_state,
+                &resolution_block.witness.state_sidecar,
             )
         );
     }
@@ -3226,7 +3232,11 @@ mod tests {
         assert_eq!(bp.witness.post_state.len(), 3);
         assert_eq!(
             bp.block.header.state_root,
-            crate::block::compute_state_root_v2(&seq.accounts, seq.bridge_state())
+            crate::block::compute_state_root_v2(
+                &seq.accounts,
+                seq.bridge_state(),
+                seq.order_book()
+            )
         );
     }
 

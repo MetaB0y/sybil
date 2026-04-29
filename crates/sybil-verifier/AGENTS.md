@@ -58,7 +58,7 @@ struct BlockWitness {
     pre_state: Vec<AccountSnapshot>,
     post_system_state: Vec<AccountSnapshot>,
     post_state: Vec<AccountSnapshot>,
-    bridge_state: BridgeStateSnapshot,
+    state_sidecar: StateSidecarSnapshot,
     resolved_markets: Vec<MarketId>,
 }
 

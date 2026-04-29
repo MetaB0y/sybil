@@ -11,7 +11,7 @@
 //! 4. `orders_for_batch()` — yield orders for the solver
 //! 5. `settle()` — remove filled orders, create remainders, adjust reservations
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use matching_engine::{Fill, MarketId, Order};
 use serde::{Deserialize, Serialize};
@@ -90,6 +90,19 @@ impl OrderBook {
     /// derivable from the per-order reservations, so only the order list is stored.
     pub fn snapshot(&self) -> Vec<RestingOrder> {
         self.orders.clone()
+    }
+
+    /// Canonical resting-order leaves for the state-root sidecar.
+    pub fn state_root_orders(&self) -> Vec<sybil_verifier::RestingOrderSnapshot> {
+        resting_order_snapshots(&self.orders)
+    }
+
+    /// Canonical aggregate reservation leaves for the state-root sidecar.
+    pub fn state_root_reservations(&self) -> Vec<sybil_verifier::AccountReservationSnapshot> {
+        reservation_snapshots_from_aggregates(
+            &self.balance_reservations,
+            &self.position_reservations,
+        )
     }
 
     /// Rebuild an order book from a persisted snapshot. Reservation aggregates
@@ -499,6 +512,97 @@ impl OrderBook {
             }
         }
     }
+}
+
+pub(crate) fn resting_order_snapshots(
+    orders: &[RestingOrder],
+) -> Vec<sybil_verifier::RestingOrderSnapshot> {
+    let mut snapshots: Vec<_> = orders
+        .iter()
+        .map(|resting| {
+            let mut reserved_positions: Vec<_> = resting
+                .reserved_positions
+                .iter()
+                .map(|&((market, outcome), qty)| (market, outcome, qty))
+                .collect();
+            reserved_positions.sort_by_key(|&(market, outcome, _)| (market.0, outcome));
+            sybil_verifier::RestingOrderSnapshot {
+                order: resting.order.clone(),
+                account_id: resting.account_id.0,
+                created_at: resting.created_at,
+                expires_at_block: resting.expires_at_block,
+                reserved_balance: resting.reserved_balance,
+                reserved_positions,
+            }
+        })
+        .collect();
+    snapshots.sort_by_key(|snapshot| snapshot.order.id);
+    snapshots
+}
+
+pub(crate) fn reservation_snapshots_from_resting_orders(
+    orders: &[RestingOrder],
+) -> Vec<sybil_verifier::AccountReservationSnapshot> {
+    let mut balance_reservations = HashMap::new();
+    let mut position_reservations = HashMap::new();
+    for resting in orders {
+        if resting.reserved_balance > 0 {
+            *balance_reservations.entry(resting.account_id).or_insert(0) +=
+                resting.reserved_balance;
+        }
+        for &(key, qty) in &resting.reserved_positions {
+            if qty != 0 {
+                *position_reservations
+                    .entry((resting.account_id, key))
+                    .or_insert(0) += qty;
+            }
+        }
+    }
+    reservation_snapshots_from_aggregates(&balance_reservations, &position_reservations)
+}
+
+fn reservation_snapshots_from_aggregates(
+    balance_reservations: &HashMap<AccountId, i64>,
+    position_reservations: &HashMap<(AccountId, PositionKey), i64>,
+) -> Vec<sybil_verifier::AccountReservationSnapshot> {
+    let mut by_account: BTreeMap<u64, sybil_verifier::AccountReservationSnapshot> = BTreeMap::new();
+
+    for (&account_id, &reserved_balance) in balance_reservations {
+        if reserved_balance == 0 {
+            continue;
+        }
+        by_account
+            .entry(account_id.0)
+            .or_insert_with(|| sybil_verifier::AccountReservationSnapshot {
+                account_id: account_id.0,
+                reserved_balance: 0,
+                reserved_positions: Vec::new(),
+            })
+            .reserved_balance += reserved_balance;
+    }
+
+    for (&(account_id, (market, outcome)), &qty) in position_reservations {
+        if qty == 0 {
+            continue;
+        }
+        by_account
+            .entry(account_id.0)
+            .or_insert_with(|| sybil_verifier::AccountReservationSnapshot {
+                account_id: account_id.0,
+                reserved_balance: 0,
+                reserved_positions: Vec::new(),
+            })
+            .reserved_positions
+            .push((market, outcome, qty));
+    }
+
+    let mut snapshots: Vec<_> = by_account.into_values().collect();
+    for snapshot in &mut snapshots {
+        snapshot
+            .reserved_positions
+            .sort_by_key(|&(market, outcome, _)| (market.0, outcome));
+    }
+    snapshots
 }
 
 #[cfg(test)]

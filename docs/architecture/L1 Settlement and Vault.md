@@ -569,9 +569,10 @@ The L1 contract design assumes these typed leaves exist or will exist under
 | `sys/next_withdrawal_id` | withdrawal id allocation counter |
 | `sys/bridge_config` | token id, chain id, vault address, bridge version |
 
-`withdrawal/{withdrawal_id}` is implemented in the current typed
-`state_root_v2` subset. It is small and additive, and it avoids proving
-withdrawals from stale raw balances.
+`acct_resv/{account_id}` and `withdrawal/{withdrawal_id}` are implemented in
+the current typed `state_root_v2` subset. Withdrawal leaves avoid proving
+withdrawals from stale raw balances; reservation leaves make conservative
+emergency cash exits computable from committed state.
 
 ## Current Rust bridge hooks
 
@@ -595,14 +596,15 @@ development path:
   should come from an L1 indexer and authenticated account flow.
 
 The current block header now uses the typed `state_root_v2` subset from
-[[State Root Schema]], so it commits account leaves plus
+[[State Root Schema]], so it commits account leaves, active
+`order/{order_id}` leaves, `acct_resv/{account_id}` leaves,
 `sys/deposit_cursor`, `sys/deposit_root`, `sys/next_withdrawal_id`, and active
 `withdrawal/{withdrawal_id}` leaves. Full proof-backed L1 withdrawal
 verification still depends on the ZK proof program and accepted-root
 contracts, and the native qmdb MMR root/proof path is still a later migration.
 
-This does not solve complete validium recovery yet: reservations, resting
-orders, market lifecycle state, DA publication, and operator replacement are
+This does not solve complete validium recovery yet: market lifecycle state,
+market definitions/metadata, DA publication, and operator replacement are
 still outside the current root subset.
 
 ## Development sequence

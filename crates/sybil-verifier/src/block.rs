@@ -5,7 +5,8 @@
 use sha2::{Digest as _, Sha256};
 
 use crate::types::{
-    AccountSnapshot, BlockWitness, BridgeStateSnapshot, WithdrawalSnapshot, WitnessBlockHeader,
+    AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
+    RestingOrderSnapshot, StateSidecarSnapshot, WithdrawalSnapshot, WitnessBlockHeader,
 };
 use crate::violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
 
@@ -14,8 +15,9 @@ pub fn verify_block(witness: &BlockWitness) -> VerificationResult {
     let mut violations = Vec::new();
     let stats = VerificationStats::default();
 
-    // 1. State root: recompute from post-state and bridge sidecar
-    let computed_root = compute_state_root_with_bridge(&witness.post_state, &witness.bridge_state);
+    // 1. State root: recompute from post-state and non-account sidecar
+    let computed_root =
+        compute_state_root_with_sidecar(&witness.post_state, &witness.state_sidecar);
     if computed_root != witness.header.state_root {
         violations.push(Violation {
             kind: ViolationKind::StateRootMismatch,
@@ -106,11 +108,11 @@ pub fn verify_block(witness: &BlockWitness) -> VerificationResult {
 }
 
 /// Compute the current deterministic v2 state root from account snapshots and
-/// an empty bridge sidecar.
+/// an empty sidecar.
 ///
-/// Use [`compute_state_root_with_bridge`] when verifying real blocks.
+/// Use [`compute_state_root_with_sidecar`] when verifying real blocks.
 pub fn compute_state_root(accounts: &[AccountSnapshot]) -> [u8; 32] {
-    compute_state_root_with_bridge(accounts, &BridgeStateSnapshot::default())
+    compute_state_root_with_sidecar(accounts, &StateSidecarSnapshot::default())
 }
 
 /// Compute a deterministic v1 account-only state root from account snapshots.
@@ -152,21 +154,36 @@ pub fn compute_account_state_root_v1(accounts: &[AccountSnapshot]) -> [u8; 32] {
 
 /// Compute the current v2 typed state root.
 ///
-/// This commits account leaves plus the bridge leaves required for normal
-/// withdrawals. The encoding is deliberately key/value-shaped so the same
-/// leaves can be persisted in qmdb and later swapped to a native qmdb proof
-/// root without changing leaf domains.
+/// This convenience wrapper commits account leaves plus bridge leaves, with an
+/// otherwise empty sidecar. Use [`compute_state_root_with_sidecar`] for real
+/// blocks so order and reservation leaves are included.
 pub fn compute_state_root_with_bridge(
     accounts: &[AccountSnapshot],
     bridge: &BridgeStateSnapshot,
 ) -> [u8; 32] {
-    let leaves = state_root_v2_leaves(accounts, bridge);
+    let sidecar = StateSidecarSnapshot {
+        bridge: bridge.clone(),
+        ..StateSidecarSnapshot::default()
+    };
+    compute_state_root_with_sidecar(accounts, &sidecar)
+}
+
+pub fn compute_state_root_with_sidecar(
+    accounts: &[AccountSnapshot],
+    sidecar: &StateSidecarSnapshot,
+) -> [u8; 32] {
+    let leaves = state_root_v2_leaves(accounts, sidecar);
     state_root_v2_from_leaves(&leaves)
 }
 
+/// Return the sorted typed key/value leaves that define `state_root_v2`.
+///
+/// The encoding is deliberately key/value-shaped so the same leaves can be
+/// persisted in qmdb and later swapped to a native qmdb proof root without
+/// changing leaf domains.
 pub fn state_root_v2_leaves(
     accounts: &[AccountSnapshot],
-    bridge: &BridgeStateSnapshot,
+    sidecar: &StateSidecarSnapshot,
 ) -> Vec<(Vec<u8>, Vec<u8>)> {
     let mut leaves = Vec::new();
 
@@ -178,23 +195,42 @@ pub fn state_root_v2_leaves(
 
     leaves.push((
         b"sys/deposit_cursor".to_vec(),
-        sys_u64_leaf_value(b"deposit_cursor", bridge.deposit_cursor),
+        sys_u64_leaf_value(b"deposit_cursor", sidecar.bridge.deposit_cursor),
     ));
     leaves.push((
         b"sys/deposit_root".to_vec(),
-        sys_bytes32_leaf_value(b"deposit_root", &bridge.deposit_root),
+        sys_bytes32_leaf_value(b"deposit_root", &sidecar.bridge.deposit_root),
     ));
     leaves.push((
         b"sys/next_withdrawal_id".to_vec(),
-        sys_u64_leaf_value(b"next_withdrawal_id", bridge.next_withdrawal_id),
+        sys_u64_leaf_value(b"next_withdrawal_id", sidecar.bridge.next_withdrawal_id),
     ));
 
-    let mut withdrawals: Vec<&WithdrawalSnapshot> = bridge.withdrawals.iter().collect();
+    let mut withdrawals: Vec<&WithdrawalSnapshot> = sidecar.bridge.withdrawals.iter().collect();
     withdrawals.sort_by_key(|withdrawal| withdrawal.withdrawal_id);
     for withdrawal in withdrawals {
         leaves.push((
             withdrawal_leaf_key(withdrawal.withdrawal_id),
             withdrawal_leaf_value(withdrawal),
+        ));
+    }
+
+    let mut resting_orders: Vec<&RestingOrderSnapshot> = sidecar.resting_orders.iter().collect();
+    resting_orders.sort_by_key(|resting| resting.order.id);
+    for resting in resting_orders {
+        leaves.push((
+            resting_order_leaf_key(resting.order.id),
+            resting_order_leaf_value(resting),
+        ));
+    }
+
+    let mut reservations: Vec<&AccountReservationSnapshot> =
+        sidecar.account_reservations.iter().collect();
+    reservations.sort_by_key(|reservation| reservation.account_id);
+    for reservation in reservations {
+        leaves.push((
+            account_reservation_leaf_key(reservation.account_id),
+            account_reservation_leaf_value(reservation),
         ));
     }
 
@@ -226,6 +262,20 @@ pub fn withdrawal_leaf_key(withdrawal_id: u64) -> Vec<u8> {
     let mut key = Vec::with_capacity(19);
     key.extend_from_slice(b"withdrawal/");
     key.extend_from_slice(&withdrawal_id.to_be_bytes());
+    key
+}
+
+pub fn resting_order_leaf_key(order_id: u64) -> Vec<u8> {
+    let mut key = Vec::with_capacity(14);
+    key.extend_from_slice(b"order/");
+    key.extend_from_slice(&order_id.to_be_bytes());
+    key
+}
+
+pub fn account_reservation_leaf_key(account_id: u64) -> Vec<u8> {
+    let mut key = Vec::with_capacity(18);
+    key.extend_from_slice(b"acct_resv/");
+    key.extend_from_slice(&account_id.to_be_bytes());
     key
 }
 
@@ -280,6 +330,75 @@ fn withdrawal_leaf_value(withdrawal: &WithdrawalSnapshot) -> Vec<u8> {
     value.extend_from_slice(&withdrawal.expiry_height.to_le_bytes());
     value.extend_from_slice(&withdrawal.nullifier);
     value
+}
+
+fn resting_order_leaf_value(resting: &RestingOrderSnapshot) -> Vec<u8> {
+    let mut value = Vec::new();
+    value.extend_from_slice(b"sybil/state/order/v1");
+    value.extend_from_slice(&resting.account_id.to_le_bytes());
+    value.extend_from_slice(&resting.created_at.to_le_bytes());
+    value.extend_from_slice(&resting.expires_at_block.to_le_bytes());
+    value.extend_from_slice(&resting.reserved_balance.to_le_bytes());
+    append_position_reservations(&mut value, &resting.reserved_positions);
+    append_order(&mut value, &resting.order);
+    value
+}
+
+fn account_reservation_leaf_value(reservation: &AccountReservationSnapshot) -> Vec<u8> {
+    let mut value = Vec::new();
+    value.extend_from_slice(b"sybil/state/acct-resv/v1");
+    value.extend_from_slice(&reservation.account_id.to_le_bytes());
+    value.extend_from_slice(&reservation.reserved_balance.to_le_bytes());
+    append_position_reservations(&mut value, &reservation.reserved_positions);
+    value
+}
+
+fn append_position_reservations(
+    value: &mut Vec<u8>,
+    positions: &[(matching_engine::MarketId, u8, i64)],
+) {
+    let mut positions = positions.to_vec();
+    positions.sort_by_key(|&(market, outcome, _)| (market.0, outcome));
+    positions.retain(|(_, _, qty)| *qty != 0);
+    value.extend_from_slice(&(positions.len() as u64).to_le_bytes());
+    for (market, outcome, qty) in positions {
+        value.extend_from_slice(&market.0.to_le_bytes());
+        value.push(outcome);
+        value.extend_from_slice(&qty.to_le_bytes());
+    }
+}
+
+fn append_order(value: &mut Vec<u8>, order: &matching_engine::Order) {
+    value.extend_from_slice(&order.id.to_le_bytes());
+    value.push(order.num_markets);
+    for market in order.markets.iter().take(order.num_markets as usize) {
+        value.extend_from_slice(&market.0.to_le_bytes());
+    }
+    value.push(order.num_states);
+    for payoff in order.payoffs.iter().take(order.num_states as usize) {
+        value.extend_from_slice(&payoff.to_le_bytes());
+    }
+    value.extend_from_slice(&order.limit_price.to_le_bytes());
+    value.extend_from_slice(&order.max_fill.to_le_bytes());
+    match &order.condition {
+        None => value.push(0),
+        Some(condition) => {
+            value.push(1);
+            value.extend_from_slice(&condition.market.0.to_le_bytes());
+            value.extend_from_slice(&condition.threshold.to_le_bytes());
+            value.push(match condition.direction {
+                matching_engine::ConditionDir::Above => 0,
+                matching_engine::ConditionDir::Below => 1,
+            });
+        }
+    }
+    match order.expires_at_block {
+        None => value.push(0),
+        Some(expires_at_block) => {
+            value.push(1);
+            value.extend_from_slice(&expires_at_block.to_le_bytes());
+        }
+    }
 }
 
 /// Compute blake3 hash of a block header for chaining.
@@ -493,6 +612,98 @@ mod tests {
     }
 
     #[test]
+    fn test_state_root_changes_on_resting_order_leaf() {
+        let accounts = vec![AccountSnapshot {
+            id: 7,
+            balance: 100,
+            total_deposited: 100,
+            positions: vec![],
+            events_digest: [0u8; 32],
+        }];
+        let mut order = matching_engine::Order::new(42);
+        order.markets[0] = MarketId::new(1);
+        order.num_markets = 1;
+        order.num_states = 2;
+        order.payoffs[0] = 1;
+        order.limit_price = 500_000_000;
+        order.max_fill = 3;
+
+        let sidecar = StateSidecarSnapshot {
+            resting_orders: vec![RestingOrderSnapshot {
+                order,
+                account_id: 7,
+                created_at: 3,
+                expires_at_block: 10,
+                reserved_balance: 1_500_000_000,
+                reserved_positions: vec![],
+            }],
+            account_reservations: vec![AccountReservationSnapshot {
+                account_id: 7,
+                reserved_balance: 1_500_000_000,
+                reserved_positions: vec![],
+            }],
+            ..StateSidecarSnapshot::default()
+        };
+
+        assert_ne!(
+            compute_state_root(&accounts),
+            compute_state_root_with_sidecar(&accounts, &sidecar)
+        );
+    }
+
+    #[test]
+    fn test_state_root_order_book_leaves_are_order_independent() {
+        let accounts = vec![];
+        let mut first_order = matching_engine::Order::new(2);
+        first_order.limit_price = 500_000_000;
+        first_order.max_fill = 2;
+        let mut second_order = matching_engine::Order::new(1);
+        second_order.limit_price = 600_000_000;
+        second_order.max_fill = 1;
+        let first = RestingOrderSnapshot {
+            order: first_order,
+            account_id: 7,
+            created_at: 3,
+            expires_at_block: 10,
+            reserved_balance: 1_000_000_000,
+            reserved_positions: vec![],
+        };
+        let second = RestingOrderSnapshot {
+            order: second_order,
+            account_id: 8,
+            created_at: 4,
+            expires_at_block: 11,
+            reserved_balance: 600_000_000,
+            reserved_positions: vec![],
+        };
+        let reservation_a = AccountReservationSnapshot {
+            account_id: 8,
+            reserved_balance: 600_000_000,
+            reserved_positions: vec![],
+        };
+        let reservation_b = AccountReservationSnapshot {
+            account_id: 7,
+            reserved_balance: 1_000_000_000,
+            reserved_positions: vec![],
+        };
+        let sidecar_a = StateSidecarSnapshot {
+            resting_orders: vec![first.clone(), second.clone()],
+            account_reservations: vec![reservation_a.clone(), reservation_b.clone()],
+            ..StateSidecarSnapshot::default()
+        };
+        let sidecar_b = StateSidecarSnapshot {
+            resting_orders: vec![second, first],
+            account_reservations: vec![reservation_b, reservation_a],
+            ..StateSidecarSnapshot::default()
+        };
+
+        assert_eq!(
+            compute_state_root_with_sidecar(&accounts, &sidecar_a),
+            compute_state_root_with_sidecar(&accounts, &sidecar_b)
+        );
+    }
+
+    #[test]
     fn test_valid_genesis_block() {
         let post_state = vec![AccountSnapshot {
             id: 0,
@@ -518,7 +729,7 @@ mod tests {
             pre_state: vec![],
             post_system_state: vec![],
             post_state,
-            bridge_state: Default::default(),
+            state_sidecar: Default::default(),
 
             resolved_markets: vec![],
         };
@@ -552,7 +763,7 @@ mod tests {
             pre_state: vec![],
             post_system_state: vec![],
             post_state,
-            bridge_state: Default::default(),
+            state_sidecar: Default::default(),
 
             resolved_markets: vec![],
         };
@@ -603,7 +814,7 @@ mod tests {
             pre_state: vec![],
             post_system_state: vec![],
             post_state,
-            bridge_state: Default::default(),
+            state_sidecar: Default::default(),
 
             resolved_markets: vec![],
         };
@@ -644,7 +855,7 @@ mod tests {
             pre_state: vec![],
             post_system_state: vec![],
             post_state,
-            bridge_state: Default::default(),
+            state_sidecar: Default::default(),
 
             resolved_markets: vec![],
         };

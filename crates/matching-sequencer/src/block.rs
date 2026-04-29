@@ -8,6 +8,7 @@ use crate::account::AccountStore;
 use crate::bridge::{bridge_state_snapshot, BridgeBlockData, BridgeState};
 use crate::canonical_state::CanonicalState;
 use crate::error::Rejection;
+use crate::order_book::OrderBook;
 use crate::system_event::SystemEvent;
 
 /// Named result of [`BlockSequencer::produce_block`].
@@ -35,7 +36,7 @@ pub struct BlockHeader {
     /// blake3(previous header bytes), zeros for genesis.
     pub parent_hash: [u8; 32],
     /// Current state root. Today this is the v2 typed root over canonical
-    /// account leaves plus the bridge sidecar leaves implemented so far.
+    /// account leaves plus bridge and order-book sidecar leaves.
     pub state_root: [u8; 32],
     pub order_count: u32,
     pub fill_count: u32,
@@ -60,18 +61,33 @@ pub struct Block {
 /// Compute a deterministic account-only state root with the verifier's
 /// zero-valued bridge sidecar.
 ///
-/// Production blocks should call [`compute_state_root_v2`] so the bridge
-/// sidecar committed by the witness is included.
+/// Production blocks should call [`compute_state_root_v2`] so the sidecar
+/// committed by the witness is included.
 pub fn compute_state_root(accounts: &AccountStore) -> [u8; 32] {
     CanonicalState::from_accounts(accounts).state_root()
 }
 
-pub fn compute_state_root_v2(accounts: &AccountStore, bridge: &BridgeState) -> [u8; 32] {
+pub fn compute_state_root_v2(
+    accounts: &AccountStore,
+    bridge: &BridgeState,
+    order_book: &OrderBook,
+) -> [u8; 32] {
     let accounts = CanonicalState::from_accounts(accounts);
-    sybil_verifier::block::compute_state_root_with_bridge(
+    sybil_verifier::block::compute_state_root_with_sidecar(
         accounts.as_snapshots(),
-        &bridge_state_snapshot(bridge),
+        &state_sidecar_snapshot(bridge, order_book),
     )
+}
+
+pub fn state_sidecar_snapshot(
+    bridge: &BridgeState,
+    order_book: &OrderBook,
+) -> sybil_verifier::StateSidecarSnapshot {
+    sybil_verifier::StateSidecarSnapshot {
+        bridge: bridge_state_snapshot(bridge),
+        resting_orders: order_book.state_root_orders(),
+        account_reservations: order_book.state_root_reservations(),
+    }
 }
 
 /// Compute blake3 hash of a block header for chaining.

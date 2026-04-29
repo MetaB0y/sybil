@@ -21,6 +21,9 @@ use crate::account::{Account, AccountId, AccountStore};
 use crate::account_storage::AccountSnapshotSlot;
 use crate::bridge::{bridge_state_snapshot, BridgeState};
 use crate::canonical_state::snapshot_account;
+use crate::order_book::{
+    reservation_snapshots_from_resting_orders, resting_order_snapshots, RestingOrder,
+};
 use crate::store::StoreError;
 
 const CHUNK_SIZE: usize = 32;
@@ -71,6 +74,7 @@ enum Command {
 struct PersistedAccountSnapshot {
     accounts: Vec<Account>,
     bridge_state: BridgeState,
+    resting_orders: Vec<RestingOrder>,
     height: u64,
     next_account_id: u64,
 }
@@ -114,6 +118,7 @@ impl QmdbAccounts {
         slot: AccountSnapshotSlot,
         accounts: &AccountStore,
         bridge_state: &BridgeState,
+        resting_orders: &[RestingOrder],
         height: u64,
         next_account_id: u64,
     ) -> Result<(), StoreError> {
@@ -123,6 +128,7 @@ impl QmdbAccounts {
                 .map(|(_, account)| account.clone())
                 .collect(),
             bridge_state: bridge_state.clone(),
+            resting_orders: resting_orders.to_vec(),
             height,
             next_account_id,
         };
@@ -216,9 +222,13 @@ async fn replace_snapshot(
     let mut desired = HashMap::new();
 
     let account_snapshots: Vec<_> = snapshot.accounts.iter().map(snapshot_account).collect();
-    let bridge_snapshot = bridge_state_snapshot(&snapshot.bridge_state);
+    let state_sidecar = sybil_verifier::StateSidecarSnapshot {
+        bridge: bridge_state_snapshot(&snapshot.bridge_state),
+        resting_orders: resting_order_snapshots(&snapshot.resting_orders),
+        account_reservations: reservation_snapshots_from_resting_orders(&snapshot.resting_orders),
+    };
     for (leaf_key, leaf_value) in
-        sybil_verifier::block::state_root_v2_leaves(&account_snapshots, &bridge_snapshot)
+        sybil_verifier::block::state_root_v2_leaves(&account_snapshots, &state_sidecar)
     {
         desired.insert(encode_state_v2_key(slot, &leaf_key), leaf_value);
     }

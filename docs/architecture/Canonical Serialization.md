@@ -169,10 +169,11 @@ is frozen.
 ### State leaves for `state_root_v2`
 
 [[State Root Schema]] fixes the v2 commitment shape. The current
-implementation commits a typed subset: accounts, bridge counters, deposit
-root, and active withdrawal leaves. Each committed value begins with an ASCII
-domain string identifying the leaf type and version, followed by canonical
-fixed-width fields and deterministically sorted collections.
+implementation commits a typed subset: accounts, resting orders, aggregate
+reservations, bridge counters, deposit root, and active withdrawal leaves.
+Each committed value begins with an ASCII domain string identifying the leaf
+type and version, followed by canonical fixed-width fields and
+deterministically sorted collections.
 
 Reserved domains:
 
@@ -190,6 +191,8 @@ Implemented key encodings:
 | Logical key | Bytes |
 |---|---|
 | `acct/{account_id}` | `"acct/" || account_id:u64_be` |
+| `acct_resv/{account_id}` | `"acct_resv/" || account_id:u64_be` |
+| `order/{order_id}` | `"order/" || order_id:u64_be` |
 | `sys/deposit_cursor` | ASCII literal |
 | `sys/deposit_root` | ASCII literal |
 | `sys/next_withdrawal_id` | ASCII literal |
@@ -239,8 +242,66 @@ withdrawal_leaf_value =
  || nullifier:[u8;32]
 ```
 
+`acct_resv` value:
+
+```text
+account_reservation_leaf_value =
+    "sybil/state/acct-resv/v1"
+ || account_id:u64_le
+ || reserved_balance:i64_le
+ || reserved_position_count:u64_le
+ || (market_id:u32_le || outcome:u8 || qty:i64_le) * reserved_position_count
+```
+
+Reserved positions with `qty == 0` MUST be omitted. Remaining reserved
+positions are sorted by `(market_id, outcome)`.
+
+`order` value:
+
+```text
+resting_order_leaf_value =
+    "sybil/state/order/v1"
+ || account_id:u64_le
+ || created_at:u64_le
+ || expires_at_block:u64_le
+ || reserved_balance:i64_le
+ || reserved_position_count:u64_le
+ || (market_id:u32_le || outcome:u8 || qty:i64_le) * reserved_position_count
+ || order_bytes
+```
+
+`order_bytes` is the admitted remaining order:
+
+```text
+order_bytes =
+    order_id:u64_le
+ || num_markets:u8
+ || market_id:u32_le * num_markets
+ || num_states:u8
+ || payoff:i8 * num_states
+ || limit_price:u64_le
+ || max_fill:u64_le
+ || condition_tag:u8
+ || condition_bytes?
+ || expires_at_block_tag:u8
+ || raw_expires_at_block:u64_le?
+```
+
+`condition_tag = 0` for no condition. `condition_tag = 1` is:
+
+```text
+condition_bytes =
+    market_id:u32_le
+ || threshold:u64_le
+ || direction:u8   // 0 = Above, 1 = Below
+```
+
+`expires_at_block_tag = 0` for `None`; `1` for `Some(raw_expires_at_block)`.
+The resting-order wrapper always also commits the effective
+`expires_at_block` used by the sequencer.
+
 The other reserved domains are intentionally deferred until the typed state
-writer is widened to reservations, resting orders, and market lifecycle state.
+writer is widened to market lifecycle state and market metadata.
 
 ## Event encoding registry
 

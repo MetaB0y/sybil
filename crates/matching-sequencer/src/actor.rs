@@ -907,6 +907,7 @@ impl Actor for SequencerActor {
                 let root = crate::block::compute_state_root_v2(
                     &state.sequencer.accounts,
                     state.sequencer.bridge_state(),
+                    state.sequencer.order_book(),
                 );
                 let _ = reply.send(root);
             }

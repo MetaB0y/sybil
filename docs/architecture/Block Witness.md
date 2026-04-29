@@ -18,7 +18,7 @@ tomorrow. Everything else in this doc follows from two invariants:
    block makes — without access to sequencer state, mempool, or history
    beyond the parent.
 2. **Reproducible.** `apply_fills(pre_state, system_events, fills) == post_state`,
-   and `compute_state_root_with_bridge(post_state, bridge_state) ==
+   and `compute_state_root_with_sidecar(post_state, state_sidecar) ==
    header.state_root`. If either equation fails, the witness is invalid.
 
 ## Rust type
@@ -41,7 +41,7 @@ tomorrow. Everything else in this doc follows from two invariants:
 | `pre_state` | account snapshots at block start |
 | `post_system_state` | after system events, before fills |
 | `post_state` | after fills — what the header's `state_root` commits to |
-| `bridge_state` | bridge sidecar snapshot committed by the header's `state_root` |
+| `state_sidecar` | non-account state committed by the header's `state_root`: bridge, resting orders, and reservations |
 | `resolved_markets` | markets resolved/voided; orders/fills must not reference |
 
 The sequencer builds this in `matching-sequencer::sequencer` at the end of
@@ -67,7 +67,7 @@ seen inside the circuit, never exposed).
 | `fills` (individual) | private (shape is public via events_root) |
 | `mm_constraints`, `market_groups` | private |
 | `pre_state`, `post_system_state`, `post_state` | private |
-| `bridge_state` | private (deposit root/count and withdrawal commitments are exposed through dedicated proof public inputs where needed) |
+| `state_sidecar` | private (deposit root/count, withdrawal commitments, and selected order/reservation claims can be exposed through dedicated proof public inputs where needed) |
 
 Rationale: the public side is "what was the market's observable outcome" —
 clearing prices, how many orders, welfare. The private side is "which
@@ -102,7 +102,7 @@ witness_v1_bytes =
  || section[pre_state]
  || section[post_system_state]
  || section[post_state]
- || bridge_state_section
+ || state_sidecar_section
  || section[resolved_markets]
 ```
 
@@ -129,7 +129,7 @@ carry a TODO there too):
 | `fills` | `Fill` (see Canonical Serialization) | solver output order (stable) |
 | `mm_constraints`, `market_groups` | TODO | by first market_id ascending |
 | `pre_state`, `post_system_state`, `post_state` | `AccountSnapshot` (see Canonical Serialization) | by `id` ascending |
-| `bridge_state` | `BridgeStateSnapshot` (see Canonical Serialization) | withdrawal leaves by `withdrawal_id` ascending |
+| `state_sidecar` | `StateSidecarSnapshot` (see Canonical Serialization) | withdrawal/order/reservation leaves by id ascending |
 | `resolved_markets` | `market_id:u32` | by `market_id` ascending |
 
 Once every item encoding is pinned, `witness_root = BLAKE3("sybil/witness/v1" || witness_v1_bytes)`.
@@ -214,12 +214,10 @@ in [[Proof Architecture]], [[L1 Settlement and Vault]], and the Data
 Availability RFC (sibling, M3).
 
 Order expiry lives in the private `orders` section. The verifier can check
-that an order included in a batch is eligible for `header.height`. Under v1,
-the account-only `state_root` does not commit to the post-block resting
-order book, so "this expired order did not rest" is an implementation and
-witness property. Under the v2 [[State Root Schema]], active resting orders
-are typed state leaves, so presence or absence of an order is provable against
-`state_root`.
+that an order included in a batch is eligible for `header.height`. The current
+v2 [[State Root Schema]] also commits post-block active resting orders, so
+presence or absence of an order is provable against `state_root` instead of
+being only an implementation and witness property.
 
 ## Test vectors
 
