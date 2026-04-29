@@ -30,6 +30,36 @@ pub fn encode_deposit_event(amount: i64, block_height: u64) -> Vec<u8> {
     bytes
 }
 
+pub fn encode_l1_deposit_event(
+    deposit_id: u64,
+    amount: i64,
+    deposit_root: &[u8; 32],
+    block_height: u64,
+) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(1 + 8 + 8 + 32 + 8);
+    bytes.push(0x06);
+    bytes.extend_from_slice(&deposit_id.to_le_bytes());
+    bytes.extend_from_slice(&amount.to_le_bytes());
+    bytes.extend_from_slice(deposit_root);
+    bytes.extend_from_slice(&block_height.to_le_bytes());
+    bytes
+}
+
+pub fn encode_withdrawal_created_event(
+    withdrawal_id: u64,
+    amount: i64,
+    nullifier: &[u8; 32],
+    block_height: u64,
+) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(1 + 8 + 8 + 32 + 8);
+    bytes.push(0x07);
+    bytes.extend_from_slice(&withdrawal_id.to_le_bytes());
+    bytes.extend_from_slice(&amount.to_le_bytes());
+    bytes.extend_from_slice(nullifier);
+    bytes.extend_from_slice(&block_height.to_le_bytes());
+    bytes
+}
+
 pub fn encode_resolution_event(
     market_id: MarketId,
     payout_nanos: Nanos,

@@ -180,6 +180,9 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::InvalidMarketState(ref msg) => {
                 AppError::conflict(format!("Invalid market state: {msg}"))
             }
+            matching_sequencer::SequencerError::Bridge(ref msg) => {
+                AppError::bad_request(format!("Bridge error: {msg}"))
+            }
             matching_sequencer::SequencerError::Persistence(ref msg) => {
                 AppError::internal(format!("Persistence error: {msg}"))
             }

@@ -155,7 +155,7 @@ async fn replay(socket: &mut WebSocket, handle: &SequencerHandle, from: u64) -> 
 
 async fn send_block(socket: &mut WebSocket, block: &matching_sequencer::block::Block) -> bool {
     let payload = BlockStreamPayload::Block {
-        data: block_to_response(block),
+        data: Box::new(block_to_response(block)),
     };
     send_envelope(socket, payload).await
 }

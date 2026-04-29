@@ -3,6 +3,7 @@ mod account_storage;
 pub mod actor;
 pub mod agent;
 pub mod block;
+pub mod bridge;
 pub mod canonical_state;
 pub mod crypto;
 pub mod digest;
@@ -26,6 +27,9 @@ pub mod validation;
 pub use account::{Account, AccountId, AccountStore};
 pub use actor::{MarketSearchResult, SequencerHandle};
 pub use block::{Block, BlockProduction};
+pub use bridge::{
+    BridgeBlockData, BridgeState, BridgeWithdrawalRequest, EthAddress, L1Deposit, WithdrawalLeaf,
+};
 pub use crypto::{PublicKey, SignedCancel, SignedOrder};
 pub use error::{Rejection, RejectionReason, SequencerError};
 pub use market_info::{

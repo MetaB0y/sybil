@@ -87,6 +87,9 @@ pub enum SequencerError {
     /// Market lifecycle transition is not valid in the current state.
     #[error("invalid market state: {0}")]
     InvalidMarketState(String),
+    /// Bridge deposit or withdrawal validation failed.
+    #[error("bridge error: {0}")]
+    Bridge(String),
     /// Block persistence failed before the prepared block could be committed.
     #[error("block persistence failed: {0}")]
     Persistence(String),

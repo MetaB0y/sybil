@@ -3,7 +3,7 @@ tags: [zk, spec]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-04-26
+last_verified: 2026-04-29
 ---
 
 # State Root Schema
@@ -29,8 +29,8 @@ Specifically, the fields of `AccountSnapshot`:
 - `events_digest` — per-account running BLAKE3 accumulator over events
 
 Anything not in `AccountSnapshot` is explicitly **not covered by v1**: the
-resting order book, market metadata, oracle lifecycle state, and sequencer
-counters all live outside the root.
+resting order book, market metadata, oracle lifecycle state, bridge sidecar
+state, and sequencer counters all live outside the root.
 
 Phase 2 is the production target. It is a single typed qmdb root over the
 complete validium state needed to verify, recover, and restart the exchange:
@@ -105,6 +105,10 @@ current code:
 - The MMR root produced by `batch.merkleize(...).apply_batch(...)` exists
   **but is not currently exposed or used** — state root is still the flat
   BLAKE3 of §Phase 1.
+- Bridge deposits and withdrawals now persist as redb sidecar state
+  (`BridgeState`) plus pending WALs. Blocks expose the sidecar transition data
+  for proof-generation, but v1 `state_root` does not yet commit
+  `sys/deposit_cursor` or `withdrawal/{withdrawal_id}` leaves.
 
 So qmdb is shipping today as a storage layer. It's not yet the source of
 truth for the block header's `state_root`.

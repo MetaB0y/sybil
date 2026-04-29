@@ -25,7 +25,7 @@ pub enum BlockStreamPayload {
     /// A committed block. Sent for every block during live streaming, and
     /// also for each replayed block when the client connects with
     /// `?from_block=N`.
-    Block { data: BlockResponse },
+    Block { data: Box<BlockResponse> },
     /// Sent once after a `?from_block=N` replay, signaling that all
     /// blocks up to and including `up_to_height` have been delivered and
     /// the connection is now following the live stream.
@@ -49,7 +49,7 @@ mod tests {
         let msg = BlockStreamMessage {
             v: BLOCK_STREAM_VERSION,
             payload: BlockStreamPayload::Block {
-                data: BlockResponse {
+                data: Box::new(BlockResponse {
                     height: 42,
                     parent_hash: "ab".into(),
                     state_root: "cd".into(),
@@ -60,10 +60,11 @@ mod tests {
                     fills: vec![],
                     clearing_prices_nanos: Default::default(),
                     rejections: vec![],
+                    bridge: Default::default(),
                     total_welfare_nanos: 0,
                     total_volume_nanos: 0,
                     orders_filled: 0,
-                },
+                }),
             },
         };
         let json = serde_json::to_string(&msg).unwrap();

@@ -14,6 +14,11 @@ use tracing::{debug, error};
 
 use crate::account::{Account, AccountId, AccountStore};
 use crate::block::{hash_header, Block, BlockFlowMetrics, BlockHeader, BlockProduction};
+use crate::bridge::{
+    account_key, amount_token_units_to_i64_nanos, amount_token_units_to_nanos, BridgeBlockData,
+    BridgeError, BridgeState, BridgeWithdrawalRequest, L1Deposit, WithdrawalLeaf,
+    DEFAULT_WITHDRAWAL_EXPIRY_BLOCKS,
+};
 use crate::canonical_state::{snapshot_account, CanonicalState};
 use crate::error::{Rejection, RejectionReason, SequencerError};
 use crate::market_info::{AccountFillRecord, MarketMetadata, PricePoint};
@@ -187,6 +192,28 @@ struct WitnessAssemblyInput<'a> {
     resolved_markets: Vec<MarketId>,
 }
 
+fn bridge_block_data(system_events: &[SystemEvent], bridge_state: &BridgeState) -> BridgeBlockData {
+    let mut consumed_deposits = Vec::new();
+    let mut withdrawal_leaves = Vec::new();
+    for event in system_events {
+        match event {
+            SystemEvent::L1Deposit { deposit, .. } => consumed_deposits.push(deposit.clone()),
+            SystemEvent::WithdrawalCreated { withdrawal, .. } => {
+                withdrawal_leaves.push(withdrawal.clone());
+            }
+            SystemEvent::CreateAccount { .. }
+            | SystemEvent::Deposit { .. }
+            | SystemEvent::MarketResolved { .. } => {}
+        }
+    }
+    BridgeBlockData {
+        deposit_count: bridge_state.deposit_cursor,
+        deposit_root: bridge_state.deposit_root,
+        consumed_deposits,
+        withdrawal_leaves,
+    }
+}
+
 impl PreparedBlock {
     pub fn production(&self) -> &BlockProduction {
         &self.production
@@ -336,6 +363,31 @@ fn convert_system_event(event: &SystemEvent) -> SystemEventWitness {
             account_id: account_id.0,
             amount: *amount,
         },
+        SystemEvent::L1Deposit {
+            account_id,
+            amount,
+            deposit,
+        } => SystemEventWitness::L1Deposit {
+            account_id: account_id.0,
+            amount: *amount,
+            deposit_id: deposit.deposit_id,
+            deposit_root: deposit.deposit_root,
+            sybil_account_key: deposit.sybil_account_key,
+        },
+        SystemEvent::WithdrawalCreated {
+            account_id,
+            amount,
+            withdrawal,
+        } => SystemEventWitness::WithdrawalCreated {
+            account_id: account_id.0,
+            amount: *amount,
+            withdrawal_id: withdrawal.withdrawal_id,
+            recipient: withdrawal.recipient,
+            token: withdrawal.token_address,
+            amount_token_units: withdrawal.amount_token_units,
+            expiry_height: withdrawal.expiry_height,
+            nullifier: withdrawal.nullifier,
+        },
         SystemEvent::MarketResolved {
             market_id,
             payout_nanos,
@@ -481,6 +533,8 @@ pub struct BlockSequencer {
     pub lifecycle: crate::market_lifecycle::MarketLifecycle,
     /// P256 public key to account mapping.
     pubkey_registry: HashMap<crate::crypto::PublicKey, AccountId>,
+    /// L1 bridge sidecar state: consumed deposits and normal withdrawal leaves.
+    bridge: BridgeState,
     /// Administrative state changes that should be included in the next block.
     pending_system_events: Vec<SystemEvent>,
     /// Block-start baselines for accounts touched by pending system events.
@@ -519,6 +573,7 @@ impl BlockSequencer {
             fill_recorder: crate::fill_recorder::FillRecorder::new(),
             lifecycle: crate::market_lifecycle::MarketLifecycle::new(oracle),
             pubkey_registry: HashMap::new(),
+            bridge: BridgeState::default(),
             pending_system_events: Vec::new(),
             pending_system_account_baselines: HashMap::new(),
             pending_bundles: Vec::new(),
@@ -566,7 +621,7 @@ impl BlockSequencer {
         for resting in state.admit_log {
             order_book.reinsert_for_replay(resting);
         }
-        Self {
+        let mut restored = Self {
             accounts: state.accounts,
             solver,
             next_order_id: state.next_order_id,
@@ -582,11 +637,23 @@ impl BlockSequencer {
             fill_recorder: crate::fill_recorder::FillRecorder::restore(state.account_fills),
             lifecycle,
             pubkey_registry: state.pubkey_registry,
+            bridge: state.bridge_state,
             pending_system_events: Vec::new(),
             pending_system_account_baselines: HashMap::new(),
             pending_bundles: state.pending_bundles,
             config,
+        };
+        for deposit in state.pending_l1_deposits {
+            restored
+                .ingest_l1_deposit(deposit)
+                .expect("pending l1 deposit replay should be valid");
         }
+        for request in state.pending_bridge_withdrawals {
+            restored
+                .request_bridge_withdrawal(request)
+                .expect("pending bridge withdrawal replay should be valid");
+        }
+        restored
     }
 
     pub fn height(&self) -> u64 {
@@ -619,6 +686,7 @@ impl BlockSequencer {
             market_volumes: self.price_tracker.market_volumes(),
             account_fills: self.fill_recorder.snapshot(),
             resting_orders: self.order_book.snapshot(),
+            bridge_state: &self.bridge,
         }
     }
 
@@ -799,6 +867,164 @@ impl BlockSequencer {
         let updated = account.clone();
         self.record_system_event(SystemEvent::Deposit { account_id, amount });
         Ok(updated)
+    }
+
+    pub fn bridge_state(&self) -> &BridgeState {
+        &self.bridge
+    }
+
+    pub fn bridge_account_key(&self, account_id: AccountId) -> Option<[u8; 32]> {
+        self.accounts
+            .get(account_id)
+            .map(|_| account_key(account_id))
+    }
+
+    pub fn default_bridge_withdrawal_expiry_height(&self) -> u64 {
+        self.height
+            .saturating_add(1)
+            .saturating_add(DEFAULT_WITHDRAWAL_EXPIRY_BLOCKS)
+    }
+
+    pub fn bridge_withdrawal(&self, withdrawal_id: u64) -> Option<&WithdrawalLeaf> {
+        self.bridge.withdrawals.get(&withdrawal_id)
+    }
+
+    pub fn validate_l1_deposit(&self, deposit: &L1Deposit) -> Result<i64, SequencerError> {
+        if self.accounts.get(deposit.account_id).is_none() {
+            return Err(SequencerError::Rejected(Rejection {
+                order_id: 0,
+                account_id: deposit.account_id,
+                reason: RejectionReason::AccountNotFound,
+            }));
+        }
+        let expected_id = self.bridge.deposit_cursor.saturating_add(1);
+        if deposit.deposit_id != expected_id {
+            return Err(SequencerError::Bridge(
+                BridgeError::NonSequentialDeposit {
+                    expected: expected_id,
+                    actual: deposit.deposit_id,
+                }
+                .to_string(),
+            ));
+        }
+        if deposit.sybil_account_key != account_key(deposit.account_id) {
+            return Err(SequencerError::Bridge(
+                BridgeError::AccountKeyMismatch.to_string(),
+            ));
+        }
+        amount_token_units_to_i64_nanos(deposit.amount_token_units)
+            .map_err(|err| SequencerError::Bridge(err.to_string()))
+    }
+
+    pub fn ingest_l1_deposit(&mut self, deposit: L1Deposit) -> Result<Account, SequencerError> {
+        let amount = self.validate_l1_deposit(&deposit)?;
+        let account_id = deposit.account_id;
+        self.capture_system_account_baseline(account_id);
+        let account = self.accounts.get_mut(account_id).ok_or({
+            SequencerError::Rejected(Rejection {
+                order_id: 0,
+                account_id,
+                reason: RejectionReason::AccountNotFound,
+            })
+        })?;
+
+        account.balance += amount;
+        account.total_deposited += amount;
+        let updated = account.clone();
+        self.bridge.deposit_cursor = deposit.deposit_id;
+        self.bridge.deposit_root = deposit.deposit_root;
+        self.record_system_event(SystemEvent::L1Deposit {
+            account_id,
+            amount,
+            deposit,
+        });
+        Ok(updated)
+    }
+
+    pub fn validate_bridge_withdrawal(
+        &self,
+        request: &BridgeWithdrawalRequest,
+    ) -> Result<i64, SequencerError> {
+        let account = self.accounts.get(request.account_id).ok_or({
+            SequencerError::Rejected(Rejection {
+                order_id: 0,
+                account_id: request.account_id,
+                reason: RejectionReason::AccountNotFound,
+            })
+        })?;
+        let amount = amount_token_units_to_i64_nanos(request.amount_token_units)
+            .map_err(|err| SequencerError::Bridge(err.to_string()))?;
+        let next_height = self.height.saturating_add(1);
+        if request.expiry_height < next_height {
+            return Err(SequencerError::Bridge(
+                BridgeError::WithdrawalExpired {
+                    expiry_height: request.expiry_height,
+                    next_height,
+                }
+                .to_string(),
+            ));
+        }
+        let available = account.balance - self.order_book.reserved_balance(request.account_id);
+        if amount > available {
+            return Err(SequencerError::Bridge(
+                BridgeError::InsufficientAvailableBalance {
+                    required: amount,
+                    available,
+                }
+                .to_string(),
+            ));
+        }
+        Ok(amount)
+    }
+
+    pub fn request_bridge_withdrawal(
+        &mut self,
+        request: BridgeWithdrawalRequest,
+    ) -> Result<WithdrawalLeaf, SequencerError> {
+        let amount_i64 = self.validate_bridge_withdrawal(&request)?;
+        let amount_nanos = amount_token_units_to_nanos(request.amount_token_units)
+            .map_err(|err| SequencerError::Bridge(err.to_string()))?;
+        let withdrawal_id = self.bridge.next_withdrawal_id;
+        let nullifier = crate::bridge::withdrawal_nullifier(
+            request.chain_id,
+            request.vault_address,
+            withdrawal_id,
+            request.account_id,
+            request.recipient,
+            request.token_address,
+            request.amount_token_units,
+        );
+        let withdrawal = WithdrawalLeaf {
+            withdrawal_id,
+            account_id: request.account_id,
+            recipient: request.recipient,
+            token_address: request.token_address,
+            amount_token_units: request.amount_token_units,
+            amount_nanos,
+            expiry_height: request.expiry_height,
+            nullifier,
+            created_at_height: self.height.saturating_add(1),
+        };
+
+        self.capture_system_account_baseline(request.account_id);
+        let account = self.accounts.get_mut(request.account_id).ok_or({
+            SequencerError::Rejected(Rejection {
+                order_id: 0,
+                account_id: request.account_id,
+                reason: RejectionReason::AccountNotFound,
+            })
+        })?;
+        account.balance -= amount_i64;
+        self.bridge.next_withdrawal_id = withdrawal_id.saturating_add(1);
+        self.bridge
+            .withdrawals
+            .insert(withdrawal_id, withdrawal.clone());
+        self.record_system_event(SystemEvent::WithdrawalCreated {
+            account_id: request.account_id,
+            amount: amount_i64,
+            withdrawal: withdrawal.clone(),
+        });
+        Ok(withdrawal)
     }
 
     pub fn record_system_event(&mut self, event: SystemEvent) {
@@ -1409,6 +1635,38 @@ impl BlockSequencer {
                             crate::digest::update_digest(&account.events_digest, &encoded);
                     }
                 }
+                SystemEvent::L1Deposit {
+                    account_id,
+                    amount,
+                    deposit,
+                } => {
+                    if let Some(account) = self.accounts.get_mut(*account_id) {
+                        let encoded = crate::digest::encode_l1_deposit_event(
+                            deposit.deposit_id,
+                            *amount,
+                            &deposit.deposit_root,
+                            self.height,
+                        );
+                        account.events_digest =
+                            crate::digest::update_digest(&account.events_digest, &encoded);
+                    }
+                }
+                SystemEvent::WithdrawalCreated {
+                    account_id,
+                    amount,
+                    withdrawal,
+                } => {
+                    if let Some(account) = self.accounts.get_mut(*account_id) {
+                        let encoded = crate::digest::encode_withdrawal_created_event(
+                            withdrawal.withdrawal_id,
+                            *amount,
+                            &withdrawal.nullifier,
+                            self.height,
+                        );
+                        account.events_digest =
+                            crate::digest::update_digest(&account.events_digest, &encoded);
+                    }
+                }
                 SystemEvent::MarketResolved {
                     market_id,
                     payout_nanos,
@@ -1428,6 +1686,7 @@ impl BlockSequencer {
                 }
             }
         }
+        let bridge = bridge_block_data(&system_events, &self.bridge);
 
         let fresh_submissions = submissions.len();
         let fresh_orders_received: usize = submissions
@@ -1768,6 +2027,7 @@ impl BlockSequencer {
             header,
             order_ids,
             system_events,
+            bridge,
             fills,
             clearing_prices,
             rejections,
@@ -1854,6 +2114,64 @@ mod tests {
             ),
             aid,
         )
+    }
+
+    fn eth_address(byte: u8) -> [u8; 20] {
+        [byte; 20]
+    }
+
+    fn l1_deposit(account_id: AccountId, deposit_id: u64, amount_token_units: u64) -> L1Deposit {
+        L1Deposit {
+            deposit_id,
+            account_id,
+            chain_id: 1,
+            vault_address: eth_address(0x10),
+            token_address: eth_address(0x20),
+            sender: eth_address(0x30),
+            sybil_account_key: account_key(account_id),
+            amount_token_units,
+            deposit_root: [deposit_id as u8; 32],
+        }
+    }
+
+    #[test]
+    fn bridge_deposit_and_withdrawal_emit_block_sidecar() {
+        let (mut seq, aid) = make_sequencer(0);
+
+        let account = seq.ingest_l1_deposit(l1_deposit(aid, 1, 10_000)).unwrap();
+        assert_eq!(account.balance, 10_000_000);
+
+        let withdrawal = seq
+            .request_bridge_withdrawal(BridgeWithdrawalRequest {
+                account_id: aid,
+                chain_id: 1,
+                vault_address: eth_address(0x10),
+                recipient: eth_address(0x40),
+                token_address: eth_address(0x20),
+                amount_token_units: 4_000,
+                expiry_height: 10,
+            })
+            .unwrap();
+        assert_eq!(withdrawal.amount_nanos, 4_000_000);
+
+        let block = seq.produce_block(vec![], 1_000).block;
+        assert_eq!(block.bridge.deposit_count, 1);
+        assert_eq!(block.bridge.deposit_root, [1u8; 32]);
+        assert_eq!(block.bridge.consumed_deposits.len(), 1);
+        assert_eq!(block.bridge.withdrawal_leaves, vec![withdrawal]);
+        assert_eq!(seq.accounts.get(aid).unwrap().balance, 6_000_000);
+    }
+
+    #[test]
+    fn bridge_deposit_requires_next_l1_cursor() {
+        let (mut seq, aid) = make_sequencer(0);
+        match seq.ingest_l1_deposit(l1_deposit(aid, 2, 10_000)) {
+            Err(SequencerError::Bridge(_)) => {}
+            other => panic!(
+                "expected bridge error, got {:?}",
+                other.map(|account| account.id)
+            ),
+        }
     }
 
     #[test]
@@ -2308,6 +2626,9 @@ mod tests {
             resting_orders: seq_a.order_book.snapshot(),
             data_feeds: Vec::new(),
             pending_bundles: Vec::new(),
+            pending_l1_deposits: Vec::new(),
+            pending_bridge_withdrawals: Vec::new(),
+            bridge_state: BridgeState::default(),
             admit_log: Vec::new(),
             account_fills: Vec::new(),
         };

@@ -27,6 +27,11 @@ use crate::types::response::*;
         routes::accounts::register_key,
         routes::accounts::get_portfolio,
         routes::accounts::get_account_fills,
+        routes::bridge::status,
+        routes::bridge::account_key,
+        routes::bridge::submit_l1_deposit,
+        routes::bridge::create_withdrawal,
+        routes::bridge::get_withdrawal,
         routes::markets::list_markets,
         routes::markets::list_markets_summary,
         routes::markets::get_market,
@@ -56,6 +61,8 @@ use crate::types::response::*;
     components(schemas(
         CreateAccountRequest,
         FundAccountRequest,
+        SubmitL1DepositRequest,
+        CreateBridgeWithdrawalRequest,
         RegisterKeyRequest,
         CreateMarketRequest,
         CreateMarketGroupRequest,
@@ -74,6 +81,12 @@ use crate::types::response::*;
         MarketSearchParams,
         AccountResponse,
         PositionResponse,
+        BridgeStatusResponse,
+        BridgeAccountKeyResponse,
+        BridgeDepositResponse,
+        BridgeDepositEventResponse,
+        BridgeWithdrawalResponse,
+        BridgeBlockResponse,
         MarketResponse,
         MarketSummaryResponse,
         MarketGroupResponse,
@@ -237,8 +250,29 @@ pub fn create_router(state: AppState) -> Router {
             axum::routing::get(routes::accounts::get_account_fills),
         )
         .route(
+            "/v1/accounts/{id}/bridge-key",
+            axum::routing::get(routes::bridge::account_key),
+        )
+        .route(
             "/v1/accounts/{id}/orders",
             axum::routing::get(routes::orders::get_account_orders),
+        )
+        // Bridge sidecar
+        .route(
+            "/v1/bridge/status",
+            axum::routing::get(routes::bridge::status),
+        )
+        .route(
+            "/v1/bridge/deposits",
+            axum::routing::post(routes::bridge::submit_l1_deposit),
+        )
+        .route(
+            "/v1/bridge/withdrawals",
+            axum::routing::post(routes::bridge::create_withdrawal),
+        )
+        .route(
+            "/v1/bridge/withdrawals/{id}",
+            axum::routing::get(routes::bridge::get_withdrawal),
         )
         // Markets — search & summary MUST come before {id} to avoid path param capture
         .route(

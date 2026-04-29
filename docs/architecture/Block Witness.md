@@ -3,7 +3,7 @@ tags: [zk, spec]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-04-26
+last_verified: 2026-04-29
 ---
 
 # Block Witness
@@ -31,7 +31,7 @@ tomorrow. Everything else in this doc follows from two invariants:
 | `previous_header` | parent header (or `None` for genesis) |
 | `orders` | orders accepted into this batch, with account mapping |
 | `rejections` | orders rejected, with reasons |
-| `system_events` | state changes applied between blocks (deposit, create, resolve) |
+| `system_events` | state changes applied between blocks (create account, dev deposit, L1 deposit, withdrawal creation, resolution) |
 | `fills` | solver output |
 | `clearing_prices` | per-market clearing prices produced by the solver |
 | `total_welfare` | sum of `(limit_price - clearing_price) * fill_qty` |
@@ -62,7 +62,7 @@ seen inside the circuit, never exposed).
 | `header.order_count`, `header.fill_count` | public |
 | `orders` (individual, including expiry) | private |
 | `rejections` | private |
-| `system_events` (individual) | private (shape is public via events_root) |
+| `system_events` (individual) | private (shape is public via events_root; bridge public inputs carry deposit/withdrawal commitments separately) |
 | `fills` (individual) | private (shape is public via events_root) |
 | `mm_constraints`, `market_groups` | private |
 | `pre_state`, `post_system_state`, `post_state` | private |

@@ -27,6 +27,10 @@ fn to_hex(bytes: &[u8]) -> String {
     hex::encode(bytes)
 }
 
+fn hex_bytes(byte: u8, len: usize) -> String {
+    hex::encode(vec![byte; len])
+}
+
 fn new_signing_key() -> SigningKey {
     SigningKey::from_bytes((&[7u8; 32]).into()).expect("fixed signing key")
 }
@@ -255,6 +259,86 @@ async fn fund_account_increases_balance() {
     assert_eq!(
         resp["balance_nanos"].as_i64().unwrap(),
         (initial + fund_amount) as i64
+    );
+}
+
+#[tokio::test]
+async fn bridge_deposit_and_withdrawal_surface_in_block_response() {
+    let (app, handle) = test_app(true).await;
+
+    let (status, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 0 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+
+    let (status, body) = get(
+        app.clone(),
+        &format!("/v1/accounts/{account_id}/bridge-key"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let account_key = parse_json(&body)["sybil_account_key_hex"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let deposit_root = hex_bytes(0x44, 32);
+    let (status, body) = post_json(
+        app.clone(),
+        "/v1/bridge/deposits",
+        json!({
+            "deposit_id": 1,
+            "account_id": account_id,
+            "chain_id": 1,
+            "vault_address_hex": hex_bytes(0x10, 20),
+            "token_address_hex": hex_bytes(0x20, 20),
+            "sender_hex": hex_bytes(0x30, 20),
+            "sybil_account_key_hex": account_key,
+            "amount_token_units": 10_000u64,
+            "deposit_root_hex": deposit_root,
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(parse_json(&body)["balance_nanos"], json!(10_000_000i64));
+
+    let (status, body) = post_json(
+        app.clone(),
+        "/v1/bridge/withdrawals",
+        json!({
+            "account_id": account_id,
+            "chain_id": 1,
+            "vault_address_hex": hex_bytes(0x10, 20),
+            "recipient_hex": hex_bytes(0x40, 20),
+            "token_address_hex": hex_bytes(0x20, 20),
+            "amount_token_units": 4_000u64,
+            "expiry_height": 10u64,
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let withdrawal = parse_json(&body);
+    assert_eq!(withdrawal["withdrawal_id"], json!(1));
+    assert_eq!(withdrawal["amount_nanos"], json!(4_000_000u64));
+    assert!(withdrawal["withdrawal_leaf_digest_hex"].as_str().is_some());
+
+    handle.produce_block().await.unwrap();
+
+    let (status, body) = get(app, "/v1/blocks/latest").await;
+    assert_eq!(status, StatusCode::OK);
+    let block = parse_json(&body);
+    assert_eq!(block["bridge"]["deposit_count"], json!(1));
+    assert_eq!(
+        block["bridge"]["consumed_deposits"][0]["deposit_id"],
+        json!(1)
+    );
+    assert_eq!(
+        block["bridge"]["withdrawal_leaves"][0]["withdrawal_id"],
+        json!(1)
     );
 }
 

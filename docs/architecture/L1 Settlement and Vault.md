@@ -571,13 +571,41 @@ The L1 contract design assumes these typed leaves exist or will exist under
 state-root note. It is small and additive, and it avoids proving withdrawals
 from stale raw balances.
 
+## Current Rust bridge hooks
+
+The sequencer now has a bridge sidecar in
+`crates/matching-sequencer/src/bridge.rs` and actor/API plumbing for the
+development path:
+
+- `BridgeState` tracks `deposit_cursor`, the latest consumed `deposit_root`,
+  the next withdrawal id, and created withdrawal leaves.
+- L1 deposits are accepted as sequential `L1Deposit` records, credited through
+  `SystemEvent::L1Deposit`, and persisted in a pending-deposit WAL until the
+  next block commit.
+- Withdrawal requests debit available account balance immediately, create a
+  `WithdrawalLeaf`, emit `SystemEvent::WithdrawalCreated`, and persist the
+  request in a pending-withdrawal WAL until the next block commit.
+- Blocks expose `BridgeBlockData` with consumed deposits and withdrawal leaves
+  so proof-generation jobs can see the bridge transition data.
+- The HTTP surface exposes bridge status, account bridge keys, deposit
+  ingestion, withdrawal creation, and withdrawal lookup under `/v1/bridge/*`.
+  Bridge writes are currently dev/internal endpoints; production ingress
+  should come from an L1 indexer and authenticated account flow.
+
+This is not yet `state_root_v2`. The current block header still uses
+`state_root_v1`, which commits only account snapshots after system events and
+settlement. Bridge sidecar state is persisted and surfaced, but full
+proof-backed L1 withdrawal verification still depends on the typed qmdb root
+described in [[State Root Schema]].
+
 ## Development sequence
 
 1. **RFC**: this note.
 2. **Foundry skeleton**: contracts, interfaces, events, custom errors, mock
    verifier, mock ERC20, and state-machine tests. No real proof system.
-3. **Sequencer bridge hooks**: consume L1 deposits in order; create typed
-   withdrawal leaves; expose proof-generation data.
+3. **Sequencer bridge hooks**: consume L1 deposits in order; create withdrawal
+   leaves; expose proof-generation data. Implemented as a v1 sidecar; typed
+   qmdb commitment is still pending.
 4. **Verifier integration**: plug in the chosen ZK verifier adapter and
    public-input hash.
 5. **DA/operator replacement**: bind `daCommitment` to the chosen DA layer and

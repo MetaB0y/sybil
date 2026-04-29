@@ -2,7 +2,7 @@
 tags: [zk, serialization, spec]
 layer: verification
 status: current
-last_verified: 2026-04-26
+last_verified: 2026-04-29
 ---
 
 # Canonical Serialization
@@ -204,7 +204,9 @@ Events are tag-dispatched single-byte sum types. The running
 | `0x03` | Resolution | `market_id:u32 \|\| payout_nanos:u64 \|\| block_height:u64` | `encode_resolution_event` |
 | `0x04` | CreateAccount | `initial_balance:i64 \|\| block_height:u64` | `encode_create_account_event` |
 | `0x05` | Mint | `count:u64 \|\| (market_id:u32 \|\| outcome:u8 \|\| position_delta:i64 \|\| balance_delta:i64) * count \|\| block_height:u64` | `encode_mint_event` |
-| `0x06` – `0xFE` | reserved for future events | — | — |
+| `0x06` | L1Deposit | `deposit_id:u64 \|\| amount:i64 \|\| deposit_root:[u8;32] \|\| block_height:u64` | `encode_l1_deposit_event` |
+| `0x07` | WithdrawalCreated | `withdrawal_id:u64 \|\| amount:i64 \|\| nullifier:[u8;32] \|\| block_height:u64` | `encode_withdrawal_created_event` |
+| `0x08` – `0xFE` | reserved for future events | — | — |
 | `0xFF` | reserved as sentinel (do not use) | — | — |
 
 Adding an event type consumes the next free tag. Removing or re-tagging is a

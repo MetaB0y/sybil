@@ -121,6 +121,19 @@ pub enum SystemEventResponse {
         account_id: u64,
         amount_nanos: i64,
     },
+    L1Deposit {
+        account_id: u64,
+        amount_nanos: i64,
+        deposit_id: u64,
+        deposit_root_hex: String,
+        sybil_account_key_hex: String,
+    },
+    WithdrawalCreated {
+        account_id: u64,
+        amount_nanos: i64,
+        withdrawal_id: u64,
+        nullifier_hex: String,
+    },
     MarketResolved {
         market_id: u32,
         payout_nanos: u64,
@@ -153,9 +166,72 @@ pub struct BlockResponse {
     pub clearing_prices_nanos: HashMap<String, Vec<u64>>,
     #[serde(default)]
     pub rejections: Vec<RejectionResponse>,
+    #[serde(default)]
+    pub bridge: BridgeBlockResponse,
     pub total_welfare_nanos: i64,
     pub total_volume_nanos: u64,
     pub orders_filled: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct BridgeBlockResponse {
+    pub deposit_count: u64,
+    pub deposit_root_hex: String,
+    #[serde(default)]
+    pub consumed_deposits: Vec<BridgeDepositEventResponse>,
+    #[serde(default)]
+    pub withdrawal_leaves: Vec<BridgeWithdrawalResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct BridgeDepositEventResponse {
+    pub deposit_id: u64,
+    pub account_id: u64,
+    pub amount_token_units: u64,
+    pub deposit_root_hex: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct BridgeStatusResponse {
+    pub deposit_cursor: u64,
+    pub deposit_root_hex: String,
+    pub next_withdrawal_id: u64,
+    pub withdrawal_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct BridgeAccountKeyResponse {
+    pub account_id: u64,
+    pub sybil_account_key_hex: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct BridgeDepositResponse {
+    pub account_id: u64,
+    pub balance_nanos: i64,
+    pub deposit_id: u64,
+    pub deposit_root_hex: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct BridgeWithdrawalResponse {
+    pub withdrawal_id: u64,
+    pub account_id: u64,
+    pub recipient_hex: String,
+    pub token_hex: String,
+    pub amount_token_units: u64,
+    pub amount_nanos: u64,
+    pub expiry_height: u64,
+    pub nullifier_hex: String,
+    pub withdrawal_leaf_hex: String,
+    pub withdrawal_leaf_digest_hex: String,
+    pub created_at_height: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

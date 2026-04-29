@@ -109,6 +109,23 @@ pub enum SystemEventWitness {
         account_id: u64,
         amount: i64,
     },
+    L1Deposit {
+        account_id: u64,
+        amount: i64,
+        deposit_id: u64,
+        deposit_root: [u8; 32],
+        sybil_account_key: [u8; 32],
+    },
+    WithdrawalCreated {
+        account_id: u64,
+        amount: i64,
+        withdrawal_id: u64,
+        recipient: [u8; 20],
+        token: [u8; 20],
+        amount_token_units: u64,
+        expiry_height: u64,
+        nullifier: [u8; 32],
+    },
     MarketResolved {
         market_id: MarketId,
         payout_nanos: Nanos,

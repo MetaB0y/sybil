@@ -57,6 +57,7 @@ use crate::account_storage::{
     RecoveryAccountState,
 };
 use crate::block::BlockHeader;
+use crate::bridge::{BridgeState, BridgeWithdrawalRequest, L1Deposit};
 use crate::market_info::{AccountFillRecord, MarketMetadata};
 use crate::market_lifecycle::MarketLifecycle;
 use crate::order_book::RestingOrder;
@@ -126,6 +127,20 @@ const ADMIT_LOG: TableDefinition<u64, &[u8]> = TableDefinition::new("admit_log")
 /// account and ordered by block for efficient restoration and future scans.
 const FILL_HISTORY: TableDefinition<&[u8], &[u8]> = TableDefinition::new("fill_history");
 
+/// L1 bridge sidecar state: consumed deposit cursor/root and withdrawal leaves.
+const BRIDGE_STATE: TableDefinition<&str, &[u8]> = TableDefinition::new("bridge_state");
+const KEY_BRIDGE_STATE: &str = "state";
+
+/// L1 deposits observed after the last committed block. They are replayed on
+/// restart and cleared atomically once a block commits them into state.
+const PENDING_L1_DEPOSITS: TableDefinition<u64, &[u8]> =
+    TableDefinition::new("pending_l1_deposits");
+
+/// Bridge withdrawals requested after the last committed block. They are
+/// replayed on restart and cleared atomically once a block commits them.
+const PENDING_BRIDGE_WITHDRAWALS: TableDefinition<u64, &[u8]> =
+    TableDefinition::new("pending_bridge_withdrawals");
+
 // Counter keys
 const KEY_STORE_LAYOUT_VERSION: &str = "store_layout_version";
 const KEY_HEIGHT: &str = "height";
@@ -194,6 +209,12 @@ pub struct RestoredState {
     pub admit_log: Vec<RestingOrder>,
     /// Full fill history restored from redb.
     pub account_fills: Vec<(AccountId, AccountFillRecord)>,
+    /// L1 bridge sidecar state restored from the last committed block.
+    pub bridge_state: BridgeState,
+    /// L1 deposits durably accepted after the last committed block.
+    pub pending_l1_deposits: Vec<L1Deposit>,
+    /// Bridge withdrawals durably accepted after the last committed block.
+    pub pending_bridge_withdrawals: Vec<BridgeWithdrawalRequest>,
 }
 
 /// Borrowed view of sequencer state needed to persist one block.
@@ -211,6 +232,7 @@ pub struct SequencerSnapshot<'a> {
     pub account_fills: Vec<(AccountId, AccountFillRecord)>,
     /// Owned because the snapshot clones the live book — cheap for bounded sizes.
     pub resting_orders: Vec<RestingOrder>,
+    pub bridge_state: &'a BridgeState,
 }
 
 impl Store {
@@ -239,6 +261,9 @@ impl Store {
         txn.open_table(ADMIT_LOG)?;
         txn.open_table(FILL_HISTORY)?;
         txn.open_table(DATA_FEEDS)?;
+        txn.open_table(BRIDGE_STATE)?;
+        txn.open_table(PENDING_L1_DEPOSITS)?;
+        txn.open_table(PENDING_BRIDGE_WITHDRAWALS)?;
         txn.commit()?;
 
         initialize_or_validate_layout(&db)?;
@@ -364,6 +389,13 @@ impl Store {
             }
         }
 
+        // L1 bridge sidecar state.
+        {
+            let mut table = txn.open_table(BRIDGE_STATE)?;
+            let bytes = rmp_serde::to_vec(snapshot.bridge_state)?;
+            table.insert(KEY_BRIDGE_STATE, bytes.as_slice())?;
+        }
+
         // Clear the pending-bundles buffer: everything admitted up to this
         // block has now been consumed (or rejected and logged into the
         // block's witness), so the recovery replay set resets atomically
@@ -378,6 +410,17 @@ impl Store {
         // the incremental log atomically in this txn.
         {
             let mut table = txn.open_table(ADMIT_LOG)?;
+            table.retain(|_, _| false)?;
+        }
+
+        // Bridge WALs: pending L1 deposits and withdrawals are committed by
+        // this block's system-event phase and captured in BRIDGE_STATE.
+        {
+            let mut table = txn.open_table(PENDING_L1_DEPOSITS)?;
+            table.retain(|_, _| false)?;
+        }
+        {
+            let mut table = txn.open_table(PENDING_BRIDGE_WITHDRAWALS)?;
             table.retain(|_, _| false)?;
         }
 
@@ -568,6 +611,34 @@ impl Store {
             out
         };
 
+        let bridge_state: BridgeState = {
+            let table = txn.open_table(BRIDGE_STATE)?;
+            match table.get(KEY_BRIDGE_STATE)? {
+                Some(value) => rmp_serde::from_slice(value.value())?,
+                None => BridgeState::default(),
+            }
+        };
+
+        let pending_l1_deposits: Vec<L1Deposit> = {
+            let table = txn.open_table(PENDING_L1_DEPOSITS)?;
+            let mut out = Vec::new();
+            for entry in table.iter()? {
+                let (_, value) = entry?;
+                out.push(rmp_serde::from_slice(value.value())?);
+            }
+            out
+        };
+
+        let pending_bridge_withdrawals: Vec<BridgeWithdrawalRequest> = {
+            let table = txn.open_table(PENDING_BRIDGE_WITHDRAWALS)?;
+            let mut out = Vec::new();
+            for entry in table.iter()? {
+                let (_, value) = entry?;
+                out.push(rmp_serde::from_slice(value.value())?);
+            }
+            out
+        };
+
         info!(
             height = recovery_metadata.height,
             accounts = num_accounts,
@@ -579,6 +650,9 @@ impl Store {
             admit_log = admit_log.len(),
             account_fills = account_fills.len(),
             data_feeds = data_feeds.len(),
+            bridge_deposit_cursor = bridge_state.deposit_cursor,
+            pending_l1_deposits = pending_l1_deposits.len(),
+            pending_bridge_withdrawals = pending_bridge_withdrawals.len(),
             "state restored from store"
         );
 
@@ -599,6 +673,9 @@ impl Store {
             pending_bundles,
             admit_log,
             account_fills,
+            bridge_state,
+            pending_l1_deposits,
+            pending_bridge_withdrawals,
         }))
     }
 
@@ -658,6 +735,41 @@ impl Store {
         txn.commit()?;
         Ok(())
     }
+
+    pub async fn append_pending_l1_deposit(&self, deposit: &L1Deposit) -> Result<(), StoreError> {
+        append_msgpack_row(&self.db, PENDING_L1_DEPOSITS, deposit)
+    }
+
+    pub async fn append_pending_bridge_withdrawal(
+        &self,
+        request: &BridgeWithdrawalRequest,
+    ) -> Result<(), StoreError> {
+        append_msgpack_row(&self.db, PENDING_BRIDGE_WITHDRAWALS, request)
+    }
+}
+
+fn append_msgpack_row<T: serde::Serialize>(
+    db: &Database,
+    table: TableDefinition<u64, &[u8]>,
+    value: &T,
+) -> Result<(), StoreError> {
+    let bytes = rmp_serde::to_vec(value)?;
+    let txn = db.begin_write()?;
+    let next_seq = {
+        let table = txn.open_table(table)?;
+        let last_key = table
+            .iter()?
+            .next_back()
+            .transpose()?
+            .map(|(k, _)| k.value());
+        last_key.map(|k| k + 1).unwrap_or(0)
+    };
+    {
+        let mut table = txn.open_table(table)?;
+        table.insert(next_seq, bytes.as_slice())?;
+    }
+    txn.commit()?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -881,6 +993,7 @@ mod tests {
         empty_pk: HashMap<crate::crypto::PublicKey, AccountId>,
         empty_prices: HashMap<MarketId, Vec<Nanos>>,
         empty_volumes: HashMap<MarketId, u64>,
+        bridge_state: BridgeState,
     }
 
     impl TestEnv {
@@ -889,6 +1002,7 @@ mod tests {
                 empty_pk: HashMap::new(),
                 empty_prices: HashMap::new(),
                 empty_volumes: HashMap::new(),
+                bridge_state: BridgeState::default(),
             }
         }
 
@@ -913,6 +1027,7 @@ mod tests {
                 pubkey_registry: &self.empty_pk,
                 last_clearing_prices: &self.empty_prices,
                 market_volumes: market_volumes.unwrap_or(&self.empty_volumes),
+                bridge_state: &self.bridge_state,
                 account_fills: Vec::new(),
                 resting_orders,
             }
@@ -936,6 +1051,7 @@ mod tests {
                 pubkey_registry: &self.empty_pk,
                 last_clearing_prices: &self.empty_prices,
                 market_volumes: &self.empty_volumes,
+                bridge_state: &self.bridge_state,
                 account_fills,
                 resting_orders: Vec::new(),
             }
@@ -983,6 +1099,61 @@ mod tests {
         let restored = store.load_state().await.unwrap().unwrap();
         assert_eq!(restored.height, 2);
         assert_eq!(restored.accounts.get(account_id).unwrap().balance, 200);
+    }
+
+    #[tokio::test]
+    async fn test_store_restores_pending_bridge_wals() {
+        let path = temp_db_path("store-bridge-wal");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+        let lifecycle = MarketLifecycle::new(oracle);
+        let markets = MarketSet::new();
+        let env = TestEnv::new();
+
+        let mut accounts = AccountStore::new();
+        let account_id = accounts.create_account(0);
+        store
+            .save_block(env.snapshot(
+                &accounts,
+                &markets,
+                &lifecycle,
+                &sample_header(1),
+                1,
+                None,
+                vec![],
+            ))
+            .await
+            .unwrap();
+
+        let deposit = L1Deposit {
+            deposit_id: 1,
+            account_id,
+            chain_id: 1,
+            vault_address: [0x10; 20],
+            token_address: [0x20; 20],
+            sender: [0x30; 20],
+            sybil_account_key: crate::bridge::account_key(account_id),
+            amount_token_units: 10_000,
+            deposit_root: [0x44; 32],
+        };
+        let withdrawal = BridgeWithdrawalRequest {
+            account_id,
+            chain_id: 1,
+            vault_address: [0x10; 20],
+            recipient: [0x40; 20],
+            token_address: [0x20; 20],
+            amount_token_units: 4_000,
+            expiry_height: 10,
+        };
+        store.append_pending_l1_deposit(&deposit).await.unwrap();
+        store
+            .append_pending_bridge_withdrawal(&withdrawal)
+            .await
+            .unwrap();
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        assert_eq!(restored.pending_l1_deposits, vec![deposit]);
+        assert_eq!(restored.pending_bridge_withdrawals, vec![withdrawal]);
     }
 
     #[tokio::test]

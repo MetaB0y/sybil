@@ -20,6 +20,50 @@ pub struct FundAccountRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SubmitL1DepositRequest {
+    /// Sequential L1 vault deposit id.
+    pub deposit_id: u64,
+    /// Sybil account receiving the credit.
+    pub account_id: u64,
+    /// Source chain id.
+    pub chain_id: u64,
+    /// Hex-encoded vault contract address (20 bytes).
+    pub vault_address_hex: String,
+    /// Hex-encoded token contract address (20 bytes).
+    pub token_address_hex: String,
+    /// Hex-encoded L1 sender address (20 bytes).
+    pub sender_hex: String,
+    /// Optional Sybil bridge account key. If omitted, the API derives it for the account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sybil_account_key_hex: Option<String>,
+    /// Token base units accepted by the vault, e.g. USDC's 6-decimal units.
+    pub amount_token_units: u64,
+    /// Hex-encoded post-deposit L1 deposit tree root (32 bytes).
+    pub deposit_root_hex: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CreateBridgeWithdrawalRequest {
+    /// Sybil account whose available balance is burned.
+    pub account_id: u64,
+    /// Destination chain id.
+    pub chain_id: u64,
+    /// Hex-encoded vault contract address (20 bytes).
+    pub vault_address_hex: String,
+    /// Hex-encoded L1 recipient address (20 bytes).
+    pub recipient_hex: String,
+    /// Hex-encoded token contract address (20 bytes).
+    pub token_address_hex: String,
+    /// Token base units released by the vault.
+    pub amount_token_units: u64,
+    /// Last Sybil block height at which this withdrawal leaf is valid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expiry_height: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RegisterKeyRequest {
     /// Hex-encoded compressed P256 public key (33 bytes).
     #[cfg_attr(feature = "openapi", schema(example = "02a1b2c3..."))]

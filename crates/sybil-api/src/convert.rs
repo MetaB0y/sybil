@@ -27,6 +27,27 @@ fn system_event_to_response(event: &matching_sequencer::SystemEvent) -> SystemEv
                 amount_nanos: *amount,
             }
         }
+        matching_sequencer::SystemEvent::L1Deposit {
+            account_id,
+            amount,
+            deposit,
+        } => SystemEventResponse::L1Deposit {
+            account_id: account_id.0,
+            amount_nanos: *amount,
+            deposit_id: deposit.deposit_id,
+            deposit_root_hex: hex::encode(deposit.deposit_root),
+            sybil_account_key_hex: hex::encode(deposit.sybil_account_key),
+        },
+        matching_sequencer::SystemEvent::WithdrawalCreated {
+            account_id,
+            amount,
+            withdrawal,
+        } => SystemEventResponse::WithdrawalCreated {
+            account_id: account_id.0,
+            amount_nanos: *amount,
+            withdrawal_id: withdrawal.withdrawal_id,
+            nullifier_hex: hex::encode(withdrawal.nullifier),
+        },
         matching_sequencer::SystemEvent::MarketResolved {
             market_id,
             payout_nanos,
@@ -60,6 +81,52 @@ pub fn account_to_response(account: &Account) -> AccountResponse {
         account_id: account.id.0,
         balance_nanos: account.balance,
         positions,
+    }
+}
+
+pub fn bridge_withdrawal_to_response(
+    withdrawal: &matching_sequencer::WithdrawalLeaf,
+) -> BridgeWithdrawalResponse {
+    BridgeWithdrawalResponse {
+        withdrawal_id: withdrawal.withdrawal_id,
+        account_id: withdrawal.account_id.0,
+        recipient_hex: hex::encode(withdrawal.recipient),
+        token_hex: hex::encode(withdrawal.token_address),
+        amount_token_units: withdrawal.amount_token_units,
+        amount_nanos: withdrawal.amount_nanos,
+        expiry_height: withdrawal.expiry_height,
+        nullifier_hex: hex::encode(withdrawal.nullifier),
+        withdrawal_leaf_hex: hex::encode(matching_sequencer::bridge::withdrawal_leaf_bytes(
+            withdrawal,
+        )),
+        withdrawal_leaf_digest_hex: hex::encode(
+            matching_sequencer::bridge::withdrawal_leaf_digest(withdrawal),
+        ),
+        created_at_height: withdrawal.created_at_height,
+    }
+}
+
+fn bridge_block_to_response(block: &Block) -> BridgeBlockResponse {
+    BridgeBlockResponse {
+        deposit_count: block.bridge.deposit_count,
+        deposit_root_hex: hex::encode(block.bridge.deposit_root),
+        consumed_deposits: block
+            .bridge
+            .consumed_deposits
+            .iter()
+            .map(|deposit| BridgeDepositEventResponse {
+                deposit_id: deposit.deposit_id,
+                account_id: deposit.account_id.0,
+                amount_token_units: deposit.amount_token_units,
+                deposit_root_hex: hex::encode(deposit.deposit_root),
+            })
+            .collect(),
+        withdrawal_leaves: block
+            .bridge
+            .withdrawal_leaves
+            .iter()
+            .map(bridge_withdrawal_to_response)
+            .collect(),
     }
 }
 
@@ -100,6 +167,7 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
         fills,
         clearing_prices_nanos,
         rejections,
+        bridge: bridge_block_to_response(block),
         total_welfare_nanos: block.total_welfare,
         total_volume_nanos: block.total_volume,
         orders_filled: block.orders_filled,

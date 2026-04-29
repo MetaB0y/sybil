@@ -5,6 +5,7 @@ use matching_solver::PipelineResult;
 use sybil_verifier::BlockWitness;
 
 use crate::account::AccountStore;
+use crate::bridge::BridgeBlockData;
 use crate::canonical_state::CanonicalState;
 use crate::error::Rejection;
 use crate::system_event::SystemEvent;
@@ -46,6 +47,7 @@ pub struct Block {
     pub header: BlockHeader,
     pub order_ids: Vec<u64>,
     pub system_events: Vec<SystemEvent>,
+    pub bridge: BridgeBlockData,
     pub fills: Vec<Fill>,
     pub clearing_prices: HashMap<MarketId, Vec<Nanos>>,
     pub rejections: Vec<Rejection>,
