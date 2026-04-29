@@ -181,13 +181,16 @@ Reserved domains:
 | `acct/{account_id}` | `sybil/state/acct/v1` |
 | `acct_resv/{account_id}` | `sybil/state/acct-resv/v1` |
 | `order/{order_id}` | `sybil/state/order/v1` |
+| `withdrawal/{withdrawal_id}` | `sybil/state/withdrawal/v1` |
 | `market/{market_id}` | `sybil/state/market/v1` |
 | `sys/*` | `sybil/state/sys/v1` |
 
 The account leaf can reuse `AccountSnapshot` fields plus any withdrawal or
-nullifier metadata needed by the bridge. The non-account field layouts are
-intentionally deferred until the typed state writer is implemented; adding
-them is required before `state_root_v2` can ship.
+nullifier metadata needed by the bridge. The withdrawal leaf is defined at
+the field level in [[L1 Settlement and Vault]], but still needs exact byte
+widths and ordering here before implementation. The other non-account field
+layouts are intentionally deferred until the typed state writer is
+implemented; adding them is required before `state_root_v2` can ship.
 
 ## Event encoding registry
 

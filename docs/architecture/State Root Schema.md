@@ -40,6 +40,7 @@ complete validium state needed to verify, recover, and restart the exchange:
 | `acct/{account_id}` | balance, positions, total deposited, account event digest, withdrawal/nullifier metadata |
 | `acct_resv/{account_id}` | aggregate open reservations or equivalent data needed to derive withdrawable cash |
 | `order/{order_id}` | active resting order, owner, remaining quantity, expiry, and reservation metadata |
+| `withdrawal/{withdrawal_id}` | normal L1 withdrawal claim, recipient, amount, expiry, and nullifier |
 | `market/{market_id}` | market lifecycle, resolution state, and compact metadata commitment |
 | `sys/*` | schema version, height marker, next ids, and global counters |
 
@@ -202,8 +203,10 @@ or exclusion proof. For bridge withdrawals, the L1 contract should verify a
 ZK proof over the relevant qmdb membership/exclusion checks rather than
 reimplement qmdb proof verification directly in Solidity.
 
-The proof should expose withdrawable cash, not just raw balance. That is why
-reservations or equivalent open-exposure data are committed state.
+Normal bridge withdrawals should prove a committed `withdrawal/{withdrawal_id}`
+leaf. Emergency cash exits should expose withdrawable cash, not just raw
+balance. That is why reservations or equivalent open-exposure data are
+committed state. See [[L1 Settlement and Vault]] for the contract boundary.
 
 ## Alternatives considered
 
@@ -293,14 +296,14 @@ Out of scope here:
 - DA provider and publication cadence: SYB-76.
 - Escape reconstruction tooling: SYB-80.
 - Operator replacement and encrypted emergency disclosure: SYB-116.
-- L1 vault/settlement contracts: SYB-31/SYB-32.
+- L1 vault/settlement contracts: [[L1 Settlement and Vault]] and SYB-31/SYB-32.
 
 ## Open questions
 
 1. **Typed leaf encodings.** The key families are fixed here, but byte-level
-   encodings for account reservation, resting order, market lifecycle, and
-   system leaves must be pinned in [[Canonical Serialization]] before v2 is
-   implemented.
+   encodings for account reservation, resting order, withdrawal, market
+   lifecycle, and system leaves must be pinned in [[Canonical Serialization]]
+   before v2 is implemented.
 2. **Exposing qmdb's MMR root and proofs.** The `merkleize` API builds the
    root but the current `QmdbAccounts` wrapper does not surface it. The v2
    implementation should replace that wrapper with a typed state wrapper.
@@ -348,4 +351,5 @@ state_root_v2 = SHA256("sybil/state-root/v2" || qmdb_root)
 - [[Block Witness]] — the witness the state root lives inside
 - [[Proof Architecture]] — events tree (complementary) and proof-composition patterns
 - [[ZK Integration Path]] — how the state root anchors the on-chain proof chain
+- [[L1 Settlement and Vault]] — bridge contract assumptions and withdrawal proof shape
 - [[Persistence]] — storage tiers and the qmdb wrapper

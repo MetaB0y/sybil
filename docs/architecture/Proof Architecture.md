@@ -47,7 +47,7 @@ incrementally each block. Phase 1 is still the account-only flat hash in
 
 **Keys**: typed namespaces such as `acct/{account_id}`,
 `acct_resv/{account_id}`, `order/{order_id}`, `market/{market_id}`, and
-`sys/*`.
+`withdrawal/{withdrawal_id}`, and `sys/*`.
 
 **Values**: canonical Sybil bytes for each leaf type.
 
@@ -56,6 +56,7 @@ incrementally each block. Phase 1 is still the account-only flat hash in
 - Account X does not exist at block N (non-inclusion proof, requires sparse or sorted tree)
 - Resting order Y is active or absent at block N
 - Market M has lifecycle/resolution state S
+- Withdrawal W exists and can be claimed against an accepted root
 - The complete validium state at block N (full tree)
 
 **Current implementation**: flat BLAKE3 hash over all accounts — O(n) per block, no per-account proofs. The hashed value already includes a per-account `events_digest`, a running BLAKE3 accumulator over fills and admin events that touched the account.
@@ -256,6 +257,7 @@ qmdb proof verification is too expensive.
 ## Related Notes
 
 - [[ZK Integration Path]] — the validity proof pipeline this feeds into
+- [[L1 Settlement and Vault]] — how accepted roots and withdrawal proofs are used on-chain
 - [[Block Witness]] — evolves to use Merkle paths instead of full snapshots
 - [[State Root and Parent Hash]] — current commitment scheme, replaced by Phase 2
 - [[Four-Layer Verification]] — gains events_root check in Phase 1

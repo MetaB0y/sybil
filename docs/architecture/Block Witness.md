@@ -206,7 +206,8 @@ Three hash roots in play, each with a different scope:
 They're complementary. A minimal on-chain commitment would include only
 `state_root` (chain-valid) + `witness_root` (auditable) and use `events_root`
 as a caller-supplied input to prove derived claims. Exact layout is decided
-in [[Proof Architecture]] and the Data Availability RFC (sibling, M3).
+in [[Proof Architecture]], [[L1 Settlement and Vault]], and the Data
+Availability RFC (sibling, M3).
 
 Order expiry lives in the private `orders` section. The verifier can check
 that an order included in a batch is eligible for `header.height`. Under v1,
@@ -256,6 +257,7 @@ deferred item encodings are pinned.
 - [[State Root Schema]] — normative spec for the `state_root` field
 - [[State Root and Parent Hash]] — concept intro for state root and chaining
 - [[Proof Architecture]] — events_root + authenticated data layer
+- [[L1 Settlement and Vault]] — how witness-backed roots drive bridge custody
 - [[Four-Layer Verification]] — current consumer of the witness
 - [[ZK Integration Path]] — future consumer (the prover)
 - [[Block Lifecycle]] — where in block production the witness is built

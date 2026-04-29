@@ -5,7 +5,7 @@ status: planned
 last_verified: 2026-04-26
 ---
 
-Sybil is designed for a Validium architecture: off-chain data, on-chain proofs. The exchange runs off-chain for performance, but every batch's correctness is attested by a SNARK proof posted to Ethereum L1. The on-chain contract only stores the latest [[State Root and Parent Hash|state root]] and verifies proofs — it never sees individual orders, fills, or account balances.
+Sybil is designed for a Validium architecture: off-chain data, on-chain proofs. The exchange runs off-chain for performance, but every batch's correctness is attested by a SNARK proof posted to Ethereum L1. The [[L1 Settlement and Vault|on-chain contracts]] store accepted [[State Root and Parent Hash|state roots]], custody collateral, and process proof-backed withdrawals — they never see individual orders, fills, or account balances.
 
 The path from current architecture to ZK proofs is deliberately incremental. The [[Four-Layer Verification|4-layer verification logic]] already exists and runs on every batch in tests. This same logic — match validity, settlement correctness, block integrity, order validation — is exactly what the ZK circuit will enforce. The [[Block Witness]] is designed as the circuit's input: a self-contained package of everything needed to verify a state transition. The plan is to compile the verification logic into a SNARK circuit using OpenVM, which can take Rust code and produce arithmetic circuits.
 
@@ -14,7 +14,7 @@ Several architectural choices were made specifically for ZK-friendliness. [[Nano
 1. **Phase 1 (current):** 4-layer verification logic runs in Rust, exercised in tests and `matching-sim`. No ZK circuits yet.
 2. **Phase 2:** Compile the verification logic into an OpenVM arithmetic circuit. Prove that the same Rust code produces a valid SNARK.
 3. **Phase 3:** Prover service that takes a `BlockWitness` and produces a SNARK proof per batch. Runs alongside the sequencer.
-4. **Phase 4:** L1 verifier contract on Ethereum. Stores the latest state root and verifies proofs on-chain. Adds deposit/withdrawal bridge and conservative escape paths; full operator disappearance recovery depends on the DA/operator replacement design.
+4. **Phase 4:** [[L1 Settlement and Vault|L1 settlement and vault contracts]] on Ethereum. Store accepted state roots, verify proofs on-chain, custody deposits, and process conservative proof-backed exits; full operator disappearance recovery depends on the DA/operator replacement design.
 
 ## Key Properties
 - Validium: off-chain data, on-chain proofs
@@ -33,5 +33,6 @@ Several architectural choices were made specifically for ZK-friendliness. [[Nano
 - [[Four-Layer Verification]] — the checks that become the circuit
 - [[Block Witness]] — the circuit's input
 - [[State Root and Parent Hash]] — anchors the on-chain proof chain
+- [[L1 Settlement and Vault]] — contract boundary for accepted roots and bridge custody
 - [[Canonical Serialization]] — byte layout the circuit consumes
 - [[Nanos and Integer Arithmetic]] — ZK-friendly arithmetic
