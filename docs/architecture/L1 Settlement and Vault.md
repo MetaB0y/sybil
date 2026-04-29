@@ -31,9 +31,14 @@ Those checks live in the [[ZK Integration Path|ZK proof]] over the
   unresolved positions and resting orders.
 - qmdb membership and exclusion checks are verified inside ZK proofs. Solidity
   sees succinct proof outputs and accepted root identifiers.
+- Contracts are written in Solidity and tested with Foundry.
+- State-transition and withdrawal proofs use OpenVM. The contracts call an
+  OpenVM verifier adapter rather than embedding prover-system details in the
+  vault.
 
-This deliberately leaves the proving-system adapter replaceable. SP1, RISC
-Zero, or another verifier can sit behind the same settlement interface.
+The verifier adapter remains a boundary because the OpenVM Solidity SDK may
+change public-input marshalling or verifier deployment details. It is not a
+signal that Sybil is prover-agnostic: OpenVM is the chosen proving stack.
 
 ## Contract split
 
@@ -42,7 +47,7 @@ flowchart LR
     USER["User"]
     VAULT["SybilVault<br/>ERC20 custody / deposits / withdrawals"]
     SETTLEMENT["SybilSettlement<br/>accepted roots / verifier adapter"]
-    VERIFIER["IZkVerifier<br/>SP1/RISC Zero/etc."]
+    VERIFIER["OpenVM verifier adapter"]
     SEQ["Sequencer / prover"]
     STATE["Typed qmdb state<br/>accounts / orders / markets / sys"]
     DA["DA layer<br/>snapshots / deltas / witnesses"]
@@ -148,12 +153,12 @@ Aggregation fits this interface: an aggregated proof can move from
 withdrawal leaf must remain in typed state until claimed or expired, so users
 do not need every intermediate root on L1.
 
-### Verifier adapter
+### OpenVM verifier adapter
 
 The stable interface is intentionally small:
 
 ```solidity
-interface IZkVerifier {
+interface IOpenVmVerifierAdapter {
     function verify(bytes calldata proof, bytes32 publicInputHash)
         external
         view
@@ -161,11 +166,34 @@ interface IZkVerifier {
 }
 ```
 
-Each proving system gets an adapter that knows how to hash and marshal its
-public inputs. `SybilSettlement` stores the active adapter and a
-`verifierVersion`. Upgrades are allowed only through the admin-governance path
-defined below; historical roots retain the verifier version that accepted
-them.
+The adapter owns the OpenVM Solidity SDK integration. `SybilSettlement`
+computes Sybil's public-input hash and passes it to the adapter; the OpenVM
+guest program must expose the same digest as a public value. The adapter then
+checks the proof against the OpenVM verifier contract generated for the Sybil
+state-transition program.
+
+Public-input hash:
+
+```text
+state_transition_public_input_hash =
+    keccak256(abi.encode(
+        "sybil/openvm/state-transition/v1",
+        previousHeight,
+        newHeight,
+        previousStateRoot,
+        newStateRoot,
+        blockHash,
+        eventsRoot,
+        witnessRoot,
+        daCommitment,
+        depositRoot,
+        depositCount
+    ))
+```
+
+`SybilSettlement` stores the active adapter and a `verifierVersion`. Upgrades
+are allowed only through the admin-governance path defined below; historical
+roots retain the verifier version that accepted them.
 
 ## `SybilVault`
 
@@ -173,9 +201,14 @@ them.
 consume, verifies withdrawal proofs against accepted roots, queues
 withdrawals, and transfers funds after a delay.
 
-The first production asset should be one ERC20 stablecoin. Multi-asset support
-can be added by domain-separating asset ids in deposit and withdrawal leaves,
-but the initial contract should not generalize prematurely.
+The first production asset is one USDC-like ERC20 with 6 decimals. Multi-asset
+support can be added by domain-separating asset ids in deposit and withdrawal
+leaves, but the initial contract should not generalize prematurely. Sybil's
+internal accounting remains nanos; for the initial asset, conversion is exact:
+
+```text
+amount_nanos = amount_token_units * 1_000
+```
 
 ### Deposits
 
@@ -195,26 +228,49 @@ Deposit leaf:
 
 ```text
 deposit_leaf =
-    SHA256(
-        "sybil/l1-deposit/v1"
-     || chain_id
-     || vault_address
-     || deposit_id
-     || token_address
-     || sender
-     || sybil_account_key
-     || amount
-    )
+    keccak256(abi.encode(
+        "sybil/l1-deposit/v1",
+        chain_id,
+        vault_address,
+        deposit_id,
+        token_address,
+        sender,
+        sybil_account_key,
+        amount_token_units
+    ))
 ```
 
-The simplest deposit log is an append-only Merkle accumulator with
-`depositRootByCount[count] = root`. Storing every root is acceptable for
-testnet and keeps the proof interface simple. Production can checkpoint roots
-less frequently if gas becomes material.
+Deposit tree:
 
-Sequential deposit consumption is a deliberate simplifying constraint. It
-lets typed state carry a single `sys/deposit_cursor` rather than an unbounded
-set of consumed deposit ids.
+```text
+leaf_i = keccak256(0x00 || deposit_leaf_i)
+node   = keccak256(0x01 || left || right)
+```
+
+The vault maintains a fixed-depth incremental Merkle tree with depth 32,
+supporting up to `2^32` deposits before migration. `deposit_id` starts at 1,
+and `depositRootByCount[deposit_id]` stores the root after that deposit is
+appended. Empty subtrees use deterministic zero hashes:
+
+```text
+zero_0 = bytes32(0)
+zero_n = keccak256(0x01 || zero_{n-1} || zero_{n-1})
+```
+
+This is more gas than a rolling hash, but it gives clean inclusion proofs for
+OpenVM and unambiguous deposit-log checkpoints for `SybilSettlement`.
+
+The state-transition proof binds to a checkpoint:
+
+```text
+inputs.depositRoot == vault.depositRootByCount(inputs.depositCount)
+```
+
+The proof then verifies that every newly credited deposit is included in the
+prefix ending at `depositCount` and that typed state advances
+`sys/deposit_cursor` monotonically. Deposits must be consumed in id order.
+That keeps typed state to a single cursor rather than an unbounded consumed-id
+set.
 
 ### Normal withdrawals
 
@@ -231,16 +287,42 @@ Normal withdrawals are sequencer-cooperative:
 Withdrawal leaf:
 
 ```text
-withdrawal_leaf =
+withdrawal_leaf_bytes =
     "sybil/state/withdrawal/v1"
- || withdrawal_id
- || account_id
- || recipient
- || token_address
- || amount
- || expiry_height
- || nullifier
+ || withdrawal_id:u64
+ || account_id:u64
+ || recipient:address
+ || token:address
+ || amount_token_units:u64
+ || amount_nanos:u64
+ || expiry_height:u64
+ || nullifier:bytes32
 ```
+
+For the initial USDC-like asset, the ZK program verifies:
+
+```text
+amount_nanos == amount_token_units * 1_000
+```
+
+The nullifier is:
+
+```text
+nullifier = keccak256(abi.encode(
+    "sybil/withdrawal-nullifier/v1",
+    chain_id,
+    vault_address,
+    withdrawal_id,
+    account_id,
+    recipient,
+    token_address,
+    amount_token_units
+))
+```
+
+The nullifier deliberately does not include `stateRoot`. A withdrawal leaf may
+persist across multiple accepted roots until claimed or expired; including the
+root would allow replaying the same withdrawal through a later root.
 
 The proof statement is:
 
@@ -348,9 +430,12 @@ Initial testnet roles:
 | `PARAMETER_ADMIN` | vault | tune `withdrawalDelay` and `escapeTimeout` within caps |
 | `GUARDIAN` | vault | cancel queued withdrawals during pause with reason |
 
-Production should move verifier and parameter changes behind a timelock.
-Testnet may use a Safe multisig without timelock while the verifier is still
-changing.
+Testnet decision: use a Safe multisig, granular pause, and no timelock while
+the verifier adapter and public-input encoding are still changing.
+
+Production decision: verifier upgrades, `withdrawalDelay`, and
+`escapeTimeout` changes go through a timelock. Emergency pause may remain
+immediate, but unpause should require multisig review.
 
 Pausing should be granular:
 
@@ -507,20 +592,17 @@ are implemented.
 
 ## Open questions
 
-1. **Verifier public-input hashing.** Depends on SYB-27/SYB-30. The contract
-   should hash canonical public inputs once and pass a digest to the adapter,
-   but the exact hash may be prover-specific.
-2. **Deposit accumulator implementation.** A full Merkle accumulator is easy
-   for proofs but costs more gas than a rolling hash. Choose during the
-   Foundry skeleton, with tests for proof compatibility.
-3. **Withdrawal leaf expiry.** Normal withdrawal leaves should expire if never
+1. **OpenVM SDK binding.** OpenVM is chosen, but the exact generated verifier
+   contract ABI and public-value decoding should be pinned when the SDK is
+   imported into the Foundry project.
+2. **Withdrawal leaf expiry.** Normal withdrawal leaves should expire if never
    requested on L1, but expiry must be long enough for delayed proof
    generation and DA retrieval.
-4. **Account-to-recipient binding.** The withdrawal proof must bind a Sybil
+3. **Account-to-recipient binding.** The withdrawal proof must bind a Sybil
    account to an Ethereum recipient. The exact key path depends on the account
    authentication model in [[P256 Authentication]] and any future wallet-link
    flow.
-5. **Escape-mode deactivation.** Decide whether a new valid root can
+4. **Escape-mode deactivation.** Decide whether a new valid root can
    automatically leave escape mode or whether governance must explicitly
    resume.
 

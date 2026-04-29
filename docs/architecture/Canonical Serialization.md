@@ -186,10 +186,9 @@ Reserved domains:
 | `sys/*` | `sybil/state/sys/v1` |
 
 The account leaf can reuse `AccountSnapshot` fields plus any withdrawal or
-nullifier metadata needed by the bridge. The withdrawal leaf is defined at
-the field level in [[L1 Settlement and Vault]], but still needs exact byte
-widths and ordering here before implementation. The other non-account field
-layouts are intentionally deferred until the typed state writer is
+nullifier metadata needed by the bridge. The withdrawal leaf field widths and
+ordering are defined in [[L1 Settlement and Vault]]. The other non-account
+field layouts are intentionally deferred until the typed state writer is
 implemented; adding them is required before `state_root_v2` can ship.
 
 ## Event encoding registry

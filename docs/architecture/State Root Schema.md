@@ -40,7 +40,7 @@ complete validium state needed to verify, recover, and restart the exchange:
 | `acct/{account_id}` | balance, positions, total deposited, account event digest, withdrawal/nullifier metadata |
 | `acct_resv/{account_id}` | aggregate open reservations or equivalent data needed to derive withdrawable cash |
 | `order/{order_id}` | active resting order, owner, remaining quantity, expiry, and reservation metadata |
-| `withdrawal/{withdrawal_id}` | normal L1 withdrawal claim, recipient, amount, expiry, and nullifier |
+| `withdrawal/{withdrawal_id}` | normal L1 withdrawal claim, recipient, token, amount, expiry, and nullifier |
 | `market/{market_id}` | market lifecycle, resolution state, and compact metadata commitment |
 | `sys/*` | schema version, height marker, next ids, and global counters |
 
