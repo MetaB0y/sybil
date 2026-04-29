@@ -15,9 +15,9 @@ use tracing::{debug, error};
 use crate::account::{Account, AccountId, AccountStore};
 use crate::block::{hash_header, Block, BlockFlowMetrics, BlockHeader, BlockProduction};
 use crate::bridge::{
-    account_key, amount_token_units_to_i64_nanos, amount_token_units_to_nanos, BridgeBlockData,
-    BridgeError, BridgeState, BridgeWithdrawalRequest, L1Deposit, WithdrawalLeaf,
-    DEFAULT_WITHDRAWAL_EXPIRY_BLOCKS,
+    account_key, amount_token_units_to_i64_nanos, amount_token_units_to_nanos,
+    bridge_state_snapshot, BridgeBlockData, BridgeError, BridgeState, BridgeWithdrawalRequest,
+    L1Deposit, WithdrawalLeaf, DEFAULT_WITHDRAWAL_EXPIRY_BLOCKS,
 };
 use crate::canonical_state::{snapshot_account, CanonicalState};
 use crate::error::{Rejection, RejectionReason, SequencerError};
@@ -1569,11 +1569,15 @@ impl BlockSequencer {
                 .as_ref()
                 .map(hash_header)
                 .unwrap_or([0u8; 32]),
-            state_root: post_state.state_root(),
+            state_root: sybil_verifier::block::compute_state_root_with_bridge(
+                post_state.as_snapshots(),
+                &bridge_state_snapshot(&self.bridge),
+            ),
             order_count,
             fill_count: fills.len() as u32,
             timestamp_ms,
         };
+        let bridge_state = bridge_state_snapshot(&self.bridge);
 
         let witness = BlockWitness {
             header: WitnessBlockHeader {
@@ -1597,6 +1601,7 @@ impl BlockSequencer {
             pre_state,
             post_system_state,
             post_state: post_state.into_snapshots(),
+            bridge_state,
             resolved_markets,
         };
 
@@ -3128,7 +3133,10 @@ mod tests {
         let bp2 = seq.produce_block(vec![sub], 0);
 
         // State root matches the witness post-state (what verifier will check)
-        let expected_root = sybil_verifier::block::compute_state_root(&bp2.witness.post_state);
+        let expected_root = sybil_verifier::block::compute_state_root_with_bridge(
+            &bp2.witness.post_state,
+            &bp2.witness.bridge_state,
+        );
         assert_eq!(bp2.block.header.state_root, expected_root);
 
         // An unfilled order does not change account state, so the state root
@@ -3190,7 +3198,10 @@ mod tests {
         );
         assert_eq!(
             resolution_block.block.header.state_root,
-            sybil_verifier::block::compute_state_root(&resolution_block.witness.post_state)
+            sybil_verifier::block::compute_state_root_with_bridge(
+                &resolution_block.witness.post_state,
+                &resolution_block.witness.bridge_state,
+            )
         );
     }
 
@@ -3215,7 +3226,7 @@ mod tests {
         assert_eq!(bp.witness.post_state.len(), 3);
         assert_eq!(
             bp.block.header.state_root,
-            crate::block::compute_state_root(&seq.accounts)
+            crate::block::compute_state_root_v2(&seq.accounts, seq.bridge_state())
         );
     }
 

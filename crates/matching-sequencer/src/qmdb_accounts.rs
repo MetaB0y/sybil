@@ -19,6 +19,8 @@ use tokio::sync::{mpsc as tokio_mpsc, oneshot};
 
 use crate::account::{Account, AccountId, AccountStore};
 use crate::account_storage::AccountSnapshotSlot;
+use crate::bridge::{bridge_state_snapshot, BridgeState};
+use crate::canonical_state::snapshot_account;
 use crate::store::StoreError;
 
 const CHUNK_SIZE: usize = 32;
@@ -32,6 +34,7 @@ const MAX_VALUE_BYTES: usize = 1 << 20;
 const ACCOUNT_KEY_PREFIX: u8 = b'a';
 const HEIGHT_KEY: &[u8] = b"meta:height";
 const NEXT_ACCOUNT_ID_KEY: &[u8] = b"meta:next_account_id";
+const STATE_V2_KEY_PREFIX: &[u8] = b"v2:";
 
 type AccountDb = OrderedVariableDb<
     MmrFamily,
@@ -67,6 +70,7 @@ enum Command {
 
 struct PersistedAccountSnapshot {
     accounts: Vec<Account>,
+    bridge_state: BridgeState,
     height: u64,
     next_account_id: u64,
 }
@@ -109,6 +113,7 @@ impl QmdbAccounts {
         &self,
         slot: AccountSnapshotSlot,
         accounts: &AccountStore,
+        bridge_state: &BridgeState,
         height: u64,
         next_account_id: u64,
     ) -> Result<(), StoreError> {
@@ -117,6 +122,7 @@ impl QmdbAccounts {
                 .iter()
                 .map(|(_, account)| account.clone())
                 .collect(),
+            bridge_state: bridge_state.clone(),
             height,
             next_account_id,
         };
@@ -208,6 +214,15 @@ async fn replace_snapshot(
 ) -> Result<(), StoreError> {
     let current_entries = collect_entries(db, slot).await?;
     let mut desired = HashMap::new();
+
+    let account_snapshots: Vec<_> = snapshot.accounts.iter().map(snapshot_account).collect();
+    let bridge_snapshot = bridge_state_snapshot(&snapshot.bridge_state);
+    for (leaf_key, leaf_value) in
+        sybil_verifier::block::state_root_v2_leaves(&account_snapshots, &bridge_snapshot)
+    {
+        desired.insert(encode_state_v2_key(slot, &leaf_key), leaf_value);
+    }
+
     for account in snapshot.accounts {
         desired.insert(
             encode_account_key(slot, account.id),
@@ -341,6 +356,15 @@ fn encode_height_key(slot: AccountSnapshotSlot) -> Vec<u8> {
 fn encode_next_account_id_key(slot: AccountSnapshotSlot) -> Vec<u8> {
     let mut key = slot_prefix(slot);
     key.extend_from_slice(NEXT_ACCOUNT_ID_KEY);
+    key
+}
+
+fn encode_state_v2_key(slot: AccountSnapshotSlot, leaf_key: &[u8]) -> Vec<u8> {
+    let prefix = slot_prefix(slot);
+    let mut key = Vec::with_capacity(prefix.len() + STATE_V2_KEY_PREFIX.len() + leaf_key.len());
+    key.extend_from_slice(&prefix);
+    key.extend_from_slice(STATE_V2_KEY_PREFIX);
+    key.extend_from_slice(leaf_key);
     key
 }
 

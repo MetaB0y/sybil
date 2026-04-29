@@ -2,7 +2,7 @@
 tags: [infrastructure, storage]
 layer: sequencer
 status: current
-last_verified: 2026-04-26
+last_verified: 2026-04-29
 ---
 
 # Persistence
@@ -19,12 +19,14 @@ This follows [[Block Lifecycle]]: the block is the natural checkpoint. We do not
 
 Sybil currently uses two storage engines with distinct authority boundaries:
 
-- **qmdb** stores account snapshots.
+- **qmdb** stores account snapshots plus the typed v2 leaves currently hashed
+  into the block header state root.
 - **redb** stores block metadata, market data, counters, and the authoritative commit fence that says which qmdb snapshot is committed.
 
 This is intentionally not "one transaction across two databases". There is no journal and no cross-db transaction. Instead, redb is the only commit point:
 
-1. Write the next account snapshot into the inactive qmdb slot.
+1. Write the next account snapshot and typed v2 leaves into the inactive qmdb
+   slot.
 2. Commit the redb transaction that stores the new block metadata and flips the authoritative fence to that slot.
 3. Recover strictly from the fence recorded in redb.
 
@@ -42,12 +44,14 @@ Anything written to qmdb without a corresponding redb fence flip is treated as u
 ### Commitment Direction
 
 This split is the current runtime persistence model, not the final
-cryptographic commitment model. [[State Root Schema]] Phase 2 promotes qmdb
-from account-snapshot storage to a typed global state commitment over
+cryptographic commitment model. [[State Root Schema]] now hashes typed v2
+leaves for accounts and bridge state, and those exact leaves are persisted in
+qmdb under the fenced slot. The public root is still a canonical SHA-256 digest
+over sorted key/value leaves, not qmdb's native MMR root. The native qmdb
+target promotes qmdb from storage to the authenticated root/proof system over
 accounts, reservations, resting orders, market lifecycle state, and system
 counters. redb can continue to own simple metadata and the crash-recovery
-fence, but the block header's production `state_root_v2` should come from the
-typed qmdb root, not from redb tables or MessagePack bytes.
+fence.
 
 ## Tier 1: Core State
 
@@ -56,6 +60,7 @@ Authoritative state needed to resume the exchange after a crash:
 | Engine | Namespace / Table | Role |
 |--------|--------------------|------|
 | `qmdb` | slot-prefixed account snapshot keys | `Account` rows plus slot-local `height` and `next_account_id` |
+| `qmdb` | slot-prefixed `v2:` typed leaf keys | canonical account + bridge leaves committed by `state_root_v2` |
 | `redb` | `markets` | market definitions |
 | `redb` | `market_meta` | market metadata |
 | `redb` | `market_statuses` | market status driven by oracle/system logic |

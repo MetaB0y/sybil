@@ -331,6 +331,8 @@ mod tests {
                 pre_state: post_system_state.clone(),
                 post_system_state,
                 post_state,
+                bridge_state: Default::default(),
+
                 resolved_markets: vec![],
             };
 

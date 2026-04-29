@@ -5,7 +5,7 @@ use matching_solver::PipelineResult;
 use sybil_verifier::BlockWitness;
 
 use crate::account::AccountStore;
-use crate::bridge::BridgeBlockData;
+use crate::bridge::{bridge_state_snapshot, BridgeBlockData, BridgeState};
 use crate::canonical_state::CanonicalState;
 use crate::error::Rejection;
 use crate::system_event::SystemEvent;
@@ -34,7 +34,8 @@ pub struct BlockHeader {
     pub height: u64,
     /// blake3(previous header bytes), zeros for genesis.
     pub parent_hash: [u8; 32],
-    /// blake3(canonical account state).
+    /// Current state root. Today this is the v2 typed root over canonical
+    /// account leaves plus the bridge sidecar leaves implemented so far.
     pub state_root: [u8; 32],
     pub order_count: u32,
     pub fill_count: u32,
@@ -56,19 +57,21 @@ pub struct Block {
     pub orders_filled: usize,
 }
 
-/// Compute a deterministic state root from accounts.
+/// Compute a deterministic account-only state root with the verifier's
+/// zero-valued bridge sidecar.
 ///
-/// Canonical encoding: sorted by AccountId, each account encodes
-/// balance, total_deposited, then sorted (MarketId, outcome) -> position pairs.
-/// All integers are little-endian i64/u64.
-///
-/// NOTE: This is a flat hash over all accounts — O(n) per block. For the validium
-/// proof pipeline, replace with an authenticated data structure (Merkle tree / MMR)
-/// so we can produce per-account inclusion proofs and incremental state roots.
-/// Candidate: commonware-storage qmdb (LayerZero research + Commonware productionization).
-/// See: https://commonware.xyz/blogs/qmdb
+/// Production blocks should call [`compute_state_root_v2`] so the bridge
+/// sidecar committed by the witness is included.
 pub fn compute_state_root(accounts: &AccountStore) -> [u8; 32] {
     CanonicalState::from_accounts(accounts).state_root()
+}
+
+pub fn compute_state_root_v2(accounts: &AccountStore, bridge: &BridgeState) -> [u8; 32] {
+    let accounts = CanonicalState::from_accounts(accounts);
+    sybil_verifier::block::compute_state_root_with_bridge(
+        accounts.as_snapshots(),
+        &bridge_state_snapshot(bridge),
+    )
 }
 
 /// Compute blake3 hash of a block header for chaining.

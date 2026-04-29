@@ -48,13 +48,17 @@ struct BlockWitness {
     previous_header: Option<WitnessBlockHeader>,
     orders: Vec<WitnessOrder>,
     rejections: Vec<WitnessRejection>,
+    system_events: Vec<SystemEventWitness>,
     fills: Vec<Fill>,
     clearing_prices: HashMap<MarketId, Vec<Nanos>>,
     total_welfare: i64,
+    minting_cost: i64,
     mm_constraints: Vec<MmConstraint>,
     market_groups: Vec<MarketGroup>,
     pre_state: Vec<AccountSnapshot>,
+    post_system_state: Vec<AccountSnapshot>,
     post_state: Vec<AccountSnapshot>,
+    bridge_state: BridgeStateSnapshot,
     resolved_markets: Vec<MarketId>,
 }
 

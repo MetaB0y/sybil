@@ -287,6 +287,7 @@ impl Store {
         self.account_state_store
             .persist(CommittedAccountState {
                 accounts: snapshot.accounts,
+                bridge_state: snapshot.bridge_state,
                 height: snapshot.header.height,
                 next_account_id: snapshot.accounts.next_id(),
                 slot: next_slot,

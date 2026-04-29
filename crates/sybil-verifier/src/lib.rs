@@ -28,8 +28,8 @@ pub mod types;
 pub mod violations;
 
 pub use types::{
-    AccountSnapshot, BlockWitness, RejectionReason, SystemEventWitness, WitnessBlockHeader,
-    WitnessOrder, WitnessRejection,
+    AccountSnapshot, BlockWitness, BridgeStateSnapshot, RejectionReason, SystemEventWitness,
+    WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder, WitnessRejection,
 };
 pub use violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
 

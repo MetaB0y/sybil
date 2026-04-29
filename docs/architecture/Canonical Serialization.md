@@ -166,13 +166,13 @@ follow-up RFC alongside the events tree. The Rust signing path already uses
 cover resolved IOC/GTD expiry semantics even before the full witness byte spec
 is frozen.
 
-### State leaves for `state_root_v2` (deferred)
+### State leaves for `state_root_v2`
 
-[[State Root Schema]] fixes the v2 commitment shape: one typed qmdb root over
-accounts, reservations, active/resting orders, market lifecycle state, and
-system counters. Each committed value MUST begin with an ASCII domain string
-identifying the leaf type and version, followed by canonical fixed-width fields
-and deterministically sorted collections.
+[[State Root Schema]] fixes the v2 commitment shape. The current
+implementation commits a typed subset: accounts, bridge counters, deposit
+root, and active withdrawal leaves. Each committed value begins with an ASCII
+domain string identifying the leaf type and version, followed by canonical
+fixed-width fields and deterministically sorted collections.
 
 Reserved domains:
 
@@ -185,11 +185,62 @@ Reserved domains:
 | `market/{market_id}` | `sybil/state/market/v1` |
 | `sys/*` | `sybil/state/sys/v1` |
 
-The account leaf can reuse `AccountSnapshot` fields plus any withdrawal or
-nullifier metadata needed by the bridge. The withdrawal leaf field widths and
-ordering are defined in [[L1 Settlement and Vault]]. The other non-account
-field layouts are intentionally deferred until the typed state writer is
-implemented; adding them is required before `state_root_v2` can ship.
+Implemented key encodings:
+
+| Logical key | Bytes |
+|---|---|
+| `acct/{account_id}` | `"acct/" || account_id:u64_be` |
+| `sys/deposit_cursor` | ASCII literal |
+| `sys/deposit_root` | ASCII literal |
+| `sys/next_withdrawal_id` | ASCII literal |
+| `withdrawal/{withdrawal_id}` | `"withdrawal/" || withdrawal_id:u64_be` |
+
+`acct` value:
+
+```text
+account_leaf_value =
+    "sybil/state/acct/v1"
+ || id:u64_le
+ || balance:i64_le
+ || total_deposited:i64_le
+ || position_count:u64_le
+ || (market_id:u32_le || outcome:u8 || qty:i64_le) * position_count
+ || events_digest:[u8;32]
+```
+
+Positions with `qty == 0` MUST be omitted. Remaining positions are sorted by
+`(market_id, outcome)`.
+
+`sys` value:
+
+```text
+sys_leaf_value =
+    "sybil/state/sys/v1"
+ || name_len:u8
+ || name:ascii_bytes
+ || raw_value
+```
+
+`deposit_cursor` and `next_withdrawal_id` use `raw_value:u64_le`.
+`deposit_root` uses `raw_value:[u8;32]`.
+
+`withdrawal` value:
+
+```text
+withdrawal_leaf_value =
+    "sybil/state/withdrawal/v1"
+ || withdrawal_id:u64_le
+ || account_id:u64_le
+ || recipient:address
+ || token:address
+ || amount_token_units:u64_le
+ || amount_nanos:u64_le
+ || expiry_height:u64_le
+ || nullifier:[u8;32]
+```
+
+The other reserved domains are intentionally deferred until the typed state
+writer is widened to reservations, resting orders, and market lifecycle state.
 
 ## Event encoding registry
 

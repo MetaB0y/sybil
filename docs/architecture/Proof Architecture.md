@@ -2,7 +2,7 @@
 tags: [zk, infrastructure]
 layer: verification
 status: planned
-last_verified: 2026-04-26
+last_verified: 2026-04-29
 ---
 
 # Proof Architecture
@@ -42,8 +42,9 @@ Combined with `parent_hash` chaining, a prover can make claims spanning any rang
 ### 1. State Tree
 
 A typed authenticated key-value tree over complete validium state, updated
-incrementally each block. Phase 1 is still the account-only flat hash in
-[[State Root Schema]]; Phase 2 is one typed qmdb root.
+incrementally each block. The current [[State Root Schema]] implementation is
+a typed v2 subset over accounts and bridge leaves; the target is one native
+typed qmdb root over the complete validium state.
 
 **Keys**: typed namespaces such as `acct/{account_id}`,
 `acct_resv/{account_id}`, `order/{order_id}`, `market/{market_id}`, and
@@ -59,10 +60,13 @@ incrementally each block. Phase 1 is still the account-only flat hash in
 - Withdrawal W exists and can be claimed against an accepted root
 - The complete validium state at block N (full tree)
 
-**Current implementation**: flat BLAKE3 hash over all accounts — O(n) per block, no per-account proofs. The hashed value already includes a per-account `events_digest`, a running BLAKE3 accumulator over fills and admin events that touched the account.
+**Current implementation**: SHA-256 over sorted typed account and bridge
+leaves — O(n) over committed leaves per block, no native per-key qmdb proofs
+yet. Account leaves include `events_digest`, a running BLAKE3 accumulator over
+fills and admin events that touched the account.
 
 **Target**: ordered qmdb authenticated key-value store using SHA-256 for the
-v2 state root. O(k log n) per block where k = state leaves touched.
+native state root. O(k log n) per block where k = state leaves touched.
 
 **Why this enables flexible proofs**:
 - PnL: state proof at block A + state proof at block B → `portfolio_value_B - total_deposited_B` (note: `total_deposited` is already on the Account struct)
@@ -173,19 +177,21 @@ Build a Merkle tree over block events and commit `events_root` in the block head
 - Verifier checks `events_root` matches (new Layer 3 check)
 - BLAKE3 as leaf/node hash (consistent with existing choices)
 
-### Phase 2: Authenticated State Tree
+### Phase 2: Complete Typed State Root
 
-Replace `compute_state_root()` with the typed qmdb state commitment specified
-in [[State Root Schema]].
+Widen the current typed root to the complete state commitment specified in
+[[State Root Schema]].
 
 - One typed qmdb keyspace for accounts, reservations, resting orders,
   market lifecycle state, and system counters
-- SHA-256 state-root hash; v1 flat BLAKE3 roots remain historical
+- SHA-256 state-root hash; historical flat BLAKE3 roots remain test/migration
+  compatibility only
 - Inclusion and exclusion proof generation for typed leaves
-- State root computation becomes O(k log n) instead of O(n)
+- State root computation becomes O(k log n) once the native qmdb root replaces
+  the current sorted-leaf digest
 - Verifier's state root check dispatches by root version or migration height
 
-This is the deeper change — it touches state storage, `compute_state_root()`,
+This is the deeper change — it touches state storage, root versioning,
 persistence, and the verifier's Layer 3.
 
 ### Phase 3: Proof API
@@ -230,7 +236,7 @@ qmdb proof verification is too expensive.
 |-----------|---------|---------------|---------------|
 | `BlockHeader` | state_root, parent_hash | + events_root | same |
 | `Block` | orders, fills, prices, rejections | + system_events | same |
-| `compute_state_root()` | flat BLAKE3 over all accounts + `events_digest` | same | typed qmdb root |
+| `compute_state_root()` | SHA-256 typed account + bridge leaves | same | native typed qmdb root |
 | `Fill` struct | order_id, qty, price, account_id | same | same |
 | `Account` | balance, positions, total_deposited, events_digest | same | same |
 | `AccountStore` | HashMap | same | mirrored into authenticated KV |
@@ -245,7 +251,7 @@ qmdb proof verification is too expensive.
 
 2. **Events hash function**: BLAKE3. It's already the event/header hash and remains acceptable for per-block event authentication.
 
-3. **State-root v2 hash function**: SHA-256 via qmdb. This is the default for the complete typed state root because it matches the current qmdb instantiation and is easier to route through ZK/EVM verification paths.
+3. **Typed state-root hash function**: SHA-256. This matches the current qmdb instantiation and is easier to route through ZK/EVM verification paths than BLAKE3.
 
 4. **Range inactivity compression**: implemented today as `events_digest` on `Account`. Equal digests at two trusted heights imply no account-level activity in between.
 

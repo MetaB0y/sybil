@@ -44,6 +44,8 @@ pub struct BlockWitness {
     pub post_system_state: Vec<AccountSnapshot>,
     /// Account snapshots *after* settlement, sorted by id.
     pub post_state: Vec<AccountSnapshot>,
+    /// Bridge sidecar state after system events and settlement.
+    pub bridge_state: BridgeStateSnapshot,
 
     /// Markets that are resolved/voided — orders/fills must not reference these.
     pub resolved_markets: Vec<MarketId>,
@@ -144,4 +146,24 @@ pub struct AccountSnapshot {
     pub positions: Vec<(MarketId, u8, i64)>,
     #[serde(default)]
     pub events_digest: [u8; 32],
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct BridgeStateSnapshot {
+    pub deposit_cursor: u64,
+    pub deposit_root: [u8; 32],
+    pub next_withdrawal_id: u64,
+    pub withdrawals: Vec<WithdrawalSnapshot>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WithdrawalSnapshot {
+    pub withdrawal_id: u64,
+    pub account_id: u64,
+    pub recipient: [u8; 20],
+    pub token: [u8; 20],
+    pub amount_token_units: u64,
+    pub amount_nanos: u64,
+    pub expiry_height: u64,
+    pub nullifier: [u8; 32],
 }

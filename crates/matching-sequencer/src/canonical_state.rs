@@ -36,6 +36,7 @@ impl CanonicalState {
         self.accounts
     }
 
+    /// Account-only root with the verifier's zero-valued bridge sidecar.
     pub fn state_root(&self) -> [u8; 32] {
         sybil_verifier::block::compute_state_root(&self.accounts)
     }

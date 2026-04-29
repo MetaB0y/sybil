@@ -2,7 +2,11 @@
 //!
 //! Checks state root, parent hash chaining, height, and counts.
 
-use crate::types::{AccountSnapshot, BlockWitness, WitnessBlockHeader};
+use sha2::{Digest as _, Sha256};
+
+use crate::types::{
+    AccountSnapshot, BlockWitness, BridgeStateSnapshot, WithdrawalSnapshot, WitnessBlockHeader,
+};
 use crate::violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
 
 /// Verify block header integrity.
@@ -10,8 +14,8 @@ pub fn verify_block(witness: &BlockWitness) -> VerificationResult {
     let mut violations = Vec::new();
     let stats = VerificationStats::default();
 
-    // 1. State root: recompute from post-state
-    let computed_root = compute_state_root(&witness.post_state);
+    // 1. State root: recompute from post-state and bridge sidecar
+    let computed_root = compute_state_root_with_bridge(&witness.post_state, &witness.bridge_state);
     if computed_root != witness.header.state_root {
         violations.push(Violation {
             kind: ViolationKind::StateRootMismatch,
@@ -101,13 +105,21 @@ pub fn verify_block(witness: &BlockWitness) -> VerificationResult {
     }
 }
 
-/// Compute a deterministic state root from account snapshots.
+/// Compute the current deterministic v2 state root from account snapshots and
+/// an empty bridge sidecar.
+///
+/// Use [`compute_state_root_with_bridge`] when verifying real blocks.
+pub fn compute_state_root(accounts: &[AccountSnapshot]) -> [u8; 32] {
+    compute_state_root_with_bridge(accounts, &BridgeStateSnapshot::default())
+}
+
+/// Compute a deterministic v1 account-only state root from account snapshots.
 ///
 /// Must produce the exact same hash as `matching-sequencer`'s
-/// `compute_state_root`. Canonical encoding: sorted by account id,
-/// each account encodes balance, total_deposited, then sorted
-/// (market, outcome) -> qty.
-pub fn compute_state_root(accounts: &[AccountSnapshot]) -> [u8; 32] {
+/// historical `compute_state_root_v1`. Canonical encoding: sorted by account
+/// id, each account encodes balance, total_deposited, then sorted
+/// `(market, outcome) -> qty`.
+pub fn compute_account_state_root_v1(accounts: &[AccountSnapshot]) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new();
 
     // Accounts should already be sorted by id, but sort to be safe
@@ -136,6 +148,138 @@ pub fn compute_state_root(accounts: &[AccountSnapshot]) -> [u8; 32] {
     }
 
     *hasher.finalize().as_bytes()
+}
+
+/// Compute the current v2 typed state root.
+///
+/// This commits account leaves plus the bridge leaves required for normal
+/// withdrawals. The encoding is deliberately key/value-shaped so the same
+/// leaves can be persisted in qmdb and later swapped to a native qmdb proof
+/// root without changing leaf domains.
+pub fn compute_state_root_with_bridge(
+    accounts: &[AccountSnapshot],
+    bridge: &BridgeStateSnapshot,
+) -> [u8; 32] {
+    let leaves = state_root_v2_leaves(accounts, bridge);
+    state_root_v2_from_leaves(&leaves)
+}
+
+pub fn state_root_v2_leaves(
+    accounts: &[AccountSnapshot],
+    bridge: &BridgeStateSnapshot,
+) -> Vec<(Vec<u8>, Vec<u8>)> {
+    let mut leaves = Vec::new();
+
+    let mut sorted_accounts: Vec<&AccountSnapshot> = accounts.iter().collect();
+    sorted_accounts.sort_by_key(|account| account.id);
+    for account in sorted_accounts {
+        leaves.push((account_leaf_key(account.id), account_leaf_value(account)));
+    }
+
+    leaves.push((
+        b"sys/deposit_cursor".to_vec(),
+        sys_u64_leaf_value(b"deposit_cursor", bridge.deposit_cursor),
+    ));
+    leaves.push((
+        b"sys/deposit_root".to_vec(),
+        sys_bytes32_leaf_value(b"deposit_root", &bridge.deposit_root),
+    ));
+    leaves.push((
+        b"sys/next_withdrawal_id".to_vec(),
+        sys_u64_leaf_value(b"next_withdrawal_id", bridge.next_withdrawal_id),
+    ));
+
+    let mut withdrawals: Vec<&WithdrawalSnapshot> = bridge.withdrawals.iter().collect();
+    withdrawals.sort_by_key(|withdrawal| withdrawal.withdrawal_id);
+    for withdrawal in withdrawals {
+        leaves.push((
+            withdrawal_leaf_key(withdrawal.withdrawal_id),
+            withdrawal_leaf_value(withdrawal),
+        ));
+    }
+
+    leaves.sort_by(|(left, _), (right, _)| left.cmp(right));
+    leaves
+}
+
+pub fn state_root_v2_from_leaves(leaves: &[(Vec<u8>, Vec<u8>)]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(b"sybil/state-root/v2");
+    hasher.update((leaves.len() as u64).to_le_bytes());
+    for (key, value) in leaves {
+        hasher.update((key.len() as u32).to_le_bytes());
+        hasher.update(key);
+        hasher.update((value.len() as u32).to_le_bytes());
+        hasher.update(value);
+    }
+    hasher.finalize().into()
+}
+
+pub fn account_leaf_key(account_id: u64) -> Vec<u8> {
+    let mut key = Vec::with_capacity(13);
+    key.extend_from_slice(b"acct/");
+    key.extend_from_slice(&account_id.to_be_bytes());
+    key
+}
+
+pub fn withdrawal_leaf_key(withdrawal_id: u64) -> Vec<u8> {
+    let mut key = Vec::with_capacity(19);
+    key.extend_from_slice(b"withdrawal/");
+    key.extend_from_slice(&withdrawal_id.to_be_bytes());
+    key
+}
+
+fn account_leaf_value(account: &AccountSnapshot) -> Vec<u8> {
+    let mut value = Vec::new();
+    value.extend_from_slice(b"sybil/state/acct/v1");
+    value.extend_from_slice(&account.id.to_le_bytes());
+    value.extend_from_slice(&account.balance.to_le_bytes());
+    value.extend_from_slice(&account.total_deposited.to_le_bytes());
+
+    let mut positions = account.positions.clone();
+    positions.sort_by_key(|&(market, outcome, _)| (market.0, outcome));
+    positions.retain(|(_, _, qty)| *qty != 0);
+    value.extend_from_slice(&(positions.len() as u64).to_le_bytes());
+    for (market, outcome, qty) in positions {
+        value.extend_from_slice(&market.0.to_le_bytes());
+        value.push(outcome);
+        value.extend_from_slice(&qty.to_le_bytes());
+    }
+
+    value.extend_from_slice(&account.events_digest);
+    value
+}
+
+fn sys_u64_leaf_value(name: &[u8], raw: u64) -> Vec<u8> {
+    let mut value = Vec::with_capacity(19 + 1 + name.len() + 8);
+    value.extend_from_slice(b"sybil/state/sys/v1");
+    value.push(name.len() as u8);
+    value.extend_from_slice(name);
+    value.extend_from_slice(&raw.to_le_bytes());
+    value
+}
+
+fn sys_bytes32_leaf_value(name: &[u8], raw: &[u8; 32]) -> Vec<u8> {
+    let mut value = Vec::with_capacity(19 + 1 + name.len() + 32);
+    value.extend_from_slice(b"sybil/state/sys/v1");
+    value.push(name.len() as u8);
+    value.extend_from_slice(name);
+    value.extend_from_slice(raw);
+    value
+}
+
+fn withdrawal_leaf_value(withdrawal: &WithdrawalSnapshot) -> Vec<u8> {
+    let mut value = Vec::with_capacity(25 + 8 + 8 + 20 + 20 + 8 + 8 + 8 + 32);
+    value.extend_from_slice(b"sybil/state/withdrawal/v1");
+    value.extend_from_slice(&withdrawal.withdrawal_id.to_le_bytes());
+    value.extend_from_slice(&withdrawal.account_id.to_le_bytes());
+    value.extend_from_slice(&withdrawal.recipient);
+    value.extend_from_slice(&withdrawal.token);
+    value.extend_from_slice(&withdrawal.amount_token_units.to_le_bytes());
+    value.extend_from_slice(&withdrawal.amount_nanos.to_le_bytes());
+    value.extend_from_slice(&withdrawal.expiry_height.to_le_bytes());
+    value.extend_from_slice(&withdrawal.nullifier);
+    value
 }
 
 /// Compute blake3 hash of a block header for chaining.
@@ -252,6 +396,103 @@ mod tests {
     }
 
     #[test]
+    fn test_state_root_changes_on_bridge_cursor() {
+        let accounts = vec![AccountSnapshot {
+            id: 0,
+            balance: 100,
+            total_deposited: 100,
+            positions: vec![],
+            events_digest: [0u8; 32],
+        }];
+        let mut bridge = BridgeStateSnapshot::default();
+        let before = compute_state_root_with_bridge(&accounts, &bridge);
+
+        bridge.deposit_cursor = 1;
+        let after = compute_state_root_with_bridge(&accounts, &bridge);
+
+        assert_ne!(before, after);
+    }
+
+    #[test]
+    fn test_state_root_changes_on_withdrawal_leaf() {
+        let accounts = vec![AccountSnapshot {
+            id: 7,
+            balance: 100,
+            total_deposited: 100,
+            positions: vec![],
+            events_digest: [0u8; 32],
+        }];
+        let bridge = BridgeStateSnapshot {
+            deposit_cursor: 1,
+            deposit_root: [1u8; 32],
+            next_withdrawal_id: 3,
+            withdrawals: vec![WithdrawalSnapshot {
+                withdrawal_id: 2,
+                account_id: 7,
+                recipient: [2u8; 20],
+                token: [3u8; 20],
+                amount_token_units: 1_000,
+                amount_nanos: 2_000,
+                expiry_height: 99,
+                nullifier: [4u8; 32],
+            }],
+        };
+        let mut changed = bridge.clone();
+        changed.withdrawals[0].amount_nanos += 1;
+
+        assert_ne!(
+            compute_state_root_with_bridge(&accounts, &bridge),
+            compute_state_root_with_bridge(&accounts, &changed)
+        );
+    }
+
+    #[test]
+    fn test_state_root_bridge_withdrawals_are_order_independent() {
+        let accounts = vec![AccountSnapshot {
+            id: 7,
+            balance: 100,
+            total_deposited: 100,
+            positions: vec![],
+            events_digest: [0u8; 32],
+        }];
+        let first = WithdrawalSnapshot {
+            withdrawal_id: 2,
+            account_id: 7,
+            recipient: [2u8; 20],
+            token: [3u8; 20],
+            amount_token_units: 1_000,
+            amount_nanos: 2_000,
+            expiry_height: 99,
+            nullifier: [4u8; 32],
+        };
+        let second = WithdrawalSnapshot {
+            withdrawal_id: 1,
+            account_id: 8,
+            recipient: [5u8; 20],
+            token: [6u8; 20],
+            amount_token_units: 3_000,
+            amount_nanos: 4_000,
+            expiry_height: 100,
+            nullifier: [7u8; 32],
+        };
+        let bridge_a = BridgeStateSnapshot {
+            deposit_cursor: 1,
+            deposit_root: [1u8; 32],
+            next_withdrawal_id: 3,
+            withdrawals: vec![first.clone(), second.clone()],
+        };
+        let bridge_b = BridgeStateSnapshot {
+            withdrawals: vec![second, first],
+            ..bridge_a.clone()
+        };
+
+        assert_eq!(
+            compute_state_root_with_bridge(&accounts, &bridge_a),
+            compute_state_root_with_bridge(&accounts, &bridge_b)
+        );
+    }
+
+    #[test]
     fn test_valid_genesis_block() {
         let post_state = vec![AccountSnapshot {
             id: 0,
@@ -277,6 +518,8 @@ mod tests {
             pre_state: vec![],
             post_system_state: vec![],
             post_state,
+            bridge_state: Default::default(),
+
             resolved_markets: vec![],
         };
 
@@ -309,6 +552,8 @@ mod tests {
             pre_state: vec![],
             post_system_state: vec![],
             post_state,
+            bridge_state: Default::default(),
+
             resolved_markets: vec![],
         };
 
@@ -358,6 +603,8 @@ mod tests {
             pre_state: vec![],
             post_system_state: vec![],
             post_state,
+            bridge_state: Default::default(),
+
             resolved_markets: vec![],
         };
 
@@ -397,6 +644,8 @@ mod tests {
             pre_state: vec![],
             post_system_state: vec![],
             post_state,
+            bridge_state: Default::default(),
+
             resolved_markets: vec![],
         };
 

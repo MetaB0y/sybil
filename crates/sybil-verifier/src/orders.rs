@@ -256,6 +256,8 @@ mod tests {
             pre_state,
             post_system_state,
             post_state: vec![],
+            bridge_state: Default::default(),
+
             resolved_markets: vec![],
         }
     }

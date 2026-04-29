@@ -195,6 +195,30 @@ pub fn withdrawal_leaf_digest(leaf: &WithdrawalLeaf) -> Bytes32 {
     *hasher.finalize().as_bytes()
 }
 
+pub fn bridge_state_snapshot(state: &BridgeState) -> sybil_verifier::BridgeStateSnapshot {
+    let mut withdrawals: Vec<_> = state
+        .withdrawals
+        .values()
+        .map(|withdrawal| sybil_verifier::WithdrawalSnapshot {
+            withdrawal_id: withdrawal.withdrawal_id,
+            account_id: withdrawal.account_id.0,
+            recipient: withdrawal.recipient,
+            token: withdrawal.token_address,
+            amount_token_units: withdrawal.amount_token_units,
+            amount_nanos: withdrawal.amount_nanos,
+            expiry_height: withdrawal.expiry_height,
+            nullifier: withdrawal.nullifier,
+        })
+        .collect();
+    withdrawals.sort_by_key(|withdrawal| withdrawal.withdrawal_id);
+    sybil_verifier::BridgeStateSnapshot {
+        deposit_cursor: state.deposit_cursor,
+        deposit_root: state.deposit_root,
+        next_withdrawal_id: state.next_withdrawal_id,
+        withdrawals,
+    }
+}
+
 fn keccak256(bytes: &[u8]) -> Bytes32 {
     let mut hasher = Keccak256::new();
     hasher.update(bytes);

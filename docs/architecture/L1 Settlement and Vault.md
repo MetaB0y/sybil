@@ -565,11 +565,13 @@ The L1 contract design assumes these typed leaves exist or will exist under
 | `acct_resv/{account_id}` | cash reservations that reduce emergency withdrawable cash |
 | `withdrawal/{withdrawal_id}` | normal withdrawal claims |
 | `sys/deposit_cursor` | highest sequential L1 deposit consumed by Sybil state |
+| `sys/deposit_root` | deposit log root paired with the consumed cursor |
+| `sys/next_withdrawal_id` | withdrawal id allocation counter |
 | `sys/bridge_config` | token id, chain id, vault address, bridge version |
 
-`withdrawal/{withdrawal_id}` is a new key family relative to the current
-state-root note. It is small and additive, and it avoids proving withdrawals
-from stale raw balances.
+`withdrawal/{withdrawal_id}` is implemented in the current typed
+`state_root_v2` subset. It is small and additive, and it avoids proving
+withdrawals from stale raw balances.
 
 ## Current Rust bridge hooks
 
@@ -592,11 +594,16 @@ development path:
   Bridge writes are currently dev/internal endpoints; production ingress
   should come from an L1 indexer and authenticated account flow.
 
-This is not yet `state_root_v2`. The current block header still uses
-`state_root_v1`, which commits only account snapshots after system events and
-settlement. Bridge sidecar state is persisted and surfaced, but full
-proof-backed L1 withdrawal verification still depends on the typed qmdb root
-described in [[State Root Schema]].
+The current block header now uses the typed `state_root_v2` subset from
+[[State Root Schema]], so it commits account leaves plus
+`sys/deposit_cursor`, `sys/deposit_root`, `sys/next_withdrawal_id`, and active
+`withdrawal/{withdrawal_id}` leaves. Full proof-backed L1 withdrawal
+verification still depends on the ZK proof program and accepted-root
+contracts, and the native qmdb MMR root/proof path is still a later migration.
+
+This does not solve complete validium recovery yet: reservations, resting
+orders, market lifecycle state, DA publication, and operator replacement are
+still outside the current root subset.
 
 ## Development sequence
 
@@ -604,8 +611,8 @@ described in [[State Root Schema]].
 2. **Foundry skeleton**: contracts, interfaces, events, custom errors, mock
    verifier, mock ERC20, and state-machine tests. No real proof system.
 3. **Sequencer bridge hooks**: consume L1 deposits in order; create withdrawal
-   leaves; expose proof-generation data. Implemented as a v1 sidecar; typed
-   qmdb commitment is still pending.
+   leaves; expose proof-generation data. Implemented with a bridge sidecar and
+   committed in the current typed `state_root_v2` subset.
 4. **Verifier integration**: plug in the chosen ZK verifier adapter and
    public-input hash.
 5. **DA/operator replacement**: bind `daCommitment` to the chosen DA layer and
