@@ -101,6 +101,16 @@ impl SybilClient {
         Ok(resp.json().await?)
     }
 
+    pub async fn list_market_summaries(&self) -> Result<Vec<MarketSummaryResponse>, Error> {
+        let resp = self
+            .http
+            .get(self.url("/v1/markets/summary"))
+            .send()
+            .await?;
+        let resp = self.check_response(resp).await?;
+        Ok(resp.json().await?)
+    }
+
     pub async fn create_market_group(
         &self,
         req: &CreateMarketGroupRequest,

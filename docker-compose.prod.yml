@@ -4,8 +4,13 @@ services:
   sybil-api:
     volumes:
       - sybil-data:/data
+      - arena-data:/arena-data
     environment:
-      SYBIL_DATA_DIR: "/data"
+      # The qmdb-backed account snapshot store currently does not restore
+      # reliably after container restart. Keep the volume mounted for future
+      # recovery work, but run the public demo in explicit in-memory mode.
+      SYBIL_DATA_DIR: ""
+      SYBIL_ARENA_DB_PATH: "/arena-data/decisions.db"
 
   sybil-polymarket:
     command:

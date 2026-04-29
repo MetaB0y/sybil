@@ -1,10 +1,11 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
 use tokio::sync::{mpsc, watch, RwLock};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use sybil_api_types::NANOS_PER_DOLLAR;
 use sybil_polymarket::config::Config;
@@ -90,6 +91,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     info!("Sybil API is healthy");
+
+    // A persisted Polymarket mapping is only valid for the Sybil chain that
+    // created it. If the API starts from a fresh store, stale IDs would make the
+    // mirror submit orders to markets that do not exist. Clear the mapping and
+    // let the sync actor rebuild it from Polymarket.
+    {
+        let mapped_markets = mapping.read().await.all_markets();
+        if !mapped_markets.is_empty() {
+            let sybil_markets = sybil_client_sync.list_market_summaries().await?;
+            let sybil_ids: HashSet<u32> = sybil_markets.iter().map(|m| m.market_id).collect();
+            let missing = mapped_markets
+                .iter()
+                .filter(|(market_id, _, _)| !sybil_ids.contains(market_id))
+                .count();
+
+            if missing > 0 {
+                let mut mapping = mapping.write().await;
+                warn!(
+                    mapped = mapped_markets.len(),
+                    missing,
+                    sybil_markets = sybil_ids.len(),
+                    "clearing stale mapping store; Sybil API no longer has mapped markets"
+                );
+                mapping.clear();
+                mapping.save()?;
+            }
+        }
+    }
 
     // Create MM account
     let balance_nanos = (config.mm_initial_balance_dollars * NANOS_PER_DOLLAR as f64) as u64;

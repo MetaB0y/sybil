@@ -209,6 +209,11 @@ pub fn create_router(state: AppState) -> Router {
         .route("/openapi.json", axum::routing::get(openapi_json))
         // Metrics (outside http_metrics middleware to avoid self-scraping noise)
         .route("/metrics", axum::routing::get(prometheus_metrics))
+        // Native arena / bot analytics
+        .route(
+            "/v1/bots/decisions",
+            axum::routing::get(routes::bots::get_bot_decisions),
+        )
         // System
         .route("/v1/health", axum::routing::get(routes::system::health))
         .route(

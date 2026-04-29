@@ -108,6 +108,11 @@ pub struct ApiConfig {
     #[arg(long, default_value = "", env = "SYBIL_DATA_DIR")]
     pub data_dir: String,
 
+    /// Path to arena's live decisions SQLite database. Empty disables native
+    /// bot-decision analytics in the dashboard.
+    #[arg(long, default_value = "", env = "SYBIL_ARENA_DB_PATH")]
+    pub arena_db_path: String,
+
     /// Path to the P256 signing key used by the admin feed. The file stores
     /// the raw 32-byte SEC1 scalar, hex-encoded. Empty = generate a fresh
     /// ephemeral key at startup (dev-mode convenience; will NOT persist
@@ -148,6 +153,7 @@ impl Default for ApiConfig {
             actor_queue_warn_depth: 1_000,
             actor_queue_error_depth: 5_000,
             data_dir: String::new(),
+            arena_db_path: String::new(),
             admin_feed_key_path: String::new(),
             polymarket_feed_pubkey_hex: String::new(),
         }

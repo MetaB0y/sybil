@@ -3,316 +3,1334 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sybil</title>
+<title>Sybil Console</title>
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
 <style>
-  :root { --bg: #0a0a0f; --surface: #12121a; --border: #1e1e2e; --text: #e0e0e8; --dim: #6b6b80; --green: #4ade80; --red: #f87171; --blue: #60a5fa; --yellow: #fbbf24; }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'SF Mono', 'Fira Code', monospace; background: var(--bg); color: var(--text); font-size: 13px; line-height: 1.5; }
-  .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
-  header { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
-  header h1 { font-size: 16px; font-weight: 600; }
-  .status { display: flex; gap: 16px; color: var(--dim); font-size: 12px; }
-  .status .live { color: var(--green); }
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
-  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px; }
-  .stat .label { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .stat .value { font-size: 20px; font-weight: 600; margin-top: 4px; }
-  .stat .value.green { color: var(--green); }
-  .stat .value.red { color: var(--red); }
-  h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--dim); margin: 20px 0 8px; }
-  table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
-  th { text-align: left; padding: 8px 12px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--dim); border-bottom: 1px solid var(--border); font-weight: 500; }
-  td { padding: 6px 12px; border-bottom: 1px solid var(--border); }
-  tr:last-child td { border-bottom: none; }
-  tr:hover { background: rgba(255,255,255,0.02); }
-  .price { font-variant-numeric: tabular-nums; }
+  :root {
+    --bg: #08090d;
+    --surface: #11131a;
+    --surface-2: #171a23;
+    --border: #252a36;
+    --text: #e6e8ee;
+    --muted: #8b93a6;
+    --dim: #5c6578;
+    --green: #4ade80;
+    --red: #fb7185;
+    --blue: #60a5fa;
+    --yellow: #fbbf24;
+    --cyan: #22d3ee;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  button, input, select {
+    font: inherit;
+  }
+  button {
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 7px 10px;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--blue); }
+  button.active { border-color: var(--blue); color: var(--blue); background: rgba(96,165,250,0.08); }
+  input, select {
+    width: 100%;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 7px 9px;
+  }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .shell { min-height: 100vh; display: grid; grid-template-rows: auto 1fr; }
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: rgba(8, 9, 13, 0.96);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(8px);
+  }
+  .topbar {
+    max-width: 1580px;
+    margin: 0 auto;
+    padding: 12px 18px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+  }
+  .brand { display: flex; align-items: baseline; gap: 12px; min-width: 220px; }
+  .brand h1 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: 0; }
+  .brand span { color: var(--muted); font-size: 11px; }
+  .status-line { display: flex; gap: 16px; align-items: center; color: var(--muted); white-space: nowrap; }
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 7px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); display: inline-block; }
+  .dot.live { background: var(--green); box-shadow: 0 0 12px rgba(74,222,128,0.5); }
+  nav {
+    max-width: 1580px;
+    margin: 0 auto;
+    padding: 0 18px 12px;
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+  }
+  nav button { white-space: nowrap; padding: 6px 10px; }
+  main {
+    max-width: 1580px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 16px 18px 28px;
+  }
+  .grid { display: grid; gap: 12px; }
+  .grid.stats { grid-template-columns: repeat(6, minmax(150px, 1fr)); }
+  .grid.two { grid-template-columns: minmax(0, 1.4fr) minmax(360px, 0.8fr); align-items: start; }
+  .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .panel-head {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+  .panel-head h2, .section-title {
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    font-weight: 650;
+  }
+  .panel-body { padding: 12px; }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 11px;
+    min-height: 78px;
+  }
+  .stat .label { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; }
+  .stat .value { margin-top: 4px; font-size: 21px; font-weight: 650; }
+  .stat .sub { margin-top: 4px; color: var(--dim); font-size: 11px; }
   .green { color: var(--green); }
   .red { color: var(--red); }
   .blue { color: var(--blue); }
+  .yellow { color: var(--yellow); }
+  .cyan { color: var(--cyan); }
+  .muted { color: var(--muted); }
   .dim { color: var(--dim); }
-  .bar-bg { background: var(--border); border-radius: 2px; height: 4px; width: 80px; display: inline-block; vertical-align: middle; }
-  .bar-fill { background: var(--blue); height: 100%; border-radius: 2px; }
-  .groups { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
-  .group-tag { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; }
-  .group-tag.active { border-color: var(--blue); color: var(--blue); }
-  .blocks { max-height: 200px; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; font-size: 12px; }
-  .block-line { padding: 2px 0; border-bottom: 1px solid var(--border); display: flex; gap: 16px; }
-  .block-line:last-child { border-bottom: none; }
-  .positions table { font-size: 12px; }
-  .state { font-size: 11px; color: var(--dim); }
-  .state.priced { color: var(--green); }
-  .state.ref { color: var(--blue); }
+  .row { display: flex; gap: 10px; align-items: center; }
+  .wrap { flex-wrap: wrap; }
+  .right { text-align: right; }
+  .controls {
+    display: grid;
+    grid-template-columns: minmax(180px, 1.4fr) minmax(160px, 0.8fr) minmax(140px, 0.6fr);
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .table-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+  table { width: 100%; border-collapse: collapse; min-width: 760px; }
+  th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--surface-2);
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    text-align: left;
+    padding: 7px 9px;
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 7px 9px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  tr:hover td { background: rgba(255,255,255,0.025); }
+  tr:last-child td { border-bottom: none; }
+  .price, .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .market-name { min-width: 260px; max-width: 520px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-bg { display: inline-block; width: 86px; height: 5px; background: #242a37; border-radius: 99px; overflow: hidden; vertical-align: middle; }
+  .bar-fill { display: block; height: 100%; background: var(--blue); border-radius: 99px; }
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--muted);
+    font-size: 10px;
+    white-space: nowrap;
+  }
+  .tag.green { color: var(--green); border-color: rgba(74,222,128,0.35); }
+  .tag.blue { color: var(--blue); border-color: rgba(96,165,250,0.35); }
+  .tag.red { color: var(--red); border-color: rgba(251,113,133,0.35); }
+  .insights { display: grid; gap: 8px; }
+  .insight {
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.02);
+    border-radius: 7px;
+    padding: 9px 10px;
+  }
+  .insight strong { color: var(--text); }
+  .qa { display: grid; gap: 8px; }
+  .answer {
+    min-height: 96px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    background: #0d0f15;
+    white-space: pre-wrap;
+  }
+  canvas { width: 100%; height: 240px; display: block; }
+  .mini-chart { height: 180px; }
+  .block-list {
+    max-height: 520px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .block-row {
+    display: grid;
+    grid-template-columns: 72px 68px 90px 1fr;
+    gap: 10px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .block-row:hover, .block-row.active { background: rgba(96,165,250,0.08); }
+  .block-row:last-child { border-bottom: none; }
+  pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .iframe-wrap {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+  iframe { width: 100%; border: 0; display: block; background: white; }
+  .trade-frame { height: calc(100vh - 150px); min-height: 820px; }
+  .empty { padding: 26px 12px; color: var(--dim); text-align: center; }
+  .clickable { cursor: pointer; }
+  .account-strip {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    margin-bottom: 12px;
+  }
+  .account-chip {
+    min-width: 112px;
+    text-align: left;
+  }
+  .account-chip strong { display: block; font-size: 12px; }
+  .account-chip span { display: block; color: var(--muted); font-size: 10px; }
+  .decision-list {
+    display: grid;
+    gap: 10px;
+    max-height: calc(100vh - 330px);
+    min-height: 420px;
+    overflow: auto;
+    padding-right: 4px;
+  }
+  .decision-card {
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.02);
+    border-radius: 8px;
+    padding: 10px;
+  }
+  .decision-top {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: start;
+  }
+  .decision-title {
+    font-weight: 650;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .decision-text {
+    margin-top: 8px;
+    color: var(--text);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .decision-text.muted-text { color: var(--muted); }
+  .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .article-link {
+    display: inline-block;
+    max-width: 320px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: bottom;
+  }
+  @media (max-width: 1180px) {
+    .grid.stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid.two, .grid.three { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 720px) {
+    .topbar { align-items: flex-start; flex-direction: column; }
+    .status-line { flex-wrap: wrap; }
+    main { padding: 12px; }
+    .grid.stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .controls { grid-template-columns: 1fr; }
+    .stat .value { font-size: 17px; }
+  }
 </style>
 </head>
 <body>
-<div class="container" x-data="dashboard()" x-init="start()">
-
+<div class="shell" x-data="consoleApp()" x-init="start()">
   <header>
-    <div style="display: flex; gap: 20px; align-items: center;">
-      <h1>sybil</h1>
-      <a href="/trade" style="color: var(--blue); text-decoration: none; font-size: 12px;">Trade &rarr;</a>
+    <div class="topbar">
+      <div class="brand">
+        <h1>sybil console</h1>
+        <span>exchange, bots, markets, chain</span>
+      </div>
+      <div class="status-line">
+        <span class="status-pill"><span class="dot" :class="isLive && 'live'"></span><span x-text="isLive ? 'live' : 'connecting'"></span></span>
+        <span>block <strong x-text="health.height ?? '...'"></strong></span>
+        <span>root <strong x-text="shortRoot(latestBlock && latestBlock.state_root)"></strong></span>
+        <span class="muted" x-text="lastUpdated ? 'updated ' + lastUpdated : ''"></span>
+      </div>
     </div>
-    <div class="status">
-      <span>block <strong x-text="health.height || '...'"></strong></span>
-      <span class="live" x-show="health.status === 'ok'">live</span>
-    </div>
+    <nav>
+      <template x-for="tab in tabs" :key="tab.id">
+        <button :class="selectedTab === tab.id && 'active'" @click="selectedTab = tab.id; afterTabChange()" x-text="tab.label"></button>
+      </template>
+      <a href="/openapi.json" style="margin-left:auto; align-self:center; font-size:11px;">OpenAPI</a>
+    </nav>
   </header>
 
-  <!-- Stats -->
-  <div class="stats">
-    <div class="stat">
-      <div class="label">Markets</div>
-      <div class="value" x-text="loaded ? markets.length : '…'"></div>
-    </div>
-    <div class="stat">
-      <div class="label">Groups</div>
-      <div class="value" x-text="loaded ? groups.length : '…'"></div>
-    </div>
-    <div class="stat">
-      <div class="label">MM Balance</div>
-      <div class="value" :class="mmPnl >= 0 ? 'green' : 'red'" x-text="portfolio ? '$' + mmBalance : '…'"></div>
-    </div>
-    <div class="stat">
-      <div class="label">MM PnL</div>
-      <div class="value" :class="mmPnl >= 0 ? 'green' : 'red'" x-text="portfolio ? ((mmPnl >= 0 ? '+$' : '-$') + Math.abs(mmPnl).toLocaleString()) : '…'"></div>
-    </div>
-    <div class="stat">
-      <div class="label">Positions</div>
-      <div class="value" x-text="portfolio ? mmPositions : '…'"></div>
-    </div>
-    <div class="stat">
-      <div class="label">Last Block Volume</div>
-      <div class="value" x-text="recentBlocks.length ? '$' + lastVolume : '…'"></div>
-    </div>
-  </div>
-
-  <!-- Group filter -->
-  <div class="groups">
-    <span class="group-tag" :class="selectedGroup === null && 'active'" @click="selectedGroup = null">All</span>
-    <template x-for="g in groups" :key="g.name">
-      <span class="group-tag" :class="selectedGroup === g.name && 'active'" @click="selectedGroup = selectedGroup === g.name ? null : g.name" x-text="g.name + ' (' + g.market_ids.length + ')'"></span>
-    </template>
-  </div>
-
-  <!-- Markets table -->
-  <h2>Markets</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>#</th>
-        <th>Market</th>
-        <th>Ref</th>
-        <th>Yes</th>
-        <th>No</th>
-        <th></th>
-        <th>Volume</th>
-        <th>Status</th>
-      </tr>
-    </thead>
-    <tbody>
-      <template x-for="m in filteredMarkets" :key="m.market_id">
-        <tr>
-          <td class="dim" x-text="m.market_id"></td>
-          <td x-text="m.name.length > 60 ? m.name.slice(0, 57) + '...' : m.name"></td>
-          <td class="price blue" x-text="fmt(m.reference_price_nanos)"></td>
-          <td class="price green" x-text="fmt(m.yes_price_nanos)"></td>
-          <td class="price red" x-text="fmt(m.no_price_nanos)"></td>
-          <td>
-            <span class="bar-bg"><span class="bar-fill" :style="'width:' + pct(m.reference_price_nanos || m.yes_price_nanos) + '%'"></span></span>
-          </td>
-          <td class="dim price" x-text="'$' + dollars(m.volume_nanos)"></td>
-          <td>
-            <span :class="m.status === 'active' ? 'green' : 'dim'" x-text="m.status"></span>
-            <span class="state" :class="priceStateClass(m)" x-text="' / ' + priceState(m)"></span>
-          </td>
-        </tr>
-      </template>
-    </tbody>
-  </table>
-
-  <!-- Recent blocks -->
-  <h2>Recent Blocks</h2>
-  <div class="blocks">
-    <template x-for="b in recentBlocks.slice().reverse()" :key="b.height">
-      <div class="block-line">
-        <span class="dim" x-text="'#' + b.height"></span>
-        <span x-text="b.orders_filled + ' fills'"></span>
-        <span class="blue" x-text="'$' + dollars(b.total_volume_nanos)"></span>
-        <span class="dim" x-text="'W: $' + dollars(b.total_welfare_nanos)"></span>
+  <main>
+    <section x-show="selectedTab === 'overview'">
+      <div class="grid stats">
+        <div class="stat">
+          <div class="label">Markets</div>
+          <div class="value" x-text="markets.length || '...'"></div>
+          <div class="sub" x-text="pricedMarkets.length + ' cleared / ' + noClearMarkets.length + ' no clears'"></div>
+        </div>
+        <div class="stat">
+          <div class="label">Reference Prices</div>
+          <div class="value blue" x-text="refMarkets.length"></div>
+          <div class="sub" x-text="refOnlyMarkets.length + ' ref-only markets'"></div>
+        </div>
+        <div class="stat">
+          <div class="label">Pending Orders</div>
+          <div class="value yellow" x-text="fmtInt(pendingOrders.length)"></div>
+          <div class="sub" x-text="marketsWithPending + ' markets with resting orders'"></div>
+        </div>
+        <div class="stat">
+          <div class="label">Recent Volume</div>
+          <div class="value blue" x-text="'$' + dollars(recentVolumeNanos)"></div>
+          <div class="sub" x-text="recentBlocks.length + ' blocks in window'"></div>
+        </div>
+        <div class="stat">
+          <div class="label">Recent Fills</div>
+          <div class="value" :class="recentFills > 0 ? 'green' : 'red'" x-text="fmtInt(recentFills)"></div>
+          <div class="sub" x-text="recentOrders + ' orders seen'"></div>
+        </div>
+        <div class="stat">
+          <div class="label">MM Ref PnL</div>
+          <div class="value" :class="mmReferencePnl >= 0 ? 'green' : 'red'" x-text="moneySigned(mmReferencePnl)"></div>
+          <div class="sub" x-text="mmPositionCount + ' positions, ' + activeTradingAccounts.length + ' active accounts'"></div>
+        </div>
       </div>
-    </template>
-    <div x-show="recentBlocks.length === 0" class="dim">waiting for blocks...</div>
-  </div>
 
-  <!-- MM Positions -->
-  <template x-if="portfolio && portfolio.positions && portfolio.positions.length > 0">
-    <div class="positions">
-      <h2>MM Positions</h2>
-      <table>
-        <thead><tr><th>Market</th><th>Side</th><th>Qty</th><th>Value</th></tr></thead>
-        <tbody>
-          <template x-for="p in portfolio.positions" :key="p.market_id + p.outcome">
-            <tr>
-              <td x-text="marketName(p.market_id)"></td>
-              <td :class="p.outcome === 'YES' ? 'green' : 'red'" x-text="p.outcome"></td>
-              <td class="price" x-text="p.quantity"></td>
-              <td class="price dim" x-text="'$' + dollars(p.value_nanos)"></td>
-            </tr>
-          </template>
-        </tbody>
-      </table>
-    </div>
-  </template>
+      <div class="grid two" style="margin-top:12px;">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Block Activity</h2>
+            <div class="row">
+              <button :class="chartMetric === 'volume' && 'active'" @click="chartMetric = 'volume'; drawCharts()">Volume</button>
+              <button :class="chartMetric === 'fills' && 'active'" @click="chartMetric = 'fills'; drawCharts()">Fills</button>
+              <button :class="chartMetric === 'orders' && 'active'" @click="chartMetric = 'orders'; drawCharts()">Orders</button>
+            </div>
+          </div>
+          <div class="panel-body">
+            <canvas id="activityChart"></canvas>
+            <div class="row wrap" style="margin-top:10px;">
+              <span class="tag" x-text="'blocks ' + blockRangeLabel"></span>
+              <span class="tag green" x-text="recentFills + ' fills'"></span>
+              <span class="tag blue" x-text="'$' + dollars(recentVolumeNanos) + ' volume'"></span>
+              <span class="tag" x-text="uniqueStateRoots + ' state roots'"></span>
+            </div>
+          </div>
+        </div>
 
+        <div class="grid">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>What Is Going On?</h2>
+              <button @click="refreshAll()">Refresh</button>
+            </div>
+            <div class="panel-body insights">
+              <template x-for="item in insights" :key="item.title">
+                <div class="insight">
+                  <strong x-text="item.title"></strong>
+                  <div class="muted" x-text="item.body"></div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head"><h2>Quick Questions</h2></div>
+            <div class="panel-body qa">
+              <div class="row wrap">
+                <button @click="answerQuestion('prices')">Why no prices?</button>
+                <button @click="answerQuestion('chain')">Is chain alive?</button>
+                <button @click="answerQuestion('liquidity')">Where is liquidity?</button>
+                <button @click="answerQuestion('mm')">How is MM doing?</button>
+              </div>
+              <div class="answer" x-text="questionAnswer || 'Pick a question. These answers are computed from live API data on this page.'"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section x-show="selectedTab === 'markets'">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Market Analytics</h2>
+          <span class="muted" x-text="filteredMarkets.length + ' shown / ' + markets.length + ' total'"></span>
+        </div>
+        <div class="panel-body">
+          <div class="controls">
+            <input x-model="marketSearch" placeholder="Search markets, IDs, names">
+            <select x-model="selectedGroup">
+              <option value="">All groups</option>
+              <template x-for="g in groups" :key="g.name">
+                <option :value="g.name" x-text="g.name + ' (' + g.market_ids.length + ')'"></option>
+              </template>
+            </select>
+            <select x-model="marketStateFilter">
+              <option value="all">All states</option>
+              <option value="cleared">Cleared</option>
+              <option value="ref">Reference only</option>
+              <option value="none">No clears</option>
+              <option value="pending">Has pending</option>
+              <option value="mismatch">Large ref mismatch</option>
+            </select>
+          </div>
+          <div class="table-wrap" style="max-height: calc(100vh - 260px);">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th><th>Market</th><th>State</th><th>Ref</th><th>Yes</th><th>No</th><th></th><th>Volume</th><th>Pending</th><th>Gap</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="m in filteredMarkets" :key="m.market_id">
+                  <tr>
+                    <td class="dim num" x-text="m.market_id"></td>
+                    <td class="market-name" :title="m.name" x-text="m.name"></td>
+                    <td><span class="tag" :class="priceStateClass(m)" x-text="priceState(m)"></span></td>
+                    <td class="price blue" x-text="fmtPrice(m.reference_price_nanos)"></td>
+                    <td class="price green" x-text="fmtPrice(m.yes_price_nanos)"></td>
+                    <td class="price red" x-text="fmtPrice(m.no_price_nanos)"></td>
+                    <td><span class="bar-bg"><span class="bar-fill" :style="'width:' + pct(m.reference_price_nanos ?? m.yes_price_nanos) + '%'"></span></span></td>
+                    <td class="num" x-text="'$' + dollars(m.volume_nanos)"></td>
+                    <td class="num yellow" x-text="pendingCount(m.market_id)"></td>
+                    <td class="num" :class="priceGap(m) > 0.1 ? 'red' : 'dim'" x-text="fmtPct(priceGap(m))"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section x-show="selectedTab === 'blocks'">
+      <div class="grid two">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Chain Blocks</h2>
+            <button @click="loadRecentBlocks()">Reload recent history</button>
+          </div>
+          <div class="panel-body">
+            <canvas id="blockChart" class="mini-chart"></canvas>
+            <div class="block-list" style="margin-top:12px;">
+              <template x-for="b in recentBlocks.slice().reverse()" :key="b.height">
+                <div class="block-row" :class="selectedBlock && selectedBlock.height === b.height && 'active'" @click="selectedBlock = b">
+                  <span class="blue" x-text="'#' + b.height"></span>
+                  <span :class="b.fill_count > 0 ? 'green' : 'dim'" x-text="b.fill_count + ' fills'"></span>
+                  <span x-text="'$' + dollars(b.total_volume_nanos)"></span>
+                  <span class="dim" x-text="shortRoot(b.state_root) + ' / ' + b.order_count + ' orders'"></span>
+                </div>
+              </template>
+              <div class="empty" x-show="recentBlocks.length === 0">Waiting for block history...</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Selected Block</h2>
+            <span class="muted" x-text="selectedBlock ? '#' + selectedBlock.height : 'none'"></span>
+          </div>
+          <div class="panel-body" x-show="selectedBlock">
+            <div class="grid three">
+              <div class="stat">
+                <div class="label">Orders</div>
+                <div class="value" x-text="selectedBlock?.order_count"></div>
+              </div>
+              <div class="stat">
+                <div class="label">Fills</div>
+                <div class="value" :class="selectedBlock?.fill_count > 0 ? 'green' : 'red'" x-text="selectedBlock?.fill_count"></div>
+              </div>
+              <div class="stat">
+                <div class="label">Volume</div>
+                <div class="value blue" x-text="'$' + dollars(selectedBlock?.total_volume_nanos)"></div>
+              </div>
+            </div>
+            <h3 class="section-title" style="margin:14px 0 8px;">Root And Prices</h3>
+            <pre x-text="blockSummary(selectedBlock)"></pre>
+            <h3 class="section-title" style="margin:14px 0 8px;">Fills</h3>
+            <pre x-text="JSON.stringify((selectedBlock && selectedBlock.fills || []).slice(0, 12), null, 2)"></pre>
+            <h3 class="section-title" style="margin:14px 0 8px;">Rejections</h3>
+            <pre x-text="JSON.stringify((selectedBlock && selectedBlock.rejections || []).slice(0, 12), null, 2)"></pre>
+          </div>
+          <div class="empty" x-show="!selectedBlock">Select a block to inspect fills, rejections, prices, and roots.</div>
+        </div>
+      </div>
+    </section>
+
+    <section x-show="selectedTab === 'participants'">
+      <div class="grid two">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Active Trading Accounts</h2>
+            <span class="muted">Aggregated positions, pending orders, and reference marks</span>
+          </div>
+          <div class="panel-body">
+            <div class="account-strip">
+              <button class="account-chip" :class="selectedAccountId === null && 'active'" @click="selectedAccountId = null">
+                <strong>Aggregate</strong>
+                <span x-text="activeTradingAccounts.length + ' active accounts'"></span>
+              </button>
+              <template x-for="a in activeTradingAccounts.slice(0, 18)" :key="a.account_id">
+                <button class="account-chip" :class="selectedAccountId === a.account_id && 'active'" @click="selectedAccountId = a.account_id">
+                  <strong x-text="'Account #' + a.account_id"></strong>
+                  <span x-text="accountPendingCount(a.account_id) + ' pending, ' + a.positions.length + ' pos'"></span>
+                </button>
+              </template>
+            </div>
+            <div class="grid stats" style="grid-template-columns: repeat(5, minmax(0, 1fr));">
+              <div class="stat">
+                <div class="label">Scope</div>
+                <div class="value" x-text="selectedTradingAccounts.length"></div>
+                <div class="sub" x-text="selectedAccountId === null ? 'active trading accounts' : 'selected account #' + selectedAccountId"></div>
+              </div>
+              <div class="stat">
+                <div class="label">Pending Orders</div>
+                <div class="value yellow" x-text="fmtInt(mmPendingOrders)"></div>
+                <div class="sub">resting liquidity</div>
+              </div>
+              <div class="stat">
+                <div class="label">Cash</div>
+                <div class="value" x-text="'$' + dollarsSigned(mmCashNanos)"></div>
+                <div class="sub" x-text="mmPositionCount + ' positions'"></div>
+              </div>
+              <div class="stat">
+                <div class="label">Ref Portfolio</div>
+                <div class="value cyan" x-text="'$' + dollarsFloat(mmReferenceTotal)"></div>
+                <div class="sub">cash plus reference marks</div>
+              </div>
+              <div class="stat">
+                <div class="label">Ref PnL</div>
+                <div class="value" :class="mmReferencePnl >= 0 ? 'green' : 'red'" x-text="moneySigned(mmReferencePnl)"></div>
+                <div class="sub" x-text="'Sybil mark $' + dollarsSigned(mmSybilValueNanos)"></div>
+              </div>
+            </div>
+            <div class="insight" style="margin-top:12px;" x-show="accountZeroIsInactive">
+              <strong>Account #0 is not the market maker</strong>
+              <div class="muted">Account #0 currently has no positions or pending orders. This panel now follows accounts with actual activity instead of pinning the MM view to #0.</div>
+            </div>
+            <h3 class="section-title" style="margin:14px 0 8px;">Top Positions</h3>
+            <div class="table-wrap" style="max-height:300px;">
+              <table>
+                <thead><tr><th>Account</th><th>Market</th><th>Outcome</th><th>Qty</th><th>Sybil Value</th><th>Ref Mark</th></tr></thead>
+                <tbody>
+                  <template x-for="p in topMmPositions" :key="p.account_id + '-' + p.market_id + '-' + p.outcome">
+                    <tr>
+                      <td class="blue" x-text="'#' + p.account_id"></td>
+                      <td class="market-name" x-text="marketName(p.market_id)"></td>
+                      <td :class="p.outcome === 'YES' ? 'green' : 'red'" x-text="p.outcome"></td>
+                      <td class="num" x-text="p.quantity"></td>
+                      <td class="num" x-text="'$' + dollarsSigned(p.value_nanos)"></td>
+                      <td class="num blue" x-text="'$' + dollarsFloat(positionRefValue(p))"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Participants</h2>
+            <button @click="loadAccounts()">Reload accounts</button>
+          </div>
+          <div class="panel-body">
+            <div class="table-wrap" style="max-height:520px;">
+              <table>
+                <thead><tr><th>Account</th><th>Cash</th><th>Portfolio</th><th>PnL</th><th>Positions</th><th>Pending</th><th>Recent Fills</th></tr></thead>
+                <tbody>
+                  <template x-for="a in accounts" :key="a.account_id">
+                    <tr>
+                      <td class="blue" x-text="'#' + a.account_id"></td>
+                      <td class="num" x-text="'$' + dollarsSigned(a.balance_nanos)"></td>
+                      <td class="num" x-text="'$' + dollarsSigned(a.portfolio_value_nanos)"></td>
+                      <td class="num" :class="a.pnl_nanos >= 0 ? 'green' : 'red'" x-text="moneySigned(a.pnl_nanos / 1e9)"></td>
+                      <td class="num" x-text="a.positions.length"></td>
+                      <td class="num yellow" x-text="accountPendingCount(a.account_id)"></td>
+                      <td class="num green" x-text="accountFillCount(a.account_id)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+            <div class="empty" x-show="accounts.length === 0">Loading account portfolios...</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:12px;">
+        <div class="panel-head"><h2>Pending Order Concentration</h2></div>
+        <div class="panel-body">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Market</th><th>Pending</th><th>Buy Yes</th><th>Buy No</th><th>Sell Yes</th><th>Sell No</th><th>Clearing</th><th>Reference</th></tr></thead>
+              <tbody>
+                <template x-for="row in topPendingMarkets" :key="row.market_id">
+                  <tr>
+                    <td class="market-name" x-text="'#' + row.market_id + ' ' + marketName(row.market_id)"></td>
+                    <td class="num yellow" x-text="row.count"></td>
+                    <td class="num" x-text="row.BuyYes || 0"></td>
+                    <td class="num" x-text="row.BuyNo || 0"></td>
+                    <td class="num" x-text="row.SellYes || 0"></td>
+                    <td class="num" x-text="row.SellNo || 0"></td>
+                    <td class="num green" x-text="fmtPrice((marketById(row.market_id) || {}).yes_price_nanos)"></td>
+                    <td class="num blue" x-text="fmtPrice((marketById(row.market_id) || {}).reference_price_nanos)"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section x-show="selectedTab === 'bots'">
+      <div class="grid stats" style="margin-bottom:12px;">
+        <div class="stat">
+          <div class="label">Decisions</div>
+          <div class="value blue" x-text="fmtInt(botStats.decisions)"></div>
+          <div class="sub" x-text="botStats.latest_decision_timestamp ? 'latest ' + shortTime(botStats.latest_decision_timestamp) : 'no decisions yet'"></div>
+        </div>
+        <div class="stat">
+          <div class="label">Traders</div>
+          <div class="value" x-text="fmtInt(botStats.traders)"></div>
+          <div class="sub">native arena SQLite feed</div>
+        </div>
+        <div class="stat">
+          <div class="label">Articles</div>
+          <div class="value cyan" x-text="fmtInt(botStats.articles)"></div>
+          <div class="sub">logged news inputs</div>
+        </div>
+        <div class="stat">
+          <div class="label">Snapshots</div>
+          <div class="value" x-text="fmtInt(botStats.snapshots)"></div>
+          <div class="sub">portfolio records</div>
+        </div>
+        <div class="stat">
+          <div class="label">LLM Calls</div>
+          <div class="value yellow" x-text="fmtInt(botStats.token_usage)"></div>
+          <div class="sub">token usage rows</div>
+        </div>
+        <div class="stat">
+          <div class="label">Visible</div>
+          <div class="value" x-text="filteredBotDecisions.length"></div>
+          <div class="sub">recent reasoning cards</div>
+        </div>
+      </div>
+
+      <div class="grid two">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Bot Summaries</h2>
+            <button @click="loadBotDecisions()">Reload decisions</button>
+          </div>
+          <div class="panel-body">
+          <div class="controls" style="grid-template-columns: 1fr;">
+            <select x-model="botFilter">
+              <option value="">All bots</option>
+              <template x-for="name in botTraderNames" :key="name">
+                <option :value="name" x-text="name"></option>
+              </template>
+            </select>
+          </div>
+          <div class="table-wrap" style="max-height:520px;">
+            <table>
+              <thead><tr><th>Bot</th><th>Decisions</th><th>Avg Edge</th><th>Latest Market</th><th>FV</th><th>Mkt</th><th>PnL</th><th>Orders/Fills</th></tr></thead>
+              <tbody>
+                <template x-for="b in botSummaries" :key="b.trader_name">
+                  <tr class="clickable" @click="botFilter = b.trader_name">
+                    <td class="market-name" x-text="b.trader_name"></td>
+                    <td class="num" x-text="fmtInt(b.decision_count)"></td>
+                    <td class="num" :class="b.avg_edge >= 0.1 ? 'yellow' : 'dim'" x-text="fmtProb(b.avg_edge)"></td>
+                    <td class="market-name" x-text="b.latest_market_name || '-'"></td>
+                    <td class="num green" x-text="fmtProb(b.latest_fair_value)"></td>
+                    <td class="num blue" x-text="fmtProb(b.latest_market_price)"></td>
+                    <td class="num" :class="(b.pnl || 0) >= 0 ? 'green' : 'red'" x-text="moneySigned(b.pnl || 0)"></td>
+                    <td class="num" x-text="fmtInt(b.total_orders) + ' / ' + fmtInt(b.total_fills)"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+          <div class="empty" x-show="!botDbAvailable" x-text="botDbError || 'Arena decision database is not mounted.'"></div>
+          <div class="empty" x-show="botDbAvailable && botSummaries.length === 0">No bot decisions have been logged yet.</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Recent Reasoning</h2>
+            <span class="muted" x-text="botFilter ? botFilter : 'all bots'"></span>
+          </div>
+          <div class="panel-body">
+            <div class="decision-list">
+              <template x-for="d in filteredBotDecisions" :key="d.id">
+                <div class="decision-card">
+                  <div class="decision-top">
+                    <div>
+                      <div class="decision-title" :title="d.market_name" x-text="d.market_name || 'Market #' + d.market_id"></div>
+                      <div class="muted" x-text="d.trader_name + ' / ' + shortTime(d.timestamp)"></div>
+                    </div>
+                    <div class="right">
+                      <span class="tag" :class="(d.edge || 0) >= 0.1 ? 'yellow' : 'blue'" x-text="'edge ' + fmtProb(d.edge)"></span>
+                    </div>
+                  </div>
+                  <div class="chip-row">
+                    <span class="tag green" x-text="'FV ' + fmtProb(d.fair_value)"></span>
+                    <span class="tag blue" x-text="'market ' + fmtProb(d.market_price)"></span>
+                    <span class="tag" x-text="'balance $' + dollarsFloat(d.balance)"></span>
+                    <span class="tag" x-text="fmtInt(d.yes_pos) + ' YES / ' + fmtInt(d.no_pos) + ' NO'"></span>
+                    <span class="tag" x-text="d.llm_duration_s ? d.llm_duration_s.toFixed(1) + 's LLM' : 'LLM time -'"></span>
+                  </div>
+                  <div class="decision-text muted-text" x-show="d.motivation" x-text="d.motivation"></div>
+                  <div class="decision-text" x-show="d.analysis" x-text="d.analysis"></div>
+                  <div class="chip-row" x-show="orderList(d).length">
+                    <template x-for="(o, idx) in orderList(d)" :key="idx">
+                      <span class="tag" :class="String(o.side || '').includes('Yes') ? 'green' : 'red'" x-text="formatOrder(o)"></span>
+                    </template>
+                  </div>
+                  <div class="chip-row" x-show="articleList(d).length">
+                    <template x-for="(a, idx) in articleList(d)" :key="idx">
+                      <a class="tag article-link" :href="articleUrl(a)" target="_blank" rel="noreferrer" x-text="articleLabel(a)"></a>
+                    </template>
+                  </div>
+                </div>
+              </template>
+              <div class="empty" x-show="botDbAvailable && filteredBotDecisions.length === 0">No matching bot decisions.</div>
+              <div class="empty" x-show="!botDbAvailable" x-text="botDbError || 'Arena decision database is not available.'"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section x-show="selectedTab === 'trade'">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Trade</h2>
+          <a href="/trade" target="_blank" rel="noreferrer">Open direct trade view</a>
+        </div>
+        <div class="iframe-wrap">
+          <iframe class="trade-frame" src="/trade" title="Sybil Trading"></iframe>
+        </div>
+      </div>
+    </section>
+  </main>
 </div>
 
 <script>
-function dashboard() {
+function consoleApp() {
   return {
+    tabs: [
+      { id: 'overview', label: 'Overview' },
+      { id: 'markets', label: 'Markets' },
+      { id: 'blocks', label: 'Blocks' },
+      { id: 'participants', label: 'MM & Accounts' },
+      { id: 'bots', label: 'Bot Decisions' },
+      { id: 'trade', label: 'Trade' },
+    ],
+    selectedTab: 'overview',
     health: {},
     markets: [],
     groups: [],
-    portfolio: null,
+    pendingOrders: [],
+    accounts: [],
+    accountFills: {},
     recentBlocks: [],
-    selectedGroup: null,
-    mmAccountId: 0,
-    loaded: false,
+    selectedBlock: null,
+    selectedAccountId: null,
+    botStats: {},
+    botSummaries: [],
+    botDecisions: [],
+    botTokenUsage: [],
+    botDbAvailable: false,
+    botDbError: '',
+    botFilter: '',
+    marketSearch: '',
+    selectedGroup: '',
+    marketStateFilter: 'all',
+    chartMetric: 'volume',
+    questionAnswer: '',
+    isLive: false,
+    lastUpdated: '',
+    loadingAccounts: false,
 
+    get latestBlock() {
+      return this.recentBlocks.length ? this.recentBlocks[this.recentBlocks.length - 1] : null;
+    },
+    get blockRangeLabel() {
+      if (!this.recentBlocks.length) return 'none';
+      return '#' + this.recentBlocks[0].height + '..#' + this.recentBlocks[this.recentBlocks.length - 1].height;
+    },
+    get pricedMarkets() { return this.markets.filter(m => m.yes_price_nanos != null); },
+    get noClearMarkets() { return this.markets.filter(m => m.yes_price_nanos == null); },
+    get refMarkets() { return this.markets.filter(m => m.reference_price_nanos != null); },
+    get refOnlyMarkets() { return this.markets.filter(m => m.yes_price_nanos == null && m.reference_price_nanos != null); },
+    get marketsWithPending() { return new Set(this.pendingOrders.map(o => o.market_id)).size; },
+    get recentVolumeNanos() {
+      return this.recentBlocks.reduce((sum, b) => sum + (b.total_volume_nanos || 0), 0);
+    },
+    get recentFills() {
+      return this.recentBlocks.reduce((sum, b) => sum + (b.fill_count || 0), 0);
+    },
+    get recentOrders() {
+      return this.recentBlocks.reduce((sum, b) => sum + (b.order_count || 0), 0);
+    },
+    get uniqueStateRoots() {
+      return new Set(this.recentBlocks.map(b => b.state_root).filter(Boolean)).size;
+    },
+    get marketIndex() {
+      const map = new Map();
+      this.markets.forEach(m => map.set(m.market_id, m));
+      return map;
+    },
+    get pendingIndex() {
+      const map = new Map();
+      for (const o of this.pendingOrders) {
+        const row = map.get(o.market_id) || { market_id: o.market_id, count: 0, BuyYes: 0, BuyNo: 0, SellYes: 0, SellNo: 0 };
+        row.count++;
+        row[o.side] = (row[o.side] || 0) + 1;
+        map.set(o.market_id, row);
+      }
+      return map;
+    },
+    get topPendingMarkets() {
+      return Array.from(this.pendingIndex.values()).sort((a, b) => b.count - a.count).slice(0, 30);
+    },
     get filteredMarkets() {
-      if (!this.selectedGroup) return this.markets;
-      const g = this.groups.find(g => g.name === this.selectedGroup);
-      if (!g) return this.markets;
-      const ids = new Set(g.market_ids);
-      return this.markets.filter(m => ids.has(m.market_id));
+      const q = this.marketSearch.trim().toLowerCase();
+      let list = this.markets;
+      if (this.selectedGroup) {
+        const group = this.groups.find(g => g.name === this.selectedGroup);
+        const ids = new Set(group ? group.market_ids : []);
+        list = list.filter(m => ids.has(m.market_id));
+      }
+      if (q) {
+        list = list.filter(m => String(m.market_id).includes(q) || m.name.toLowerCase().includes(q));
+      }
+      if (this.marketStateFilter === 'cleared') list = list.filter(m => m.yes_price_nanos != null);
+      if (this.marketStateFilter === 'ref') list = list.filter(m => m.yes_price_nanos == null && m.reference_price_nanos != null);
+      if (this.marketStateFilter === 'none') list = list.filter(m => m.yes_price_nanos == null && m.reference_price_nanos == null);
+      if (this.marketStateFilter === 'pending') list = list.filter(m => this.pendingCount(m.market_id) > 0);
+      if (this.marketStateFilter === 'mismatch') list = list.filter(m => this.priceGap(m) >= 0.1);
+      return list.slice().sort((a, b) => {
+        const pa = this.pendingCount(a.market_id);
+        const pb = this.pendingCount(b.market_id);
+        return (b.volume_nanos || 0) - (a.volume_nanos || 0) || pb - pa || a.market_id - b.market_id;
+      });
+    },
+    get pendingByAccount() {
+      const map = new Map();
+      for (const o of this.pendingOrders) {
+        const id = Number(o.account_id);
+        if (!Number.isFinite(id)) continue;
+        map.set(id, (map.get(id) || 0) + 1);
+      }
+      return map;
+    },
+    get activeTradingAccounts() {
+      return this.accounts
+        .filter(a => a.account_id !== 0)
+        .filter(a => (a.positions || []).length > 0 || this.accountPendingCount(a.account_id) > 0 || Math.abs(a.pnl_nanos || 0) > 0)
+        .sort((a, b) =>
+          this.accountPendingCount(b.account_id) - this.accountPendingCount(a.account_id) ||
+          (b.positions || []).length - (a.positions || []).length ||
+          b.account_id - a.account_id
+        );
+    },
+    get selectedTradingAccounts() {
+      if (this.selectedAccountId === null) return this.activeTradingAccounts;
+      return this.accounts.filter(a => a.account_id === this.selectedAccountId);
+    },
+    get accountZeroIsInactive() {
+      const a = this.accounts.find(row => row.account_id === 0);
+      return !!a && (a.positions || []).length === 0 && this.accountPendingCount(0) === 0;
+    },
+    get mmCashNanos() {
+      return this.selectedTradingAccounts.reduce((sum, a) => sum + (a.balance_nanos || 0), 0);
+    },
+    get mmSybilValueNanos() {
+      return this.selectedTradingAccounts.reduce((sum, a) => sum + (a.portfolio_value_nanos || 0), 0);
+    },
+    get mmPositionCount() {
+      return this.selectedTradingAccounts.reduce((sum, a) => sum + ((a.positions || []).length), 0);
+    },
+    get mmPendingOrders() {
+      return this.selectedTradingAccounts.reduce((sum, a) => sum + this.accountPendingCount(a.account_id), 0);
+    },
+    get mmReferencePositionValue() {
+      return this.selectedTradingAccounts.reduce((sum, a) =>
+        sum + (a.positions || []).reduce((posSum, p) => posSum + this.positionRefValue({ ...p, account_id: a.account_id }), 0), 0
+      );
+    },
+    get mmReferenceTotal() {
+      return (this.mmCashNanos / 1e9) + this.mmReferencePositionValue;
+    },
+    get mmReferencePnl() {
+      const deposited = this.selectedTradingAccounts.reduce((sum, a) => sum + ((a.total_deposited_nanos || 0) / 1e9), 0);
+      return this.mmReferenceTotal - deposited;
+    },
+    get topMmPositions() {
+      return this.selectedTradingAccounts
+        .flatMap(a => (a.positions || []).map(p => ({ ...p, account_id: a.account_id })))
+        .sort((a, b) => Math.abs(b.value_nanos || 0) - Math.abs(a.value_nanos || 0))
+        .slice(0, 25);
+    },
+    get botTraderNames() {
+      return this.botSummaries.map(b => b.trader_name).filter(Boolean);
+    },
+    get filteredBotDecisions() {
+      if (!this.botFilter) return this.botDecisions;
+      return this.botDecisions.filter(d => d.trader_name === this.botFilter);
+    },
+    get insights() {
+      const items = [];
+      const latest = this.latestBlock;
+      if (latest) {
+        items.push({
+          title: latest.fill_count > 0 ? 'Blocks are clearing trades' : 'Blocks are alive but not clearing',
+          body: 'Latest block #' + latest.height + ' has ' + latest.order_count + ' orders, ' + latest.fill_count + ' fills, and $' + this.dollars(latest.total_volume_nanos) + ' volume.',
+        });
+      }
+      items.push({
+        title: 'Price coverage',
+        body: this.pricedMarkets.length + ' of ' + this.markets.length + ' markets have Sybil clearing prices. A market gets a clearing price only after a fill.',
+      });
+      items.push({
+        title: 'Reference price coverage',
+        body: this.refMarkets.length + ' markets have external reference prices, and ' + this.refOnlyMarkets.length + ' of those have no Sybil clears yet.',
+      });
+      if (this.pendingOrders.length) {
+        const top = this.topPendingMarkets[0];
+        items.push({
+          title: 'Pending liquidity is concentrated',
+          body: top ? ('Top pending market is #' + top.market_id + ' with ' + top.count + ' resting orders. Only ' + this.marketsWithPending + ' markets have any pending orders.') : 'No pending-order detail available.',
+        });
+      }
+      if (this.recentBlocks.length) {
+        items.push({
+          title: this.uniqueStateRoots <= 1 ? 'State root is not moving' : 'State root is moving',
+          body: this.uniqueStateRoots + ' unique state roots across ' + this.recentBlocks.length + ' recent blocks. No fills usually means the root stays constant.',
+        });
+      }
+      return items;
     },
 
-    get mmBalance() {
-      if (!this.portfolio || this.portfolio.balance_nanos == null) return '...';
-      return Math.round(this.portfolio.balance_nanos / 1e9).toLocaleString();
+    async start() {
+      await this.refreshAll();
+      await this.loadAccounts();
+      this.streamBlocks();
+      setInterval(() => this.poll(), 10000);
+      setInterval(() => this.loadAccounts(), 60000);
+      setInterval(() => this.loadBotDecisions(), 30000);
+      window.addEventListener('resize', () => this.drawCharts());
     },
-
-    get mmPnl() {
-      if (!this.portfolio || this.portfolio.pnl_nanos == null) return 0;
-      return Math.round(this.portfolio.pnl_nanos / 1e9);
+    async refreshAll() {
+      await this.poll();
+      await Promise.all([this.loadRecentBlocks(), this.loadBotDecisions()]);
+      this.$nextTick(() => this.drawCharts());
     },
-
-    get mmPositions() {
-      if (!this.portfolio || !this.portfolio.positions) return 0;
-      return this.portfolio.positions.length;
-    },
-
-    get lastVolume() {
-      if (this.recentBlocks.length === 0) return '0';
-      const last = this.recentBlocks[this.recentBlocks.length - 1];
-      return this.dollars(last.total_volume_nanos);
-    },
-
-    fmt(nanos) {
-      if (!nanos) return '-';
-      return (nanos / 1e9).toFixed(3);
-    },
-
-    pct(nanos) {
-      if (!nanos) return 0;
-      return Math.round(nanos / 1e7);
-    },
-
-    priceState(m) {
-      if (m.yes_price_nanos) return 'cleared';
-      if (m.reference_price_nanos) return 'ref only';
-      return 'no clears';
-    },
-
-    priceStateClass(m) {
-      if (m.yes_price_nanos) return 'priced';
-      if (m.reference_price_nanos) return 'ref';
-      return '';
-    },
-
-    dollars(nanos) {
-      if (!nanos) return '0';
-      return Math.round(nanos / 1e9).toLocaleString();
-    },
-
-    marketName(id) {
-      const m = this.markets.find(m => m.market_id === id);
-      if (!m) return '#' + id;
-      return m.name.length > 40 ? m.name.slice(0, 37) + '...' : m.name;
-    },
-
     async poll() {
       try {
-        const [h, m, g, ...portfolios] = await Promise.all([
+        const [h, m, g, p] = await Promise.all([
           fetch('/v1/health').then(r => r.json()),
           fetch('/v1/markets/summary').then(r => r.json()),
           fetch('/v1/markets/groups').then(r => r.json()),
-          ...[0, 1, 2, 3].map(id =>
-            fetch('/v1/accounts/' + id + '/portfolio')
-              .then(r => r.ok ? r.json() : null)
-              .catch(() => null)
-          ),
+          fetch('/v1/orders/pending').then(r => r.ok ? r.json() : []).catch(() => []),
         ]);
         this.health = h;
-        this.markets = m.sort((a, b) => (b.volume_nanos || 0) - (a.volume_nanos || 0));
+        this.markets = m;
         this.groups = g;
-        this.loaded = true;
-
-        // Pick the account with the most positions as the MM.
-        let best = null, bestIdx = 0;
-        portfolios.forEach((p, i) => {
-          if (!p) return;
-          if (!best || (p.positions || []).length > (best.positions || []).length) {
-            best = p;
-            bestIdx = i;
-          }
-        });
-        if (best) {
-          this.portfolio = best;
-          this.mmAccountId = bestIdx;
-        }
+        this.pendingOrders = p;
+        this.isLive = h.status === 'ok';
+        this.lastUpdated = new Date().toLocaleTimeString();
       } catch (e) {
-        console.error('poll failed:', e);
+        console.error('poll failed', e);
+        this.isLive = false;
+      }
+      this.$nextTick(() => this.drawCharts());
+    },
+    async loadRecentBlocks() {
+      try {
+        const latest = await fetch('/v1/blocks/latest').then(r => r.ok ? r.json() : null);
+        if (!latest || latest.height == null) return;
+        const start = Math.max(0, latest.height - 79);
+        const heights = [];
+        for (let h = start; h <= latest.height; h++) heights.push(h);
+        const rows = await Promise.all(heights.map(h =>
+          fetch('/v1/blocks/' + h).then(r => r.ok ? r.json() : null).catch(() => null)
+        ));
+        this.recentBlocks = this.dedupeBlocks(rows.filter(Boolean).concat([latest]));
+        this.selectedBlock = this.recentBlocks[this.recentBlocks.length - 1] || null;
+      } catch (e) {
+        console.error('loadRecentBlocks failed', e);
+      }
+      this.$nextTick(() => this.drawCharts());
+    },
+    async loadAccounts() {
+      if (this.loadingAccounts) return;
+      this.loadingAccounts = true;
+      try {
+        const pendingIds = this.pendingOrders.map(o => Number(o.account_id)).filter(Number.isFinite);
+        const ids = Array.from(new Set(Array.from({ length: 48 }, (_, i) => i).concat(pendingIds))).sort((a, b) => a - b);
+        const rows = await Promise.all(ids.map(id =>
+          fetch('/v1/accounts/' + id + '/portfolio').then(r => r.ok ? r.json() : null).catch(() => null)
+        ));
+        this.accounts = rows.filter(Boolean).sort((a, b) => a.account_id - b.account_id);
+        if (this.selectedAccountId !== null && !this.accounts.some(a => a.account_id === this.selectedAccountId)) {
+          this.selectedAccountId = null;
+        }
+        await this.loadAccountFills(this.activeTradingAccounts.map(a => a.account_id));
+      } finally {
+        this.loadingAccounts = false;
       }
     },
-
+    async loadAccountFills(ids) {
+      const unique = Array.from(new Set(ids)).slice(0, 24);
+      const entries = await Promise.all(unique.map(id =>
+        fetch('/v1/accounts/' + id + '/fills?limit=25')
+          .then(r => r.ok ? r.json() : [])
+          .then(rows => [id, rows])
+          .catch(() => [id, []])
+      ));
+      this.accountFills = Object.fromEntries(entries);
+    },
+    async loadBotDecisions() {
+      try {
+        const data = await fetch('/v1/bots/decisions?limit=80').then(r => r.ok ? r.json() : null);
+        if (!data) return;
+        this.botDbAvailable = !!data.db_available;
+        this.botDbError = data.error || '';
+        this.botStats = data.stats || {};
+        this.botSummaries = data.summaries || [];
+        this.botDecisions = data.decisions || [];
+        this.botTokenUsage = data.token_usage || [];
+        if (this.botFilter && !this.botTraderNames.includes(this.botFilter)) this.botFilter = '';
+      } catch (e) {
+        console.error('loadBotDecisions failed', e);
+        this.botDbAvailable = false;
+        this.botDbError = 'failed to load bot decision feed';
+      }
+    },
     async streamBlocks() {
       try {
         const resp = await fetch('/v1/blocks/stream');
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
-
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
-
           const lines = buffer.split('\n');
           buffer = lines.pop();
-
           for (const line of lines) {
-            if (line.startsWith('data:')) {
-              try {
-                const block = JSON.parse(line.slice(5).trim());
-                this.recentBlocks.push(block);
-                if (this.recentBlocks.length > 50) this.recentBlocks.shift();
-                this.health.height = block.height;
-              } catch {}
-            }
+            if (!line.startsWith('data:')) continue;
+            try {
+              const block = JSON.parse(line.slice(5).trim());
+              this.recentBlocks = this.dedupeBlocks(this.recentBlocks.concat([block])).slice(-100);
+              this.health.height = block.height;
+              this.isLive = true;
+              this.lastUpdated = new Date().toLocaleTimeString();
+              if (!this.selectedBlock || this.selectedBlock.height < block.height) this.selectedBlock = block;
+              this.$nextTick(() => this.drawCharts());
+            } catch {}
           }
         }
       } catch (e) {
-        console.error('SSE failed:', e);
+        console.error('SSE failed', e);
+        this.isLive = false;
         setTimeout(() => this.streamBlocks(), 3000);
       }
     },
-
-    start() {
-      this.poll();
-      setInterval(() => this.poll(), 5000);
-      this.streamBlocks();
-    }
+    dedupeBlocks(blocks) {
+      const map = new Map();
+      for (const b of blocks) if (b && b.height != null) map.set(b.height, b);
+      return Array.from(map.values()).sort((a, b) => a.height - b.height);
+    },
+    afterTabChange() {
+      if (this.selectedTab === 'bots') this.loadBotDecisions();
+      if (this.selectedTab === 'participants') this.loadAccounts();
+      this.$nextTick(() => this.drawCharts());
+    },
+    drawCharts() {
+      this.drawActivityChart('activityChart', this.chartMetric);
+      this.drawActivityChart('blockChart', 'fills');
+    },
+    drawActivityChart(id, metric) {
+      const canvas = document.getElementById(id);
+      if (!canvas || !this.recentBlocks.length) return;
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      canvas.width = Math.floor(rect.width * dpr);
+      canvas.height = Math.floor(rect.height * dpr);
+      const ctx = canvas.getContext('2d');
+      ctx.scale(dpr, dpr);
+      const w = rect.width;
+      const h = rect.height;
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = '#0d0f15';
+      ctx.fillRect(0, 0, w, h);
+      const pad = { l: 46, r: 14, t: 18, b: 28 };
+      const plotW = w - pad.l - pad.r;
+      const plotH = h - pad.t - pad.b;
+      const values = this.recentBlocks.map(b => {
+        if (metric === 'volume') return (b.total_volume_nanos || 0) / 1e9;
+        if (metric === 'orders') return b.order_count || 0;
+        return b.fill_count || 0;
+      });
+      const max = Math.max(...values, 1);
+      ctx.strokeStyle = '#252a36';
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 4; i++) {
+        const y = pad.t + (plotH * i / 4);
+        ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
+      }
+      const barW = Math.max(2, plotW / values.length - 1);
+      values.forEach((v, i) => {
+        const x = pad.l + i * (plotW / values.length);
+        const bh = Math.max(1, (v / max) * plotH);
+        ctx.fillStyle = metric === 'volume' ? '#60a5fa' : metric === 'orders' ? '#fbbf24' : '#4ade80';
+        if (v === 0) ctx.fillStyle = '#303746';
+        ctx.fillRect(x, pad.t + plotH - bh, barW, bh);
+      });
+      ctx.fillStyle = '#8b93a6';
+      ctx.font = '11px ui-monospace, monospace';
+      ctx.fillText(metric + ' max ' + (metric === 'volume' ? '$' + max.toFixed(0) : max.toFixed(0)), 10, 14);
+      const first = this.recentBlocks[0]?.height;
+      const last = this.recentBlocks[this.recentBlocks.length - 1]?.height;
+      ctx.fillText('#' + first, pad.l, h - 8);
+      ctx.textAlign = 'right';
+      ctx.fillText('#' + last, w - pad.r, h - 8);
+      ctx.textAlign = 'left';
+      if (values.every(v => v === 0)) {
+        ctx.fillStyle = '#5c6578';
+        ctx.fillText('no ' + metric + ' in this window', pad.l + 10, pad.t + 22);
+      }
+    },
+    answerQuestion(kind) {
+      if (kind === 'prices') {
+        this.questionAnswer =
+          this.pricedMarkets.length + ' / ' + this.markets.length + ' markets have Sybil clearing prices.\n' +
+          'A Sybil price appears only after a market has fills. ' + this.noClearMarkets.length + ' markets have no clears, so they show no clearing price.\n' +
+          this.refOnlyMarkets.length + ' markets have an external reference price but still no Sybil fill.';
+      } else if (kind === 'chain') {
+        const latest = this.latestBlock;
+        this.questionAnswer =
+          'Latest block: #' + (latest?.height ?? 'unknown') + '\n' +
+          'Recent window: ' + this.recentBlocks.length + ' blocks, ' + this.recentFills + ' fills, $' + this.dollars(this.recentVolumeNanos) + ' volume.\n' +
+          'State roots in window: ' + this.uniqueStateRoots + '. If this is 1, blocks are being produced but state is not changing.';
+      } else if (kind === 'liquidity') {
+        const rows = this.topPendingMarkets.slice(0, 8).map(r =>
+          '#' + r.market_id + ' ' + this.marketName(r.market_id) + ': ' + r.count + ' pending'
+        ).join('\n');
+        this.questionAnswer =
+          this.pendingOrders.length + ' pending orders across ' + this.marketsWithPending + ' markets.\n' +
+          (rows || 'No pending orders are visible from /v1/orders/pending.');
+      } else if (kind === 'mm') {
+        this.questionAnswer =
+          'Active trading accounts: ' + this.activeTradingAccounts.map(a => '#' + a.account_id).join(', ') + '\n' +
+          'Account #0 activity: ' + (this.accountZeroIsInactive ? 'none visible' : 'has activity') + '\n' +
+          'Pending orders: ' + this.mmPendingOrders + '\n' +
+          'Sybil-mark portfolio: $' + this.dollarsSigned(this.mmSybilValueNanos) + '\n' +
+          'Reference-mark portfolio: $' + this.dollarsFloat(this.mmReferenceTotal) + '\n' +
+          'Reference PnL: ' + this.moneySigned(this.mmReferencePnl) + '\n' +
+          'Positions: ' + this.mmPositionCount;
+      }
+    },
+    marketById(id) { return this.marketIndex.get(Number(id)); },
+    marketName(id) {
+      const m = this.marketById(id);
+      return m ? m.name : '#' + id;
+    },
+    pendingCount(id) {
+      const row = this.pendingIndex.get(Number(id));
+      return row ? row.count : 0;
+    },
+    accountPendingCount(id) {
+      return this.pendingByAccount.get(Number(id)) || 0;
+    },
+    accountFillCount(id) {
+      return (this.accountFills[String(id)] || this.accountFills[id] || []).length;
+    },
+    priceState(m) {
+      if (m.yes_price_nanos != null) return 'cleared';
+      if (m.reference_price_nanos != null) return 'ref only';
+      return 'no clears';
+    },
+    priceStateClass(m) {
+      if (m.yes_price_nanos != null) return 'green';
+      if (m.reference_price_nanos != null) return 'blue';
+      return 'red';
+    },
+    priceGap(m) {
+      if (m.yes_price_nanos == null || m.reference_price_nanos == null) return 0;
+      return Math.abs(m.yes_price_nanos - m.reference_price_nanos) / 1e9;
+    },
+    positionRefValue(p) {
+      const m = this.marketById(p.market_id);
+      const yes = m && m.reference_price_nanos != null
+        ? m.reference_price_nanos / 1e9
+        : (p.current_price_nanos != null ? p.current_price_nanos / 1e9 : 0.5);
+      const price = p.outcome === 'YES' ? yes : 1 - yes;
+      return p.quantity * price;
+    },
+    orderList(d) {
+      return Array.isArray(d.orders) ? d.orders : [];
+    },
+    articleList(d) {
+      return Array.isArray(d.article_urls) ? d.article_urls : [];
+    },
+    articleUrl(a) {
+      return typeof a === 'string' ? a : (a && a.url) || '#';
+    },
+    articleLabel(a) {
+      if (typeof a === 'string') return a;
+      if (!a) return 'article';
+      return [a.source, a.title || a.url].filter(Boolean).join(': ');
+    },
+    formatOrder(o) {
+      const side = o.side || o.action || o.type || 'order';
+      const qty = o.quantity ?? o.qty ?? o.size ?? o.shares ?? '';
+      const price = o.price ?? o.limit_price ?? o.limit ?? o.limit_price_nanos;
+      const px = price == null ? '' : (' @ ' + (price > 1 ? '$' + (price / 1e9).toFixed(3) : this.fmtProb(price)));
+      return String(side) + (qty !== '' ? ' ' + qty : '') + px;
+    },
+    blockSummary(b) {
+      if (!b) return '';
+      return JSON.stringify({
+        height: b.height,
+        timestamp_ms: b.timestamp_ms,
+        state_root: b.state_root,
+        parent_hash: b.parent_hash,
+        clearing_prices: Object.keys(b.clearing_prices_nanos || {}).length,
+        system_events: (b.system_events || []).length,
+        bridge: b.bridge || {},
+      }, null, 2);
+    },
+    fmtPrice(nanos) {
+      if (nanos == null) return '-';
+      return '$' + (nanos / 1e9).toFixed(3);
+    },
+    fmtProb(v) {
+      if (v == null || Number.isNaN(Number(v))) return '-';
+      return (Number(v) * 100).toFixed(1) + '%';
+    },
+    fmtPct(v) {
+      if (!v) return '-';
+      return (v * 100).toFixed(1) + '%';
+    },
+    pct(nanos) {
+      if (nanos == null) return 0;
+      return Math.max(0, Math.min(100, Math.round(nanos / 1e7)));
+    },
+    dollars(nanos) {
+      if (!nanos) return '0';
+      return Math.round(nanos / 1e9).toLocaleString();
+    },
+    dollarsSigned(nanos) {
+      if (!nanos) return '0';
+      return Math.round(nanos / 1e9).toLocaleString();
+    },
+    dollarsFloat(v) {
+      if (!v) return '0';
+      return v.toLocaleString(undefined, { maximumFractionDigits: 0 });
+    },
+    moneySigned(v) {
+      const sign = v >= 0 ? '+$' : '-$';
+      return sign + Math.abs(v || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
+    },
+    fmtInt(v) {
+      return (v || 0).toLocaleString();
+    },
+    shortRoot(root) {
+      if (!root) return '...';
+      return String(root).slice(0, 8);
+    },
+    shortTime(value) {
+      if (!value) return '-';
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return String(value);
+      return d.toLocaleString(undefined, { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    },
   };
 }
 </script>

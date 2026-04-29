@@ -71,7 +71,7 @@ fn init_telemetry() -> Telemetry {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let Telemetry {
         prometheus_handle,
         tracer_provider,
@@ -92,8 +92,10 @@ async fn main() {
         match matching_sequencer::store::Store::open(&db_path) {
             Ok(s) => Some(s),
             Err(e) => {
-                tracing::error!(error = %e, "failed to open store, starting in-memory");
-                None
+                tracing::error!(error = %e, "failed to open persistent store");
+                return Err(
+                    std::io::Error::other(format!("failed to open persistent store: {e}")).into(),
+                );
             }
         }
     } else {
@@ -105,8 +107,11 @@ async fn main() {
         match store.load_state().await {
             Ok(state) => state,
             Err(e) => {
-                tracing::error!(error = %e, "failed to restore state, starting fresh");
-                None
+                tracing::error!(error = %e, "failed to restore persistent state");
+                return Err(std::io::Error::other(format!(
+                    "failed to restore persistent state: {e}"
+                ))
+                .into());
             }
         }
     } else {
@@ -203,6 +208,7 @@ async fn main() {
     }
 
     tracing::info!("Server shut down cleanly");
+    Ok(())
 }
 
 /// Register the admin data feed, optionally register the Polymarket-mirror

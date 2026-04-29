@@ -105,6 +105,8 @@ pub struct AppState {
     pub reference_prices: Arc<RwLock<HashMap<u32, u64>>>,
     /// Reference data per market (external URLs, etc.).
     pub market_ref_data: Arc<RwLock<HashMap<u32, MarketRefData>>>,
+    /// Path to arena's live decision database, when configured.
+    pub arena_db_path: String,
     /// Cheap pre-handler limiter for order endpoints. Sequencer admission has
     /// authoritative account/global limits; this bounds parsing/signature work.
     pub http_order_limiter: Arc<Mutex<HttpOrderRateLimiter>>,
@@ -122,6 +124,7 @@ impl AppState {
             prometheus,
             reference_prices: Arc::new(RwLock::new(HashMap::new())),
             market_ref_data: Arc::new(RwLock::new(HashMap::new())),
+            arena_db_path: config.arena_db_path.clone(),
             http_order_limiter: Arc::new(Mutex::new(HttpOrderRateLimiter::new(config))),
         }
     }

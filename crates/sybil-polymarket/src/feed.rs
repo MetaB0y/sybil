@@ -102,6 +102,7 @@ impl FeedActor {
                 tokens = self.token_ids.len(),
                 "attempting WebSocket connection"
             );
+            self.poll_rest_once().await;
             let ws_result = tokio::select! {
                 _ = cancel.cancelled() => {
                     info!("FeedActor shutting down");

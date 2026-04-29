@@ -7,8 +7,11 @@ services:
       SYBIL_PORT: "3000"
       SYBIL_DEV_MODE: "true"
       SYBIL_BLOCK_INTERVAL_MS: "2000"
+      SYBIL_ARENA_DB_PATH: "/arena-data/decisions.db"
       RUST_LOG: "info"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+    volumes:
+      - arena-data:/arena-data
     restart: unless-stopped
     stop_grace_period: 10s
     logging:

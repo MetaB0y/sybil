@@ -130,6 +130,15 @@ impl MappingStore {
         self.condition_to_sybil.len()
     }
 
+    /// Clear all persisted Sybil mappings while preserving the persistence path.
+    pub fn clear(&mut self) {
+        self.condition_to_sybil.clear();
+        self.sybil_to_condition.clear();
+        self.token_to_sybil.clear();
+        self.event_to_group.clear();
+        self.synced_events.clear();
+    }
+
     /// All (condition_id, sybil_market_id) pairs — used by the resolution
     /// actor to reconcile settled Polymarket conditions against locally
     /// mirrored markets.
