@@ -29,8 +29,10 @@ pub mod violations;
 
 pub use types::{
     AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
-    RejectionReason, RestingOrderSnapshot, StateSidecarSnapshot, SystemEventWitness,
-    WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder, WitnessRejection,
+    ChallengeSnapshot, MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot,
+    OracleSourceSnapshot, RejectionReason, ResolutionProposalSnapshot, ResolutionRecordSnapshot,
+    RestingOrderSnapshot, StateSidecarSnapshot, SystemEventWitness, WithdrawalSnapshot,
+    WitnessBlockHeader, WitnessOrder, WitnessRejection,
 };
 pub use violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
 

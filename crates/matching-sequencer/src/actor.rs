@@ -908,6 +908,9 @@ impl Actor for SequencerActor {
                     &state.sequencer.accounts,
                     state.sequencer.bridge_state(),
                     state.sequencer.order_book(),
+                    state.sequencer.markets(),
+                    state.sequencer.market_groups(),
+                    state.sequencer.market_lifecycle(),
                 );
                 let _ = reply.send(root);
             }

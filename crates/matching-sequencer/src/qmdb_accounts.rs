@@ -19,11 +19,7 @@ use tokio::sync::{mpsc as tokio_mpsc, oneshot};
 
 use crate::account::{Account, AccountId, AccountStore};
 use crate::account_storage::AccountSnapshotSlot;
-use crate::bridge::{bridge_state_snapshot, BridgeState};
 use crate::canonical_state::snapshot_account;
-use crate::order_book::{
-    reservation_snapshots_from_resting_orders, resting_order_snapshots, RestingOrder,
-};
 use crate::store::StoreError;
 
 const CHUNK_SIZE: usize = 32;
@@ -62,7 +58,7 @@ pub struct QmdbAccounts {
 enum Command {
     ReplaceSnapshot {
         slot: AccountSnapshotSlot,
-        snapshot: PersistedAccountSnapshot,
+        snapshot: Box<PersistedAccountSnapshot>,
         respond_to: oneshot::Sender<Result<(), StoreError>>,
     },
     LoadSnapshot {
@@ -73,8 +69,7 @@ enum Command {
 
 struct PersistedAccountSnapshot {
     accounts: Vec<Account>,
-    bridge_state: BridgeState,
-    resting_orders: Vec<RestingOrder>,
+    state_sidecar: sybil_verifier::StateSidecarSnapshot,
     height: u64,
     next_account_id: u64,
 }
@@ -117,8 +112,7 @@ impl QmdbAccounts {
         &self,
         slot: AccountSnapshotSlot,
         accounts: &AccountStore,
-        bridge_state: &BridgeState,
-        resting_orders: &[RestingOrder],
+        state_sidecar: &sybil_verifier::StateSidecarSnapshot,
         height: u64,
         next_account_id: u64,
     ) -> Result<(), StoreError> {
@@ -127,8 +121,7 @@ impl QmdbAccounts {
                 .iter()
                 .map(|(_, account)| account.clone())
                 .collect(),
-            bridge_state: bridge_state.clone(),
-            resting_orders: resting_orders.to_vec(),
+            state_sidecar: state_sidecar.clone(),
             height,
             next_account_id,
         };
@@ -136,7 +129,7 @@ impl QmdbAccounts {
         self.sender
             .send(Command::ReplaceSnapshot {
                 slot,
-                snapshot,
+                snapshot: Box::new(snapshot),
                 respond_to,
             })
             .await
@@ -169,7 +162,7 @@ async fn run(mut db: AccountDb, mut receiver: tokio_mpsc::Receiver<Command>) {
                 snapshot,
                 respond_to,
             } => {
-                let _ = respond_to.send(replace_snapshot(&mut db, slot, snapshot).await);
+                let _ = respond_to.send(replace_snapshot(&mut db, slot, *snapshot).await);
             }
             Command::LoadSnapshot { slot, respond_to } => {
                 let _ = respond_to.send(load_snapshot(&db, slot).await);
@@ -222,13 +215,8 @@ async fn replace_snapshot(
     let mut desired = HashMap::new();
 
     let account_snapshots: Vec<_> = snapshot.accounts.iter().map(snapshot_account).collect();
-    let state_sidecar = sybil_verifier::StateSidecarSnapshot {
-        bridge: bridge_state_snapshot(&snapshot.bridge_state),
-        resting_orders: resting_order_snapshots(&snapshot.resting_orders),
-        account_reservations: reservation_snapshots_from_resting_orders(&snapshot.resting_orders),
-    };
     for (leaf_key, leaf_value) in
-        sybil_verifier::block::state_root_v2_leaves(&account_snapshots, &state_sidecar)
+        sybil_verifier::block::state_root_v2_leaves(&account_snapshots, &snapshot.state_sidecar)
     {
         desired.insert(encode_state_v2_key(slot, &leaf_key), leaf_value);
     }

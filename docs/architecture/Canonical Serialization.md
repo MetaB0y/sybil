@@ -170,10 +170,10 @@ is frozen.
 
 [[State Root Schema]] fixes the v2 commitment shape. The current
 implementation commits a typed subset: accounts, resting orders, aggregate
-reservations, bridge counters, deposit root, and active withdrawal leaves.
-Each committed value begins with an ASCII domain string identifying the leaf
-type and version, followed by canonical fixed-width fields and
-deterministically sorted collections.
+reservations, market definitions/lifecycle, market groups, bridge counters,
+deposit root, and active withdrawal leaves. Each committed value begins with
+an ASCII domain string identifying the leaf type and version, followed by
+canonical fixed-width fields and deterministically sorted collections.
 
 Reserved domains:
 
@@ -184,6 +184,7 @@ Reserved domains:
 | `order/{order_id}` | `sybil/state/order/v1` |
 | `withdrawal/{withdrawal_id}` | `sybil/state/withdrawal/v1` |
 | `market/{market_id}` | `sybil/state/market/v1` |
+| `market_group/{group_id}` | `sybil/state/market-group/v1` |
 | `sys/*` | `sybil/state/sys/v1` |
 
 Implemented key encodings:
@@ -192,6 +193,8 @@ Implemented key encodings:
 |---|---|
 | `acct/{account_id}` | `"acct/" || account_id:u64_be` |
 | `acct_resv/{account_id}` | `"acct_resv/" || account_id:u64_be` |
+| `market/{market_id}` | `"market/" || market_id:u32_be` |
+| `market_group/{group_id}` | `"market_group/" || group_id:u64_be` |
 | `order/{order_id}` | `"order/" || order_id:u64_be` |
 | `sys/deposit_cursor` | ASCII literal |
 | `sys/deposit_root` | ASCII literal |
@@ -300,8 +303,86 @@ condition_bytes =
 The resting-order wrapper always also commits the effective
 `expires_at_block` used by the sequencer.
 
-The other reserved domains are intentionally deferred until the typed state
-writer is widened to market lifecycle state and market metadata.
+`market` value:
+
+```text
+market_leaf_value =
+    "sybil/state/market/v1"
+ || market_id:u32_le
+ || name_len:u64_le
+ || name:utf8_bytes
+ || num_outcomes:u8
+ || market_status_bytes
+ || metadata_digest:[u8;32]
+ || resolution_template_len:u64_le
+ || resolution_template:utf8_bytes
+```
+
+`metadata_digest = SHA256("sybil/state/market-meta/v1" || payload_len:u64_le ||
+payload)`. The sequencer payload is tagged: `0x00` for no metadata, or `0x01`
+followed by description, category, sorted tags, resolution criteria,
+expiry timestamp, creation timestamp, and effective resolution template. Text
+fields use `len:u64_le || utf8_bytes`.
+
+`market_status_bytes` is tag-dispatched:
+
+```text
+0x00 = Active
+0x01 = Proposed   || resolution_proposal || challenge_deadline_ms:u64_le
+0x02 = Challenged || resolution_proposal || challenge
+0x03 = Resolved   || resolution_record
+0x04 = Voided
+```
+
+Resolution helper encodings:
+
+```text
+oracle_source =
+    0x00                     // Admin
+  | 0x01 || feed_id:u64_le   // DataFeed
+  | 0x02                     // AutomatedL0
+
+resolution_proposal =
+    proposal_id:u64_le
+ || market_id:u32_le
+ || payout_nanos:u64_le
+ || oracle_source
+ || proposed_at_ms:u64_le
+ || reason_tag:u8
+ || reason_len:u64_le || reason:utf8_bytes   // only when reason_tag = 1
+
+challenge =
+    challenge_id:u64_le
+ || challenger:u64_le
+ || proposal_id:u64_le
+ || bond_amount:u64_le
+ || proposed_payout_nanos:u64_le
+ || reason_len:u64_le
+ || reason:utf8_bytes
+ || challenged_at_ms:u64_le
+
+resolution_record =
+    market_id:u32_le
+ || payout_nanos:u64_le
+ || oracle_source
+ || resolved_at_ms:u64_le
+ || proposal_tag:u8 || resolution_proposal?
+ || challenge_tag:u8 || challenge?
+```
+
+`market_group` value:
+
+```text
+market_group_leaf_value =
+    "sybil/state/market-group/v1"
+ || group_id:u64_le
+ || name_len:u64_le
+ || name:utf8_bytes
+ || market_count:u64_le
+ || market_id:u32_le * market_count
+```
+
+Market ids inside a group are sorted ascending before encoding.
 
 ## Event encoding registry
 

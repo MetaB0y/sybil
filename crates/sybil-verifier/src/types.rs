@@ -151,8 +151,82 @@ pub struct AccountSnapshot {
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct StateSidecarSnapshot {
     pub bridge: BridgeStateSnapshot,
+    pub markets: Vec<MarketSnapshot>,
+    pub market_groups: Vec<MarketGroupSnapshot>,
     pub resting_orders: Vec<RestingOrderSnapshot>,
     pub account_reservations: Vec<AccountReservationSnapshot>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MarketSnapshot {
+    pub market_id: MarketId,
+    pub name: String,
+    pub num_outcomes: u8,
+    pub status: MarketStatusSnapshot,
+    pub metadata_digest: [u8; 32],
+    pub resolution_template: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MarketGroupSnapshot {
+    pub group_id: u64,
+    pub name: String,
+    pub markets: Vec<MarketId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum MarketStatusSnapshot {
+    Active,
+    Proposed {
+        proposal: ResolutionProposalSnapshot,
+        challenge_deadline_ms: u64,
+    },
+    Challenged {
+        proposal: ResolutionProposalSnapshot,
+        challenge: ChallengeSnapshot,
+    },
+    Resolved {
+        record: ResolutionRecordSnapshot,
+    },
+    Voided,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ResolutionProposalSnapshot {
+    pub id: u64,
+    pub market_id: MarketId,
+    pub payout_nanos: Nanos,
+    pub source: OracleSourceSnapshot,
+    pub proposed_at_ms: u64,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ChallengeSnapshot {
+    pub id: u64,
+    pub challenger: u64,
+    pub proposal_id: u64,
+    pub bond_amount: Nanos,
+    pub proposed_payout_nanos: Nanos,
+    pub reason: String,
+    pub challenged_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ResolutionRecordSnapshot {
+    pub market_id: MarketId,
+    pub payout_nanos: Nanos,
+    pub resolved_by: OracleSourceSnapshot,
+    pub resolved_at_ms: u64,
+    pub proposal: Option<ResolutionProposalSnapshot>,
+    pub challenge: Option<ChallengeSnapshot>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum OracleSourceSnapshot {
+    Admin,
+    DataFeed(u64),
+    AutomatedL0,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

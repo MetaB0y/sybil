@@ -21,8 +21,8 @@ of *why* we have a state root and a parent hash. This doc is the *how*.
 The current implementation is `state_root_v2`: a SHA-256 digest over sorted,
 typed key/value leaves. It commits to account state after settlement,
 including system-event effects, the bridge sidecar state needed for normal
-withdrawals, and the post-block resting order book with aggregate
-reservations.
+withdrawals, market definitions/lifecycle, market groups, and the post-block
+resting order book with aggregate reservations.
 
 Current key families:
 
@@ -30,15 +30,19 @@ Current key families:
 |---|---|
 | `acct/{account_id}` | `id`, `balance`, `total_deposited`, non-zero `positions`, `events_digest` |
 | `acct_resv/{account_id}` | aggregate reserved cash and positions from active resting orders |
+| `market/{market_id}` | binary market definition, lifecycle status/resolution, metadata digest, resolution template |
+| `market_group/{group_id}` | mutually exclusive market group name and member markets |
 | `order/{order_id}` | active resting order, owner, effective expiry, remaining quantity, and reservation metadata |
 | `sys/deposit_cursor` | highest consumed L1 deposit cursor |
 | `sys/deposit_root` | deposit log root used by the bridge sidecar |
 | `sys/next_withdrawal_id` | next withdrawal id counter |
 | `withdrawal/{withdrawal_id}` | normal L1 withdrawal claim, recipient, token, amount, expiry, and nullifier |
 
-The current implementation does **not** yet commit market metadata, market
-definitions, or oracle lifecycle state. Those are still required before the
-state root is a complete production validium commitment.
+The current implementation still uses a spec-level SHA-256 digest over typed
+leaves rather than qmdb's native MMR root, and only commits the bridge system
+counters implemented so far. It now covers the exchange's active trading
+surface: accounts, bridge withdrawals, markets, groups, resting orders, and
+reservations.
 
 The production target is a single typed qmdb root over the complete validium
 state needed to verify, recover, and restart the exchange:
@@ -50,13 +54,15 @@ state needed to verify, recover, and restart the exchange:
 | `order/{order_id}` | active resting order, owner, remaining quantity, expiry, and reservation metadata |
 | `withdrawal/{withdrawal_id}` | normal L1 withdrawal claim, recipient, token, amount, expiry, and nullifier |
 | `market/{market_id}` | market lifecycle, resolution state, and compact metadata commitment |
+| `market_group/{group_id}` | market group definition and membership |
 | `sys/*` | schema version, height marker, next ids, and global counters |
 
 This matters for [[Order Types|order expiry]]. The verifier can check that an
 included order was not expired at `header.height`, and the current root now
 commits the post-block resting order leaves. That means active order
-existence/absence is no longer purely a witness claim. The remaining gap is
-market lifecycle and metadata state.
+existence/absence is no longer purely a witness claim. Market tradeability and
+resolution are likewise committed by `market/{market_id}` leaves instead of
+being only witness-side context.
 
 ## Current root: typed v2 subset
 
@@ -75,9 +81,10 @@ state_root_v2 =
   )
 ```
 
-Keys are sorted bytewise ascending. Account, withdrawal, resting-order, and
-reservation collections are sorted by id before leaf construction. Values are
-canonical Sybil bytes under the domains in [[Canonical Serialization]].
+Keys are sorted bytewise ascending. Account, market, market-group,
+withdrawal, resting-order, and reservation collections are sorted by id before
+leaf construction. Values are canonical Sybil bytes under the domains in
+[[Canonical Serialization]].
 
 The sequencer also writes these same typed v2 leaves into the active fenced
 qmdb slot under `slot_prefix || "v2:" || leaf_key`. Because the current
@@ -175,10 +182,10 @@ root, not one root per subsystem.
    the block header, or choose an explicit migration height and domain if the
    naming changes before mainnet.
 
-Result: accounts, reservations, active orders, market lifecycle, and global
-counters share one authenticated commitment. Inclusion and exclusion proofs
-come from qmdb's ordered proof APIs. Historical proofs come from qmdb's
-append-only structure within the retained journal window.
+Result: accounts, reservations, active orders, market lifecycle, market
+groups, and global counters share one authenticated commitment. Inclusion and
+exclusion proofs come from qmdb's ordered proof APIs. Historical proofs come
+from qmdb's append-only structure within the retained journal window.
 
 ### Hasher: SHA-256
 
@@ -212,9 +219,10 @@ commitment value.
 The state leaf domain rules are defined in [[Canonical Serialization]].
 Every leaf starts with a type/version domain, for example
 `"sybil/state/acct/v1"` or `"sybil/state/order/v1"`, followed by fixed-width
-canonical fields and deterministically sorted collections. Exact byte-level
-field layouts for non-account v2 leaves are still implementation follow-ups;
-the key families and commitment shape are fixed here.
+canonical fields and deterministically sorted collections. Current v2 pins
+the implemented account, bridge, withdrawal, market, market-group, order, and
+reservation leaf layouts there; the future native-qmdb root reuses those
+bytes.
 
 ### Incremental update
 
@@ -224,7 +232,8 @@ snapshots at block boundaries. The v2 change is:
 
 - Replace the account-only snapshot wrapper with a typed state writer.
 - Write every touched account, reservation, active/resting order,
-  market-state, and system leaf in the same block-boundary batch.
+  market-state, market-group, and system leaf in the same block-boundary
+  batch.
 - After `apply_batch`, ask qmdb for the resulting MMR root.
 - Write the domain-wrapped root into `BlockHeader.state_root`.
 
@@ -263,9 +272,9 @@ committed state. See [[L1 Settlement and Vault]] for the contract boundary.
 ### Account-only qmdb root
 
 Rejected as the production target. It is simple, but incomplete: it cannot
-prove active resting orders, reservations, market lifecycle state, or that an
-expired order is absent after a block. It remains the Phase 1 historical
-scheme only.
+prove active resting orders, reservations, market lifecycle state, market
+group membership, or that an expired order is absent after a block. It remains
+the Phase 1 historical scheme only.
 
 ### Build a fresh Sparse Merkle Tree
 
@@ -309,7 +318,7 @@ versions even when they cover overlapping state data.
 
 ## Retention and historical proofs
 
-Current v2 subset: current state only; historical proofs not supported
+Current v2 digest: current state only; historical proofs not supported
 without replay.
 
 Native qmdb root: qmdb is append-only by design, so historical state proofs
@@ -351,13 +360,10 @@ Out of scope here:
 
 ## Open questions
 
-1. **Market leaf encodings.** Account, reservation, resting-order, withdrawal,
-   and bridge-system leaves are pinned in [[Canonical Serialization]]. Market
-   lifecycle, market definition, and compact metadata leaves are still pending.
-2. **Exposing qmdb's MMR root and proofs.** The `merkleize` API builds the
+1. **Exposing qmdb's MMR root and proofs.** The `merkleize` API builds the
    root but the current `QmdbAccounts` wrapper does not surface it. The v2
    implementation should replace that wrapper with a typed state wrapper.
-3. **Events tree co-habitation.** The events tree from
+2. **Events tree co-habitation.** The events tree from
    [[Proof Architecture]] is orthogonal. It may remain a separate per-block
    tree even though long-lived state lives in qmdb.
 

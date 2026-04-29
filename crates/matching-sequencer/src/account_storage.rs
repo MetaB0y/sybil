@@ -4,8 +4,6 @@ use std::path::Path;
 use std::pin::Pin;
 
 use crate::account::{Account, AccountId, AccountStore};
-use crate::bridge::BridgeState;
-use crate::order_book::RestingOrder;
 use crate::qmdb_accounts::QmdbAccounts;
 use crate::store::StoreError;
 
@@ -51,8 +49,7 @@ impl AccountSnapshotSlot {
 /// Account snapshot metadata written before a redb fence flip.
 pub struct CommittedAccountState<'a> {
     pub accounts: &'a AccountStore,
-    pub bridge_state: &'a BridgeState,
-    pub resting_orders: &'a [RestingOrder],
+    pub state_sidecar: &'a sybil_verifier::StateSidecarSnapshot,
     pub height: u64,
     pub next_account_id: u64,
     pub slot: AccountSnapshotSlot,
@@ -96,8 +93,7 @@ impl AccountStateStore for FencedAccountStorage {
                 .persist(
                     state.slot,
                     state.accounts,
-                    state.bridge_state,
-                    state.resting_orders,
+                    state.state_sidecar,
                     state.height,
                     state.next_account_id,
                 )
@@ -158,14 +154,12 @@ mod tests {
 
         let accounts_a = sample_accounts(100);
         let accounts_b = sample_accounts(200);
-        let bridge_state = BridgeState::default();
-        let resting_orders = Vec::new();
+        let state_sidecar = sybil_verifier::StateSidecarSnapshot::default();
 
         storage
             .persist(CommittedAccountState {
                 accounts: &accounts_a,
-                bridge_state: &bridge_state,
-                resting_orders: &resting_orders,
+                state_sidecar: &state_sidecar,
                 height: 1,
                 next_account_id: accounts_a.next_id(),
                 slot: AccountSnapshotSlot::A,
@@ -175,8 +169,7 @@ mod tests {
         storage
             .persist(CommittedAccountState {
                 accounts: &accounts_b,
-                bridge_state: &bridge_state,
-                resting_orders: &resting_orders,
+                state_sidecar: &state_sidecar,
                 height: 2,
                 next_account_id: accounts_b.next_id(),
                 slot: AccountSnapshotSlot::B,
@@ -202,14 +195,12 @@ mod tests {
         let path = temp_dir("fenced-account-storage-mismatch");
         let storage = FencedAccountStorage::open(&path).unwrap();
         let accounts = sample_accounts(100);
-        let bridge_state = BridgeState::default();
-        let resting_orders = Vec::new();
+        let state_sidecar = sybil_verifier::StateSidecarSnapshot::default();
 
         storage
             .persist(CommittedAccountState {
                 accounts: &accounts,
-                bridge_state: &bridge_state,
-                resting_orders: &resting_orders,
+                state_sidecar: &state_sidecar,
                 height: 1,
                 next_account_id: accounts.next_id(),
                 slot: AccountSnapshotSlot::A,

@@ -43,13 +43,13 @@ Combined with `parent_hash` chaining, a prover can make claims spanning any rang
 
 A typed authenticated key-value tree over complete validium state, updated
 incrementally each block. The current [[State Root Schema]] implementation is
-a typed v2 subset over accounts, bridge leaves, active resting orders, and
-aggregate reservations; the target is one native typed qmdb root over the
-complete validium state.
+a typed v2 digest over accounts, bridge leaves, markets, market groups,
+active resting orders, and aggregate reservations; the target is one native
+typed qmdb root over the complete validium state.
 
 **Keys**: typed namespaces such as `acct/{account_id}`,
-`acct_resv/{account_id}`, `order/{order_id}`, `market/{market_id}`, and
-`withdrawal/{withdrawal_id}`, and `sys/*`.
+`acct_resv/{account_id}`, `order/{order_id}`, `market/{market_id}`,
+`market_group/{group_id}`, `withdrawal/{withdrawal_id}`, plus `sys/*`.
 
 **Values**: canonical Sybil bytes for each leaf type.
 
@@ -62,10 +62,10 @@ complete validium state.
 - The complete validium state at block N (full tree)
 
 **Current implementation**: SHA-256 over sorted typed account, bridge,
-resting-order, and reservation leaves — O(n) over committed leaves per block,
-no native per-key qmdb proofs yet. Account leaves include `events_digest`, a
-running BLAKE3 accumulator over fills and admin events that touched the
-account.
+market, market-group, resting-order, and reservation leaves — O(n) over
+committed leaves per block, no native per-key qmdb proofs yet. Account leaves
+include `events_digest`, a running BLAKE3 accumulator over fills and admin
+events that touched the account.
 
 **Target**: ordered qmdb authenticated key-value store using SHA-256 for the
 native state root. O(k log n) per block where k = state leaves touched.
@@ -185,7 +185,7 @@ Widen the current typed root to the complete state commitment specified in
 [[State Root Schema]].
 
 - One typed qmdb keyspace for accounts, reservations, resting orders,
-  market lifecycle state, and system counters
+  market lifecycle state, market groups, and system counters
 - SHA-256 state-root hash; historical flat BLAKE3 roots remain test/migration
   compatibility only
 - Inclusion and exclusion proof generation for typed leaves
@@ -238,7 +238,7 @@ qmdb proof verification is too expensive.
 |-----------|---------|---------------|---------------|
 | `BlockHeader` | state_root, parent_hash | + events_root | same |
 | `Block` | orders, fills, prices, rejections | + system_events | same |
-| `compute_state_root()` | SHA-256 typed account, bridge, order, and reservation leaves | same | native typed qmdb root |
+| `compute_state_root()` | SHA-256 typed account, bridge, market, market-group, order, and reservation leaves | same | native typed qmdb root |
 | `Fill` struct | order_id, qty, price, account_id | same | same |
 | `Account` | balance, positions, total_deposited, events_digest | same | same |
 | `AccountStore` | HashMap | same | mirrored into authenticated KV |

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use matching_engine::{Fill, MarketId, Nanos};
+use matching_engine::{Fill, MarketGroup, MarketId, MarketSet, Nanos};
 use matching_solver::PipelineResult;
 use sybil_verifier::BlockWitness;
 
@@ -8,7 +8,11 @@ use crate::account::AccountStore;
 use crate::bridge::{bridge_state_snapshot, BridgeBlockData, BridgeState};
 use crate::canonical_state::CanonicalState;
 use crate::error::Rejection;
-use crate::order_book::OrderBook;
+use crate::market_info::MarketMetadata;
+use crate::market_lifecycle::MarketLifecycle;
+use crate::order_book::{
+    reservation_snapshots_from_resting_orders, resting_order_snapshots, OrderBook, RestingOrder,
+};
 use crate::system_event::SystemEvent;
 
 /// Named result of [`BlockSequencer::produce_block`].
@@ -36,7 +40,7 @@ pub struct BlockHeader {
     /// blake3(previous header bytes), zeros for genesis.
     pub parent_hash: [u8; 32],
     /// Current state root. Today this is the v2 typed root over canonical
-    /// account leaves plus bridge and order-book sidecar leaves.
+    /// account leaves plus bridge, market, and order-book sidecar leaves.
     pub state_root: [u8; 32],
     pub order_count: u32,
     pub fill_count: u32,
@@ -71,22 +75,195 @@ pub fn compute_state_root_v2(
     accounts: &AccountStore,
     bridge: &BridgeState,
     order_book: &OrderBook,
+    markets: &MarketSet,
+    market_groups: &[MarketGroup],
+    lifecycle: &MarketLifecycle,
 ) -> [u8; 32] {
     let accounts = CanonicalState::from_accounts(accounts);
     sybil_verifier::block::compute_state_root_with_sidecar(
         accounts.as_snapshots(),
-        &state_sidecar_snapshot(bridge, order_book),
+        &state_sidecar_snapshot(bridge, order_book, markets, market_groups, lifecycle),
     )
 }
 
 pub fn state_sidecar_snapshot(
     bridge: &BridgeState,
     order_book: &OrderBook,
+    markets: &MarketSet,
+    market_groups: &[MarketGroup],
+    lifecycle: &MarketLifecycle,
+) -> sybil_verifier::StateSidecarSnapshot {
+    state_sidecar_snapshot_from_resting_orders(
+        bridge,
+        &order_book.snapshot(),
+        markets,
+        market_groups,
+        lifecycle,
+    )
+}
+
+pub(crate) fn state_sidecar_snapshot_from_resting_orders(
+    bridge: &BridgeState,
+    resting_orders: &[RestingOrder],
+    markets: &MarketSet,
+    market_groups: &[MarketGroup],
+    lifecycle: &MarketLifecycle,
 ) -> sybil_verifier::StateSidecarSnapshot {
     sybil_verifier::StateSidecarSnapshot {
         bridge: bridge_state_snapshot(bridge),
-        resting_orders: order_book.state_root_orders(),
-        account_reservations: order_book.state_root_reservations(),
+        markets: market_snapshots(markets, lifecycle),
+        market_groups: market_group_snapshots(market_groups),
+        resting_orders: resting_order_snapshots(resting_orders),
+        account_reservations: reservation_snapshots_from_resting_orders(resting_orders),
+    }
+}
+
+fn market_snapshots(
+    markets: &MarketSet,
+    lifecycle: &MarketLifecycle,
+) -> Vec<sybil_verifier::MarketSnapshot> {
+    let mut snapshots: Vec<_> = markets
+        .iter()
+        .map(|market| {
+            let metadata = lifecycle.market_metadata(market.id);
+            sybil_verifier::MarketSnapshot {
+                market_id: market.id,
+                name: market.name.clone(),
+                num_outcomes: market.num_outcomes(),
+                status: market_status_snapshot(lifecycle.market_status(market.id)),
+                metadata_digest: market_metadata_digest(metadata),
+                resolution_template: lifecycle.template_for_market(market.id).to_string(),
+            }
+        })
+        .collect();
+    snapshots.sort_by_key(|market| market.market_id.0);
+    snapshots
+}
+
+fn market_group_snapshots(groups: &[MarketGroup]) -> Vec<sybil_verifier::MarketGroupSnapshot> {
+    groups
+        .iter()
+        .enumerate()
+        .map(|(index, group)| {
+            let mut markets = group.markets.clone();
+            markets.sort_by_key(|market| market.0);
+            sybil_verifier::MarketGroupSnapshot {
+                group_id: index as u64,
+                name: group.name.clone(),
+                markets,
+            }
+        })
+        .collect()
+}
+
+fn market_metadata_digest(metadata: Option<&MarketMetadata>) -> [u8; 32] {
+    let mut payload = Vec::new();
+    match metadata {
+        None => payload.push(0),
+        Some(metadata) => {
+            payload.push(1);
+            append_string(&mut payload, &metadata.description);
+            append_string(&mut payload, &metadata.category);
+
+            let mut tags = metadata.tags.clone();
+            tags.sort();
+            payload.extend_from_slice(&(tags.len() as u64).to_le_bytes());
+            for tag in tags {
+                append_string(&mut payload, &tag);
+            }
+
+            append_string(&mut payload, &metadata.resolution_criteria);
+            payload.extend_from_slice(&metadata.expiry_timestamp_ms.to_le_bytes());
+            payload.extend_from_slice(&metadata.created_at_ms.to_le_bytes());
+            append_string(&mut payload, metadata.effective_template());
+        }
+    }
+    sybil_verifier::block::market_metadata_digest(&payload)
+}
+
+fn append_string(value: &mut Vec<u8>, text: &str) {
+    let bytes = text.as_bytes();
+    value.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+    value.extend_from_slice(bytes);
+}
+
+fn market_status_snapshot(
+    status: sybil_oracle::MarketStatus,
+) -> sybil_verifier::MarketStatusSnapshot {
+    match status {
+        sybil_oracle::MarketStatus::Active => sybil_verifier::MarketStatusSnapshot::Active,
+        sybil_oracle::MarketStatus::Proposed {
+            proposal,
+            challenge_deadline_ms,
+        } => sybil_verifier::MarketStatusSnapshot::Proposed {
+            proposal: resolution_proposal_snapshot(proposal),
+            challenge_deadline_ms,
+        },
+        sybil_oracle::MarketStatus::Challenged {
+            proposal,
+            challenge,
+        } => sybil_verifier::MarketStatusSnapshot::Challenged {
+            proposal: resolution_proposal_snapshot(proposal),
+            challenge: challenge_snapshot(challenge),
+        },
+        sybil_oracle::MarketStatus::Resolved { record } => {
+            sybil_verifier::MarketStatusSnapshot::Resolved {
+                record: resolution_record_snapshot(record),
+            }
+        }
+        sybil_oracle::MarketStatus::Voided => sybil_verifier::MarketStatusSnapshot::Voided,
+    }
+}
+
+fn resolution_proposal_snapshot(
+    proposal: sybil_oracle::ResolutionProposal,
+) -> sybil_verifier::ResolutionProposalSnapshot {
+    sybil_verifier::ResolutionProposalSnapshot {
+        id: proposal.id.0,
+        market_id: proposal.market_id,
+        payout_nanos: proposal.payout_nanos,
+        source: oracle_source_snapshot(proposal.source),
+        proposed_at_ms: proposal.proposed_at_ms,
+        reason: proposal.reason,
+    }
+}
+
+fn challenge_snapshot(challenge: sybil_oracle::Challenge) -> sybil_verifier::ChallengeSnapshot {
+    sybil_verifier::ChallengeSnapshot {
+        id: challenge.id.0,
+        challenger: challenge.challenger,
+        proposal_id: challenge.proposal_id.0,
+        bond_amount: challenge.bond_amount,
+        proposed_payout_nanos: challenge.proposed_payout_nanos,
+        reason: challenge.reason,
+        challenged_at_ms: challenge.challenged_at_ms,
+    }
+}
+
+fn resolution_record_snapshot(
+    record: sybil_oracle::ResolutionRecord,
+) -> sybil_verifier::ResolutionRecordSnapshot {
+    sybil_verifier::ResolutionRecordSnapshot {
+        market_id: record.market_id,
+        payout_nanos: record.payout_nanos,
+        resolved_by: oracle_source_snapshot(record.resolved_by),
+        resolved_at_ms: record.resolved_at_ms,
+        proposal: record.proposal.map(resolution_proposal_snapshot),
+        challenge: record.challenge.map(challenge_snapshot),
+    }
+}
+
+fn oracle_source_snapshot(
+    source: sybil_oracle::OracleSource,
+) -> sybil_verifier::OracleSourceSnapshot {
+    match source {
+        sybil_oracle::OracleSource::Admin => sybil_verifier::OracleSourceSnapshot::Admin,
+        sybil_oracle::OracleSource::DataFeed(feed_id) => {
+            sybil_verifier::OracleSourceSnapshot::DataFeed(feed_id.0)
+        }
+        sybil_oracle::OracleSource::AutomatedL0 => {
+            sybil_verifier::OracleSourceSnapshot::AutomatedL0
+        }
     }
 }
 
@@ -107,8 +284,12 @@ mod tests {
     use super::*;
     use crate::account::AccountStore;
     use crate::canonical_state::CanonicalState;
-    use matching_engine::MarketId;
+    use crate::market_info::MarketMetadata;
+    use crate::market_lifecycle::MarketLifecycle;
+    use matching_engine::{MarketId, MarketSet};
     use proptest::prelude::*;
+    use std::sync::Arc;
+    use sybil_oracle::{AdminOracle, MarketStatus, OracleSource, ResolutionRecord};
     use sybil_verifier::AccountSnapshot;
 
     #[test]
@@ -258,6 +439,66 @@ mod tests {
             ..h1.clone()
         };
         assert_ne!(hash_header(&h1), hash_header(&h2));
+    }
+
+    #[test]
+    fn test_state_root_v2_commits_market_registry() {
+        let accounts = AccountStore::new();
+        let bridge = BridgeState::default();
+        let order_book = OrderBook::new(3);
+        let mut markets = MarketSet::new();
+        let market_id = markets.add_binary("Rain tomorrow");
+        let groups = Vec::new();
+        let mut lifecycle = MarketLifecycle::new(Arc::new(AdminOracle::new()));
+
+        let active_root = compute_state_root_v2(
+            &accounts,
+            &bridge,
+            &order_book,
+            &markets,
+            &groups,
+            &lifecycle,
+        );
+
+        lifecycle.set_market_metadata(
+            market_id,
+            MarketMetadata {
+                description: "Rain in London by noon".to_string(),
+                ..MarketMetadata::default()
+            },
+        );
+        let metadata_root = compute_state_root_v2(
+            &accounts,
+            &bridge,
+            &order_book,
+            &markets,
+            &groups,
+            &lifecycle,
+        );
+        assert_ne!(active_root, metadata_root);
+
+        lifecycle.set_market_status(
+            market_id,
+            MarketStatus::Resolved {
+                record: ResolutionRecord {
+                    market_id,
+                    payout_nanos: 1_000_000_000,
+                    resolved_by: OracleSource::Admin,
+                    resolved_at_ms: 1_000,
+                    proposal: None,
+                    challenge: None,
+                },
+            },
+        );
+        let resolved_root = compute_state_root_v2(
+            &accounts,
+            &bridge,
+            &order_book,
+            &markets,
+            &groups,
+            &lifecycle,
+        );
+        assert_ne!(metadata_root, resolved_root);
     }
 
     proptest! {

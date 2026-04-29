@@ -704,6 +704,10 @@ impl BlockSequencer {
         &self.market_groups
     }
 
+    pub fn market_lifecycle(&self) -> &MarketLifecycle {
+        &self.lifecycle
+    }
+
     pub fn market_groups_mut(&mut self) -> &mut Vec<MarketGroup> {
         &mut self.market_groups
     }
@@ -1568,6 +1572,13 @@ impl BlockSequencer {
             resolved_markets,
         } = input;
 
+        let state_sidecar = state_sidecar_snapshot(
+            &self.bridge,
+            &self.order_book,
+            &self.markets,
+            &self.market_groups,
+            &self.lifecycle,
+        );
         let header = BlockHeader {
             height: self.height,
             parent_hash: self
@@ -1577,13 +1588,12 @@ impl BlockSequencer {
                 .unwrap_or([0u8; 32]),
             state_root: sybil_verifier::block::compute_state_root_with_sidecar(
                 post_state.as_snapshots(),
-                &state_sidecar_snapshot(&self.bridge, &self.order_book),
+                &state_sidecar,
             ),
             order_count,
             fill_count: fills.len() as u32,
             timestamp_ms,
         };
-        let state_sidecar = state_sidecar_snapshot(&self.bridge, &self.order_book);
 
         let witness = BlockWitness {
             header: WitnessBlockHeader {
@@ -3235,7 +3245,10 @@ mod tests {
             crate::block::compute_state_root_v2(
                 &seq.accounts,
                 seq.bridge_state(),
-                seq.order_book()
+                seq.order_book(),
+                seq.markets(),
+                seq.market_groups(),
+                seq.market_lifecycle(),
             )
         );
     }

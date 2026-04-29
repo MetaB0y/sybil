@@ -45,13 +45,14 @@ Anything written to qmdb without a corresponding redb fence flip is treated as u
 
 This split is the current runtime persistence model, not the final
 cryptographic commitment model. [[State Root Schema]] now hashes typed v2
-leaves for accounts, bridge state, active resting orders, and aggregate
-reservations, and those exact leaves are persisted in qmdb under the fenced
-slot. The public root is still a canonical SHA-256 digest over sorted
-key/value leaves, not qmdb's native MMR root. The native qmdb target promotes
-qmdb from storage to the authenticated root/proof system over accounts,
-reservations, resting orders, market lifecycle state, and system counters.
-redb can continue to own simple metadata and the crash-recovery fence.
+leaves for accounts, bridge state, markets, market groups, active resting
+orders, and aggregate reservations, and those exact leaves are persisted in
+qmdb under the fenced slot. The public root is still a canonical SHA-256
+digest over sorted key/value leaves, not qmdb's native MMR root. The native
+qmdb target promotes qmdb from storage to the authenticated root/proof system
+over accounts, reservations, resting orders, market lifecycle state, market
+groups, and system counters. redb can continue to own simple metadata and the
+crash-recovery fence.
 
 ## Tier 1: Core State
 
@@ -60,7 +61,7 @@ Authoritative state needed to resume the exchange after a crash:
 | Engine | Namespace / Table | Role |
 |--------|--------------------|------|
 | `qmdb` | slot-prefixed account snapshot keys | `Account` rows plus slot-local `height` and `next_account_id` |
-| `qmdb` | slot-prefixed `v2:` typed leaf keys | canonical account, bridge, order, and reservation leaves committed by `state_root_v2` |
+| `qmdb` | slot-prefixed `v2:` typed leaf keys | canonical account, bridge, market, market-group, order, and reservation leaves committed by `state_root_v2` |
 | `redb` | `markets` | market definitions |
 | `redb` | `market_meta` | market metadata |
 | `redb` | `market_statuses` | market status driven by oracle/system logic |

@@ -41,7 +41,7 @@ tomorrow. Everything else in this doc follows from two invariants:
 | `pre_state` | account snapshots at block start |
 | `post_system_state` | after system events, before fills |
 | `post_state` | after fills — what the header's `state_root` commits to |
-| `state_sidecar` | non-account state committed by the header's `state_root`: bridge, resting orders, and reservations |
+| `state_sidecar` | non-account state committed by the header's `state_root`: bridge, markets, market groups, resting orders, and reservations |
 | `resolved_markets` | markets resolved/voided; orders/fills must not reference |
 
 The sequencer builds this in `matching-sequencer::sequencer` at the end of
@@ -67,7 +67,7 @@ seen inside the circuit, never exposed).
 | `fills` (individual) | private (shape is public via events_root) |
 | `mm_constraints`, `market_groups` | private |
 | `pre_state`, `post_system_state`, `post_state` | private |
-| `state_sidecar` | private (deposit root/count, withdrawal commitments, and selected order/reservation claims can be exposed through dedicated proof public inputs where needed) |
+| `state_sidecar` | private (deposit root/count, withdrawal commitments, market status, and selected market/order/reservation claims can be exposed through dedicated proof public inputs where needed) |
 
 Rationale: the public side is "what was the market's observable outcome" —
 clearing prices, how many orders, welfare. The private side is "which
@@ -129,7 +129,7 @@ carry a TODO there too):
 | `fills` | `Fill` (see Canonical Serialization) | solver output order (stable) |
 | `mm_constraints`, `market_groups` | TODO | by first market_id ascending |
 | `pre_state`, `post_system_state`, `post_state` | `AccountSnapshot` (see Canonical Serialization) | by `id` ascending |
-| `state_sidecar` | `StateSidecarSnapshot` (see Canonical Serialization) | withdrawal/order/reservation leaves by id ascending |
+| `state_sidecar` | `StateSidecarSnapshot` (see Canonical Serialization) | market, market-group, withdrawal, order, and reservation leaves by id ascending |
 | `resolved_markets` | `market_id:u32` | by `market_id` ascending |
 
 Once every item encoding is pinned, `witness_root = BLAKE3("sybil/witness/v1" || witness_v1_bytes)`.

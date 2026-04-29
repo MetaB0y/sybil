@@ -6,6 +6,8 @@ use sha2::{Digest as _, Sha256};
 
 use crate::types::{
     AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
+    ChallengeSnapshot, MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot,
+    OracleSourceSnapshot, ResolutionProposalSnapshot, ResolutionRecordSnapshot,
     RestingOrderSnapshot, StateSidecarSnapshot, WithdrawalSnapshot, WitnessBlockHeader,
 };
 use crate::violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
@@ -206,6 +208,21 @@ pub fn state_root_v2_leaves(
         sys_u64_leaf_value(b"next_withdrawal_id", sidecar.bridge.next_withdrawal_id),
     ));
 
+    let mut markets: Vec<&MarketSnapshot> = sidecar.markets.iter().collect();
+    markets.sort_by_key(|market| market.market_id.0);
+    for market in markets {
+        leaves.push((market_leaf_key(market.market_id), market_leaf_value(market)));
+    }
+
+    let mut market_groups: Vec<&MarketGroupSnapshot> = sidecar.market_groups.iter().collect();
+    market_groups.sort_by_key(|group| group.group_id);
+    for group in market_groups {
+        leaves.push((
+            market_group_leaf_key(group.group_id),
+            market_group_leaf_value(group),
+        ));
+    }
+
     let mut withdrawals: Vec<&WithdrawalSnapshot> = sidecar.bridge.withdrawals.iter().collect();
     withdrawals.sort_by_key(|withdrawal| withdrawal.withdrawal_id);
     for withdrawal in withdrawals {
@@ -255,6 +272,20 @@ pub fn account_leaf_key(account_id: u64) -> Vec<u8> {
     let mut key = Vec::with_capacity(13);
     key.extend_from_slice(b"acct/");
     key.extend_from_slice(&account_id.to_be_bytes());
+    key
+}
+
+pub fn market_leaf_key(market_id: matching_engine::MarketId) -> Vec<u8> {
+    let mut key = Vec::with_capacity(11);
+    key.extend_from_slice(b"market/");
+    key.extend_from_slice(&market_id.0.to_be_bytes());
+    key
+}
+
+pub fn market_group_leaf_key(group_id: u64) -> Vec<u8> {
+    let mut key = Vec::with_capacity(21);
+    key.extend_from_slice(b"market_group/");
+    key.extend_from_slice(&group_id.to_be_bytes());
     key
 }
 
@@ -318,6 +349,46 @@ fn sys_bytes32_leaf_value(name: &[u8], raw: &[u8; 32]) -> Vec<u8> {
     value
 }
 
+/// Canonical digest for sequencer-layer market metadata.
+///
+/// The market leaf stores this digest instead of large text fields. A caller
+/// proving metadata can reveal the raw metadata bytes and recompute this
+/// digest against the committed market leaf.
+pub fn market_metadata_digest(payload: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(b"sybil/state/market-meta/v1");
+    hasher.update((payload.len() as u64).to_le_bytes());
+    hasher.update(payload);
+    hasher.finalize().into()
+}
+
+fn market_leaf_value(market: &MarketSnapshot) -> Vec<u8> {
+    let mut value = Vec::new();
+    value.extend_from_slice(b"sybil/state/market/v1");
+    value.extend_from_slice(&market.market_id.0.to_le_bytes());
+    append_string(&mut value, &market.name);
+    value.push(market.num_outcomes);
+    append_market_status(&mut value, &market.status);
+    value.extend_from_slice(&market.metadata_digest);
+    append_string(&mut value, &market.resolution_template);
+    value
+}
+
+fn market_group_leaf_value(group: &MarketGroupSnapshot) -> Vec<u8> {
+    let mut value = Vec::new();
+    value.extend_from_slice(b"sybil/state/market-group/v1");
+    value.extend_from_slice(&group.group_id.to_le_bytes());
+    append_string(&mut value, &group.name);
+
+    let mut markets = group.markets.clone();
+    markets.sort_by_key(|market| market.0);
+    value.extend_from_slice(&(markets.len() as u64).to_le_bytes());
+    for market in markets {
+        value.extend_from_slice(&market.0.to_le_bytes());
+    }
+    value
+}
+
 fn withdrawal_leaf_value(withdrawal: &WithdrawalSnapshot) -> Vec<u8> {
     let mut value = Vec::with_capacity(25 + 8 + 8 + 20 + 20 + 8 + 8 + 8 + 32);
     value.extend_from_slice(b"sybil/state/withdrawal/v1");
@@ -365,6 +436,111 @@ fn append_position_reservations(
         value.extend_from_slice(&market.0.to_le_bytes());
         value.push(outcome);
         value.extend_from_slice(&qty.to_le_bytes());
+    }
+}
+
+fn append_string(value: &mut Vec<u8>, text: &str) {
+    let bytes = text.as_bytes();
+    value.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+    value.extend_from_slice(bytes);
+}
+
+fn append_option_string(value: &mut Vec<u8>, text: &Option<String>) {
+    match text {
+        None => value.push(0),
+        Some(text) => {
+            value.push(1);
+            append_string(value, text);
+        }
+    }
+}
+
+fn append_market_status(value: &mut Vec<u8>, status: &MarketStatusSnapshot) {
+    match status {
+        MarketStatusSnapshot::Active => value.push(0),
+        MarketStatusSnapshot::Proposed {
+            proposal,
+            challenge_deadline_ms,
+        } => {
+            value.push(1);
+            append_resolution_proposal(value, proposal);
+            value.extend_from_slice(&challenge_deadline_ms.to_le_bytes());
+        }
+        MarketStatusSnapshot::Challenged {
+            proposal,
+            challenge,
+        } => {
+            value.push(2);
+            append_resolution_proposal(value, proposal);
+            append_challenge(value, challenge);
+        }
+        MarketStatusSnapshot::Resolved { record } => {
+            value.push(3);
+            append_resolution_record(value, record);
+        }
+        MarketStatusSnapshot::Voided => value.push(4),
+    }
+}
+
+fn append_resolution_proposal(value: &mut Vec<u8>, proposal: &ResolutionProposalSnapshot) {
+    value.extend_from_slice(&proposal.id.to_le_bytes());
+    value.extend_from_slice(&proposal.market_id.0.to_le_bytes());
+    value.extend_from_slice(&proposal.payout_nanos.to_le_bytes());
+    append_oracle_source(value, &proposal.source);
+    value.extend_from_slice(&proposal.proposed_at_ms.to_le_bytes());
+    append_option_string(value, &proposal.reason);
+}
+
+fn append_challenge(value: &mut Vec<u8>, challenge: &ChallengeSnapshot) {
+    value.extend_from_slice(&challenge.id.to_le_bytes());
+    value.extend_from_slice(&challenge.challenger.to_le_bytes());
+    value.extend_from_slice(&challenge.proposal_id.to_le_bytes());
+    value.extend_from_slice(&challenge.bond_amount.to_le_bytes());
+    value.extend_from_slice(&challenge.proposed_payout_nanos.to_le_bytes());
+    append_string(value, &challenge.reason);
+    value.extend_from_slice(&challenge.challenged_at_ms.to_le_bytes());
+}
+
+fn append_resolution_record(value: &mut Vec<u8>, record: &ResolutionRecordSnapshot) {
+    value.extend_from_slice(&record.market_id.0.to_le_bytes());
+    value.extend_from_slice(&record.payout_nanos.to_le_bytes());
+    append_oracle_source(value, &record.resolved_by);
+    value.extend_from_slice(&record.resolved_at_ms.to_le_bytes());
+    append_optional_resolution_proposal(value, &record.proposal);
+    append_optional_challenge(value, &record.challenge);
+}
+
+fn append_optional_resolution_proposal(
+    value: &mut Vec<u8>,
+    proposal: &Option<ResolutionProposalSnapshot>,
+) {
+    match proposal {
+        None => value.push(0),
+        Some(proposal) => {
+            value.push(1);
+            append_resolution_proposal(value, proposal);
+        }
+    }
+}
+
+fn append_optional_challenge(value: &mut Vec<u8>, challenge: &Option<ChallengeSnapshot>) {
+    match challenge {
+        None => value.push(0),
+        Some(challenge) => {
+            value.push(1);
+            append_challenge(value, challenge);
+        }
+    }
+}
+
+fn append_oracle_source(value: &mut Vec<u8>, source: &OracleSourceSnapshot) {
+    match source {
+        OracleSourceSnapshot::Admin => value.push(0),
+        OracleSourceSnapshot::DataFeed(feed_id) => {
+            value.push(1);
+            value.extend_from_slice(&feed_id.to_le_bytes());
+        }
+        OracleSourceSnapshot::AutomatedL0 => value.push(2),
     }
 }
 
@@ -694,6 +870,90 @@ mod tests {
         let sidecar_b = StateSidecarSnapshot {
             resting_orders: vec![second, first],
             account_reservations: vec![reservation_b, reservation_a],
+            ..StateSidecarSnapshot::default()
+        };
+
+        assert_eq!(
+            compute_state_root_with_sidecar(&accounts, &sidecar_a),
+            compute_state_root_with_sidecar(&accounts, &sidecar_b)
+        );
+    }
+
+    #[test]
+    fn test_state_root_changes_on_market_leaf() {
+        let accounts = vec![];
+        let market = MarketSnapshot {
+            market_id: MarketId::new(1),
+            name: "Will it rain?".to_string(),
+            num_outcomes: 2,
+            status: MarketStatusSnapshot::Active,
+            metadata_digest: [1u8; 32],
+            resolution_template: "admin_immediate".to_string(),
+        };
+        let mut resolved = market.clone();
+        resolved.status = MarketStatusSnapshot::Resolved {
+            record: ResolutionRecordSnapshot {
+                market_id: MarketId::new(1),
+                payout_nanos: 1_000_000_000,
+                resolved_by: OracleSourceSnapshot::Admin,
+                resolved_at_ms: 42,
+                proposal: None,
+                challenge: None,
+            },
+        };
+
+        let before = StateSidecarSnapshot {
+            markets: vec![market],
+            ..StateSidecarSnapshot::default()
+        };
+        let after = StateSidecarSnapshot {
+            markets: vec![resolved],
+            ..StateSidecarSnapshot::default()
+        };
+
+        assert_ne!(
+            compute_state_root_with_sidecar(&accounts, &before),
+            compute_state_root_with_sidecar(&accounts, &after)
+        );
+    }
+
+    #[test]
+    fn test_state_root_market_leaves_are_order_independent() {
+        let accounts = vec![];
+        let first_market = MarketSnapshot {
+            market_id: MarketId::new(2),
+            name: "B".to_string(),
+            num_outcomes: 2,
+            status: MarketStatusSnapshot::Active,
+            metadata_digest: [2u8; 32],
+            resolution_template: "admin_immediate".to_string(),
+        };
+        let second_market = MarketSnapshot {
+            market_id: MarketId::new(1),
+            name: "A".to_string(),
+            num_outcomes: 2,
+            status: MarketStatusSnapshot::Active,
+            metadata_digest: [1u8; 32],
+            resolution_template: "admin_immediate".to_string(),
+        };
+        let first_group = MarketGroupSnapshot {
+            group_id: 1,
+            name: "Group B".to_string(),
+            markets: vec![MarketId::new(2), MarketId::new(1)],
+        };
+        let second_group = MarketGroupSnapshot {
+            group_id: 0,
+            name: "Group A".to_string(),
+            markets: vec![MarketId::new(3), MarketId::new(1)],
+        };
+        let sidecar_a = StateSidecarSnapshot {
+            markets: vec![first_market.clone(), second_market.clone()],
+            market_groups: vec![first_group.clone(), second_group.clone()],
+            ..StateSidecarSnapshot::default()
+        };
+        let sidecar_b = StateSidecarSnapshot {
+            markets: vec![second_market, first_market],
+            market_groups: vec![second_group, first_group],
             ..StateSidecarSnapshot::default()
         };
 

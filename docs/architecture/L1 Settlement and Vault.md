@@ -563,16 +563,20 @@ The L1 contract design assumes these typed leaves exist or will exist under
 |---|---|
 | `acct/{account_id}` | ownership, balance, withdrawal metadata |
 | `acct_resv/{account_id}` | cash reservations that reduce emergency withdrawable cash |
+| `market/{market_id}` | lifecycle/resolution state needed to interpret positions |
+| `market_group/{group_id}` | mutually exclusive group membership needed to interpret complete-set exposure |
 | `withdrawal/{withdrawal_id}` | normal withdrawal claims |
 | `sys/deposit_cursor` | highest sequential L1 deposit consumed by Sybil state |
 | `sys/deposit_root` | deposit log root paired with the consumed cursor |
 | `sys/next_withdrawal_id` | withdrawal id allocation counter |
 | `sys/bridge_config` | token id, chain id, vault address, bridge version |
 
-`acct_resv/{account_id}` and `withdrawal/{withdrawal_id}` are implemented in
-the current typed `state_root_v2` subset. Withdrawal leaves avoid proving
-withdrawals from stale raw balances; reservation leaves make conservative
-emergency cash exits computable from committed state.
+`acct_resv/{account_id}`, `market/{market_id}`, `market_group/{group_id}`,
+and `withdrawal/{withdrawal_id}` are implemented in the current typed
+`state_root_v2` digest. Withdrawal leaves avoid proving withdrawals from
+stale raw balances; reservation leaves make conservative emergency cash exits
+computable from committed state; market leaves commit the lifecycle context
+needed to interpret positions.
 
 ## Current Rust bridge hooks
 
@@ -597,15 +601,16 @@ development path:
 
 The current block header now uses the typed `state_root_v2` subset from
 [[State Root Schema]], so it commits account leaves, active
+`market/{market_id}` leaves, `market_group/{group_id}` leaves,
 `order/{order_id}` leaves, `acct_resv/{account_id}` leaves,
 `sys/deposit_cursor`, `sys/deposit_root`, `sys/next_withdrawal_id`, and active
 `withdrawal/{withdrawal_id}` leaves. Full proof-backed L1 withdrawal
 verification still depends on the ZK proof program and accepted-root
 contracts, and the native qmdb MMR root/proof path is still a later migration.
 
-This does not solve complete validium recovery yet: market lifecycle state,
-market definitions/metadata, DA publication, and operator replacement are
-still outside the current root subset.
+This does not solve complete validium recovery yet: DA publication, retained
+state reconstruction, and operator replacement are still outside the current
+root subset.
 
 ## Development sequence
 

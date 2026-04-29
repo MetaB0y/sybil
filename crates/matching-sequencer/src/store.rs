@@ -56,7 +56,7 @@ use crate::account_storage::{
     AccountSnapshotSlot, AccountStateStore, CommittedAccountState, FencedAccountStorage,
     RecoveryAccountState,
 };
-use crate::block::BlockHeader;
+use crate::block::{state_sidecar_snapshot_from_resting_orders, BlockHeader};
 use crate::bridge::{BridgeState, BridgeWithdrawalRequest, L1Deposit};
 use crate::market_info::{AccountFillRecord, MarketMetadata};
 use crate::market_lifecycle::MarketLifecycle;
@@ -284,11 +284,18 @@ impl Store {
 
         // Persist the inactive qmdb slot first. It becomes committed only when the
         // redb transaction below flips the fence to point at it.
+        let state_sidecar = state_sidecar_snapshot_from_resting_orders(
+            snapshot.bridge_state,
+            &snapshot.resting_orders,
+            snapshot.markets,
+            snapshot.market_groups,
+            snapshot.lifecycle,
+        );
+
         self.account_state_store
             .persist(CommittedAccountState {
                 accounts: snapshot.accounts,
-                bridge_state: snapshot.bridge_state,
-                resting_orders: &snapshot.resting_orders,
+                state_sidecar: &state_sidecar,
                 height: snapshot.header.height,
                 next_account_id: snapshot.accounts.next_id(),
                 slot: next_slot,
