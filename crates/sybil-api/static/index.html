@@ -40,6 +40,9 @@
   .block-line { padding: 2px 0; border-bottom: 1px solid var(--border); display: flex; gap: 16px; }
   .block-line:last-child { border-bottom: none; }
   .positions table { font-size: 12px; }
+  .state { font-size: 11px; color: var(--dim); }
+  .state.priced { color: var(--green); }
+  .state.ref { color: var(--blue); }
 </style>
 </head>
 <body>
@@ -99,6 +102,7 @@
       <tr>
         <th>#</th>
         <th>Market</th>
+        <th>Ref</th>
         <th>Yes</th>
         <th>No</th>
         <th></th>
@@ -111,14 +115,16 @@
         <tr>
           <td class="dim" x-text="m.market_id"></td>
           <td x-text="m.name.length > 60 ? m.name.slice(0, 57) + '...' : m.name"></td>
+          <td class="price blue" x-text="fmt(m.reference_price_nanos)"></td>
           <td class="price green" x-text="fmt(m.yes_price_nanos)"></td>
           <td class="price red" x-text="fmt(m.no_price_nanos)"></td>
           <td>
-            <span class="bar-bg"><span class="bar-fill" :style="'width:' + pct(m.yes_price_nanos) + '%'"></span></span>
+            <span class="bar-bg"><span class="bar-fill" :style="'width:' + pct(m.reference_price_nanos || m.yes_price_nanos) + '%'"></span></span>
           </td>
           <td class="dim price" x-text="'$' + dollars(m.volume_nanos)"></td>
           <td>
             <span :class="m.status === 'active' ? 'green' : 'dim'" x-text="m.status"></span>
+            <span class="state" :class="priceStateClass(m)" x-text="' / ' + priceState(m)"></span>
           </td>
         </tr>
       </template>
@@ -210,6 +216,18 @@ function dashboard() {
     pct(nanos) {
       if (!nanos) return 0;
       return Math.round(nanos / 1e7);
+    },
+
+    priceState(m) {
+      if (m.yes_price_nanos) return 'cleared';
+      if (m.reference_price_nanos) return 'ref only';
+      return 'no clears';
+    },
+
+    priceStateClass(m) {
+      if (m.yes_price_nanos) return 'priced';
+      if (m.reference_price_nanos) return 'ref';
+      return '';
     },
 
     dollars(nanos) {

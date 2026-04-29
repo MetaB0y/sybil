@@ -63,6 +63,9 @@ pub struct MarketSummaryResponse {
     pub name: String,
     pub yes_price_nanos: Option<u64>,
     pub no_price_nanos: Option<u64>,
+    /// Reference price from external system (e.g., Polymarket), display only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_price_nanos: Option<u64>,
     pub volume_nanos: u64,
     pub status: String,
 }

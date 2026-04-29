@@ -150,6 +150,8 @@ pub async fn list_markets_summary(
     .instrument(tracing::info_span!("list_markets_summary.fetch"))
     .await?;
 
+    let ref_prices = state.reference_prices.read().await;
+
     let _build_span = tracing::info_span!(
         "list_markets_summary.build_response",
         markets = markets.len()
@@ -168,6 +170,7 @@ pub async fn list_markets_summary(
                 name: m.name.clone(),
                 yes_price_nanos: market_prices.and_then(|p| p.first().copied()),
                 no_price_nanos: market_prices.and_then(|p| p.get(1).copied()),
+                reference_price_nanos: ref_prices.get(&m.id.0).copied(),
                 volume_nanos: volumes.get(&m.id).copied().unwrap_or(0),
                 status: status.as_str().to_string(),
             }
