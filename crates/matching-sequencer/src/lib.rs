@@ -24,6 +24,7 @@ pub mod simulation;
 pub mod store;
 pub mod system_event;
 pub mod validation;
+pub mod zk_witness;
 
 pub use account::{Account, AccountId, AccountStore};
 pub use account_storage::{
@@ -52,6 +53,7 @@ pub use sequencer::{
 };
 pub use simulation::{SimulationResult, SimulationRunner};
 pub use system_event::SystemEvent;
+pub use zk_witness::build_state_transition_guest_input;
 
 // Re-export oracle types needed by consumers (e.g. sybil-api)
 pub use sybil_oracle::{AdminOracle, MarketStatus, Oracle, ResolutionRecord};

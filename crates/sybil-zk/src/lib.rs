@@ -726,6 +726,26 @@ pub fn hash_header(header: &WitnessBlockHeader) -> [u8; 32] {
     *hasher.finalize().as_bytes()
 }
 
+pub fn public_inputs_from_witness(witness: &BlockWitness) -> StateTransitionPublicInputs {
+    let (previous_height, previous_state_root) = match &witness.previous_header {
+        Some(previous) => (previous.height, previous.state_root),
+        None => (0, [0u8; 32]),
+    };
+
+    StateTransitionPublicInputs {
+        previous_height,
+        new_height: witness.header.height,
+        previous_state_root,
+        new_state_root: witness.header.state_root,
+        block_hash: hash_header(&witness.header),
+        events_root: witness.header.events_root,
+        witness_root: UNIMPLEMENTED_WITNESS_ROOT,
+        da_commitment: UNIMPLEMENTED_DA_COMMITMENT,
+        deposit_root: witness.state_sidecar.bridge.deposit_root,
+        deposit_count: witness.state_sidecar.bridge.deposit_cursor,
+    }
+}
+
 fn verify_public_input_binding(
     inputs: &StateTransitionPublicInputs,
     witness: &BlockWitness,

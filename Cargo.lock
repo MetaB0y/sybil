@@ -2467,6 +2467,7 @@ dependencies = [
  "sybil-canonical",
  "sybil-oracle",
  "sybil-verifier",
+ "sybil-zk",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

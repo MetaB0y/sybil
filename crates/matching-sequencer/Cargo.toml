@@ -14,6 +14,7 @@ matching-solver = { path = "../matching-solver", features = ["lp"] }
 sybil-canonical = { path = "../sybil-canonical" }
 sybil-oracle = { path = "../sybil-oracle" }
 sybil-verifier = { path = "../sybil-verifier" }
+sybil-zk = { path = "../sybil-zk" }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 clap = { version = "4.5", features = ["derive"] }
