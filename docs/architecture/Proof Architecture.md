@@ -2,7 +2,7 @@
 tags: [zk, infrastructure]
 layer: verification
 status: planned
-last_verified: 2026-04-29
+last_verified: 2026-04-30
 ---
 
 # Proof Architecture
@@ -43,9 +43,8 @@ Combined with `parent_hash` chaining, a prover can make claims spanning any rang
 
 A typed authenticated key-value tree over complete validium state, updated
 incrementally each block. The current [[State Root Schema]] implementation is
-a typed v2 digest over accounts, bridge leaves, markets, market groups,
-active resting orders, and aggregate reservations; the target is one native
-typed qmdb root over the complete validium state.
+a native qMDB root over accounts, bridge leaves, markets, market groups,
+active resting orders, and aggregate reservations.
 
 **Keys**: typed namespaces such as `acct/{account_id}`,
 `acct_resv/{account_id}`, `order/{order_id}`, `market/{market_id}`,
@@ -179,24 +178,20 @@ Build a Merkle tree over block events and commit `events_root` in the block head
 - Verifier checks `events_root` matches (new Layer 3 check)
 - BLAKE3 as leaf/node hash (consistent with existing choices)
 
-### Phase 2: Complete Typed State Root
+### Current: Typed qMDB State Root
 
-Widen the current typed root to the complete state commitment specified in
-[[State Root Schema]].
+`BlockHeader.state_root` is the native qMDB root over the typed state leaves
+specified in [[State Root Schema]]. It covers accounts, reservations, resting
+orders, market lifecycle state, market groups, bridge counters, deposit root,
+and active withdrawal leaves.
 
-- One typed qmdb keyspace for accounts, reservations, resting orders,
-  market lifecycle state, market groups, and system counters
-- SHA-256 state-root hash; historical flat BLAKE3 roots remain test/migration
-  compatibility only
-- Inclusion and exclusion proof generation for typed leaves
-- State root computation becomes O(k log n) once the native qmdb root replaces
-  the current sorted-leaf digest
-- Verifier's state root check dispatches by root version or migration height
+The verifier currently recomputes that root from the full witness by inserting
+the typed leaves into a fresh qMDB and comparing the native qMDB root. The
+remaining storage cleanup is to replace the mixed account snapshot wrapper
+with a dedicated typed-state qMDB whose active keyspace exactly matches the
+header root.
 
-This is the deeper change — it touches state storage, root versioning,
-persistence, and the verifier's Layer 3.
-
-### Phase 3: Proof API
+### Next: Proof API
 
 Expose endpoints for requesting authenticated data:
 
@@ -204,9 +199,12 @@ Expose endpoints for requesting authenticated data:
 - `GET /v1/proofs/events?height={N}` → events tree for block N
 - `GET /v1/proofs/events/{account_id}?from={A}&to={B}` → account's events with Merkle proofs
 
-The sequencer needs to retain enough history to serve these (state tree at each height, or ability to reconstruct). This interacts with the persistence tiers — authenticated state snapshots need to be stored or reconstructable.
+The sequencer needs to retain enough history to serve these: state tree
+history at each height, or enough data to reconstruct it. This interacts with
+the persistence tiers because authenticated state snapshots need to be stored
+or reconstructable.
 
-### Phase 4: Integration with ZK Pipeline
+### Later: Integration with ZK Pipeline
 
 The [[Block Witness]] evolves: instead of full `pre_state` / `post_state` snapshots, it includes qmdb paths for the typed leaves touched by the block. The ZK circuit verifies the paths against the state root, applies settlement and order-book/market-state changes, and verifies the new state root.
 
@@ -229,23 +227,23 @@ X had balance B at block 1000" or "order Y was absent at block 1000" without
 storing a separate tree snapshot per height.
 
 Stability: ALPHA. It is already in the sequencer as the account snapshot
-store, so Phase 2 should reuse it unless the ZK/bridge implementation proves
-qmdb proof verification is too expensive.
+store, so the typed state store should reuse it unless the ZK/bridge
+implementation proves qMDB proof verification is too expensive.
 
 ## What Changes in Sybil
 
-| Component | Current | After Phase 1 | After Phase 2 |
-|-----------|---------|---------------|---------------|
+| Component | Current | With events root | With proof API |
+|-----------|---------|------------------|----------------|
 | `BlockHeader` | state_root, parent_hash | + events_root | same |
 | `Block` | orders, fills, prices, rejections | + system_events | same |
-| `compute_state_root()` | SHA-256 typed account, bridge, market, market-group, order, and reservation leaves | same | native typed qmdb root |
+| `compute_state_root()` | native typed qMDB root | same | same |
 | `Fill` struct | order_id, qty, price, account_id | same | same |
 | `Account` | balance, positions, total_deposited, events_digest | same | same |
 | `AccountStore` | HashMap | same | mirrored into authenticated KV |
-| `store.rs` | redb tables + account qmdb snapshots | + events tree storage | typed state qmdb commitment |
-| Verifier Layer 3 | checks state_root, parent_hash | + checks events_root | state root via Merkle |
-| `BlockWitness` | full pre/post state snapshots + system_events | same | qmdb paths for touched state leaves |
-| API | no proof endpoints | same | + proof endpoints (Phase 3) |
+| `store.rs` | redb tables + account qMDB snapshots | + events tree storage | dedicated typed-state qMDB |
+| Verifier Layer 3 | checks state_root, parent_hash | + checks events_root | verifies qMDB paths |
+| `BlockWitness` | full pre/post state snapshots + system_events | same | qMDB paths for touched state leaves |
+| API | no proof endpoints | same | + proof endpoints |
 
 ## Resolved Decisions
 
@@ -267,7 +265,7 @@ qmdb proof verification is too expensive.
 - [[ZK Integration Path]] — the validity proof pipeline this feeds into
 - [[L1 Settlement and Vault]] — how accepted roots and withdrawal proofs are used on-chain
 - [[Block Witness]] — evolves to use Merkle paths instead of full snapshots
-- [[State Root and Parent Hash]] — current commitment scheme, replaced by Phase 2
+- [[State Root and Parent Hash]] — state-root concept and qMDB commitment
 - [[Four-Layer Verification]] — gains events_root check in Phase 1
 - [[Persistence]] — storage requirements for authenticated structures
 - [[Settlement]] — fills need account_id for events tree

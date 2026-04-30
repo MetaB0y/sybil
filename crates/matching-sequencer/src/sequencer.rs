@@ -3242,7 +3242,7 @@ mod tests {
         assert_eq!(bp.witness.post_state.len(), 3);
         assert_eq!(
             bp.block.header.state_root,
-            crate::block::compute_state_root_v2(
+            crate::block::compute_complete_state_root(
                 &seq.accounts,
                 seq.bridge_state(),
                 seq.order_book(),

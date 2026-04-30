@@ -279,7 +279,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_qmdb_typed_leaves_match_verifier_state_root_v2_leaves() {
+    async fn test_qmdb_typed_leaves_match_verifier_state_root_leaves() {
         let path = temp_dir("fenced-account-storage-typed-leaves");
         let storage = FencedAccountStorage::open(&path).unwrap();
         let accounts = sample_accounts(100);
@@ -299,7 +299,7 @@ mod tests {
 
         let canonical = crate::canonical_state::CanonicalState::from_accounts(&accounts);
         let expected =
-            sybil_verifier::block::state_root_v2_leaves(canonical.as_snapshots(), &state_sidecar);
+            sybil_verifier::block::state_root_leaves(canonical.as_snapshots(), &state_sidecar);
         let actual = storage.qmdb_typed_leaves(slot).await.unwrap();
         assert_eq!(actual, expected);
 

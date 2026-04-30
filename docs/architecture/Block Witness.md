@@ -3,7 +3,7 @@ tags: [zk, spec]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-04-29
+last_verified: 2026-04-30
 ---
 
 # Block Witness
@@ -81,11 +81,11 @@ prove "fill F happened in block N" without seeing the whole witness.
 
 ## Canonical witness bytes
 
-Under [[Canonical Serialization]] v1. The witness encodes as a fixed outer
-layout with variable-length sections, each prefixed with `count:u64`.
+Under [[Canonical Serialization]], the witness encodes as a fixed outer layout
+with variable-length sections, each prefixed with `count:u64`.
 
 ```
-witness_v1_bytes =
+witness_bytes =
     version:u8 = 0x01
  || header_bytes                                              (88 bytes, see Canonical Serialization)
  || previous_header_tag:u8                                    (0x00 = none, 0x01 = present)
@@ -132,7 +132,7 @@ carry a TODO there too):
 | `state_sidecar` | `StateSidecarSnapshot` (see Canonical Serialization) | market, market-group, withdrawal, order, and reservation leaves by id ascending |
 | `resolved_markets` | `market_id:u32` | by `market_id` ascending |
 
-Once every item encoding is pinned, `witness_root = BLAKE3("sybil/witness/v1" || witness_v1_bytes)`.
+Once every item encoding is pinned, `witness_root = BLAKE3("sybil/witness" || witness_bytes)`.
 
 ## `witness_root` in the block header
 
@@ -143,39 +143,37 @@ witness to downstream verifiers. The verifier would catch the mismatch
 (post_state must rehash to state_root), but the witness itself is not
 cryptographically anchored.
 
-**Proposal — BlockHeader v2.** Extend the header:
+**Proposal - extended BlockHeader.** Add the witness and events roots to the
+header:
 
 ```
-BlockHeader v2 =
+BlockHeader =
     height:u64
  || parent_hash:[u8; 32]
  || state_root:[u8; 32]
- || events_root:[u8; 32]          (new — see Proof Architecture Phase 1)
- || witness_root:[u8; 32]          (new — this doc)
+ || events_root:[u8; 32]
+ || witness_root:[u8; 32]
  || order_count:u32
  || fill_count:u32
  || timestamp_ms:u64
 ```
 
-Chaining hash uses a domain-separation prefix `"sybil/block-header/v2"` so v2
-chains don't collide with v1 chains. Migration: hard fork at a chosen height,
-same as the [[Canonical Serialization]] version-bump pattern.
+Chaining hash uses a domain-separation prefix `"sybil/block-header"` so the
+extended header has explicit bytes.
 
 This makes the witness a first-class part of the commitment chain. Anyone who
 trusts the header transitively trusts the witness, and the sequencer can no
 longer equivocate about what happened in a block without changing the header
 (and thereby the on-chain state-root chain).
 
-## Versioning
+## Format Changes
 
-- **v1 witness** is the shape in this doc. Implementations MUST reject
-  witness bytes whose first byte is not `0x01`.
-- **v2 witness** will bump the leading byte to `0x02` and may rearrange
-  sections. Verifiers dispatch on the version byte.
-- **Adding a field** to the witness that affects correctness = new version.
-  Adding a purely-observational field (e.g., timing info for debugging) that
-  the verifier ignores = no version bump, but the verifier MUST skip unknown
-  trailing bytes gracefully.
+- The witness bytes begin with a format byte. The shape in this doc uses
+  `0x01`; implementations MUST reject unknown format bytes.
+- Before launch, changing the witness layout updates the format byte, hash
+  domain, and verifier together.
+- Adding a purely observational field that the verifier ignores must be an
+  explicitly skipped trailing section.
 
 ## Size budget
 
@@ -203,7 +201,7 @@ Three hash roots in play, each with a different scope:
 
 | Root | Scope | Primary consumer |
 |---|---|---|
-| `state_root` | v1: accounts; v2: complete typed validium state | ZK settlement, bridge claims, recovery checks |
+| `state_root` | complete typed validium state | ZK settlement, bridge claims, recovery checks |
 | `events_root` | everything that happened in this block | external verifiers asking "did F happen" |
 | `witness_root` | the full audit package | prover; anyone reconstructing the block |
 
@@ -214,19 +212,19 @@ in [[Proof Architecture]], [[L1 Settlement and Vault]], and the Data
 Availability RFC (sibling, M3).
 
 Order expiry lives in the private `orders` section. The verifier can check
-that an order included in a batch is eligible for `header.height`. The current
-v2 [[State Root Schema]] also commits post-block active resting orders, so
-presence or absence of an order is provable against `state_root` instead of
-being only an implementation and witness property.
+that an order included in a batch is eligible for `header.height`. [[State Root Schema]]
+also commits post-block active resting orders, so presence or absence of an
+order is provable against `state_root` instead of being only an implementation
+and witness property.
 
 ## Test vectors
 
 Minimal genesis witness: zero accounts, zero orders, zero fills. Expected
-`state_root` is the BLAKE3 of empty input (see [[Canonical Serialization]]
-test vector 1). With the genesis header in [[Canonical Serialization]] test
-vector 4, expected `witness_root = BLAKE3("sybil/witness/v1" ||
-witness_v1_bytes)` — concrete hex lands in a follow-up test file once the
-deferred item encodings are pinned.
+`state_root` is the native qMDB root over the default typed state leaves.
+With the genesis header in [[Canonical Serialization]] test vector 3,
+expected `witness_root = BLAKE3("sybil/witness" || witness_bytes)` - concrete
+hex lands in a follow-up test file once the deferred item encodings are
+pinned.
 
 ## Open questions
 
@@ -250,7 +248,7 @@ deferred item encodings are pinned.
 ## Where this lives
 
 > `crates/sybil-verifier/src/types.rs` — `BlockWitness`, `WitnessBlockHeader`, `AccountSnapshot`
-> `crates/matching-sequencer/src/block.rs` — `produce_block` builds the witness; `hash_header` is the current (v1) header hash
+> `crates/matching-sequencer/src/block.rs` — `produce_block` builds the witness; `hash_header` is the current header hash
 > `crates/sybil-verifier/src/block.rs` — `verify_block` runs Layer 3 checks against the witness
 
 ## See also

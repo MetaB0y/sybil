@@ -39,8 +39,8 @@ pub struct BlockHeader {
     pub height: u64,
     /// blake3(previous header bytes), zeros for genesis.
     pub parent_hash: [u8; 32],
-    /// Current state root. Today this is the v2 typed root over canonical
-    /// account leaves plus bridge, market, and order-book sidecar leaves.
+    /// Current typed qMDB state root over canonical account leaves plus bridge,
+    /// market, and order-book sidecar leaves.
     pub state_root: [u8; 32],
     pub order_count: u32,
     pub fill_count: u32,
@@ -65,13 +65,13 @@ pub struct Block {
 /// Compute a deterministic account-only state root with the verifier's
 /// zero-valued bridge sidecar.
 ///
-/// Production blocks should call [`compute_state_root_v2`] so the sidecar
+/// Production blocks should call [`compute_complete_state_root`] so the sidecar
 /// committed by the witness is included.
 pub fn compute_state_root(accounts: &AccountStore) -> [u8; 32] {
     CanonicalState::from_accounts(accounts).state_root()
 }
 
-pub fn compute_state_root_v2(
+pub fn compute_complete_state_root(
     accounts: &AccountStore,
     bridge: &BridgeState,
     order_book: &OrderBook,
@@ -442,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn test_state_root_v2_commits_market_registry() {
+    fn test_state_root_commits_market_registry() {
         let accounts = AccountStore::new();
         let bridge = BridgeState::default();
         let order_book = OrderBook::new(3);
@@ -451,7 +451,7 @@ mod tests {
         let groups = Vec::new();
         let mut lifecycle = MarketLifecycle::new(Arc::new(AdminOracle::new()));
 
-        let active_root = compute_state_root_v2(
+        let active_root = compute_complete_state_root(
             &accounts,
             &bridge,
             &order_book,
@@ -467,7 +467,7 @@ mod tests {
                 ..MarketMetadata::default()
             },
         );
-        let metadata_root = compute_state_root_v2(
+        let metadata_root = compute_complete_state_root(
             &accounts,
             &bridge,
             &order_book,
@@ -490,7 +490,7 @@ mod tests {
                 },
             },
         );
-        let resolved_root = compute_state_root_v2(
+        let resolved_root = compute_complete_state_root(
             &accounts,
             &bridge,
             &order_book,

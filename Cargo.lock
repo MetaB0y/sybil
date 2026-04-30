@@ -4256,6 +4256,10 @@ name = "sybil-verifier"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "commonware-codec",
+ "commonware-cryptography",
+ "commonware-runtime",
+ "commonware-storage",
  "matching-engine",
  "proptest",
  "serde",

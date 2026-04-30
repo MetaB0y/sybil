@@ -904,7 +904,7 @@ impl Actor for SequencerActor {
                 let _ = reply.send(state.sequencer.accounts.get(account_id).cloned());
             }
             SequencerMsg::GetStateRoot(reply) => {
-                let root = crate::block::compute_state_root_v2(
+                let root = crate::block::compute_complete_state_root(
                     &state.sequencer.accounts,
                     state.sequencer.bridge_state(),
                     state.sequencer.order_book(),

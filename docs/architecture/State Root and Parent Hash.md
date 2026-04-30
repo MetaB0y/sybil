@@ -10,15 +10,12 @@ Every block carries two cryptographic commitments: a state root and a parent has
 
 This note is the concept introduction. For the byte-level normative spec and the native authenticated qmdb target, see [[State Root Schema]].
 
-The **state root** is the compact commitment to post-settlement state. Today
-(`state_root_v2`) it is a SHA-256 digest over sorted typed leaves: account
-snapshots, bridge sidecar leaves needed for normal withdrawals, active resting
-orders, aggregate reservations, market definitions/lifecycle, and market
-groups. The production target in [[State Root Schema]] is a native qmdb root
-over complete typed validium state, including remaining system counters.
-The sequencer already exposes qmdb inclusion/exclusion proofs for the typed
-`v2:` rows stored in the fenced account qMDB, but those proofs verify against
-the full account-qMDB root rather than the block header's `state_root_v2`.
+The **state root** is the compact commitment to post-settlement state. It is a
+SHA-256 qMDB root over typed leaves: account snapshots, bridge sidecar leaves
+needed for normal withdrawals, active resting orders, aggregate reservations,
+market definitions/lifecycle, and market groups. The current verifier
+recomputes that qMDB root from the witness. The next storage cleanup is to
+make the persisted typed-state qMDB root exactly match the block header root.
 Anyone with the same committed state can independently compute the root and
 verify it matches — this is exactly what the
 [[Four-Layer Verification|block integrity verification layer]] does.
@@ -26,8 +23,7 @@ verify it matches — this is exactly what the
 The **parent hash** is the BLAKE3 hash of the previous block's header. Each block header includes the parent hash, creating a chain: block N's header hash becomes block N+1's parent hash. To verify any block, you need its predecessor. To verify the entire history, you start from the genesis block and walk forward. This is the same chaining structure used by blockchains, and it enables the [[ZK Integration Path|Validium architecture]]: the ZK prover attests that each state transition (from parent state root to new state root via the fills in this block) is correct, and the on-chain contract only needs to verify the proof and update the latest state root.
 
 ## Key Properties
-- State root v2 current: SHA-256 digest over sorted typed account, bridge, market, market-group, order, and reservation leaves
-- Native qmdb target: SHA-256 authenticated root over complete validium state
+- State root: SHA-256 authenticated qMDB root over typed account, bridge, market, market-group, order, and reservation leaves
 - Parent hash: BLAKE3 hash of previous block's header
 - Deterministic serialization — anyone can reproduce the state root
 - Hash chain makes block sequence tamper-evident

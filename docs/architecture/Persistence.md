@@ -19,13 +19,13 @@ This follows [[Block Lifecycle]]: the block is the natural checkpoint. We do not
 
 Sybil currently uses two storage engines with distinct authority boundaries:
 
-- **qmdb** stores account snapshots plus the typed v2 leaves currently hashed
-  into the block header state root.
+- **qmdb** stores account snapshots plus the typed leaves committed by the
+  block header state root.
 - **redb** stores block metadata, market data, counters, and the authoritative commit fence that says which qmdb snapshot is committed.
 
 This is intentionally not "one transaction across two databases". There is no journal and no cross-db transaction. Instead, redb is the only commit point:
 
-1. Write the next account snapshot and typed v2 leaves into the inactive qmdb
+1. Write the next account snapshot and typed state leaves into the inactive qmdb
    slot.
 2. Commit the redb transaction that stores the new block metadata and flips the authoritative fence to that slot.
 3. Recover strictly from the fence recorded in redb.
@@ -43,24 +43,20 @@ Anything written to qmdb without a corresponding redb fence flip is treated as u
 
 ### Commitment Direction
 
-This split is the current runtime persistence model, not the final
-cryptographic commitment model. [[State Root Schema]] now hashes typed v2
-leaves for accounts, bridge state, markets, market groups, active resting
-orders, and aggregate reservations, and those exact leaves are persisted in
-qmdb under the fenced slot. The public root is still a canonical SHA-256
-digest over sorted key/value leaves, not qmdb's native MMR root. The native
-qmdb target promotes qmdb from storage to the authenticated root/proof system
-over accounts, reservations, resting orders, market lifecycle state, market
-groups, and system counters. redb can continue to own simple metadata and the
-crash-recovery fence.
+This split is the current runtime persistence model. [[State Root Schema]]
+commits typed leaves for accounts, bridge state, markets, market groups,
+active resting orders, and aggregate reservations through native qMDB. The
+same canonical leaves are persisted in qmdb under the fenced account slot
+today. The next cleanup is to move those leaves into a dedicated typed-state
+qMDB whose root is exactly the block header `state_root`. redb can continue to
+own simple metadata and the crash-recovery fence.
 
 The current `FencedAccountStorage` API exposes qmdb's authenticated account
 root plus typed-leaf inclusion and exclusion proofs for keys stored as
-`slot_prefix || "v2:" || leaf_key`. The exposed root is deliberately named as
+`slot_prefix || "state:" || leaf_key`. The exposed root is deliberately named as
 the full account-qmdb root, not a slot root: it includes both A/B slots,
 slot-local metadata, legacy account rows, and typed leaves. redb remains the
-authority for which slot is committed, and block headers still use
-`state_root_v2` until the native typed-only qmdb root replacement.
+authority for which slot is committed.
 
 ## Tier 1: Core State
 
@@ -69,7 +65,7 @@ Authoritative state needed to resume the exchange after a crash:
 | Engine | Namespace / Table | Role |
 |--------|--------------------|------|
 | `qmdb` | slot-prefixed account snapshot keys | `Account` rows plus slot-local `height` and `next_account_id` |
-| `qmdb` | slot-prefixed `v2:` typed leaf keys | canonical account, bridge, market, market-group, order, and reservation leaves committed by `state_root_v2` |
+| `qmdb` | slot-prefixed `state:` typed leaf keys | canonical account, bridge, market, market-group, order, and reservation leaves committed by `state_root` |
 | `redb` | `markets` | market definitions |
 | `redb` | `market_meta` | market metadata |
 | `redb` | `market_statuses` | market status driven by oracle/system logic |
@@ -130,8 +126,8 @@ The current model relies on explicit invariants:
 - If `height` exists, then `account_state_height` and `account_state_slot` must also exist.
 - `height == account_state_height`.
 - The qmdb slot named by `account_state_slot` must contain matching `height` and `next_account_id`.
-- The qmdb slot named by `account_state_slot` must contain typed `v2:` leaf
-  bytes equal to `sybil_verifier::block::state_root_v2_leaves` for the same
+- The qmdb slot named by `account_state_slot` must contain typed state leaf
+  bytes equal to `sybil_verifier::block::state_root_leaves` for the same
   account and sidecar snapshot.
 - Recovery trusts redb's fence, not qmdb recency.
 

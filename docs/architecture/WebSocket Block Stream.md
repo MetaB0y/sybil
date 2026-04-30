@@ -3,7 +3,7 @@ tags: [infrastructure]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-04-18
+last_verified: 2026-04-30
 ---
 
 The WebSocket block stream is the production transport for the block feed — a persistent, bidirectional channel at `GET /v1/blocks/ws` that pushes every committed block to subscribers. It complements the simpler [[SSE Block Stream]] (`/v1/blocks/stream`) with stronger guarantees: versioned message envelope, explicit lag signalling with close codes, server-initiated pings, and gap-free reconnect via `?from_block=N`. These are the properties long-lived clients (frontends, agents, proof consumers) need; SSE stays around for scripted tooling and `curl` debugging.
@@ -40,7 +40,7 @@ The server sends a WebSocket Ping frame every 30 seconds. Any message from the c
 
 - **v1** is the current version. The envelope shape (`v`, `type`, `data`) and the three initial types (`block`, `replay_complete`, `lagged`) are frozen.
 - **Additive changes within v1**: new `type` values, new optional fields on existing types, new optional query params. Old clients continue to work.
-- **Breaking changes**: bump to v2 via a new endpoint (`/v2/blocks/ws`), not a silent change on `/v1/blocks/ws`.
+- **Breaking changes**: use a new endpoint path, not a silent change on `/v1/blocks/ws`.
 
 ## Where This Lives
 

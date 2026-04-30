@@ -2,6 +2,19 @@
 //!
 //! Checks state root, parent hash chaining, height, and counts.
 
+use std::num::{NonZeroU16, NonZeroU64, NonZeroUsize};
+use std::thread;
+
+use commonware_codec::RangeCfg;
+use commonware_cryptography::Sha256 as QmdbSha256;
+use commonware_runtime::buffer::paged::CacheRef;
+use commonware_runtime::{deterministic, Runner as _};
+use commonware_storage::journal::contiguous::variable::Config as VConfig;
+use commonware_storage::merkle::mmr::journaled::Config as MmrConfig;
+use commonware_storage::merkle::mmr::Family as MmrFamily;
+use commonware_storage::qmdb::current::ordered::variable::Db as OrderedVariableDb;
+use commonware_storage::qmdb::current::VariableConfig;
+use commonware_storage::translator::OneCap;
 use sha2::{Digest as _, Sha256};
 
 use crate::types::{
@@ -11,6 +24,24 @@ use crate::types::{
     RestingOrderSnapshot, StateSidecarSnapshot, WithdrawalSnapshot, WitnessBlockHeader,
 };
 use crate::violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
+
+const QMDB_CHUNK_SIZE: usize = 32;
+const PAGE_SIZE: u16 = 4096;
+const PAGE_CACHE_PAGES: usize = 128;
+const ITEMS_PER_BLOB: u64 = 1024;
+const WRITE_BUFFER_BYTES: usize = 64 * 1024;
+const MAX_KEY_BYTES: usize = 64;
+const MAX_VALUE_BYTES: usize = 1 << 20;
+
+type StateRootDb = OrderedVariableDb<
+    MmrFamily,
+    deterministic::Context,
+    Vec<u8>,
+    Vec<u8>,
+    QmdbSha256,
+    OneCap,
+    QMDB_CHUNK_SIZE,
+>;
 
 /// Verify block header integrity.
 pub fn verify_block(witness: &BlockWitness) -> VerificationResult {
@@ -109,52 +140,15 @@ pub fn verify_block(witness: &BlockWitness) -> VerificationResult {
     }
 }
 
-/// Compute the current deterministic v2 state root from account snapshots and
-/// an empty sidecar.
+/// Compute the deterministic state root from account snapshots and an empty
+/// sidecar.
 ///
 /// Use [`compute_state_root_with_sidecar`] when verifying real blocks.
 pub fn compute_state_root(accounts: &[AccountSnapshot]) -> [u8; 32] {
     compute_state_root_with_sidecar(accounts, &StateSidecarSnapshot::default())
 }
 
-/// Compute a deterministic v1 account-only state root from account snapshots.
-///
-/// Must produce the exact same hash as `matching-sequencer`'s
-/// historical `compute_state_root_v1`. Canonical encoding: sorted by account
-/// id, each account encodes balance, total_deposited, then sorted
-/// `(market, outcome) -> qty`.
-pub fn compute_account_state_root_v1(accounts: &[AccountSnapshot]) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-
-    // Accounts should already be sorted by id, but sort to be safe
-    let mut sorted: Vec<&AccountSnapshot> = accounts.iter().collect();
-    sorted.sort_by_key(|a| a.id);
-
-    for account in sorted {
-        // AccountId
-        hasher.update(&account.id.to_le_bytes());
-        // Balance
-        hasher.update(&account.balance.to_le_bytes());
-        // Total deposited
-        hasher.update(&account.total_deposited.to_le_bytes());
-
-        // Positions should already be sorted, but sort again to ensure
-        // canonical hashing even if a caller constructs a snapshot manually.
-        let mut positions = account.positions.clone();
-        positions.sort_by_key(|&(market, outcome, _)| (market.0, outcome));
-        for (market, outcome, qty) in positions {
-            hasher.update(&market.0.to_le_bytes());
-            hasher.update(&[outcome]);
-            hasher.update(&qty.to_le_bytes());
-        }
-
-        hasher.update(&account.events_digest);
-    }
-
-    *hasher.finalize().as_bytes()
-}
-
-/// Compute the current v2 typed state root.
+/// Compute the typed state root with bridge leaves.
 ///
 /// This convenience wrapper commits account leaves plus bridge leaves, with an
 /// otherwise empty sidecar. Use [`compute_state_root_with_sidecar`] for real
@@ -174,16 +168,12 @@ pub fn compute_state_root_with_sidecar(
     accounts: &[AccountSnapshot],
     sidecar: &StateSidecarSnapshot,
 ) -> [u8; 32] {
-    let leaves = state_root_v2_leaves(accounts, sidecar);
-    state_root_v2_from_leaves(&leaves)
+    let leaves = state_root_leaves(accounts, sidecar);
+    state_root_from_leaves(&leaves)
 }
 
-/// Return the sorted typed key/value leaves that define `state_root_v2`.
-///
-/// The encoding is deliberately key/value-shaped so the same leaves can be
-/// persisted in qmdb and later swapped to a native qmdb proof root without
-/// changing leaf domains.
-pub fn state_root_v2_leaves(
+/// Return the sorted typed key/value leaves committed by `state_root`.
+pub fn state_root_leaves(
     accounts: &[AccountSnapshot],
     sidecar: &StateSidecarSnapshot,
 ) -> Vec<(Vec<u8>, Vec<u8>)> {
@@ -255,17 +245,81 @@ pub fn state_root_v2_leaves(
     leaves
 }
 
-pub fn state_root_v2_from_leaves(leaves: &[(Vec<u8>, Vec<u8>)]) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(b"sybil/state-root/v2");
-    hasher.update((leaves.len() as u64).to_le_bytes());
-    for (key, value) in leaves {
-        hasher.update((key.len() as u32).to_le_bytes());
-        hasher.update(key);
-        hasher.update((value.len() as u32).to_le_bytes());
-        hasher.update(value);
-    }
-    hasher.finalize().into()
+pub fn state_root_from_leaves(leaves: &[(Vec<u8>, Vec<u8>)]) -> [u8; 32] {
+    let mut leaves = leaves.to_vec();
+    leaves.sort_by(|(left, _), (right, _)| left.cmp(right));
+
+    // The verifier API is synchronous, while qMDB is async. Keep the fresh
+    // in-memory runtime off any caller-owned Tokio worker.
+    thread::Builder::new()
+        .name("sybil-state-root-qmdb".to_string())
+        .spawn(move || {
+            deterministic::Runner::default().start(|context| async move {
+                let mut db = open_state_root_db(context)
+                    .await
+                    .expect("state root qmdb should initialize");
+                if !leaves.is_empty() {
+                    let mut batch = db.new_batch();
+                    for (key, value) in leaves {
+                        assert!(
+                            key.len() <= MAX_KEY_BYTES,
+                            "state root key exceeds qmdb key limit"
+                        );
+                        assert!(
+                            value.len() <= MAX_VALUE_BYTES,
+                            "state root value exceeds qmdb value limit"
+                        );
+                        batch = batch.write(key, Some(value));
+                    }
+                    let merkleized = batch
+                        .merkleize(&db, None)
+                        .await
+                        .expect("state root qmdb batch should merkleize");
+                    db.apply_batch(merkleized)
+                        .await
+                        .expect("state root qmdb batch should apply");
+                }
+                db.root().0
+            })
+        })
+        .expect("state root qmdb thread should spawn")
+        .join()
+        .expect("state root qmdb thread should not panic")
+}
+
+async fn open_state_root_db(context: deterministic::Context) -> Result<StateRootDb, String> {
+    let page_cache = CacheRef::from_pooler(
+        &context,
+        NonZeroU16::new(PAGE_SIZE).unwrap(),
+        NonZeroUsize::new(PAGE_CACHE_PAGES).unwrap(),
+    );
+    let config = VariableConfig {
+        merkle_config: MmrConfig {
+            journal_partition: "state-root-mmr-journal".to_string(),
+            items_per_blob: NonZeroU64::new(ITEMS_PER_BLOB).unwrap(),
+            write_buffer: NonZeroUsize::new(WRITE_BUFFER_BYTES).unwrap(),
+            metadata_partition: "state-root-mmr-metadata".to_string(),
+            thread_pool: None,
+            page_cache: page_cache.clone(),
+        },
+        journal_config: VConfig {
+            partition: "state-root-log".to_string(),
+            write_buffer: NonZeroUsize::new(WRITE_BUFFER_BYTES).unwrap(),
+            compression: None,
+            codec_config: (
+                (RangeCfg::from(0..=MAX_KEY_BYTES), ()),
+                (RangeCfg::from(0..=MAX_VALUE_BYTES), ()),
+            ),
+            items_per_section: NonZeroU64::new(ITEMS_PER_BLOB).unwrap(),
+            page_cache,
+        },
+        grafted_metadata_partition: "state-root-grafted-mmr-metadata".to_string(),
+        translator: OneCap,
+    };
+
+    StateRootDb::init(context, config)
+        .await
+        .map_err(|error| format!("failed to initialize state root qmdb: {error}"))
 }
 
 pub fn account_leaf_key(account_id: u64) -> Vec<u8> {

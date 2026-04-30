@@ -2,7 +2,7 @@
 tags: [contracts, bridge, validium, spec]
 layer: verification
 status: planned
-last_verified: 2026-04-29
+last_verified: 2026-04-30
 ---
 
 # L1 Settlement and Vault
@@ -59,7 +59,7 @@ flowchart LR
     SETTLEMENT -->|"accepted state root"| VAULT
     USER -->|"withdrawal proof"| VAULT
     SEQ -->|"publish data"| DA
-    STATE -->|"state_root_v2"| SETTLEMENT
+    STATE -->|"state_root"| SETTLEMENT
 ```
 
 `SybilSettlement` owns proof acceptance. `SybilVault` queries it for root
@@ -572,11 +572,11 @@ The L1 contract design assumes these typed leaves exist or will exist under
 | `sys/bridge_config` | token id, chain id, vault address, bridge version |
 
 `acct_resv/{account_id}`, `market/{market_id}`, `market_group/{group_id}`,
-and `withdrawal/{withdrawal_id}` are implemented in the current typed
-`state_root_v2` digest. Withdrawal leaves avoid proving withdrawals from
-stale raw balances; reservation leaves make conservative emergency cash exits
-computable from committed state; market leaves commit the lifecycle context
-needed to interpret positions.
+and `withdrawal/{withdrawal_id}` are implemented in the typed `state_root`.
+Withdrawal leaves avoid proving withdrawals from stale raw balances;
+reservation leaves make conservative emergency cash exits computable from
+committed state; market leaves commit the lifecycle context needed to
+interpret positions.
 
 ## Current Rust bridge hooks
 
@@ -599,14 +599,14 @@ development path:
   Bridge writes are currently dev/internal endpoints; production ingress
   should come from an L1 indexer and authenticated account flow.
 
-The current block header now uses the typed `state_root_v2` subset from
+The current block header uses the typed qMDB `state_root` from
 [[State Root Schema]], so it commits account leaves, active
 `market/{market_id}` leaves, `market_group/{group_id}` leaves,
 `order/{order_id}` leaves, `acct_resv/{account_id}` leaves,
 `sys/deposit_cursor`, `sys/deposit_root`, `sys/next_withdrawal_id`, and active
 `withdrawal/{withdrawal_id}` leaves. Full proof-backed L1 withdrawal
 verification still depends on the ZK proof program and accepted-root
-contracts, and the native qmdb MMR root/proof path is still a later migration.
+contracts, plus the typed-state qMDB proof API.
 
 This does not solve complete validium recovery yet: DA publication, retained
 state reconstruction, and operator replacement are still outside the current
@@ -618,8 +618,8 @@ root subset.
 2. **Foundry skeleton**: contracts, interfaces, events, custom errors, mock
    verifier, mock ERC20, and state-machine tests. No real proof system.
 3. **Sequencer bridge hooks**: consume L1 deposits in order; create withdrawal
-   leaves; expose proof-generation data. Implemented with a bridge sidecar and
-   committed in the current typed `state_root_v2` subset.
+  leaves; expose proof-generation data. Implemented with a bridge sidecar and
+  committed in the typed `state_root`.
 4. **Verifier integration**: plug in the chosen ZK verifier adapter and
    public-input hash.
 5. **DA/operator replacement**: bind `daCommitment` to the chosen DA layer and

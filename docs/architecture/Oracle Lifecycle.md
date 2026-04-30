@@ -3,7 +3,7 @@ tags: [concept]
 layer: oracle
 crate: sybil-oracle
 status: current
-last_verified: 2026-04-18
+last_verified: 2026-04-30
 ---
 
 > **Full architecture and roadmap: [[Oracle System]].** This note captures the *current* (SYB-23) minimal state. The design doc is the source of truth for planned variants (Optimistic, Quorum, Predicate, External), bond escrow, liveness, and bridge feeds.
@@ -15,7 +15,7 @@ As of SYB-23 the only policy variant is `Immediate { feed_id }`: one attestation
 State transitions today: `Active → Resolved`. The `Proposed`, `Challenged`, and `Voided` states are reserved — cost nothing, documented as future policy states for when `Optimistic` and `External` ship.
 
 ```mermaid
-stateDiagram-v2
+stateDiagram
     [*] --> Active
     Active --> Resolved : signed attestation from registered feed
 ```

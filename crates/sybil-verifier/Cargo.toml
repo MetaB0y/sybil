@@ -7,6 +7,10 @@ description = "Comprehensive block verification for prediction market matching â
 [dependencies]
 matching-engine = { path = "../matching-engine" }
 blake3 = "1"
+commonware-codec = "2026.4.0"
+commonware-cryptography = "2026.4.0"
+commonware-runtime = "2026.4.0"
+commonware-storage = "2026.4.0"
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 thiserror = { workspace = true }

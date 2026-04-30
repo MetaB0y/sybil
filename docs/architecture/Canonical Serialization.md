@@ -2,7 +2,7 @@
 tags: [zk, serialization, spec]
 layer: verification
 status: current
-last_verified: 2026-04-29
+last_verified: 2026-04-30
 ---
 
 # Canonical Serialization
@@ -134,13 +134,13 @@ header_bytes =
 
 Total: 8 + 32 + 32 + 4 + 4 + 8 = **88 bytes**, fixed.
 
-[[Block Witness]] proposes a `BlockHeader v2` that adds `events_root` and
-`witness_root`. The v2 encoding is a strict prefix of v1 for forward-compat
-(see §8 of this doc).
+[[Block Witness]] proposes an extended header that adds `events_root` and
+`witness_root`. Until that lands, `header_bytes` is the fixed 88-byte format
+above.
 
 ### `Fill` (deferred)
 
-**TODO v1.1.** `Fill` is used inside the [[Block Witness]] but is currently
+**TODO.** `Fill` is used inside the [[Block Witness]] but is currently
 serialized only via serde-for-debugging. The events tree (Proof Architecture
 Phase 1) will need a canonical encoding. Proposed:
 
@@ -159,21 +159,21 @@ output index.
 
 ### `Order`, `MmConstraint`, `MarketGroup` (deferred)
 
-**TODO v1.1.** These only matter for the [[Block Witness]] canonical bytes and
+**TODO.** These only matter for the [[Block Witness]] canonical bytes and
 the ZK circuit. Not needed for state root. Encodings will be added in a
 follow-up RFC alongside the events tree. The Rust signing path already uses
 `sybil-canonical::Order`, including `expires_at_block`, so P256 signed orders
 cover resolved IOC/GTD expiry semantics even before the full witness byte spec
 is frozen.
 
-### State leaves for `state_root_v2`
+### State leaves for `state_root`
 
-[[State Root Schema]] fixes the v2 commitment shape. The current
-implementation commits a typed subset: accounts, resting orders, aggregate
-reservations, market definitions/lifecycle, market groups, bridge counters,
-deposit root, and active withdrawal leaves. Each committed value begins with
-an ASCII domain string identifying the leaf type and version, followed by
-canonical fixed-width fields and deterministically sorted collections.
+[[State Root Schema]] fixes the qMDB commitment shape. The current
+implementation commits accounts, resting orders, aggregate reservations,
+market definitions/lifecycle, market groups, bridge counters, deposit root,
+and active withdrawal leaves. Each committed value begins with an ASCII domain
+string identifying the leaf type, followed by canonical fixed-width fields and
+deterministically sorted collections.
 
 Reserved domains:
 
@@ -402,8 +402,9 @@ Events are tag-dispatched single-byte sum types. The running
 | `0x08` – `0xFE` | reserved for future events | — | — |
 | `0xFF` | reserved as sentinel (do not use) | — | — |
 
-Adding an event type consumes the next free tag. Removing or re-tagging is a
-major version bump.
+Adding an event type consumes the next free tag. Removing or re-tagging
+changes the event byte language and requires updating the verifier in the same
+change.
 
 ## The running digest
 
@@ -415,37 +416,24 @@ This is *not* a Merkle root; it is a non-commutative running hash. Equal
 digests at two trusted state roots imply no account-level event activity in
 between — the Proof Architecture inactivity-proof primitive.
 
-## Versioning
+## Hash Domains
 
-Canonical Bytes v1 has no version byte in individual encodings. Breaking
-changes are handled at the **hash-domain level**:
+Canonical bytes use explicit hash/type domains. For state roots, the
+production commitment is:
 
-- v1 state root: `BLAKE3(concat(sorted_account_bytes))`
-- v2 state root: `SHA256("sybil/state-root/v2" || qmdb_root(typed_state_leaves))`
+- state root: native SHA-256 qMDB root over typed state leaves
 
-This means existing hashes remain valid; only new hashes land under new
-domain separation strings. Verifiers pick the algorithm by block height (see
-[[State Root and Parent Hash]] migration section).
-
-Adding a field to a struct is always a version bump for any root that covers
-it. There is no silent "skip unknown field" rule — consumers that don't know
-about the field MUST reject.
+If a committed structure changes before launch, update the canonical leaf
+bytes and the verifier together. There is no silent "skip unknown field" rule
+- consumers that don't know about the current field set MUST reject.
 
 ## Test vectors
 
-Minimal worked examples. All outputs are BLAKE3.
+Minimal worked examples. These vectors cover canonical bytes. State-root
+vectors live with verifier tests because the root is commonware qMDB's native
+root over typed leaves.
 
-### Vector 1: empty state root
-
-No accounts → empty input → `BLAKE3(empty)`:
-
-```
-state_root_v1 = af1349b9 f5f9a1a6 a0404dea 36dcc949 9bcb25c9 adc112b7 cc9a93ca e41f3262
-```
-
-(The BLAKE3 of the empty string.)
-
-### Vector 2: one account, no positions
+### Vector 1: one account state leaf
 
 ```
 account:
@@ -455,19 +443,22 @@ account:
   positions        = []
   events_digest    = [0; 32]
 
-account_bytes (hex):
+key:
+  acct/00 00 00 00 00 00 00 01
+
+value (hex):
+  73 79 62 69 6c 2f 73 74 61 74 65 2f 61 63 63 74 2f 76 31
   01 00 00 00 00 00 00 00    # id: u64 LE
   64 00 00 00 00 00 00 00    # balance: i64 LE
   64 00 00 00 00 00 00 00    # total_deposited: i64 LE
+  00 00 00 00 00 00 00 00    # positions count: u64 LE
   00 00 00 00 00 00 00 00    # events_digest[0..8]
   00 00 00 00 00 00 00 00    # events_digest[8..16]
   00 00 00 00 00 00 00 00    # events_digest[16..24]
   00 00 00 00 00 00 00 00    # events_digest[24..32]
-
-state_root_v1 = BLAKE3(account_bytes)   # implementations MUST match
 ```
 
-### Vector 3: fill event digest
+### Vector 2: fill event digest
 
 ```
 event:
@@ -487,7 +478,7 @@ event_bytes (hex):
 events_digest_new = BLAKE3([0; 32] || event_bytes)
 ```
 
-### Vector 4: block header
+### Vector 3: block header
 
 ```
 header:
@@ -513,13 +504,12 @@ Two patterns:
 1. **New top-level root.** Don't extend the existing structure — introduce a
    new root that covers the new field. `events_root` is the canonical
    example: it's a sibling of `state_root`, not an extension of it.
-2. **Version bump.** If a new field fundamentally belongs inside an
-   existing structure (e.g., adding a `last_seen_block` to the account
-   snapshot), bump the version and domain-separate the new root. Dual-support
-   during migration.
+2. **Domain clarity.** If a new field fundamentally belongs inside an existing
+   structure, update the relevant leaf domain/encoding and the state-root
+   verifier in the same change.
 
-Bad pattern: adding a field to `AccountSnapshot` without version-bumping. Old
-hashers produce v1 bytes, new hashers produce v2 bytes, and everything breaks
+Bad pattern: adding a field to `AccountSnapshot` without updating the
+canonical leaf encoding. Different hashers would commit different bytes
 silently. Don't do this.
 
 ## Implementation note
@@ -531,7 +521,7 @@ improvement.
 
 ## See also
 
-- [[State Root Schema]] — consumes this spec to define Phase 1 and Phase 2 state roots
+- [[State Root Schema]] — consumes this spec to define `state_root`
 - [[State Root and Parent Hash]] — concept introduction
 - [[Block Witness]] — the witness uses this spec for canonical witness bytes
 - [[Proof Architecture]] — authenticated data layer consuming these encodings

@@ -39,7 +39,7 @@ const MAX_VALUE_BYTES: usize = 1 << 20;
 const ACCOUNT_KEY_PREFIX: u8 = b'a';
 const HEIGHT_KEY: &[u8] = b"meta:height";
 const NEXT_ACCOUNT_ID_KEY: &[u8] = b"meta:next_account_id";
-const STATE_V2_KEY_PREFIX: &[u8] = b"v2:";
+const STATE_KEY_PREFIX: &[u8] = b"state:";
 
 type AccountDb = OrderedVariableDb<
     MmrFamily,
@@ -65,7 +65,7 @@ pub type QmdbAccountExclusionProof = ExclusionProof<
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QmdbAccountRootScope {
     /// The root covers every active key in the account qMDB, including both
-    /// snapshot slots, slot metadata, legacy account rows, and typed `v2:`
+    /// snapshot slots, slot metadata, legacy account rows, and typed state
     /// leaves. redb remains the authority for which slot is committed.
     AccountDbAllSlots,
 }
@@ -83,7 +83,7 @@ pub struct QmdbTypedLeafProof {
     pub slot: AccountSnapshotSlot,
     /// Unprefixed verifier/state-root leaf key.
     pub leaf_key: Vec<u8>,
-    /// Actual qMDB key: `s{slot}:v2:{leaf_key}`.
+    /// Actual qMDB key: `s{slot}:state:{leaf_key}`.
     pub encoded_key: Vec<u8>,
     pub leaf_value: Vec<u8>,
     pub proof: QmdbAccountKeyValueProof,
@@ -109,7 +109,7 @@ pub struct QmdbTypedLeafExclusionProof {
     pub slot: AccountSnapshotSlot,
     /// Unprefixed verifier/state-root leaf key.
     pub leaf_key: Vec<u8>,
-    /// Actual qMDB key: `s{slot}:v2:{leaf_key}`.
+    /// Actual qMDB key: `s{slot}:state:{leaf_key}`.
     pub encoded_key: Vec<u8>,
     pub proof: QmdbAccountExclusionProof,
 }
@@ -397,9 +397,9 @@ async fn replace_snapshot(
 
     let account_snapshots: Vec<_> = snapshot.accounts.iter().map(snapshot_account).collect();
     for (leaf_key, leaf_value) in
-        sybil_verifier::block::state_root_v2_leaves(&account_snapshots, &snapshot.state_sidecar)
+        sybil_verifier::block::state_root_leaves(&account_snapshots, &snapshot.state_sidecar)
     {
-        desired.insert(encode_state_v2_key(slot, &leaf_key), leaf_value);
+        desired.insert(encode_state_key(slot, &leaf_key), leaf_value);
     }
 
     for account in snapshot.accounts {
@@ -502,7 +502,7 @@ async fn collect_typed_leaves(
     db: &AccountDb,
     slot: AccountSnapshotSlot,
 ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StoreError> {
-    let prefix = encode_state_v2_key(slot, b"");
+    let prefix = encode_state_key(slot, b"");
     let stream = db.stream_range(prefix.clone()).await.map_err(|error| {
         StoreError::Qmdb(format!("failed to stream qmdb typed leaves: {error}"))
     })?;
@@ -526,7 +526,7 @@ async fn typed_leaf_proof(
     slot: AccountSnapshotSlot,
     leaf_key: Vec<u8>,
 ) -> Result<Option<QmdbTypedLeafProof>, StoreError> {
-    let encoded_key = encode_state_v2_key(slot, &leaf_key);
+    let encoded_key = encode_state_key(slot, &leaf_key);
     let Some(leaf_value) = db
         .get(&encoded_key)
         .await
@@ -557,7 +557,7 @@ async fn typed_leaf_exclusion_proof(
     slot: AccountSnapshotSlot,
     leaf_key: Vec<u8>,
 ) -> Result<Option<QmdbTypedLeafExclusionProof>, StoreError> {
-    let encoded_key = encode_state_v2_key(slot, &leaf_key);
+    let encoded_key = encode_state_key(slot, &leaf_key);
     let mut hasher = Sha256::new();
     let proof = match db.exclusion_proof(&mut hasher, &encoded_key).await {
         Ok(proof) => proof,
@@ -626,11 +626,11 @@ fn encode_next_account_id_key(slot: AccountSnapshotSlot) -> Vec<u8> {
     key
 }
 
-fn encode_state_v2_key(slot: AccountSnapshotSlot, leaf_key: &[u8]) -> Vec<u8> {
+fn encode_state_key(slot: AccountSnapshotSlot, leaf_key: &[u8]) -> Vec<u8> {
     let prefix = slot_prefix(slot);
-    let mut key = Vec::with_capacity(prefix.len() + STATE_V2_KEY_PREFIX.len() + leaf_key.len());
+    let mut key = Vec::with_capacity(prefix.len() + STATE_KEY_PREFIX.len() + leaf_key.len());
     key.extend_from_slice(&prefix);
-    key.extend_from_slice(STATE_V2_KEY_PREFIX);
+    key.extend_from_slice(STATE_KEY_PREFIX);
     key.extend_from_slice(leaf_key);
     key
 }
