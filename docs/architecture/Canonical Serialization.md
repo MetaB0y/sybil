@@ -137,8 +137,9 @@ header_bytes =
 Total: 8 + 32 + 32 + 32 + 4 + 4 + 8 = **120 bytes**, fixed.
 
 `events_root` is the keyless qMDB commitment over canonical per-block event
-bytes. `witness_root` remains a proposed sibling commitment in [[Block Witness]];
-it is not part of the implemented header.
+bytes. `witness_root` is computed for the ZK public input binding from full
+`BlockWitness` canonical bytes; adding it to the block header remains the
+header-chain proposal in [[Block Witness]].
 
 ### `Fill`
 
@@ -156,14 +157,15 @@ fill_bytes =
 Fill events stay in solver output order. The accepted-order event for the same
 `order_id` carries the order's market/payoff structure.
 
-### `Order`, `MmConstraint`, `MarketGroup` (deferred)
+### `Order`, `MmConstraint`, `MarketGroup`
 
-**TODO for full witness bytes.** `Order` already has a verifier-local canonical
-encoding for state leaves and event leaves. `MmConstraint` and `MarketGroup`
-still only matter for the full [[Block Witness]] canonical bytes and the ZK
-circuit. The Rust signing path already uses `sybil-canonical::Order`,
-including `expires_at_block`, so P256 signed orders cover resolved IOC/GTD
-expiry semantics even before the full witness byte spec is frozen.
+`Order` uses the verifier-local canonical order encoding shared by state and
+event leaves. Full witness bytes encode `MmConstraint` entries sorted by
+`mm_id`, with `order_ids` and `order_sides` sorted by `order_id`.
+`MarketGroup` entries are sorted by first contained market id, then name, and
+their market lists are sorted by `market_id`. The Rust signing path continues
+to use `sybil-canonical::Order`, including `expires_at_block`, so P256 signed
+orders cover resolved IOC/GTD expiry semantics.
 
 ### State leaves for `state_root`
 

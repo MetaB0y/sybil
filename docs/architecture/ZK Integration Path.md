@@ -30,6 +30,7 @@ The first guest boundary is intentionally narrow:
   key/value proofs for those leaves against the public `new_state_root`,
   verifies that each qMDB `next_key` pointer forms the exact sorted key ring,
   recomputes the keyless-qMDB `events_root` from canonical event leaf bytes,
+  recomputes `witness_root = BLAKE3("sybil/witness" || witness_bytes)`,
   then verifies the match, settlement, and order-validation layers through
   `sybil-verifier` with qMDB block-runtime features disabled. The guest uses
   small local SHA-256/MMR verifiers for the qMDB proof/root shapes so OpenVM
@@ -38,10 +39,10 @@ The first guest boundary is intentionally narrow:
 - The guest reveals
   `keccak256(abi.encode("sybil/openvm/state-transition/v1", ...))` as the
   public value expected by `SybilSettlement`.
-- Historical qMDB paths, full `witness_root`, and DA binding remain follow-up
-  work. The current state-root proof is a post-state exact-keyspace proof:
-  every witness leaf must be in qMDB, and hidden extra leaves are rejected
-  because they alter the verified `next_key` ring.
+- Historical qMDB paths and DA binding remain follow-up work. The current
+  state-root proof is a post-state exact-keyspace proof: every witness leaf
+  must be in qMDB, and hidden extra leaves are rejected because they alter the
+  verified `next_key` ring.
 
 Commands:
 

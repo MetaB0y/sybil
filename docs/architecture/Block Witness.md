@@ -120,21 +120,23 @@ clearing_prices_section =
 
 with markets sorted by `market_id` ascending and prices in outcome order.
 
-**Item encodings** (all defined in [[Canonical Serialization]]; deferred items
-carry a TODO there too):
+**Item encodings** are defined by [[Canonical Serialization]] and the
+executable schema in `crates/sybil-verifier/src/witness_schema.rs`:
 
 | Section | Item encoding | Sort order |
 |---|---|---|
-| `orders` | `WitnessOrder` (TODO, see Canonical Serialization §composites) | by `order.order_id` ascending |
-| `rejections` | `WitnessRejection` (TODO) | by `order.order_id` ascending |
+| `orders` | accepted-order event leaf bytes | by `order.order_id` ascending |
+| `rejections` | rejected-order event leaf bytes | by `order.order_id` ascending |
 | `system_events` | `SystemEventWitness` (tag-dispatched like events registry) | by emission order |
 | `fills` | `Fill` (see Canonical Serialization) | solver output order (stable) |
-| `mm_constraints`, `market_groups` | TODO | by first market_id ascending |
+| `mm_constraints` | `MmConstraint` canonical bytes | by `mm_id` ascending |
+| `market_groups` | `MarketGroup` canonical bytes | by first market_id, then name |
 | `pre_state`, `post_system_state`, `post_state` | `AccountSnapshot` (see Canonical Serialization) | by `id` ascending |
 | `state_sidecar` | `StateSidecarSnapshot` (see Canonical Serialization) | market, market-group, withdrawal, order, and reservation leaves by id ascending |
 | `resolved_markets` | `market_id:u32` | by `market_id` ascending |
 
-Once every item encoding is pinned, `witness_root = BLAKE3("sybil/witness" || witness_bytes)`.
+`witness_root = BLAKE3("sybil/witness" || witness_bytes)`. The implemented
+schema lives in `crates/sybil-verifier/src/witness_schema.rs`.
 
 ## `witness_root` in the block header
 
@@ -144,6 +146,11 @@ sequencer could produce an internally consistent block while feeding a
 different non-event witness section to downstream verifiers. The verifier
 would catch state/event mismatches, but the full witness package itself is not
 cryptographically anchored.
+
+The OpenVM state-transition public inputs now include `witness_root`, and the
+guest recomputes it from the private `BlockWitness`. This binds the proof to a
+canonical full witness package, but the root is still not part of the block
+header hash chain until the header extension below lands.
 
 **Proposal - witness root.** Add `witness_root` to the header:
 
@@ -223,9 +230,9 @@ and witness property.
 Minimal genesis witness: zero accounts, zero orders, zero fills. Expected
 `state_root` is the native qMDB root over the default typed state leaves.
 With the genesis header in [[Canonical Serialization]] test vector 3,
-expected `witness_root = BLAKE3("sybil/witness" || witness_bytes)` - concrete
-hex lands in a follow-up test file once the deferred item encodings are
-pinned.
+expected `witness_root = BLAKE3("sybil/witness" || witness_bytes)`. The
+current executable vectors live in `sybil-zk`'s public-input golden test and
+`sybil-verifier`'s `witness_schema` tests.
 
 ## Open questions
 
@@ -242,10 +249,6 @@ pinned.
    system_events`. Keeping it in the witness is convenient for the verifier
    but inflates bytes and proof-generation time. Could be dropped once the
    verifier is robust.
-4. **Full witness-root item encodings.** Event leaves and typed state leaves
-   are pinned, but `witness_root` still needs a complete byte spec for every
-   witness-only item before it can be implemented.
-
 ## Where this lives
 
 > `crates/sybil-verifier/src/types.rs` — `BlockWitness`, `WitnessBlockHeader`, `AccountSnapshot`
@@ -253,6 +256,8 @@ pinned.
 > `crates/sybil-verifier/src/block.rs` — `verify_block` runs Layer 3 checks against the witness
 > `crates/sybil-verifier/src/event_schema.rs` — canonical event leaves
 > `crates/sybil-verifier/src/event_commitment.rs` — native keyless-qMDB `events_root`
+> `crates/sybil-verifier/src/witness_schema.rs` — canonical full witness bytes
+> `crates/sybil-zk/src/lib.rs` — `witness_root` computation and public input binding
 
 ## See also
 

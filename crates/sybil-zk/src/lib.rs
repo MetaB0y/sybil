@@ -6,7 +6,7 @@ use sha3::Keccak256;
 use sybil_verifier::{BlockWitness, VerificationResult, WitnessBlockHeader};
 
 pub const STATE_TRANSITION_DOMAIN: &[u8] = b"sybil/openvm/state-transition/v1";
-pub const UNIMPLEMENTED_WITNESS_ROOT: [u8; 32] = [0u8; 32];
+pub const WITNESS_ROOT_DOMAIN: &[u8] = b"sybil/witness";
 pub const UNIMPLEMENTED_DA_COMMITMENT: [u8; 32] = [0u8; 32];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -106,7 +106,7 @@ pub enum ZkTransitionError {
     StateRootNextKeyMismatch {
         index: usize,
     },
-    WitnessRootUnsupported,
+    WitnessRootMismatch,
     DaCommitmentUnsupported,
     VerificationLayerFailed {
         layer: &'static str,
@@ -170,9 +170,7 @@ impl fmt::Display for ZkTransitionError {
             ZkTransitionError::StateRootNextKeyMismatch { index } => {
                 write!(f, "state root qMDB next-key mismatch at leaf index {index}")
             }
-            ZkTransitionError::WitnessRootUnsupported => {
-                write!(f, "witness root is not implemented yet")
-            }
+            ZkTransitionError::WitnessRootMismatch => write!(f, "witness root mismatch"),
             ZkTransitionError::DaCommitmentUnsupported => {
                 write!(f, "DA commitment is not implemented yet")
             }
@@ -730,6 +728,15 @@ pub fn hash_header(header: &WitnessBlockHeader) -> [u8; 32] {
     *hasher.finalize().as_bytes()
 }
 
+pub fn witness_root(witness: &BlockWitness) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(WITNESS_ROOT_DOMAIN);
+    hasher.update(&sybil_verifier::witness_schema::canonical_witness_bytes(
+        witness,
+    ));
+    *hasher.finalize().as_bytes()
+}
+
 pub fn compute_events_root(witness: &BlockWitness) -> Option<[u8; 32]> {
     let events = sybil_verifier::event_schema::event_leaf_values(
         &witness.system_events,
@@ -834,7 +841,7 @@ pub fn public_inputs_from_witness(witness: &BlockWitness) -> StateTransitionPubl
         new_state_root: witness.header.state_root,
         block_hash: hash_header(&witness.header),
         events_root: witness.header.events_root,
-        witness_root: UNIMPLEMENTED_WITNESS_ROOT,
+        witness_root: witness_root(witness),
         da_commitment: UNIMPLEMENTED_DA_COMMITMENT,
         deposit_root: witness.state_sidecar.bridge.deposit_root,
         deposit_count: witness.state_sidecar.bridge.deposit_cursor,
@@ -865,8 +872,8 @@ fn verify_public_input_binding(
     if inputs.block_hash != hash_header(&witness.header) {
         return Err(ZkTransitionError::BlockHashMismatch);
     }
-    if inputs.witness_root != UNIMPLEMENTED_WITNESS_ROOT {
-        return Err(ZkTransitionError::WitnessRootUnsupported);
+    if inputs.witness_root != witness_root(witness) {
+        return Err(ZkTransitionError::WitnessRootMismatch);
     }
     if inputs.da_commitment != UNIMPLEMENTED_DA_COMMITMENT {
         return Err(ZkTransitionError::DaCommitmentUnsupported);
@@ -1037,38 +1044,28 @@ mod tests {
             fill_count: 0,
             timestamp_ms: 1000,
         };
-        let public_inputs = StateTransitionPublicInputs {
-            previous_height: 0,
-            new_height: header.height,
-            previous_state_root: [0u8; 32],
-            new_state_root: header.state_root,
-            block_hash: hash_header(&header),
-            events_root: header.events_root,
-            witness_root: UNIMPLEMENTED_WITNESS_ROOT,
-            da_commitment: UNIMPLEMENTED_DA_COMMITMENT,
-            deposit_root: [0u8; 32],
-            deposit_count: 0,
+        let witness = BlockWitness {
+            header,
+            previous_header: None,
+            orders: vec![],
+            rejections: vec![],
+            system_events: vec![],
+            fills: vec![],
+            clearing_prices: Default::default(),
+            total_welfare: 0,
+            minting_cost: 0,
+            mm_constraints: vec![],
+            market_groups: vec![],
+            pre_state: vec![],
+            post_system_state: vec![],
+            post_state: vec![],
+            state_sidecar,
+            resolved_markets: vec![],
         };
+        let public_inputs = public_inputs_from_witness(&witness);
         StateTransitionGuestInput {
             public_inputs,
-            witness: BlockWitness {
-                header,
-                previous_header: None,
-                orders: vec![],
-                rejections: vec![],
-                system_events: vec![],
-                fills: vec![],
-                clearing_prices: Default::default(),
-                total_welfare: 0,
-                minting_cost: 0,
-                mm_constraints: vec![],
-                market_groups: vec![],
-                pre_state: vec![],
-                post_system_state: vec![],
-                post_state: vec![],
-                state_sidecar,
-                resolved_markets: vec![],
-            },
+            witness,
             state_root_proof,
         }
     }
@@ -1150,38 +1147,28 @@ mod tests {
             fill_count: 0,
             timestamp_ms: 1000,
         };
-        let public_inputs = StateTransitionPublicInputs {
-            previous_height: 0,
-            new_height: header.height,
-            previous_state_root: [0u8; 32],
-            new_state_root: header.state_root,
-            block_hash: hash_header(&header),
-            events_root: header.events_root,
-            witness_root: UNIMPLEMENTED_WITNESS_ROOT,
-            da_commitment: UNIMPLEMENTED_DA_COMMITMENT,
-            deposit_root: state_sidecar.bridge.deposit_root,
-            deposit_count: state_sidecar.bridge.deposit_cursor,
+        let witness = BlockWitness {
+            header,
+            previous_header: None,
+            orders: vec![],
+            rejections: vec![],
+            system_events: vec![],
+            fills: vec![],
+            clearing_prices: Default::default(),
+            total_welfare: 0,
+            minting_cost: 0,
+            mm_constraints: vec![],
+            market_groups: vec![],
+            pre_state: post_state.clone(),
+            post_system_state: post_state.clone(),
+            post_state,
+            state_sidecar,
+            resolved_markets: vec![],
         };
+        let public_inputs = public_inputs_from_witness(&witness);
         StateTransitionGuestInput {
             public_inputs,
-            witness: BlockWitness {
-                header,
-                previous_header: None,
-                orders: vec![],
-                rejections: vec![],
-                system_events: vec![],
-                fills: vec![],
-                clearing_prices: Default::default(),
-                total_welfare: 0,
-                minting_cost: 0,
-                mm_constraints: vec![],
-                market_groups: vec![],
-                pre_state: post_state.clone(),
-                post_system_state: post_state.clone(),
-                post_state,
-                state_sidecar,
-                resolved_markets: vec![],
-            },
+            witness,
             state_root_proof,
         }
     }
@@ -1209,39 +1196,29 @@ mod tests {
             fill_count: 0,
             timestamp_ms: 1000,
         };
-        let public_inputs = StateTransitionPublicInputs {
-            previous_height: 0,
-            new_height: header.height,
-            previous_state_root: [0u8; 32],
-            new_state_root: header.state_root,
-            block_hash: hash_header(&header),
-            events_root: header.events_root,
-            witness_root: UNIMPLEMENTED_WITNESS_ROOT,
-            da_commitment: UNIMPLEMENTED_DA_COMMITMENT,
-            deposit_root: state_sidecar.bridge.deposit_root,
-            deposit_count: state_sidecar.bridge.deposit_cursor,
+        let witness = BlockWitness {
+            header,
+            previous_header: None,
+            orders: vec![],
+            rejections: vec![],
+            system_events: vec![],
+            fills: vec![],
+            clearing_prices: Default::default(),
+            total_welfare: 0,
+            minting_cost: 0,
+            mm_constraints: vec![],
+            market_groups: vec![],
+            pre_state: post_state.clone(),
+            post_system_state: post_state.clone(),
+            post_state,
+            state_sidecar,
+            resolved_markets: vec![],
         };
+        let public_inputs = public_inputs_from_witness(&witness);
 
         StateTransitionGuestInput {
             public_inputs,
-            witness: BlockWitness {
-                header,
-                previous_header: None,
-                orders: vec![],
-                rejections: vec![],
-                system_events: vec![],
-                fills: vec![],
-                clearing_prices: Default::default(),
-                total_welfare: 0,
-                minting_cost: 0,
-                mm_constraints: vec![],
-                market_groups: vec![],
-                pre_state: post_state.clone(),
-                post_system_state: post_state.clone(),
-                post_state,
-                state_sidecar,
-                resolved_markets: vec![],
-            },
+            witness,
             state_root_proof,
         }
     }
@@ -1389,8 +1366,8 @@ mod tests {
         assert_eq!(
             state_transition_public_input_hash(&input.public_inputs),
             [
-                242, 209, 67, 5, 214, 19, 250, 198, 198, 80, 245, 80, 211, 182, 180, 76, 98, 37,
-                155, 44, 173, 227, 98, 124, 92, 10, 242, 210, 117, 160, 45, 141,
+                126, 206, 84, 228, 251, 129, 163, 143, 167, 114, 107, 195, 102, 217, 75, 46, 5,
+                169, 103, 108, 187, 48, 143, 93, 124, 99, 38, 78, 184, 208, 197, 48,
             ]
         );
     }
@@ -1419,6 +1396,28 @@ mod tests {
         assert_eq!(
             verify_state_transition_input(&input),
             Err(ZkTransitionError::EventsRootMismatch)
+        );
+    }
+
+    #[test]
+    fn zero_witness_root_is_rejected() {
+        let mut input = empty_guest_input();
+        input.public_inputs.witness_root = [0u8; 32];
+
+        assert_eq!(
+            verify_state_transition_input(&input),
+            Err(ZkTransitionError::WitnessRootMismatch)
+        );
+    }
+
+    #[test]
+    fn witness_mutation_after_public_binding_is_rejected() {
+        let mut input = empty_guest_input();
+        input.witness.total_welfare = 1;
+
+        assert_eq!(
+            verify_state_transition_input(&input),
+            Err(ZkTransitionError::WitnessRootMismatch)
         );
     }
 
@@ -1475,6 +1474,7 @@ mod tests {
             .state_root_proof
             .leaf_proofs
             .push(input.state_root_proof.leaf_proofs[0].clone());
+        input.public_inputs.witness_root = witness_root(&input.witness);
 
         assert!(matches!(
             verify_state_transition_input(&input),
@@ -1512,6 +1512,7 @@ mod tests {
         input.witness.header.state_root = [0x42; 32];
         input.public_inputs.new_state_root = input.witness.header.state_root;
         input.public_inputs.block_hash = hash_header(&input.witness.header);
+        input.public_inputs.witness_root = witness_root(&input.witness);
 
         assert_eq!(
             verify_state_transition_input(&input),
@@ -1538,6 +1539,7 @@ mod tests {
         input.witness.header.state_root = root;
         input.public_inputs.new_state_root = root;
         input.public_inputs.block_hash = hash_header(&input.witness.header);
+        input.public_inputs.witness_root = witness_root(&input.witness);
         input.state_root_proof = state_root_proof;
 
         assert!(matches!(

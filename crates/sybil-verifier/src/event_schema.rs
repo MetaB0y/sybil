@@ -21,7 +21,7 @@ pub fn event_leaf_values(
     events
 }
 
-fn system_event_leaf_value(event: &SystemEventWitness) -> Vec<u8> {
+pub fn system_event_leaf_value(event: &SystemEventWitness) -> Vec<u8> {
     let mut value = Vec::new();
     value.extend_from_slice(b"sybil/event/system");
     match event {
@@ -91,7 +91,7 @@ fn system_event_leaf_value(event: &SystemEventWitness) -> Vec<u8> {
     value
 }
 
-fn order_accepted_leaf_value(event: &WitnessOrder) -> Vec<u8> {
+pub fn order_accepted_leaf_value(event: &WitnessOrder) -> Vec<u8> {
     let mut value = Vec::new();
     value.extend_from_slice(b"sybil/event/order-accepted");
     value.extend_from_slice(&event.account_id.to_le_bytes());
@@ -100,7 +100,7 @@ fn order_accepted_leaf_value(event: &WitnessOrder) -> Vec<u8> {
     value
 }
 
-fn order_rejected_leaf_value(event: &WitnessRejection) -> Vec<u8> {
+pub fn order_rejected_leaf_value(event: &WitnessRejection) -> Vec<u8> {
     let mut value = Vec::new();
     value.extend_from_slice(b"sybil/event/order-rejected");
     value.extend_from_slice(&event.account_id.to_le_bytes());
@@ -109,7 +109,7 @@ fn order_rejected_leaf_value(event: &WitnessRejection) -> Vec<u8> {
     value
 }
 
-fn fill_leaf_value(fill: &Fill) -> Vec<u8> {
+pub fn fill_leaf_value(fill: &Fill) -> Vec<u8> {
     let mut value = Vec::new();
     value.extend_from_slice(b"sybil/event/fill");
     value.extend_from_slice(&fill.order_id.to_le_bytes());

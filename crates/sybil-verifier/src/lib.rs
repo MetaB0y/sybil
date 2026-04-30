@@ -32,6 +32,7 @@ pub mod settlement;
 pub mod state_schema;
 pub mod types;
 pub mod violations;
+pub mod witness_schema;
 
 pub use types::{
     AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
