@@ -57,6 +57,7 @@ pub struct WitnessBlockHeader {
     pub height: u64,
     pub parent_hash: [u8; 32],
     pub state_root: [u8; 32],
+    pub events_root: [u8; 32],
     pub order_count: u32,
     pub fill_count: u32,
     pub timestamp_ms: u64,

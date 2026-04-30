@@ -53,6 +53,7 @@ mod tests {
                     height: 42,
                     parent_hash: "ab".into(),
                     state_root: "cd".into(),
+                    events_root: "ef".into(),
                     order_count: 0,
                     fill_count: 0,
                     timestamp_ms: 0,

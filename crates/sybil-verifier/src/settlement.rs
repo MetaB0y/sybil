@@ -301,6 +301,7 @@ mod tests {
             height: 1,
             parent_hash: [0u8; 32],
             state_root: [0u8; 32],
+            events_root: crate::event_commitment::empty_events_root(),
             order_count: 0,
             fill_count: 0,
             timestamp_ms: 0,

@@ -722,11 +722,12 @@ fn witness_from_problem(problem: &Problem, result: &PipelineResult) -> BlockWitn
         })
         .collect();
 
-    BlockWitness {
+    let mut witness = BlockWitness {
         header: WitnessBlockHeader {
             height: 1,
             parent_hash: [0u8; 32],
             state_root: [0u8; 32],
+            events_root: [0u8; 32],
             order_count: problem.orders.len() as u32,
             fill_count: result.result.fills.len() as u32,
             timestamp_ms: 0,
@@ -746,7 +747,9 @@ fn witness_from_problem(problem: &Problem, result: &PipelineResult) -> BlockWitn
         post_state: vec![],
         state_sidecar: Default::default(),
         resolved_markets: vec![],
-    }
+    };
+    witness.header.events_root = sybil_verifier::event_commitment::compute_events_root(&witness);
+    witness
 }
 
 fn print_verification_result(result: &VerificationResult) {
@@ -1349,11 +1352,12 @@ fn witness_from_milp(problem: &Problem, result: &matching_solver::MilpResult) ->
         })
         .collect();
 
-    BlockWitness {
+    let mut witness = BlockWitness {
         header: WitnessBlockHeader {
             height: 1,
             parent_hash: [0u8; 32],
             state_root: [0u8; 32],
+            events_root: [0u8; 32],
             order_count: all_orders.len() as u32,
             fill_count: result.result.fills.len() as u32,
             timestamp_ms: 0,
@@ -1373,7 +1377,9 @@ fn witness_from_milp(problem: &Problem, result: &matching_solver::MilpResult) ->
         post_state: vec![],
         state_sidecar: Default::default(),
         resolved_markets: vec![],
-    }
+    };
+    witness.header.events_root = sybil_verifier::event_commitment::compute_events_root(&witness);
+    witness
 }
 
 #[allow(unused_variables, clippy::too_many_arguments)]

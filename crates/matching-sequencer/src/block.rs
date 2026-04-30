@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use matching_engine::{Fill, MarketGroup, MarketId, MarketSet, Nanos};
 use matching_solver::PipelineResult;
-use sybil_verifier::BlockWitness;
+use sybil_verifier::{BlockWitness, WitnessBlockHeader};
 
 use crate::account::AccountStore;
 use crate::bridge::{bridge_state_snapshot, BridgeBlockData, BridgeState};
@@ -42,9 +42,25 @@ pub struct BlockHeader {
     /// Current typed qMDB state root over canonical account leaves plus bridge,
     /// market, and order-book sidecar leaves.
     pub state_root: [u8; 32],
+    /// Keyless qMDB root over canonical block event leaves.
+    pub events_root: [u8; 32],
     pub order_count: u32,
     pub fill_count: u32,
     pub timestamp_ms: u64,
+}
+
+impl BlockHeader {
+    pub fn to_witness_header(&self) -> WitnessBlockHeader {
+        WitnessBlockHeader {
+            height: self.height,
+            parent_hash: self.parent_hash,
+            state_root: self.state_root,
+            events_root: self.events_root,
+            order_count: self.order_count,
+            fill_count: self.fill_count,
+            timestamp_ms: self.timestamp_ms,
+        }
+    }
 }
 
 /// A sequencer block produced each tick.
@@ -273,6 +289,7 @@ pub fn hash_header(header: &BlockHeader) -> [u8; 32] {
     hasher.update(&header.height.to_le_bytes());
     hasher.update(&header.parent_hash);
     hasher.update(&header.state_root);
+    hasher.update(&header.events_root);
     hasher.update(&header.order_count.to_le_bytes());
     hasher.update(&header.fill_count.to_le_bytes());
     hasher.update(&header.timestamp_ms.to_le_bytes());
@@ -417,6 +434,7 @@ mod tests {
             height: 1,
             parent_hash: [0u8; 32],
             state_root: [1u8; 32],
+            events_root: [2u8; 32],
             order_count: 5,
             fill_count: 3,
             timestamp_ms: 1000,
@@ -430,6 +448,7 @@ mod tests {
             height: 1,
             parent_hash: [0u8; 32],
             state_root: [1u8; 32],
+            events_root: [2u8; 32],
             order_count: 5,
             fill_count: 3,
             timestamp_ms: 1000,

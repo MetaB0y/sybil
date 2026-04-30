@@ -1053,6 +1053,7 @@ mod tests {
             height,
             parent_hash: [height as u8; 32],
             state_root: [height as u8; 32],
+            events_root: [height as u8; 32],
             order_count: 0,
             fill_count: 0,
             timestamp_ms: height * 1000,

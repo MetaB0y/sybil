@@ -14,7 +14,7 @@ The [[Bot Framework]] is built around this pattern. A bot's main loop is `async 
 
 ## Key Properties
 - `GET /v1/blocks/stream` — persistent HTTP connection with server push
-- Each block event includes fills, clearing prices, rejections, state root
+- Each block event includes fills, clearing prices, rejections, state root, and events root
 - Unidirectional: server → client only
 - Auto-reconnect on connection loss
 - Primary interaction pattern for [[Bot Framework|trading bots]]

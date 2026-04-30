@@ -19,7 +19,9 @@ tomorrow. Everything else in this doc follows from two invariants:
    beyond the parent.
 2. **Reproducible.** `apply_fills(pre_state, system_events, fills) == post_state`,
    and `compute_state_root_with_sidecar(post_state, state_sidecar) ==
-   header.state_root`. If either equation fails, the witness is invalid.
+   header.state_root`, and `compute_events_root(system_events, orders,
+   rejections, fills) == header.events_root`. If any equation fails, the
+   witness is invalid.
 
 ## Rust type
 
@@ -75,9 +77,9 @@ specific users did what" — individual orders, fills, balances. Selective-revea
 ZK proofs (see [[Proof Architecture]] and future "Selective Reveal ZK" doc)
 let an account-holder reveal their own slice without exposing anyone else's.
 
-The `events_root` (proposed in [[Proof Architecture]] Phase 1) is a public
-commitment over the private event list, which is how external verifiers can
-prove "fill F happened in block N" without seeing the whole witness.
+The `events_root` is a public qMDB commitment over the private event list,
+which is how external verifiers can prove "fill F happened in block N" without
+seeing the whole witness.
 
 ## Canonical witness bytes
 
@@ -87,9 +89,9 @@ with variable-length sections, each prefixed with `count:u64`.
 ```
 witness_bytes =
     version:u8 = 0x01
- || header_bytes                                              (88 bytes, see Canonical Serialization)
+ || header_bytes                                              (120 bytes, see Canonical Serialization)
  || previous_header_tag:u8                                    (0x00 = none, 0x01 = present)
- || previous_header_bytes?                                    (88 bytes if present)
+ || previous_header_bytes?                                    (120 bytes if present)
  || section[orders]
  || section[rejections]
  || section[system_events]
@@ -136,15 +138,14 @@ Once every item encoding is pinned, `witness_root = BLAKE3("sybil/witness" || wi
 
 ## `witness_root` in the block header
 
-Today the block header commits to `state_root` and `parent_hash`. It does
-**not** commit to the witness. That means the sequencer could produce an
-internally consistent block (state_root valid) while feeding a different
-witness to downstream verifiers. The verifier would catch the mismatch
-(post_state must rehash to state_root), but the witness itself is not
+Today the block header commits to `state_root`, `events_root`, and
+`parent_hash`. It does **not** commit to the full witness. That means the
+sequencer could produce an internally consistent block while feeding a
+different non-event witness section to downstream verifiers. The verifier
+would catch state/event mismatches, but the full witness package itself is not
 cryptographically anchored.
 
-**Proposal - extended BlockHeader.** Add the witness and events roots to the
-header:
+**Proposal - witness root.** Add `witness_root` to the header:
 
 ```
 BlockHeader =
@@ -161,10 +162,10 @@ BlockHeader =
 Chaining hash uses a domain-separation prefix `"sybil/block-header"` so the
 extended header has explicit bytes.
 
-This makes the witness a first-class part of the commitment chain. Anyone who
-trusts the header transitively trusts the witness, and the sequencer can no
-longer equivocate about what happened in a block without changing the header
-(and thereby the on-chain state-root chain).
+This would make the full witness a first-class part of the commitment chain.
+Anyone who trusts the header transitively trusts the witness, and the
+sequencer can no longer equivocate about non-event witness data without
+changing the header.
 
 ## Format Changes
 
@@ -202,7 +203,7 @@ Three hash roots in play, each with a different scope:
 | Root | Scope | Primary consumer |
 |---|---|---|
 | `state_root` | complete typed validium state | ZK settlement, bridge claims, recovery checks |
-| `events_root` | everything that happened in this block | external verifiers asking "did F happen" |
+| `events_root` | qMDB event log for everything that happened in this block | external verifiers asking "did F happen" |
 | `witness_root` | the full audit package | prover; anyone reconstructing the block |
 
 They're complementary. A minimal on-chain commitment would include only
@@ -241,15 +242,16 @@ pinned.
    system_events`. Keeping it in the witness is convenient for the verifier
    but inflates bytes and proof-generation time. Could be dropped once the
    verifier is robust.
-4. **Item encodings for Order / MmConstraint / MarketGroup.** Deferred from
-   [[Canonical Serialization]] v1. Until these land, `witness_root` cannot be
-   computed from spec — a gap to close before the events tree ships.
+4. **Full witness-root item encodings.** Event leaves and typed state leaves
+   are pinned, but `witness_root` still needs a complete byte spec for every
+   witness-only item before it can be implemented.
 
 ## Where this lives
 
 > `crates/sybil-verifier/src/types.rs` — `BlockWitness`, `WitnessBlockHeader`, `AccountSnapshot`
 > `crates/matching-sequencer/src/block.rs` — `produce_block` builds the witness; `hash_header` is the current header hash
 > `crates/sybil-verifier/src/block.rs` — `verify_block` runs Layer 3 checks against the witness
+> `crates/sybil-verifier/src/event_commitment.rs` — canonical event leaves and `events_root`
 
 ## See also
 

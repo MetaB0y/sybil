@@ -1,6 +1,6 @@
 //! Layer 3: Block header integrity verification.
 //!
-//! Checks state root, parent hash chaining, height, and counts.
+//! Checks state root, events root, parent hash chaining, height, and counts.
 
 use std::num::{NonZeroU16, NonZeroU64, NonZeroUsize};
 use std::sync::{mpsc, OnceLock};
@@ -18,6 +18,8 @@ use commonware_storage::qmdb::current::VariableConfig;
 use commonware_storage::translator::OneCap;
 use sha2::{Digest as _, Sha256};
 
+use crate::canonical::append_order;
+use crate::event_commitment::compute_events_root;
 use crate::types::{
     AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
     ChallengeSnapshot, MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot,
@@ -74,7 +76,20 @@ pub fn verify_block(witness: &BlockWitness) -> VerificationResult {
         });
     }
 
-    // 2. Parent hash
+    // 2. Events root: recompute from canonical per-block event bytes.
+    let computed_events_root = compute_events_root(witness);
+    if computed_events_root != witness.header.events_root {
+        violations.push(Violation {
+            kind: ViolationKind::EventRootMismatch,
+            details: format!(
+                "Computed events root {:?} != header events root {:?}",
+                hex(&computed_events_root),
+                hex(&witness.header.events_root),
+            ),
+        });
+    }
+
+    // 3. Parent hash
     match &witness.previous_header {
         Some(prev) => {
             let computed_parent = hash_header(prev);
@@ -89,7 +104,7 @@ pub fn verify_block(witness: &BlockWitness) -> VerificationResult {
                 });
             }
 
-            // 3. Height consecutive
+            // 4. Height consecutive
             if witness.header.height != prev.height + 1 {
                 violations.push(Violation {
                     kind: ViolationKind::HeightNotConsecutive,
@@ -120,7 +135,7 @@ pub fn verify_block(witness: &BlockWitness) -> VerificationResult {
         }
     }
 
-    // 4. Counts match
+    // 5. Counts match
     let expected_order_count = witness.orders.len() + witness.rejections.len();
     if witness.header.order_count != expected_order_count as u32 {
         violations.push(Violation {
@@ -627,39 +642,6 @@ fn append_oracle_source(value: &mut Vec<u8>, source: &OracleSourceSnapshot) {
     }
 }
 
-fn append_order(value: &mut Vec<u8>, order: &matching_engine::Order) {
-    value.extend_from_slice(&order.id.to_le_bytes());
-    value.push(order.num_markets);
-    for market in order.markets.iter().take(order.num_markets as usize) {
-        value.extend_from_slice(&market.0.to_le_bytes());
-    }
-    value.push(order.num_states);
-    for payoff in order.payoffs.iter().take(order.num_states as usize) {
-        value.extend_from_slice(&payoff.to_le_bytes());
-    }
-    value.extend_from_slice(&order.limit_price.to_le_bytes());
-    value.extend_from_slice(&order.max_fill.to_le_bytes());
-    match &order.condition {
-        None => value.push(0),
-        Some(condition) => {
-            value.push(1);
-            value.extend_from_slice(&condition.market.0.to_le_bytes());
-            value.extend_from_slice(&condition.threshold.to_le_bytes());
-            value.push(match condition.direction {
-                matching_engine::ConditionDir::Above => 0,
-                matching_engine::ConditionDir::Below => 1,
-            });
-        }
-    }
-    match order.expires_at_block {
-        None => value.push(0),
-        Some(expires_at_block) => {
-            value.push(1);
-            value.extend_from_slice(&expires_at_block.to_le_bytes());
-        }
-    }
-}
-
 /// Compute blake3 hash of a block header for chaining.
 ///
 /// Must match `matching-sequencer`'s `hash_header`.
@@ -668,6 +650,7 @@ pub fn hash_header(header: &WitnessBlockHeader) -> [u8; 32] {
     hasher.update(&header.height.to_le_bytes());
     hasher.update(&header.parent_hash);
     hasher.update(&header.state_root);
+    hasher.update(&header.events_root);
     hasher.update(&header.order_count.to_le_bytes());
     hasher.update(&header.fill_count.to_le_bytes());
     hasher.update(&header.timestamp_ms.to_le_bytes());
@@ -687,6 +670,7 @@ fn hex(bytes: &[u8; 32]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event_commitment::empty_events_root;
     use crate::types::WitnessBlockHeader;
     use matching_engine::MarketId;
     use proptest::prelude::*;
@@ -697,6 +681,7 @@ mod tests {
             height: 1,
             parent_hash: [0u8; 32],
             state_root,
+            events_root: empty_events_root(),
             order_count: 0,
             fill_count: 0,
             timestamp_ms: 1000,
@@ -1120,6 +1105,45 @@ mod tests {
     }
 
     #[test]
+    fn test_events_root_mismatch() {
+        let post_state = vec![];
+        let state_root = compute_state_root(&post_state);
+        let witness = BlockWitness {
+            header: WitnessBlockHeader {
+                height: 1,
+                parent_hash: [0u8; 32],
+                state_root,
+                events_root: [0xff; 32],
+                order_count: 0,
+                fill_count: 0,
+                timestamp_ms: 1000,
+            },
+            previous_header: None,
+            orders: vec![],
+            rejections: vec![],
+            system_events: vec![],
+            fills: vec![],
+            clearing_prices: HashMap::new(),
+            total_welfare: 0,
+            minting_cost: 0,
+            mm_constraints: vec![],
+            market_groups: vec![],
+            pre_state: vec![],
+            post_system_state: vec![],
+            post_state,
+            state_sidecar: Default::default(),
+            resolved_markets: vec![],
+        };
+
+        let result = verify_block(&witness);
+        assert!(!result.valid);
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::EventRootMismatch));
+    }
+
+    #[test]
     fn test_parent_hash_chain() {
         let post_state = vec![AccountSnapshot {
             id: 0,
@@ -1137,6 +1161,7 @@ mod tests {
             height: 2,
             parent_hash,
             state_root,
+            events_root: empty_events_root(),
             order_count: 0,
             fill_count: 0,
             timestamp_ms: 2000,
@@ -1178,6 +1203,7 @@ mod tests {
             height: 5, // Should be 2
             parent_hash,
             state_root,
+            events_root: empty_events_root(),
             order_count: 0,
             fill_count: 0,
             timestamp_ms: 2000,
@@ -1217,6 +1243,7 @@ mod tests {
             height: 1,
             parent_hash: [0u8; 32],
             state_root: [1u8; 32],
+            events_root: [2u8; 32],
             order_count: 5,
             fill_count: 3,
             timestamp_ms: 1000,

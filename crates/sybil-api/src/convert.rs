@@ -160,6 +160,7 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
         height: block.header.height,
         parent_hash: hex::encode(block.header.parent_hash),
         state_root: hex::encode(block.header.state_root),
+        events_root: hex::encode(block.header.events_root),
         order_count: block.header.order_count,
         fill_count: block.header.fill_count,
         timestamp_ms: block.header.timestamp_ms,

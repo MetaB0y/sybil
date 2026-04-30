@@ -23,17 +23,12 @@ The **block header** is the root of trust. If a verifier trusts a block header (
 
 Current header:
 ```
-height | parent_hash | state_root | order_count | fill_count | timestamp_ms
-```
-
-Extended header:
-```
 height | parent_hash | state_root | events_root | order_count | fill_count | timestamp_ms
 ```
 
-The extended header gives two authenticated roots:
+The header gives two authenticated roots:
 1. **State tree** (`state_root`): "after this block, this complete validium state leaf has value V" — inclusion or exclusion proof against the typed state root.
-2. **Events tree** (`events_root`): "fill F happened in block N" or "these are ALL fills in block N" — inclusion/completeness proof against the events Merkle root.
+2. **Events commitment** (`events_root`): "fill F happened in block N" or "these are ALL fills in block N" — range proof against the block's authenticated event log.
 
 Combined with `parent_hash` chaining, a prover can make claims spanning any range of blocks.
 
@@ -73,9 +68,13 @@ fills and admin events that touched the account.
 - Solvency: state proof showing `balance ≥ 0` and no negative positions
 - Inactivity: if `events_digest_A == events_digest_B`, the account had no recorded fills/deposits/resolutions in that range (assuming collision resistance)
 
-### 2. Events Tree
+### 2. Events Commitment
 
-A Merkle tree over everything that happened in this block, built fresh each block.
+An authenticated append-only log over everything that happened in this block,
+built fresh each block. The implementation target is commonware's keyless
+qMDB with SHA-256, not a custom binary Merkle tree. Each canonical event byte
+string is appended in section order - system events, accepted orders, rejected
+orders, then fills - and qMDB's native MMR root becomes `events_root`.
 
 **Leaves** (canonical encoding of each event):
 
@@ -96,13 +95,13 @@ Current groundwork already landed:
 - Each account carries `events_digest`, so range-inactivity proofs can often use state snapshots instead of scanning every block event
 
 **What it proves**:
-- Fill F happened in block N (inclusion proof)
-- These are ALL events in block N (tree completeness — leaf count matches `order_count + fill_count + ...`)
+- Fill F happened in block N (qMDB range proof at the event's location)
+- These are ALL events in block N (range proof for the complete append interval plus the committed event count)
 - Account X had no fills in block N (enumerate all fills, show none match — or maintain per-account sub-index)
 
 **Why this enables flexible proofs**:
-- "I didn't trade market M between blocks A and B": for each block in range, show events tree has no fills for my account on market M
-- "I didn't receive deposits": for each block in range, show events tree has no Deposit events for my account
+- "I didn't trade market M between blocks A and B": for each block in range, show the authenticated event range has no fills for my account on market M
+- "I didn't receive deposits": for each block in range, show the authenticated event range has no Deposit events for my account
 - Trade history: collect all Fill events for my account across blocks
 - Volume: sum fill quantities from events proofs
 
@@ -115,7 +114,7 @@ Already exists: `parent_hash` links blocks into a hash chain. The on-chain contr
 - Block ordering and timestamps
 - No blocks were inserted or removed
 
-**No changes needed** — the current chain structure works. The chain becomes more useful once state and events trees provide per-block proofs to anchor to.
+**No changes needed** — the current chain structure works. The chain becomes more useful once state roots and event commitments provide per-block proofs to anchor to.
 
 ## Proof Composition
 
@@ -129,7 +128,7 @@ Data:
   2. State Merkle proof: account 42 at block 1000 → {balance: X, deposited: D, positions: [...]}
   3. Block header at height 2000 (trusted via chain)
   4. State Merkle proof: account 42 at block 2000 → {balance: Y, deposited: D', positions: [...]}
-  5. Clearing prices at block 2000 (from events tree or header extension)
+  5. Clearing prices at block 2000 (from the event commitment or header extension)
 
 Computation:
   portfolio_value = balance_2000 + Σ(position * clearing_price)
@@ -149,7 +148,7 @@ Data: state proofs at daily intervals (30 snapshots). Computation: daily returns
 
 ### "I never traded market M"
 
-Data: for each block in range, events tree proof showing no fills for my account on market M. If blocks are frequent (1/sec), this could be compressed by providing state proofs showing my position on market M is 0 at start and 0 at end, plus events proofs at a coarser granularity.
+Data: for each block in range, event range proof showing no fills for my account on market M. If blocks are frequent (1/sec), this could be compressed by providing state proofs showing my position on market M is 0 at start and 0 at end, plus event proofs at a coarser granularity.
 
 ### "I had no deposits after block 1000"
 
@@ -157,7 +156,7 @@ Data: state proof at block 1000 showing `total_deposited = D`, state proof at bl
 
 ### "My account was never funded by account X"
 
-This requires provenance tracking not currently in the data model. Deposits are admin-only operations with no on-chain linkage to source. Once deposits come from L1 bridge (Phase 4), the deposit events in the events tree will include the L1 sender address, making this provable.
+This requires provenance tracking not currently in the data model. Deposits are admin-only operations with no on-chain linkage to source. Once deposits come from L1 bridge (Phase 4), the deposit events in the event commitment will include the L1 sender address, making this provable.
 
 ## Implementation Plan
 
@@ -165,15 +164,16 @@ This requires provenance tracking not currently in the data model. Deposits are 
 
 `Fill` now carries `account_id`. This was the prerequisite for useful event authentication.
 
-### Phase 1: Events Tree (simplest, most useful)
+### Phase 1: Events Commitment (done)
 
-Build a Merkle tree over block events and commit `events_root` in the block header. This is a pure addition — doesn't change existing state management.
+Build a keyless qMDB over block events and commit `events_root` in the block
+header. This is a pure addition - it doesn't change existing state management.
 
 - Canonical encoding for each event type
-- Simple binary Merkle tree (balanced, padded)
+- commonware `qmdb::keyless::variable` over canonical event bytes
 - `events_root` added to `BlockHeader`
 - Verifier checks `events_root` matches (new Layer 3 check)
-- BLAKE3 as leaf/node hash (consistent with existing choices)
+- SHA-256 qMDB root/proof format, matching the state-root verifier path
 
 ### Current: Typed qMDB State Root
 
@@ -202,7 +202,7 @@ qMDB operation/range proof parts.
 Historical state proofs and event proofs remain future work:
 
 - `GET /v1/proofs/state/{leaf_key_hex}?height={N}` -> historical typed-state proof
-- `GET /v1/proofs/events?height={N}` -> events tree for block N
+- `GET /v1/proofs/events?height={N}` -> qMDB event range proof for block N
 - `GET /v1/proofs/events/{account_id}?from={A}&to={B}` -> account's events with Merkle proofs
 
 Historical state proofs are intentionally not implemented yet. They become
@@ -249,24 +249,24 @@ implementation proves qMDB proof verification is too expensive.
 
 ## What Changes in Sybil
 
-| Component | Current | With events root | With proof API |
-|-----------|---------|------------------|----------------|
-| `BlockHeader` | state_root, parent_hash | + events_root | same |
-| `Block` | orders, fills, prices, rejections | + system_events | same |
-| `compute_state_root()` | native typed qMDB root | same | same |
-| `Fill` struct | order_id, qty, price, account_id | same | same |
-| `Account` | balance, positions, total_deposited, events_digest | same | same |
-| `AccountStore` | HashMap | same | mirrored into authenticated KV |
-| `store.rs` | redb tables + account qMDB snapshots | + events tree storage | dedicated typed-state qMDB |
-| Verifier Layer 3 | checks state_root, parent_hash | + checks events_root | verifies qMDB paths |
-| `BlockWitness` | full pre/post state snapshots + system_events | same | qMDB paths for touched state leaves |
-| API | no proof endpoints | same | + proof endpoints |
+| Component | Current | With proof API |
+|-----------|---------|----------------|
+| `BlockHeader` | state_root, events_root, parent_hash | same |
+| `Block` | orders, fills, prices, rejections, system_events | same |
+| `compute_state_root()` | native typed qMDB root | same |
+| `Fill` struct | order_id, qty, price, account_id | same |
+| `Account` | balance, positions, total_deposited, events_digest | same |
+| `AccountStore` | HashMap | mirrored into authenticated KV |
+| `store.rs` | redb tables + account qMDB snapshots | typed-state qMDB plus retained event proof material / block event bounds as needed |
+| Verifier Layer 3 | checks state_root, events_root, parent_hash | verifies qMDB paths |
+| `BlockWitness` | full pre/post state snapshots + system_events | qMDB paths for touched state leaves |
+| API | latest state proof endpoint | + historical state/event proof endpoints |
 
 ## Resolved Decisions
 
-1. **Events tree structure**: flat list of leaves, sorted by canonical block order. Per-account indexing can be added later if scans become too expensive.
+1. **Events commitment structure**: keyless qMDB append log over a flat list of canonical event bytes in section order: system events, accepted orders, rejected orders, fills. Per-account indexing can be added later if scans become too expensive.
 
-2. **Events hash function**: BLAKE3. It's already the event/header hash and remains acceptable for per-block event authentication.
+2. **Events hash function**: SHA-256 through commonware qMDB. This reuses the proof machinery already used by `state_root`; the separate per-account `events_digest` remains BLAKE3 because it is an account-local activity accumulator, not the block event commitment.
 
 3. **Typed state-root hash function**: SHA-256. This matches the current qmdb instantiation and is easier to route through ZK/EVM verification paths than BLAKE3.
 
@@ -283,6 +283,6 @@ implementation proves qMDB proof verification is too expensive.
 - [[L1 Settlement and Vault]] — how accepted roots and withdrawal proofs are used on-chain
 - [[Block Witness]] — evolves to use Merkle paths instead of full snapshots
 - [[State Root and Parent Hash]] — state-root concept and qMDB commitment
-- [[Four-Layer Verification]] — gains events_root check in Phase 1
+- [[Four-Layer Verification]] — checks `events_root` in Layer 3
 - [[Persistence]] — storage requirements for authenticated structures
-- [[Settlement]] — fills need account_id for events tree
+- [[Settlement]] — fills need account_id for the event commitment

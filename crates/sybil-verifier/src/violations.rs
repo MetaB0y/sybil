@@ -70,6 +70,8 @@ pub enum ViolationKind {
     // === Layer 3: Block verification ===
     /// Recomputed state root does not match header.
     StateRootMismatch,
+    /// Recomputed events root does not match header.
+    EventRootMismatch,
     /// Recomputed parent hash does not match header.
     ParentHashMismatch,
     /// `header.height != previous.height + 1`.

@@ -158,6 +158,7 @@ pub struct BlockResponse {
     pub height: u64,
     pub parent_hash: String,
     pub state_root: String,
+    pub events_root: String,
     pub order_count: u32,
     pub fill_count: u32,
     pub timestamp_ms: u64,

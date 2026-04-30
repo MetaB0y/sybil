@@ -7,7 +7,7 @@
 //!
 //! 1. **Match verification** — per-fill checks + market-level invariants
 //! 2. **Settlement verification** — re-derive post-state from post-system state + fills
-//! 3. **Block verification** — state root, parent hash, height, counts
+//! 3. **Block verification** — state root, events root, parent hash, height, counts
 //! 4. **Order verification** — post-system balance/position checks, rejection correctness
 //!
 //! # Usage
@@ -21,6 +21,8 @@
 
 pub mod arithmetic;
 pub mod block;
+mod canonical;
+pub mod event_commitment;
 pub mod match_verifier;
 pub mod orders;
 pub mod settlement;

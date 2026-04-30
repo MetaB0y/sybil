@@ -24,12 +24,13 @@ encoding — across Rust crates, across languages, and across implementations.
 Without a normative spec, drift is silent and catastrophic: two honest
 implementations can compute different state roots from the same logical state.
 
-Today the rules are scattered across five files:
+Today the rules are scattered across six files:
 
 - `crates/matching-sequencer/src/block.rs::hash_header`
 - `crates/matching-sequencer/src/canonical_state.rs::CanonicalState`
 - `crates/matching-sequencer/src/digest.rs` (5 event encoders)
 - `crates/sybil-verifier/src/block.rs::compute_state_root`
+- `crates/sybil-verifier/src/event_commitment.rs::event_leaf_values`
 - `crates/sybil-verifier/src/types.rs::AccountSnapshot`
 
 This RFC collects them in one place and pins the rules.
@@ -118,7 +119,7 @@ Rules:
 When a list of accounts is hashed (state root), accounts are sorted ascending
 by `id` and concatenated.
 
-### `BlockHeader v1`
+### `BlockHeader`
 
 Source: `matching-sequencer::block::hash_header`.
 
@@ -127,44 +128,42 @@ header_bytes =
       height:u64
    || parent_hash:[u8; 32]
    || state_root:[u8; 32]
+   || events_root:[u8; 32]
    || order_count:u32
    || fill_count:u32
    || timestamp_ms:u64
 ```
 
-Total: 8 + 32 + 32 + 4 + 4 + 8 = **88 bytes**, fixed.
+Total: 8 + 32 + 32 + 32 + 4 + 4 + 8 = **120 bytes**, fixed.
 
-[[Block Witness]] proposes an extended header that adds `events_root` and
-`witness_root`. Until that lands, `header_bytes` is the fixed 88-byte format
-above.
+`events_root` is the keyless qMDB commitment over canonical per-block event
+bytes. `witness_root` remains a proposed sibling commitment in [[Block Witness]];
+it is not part of the implemented header.
 
-### `Fill` (deferred)
+### `Fill`
 
-**TODO.** `Fill` is used inside the [[Block Witness]] but is currently
-serialized only via serde-for-debugging. The events tree (Proof Architecture
-Phase 1) will need a canonical encoding. Proposed:
+The implemented event commitment encodes fills as:
 
 ```
 fill_bytes =
-      order_id:u64
-   || fill_qty:u64
-   || fill_price:u64
-   || account_id:u64
-   || market_count:u32
-   || market_id:u32 * market_count
+      "sybil/event/fill"
+   || order_id:u64_le
+   || fill_qty:u64_le
+   || fill_price:u64_le
+   || account_id:u64_le
 ```
 
-Lists of fills sorted by `order_id` ascending; ties broken by original solver
-output index.
+Fill events stay in solver output order. The accepted-order event for the same
+`order_id` carries the order's market/payoff structure.
 
 ### `Order`, `MmConstraint`, `MarketGroup` (deferred)
 
-**TODO.** These only matter for the [[Block Witness]] canonical bytes and
-the ZK circuit. Not needed for state root. Encodings will be added in a
-follow-up RFC alongside the events tree. The Rust signing path already uses
-`sybil-canonical::Order`, including `expires_at_block`, so P256 signed orders
-cover resolved IOC/GTD expiry semantics even before the full witness byte spec
-is frozen.
+**TODO for full witness bytes.** `Order` already has a verifier-local canonical
+encoding for state leaves and event leaves. `MmConstraint` and `MarketGroup`
+still only matter for the full [[Block Witness]] canonical bytes and the ZK
+circuit. The Rust signing path already uses `sybil-canonical::Order`,
+including `expires_at_block`, so P256 signed orders cover resolved IOC/GTD
+expiry semantics even before the full witness byte spec is frozen.
 
 ### State leaves for `state_root`
 
@@ -485,11 +484,12 @@ header:
   height           = 1
   parent_hash      = [0; 32]
   state_root       = [1; 32]
+  events_root      = [2; 32]
   order_count      = 5
   fill_count       = 3
   timestamp_ms     = 1000
 
-header_bytes length = 88 bytes, as defined above.
+header_bytes length = 120 bytes, as defined above.
 header_hash = BLAKE3(header_bytes)
 ```
 
@@ -501,9 +501,9 @@ against the implementation. This RFC is pure spec.
 
 Two patterns:
 
-1. **New top-level root.** Don't extend the existing structure — introduce a
-   new root that covers the new field. `events_root` is the canonical
-   example: it's a sibling of `state_root`, not an extension of it.
+1. **New top-level root.** Add an explicit sibling commitment to the header
+   and update the header hash in the same change. `events_root` is the
+   canonical example: it's a sibling of `state_root`, not an extension of it.
 2. **Domain clarity.** If a new field fundamentally belongs inside an existing
    structure, update the relevant leaf domain/encoding and the state-root
    verifier in the same change.

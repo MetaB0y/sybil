@@ -1579,6 +1579,16 @@ impl BlockSequencer {
             &self.market_groups,
             &self.lifecycle,
         );
+        let system_event_witnesses: Vec<SystemEventWitness> =
+            system_events.iter().map(convert_system_event).collect();
+        let events_root = sybil_verifier::event_commitment::events_root_from_event_bytes(
+            &sybil_verifier::event_commitment::event_leaf_values(
+                &system_event_witnesses,
+                &witness_orders,
+                &witness_rejections,
+                fills,
+            ),
+        );
         let header = BlockHeader {
             height: self.height,
             parent_hash: self
@@ -1590,24 +1600,18 @@ impl BlockSequencer {
                 post_state.as_snapshots(),
                 &state_sidecar,
             ),
+            events_root,
             order_count,
             fill_count: fills.len() as u32,
             timestamp_ms,
         };
 
         let witness = BlockWitness {
-            header: WitnessBlockHeader {
-                height: header.height,
-                parent_hash: header.parent_hash,
-                state_root: header.state_root,
-                order_count: header.order_count,
-                fill_count: header.fill_count,
-                timestamp_ms: header.timestamp_ms,
-            },
+            header: header.to_witness_header(),
             previous_header,
             orders: witness_orders,
             rejections: witness_rejections,
-            system_events: system_events.iter().map(convert_system_event).collect(),
+            system_events: system_event_witnesses,
             fills: fills.to_vec(),
             clearing_prices: clearing_prices.clone(),
             total_welfare,
@@ -2004,14 +2008,10 @@ impl BlockSequencer {
             .settle(&fills, &mm_order_ids_set, self.height);
         let pending_orders_after = self.order_book.len();
 
-        let previous_header = self.last_header.as_ref().map(|h| WitnessBlockHeader {
-            height: h.height,
-            parent_hash: h.parent_hash,
-            state_root: h.state_root,
-            order_count: h.order_count,
-            fill_count: h.fill_count,
-            timestamp_ms: h.timestamp_ms,
-        });
+        let previous_header = self
+            .last_header
+            .as_ref()
+            .map(BlockHeader::to_witness_header);
 
         let WitnessArtifacts { header, witness } =
             self.assemble_witness_artifacts(WitnessAssemblyInput {
@@ -2899,6 +2899,10 @@ mod tests {
         let bp = seq.produce_block(vec![], 1000);
         assert_eq!(bp.block.header.height, 1);
         assert_eq!(bp.block.header.parent_hash, [0u8; 32]); // genesis
+        assert_eq!(
+            bp.block.header.events_root,
+            sybil_verifier::event_commitment::compute_events_root(&bp.witness)
+        );
         assert_eq!(bp.block.header.timestamp_ms, 1000);
     }
 
