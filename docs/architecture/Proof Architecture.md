@@ -205,10 +205,21 @@ Historical state proofs and event proofs remain future work:
 - `GET /v1/proofs/events?height={N}` -> events tree for block N
 - `GET /v1/proofs/events/{account_id}?from={A}&to={B}` -> account's events with Merkle proofs
 
-The sequencer needs to retain enough history to serve these: state tree
-history at each height, or enough data to reconstruct it. This interacts with
-the persistence tiers because authenticated state snapshots need to be stored
-or reconstructable.
+Historical state proofs are intentionally not implemented yet. They become
+important when L1 contracts accept old roots during a withdrawal window, when a
+ZK prover needs authenticated reads against a specific pre-state root, or when
+auditors need reproducible block-by-block account/order/market state. They are
+not required for the latest-root proof API, which is enough for current state
+checks and early prover plumbing.
+
+The sequencer needs to retain enough history to serve historical proofs:
+state tree history at each height, or enough data to reconstruct it. The
+current fenced A/B qMDB persistence boundary does not provide that by itself.
+Commonware qMDB provides historical operation proofs within its retained
+journal window, but Sybil still needs a height-to-root/operation-boundary index
+and a clean API for current-state membership or exclusion as of an old block.
+This interacts with the persistence tiers because authenticated state snapshots
+need to be stored or reconstructable.
 
 ### Later: Integration with ZK Pipeline
 

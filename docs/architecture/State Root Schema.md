@@ -130,10 +130,33 @@ equivalent open-exposure data are committed state. See
 
 ## Retention and Historical Proofs
 
-qMDB is append-only, so historical state proofs come from the retained journal
-window. Retention is configured by `items_per_blob` and pruning policy. A
-future "prune to last N blocks" policy is a storage and data-availability
-question, not a commitment-scheme question.
+The current proof API intentionally serves only the latest committed state.
+Historical proofs are useful once an external verifier needs to prove a claim
+against a specific previously accepted root:
+
+- a withdrawal leaf existed under root `R_N`, even if the latest state has
+  since consumed, expired, or replaced it
+- a prover is checking a transition from old root `R_N` to new root `R_N+1`
+- an auditor needs account, order, or market state exactly as of block `N`
+
+This is deferred because the current sequencer storage uses fenced A/B qMDB
+slots. That gives a clean latest committed root, but it is not a real
+retained-height proof store. Commonware qMDB is append-only and has historical
+operation proofs in the retained journal window, but Sybil still needs a
+designed height-to-root/operation-boundary index and a current-state
+membership/exclusion proof API for a past block height.
+
+Acceptable implementation shapes:
+
+- retain typed-state qMDB history plus per-block metadata, then expose
+  `GET /v1/proofs/state/{leaf_key_hex}?height=N`
+- archive full typed leaf snapshots for a bounded window and rebuild qMDB on
+  demand, only if simplicity matters more than duplication
+- keep latest-only proofs until L1 root acceptance, withdrawal claim windows,
+  or transition proofs require historical roots
+
+A future "prune to last N blocks" policy is therefore a storage and
+data-availability question, not a commitment-scheme question.
 
 ## Recovery Boundary
 
