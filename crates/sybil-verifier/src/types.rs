@@ -11,6 +11,7 @@ use matching_engine::{Fill, MarketGroup, MarketId, MmConstraint, Nanos, Order};
 ///
 /// Built by the sequencer, consumed by the verifier. A future ZK circuit
 /// takes this as its public/private input.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct BlockWitness {
     /// Block header being verified.
     pub header: WitnessBlockHeader,
@@ -52,7 +53,7 @@ pub struct BlockWitness {
 }
 
 /// Minimal block header stored in the witness.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct WitnessBlockHeader {
     pub height: u64,
     pub parent_hash: [u8; 32],
@@ -64,6 +65,7 @@ pub struct WitnessBlockHeader {
 }
 
 /// An order together with the account that placed it.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct WitnessOrder {
     pub order: Order,
     pub account_id: u64,
@@ -72,6 +74,7 @@ pub struct WitnessOrder {
 }
 
 /// A rejected order together with a reason.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct WitnessRejection {
     pub order: Order,
     pub account_id: u64,
@@ -79,7 +82,7 @@ pub struct WitnessRejection {
 }
 
 /// Reason an order was rejected (mirrors sequencer's `RejectionReason`).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum RejectionReason {
     InsufficientBalance {
         required: i64,
@@ -102,7 +105,7 @@ pub enum RejectionReason {
 }
 
 /// System state change recorded in a block witness.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SystemEventWitness {
     CreateAccount {
         account_id: u64,

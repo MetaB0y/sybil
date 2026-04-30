@@ -258,8 +258,8 @@ implementation proves qMDB proof verification is too expensive.
 | `Account` | balance, positions, total_deposited, events_digest | same |
 | `AccountStore` | HashMap | mirrored into authenticated KV |
 | `store.rs` | redb tables + account qMDB snapshots | typed-state qMDB plus retained event proof material / block event bounds as needed |
-| Verifier Layer 3 | checks state_root, events_root, parent_hash | verifies qMDB paths |
-| `BlockWitness` | full pre/post state snapshots + system_events | qMDB paths for touched state leaves |
+| Verifier Layer 3 | checks state_root, events_root, parent_hash | verifies post-state qMDB paths in the OpenVM guest; event-root recomputation remains next |
+| `BlockWitness` | full pre/post state snapshots + system_events | qMDB paths for committed post-state leaves, then touched historical leaves as needed |
 | API | latest state proof endpoint | + historical state/event proof endpoints |
 
 ## Resolved Decisions

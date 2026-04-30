@@ -20,12 +20,15 @@
 //! ```
 
 pub mod arithmetic;
+#[cfg(feature = "qmdb")]
 pub mod block;
 mod canonical;
+#[cfg(feature = "qmdb")]
 pub mod event_commitment;
 pub mod match_verifier;
 pub mod orders;
 pub mod settlement;
+pub mod state_schema;
 pub mod types;
 pub mod violations;
 
@@ -53,6 +56,7 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
 }
 
 /// Verify block header integrity (state root, parent hash, height, counts).
+#[cfg(feature = "qmdb")]
 pub fn verify_block(witness: &BlockWitness) -> VerificationResult {
     block::verify_block(witness)
 }
@@ -63,6 +67,7 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
 }
 
 /// Run all 4 verification layers and merge results.
+#[cfg(feature = "qmdb")]
 pub fn verify_full(witness: &BlockWitness, diagnostics: bool) -> VerificationResult {
     let mut result = verify_match(witness, diagnostics);
     result.merge(verify_settlement(witness));

@@ -1,0 +1,19 @@
+[package]
+name = "sybil-zk"
+version = "0.1.0"
+edition = "2021"
+description = "ZK public input binding and guest-safe Sybil verification entrypoints"
+
+[dependencies]
+blake3 = "1"
+serde = { version = "1", features = ["derive"] }
+sha2 = { version = "0.10", default-features = false }
+sha3 = "0.10"
+sybil-verifier = { path = "../sybil-verifier", default-features = false }
+
+[dev-dependencies]
+commonware-codec = "2026.4.0"
+commonware-cryptography = "2026.4.0"
+commonware-runtime = "2026.4.0"
+commonware-storage = "2026.4.0"
+matching-engine = { path = "../matching-engine" }

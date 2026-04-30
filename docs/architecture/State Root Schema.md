@@ -23,7 +23,7 @@ The root uses commonware's ordered current qMDB with SHA-256 and variable-size
 Implementation:
 
 - `crates/sybil-verifier/src/block.rs::compute_state_root_with_sidecar`
-- `crates/sybil-verifier/src/block.rs::state_root_leaves`
+- `crates/sybil-verifier/src/state_schema.rs::state_root_leaves`
 - `crates/sybil-verifier/src/block.rs::state_root_from_leaves`
 - `crates/matching-sequencer/src/block.rs::compute_complete_state_root`
 
@@ -69,6 +69,28 @@ copies elsewhere, but authenticated state values must be canonical leaf bytes.
 
 The qMDB root commits to the key/value pairs themselves. There is no separate
 sorted-leaf digest layer.
+
+## OpenVM State Proof
+
+The OpenVM guest does not rebuild the qMDB database. Instead, the private input
+includes commonware ordered-current-qMDB key/value proofs for every typed leaf
+derived from `BlockWitness.post_state` and `BlockWitness.state_sidecar`.
+
+For each derived leaf, the guest verifies:
+
+- the qMDB key/value proof against public `new_state_root`
+- the proven qMDB `next_key` equals the next derived key in bytewise sorted
+  order, wrapping from the last key back to the first
+
+This proves exact post-state keyspace, not just membership of a subset. If the
+committed qMDB contains a hidden extra active key, at least one adjacent
+`next_key` pointer will target that hidden key and the guest rejects the
+transition.
+
+The proof bytes are produced from commonware qMDB outside the guest. Inside
+OpenVM, `crates/sybil-zk` verifies the needed SHA-256 MMR/grafted-root proof
+shape directly, avoiding commonware storage as a guest dependency while keeping
+the proof format pinned to commonware's ordered-current-qMDB semantics.
 
 ## Sequencer Storage
 

@@ -125,7 +125,7 @@ The current model relies on explicit invariants:
 - The account qmdb slot named by `account_state_slot` must contain matching
   `height` and `next_account_id`.
 - The typed-state qmdb slot named by `account_state_slot` must contain leaf
-  bytes equal to `sybil_verifier::block::state_root_leaves` for the same
+  bytes equal to `sybil_verifier::state_schema::state_root_leaves` for the same
   account and sidecar snapshot.
 - The typed-state qmdb slot root must equal the committed block header
   `state_root`.

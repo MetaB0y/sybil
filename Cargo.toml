@@ -11,6 +11,7 @@ members = [
     "crates/sybil-api",
     "crates/sybil-api-types",
     "crates/sybil-verifier",
+    "crates/sybil-zk",
     "crates/sybil-polymarket",
 ]
 

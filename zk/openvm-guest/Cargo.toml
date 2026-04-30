@@ -1,0 +1,13 @@
+[package]
+name = "sybil-openvm-guest"
+version = "0.1.0"
+edition = "2021"
+description = "OpenVM guest for Sybil state-transition verification"
+
+# This package intentionally lives outside the root workspace so normal
+# `cargo test --workspace` does not require the OpenVM prerelease toolchain.
+[workspace]
+
+[dependencies]
+openvm = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.0-beta.2", features = ["std"] }
+sybil-zk = { path = "../../crates/sybil-zk" }

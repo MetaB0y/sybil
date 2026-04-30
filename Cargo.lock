@@ -4268,6 +4268,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "sybil-zk"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "commonware-codec",
+ "commonware-cryptography",
+ "commonware-runtime",
+ "commonware-storage",
+ "matching-engine",
+ "serde",
+ "sha2 0.10.9",
+ "sha3",
+ "sybil-verifier",
+]
+
+[[package]]
 name = "syn"
 version = "1.0.109"
 source = "registry+https://github.com/rust-lang/crates.io-index"

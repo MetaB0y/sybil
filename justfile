@@ -56,6 +56,18 @@ sim preset="medium" solver="lp" verbose="-v":
 build:
     cargo build --release
 
+# Install OpenVM 2.0 beta CLI used by the ZK guest tooling
+openvm-install:
+    cargo install --locked --git https://github.com/openvm-org/openvm.git --tag v2.0.0-beta.2 cargo-openvm
+
+# Check the OpenVM guest crate with the normal host compiler
+openvm-guest-check:
+    cargo check --manifest-path zk/openvm-guest/Cargo.toml
+
+# Build and transpile the Sybil OpenVM guest
+openvm-guest-build:
+    cargo openvm build --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil
+
 # Clean and rebuild
 rebuild:
     cargo clean && cargo build --release

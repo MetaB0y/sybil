@@ -8,6 +8,9 @@ contracts/out/
 contracts/cache/
 contracts/broadcast/
 contracts/lib/
+zk/openvm-guest/openvm/
+zk/openvm-guest/target/
+zk/openvm-guest/openvm_init.rs
 *.tsbuildinfo
 .env
 comparison*.json
