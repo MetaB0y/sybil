@@ -1313,6 +1313,80 @@ mod tests {
     }
 
     #[test]
+    fn missing_state_root_proof_fails_count_check() {
+        let mut input = empty_guest_input();
+        input.state_root_proof.leaf_proofs.pop();
+        let expected = sybil_verifier::state_schema::state_root_leaves(
+            &input.witness.post_state,
+            &input.witness.state_sidecar,
+        )
+        .len();
+
+        assert_eq!(
+            verify_state_transition_input(&input),
+            Err(ZkTransitionError::StateRootProofCountMismatch {
+                expected,
+                actual: expected - 1,
+            })
+        );
+    }
+
+    #[test]
+    fn duplicate_state_leaf_key_fails_before_proof_verification() {
+        let mut input = non_empty_guest_input();
+        input
+            .witness
+            .post_state
+            .push(input.witness.post_state[0].clone());
+        input
+            .state_root_proof
+            .leaf_proofs
+            .push(input.state_root_proof.leaf_proofs[0].clone());
+
+        assert!(matches!(
+            verify_state_transition_input(&input),
+            Err(ZkTransitionError::DuplicateStateLeafKey { .. })
+        ));
+    }
+
+    #[test]
+    fn reordered_state_root_proofs_fail() {
+        let mut input = non_empty_guest_input();
+        input.state_root_proof.leaf_proofs.swap(0, 1);
+
+        assert_eq!(
+            verify_state_transition_input(&input),
+            Err(ZkTransitionError::StateRootProofVerificationFailed { index: 0 })
+        );
+    }
+
+    #[test]
+    fn corrupted_activity_chunk_fails() {
+        let mut input = non_empty_guest_input();
+        input.state_root_proof.leaf_proofs[0]
+            .operation
+            .activity_chunk = [0u8; QMDB_STATE_CHUNK_SIZE];
+
+        assert_eq!(
+            verify_state_transition_input(&input),
+            Err(ZkTransitionError::StateRootProofVerificationFailed { index: 0 })
+        );
+    }
+
+    #[test]
+    fn wrong_committed_state_root_fails_proof_verification() {
+        let mut input = non_empty_guest_input();
+        input.witness.header.state_root = [0x42; 32];
+        input.public_inputs.new_state_root = input.witness.header.state_root;
+        input.public_inputs.block_hash = hash_header(&input.witness.header);
+
+        assert_eq!(
+            verify_state_transition_input(&input),
+            Err(ZkTransitionError::StateRootProofVerificationFailed { index: 0 })
+        );
+    }
+
+    #[test]
     fn hidden_state_leaf_fails_next_key_ring() {
         let mut input = empty_guest_input();
         let witness_leaves = sybil_verifier::state_schema::state_root_leaves(
