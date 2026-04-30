@@ -187,13 +187,23 @@ the typed leaves into a fresh qMDB and comparing the native qMDB root. Runtime
 persistence stores the same keyspace in a dedicated typed-state qMDB, so proof
 APIs can verify directly against the header root.
 
-### Next: Proof API
+### Current: State Proof API
 
-Expose endpoints for requesting authenticated data:
+The first proof endpoint serves authenticated typed-state data for the latest
+committed block:
 
-- `GET /v1/proofs/state/{key}?height={N}` → typed state inclusion/exclusion proof
-- `GET /v1/proofs/events?height={N}` → events tree for block N
-- `GET /v1/proofs/events/{account_id}?from={A}&to={B}` → account's events with Merkle proofs
+- `GET /v1/proofs/state/{leaf_key_hex}` -> typed state inclusion/exclusion proof
+
+The key is hex-encoded because typed state keys are canonical byte strings.
+The response includes the committed block height, header `state_root`, proof
+kind, canonical value for inclusion proofs, and the Commonware ordered-current
+qMDB operation/range proof parts.
+
+Historical state proofs and event proofs remain future work:
+
+- `GET /v1/proofs/state/{leaf_key_hex}?height={N}` -> historical typed-state proof
+- `GET /v1/proofs/events?height={N}` -> events tree for block N
+- `GET /v1/proofs/events/{account_id}?from={A}&to={B}` -> account's events with Merkle proofs
 
 The sequencer needs to retain enough history to serve these: state tree
 history at each height, or enough data to reconstruct it. This interacts with

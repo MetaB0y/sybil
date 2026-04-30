@@ -7,7 +7,11 @@ use crate::account::{Account, AccountId, AccountStore};
 use crate::canonical_state::CanonicalState;
 use crate::qmdb_accounts::QmdbAccounts;
 use crate::qmdb_state::QmdbState;
-pub use crate::qmdb_state::{QmdbStateLeafExclusionProof, QmdbStateLeafProof, QmdbStateRoot};
+pub use crate::qmdb_state::{
+    QmdbStateExclusionProofParts, QmdbStateKeyValueProofParts, QmdbStateLeafExclusionProof,
+    QmdbStateLeafProof, QmdbStateOperationProofParts, QmdbStateRangeProofParts, QmdbStateRoot,
+    QMDB_STATE_MAX_KEY_BYTES,
+};
 use crate::store::StoreError;
 
 type StoreFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, StoreError>> + Send + 'a>>;

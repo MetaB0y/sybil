@@ -17,6 +17,7 @@ use commonware_storage::qmdb::current::ordered::variable::{
     Db as OrderedVariableDb, KeyValueProof,
 };
 use commonware_storage::qmdb::current::ordered::ExclusionProof;
+use commonware_storage::qmdb::current::proof::{OperationProof, RangeProof};
 use commonware_storage::qmdb::current::VariableConfig;
 use commonware_storage::translator::OneCap;
 use futures::StreamExt;
@@ -26,12 +27,12 @@ use crate::account_storage::AccountSnapshotSlot;
 use crate::store::StoreError;
 
 pub const QMDB_STATE_CHUNK_SIZE: usize = 32;
+pub const QMDB_STATE_MAX_KEY_BYTES: usize = 64;
 const CHUNK_SIZE: usize = QMDB_STATE_CHUNK_SIZE;
 const PAGE_SIZE: u16 = 4096;
 const PAGE_CACHE_PAGES: usize = 128;
 const ITEMS_PER_BLOB: u64 = 1024;
 const WRITE_BUFFER_BYTES: usize = 64 * 1024;
-const MAX_KEY_BYTES: usize = 64;
 const MAX_VALUE_BYTES: usize = 1 << 20;
 
 type StateDb = OrderedVariableDb<
@@ -43,6 +44,7 @@ type StateDb = OrderedVariableDb<
     OneCap,
     CHUNK_SIZE,
 >;
+type StateLeafEntries = Vec<(Vec<u8>, Vec<u8>)>;
 
 pub type QmdbStateKeyValueProof =
     KeyValueProof<MmrFamily, Vec<u8>, Sha256Digest, QMDB_STATE_CHUNK_SIZE>;
@@ -54,6 +56,43 @@ pub type QmdbStateExclusionProof = ExclusionProof<
     Sha256Digest,
     QMDB_STATE_CHUNK_SIZE,
 >;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QmdbStateRangeProofParts {
+    pub leaves: u64,
+    pub digests: Vec<[u8; 32]>,
+    pub pre_prefix_acc: Option<[u8; 32]>,
+    pub unfolded_prefix_peaks: Vec<[u8; 32]>,
+    pub partial_chunk_digest: Option<[u8; 32]>,
+    pub ops_root: [u8; 32],
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QmdbStateOperationProofParts {
+    pub location: u64,
+    pub activity_chunk: [u8; QMDB_STATE_CHUNK_SIZE],
+    pub range: QmdbStateRangeProofParts,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QmdbStateKeyValueProofParts {
+    pub operation: QmdbStateOperationProofParts,
+    pub next_key: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum QmdbStateExclusionProofParts {
+    KeyValue {
+        operation: QmdbStateOperationProofParts,
+        span_key: Vec<u8>,
+        span_value: Vec<u8>,
+        span_next_key: Vec<u8>,
+    },
+    Commit {
+        operation: QmdbStateOperationProofParts,
+        metadata: Option<Vec<u8>>,
+    },
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct QmdbStateRoot {
@@ -81,6 +120,13 @@ impl QmdbStateLeafProof {
             &Sha256Digest::from(self.root),
         )
     }
+
+    pub fn proof_parts(&self) -> QmdbStateKeyValueProofParts {
+        QmdbStateKeyValueProofParts {
+            operation: operation_proof_parts(&self.proof.proof),
+            next_key: self.proof.next_key.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -101,6 +147,21 @@ impl QmdbStateLeafExclusionProof {
             &Sha256Digest::from(self.root),
         )
     }
+
+    pub fn proof_parts(&self) -> QmdbStateExclusionProofParts {
+        match &self.proof {
+            ExclusionProof::KeyValue(operation, update) => QmdbStateExclusionProofParts::KeyValue {
+                operation: operation_proof_parts(operation),
+                span_key: update.key.clone(),
+                span_value: update.value.clone(),
+                span_next_key: update.next_key.clone(),
+            },
+            ExclusionProof::Commit(operation, metadata) => QmdbStateExclusionProofParts::Commit {
+                operation: operation_proof_parts(operation),
+                metadata: metadata.clone(),
+            },
+        }
+    }
 }
 
 pub struct QmdbState {
@@ -109,14 +170,14 @@ pub struct QmdbState {
 
 enum Command {
     ReplaceLeaves {
-        leaves: Vec<(Vec<u8>, Vec<u8>)>,
+        leaves: StateLeafEntries,
         respond_to: oneshot::Sender<Result<(), StoreError>>,
     },
     Root {
         respond_to: oneshot::Sender<Result<QmdbStateRoot, StoreError>>,
     },
     Leaves {
-        respond_to: oneshot::Sender<Result<Vec<(Vec<u8>, Vec<u8>)>, StoreError>>,
+        respond_to: oneshot::Sender<Result<StateLeafEntries, StoreError>>,
     },
     LeafProof {
         leaf_key: Vec<u8>,
@@ -163,7 +224,7 @@ impl QmdbState {
         Ok(Self { sender })
     }
 
-    pub async fn persist(&self, leaves: Vec<(Vec<u8>, Vec<u8>)>) -> Result<(), StoreError> {
+    pub async fn persist(&self, leaves: StateLeafEntries) -> Result<(), StoreError> {
         let (respond_to, response) = oneshot::channel();
         self.sender
             .send(Command::ReplaceLeaves { leaves, respond_to })
@@ -185,7 +246,7 @@ impl QmdbState {
             .map_err(|_| StoreError::Qmdb("state qmdb response channel dropped".to_string()))?
     }
 
-    pub async fn leaves(&self) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StoreError> {
+    pub async fn leaves(&self) -> Result<StateLeafEntries, StoreError> {
         let (respond_to, response) = oneshot::channel();
         self.sender
             .send(Command::Leaves { respond_to })
@@ -283,7 +344,7 @@ async fn open_db(context: commonware_tokio::Context) -> Result<StateDb, StoreErr
             write_buffer: NonZeroUsize::new(WRITE_BUFFER_BYTES).unwrap(),
             compression: None,
             codec_config: (
-                (RangeCfg::from(0..=MAX_KEY_BYTES), ()),
+                (RangeCfg::from(0..=QMDB_STATE_MAX_KEY_BYTES), ()),
                 (RangeCfg::from(0..=MAX_VALUE_BYTES), ()),
             ),
             items_per_section: NonZeroU64::new(ITEMS_PER_BLOB).unwrap(),
@@ -298,16 +359,13 @@ async fn open_db(context: commonware_tokio::Context) -> Result<StateDb, StoreErr
         .map_err(|error| StoreError::Qmdb(format!("failed to initialize state qmdb: {error}")))
 }
 
-async fn replace_leaves(
-    db: &mut StateDb,
-    leaves: Vec<(Vec<u8>, Vec<u8>)>,
-) -> Result<(), StoreError> {
+async fn replace_leaves(db: &mut StateDb, leaves: StateLeafEntries) -> Result<(), StoreError> {
     let current_entries = collect_entries(db).await?;
     let mut desired = HashMap::new();
     for (key, value) in leaves {
-        if key.len() > MAX_KEY_BYTES {
+        if key.len() > QMDB_STATE_MAX_KEY_BYTES {
             return Err(StoreError::Qmdb(format!(
-                "state qmdb key exceeds {MAX_KEY_BYTES} bytes"
+                "state qmdb key exceeds {QMDB_STATE_MAX_KEY_BYTES} bytes"
             )));
         }
         if value.len() > MAX_VALUE_BYTES {
@@ -361,7 +419,43 @@ fn root(slot: AccountSnapshotSlot, db: &StateDb) -> QmdbStateRoot {
     }
 }
 
-async fn collect_entries(db: &StateDb) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StoreError> {
+fn digest_bytes(digest: Sha256Digest) -> [u8; 32] {
+    digest.0
+}
+
+fn range_proof_parts(proof: &RangeProof<MmrFamily, Sha256Digest>) -> QmdbStateRangeProofParts {
+    QmdbStateRangeProofParts {
+        leaves: u64::from(proof.proof.leaves),
+        digests: proof
+            .proof
+            .digests
+            .iter()
+            .copied()
+            .map(digest_bytes)
+            .collect(),
+        pre_prefix_acc: proof.pre_prefix_acc.map(digest_bytes),
+        unfolded_prefix_peaks: proof
+            .unfolded_prefix_peaks
+            .iter()
+            .copied()
+            .map(digest_bytes)
+            .collect(),
+        partial_chunk_digest: proof.partial_chunk_digest.map(digest_bytes),
+        ops_root: digest_bytes(proof.ops_root),
+    }
+}
+
+fn operation_proof_parts(
+    proof: &OperationProof<MmrFamily, Sha256Digest, QMDB_STATE_CHUNK_SIZE>,
+) -> QmdbStateOperationProofParts {
+    QmdbStateOperationProofParts {
+        location: u64::from(proof.loc),
+        activity_chunk: proof.chunk,
+        range: range_proof_parts(&proof.range_proof),
+    }
+}
+
+async fn collect_entries(db: &StateDb) -> Result<StateLeafEntries, StoreError> {
     let stream = db
         .stream_range(Vec::new())
         .await

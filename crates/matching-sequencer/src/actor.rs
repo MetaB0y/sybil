@@ -23,6 +23,10 @@ use crate::portfolio::{self, PortfolioSummary};
 use crate::sequencer::{
     BlockSequencer, OrderSubmission, PendingOrderInfo, PreparedBlock, SequencerConfig,
 };
+use crate::{
+    AccountSnapshotSlot, QmdbStateExclusionProofParts, QmdbStateKeyValueProofParts,
+    QMDB_STATE_MAX_KEY_BYTES,
+};
 
 const SEQUENCER_ACTOR_METRIC_NAME: &str = "sequencer";
 
@@ -35,6 +39,10 @@ pub enum SequencerMsg {
     GetLatestBlock(RpcReplyPort<Option<Block>>),
     GetAccount(AccountId, RpcReplyPort<Option<Account>>),
     GetStateRoot(RpcReplyPort<[u8; 32]>),
+    GetStateProof(
+        Vec<u8>,
+        RpcReplyPort<Result<SequencerStateProof, SequencerError>>,
+    ),
     ProduceBlock(RpcReplyPort<Result<Block, SequencerError>>),
     CreateAccount(i64, RpcReplyPort<Account>),
     FundAccount(
@@ -119,6 +127,27 @@ pub struct MarketSearchResult {
     pub no_price_nanos: Option<Nanos>,
     pub volume_nanos: u64,
     pub status: MarketStatus,
+}
+
+#[derive(Clone, Debug)]
+pub struct SequencerStateProof {
+    pub block_height: u64,
+    pub state_root: [u8; 32],
+    pub slot: AccountSnapshotSlot,
+    pub leaf_key: Vec<u8>,
+    pub verified: bool,
+    pub kind: SequencerStateProofKind,
+}
+
+#[derive(Clone, Debug)]
+pub enum SequencerStateProofKind {
+    Inclusion {
+        leaf_value: Vec<u8>,
+        proof: QmdbStateKeyValueProofParts,
+    },
+    Exclusion {
+        proof: QmdbStateExclusionProofParts,
+    },
 }
 
 struct SequencerActor;
@@ -808,6 +837,78 @@ impl SequencerActorState {
         }
         self.sequencer.request_bridge_withdrawal(request)
     }
+
+    async fn handle_state_proof(
+        &self,
+        leaf_key: Vec<u8>,
+    ) -> Result<SequencerStateProof, SequencerError> {
+        if leaf_key.len() > QMDB_STATE_MAX_KEY_BYTES {
+            return Err(SequencerError::ProofUnavailable(format!(
+                "state leaf key exceeds {QMDB_STATE_MAX_KEY_BYTES} bytes"
+            )));
+        }
+
+        let Some(store) = &self.store else {
+            return Err(SequencerError::ProofUnavailable(
+                "state proofs require a persistent store".to_string(),
+            ));
+        };
+
+        let root = store
+            .current_state_qmdb_root()
+            .await
+            .map_err(|error| SequencerError::Persistence(error.to_string()))?
+            .ok_or(SequencerError::BlockNotFound)?;
+
+        if let Some(proof) = store
+            .current_state_qmdb_leaf_proof(&leaf_key)
+            .await
+            .map_err(|error| SequencerError::Persistence(error.to_string()))?
+        {
+            if proof.root != root.root || proof.slot != root.slot {
+                return Err(SequencerError::Persistence(
+                    "state proof root does not match committed qMDB root".to_string(),
+                ));
+            }
+            return Ok(SequencerStateProof {
+                block_height: self.sequencer.height(),
+                state_root: proof.root,
+                slot: proof.slot,
+                leaf_key: proof.leaf_key.clone(),
+                verified: proof.verify(),
+                kind: SequencerStateProofKind::Inclusion {
+                    leaf_value: proof.leaf_value.clone(),
+                    proof: proof.proof_parts(),
+                },
+            });
+        }
+
+        let proof = store
+            .current_state_qmdb_leaf_exclusion_proof(&leaf_key)
+            .await
+            .map_err(|error| SequencerError::Persistence(error.to_string()))?
+            .ok_or_else(|| {
+                SequencerError::Persistence(
+                    "state qmdb returned neither inclusion nor exclusion proof".to_string(),
+                )
+            })?;
+        if proof.root != root.root || proof.slot != root.slot {
+            return Err(SequencerError::Persistence(
+                "state proof root does not match committed qMDB root".to_string(),
+            ));
+        }
+
+        Ok(SequencerStateProof {
+            block_height: self.sequencer.height(),
+            state_root: root.root,
+            slot: proof.slot,
+            leaf_key: proof.leaf_key.clone(),
+            verified: proof.verify(),
+            kind: SequencerStateProofKind::Exclusion {
+                proof: proof.proof_parts(),
+            },
+        })
+    }
 }
 
 #[ractor::async_trait]
@@ -913,6 +1014,9 @@ impl Actor for SequencerActor {
                     state.sequencer.market_lifecycle(),
                 );
                 let _ = reply.send(root);
+            }
+            SequencerMsg::GetStateProof(leaf_key, reply) => {
+                let _ = reply.send(state.handle_state_proof(leaf_key).await);
             }
             SequencerMsg::ProduceBlock(reply) => {
                 state.on_tick().await;
@@ -1398,6 +1502,14 @@ impl SequencerHandle {
 
     pub async fn get_state_root(&self) -> Result<[u8; 32], SequencerError> {
         self.rpc(SequencerMsg::GetStateRoot).await
+    }
+
+    pub async fn get_state_proof(
+        &self,
+        leaf_key: Vec<u8>,
+    ) -> Result<SequencerStateProof, SequencerError> {
+        self.rpc(|reply| SequencerMsg::GetStateProof(leaf_key, reply))
+            .await?
     }
 
     pub async fn produce_block(&self) -> Result<Block, SequencerError> {

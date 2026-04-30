@@ -27,9 +27,13 @@ pub mod validation;
 
 pub use account::{Account, AccountId, AccountStore};
 pub use account_storage::{
-    AccountSnapshotSlot, QmdbStateLeafExclusionProof, QmdbStateLeafProof, QmdbStateRoot,
+    AccountSnapshotSlot, QmdbStateExclusionProofParts, QmdbStateKeyValueProofParts,
+    QmdbStateLeafExclusionProof, QmdbStateLeafProof, QmdbStateOperationProofParts,
+    QmdbStateRangeProofParts, QmdbStateRoot, QMDB_STATE_MAX_KEY_BYTES,
 };
-pub use actor::{MarketSearchResult, SequencerHandle};
+pub use actor::{
+    MarketSearchResult, SequencerHandle, SequencerStateProof, SequencerStateProofKind,
+};
 pub use block::{Block, BlockProduction};
 pub use bridge::{
     BridgeBlockData, BridgeState, BridgeWithdrawalRequest, EthAddress, L1Deposit, WithdrawalLeaf,

@@ -5,4 +5,5 @@ pub mod bridge;
 pub mod feeds;
 pub mod markets;
 pub mod orders;
+pub mod proofs;
 pub mod system;

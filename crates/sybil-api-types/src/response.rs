@@ -253,6 +253,69 @@ pub struct StateRootResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct StateProofResponse {
+    pub block_height: u64,
+    pub state_root: String,
+    pub state_slot: String,
+    pub leaf_key_hex: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leaf_key_ascii: Option<String>,
+    pub proof_kind: String,
+    pub proof_format: String,
+    pub verified: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leaf_value_hex: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inclusion_proof: Option<QmdbStateInclusionProofResponse>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exclusion_proof: Option<QmdbStateExclusionProofResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct QmdbStateInclusionProofResponse {
+    pub operation: QmdbStateOperationProofResponse,
+    pub next_key_hex: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct QmdbStateExclusionProofResponse {
+    pub variant: String,
+    pub operation: QmdbStateOperationProofResponse,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span_key_hex: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span_value_hex: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span_next_key_hex: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata_hex: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct QmdbStateOperationProofResponse {
+    pub location: u64,
+    pub activity_chunk_hex: String,
+    pub range: QmdbStateRangeProofResponse,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct QmdbStateRangeProofResponse {
+    pub leaves: u64,
+    pub digests_hex: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_prefix_acc_hex: Option<String>,
+    pub unfolded_prefix_peaks_hex: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partial_chunk_digest_hex: Option<String>,
+    pub ops_root_hex: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ResolveMarketResponse {
     pub market_id: u32,
     pub payout_nanos: u64,

@@ -21,6 +21,7 @@ use crate::types::response::*;
     paths(
         routes::system::health,
         routes::system::state_root,
+        routes::proofs::get_state_proof,
         routes::accounts::create_account,
         routes::accounts::fund_account,
         routes::accounts::get_account,
@@ -100,6 +101,11 @@ use crate::types::response::*;
         BlockResponse,
         HealthResponse,
         StateRootResponse,
+        StateProofResponse,
+        QmdbStateInclusionProofResponse,
+        QmdbStateExclusionProofResponse,
+        QmdbStateOperationProofResponse,
+        QmdbStateRangeProofResponse,
         ResolveMarketResponse,
         PortfolioResponse,
         PositionValueResponse,
@@ -219,6 +225,10 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/v1/state-root",
             axum::routing::get(routes::system::state_root),
+        )
+        .route(
+            "/v1/proofs/state/{leaf_key_hex}",
+            axum::routing::get(routes::proofs::get_state_proof),
         )
         // Simulation control
         .route(

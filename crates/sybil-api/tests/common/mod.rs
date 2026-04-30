@@ -3,6 +3,8 @@
 // narrow the allow to the specific helpers so a genuinely unused addition
 // still warns.
 
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -10,6 +12,7 @@ use axum::http::{HeaderMap, Method, Request, StatusCode};
 use axum::Router;
 use http_body_util::BodyExt;
 use matching_engine::MarketSet;
+use matching_sequencer::store::Store;
 use matching_sequencer::{
     AccountStore, AdminOracle, BlockSequencer, PublicKey, SequencerConfig, SequencerHandle,
 };
@@ -20,6 +23,13 @@ use sybil_api::config::ApiConfig;
 use sybil_api::state::AppState;
 use sybil_oracle::{FeedId, FeedPubkey, ResolutionPolicy, ResolutionTemplate, TemplateId};
 use tower::ServiceExt;
+
+static NEXT_STORE_ID: AtomicU64 = AtomicU64::new(0);
+
+fn temp_store_path() -> PathBuf {
+    let id = NEXT_STORE_ID.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("sybil-api-test-{}-{id}.redb", std::process::id()))
+}
 
 /// Create a test app with optional dev mode. Bootstraps an `admin` feed +
 /// `admin_immediate` template out of the box, mirroring production wiring.
@@ -97,6 +107,33 @@ pub async fn test_app_with_config(config: ApiConfig) -> (Router, SequencerHandle
     let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
         .handle();
+    let state = AppState::new(handle.clone(), &config, prometheus);
+    (create_router(state), handle)
+}
+
+/// Create a test app backed by the production persistent store path. Use this
+/// for endpoints that depend on qMDB state roots or proofs.
+#[allow(dead_code)]
+pub async fn test_app_with_store(dev_mode: bool) -> (Router, SequencerHandle) {
+    let accounts = AccountStore::new();
+    let markets = MarketSet::new();
+    let oracle = Arc::new(AdminOracle::new());
+    let sequencer = BlockSequencer::with_default_solver(
+        accounts,
+        markets,
+        vec![],
+        oracle,
+        SequencerConfig::default(),
+    );
+    let store = Store::open(&temp_store_path()).expect("test store opens");
+    let handle = SequencerHandle::spawn_with_store(sequencer, Some(store));
+    let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .build_recorder()
+        .handle();
+    let config = ApiConfig {
+        dev_mode,
+        ..ApiConfig::default()
+    };
     let state = AppState::new(handle.clone(), &config, prometheus);
     (create_router(state), handle)
 }

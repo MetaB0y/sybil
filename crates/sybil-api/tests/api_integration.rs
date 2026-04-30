@@ -10,7 +10,9 @@ use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
 use serde_json::{json, Value};
 
-use common::{get, post_json, post_json_with_headers, test_app, test_app_with_config};
+use common::{
+    get, post_json, post_json_with_headers, test_app, test_app_with_config, test_app_with_store,
+};
 use matching_engine::MarketSet;
 use matching_sequencer::crypto::{canonical_cancel_bytes, canonical_order_bytes};
 use sybil_api::config::ApiConfig;
@@ -33,6 +35,13 @@ fn hex_bytes(byte: u8, len: usize) -> String {
 
 fn new_signing_key() -> SigningKey {
     SigningKey::from_bytes((&[7u8; 32]).into()).expect("fixed signing key")
+}
+
+fn account_state_leaf_key(account_id: u64) -> Vec<u8> {
+    let mut key = Vec::with_capacity(13);
+    key.extend_from_slice(b"acct/");
+    key.extend_from_slice(&account_id.to_be_bytes());
+    key
 }
 
 #[tokio::test]
@@ -200,6 +209,63 @@ async fn get_nonexistent_block_404() {
     // No blocks produced yet
     let (status, _) = get(app, "/v1/blocks/latest").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn state_proof_returns_inclusion_for_committed_account_leaf() {
+    let (app, handle) = test_app_with_store(true).await;
+    let account = handle.create_account(1_000_000).await.unwrap();
+    let block = handle.produce_block().await.unwrap();
+    let leaf_key = account_state_leaf_key(account.id.0);
+
+    let (status, body) = get(app, &format!("/v1/proofs/state/{}", hex::encode(&leaf_key))).await;
+
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let proof = parse_json(&body);
+    assert_eq!(proof["block_height"], json!(block.header.height));
+    assert_eq!(
+        proof["state_root"],
+        json!(hex::encode(block.header.state_root))
+    );
+    assert_eq!(proof["leaf_key_hex"], json!(hex::encode(leaf_key)));
+    assert_eq!(proof["proof_kind"], json!("inclusion"));
+    assert_eq!(proof["verified"], json!(true));
+    assert!(proof["leaf_value_hex"].as_str().is_some());
+    assert!(proof["inclusion_proof"]["operation"]["location"]
+        .as_u64()
+        .is_some());
+}
+
+#[tokio::test]
+async fn state_proof_returns_exclusion_for_missing_leaf() {
+    let (app, handle) = test_app_with_store(true).await;
+    handle.create_account(1_000_000).await.unwrap();
+    let block = handle.produce_block().await.unwrap();
+    let leaf_key = b"acct/missing".to_vec();
+
+    let (status, body) = get(app, &format!("/v1/proofs/state/{}", hex::encode(&leaf_key))).await;
+
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let proof = parse_json(&body);
+    assert_eq!(proof["block_height"], json!(block.header.height));
+    assert_eq!(
+        proof["state_root"],
+        json!(hex::encode(block.header.state_root))
+    );
+    assert_eq!(proof["leaf_key_ascii"], json!("acct/missing"));
+    assert_eq!(proof["proof_kind"], json!("exclusion"));
+    assert_eq!(proof["verified"], json!(true));
+    assert!(proof.get("leaf_value_hex").is_none());
+    assert!(proof["exclusion_proof"]["operation"]["location"]
+        .as_u64()
+        .is_some());
+}
+
+#[tokio::test]
+async fn state_proof_rejects_invalid_leaf_key_hex() {
+    let (app, _) = test_app_with_store(true).await;
+    let (status, _) = get(app, "/v1/proofs/state/not-hex").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 // ---------------------------------------------------------------------------

@@ -92,26 +92,35 @@ and exclusion proofs. Those proofs verify directly against
 
 ## Proof API
 
-qMDB exposes current-value and exclusion proofs natively. A Sybil-facing API
-should wrap them for off-chain verifiers and ZK provers:
+qMDB exposes current-value and exclusion proofs natively. The Sybil API wraps
+the committed typed-state qMDB proof for off-chain verifiers and ZK provers:
 
 ```
-GET /v1/proofs/state/{key}?height={N}
+GET /v1/proofs/state/{leaf_key_hex}
   -> {
-      "key": "acct/42",
-      "block_height": N,
-      "state_root": "0x...",
-      "leaf": "0x...",
-      "leaf_type": "acct",
-      "qmdb_proof": { ... }
+      "block_height": 42,
+      "state_root": "...",
+      "leaf_key_hex": "...",
+      "proof_kind": "inclusion" | "exclusion",
+      "proof_format": "commonware-qmdb-current-ordered-sha256-mmr",
+      "verified": true,
+      "leaf_value_hex": "...",
+      "inclusion_proof": { ... },
+      "exclusion_proof": { ... }
     }
 ```
 
+The endpoint currently serves the latest committed block only. The path key is
+hex-encoded because canonical keys are byte strings (`acct/` followed by an
+8-byte big-endian id, `order/` followed by an 8-byte id, and so on).
+
 Verifier logic checks the qMDB proof with SHA-256, the supplied key/value (or
-exclusion key), and the header `state_root`. For bridge withdrawals, the L1
-contract should verify a ZK proof over the relevant qMDB membership/exclusion
-checks rather than reimplementing qMDB proof verification directly in
-Solidity.
+exclusion key), and the header `state_root`. The API also verifies the proof
+server-side before returning it, but external verifiers must treat that boolean
+as diagnostic only and verify independently. For bridge withdrawals, the L1
+contract should verify a ZK proof over the relevant qMDB
+membership/exclusion checks rather than reimplementing qMDB proof verification
+directly in Solidity.
 
 Normal bridge withdrawals should prove a committed
 `withdrawal/{withdrawal_id}` leaf. Emergency cash exits should expose

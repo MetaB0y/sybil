@@ -90,6 +90,9 @@ pub enum SequencerError {
     /// Bridge deposit or withdrawal validation failed.
     #[error("bridge error: {0}")]
     Bridge(String),
+    /// Requested proof cannot be served by this sequencer configuration.
+    #[error("proof unavailable: {0}")]
+    ProofUnavailable(String),
     /// Block persistence failed before the prepared block could be committed.
     #[error("block persistence failed: {0}")]
     Persistence(String),
