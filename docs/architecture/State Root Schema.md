@@ -3,7 +3,7 @@ tags: [zk, spec]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-04-29
+last_verified: 2026-04-30
 ---
 
 # State Root Schema
@@ -94,6 +94,16 @@ MessagePack account copies alongside the typed leaves, the public
 so the storage keyspace and public commitment use the same typed bytes before
 we switch to native qmdb roots and proofs.
 
+The account-storage layer now exposes the current qmdb authenticated root and
+typed-leaf inclusion/exclusion proofs. That root has explicit scope
+`AccountDbAllSlots`: it covers every active key in the account qmdb, including
+both A/B slots, slot metadata, legacy account rows, and typed `v2:` leaves.
+A typed leaf proof targets the encoded key
+`slot_prefix || "v2:" || leaf_key` and verifies against that full account-qmdb
+root. This is useful proof plumbing for the current typed leaves, but it is not
+the final block-header state root because redb still supplies the authoritative
+slot fence and the root includes transitional non-state-root rows.
+
 ## Historical v1: flat canonical hash
 
 Implementation: `crates/sybil-verifier/src/block.rs::compute_account_state_root_v1`.
@@ -152,9 +162,11 @@ current code:
 - Typed commitment leaves use keys `slot_prefix || "v2:" || leaf_key` and the
   same canonical values hashed into `state_root_v2`.
 - The qmdb type alias pins the hasher to `commonware_cryptography::Sha256`.
-- The MMR root produced by `batch.merkleize(...).apply_batch(...)` exists
-  **but is not currently exposed or used** — the block header uses the
-  canonical SHA-256 typed leaf digest described in §Current root.
+- `QmdbAccounts` exposes the full account-qmdb authenticated root plus
+  typed-leaf inclusion and exclusion proofs. These proofs are verified against
+  the account-qmdb root, not against `state_root_v2`.
+- The block header uses the canonical SHA-256 typed leaf digest described in
+  §Current root.
 - Bridge deposits and withdrawals now persist as redb sidecar state
   (`BridgeState`) plus pending WALs. Blocks expose the sidecar transition data
   for proof-generation, and the header root now commits
@@ -360,9 +372,10 @@ Out of scope here:
 
 ## Open questions
 
-1. **Exposing qmdb's MMR root and proofs.** The `merkleize` API builds the
-   root but the current `QmdbAccounts` wrapper does not surface it. The v2
-   implementation should replace that wrapper with a typed state wrapper.
+1. **Typed-only native qmdb root.** The current wrapper exposes proofs for
+   typed `v2:` leaves against the full account-qmdb root. The native state-root
+   migration should replace the mixed account wrapper with a typed state wrapper
+   whose active keyspace is exactly the block-header state keyspace.
 2. **Events tree co-habitation.** The events tree from
    [[Proof Architecture]] is orthogonal. It may remain a separate per-block
    tree even though long-lived state lives in qmdb.

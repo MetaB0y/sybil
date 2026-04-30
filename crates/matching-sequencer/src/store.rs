@@ -54,7 +54,7 @@ use tracing::{debug, info, warn};
 use crate::account::{AccountId, AccountStore};
 use crate::account_storage::{
     AccountSnapshotSlot, AccountStateStore, CommittedAccountState, FencedAccountStorage,
-    RecoveryAccountState,
+    QmdbAccountRoot, QmdbTypedLeafExclusionProof, QmdbTypedLeafProof, RecoveryAccountState,
 };
 use crate::block::{state_sidecar_snapshot_from_resting_orders, BlockHeader};
 use crate::bridge::{BridgeState, BridgeWithdrawalRequest, L1Deposit};
@@ -454,6 +454,59 @@ impl Store {
         txn.commit()?;
         debug!(height = snapshot.header.height, "block persisted");
         Ok(())
+    }
+
+    pub async fn account_qmdb_root(&self) -> Result<QmdbAccountRoot, StoreError> {
+        self.account_state_store.qmdb_account_root().await
+    }
+
+    pub async fn account_qmdb_typed_leaves(
+        &self,
+        slot: AccountSnapshotSlot,
+    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StoreError> {
+        self.account_state_store.qmdb_typed_leaves(slot).await
+    }
+
+    pub async fn account_qmdb_typed_leaf_proof(
+        &self,
+        slot: AccountSnapshotSlot,
+        leaf_key: &[u8],
+    ) -> Result<Option<QmdbTypedLeafProof>, StoreError> {
+        self.account_state_store
+            .qmdb_typed_leaf_proof(slot, leaf_key)
+            .await
+    }
+
+    pub async fn account_qmdb_typed_leaf_exclusion_proof(
+        &self,
+        slot: AccountSnapshotSlot,
+        leaf_key: &[u8],
+    ) -> Result<Option<QmdbTypedLeafExclusionProof>, StoreError> {
+        self.account_state_store
+            .qmdb_typed_leaf_exclusion_proof(slot, leaf_key)
+            .await
+    }
+
+    pub async fn current_account_qmdb_typed_leaf_proof(
+        &self,
+        leaf_key: &[u8],
+    ) -> Result<Option<QmdbTypedLeafProof>, StoreError> {
+        let Some(fence) = read_account_state_fence(&self.db)? else {
+            return Ok(None);
+        };
+        self.account_qmdb_typed_leaf_proof(fence.slot, leaf_key)
+            .await
+    }
+
+    pub async fn current_account_qmdb_typed_leaf_exclusion_proof(
+        &self,
+        leaf_key: &[u8],
+    ) -> Result<Option<QmdbTypedLeafExclusionProof>, StoreError> {
+        let Some(fence) = read_account_state_fence(&self.db)? else {
+            return Ok(None);
+        };
+        self.account_qmdb_typed_leaf_exclusion_proof(fence.slot, leaf_key)
+            .await
     }
 
     /// Load state from the store. Returns None if the store is empty (fresh start).

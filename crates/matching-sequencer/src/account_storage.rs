@@ -5,6 +5,9 @@ use std::pin::Pin;
 
 use crate::account::{Account, AccountId, AccountStore};
 use crate::qmdb_accounts::QmdbAccounts;
+pub use crate::qmdb_accounts::{
+    QmdbAccountRoot, QmdbAccountRootScope, QmdbTypedLeafExclusionProof, QmdbTypedLeafProof,
+};
 use crate::store::StoreError;
 
 type StoreFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, StoreError>> + Send + 'a>>;
@@ -72,6 +75,25 @@ pub trait AccountStateStore: Send + Sync {
     fn persist<'a>(&'a self, state: CommittedAccountState<'a>) -> StoreFuture<'a, ()>;
 
     fn recover<'a>(&'a self, state: RecoveryAccountState) -> StoreFuture<'a, RecoveredAccounts>;
+
+    fn qmdb_account_root<'a>(&'a self) -> StoreFuture<'a, QmdbAccountRoot>;
+
+    fn qmdb_typed_leaves<'a>(
+        &'a self,
+        slot: AccountSnapshotSlot,
+    ) -> StoreFuture<'a, Vec<(Vec<u8>, Vec<u8>)>>;
+
+    fn qmdb_typed_leaf_proof<'a>(
+        &'a self,
+        slot: AccountSnapshotSlot,
+        leaf_key: &'a [u8],
+    ) -> StoreFuture<'a, Option<QmdbTypedLeafProof>>;
+
+    fn qmdb_typed_leaf_exclusion_proof<'a>(
+        &'a self,
+        slot: AccountSnapshotSlot,
+        leaf_key: &'a [u8],
+    ) -> StoreFuture<'a, Option<QmdbTypedLeafExclusionProof>>;
 }
 
 pub struct FencedAccountStorage {
@@ -122,6 +144,39 @@ impl AccountStateStore for FencedAccountStorage {
                 qmdb_accounts.height,
                 qmdb_accounts.next_account_id
             )))
+        })
+    }
+
+    fn qmdb_account_root<'a>(&'a self) -> StoreFuture<'a, QmdbAccountRoot> {
+        Box::pin(async move { self.qmdb_accounts.account_root().await })
+    }
+
+    fn qmdb_typed_leaves<'a>(
+        &'a self,
+        slot: AccountSnapshotSlot,
+    ) -> StoreFuture<'a, Vec<(Vec<u8>, Vec<u8>)>> {
+        Box::pin(async move { self.qmdb_accounts.typed_leaves(slot).await })
+    }
+
+    fn qmdb_typed_leaf_proof<'a>(
+        &'a self,
+        slot: AccountSnapshotSlot,
+        leaf_key: &'a [u8],
+    ) -> StoreFuture<'a, Option<QmdbTypedLeafProof>> {
+        let leaf_key = leaf_key.to_vec();
+        Box::pin(async move { self.qmdb_accounts.typed_leaf_proof(slot, &leaf_key).await })
+    }
+
+    fn qmdb_typed_leaf_exclusion_proof<'a>(
+        &'a self,
+        slot: AccountSnapshotSlot,
+        leaf_key: &'a [u8],
+    ) -> StoreFuture<'a, Option<QmdbTypedLeafExclusionProof>> {
+        let leaf_key = leaf_key.to_vec();
+        Box::pin(async move {
+            self.qmdb_accounts
+                .typed_leaf_exclusion_proof(slot, &leaf_key)
+                .await
         })
     }
 }
@@ -221,5 +276,68 @@ mod tests {
         };
 
         assert!(matches!(error, StoreError::CorruptLayout(_)));
+    }
+
+    #[tokio::test]
+    async fn test_qmdb_typed_leaves_match_verifier_state_root_v2_leaves() {
+        let path = temp_dir("fenced-account-storage-typed-leaves");
+        let storage = FencedAccountStorage::open(&path).unwrap();
+        let accounts = sample_accounts(100);
+        let state_sidecar = sybil_verifier::StateSidecarSnapshot::default();
+        let slot = AccountSnapshotSlot::A;
+
+        storage
+            .persist(CommittedAccountState {
+                accounts: &accounts,
+                state_sidecar: &state_sidecar,
+                height: 1,
+                next_account_id: accounts.next_id(),
+                slot,
+            })
+            .await
+            .unwrap();
+
+        let canonical = crate::canonical_state::CanonicalState::from_accounts(&accounts);
+        let expected =
+            sybil_verifier::block::state_root_v2_leaves(canonical.as_snapshots(), &state_sidecar);
+        let actual = storage.qmdb_typed_leaves(slot).await.unwrap();
+        assert_eq!(actual, expected);
+
+        let account_root = storage.qmdb_account_root().await.unwrap();
+        assert_eq!(account_root.scope, QmdbAccountRootScope::AccountDbAllSlots);
+
+        let (leaf_key, leaf_value) = expected
+            .iter()
+            .find(|(key, _)| key.starts_with(b"acct/"))
+            .expect("expected account leaf");
+        let proof = storage
+            .qmdb_typed_leaf_proof(slot, leaf_key)
+            .await
+            .unwrap()
+            .expect("typed leaf should exist");
+        assert_eq!(proof.root, account_root.root);
+        assert_eq!(proof.root_scope, account_root.scope);
+        assert_eq!(&proof.leaf_key, leaf_key);
+        assert_eq!(&proof.leaf_value, leaf_value);
+        assert!(proof.verify());
+
+        let missing_key = b"acct/missing".to_vec();
+        assert!(storage
+            .qmdb_typed_leaf_proof(slot, &missing_key)
+            .await
+            .unwrap()
+            .is_none());
+        let exclusion = storage
+            .qmdb_typed_leaf_exclusion_proof(slot, &missing_key)
+            .await
+            .unwrap()
+            .expect("missing typed leaf should have exclusion proof");
+        assert_eq!(exclusion.root, account_root.root);
+        assert!(exclusion.verify());
+        assert!(storage
+            .qmdb_typed_leaf_exclusion_proof(slot, leaf_key)
+            .await
+            .unwrap()
+            .is_none());
     }
 }

@@ -2,7 +2,7 @@
 tags: [infrastructure, storage]
 layer: sequencer
 status: current
-last_verified: 2026-04-29
+last_verified: 2026-04-30
 ---
 
 # Persistence
@@ -53,6 +53,14 @@ qmdb target promotes qmdb from storage to the authenticated root/proof system
 over accounts, reservations, resting orders, market lifecycle state, market
 groups, and system counters. redb can continue to own simple metadata and the
 crash-recovery fence.
+
+The current `FencedAccountStorage` API exposes qmdb's authenticated account
+root plus typed-leaf inclusion and exclusion proofs for keys stored as
+`slot_prefix || "v2:" || leaf_key`. The exposed root is deliberately named as
+the full account-qmdb root, not a slot root: it includes both A/B slots,
+slot-local metadata, legacy account rows, and typed leaves. redb remains the
+authority for which slot is committed, and block headers still use
+`state_root_v2` until the native typed-only qmdb root migration.
 
 ## Tier 1: Core State
 
@@ -122,6 +130,9 @@ The current model relies on explicit invariants:
 - If `height` exists, then `account_state_height` and `account_state_slot` must also exist.
 - `height == account_state_height`.
 - The qmdb slot named by `account_state_slot` must contain matching `height` and `next_account_id`.
+- The qmdb slot named by `account_state_slot` must contain typed `v2:` leaf
+  bytes equal to `sybil_verifier::block::state_root_v2_leaves` for the same
+  account and sidecar snapshot.
 - Recovery trusts redb's fence, not qmdb recency.
 
 When any of these fail, startup should reject the store as unsupported or corrupt rather than guessing.

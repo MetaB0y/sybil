@@ -3,7 +3,7 @@ tags: [infrastructure, zk]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-04-29
+last_verified: 2026-04-30
 ---
 
 Every block carries two cryptographic commitments: a state root and a parent hash. Together they form a hash chain that makes the sequence of blocks tamper-evident and independently verifiable — the foundation for [[ZK Integration Path|ZK proof integration]].
@@ -16,6 +16,9 @@ snapshots, bridge sidecar leaves needed for normal withdrawals, active resting
 orders, aggregate reservations, market definitions/lifecycle, and market
 groups. The production target in [[State Root Schema]] is a native qmdb root
 over complete typed validium state, including remaining system counters.
+The sequencer already exposes qmdb inclusion/exclusion proofs for the typed
+`v2:` rows stored in the fenced account qMDB, but those proofs verify against
+the full account-qMDB root rather than the block header's `state_root_v2`.
 Anyone with the same committed state can independently compute the root and
 verify it matches — this is exactly what the
 [[Four-Layer Verification|block integrity verification layer]] does.

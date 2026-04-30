@@ -25,6 +25,10 @@ pub mod system_event;
 pub mod validation;
 
 pub use account::{Account, AccountId, AccountStore};
+pub use account_storage::{
+    AccountSnapshotSlot, QmdbAccountRoot, QmdbAccountRootScope, QmdbTypedLeafExclusionProof,
+    QmdbTypedLeafProof,
+};
 pub use actor::{MarketSearchResult, SequencerHandle};
 pub use block::{Block, BlockProduction};
 pub use bridge::{
