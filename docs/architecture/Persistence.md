@@ -60,7 +60,7 @@ root plus typed-leaf inclusion and exclusion proofs for keys stored as
 the full account-qmdb root, not a slot root: it includes both A/B slots,
 slot-local metadata, legacy account rows, and typed leaves. redb remains the
 authority for which slot is committed, and block headers still use
-`state_root_v2` until the native typed-only qmdb root migration.
+`state_root_v2` until the native typed-only qmdb root replacement.
 
 ## Tier 1: Core State
 

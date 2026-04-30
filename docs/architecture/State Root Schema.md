@@ -116,9 +116,9 @@ Where `account_bytes` follows [[Canonical Serialization]] v1. Implementations
 MUST sort accounts by `id` ascending before concatenation; they MUST filter
 zero-qty positions; they MUST sort positions by `(market_id, outcome)`.
 
-This root is retained for tests, historical compatibility, and migration
-discussion. It is no longer the root written into newly produced block
-headers.
+This root is retained for tests and implementation comparison. It is no longer
+the root written into newly produced block headers, and it does not impose a
+mainnet compatibility constraint.
 
 **Properties.**
 
@@ -190,9 +190,9 @@ root, not one root per subsystem.
 2. Delete leaves that are no longer active, such as fully filled or expired
    resting orders.
 3. Read the MMR root back from qmdb after `merkleize` / `apply_batch`.
-4. Publish `state_root_v3 = SHA256("sybil/state-root/v3" || qmdb_root)` in
-   the block header, or choose an explicit migration height and domain if the
-   naming changes before mainnet.
+4. Publish the native qmdb commitment directly as the block header
+   `state_root`. Before mainnet, this can replace the current pre-production
+   typed-leaf digest without carrying a legacy verifier path.
 
 Result: accounts, reservations, active orders, market lifecycle, market
 groups, and global counters share one authenticated commitment. Inclusion and
@@ -214,8 +214,9 @@ type AccountDb = OrderedVariableDb<
 instantiation already wired into the sequencer, keeps the authenticated
 database on a conservative hash, and is easier to route through ZK/EVM
 verification paths than BLAKE3. Historical v1 roots, block parent hashes, and
-account `events_digest` remain BLAKE3; verifiers dispatch by root version or
-migration height.
+account `events_digest` remain BLAKE3 for the local helpers that still use
+them, but the production verifier only needs the final pre-mainnet state-root
+scheme.
 
 ### Encoding alignment
 
@@ -309,24 +310,14 @@ direct Solidity membership proofs that cannot economically verify qmdb
 semantics inside a ZK proof. Keep as a fallback if SYB-27/SYB-30 prove the
 ZK path too expensive or operationally fragile.
 
-## Migration path
+## Pre-Mainnet Replacement Path
 
 Pre-mainnet blocks now use `state_root_v2`, the typed leaf digest described
-above. If we need to verify older local/dev blocks, the verifier retains
-`compute_account_state_root_v1`.
-
-The future native-qmdb-root switch must be a versioned migration because the
-current `state_root_v2` domain already means "SHA-256 over sorted typed
-key/value leaves." A native qmdb root should therefore use a new root domain
-such as `sybil/state-root/v3`, unless we decide before mainnet to rename the
-current pre-production scheme.
-
-Verifiers dispatch on `header.height` and root version: read block header,
-pick the algorithm, re-verify. Historical implementations remain in
-`sybil-verifier` during the migration window.
-
-Domain separation and verifier dispatch ensure no collision between root
-versions even when they cover overlapping state data.
+above. This is a development-stage commitment, not a mainnet compatibility
+promise. When the native typed qmdb root is ready, we can replace the current
+block-header root algorithm directly and update the verifier to the final
+scheme. There is no requirement to preserve old local/dev block verification
+or to introduce a `state_root_v3` name solely for compatibility.
 
 ## Retention and historical proofs
 
@@ -374,8 +365,8 @@ Out of scope here:
 
 1. **Typed-only native qmdb root.** The current wrapper exposes proofs for
    typed `v2:` leaves against the full account-qmdb root. The native state-root
-   migration should replace the mixed account wrapper with a typed state wrapper
-   whose active keyspace is exactly the block-header state keyspace.
+   replacement should replace the mixed account wrapper with a typed state
+   wrapper whose active keyspace is exactly the block-header state keyspace.
 2. **Events tree co-habitation.** The events tree from
    [[Proof Architecture]] is orthogonal. It may remain a separate per-block
    tree even though long-lived state lives in qmdb.
@@ -404,7 +395,7 @@ state_root_v2 = SHA256(
 )
 ```
 
-Native qmdb-root vectors land when that versioned migration is implemented.
+Native qmdb-root vectors land when the replacement root is implemented.
 
 ## Where this lives
 
