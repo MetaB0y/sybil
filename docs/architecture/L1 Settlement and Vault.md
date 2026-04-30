@@ -288,7 +288,7 @@ Withdrawal leaf:
 
 ```text
 withdrawal_leaf_bytes =
-    "sybil/state/withdrawal/v1"
+    "sybil/state/withdrawal"
  || withdrawal_id:u64
  || account_id:u64
  || recipient:address

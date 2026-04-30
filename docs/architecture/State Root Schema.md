@@ -29,14 +29,8 @@ Implementation:
 
 For verifier-side recomputation, the typed leaves are inserted into a fresh
 empty qMDB in bytewise key order and the resulting qMDB root is the
-`state_root`. This gives today's verifier a deterministic full-state check
-from the witness while keeping the block header on the same authenticated data
-structure used for membership and exclusion proofs.
-
-The next storage cleanup is to replace the mixed account snapshot wrapper with
-a typed-state qMDB whose active keyspace exactly matches these leaves. That
-will let runtime persistence expose proofs against the same root written into
-the header.
+`state_root`. Runtime persistence stores the same leaves in a dedicated
+typed-state qMDB whose active keyspace exactly matches the header root.
 
 ## Key Families
 
@@ -78,27 +72,23 @@ sorted-leaf digest layer.
 
 ## Sequencer Storage
 
-Current storage still has two pieces:
+Current storage has two qMDB roles:
 
 - The block header root is computed from the typed leaves through native qMDB.
 - `crates/matching-sequencer/src/qmdb_accounts.rs` persists account snapshots
-  plus the same typed leaves under a fenced account-qMDB slot.
+  under a fenced account-qMDB slot for crash recovery.
+- `crates/matching-sequencer/src/qmdb_state.rs` persists the typed state
+  leaves in fenced A/B qMDBs whose unprefixed keyspace is exactly the
+  `state_root` keyspace.
 
 The account qMDB slot currently stores:
 
 - legacy account rows: `slot_prefix || 'a' || account_id_be_u64`
 - metadata rows: slot height and `next_account_id`
-- typed state rows: `slot_prefix || "state:" || leaf_key`
 
-`QmdbAccounts` exposes the full account-qMDB root plus typed-leaf inclusion
-and exclusion proofs. That root has explicit scope `AccountDbAllSlots`: it
-covers both A/B slots, slot metadata, legacy account rows, and typed state
-rows. It is useful proof plumbing, but it is not yet the same root as
-`BlockHeader.state_root`.
-
-The remaining cleanup is straightforward: introduce a typed-state qMDB without
-slot prefixes or legacy rows, update it at block boundaries, and expose proofs
-directly against `BlockHeader.state_root`.
+`QmdbState` exposes the committed typed-state root plus typed-leaf inclusion
+and exclusion proofs. Those proofs verify directly against
+`BlockHeader.state_root` for the fenced slot recorded by redb.
 
 ## Proof API
 
@@ -175,7 +165,8 @@ store.
 > `crates/sybil-verifier/src/block.rs` - typed leaf construction and native qMDB root recomputation
 > `crates/matching-sequencer/src/block.rs` - writes `state_root` into the block header
 > `crates/matching-sequencer/src/canonical_state.rs` - canonical account ordering used by account leaves
-> `crates/matching-sequencer/src/qmdb_accounts.rs` - current fenced account-qMDB wrapper
+> `crates/matching-sequencer/src/qmdb_accounts.rs` - fenced account recovery snapshots
+> `crates/matching-sequencer/src/qmdb_state.rs` - fenced typed-state qMDB and proofs
 > `crates/matching-sequencer/src/account_storage.rs` - account snapshot and typed-leaf persistence boundary
 
 ## See Also

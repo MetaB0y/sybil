@@ -179,13 +179,13 @@ Reserved domains:
 
 | Key family | Value domain |
 |---|---|
-| `acct/{account_id}` | `sybil/state/acct/v1` |
-| `acct_resv/{account_id}` | `sybil/state/acct-resv/v1` |
-| `order/{order_id}` | `sybil/state/order/v1` |
-| `withdrawal/{withdrawal_id}` | `sybil/state/withdrawal/v1` |
-| `market/{market_id}` | `sybil/state/market/v1` |
-| `market_group/{group_id}` | `sybil/state/market-group/v1` |
-| `sys/*` | `sybil/state/sys/v1` |
+| `acct/{account_id}` | `sybil/state/acct` |
+| `acct_resv/{account_id}` | `sybil/state/acct-resv` |
+| `order/{order_id}` | `sybil/state/order` |
+| `withdrawal/{withdrawal_id}` | `sybil/state/withdrawal` |
+| `market/{market_id}` | `sybil/state/market` |
+| `market_group/{group_id}` | `sybil/state/market-group` |
+| `sys/*` | `sybil/state/sys` |
 
 Implemented key encodings:
 
@@ -205,7 +205,7 @@ Implemented key encodings:
 
 ```text
 account_leaf_value =
-    "sybil/state/acct/v1"
+    "sybil/state/acct"
  || id:u64_le
  || balance:i64_le
  || total_deposited:i64_le
@@ -221,7 +221,7 @@ Positions with `qty == 0` MUST be omitted. Remaining positions are sorted by
 
 ```text
 sys_leaf_value =
-    "sybil/state/sys/v1"
+    "sybil/state/sys"
  || name_len:u8
  || name:ascii_bytes
  || raw_value
@@ -234,7 +234,7 @@ sys_leaf_value =
 
 ```text
 withdrawal_leaf_value =
-    "sybil/state/withdrawal/v1"
+    "sybil/state/withdrawal"
  || withdrawal_id:u64_le
  || account_id:u64_le
  || recipient:address
@@ -249,7 +249,7 @@ withdrawal_leaf_value =
 
 ```text
 account_reservation_leaf_value =
-    "sybil/state/acct-resv/v1"
+    "sybil/state/acct-resv"
  || account_id:u64_le
  || reserved_balance:i64_le
  || reserved_position_count:u64_le
@@ -263,7 +263,7 @@ positions are sorted by `(market_id, outcome)`.
 
 ```text
 resting_order_leaf_value =
-    "sybil/state/order/v1"
+    "sybil/state/order"
  || account_id:u64_le
  || created_at:u64_le
  || expires_at_block:u64_le
@@ -307,7 +307,7 @@ The resting-order wrapper always also commits the effective
 
 ```text
 market_leaf_value =
-    "sybil/state/market/v1"
+    "sybil/state/market"
  || market_id:u32_le
  || name_len:u64_le
  || name:utf8_bytes
@@ -318,7 +318,7 @@ market_leaf_value =
  || resolution_template:utf8_bytes
 ```
 
-`metadata_digest = SHA256("sybil/state/market-meta/v1" || payload_len:u64_le ||
+`metadata_digest = SHA256("sybil/state/market-meta" || payload_len:u64_le ||
 payload)`. The sequencer payload is tagged: `0x00` for no metadata, or `0x01`
 followed by description, category, sorted tags, resolution criteria,
 expiry timestamp, creation timestamp, and effective resolution template. Text
@@ -374,7 +374,7 @@ resolution_record =
 
 ```text
 market_group_leaf_value =
-    "sybil/state/market-group/v1"
+    "sybil/state/market-group"
  || group_id:u64_le
  || name_len:u64_le
  || name:utf8_bytes
@@ -447,7 +447,7 @@ key:
   acct/00 00 00 00 00 00 00 01
 
 value (hex):
-  73 79 62 69 6c 2f 73 74 61 74 65 2f 61 63 63 74 2f 76 31
+  73 79 62 69 6c 2f 73 74 61 74 65 2f 61 63 63 74
   01 00 00 00 00 00 00 00    # id: u64 LE
   64 00 00 00 00 00 00 00    # balance: i64 LE
   64 00 00 00 00 00 00 00    # total_deposited: i64 LE

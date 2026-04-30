@@ -60,14 +60,11 @@ active resting orders, and aggregate reservations.
 - Withdrawal W exists and can be claimed against an accepted root
 - The complete validium state at block N (full tree)
 
-**Current implementation**: SHA-256 over sorted typed account, bridge,
-market, market-group, resting-order, and reservation leaves — O(n) over
-committed leaves per block, no native per-key qmdb proofs yet. Account leaves
-include `events_digest`, a running BLAKE3 accumulator over fills and admin
-events that touched the account.
-
-**Target**: ordered qmdb authenticated key-value store using SHA-256 for the
-native state root. O(k log n) per block where k = state leaves touched.
+**Current implementation**: ordered qMDB authenticated key-value store using
+SHA-256 for the native state root. The committed leaves cover accounts,
+bridge state, markets, market groups, resting orders, and reservations.
+Account leaves include `events_digest`, a running BLAKE3 accumulator over
+fills and admin events that touched the account.
 
 **Why this enables flexible proofs**:
 - PnL: state proof at block A + state proof at block B → `portfolio_value_B - total_deposited_B` (note: `total_deposited` is already on the Account struct)
@@ -186,10 +183,9 @@ orders, market lifecycle state, market groups, bridge counters, deposit root,
 and active withdrawal leaves.
 
 The verifier currently recomputes that root from the full witness by inserting
-the typed leaves into a fresh qMDB and comparing the native qMDB root. The
-remaining storage cleanup is to replace the mixed account snapshot wrapper
-with a dedicated typed-state qMDB whose active keyspace exactly matches the
-header root.
+the typed leaves into a fresh qMDB and comparing the native qMDB root. Runtime
+persistence stores the same keyspace in a dedicated typed-state qMDB, so proof
+APIs can verify directly against the header root.
 
 ### Next: Proof API
 

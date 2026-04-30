@@ -16,6 +16,7 @@ pub mod order_book;
 pub mod portfolio;
 pub mod price_tracker;
 mod qmdb_accounts;
+mod qmdb_state;
 pub mod scenario;
 pub mod sequencer;
 pub mod settlement;
@@ -26,8 +27,7 @@ pub mod validation;
 
 pub use account::{Account, AccountId, AccountStore};
 pub use account_storage::{
-    AccountSnapshotSlot, QmdbAccountRoot, QmdbAccountRootScope, QmdbTypedLeafExclusionProof,
-    QmdbTypedLeafProof,
+    AccountSnapshotSlot, QmdbStateLeafExclusionProof, QmdbStateLeafProof, QmdbStateRoot,
 };
 pub use actor::{MarketSearchResult, SequencerHandle};
 pub use block::{Block, BlockProduction};

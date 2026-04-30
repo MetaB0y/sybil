@@ -3,6 +3,7 @@
 //! Checks state root, parent hash chaining, height, and counts.
 
 use std::num::{NonZeroU16, NonZeroU64, NonZeroUsize};
+use std::sync::{mpsc, OnceLock};
 use std::thread;
 
 use commonware_codec::RangeCfg;
@@ -42,6 +43,17 @@ type StateRootDb = OrderedVariableDb<
     OneCap,
     QMDB_CHUNK_SIZE,
 >;
+
+struct StateRootRequest {
+    leaves: Vec<(Vec<u8>, Vec<u8>)>,
+    respond_to: mpsc::SyncSender<[u8; 32]>,
+}
+
+struct StateRootWorker {
+    sender: mpsc::Sender<StateRootRequest>,
+}
+
+static STATE_ROOT_WORKER: OnceLock<StateRootWorker> = OnceLock::new();
 
 /// Verify block header integrity.
 pub fn verify_block(witness: &BlockWitness) -> VerificationResult {
@@ -249,42 +261,59 @@ pub fn state_root_from_leaves(leaves: &[(Vec<u8>, Vec<u8>)]) -> [u8; 32] {
     let mut leaves = leaves.to_vec();
     leaves.sort_by(|(left, _), (right, _)| left.cmp(right));
 
-    // The verifier API is synchronous, while qMDB is async. Keep the fresh
-    // in-memory runtime off any caller-owned Tokio worker.
-    thread::Builder::new()
-        .name("sybil-state-root-qmdb".to_string())
-        .spawn(move || {
-            deterministic::Runner::default().start(|context| async move {
-                let mut db = open_state_root_db(context)
-                    .await
-                    .expect("state root qmdb should initialize");
-                if !leaves.is_empty() {
-                    let mut batch = db.new_batch();
-                    for (key, value) in leaves {
-                        assert!(
-                            key.len() <= MAX_KEY_BYTES,
-                            "state root key exceeds qmdb key limit"
-                        );
-                        assert!(
-                            value.len() <= MAX_VALUE_BYTES,
-                            "state root value exceeds qmdb value limit"
-                        );
-                        batch = batch.write(key, Some(value));
-                    }
-                    let merkleized = batch
-                        .merkleize(&db, None)
-                        .await
-                        .expect("state root qmdb batch should merkleize");
-                    db.apply_batch(merkleized)
-                        .await
-                        .expect("state root qmdb batch should apply");
+    let (respond_to, response) = mpsc::sync_channel(1);
+    state_root_worker()
+        .sender
+        .send(StateRootRequest { leaves, respond_to })
+        .expect("state root worker should be available");
+    response.recv().expect("state root worker should respond")
+}
+
+fn state_root_worker() -> &'static StateRootWorker {
+    STATE_ROOT_WORKER.get_or_init(|| {
+        let (sender, receiver) = mpsc::channel::<StateRootRequest>();
+        thread::Builder::new()
+            .name("sybil-state-root-qmdb".to_string())
+            .spawn(move || {
+                while let Ok(request) = receiver.recv() {
+                    let root = state_root_from_sorted_leaves(request.leaves);
+                    let _ = request.respond_to.send(root);
                 }
-                db.root().0
             })
-        })
-        .expect("state root qmdb thread should spawn")
-        .join()
-        .expect("state root qmdb thread should not panic")
+            .expect("state root qmdb thread should spawn");
+
+        StateRootWorker { sender }
+    })
+}
+
+fn state_root_from_sorted_leaves(leaves: Vec<(Vec<u8>, Vec<u8>)>) -> [u8; 32] {
+    deterministic::Runner::default().start(|context| async move {
+        let mut db = open_state_root_db(context)
+            .await
+            .expect("state root qmdb should initialize");
+        if !leaves.is_empty() {
+            let mut batch = db.new_batch();
+            for (key, value) in leaves {
+                assert!(
+                    key.len() <= MAX_KEY_BYTES,
+                    "state root key exceeds qmdb key limit"
+                );
+                assert!(
+                    value.len() <= MAX_VALUE_BYTES,
+                    "state root value exceeds qmdb value limit"
+                );
+                batch = batch.write(key, Some(value));
+            }
+            let merkleized = batch
+                .merkleize(&db, None)
+                .await
+                .expect("state root qmdb batch should merkleize");
+            db.apply_batch(merkleized)
+                .await
+                .expect("state root qmdb batch should apply");
+        }
+        db.root().0
+    })
 }
 
 async fn open_state_root_db(context: deterministic::Context) -> Result<StateRootDb, String> {
@@ -366,7 +395,7 @@ pub fn account_reservation_leaf_key(account_id: u64) -> Vec<u8> {
 
 fn account_leaf_value(account: &AccountSnapshot) -> Vec<u8> {
     let mut value = Vec::new();
-    value.extend_from_slice(b"sybil/state/acct/v1");
+    value.extend_from_slice(b"sybil/state/acct");
     value.extend_from_slice(&account.id.to_le_bytes());
     value.extend_from_slice(&account.balance.to_le_bytes());
     value.extend_from_slice(&account.total_deposited.to_le_bytes());
@@ -387,7 +416,7 @@ fn account_leaf_value(account: &AccountSnapshot) -> Vec<u8> {
 
 fn sys_u64_leaf_value(name: &[u8], raw: u64) -> Vec<u8> {
     let mut value = Vec::with_capacity(19 + 1 + name.len() + 8);
-    value.extend_from_slice(b"sybil/state/sys/v1");
+    value.extend_from_slice(b"sybil/state/sys");
     value.push(name.len() as u8);
     value.extend_from_slice(name);
     value.extend_from_slice(&raw.to_le_bytes());
@@ -396,7 +425,7 @@ fn sys_u64_leaf_value(name: &[u8], raw: u64) -> Vec<u8> {
 
 fn sys_bytes32_leaf_value(name: &[u8], raw: &[u8; 32]) -> Vec<u8> {
     let mut value = Vec::with_capacity(19 + 1 + name.len() + 32);
-    value.extend_from_slice(b"sybil/state/sys/v1");
+    value.extend_from_slice(b"sybil/state/sys");
     value.push(name.len() as u8);
     value.extend_from_slice(name);
     value.extend_from_slice(raw);
@@ -410,7 +439,7 @@ fn sys_bytes32_leaf_value(name: &[u8], raw: &[u8; 32]) -> Vec<u8> {
 /// digest against the committed market leaf.
 pub fn market_metadata_digest(payload: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
-    hasher.update(b"sybil/state/market-meta/v1");
+    hasher.update(b"sybil/state/market-meta");
     hasher.update((payload.len() as u64).to_le_bytes());
     hasher.update(payload);
     hasher.finalize().into()
@@ -418,7 +447,7 @@ pub fn market_metadata_digest(payload: &[u8]) -> [u8; 32] {
 
 fn market_leaf_value(market: &MarketSnapshot) -> Vec<u8> {
     let mut value = Vec::new();
-    value.extend_from_slice(b"sybil/state/market/v1");
+    value.extend_from_slice(b"sybil/state/market");
     value.extend_from_slice(&market.market_id.0.to_le_bytes());
     append_string(&mut value, &market.name);
     value.push(market.num_outcomes);
@@ -430,7 +459,7 @@ fn market_leaf_value(market: &MarketSnapshot) -> Vec<u8> {
 
 fn market_group_leaf_value(group: &MarketGroupSnapshot) -> Vec<u8> {
     let mut value = Vec::new();
-    value.extend_from_slice(b"sybil/state/market-group/v1");
+    value.extend_from_slice(b"sybil/state/market-group");
     value.extend_from_slice(&group.group_id.to_le_bytes());
     append_string(&mut value, &group.name);
 
@@ -445,7 +474,7 @@ fn market_group_leaf_value(group: &MarketGroupSnapshot) -> Vec<u8> {
 
 fn withdrawal_leaf_value(withdrawal: &WithdrawalSnapshot) -> Vec<u8> {
     let mut value = Vec::with_capacity(25 + 8 + 8 + 20 + 20 + 8 + 8 + 8 + 32);
-    value.extend_from_slice(b"sybil/state/withdrawal/v1");
+    value.extend_from_slice(b"sybil/state/withdrawal");
     value.extend_from_slice(&withdrawal.withdrawal_id.to_le_bytes());
     value.extend_from_slice(&withdrawal.account_id.to_le_bytes());
     value.extend_from_slice(&withdrawal.recipient);
@@ -459,7 +488,7 @@ fn withdrawal_leaf_value(withdrawal: &WithdrawalSnapshot) -> Vec<u8> {
 
 fn resting_order_leaf_value(resting: &RestingOrderSnapshot) -> Vec<u8> {
     let mut value = Vec::new();
-    value.extend_from_slice(b"sybil/state/order/v1");
+    value.extend_from_slice(b"sybil/state/order");
     value.extend_from_slice(&resting.account_id.to_le_bytes());
     value.extend_from_slice(&resting.created_at.to_le_bytes());
     value.extend_from_slice(&resting.expires_at_block.to_le_bytes());
@@ -471,7 +500,7 @@ fn resting_order_leaf_value(resting: &RestingOrderSnapshot) -> Vec<u8> {
 
 fn account_reservation_leaf_value(reservation: &AccountReservationSnapshot) -> Vec<u8> {
     let mut value = Vec::new();
-    value.extend_from_slice(b"sybil/state/acct-resv/v1");
+    value.extend_from_slice(b"sybil/state/acct-resv");
     value.extend_from_slice(&reservation.account_id.to_le_bytes());
     value.extend_from_slice(&reservation.reserved_balance.to_le_bytes());
     append_position_reservations(&mut value, &reservation.reserved_positions);

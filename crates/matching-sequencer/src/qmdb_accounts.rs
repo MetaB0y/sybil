@@ -5,18 +5,13 @@ use std::sync::mpsc;
 use std::thread;
 
 use commonware_codec::RangeCfg;
-use commonware_cryptography::sha256::Digest as Sha256Digest;
-use commonware_cryptography::Hasher as _;
 use commonware_cryptography::Sha256;
 use commonware_runtime::buffer::paged::CacheRef;
 use commonware_runtime::{tokio as commonware_tokio, Runner as _};
 use commonware_storage::journal::contiguous::variable::Config as VConfig;
 use commonware_storage::merkle::mmr::journaled::Config as MmrConfig;
 use commonware_storage::merkle::mmr::Family as MmrFamily;
-use commonware_storage::qmdb::current::ordered::variable::{
-    Db as OrderedVariableDb, KeyValueProof,
-};
-use commonware_storage::qmdb::current::ordered::ExclusionProof;
+use commonware_storage::qmdb::current::ordered::variable::Db as OrderedVariableDb;
 use commonware_storage::qmdb::current::VariableConfig;
 use commonware_storage::translator::OneCap;
 use futures::StreamExt;
@@ -24,11 +19,9 @@ use tokio::sync::{mpsc as tokio_mpsc, oneshot};
 
 use crate::account::{Account, AccountId, AccountStore};
 use crate::account_storage::AccountSnapshotSlot;
-use crate::canonical_state::snapshot_account;
 use crate::store::StoreError;
 
-pub const QMDB_ACCOUNT_CHUNK_SIZE: usize = 32;
-const CHUNK_SIZE: usize = QMDB_ACCOUNT_CHUNK_SIZE;
+const CHUNK_SIZE: usize = 32;
 const PAGE_SIZE: u16 = 4096;
 const PAGE_CACHE_PAGES: usize = 128;
 const ITEMS_PER_BLOB: u64 = 1024;
@@ -39,7 +32,6 @@ const MAX_VALUE_BYTES: usize = 1 << 20;
 const ACCOUNT_KEY_PREFIX: u8 = b'a';
 const HEIGHT_KEY: &[u8] = b"meta:height";
 const NEXT_ACCOUNT_ID_KEY: &[u8] = b"meta:next_account_id";
-const STATE_KEY_PREFIX: &[u8] = b"state:";
 
 type AccountDb = OrderedVariableDb<
     MmrFamily,
@@ -50,81 +42,6 @@ type AccountDb = OrderedVariableDb<
     OneCap,
     CHUNK_SIZE,
 >;
-
-pub type QmdbAccountKeyValueProof =
-    KeyValueProof<MmrFamily, Vec<u8>, Sha256Digest, QMDB_ACCOUNT_CHUNK_SIZE>;
-
-pub type QmdbAccountExclusionProof = ExclusionProof<
-    MmrFamily,
-    Vec<u8>,
-    commonware_storage::qmdb::any::value::VariableEncoding<Vec<u8>>,
-    Sha256Digest,
-    QMDB_ACCOUNT_CHUNK_SIZE,
->;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum QmdbAccountRootScope {
-    /// The root covers every active key in the account qMDB, including both
-    /// snapshot slots, slot metadata, legacy account rows, and typed state
-    /// leaves. redb remains the authority for which slot is committed.
-    AccountDbAllSlots,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct QmdbAccountRoot {
-    pub root: [u8; 32],
-    pub scope: QmdbAccountRootScope,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct QmdbTypedLeafProof {
-    pub root: [u8; 32],
-    pub root_scope: QmdbAccountRootScope,
-    pub slot: AccountSnapshotSlot,
-    /// Unprefixed verifier/state-root leaf key.
-    pub leaf_key: Vec<u8>,
-    /// Actual qMDB key: `s{slot}:state:{leaf_key}`.
-    pub encoded_key: Vec<u8>,
-    pub leaf_value: Vec<u8>,
-    pub proof: QmdbAccountKeyValueProof,
-}
-
-impl QmdbTypedLeafProof {
-    pub fn verify(&self) -> bool {
-        let mut hasher = Sha256::new();
-        AccountDb::verify_key_value_proof(
-            &mut hasher,
-            self.encoded_key.clone(),
-            self.leaf_value.clone(),
-            &self.proof,
-            &Sha256Digest::from(self.root),
-        )
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct QmdbTypedLeafExclusionProof {
-    pub root: [u8; 32],
-    pub root_scope: QmdbAccountRootScope,
-    pub slot: AccountSnapshotSlot,
-    /// Unprefixed verifier/state-root leaf key.
-    pub leaf_key: Vec<u8>,
-    /// Actual qMDB key: `s{slot}:state:{leaf_key}`.
-    pub encoded_key: Vec<u8>,
-    pub proof: QmdbAccountExclusionProof,
-}
-
-impl QmdbTypedLeafExclusionProof {
-    pub fn verify(&self) -> bool {
-        let mut hasher = Sha256::new();
-        AccountDb::verify_exclusion_proof(
-            &mut hasher,
-            &self.encoded_key,
-            &self.proof,
-            &Sha256Digest::from(self.root),
-        )
-    }
-}
 
 pub struct LoadedAccountSnapshot {
     pub accounts: HashMap<AccountId, Account>,
@@ -139,41 +56,24 @@ pub struct QmdbAccounts {
 enum Command {
     ReplaceSnapshot {
         slot: AccountSnapshotSlot,
-        snapshot: Box<PersistedAccountSnapshot>,
+        snapshot: PersistedAccountSnapshot,
         respond_to: oneshot::Sender<Result<(), StoreError>>,
     },
     LoadSnapshot {
         slot: AccountSnapshotSlot,
         respond_to: oneshot::Sender<Result<LoadedAccountSnapshot, StoreError>>,
     },
-    AccountRoot {
-        respond_to: oneshot::Sender<Result<QmdbAccountRoot, StoreError>>,
-    },
-    TypedLeaves {
-        slot: AccountSnapshotSlot,
-        respond_to: oneshot::Sender<Result<Vec<(Vec<u8>, Vec<u8>)>, StoreError>>,
-    },
-    TypedLeafProof {
-        slot: AccountSnapshotSlot,
-        leaf_key: Vec<u8>,
-        respond_to: oneshot::Sender<Result<Option<QmdbTypedLeafProof>, StoreError>>,
-    },
-    TypedLeafExclusionProof {
-        slot: AccountSnapshotSlot,
-        leaf_key: Vec<u8>,
-        respond_to: oneshot::Sender<Result<Option<QmdbTypedLeafExclusionProof>, StoreError>>,
-    },
 }
 
 struct PersistedAccountSnapshot {
     accounts: Vec<Account>,
-    state_sidecar: sybil_verifier::StateSidecarSnapshot,
     height: u64,
     next_account_id: u64,
 }
 
 impl QmdbAccounts {
     pub fn open(path: &Path) -> Result<Self, StoreError> {
+        std::fs::create_dir_all(path)?;
         let storage_directory = path.to_path_buf();
         let (sender, receiver) = tokio_mpsc::channel(8);
         let (started_tx, started_rx) = mpsc::sync_channel(1);
@@ -210,7 +110,6 @@ impl QmdbAccounts {
         &self,
         slot: AccountSnapshotSlot,
         accounts: &AccountStore,
-        state_sidecar: &sybil_verifier::StateSidecarSnapshot,
         height: u64,
         next_account_id: u64,
     ) -> Result<(), StoreError> {
@@ -219,7 +118,6 @@ impl QmdbAccounts {
                 .iter()
                 .map(|(_, account)| account.clone())
                 .collect(),
-            state_sidecar: state_sidecar.clone(),
             height,
             next_account_id,
         };
@@ -227,7 +125,7 @@ impl QmdbAccounts {
         self.sender
             .send(Command::ReplaceSnapshot {
                 slot,
-                snapshot: Box::new(snapshot),
+                snapshot,
                 respond_to,
             })
             .await
@@ -250,69 +148,6 @@ impl QmdbAccounts {
             .await
             .map_err(|_| StoreError::Qmdb("qmdb account response channel dropped".to_string()))?
     }
-
-    pub async fn account_root(&self) -> Result<QmdbAccountRoot, StoreError> {
-        let (respond_to, response) = oneshot::channel();
-        self.sender
-            .send(Command::AccountRoot { respond_to })
-            .await
-            .map_err(|_| StoreError::Qmdb("qmdb account service unavailable".to_string()))?;
-        response
-            .await
-            .map_err(|_| StoreError::Qmdb("qmdb account response channel dropped".to_string()))?
-    }
-
-    pub async fn typed_leaves(
-        &self,
-        slot: AccountSnapshotSlot,
-    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StoreError> {
-        let (respond_to, response) = oneshot::channel();
-        self.sender
-            .send(Command::TypedLeaves { slot, respond_to })
-            .await
-            .map_err(|_| StoreError::Qmdb("qmdb account service unavailable".to_string()))?;
-        response
-            .await
-            .map_err(|_| StoreError::Qmdb("qmdb account response channel dropped".to_string()))?
-    }
-
-    pub async fn typed_leaf_proof(
-        &self,
-        slot: AccountSnapshotSlot,
-        leaf_key: &[u8],
-    ) -> Result<Option<QmdbTypedLeafProof>, StoreError> {
-        let (respond_to, response) = oneshot::channel();
-        self.sender
-            .send(Command::TypedLeafProof {
-                slot,
-                leaf_key: leaf_key.to_vec(),
-                respond_to,
-            })
-            .await
-            .map_err(|_| StoreError::Qmdb("qmdb account service unavailable".to_string()))?;
-        response
-            .await
-            .map_err(|_| StoreError::Qmdb("qmdb account response channel dropped".to_string()))?
-    }
-
-    pub async fn typed_leaf_exclusion_proof(
-        &self,
-        slot: AccountSnapshotSlot,
-        leaf_key: &[u8],
-    ) -> Result<Option<QmdbTypedLeafExclusionProof>, StoreError> {
-        let (respond_to, response) = oneshot::channel();
-        self.sender
-            .send(Command::TypedLeafExclusionProof {
-                slot,
-                leaf_key: leaf_key.to_vec(),
-                respond_to,
-            })
-            .await
-            .map_err(|_| StoreError::Qmdb("qmdb account service unavailable".to_string()))?;
-        response
-            .await
-            .map_err(|_| StoreError::Qmdb("qmdb account response channel dropped".to_string()))?
-    }
 }
 
 async fn run(mut db: AccountDb, mut receiver: tokio_mpsc::Receiver<Command>) {
@@ -323,30 +158,10 @@ async fn run(mut db: AccountDb, mut receiver: tokio_mpsc::Receiver<Command>) {
                 snapshot,
                 respond_to,
             } => {
-                let _ = respond_to.send(replace_snapshot(&mut db, slot, *snapshot).await);
+                let _ = respond_to.send(replace_snapshot(&mut db, slot, snapshot).await);
             }
             Command::LoadSnapshot { slot, respond_to } => {
                 let _ = respond_to.send(load_snapshot(&db, slot).await);
-            }
-            Command::AccountRoot { respond_to } => {
-                let _ = respond_to.send(Ok(account_root(&db)));
-            }
-            Command::TypedLeaves { slot, respond_to } => {
-                let _ = respond_to.send(collect_typed_leaves(&db, slot).await);
-            }
-            Command::TypedLeafProof {
-                slot,
-                leaf_key,
-                respond_to,
-            } => {
-                let _ = respond_to.send(typed_leaf_proof(&db, slot, leaf_key).await);
-            }
-            Command::TypedLeafExclusionProof {
-                slot,
-                leaf_key,
-                respond_to,
-            } => {
-                let _ = respond_to.send(typed_leaf_exclusion_proof(&db, slot, leaf_key).await);
             }
         }
     }
@@ -394,13 +209,6 @@ async fn replace_snapshot(
 ) -> Result<(), StoreError> {
     let current_entries = collect_entries(db, slot).await?;
     let mut desired = HashMap::new();
-
-    let account_snapshots: Vec<_> = snapshot.accounts.iter().map(snapshot_account).collect();
-    for (leaf_key, leaf_value) in
-        sybil_verifier::block::state_root_leaves(&account_snapshots, &snapshot.state_sidecar)
-    {
-        desired.insert(encode_state_key(slot, &leaf_key), leaf_value);
-    }
 
     for account in snapshot.accounts {
         desired.insert(
@@ -491,94 +299,6 @@ async fn load_snapshot(
     })
 }
 
-fn account_root(db: &AccountDb) -> QmdbAccountRoot {
-    QmdbAccountRoot {
-        root: db.root().0,
-        scope: QmdbAccountRootScope::AccountDbAllSlots,
-    }
-}
-
-async fn collect_typed_leaves(
-    db: &AccountDb,
-    slot: AccountSnapshotSlot,
-) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StoreError> {
-    let prefix = encode_state_key(slot, b"");
-    let stream = db.stream_range(prefix.clone()).await.map_err(|error| {
-        StoreError::Qmdb(format!("failed to stream qmdb typed leaves: {error}"))
-    })?;
-    futures::pin_mut!(stream);
-
-    let mut leaves = Vec::new();
-    while let Some(item) = stream.next().await {
-        let (key, value) = item.map_err(|error| {
-            StoreError::Qmdb(format!("failed to read qmdb typed leaf: {error}"))
-        })?;
-        if !key.starts_with(&prefix) {
-            break;
-        }
-        leaves.push((key[prefix.len()..].to_vec(), value));
-    }
-    Ok(leaves)
-}
-
-async fn typed_leaf_proof(
-    db: &AccountDb,
-    slot: AccountSnapshotSlot,
-    leaf_key: Vec<u8>,
-) -> Result<Option<QmdbTypedLeafProof>, StoreError> {
-    let encoded_key = encode_state_key(slot, &leaf_key);
-    let Some(leaf_value) = db
-        .get(&encoded_key)
-        .await
-        .map_err(|error| StoreError::Qmdb(format!("failed to read qmdb typed leaf: {error}")))?
-    else {
-        return Ok(None);
-    };
-
-    let mut hasher = Sha256::new();
-    let proof = db
-        .key_value_proof(&mut hasher, encoded_key.clone())
-        .await
-        .map_err(|error| StoreError::Qmdb(format!("failed to prove qmdb typed leaf: {error}")))?;
-    let root = account_root(db);
-    Ok(Some(QmdbTypedLeafProof {
-        root: root.root,
-        root_scope: root.scope,
-        slot,
-        leaf_key,
-        encoded_key,
-        leaf_value,
-        proof,
-    }))
-}
-
-async fn typed_leaf_exclusion_proof(
-    db: &AccountDb,
-    slot: AccountSnapshotSlot,
-    leaf_key: Vec<u8>,
-) -> Result<Option<QmdbTypedLeafExclusionProof>, StoreError> {
-    let encoded_key = encode_state_key(slot, &leaf_key);
-    let mut hasher = Sha256::new();
-    let proof = match db.exclusion_proof(&mut hasher, &encoded_key).await {
-        Ok(proof) => proof,
-        Err(commonware_storage::qmdb::Error::KeyExists) => return Ok(None),
-        Err(error) => {
-            return Err(StoreError::Qmdb(format!(
-                "failed to prove qmdb typed leaf exclusion: {error}"
-            )));
-        }
-    };
-    let root = account_root(db);
-    Ok(Some(QmdbTypedLeafExclusionProof {
-        root: root.root,
-        root_scope: root.scope,
-        slot,
-        leaf_key,
-        encoded_key,
-        proof,
-    }))
-}
-
 async fn collect_entries(
     db: &AccountDb,
     slot: AccountSnapshotSlot,
@@ -623,15 +343,6 @@ fn encode_height_key(slot: AccountSnapshotSlot) -> Vec<u8> {
 fn encode_next_account_id_key(slot: AccountSnapshotSlot) -> Vec<u8> {
     let mut key = slot_prefix(slot);
     key.extend_from_slice(NEXT_ACCOUNT_ID_KEY);
-    key
-}
-
-fn encode_state_key(slot: AccountSnapshotSlot, leaf_key: &[u8]) -> Vec<u8> {
-    let prefix = slot_prefix(slot);
-    let mut key = Vec::with_capacity(prefix.len() + STATE_KEY_PREFIX.len() + leaf_key.len());
-    key.extend_from_slice(&prefix);
-    key.extend_from_slice(STATE_KEY_PREFIX);
-    key.extend_from_slice(leaf_key);
     key
 }
 

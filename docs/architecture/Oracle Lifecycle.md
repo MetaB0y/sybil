@@ -28,7 +28,11 @@ stateDiagram
 - Reserved states (`Proposed`, `Challenged`, `Voided`) and enum arms tracked in [[Oracle System]]
 
 ## Where This Lives
-> `crates/sybil-oracle/src/{feed,attestation,policy,registry,template}.rs` — primitives
+> `crates/sybil-oracle/src/feed.rs` — data-feed identity
+> `crates/sybil-oracle/src/attestation.rs` — signed resolution payloads
+> `crates/sybil-oracle/src/policy.rs` — resolution policy state machine
+> `crates/sybil-oracle/src/registry.rs` — registered feed lookup
+> `crates/sybil-oracle/src/template.rs` — market resolution templates
 > `crates/sybil-oracle/src/traits.rs` — `Oracle` trait (legacy admin path)
 > `crates/matching-sequencer/src/market_lifecycle.rs` — policy dispatch
 > `crates/matching-sequencer/src/crypto.rs` — attestation sign/verify

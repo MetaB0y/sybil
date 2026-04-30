@@ -40,3 +40,4 @@ flowchart LR
 - [[Settlement]] — fill processing within the lifecycle
 - [[Block Witness]] — the audit trail produced alongside each block
 - [[State Root and Parent Hash]] — cryptographic block chaining
+- [[Crate Dependency Map]] — crate boundaries used by the pipeline

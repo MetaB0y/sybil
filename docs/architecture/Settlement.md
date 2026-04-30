@@ -3,7 +3,7 @@ tags: [infrastructure]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-04-10
+last_verified: 2026-04-30
 ---
 
 Settlement is the step in the [[Block Lifecycle]] where fills become real: balances are debited, positions are credited, and account state is updated. It runs after the solver returns fills and clearing prices but before the block is sealed. The system uses i128 signed intermediates for all arithmetic to prevent overflow — a price times a quantity in [[Nanos and Integer Arithmetic|nanos]] can exceed u64 range, and settlement involves both debits (negative) and credits (positive).
@@ -31,6 +31,7 @@ Market resolution is also handled through settlement. When a market resolves via
 - [[Block Lifecycle]] — settlement is step 6 of the pipeline
 - [[Nanos and Integer Arithmetic]] — why i128 intermediates are needed
 - [[Four-Layer Verification]] — Layer 2 independently verifies settlement
+- [[Fill History Persistence]] — durable per-account records derived from settled fills
 - [[Market Resolution]] — the oracle-triggered resolution process
 - [[Oracle Lifecycle]] — the state machine that triggers resolution decisions
 - [[Pending Orders and TTL]] — unfilled orders persist after settlement for future batches

@@ -3,7 +3,7 @@ tags: [infrastructure]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-03-15
+last_verified: 2026-04-30
 ---
 
 The SSE (Server-Sent Events) block stream is the primary way trading bots interact with the exchange in real time. When a client connects to `GET /v1/blocks/stream`, they receive a persistent HTTP connection that pushes each new block as it's produced — fills, clearing prices, rejections, and state updates. This is a one-way channel: the server pushes, the client listens.
@@ -26,6 +26,7 @@ The [[Bot Framework]] is built around this pattern. A bot's main loop is `async 
 
 ## See Also
 - [[REST API]] — order submission endpoint (the other half of the bot interaction)
+- [[WebSocket Block Stream]] — bidirectional production stream with replay and lag signalling
 - [[Bot Framework]] — `on_block()` handler driven by SSE events
 - [[Python SDK]] — SSE stream wrapped as async iterator
 - [[Block Lifecycle]] — blocks pushed to SSE after sealing

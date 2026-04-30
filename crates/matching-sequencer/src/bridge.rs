@@ -176,7 +176,7 @@ pub fn withdrawal_nullifier(
 
 pub fn withdrawal_leaf_bytes(leaf: &WithdrawalLeaf) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(32 + 8 * 5 + 20 + 20 + 32);
-    bytes.extend_from_slice(b"sybil/state/withdrawal/v1");
+    bytes.extend_from_slice(b"sybil/state/withdrawal");
     bytes.extend_from_slice(&leaf.withdrawal_id.to_le_bytes());
     bytes.extend_from_slice(&leaf.account_id.0.to_le_bytes());
     bytes.extend_from_slice(&leaf.recipient);
@@ -190,7 +190,7 @@ pub fn withdrawal_leaf_bytes(leaf: &WithdrawalLeaf) -> Vec<u8> {
 
 pub fn withdrawal_leaf_digest(leaf: &WithdrawalLeaf) -> Bytes32 {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(b"sybil/state-leaf/withdrawal/v1");
+    hasher.update(b"sybil/state-leaf/withdrawal");
     hasher.update(&withdrawal_leaf_bytes(leaf));
     *hasher.finalize().as_bytes()
 }
