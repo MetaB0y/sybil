@@ -68,6 +68,7 @@ pub enum ZkTransitionError {
     },
     StateRootMismatch,
     EventsRootMismatch,
+    EventsRootComputationFailed,
     BlockHashMismatch,
     PreviousHeightMismatch {
         expected: u64,
@@ -124,6 +125,9 @@ impl fmt::Display for ZkTransitionError {
             }
             ZkTransitionError::StateRootMismatch => write!(f, "state root mismatch"),
             ZkTransitionError::EventsRootMismatch => write!(f, "events root mismatch"),
+            ZkTransitionError::EventsRootComputationFailed => {
+                write!(f, "events root computation failed")
+            }
             ZkTransitionError::BlockHashMismatch => write!(f, "block hash mismatch"),
             ZkTransitionError::PreviousHeightMismatch { expected, actual } => {
                 write!(
@@ -726,6 +730,97 @@ pub fn hash_header(header: &WitnessBlockHeader) -> [u8; 32] {
     *hasher.finalize().as_bytes()
 }
 
+pub fn compute_events_root(witness: &BlockWitness) -> Option<[u8; 32]> {
+    let events = sybil_verifier::event_schema::event_leaf_values(
+        &witness.system_events,
+        &witness.orders,
+        &witness.rejections,
+        &witness.fills,
+    );
+    events_root_from_event_bytes(&events)
+}
+
+pub fn events_root_from_event_bytes(events: &[Vec<u8>]) -> Option<[u8; 32]> {
+    let mut operations = Vec::with_capacity(events.len().checked_add(2)?);
+    operations.push(encode_keyless_commit_operation(None)?);
+    for event in events {
+        operations.push(encode_keyless_append_operation(event)?);
+    }
+    operations.push(encode_keyless_commit_operation(Some(
+        &(u64::try_from(events.len()).ok()?).to_le_bytes(),
+    ))?);
+    compute_mmr_root_from_elements(&operations)
+}
+
+fn encode_keyless_append_operation(value: &[u8]) -> Option<Vec<u8>> {
+    const APPEND_CONTEXT: u8 = 1;
+
+    let mut out = Vec::with_capacity(1 + encoded_len_size(value.len())? + value.len());
+    out.push(APPEND_CONTEXT);
+    append_len_prefixed_bytes(&mut out, value)?;
+    Some(out)
+}
+
+fn encode_keyless_commit_operation(metadata: Option<&[u8]>) -> Option<Vec<u8>> {
+    const COMMIT_CONTEXT: u8 = 0;
+
+    let metadata_len = match metadata {
+        Some(bytes) => encoded_len_size(bytes.len())?.checked_add(bytes.len())?,
+        None => 0,
+    };
+    let mut out = Vec::with_capacity(2 + metadata_len);
+    out.push(COMMIT_CONTEXT);
+    match metadata {
+        Some(bytes) => {
+            out.push(1);
+            append_len_prefixed_bytes(&mut out, bytes)?;
+        }
+        None => out.push(0),
+    }
+    Some(out)
+}
+
+fn compute_mmr_root_from_elements(elements: &[Vec<u8>]) -> Option<[u8; 32]> {
+    let leaves = u64::try_from(elements.len()).ok()?;
+    if leaves > MAX_MMR_LEAVES {
+        return None;
+    }
+    let size = mmr_location_to_position(leaves)?;
+    let mut peak_digests = Vec::new();
+    let mut leaf_cursor = 0usize;
+
+    for (peak_pos, height) in mmr_peaks(size) {
+        let width = 1usize.checked_shl(height)?;
+        let end = leaf_cursor.checked_add(width)?;
+        let peak = elements.get(leaf_cursor..end)?;
+        peak_digests.push(compute_mmr_peak_from_elements(peak_pos, height, peak)?);
+        leaf_cursor = end;
+    }
+
+    if leaf_cursor != elements.len() {
+        return None;
+    }
+    Some(mmr_root(leaves, &peak_digests))
+}
+
+fn compute_mmr_peak_from_elements(pos: u64, height: u32, elements: &[Vec<u8>]) -> Option<[u8; 32]> {
+    if height == 0 {
+        let [element] = elements else {
+            return None;
+        };
+        return Some(mmr_leaf_digest(pos, element));
+    }
+
+    let child_height = height - 1;
+    let left_width = 1usize.checked_shl(child_height)?;
+    let (left_elements, right_elements) = elements.split_at(left_width);
+    let left_pos = pos.checked_sub(1u64.checked_shl(height)?)?;
+    let right_pos = pos.checked_sub(1)?;
+    let left = compute_mmr_peak_from_elements(left_pos, child_height, left_elements)?;
+    let right = compute_mmr_peak_from_elements(right_pos, child_height, right_elements)?;
+    Some(mmr_node_digest(pos, &left, &right))
+}
+
 pub fn public_inputs_from_witness(witness: &BlockWitness) -> StateTransitionPublicInputs {
     let (previous_height, previous_state_root) = match &witness.previous_header {
         Some(previous) => (previous.height, previous.state_root),
@@ -760,6 +855,11 @@ fn verify_public_input_binding(
         return Err(ZkTransitionError::StateRootMismatch);
     }
     if inputs.events_root != witness.header.events_root {
+        return Err(ZkTransitionError::EventsRootMismatch);
+    }
+    let expected_events_root =
+        compute_events_root(witness).ok_or(ZkTransitionError::EventsRootComputationFailed)?;
+    if witness.header.events_root != expected_events_root {
         return Err(ZkTransitionError::EventsRootMismatch);
     }
     if inputs.block_hash != hash_header(&witness.header) {
@@ -927,11 +1027,12 @@ mod tests {
         let state_sidecar = StateSidecarSnapshot::default();
         let leaves = sybil_verifier::state_schema::state_root_leaves(&[], &state_sidecar);
         let (state_root, state_root_proof) = state_root_and_proof(&leaves);
+        let events_root = events_root_from_event_bytes(&[]).expect("empty events root");
         let header = WitnessBlockHeader {
             height: 1,
             parent_hash: [0u8; 32],
             state_root,
-            events_root: [2u8; 32],
+            events_root,
             order_count: 0,
             fill_count: 0,
             timestamp_ms: 1000,
@@ -1039,11 +1140,12 @@ mod tests {
         let post_state = vec![account];
         let leaves = sybil_verifier::state_schema::state_root_leaves(&post_state, &state_sidecar);
         let (state_root, state_root_proof) = state_root_and_proof(&leaves);
+        let events_root = events_root_from_event_bytes(&[]).expect("empty events root");
         let header = WitnessBlockHeader {
             height: 1,
             parent_hash: [0u8; 32],
             state_root,
-            events_root: [4u8; 32],
+            events_root,
             order_count: 0,
             fill_count: 0,
             timestamp_ms: 1000,
@@ -1097,11 +1199,12 @@ mod tests {
             .collect::<Vec<_>>();
         let leaves = sybil_verifier::state_schema::state_root_leaves(&post_state, &state_sidecar);
         let (state_root, state_root_proof) = state_root_and_proof(&leaves);
+        let events_root = events_root_from_event_bytes(&[]).expect("empty events root");
         let header = WitnessBlockHeader {
             height: 1,
             parent_hash: [0u8; 32],
             state_root,
-            events_root: [5u8; 32],
+            events_root,
             order_count: 0,
             fill_count: 0,
             timestamp_ms: 1000,
@@ -1286,9 +1389,26 @@ mod tests {
         assert_eq!(
             state_transition_public_input_hash(&input.public_inputs),
             [
-                137, 52, 203, 207, 127, 11, 249, 24, 126, 204, 138, 206, 160, 43, 89, 207, 215,
-                110, 228, 4, 220, 168, 162, 188, 68, 94, 55, 182, 144, 124, 141, 138,
+                242, 209, 67, 5, 214, 19, 250, 198, 198, 80, 245, 80, 211, 182, 180, 76, 98, 37,
+                155, 44, 173, 227, 98, 124, 92, 10, 242, 210, 117, 160, 45, 141,
             ]
+        );
+    }
+
+    #[test]
+    fn guest_events_root_matches_native_golden_deposit() {
+        let system_events = vec![sybil_verifier::SystemEventWitness::Deposit {
+            account_id: 7,
+            amount: 50,
+        }];
+        let events = sybil_verifier::event_schema::event_leaf_values(&system_events, &[], &[], &[]);
+
+        assert_eq!(
+            events_root_from_event_bytes(&events),
+            Some([
+                192, 49, 15, 127, 205, 199, 131, 164, 175, 240, 21, 115, 173, 61, 247, 113, 35,
+                129, 44, 150, 211, 36, 13, 167, 222, 164, 46, 216, 180, 50, 124, 160,
+            ])
         );
     }
 
@@ -1296,6 +1416,19 @@ mod tests {
     fn mismatched_event_root_fails_before_guest_hash() {
         let mut input = empty_guest_input();
         input.public_inputs.events_root = [9u8; 32];
+        assert_eq!(
+            verify_state_transition_input(&input),
+            Err(ZkTransitionError::EventsRootMismatch)
+        );
+    }
+
+    #[test]
+    fn witness_event_root_mismatch_fails_even_when_public_input_matches() {
+        let mut input = empty_guest_input();
+        input.witness.header.events_root = [9u8; 32];
+        input.public_inputs.events_root = input.witness.header.events_root;
+        input.public_inputs.block_hash = hash_header(&input.witness.header);
+
         assert_eq!(
             verify_state_transition_input(&input),
             Err(ZkTransitionError::EventsRootMismatch)

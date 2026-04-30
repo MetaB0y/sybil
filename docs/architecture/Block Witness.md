@@ -251,7 +251,8 @@ pinned.
 > `crates/sybil-verifier/src/types.rs` — `BlockWitness`, `WitnessBlockHeader`, `AccountSnapshot`
 > `crates/matching-sequencer/src/block.rs` — `produce_block` builds the witness; `hash_header` is the current header hash
 > `crates/sybil-verifier/src/block.rs` — `verify_block` runs Layer 3 checks against the witness
-> `crates/sybil-verifier/src/event_commitment.rs` — canonical event leaves and `events_root`
+> `crates/sybil-verifier/src/event_schema.rs` — canonical event leaves
+> `crates/sybil-verifier/src/event_commitment.rs` — native keyless-qMDB `events_root`
 
 ## See also
 

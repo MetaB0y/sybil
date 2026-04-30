@@ -25,6 +25,7 @@ pub mod block;
 mod canonical;
 #[cfg(feature = "qmdb")]
 pub mod event_commitment;
+pub mod event_schema;
 pub mod match_verifier;
 pub mod orders;
 pub mod settlement;
