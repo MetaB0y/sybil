@@ -4302,6 +4302,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "hex",
+ "matching-engine",
  "matching-sequencer",
  "rmp-serde",
  "serde",

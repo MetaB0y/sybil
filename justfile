@@ -100,6 +100,10 @@ prover-submit-state-root settlement guest_input="/tmp/sybil-guest-input.msgpack"
 witgen-export-latest store job="/tmp/sybil-proof-job.msgpack":
     cargo run -p sybil-witgen-cli -- export-latest --store {{store}} --job {{job}}
 
+# Create a one-block local sequencer smoke fixture and export its proof job
+witgen-smoke-job store="/tmp/sybil-smoke.redb" job="/tmp/sybil-proof-job.msgpack":
+    cargo run -p sybil-witgen-cli -- smoke-job --store {{store}} --job {{job}}
+
 # Clean and rebuild
 rebuild:
     cargo clean && cargo build --release

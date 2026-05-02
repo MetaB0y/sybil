@@ -37,9 +37,10 @@ The first guest boundary is intentionally narrow:
   witness byte schemas used by native verification, witgen, and the guest.
 - `crates/sybil-prover/` is the proof-job CLI/service boundary. It consumes
   serialized `StateTransitionProofJob` values, validates them through
-  `sybil-witgen`, emits serialized `StateTransitionGuestInput` artifacts, and
-  reports the public input hash. It also encodes `submitStateRoot` calldata for
-  the L1 settlement contract once OpenVM proof bytes exist. Real OpenVM proof
+  `sybil-witgen`, runs the native `sybil-zk` transition verifier before
+  emitting serialized `StateTransitionGuestInput` artifacts, and reports the
+  public input hash. It also encodes `submitStateRoot` calldata for the L1
+  settlement contract once OpenVM proof bytes exist. Real OpenVM proof
   orchestration is still service work.
 - `zk/openvm-guest/` is a standalone OpenVM package pinned to
   `v2.0.0-beta.2`. It is outside the root Cargo workspace so normal Rust
@@ -78,6 +79,7 @@ just openvm-install
 just openvm-guest-check
 just openvm-guest-build
 just openvm-keygen-app
+just witgen-smoke-job /tmp/sybil-smoke.redb /tmp/job.msgpack
 just witgen-export-latest data/sybil.redb /tmp/job.msgpack
 just prover-inspect /tmp/job.msgpack
 just prover-prepare /tmp/job.msgpack

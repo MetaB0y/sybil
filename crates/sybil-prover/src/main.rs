@@ -116,6 +116,8 @@ enum ProverCliError {
     EmptyProof { path: PathBuf },
     #[error(transparent)]
     ProofJob(#[from] sybil_witgen::ProofJobError),
+    #[error("verify prepared guest input: {0}")]
+    ZkTransition(#[from] sybil_zk::ZkTransitionError),
 }
 
 fn main() {
@@ -143,8 +145,7 @@ fn prepare(args: PrepareArgs) -> Result<(), ProverCliError> {
     let job = read_job(&args.job)?;
     let job_id = job.id();
     let guest_input = build_state_transition_guest_input(job)?;
-    let public_input_hash =
-        sybil_zk::state_transition_public_input_hash(&guest_input.public_inputs);
+    let public_input_hash = sybil_zk::verify_state_transition_input(&guest_input)?;
 
     write_msgpack_named(&args.guest_input, &guest_input)?;
     if let Some(path) = args.public_input_hash {
