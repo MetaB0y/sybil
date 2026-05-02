@@ -1,0 +1,19 @@
+[package]
+name = "sybil-witgen-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Sequencer-side proof job export tooling"
+
+[[bin]]
+name = "sybil-witgen"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+hex = "0.4"
+matching-sequencer = { path = "../matching-sequencer" }
+rmp-serde = "1"
+serde = { version = "1", features = ["derive"] }
+sybil-witgen = { path = "../sybil-witgen" }
+thiserror = { workspace = true }
+tokio = { version = "1", features = ["rt", "macros"] }

@@ -381,7 +381,10 @@ impl SequencerActorState {
     async fn persist_block(&self, prepared: &PreparedBlock) -> Result<(), SequencerError> {
         if let Some(ref store) = self.store {
             store
-                .save_block(prepared.next_sequencer().snapshot())
+                .save_block_with_witness(
+                    prepared.next_sequencer().snapshot(),
+                    &prepared.production().witness,
+                )
                 .await
                 .map_err(|error| SequencerError::Persistence(error.to_string()))?;
         }

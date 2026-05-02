@@ -176,9 +176,17 @@ mod tests {
 
         let path = temp_db_path("zk-proof-job");
         let store = Store::open(&path).unwrap();
-        store.save_block(sequencer.snapshot()).await.unwrap();
+        store
+            .save_block_with_witness(sequencer.snapshot(), &production.witness)
+            .await
+            .unwrap();
 
-        let job = collect_state_transition_proof_job(&store, production.witness)
+        let persisted_witness = store
+            .latest_block_witness()
+            .unwrap()
+            .expect("latest witness persisted");
+
+        let job = collect_state_transition_proof_job(&store, persisted_witness)
             .await
             .unwrap();
         assert_eq!(job.block_height, production.block.header.height);

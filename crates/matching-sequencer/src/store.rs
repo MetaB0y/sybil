@@ -50,6 +50,7 @@ use std::path::Path;
 use matching_engine::{MarketGroup, MarketId, MarketSet, Nanos};
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 use sybil_oracle::{DataFeed, MarketStatus};
+use sybil_verifier::BlockWitness;
 use tracing::{debug, info, warn};
 
 use crate::account::{AccountId, AccountStore};
@@ -86,6 +87,11 @@ const MARKET_GROUPS: TableDefinition<u32, &[u8]> = TableDefinition::new("market_
 
 /// Block headers: height (u64) → msgpack(BlockHeader)
 const BLOCK_HEADERS: TableDefinition<u64, &[u8]> = TableDefinition::new("block_headers");
+
+/// Block witnesses: height (u64) -> msgpack(BlockWitness).
+/// Persisted for asynchronous witgen/prover workers. Historical qMDB slots are
+/// not retained yet, so proof-job export currently targets the latest block.
+const BLOCK_WITNESSES: TableDefinition<u64, &[u8]> = TableDefinition::new("block_witnesses");
 
 /// Pubkey registry: compressed_point (33 bytes) → account_id (u64)
 const PUBKEY_REGISTRY: TableDefinition<&[u8], u64> = TableDefinition::new("pubkey_registry");
@@ -253,6 +259,7 @@ impl Store {
         txn.open_table(MARKET_STATUSES)?;
         txn.open_table(MARKET_GROUPS)?;
         txn.open_table(BLOCK_HEADERS)?;
+        txn.open_table(BLOCK_WITNESSES)?;
         txn.open_table(PUBKEY_REGISTRY)?;
         txn.open_table(COUNTERS)?;
         txn.open_table(CLEARING_PRICES)?;
@@ -278,6 +285,31 @@ impl Store {
 
     /// Save the sequencer state after a block. Single ACID transaction.
     pub async fn save_block(&self, snapshot: SequencerSnapshot<'_>) -> Result<(), StoreError> {
+        self.save_block_inner(snapshot, None).await
+    }
+
+    /// Save the sequencer state and its witness after a block.
+    ///
+    /// The witness is committed in the same redb transaction as the block
+    /// metadata, so an asynchronous witgen process can later export a proof job
+    /// for the latest committed block.
+    pub async fn save_block_with_witness(
+        &self,
+        snapshot: SequencerSnapshot<'_>,
+        witness: &BlockWitness,
+    ) -> Result<(), StoreError> {
+        self.save_block_inner(snapshot, Some(witness)).await
+    }
+
+    async fn save_block_inner(
+        &self,
+        snapshot: SequencerSnapshot<'_>,
+        witness: Option<&BlockWitness>,
+    ) -> Result<(), StoreError> {
+        if let Some(witness) = witness {
+            validate_witness_header(snapshot.header, witness)?;
+        }
+
         let current_fence = read_account_state_fence(&self.db)?;
         let next_slot = current_fence
             .map(|fence| fence.slot.inactive())
@@ -344,6 +376,18 @@ impl Store {
             let mut table = txn.open_table(BLOCK_HEADERS)?;
             let bytes = rmp_serde::to_vec(snapshot.header)?;
             table.insert(snapshot.header.height, bytes.as_slice())?;
+        }
+
+        // Block witness, when produced by the actor path. If this call path
+        // intentionally omits a witness, remove any stale row for the height.
+        {
+            let mut table = txn.open_table(BLOCK_WITNESSES)?;
+            if let Some(witness) = witness {
+                let bytes = rmp_serde::to_vec(witness)?;
+                table.insert(snapshot.header.height, bytes.as_slice())?;
+            } else {
+                table.remove(snapshot.header.height)?;
+            }
         }
 
         // Pubkey registry
@@ -517,6 +561,31 @@ impl Store {
         };
         self.state_qmdb_leaf_exclusion_proof(fence.slot, leaf_key)
             .await
+    }
+
+    /// Load a persisted block witness by height.
+    pub fn block_witness(&self, height: u64) -> Result<Option<BlockWitness>, StoreError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(BLOCK_WITNESSES)?;
+        table
+            .get(height)?
+            .map(|value| rmp_serde::from_slice(value.value()))
+            .transpose()
+            .map_err(StoreError::from)
+    }
+
+    /// Load the latest committed block witness, if the store has one.
+    pub fn latest_block_witness(&self) -> Result<Option<BlockWitness>, StoreError> {
+        let txn = self.db.begin_read()?;
+        let Some(metadata) = read_recovery_metadata(&txn)? else {
+            return Ok(None);
+        };
+        let table = txn.open_table(BLOCK_WITNESSES)?;
+        table
+            .get(metadata.height)?
+            .map(|value| rmp_serde::from_slice(value.value()))
+            .transpose()
+            .map_err(StoreError::from)
     }
 
     /// Load state from the store. Returns None if the store is empty (fresh start).
@@ -870,6 +939,8 @@ pub enum StoreError {
     Io(#[from] std::io::Error),
     #[error("qmdb: {0}")]
     Qmdb(String),
+    #[error("block witness header does not match persisted block header")]
+    WitnessHeaderMismatch,
     #[error("unsupported store layout: {0}")]
     UnsupportedLayout(String),
     #[error("corrupt store layout: {0}")]
@@ -898,6 +969,21 @@ struct RecoveryMetadata {
     next_market_id: u32,
     next_order_id: u64,
     account_state: RecoveryAccountState,
+}
+
+fn validate_witness_header(header: &BlockHeader, witness: &BlockWitness) -> Result<(), StoreError> {
+    let witness_header = &witness.header;
+    if witness_header.height != header.height
+        || witness_header.parent_hash != header.parent_hash
+        || witness_header.state_root != header.state_root
+        || witness_header.events_root != header.events_root
+        || witness_header.order_count != header.order_count
+        || witness_header.fill_count != header.fill_count
+        || witness_header.timestamp_ms != header.timestamp_ms
+    {
+        return Err(StoreError::WitnessHeaderMismatch);
+    }
+    Ok(())
 }
 
 fn initialize_or_validate_layout(db: &Database) -> Result<(), StoreError> {
@@ -1060,6 +1146,27 @@ mod tests {
         }
     }
 
+    fn sample_witness(header: &BlockHeader) -> BlockWitness {
+        BlockWitness {
+            header: header.to_witness_header(),
+            previous_header: None,
+            orders: Vec::new(),
+            rejections: Vec::new(),
+            system_events: Vec::new(),
+            fills: Vec::new(),
+            clearing_prices: HashMap::new(),
+            total_welfare: 0,
+            minting_cost: 0,
+            mm_constraints: Vec::new(),
+            market_groups: Vec::new(),
+            pre_state: Vec::new(),
+            post_system_state: Vec::new(),
+            post_state: Vec::new(),
+            state_sidecar: sybil_verifier::StateSidecarSnapshot::default(),
+            resolved_markets: Vec::new(),
+        }
+    }
+
     /// Owns the empty defaults for `SequencerSnapshot` references so test code
     /// doesn't have to repeat the ceremony on every call site.
     struct TestEnv {
@@ -1172,6 +1279,95 @@ mod tests {
         let restored = store.load_state().await.unwrap().unwrap();
         assert_eq!(restored.height, 2);
         assert_eq!(restored.accounts.get(account_id).unwrap().balance, 200);
+    }
+
+    #[tokio::test]
+    async fn save_block_with_witness_persists_latest_witness() {
+        let path = temp_db_path("store-witness");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+        let lifecycle = MarketLifecycle::new(oracle);
+        let markets = MarketSet::new();
+        let env = TestEnv::new();
+        let mut accounts = AccountStore::new();
+        accounts.create_account(100);
+
+        let header = sample_header(1);
+        let witness = sample_witness(&header);
+        store
+            .save_block_with_witness(
+                env.snapshot(&accounts, &markets, &lifecycle, &header, 1, None, vec![]),
+                &witness,
+            )
+            .await
+            .unwrap();
+
+        let latest = store
+            .latest_block_witness()
+            .unwrap()
+            .expect("latest witness persisted");
+        let by_height = store
+            .block_witness(header.height)
+            .unwrap()
+            .expect("height witness persisted");
+
+        assert_eq!(latest.header.height, header.height);
+        assert_eq!(latest.header.state_root, header.state_root);
+        assert_eq!(by_height.header.height, header.height);
+    }
+
+    #[tokio::test]
+    async fn save_block_with_witness_rejects_mismatched_header() {
+        let path = temp_db_path("store-witness-mismatch");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+        let lifecycle = MarketLifecycle::new(oracle);
+        let markets = MarketSet::new();
+        let env = TestEnv::new();
+        let accounts = AccountStore::new();
+
+        let header = sample_header(1);
+        let mut witness = sample_witness(&header);
+        witness.header.height = 2;
+
+        let error = store
+            .save_block_with_witness(
+                env.snapshot(&accounts, &markets, &lifecycle, &header, 1, None, vec![]),
+                &witness,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, StoreError::WitnessHeaderMismatch));
+    }
+
+    #[tokio::test]
+    async fn save_block_without_witness_clears_stale_witness_for_height() {
+        let path = temp_db_path("store-witness-clear");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+        let lifecycle = MarketLifecycle::new(oracle);
+        let markets = MarketSet::new();
+        let env = TestEnv::new();
+        let accounts = AccountStore::new();
+
+        let header = sample_header(1);
+        let witness = sample_witness(&header);
+        store
+            .save_block_with_witness(
+                env.snapshot(&accounts, &markets, &lifecycle, &header, 1, None, vec![]),
+                &witness,
+            )
+            .await
+            .unwrap();
+        assert!(store.latest_block_witness().unwrap().is_some());
+
+        store
+            .save_block(env.snapshot(&accounts, &markets, &lifecycle, &header, 1, None, vec![]))
+            .await
+            .unwrap();
+
+        assert!(store.latest_block_witness().unwrap().is_none());
     }
 
     #[tokio::test]

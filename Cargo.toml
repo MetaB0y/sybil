@@ -14,6 +14,7 @@ members = [
     "crates/sybil-zk",
     "crates/sybil-witgen",
     "crates/sybil-prover",
+    "crates/sybil-witgen-cli",
     "crates/sybil-polymarket",
 ]
 

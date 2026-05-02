@@ -4296,6 +4296,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sybil-witgen-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "hex",
+ "matching-sequencer",
+ "rmp-serde",
+ "serde",
+ "sybil-witgen",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "sybil-zk"
 version = "0.1.0"
 dependencies = [

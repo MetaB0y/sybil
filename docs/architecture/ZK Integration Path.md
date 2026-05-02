@@ -29,6 +29,10 @@ The first guest boundary is intentionally narrow:
   The default `sequencer-store` feature adds the adapter that collects this
   job from sequencer storage; the core job-to-guest conversion has no
   dependency on `matching-sequencer`.
+- `crates/sybil-witgen-cli/` is the sequencer-side proof-job export tool. It
+  reads the latest committed block witness from the store, collects qMDB state
+  leaf proofs through `sybil-witgen`, and writes a portable MessagePack proof
+  job for prover workers.
 - `crates/sybil-verifier::commitments` owns the canonical state, event, and
   witness byte schemas used by native verification, witgen, and the guest.
 - `crates/sybil-prover/` is the proof-job CLI/service boundary. It consumes
@@ -68,6 +72,7 @@ Commands:
 just openvm-install
 just openvm-guest-check
 just openvm-guest-build
+just witgen-export-latest data/sybil.redb /tmp/job.msgpack
 just prover-inspect /tmp/job.msgpack
 just prover-prepare /tmp/job.msgpack
 ```
@@ -83,6 +88,7 @@ just prover-prepare /tmp/job.msgpack
 ## Where This Lives
 > `crates/sybil-verifier/` — verification logic that will become the ZK circuit
 > `crates/sybil-witgen/` — portable proof job type and OpenVM guest input construction
+> `crates/sybil-witgen-cli/` — sequencer-store proof-job export CLI
 > `crates/sybil-prover/` — proof-job CLI and future prover service
 > `crates/sybil-zk/` — public input hash and guest-safe transition verifier
 > `zk/openvm-guest/` — OpenVM 2.0 beta guest entrypoint
