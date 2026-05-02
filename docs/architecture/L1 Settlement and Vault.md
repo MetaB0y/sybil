@@ -193,6 +193,12 @@ state_transition_public_input_hash =
     ))
 ```
 
+The host submitter tooling derives this struct from the prepared
+`StateTransitionGuestInput`, computes the same Rust-side
+`state_transition_public_input_hash`, and writes ABI calldata for
+`submitStateRoot(inputs, proof)`. The contract remains the source of truth for
+sequencing, deposit-root checkpoint checks, and verifier-adapter acceptance.
+
 `SybilSettlement` stores the active adapter and a `verifierVersion`. Upgrades
 are allowed only through the admin-governance path defined below; historical
 roots retain the verifier version that accepted them.

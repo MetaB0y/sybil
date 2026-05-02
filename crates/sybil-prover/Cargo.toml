@@ -13,6 +13,7 @@ clap = { version = "4.5", features = ["derive"] }
 hex = "0.4"
 rmp-serde = "1"
 serde = { version = "1", features = ["derive"] }
+sha3 = "0.10"
 sybil-witgen = { path = "../sybil-witgen", default-features = false }
 sybil-zk = { path = "../sybil-zk" }
 thiserror = { workspace = true }

@@ -38,8 +38,9 @@ The first guest boundary is intentionally narrow:
 - `crates/sybil-prover/` is the proof-job CLI/service boundary. It consumes
   serialized `StateTransitionProofJob` values, validates them through
   `sybil-witgen`, emits serialized `StateTransitionGuestInput` artifacts, and
-  reports the public input hash. Real OpenVM proof generation is the next
-  layer on this boundary.
+  reports the public input hash. It also encodes `submitStateRoot` calldata for
+  the L1 settlement contract once OpenVM proof bytes exist. Real OpenVM proof
+  orchestration is still service work.
 - `zk/openvm-guest/` is a standalone OpenVM package pinned to
   `v2.0.0-beta.2`. It is outside the root Cargo workspace so normal Rust
   checks do not require the OpenVM prerelease CLI or generated artifacts.
@@ -83,6 +84,7 @@ just prover-prepare /tmp/job.msgpack
 just openvm-input /tmp/sybil-guest-input.msgpack /tmp/sybil-openvm-input.json
 just openvm-run /tmp/sybil-openvm-input.json
 just openvm-prove-app /tmp/sybil-openvm-input.json /tmp/sybil-openvm.app.proof
+just prover-submit-state-root 0xYourSettlement /tmp/sybil-guest-input.msgpack /tmp/sybil-openvm.app.proof
 ```
 
 ## Key Properties
@@ -97,7 +99,7 @@ just openvm-prove-app /tmp/sybil-openvm-input.json /tmp/sybil-openvm.app.proof
 > `crates/sybil-verifier/` — verification logic that will become the ZK circuit
 > `crates/sybil-witgen/` — portable proof job type and OpenVM guest input construction
 > `crates/sybil-witgen-cli/` — sequencer-store proof-job export CLI
-> `crates/sybil-prover/` — proof-job CLI and future prover service
+> `crates/sybil-prover/` — proof-job CLI, settlement calldata encoder, and future prover service
 > `crates/sybil-zk/` — public input hash and guest-safe transition verifier
 > `zk/openvm-guest/` — OpenVM 2.0 beta guest entrypoint
 > `zk/openvm-tools/` — OpenVM CLI input encoder for prepared guest inputs

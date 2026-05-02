@@ -92,6 +92,10 @@ prover-inspect job:
 prover-prepare job guest_input="/tmp/sybil-guest-input.msgpack" public_input_hash="/tmp/sybil-public-input-hash.hex":
     cargo run -p sybil-prover -- prepare --job {{job}} --guest-input {{guest_input}} --public-input-hash {{public_input_hash}}
 
+# Encode a SybilSettlement.submitStateRoot transaction from guest input and proof bytes
+prover-submit-state-root settlement guest_input="/tmp/sybil-guest-input.msgpack" proof="/tmp/sybil-openvm.app.proof" calldata="/tmp/sybil-submit-state-root.calldata":
+    cargo run -p sybil-prover -- submit-state-root --settlement {{settlement}} --guest-input {{guest_input}} --proof {{proof}} --calldata {{calldata}}
+
 # Export the latest committed sequencer block as a portable proof job
 witgen-export-latest store job="/tmp/sybil-proof-job.msgpack":
     cargo run -p sybil-witgen-cli -- export-latest --store {{store}} --job {{job}}
