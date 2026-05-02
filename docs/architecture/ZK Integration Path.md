@@ -11,8 +11,8 @@ The path from current architecture to ZK proofs is deliberately incremental. The
 
 Several architectural choices were made specifically for ZK-friendliness. [[Nanos and Integer Arithmetic|All-integer arithmetic]] maps directly to finite field operations (no floating-point emulation needed). The [[State Root Schema|state commitment]] uses a SHA-256 qMDB root so membership/exclusion checks can be wrapped in settlement and withdrawal proofs without forcing Solidity to understand qMDB directly. The [[Payoff Vectors|payoff vector]] representation keeps orders as small fixed-size arrays rather than variable-length structures, simplifying circuit layout. The verification layers are independent, allowing the circuit to be decomposed and parallelized. The OpenVM guest boundary now exists; prover orchestration, proof service operations, and DA semantics are still future work. The rollout is planned in four phases:
 
-1. **Phase 1 (current):** 4-layer verification logic runs in Rust, exercised in tests and `matching-sim`. No ZK circuits yet.
-2. **Phase 2 (started):** Compile the verification logic into an OpenVM guest program. The current guest verifies public input binding, post-state qMDB proofs, event-root recomputation, witness-root binding, and match/settlement/order logic. End-to-end proof generation is the remaining work in this phase.
+1. **Phase 1:** 4-layer verification logic runs in Rust, exercised in tests and `matching-sim`.
+2. **Phase 2 (started):** Compile the verification logic into an OpenVM guest program. The current guest verifies public input binding, post-state qMDB proofs, event-root recomputation, witness-root binding, and match/settlement/order logic. Local app-proof generation works for the smoke proof job; generated verifier-contract integration remains follow-up work.
 3. **Phase 3:** Prover service that takes a `BlockWitness` and produces an OpenVM proof per batch. Runs alongside the sequencer.
 4. **Phase 4:** [[L1 Settlement and Vault|L1 settlement and vault contracts]] on Ethereum. Store accepted state roots, verify proofs on-chain, custody deposits, and process conservative proof-backed exits; full operator disappearance recovery depends on the DA/operator replacement design.
 
@@ -49,8 +49,11 @@ The first guest boundary is intentionally narrow:
   OpenVM tag. It converts prepared `StateTransitionGuestInput` MessagePack into
   the JSON/hex input format expected by `cargo openvm run` and
   `cargo openvm prove`.
-- The guest reads `StateTransitionGuestInput`, derives the canonical typed
-  state leaves from the block witness, verifies ordered-current-qMDB
+- The OpenVM CLI input is a raw byte stream containing little-endian
+  `openvm::serde` words. The guest reconstructs those words and decodes
+  `StateTransitionGuestInput` with `openvm::serde::from_slice`, then derives
+  the canonical typed state leaves from the block witness, verifies
+  ordered-current-qMDB
   key/value proofs for those leaves against the public `new_state_root`,
   verifies that each qMDB `next_key` pointer forms the exact sorted key ring,
   recomputes the keyless-qMDB `events_root` from canonical event leaf bytes,
@@ -95,7 +98,9 @@ just prover-submit-state-root 0xYourSettlement /tmp/sybil-guest-input.msgpack /t
 - State roots on Ethereum L1 — proofs attest each state transition
 - Escape hatch: conservative exits plus DA-backed recovery design
 - All architectural choices (integer arithmetic, typed state roots, fixed-size arrays) are ZK-motivated
-- Status: planned, not yet implemented
+- Status: partial implementation; local guest execution, app proof generation,
+  and mock-verifier settlement submission work, while production prover service
+  and generated on-chain verifier integration remain open.
 
 ## Where This Lives
 > `crates/sybil-verifier/` — verification logic that will become the ZK circuit
