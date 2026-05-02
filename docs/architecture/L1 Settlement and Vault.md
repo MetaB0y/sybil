@@ -2,7 +2,7 @@
 tags: [contracts, bridge, validium, spec]
 layer: verification
 status: planned
-last_verified: 2026-04-30
+last_verified: 2026-05-02
 ---
 
 # L1 Settlement and Vault
@@ -104,9 +104,11 @@ struct RootRecord {
 }
 ```
 
-`daCommitment` is an opaque commitment until [[Persistence|DA publication]]
-and operator replacement are fully specified. L1 stores it so users can bind a
-root to the data publication the operator claimed to make, but the vault does
+`daCommitment` is reserved for [[Persistence|DA publication]] and operator
+replacement. Until SYB-76 defines provider semantics, the only accepted value
+is the zero pre-DA placeholder; `SybilSettlement` rejects any other value.
+Once DA is specified, L1 will store the commitment so users can bind a root to
+the data publication the operator claimed to make, but the vault will still
 not assume that `daCommitment` alone makes the data available.
 
 `depositRoot` and `depositCount` bind a state transition to the L1 deposit log

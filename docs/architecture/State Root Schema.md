@@ -3,7 +3,7 @@ tags: [zk, spec]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-04-30
+last_verified: 2026-05-02
 ---
 
 # State Root Schema
@@ -24,6 +24,7 @@ Implementation:
 
 - `crates/sybil-verifier/src/block.rs::compute_state_root_with_sidecar`
 - `crates/sybil-verifier/src/state_schema.rs::state_root_leaves`
+- `sybil_verifier::commitments::state_schema` as the public schema namespace
 - `crates/sybil-verifier/src/block.rs::state_root_from_leaves`
 - `crates/matching-sequencer/src/block.rs::compute_complete_state_root`
 
@@ -87,10 +88,13 @@ committed qMDB contains a hidden extra active key, at least one adjacent
 `next_key` pointer will target that hidden key and the guest rejects the
 transition.
 
-The proof bytes are produced from commonware qMDB outside the guest. Inside
-OpenVM, `crates/sybil-zk` verifies the needed SHA-256 MMR/grafted-root proof
-shape directly, avoiding commonware storage as a guest dependency while keeping
-the proof format pinned to commonware's ordered-current-qMDB semantics.
+The proof bytes are produced from commonware qMDB outside the guest.
+`crates/sybil-witgen` reads the committed block witness and retained qMDB
+proof material from sequencer storage, checks the native proof against the
+committed root, and converts it into the guest input shape. Inside OpenVM,
+`crates/sybil-zk` verifies the needed SHA-256 MMR/grafted-root proof shape
+directly, avoiding commonware storage as a guest dependency while keeping the
+proof format pinned to commonware's ordered-current-qMDB semantics.
 
 ## Sequencer Storage
 
@@ -111,6 +115,8 @@ The account qMDB slot currently stores:
 `QmdbState` exposes the committed typed-state root plus typed-leaf inclusion
 and exclusion proofs. Those proofs verify directly against
 `BlockHeader.state_root` for the fenced slot recorded by redb.
+The sequencer persists this material; `sybil-witgen` owns turning it into
+OpenVM prover input.
 
 ## Proof API
 
