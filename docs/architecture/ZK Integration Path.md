@@ -31,6 +31,11 @@ The first guest boundary is intentionally narrow:
   dependency on `matching-sequencer`.
 - `crates/sybil-verifier::commitments` owns the canonical state, event, and
   witness byte schemas used by native verification, witgen, and the guest.
+- `crates/sybil-prover/` is the proof-job CLI/service boundary. It consumes
+  serialized `StateTransitionProofJob` values, validates them through
+  `sybil-witgen`, emits serialized `StateTransitionGuestInput` artifacts, and
+  reports the public input hash. Real OpenVM proof generation is the next
+  layer on this boundary.
 - `zk/openvm-guest/` is a standalone OpenVM package pinned to
   `v2.0.0-beta.2`. It is outside the root Cargo workspace so normal Rust
   checks do not require the OpenVM prerelease CLI or generated artifacts.
@@ -63,6 +68,8 @@ Commands:
 just openvm-install
 just openvm-guest-check
 just openvm-guest-build
+just prover-inspect /tmp/job.msgpack
+just prover-prepare /tmp/job.msgpack
 ```
 
 ## Key Properties
@@ -76,6 +83,7 @@ just openvm-guest-build
 ## Where This Lives
 > `crates/sybil-verifier/` — verification logic that will become the ZK circuit
 > `crates/sybil-witgen/` — portable proof job type and OpenVM guest input construction
+> `crates/sybil-prover/` — proof-job CLI and future prover service
 > `crates/sybil-zk/` — public input hash and guest-safe transition verifier
 > `zk/openvm-guest/` — OpenVM 2.0 beta guest entrypoint
 > `crates/matching-sequencer/src/qmdb_state.rs` — persisted typed-state qMDB roots and proofs used by witgen

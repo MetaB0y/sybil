@@ -4252,6 +4252,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sybil-prover"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "hex",
+ "rmp-serde",
+ "serde",
+ "sybil-verifier",
+ "sybil-witgen",
+ "sybil-zk",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "sybil-verifier"
 version = "0.1.0"
 dependencies = [

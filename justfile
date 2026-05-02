@@ -68,6 +68,14 @@ openvm-guest-check:
 openvm-guest-build:
     cargo openvm build --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil
 
+# Inspect a serialized state-transition proof job
+prover-inspect job:
+    cargo run -p sybil-prover -- inspect --job {{job}}
+
+# Validate a proof job and emit a serialized OpenVM guest input artifact
+prover-prepare job guest_input="/tmp/sybil-guest-input.msgpack" public_input_hash="/tmp/sybil-public-input-hash.hex":
+    cargo run -p sybil-prover -- prepare --job {{job}} --guest-input {{guest_input}} --public-input-hash {{public_input_hash}}
+
 # Clean and rebuild
 rebuild:
     cargo clean && cargo build --release

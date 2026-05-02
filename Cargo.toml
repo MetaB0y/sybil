@@ -13,6 +13,7 @@ members = [
     "crates/sybil-verifier",
     "crates/sybil-zk",
     "crates/sybil-witgen",
+    "crates/sybil-prover",
     "crates/sybil-polymarket",
 ]
 

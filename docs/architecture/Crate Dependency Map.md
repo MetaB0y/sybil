@@ -17,7 +17,9 @@ path depends only on `sybil-verifier` and `sybil-zk`; the optional default
 `sequencer-store` feature adds the adapter that reads persisted block/proof
 material from `matching-sequencer`. The sequencer does not depend on
 `sybil-zk`; it produces and persists blocks, witnesses, and qMDB proof
-material.
+material. `sybil-prover` is the CLI/service boundary on top of `sybil-witgen`:
+it consumes portable proof jobs, emits guest-input artifacts and public input
+hashes, and later owns OpenVM proof invocation.
 
 The Python `arena/` sits outside the Rust workspace entirely, connected only via HTTP to `sybil-api`. This clean boundary means the Python bots can be developed, tested, and deployed independently of the Rust code — they only need a running server. The separation also means the arena doesn't need to compile any Rust code, which is important for Python-first developers who want to build bots without a Rust toolchain.
 
@@ -42,6 +44,8 @@ graph TB
     VERIFIER --> WITGEN
     ZK --> WITGEN
     SEQ -.->|"sequencer-store feature"| WITGEN["sybil-witgen"]
+    WITGEN --> PROVER["sybil-prover"]
+    ZK --> PROVER
     ZK --> OPENVM["zk/openvm-guest"]
 ```
 
@@ -52,6 +56,7 @@ graph TB
 - No upward dependencies: engine doesn't know about solvers, solvers don't know about API
 - Sequencer composes middle-tier crates into the block production pipeline
 - `sybil-zk` is guest-safe verification; `sybil-witgen` owns portable proof jobs and host-side prover input construction
+- `sybil-prover` is the proof-job CLI/service boundary; it does not depend on the sequencer
 - Sequencer owns block production and persistence, not prover input assembly
 - Arena connects via HTTP only — no Rust compilation required
 - `matching-sim` is a dev tool that cross-cuts multiple crates for benchmarking
