@@ -94,6 +94,8 @@ just openvm-keygen
 just openvm-setup
 just openvm-setup-evm-download
 just openvm-commit
+just zk-smoke
+just zk-smoke true
 just witgen-smoke-job /tmp/sybil-smoke.redb /tmp/job.msgpack
 just witgen-export-latest data/sybil.redb /tmp/job.msgpack
 just prover-inspect /tmp/job.msgpack
@@ -108,6 +110,12 @@ just prover-submit-state-root 0xYourSettlement /tmp/sybil-guest-input.msgpack /t
 just prover-submit-state-root-rpc 0xYourSettlement 0xYourSender
 just prover-submit-state-root-evm-rpc 0xYourSettlement 0xYourSender
 ```
+
+`just zk-smoke` is the normal local integration smoke. It creates a one-block
+sequencer fixture, exports a portable proof job, prepares `StateTransitionGuestInput`,
+encodes OpenVM input JSON, builds/transpiles the guest, and runs the guest in
+OpenVM. `just zk-smoke true` additionally runs app keygen, app proof generation,
+and app proof verification. It deliberately never runs EVM setup/proving.
 
 ## Key Properties
 - Validium: off-chain data, on-chain proofs

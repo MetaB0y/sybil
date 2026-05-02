@@ -1,11 +1,93 @@
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_os = "zkvm"))]
 use sha2::{Digest as _, Sha256};
 use sybil_verifier::{
     commitments::{event_schema, state_schema},
     BlockWitness,
 };
+#[cfg(target_os = "zkvm")]
+use zkvm_sha256::Sha256;
 
 use crate::ZkTransitionError;
+
+#[cfg(target_os = "zkvm")]
+mod zkvm_sha256 {
+    use core::cmp::min;
+
+    // Keep sybil-zk free of OpenVM dependencies in the root workspace. The
+    // standalone guest links openvm-sha2-guest, which provides this intrinsic.
+    const BLOCK_BYTES: usize = 64;
+    const DIGEST_BYTES: usize = 32;
+    const STATE_WORDS: usize = 8;
+    const H: [u32; STATE_WORDS] = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
+    ];
+    const PADDING_BYTES: [u8; BLOCK_BYTES] = {
+        let mut bytes = [0u8; BLOCK_BYTES];
+        bytes[0] = 0x80;
+        bytes
+    };
+
+    pub struct Sha256 {
+        state: [u32; STATE_WORDS],
+        buffer: [u8; BLOCK_BYTES],
+        idx: usize,
+        len: u64,
+    }
+
+    impl Sha256 {
+        pub fn new() -> Self {
+            Self {
+                state: H,
+                buffer: [0; BLOCK_BYTES],
+                idx: 0,
+                len: 0,
+            }
+        }
+
+        pub fn update(&mut self, mut input: &[u8]) {
+            self.len = self.len.checked_add(input.len() as u64).unwrap();
+            while !input.is_empty() {
+                let to_copy = min(input.len(), BLOCK_BYTES - self.idx);
+                self.buffer[self.idx..self.idx + to_copy].copy_from_slice(&input[..to_copy]);
+                self.idx += to_copy;
+                if self.idx == BLOCK_BYTES {
+                    self.idx = 0;
+                    self.compress();
+                }
+                input = &input[to_copy..];
+            }
+        }
+
+        pub fn finalize(mut self) -> [u8; DIGEST_BYTES] {
+            let padding_len = BLOCK_BYTES - (self.idx + 8) % BLOCK_BYTES;
+            let bit_len = self.len.checked_mul(8).unwrap();
+            self.update(&PADDING_BYTES[..padding_len]);
+            self.update(&bit_len.to_be_bytes());
+
+            let mut output = [0u8; DIGEST_BYTES];
+            for (chunk, word) in output.chunks_exact_mut(4).zip(self.state.iter()) {
+                chunk.copy_from_slice(&word.to_be_bytes());
+            }
+            output
+        }
+
+        fn compress(&mut self) {
+            unsafe {
+                zkvm_sha256_impl(
+                    self.state.as_ptr() as *const u8,
+                    self.buffer.as_ptr(),
+                    self.state.as_mut_ptr() as *mut u8,
+                );
+            }
+        }
+    }
+
+    unsafe extern "C" {
+        fn zkvm_sha256_impl(state: *const u8, input: *const u8, output: *mut u8);
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QmdbStateRootProof {
@@ -163,11 +245,11 @@ fn verify_qmdb_range_proof(
     };
 
     let mut hasher = Sha256::new();
-    hasher.update(proof.ops_root);
-    hasher.update(merkle_root);
+    hasher.update(&proof.ops_root);
+    hasher.update(&merkle_root);
     if has_partial_chunk {
-        hasher.update(next_bit.to_be_bytes());
-        hasher.update(proof.partial_chunk_digest.expect("checked above"));
+        hasher.update(&next_bit.to_be_bytes());
+        hasher.update(&proof.partial_chunk_digest.expect("checked above"));
     }
     hasher.finalize().as_slice() == root
 }

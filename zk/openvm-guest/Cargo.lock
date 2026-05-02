@@ -271,6 +271,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "openvm-sha2-guest"
+version = "2.0.0-beta.2"
+source = "git+https://github.com/openvm-org/openvm.git?tag=v2.0.0-beta.2#30a13e26e57b2d54178fa3c7dc124b45c0be6782"
+dependencies = [
+ "openvm-platform",
+]
+
+[[package]]
 name = "p3-field"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -433,6 +441,7 @@ name = "sybil-openvm-guest"
 version = "0.1.0"
 dependencies = [
  "openvm",
+ "openvm-sha2-guest",
  "sybil-zk",
 ]
 

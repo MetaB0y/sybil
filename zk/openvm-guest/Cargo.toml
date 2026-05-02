@@ -10,4 +10,5 @@ description = "OpenVM guest for Sybil state-transition verification"
 
 [dependencies]
 openvm = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.0-beta.2", features = ["std"] }
+openvm-sha2-guest = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.0-beta.2" }
 sybil-zk = { path = "../../crates/sybil-zk" }

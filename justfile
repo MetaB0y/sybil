@@ -95,6 +95,45 @@ openvm-input guest_input="/tmp/sybil-guest-input.msgpack" openvm_input="/tmp/syb
 openvm-run input="/tmp/sybil-openvm-input.json":
     cargo openvm run --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil --input {{input}}
 
+# Run local sequencer -> witgen -> prover input -> OpenVM smoke; prove=true adds app proof verification, never EVM proving.
+zk-smoke prove="false":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    case "{{prove}}" in
+      true|false) ;;
+      *) echo "prove must be true or false" >&2; exit 2 ;;
+    esac
+
+    root="${SYBIL_ZK_SMOKE_DIR:-/tmp}"
+    workdir="$root/sybil-zk-smoke-$(date +%s)-$$"
+    store="$workdir/smoke.redb"
+    job="$workdir/proof-job.msgpack"
+    guest_input="$workdir/guest-input.msgpack"
+    public_hash="$workdir/public-input-hash.hex"
+    openvm_input="$workdir/openvm-input.json"
+    app_proof="$workdir/openvm.app.proof"
+
+    mkdir -p "$workdir"
+    echo "zk_smoke_dir=$workdir"
+
+    cargo run -p sybil-witgen-cli -- smoke-job --store "$store" --job "$job"
+    cargo run -p sybil-prover -- prepare --job "$job" --guest-input "$guest_input" --public-input-hash "$public_hash"
+    cargo run --manifest-path zk/openvm-tools/Cargo.toml -- encode-input --guest-input "$guest_input" --openvm-input "$openvm_input"
+    CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}" cargo openvm build --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil
+    cargo openvm run --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil --input "$openvm_input"
+
+    if [[ "{{prove}}" == "true" ]]; then
+      CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}" cargo openvm keygen --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil --app-only
+      cargo openvm prove app --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil --input "$openvm_input" --proof "$app_proof"
+      cargo openvm verify app --manifest-path zk/openvm-guest/Cargo.toml --proof "$app_proof"
+      echo "app_proof=$app_proof"
+    fi
+
+    echo "public_input_hash=$(cat "$public_hash")"
+    echo "openvm_input=$openvm_input"
+    echo "zk_smoke=ok"
+
 # Generate an OpenVM app proof for the Sybil guest
 openvm-prove-app input="/tmp/sybil-openvm-input.json" proof="/tmp/sybil-openvm.app.proof":
     cargo openvm prove app --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil --input {{input}} --proof {{proof}}
