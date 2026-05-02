@@ -2,7 +2,9 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use sha3::{Digest as _, Keccak256};
-use sybil_verifier::{BlockWitness, VerificationResult, WitnessBlockHeader};
+use sybil_verifier::{
+    commitments::witness_schema, BlockWitness, VerificationResult, WitnessBlockHeader,
+};
 
 mod guest_commitments;
 
@@ -214,9 +216,7 @@ pub fn hash_header(header: &WitnessBlockHeader) -> [u8; 32] {
 pub fn witness_root(witness: &BlockWitness) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new();
     hasher.update(WITNESS_ROOT_DOMAIN);
-    hasher.update(&sybil_verifier::witness_schema::canonical_witness_bytes(
-        witness,
-    ));
+    hasher.update(&witness_schema::canonical_witness_bytes(witness));
     *hasher.finalize().as_bytes()
 }
 
@@ -399,6 +399,7 @@ mod tests {
     use commonware_storage::translator::OneCap;
     use matching_engine::{MarketId, Order};
     use sybil_verifier::{
+        commitments::{event_schema, state_schema},
         AccountReservationSnapshot, AccountSnapshot, BridgeStateSnapshot, MarketGroupSnapshot,
         MarketSnapshot, MarketStatusSnapshot, StateSidecarSnapshot, WithdrawalSnapshot,
         WitnessBlockHeader,
@@ -424,7 +425,7 @@ mod tests {
 
     fn empty_guest_input() -> StateTransitionGuestInput {
         let state_sidecar = StateSidecarSnapshot::default();
-        let leaves = sybil_verifier::state_schema::state_root_leaves(&[], &state_sidecar);
+        let leaves = state_schema::state_root_leaves(&[], &state_sidecar);
         let (state_root, state_root_proof) = state_root_and_proof(&leaves);
         let events_root = events_root_from_event_bytes(&[]).expect("empty events root");
         let header = WitnessBlockHeader {
@@ -475,7 +476,7 @@ mod tests {
             name: "Election test".to_string(),
             num_outcomes: 2,
             status: MarketStatusSnapshot::Active,
-            metadata_digest: sybil_verifier::state_schema::market_metadata_digest(b"metadata"),
+            metadata_digest: state_schema::market_metadata_digest(b"metadata"),
             resolution_template: "yes/no".to_string(),
         };
         let market_group = MarketGroupSnapshot {
@@ -527,7 +528,7 @@ mod tests {
         };
 
         let post_state = vec![account];
-        let leaves = sybil_verifier::state_schema::state_root_leaves(&post_state, &state_sidecar);
+        let leaves = state_schema::state_root_leaves(&post_state, &state_sidecar);
         let (state_root, state_root_proof) = state_root_and_proof(&leaves);
         let events_root = events_root_from_event_bytes(&[]).expect("empty events root");
         let header = WitnessBlockHeader {
@@ -576,7 +577,7 @@ mod tests {
                 events_digest: [id as u8; 32],
             })
             .collect::<Vec<_>>();
-        let leaves = sybil_verifier::state_schema::state_root_leaves(&post_state, &state_sidecar);
+        let leaves = state_schema::state_root_leaves(&post_state, &state_sidecar);
         let (state_root, state_root_proof) = state_root_and_proof(&leaves);
         let events_root = events_root_from_event_bytes(&[]).expect("empty events root");
         let header = WitnessBlockHeader {
@@ -770,7 +771,7 @@ mod tests {
             account_id: 7,
             amount: 50,
         }];
-        let events = sybil_verifier::event_schema::event_leaf_values(&system_events, &[], &[], &[]);
+        let events = event_schema::event_leaf_values(&system_events, &[], &[], &[]);
 
         assert_eq!(
             events_root_from_event_bytes(&events),
@@ -840,7 +841,7 @@ mod tests {
     fn missing_state_root_proof_fails_count_check() {
         let mut input = empty_guest_input();
         input.state_root_proof.leaf_proofs.pop();
-        let expected = sybil_verifier::state_schema::state_root_leaves(
+        let expected = state_schema::state_root_leaves(
             &input.witness.post_state,
             &input.witness.state_sidecar,
         )
@@ -915,7 +916,7 @@ mod tests {
     #[test]
     fn hidden_state_leaf_fails_next_key_ring() {
         let mut input = empty_guest_input();
-        let witness_leaves = sybil_verifier::state_schema::state_root_leaves(
+        let witness_leaves = state_schema::state_root_leaves(
             &input.witness.post_state,
             &input.witness.state_sidecar,
         );

@@ -34,6 +34,14 @@ pub mod types;
 pub mod violations;
 pub mod witness_schema;
 
+/// Canonical byte schemas used as inputs to state, event, and witness commitments.
+///
+/// The verifier crate owns these schemas so native verification, witness
+/// generation, and guest verification all serialize committed data the same way.
+pub mod commitments {
+    pub use crate::{event_schema, state_schema, witness_schema};
+}
+
 pub use types::{
     AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
     ChallengeSnapshot, MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot,

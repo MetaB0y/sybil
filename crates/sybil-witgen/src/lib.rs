@@ -8,7 +8,7 @@ use matching_sequencer::store::Store;
 use matching_sequencer::{
     QmdbStateKeyValueProofParts, QmdbStateOperationProofParts, QmdbStateRangeProofParts,
 };
-use sybil_verifier::BlockWitness;
+use sybil_verifier::{commitments::state_schema, BlockWitness};
 
 #[derive(Debug, thiserror::Error)]
 pub enum WitgenError {
@@ -30,10 +30,7 @@ pub async fn build_state_transition_guest_input(
     store: &Store,
     witness: BlockWitness,
 ) -> Result<sybil_zk::StateTransitionGuestInput, WitgenError> {
-    let leaves = sybil_verifier::state_schema::state_root_leaves(
-        &witness.post_state,
-        &witness.state_sidecar,
-    );
+    let leaves = state_schema::state_root_leaves(&witness.post_state, &witness.state_sidecar);
     let root = store
         .current_state_qmdb_root()
         .await

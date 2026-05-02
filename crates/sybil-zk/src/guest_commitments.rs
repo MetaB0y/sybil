@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
-use sybil_verifier::BlockWitness;
+use sybil_verifier::{
+    commitments::{event_schema, state_schema},
+    BlockWitness,
+};
 
 use crate::ZkTransitionError;
 
@@ -39,10 +42,7 @@ pub fn verify_qmdb_state_root(
     witness: &BlockWitness,
     proof: &QmdbStateRootProof,
 ) -> Result<(), ZkTransitionError> {
-    let leaves = sybil_verifier::state_schema::state_root_leaves(
-        &witness.post_state,
-        &witness.state_sidecar,
-    );
+    let leaves = state_schema::state_root_leaves(&witness.post_state, &witness.state_sidecar);
     if proof.leaf_proofs.len() != leaves.len() {
         return Err(ZkTransitionError::StateRootProofCountMismatch {
             expected: leaves.len(),
@@ -83,7 +83,7 @@ pub fn verify_qmdb_key_value_proof(
 }
 
 pub fn compute_events_root(witness: &BlockWitness) -> Option<[u8; 32]> {
-    let events = sybil_verifier::event_schema::event_leaf_values(
+    let events = event_schema::event_leaf_values(
         &witness.system_events,
         &witness.orders,
         &witness.rejections,
