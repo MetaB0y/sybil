@@ -1,15 +1,35 @@
-use sybil_verifier::BlockWitness;
+//! Host-side construction of prover inputs from sequencer-persisted data.
+//!
+//! The sequencer owns block production and persistence. This crate owns the
+//! witgen/prover boundary: turning a committed `BlockWitness` plus retained
+//! qMDB proof material into the guest input consumed by `sybil-zk`.
 
-use crate::account_storage::{
+use matching_sequencer::store::Store;
+use matching_sequencer::{
     QmdbStateKeyValueProofParts, QmdbStateOperationProofParts, QmdbStateRangeProofParts,
 };
-use crate::error::SequencerError;
-use crate::store::Store;
+use sybil_verifier::BlockWitness;
+
+#[derive(Debug, thiserror::Error)]
+pub enum WitgenError {
+    #[error("persistence error: {0}")]
+    Persistence(String),
+    #[error("proof unavailable: {0}")]
+    ProofUnavailable(String),
+    #[error("committed state qMDB root does not match witness header state_root")]
+    StateRootMismatch,
+    #[error("state qMDB leaf proof at sorted leaf index {index} came from a different root")]
+    ProofRootMismatch { index: usize },
+    #[error("state qMDB leaf proof at sorted leaf index {index} does not match the witness leaf")]
+    WitnessLeafMismatch { index: usize },
+    #[error("state qMDB leaf proof at sorted leaf index {index} failed native verification")]
+    NativeProofFailed { index: usize },
+}
 
 pub async fn build_state_transition_guest_input(
     store: &Store,
     witness: BlockWitness,
-) -> Result<sybil_zk::StateTransitionGuestInput, SequencerError> {
+) -> Result<sybil_zk::StateTransitionGuestInput, WitgenError> {
     let leaves = sybil_verifier::state_schema::state_root_leaves(
         &witness.post_state,
         &witness.state_sidecar,
@@ -17,15 +37,11 @@ pub async fn build_state_transition_guest_input(
     let root = store
         .current_state_qmdb_root()
         .await
-        .map_err(|error| SequencerError::Persistence(error.to_string()))?
-        .ok_or_else(|| {
-            SequencerError::ProofUnavailable("no committed state qMDB root".to_string())
-        })?;
+        .map_err(|error| WitgenError::Persistence(error.to_string()))?
+        .ok_or_else(|| WitgenError::ProofUnavailable("no committed state qMDB root".to_string()))?;
 
     if root.root != witness.header.state_root {
-        return Err(SequencerError::ProofUnavailable(
-            "committed state qMDB root does not match witness header state_root".to_string(),
-        ));
+        return Err(WitgenError::StateRootMismatch);
     }
 
     let mut leaf_proofs = Vec::with_capacity(leaves.len());
@@ -33,27 +49,21 @@ pub async fn build_state_transition_guest_input(
         let proof = store
             .state_qmdb_leaf_proof(root.slot, key)
             .await
-            .map_err(|error| SequencerError::Persistence(error.to_string()))?
+            .map_err(|error| WitgenError::Persistence(error.to_string()))?
             .ok_or_else(|| {
-                SequencerError::ProofUnavailable(format!(
+                WitgenError::ProofUnavailable(format!(
                     "missing state qMDB leaf proof at sorted leaf index {index}"
                 ))
             })?;
 
         if proof.root != root.root || proof.slot != root.slot {
-            return Err(SequencerError::Persistence(format!(
-                "state qMDB leaf proof at sorted leaf index {index} came from a different root"
-            )));
+            return Err(WitgenError::ProofRootMismatch { index });
         }
         if &proof.leaf_key != key || &proof.leaf_value != value {
-            return Err(SequencerError::Persistence(format!(
-                "state qMDB leaf proof at sorted leaf index {index} does not match the witness leaf"
-            )));
+            return Err(WitgenError::WitnessLeafMismatch { index });
         }
         if !proof.verify() {
-            return Err(SequencerError::ProofUnavailable(format!(
-                "state qMDB leaf proof at sorted leaf index {index} failed native verification"
-            )));
+            return Err(WitgenError::NativeProofFailed { index });
         }
 
         leaf_proofs.push(convert_key_value_proof(proof.proof_parts()));
@@ -101,11 +111,11 @@ mod tests {
     use std::sync::Arc;
 
     use matching_engine::{outcome_buy, outcome_sell, MarketSet, NANOS_PER_DOLLAR};
+    use matching_sequencer::store::Store;
+    use matching_sequencer::{AccountStore, BlockSequencer, OrderSubmission, SequencerConfig};
     use sybil_oracle::AdminOracle;
 
     use super::*;
-    use crate::account::AccountStore;
-    use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
 
     static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 

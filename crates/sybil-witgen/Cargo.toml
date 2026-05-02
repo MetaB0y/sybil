@@ -1,0 +1,16 @@
+[package]
+name = "sybil-witgen"
+version = "0.1.0"
+edition = "2021"
+description = "Host-side prover input construction for Sybil ZK proofs"
+
+[dependencies]
+matching-sequencer = { path = "../matching-sequencer" }
+sybil-verifier = { path = "../sybil-verifier" }
+sybil-zk = { path = "../sybil-zk" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+matching-engine = { path = "../matching-engine" }
+sybil-oracle = { path = "../sybil-oracle" }
+tokio = { version = "1", features = ["rt", "macros"] }

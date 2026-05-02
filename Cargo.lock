@@ -2467,7 +2467,6 @@ dependencies = [
  "sybil-canonical",
  "sybil-oracle",
  "sybil-verifier",
- "sybil-zk",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -4266,6 +4265,19 @@ dependencies = [
  "serde",
  "sha2 0.10.9",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "sybil-witgen"
+version = "0.1.0"
+dependencies = [
+ "matching-engine",
+ "matching-sequencer",
+ "sybil-oracle",
+ "sybil-verifier",
+ "sybil-zk",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
