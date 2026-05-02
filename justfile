@@ -68,6 +68,22 @@ openvm-guest-check:
 openvm-guest-build:
     cargo openvm build --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil
 
+# Generate OpenVM app proving keys for the Sybil guest
+openvm-keygen-app:
+    cargo openvm keygen --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil --app-only
+
+# Convert a prepared guest input artifact into OpenVM CLI input JSON
+openvm-input guest_input="/tmp/sybil-guest-input.msgpack" openvm_input="/tmp/sybil-openvm-input.json":
+    cargo run --manifest-path zk/openvm-tools/Cargo.toml -- encode-input --guest-input {{guest_input}} --openvm-input {{openvm_input}}
+
+# Run the Sybil OpenVM guest against an OpenVM CLI input JSON file
+openvm-run input="/tmp/sybil-openvm-input.json":
+    cargo openvm run --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil --input {{input}}
+
+# Generate an OpenVM app proof for the Sybil guest
+openvm-prove-app input="/tmp/sybil-openvm-input.json" proof="/tmp/sybil-openvm.app.proof":
+    cargo openvm prove app --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil --input {{input}} --proof {{proof}}
+
 # Inspect a serialized state-transition proof job
 prover-inspect job:
     cargo run -p sybil-prover -- inspect --job {{job}}

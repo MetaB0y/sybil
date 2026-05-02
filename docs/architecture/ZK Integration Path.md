@@ -43,6 +43,10 @@ The first guest boundary is intentionally narrow:
 - `zk/openvm-guest/` is a standalone OpenVM package pinned to
   `v2.0.0-beta.2`. It is outside the root Cargo workspace so normal Rust
   checks do not require the OpenVM prerelease CLI or generated artifacts.
+- `zk/openvm-tools/` is a standalone host-tool package pinned to the same
+  OpenVM tag. It converts prepared `StateTransitionGuestInput` MessagePack into
+  the JSON/hex input format expected by `cargo openvm run` and
+  `cargo openvm prove`.
 - The guest reads `StateTransitionGuestInput`, derives the canonical typed
   state leaves from the block witness, verifies ordered-current-qMDB
   key/value proofs for those leaves against the public `new_state_root`,
@@ -72,9 +76,13 @@ Commands:
 just openvm-install
 just openvm-guest-check
 just openvm-guest-build
+just openvm-keygen-app
 just witgen-export-latest data/sybil.redb /tmp/job.msgpack
 just prover-inspect /tmp/job.msgpack
 just prover-prepare /tmp/job.msgpack
+just openvm-input /tmp/sybil-guest-input.msgpack /tmp/sybil-openvm-input.json
+just openvm-run /tmp/sybil-openvm-input.json
+just openvm-prove-app /tmp/sybil-openvm-input.json /tmp/sybil-openvm.app.proof
 ```
 
 ## Key Properties
@@ -92,6 +100,7 @@ just prover-prepare /tmp/job.msgpack
 > `crates/sybil-prover/` — proof-job CLI and future prover service
 > `crates/sybil-zk/` — public input hash and guest-safe transition verifier
 > `zk/openvm-guest/` — OpenVM 2.0 beta guest entrypoint
+> `zk/openvm-tools/` — OpenVM CLI input encoder for prepared guest inputs
 > `crates/matching-sequencer/src/qmdb_state.rs` — persisted typed-state qMDB roots and proofs used by witgen
 
 ## See Also
