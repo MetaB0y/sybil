@@ -72,6 +72,21 @@ openvm-guest-build:
 openvm-keygen-app:
     cargo openvm keygen --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil --app-only
 
+# Generate OpenVM app and aggregation prefix proving keys for the Sybil guest
+openvm-keygen:
+    cargo openvm keygen --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil
+
+# Generate or download OpenVM recursive proving and EVM verifier artifacts
+openvm-setup:
+    cargo openvm setup
+
+openvm-setup-evm-download:
+    cargo openvm setup --evm --download
+
+# Print the app executable and VM commitments used by the on-chain verifier adapter
+openvm-commit:
+    cargo openvm commit --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil
+
 # Convert a prepared guest input artifact into OpenVM CLI input JSON
 openvm-input guest_input="/tmp/sybil-guest-input.msgpack" openvm_input="/tmp/sybil-openvm-input.json":
     cargo run --manifest-path zk/openvm-tools/Cargo.toml -- encode-input --guest-input {{guest_input}} --openvm-input {{openvm_input}}
@@ -84,9 +99,17 @@ openvm-run input="/tmp/sybil-openvm-input.json":
 openvm-prove-app input="/tmp/sybil-openvm-input.json" proof="/tmp/sybil-openvm.app.proof":
     cargo openvm prove app --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil --input {{input}} --proof {{proof}}
 
+# Generate an OpenVM EVM proof for the Sybil guest
+openvm-prove-evm input="/tmp/sybil-openvm-input.json" proof="/tmp/sybil-openvm.evm.proof":
+    cargo openvm prove evm --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil --input {{input}} --proof {{proof}}
+
 # Verify an OpenVM app proof for the Sybil guest
 openvm-verify-app proof="/tmp/sybil-openvm.app.proof":
     cargo openvm verify app --manifest-path zk/openvm-guest/Cargo.toml --proof {{proof}}
+
+# Verify an OpenVM EVM proof locally with the generated Halo2 verifier artifacts
+openvm-verify-evm proof="/tmp/sybil-openvm.evm.proof":
+    cargo openvm verify evm --proof {{proof}}
 
 # Inspect a serialized state-transition proof job
 prover-inspect job:
@@ -103,6 +126,10 @@ prover-submit-state-root settlement guest_input="/tmp/sybil-guest-input.msgpack"
 # Encode calldata plus a file-based eth_sendTransaction request for large proof bytes
 prover-submit-state-root-rpc settlement from gas="0x1c9c380" guest_input="/tmp/sybil-guest-input.msgpack" proof="/tmp/sybil-openvm.app.proof" calldata="/tmp/sybil-submit-state-root.calldata" rpc_request="/tmp/sybil-submit-state-root-rpc.json":
     cargo run -p sybil-prover -- submit-state-root --settlement {{settlement}} --guest-input {{guest_input}} --proof {{proof}} --calldata {{calldata}} --rpc-request {{rpc_request}} --from {{from}} --gas {{gas}}
+
+# Encode a real OpenVM EVM proof JSON for OpenVmVerifierAdapter and submitStateRoot
+prover-submit-state-root-evm-rpc settlement from gas="0x1c9c380" guest_input="/tmp/sybil-guest-input.msgpack" proof="/tmp/sybil-openvm.evm.proof" calldata="/tmp/sybil-submit-state-root.calldata" rpc_request="/tmp/sybil-submit-state-root-rpc.json":
+    cargo run -p sybil-prover -- submit-state-root --settlement {{settlement}} --guest-input {{guest_input}} --proof {{proof}} --proof-format openvm-evm-json --calldata {{calldata}} --rpc-request {{rpc_request}} --from {{from}} --gas {{gas}}
 
 # Export the latest committed sequencer block as a portable proof job
 witgen-export-latest store job="/tmp/sybil-proof-job.msgpack":

@@ -2,9 +2,11 @@
 
 Solidity + Foundry project for Sybil's L1 settlement and vault contracts.
 
-The first skeleton uses a mock OpenVM verifier adapter. The real OpenVM
-Solidity SDK is intended to plug in behind `IOpenVmVerifierAdapter` without
-changing `SybilSettlement` or `SybilVault`.
+`SybilSettlement` and `SybilVault` depend only on `IOpenVmVerifierAdapter`.
+Tests use `MockOpenVmVerifierAdapter`; production deployments use
+`OpenVmVerifierAdapter`, which wraps the generated OpenVM Halo2 verifier,
+pins the Sybil guest executable/VM commitments, and checks the revealed public
+input hash before accepting a proof.
 
 ```bash
 forge fmt

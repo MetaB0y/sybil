@@ -168,11 +168,20 @@ interface IOpenVmVerifierAdapter {
 }
 ```
 
-The adapter owns the OpenVM Solidity SDK integration. `SybilSettlement`
-computes Sybil's public-input hash and passes it to the adapter; the OpenVM
-guest program must expose the same digest as a public value. The adapter then
-checks the proof against the OpenVM verifier contract generated for the Sybil
-state-transition program.
+`OpenVmVerifierAdapter` owns the OpenVM Solidity SDK integration.
+`SybilSettlement` computes Sybil's public-input hash and passes it to the
+adapter; the OpenVM guest program exposes the same digest as the first user
+public value. The adapter checks four things before returning true:
+
+1. The proof payload decodes as `(bytes publicValues, bytes proofData, bytes32 appExeCommit, bytes32 appVmCommit)`.
+2. `appExeCommit` and `appVmCommit` equal the Sybil guest commitments pinned in the adapter constructor.
+3. `publicValues` has the default OpenVM EVM-verifier length of 32 words, its first word equals `publicInputHash`, and the remaining words are zero.
+4. The generated OpenVM Halo2 verifier accepts `proofData` for those public values and pinned commits.
+
+This extra commit pinning is part of the soundness boundary: a generic OpenVM
+Halo2 verifier proves only that some committed OpenVM program ran. The adapter
+must additionally prove that the committed program is the Sybil state-transition
+guest.
 
 Public-input hash:
 
@@ -196,8 +205,11 @@ state_transition_public_input_hash =
 The host submitter tooling derives this struct from the prepared
 `StateTransitionGuestInput`, computes the same Rust-side
 `state_transition_public_input_hash`, and writes ABI calldata for
-`submitStateRoot(inputs, proof)`. The contract remains the source of truth for
-sequencing, deposit-root checkpoint checks, and verifier-adapter acceptance.
+`submitStateRoot(inputs, proof)`. For real OpenVM EVM proof JSON, the submitter
+converts OpenVM's `{user_public_values, proof_data, app_*_commit}` shape into
+the adapter ABI payload before embedding it as the settlement `proof` bytes.
+The contract remains the source of truth for sequencing, deposit-root
+checkpoint checks, and verifier-adapter acceptance.
 
 `SybilSettlement` stores the active adapter and a `verifierVersion`. Upgrades
 are allowed only through the admin-governance path defined below; historical
@@ -629,7 +641,9 @@ root subset.
   leaves; expose proof-generation data. Implemented with a bridge sidecar and
   committed in the typed `state_root`.
 4. **Verifier integration**: plug in the chosen ZK verifier adapter and
-   public-input hash.
+   public-input hash. The local `OpenVmVerifierAdapter` boundary is
+   implemented; deployment still requires generated OpenVM Halo2 verifier
+   artifacts and the Sybil app commitments.
 5. **DA/operator replacement**: bind `daCommitment` to the chosen DA layer and
    implement reconstruction tooling.
 6. **Sepolia deployment**: real deployment, monitoring, pause runbook, and
@@ -642,9 +656,9 @@ are implemented.
 
 ## Open questions
 
-1. **OpenVM SDK binding.** OpenVM is chosen, but the exact generated verifier
-   contract ABI and public-value decoding should be pinned when the SDK is
-   imported into the Foundry project.
+1. **OpenVM SDK deployment.** The adapter ABI is pinned, but deployment still
+   needs the generated `OpenVmHalo2Verifier` bytecode/address and the Sybil
+   app executable and VM commitments from `cargo openvm commit`.
 2. **Withdrawal leaf expiry.** Normal withdrawal leaves should expire if never
    requested on L1, but expiry must be long enough for delayed proof
    generation and DA retrieval.

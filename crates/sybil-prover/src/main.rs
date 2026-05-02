@@ -2,8 +2,8 @@ use std::fs::File;
 use std::io::{BufReader, Write as _};
 use std::path::{Path, PathBuf};
 
-use clap::{Args, Parser, Subcommand};
-use serde::Serialize;
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use serde::{Deserialize, Serialize};
 use sha3::{Digest as _, Keccak256};
 use sybil_witgen::{
     build_state_transition_guest_input, StateTransitionProofJob, StateTransitionProofJobId,
@@ -14,6 +14,7 @@ const SUBMIT_STATE_ROOT_SIGNATURE: &str =
 const STATE_TRANSITION_PUBLIC_INPUT_WORDS: usize = 10;
 const ABI_WORD_BYTES: usize = 32;
 const SHELL_SAFE_CALLDATA_BYTES: usize = 128 * 1024;
+const OPENVM_EVM_ADAPTER_PROOF_WORDS: usize = 4;
 
 #[derive(Parser)]
 #[command(name = "sybil-prover")]
@@ -61,6 +62,10 @@ struct SubmitStateRootArgs {
     /// OpenVM proof bytes to submit.
     #[arg(long)]
     proof: PathBuf,
+    /// Proof file format. `openvm-evm-json` converts OpenVM's EVM proof JSON
+    /// into the ABI payload expected by OpenVmVerifierAdapter.
+    #[arg(long, value_enum, default_value_t = ProofFormat::Raw)]
+    proof_format: ProofFormat,
     /// Deployed SybilSettlement address.
     #[arg(long)]
     settlement: String,
@@ -82,6 +87,13 @@ struct SubmitStateRootArgs {
     /// Environment variable containing the private key for the printed cast command.
     #[arg(long, default_value = "PRIVATE_KEY")]
     private_key_env: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum ProofFormat {
+    Raw,
+    #[value(name = "openvm-evm-json")]
+    OpenVmEvmJson,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -122,6 +134,20 @@ enum ProverCliError {
         #[source]
         source: std::io::Error,
     },
+    #[error("read OpenVM EVM proof JSON from {path}: {source}")]
+    DecodeOpenVmEvmProof {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("decode hex field {field}: {source}")]
+    DecodeHex {
+        field: &'static str,
+        #[source]
+        source: hex::FromHexError,
+    },
+    #[error("field {field} must be 32 bytes, got {actual}")]
+    InvalidBytes32Field { field: &'static str, actual: usize },
     #[error("proof file is empty: {path}")]
     EmptyProof { path: PathBuf },
     #[error("--from is required when --rpc-request is set")]
@@ -136,6 +162,20 @@ enum ProverCliError {
     ProofJob(#[from] sybil_witgen::ProofJobError),
     #[error("verify prepared guest input: {0}")]
     ZkTransition(#[from] sybil_zk::ZkTransitionError),
+}
+
+#[derive(Deserialize)]
+struct OpenVmEvmProofJson {
+    app_exe_commit: String,
+    app_vm_commit: String,
+    user_public_values: String,
+    proof_data: OpenVmEvmProofDataJson,
+}
+
+#[derive(Deserialize)]
+struct OpenVmEvmProofDataJson {
+    accumulator: String,
+    proof: String,
 }
 
 fn main() {
@@ -178,7 +218,7 @@ fn prepare(args: PrepareArgs) -> Result<(), ProverCliError> {
 
 fn submit_state_root(args: SubmitStateRootArgs) -> Result<(), ProverCliError> {
     let guest_input = read_guest_input(&args.guest_input)?;
-    let proof = read_proof(&args.proof)?;
+    let proof = read_proof(&args.proof, args.proof_format)?;
     let calldata = submit_state_root_calldata(&guest_input.public_inputs, &proof);
     let public_input_hash =
         sybil_zk::state_transition_public_input_hash(&guest_input.public_inputs);
@@ -249,7 +289,14 @@ fn read_guest_input(path: &Path) -> Result<sybil_zk::StateTransitionGuestInput, 
     })
 }
 
-fn read_proof(path: &Path) -> Result<Vec<u8>, ProverCliError> {
+fn read_proof(path: &Path, format: ProofFormat) -> Result<Vec<u8>, ProverCliError> {
+    match format {
+        ProofFormat::Raw => read_raw_proof(path),
+        ProofFormat::OpenVmEvmJson => read_openvm_evm_adapter_proof(path),
+    }
+}
+
+fn read_raw_proof(path: &Path) -> Result<Vec<u8>, ProverCliError> {
     let proof = std::fs::read(path).map_err(|source| ProverCliError::Read {
         path: path.to_path_buf(),
         source,
@@ -260,6 +307,35 @@ fn read_proof(path: &Path) -> Result<Vec<u8>, ProverCliError> {
         });
     }
     Ok(proof)
+}
+
+fn read_openvm_evm_adapter_proof(path: &Path) -> Result<Vec<u8>, ProverCliError> {
+    let file = File::open(path).map_err(|source| ProverCliError::Open {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let reader = BufReader::new(file);
+    let proof: OpenVmEvmProofJson =
+        serde_json::from_reader(reader).map_err(|source| ProverCliError::DecodeOpenVmEvmProof {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+    let public_values = decode_hex_field("user_public_values", &proof.user_public_values)?;
+    let mut proof_data = decode_hex_field("proof_data.accumulator", &proof.proof_data.accumulator)?;
+    proof_data.extend(decode_hex_field(
+        "proof_data.proof",
+        &proof.proof_data.proof,
+    )?);
+    let app_exe_commit = decode_bytes32_field("app_exe_commit", &proof.app_exe_commit)?;
+    let app_vm_commit = decode_bytes32_field("app_vm_commit", &proof.app_vm_commit)?;
+
+    Ok(openvm_evm_adapter_proof(
+        &public_values,
+        &proof_data,
+        &app_exe_commit,
+        &app_vm_commit,
+    ))
 }
 
 fn write_msgpack_named<T: Serialize>(path: &Path, value: &T) -> Result<(), ProverCliError> {
@@ -291,6 +367,57 @@ fn write_hex_hash(path: &Path, hash: [u8; 32]) -> Result<(), ProverCliError> {
         path: path.to_path_buf(),
         source,
     })
+}
+
+fn openvm_evm_adapter_proof(
+    public_values: &[u8],
+    proof_data: &[u8],
+    app_exe_commit: &[u8; ABI_WORD_BYTES],
+    app_vm_commit: &[u8; ABI_WORD_BYTES],
+) -> Vec<u8> {
+    let public_values_offset = (OPENVM_EVM_ADAPTER_PROOF_WORDS * ABI_WORD_BYTES) as u64;
+    let proof_data_offset =
+        public_values_offset + ABI_WORD_BYTES as u64 + padded_abi_len(public_values.len()) as u64;
+
+    let mut encoded = Vec::with_capacity(
+        (OPENVM_EVM_ADAPTER_PROOF_WORDS * ABI_WORD_BYTES)
+            + ABI_WORD_BYTES
+            + padded_abi_len(public_values.len())
+            + ABI_WORD_BYTES
+            + padded_abi_len(proof_data.len()),
+    );
+    append_abi_word_u64(&mut encoded, public_values_offset);
+    append_abi_word_u64(&mut encoded, proof_data_offset);
+    append_abi_word_bytes32(&mut encoded, app_exe_commit);
+    append_abi_word_bytes32(&mut encoded, app_vm_commit);
+    append_abi_word_u64(&mut encoded, public_values.len() as u64);
+    encoded.extend_from_slice(public_values);
+    encoded.resize(encoded.len() + abi_padding_len(public_values.len()), 0);
+    append_abi_word_u64(&mut encoded, proof_data.len() as u64);
+    encoded.extend_from_slice(proof_data);
+    encoded.resize(encoded.len() + abi_padding_len(proof_data.len()), 0);
+    encoded
+}
+
+fn decode_bytes32_field(
+    field: &'static str,
+    hex_value: &str,
+) -> Result<[u8; ABI_WORD_BYTES], ProverCliError> {
+    let bytes = decode_hex_field(field, hex_value)?;
+    bytes
+        .try_into()
+        .map_err(|bytes: Vec<u8>| ProverCliError::InvalidBytes32Field {
+            field,
+            actual: bytes.len(),
+        })
+}
+
+fn decode_hex_field(field: &'static str, hex_value: &str) -> Result<Vec<u8>, ProverCliError> {
+    let normalized = hex_value
+        .strip_prefix("0x")
+        .or_else(|| hex_value.strip_prefix("0X"))
+        .unwrap_or(hex_value);
+    hex::decode(normalized).map_err(|source| ProverCliError::DecodeHex { field, source })
 }
 
 fn write_eth_send_transaction_request(
@@ -612,6 +739,85 @@ mod tests {
     }
 
     #[test]
+    fn openvm_evm_adapter_proof_uses_solidity_abi_layout() {
+        let public_values = vec![0x11; 64];
+        let proof_data = vec![0x22; 65];
+        let app_exe_commit = [0x33; 32];
+        let app_vm_commit = [0x44; 32];
+        let encoded =
+            openvm_evm_adapter_proof(&public_values, &proof_data, &app_exe_commit, &app_vm_commit);
+
+        let proof_data_offset = (OPENVM_EVM_ADAPTER_PROOF_WORDS * ABI_WORD_BYTES)
+            + ABI_WORD_BYTES
+            + padded_abi_len(public_values.len());
+
+        assert_eq!(
+            &encoded[24..32],
+            &((OPENVM_EVM_ADAPTER_PROOF_WORDS * ABI_WORD_BYTES) as u64).to_be_bytes()
+        );
+        assert_eq!(
+            &encoded[ABI_WORD_BYTES + 24..2 * ABI_WORD_BYTES],
+            &(proof_data_offset as u64).to_be_bytes()
+        );
+        assert_eq!(
+            &encoded[2 * ABI_WORD_BYTES..3 * ABI_WORD_BYTES],
+            &app_exe_commit
+        );
+        assert_eq!(
+            &encoded[3 * ABI_WORD_BYTES..4 * ABI_WORD_BYTES],
+            &app_vm_commit
+        );
+        assert_eq!(
+            &encoded[4 * ABI_WORD_BYTES + 24..5 * ABI_WORD_BYTES],
+            &(public_values.len() as u64).to_be_bytes()
+        );
+        assert_eq!(
+            &encoded[5 * ABI_WORD_BYTES..5 * ABI_WORD_BYTES + public_values.len()],
+            public_values.as_slice()
+        );
+        assert_eq!(
+            &encoded[proof_data_offset + 24..proof_data_offset + ABI_WORD_BYTES],
+            &(proof_data.len() as u64).to_be_bytes()
+        );
+        assert_eq!(
+            &encoded[proof_data_offset + ABI_WORD_BYTES
+                ..proof_data_offset + ABI_WORD_BYTES + proof_data.len()],
+            proof_data.as_slice()
+        );
+    }
+
+    #[test]
+    fn reads_openvm_evm_json_as_adapter_proof() {
+        let path = temp_path("openvm-evm-proof");
+        let json = serde_json::json!({
+            "version": "v2.0.0",
+            "app_exe_commit": format!("0x{}", "33".repeat(32)),
+            "app_vm_commit": "44".repeat(32),
+            "user_public_values": "11".repeat(64),
+            "proof_data": {
+                "accumulator": "22".repeat(12 * 32),
+                "proof": "55".repeat(43 * 32),
+            }
+        });
+        std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
+
+        let proof = read_proof(&path, ProofFormat::OpenVmEvmJson).unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(&proof[2 * ABI_WORD_BYTES..3 * ABI_WORD_BYTES], &[0x33; 32]);
+        assert_eq!(&proof[3 * ABI_WORD_BYTES..4 * ABI_WORD_BYTES], &[0x44; 32]);
+        let proof_data_offset = u64::from_be_bytes(
+            proof[ABI_WORD_BYTES + 24..2 * ABI_WORD_BYTES]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        assert_eq!(
+            &proof[proof_data_offset + 24..proof_data_offset + ABI_WORD_BYTES],
+            &((55 * 32) as u64).to_be_bytes()
+        );
+    }
+
+    #[test]
     fn cast_send_command_reads_calldata_file() {
         let command = cast_send_data_command(
             "0x1234567890123456789012345678901234567890",
@@ -686,6 +892,7 @@ mod tests {
             rpc_request: None,
             from: None,
             gas: None,
+            proof_format: ProofFormat::Raw,
             rpc_url_env: "ETH_RPC_URL".to_string(),
             private_key_env: "PRIVATE_KEY".to_string(),
         })

@@ -41,7 +41,9 @@ The first guest boundary is intentionally narrow:
   emitting serialized `StateTransitionGuestInput` artifacts, and reports the
   public input hash. It also encodes `submitStateRoot` calldata for the L1
   settlement contract and can emit a file-based `eth_sendTransaction` request
-  for large proof calldata. Real OpenVM proof orchestration is still service
+  for large proof calldata. When given an OpenVM EVM proof JSON file, it
+  converts OpenVM's proof fields into the ABI payload expected by
+  `OpenVmVerifierAdapter`. Real OpenVM proof orchestration is still service
   work.
 - `zk/openvm-guest/` is a standalone OpenVM package pinned to
   `v2.0.0-beta.2`. It is outside the root Cargo workspace so normal Rust
@@ -67,6 +69,11 @@ The first guest boundary is intentionally narrow:
 - The guest reveals
   `keccak256(abi.encode("sybil/openvm/state-transition/v1", ...))` as the
   public value expected by `SybilSettlement`.
+- `contracts/src/OpenVmVerifierAdapter.sol` wraps the generated OpenVM Halo2
+  verifier contract. It pins `appExeCommit` and `appVmCommit`, checks the first
+  OpenVM user public value equals the settlement public-input hash, requires
+  the remaining default public-value words to be zero, then calls
+  `IOpenVmHalo2Verifier.verify`.
 - Historical qMDB paths and DA binding remain follow-up work. The current
   state-root proof is a post-state exact-keyspace proof: every witness leaf
   must be in qMDB, and hidden extra leaves are rejected because they alter the
@@ -83,6 +90,10 @@ just openvm-install
 just openvm-guest-check
 just openvm-guest-build
 just openvm-keygen-app
+just openvm-keygen
+just openvm-setup
+just openvm-setup-evm-download
+just openvm-commit
 just witgen-smoke-job /tmp/sybil-smoke.redb /tmp/job.msgpack
 just witgen-export-latest data/sybil.redb /tmp/job.msgpack
 just prover-inspect /tmp/job.msgpack
@@ -91,8 +102,11 @@ just openvm-input /tmp/sybil-guest-input.msgpack /tmp/sybil-openvm-input.json
 just openvm-run /tmp/sybil-openvm-input.json
 just openvm-prove-app /tmp/sybil-openvm-input.json /tmp/sybil-openvm.app.proof
 just openvm-verify-app /tmp/sybil-openvm.app.proof
+just openvm-prove-evm /tmp/sybil-openvm-input.json /tmp/sybil-openvm.evm.proof
+just openvm-verify-evm /tmp/sybil-openvm.evm.proof
 just prover-submit-state-root 0xYourSettlement /tmp/sybil-guest-input.msgpack /tmp/sybil-openvm.app.proof
 just prover-submit-state-root-rpc 0xYourSettlement 0xYourSender
+just prover-submit-state-root-evm-rpc 0xYourSettlement 0xYourSender
 ```
 
 ## Key Properties
@@ -113,6 +127,7 @@ just prover-submit-state-root-rpc 0xYourSettlement 0xYourSender
 > `crates/sybil-zk/` — public input hash and guest-safe transition verifier
 > `zk/openvm-guest/` — OpenVM 2.0 beta guest entrypoint
 > `zk/openvm-tools/` — OpenVM CLI input encoder for prepared guest inputs
+> `contracts/src/OpenVmVerifierAdapter.sol` — L1 adapter from Sybil public-input hash to OpenVM Halo2 verifier calls
 > `crates/matching-sequencer/src/qmdb_state.rs` — persisted typed-state qMDB roots and proofs used by witgen
 
 ## See Also
