@@ -33,7 +33,7 @@ contract SybilBridgeTest {
     bytes32 private constant BLOCK_HASH = keccak256("block");
     bytes32 private constant EVENTS_ROOT = keccak256("events");
     bytes32 private constant WITNESS_ROOT = keccak256("witness");
-    bytes32 private constant DA_COMMITMENT = keccak256("da");
+    bytes32 private constant PRE_DA_COMMITMENT_PLACEHOLDER = bytes32(0);
 
     function setUp() public {
         token = new MockUSDC();
@@ -95,6 +95,20 @@ contract SybilBridgeTest {
                 )
             );
         require(!ok, "bad deposit root accepted");
+    }
+
+    function testStateRootSubmissionRejectsDaCommitmentBeforeDaEnabled() public {
+        SybilTypes.StateTransitionPublicInputs memory inputs =
+            _nextRootInputs(bytes32(0), 0, keccak256("state-1"));
+        inputs.daCommitment = keccak256("da");
+
+        (bool ok,) = address(settlement)
+            .call(
+                abi.encodeWithSelector(
+                    SybilSettlement.submitStateRoot.selector, inputs, bytes("proof")
+                )
+            );
+        require(!ok, "pre-DA placeholder bypassed");
     }
 
     function testStateRootSubmissionRejectsInvalidProof() public {
@@ -245,7 +259,7 @@ contract SybilBridgeTest {
             blockHash: BLOCK_HASH,
             eventsRoot: EVENTS_ROOT,
             witnessRoot: WITNESS_ROOT,
-            daCommitment: DA_COMMITMENT,
+            daCommitment: PRE_DA_COMMITMENT_PLACEHOLDER,
             depositRoot: vault.depositRootByCount(vault.depositCount()),
             depositCount: vault.depositCount()
         });

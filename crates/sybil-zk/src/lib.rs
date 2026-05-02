@@ -16,7 +16,7 @@ pub use guest_commitments::{
 
 pub const STATE_TRANSITION_DOMAIN: &[u8] = b"sybil/openvm/state-transition/v1";
 pub const WITNESS_ROOT_DOMAIN: &[u8] = b"sybil/witness";
-pub const UNIMPLEMENTED_DA_COMMITMENT: [u8; 32] = [0u8; 32];
+pub const PRE_DA_COMMITMENT_PLACEHOLDER: [u8; 32] = [0u8; 32];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateTransitionPublicInputs {
@@ -86,7 +86,9 @@ pub enum ZkTransitionError {
         index: usize,
     },
     WitnessRootMismatch,
-    DaCommitmentUnsupported,
+    DaCommitmentNotEnabled {
+        provided: [u8; 32],
+    },
     VerificationLayerFailed {
         layer: &'static str,
         violations: usize,
@@ -150,8 +152,11 @@ impl fmt::Display for ZkTransitionError {
                 write!(f, "state root qMDB next-key mismatch at leaf index {index}")
             }
             ZkTransitionError::WitnessRootMismatch => write!(f, "witness root mismatch"),
-            ZkTransitionError::DaCommitmentUnsupported => {
-                write!(f, "DA commitment is not implemented yet")
+            ZkTransitionError::DaCommitmentNotEnabled { provided } => {
+                write!(
+                    f,
+                    "DA commitment is not enabled yet: expected zero pre-DA placeholder, got {provided:?}"
+                )
             }
             ZkTransitionError::VerificationLayerFailed { layer, violations } => {
                 write!(
@@ -234,7 +239,7 @@ pub fn public_inputs_from_witness(witness: &BlockWitness) -> StateTransitionPubl
         block_hash: hash_header(&witness.header),
         events_root: witness.header.events_root,
         witness_root: witness_root(witness),
-        da_commitment: UNIMPLEMENTED_DA_COMMITMENT,
+        da_commitment: PRE_DA_COMMITMENT_PLACEHOLDER,
         deposit_root: witness.state_sidecar.bridge.deposit_root,
         deposit_count: witness.state_sidecar.bridge.deposit_cursor,
     }
@@ -267,8 +272,10 @@ fn verify_public_input_binding(
     if inputs.witness_root != witness_root(witness) {
         return Err(ZkTransitionError::WitnessRootMismatch);
     }
-    if inputs.da_commitment != UNIMPLEMENTED_DA_COMMITMENT {
-        return Err(ZkTransitionError::DaCommitmentUnsupported);
+    if inputs.da_commitment != PRE_DA_COMMITMENT_PLACEHOLDER {
+        return Err(ZkTransitionError::DaCommitmentNotEnabled {
+            provided: inputs.da_commitment,
+        });
     }
 
     let (previous_height, previous_state_root, expected_parent_hash) =
@@ -800,6 +807,19 @@ mod tests {
         assert_eq!(
             verify_state_transition_input(&input),
             Err(ZkTransitionError::WitnessRootMismatch)
+        );
+    }
+
+    #[test]
+    fn non_placeholder_da_commitment_is_rejected() {
+        let mut input = empty_guest_input();
+        input.public_inputs.da_commitment = [7u8; 32];
+
+        assert_eq!(
+            verify_state_transition_input(&input),
+            Err(ZkTransitionError::DaCommitmentNotEnabled {
+                provided: [7u8; 32],
+            })
         );
     }
 
