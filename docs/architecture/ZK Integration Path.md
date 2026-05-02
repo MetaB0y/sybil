@@ -40,8 +40,9 @@ The first guest boundary is intentionally narrow:
   `sybil-witgen`, runs the native `sybil-zk` transition verifier before
   emitting serialized `StateTransitionGuestInput` artifacts, and reports the
   public input hash. It also encodes `submitStateRoot` calldata for the L1
-  settlement contract once OpenVM proof bytes exist. Real OpenVM proof
-  orchestration is still service work.
+  settlement contract and can emit a file-based `eth_sendTransaction` request
+  for large proof calldata. Real OpenVM proof orchestration is still service
+  work.
 - `zk/openvm-guest/` is a standalone OpenVM package pinned to
   `v2.0.0-beta.2`. It is outside the root Cargo workspace so normal Rust
   checks do not require the OpenVM prerelease CLI or generated artifacts.
@@ -89,7 +90,9 @@ just prover-prepare /tmp/job.msgpack
 just openvm-input /tmp/sybil-guest-input.msgpack /tmp/sybil-openvm-input.json
 just openvm-run /tmp/sybil-openvm-input.json
 just openvm-prove-app /tmp/sybil-openvm-input.json /tmp/sybil-openvm.app.proof
+just openvm-verify-app /tmp/sybil-openvm.app.proof
 just prover-submit-state-root 0xYourSettlement /tmp/sybil-guest-input.msgpack /tmp/sybil-openvm.app.proof
+just prover-submit-state-root-rpc 0xYourSettlement 0xYourSender
 ```
 
 ## Key Properties

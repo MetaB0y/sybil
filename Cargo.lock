@@ -4259,6 +4259,7 @@ dependencies = [
  "hex",
  "rmp-serde",
  "serde",
+ "serde_json",
  "sha3",
  "sybil-verifier",
  "sybil-witgen",

@@ -84,6 +84,10 @@ openvm-run input="/tmp/sybil-openvm-input.json":
 openvm-prove-app input="/tmp/sybil-openvm-input.json" proof="/tmp/sybil-openvm.app.proof":
     cargo openvm prove app --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil --input {{input}} --proof {{proof}}
 
+# Verify an OpenVM app proof for the Sybil guest
+openvm-verify-app proof="/tmp/sybil-openvm.app.proof":
+    cargo openvm verify app --manifest-path zk/openvm-guest/Cargo.toml --proof {{proof}}
+
 # Inspect a serialized state-transition proof job
 prover-inspect job:
     cargo run -p sybil-prover -- inspect --job {{job}}
@@ -95,6 +99,10 @@ prover-prepare job guest_input="/tmp/sybil-guest-input.msgpack" public_input_has
 # Encode a SybilSettlement.submitStateRoot transaction from guest input and proof bytes
 prover-submit-state-root settlement guest_input="/tmp/sybil-guest-input.msgpack" proof="/tmp/sybil-openvm.app.proof" calldata="/tmp/sybil-submit-state-root.calldata":
     cargo run -p sybil-prover -- submit-state-root --settlement {{settlement}} --guest-input {{guest_input}} --proof {{proof}} --calldata {{calldata}}
+
+# Encode calldata plus a file-based eth_sendTransaction request for large proof bytes
+prover-submit-state-root-rpc settlement from gas="0x1c9c380" guest_input="/tmp/sybil-guest-input.msgpack" proof="/tmp/sybil-openvm.app.proof" calldata="/tmp/sybil-submit-state-root.calldata" rpc_request="/tmp/sybil-submit-state-root-rpc.json":
+    cargo run -p sybil-prover -- submit-state-root --settlement {{settlement}} --guest-input {{guest_input}} --proof {{proof}} --calldata {{calldata}} --rpc-request {{rpc_request}} --from {{from}} --gas {{gas}}
 
 # Export the latest committed sequencer block as a portable proof job
 witgen-export-latest store job="/tmp/sybil-proof-job.msgpack":

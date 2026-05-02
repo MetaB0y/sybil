@@ -13,6 +13,7 @@ const SUBMIT_STATE_ROOT_SIGNATURE: &str =
     "submitStateRoot((uint64,uint64,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,uint64),bytes)";
 const STATE_TRANSITION_PUBLIC_INPUT_WORDS: usize = 10;
 const ABI_WORD_BYTES: usize = 32;
+const SHELL_SAFE_CALLDATA_BYTES: usize = 128 * 1024;
 
 #[derive(Parser)]
 #[command(name = "sybil-prover")]
@@ -66,6 +67,15 @@ struct SubmitStateRootArgs {
     /// Output path for hex calldata accepted by `cast send --data`.
     #[arg(long, default_value = "/tmp/sybil-submit-state-root.calldata")]
     calldata: PathBuf,
+    /// Optional output path for an eth_sendTransaction JSON-RPC request.
+    #[arg(long)]
+    rpc_request: Option<PathBuf>,
+    /// Sender address to include in the optional eth_sendTransaction request.
+    #[arg(long)]
+    from: Option<String>,
+    /// Optional gas limit to include in the eth_sendTransaction request.
+    #[arg(long)]
+    gas: Option<String>,
     /// Environment variable containing the RPC URL for the printed cast command.
     #[arg(long, default_value = "ETH_RPC_URL")]
     rpc_url_env: String,
@@ -114,6 +124,14 @@ enum ProverCliError {
     },
     #[error("proof file is empty: {path}")]
     EmptyProof { path: PathBuf },
+    #[error("--from is required when --rpc-request is set")]
+    MissingRpcRequestFrom,
+    #[error("encode JSON artifact for {path}: {source}")]
+    EncodeJson {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
     #[error(transparent)]
     ProofJob(#[from] sybil_witgen::ProofJobError),
     #[error("verify prepared guest input: {0}")]
@@ -167,6 +185,20 @@ fn submit_state_root(args: SubmitStateRootArgs) -> Result<(), ProverCliError> {
 
     write_hex_bytes(&args.calldata, &calldata)?;
 
+    if let Some(path) = &args.rpc_request {
+        let from = args
+            .from
+            .as_deref()
+            .ok_or(ProverCliError::MissingRpcRequestFrom)?;
+        write_eth_send_transaction_request(
+            path,
+            from,
+            &args.settlement,
+            args.gas.as_deref(),
+            &calldata,
+        )?;
+    }
+
     let cast_command = cast_send_data_command(
         &args.settlement,
         &args.calldata,
@@ -180,6 +212,16 @@ fn submit_state_root(args: SubmitStateRootArgs) -> Result<(), ProverCliError> {
     println!("proof_bytes={}", proof.len());
     println!("calldata={}", args.calldata.display());
     println!("cast_send={cast_command}");
+    if calldata.len() > SHELL_SAFE_CALLDATA_BYTES {
+        println!("cast_send_warning=calldata is large; prefer --rpc-request and curl_send instead");
+    }
+    if let Some(path) = args.rpc_request {
+        println!("rpc_request={}", path.display());
+        println!(
+            "curl_send={}",
+            curl_rpc_request_command(&path, &args.rpc_url_env)
+        );
+    }
     Ok(())
 }
 
@@ -246,6 +288,47 @@ fn write_hex_hash(path: &Path, hash: [u8; 32]) -> Result<(), ProverCliError> {
         source,
     })?;
     writeln!(file, "0x{}", hex::encode(hash)).map_err(|source| ProverCliError::Write {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+fn write_eth_send_transaction_request(
+    path: &Path,
+    from: &str,
+    to: &str,
+    gas: Option<&str>,
+    calldata: &[u8],
+) -> Result<(), ProverCliError> {
+    let mut tx = serde_json::Map::new();
+    tx.insert(
+        "from".to_string(),
+        serde_json::Value::String(from.to_string()),
+    );
+    tx.insert("to".to_string(), serde_json::Value::String(to.to_string()));
+    tx.insert(
+        "data".to_string(),
+        serde_json::Value::String(format!("0x{}", hex::encode(calldata))),
+    );
+    if let Some(gas) = gas {
+        tx.insert(
+            "gas".to_string(),
+            serde_json::Value::String(gas.to_string()),
+        );
+    }
+
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_sendTransaction",
+        "params": [serde_json::Value::Object(tx)],
+    });
+    let json =
+        serde_json::to_vec_pretty(&request).map_err(|source| ProverCliError::EncodeJson {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    std::fs::write(path, json).map_err(|source| ProverCliError::Write {
         path: path.to_path_buf(),
         source,
     })
@@ -350,6 +433,14 @@ fn cast_send_data_command(
         shell_quote(&calldata.display().to_string()),
         rpc_url_env,
         private_key_env,
+    )
+}
+
+fn curl_rpc_request_command(path: &Path, rpc_url_env: &str) -> String {
+    format!(
+        "curl -sS -H 'content-type: application/json' --data-binary @{} \"${}\"",
+        shell_quote(&path.display().to_string()),
+        rpc_url_env,
     )
 }
 
@@ -536,6 +627,48 @@ mod tests {
     }
 
     #[test]
+    fn curl_rpc_request_command_reads_request_file() {
+        let command = curl_rpc_request_command(Path::new("/tmp/state root.json"), "ETH_RPC_URL");
+
+        assert_eq!(
+            command,
+            "curl -sS -H 'content-type: application/json' --data-binary @'/tmp/state root.json' \"$ETH_RPC_URL\""
+        );
+    }
+
+    #[test]
+    fn writes_eth_send_transaction_request_artifact() {
+        let path = temp_path("rpc-request");
+        let calldata = [0xf2, 0x33, 0x91, 0xb1];
+
+        write_eth_send_transaction_request(
+            &path,
+            "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+            "0x1234567890123456789012345678901234567890",
+            Some("0x1c9c380"),
+            &calldata,
+        )
+        .unwrap();
+
+        let json = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        let request: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(request["jsonrpc"], "2.0");
+        assert_eq!(request["method"], "eth_sendTransaction");
+        assert_eq!(
+            request["params"][0]["from"],
+            "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+        );
+        assert_eq!(
+            request["params"][0]["to"],
+            "0x1234567890123456789012345678901234567890"
+        );
+        assert_eq!(request["params"][0]["gas"], "0x1c9c380");
+        assert_eq!(request["params"][0]["data"], "0xf23391b1");
+    }
+
+    #[test]
     fn submit_state_root_writes_calldata_artifact() {
         let guest_input_path = temp_path("submit-guest-input");
         let proof_path = temp_path("submit-proof");
@@ -550,6 +683,9 @@ mod tests {
             proof: proof_path.clone(),
             settlement: "0x1234567890123456789012345678901234567890".to_string(),
             calldata: calldata_path.clone(),
+            rpc_request: None,
+            from: None,
+            gas: None,
             rpc_url_env: "ETH_RPC_URL".to_string(),
             private_key_env: "PRIVATE_KEY".to_string(),
         })
