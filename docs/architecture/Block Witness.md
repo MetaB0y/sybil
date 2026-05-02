@@ -11,9 +11,9 @@ last_verified: 2026-05-02
 The Block Witness is the self-contained input to block verification. The
 sequencer produces one per block and persists the qMDB proof material needed
 for the post-state commitment. The [[Four-Layer Verification]] logic consumes
-the witness today; `sybil-witgen` combines it with retained qMDB proofs to
-build OpenVM guest input. Everything else in this doc follows from two
-invariants:
+the witness today; `sybil-witgen` combines it with retained qMDB proofs into
+a portable `StateTransitionProofJob`, then builds OpenVM guest input from
+that job. Everything else in this doc follows from two invariants:
 
 1. **Self-contained.** Given a witness and its parent header (or nothing, for
    genesis), any third party can re-run settlement and verify every claim the
@@ -50,9 +50,10 @@ invariants:
 
 The sequencer builds this in `matching-sequencer::sequencer` at the end of
 each block. Tests and `matching-sim` run the 4-layer verifier over it.
-`sybil-witgen` is the prover-input boundary; it consumes a committed witness
-plus qMDB proofs from storage and produces `StateTransitionGuestInput` for
-`sybil-zk`.
+`sybil-witgen` is the prover-input boundary; the store adapter consumes a
+committed witness plus qMDB proofs from storage and emits
+`StateTransitionProofJob`, while the core builder consumes only that portable
+job and produces `StateTransitionGuestInput` for `sybil-zk`.
 
 ## ZK public/private partition
 

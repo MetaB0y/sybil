@@ -23,9 +23,12 @@ The first guest boundary is intentionally narrow:
 - `crates/sybil-zk/` owns the public input binding shared by host tests and
   the guest. Its `guest_commitments` module contains the OpenVM-safe
   qMDB/event-root verifier subset.
-- `crates/sybil-witgen/` owns host-side prover input construction. It reads
-  a committed `BlockWitness` plus retained qMDB proof material from
-  sequencer storage and converts that into `StateTransitionGuestInput`.
+- `crates/sybil-witgen/` owns host-side prover input construction. Its core
+  API is a serializable `StateTransitionProofJob`: a committed
+  `BlockWitness`, job identity metadata, and ordered post-state qMDB proofs.
+  The default `sequencer-store` feature adds the adapter that collects this
+  job from sequencer storage; the core job-to-guest conversion has no
+  dependency on `matching-sequencer`.
 - `crates/sybil-verifier::commitments` owns the canonical state, event, and
   witness byte schemas used by native verification, witgen, and the guest.
 - `zk/openvm-guest/` is a standalone OpenVM package pinned to
@@ -72,7 +75,7 @@ just openvm-guest-build
 
 ## Where This Lives
 > `crates/sybil-verifier/` — verification logic that will become the ZK circuit
-> `crates/sybil-witgen/` — host-side construction of OpenVM guest inputs
+> `crates/sybil-witgen/` — portable proof job type and OpenVM guest input construction
 > `crates/sybil-zk/` — public input hash and guest-safe transition verifier
 > `zk/openvm-guest/` — OpenVM 2.0 beta guest entrypoint
 > `crates/matching-sequencer/src/qmdb_state.rs` — persisted typed-state qMDB roots and proofs used by witgen

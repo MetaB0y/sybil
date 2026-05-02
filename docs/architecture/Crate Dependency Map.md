@@ -11,11 +11,13 @@ The dependency DAG flows in three tiers. **Foundation**: `matching-engine` defin
 
 The ZK boundary is deliberately split from block production. `sybil-zk`
 depends on `sybil-verifier` with native qMDB runtime features disabled and
-contains the guest-safe transition verifier. `sybil-witgen` sits on the host
-side: it depends on `matching-sequencer`, `sybil-verifier`, and `sybil-zk` to
-turn persisted block/proof material into guest input. The sequencer does not
-depend on `sybil-zk`; it produces and persists blocks, witnesses, and qMDB
-proof material.
+contains the guest-safe transition verifier. `sybil-witgen` owns a portable
+proof job type and the conversion from that job into guest input. Its core
+path depends only on `sybil-verifier` and `sybil-zk`; the optional default
+`sequencer-store` feature adds the adapter that reads persisted block/proof
+material from `matching-sequencer`. The sequencer does not depend on
+`sybil-zk`; it produces and persists blocks, witnesses, and qMDB proof
+material.
 
 The Python `arena/` sits outside the Rust workspace entirely, connected only via HTTP to `sybil-api`. This clean boundary means the Python bots can be developed, tested, and deployed independently of the Rust code — they only need a running server. The separation also means the arena doesn't need to compile any Rust code, which is important for Python-first developers who want to build bots without a Rust toolchain.
 
@@ -37,9 +39,9 @@ graph TB
 
     SCENARIOS --> SIM["matching-sim"]
     VERIFIER --> ZK["sybil-zk"]
-    SEQ --> WITGEN["sybil-witgen"]
     VERIFIER --> WITGEN
     ZK --> WITGEN
+    SEQ -.->|"sequencer-store feature"| WITGEN["sybil-witgen"]
     ZK --> OPENVM["zk/openvm-guest"]
 ```
 
@@ -49,7 +51,7 @@ graph TB
 - `matching-engine` is the sole foundation — all crates depend on it
 - No upward dependencies: engine doesn't know about solvers, solvers don't know about API
 - Sequencer composes middle-tier crates into the block production pipeline
-- `sybil-zk` is guest-safe verification; `sybil-witgen` is host-side prover input construction
+- `sybil-zk` is guest-safe verification; `sybil-witgen` owns portable proof jobs and host-side prover input construction
 - Sequencer owns block production and persistence, not prover input assembly
 - Arena connects via HTTP only — no Rust compilation required
 - `matching-sim` is a dev tool that cross-cuts multiple crates for benchmarking

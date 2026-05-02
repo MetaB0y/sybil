@@ -4273,6 +4273,7 @@ version = "0.1.0"
 dependencies = [
  "matching-engine",
  "matching-sequencer",
+ "serde",
  "sybil-oracle",
  "sybil-verifier",
  "sybil-zk",

@@ -4,8 +4,13 @@ version = "0.1.0"
 edition = "2021"
 description = "Host-side prover input construction for Sybil ZK proofs"
 
+[features]
+default = ["sequencer-store"]
+sequencer-store = ["dep:matching-sequencer"]
+
 [dependencies]
-matching-sequencer = { path = "../matching-sequencer" }
+matching-sequencer = { path = "../matching-sequencer", optional = true }
+serde = { version = "1", features = ["derive"] }
 sybil-verifier = { path = "../sybil-verifier" }
 sybil-zk = { path = "../sybil-zk" }
 thiserror = { workspace = true }

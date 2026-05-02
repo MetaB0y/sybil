@@ -88,10 +88,12 @@ committed qMDB contains a hidden extra active key, at least one adjacent
 `next_key` pointer will target that hidden key and the guest rejects the
 transition.
 
-The proof bytes are produced from commonware qMDB outside the guest.
-`crates/sybil-witgen` reads the committed block witness and retained qMDB
-proof material from sequencer storage, checks the native proof against the
-committed root, and converts it into the guest input shape. Inside OpenVM,
+The proof bytes are produced from commonware qMDB outside the guest. With its
+default `sequencer-store` feature, `crates/sybil-witgen` reads the committed
+block witness and retained qMDB proof material from sequencer storage, checks
+the native proof against the committed root, and emits a serializable
+`StateTransitionProofJob`. The core witgen path then validates that portable
+job and converts it into the guest input shape. Inside OpenVM,
 `crates/sybil-zk` verifies the needed SHA-256 MMR/grafted-root proof shape
 directly, avoiding commonware storage as a guest dependency while keeping the
 proof format pinned to commonware's ordered-current-qMDB semantics.
@@ -116,7 +118,7 @@ The account qMDB slot currently stores:
 and exclusion proofs. Those proofs verify directly against
 `BlockHeader.state_root` for the fenced slot recorded by redb.
 The sequencer persists this material; `sybil-witgen` owns turning it into
-OpenVM prover input.
+portable proof jobs and then OpenVM prover input.
 
 ## Proof API
 
