@@ -71,6 +71,29 @@ Before `provider_refs_hash` becomes non-empty, provider references must have a
 canonical byte encoding and deterministic ordering. That lets the prover bind
 the exact references while keeping L1 storage to one bytes32 field.
 
+## File-Backed Publisher
+
+The host tooling can export the current file-backed DA artifacts from a
+prepared guest input:
+
+```bash
+just prover-publish-da /tmp/sybil-guest-input.msgpack /tmp/sybil-da-witness.bin /tmp/sybil-da-manifest.json
+```
+
+`sybil-prover publish-da` verifies the prepared guest input, writes
+`/tmp/sybil-da-witness.bin` as canonical witness bytes, and writes a JSON
+manifest. The manifest includes:
+
+- block height, block hash, state root, witness root, payload root, payload
+  length, provider refs hash, DA commitment, and public-input hash
+- `provider_refs: []`, because the current proof binds
+  `BLAKE3("sybil/da/provider-refs/empty/v1")`
+- `local_payload_path`, which helps local operators find the file but is
+  explicitly not proof-bound
+
+This gives us an auditable local publication artifact now without baking a
+filesystem path or object-store key into the circuit.
+
 ## Availability Model
 
 The first useful deployment target is file-backed publication: persist the

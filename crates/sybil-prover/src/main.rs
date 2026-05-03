@@ -30,6 +30,8 @@ enum Command {
     Inspect(JobPathArgs),
     /// Validate a proof job and write the OpenVM guest input artifact.
     Prepare(PrepareArgs),
+    /// Write the file-backed DA payload and manifest for a prepared guest input.
+    PublishDa(PublishDaArgs),
     /// Encode a state-root submission for SybilSettlement.
     SubmitStateRoot(SubmitStateRootArgs),
 }
@@ -52,6 +54,19 @@ struct PrepareArgs {
     /// Optional output path for the hex public input hash.
     #[arg(long)]
     public_input_hash: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct PublishDaArgs {
+    /// MessagePack-encoded StateTransitionGuestInput produced by `prepare`.
+    #[arg(long)]
+    guest_input: PathBuf,
+    /// Output path for canonical witness payload bytes.
+    #[arg(long)]
+    payload: PathBuf,
+    /// Output path for the JSON DA manifest.
+    #[arg(long)]
+    manifest: PathBuf,
 }
 
 #[derive(Args)]
@@ -178,6 +193,26 @@ struct OpenVmEvmProofDataJson {
     proof: String,
 }
 
+#[derive(Serialize)]
+struct DaManifestJson {
+    version: u8,
+    payload_kind: &'static str,
+    payload_encoding: &'static str,
+    provider_refs_encoding: &'static str,
+    block_height: u64,
+    block_hash: String,
+    state_root: String,
+    witness_root: String,
+    payload_root: String,
+    payload_len: u64,
+    provider_refs_hash: String,
+    provider_refs: Vec<serde_json::Value>,
+    da_commitment: String,
+    public_input_hash: String,
+    local_payload_path: String,
+    local_payload_path_proof_bound: bool,
+}
+
 fn main() {
     if let Err(error) = run(Cli::parse()) {
         eprintln!("error: {error}");
@@ -189,6 +224,7 @@ fn run(cli: Cli) -> Result<(), ProverCliError> {
     match cli.command {
         Command::Inspect(args) => inspect(args),
         Command::Prepare(args) => prepare(args),
+        Command::PublishDa(args) => publish_da(args),
         Command::SubmitStateRoot(args) => submit_state_root(args),
     }
 }
@@ -213,6 +249,35 @@ fn prepare(args: PrepareArgs) -> Result<(), ProverCliError> {
     print_job_id(&job_id);
     println!("public_input_hash=0x{}", hex::encode(public_input_hash));
     println!("guest_input={}", args.guest_input.display());
+    Ok(())
+}
+
+fn publish_da(args: PublishDaArgs) -> Result<(), ProverCliError> {
+    let guest_input = read_guest_input(&args.guest_input)?;
+    let public_input_hash = sybil_zk::verify_state_transition_input(&guest_input)?;
+    write_da_artifacts(
+        &guest_input,
+        public_input_hash,
+        &args.payload,
+        &args.manifest,
+    )?;
+
+    println!("block_height={}", guest_input.public_inputs.new_height);
+    println!(
+        "block_hash=0x{}",
+        hex::encode(guest_input.public_inputs.block_hash)
+    );
+    println!(
+        "state_root=0x{}",
+        hex::encode(guest_input.public_inputs.new_state_root)
+    );
+    println!(
+        "da_commitment=0x{}",
+        hex::encode(guest_input.public_inputs.da_commitment)
+    );
+    println!("public_input_hash=0x{}", hex::encode(public_input_hash));
+    println!("da_payload={}", args.payload.display());
+    println!("da_manifest={}", args.manifest.display());
     Ok(())
 }
 
@@ -367,6 +432,65 @@ fn write_hex_hash(path: &Path, hash: [u8; 32]) -> Result<(), ProverCliError> {
         path: path.to_path_buf(),
         source,
     })
+}
+
+fn write_da_artifacts(
+    guest_input: &sybil_zk::StateTransitionGuestInput,
+    public_input_hash: [u8; 32],
+    payload_path: &Path,
+    manifest_path: &Path,
+) -> Result<(), ProverCliError> {
+    let payload = sybil_zk::da_witness_payload_bytes(&guest_input.witness);
+    let components =
+        sybil_zk::da_commitment_components_from_payload(&guest_input.witness, &payload);
+    let manifest = da_manifest_json(guest_input, &components, public_input_hash, payload_path);
+
+    std::fs::write(payload_path, payload).map_err(|source| ProverCliError::Write {
+        path: payload_path.to_path_buf(),
+        source,
+    })?;
+    write_json_pretty(manifest_path, &manifest)
+}
+
+fn da_manifest_json(
+    guest_input: &sybil_zk::StateTransitionGuestInput,
+    components: &sybil_zk::DaCommitmentComponents,
+    public_input_hash: [u8; 32],
+    payload_path: &Path,
+) -> DaManifestJson {
+    DaManifestJson {
+        version: 1,
+        payload_kind: "block_witness",
+        payload_encoding: "sybil-canonical-witness-v1",
+        provider_refs_encoding: "empty-v1",
+        block_height: components.block_height,
+        block_hash: hex32(guest_input.public_inputs.block_hash),
+        state_root: hex32(components.state_root),
+        witness_root: hex32(components.witness_root),
+        payload_root: hex32(components.payload_root),
+        payload_len: components.payload_len,
+        provider_refs_hash: hex32(components.provider_refs_hash),
+        provider_refs: Vec::new(),
+        da_commitment: hex32(components.da_commitment),
+        public_input_hash: hex32(public_input_hash),
+        local_payload_path: payload_path.display().to_string(),
+        local_payload_path_proof_bound: false,
+    }
+}
+
+fn write_json_pretty<T: Serialize>(path: &Path, value: &T) -> Result<(), ProverCliError> {
+    let json = serde_json::to_vec_pretty(value).map_err(|source| ProverCliError::EncodeJson {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    std::fs::write(path, json).map_err(|source| ProverCliError::Write {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+fn hex32(bytes: [u8; 32]) -> String {
+    format!("0x{}", hex::encode(bytes))
 }
 
 fn openvm_evm_adapter_proof(
@@ -651,19 +775,9 @@ mod tests {
             state_sidecar: StateSidecarSnapshot::default(),
             resolved_markets: vec![],
         };
+        let public_inputs = sybil_zk::public_inputs_from_witness(&witness);
         sybil_zk::StateTransitionGuestInput {
-            public_inputs: sybil_zk::StateTransitionPublicInputs {
-                previous_height: 1,
-                new_height: 3,
-                previous_state_root: [4u8; 32],
-                new_state_root: [5u8; 32],
-                block_hash: [6u8; 32],
-                events_root: [7u8; 32],
-                witness_root: [8u8; 32],
-                da_commitment: [0u8; 32],
-                deposit_root: [9u8; 32],
-                deposit_count: 11,
-            },
+            public_inputs,
             witness,
             state_root_proof: sybil_zk::QmdbStateRootProof {
                 leaf_proofs: vec![],
@@ -872,6 +986,35 @@ mod tests {
         );
         assert_eq!(request["params"][0]["gas"], "0x1c9c380");
         assert_eq!(request["params"][0]["data"], "0xf23391b1");
+    }
+
+    #[test]
+    fn writes_da_payload_and_manifest_artifacts() {
+        let payload_path = temp_path("da-payload");
+        let manifest_path = temp_path("da-manifest");
+        let input = minimal_guest_input();
+        let public_input_hash = sybil_zk::state_transition_public_input_hash(&input.public_inputs);
+
+        write_da_artifacts(&input, public_input_hash, &payload_path, &manifest_path).unwrap();
+
+        let payload = std::fs::read(&payload_path).unwrap();
+        let manifest = std::fs::read_to_string(&manifest_path).unwrap();
+        let _ = std::fs::remove_file(&payload_path);
+        let _ = std::fs::remove_file(&manifest_path);
+        let manifest: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+        let components = sybil_zk::da_commitment_components_from_payload(&input.witness, &payload);
+
+        assert_eq!(payload, sybil_zk::da_witness_payload_bytes(&input.witness));
+        assert_eq!(manifest["version"], 1);
+        assert_eq!(manifest["payload_kind"], "block_witness");
+        assert_eq!(
+            manifest["da_commitment"],
+            hex32(input.public_inputs.da_commitment)
+        );
+        assert_eq!(manifest["payload_root"], hex32(components.payload_root));
+        assert_eq!(manifest["payload_len"], payload.len() as u64);
+        assert_eq!(manifest["provider_refs"].as_array().unwrap().len(), 0);
+        assert_eq!(manifest["local_payload_path_proof_bound"], false);
     }
 
     #[test]

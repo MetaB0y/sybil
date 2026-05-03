@@ -20,6 +20,17 @@ pub const DA_COMMITMENT_DOMAIN: &[u8] = b"sybil/da-commitment/v1";
 pub const DA_WITNESS_PAYLOAD_DOMAIN: &[u8] = b"sybil/da/witness-payload/v1";
 pub const DA_EMPTY_PROVIDER_REFS_DOMAIN: &[u8] = b"sybil/da/provider-refs/empty/v1";
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DaCommitmentComponents {
+    pub block_height: u64,
+    pub state_root: [u8; 32],
+    pub witness_root: [u8; 32],
+    pub payload_root: [u8; 32],
+    pub payload_len: u64,
+    pub provider_refs_hash: [u8; 32],
+    pub da_commitment: [u8; 32],
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateTransitionPublicInputs {
     pub previous_height: u64,
@@ -222,7 +233,7 @@ pub fn hash_header(header: &WitnessBlockHeader) -> [u8; 32] {
 }
 
 pub fn witness_root(witness: &BlockWitness) -> [u8; 32] {
-    let witness_bytes = witness_schema::canonical_witness_bytes(witness);
+    let witness_bytes = da_witness_payload_bytes(witness);
     witness_root_from_bytes(&witness_bytes)
 }
 
@@ -234,17 +245,43 @@ fn witness_root_from_bytes(witness_bytes: &[u8]) -> [u8; 32] {
 }
 
 pub fn da_commitment(witness: &BlockWitness) -> [u8; 32] {
-    let witness_bytes = witness_schema::canonical_witness_bytes(witness);
-    let witness_root = witness_root_from_bytes(&witness_bytes);
-    let payload_root = da_witness_payload_root(&witness_bytes);
-    da_commitment_from_parts(
+    da_commitment_components(witness).da_commitment
+}
+
+pub fn da_witness_payload_bytes(witness: &BlockWitness) -> Vec<u8> {
+    witness_schema::canonical_witness_bytes(witness)
+}
+
+pub fn da_commitment_components(witness: &BlockWitness) -> DaCommitmentComponents {
+    let witness_bytes = da_witness_payload_bytes(witness);
+    da_commitment_components_from_payload(witness, &witness_bytes)
+}
+
+pub fn da_commitment_components_from_payload(
+    witness: &BlockWitness,
+    witness_bytes: &[u8],
+) -> DaCommitmentComponents {
+    let witness_root = witness_root_from_bytes(witness_bytes);
+    let payload_root = da_witness_payload_root(witness_bytes);
+    let payload_len = witness_bytes.len() as u64;
+    let provider_refs_hash = empty_da_provider_refs_hash();
+    let da_commitment = da_commitment_from_parts(
         witness.header.height,
         witness.header.state_root,
         witness_root,
         payload_root,
-        witness_bytes.len() as u64,
-        empty_da_provider_refs_hash(),
-    )
+        payload_len,
+        provider_refs_hash,
+    );
+    DaCommitmentComponents {
+        block_height: witness.header.height,
+        state_root: witness.header.state_root,
+        witness_root,
+        payload_root,
+        payload_len,
+        provider_refs_hash,
+        da_commitment,
+    }
 }
 
 pub fn da_witness_payload_root(witness_bytes: &[u8]) -> [u8; 32] {
@@ -285,16 +322,7 @@ pub fn public_inputs_from_witness(witness: &BlockWitness) -> StateTransitionPubl
         Some(previous) => (previous.height, previous.state_root),
         None => (0, [0u8; 32]),
     };
-    let witness_bytes = witness_schema::canonical_witness_bytes(witness);
-    let witness_root = witness_root_from_bytes(&witness_bytes);
-    let da_commitment = da_commitment_from_parts(
-        witness.header.height,
-        witness.header.state_root,
-        witness_root,
-        da_witness_payload_root(&witness_bytes),
-        witness_bytes.len() as u64,
-        empty_da_provider_refs_hash(),
-    );
+    let components = da_commitment_components(witness);
 
     StateTransitionPublicInputs {
         previous_height,
@@ -303,8 +331,8 @@ pub fn public_inputs_from_witness(witness: &BlockWitness) -> StateTransitionPubl
         new_state_root: witness.header.state_root,
         block_hash: hash_header(&witness.header),
         events_root: witness.header.events_root,
-        witness_root,
-        da_commitment,
+        witness_root: components.witness_root,
+        da_commitment: components.da_commitment,
         deposit_root: witness.state_sidecar.bridge.deposit_root,
         deposit_count: witness.state_sidecar.bridge.deposit_cursor,
     }
@@ -886,6 +914,21 @@ mod tests {
             input.public_inputs.da_commitment,
             da_commitment(&input.witness)
         );
+    }
+
+    #[test]
+    fn da_components_match_public_inputs() {
+        let input = empty_guest_input();
+        let payload = da_witness_payload_bytes(&input.witness);
+        let components = da_commitment_components_from_payload(&input.witness, &payload);
+
+        assert_eq!(components.block_height, input.public_inputs.new_height);
+        assert_eq!(components.state_root, input.public_inputs.new_state_root);
+        assert_eq!(components.witness_root, input.public_inputs.witness_root);
+        assert_eq!(components.payload_len, payload.len() as u64);
+        assert_eq!(components.payload_root, da_witness_payload_root(&payload));
+        assert_eq!(components.provider_refs_hash, empty_da_provider_refs_hash());
+        assert_eq!(components.da_commitment, input.public_inputs.da_commitment);
     }
 
     #[test]
