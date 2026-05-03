@@ -87,6 +87,7 @@ The matching problem itself has an elegant mathematical structure: without marke
 - [[Four-Layer Verification]] — 37 independent correctness checks across 4 layers
 - [[Proof Architecture]] — authenticated data for arbitrary account-level proofs
 - [[ZK Integration Path]] — the road to on-chain proofs
+- [[Data Availability]] — provider-neutral validium payload commitments
 - [[L1 Settlement and Vault]] — Ethereum custody, root acceptance, withdrawals, and escape boundaries
 
 ## API and Oracle

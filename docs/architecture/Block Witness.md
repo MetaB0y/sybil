@@ -206,9 +206,10 @@ accounts touched with ~5 positions each):
 
 At 1 block per 2s, that's ~13 GB/day of witness data. Most of it is highly
 compressible (canonical bytes are regular). Whether to post the full witness
-to DA or just the `witness_root` + a compressed events summary is decided in
-the Data Availability RFC (sibling, M3 · Validium Foundations). See also the
-open-questions section below.
+to DA or only a recovery-oriented subset is part of [[Data Availability]] and
+future operator-replacement design. The current proof binds the canonical
+witness payload into `da_commitment` but does not yet require a specific DA
+provider.
 
 ## Relation to events and state roots
 

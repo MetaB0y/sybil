@@ -104,12 +104,12 @@ struct RootRecord {
 }
 ```
 
-`daCommitment` is reserved for [[Persistence|DA publication]] and operator
-replacement. Until SYB-76 defines provider semantics, the only accepted value
-is the zero pre-DA placeholder; `SybilSettlement` rejects any other value.
-Once DA is specified, L1 will store the commitment so users can bind a root to
-the data publication the operator claimed to make, but the vault will still
-not assume that `daCommitment` alone makes the data available.
+`daCommitment` is the [[Data Availability]] envelope proven by OpenVM and
+stored by L1. It binds the root record to a canonical witness payload,
+payload length, and provider-reference hash. The current provider-reference
+hash is the empty set, so the first implementation commits to the data before
+choosing a production DA network. The vault still does not assume that
+`daCommitment` alone makes the data available.
 
 `depositRoot` and `depositCount` bind a state transition to the L1 deposit log
 snapshot the proof used. This prevents an off-chain block from crediting
@@ -687,6 +687,7 @@ are implemented.
 - [[State Root Schema]] - typed state leaves that withdrawals prove against.
 - [[ZK Integration Path]] - proof pipeline and on-chain root verification.
 - [[Proof Architecture]] - authenticated data and proof composition.
+- [[Data Availability]] - provider-neutral DA commitment envelope.
 - [[Block Witness]] - private/public proof input split.
 - [[Settlement]] - off-chain balance and position mutation.
 - [[P256 Authentication]] - user key model that withdrawal proofs bind to.

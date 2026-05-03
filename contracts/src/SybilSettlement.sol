@@ -10,7 +10,6 @@ import {SybilTypes} from "./SybilTypes.sol";
 contract SybilSettlement is SybilAccessControl, ISybilSettlement {
     bytes32 public constant PAUSER_ROLE = keccak256("SYBIL_PAUSER_ROLE");
     bytes32 public constant VERIFIER_ADMIN_ROLE = keccak256("SYBIL_VERIFIER_ADMIN_ROLE");
-    bytes32 public constant PRE_DA_COMMITMENT_PLACEHOLDER = bytes32(0);
 
     IOpenVmVerifierAdapter public verifier;
     ISybilVaultDepositRoots public vault;
@@ -45,7 +44,6 @@ contract SybilSettlement is SybilAccessControl, ISybilSettlement {
     error RootAlreadyAccepted(bytes32 stateRoot, uint64 height);
     error RootSubmissionPaused();
     error VaultNotSet();
-    error DaCommitmentNotEnabled(bytes32 provided);
 
     constructor(
         address admin,
@@ -100,9 +98,6 @@ contract SybilSettlement is SybilAccessControl, ISybilSettlement {
             revert NonMonotonicHeight(latestHeight, inputs.newHeight);
         }
         if (inputs.newStateRoot == bytes32(0)) revert UnknownStateRoot(inputs.newStateRoot);
-        if (inputs.daCommitment != PRE_DA_COMMITMENT_PLACEHOLDER) {
-            revert DaCommitmentNotEnabled(inputs.daCommitment);
-        }
 
         uint64 existingHeight = acceptedRootHeight[inputs.newStateRoot];
         if (existingHeight != 0) revert RootAlreadyAccepted(inputs.newStateRoot, existingHeight);

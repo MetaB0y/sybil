@@ -74,14 +74,15 @@ The first guest boundary is intentionally narrow:
   OpenVM user public value equals the settlement public-input hash, requires
   the remaining default public-value words to be zero, then calls
   `IOpenVmHalo2Verifier.verify`.
-- Historical qMDB paths and DA binding remain follow-up work. The current
-  state-root proof is a post-state exact-keyspace proof: every witness leaf
-  must be in qMDB, and hidden extra leaves are rejected because they alter the
-  verified `next_key` ring.
-- `da_commitment` is currently a pre-DA placeholder. The only accepted value
-  is zero (`PRE_DA_COMMITMENT_PLACEHOLDER`); the OpenVM guest and
-  `SybilSettlement` reject any other value until SYB-76 defines provider
-  semantics.
+- The current state-root proof is a post-state exact-keyspace proof: every
+  witness leaf must be in qMDB, and hidden extra leaves are rejected because
+  they alter the verified `next_key` ring.
+- `da_commitment` is a concrete [[Data Availability]] envelope over the
+  canonical witness payload, block height, state root, witness root, payload
+  length, and provider-reference hash. The current provider-reference set is
+  empty, so the proof binds the payload before choosing a production DA
+  provider. `SybilSettlement` stores the proven commitment but does not judge
+  provider availability on-chain.
 
 Commands:
 

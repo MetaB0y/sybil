@@ -16,7 +16,9 @@ pub use guest_commitments::{
 
 pub const STATE_TRANSITION_DOMAIN: &[u8] = b"sybil/openvm/state-transition/v1";
 pub const WITNESS_ROOT_DOMAIN: &[u8] = b"sybil/witness";
-pub const PRE_DA_COMMITMENT_PLACEHOLDER: [u8; 32] = [0u8; 32];
+pub const DA_COMMITMENT_DOMAIN: &[u8] = b"sybil/da-commitment/v1";
+pub const DA_WITNESS_PAYLOAD_DOMAIN: &[u8] = b"sybil/da/witness-payload/v1";
+pub const DA_EMPTY_PROVIDER_REFS_DOMAIN: &[u8] = b"sybil/da/provider-refs/empty/v1";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateTransitionPublicInputs {
@@ -86,8 +88,9 @@ pub enum ZkTransitionError {
         index: usize,
     },
     WitnessRootMismatch,
-    DaCommitmentNotEnabled {
-        provided: [u8; 32],
+    DaCommitmentMismatch {
+        expected: [u8; 32],
+        actual: [u8; 32],
     },
     VerificationLayerFailed {
         layer: &'static str,
@@ -152,10 +155,10 @@ impl fmt::Display for ZkTransitionError {
                 write!(f, "state root qMDB next-key mismatch at leaf index {index}")
             }
             ZkTransitionError::WitnessRootMismatch => write!(f, "witness root mismatch"),
-            ZkTransitionError::DaCommitmentNotEnabled { provided } => {
+            ZkTransitionError::DaCommitmentMismatch { expected, actual } => {
                 write!(
                     f,
-                    "DA commitment is not enabled yet: expected zero pre-DA placeholder, got {provided:?}"
+                    "DA commitment mismatch: expected {expected:?}, got {actual:?}"
                 )
             }
             ZkTransitionError::VerificationLayerFailed { layer, violations } => {
@@ -219,9 +222,61 @@ pub fn hash_header(header: &WitnessBlockHeader) -> [u8; 32] {
 }
 
 pub fn witness_root(witness: &BlockWitness) -> [u8; 32] {
+    let witness_bytes = witness_schema::canonical_witness_bytes(witness);
+    witness_root_from_bytes(&witness_bytes)
+}
+
+fn witness_root_from_bytes(witness_bytes: &[u8]) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new();
     hasher.update(WITNESS_ROOT_DOMAIN);
-    hasher.update(&witness_schema::canonical_witness_bytes(witness));
+    hasher.update(witness_bytes);
+    *hasher.finalize().as_bytes()
+}
+
+pub fn da_commitment(witness: &BlockWitness) -> [u8; 32] {
+    let witness_bytes = witness_schema::canonical_witness_bytes(witness);
+    let witness_root = witness_root_from_bytes(&witness_bytes);
+    let payload_root = da_witness_payload_root(&witness_bytes);
+    da_commitment_from_parts(
+        witness.header.height,
+        witness.header.state_root,
+        witness_root,
+        payload_root,
+        witness_bytes.len() as u64,
+        empty_da_provider_refs_hash(),
+    )
+}
+
+pub fn da_witness_payload_root(witness_bytes: &[u8]) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(DA_WITNESS_PAYLOAD_DOMAIN);
+    hasher.update(&(witness_bytes.len() as u64).to_le_bytes());
+    hasher.update(witness_bytes);
+    *hasher.finalize().as_bytes()
+}
+
+pub fn empty_da_provider_refs_hash() -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(DA_EMPTY_PROVIDER_REFS_DOMAIN);
+    *hasher.finalize().as_bytes()
+}
+
+pub fn da_commitment_from_parts(
+    block_height: u64,
+    state_root: [u8; 32],
+    witness_root: [u8; 32],
+    payload_root: [u8; 32],
+    payload_len: u64,
+    provider_refs_hash: [u8; 32],
+) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(DA_COMMITMENT_DOMAIN);
+    hasher.update(&block_height.to_le_bytes());
+    hasher.update(&state_root);
+    hasher.update(&witness_root);
+    hasher.update(&payload_root);
+    hasher.update(&payload_len.to_le_bytes());
+    hasher.update(&provider_refs_hash);
     *hasher.finalize().as_bytes()
 }
 
@@ -230,6 +285,16 @@ pub fn public_inputs_from_witness(witness: &BlockWitness) -> StateTransitionPubl
         Some(previous) => (previous.height, previous.state_root),
         None => (0, [0u8; 32]),
     };
+    let witness_bytes = witness_schema::canonical_witness_bytes(witness);
+    let witness_root = witness_root_from_bytes(&witness_bytes);
+    let da_commitment = da_commitment_from_parts(
+        witness.header.height,
+        witness.header.state_root,
+        witness_root,
+        da_witness_payload_root(&witness_bytes),
+        witness_bytes.len() as u64,
+        empty_da_provider_refs_hash(),
+    );
 
     StateTransitionPublicInputs {
         previous_height,
@@ -238,8 +303,8 @@ pub fn public_inputs_from_witness(witness: &BlockWitness) -> StateTransitionPubl
         new_state_root: witness.header.state_root,
         block_hash: hash_header(&witness.header),
         events_root: witness.header.events_root,
-        witness_root: witness_root(witness),
-        da_commitment: PRE_DA_COMMITMENT_PLACEHOLDER,
+        witness_root,
+        da_commitment,
         deposit_root: witness.state_sidecar.bridge.deposit_root,
         deposit_count: witness.state_sidecar.bridge.deposit_cursor,
     }
@@ -272,9 +337,11 @@ fn verify_public_input_binding(
     if inputs.witness_root != witness_root(witness) {
         return Err(ZkTransitionError::WitnessRootMismatch);
     }
-    if inputs.da_commitment != PRE_DA_COMMITMENT_PLACEHOLDER {
-        return Err(ZkTransitionError::DaCommitmentNotEnabled {
-            provided: inputs.da_commitment,
+    let expected_da_commitment = da_commitment(witness);
+    if inputs.da_commitment != expected_da_commitment {
+        return Err(ZkTransitionError::DaCommitmentMismatch {
+            expected: expected_da_commitment,
+            actual: inputs.da_commitment,
         });
     }
 
@@ -766,8 +833,8 @@ mod tests {
         assert_eq!(
             state_transition_public_input_hash(&input.public_inputs),
             [
-                126, 206, 84, 228, 251, 129, 163, 143, 167, 114, 107, 195, 102, 217, 75, 46, 5,
-                169, 103, 108, 187, 48, 143, 93, 124, 99, 38, 78, 184, 208, 197, 48,
+                219, 187, 192, 68, 241, 157, 93, 3, 112, 18, 214, 83, 19, 7, 85, 170, 58, 203, 196,
+                22, 88, 184, 218, 130, 85, 214, 46, 125, 247, 77, 210, 250,
             ]
         );
     }
@@ -811,14 +878,26 @@ mod tests {
     }
 
     #[test]
-    fn non_placeholder_da_commitment_is_rejected() {
+    fn public_inputs_include_nonzero_da_commitment() {
+        let input = empty_guest_input();
+
+        assert_ne!(input.public_inputs.da_commitment, [0u8; 32]);
+        assert_eq!(
+            input.public_inputs.da_commitment,
+            da_commitment(&input.witness)
+        );
+    }
+
+    #[test]
+    fn tampered_da_commitment_is_rejected() {
         let mut input = empty_guest_input();
         input.public_inputs.da_commitment = [7u8; 32];
 
         assert_eq!(
             verify_state_transition_input(&input),
-            Err(ZkTransitionError::DaCommitmentNotEnabled {
-                provided: [7u8; 32],
+            Err(ZkTransitionError::DaCommitmentMismatch {
+                expected: da_commitment(&input.witness),
+                actual: [7u8; 32],
             })
         );
     }
@@ -887,7 +966,7 @@ mod tests {
             .state_root_proof
             .leaf_proofs
             .push(input.state_root_proof.leaf_proofs[0].clone());
-        input.public_inputs.witness_root = witness_root(&input.witness);
+        input.public_inputs = public_inputs_from_witness(&input.witness);
 
         assert!(matches!(
             verify_state_transition_input(&input),
@@ -923,9 +1002,7 @@ mod tests {
     fn wrong_committed_state_root_fails_proof_verification() {
         let mut input = non_empty_guest_input();
         input.witness.header.state_root = [0x42; 32];
-        input.public_inputs.new_state_root = input.witness.header.state_root;
-        input.public_inputs.block_hash = hash_header(&input.witness.header);
-        input.public_inputs.witness_root = witness_root(&input.witness);
+        input.public_inputs = public_inputs_from_witness(&input.witness);
 
         assert_eq!(
             verify_state_transition_input(&input),
@@ -950,9 +1027,7 @@ mod tests {
         let (root, state_root_proof) =
             state_root_and_selected_proof(&committed_leaves, &proof_keys);
         input.witness.header.state_root = root;
-        input.public_inputs.new_state_root = root;
-        input.public_inputs.block_hash = hash_header(&input.witness.header);
-        input.public_inputs.witness_root = witness_root(&input.witness);
+        input.public_inputs = public_inputs_from_witness(&input.witness);
         input.state_root_proof = state_root_proof;
 
         assert!(matches!(
