@@ -2,7 +2,7 @@
 tags: [zk, validium, data-availability]
 layer: verification
 status: current
-last_verified: 2026-05-03
+last_verified: 2026-05-05
 ---
 
 # Data Availability
@@ -42,7 +42,10 @@ payload_root = BLAKE3(
   canonical_witness_bytes
 )
 
-provider_refs_hash = BLAKE3("sybil/da/provider-refs/empty/v1")
+provider_refs_hash =
+  BLAKE3("sybil/da/provider-refs/empty/v1") when no refs are present
+  or
+  BLAKE3("sybil/da/provider-refs/v1" || ref_count_le_u64 || len/ref...)
 ```
 
 `canonical_witness_bytes` is the same canonical `BlockWitness` byte string
@@ -57,7 +60,8 @@ root semantics.
 
 ## Provider References
 
-Provider references are intentionally outside the first circuit. A production
+Provider references are private guest input bytes. The proof hashes them into
+`provider_refs_hash`; L1 sees only the final `daCommitment`. A production
 publisher should create a manifest that includes:
 
 - the block height and state root
@@ -67,40 +71,49 @@ publisher should create a manifest that includes:
   namespaces and blob IDs, or archive transaction IDs
 - optional retrieval checksums and compression metadata
 
-Before `provider_refs_hash` becomes non-empty, provider references must have a
-canonical byte encoding and deterministic ordering. That lets the prover bind
-the exact references while keeping L1 storage to one bytes32 field.
+Provider references must have a canonical byte encoding and deterministic
+ordering. That lets the prover bind the exact references while keeping L1
+storage to one bytes32 field.
 
 ## File-Backed Publisher
 
-The host tooling can export the current file-backed DA artifacts from a
-prepared guest input:
+The host tooling can prepare a proof-bound file-backed DA publication directly
+from a proof job:
 
 ```bash
-just prover-publish-da /tmp/sybil-guest-input.msgpack /tmp/sybil-da-witness.bin /tmp/sybil-da-manifest.json
+just prover-prepare-file-da /tmp/job.msgpack /tmp/sybil-guest-input.msgpack /tmp/sybil-da /tmp/sybil-da-manifest.json /tmp/sybil-public-input-hash.hex
 ```
 
-`sybil-prover publish-da` verifies the prepared guest input, writes
-`/tmp/sybil-da-witness.bin` as canonical witness bytes, and writes a JSON
-manifest. The manifest includes:
+`sybil-prover prepare-file-da` validates the proof job, writes a
+`StateTransitionGuestInput`, derives a deterministic payload filename from
+`payload_root`, writes canonical witness bytes under `payload_dir`, and writes
+a JSON manifest. The file provider ref commits to:
+
+- `sybil/da/provider-ref/file/v1`
+- a stable content-addressed `sybil-file://witness/{payload_root}.witness.bin`
+  URI
+- `payload_root`
+- payload byte length
+
+The manifest includes:
 
 - block height, block hash, state root, witness root, payload root, payload
   length, provider refs hash, DA commitment, and public-input hash
-- `provider_refs: []`, because the current proof binds
-  `BLAKE3("sybil/da/provider-refs/empty/v1")`
-- `local_payload_path`, which helps local operators find the file but is
-  explicitly not proof-bound
+- one `provider_refs` entry with `kind: "file"` and
+  `encoding: "sybil-da-file-ref-v1"`
+- `local_payload_path`, which is where this host wrote the file and is not
+  proof-bound
 
-This gives us an auditable local publication artifact now without baking a
-filesystem path or object-store key into the circuit.
+`sybil-prover publish-da` still exists for empty-ref or already-prepared guest
+inputs, but the smoke path uses `prepare-file-da` so OpenVM execution and app
+proofs cover a non-empty provider-reference hash.
 
 ## Availability Model
 
 The first useful deployment target is file-backed publication: persist the
-canonical witness payload and manifest locally or in object storage, then prove
-the block with the matching `da_commitment`. This gives operators and external
-watchers an unambiguous audit handle without forcing an early choice of DA
-network.
+canonical witness payload and manifest locally, then prove the block with the
+matching file provider reference. This gives operators and external watchers
+an unambiguous audit handle without forcing an early choice of DA network.
 
 This is not an escape hatch by itself. If the operator disappears, users need
 access to the latest enough validium state to reconstruct balances, positions,
@@ -115,6 +128,8 @@ and provider-reference set without prescribing who stores or decrypts it.
 The proof verifies:
 
 - the DA commitment matches the private witness bytes
+- the provider-reference bytes hash to the `provider_refs_hash` inside that
+  DA commitment
 - the witness root, state root, events root, deposit root, and block hash are
   all bound into the same public input hash
 - L1 accepted the exact public input hash verified by OpenVM

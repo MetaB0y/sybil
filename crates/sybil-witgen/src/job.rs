@@ -106,6 +106,7 @@ pub fn build_state_transition_guest_input(
     Ok(sybil_zk::StateTransitionGuestInput {
         public_inputs: sybil_zk::public_inputs_from_witness(&job.witness),
         witness: job.witness,
+        da_provider_refs: vec![],
         state_root_proof,
     })
 }

@@ -150,6 +150,7 @@ mod tests {
         StateTransitionGuestInput {
             public_inputs: sybil_zk::public_inputs_from_witness(&witness),
             witness,
+            da_provider_refs: Vec::new(),
             state_root_proof: sybil_zk::QmdbStateRootProof::default(),
         }
     }

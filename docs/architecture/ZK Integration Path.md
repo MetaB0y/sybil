@@ -79,10 +79,10 @@ The first guest boundary is intentionally narrow:
   they alter the verified `next_key` ring.
 - `da_commitment` is a concrete [[Data Availability]] envelope over the
   canonical witness payload, block height, state root, witness root, payload
-  length, and provider-reference hash. The current provider-reference set is
-  empty, so the proof binds the payload before choosing a production DA
-  provider. `SybilSettlement` stores the proven commitment but does not judge
-  provider availability on-chain.
+  length, and provider-reference hash. The smoke path binds a deterministic
+  file provider reference; production DA networks can use the same hash slot
+  once their reference encoding is defined. `SybilSettlement` stores the
+  proven commitment but does not judge provider availability on-chain.
 
 Commands:
 
@@ -101,6 +101,7 @@ just witgen-smoke-job /tmp/sybil-smoke.redb /tmp/job.msgpack
 just witgen-export-latest data/sybil.redb /tmp/job.msgpack
 just prover-inspect /tmp/job.msgpack
 just prover-prepare /tmp/job.msgpack
+just prover-prepare-file-da /tmp/job.msgpack /tmp/sybil-guest-input.msgpack /tmp/sybil-da /tmp/sybil-da-manifest.json /tmp/sybil-public-input-hash.hex
 just prover-publish-da /tmp/sybil-guest-input.msgpack /tmp/sybil-da-witness.bin /tmp/sybil-da-manifest.json
 just openvm-input /tmp/sybil-guest-input.msgpack /tmp/sybil-openvm-input.json
 just openvm-run /tmp/sybil-openvm-input.json

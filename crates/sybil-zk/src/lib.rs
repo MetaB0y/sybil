@@ -19,6 +19,7 @@ pub const WITNESS_ROOT_DOMAIN: &[u8] = b"sybil/witness";
 pub const DA_COMMITMENT_DOMAIN: &[u8] = b"sybil/da-commitment/v1";
 pub const DA_WITNESS_PAYLOAD_DOMAIN: &[u8] = b"sybil/da/witness-payload/v1";
 pub const DA_EMPTY_PROVIDER_REFS_DOMAIN: &[u8] = b"sybil/da/provider-refs/empty/v1";
+pub const DA_PROVIDER_REFS_DOMAIN: &[u8] = b"sybil/da/provider-refs/v1";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DaCommitmentComponents {
@@ -49,6 +50,7 @@ pub struct StateTransitionPublicInputs {
 pub struct StateTransitionGuestInput {
     pub public_inputs: StateTransitionPublicInputs,
     pub witness: BlockWitness,
+    pub da_provider_refs: Vec<Vec<u8>>,
     pub state_root_proof: QmdbStateRootProof,
 }
 
@@ -187,7 +189,11 @@ impl std::error::Error for ZkTransitionError {}
 pub fn verify_state_transition_input(
     input: &StateTransitionGuestInput,
 ) -> Result<[u8; 32], ZkTransitionError> {
-    verify_public_input_binding(&input.public_inputs, &input.witness)?;
+    verify_public_input_binding(
+        &input.public_inputs,
+        &input.witness,
+        &input.da_provider_refs,
+    )?;
     verify_qmdb_state_root(
         &input.public_inputs.new_state_root,
         &input.witness,
@@ -248,23 +254,45 @@ pub fn da_commitment(witness: &BlockWitness) -> [u8; 32] {
     da_commitment_components(witness).da_commitment
 }
 
+pub fn da_commitment_with_provider_refs(
+    witness: &BlockWitness,
+    provider_refs: &[Vec<u8>],
+) -> [u8; 32] {
+    da_commitment_components_with_provider_refs(witness, provider_refs).da_commitment
+}
+
 pub fn da_witness_payload_bytes(witness: &BlockWitness) -> Vec<u8> {
     witness_schema::canonical_witness_bytes(witness)
 }
 
 pub fn da_commitment_components(witness: &BlockWitness) -> DaCommitmentComponents {
+    da_commitment_components_with_provider_refs(witness, &[])
+}
+
+pub fn da_commitment_components_with_provider_refs(
+    witness: &BlockWitness,
+    provider_refs: &[Vec<u8>],
+) -> DaCommitmentComponents {
     let witness_bytes = da_witness_payload_bytes(witness);
-    da_commitment_components_from_payload(witness, &witness_bytes)
+    da_commitment_components_from_payload_and_provider_refs(witness, &witness_bytes, provider_refs)
 }
 
 pub fn da_commitment_components_from_payload(
     witness: &BlockWitness,
     witness_bytes: &[u8],
 ) -> DaCommitmentComponents {
+    da_commitment_components_from_payload_and_provider_refs(witness, witness_bytes, &[])
+}
+
+pub fn da_commitment_components_from_payload_and_provider_refs(
+    witness: &BlockWitness,
+    witness_bytes: &[u8],
+    provider_refs: &[Vec<u8>],
+) -> DaCommitmentComponents {
     let witness_root = witness_root_from_bytes(witness_bytes);
     let payload_root = da_witness_payload_root(witness_bytes);
     let payload_len = witness_bytes.len() as u64;
-    let provider_refs_hash = empty_da_provider_refs_hash();
+    let provider_refs_hash = da_provider_refs_hash(provider_refs);
     let da_commitment = da_commitment_from_parts(
         witness.header.height,
         witness.header.state_root,
@@ -298,6 +326,21 @@ pub fn empty_da_provider_refs_hash() -> [u8; 32] {
     *hasher.finalize().as_bytes()
 }
 
+pub fn da_provider_refs_hash(provider_refs: &[Vec<u8>]) -> [u8; 32] {
+    if provider_refs.is_empty() {
+        return empty_da_provider_refs_hash();
+    }
+
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(DA_PROVIDER_REFS_DOMAIN);
+    hasher.update(&(provider_refs.len() as u64).to_le_bytes());
+    for provider_ref in provider_refs {
+        hasher.update(&(provider_ref.len() as u64).to_le_bytes());
+        hasher.update(provider_ref);
+    }
+    *hasher.finalize().as_bytes()
+}
+
 pub fn da_commitment_from_parts(
     block_height: u64,
     state_root: [u8; 32],
@@ -318,11 +361,18 @@ pub fn da_commitment_from_parts(
 }
 
 pub fn public_inputs_from_witness(witness: &BlockWitness) -> StateTransitionPublicInputs {
+    public_inputs_from_witness_and_provider_refs(witness, &[])
+}
+
+pub fn public_inputs_from_witness_and_provider_refs(
+    witness: &BlockWitness,
+    provider_refs: &[Vec<u8>],
+) -> StateTransitionPublicInputs {
     let (previous_height, previous_state_root) = match &witness.previous_header {
         Some(previous) => (previous.height, previous.state_root),
         None => (0, [0u8; 32]),
     };
-    let components = da_commitment_components(witness);
+    let components = da_commitment_components_with_provider_refs(witness, provider_refs);
 
     StateTransitionPublicInputs {
         previous_height,
@@ -341,6 +391,7 @@ pub fn public_inputs_from_witness(witness: &BlockWitness) -> StateTransitionPubl
 fn verify_public_input_binding(
     inputs: &StateTransitionPublicInputs,
     witness: &BlockWitness,
+    provider_refs: &[Vec<u8>],
 ) -> Result<(), ZkTransitionError> {
     if inputs.new_height != witness.header.height {
         return Err(ZkTransitionError::HeaderHeightMismatch {
@@ -365,7 +416,7 @@ fn verify_public_input_binding(
     if inputs.witness_root != witness_root(witness) {
         return Err(ZkTransitionError::WitnessRootMismatch);
     }
-    let expected_da_commitment = da_commitment(witness);
+    let expected_da_commitment = da_commitment_with_provider_refs(witness, provider_refs);
     if inputs.da_commitment != expected_da_commitment {
         return Err(ZkTransitionError::DaCommitmentMismatch {
             expected: expected_da_commitment,
@@ -561,6 +612,7 @@ mod tests {
         StateTransitionGuestInput {
             public_inputs,
             witness,
+            da_provider_refs: vec![],
             state_root_proof,
         }
     }
@@ -664,6 +716,7 @@ mod tests {
         StateTransitionGuestInput {
             public_inputs,
             witness,
+            da_provider_refs: vec![],
             state_root_proof,
         }
     }
@@ -714,6 +767,7 @@ mod tests {
         StateTransitionGuestInput {
             public_inputs,
             witness,
+            da_provider_refs: vec![],
             state_root_proof,
         }
     }
@@ -920,7 +974,11 @@ mod tests {
     fn da_components_match_public_inputs() {
         let input = empty_guest_input();
         let payload = da_witness_payload_bytes(&input.witness);
-        let components = da_commitment_components_from_payload(&input.witness, &payload);
+        let components = da_commitment_components_from_payload_and_provider_refs(
+            &input.witness,
+            &payload,
+            &input.da_provider_refs,
+        );
 
         assert_eq!(components.block_height, input.public_inputs.new_height);
         assert_eq!(components.state_root, input.public_inputs.new_state_root);
@@ -929,6 +987,37 @@ mod tests {
         assert_eq!(components.payload_root, da_witness_payload_root(&payload));
         assert_eq!(components.provider_refs_hash, empty_da_provider_refs_hash());
         assert_eq!(components.da_commitment, input.public_inputs.da_commitment);
+    }
+
+    #[test]
+    fn provider_refs_are_bound_into_da_commitment() {
+        let mut input = empty_guest_input();
+        input.da_provider_refs = vec![b"file://payload".to_vec()];
+        input.public_inputs =
+            public_inputs_from_witness_and_provider_refs(&input.witness, &input.da_provider_refs);
+
+        assert_ne!(
+            input.public_inputs.da_commitment,
+            da_commitment(&input.witness)
+        );
+        assert_eq!(
+            verify_state_transition_input(&input),
+            Ok(state_transition_public_input_hash(&input.public_inputs))
+        );
+    }
+
+    #[test]
+    fn provider_ref_mutation_is_rejected() {
+        let mut input = empty_guest_input();
+        input.da_provider_refs = vec![b"file://payload-a".to_vec()];
+        input.public_inputs =
+            public_inputs_from_witness_and_provider_refs(&input.witness, &input.da_provider_refs);
+        input.da_provider_refs = vec![b"file://payload-b".to_vec()];
+
+        assert!(matches!(
+            verify_state_transition_input(&input),
+            Err(ZkTransitionError::DaCommitmentMismatch { .. })
+        ));
     }
 
     #[test]

@@ -111,7 +111,7 @@ zk-smoke prove="false":
     job="$workdir/proof-job.msgpack"
     guest_input="$workdir/guest-input.msgpack"
     public_hash="$workdir/public-input-hash.hex"
-    da_payload="$workdir/da-witness.bin"
+    da_payload_dir="$workdir/da"
     da_manifest="$workdir/da-manifest.json"
     openvm_input="$workdir/openvm-input.json"
     app_proof="$workdir/openvm.app.proof"
@@ -120,8 +120,7 @@ zk-smoke prove="false":
     echo "zk_smoke_dir=$workdir"
 
     cargo run -p sybil-witgen-cli -- smoke-job --store "$store" --job "$job"
-    cargo run -p sybil-prover -- prepare --job "$job" --guest-input "$guest_input" --public-input-hash "$public_hash"
-    cargo run -p sybil-prover -- publish-da --guest-input "$guest_input" --payload "$da_payload" --manifest "$da_manifest"
+    cargo run -p sybil-prover -- prepare-file-da --job "$job" --guest-input "$guest_input" --payload-dir "$da_payload_dir" --manifest "$da_manifest" --public-input-hash "$public_hash"
     cargo run --manifest-path zk/openvm-tools/Cargo.toml -- encode-input --guest-input "$guest_input" --openvm-input "$openvm_input"
     CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}" cargo openvm build --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil
     cargo openvm run --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil --input "$openvm_input"
@@ -134,7 +133,7 @@ zk-smoke prove="false":
     fi
 
     echo "public_input_hash=$(cat "$public_hash")"
-    echo "da_payload=$da_payload"
+    echo "da_payload_dir=$da_payload_dir"
     echo "da_manifest=$da_manifest"
     echo "openvm_input=$openvm_input"
     echo "zk_smoke=ok"
@@ -162,6 +161,10 @@ prover-inspect job:
 # Validate a proof job and emit a serialized OpenVM guest input artifact
 prover-prepare job guest_input="/tmp/sybil-guest-input.msgpack" public_input_hash="/tmp/sybil-public-input-hash.hex":
     cargo run -p sybil-prover -- prepare --job {{job}} --guest-input {{guest_input}} --public-input-hash {{public_input_hash}}
+
+# Validate a proof job, bind a deterministic file DA provider ref, and emit all host artifacts
+prover-prepare-file-da job guest_input="/tmp/sybil-guest-input.msgpack" payload_dir="/tmp/sybil-da" manifest="/tmp/sybil-da-manifest.json" public_input_hash="/tmp/sybil-public-input-hash.hex":
+    cargo run -p sybil-prover -- prepare-file-da --job {{job}} --guest-input {{guest_input}} --payload-dir {{payload_dir}} --manifest {{manifest}} --public-input-hash {{public_input_hash}}
 
 # Write the canonical witness payload and provider-neutral DA manifest from prepared guest input
 prover-publish-da guest_input="/tmp/sybil-guest-input.msgpack" payload="/tmp/sybil-da-witness.bin" manifest="/tmp/sybil-da-manifest.json":
