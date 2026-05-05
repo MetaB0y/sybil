@@ -174,6 +174,10 @@ prover-worker-once jobs_dir="/tmp/sybil-prover-jobs" artifacts_dir="/tmp/sybil-p
 prover-worker jobs_dir="/tmp/sybil-prover-jobs" artifacts_dir="/tmp/sybil-prover-artifacts" poll_ms="1000":
     cargo run -p sybil-prover -- worker --jobs-dir {{jobs_dir}} --artifacts-dir {{artifacts_dir}} --poll-ms {{poll_ms}}
 
+# Serve prepared prover artifact status by block height
+prover-serve artifacts_dir="/tmp/sybil-prover-artifacts" bind="127.0.0.1:3002":
+    cargo run -p sybil-prover -- serve --artifacts-dir {{artifacts_dir}} --bind {{bind}}
+
 # Write the canonical witness payload and provider-neutral DA manifest from prepared guest input
 prover-publish-da guest_input="/tmp/sybil-guest-input.msgpack" payload="/tmp/sybil-da-witness.bin" manifest="/tmp/sybil-da-manifest.json":
     cargo run -p sybil-prover -- publish-da --guest-input {{guest_input}} --payload {{payload}} --manifest {{manifest}}

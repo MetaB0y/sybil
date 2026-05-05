@@ -4255,6 +4255,7 @@ dependencies = [
 name = "sybil-prover"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "clap",
  "hex",
  "rmp-serde",
@@ -4265,6 +4266,7 @@ dependencies = [
  "sybil-witgen",
  "sybil-zk",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

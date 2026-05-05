@@ -1,15 +1,24 @@
 use std::fs::File;
 use std::io::{BufReader, Write as _};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use axum::{
+    extract::{Path as AxumPath, State as AxumState},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::get,
+    Json, Router,
+};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest as _, Keccak256};
 use sybil_witgen::{
     build_state_transition_guest_input, StateTransitionProofJob, StateTransitionProofJobId,
 };
+use tokio::net::TcpListener;
 
 const SUBMIT_STATE_ROOT_SIGNATURE: &str =
     "submitStateRoot((uint64,uint64,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,uint64),bytes)";
@@ -40,6 +49,8 @@ enum Command {
     PublishDa(PublishDaArgs),
     /// Run a local filesystem prover worker over exported proof jobs.
     Worker(WorkerArgs),
+    /// Serve prepared prover artifacts over a small read API.
+    Serve(ServeArgs),
     /// Encode a state-root submission for SybilSettlement.
     SubmitStateRoot(SubmitStateRootArgs),
 }
@@ -113,6 +124,16 @@ struct WorkerArgs {
     /// Optional cap on jobs processed per scan.
     #[arg(long)]
     max_jobs: Option<usize>,
+}
+
+#[derive(Args)]
+struct ServeArgs {
+    /// Directory containing per-block prover artifacts written by `worker`.
+    #[arg(long)]
+    artifacts_dir: PathBuf,
+    /// Socket address for the proof-status API.
+    #[arg(long, default_value = "127.0.0.1:3002")]
+    bind: String,
 }
 
 #[derive(Args)]
@@ -213,6 +234,12 @@ enum ProverCliError {
         #[source]
         source: serde_json::Error,
     },
+    #[error("read JSON artifact from {path}: {source}")]
+    DecodeJson {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
     #[error("decode hex field {field}: {source}")]
     DecodeHex {
         field: &'static str,
@@ -230,6 +257,17 @@ enum ProverCliError {
         path: PathBuf,
         #[source]
         source: serde_json::Error,
+    },
+    #[error("bind proof API listener at {addr}: {source}")]
+    Bind {
+        addr: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("serve proof API: {source}")]
+    Serve {
+        #[source]
+        source: std::io::Error,
     },
     #[error(transparent)]
     ProofJob(#[from] sybil_witgen::ProofJobError),
@@ -302,10 +340,10 @@ struct PreparedFileDaArtifacts {
     public_input_hash_path: Option<PathBuf>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 struct WorkerStatusJson {
     version: u8,
-    status: &'static str,
+    status: String,
     job_path: String,
     artifact_dir: String,
     block_height: u64,
@@ -318,24 +356,36 @@ struct WorkerStatusJson {
     guest_input: String,
     da_manifest: String,
     public_input_hash_path: Option<String>,
-    proof_status: &'static str,
+    proof_status: String,
     updated_at_ms: u128,
 }
 
-fn main() {
-    if let Err(error) = run(Cli::parse()) {
+#[derive(Clone)]
+struct ProverApiState {
+    artifacts_dir: Arc<PathBuf>,
+}
+
+#[derive(Serialize)]
+struct ApiErrorJson {
+    error: String,
+}
+
+#[tokio::main]
+async fn main() {
+    if let Err(error) = run(Cli::parse()).await {
         eprintln!("error: {error}");
         std::process::exit(1);
     }
 }
 
-fn run(cli: Cli) -> Result<(), ProverCliError> {
+async fn run(cli: Cli) -> Result<(), ProverCliError> {
     match cli.command {
         Command::Inspect(args) => inspect(args),
         Command::Prepare(args) => prepare(args),
         Command::PrepareFileDa(args) => prepare_file_da(args),
         Command::PublishDa(args) => publish_da(args),
         Command::Worker(args) => run_worker(args),
+        Command::Serve(args) => serve(args).await,
         Command::SubmitStateRoot(args) => submit_state_root(args),
     }
 }
@@ -572,7 +622,7 @@ fn worker_status_json(
 ) -> WorkerStatusJson {
     WorkerStatusJson {
         version: 1,
-        status: "prepared",
+        status: "prepared".to_string(),
         job_path: job_path.display().to_string(),
         artifact_dir: artifact_dir.display().to_string(),
         block_height: artifacts.job_id.block_height,
@@ -588,8 +638,140 @@ fn worker_status_json(
             .public_input_hash_path
             .as_ref()
             .map(|path| path.display().to_string()),
-        proof_status: "not_started",
+        proof_status: "not_started".to_string(),
         updated_at_ms: unix_time_ms(),
+    }
+}
+
+async fn serve(args: ServeArgs) -> Result<(), ProverCliError> {
+    std::fs::create_dir_all(&args.artifacts_dir).map_err(|source| ProverCliError::CreateDir {
+        path: args.artifacts_dir.clone(),
+        source,
+    })?;
+
+    let listener = TcpListener::bind(&args.bind)
+        .await
+        .map_err(|source| ProverCliError::Bind {
+            addr: args.bind.clone(),
+            source,
+        })?;
+    let app = prover_router(args.artifacts_dir);
+    println!("proof_api={}", args.bind);
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .map_err(|source| ProverCliError::Serve { source })
+}
+
+fn prover_router(artifacts_dir: PathBuf) -> Router {
+    let state = ProverApiState {
+        artifacts_dir: Arc::new(artifacts_dir),
+    };
+    Router::new()
+        .route("/healthz", get(prover_healthz))
+        .route("/proofs/{height}", get(get_proof_status))
+        .with_state(state)
+}
+
+async fn prover_healthz() -> impl IntoResponse {
+    Json(serde_json::json!({ "status": "ok" }))
+}
+
+async fn get_proof_status(
+    AxumState(state): AxumState<ProverApiState>,
+    AxumPath(height): AxumPath<u64>,
+) -> impl IntoResponse {
+    match read_worker_status_by_height(&state.artifacts_dir, height) {
+        Ok(Some(status)) => (StatusCode::OK, Json(status)).into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(ApiErrorJson {
+                error: format!("proof status not found for height {height}"),
+            }),
+        )
+            .into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiErrorJson {
+                error: error.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+fn read_worker_status_by_height(
+    artifacts_dir: &Path,
+    height: u64,
+) -> Result<Option<WorkerStatusJson>, ProverCliError> {
+    let prefix = format!("block-{height:020}-");
+    let entries = std::fs::read_dir(artifacts_dir).map_err(|source| ProverCliError::ListDir {
+        path: artifacts_dir.to_path_buf(),
+        source,
+    })?;
+    let mut candidates = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|source| ProverCliError::ListDir {
+            path: artifacts_dir.to_path_buf(),
+            source,
+        })?;
+        let path = entry.path();
+        if path.is_dir()
+            && path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(&prefix))
+        {
+            candidates.push(path.join("status.json"));
+        }
+    }
+    candidates.sort();
+
+    for status_path in candidates {
+        if !status_path.exists() {
+            continue;
+        }
+        let file = File::open(&status_path).map_err(|source| ProverCliError::Open {
+            path: status_path.clone(),
+            source,
+        })?;
+        let reader = BufReader::new(file);
+        let status =
+            serde_json::from_reader(reader).map_err(|source| ProverCliError::DecodeJson {
+                path: status_path,
+                source,
+            })?;
+        return Ok(Some(status));
+    }
+    Ok(None)
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(error) = tokio::signal::ctrl_c().await {
+            eprintln!("failed to install Ctrl-C handler: {error}");
+        }
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(error) => {
+                eprintln!("failed to install SIGTERM handler: {error}");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
     }
 }
 
@@ -1523,6 +1705,61 @@ mod tests {
             worker_artifact_dir(artifacts_dir, &job_id),
             artifacts_dir.join(format!("block-{:020}-{}", 42, "ab".repeat(32)))
         );
+    }
+
+    #[test]
+    fn reads_worker_status_by_height_from_artifact_store() {
+        let artifacts_dir = temp_path("proof-api-artifacts");
+        let job_id = StateTransitionProofJobId {
+            block_height: 7,
+            block_hash: [0x11; 32],
+            state_root: [0x22; 32],
+        };
+        let artifact_dir = worker_artifact_dir(&artifacts_dir, &job_id);
+        std::fs::create_dir_all(&artifact_dir).unwrap();
+        let status_path = artifact_dir.join("status.json");
+        let status = WorkerStatusJson {
+            version: 1,
+            status: "prepared".to_string(),
+            job_path: "/tmp/job.msgpack".to_string(),
+            artifact_dir: artifact_dir.display().to_string(),
+            block_height: 7,
+            block_hash: hex32([0x11; 32]),
+            state_root: hex32([0x22; 32]),
+            public_input_hash: hex32([0x33; 32]),
+            da_commitment: hex32([0x44; 32]),
+            da_provider_ref: "sybil-file://witness/example.witness.bin".to_string(),
+            da_payload: artifact_dir
+                .join("da/example.witness.bin")
+                .display()
+                .to_string(),
+            guest_input: artifact_dir
+                .join("guest-input.msgpack")
+                .display()
+                .to_string(),
+            da_manifest: artifact_dir.join("da-manifest.json").display().to_string(),
+            public_input_hash_path: Some(
+                artifact_dir
+                    .join("public-input-hash.hex")
+                    .display()
+                    .to_string(),
+            ),
+            proof_status: "not_started".to_string(),
+            updated_at_ms: 123,
+        };
+        write_json_pretty(&status_path, &status).unwrap();
+
+        let loaded = read_worker_status_by_height(&artifacts_dir, 7)
+            .unwrap()
+            .unwrap();
+        let missing = read_worker_status_by_height(&artifacts_dir, 8).unwrap();
+        let _ = std::fs::remove_file(&status_path);
+        let _ = std::fs::remove_dir(&artifact_dir);
+        let _ = std::fs::remove_dir(&artifacts_dir);
+
+        assert_eq!(loaded.block_height, 7);
+        assert_eq!(loaded.public_input_hash, hex32([0x33; 32]));
+        assert!(missing.is_none());
     }
 
     #[test]

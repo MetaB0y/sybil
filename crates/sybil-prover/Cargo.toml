@@ -9,6 +9,7 @@ name = "sybil-prover"
 path = "src/main.rs"
 
 [dependencies]
+axum = { version = "0.8", features = ["json"] }
 clap = { version = "4.5", features = ["derive"] }
 hex = "0.4"
 rmp-serde = "1"
@@ -18,6 +19,7 @@ sha3 = "0.10"
 sybil-witgen = { path = "../sybil-witgen", default-features = false }
 sybil-zk = { path = "../sybil-zk" }
 thiserror = { workspace = true }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
 
 [dev-dependencies]
 sybil-verifier = { path = "../sybil-verifier" }

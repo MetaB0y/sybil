@@ -45,8 +45,9 @@ The first guest boundary is intentionally narrow:
   converts OpenVM's proof fields into the ABI payload expected by
   `OpenVmVerifierAdapter`. Its local worker mode scans a proof-job directory,
   writes per-block guest input, DA manifest/payload, public-input hash, and
-  `status.json` artifacts. Real OpenVM proof orchestration is still follow-up
-  service work.
+  `status.json` artifacts. Its local API mode serves those durable artifacts
+  through `GET /proofs/{height}`. Real OpenVM proof orchestration is still
+  follow-up service work.
 - `zk/openvm-guest/` is a standalone OpenVM package pinned to
   `v2.0.0-beta.2`. It is outside the root Cargo workspace so normal Rust
   checks do not require the OpenVM prerelease CLI or generated artifacts.
@@ -109,6 +110,7 @@ just prover-prepare-file-da /tmp/job.msgpack /tmp/sybil-guest-input.msgpack /tmp
 just prover-publish-da /tmp/sybil-guest-input.msgpack /tmp/sybil-da-witness.bin /tmp/sybil-da-manifest.json
 just prover-worker-once /tmp/sybil-prover-jobs /tmp/sybil-prover-artifacts
 just prover-worker /tmp/sybil-prover-jobs /tmp/sybil-prover-artifacts
+just prover-serve /tmp/sybil-prover-artifacts 127.0.0.1:3002
 just openvm-input /tmp/sybil-guest-input.msgpack /tmp/sybil-openvm-input.json
 just openvm-run /tmp/sybil-openvm-input.json
 just openvm-prove-app /tmp/sybil-openvm-input.json /tmp/sybil-openvm.app.proof
@@ -134,7 +136,9 @@ directories under `artifacts_dir`. Each directory contains prepared guest
 input, proof-bound file-DA artifacts, public-input hash, and `status.json`
 with `proof_status: "not_started"`. The worker is intentionally file-based so
 sequencer export, prover preparation, DA publication, and future proof
-generation can evolve independently.
+generation can evolve independently. `just prover-serve` exposes the current
+artifact store over HTTP; `GET /proofs/{height}` returns the corresponding
+`status.json` once the worker has prepared that height.
 
 ## Key Properties
 - Validium: off-chain data, on-chain proofs
@@ -150,7 +154,7 @@ generation can evolve independently.
 > `crates/sybil-verifier/` — verification logic that will become the ZK circuit
 > `crates/sybil-witgen/` — portable proof job type and OpenVM guest input construction
 > `crates/sybil-witgen-cli/` — sequencer-store proof-job export CLI
-> `crates/sybil-prover/` — proof-job CLI, local worker, settlement calldata encoder, and future proof orchestrator
+> `crates/sybil-prover/` — proof-job CLI, local worker/API, settlement calldata encoder, and future proof orchestrator
 > `crates/sybil-zk/` — public input hash and guest-safe transition verifier
 > `zk/openvm-guest/` — OpenVM 2.0 beta guest entrypoint
 > `zk/openvm-tools/` — OpenVM CLI input encoder for prepared guest inputs
