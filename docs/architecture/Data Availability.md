@@ -13,9 +13,11 @@ state-transition proof says the new root follows from the private witness; the
 DA commitment says which block payload the operator claims was made available.
 
 The current implementation binds a concrete DA envelope into the OpenVM public
-input hash. It does not yet publish to Celestia, EigenDA, Arweave, blobs, or a
-committee. Provider publication is a follow-up layer over the commitment
-defined here.
+input hash for proof-pipeline testing. Its file-backed witness payload is
+local scaffolding, not the final privacy-preserving validium recovery design.
+Production recovery DA is expected to use encrypted snapshots or encrypted
+deltas with an emergency disclosure protocol; that design is tracked in
+SYB-120.
 
 ## Commitment
 
@@ -33,7 +35,7 @@ BLAKE3(
 )
 ```
 
-For the current witness payload:
+For the current local proof-pipeline witness payload:
 
 ```text
 payload_root = BLAKE3(
@@ -49,10 +51,13 @@ provider_refs_hash =
 ```
 
 `canonical_witness_bytes` is the same canonical `BlockWitness` byte string
-used by `witness_root`. The OpenVM guest recomputes the DA commitment from the
-private witness and rejects any public input that does not match. The L1
-settlement contract stores the proven value in `RootRecord.daCommitment`; it
-does not attempt to judge whether the referenced data is actually available.
+used by `witness_root`. This plaintext witness payload is acceptable for local
+smoke tests and prover orchestration, but should not be treated as production
+public DA for a private validium. The OpenVM guest recomputes the DA
+commitment from the private witness and rejects any public input that does not
+match. The L1 settlement contract stores the proven value in
+`RootRecord.daCommitment`; it does not attempt to judge whether the referenced
+data is actually available.
 
 This makes the public root record provider-neutral. A future publisher can add
 provider references without changing the state root, witness root, or payload
@@ -75,7 +80,7 @@ Provider references must have a canonical byte encoding and deterministic
 ordering. That lets the prover bind the exact references while keeping L1
 storage to one bytes32 field.
 
-## File-Backed Publisher
+## File-Backed Scaffold
 
 The host tooling can prepare a proof-bound file-backed DA publication directly
 from a proof job:
@@ -106,22 +111,25 @@ The manifest includes:
 
 `sybil-prover publish-da` still exists for empty-ref or already-prepared guest
 inputs, but the smoke path uses `prepare-file-da` so OpenVM execution and app
-proofs cover a non-empty provider-reference hash.
+proofs cover a non-empty provider-reference hash. This is deliberately a
+scaffold: it proves the commitment/provider-ref plumbing works without
+deciding that plaintext witness publication is acceptable production DA.
 
 ## Availability Model
 
-The first useful deployment target is file-backed publication: persist the
+The first useful engineering target is file-backed publication: persist the
 canonical witness payload and manifest locally, then prove the block with the
-matching file provider reference. This gives operators and external watchers
-an unambiguous audit handle without forcing an early choice of DA network.
+matching file provider reference. This gives prover workers an unambiguous
+artifact handle without forcing an early choice of DA network.
 
 This is not an escape hatch by itself. If the operator disappears, users need
 access to the latest enough validium state to reconstruct balances, positions,
 open orders, unresolved markets, withdrawal leaves, and market metadata.
 Encrypted snapshots, committee custody, MPC decryption, blobs, or a dedicated
 DA layer may be needed for that future operator-replacement path. The envelope
-above does not conflict with those designs because it commits to the payload
-and provider-reference set without prescribing who stores or decrypts it.
+above is intended not to conflict with those designs because it commits to the
+payload and provider-reference set without prescribing whether the payload is
+plaintext, encrypted, local, or externally posted.
 
 ## Verification Boundary
 
@@ -137,6 +145,7 @@ The proof verifies:
 The proof does not verify:
 
 - that a DA provider retained the payload
+- that plaintext witness publication is the production recovery model
 - that a future operator can decrypt emergency snapshots
 - that unresolved positions can be safely exited without normal market
   resolution

@@ -166,6 +166,14 @@ prover-prepare job guest_input="/tmp/sybil-guest-input.msgpack" public_input_has
 prover-prepare-file-da job guest_input="/tmp/sybil-guest-input.msgpack" payload_dir="/tmp/sybil-da" manifest="/tmp/sybil-da-manifest.json" public_input_hash="/tmp/sybil-public-input-hash.hex":
     cargo run -p sybil-prover -- prepare-file-da --job {{job}} --guest-input {{guest_input}} --payload-dir {{payload_dir}} --manifest {{manifest}} --public-input-hash {{public_input_hash}}
 
+# Run one local prover-worker scan over exported proof jobs
+prover-worker-once jobs_dir="/tmp/sybil-prover-jobs" artifacts_dir="/tmp/sybil-prover-artifacts":
+    cargo run -p sybil-prover -- worker --jobs-dir {{jobs_dir}} --artifacts-dir {{artifacts_dir}} --once
+
+# Run the local prover worker continuously
+prover-worker jobs_dir="/tmp/sybil-prover-jobs" artifacts_dir="/tmp/sybil-prover-artifacts" poll_ms="1000":
+    cargo run -p sybil-prover -- worker --jobs-dir {{jobs_dir}} --artifacts-dir {{artifacts_dir}} --poll-ms {{poll_ms}}
+
 # Write the canonical witness payload and provider-neutral DA manifest from prepared guest input
 prover-publish-da guest_input="/tmp/sybil-guest-input.msgpack" payload="/tmp/sybil-da-witness.bin" manifest="/tmp/sybil-da-manifest.json":
     cargo run -p sybil-prover -- publish-da --guest-input {{guest_input}} --payload {{payload}} --manifest {{manifest}}

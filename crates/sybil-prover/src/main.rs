@@ -1,6 +1,8 @@
 use std::fs::File;
 use std::io::{BufReader, Write as _};
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
@@ -36,6 +38,8 @@ enum Command {
     PrepareFileDa(PrepareFileDaArgs),
     /// Write the file-backed DA payload and manifest for a prepared guest input.
     PublishDa(PublishDaArgs),
+    /// Run a local filesystem prover worker over exported proof jobs.
+    Worker(WorkerArgs),
     /// Encode a state-root submission for SybilSettlement.
     SubmitStateRoot(SubmitStateRootArgs),
 }
@@ -90,6 +94,25 @@ struct PublishDaArgs {
     /// Output path for the JSON DA manifest.
     #[arg(long)]
     manifest: PathBuf,
+}
+
+#[derive(Args)]
+struct WorkerArgs {
+    /// Directory containing MessagePack-encoded StateTransitionProofJob files.
+    #[arg(long)]
+    jobs_dir: PathBuf,
+    /// Directory where per-block prover artifacts and status JSON are written.
+    #[arg(long)]
+    artifacts_dir: PathBuf,
+    /// Poll interval for service mode.
+    #[arg(long, default_value_t = 1_000)]
+    poll_ms: u64,
+    /// Run one scan and exit.
+    #[arg(long, default_value_t = false)]
+    once: bool,
+    /// Optional cap on jobs processed per scan.
+    #[arg(long)]
+    max_jobs: Option<usize>,
 }
 
 #[derive(Args)]
@@ -168,6 +191,12 @@ enum ProverCliError {
     },
     #[error("create directory {path}: {source}")]
     CreateDir {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("list directory {path}: {source}")]
+    ListDir {
         path: PathBuf,
         #[source]
         source: std::io::Error,
@@ -262,6 +291,37 @@ struct FileDaProviderRef {
     manifest_ref: DaProviderRefJson,
 }
 
+struct PreparedFileDaArtifacts {
+    job_id: StateTransitionProofJobId,
+    public_input_hash: [u8; 32],
+    da_commitment: [u8; 32],
+    provider_ref_uri: String,
+    payload_path: PathBuf,
+    guest_input_path: PathBuf,
+    manifest_path: PathBuf,
+    public_input_hash_path: Option<PathBuf>,
+}
+
+#[derive(Serialize)]
+struct WorkerStatusJson {
+    version: u8,
+    status: &'static str,
+    job_path: String,
+    artifact_dir: String,
+    block_height: u64,
+    block_hash: String,
+    state_root: String,
+    public_input_hash: String,
+    da_commitment: String,
+    da_provider_ref: String,
+    da_payload: String,
+    guest_input: String,
+    da_manifest: String,
+    public_input_hash_path: Option<String>,
+    proof_status: &'static str,
+    updated_at_ms: u128,
+}
+
 fn main() {
     if let Err(error) = run(Cli::parse()) {
         eprintln!("error: {error}");
@@ -275,6 +335,7 @@ fn run(cli: Cli) -> Result<(), ProverCliError> {
         Command::Prepare(args) => prepare(args),
         Command::PrepareFileDa(args) => prepare_file_da(args),
         Command::PublishDa(args) => publish_da(args),
+        Command::Worker(args) => run_worker(args),
         Command::SubmitStateRoot(args) => submit_state_root(args),
     }
 }
@@ -304,11 +365,39 @@ fn prepare(args: PrepareArgs) -> Result<(), ProverCliError> {
 
 fn prepare_file_da(args: PrepareFileDaArgs) -> Result<(), ProverCliError> {
     let job = read_job(&args.job)?;
+    let artifacts = prepare_file_da_job(
+        job,
+        &args.guest_input,
+        &args.payload_dir,
+        &args.manifest,
+        args.public_input_hash.as_deref(),
+    )?;
+
+    print_job_id(&artifacts.job_id);
+    println!(
+        "public_input_hash=0x{}",
+        hex::encode(artifacts.public_input_hash)
+    );
+    println!("da_commitment=0x{}", hex::encode(artifacts.da_commitment));
+    println!("da_provider_ref={}", artifacts.provider_ref_uri);
+    println!("da_payload={}", artifacts.payload_path.display());
+    println!("da_manifest={}", args.manifest.display());
+    println!("guest_input={}", args.guest_input.display());
+    Ok(())
+}
+
+fn prepare_file_da_job(
+    job: StateTransitionProofJob,
+    guest_input_path: &Path,
+    payload_dir: &Path,
+    manifest_path: &Path,
+    public_input_hash_path: Option<&Path>,
+) -> Result<PreparedFileDaArtifacts, ProverCliError> {
     let job_id = job.id();
     let mut guest_input = build_state_transition_guest_input(job)?;
     let payload = sybil_zk::da_witness_payload_bytes(&guest_input.witness);
     let payload_root = sybil_zk::da_witness_payload_root(&payload);
-    let provider_ref = file_da_provider_ref(&args.payload_dir, payload_root, payload.len() as u64)?;
+    let provider_ref = file_da_provider_ref(payload_dir, payload_root, payload.len() as u64)?;
 
     guest_input.da_provider_refs = vec![provider_ref.canonical_bytes.clone()];
     guest_input.public_inputs = sybil_zk::public_inputs_from_witness_and_provider_refs(
@@ -316,32 +405,32 @@ fn prepare_file_da(args: PrepareFileDaArgs) -> Result<(), ProverCliError> {
         &guest_input.da_provider_refs,
     );
     let public_input_hash = sybil_zk::verify_state_transition_input(&guest_input)?;
+    let da_commitment = guest_input.public_inputs.da_commitment;
 
-    write_msgpack_named(&args.guest_input, &guest_input)?;
+    write_msgpack_named(guest_input_path, &guest_input)?;
     write_da_artifacts_with_payload(
         &guest_input,
         public_input_hash,
         &payload,
         &provider_ref.payload_path,
-        &args.manifest,
+        manifest_path,
         vec![provider_ref.manifest_ref.clone()],
         false,
     )?;
-    if let Some(path) = args.public_input_hash {
-        write_hex_hash(&path, public_input_hash)?;
+    if let Some(path) = public_input_hash_path {
+        write_hex_hash(path, public_input_hash)?;
     }
 
-    print_job_id(&job_id);
-    println!("public_input_hash=0x{}", hex::encode(public_input_hash));
-    println!(
-        "da_commitment=0x{}",
-        hex::encode(guest_input.public_inputs.da_commitment)
-    );
-    println!("da_provider_ref={}", provider_ref.uri);
-    println!("da_payload={}", provider_ref.payload_path.display());
-    println!("da_manifest={}", args.manifest.display());
-    println!("guest_input={}", args.guest_input.display());
-    Ok(())
+    Ok(PreparedFileDaArtifacts {
+        job_id,
+        public_input_hash,
+        da_commitment,
+        provider_ref_uri: provider_ref.uri,
+        payload_path: provider_ref.payload_path,
+        guest_input_path: guest_input_path.to_path_buf(),
+        manifest_path: manifest_path.to_path_buf(),
+        public_input_hash_path: public_input_hash_path.map(Path::to_path_buf),
+    })
 }
 
 fn publish_da(args: PublishDaArgs) -> Result<(), ProverCliError> {
@@ -371,6 +460,137 @@ fn publish_da(args: PublishDaArgs) -> Result<(), ProverCliError> {
     println!("da_payload={}", args.payload.display());
     println!("da_manifest={}", args.manifest.display());
     Ok(())
+}
+
+fn run_worker(args: WorkerArgs) -> Result<(), ProverCliError> {
+    std::fs::create_dir_all(&args.jobs_dir).map_err(|source| ProverCliError::CreateDir {
+        path: args.jobs_dir.clone(),
+        source,
+    })?;
+    std::fs::create_dir_all(&args.artifacts_dir).map_err(|source| ProverCliError::CreateDir {
+        path: args.artifacts_dir.clone(),
+        source,
+    })?;
+
+    loop {
+        let processed = process_worker_scan(&args)?;
+        println!("worker_processed={processed}");
+        if args.once {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(args.poll_ms));
+    }
+}
+
+fn process_worker_scan(args: &WorkerArgs) -> Result<usize, ProverCliError> {
+    let jobs = discover_proof_jobs(&args.jobs_dir)?;
+    let mut processed = 0usize;
+    for job_path in jobs {
+        if args.max_jobs.is_some_and(|max_jobs| processed >= max_jobs) {
+            break;
+        }
+        if process_worker_job(&job_path, &args.artifacts_dir)? {
+            processed += 1;
+        }
+    }
+    Ok(processed)
+}
+
+fn discover_proof_jobs(jobs_dir: &Path) -> Result<Vec<PathBuf>, ProverCliError> {
+    let entries = std::fs::read_dir(jobs_dir).map_err(|source| ProverCliError::ListDir {
+        path: jobs_dir.to_path_buf(),
+        source,
+    })?;
+    let mut jobs = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|source| ProverCliError::ListDir {
+            path: jobs_dir.to_path_buf(),
+            source,
+        })?;
+        let path = entry.path();
+        if path.is_file()
+            && path
+                .extension()
+                .is_some_and(|extension| extension == "msgpack")
+        {
+            jobs.push(path);
+        }
+    }
+    jobs.sort();
+    Ok(jobs)
+}
+
+fn process_worker_job(job_path: &Path, artifacts_dir: &Path) -> Result<bool, ProverCliError> {
+    let job = read_job(job_path)?;
+    let job_id = job.id();
+    let artifact_dir = worker_artifact_dir(artifacts_dir, &job_id);
+    let status_path = artifact_dir.join("status.json");
+    if status_path.exists() {
+        return Ok(false);
+    }
+
+    std::fs::create_dir_all(&artifact_dir).map_err(|source| ProverCliError::CreateDir {
+        path: artifact_dir.clone(),
+        source,
+    })?;
+    let guest_input = artifact_dir.join("guest-input.msgpack");
+    let payload_dir = artifact_dir.join("da");
+    let manifest = artifact_dir.join("da-manifest.json");
+    let public_input_hash = artifact_dir.join("public-input-hash.hex");
+    let artifacts = prepare_file_da_job(
+        job,
+        &guest_input,
+        &payload_dir,
+        &manifest,
+        Some(&public_input_hash),
+    )?;
+    let status = worker_status_json(job_path, &artifact_dir, &artifacts);
+    write_json_pretty(&status_path, &status)?;
+
+    println!("worker_job={}", job_path.display());
+    println!("worker_status=prepared");
+    println!("artifact_dir={}", artifact_dir.display());
+    println!(
+        "public_input_hash=0x{}",
+        hex::encode(artifacts.public_input_hash)
+    );
+    Ok(true)
+}
+
+fn worker_artifact_dir(artifacts_dir: &Path, job_id: &StateTransitionProofJobId) -> PathBuf {
+    artifacts_dir.join(format!(
+        "block-{:020}-{}",
+        job_id.block_height,
+        hex::encode(job_id.block_hash)
+    ))
+}
+
+fn worker_status_json(
+    job_path: &Path,
+    artifact_dir: &Path,
+    artifacts: &PreparedFileDaArtifacts,
+) -> WorkerStatusJson {
+    WorkerStatusJson {
+        version: 1,
+        status: "prepared",
+        job_path: job_path.display().to_string(),
+        artifact_dir: artifact_dir.display().to_string(),
+        block_height: artifacts.job_id.block_height,
+        block_hash: hex32(artifacts.job_id.block_hash),
+        state_root: hex32(artifacts.job_id.state_root),
+        public_input_hash: hex32(artifacts.public_input_hash),
+        da_commitment: hex32(artifacts.da_commitment),
+        da_provider_ref: artifacts.provider_ref_uri.clone(),
+        da_payload: artifacts.payload_path.display().to_string(),
+        guest_input: artifacts.guest_input_path.display().to_string(),
+        da_manifest: artifacts.manifest_path.display().to_string(),
+        public_input_hash_path: artifacts
+            .public_input_hash_path
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        proof_status: "not_started",
+        updated_at_ms: unix_time_ms(),
+    }
 }
 
 fn submit_state_root(args: SubmitStateRootArgs) -> Result<(), ProverCliError> {
@@ -685,6 +905,13 @@ fn write_json_pretty<T: Serialize>(path: &Path, value: &T) -> Result<(), ProverC
 
 fn hex32(bytes: [u8; 32]) -> String {
     format!("0x{}", hex::encode(bytes))
+}
+
+fn unix_time_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
 }
 
 fn openvm_evm_adapter_proof(
@@ -1261,6 +1488,41 @@ mod tests {
             FILE_DA_PROVIDER_REF_ENCODING
         );
         assert_eq!(manifest["local_payload_path_proof_bound"], false);
+    }
+
+    #[test]
+    fn discovers_msgpack_jobs_in_stable_order() {
+        let jobs_dir = temp_path("worker-jobs");
+        std::fs::create_dir_all(&jobs_dir).unwrap();
+        let second = jobs_dir.join("b.msgpack");
+        let first = jobs_dir.join("a.msgpack");
+        let ignored = jobs_dir.join("note.txt");
+        std::fs::write(&second, b"second").unwrap();
+        std::fs::write(&first, b"first").unwrap();
+        std::fs::write(&ignored, b"ignored").unwrap();
+
+        let jobs = discover_proof_jobs(&jobs_dir).unwrap();
+        let _ = std::fs::remove_file(&first);
+        let _ = std::fs::remove_file(&second);
+        let _ = std::fs::remove_file(&ignored);
+        let _ = std::fs::remove_dir(&jobs_dir);
+
+        assert_eq!(jobs, vec![first, second]);
+    }
+
+    #[test]
+    fn worker_artifact_dir_is_height_and_block_hash_stable() {
+        let artifacts_dir = Path::new("/tmp/prover-artifacts");
+        let job_id = StateTransitionProofJobId {
+            block_height: 42,
+            block_hash: [0xab; 32],
+            state_root: [0xcd; 32],
+        };
+
+        assert_eq!(
+            worker_artifact_dir(artifacts_dir, &job_id),
+            artifacts_dir.join(format!("block-{:020}-{}", 42, "ab".repeat(32)))
+        );
     }
 
     #[test]
