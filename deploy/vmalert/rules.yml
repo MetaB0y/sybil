@@ -95,13 +95,13 @@ groups:
 
       - alert: SequencerDown
         expr: up{job="sybil-api"} == 0
-        for: 1m
+        for: 3m
         labels:
           severity: critical
           component: sequencer
         annotations:
           summary: "sybil-api scrape target is down"
-          description: "VictoriaMetrics has not been able to scrape sybil-api for 1m."
+          description: "VictoriaMetrics has not been able to scrape sybil-api for 3m. Check the API container and host pressure before redeploying."
 
       - alert: BlockProductionStalled
         expr: rate(sybil_blocks_produced[2m]) == 0 and up{job="sybil-api"} == 1

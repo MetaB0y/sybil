@@ -12,7 +12,6 @@ Production demo host:
 - Grafana direct: `http://172.104.31.54:3001`
 - VictoriaMetrics direct: `http://172.104.31.54:8428`
 - vmalert direct: `http://172.104.31.54:8880`
-- Tempo direct, when running: `http://172.104.31.54:3200`
 
 Grafana is not currently routed through Caddy. It is exposed directly on port
 `3001`; anonymous Viewer access is enabled and the provisioned admin password
@@ -41,7 +40,7 @@ Main services:
 - `sybil-arena` - live Python LLM/noise traders
 - `sybil-arena-dashboard` - Streamlit dashboard on port `8501`
 - `caddy` - HTTPS for app and arena dashboard
-- `victoriametrics`, `vmalert`, `grafana`, `tempo` - observability stack
+- `victoriametrics`, `vmalert`, `grafana` - observability stack
 
 ## Read-Only Checks
 
@@ -93,7 +92,7 @@ Grafana dashboard:
 vmalert evaluates rules from `deploy/vmalert/rules.yml` every 30 seconds. The
 current rule set covers:
 
-- API scrape target down
+- API scrape target down for 3m
 - block production stalled
 - solver latency high
 - actor mailbox backlog
@@ -216,12 +215,18 @@ version, a restart clears the current in-memory book and prevents recurrence.
 
 ## Known Observability Caveat
 
-Tempo can be killed by OOM on the 2 GB Linode. When `tempo` is exited, Grafana
-metrics still work through VictoriaMetrics, but traces do not. Confirm with:
+The 2 GB Linode does not run Tempo by default. Metrics and alerts are the
+operational source of truth; tracing can be enabled later by running an OTLP
+collector/Tempo and setting `OTEL_EXPORTER_OTLP_ENDPOINT` for `sybil-api`.
+
+Host pressure can still cause brief scrape misses. Confirm the current state
+with:
 
 ```bash
-ssh root@172.104.31.54 'cd /opt/sybil && docker compose -f docker-compose.yml -f docker-compose.prod.yml ps tempo grafana victoriametrics'
+ssh root@172.104.31.54 'free -h; uptime'
+ssh root@172.104.31.54 'curl -sS http://localhost:8428/api/v1/query?query=up%7Bjob%3D%22sybil-api%22%7D'
 ```
 
-Do not treat a missing Tempo datasource as evidence that block production or
-trading is down.
+Do not treat a brief `SequencerDown` firing/resolved pair as evidence that
+block production or trading is down unless the API health, block-production,
+or no-fill alerts agree.

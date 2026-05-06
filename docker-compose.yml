@@ -8,8 +8,7 @@ services:
       SYBIL_DEV_MODE: "true"
       SYBIL_BLOCK_INTERVAL_MS: "2000"
       SYBIL_ARENA_DB_PATH: "/arena-data/decisions.db"
-      RUST_LOG: "info"
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+      RUST_LOG: "warn,sybil_api=info,matching_sequencer=info,sybil_prover=info,commonware_storage=error,tower_http=warn"
     volumes:
       - arena-data:/arena-data
     restart: unless-stopped
@@ -152,22 +151,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-  tempo:
-    image: grafana/tempo:2.4.1
-    ports:
-      - "4317:4317"
-      - "3200:3200"
-    volumes:
-      - ./deploy/tempo.yml:/etc/tempo.yml:ro
-      - tempodata:/var/tempo
-    command:
-      - "-config.file=/etc/tempo.yml"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3200/ready"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
   grafana:
     image: grafana/grafana:11.0.0
     ports:
@@ -182,8 +165,6 @@ services:
     depends_on:
       victoriametrics:
         condition: service_healthy
-      tempo:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
       interval: 5s
@@ -193,8 +174,6 @@ services:
 volumes:
   vmdata:
     name: vmdata
-  tempodata:
-    name: tempo-data
   polymarket-data:
     name: polymarket-data
   arena-data:

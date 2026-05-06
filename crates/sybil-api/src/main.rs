@@ -29,32 +29,41 @@ fn init_telemetry() -> Telemetry {
         .install_recorder()
         .expect("failed to install Prometheus metrics recorder");
 
-    // OpenTelemetry trace exporter (OTLP over gRPC)
-    // Respects OTEL_EXPORTER_OTLP_ENDPOINT env var (default: http://localhost:4317)
-    let (otel_layer, tracer_provider) = match opentelemetry_otlp::SpanExporter::builder()
-        .with_tonic()
-        .build()
-    {
-        Ok(exporter) => {
-            let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
-                .with_batch_exporter(exporter)
-                .with_resource(
-                    opentelemetry_sdk::Resource::builder()
-                        .with_service_name("sybil-api")
-                        .build(),
+    // OpenTelemetry trace export is intentionally opt-in. The public demo runs
+    // on a small 2 GB host where Tempo can starve the metrics/alerting path.
+    let otel_enabled = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+        .ok()
+        .is_some_and(|endpoint| !endpoint.trim().is_empty());
+    let (otel_layer, tracer_provider) = if otel_enabled {
+        match opentelemetry_otlp::SpanExporter::builder()
+            .with_tonic()
+            .build()
+        {
+            Ok(exporter) => {
+                let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+                    .with_batch_exporter(exporter)
+                    .with_resource(
+                        opentelemetry_sdk::Resource::builder()
+                            .with_service_name("sybil-api")
+                            .build(),
+                    )
+                    .build();
+                opentelemetry::global::set_tracer_provider(provider.clone());
+                let tracer = provider.tracer("sybil-api");
+                (
+                    Some(tracing_opentelemetry::layer().with_tracer(tracer)),
+                    Some(provider),
                 )
-                .build();
-            opentelemetry::global::set_tracer_provider(provider.clone());
-            let tracer = provider.tracer("sybil-api");
-            (
-                Some(tracing_opentelemetry::layer().with_tracer(tracer)),
-                Some(provider),
-            )
+            }
+            Err(e) => {
+                eprintln!(
+                    "OpenTelemetry OTLP exporter unavailable, traces will not be exported: {e}"
+                );
+                (None, None)
+            }
         }
-        Err(e) => {
-            eprintln!("OpenTelemetry OTLP exporter unavailable, traces will not be exported: {e}");
-            (None, None)
-        }
+    } else {
+        (None, None)
     };
 
     // Layered subscriber: console fmt + optional OTel export

@@ -127,16 +127,9 @@
       "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line" } }, "overrides": [] }
     },
     {
-      "title": "Traces",
-      "type": "traces",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
-      "datasource": { "type": "tempo", "uid": "tempo" },
-      "targets": [{ "queryType": "nativeSearch", "serviceName": "sybil-api", "refId": "A" }]
-    },
-    {
       "title": "Submission Outcomes",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
         { "expr": "sum(rate(sybil_order_submissions_total[5m])) by (source, result)", "legendFormat": "{{source}} {{result}}", "refId": "A" }
