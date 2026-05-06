@@ -8,6 +8,11 @@ Tests use `MockOpenVmVerifierAdapter`; production deployments use
 pins the Sybil guest executable/VM commitments, and checks the revealed public
 input hash before accepting a proof.
 
+Local Anvil/devnet plumbing can use
+`src/dev/UnsafeAcceptAllVerifierAdapter.sol`. It deliberately accepts every
+proof while preserving the same `IOpenVmVerifierAdapter` boundary. Do not use
+that adapter in any production or public testnet deployment.
+
 ```bash
 forge fmt
 forge build
@@ -18,4 +23,5 @@ From the repository root:
 
 ```bash
 just contracts-test
+just contracts-anvil-unsafe-smoke
 ```

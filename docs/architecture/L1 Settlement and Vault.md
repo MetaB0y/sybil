@@ -2,7 +2,7 @@
 tags: [contracts, bridge, validium, spec]
 layer: verification
 status: planned
-last_verified: 2026-05-02
+last_verified: 2026-05-06
 ---
 
 # L1 Settlement and Vault
@@ -182,6 +182,12 @@ This extra commit pinning is part of the soundness boundary: a generic OpenVM
 Halo2 verifier proves only that some committed OpenVM program ran. The adapter
 must additionally prove that the committed program is the Sybil state-transition
 guest.
+
+For Anvil-only plumbing, `UnsafeAcceptAllVerifierAdapter` implements the same
+interface and returns true for every proof. This is intentionally isolated
+under `contracts/src/dev/` so settlement and vault logic never learn about a
+bypass flag; production and public testnet deployments must use a real
+verifier adapter.
 
 Public-input hash:
 

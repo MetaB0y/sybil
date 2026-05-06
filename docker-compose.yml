@@ -45,6 +45,39 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  sybil-prover:
+    image: sybil-api:latest
+    entrypoint: ["sybil-prover"]
+    command:
+      - "serve"
+      - "--artifacts-dir=/artifacts"
+      - "--jobs-dir=/jobs"
+      - "--bind=0.0.0.0:3002"
+    ports:
+      - "3002:3002"
+    volumes:
+      - prover-jobs:/jobs
+      - prover-artifacts:/artifacts
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  sybil-prover-worker:
+    image: sybil-api:latest
+    entrypoint: ["sybil-prover"]
+    command:
+      - "worker"
+      - "--jobs-dir=/jobs"
+      - "--artifacts-dir=/artifacts"
+      - "--poll-ms=1000"
+    volumes:
+      - prover-jobs:/jobs
+      - prover-artifacts:/artifacts
+    restart: unless-stopped
+
   sybil-arena:
     image: sybil-arena:latest
     command:
@@ -166,3 +199,7 @@ volumes:
     name: polymarket-data
   arena-data:
     name: arena-data
+  prover-jobs:
+    name: prover-jobs
+  prover-artifacts:
+    name: prover-artifacts

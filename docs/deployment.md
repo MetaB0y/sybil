@@ -36,6 +36,8 @@ Main services:
 
 - `sybil-api` - Rust API/sequencer on port `3000`
 - `sybil-polymarket` - Polymarket mirror and flash MM
+- `sybil-prover` - proof artifact status API and Prometheus metrics on port `3002`
+- `sybil-prover-worker` - filesystem proof-job worker
 - `sybil-arena` - live Python LLM/noise traders
 - `sybil-arena-dashboard` - Streamlit dashboard on port `8501`
 - `caddy` - HTTPS for app and arena dashboard
@@ -59,6 +61,7 @@ Direct host checks:
 ssh root@172.104.31.54 'curl -sS http://localhost:3000/v1/health'
 ssh root@172.104.31.54 'curl -sS http://localhost:3000/v1/blocks/latest'
 ssh root@172.104.31.54 'curl -sS http://localhost:3000/metrics | grep -E "^(sybil_block_height|sybil_blocks_produced|sybil_pending_orders|sybil_pending_bundles|sybil_fills_per_block|sybil_order_submissions_total|sybil_volume_nanos|sybil_welfare_nanos)"'
+ssh root@172.104.31.54 'curl -sS http://localhost:3002/metrics | grep -E "^(sybil_prover_artifact_store_ready|sybil_prover_latest_prepared_height|sybil_prover_jobs_queued|sybil_prover_latest_artifact_age_seconds)"'
 ```
 
 VictoriaMetrics spot checks:
@@ -78,6 +81,104 @@ for query in [
     print(query, values)
 PY'
 ```
+
+## Alerting
+
+Grafana dashboard:
+
+- `http://172.104.31.54:3001/d/sybil-overview/sybil?orgId=1`
+- Anonymous Viewer access is enabled.
+- Admin login is `admin` / `admin`.
+
+vmalert evaluates rules from `deploy/vmalert/rules.yml` every 30 seconds. The
+current rule set covers:
+
+- API scrape target down
+- block production stalled
+- solver latency high
+- actor mailbox backlog
+- high order rejection rate
+- live submissions with no fills
+- accepted orders with no fills
+- large/stale pending order books
+- prover scrape target down
+- prover artifact store unreadable
+- prover lagging sequencer blocks
+- stale prover artifacts while blocks are producing
+- prover proof-job queue backlog
+
+Alert state is available at:
+
+- vmalert UI: `http://172.104.31.54:8880`
+- VictoriaMetrics `ALERTS` series via Grafana Explore
+
+### Telegram Notifications
+
+Telegram alert delivery uses the optional `docker-compose.telegram.yml`
+overlay. It runs a small `telegram-alerts` bridge that accepts vmalert's
+Alertmanager-compatible `POST /api/v2/alerts` payloads and forwards them to
+Telegram.
+
+Create a Telegram bot with BotFather, add it to the target chat, and get the
+chat id. Then store secrets on the server:
+
+```bash
+ssh root@172.104.31.54
+cd /opt/sybil
+umask 077
+cat >> .env <<'EOF'
+TELEGRAM_BOT_TOKEN=123456:replace-me
+TELEGRAM_CHAT_ID=-1001234567890
+EOF
+```
+
+Enable Telegram alert delivery:
+
+```bash
+just deploy-telegram-alerts
+```
+
+After enabling, vmalert sends notifications to `telegram-alerts` instead of
+`-notifier.blackhole`. Test the bridge from the server:
+
+```bash
+ssh root@172.104.31.54 'cd /opt/sybil && docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.telegram.yml exec -T telegram-alerts python - <<'"'"'PY'"'"'
+import json, urllib.request
+payload = [{
+    "labels": {"alertname": "TelegramTest", "severity": "info", "component": "ops"},
+    "annotations": {"summary": "Sybil Telegram alert test"},
+    "status": "firing",
+}]
+req = urllib.request.Request(
+    "http://localhost:8080/api/v2/alerts",
+    data=json.dumps(payload).encode(),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+print(urllib.request.urlopen(req).read().decode())
+PY'
+```
+
+## Prover Devnet Path
+
+The deployed `sybil-prover` service exposes `/healthz`, `/proofs/{height}`,
+and `/metrics`. The worker watches `/jobs/*.msgpack` and writes durable
+per-block artifacts under `/artifacts`. Production proof-job export is still
+being wired, so an empty prover artifact store is normal until jobs are fed
+into that inbox.
+
+For local Anvil bridge plumbing, use the explicit unsafe verifier smoke:
+
+```bash
+anvil
+just contracts-anvil-unsafe-smoke
+```
+
+This deploys `MockUSDC`, `UnsafeAcceptAllVerifierAdapter`,
+`SybilSettlement`, and `SybilVault`, then exercises deposit, state-root
+submission, withdrawal request, and withdrawal finalization. It is separate
+from production deployment and deliberately uses an accept-all verifier behind
+the same `IOpenVmVerifierAdapter` boundary.
 
 ## Blocks But No Trading
 

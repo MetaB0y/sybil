@@ -1,0 +1,30 @@
+# Optional Telegram alerting overlay.
+# Usage:
+#   1. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in /opt/sybil/.env.
+#   2. docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.telegram.yml up -d telegram-alerts vmalert
+services:
+  telegram-alerts:
+    image: python:3.13-alpine
+    command: ["python", "/app/telegram-alerts.py"]
+    environment:
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
+      TELEGRAM_CHAT_ID: "${TELEGRAM_CHAT_ID}"
+      TELEGRAM_ALERT_PREFIX: "Sybil"
+      TELEGRAM_ALERT_REPEAT_SECONDS: "1800"
+    volumes:
+      - ./deploy/telegram-alerts.py:/app/telegram-alerts.py:ro
+    restart: unless-stopped
+
+  vmalert:
+    command:
+      - "-datasource.url=http://victoriametrics:8428"
+      - "-remoteWrite.url=http://victoriametrics:8428"
+      - "-remoteRead.url=http://victoriametrics:8428"
+      - "-rule=/etc/alerts/rules.yml"
+      - "-notifier.url=http://telegram-alerts:8080"
+      - "-httpListenAddr=:8880"
+    depends_on:
+      victoriametrics:
+        condition: service_healthy
+      telegram-alerts:
+        condition: service_started

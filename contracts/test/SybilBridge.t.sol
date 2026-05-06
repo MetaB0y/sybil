@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {SybilSettlement} from "../src/SybilSettlement.sol";
 import {SybilVault} from "../src/SybilVault.sol";
 import {SybilTypes} from "../src/SybilTypes.sol";
+import {UnsafeAcceptAllVerifierAdapter} from "../src/dev/UnsafeAcceptAllVerifierAdapter.sol";
 import {IOpenVmVerifierAdapter} from "../src/interfaces/IOpenVmVerifierAdapter.sol";
 import {MockOpenVmVerifierAdapter} from "./mocks/MockOpenVmVerifierAdapter.sol";
 import {MockUSDC} from "./mocks/MockUSDC.sol";
@@ -81,6 +82,34 @@ contract SybilBridgeTest {
         require(settlement.latestHeight() == 1, "latest height");
         require(settlement.latestStateRoot() == inputs.newStateRoot, "latest root");
         require(settlement.isAcceptedRoot(inputs.newStateRoot), "accepted");
+    }
+
+    function testUnsafeAcceptAllVerifierAcceptsAnyProofThroughSettlement() public {
+        UnsafeAcceptAllVerifierAdapter unsafeVerifier = new UnsafeAcceptAllVerifierAdapter();
+        SybilSettlement unsafeSettlement = new SybilSettlement(address(this), unsafeVerifier);
+        SybilVault unsafeVault = new SybilVault(
+            address(this), token, unsafeSettlement, unsafeVerifier, WITHDRAWAL_DELAY, ESCAPE_TIMEOUT
+        );
+        unsafeSettlement.setVault(unsafeVault);
+
+        SybilTypes.StateTransitionPublicInputs memory inputs = SybilTypes.StateTransitionPublicInputs({
+            previousHeight: 0,
+            newHeight: 1,
+            previousStateRoot: bytes32(0),
+            newStateRoot: keccak256("unsafe-state-1"),
+            blockHash: BLOCK_HASH,
+            eventsRoot: EVENTS_ROOT,
+            witnessRoot: WITNESS_ROOT,
+            daCommitment: DA_COMMITMENT,
+            depositRoot: unsafeVault.depositRootByCount(0),
+            depositCount: 0
+        });
+
+        unsafeSettlement.submitStateRoot(inputs, "arbitrary-openvm-app-proof");
+
+        require(unsafeVerifier.unsafeAcceptsAllProofs(), "unsafe marker");
+        require(unsafeSettlement.latestHeight() == 1, "latest height");
+        require(unsafeSettlement.latestStateRoot() == inputs.newStateRoot, "latest root");
     }
 
     function testStateRootSubmissionRejectsBadDepositRoot() public {

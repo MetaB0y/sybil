@@ -2,7 +2,7 @@
 tags: [zk]
 layer: verification
 status: planned
-last_verified: 2026-05-02
+last_verified: 2026-05-06
 ---
 
 Sybil is designed for a Validium architecture: off-chain data, on-chain proofs. The exchange runs off-chain for performance, but every batch's correctness is attested by an OpenVM proof posted to Ethereum L1. The [[L1 Settlement and Vault|on-chain contracts]] store accepted [[State Root and Parent Hash|state roots]], custody collateral, and process proof-backed withdrawals — they never see individual orders, fills, or account balances.
@@ -110,7 +110,7 @@ just prover-prepare-file-da /tmp/job.msgpack /tmp/sybil-guest-input.msgpack /tmp
 just prover-publish-da /tmp/sybil-guest-input.msgpack /tmp/sybil-da-witness.bin /tmp/sybil-da-manifest.json
 just prover-worker-once /tmp/sybil-prover-jobs /tmp/sybil-prover-artifacts
 just prover-worker /tmp/sybil-prover-jobs /tmp/sybil-prover-artifacts
-just prover-serve /tmp/sybil-prover-artifacts 127.0.0.1:3002
+just prover-serve /tmp/sybil-prover-artifacts /tmp/sybil-prover-jobs 127.0.0.1:3002
 just openvm-input /tmp/sybil-guest-input.msgpack /tmp/sybil-openvm-input.json
 just openvm-run /tmp/sybil-openvm-input.json
 just openvm-prove-app /tmp/sybil-openvm-input.json /tmp/sybil-openvm.app.proof
@@ -138,7 +138,17 @@ with `proof_status: "not_started"`. The worker is intentionally file-based so
 sequencer export, prover preparation, DA publication, and future proof
 generation can evolve independently. `just prover-serve` exposes the current
 artifact store over HTTP; `GET /proofs/{height}` returns the corresponding
-`status.json` once the worker has prepared that height.
+`status.json` once the worker has prepared that height. It also exposes
+`/metrics`, derived from the durable artifact store and optional job inbox, so
+Grafana/vmalert can track latest prepared height, queue depth, artifact age,
+and failed proof statuses without depending on worker process memory.
+
+Anvil/devnet contract plumbing can use
+`contracts/src/dev/UnsafeAcceptAllVerifierAdapter.sol`. That adapter accepts
+every proof but keeps the final `IOpenVmVerifierAdapter.verify(proof,
+publicInputHash)` call boundary intact. This lets local devnets submit real
+OpenVM app-proof bytes or dummy bytes while EVM verifier generation remains
+heavy. It must not be used for production or public testnet deployments.
 
 ## Key Properties
 - Validium: off-chain data, on-chain proofs
@@ -147,8 +157,9 @@ artifact store over HTTP; `GET /proofs/{height}` returns the corresponding
 - Escape hatch: conservative exits plus DA-backed recovery design
 - All architectural choices (integer arithmetic, typed state roots, fixed-size arrays) are ZK-motivated
 - Status: partial implementation; local guest execution, app proof generation,
-  and mock-verifier settlement submission work, while production prover service
-  and generated on-chain verifier integration remain open.
+  unsafe/mock-verifier settlement submission, and prover observability work,
+  while production proof orchestration and generated on-chain verifier
+  integration remain open.
 
 ## Where This Lives
 > `crates/sybil-verifier/` — verification logic that will become the ZK circuit

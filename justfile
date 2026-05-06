@@ -174,9 +174,9 @@ prover-worker-once jobs_dir="/tmp/sybil-prover-jobs" artifacts_dir="/tmp/sybil-p
 prover-worker jobs_dir="/tmp/sybil-prover-jobs" artifacts_dir="/tmp/sybil-prover-artifacts" poll_ms="1000":
     cargo run -p sybil-prover -- worker --jobs-dir {{jobs_dir}} --artifacts-dir {{artifacts_dir}} --poll-ms {{poll_ms}}
 
-# Serve prepared prover artifact status by block height
-prover-serve artifacts_dir="/tmp/sybil-prover-artifacts" bind="127.0.0.1:3002":
-    cargo run -p sybil-prover -- serve --artifacts-dir {{artifacts_dir}} --bind {{bind}}
+# Serve prepared prover artifact status and Prometheus metrics
+prover-serve artifacts_dir="/tmp/sybil-prover-artifacts" jobs_dir="/tmp/sybil-prover-jobs" bind="127.0.0.1:3002":
+    cargo run -p sybil-prover -- serve --artifacts-dir {{artifacts_dir}} --jobs-dir {{jobs_dir}} --bind {{bind}}
 
 # Write the canonical witness payload and provider-neutral DA manifest from prepared guest input
 prover-publish-da guest_input="/tmp/sybil-guest-input.msgpack" payload="/tmp/sybil-da-witness.bin" manifest="/tmp/sybil-da-manifest.json":
@@ -325,21 +325,23 @@ smoke:
 
 # ── Docker ─────────────────────────────────────────────────────────────────
 
+LOCAL_COMPOSE := "docker-compose"
+
 # Build Docker image
 docker-build:
-    docker compose build
+    {{LOCAL_COMPOSE}} build
 
 # Start all services (API + VictoriaMetrics + Tempo + Grafana)
 docker-up:
-    docker compose up -d
+    {{LOCAL_COMPOSE}} up -d
 
 # Stop all services
 docker-down:
-    docker compose down
+    {{LOCAL_COMPOSE}} down
 
 # Tail API logs
 docker-logs:
-    docker compose logs -f sybil-api
+    {{LOCAL_COMPOSE}} logs -f sybil-api
 
 # ── Polymarket Mirror ──────────────────────────────────────────────────────
 
@@ -358,28 +360,33 @@ polymarket-dev port="3001" max_events="10":
 
 SERVER := "root@172.104.31.54"
 COMPOSE_PROD := "docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+COMPOSE_TELEGRAM := "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.telegram.yml"
 
 # Sync compose configs + deploy/ directory to server
 deploy-sync:
     ssh {{SERVER}} 'mkdir -p /opt/sybil'
-    scp docker-compose.yml docker-compose.prod.yml {{SERVER}}:/opt/sybil/
+    scp docker-compose.yml docker-compose.prod.yml docker-compose.telegram.yml {{SERVER}}:/opt/sybil/
     scp -r deploy {{SERVER}}:/opt/sybil/
 
-# Build and deploy sybil-api + polymarket mirror
+# Build and deploy sybil-api, polymarket mirror, and prover status API
 deploy-api: deploy-sync
-    docker compose build sybil-api
+    {{LOCAL_COMPOSE}} build sybil-api
     docker save sybil-api:latest | ssh {{SERVER}} docker load
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-api sybil-polymarket'
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-api sybil-polymarket sybil-prover sybil-prover-worker'
 
 # Build and deploy arena bots + dashboard (pass OpenRouter key)
 deploy-arena key: deploy-sync
-    docker compose build sybil-arena
+    {{LOCAL_COMPOSE}} build sybil-arena
     docker save sybil-arena:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && OPENROUTER_API_KEY={{key}} {{COMPOSE_PROD}} up -d sybil-arena sybil-arena-dashboard caddy'
 
-# Deploy observability stack (VictoriaMetrics + Tempo + Grafana)
+# Deploy observability stack (VictoriaMetrics + vmalert + Tempo + Grafana)
 deploy-monitoring: deploy-sync
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d victoriametrics tempo grafana'
+    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d victoriametrics vmalert tempo grafana telegram-alerts; else {{COMPOSE_PROD}} up -d victoriametrics vmalert tempo grafana; fi'
+
+# Enable Telegram delivery for vmalert alerts. Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in /opt/sybil/.env on the server.
+deploy-telegram-alerts: deploy-sync
+    ssh {{SERVER}} 'cd /opt/sybil && test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env && {{COMPOSE_TELEGRAM}} up -d telegram-alerts vmalert'
 
 # Deploy Caddy HTTPS reverse proxy
 deploy-caddy: deploy-sync
@@ -387,9 +394,9 @@ deploy-caddy: deploy-sync
 
 # Deploy everything
 deploy-all key: deploy-sync
-    docker compose build
+    {{LOCAL_COMPOSE}} build
     docker save sybil-api:latest sybil-arena:latest | ssh {{SERVER}} docker load
-    ssh {{SERVER}} 'cd /opt/sybil && OPENROUTER_API_KEY={{key}} {{COMPOSE_PROD}} up -d --remove-orphans'
+    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then OPENROUTER_API_KEY={{key}} {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else OPENROUTER_API_KEY={{key}} {{COMPOSE_PROD}} up -d --remove-orphans; fi'
 
 # Tail logs from a container on the server
 deploy-logs service="sybil-api":
@@ -424,3 +431,8 @@ contracts-build:
 # Run Solidity tests
 contracts-test:
     cd contracts && forge test
+
+# Run a local Anvil bridge smoke with the explicit unsafe accept-all verifier.
+# Start anvil separately, or point rpc_url at an existing Anvil-compatible RPC.
+contracts-anvil-unsafe-smoke rpc_url="http://127.0.0.1:8545" private_key="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80":
+    cd contracts && PRIVATE_KEY={{private_key}} forge script script/UnsafeAnvilSmoke.s.sol:UnsafeAnvilSmoke --rpc-url {{rpc_url}} --broadcast

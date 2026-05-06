@@ -296,6 +296,93 @@
         },
         "overrides": []
       }
+    },
+    {
+      "title": "Prover Latest Height",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 64 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sybil_prover_latest_prepared_height", "refId": "A" }],
+      "options": { "graphMode": "area" },
+      "fieldConfig": {
+        "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Prover Lag",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 64 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "max(sybil_block_height) - max(sybil_prover_latest_prepared_height)", "refId": "A" }],
+      "options": { "graphMode": "area" },
+      "fieldConfig": {
+        "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "orange", "value": 5 },
+          { "color": "red", "value": 10 }
+        ] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Prover Jobs Queued",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 64 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sybil_prover_jobs_queued", "refId": "A" }],
+      "options": { "graphMode": "area" },
+      "fieldConfig": {
+        "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "orange", "value": 10 },
+          { "color": "red", "value": 20 }
+        ] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Prover Artifact Age",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 64 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sybil_prover_latest_artifact_age_seconds", "refId": "A" }],
+      "options": { "graphMode": "area" },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "orange", "value": 180 },
+          { "color": "red", "value": 300 }
+        ] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Prover Artifacts by Status",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 68 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sybil_prover_artifacts_total", "legendFormat": "{{status}} {{proof_status}}", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Prover Lag and Queue",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 68 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "max(sybil_block_height) - max(sybil_prover_latest_prepared_height)", "legendFormat": "block lag", "refId": "A" },
+        { "expr": "sybil_prover_jobs_queued", "legendFormat": "queued jobs", "refId": "B" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      }
     }
   ],
   "schemaVersion": 39,

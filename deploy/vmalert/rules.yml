@@ -3,14 +3,17 @@ groups:
     interval: 30s
     rules:
       - alert: SolveTimeHigh
-        expr: histogram_quantile(0.99, sum(rate(sybil_solve_time_seconds_bucket[5m])) by (le)) > 0.1
+        expr: |
+          rate(sybil_solve_time_seconds_sum[5m])
+          / clamp_min(rate(sybil_solve_time_seconds_count[5m]), 0.001)
+          > 0.1
         for: 2m
         labels:
           severity: warning
           component: sequencer
         annotations:
-          summary: "Solver p99 latency above 100ms"
-          description: "Solver p99 has been above 100ms for 2m ({{ $value | humanizeDuration }})."
+          summary: "Solver average latency above 100ms"
+          description: "Solver average latency has been above 100ms for 2m (current average: {{ $value | humanizeDuration }})."
 
       - alert: RejectionRateHigh
         expr: |
@@ -24,6 +27,71 @@ groups:
         annotations:
           summary: "Order rejection rate above 50%"
           description: "More than half of submitted orders are being rejected over the last 5m (current ratio: {{ $value | humanizePercentage }})."
+
+      - alert: RejectionRateCritical
+        expr: |
+          sum(increase(sybil_order_submissions_total{result="rejected"}[5m])) >= 20
+          and
+          (
+            sum(increase(sybil_order_submissions_total{result="rejected"}[5m]))
+            / clamp_min(sum(increase(sybil_order_submissions_total[5m])), 1)
+          ) > 0.8
+        for: 3m
+        labels:
+          severity: critical
+          component: sequencer
+        annotations:
+          summary: "Most order submissions are being rejected"
+          description: "At least 20 submissions arrived in 5m and more than 80% were rejected. This often means accounts are inventory/cash locked or clients are submitting invalid orders."
+
+      - alert: LiveTradingNoFills
+        expr: |
+          sum(increase(sybil_order_submissions_total[10m])) >= 50
+          and
+          sum(increase(sybil_market_fills_total[10m])) == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: arena
+        annotations:
+          summary: "Live trading has submissions but no fills"
+          description: "At least 50 order submissions arrived over 10m, but no fills were recorded. Blocks may still be producing while trading is effectively stalled."
+
+      - alert: AcceptedOrdersNoFills
+        expr: |
+          sum(increase(sybil_order_submissions_total{result="accepted"}[10m])) >= 20
+          and
+          sum(increase(sybil_market_fills_total[10m])) == 0
+        for: 10m
+        labels:
+          severity: warning
+          component: arena
+        annotations:
+          summary: "Accepted orders are not filling"
+          description: "At least 20 order submissions were accepted over 10m, but no fills were recorded. This may indicate stale resting liquidity, non-crossing prices, or an arena strategy issue."
+
+      - alert: PendingOrderBookHigh
+        expr: sybil_pending_orders > 250
+        for: 10m
+        labels:
+          severity: warning
+          component: sequencer
+        annotations:
+          summary: "Pending order book is unusually large"
+          description: "The pending order book has held more than 250 orders for 10m (current: {{ $value }}). Live arena should normally use IOC, so sustained pending inventory is suspicious."
+
+      - alert: StalePendingOrderBook
+        expr: |
+          max(sybil_pending_orders) > 250
+          and
+          sum(increase(sybil_market_fills_total[10m])) == 0
+        for: 10m
+        labels:
+          severity: critical
+          component: sequencer
+        annotations:
+          summary: "Pending orders are accumulating without fills"
+          description: "The pending order book is above 250 and no fills have landed in 10m. This matches the stale-GTC failure mode seen in the live arena deployment."
 
       - alert: SequencerDown
         expr: up{job="sybil-api"} == 0
@@ -64,3 +132,74 @@ groups:
         annotations:
           summary: "Actor mailbox queue depth is critical"
           description: "{{ $labels.actor }} mailbox queue depth has exceeded 5000 for 1m (current depth: {{ $value }})."
+
+      - alert: ProverDown
+        expr: up{job="sybil-prover"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          component: prover
+        annotations:
+          summary: "sybil-prover scrape target is down"
+          description: "VictoriaMetrics has not been able to scrape sybil-prover for 2m."
+
+      - alert: ProverArtifactStoreUnreadable
+        expr: sybil_prover_artifact_store_ready == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: prover
+        annotations:
+          summary: "Prover artifact store is unreadable"
+          description: "sybil-prover is up, but its artifact store cannot be scanned."
+
+      - alert: ProverLagHigh
+        expr: |
+          (
+            max(sybil_block_height)
+            - max(sybil_prover_latest_prepared_height)
+          ) > 10
+          and
+          max(sybil_prover_artifact_directories_total) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: prover
+        annotations:
+          summary: "Prover is lagging sequencer blocks"
+          description: "The latest prepared proof artifact is more than 10 blocks behind the sequencer (current lag: {{ $value }} blocks)."
+
+      - alert: ProverArtifactStale
+        expr: |
+          (time() - max(sybil_prover_latest_updated_at_seconds)) > 300
+          and
+          max(sybil_prover_artifact_directories_total) > 0
+          and
+          sum(rate(sybil_blocks_produced[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: prover
+        annotations:
+          summary: "Prover artifacts are stale"
+          description: "The prover has not updated any artifact for more than 5m while blocks are still being produced."
+
+      - alert: ProverJobQueueHigh
+        expr: sybil_prover_jobs_queued > 20
+        for: 5m
+        labels:
+          severity: warning
+          component: prover
+        annotations:
+          summary: "Prover job queue is high"
+          description: "More than 20 proof jobs are waiting in the prover inbox (current queue depth: {{ $value }})."
+
+      - alert: ProverProofFailed
+        expr: sybil_prover_artifacts_total{proof_status=~"failed|error"} > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: prover
+        annotations:
+          summary: "A prover artifact is marked failed"
+          description: "At least one prover artifact has proof_status={{ $labels.proof_status }}."
