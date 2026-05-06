@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 NANOS_PER_DOLLAR = 1_000_000_000
+TimeInForce = Literal["GTC", "IOC", "GTD"]
 
 
 @dataclass

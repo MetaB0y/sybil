@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 
 from sybil_client import Block, OrderSpec, SybilClient
+from sybil_client.types import TimeInForce
 
 
 class BaseAgent(ABC):
@@ -26,6 +27,8 @@ class BaseAgent(ABC):
         self._running = False
         # MM budget constraint (None = regular orders, set to enable flash liquidity)
         self.mm_budget_nanos: int | None = None
+        self.time_in_force: TimeInForce | None = None
+        self.expires_at_block: int | None = None
         # Order tracking for observability
         self.last_orders: list[OrderSpec] = []
         self.total_orders_submitted: int = 0
@@ -84,6 +87,8 @@ class BaseAgent(ABC):
                         accepted = await self.client.submit_orders(
                             self.account_id, orders,
                             mm_budget_nanos=self.mm_budget_nanos,
+                            time_in_force=self.time_in_force,
+                            expires_at_block=self.expires_at_block,
                         )
                         if accepted:
                             self.last_orders = orders

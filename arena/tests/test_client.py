@@ -1,7 +1,5 @@
 """Tests for sybil_client."""
 
-import pytest
-
 from sybil_client import BuyNo, BuyYes, SellNo, SellYes
 from sybil_client.types import NANOS_PER_DOLLAR, Account, Block, Fill, Market, Position
 
@@ -107,3 +105,43 @@ class TestNanosConversion:
         # $0.50
         account = Account(id=1, balance_nanos=NANOS_PER_DOLLAR // 2, positions=[])
         assert account.balance_dollars == 0.5
+
+
+def test_submit_orders_can_set_ioc_time_in_force(monkeypatch):
+    import asyncio
+
+    from sybil_client import SybilClient
+
+    captured = {}
+    client = SybilClient("http://example.invalid")
+
+    async def fake_request(method, path, **kwargs):
+        captured["method"] = method
+        captured["path"] = path
+        captured["json"] = kwargs["json"]
+        return {"accepted": True}
+
+    monkeypatch.setattr(client, "_request", fake_request)
+
+    accepted = asyncio.run(
+        client.submit_orders(
+            42,
+            [BuyYes.at_price(market_id=7, price=0.55, quantity=3)],
+            time_in_force="IOC",
+        )
+    )
+
+    assert accepted is True
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/v1/orders"
+    assert captured["json"]["account_id"] == 42
+    assert captured["json"]["time_in_force"] == "IOC"
+    assert "expires_at_block" not in captured["json"]
+    assert captured["json"]["orders"] == [
+        {
+            "type": "BuyYes",
+            "market_id": 7,
+            "limit_price_nanos": 550_000_000,
+            "quantity": 3,
+        }
+    ]

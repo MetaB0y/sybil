@@ -17,6 +17,7 @@ from .types import (
     PricePoint,
     SellNo,
     SellYes,
+    TimeInForce,
 )
 
 __all__ = [
@@ -36,4 +37,5 @@ __all__ = [
     "PricePoint",
     "SellNo",
     "SellYes",
+    "TimeInForce",
 ]

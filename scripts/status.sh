@@ -23,10 +23,14 @@ echo ""
 
 echo "=== Trader Activity ==="
 LOGS=$(ssh "$S" 'cd /opt/sybil && docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --tail 1000 sybil-arena 2>&1' | grep -v httpx)
-echo "  LLM calls:      $(echo "$LOGS" | grep -c 'LLM response' || echo 0)"
-echo "  Parse failures: $(echo "$LOGS" | grep -c 'Failed to parse' || echo 0)"
-echo "  Trade orders:   $(echo "$LOGS" | grep -c 'Buy' || echo 0)"
-echo "  HOLDs:          $(echo "$LOGS" | grep -c 'HOLD' || echo 0)"
+count_logs() {
+    local pattern="$1"
+    echo "$LOGS" | grep -c "$pattern" || true
+}
+echo "  LLM calls:      $(count_logs 'LLM response')"
+echo "  Parse failures: $(count_logs 'Failed to parse')"
+echo "  Trade orders:   $(count_logs 'Buy')"
+echo "  HOLDs:          $(count_logs 'HOLD')"
 echo ""
 
 echo "=== Balances ==="
@@ -43,8 +47,40 @@ done
 echo ""
 
 echo "=== News Pipeline ==="
-echo "  Polls:          $(echo "$LOGS" | grep -c 'Poll:' || echo 0)"
-echo "  Articles gated: $(echo "$LOGS" | grep -c '✓' || echo 0)"
+echo "  Polls:          $(count_logs 'Poll:')"
+echo "  Articles gated: $(count_logs '✓')"
+echo ""
+
+echo "=== Pending Orders ==="
+ssh "$S" 'python3 - <<'"'"'PY'"'"'
+import collections, json, urllib.request
+try:
+    orders = json.load(urllib.request.urlopen("http://localhost:3000/v1/orders/pending", timeout=5))
+except Exception as exc:
+    print(f"  unavailable: {exc}")
+    raise SystemExit
+
+print(f"  Total:          {len(orders)}")
+if not orders:
+    raise SystemExit
+
+by_account = collections.Counter(o["account_id"] for o in orders)
+by_market = collections.Counter(o["market_id"] for o in orders)
+created_min = min(o["created_at_block"] for o in orders)
+created_max = max(o["created_at_block"] for o in orders)
+expiry_min = min(o["expires_at_block"] for o in orders)
+expiry_max = max(o["expires_at_block"] for o in orders)
+gtc_like = sum(
+    1 for o in orders
+    if o["expires_at_block"] - o["created_at_block"] > 1_000_000
+)
+
+print(f"  Top accounts:   {by_account.most_common(5)}")
+print(f"  Top markets:    {by_market.most_common(5)}")
+print(f"  Created range:  {created_min}..{created_max}")
+print(f"  Expiry range:   {expiry_min}..{expiry_max}")
+print(f"  GTC-like:       {gtc_like}")
+PY'
 echo ""
 
 echo "=== Recent Decisions ==="

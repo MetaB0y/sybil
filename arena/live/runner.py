@@ -2,21 +2,19 @@
 
 Usage:
     cd arena && uv run python -m live.runner --api-key $OPENROUTER_API_KEY
-    cd arena && uv run python -m live.runner --api-key $KEY --max-markets 10 --personas news_trader contrarian
+    cd arena && uv run python -m live.runner --api-key $KEY --max-markets 10
 """
 
 import argparse
 import asyncio
 import logging
 import signal
-import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 
 from bots.random_trader import RandomTrader
 from sybil_client import SybilClient
-from sybil_client.types import NANOS_PER_DOLLAR
+from sybil_client.types import NANOS_PER_DOLLAR, TimeInForce
 
 from .db import DecisionDB
 from .news_feed import NewsFeed
@@ -34,6 +32,7 @@ class LiveConfig:
     model_name: str = "deepseek/deepseek-v4-flash"
     initial_balance: float = 500.0
     max_markets: int = 20
+    order_time_in_force: TimeInForce = "IOC"
     news_poll_interval: int = 300
     min_llm_interval: float = 60.0
     noise_count: int = 5
@@ -150,7 +149,13 @@ async def run_live(config: LiveConfig):
 
         log.info("Selected %d markets for trading:", len(active))
         for m in active:
-            log.info("  [%d] %s (YES=%.2f, vol=$%.0f)", m.id, m.name[:60], m.yes_price, m.volume_dollars)
+            log.info(
+                "  [%d] %s (YES=%.2f, vol=$%.0f)",
+                m.id,
+                m.name[:60],
+                m.yes_price,
+                m.volume_dollars,
+            )
 
         markets_info = {m.id: m for m in active}
         market_ids = [m.id for m in active]
@@ -169,9 +174,16 @@ async def run_live(config: LiveConfig):
             persona = PERSONAS[persona_key]
 
             for strat_label, strategy in strategies:
-                account = await client.create_account(int(config.initial_balance * NANOS_PER_DOLLAR))
+                account = await client.create_account(
+                    int(config.initial_balance * NANOS_PER_DOLLAR)
+                )
                 bot_name = f"{persona['name']} ({strat_label})"
-                log.info("Created account %d for %s ($%.0f)", account.id, bot_name, config.initial_balance)
+                log.info(
+                    "Created account %d for %s ($%.0f)",
+                    account.id,
+                    bot_name,
+                    config.initial_balance,
+                )
 
                 trader = LiveLlmTrader(
                     client=client,
@@ -187,6 +199,7 @@ async def run_live(config: LiveConfig):
                     min_llm_interval_s=config.min_llm_interval,
                     name=bot_name,
                 )
+                trader.time_in_force = config.order_time_in_force
                 traders.append(trader)
 
         # 3. Create noise traders
@@ -200,6 +213,7 @@ async def run_live(config: LiveConfig):
                 market_ids=market_ids,
                 seed=i + 42,
             )
+            noise.time_in_force = config.order_time_in_force
             noise_traders.append(noise)
         log.info("Created %d noise traders", len(noise_traders))
 
@@ -287,10 +301,23 @@ def main():
     parser.add_argument("--api-key", required=True, help="OpenRouter API key")
     parser.add_argument("--model", default="deepseek/deepseek-v4-flash")
     parser.add_argument("--max-markets", type=int, default=20)
+    parser.add_argument(
+        "--order-time-in-force",
+        choices=["GTC", "IOC", "GTD"],
+        default="IOC",
+        help="Time-in-force for live bot/noise orders. IOC avoids stale resting orders.",
+    )
     parser.add_argument("--balance", type=float, default=500.0, help="Initial balance per trader")
     parser.add_argument("--noise-count", type=int, default=5)
-    parser.add_argument("--news-interval", type=int, default=300, help="RSS poll interval (seconds)")
-    parser.add_argument("--min-llm-interval", type=float, default=60.0, help="Min seconds between LLM calls")
+    parser.add_argument(
+        "--news-interval", type=int, default=300, help="RSS poll interval (seconds)"
+    )
+    parser.add_argument(
+        "--min-llm-interval",
+        type=float,
+        default=60.0,
+        help="Min seconds between LLM calls",
+    )
     parser.add_argument("--db-path", default="", help="SQLite DB path")
     parser.add_argument("--personas", nargs="+", default=list(PERSONAS.keys()),
                         help="Persona keys to use")
@@ -313,6 +340,7 @@ def main():
         model_name=args.model,
         initial_balance=args.balance,
         max_markets=args.max_markets,
+        order_time_in_force=args.order_time_in_force,
         noise_count=args.noise_count,
         news_poll_interval=args.news_interval,
         min_llm_interval=args.min_llm_interval,

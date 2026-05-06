@@ -23,6 +23,7 @@ from .types import (
     PricePoint,
     SellNo,
     SellYes,
+    TimeInForce,
 )
 
 
@@ -291,6 +292,8 @@ class SybilClient:
         account_id: int,
         orders: list[OrderSpec],
         mm_budget_nanos: int | None = None,
+        time_in_force: TimeInForce | None = None,
+        expires_at_block: int | None = None,
     ) -> bool:
         """Submit orders for an account.
 
@@ -301,11 +304,18 @@ class SybilClient:
                 liquidity. The value is the MM's total capital budget in nanos.
                 MM orders skip per-order balance validation; the solver enforces
                 the portfolio-level budget constraint at clearing time.
+            time_in_force: Optional order lifetime policy ("GTC", "IOC", or "GTD").
+                If omitted, the API default is used.
+            expires_at_block: Required by the API for GTD submissions.
         """
         order_specs = [self._order_to_json(o) for o in orders]
         payload: dict[str, Any] = {"account_id": account_id, "orders": order_specs}
         if mm_budget_nanos is not None:
             payload["mm_budget_nanos"] = mm_budget_nanos
+        if time_in_force is not None:
+            payload["time_in_force"] = time_in_force
+        if expires_at_block is not None:
+            payload["expires_at_block"] = expires_at_block
         data = await self._request("POST", "/v1/orders", json=payload)
         return data.get("accepted", False)
 
