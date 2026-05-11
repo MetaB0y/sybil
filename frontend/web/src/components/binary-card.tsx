@@ -38,12 +38,13 @@ const CARD_HEIGHT = 400;
  */
 export function BinaryCard({ market, price }: Props) {
   const [ref, inView] = useInViewport<HTMLAnchorElement>();
-  const { points, delta24Pct } = useCardHistory(market.market_id, inView);
+  const { points, delta24Pct, noDelta24Pct } = useCardHistory(
+    market.market_id,
+    inView
+  );
 
   const yesCents = price ? formatCents(price.yes) : "—";
   const noCents = price ? formatCents(price.no) : "—";
-  const yesPct = price ? probabilityPercent(price.yes) : null;
-  const noPct = price ? probabilityPercent(price.no) : null;
 
   return (
     <Link
@@ -75,24 +76,18 @@ export function BinaryCard({ market, price }: Props) {
       <EyebrowRow market={market} />
       <TitleRow market={market} />
       <FeaturedPriceRow
-        label="Yes"
         cents={yesCents}
         delta24Pct={delta24Pct}
         points={points}
         hasPrice={!!price}
-        priceTone={
-          yesPct == null
-            ? "var(--fg-4)"
-            : yesPct >= 50
-              ? "var(--yes)"
-              : "var(--no)"
-        }
       />
-      <BarsRow
-        yesPct={yesPct}
-        noPct={noPct}
+      <SideList
+        market={market}
         yesCents={yesCents}
         noCents={noCents}
+        hasPrice={!!price}
+        yesDelta={delta24Pct}
+        noDelta={noDelta24Pct}
       />
       <FooterRow market={market} />
     </Link>
@@ -184,19 +179,15 @@ function TitleRow({ market }: { market: Market }) {
 }
 
 function FeaturedPriceRow({
-  label,
   cents,
   delta24Pct,
   points,
   hasPrice,
-  priceTone,
 }: {
-  label: string;
   cents: string;
   delta24Pct: number | null;
   points: import("@/lib/markets/use-card-history").PricePoint[];
   hasPrice: boolean;
-  priceTone: string;
 }) {
   return (
     <div
@@ -219,7 +210,7 @@ function FeaturedPriceRow({
             color: "var(--fg-2)",
           }}
         >
-          {label}
+          Yes
         </span>
         <div
           style={{
@@ -233,7 +224,7 @@ function FeaturedPriceRow({
             style={{
               fontSize: "var(--fs-32)",
               lineHeight: "var(--lh-32)",
-              color: hasPrice ? priceTone : "var(--fg-4)",
+              color: hasPrice ? "var(--yes)" : "var(--fg-4)",
               letterSpacing: "var(--track-mono)",
             }}
           >
@@ -252,97 +243,126 @@ function FeaturedPriceRow({
           )}
         </div>
       </div>
-      <Sparkline points={points} />
+      <Sparkline points={points} tone="yes" />
     </div>
   );
 }
 
-function BarsRow({
-  yesPct,
-  noPct,
+function SideList({
+  market,
   yesCents,
   noCents,
+  hasPrice,
+  yesDelta,
+  noDelta,
 }: {
-  yesPct: number | null;
-  noPct: number | null;
+  market: Market;
   yesCents: string;
   noCents: string;
+  hasPrice: boolean;
+  yesDelta: number | null;
+  noDelta: number | null;
 }) {
+  const volNanos = market.volume_nanos ? BigInt(market.volume_nanos) : 0n;
+  const vol = volNanos > 0n ? formatCompactDollars(volNanos) : "—";
   return (
     <div
       style={{
         display: "flex",
         flexDirection: "column",
-        gap: "var(--space-2)",
-        alignSelf: "end",
+        alignSelf: "start",
+        minHeight: 0,
+        overflow: "hidden",
       }}
     >
-      <BarRow tone="yes" pct={yesPct} label="YES" centsLabel={yesCents} />
-      <BarRow tone="no" pct={noPct} label="NO" centsLabel={noCents} />
+      <SideRow
+        side="Yes"
+        cents={yesCents}
+        centsColor={hasPrice ? "var(--yes)" : "var(--fg-4)"}
+        delta={yesDelta}
+        vol={vol}
+        first
+      />
+      <SideRow
+        side="No"
+        cents={noCents}
+        centsColor={hasPrice ? "var(--no)" : "var(--fg-4)"}
+        delta={noDelta}
+        vol={vol}
+      />
     </div>
   );
 }
 
-function BarRow({
-  tone,
-  pct,
-  label,
-  centsLabel,
+function SideRow({
+  side,
+  cents,
+  centsColor,
+  delta,
+  vol,
+  first,
 }: {
-  tone: "yes" | "no";
-  pct: number | null;
-  label: string;
-  centsLabel: string;
+  side: "Yes" | "No";
+  cents: string;
+  centsColor: string;
+  delta: number | null;
+  vol: string;
+  first?: boolean;
 }) {
-  const fillColor = tone === "yes" ? "var(--yes)" : "var(--no)";
-  const trackColor = tone === "yes" ? "var(--yes-faint)" : "var(--no-faint)";
-  const width = pct != null ? `${Math.max(0, Math.min(100, pct))}%` : "0%";
   return (
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "28px 1fr 44px",
+        gridTemplateColumns: "minmax(0, 1fr) 44px 52px 52px",
+        gap: "var(--space-2)",
         alignItems: "center",
-        gap: "var(--space-3)",
+        padding: "10px 0",
+        borderTop: first ? "none" : "1px solid var(--border-1)",
       }}
     >
       <span
-        className="text-mono"
         style={{
-          fontSize: "10px",
-          letterSpacing: "var(--track-wide)",
-          color: pct != null ? fillColor : "var(--fg-4)",
+          fontFamily: "var(--font-sans)",
+          fontSize: "var(--fs-13)",
+          color: "var(--fg-2)",
         }}
       >
-        {label}
-      </span>
-      <span
-        style={{
-          height: 6,
-          background: pct != null ? trackColor : "var(--surface-2)",
-          borderRadius: 3,
-          overflow: "hidden",
-        }}
-      >
-        <span
-          style={{
-            display: "block",
-            height: "100%",
-            width,
-            background: fillColor,
-            transition: "width var(--dur-base) var(--ease-standard)",
-          }}
-        />
+        {side}
       </span>
       <span
         className="text-mono tabular"
         style={{
-          fontSize: "var(--fs-12)",
-          color: pct != null ? "var(--fg-2)" : "var(--fg-4)",
+          fontSize: "var(--fs-13)",
+          color: centsColor,
           textAlign: "right",
         }}
       >
-        {centsLabel}
+        {cents}
+      </span>
+      <span
+        className="text-mono tabular"
+        style={{
+          fontSize: "11px",
+          color:
+            delta == null
+              ? "var(--fg-4)"
+              : delta >= 0
+                ? "var(--yes)"
+                : "var(--no)",
+          textAlign: "right",
+        }}
+      >
+        {delta != null ? formatPctDelta(delta) : "—"}
+      </span>
+      <span
+        className="text-mono tabular"
+        style={{
+          fontSize: "11px",
+          color: "var(--fg-3)",
+          textAlign: "right",
+        }}
+      >
+        {vol}
       </span>
     </div>
   );
@@ -401,6 +421,3 @@ function FooterChip({
   );
 }
 
-function probabilityPercent(nanos: bigint): number {
-  return Number(nanos) / 1e7;
-}

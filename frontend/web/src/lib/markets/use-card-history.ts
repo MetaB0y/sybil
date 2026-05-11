@@ -12,7 +12,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type CardHistory = {
   points: PricePoint[];
+  /** YES price 24h delta, in percent. */
   delta24Pct: number | null;
+  /** NO price 24h delta, in percent — mirror of YES through `no = 1 − yes`. */
+  noDelta24Pct: number | null;
 };
 
 /**
@@ -50,14 +53,24 @@ export function useCardHistory(marketId: number, enabled: boolean) {
 
   const derived = useMemo<CardHistory>(() => {
     const points = query.data ?? [];
-    if (points.length < 2) return { points, delta24Pct: null };
+    if (points.length < 2) {
+      return { points, delta24Pct: null, noDelta24Pct: null };
+    }
     const firstPt = points[0]!;
     const lastPt = points[points.length - 1]!;
-    const first = parseNanos(firstPt.yes_price_nanos ?? 0);
-    const last = parseNanos(lastPt.yes_price_nanos ?? 0);
-    if (first === 0n) return { points, delta24Pct: null };
-    const pct = (Number(last - first) / Number(first)) * 100;
-    return { points, delta24Pct: pct };
+    const yesFirst = parseNanos(firstPt.yes_price_nanos ?? 0);
+    const yesLast = parseNanos(lastPt.yes_price_nanos ?? 0);
+    const noFirst = parseNanos(firstPt.no_price_nanos ?? 0);
+    const noLast = parseNanos(lastPt.no_price_nanos ?? 0);
+    const yesDelta =
+      yesFirst === 0n
+        ? null
+        : (Number(yesLast - yesFirst) / Number(yesFirst)) * 100;
+    const noDelta =
+      noFirst === 0n
+        ? null
+        : (Number(noLast - noFirst) / Number(noFirst)) * 100;
+    return { points, delta24Pct: yesDelta, noDelta24Pct: noDelta };
   }, [query.data]);
 
   return derived;

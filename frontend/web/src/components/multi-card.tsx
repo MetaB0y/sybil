@@ -270,7 +270,7 @@ function FeaturedOutcome({
             style={{
               fontSize: "var(--fs-32)",
               lineHeight: "var(--lh-32)",
-              color: priceTone(price?.yes),
+              color: deltaTone(delta24Pct, !!price),
               letterSpacing: "var(--track-mono)",
             }}
           >
@@ -335,8 +335,8 @@ function SecondaryRow({
   const label = trimOutcomeLabel(market.name);
   const yesPct = price ? Number(price.yes) / 1e7 : null;
   const cents = price ? formatCents(price.yes) : "—";
-  const tone = priceTone(price?.yes);
   const delta = mockDelta(market.market_id, yesPct);
+  const tone = deltaTone(price ? delta : null, !!price);
   const volNanos = market.volume_nanos ? BigInt(market.volume_nanos) : 0n;
   const vol = volNanos > 0n ? formatCompactDollars(volNanos) : "—";
   return (
@@ -445,9 +445,14 @@ function FooterRow({
   );
 }
 
-function priceTone(yes: bigint | undefined): string {
-  if (yes == null) return "var(--fg-4)";
-  return yes >= 500_000_000n ? "var(--yes)" : "var(--no)";
+/**
+ * Color an outcome's cents by delta sign (handoff convention).
+ * No price → fg-4 (dim). No delta yet → neutral fg-1.
+ */
+function deltaTone(delta: number | null, hasPrice: boolean): string {
+  if (!hasPrice) return "var(--fg-4)";
+  if (delta == null) return "var(--fg-1)";
+  return delta >= 0 ? "var(--yes)" : "var(--no)";
 }
 
 function FooterChip({
