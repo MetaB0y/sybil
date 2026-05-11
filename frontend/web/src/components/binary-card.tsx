@@ -52,7 +52,7 @@ export function BinaryCard({ market, price }: Props) {
       href={`/m/${market.market_id}`}
       style={{
         display: "grid",
-        gridTemplateRows: "22px 56px auto 1fr 18px",
+        gridTemplateRows: "22px 64px auto 1fr 18px",
         gap: "var(--space-3)",
         height: CARD_HEIGHT,
         padding: "var(--space-4)",
@@ -152,18 +152,19 @@ function TitleRow({ market }: { market: Market }) {
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "40px 1fr",
+        gridTemplateColumns: "64px 1fr",
         gap: "var(--space-3)",
         alignItems: "start",
       }}
     >
-      <MarketThumb marketId={market.market_id} name={market.name} />
+      <MarketThumb marketId={market.market_id} name={market.name} size={64} />
       <h3
         style={{
           fontFamily: "var(--font-sans)",
           fontWeight: 600,
-          fontSize: "var(--fs-14)",
-          lineHeight: "var(--lh-14)",
+          fontSize: "var(--fs-20)",
+          lineHeight: "var(--lh-20)",
+          letterSpacing: "var(--track-tight)",
           margin: 0,
           color: "var(--fg-1)",
           display: "-webkit-box",

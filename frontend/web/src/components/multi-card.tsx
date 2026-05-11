@@ -72,7 +72,7 @@ export function MultiCard({ groupName, markets, prices }: Props) {
       ref={ref}
       style={{
         display: "grid",
-        gridTemplateRows: "22px 56px auto 1fr 18px",
+        gridTemplateRows: "22px 64px auto 1fr 18px",
         gap: "var(--space-3)",
         height: CARD_HEIGHT,
         padding: "var(--space-4)",
@@ -177,20 +177,21 @@ function TitleRow({
       href={href}
       style={{
         display: "grid",
-        gridTemplateColumns: "40px 1fr",
+        gridTemplateColumns: "64px 1fr",
         gap: "var(--space-3)",
         alignItems: "start",
         textDecoration: "none",
         color: "var(--fg-1)",
       }}
     >
-      <MarketThumb marketId={leaderId ?? 0} name={groupName} />
+      <MarketThumb marketId={leaderId ?? 0} name={groupName} size={64} />
       <h3
         style={{
           fontFamily: "var(--font-sans)",
           fontWeight: 600,
-          fontSize: "var(--fs-14)",
-          lineHeight: "var(--lh-14)",
+          fontSize: "var(--fs-20)",
+          lineHeight: "var(--lh-20)",
+          letterSpacing: "var(--track-tight)",
           margin: 0,
           color: "var(--fg-1)",
           display: "-webkit-box",
