@@ -2,12 +2,34 @@
 
 import type { ChangeEvent } from "react";
 
-export type SortKey = "volume" | "name" | "count";
+export type SortKey =
+  | "volume"
+  | "name"
+  | "count"
+  | "closing"
+  | "new";
+
+export const SORT_KEYS: readonly SortKey[] = [
+  "volume",
+  "name",
+  "count",
+  "closing",
+  "new",
+] as const;
+
+export function parseSortKey(raw: string | null | undefined): SortKey {
+  if (raw && (SORT_KEYS as readonly string[]).includes(raw)) {
+    return raw as SortKey;
+  }
+  return "volume";
+}
 
 const SORTS: { key: SortKey; label: string }[] = [
   { key: "volume", label: "Volume" },
   { key: "name", label: "Name" },
   { key: "count", label: "Outcomes" },
+  { key: "closing", label: "Closing soon" },
+  { key: "new", label: "New" },
 ];
 
 type Props = {
