@@ -1,7 +1,7 @@
 # Sybil Frontend — Scaffolding Plan
 
-> Reference doc. Decisions locked in during planning + revised after independent DevOps / FE / PM review.
-> If you're picking this up cold, read **Decisions** and **Where the app lives** first, then jump to the highest unchecked box in **Status**.
+> **Status: complete.** All 12 scaffolding boxes done. For current state and next steps, read [`STATUS.md`](./STATUS.md).
+> This file is preserved as the decision-of-record for the original plan + reviewer feedback + locked-in choices.
 
 ## Status
 
