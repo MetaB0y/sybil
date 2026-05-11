@@ -117,8 +117,7 @@ function MarketsPageInner() {
       {bundle && <ClearingTicker marketsById={bundle.byId} />}
       <main
         style={{
-          maxWidth: "var(--max-content)",
-          margin: "0 auto",
+          width: "100%",
           padding: "var(--space-6) var(--space-5) var(--space-9)",
           display: "flex",
           flexDirection: "column",

@@ -40,8 +40,7 @@ export default function MarketDetailPage({
   return (
     <main
       style={{
-        maxWidth: "var(--max-content)",
-        margin: "0 auto",
+        width: "100%",
         padding: "var(--space-6) var(--space-5) var(--space-9)",
         display: "grid",
         gridTemplateColumns: "minmax(0, 1fr) 360px",
