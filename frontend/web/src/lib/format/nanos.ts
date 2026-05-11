@@ -44,6 +44,24 @@ export const formatProbability = (v: NanosInput): string => {
   return `${pct}%`;
 };
 
+/**
+ * Format probability nanos as integer cents 0–100 with ¢ suffix.
+ * Edge cases: values >99.5% render as `>99¢`; values <0.5% render as `<1¢`.
+ */
+export const formatCents = (v: NanosInput): string => {
+  const nanos = parseNanos(v);
+  const cents = Number(nanos) / 1e7;
+  if (cents > 99.5) return ">99¢";
+  if (cents < 0.5 && cents > 0) return "<1¢";
+  return `${Math.round(cents)}¢`;
+};
+
+/** Format a percent change (e.g. +4.2%, -1.4%) with a leading sign. */
+export const formatPctDelta = (pct: number): string => {
+  const sign = pct >= 0 ? "+" : "";
+  return `${sign}${pct.toFixed(1)}%`;
+};
+
 /** Plain integer formatter for height / block / count values that aren't money. */
 export const formatInt = (v: NanosInput): string =>
   parseNanos(v).toLocaleString("en-US");

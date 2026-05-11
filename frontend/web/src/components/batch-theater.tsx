@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { formatInt, formatProbability } from "@/lib/format/nanos";
+import { formatCents, formatInt } from "@/lib/format/nanos";
 import {
   selectConnection,
   selectLatestBlock,
@@ -170,7 +170,7 @@ export function BatchTheater({ marketId, marketName }: Props) {
               color: price ? "var(--fg-1)" : "var(--fg-4)",
             }}
           >
-            {price ? formatProbability(price.yes) : "—"}
+            {price ? formatCents(price.yes) : "—"}
           </span>
           <span
             className="text-mono"
@@ -237,7 +237,7 @@ export function BatchTheater({ marketId, marketName }: Props) {
             className="text-mono tabular"
             style={{ color: price ? "var(--no)" : "var(--fg-4)" }}
           >
-            {price ? formatProbability(price.no) : "—"}
+            {price ? formatCents(price.no) : "—"}
           </span>
         </KV>
         <KV label="Last block at">

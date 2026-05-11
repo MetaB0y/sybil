@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { formatProbability } from "@/lib/format/nanos";
+import { formatCents } from "@/lib/format/nanos";
 import {
   usePendingOrdersForMarket,
   type PendingOrder,
@@ -159,7 +159,7 @@ function OrderRow({ order }: { order: PendingOrder }) {
         {SIDE_LABEL[side] ?? order.side}
       </span>
       <span className="tabular" style={{ textAlign: "right", color: "var(--fg-1)" }}>
-        {formatProbability(parseNanos(order.limit_price_nanos))}
+        {formatCents(parseNanos(order.limit_price_nanos))}
       </span>
       <span className="tabular" style={{ textAlign: "right", color: "var(--fg-2)" }}>
         {order.remaining_quantity}

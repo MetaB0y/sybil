@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
-import { formatInt, formatProbability } from "@/lib/format/nanos";
+import { formatCents, formatInt } from "@/lib/format/nanos";
 import type { Market } from "@/lib/markets/use-markets";
 import { selectLatestBlock, useStore } from "@/lib/store";
 import { parseNanos } from "@/lib/format/nanos";
@@ -164,7 +164,7 @@ function TickerChip({ id, name, yes }: { id: number; name: string; yes: bigint }
           fontWeight: 600,
         }}
       >
-        {formatProbability(yes)}
+        {formatCents(yes)}
       </span>
     </Link>
   );

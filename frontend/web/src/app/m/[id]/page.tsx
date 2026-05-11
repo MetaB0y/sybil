@@ -7,9 +7,9 @@ import { BatchTheater } from "@/components/batch-theater";
 import { PendingOrdersFeed } from "@/components/pending-orders-feed";
 import { PriceChart } from "@/components/price-chart";
 import {
+  formatCents,
   formatCompactDollars,
   formatDate,
-  formatProbability,
 } from "@/lib/format/nanos";
 import { useMarket } from "@/lib/markets/use-market";
 import { usePriceHistory } from "@/lib/markets/use-price-history";
@@ -230,7 +230,7 @@ function PriceCard({
           color: value != null ? "var(--fg-1)" : "var(--fg-4)",
         }}
       >
-        {value != null ? formatProbability(value) : "—"}
+        {value != null ? formatCents(value) : "—"}
       </div>
       {value != null && (
         <div style={{ marginTop: "var(--space-2)", height: 4, background: faint, borderRadius: 2, overflow: "hidden" }}>
