@@ -4,6 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { use } from "react";
 import { BatchTheater } from "@/components/batch-theater";
+import { PendingOrdersFeed } from "@/components/pending-orders-feed";
 import { PriceChart } from "@/components/price-chart";
 import {
   formatCompactDollars,
@@ -64,6 +65,7 @@ export default function MarketDetailPage({
               history={history}
               isPending={historyQ.isPending}
             />
+            <PendingOrdersFeed marketId={marketId} />
             <DescriptionBlock market={market} />
           </>
         )}
