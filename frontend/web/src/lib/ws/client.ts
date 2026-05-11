@@ -101,6 +101,13 @@ export class BlockStream {
     return this.lastSeenHeight;
   }
 
+  /** Seed the height handshake from a REST snapshot. The next connect()
+   *  will pass `?from_block=height+1`, so the server replays missed blocks. */
+  seedLastSeenHeight(height: number): void {
+    if (!Number.isFinite(height) || height < 0) return;
+    this.lastSeenHeight = height;
+  }
+
   // ── Internal: socket lifecycle ────────────────────────────────────────
 
   private openSocket(reason: ConnectionTransitionReason): void {

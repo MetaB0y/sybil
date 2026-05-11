@@ -2,11 +2,14 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
-import { formatInt } from "@/lib/format/nanos";
+import { formatInt, formatProbability } from "@/lib/format/nanos";
 import {
   selectConnection,
+  selectHydratedAtHeight,
+  selectHydration,
   selectLatestHeight,
   selectMarketCount,
+  selectPricesByMarketId,
   useStore,
 } from "@/lib/store";
 
@@ -30,8 +33,12 @@ export default function Home() {
   });
 
   const connection = useStore(selectConnection);
+  const hydration = useStore(selectHydration);
+  const hydratedAt = useStore(selectHydratedAtHeight);
   const liveHeight = useStore(selectLatestHeight);
   const livePriceMarkets = useStore(selectMarketCount);
+  const prices = useStore(selectPricesByMarketId);
+  const samplePriceEntry = Object.entries(prices)[0];
 
   return (
     <main
@@ -94,18 +101,39 @@ export default function Home() {
       </section>
 
       <section style={panelStyle}>
+        <div className="eyebrow">{"// hydration · rest → store"}</div>
+        <div style={{ marginTop: "var(--space-2)" }}>
+          <span className="text-mono" style={{ fontSize: "var(--fs-20)" }}>
+            phase={hydration}
+            {hydratedAt != null ? ` · H₀=${formatInt(hydratedAt)}` : ""}
+            {livePriceMarkets > 0 ? ` · markets_priced=${livePriceMarkets}` : ""}
+          </span>
+        </div>
+      </section>
+
+      <section style={panelStyle}>
         <div className="eyebrow">{"// store · ws → zustand"}</div>
         <div style={{ marginTop: "var(--space-2)" }}>
           <span className="text-mono" style={{ fontSize: "var(--fs-20)" }}>
             state={connection.state}
             {liveHeight != null ? ` · height=${formatInt(liveHeight)}` : ""}
-            {livePriceMarkets > 0 ? ` · live_prices=${livePriceMarkets}` : ""}
           </span>
         </div>
       </section>
 
+      {samplePriceEntry && (
+        <section style={panelStyle}>
+          <div className="eyebrow">{"// sample · formatProbability (bigint → %)"}</div>
+          <div style={{ marginTop: "var(--space-2)" }}>
+            <span className="text-mono" style={{ fontSize: "var(--fs-20)" }}>
+              market #{samplePriceEntry[0]} · yes={formatProbability(samplePriceEntry[1].yes)} · no={formatProbability(samplePriceEntry[1].no)}
+            </span>
+          </div>
+        </section>
+      )}
+
       <footer style={{ marginTop: "var(--space-4)" }}>
-        <div className="text-annotation">milestone B · store-backed · throwaway until markets ship</div>
+        <div className="text-annotation">milestone C · hydrated handshake · throwaway until markets ship</div>
       </footer>
     </main>
   );
