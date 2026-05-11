@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Syne, Inter, JetBrains_Mono } from "next/font/google";
+import { GlobalNav } from "@/components/global-nav";
 import { Providers } from "./providers";
 import "./globals.css";
 
@@ -37,7 +38,10 @@ export default function RootLayout({
       className={`${display.variable} ${sans.variable} ${mono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <Providers>{children}</Providers>
+        <Providers>
+          <GlobalNav />
+          <div style={{ paddingTop: "var(--nav-height)" }}>{children}</div>
+        </Providers>
       </body>
     </html>
   );
