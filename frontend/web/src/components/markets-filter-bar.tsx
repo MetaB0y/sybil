@@ -1,18 +1,16 @@
 "use client";
 
-import type { ChangeEvent } from "react";
+import { CategoryTabs } from "./category-tabs";
 
 export type SortKey =
   | "volume"
-  | "name"
-  | "count"
+  | "topmovers"
   | "closing"
   | "new";
 
 export const SORT_KEYS: readonly SortKey[] = [
   "volume",
-  "name",
-  "count",
+  "topmovers",
   "closing",
   "new",
 ] as const;
@@ -24,132 +22,83 @@ export function parseSortKey(raw: string | null | undefined): SortKey {
   return "volume";
 }
 
-const SORTS: { key: SortKey; label: string }[] = [
+type ChipDef = {
+  key: SortKey;
+  label: string;
+  disabled?: boolean;
+  title?: string;
+};
+
+const SORTS: ChipDef[] = [
   { key: "volume", label: "Volume" },
-  { key: "name", label: "Name" },
-  { key: "count", label: "Outcomes" },
+  {
+    key: "topmovers",
+    label: "Top movers",
+    disabled: true,
+    title: "top movers — needs 24h delta from backend",
+  },
   { key: "closing", label: "Closing soon" },
   { key: "new", label: "New" },
 ];
 
 type Props = {
-  query: string;
-  onQueryChange: (q: string) => void;
   sort: SortKey;
   onSortChange: (s: SortKey) => void;
-  resultsCount: number;
 };
 
-export function MarketsFilterBar({
-  query,
-  onQueryChange,
-  sort,
-  onSortChange,
-  resultsCount,
-}: Props) {
+export function MarketsFilterBar({ sort, onSortChange }: Props) {
   return (
     <div
       style={{
         display: "flex",
         alignItems: "center",
-        gap: "var(--space-4)",
-        flexWrap: "wrap",
+        gap: "var(--space-5)",
         padding: "var(--space-3) 0",
         borderTop: "1px solid var(--border-1)",
         borderBottom: "1px solid var(--border-1)",
       }}
     >
-      {/* Search */}
-      <div
-        style={{
-          position: "relative",
-          flex: "1 1 280px",
-          display: "flex",
-          alignItems: "center",
-          height: 36,
-          background: "var(--surface-1)",
-          border: "1px solid var(--border-2)",
-          borderRadius: "var(--radius-md)",
-          padding: "0 var(--space-3)",
-        }}
-      >
-        <span
-          aria-hidden
-          className="text-mono"
-          style={{
-            color: "var(--fg-4)",
-            fontSize: "var(--fs-12)",
-            letterSpacing: "var(--track-wide)",
-            textTransform: "uppercase",
-            marginRight: "var(--space-2)",
-          }}
-        >
-          /
-        </span>
-        <input
-          value={query}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => onQueryChange(e.target.value)}
-          placeholder="search events…"
-          aria-label="search markets"
-          style={{
-            flex: 1,
-            background: "transparent",
-            border: 0,
-            outline: "none",
-            color: "var(--fg-1)",
-            fontFamily: "var(--font-sans)",
-            fontSize: "var(--fs-14)",
-            padding: 0,
-          }}
-        />
-        {query.length > 0 && (
-          <button
-            type="button"
-            onClick={() => onQueryChange("")}
-            aria-label="clear search"
-            style={{
-              background: "transparent",
-              border: 0,
-              color: "var(--fg-3)",
-              cursor: "pointer",
-              fontFamily: "var(--font-mono)",
-              fontSize: "var(--fs-12)",
-              padding: "0 var(--space-2)",
-            }}
-          >
-            ×
-          </button>
-        )}
-      </div>
+      <CategoryTabs />
 
-      {/* Sort chips */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
           gap: "var(--space-2)",
+          flexShrink: 0,
         }}
       >
-        <span className="text-meta" style={{ marginRight: "var(--space-1)" }}>
-          Sort
-        </span>
         {SORTS.map((s) => {
           const active = sort === s.key;
           return (
             <button
               key={s.key}
               type="button"
-              onClick={() => onSortChange(s.key)}
+              disabled={s.disabled}
+              title={s.title}
+              onClick={() => !s.disabled && onSortChange(s.key)}
               style={{
-                height: 28,
+                height: 26,
                 padding: "0 var(--space-3)",
-                background: active ? "var(--accent-soft)" : "var(--surface-1)",
-                color: active ? "var(--accent)" : "var(--fg-2)",
-                border: `1px solid ${active ? "color-mix(in srgb, var(--accent) 32%, transparent)" : "var(--border-2)"}`,
-                borderRadius: "var(--radius-pill)",
-                fontFamily: "var(--font-sans)",
-                fontSize: "var(--fs-12)",
-                cursor: "pointer",
+                background: active ? "var(--surface-2)" : "transparent",
+                color: active
+                  ? "var(--fg-1)"
+                  : s.disabled
+                    ? "var(--fg-4)"
+                    : "var(--fg-3)",
+                border: `1px solid ${
+                  active ? "var(--border-3)" : "var(--border-2)"
+                }`,
+                borderRadius: "var(--radius-sm)",
+                fontFamily: "var(--font-mono)",
+                fontSize: "11px",
+                letterSpacing: "var(--track-wide)",
+                textTransform: "uppercase",
+                cursor: s.disabled
+                  ? "not-allowed"
+                  : active
+                    ? "default"
+                    : "pointer",
                 transition: "all var(--dur-fast) var(--ease-standard)",
               }}
             >
@@ -158,18 +107,6 @@ export function MarketsFilterBar({
           );
         })}
       </div>
-
-      {/* Result count */}
-      <span
-        className="text-mono tabular"
-        style={{
-          marginLeft: "auto",
-          color: "var(--fg-3)",
-          fontSize: "var(--fs-12)",
-        }}
-      >
-        {resultsCount} {resultsCount === 1 ? "event" : "events"}
-      </span>
     </div>
   );
 }

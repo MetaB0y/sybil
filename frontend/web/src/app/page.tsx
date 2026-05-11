@@ -45,7 +45,7 @@ export default function MarketsPage() {
 function MarketsPageInner() {
   const { bundle, isPending, error } = useMarketsList();
   const prices = useStore(selectPricesByMarketId);
-  const { query, sort, setQuery, setSort } = useFilterParams();
+  const { query, sort, setSort } = useFilterParams();
 
   const items = useMemo(() => {
     if (!bundle) return null;
@@ -95,16 +95,13 @@ function MarketsPageInner() {
       out = out.filter((it) => it.sortKey.includes(q));
     }
     out = [...out];
-    if (sort === "name") {
-      out.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
-    } else if (sort === "count") {
-      out.sort((a, b) => sizeOf(b) - sizeOf(a));
-    } else if (sort === "closing") {
+    if (sort === "closing") {
       out.sort((a, b) => a.expiryMs - b.expiryMs);
     } else if (sort === "new") {
       out.sort((a, b) => b.createdMs - a.createdMs);
     } else {
-      // volume desc; tie-break by size desc
+      // volume desc; tie-break by size desc. "topmovers" falls here for now
+      // (it's a disabled chip — never actually selected from the UI).
       out.sort((a, b) => {
         if (a.volumeNanos !== b.volumeNanos) {
           return a.volumeNanos < b.volumeNanos ? 1 : -1;
@@ -149,19 +146,15 @@ function MarketsPageInner() {
             All markets
           </h1>
           <p className="text-annotation">
-            {bundle != null
-              ? `${bundle.total} events · ${bundle.groups.length} groups · uniform clearing every 2s`
-              : "loading…"}
+            {bundle == null
+              ? "loading…"
+              : filtered && filtered.length !== items?.length
+                ? `${filtered.length} of ${bundle.total} events · uniform clearing every 2s`
+                : `${bundle.total} events · ${bundle.groups.length} groups · uniform clearing every 2s`}
           </p>
         </header>
 
-        <MarketsFilterBar
-          query={query}
-          onQueryChange={setQuery}
-          sort={sort}
-          onSortChange={setSort}
-          resultsCount={filtered?.length ?? 0}
-        />
+        <MarketsFilterBar sort={sort} onSortChange={setSort} />
 
         {isPending && <Placeholder>loading markets…</Placeholder>}
         {error && <Placeholder error>error: {String(error)}</Placeholder>}
@@ -234,7 +227,6 @@ function useFilterParams() {
   return {
     query,
     sort,
-    setQuery: (q: string) => update({ q }),
     setSort: (s: SortKey) => update({ sort: s }),
   };
 }
