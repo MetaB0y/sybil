@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sybil — Activity</title>
+<link rel="icon" href="../assets/favicon.ico">
+<link rel="stylesheet" href="../tokens/colors_and_type.css">
+<style>
+  html, body { background: var(--bg-1); margin: 0; height: 100%; }
+  body { color: var(--fg-1); font-family: var(--font-sans); }
+  .page { min-height: 100vh; display: flex; flex-direction: column; }
+  .scroll { flex: 1; }
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 4px; }
+
+  /* Batch table — bigger rows, fewer columns */
+  .bt-row {
+    display: grid;
+    grid-template-columns:
+      24px                /* expander */
+      120px               /* batch # */
+      130px               /* cleared */
+      80px                /* markets */
+      130px               /* matched volume */
+      120px               /* welfare */
+      80px                /* traders */
+      1fr;                /* orders */
+    gap: 28px;
+    align-items: center;
+    padding: 0 22px;
+  }
+  .bt-row.bt-head    { height: 36px; }
+  .bt-row.bt-body    { height: 64px; }
+  .bt-head {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--fg-3);
+    border-bottom: 1px solid var(--border-1);
+    background: var(--bg-1);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  .bt-body-row { border-bottom: 1px solid var(--border-1); cursor: pointer; transition: background var(--dur-fast) var(--ease-standard); }
+  .bt-body-row:hover { background: var(--surface-2); }
+  .bt-body-row.expanded { background: var(--surface-2); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="../data/MarketsData.jsx"></script>
+<script type="text/babel" src="../data/ActivityData.jsx"></script>
+
+<script type="text/babel">
+// ── Live batch clock ───────────────────────────────────────────────────────
+function useBatchClock() {
+  const [secs, setSecs] = React.useState(42);
+  React.useEffect(() => {
+    const id = setInterval(() => setSecs(s => s > 0 ? s - 1 : 60), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return secs;
+}
+
+// ── Top nav ────────────────────────────────────────────────────────────────
+function NavTab({ label, active, onClick }) {
+  return (
+    <button onClick={onClick} style={{
+      background:active?'var(--surface-1)':'transparent', border:0, padding:'5px 10px', borderRadius:3,
+      color: active ? 'var(--fg-1)' : 'var(--fg-3)',
+      fontFamily:'var(--font-sans)', fontSize:12, fontWeight:500, cursor:'pointer',
+    }}>{label}</button>
+  );
+}
+function GlobalNav({ secs, activeTop, setActiveTop }) {
+  const [devOpen, setDevOpen] = React.useState(false);
+  const devRef = React.useRef(null);
+  React.useEffect(() => {
+    const close = (e) => { if (devRef.current && !devRef.current.contains(e.target)) setDevOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, []);
+  const devActive = ['Overview','Blocks','Trading'].includes(activeTop);
+  return (
+    <div style={{
+      position:'sticky', top:0, zIndex:50, height:56,
+      background:'rgba(10,14,18,0.84)', backdropFilter:'var(--blur-nav)', WebkitBackdropFilter:'var(--blur-nav)',
+      borderBottom:'1px solid var(--border-1)',
+      display:'flex', alignItems:'center', padding:'0 24px', gap:18,
+    }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+        <img src="../assets/sybil-mark.png" width="22" height="22" style={{ borderRadius:3 }} alt="" />
+        <span style={{ fontFamily:'var(--font-display)', fontWeight:700, fontSize:15, letterSpacing:'-0.01em', textTransform:'uppercase' }}>SYBIL</span>
+      </div>
+      <span style={{ fontFamily:'var(--font-mono)', fontSize:10, color:'var(--warn)', padding:'2px 7px', background:'var(--warn-soft)', borderRadius:9999, letterSpacing:'0.04em', textTransform:'uppercase' }}>testnet</span>
+      <div style={{ display:'flex', gap:2 }}>
+        {['Markets','Activity','Portfolio','Docs'].map(l => <NavTab key={l} label={l} active={activeTop===l} onClick={() => setActiveTop(l)} />)}
+        <div style={{ position:'relative' }} ref={devRef}>
+          <button onClick={() => setDevOpen(o => !o)} style={{
+            background: devActive ? 'var(--surface-1)' : 'transparent', border:0, padding:'5px 10px', borderRadius:3,
+            color: devActive ? 'var(--fg-1)' : 'var(--fg-3)',
+            fontFamily:'var(--font-sans)', fontSize:12, fontWeight:500, cursor:'pointer',
+            display:'flex', alignItems:'center', gap:6,
+          }}>
+            Dev zone
+            <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m3 4.5 3 3 3-3"/></svg>
+          </button>
+          {devOpen && (
+            <div style={{
+              position:'absolute', top:'calc(100% + 6px)', left:0,
+              background:'var(--surface-1)', border:'1px solid var(--border-2)', borderRadius:4,
+              padding:4, minWidth:160, boxShadow:'0 10px 30px rgba(0,0,0,0.35)',
+            }}>
+              <div style={{ fontFamily:'var(--font-mono)', fontSize:9, color:'var(--fg-4)', textTransform:'uppercase', letterSpacing:'0.04em', padding:'6px 10px 4px' }}>Dev zone</div>
+              {['Overview','Blocks','Trading'].map(l => (
+                <button key={l} onClick={() => { setActiveTop(l); setDevOpen(false); }} style={{
+                  display:'block', width:'100%', textAlign:'left',
+                  background: activeTop===l ? 'var(--bg-2)' : 'transparent',
+                  border:0, padding:'7px 10px', borderRadius:3,
+                  color: activeTop===l ? 'var(--fg-1)' : 'var(--fg-2)',
+                  fontFamily:'var(--font-sans)', fontSize:12, cursor:'pointer',
+                }}>{l}</button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:10 }}>
+        <BatchPill secs={secs} dense />
+        <div style={{ display:'flex', alignItems:'center', gap:8, background:'var(--surface-1)', border:'1px solid var(--border-2)', borderRadius:3, padding:'4px 10px', width:240 }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color:'var(--fg-3)' }}><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <span style={{ flex:1, color:'var(--fg-4)', fontSize:12 }}>Search batches, markets</span>
+          <span style={{ fontFamily:'var(--font-mono)', fontSize:10, color:'var(--fg-3)' }}>⌘K</span>
+        </div>
+        <button style={{ background:'transparent', border:'1px solid var(--border-2)', borderRadius:3, padding:'5px 10px', color:'var(--fg-1)', fontFamily:'var(--font-sans)', fontSize:12, fontWeight:500, cursor:'pointer' }}>0xA17F···c92E</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Tiny sparkline ─────────────────────────────────────────────────────────
+function Spark({ data, w=120, h=32, stroke='var(--accent)', fill=true, strokeWidth=1.25 }) {
+  const max = Math.max(...data), min = Math.min(...data); const r = max-min || 1;
+  const step = w/(data.length-1);
+  const pts = data.map((v,i) => [i*step, (1-(v-min)/r)*h]);
+  const path = pts.map((p,i) => (i===0?'M':'L')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width={w} height={h} style={{ display:'block', overflow:'visible' }}>
+      {fill && <path d={path + ` L ${w} ${h} L 0 ${h} Z`} fill={stroke} fillOpacity="0.12"/>}
+      <path d={path} fill="none" stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+// ── Hero — All time ────────────────────────────────────────────────────────
+// Editorial layout: a giant matched-volume number anchors the page;
+// supporting stats arrange around it as a typographic stack, no card chrome.
+function HeroAllTime() {
+  const a = ACTIVITY_ALLTIME;
+  return (
+    <section style={{
+      padding:'28px 24px 28px',
+      borderBottom:'1px solid var(--border-1)',
+      position:'relative',
+    }}>
+      <div style={{
+        display:'grid',
+        gridTemplateColumns:'minmax(0, 1.1fr) minmax(0, 1fr)',
+        gap:48, alignItems:'start',
+      }}>
+        {/* Left: hero number */}
+        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+            <span className="eyebrow">All-time matched volume</span>
+            <span className="text-annotation" style={{ fontSize:11 }}>since genesis · {a.genesisAge}</span>
+          </div>
+          <div style={{
+            fontFamily:'var(--font-sans)',
+            fontWeight:600,
+            fontSize:'clamp(48px, 5.4vw, 80px)',
+            lineHeight:0.95,
+            letterSpacing:'-0.02em',
+            color:'var(--fg-1)',
+            fontVariantNumeric:'tabular-nums',
+          }}>
+            {a.matchedVolume}
+          </div>
+          <div style={{ display:'flex', alignItems:'center', gap:14, paddingTop:6 }}>
+            <span style={{ fontFamily:'var(--font-mono)', fontSize:11, color:'var(--fg-3)', textTransform:'uppercase', letterSpacing:'0.04em' }}>
+              <span className="is-live"></span>{a.totalBatches.toLocaleString()} batches · {a.liveMarkets} live markets · uptime <span style={{ color:'var(--yes)' }}>{a.uptime}</span>
+            </span>
+          </div>
+        </div>
+
+        {/* Right: editorial stat stack */}
+        <div style={{
+          display:'grid', gridTemplateColumns:'1fr 1fr', columnGap:36, rowGap:22,
+          alignSelf:'start', paddingTop:24,
+        }}>
+          <BigKv label="Active traders"   value={fmtNum(a.traders)} sub="addresses placed ≥1 order" />
+          <BigKv label="Placed orders"    value={fmtNum(a.ordersPlaced)} sub="across all batches" />
+          <BigKv label="Matched orders"   value={fmtNum(a.ordersMatched)} accent="var(--yes)"
+                 sub="successfully filled at clear" />
+          <BigKv label="Unmatched orders" value={fmtNum(a.ordersUnmatched)} accent="var(--fg-2)"
+                 sub="cancelled or expired" />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function BigKv({ label, value, sub, accent='var(--fg-1)' }) {
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:6, minWidth:0 }}>
+      <span className="eyebrow">{label}</span>
+      <div style={{ display:'flex', alignItems:'baseline', gap:12, justifyContent:'space-between' }}>
+        <span style={{
+          fontFamily:'var(--font-sans)', fontSize:30, fontWeight:600,
+          color:accent, fontVariantNumeric:'tabular-nums', letterSpacing:'-0.01em', lineHeight:1,
+        }}>
+          {value}
+        </span>
+      </div>
+      <span style={{ fontFamily:'var(--font-mono)', fontSize:10, color:'var(--fg-3)', textTransform:'uppercase', letterSpacing:'0.04em' }}>
+        {sub}
+      </span>
+    </div>
+  );
+}
+
+// ── 24h section — compact strip below the hero ─────────────────────────────
+function PulseStrip() {
+  const a = ACTIVITY_24H;
+  const items = [
+    { label:'Matched volume',   value:a.matchedVolume,           delta:a.matchedVolumeDelta },
+    { label:'Active traders',   value:fmtNum(a.traders),         delta:a.tradersDelta        },
+    { label:'Placed orders',    value:fmtNum(a.ordersPlaced)                                  },
+    { label:'Matched orders',   value:fmtNum(a.ordersMatched),   accent:'var(--yes)'         },
+    { label:'Unmatched orders', value:fmtNum(a.ordersUnmatched), accent:'var(--fg-2)'        },
+  ];
+  return (
+    <section style={{ padding:'20px 24px 4px' }}>
+      <div style={{ display:'flex', alignItems:'baseline', gap:14, paddingBottom:14 }}>
+        <h3 style={{ fontFamily:'var(--font-sans)', fontSize:13, fontWeight:600, margin:0, color:'var(--fg-2)', textTransform:'uppercase', letterSpacing:'0.06em' }}>
+          Last 24 hours
+        </h3>
+        <span className="text-annotation" style={{ fontSize:11 }}>rolling window · vs prior 24 h</span>
+        <span style={{ marginLeft:'auto', fontFamily:'var(--font-mono)', fontSize:10, color:'var(--fg-3)', textTransform:'uppercase', letterSpacing:'0.04em' }}>
+          <span className="is-live"></span>live
+        </span>
+      </div>
+      <div style={{
+        display:'grid', gridTemplateColumns:'repeat(5, 1fr)',
+        borderTop:'1px solid var(--border-1)', borderBottom:'1px solid var(--border-1)',
+      }}>
+        {items.map((it, i) => (
+          <div key={it.label} style={{
+            padding:'14px 18px',
+            borderRight: i < items.length-1 ? '1px solid var(--border-1)' : 0,
+            display:'flex', flexDirection:'column', gap:8, minWidth:0,
+          }}>
+            <span className="eyebrow">{it.label}</span>
+            <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', gap:10 }}>
+              <span style={{
+                fontFamily:'var(--font-sans)', fontSize:22, fontWeight:600, color: it.accent || 'var(--fg-1)',
+                fontVariantNumeric:'tabular-nums', letterSpacing:'-0.01em', lineHeight:1,
+              }}>{it.value}</span>
+              {it.delta != null && (
+                <span style={{ fontFamily:'var(--font-mono)', fontSize:11, color: it.delta>=0?'var(--yes)':'var(--no)', fontVariantNumeric:'tabular-nums' }}>
+                  {it.delta>=0?'+':''}{it.delta}%
+                </span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// ── Batch row (collapsed) ──────────────────────────────────────────────────
+function BatchRow({ b, expanded, onToggle }) {
+  return (
+    <div className={'bt-body-row bt-row bt-body' + (expanded ? ' expanded' : '')} onClick={onToggle}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'center', color:'var(--fg-3)' }}>
+        <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"
+             style={{ transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', transition:'transform 120ms ease' }}>
+          <path d="m4 3 3 3-3 3"/>
+        </svg>
+      </div>
+      <div style={{ display:'flex', alignItems:'baseline', gap:8 }}>
+        <span style={{ fontFamily:'var(--font-mono)', fontSize:16, color:'var(--fg-1)', fontVariantNumeric:'tabular-nums', letterSpacing:'-0.005em' }}>
+          #{b.id.toLocaleString()}
+        </span>
+      </div>
+      <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
+        <span style={{ fontFamily:'var(--font-mono)', fontSize:13, color:'var(--fg-1)', fontVariantNumeric:'tabular-nums' }}>
+          {fmtClock(b.ts)}
+        </span>
+        <span style={{ fontFamily:'var(--font-mono)', fontSize:10, color:'var(--fg-4)', textTransform:'uppercase', letterSpacing:'0.04em' }}>
+          {fmtRelTime(b.ts)}
+        </span>
+      </div>
+      <div style={{ fontFamily:'var(--font-mono)', fontSize:14, color:'var(--fg-1)', fontVariantNumeric:'tabular-nums' }}>
+        {b.markets}
+      </div>
+      <div style={{ fontFamily:'var(--font-mono)', fontSize:14, color:'var(--fg-1)', fontVariantNumeric:'tabular-nums' }}>
+        {fmtMoneyK(b.matchedVolume)}
+      </div>
+      <div style={{ fontFamily:'var(--font-mono)', fontSize:14, color:'var(--yes)', fontVariantNumeric:'tabular-nums', display:'flex', alignItems:'baseline', gap:6 }}>
+        +{fmtMoneyK(b.matchedVolume * 0.118)}
+        <span style={{ fontSize:10, color:'rgba(91,217,154,0.6)', textTransform:'uppercase', letterSpacing:'0.04em' }}>saved</span>
+      </div>
+      <div style={{ fontFamily:'var(--font-mono)', fontSize:14, color:'var(--fg-2)', fontVariantNumeric:'tabular-nums' }}>
+        {b.traders}
+      </div>
+      <OrdersCell placed={b.ordersPlaced} matched={b.ordersMatched} unmatched={b.ordersUnmatched} />
+    </div>
+  );
+}
+
+// Orders cell: placed (big) → matched / unmatched chips with a thin bar
+function OrdersCell({ placed, matched, unmatched }) {
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:18, fontVariantNumeric:'tabular-nums' }}>
+      <span style={{ fontFamily:'var(--font-mono)', fontSize:14, color:'var(--fg-1)', minWidth:48 }}>{placed}</span>
+      <span style={{ fontFamily:'var(--font-mono)', fontSize:12, color:'var(--yes)' }}>
+        {matched} <span style={{color:'var(--fg-4)',textTransform:'uppercase',letterSpacing:'0.04em',fontSize:9,marginLeft:2}}>matched</span>
+      </span>
+      <span style={{ fontFamily:'var(--font-mono)', fontSize:12, color:'var(--no)' }}>
+        {unmatched} <span style={{color:'var(--fg-4)',textTransform:'uppercase',letterSpacing:'0.04em',fontSize:9,marginLeft:2}}>unmatched</span>
+      </span>
+    </div>
+  );
+}
+
+// ── Batch detail panel ─────────────────────────────────────────────────────
+function CategoryDot({ cat }) {
+  const dotColors = { macro:'#A988E0', crypto:'#F4A058', politics:'#E8556C', tech:'#3FB6D9', science:'#5BD99A', sports:'#E8B447' };
+  return <span style={{ width:6, height:6, borderRadius:'50%', background: dotColors[cat] || '#888', display:'inline-block' }} />;
+}
+
+function BatchDetail({ b }) {
+  const d = React.useMemo(() => detailFor(b), [b.id]);
+  const [shown, setShown] = React.useState(6);
+  const visible = d.marketRows.slice(0, shown);
+  const remaining = d.marketRows.length - visible.length;
+  return (
+    <div style={{ background:'var(--bg-1)', borderBottom:'1px solid var(--border-1)', padding:'18px 24px 24px 70px' }}>
+      {/* meta strip */}
+      <div style={{ display:'flex', flexWrap:'wrap', gap:32, paddingBottom:16, borderBottom:'1px solid var(--border-1)', marginBottom:18 }}>
+        <MetaPair label="Tx hash"           value={d.txHash}                          mono link />
+        <MetaPair label="Block"              value={'#' + d.blockNum.toLocaleString()} mono />
+        <MetaPair label="Sequencer"          value={d.sequencer}                        mono />
+        <MetaPair label="Clearing duration"  value={d.clearingMs + ' ms'}               mono />
+        <MetaPair label="Algo"               value="uniform clearing · pro-rata"        />
+      </div>
+
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 280px', gap:24 }}>
+        <div>
+          <div style={{ background:'var(--surface-1)', border:'1px solid var(--border-1)', borderRadius:6, overflow:'hidden' }}>
+            <div style={{
+              display:'grid', gridTemplateColumns:'2fr 70px 60px 110px 100px 130px 1fr',
+              gap:12, padding:'8px 14px', alignItems:'center',
+              fontFamily:'var(--font-mono)', fontSize:9.5, color:'var(--fg-3)',
+              textTransform:'uppercase', letterSpacing:'0.04em',
+              borderBottom:'1px solid var(--border-1)', background:'var(--surface-2)',
+            }}>
+              <span>Market</span>
+              <span style={{ textAlign:'right' }}>Clear</span>
+              <span style={{ textAlign:'right' }}>Δ</span>
+              <span style={{ textAlign:'right' }}>Matched vol</span>
+              <span style={{ textAlign:'right' }}>Welfare</span>
+              <span style={{ textAlign:'right' }}>Placed / Matched</span>
+              <span style={{ textAlign:'right' }}>Imbalance</span>
+            </div>
+            {visible.map((m, i) => (
+              <div key={m.id} style={{
+                display:'grid', gridTemplateColumns:'2fr 70px 60px 110px 100px 130px 1fr',
+                gap:12, padding:'10px 14px', alignItems:'center',
+                borderBottom: '1px solid var(--border-1)',
+              }}>
+                <div style={{ display:'flex', alignItems:'center', gap:10, minWidth:0 }}>
+                  <CategoryDot cat={m.category} />
+                  <span style={{ fontFamily:'var(--font-sans)', fontSize:12, color:'var(--fg-2)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    {m.title}
+                  </span>
+                </div>
+                <span style={{ fontFamily:'var(--font-mono)', fontSize:13, color:'var(--fg-1)', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>
+                  {m.clearPrice}¢
+                </span>
+                <span style={{ fontFamily:'var(--font-mono)', fontSize:11, color: m.delta>=0?'var(--yes)':'var(--no)', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>
+                  {m.delta>=0?'+':''}{m.delta}
+                </span>
+                <span style={{ fontFamily:'var(--font-mono)', fontSize:12, color:'var(--fg-2)', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>
+                  ${m.matchedVol}K
+                </span>
+                <span style={{ fontFamily:'var(--font-mono)', fontSize:12, color:'var(--yes)', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>
+                  +${(parseFloat(m.matchedVol) * 0.118).toFixed(1)}K
+                </span>
+                <span style={{ fontFamily:'var(--font-mono)', fontSize:11, textAlign:'right', fontVariantNumeric:'tabular-nums' }}>
+                  <span style={{ color:'var(--fg-2)' }}>{m.placed}</span>
+                  <span style={{ color:'var(--fg-4)' }}> / </span>
+                  <span style={{ color:'var(--yes)' }}>{m.matched}</span>
+                </span>
+                <ImbalanceSide buys={m.buys} sells={m.sells} />
+              </div>
+            ))}
+
+            {/* Show more / show less toggle */}
+            {(remaining > 0 || shown > 6) && (
+              <button
+                onClick={() => setShown(s => remaining > 0 ? Math.min(d.marketRows.length, s + 10) : 6)}
+                style={{
+                  display:'block', width:'100%', background:'transparent',
+                  border:0, borderTop:'1px solid var(--border-1)',
+                  padding:'10px 14px', cursor:'pointer',
+                  color:'var(--accent)', fontFamily:'var(--font-mono)', fontSize:11,
+                  textTransform:'uppercase', letterSpacing:'0.04em', textAlign:'left',
+                }}>
+                {remaining > 0
+                  ? `Show ${Math.min(10, remaining)} more · ${remaining} remaining`
+                  : 'Show less'}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* right: order outcome only */}
+        <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+          <DetailPanel title="Order outcome">
+            <DonutOrders matched={b.ordersMatched} unmatched={b.ordersUnmatched} />
+          </DetailPanel>
+          <DetailPanel title="Batch composition">
+            <KvRow label="Markets"          value={b.markets} />
+            <KvRow label="Unique traders"   value={b.traders} />
+            <KvRow label="Placed orders"    value={b.ordersPlaced} />
+            <KvRow label="Matched orders"   value={b.ordersMatched}   color="var(--yes)" />
+            <KvRow label="Unmatched orders" value={b.ordersUnmatched} color="var(--no)" />
+          </DetailPanel>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MetaPair({ label, value, mono, link, color }) {
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+      <span className="eyebrow" style={{ color:'var(--fg-3)' }}>{label}</span>
+      <span style={{
+        fontFamily: mono ? 'var(--font-mono)' : 'var(--font-sans)',
+        fontSize: 12,
+        color: link ? 'var(--accent)' : (color || 'var(--fg-1)'),
+        fontVariantNumeric:'tabular-nums',
+        textDecoration: link ? 'underline' : 'none',
+        textUnderlineOffset: 2,
+      }}>{value}</span>
+    </div>
+  );
+}
+
+function ImbalanceSide({ buys, sells }) {
+  const total = buys + sells || 1;
+  const diff = buys - sells;
+  const pct = Math.abs(diff) / total * 100;
+  const isBuy = diff >= 0;
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:6, justifyContent:'flex-end', fontVariantNumeric:'tabular-nums' }}>
+      <span style={{
+        fontFamily:'var(--font-mono)', fontSize:9.5, color: isBuy ? 'var(--yes)' : 'var(--no)',
+        textTransform:'uppercase', letterSpacing:'0.04em',
+      }}>{isBuy ? 'buy' : 'sell'}</span>
+      <span style={{ fontFamily:'var(--font-mono)', fontSize:12, color: isBuy ? 'var(--yes)' : 'var(--no)' }}>
+        {pct.toFixed(1)}%
+      </span>
+    </div>
+  );
+}
+
+function BuySellBar({ buys, sells }) {
+  const total = buys + sells || 1;
+  const buyPct = (buys / total) * 100;
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+      <div style={{ flex:1, height:6, background:'rgba(255,255,255,0.04)', borderRadius:1, display:'flex', overflow:'hidden' }}>
+        <div style={{ width: buyPct + '%', background:'var(--yes)', opacity:0.78 }} />
+        <div style={{ width: (100-buyPct) + '%', background:'var(--no)', opacity:0.78 }} />
+      </div>
+      <span style={{ fontFamily:'var(--font-mono)', fontSize:10, color:'var(--fg-3)', fontVariantNumeric:'tabular-nums', minWidth:46 }}>
+        {buys}b · {sells}s
+      </span>
+    </div>
+  );
+}
+
+function DetailPanel({ title, children }) {
+  return (
+    <div style={{ background:'var(--surface-1)', border:'1px solid var(--border-1)', borderRadius:6, padding:'12px 14px' }}>
+      <div className="eyebrow" style={{ color:'var(--fg-3)', paddingBottom:10 }}>{title}</div>
+      <div style={{ display:'flex', flexDirection:'column', gap:6 }}>{children}</div>
+    </div>
+  );
+}
+
+function KvRow({ label, value, color }) {
+  return (
+    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+      <span style={{ fontFamily:'var(--font-sans)', fontSize:12, color:'var(--fg-3)' }}>{label}</span>
+      <span style={{ fontFamily:'var(--font-mono)', fontSize:12, color: color || 'var(--fg-1)', fontVariantNumeric:'tabular-nums' }}>{value}</span>
+    </div>
+  );
+}
+
+function DonutOrders({ matched, unmatched }) {
+  const total = matched + unmatched || 1;
+  const matchPct = matched / total;
+  const C = 2 * Math.PI * 28;
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:14 }}>
+      <svg width="68" height="68" viewBox="0 0 68 68">
+        <circle cx="34" cy="34" r="28" fill="none" stroke="var(--no-soft)" strokeWidth="8" />
+        <circle cx="34" cy="34" r="28" fill="none" stroke="var(--yes)" strokeWidth="8"
+          strokeDasharray={`${matchPct*C} ${C}`} strokeDashoffset={C/4} transform="rotate(-90 34 34)"
+          strokeLinecap="butt" />
+        <text x="34" y="32" textAnchor="middle" style={{
+          fontFamily:'var(--font-mono)', fontSize:13, fill:'var(--fg-1)', fontVariantNumeric:'tabular-nums',
+        }}>{Math.round(matchPct*100)}%</text>
+        <text x="34" y="44" textAnchor="middle" style={{
+          fontFamily:'var(--font-mono)', fontSize:8, fill:'var(--fg-3)', textTransform:'uppercase', letterSpacing:'0.04em',
+        }}>matched</text>
+      </svg>
+      <div style={{ display:'flex', flexDirection:'column', gap:6, flex:1 }}>
+        <KvRow label={<span><span style={{display:'inline-block',width:6,height:6,borderRadius:'50%',background:'var(--yes)',marginRight:6}}/>Matched</span>} value={matched} color="var(--yes)" />
+        <KvRow label={<span><span style={{display:'inline-block',width:6,height:6,borderRadius:'50%',background:'var(--no)',marginRight:6}}/>Unmatched</span>} value={unmatched} color="var(--no)" />
+      </div>
+    </div>
+  );
+}
+
+// ── Batches table ─────────────────────────────────────────────────────────
+function BatchesTable() {
+  const [expanded, setExpanded] = React.useState(BATCHES[0].id);
+
+  return (
+    <section style={{ padding:'26px 24px 40px' }}>
+      <div style={{ display:'flex', alignItems:'baseline', gap:14, paddingBottom:14 }}>
+        <h3 style={{ fontFamily:'var(--font-sans)', fontSize:13, fontWeight:600, margin:0, color:'var(--fg-2)', textTransform:'uppercase', letterSpacing:'0.06em' }}>
+          Batches
+        </h3>
+        <span className="text-annotation" style={{ fontSize:11 }}>showing last {BATCHES.length} · click any row to expand</span>
+      </div>
+
+      <div style={{ background:'var(--surface-1)', border:'1px solid var(--border-1)', borderRadius:6, overflow:'hidden' }}>
+        <div className="bt-row bt-head">
+          <span/>
+          <span>Batch</span>
+          <span>Cleared</span>
+          <span>Markets</span>
+          <span>Matched volume</span>
+          <span>Welfare</span>
+          <span>Traders</span>
+          <span>Orders</span>
+        </div>
+        {BATCHES.map(b => (
+          <React.Fragment key={b.id}>
+            <BatchRow b={b} expanded={expanded === b.id} onToggle={() => setExpanded(e => e === b.id ? null : b.id)} />
+            {expanded === b.id && <BatchDetail b={b} />}
+          </React.Fragment>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────
+function App() {
+  const secs = useBatchClock();
+  const [activeTop, setActiveTop] = React.useState('Activity');
+  return (
+    <div className="page">
+      <GlobalNav secs={secs} activeTop={activeTop} setActiveTop={setActiveTop} />
+
+      {/* Page header */}
+      <div style={{ padding:'20px 24px 0', display:'flex', alignItems:'baseline', gap:14 }}>
+        <h1 style={{ fontFamily:'var(--font-sans)', fontSize:22, fontWeight:600, letterSpacing:'-0.01em', color:'var(--fg-1)', margin:0 }}>
+          Activity
+        </h1>
+        <span className="text-annotation" style={{ fontSize:11 }}>
+          everything happening on Sybil · uniform clearing every 60 s
+        </span>
+        <span style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:6, fontFamily:'var(--font-mono)', fontSize:11, color:'var(--fg-3)' }}>
+          <span style={{ width:6, height:6, borderRadius:'50%', background:'var(--accent)' }} />
+          batch <span style={{ color:'var(--fg-1)' }}>#{BATCHES[0].id.toLocaleString()}</span> closing in
+          <span style={{ color:'var(--accent)' }}>0:{secs.toString().padStart(2,'0')}</span>
+        </span>
+      </div>
+
+      <div className="scroll">
+        <HeroAllTime />
+        <PulseStrip />
+        <BatchesTable />
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sybil — Handoff index</title>
+<link rel="icon" href="assets/favicon.ico">
+<link rel="stylesheet" href="tokens/colors_and_type.css">
+<style>
+  body { padding: 48px; max-width: 720px; margin: 0 auto; }
+  h1 { font-family: var(--font-display); font-size: 32px; margin: 0 0 8px; letter-spacing: -0.02em; }
+  .sub { color: var(--fg-3); font-family: var(--font-mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 32px; }
+  ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+  li a { display: flex; justify-content: space-between; align-items: baseline; padding: 14px 16px; background: var(--surface-1); border: 1px solid var(--border-1); border-radius: 6px; text-decoration: none; color: var(--fg-1); transition: border-color 120ms; }
+  li a:hover { border-color: var(--border-3); text-decoration: none; }
+  .name { font-family: var(--font-sans); font-size: 14px; font-weight: 600; }
+  .desc { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
+  .docs { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--border-1); display: flex; gap: 20px; font-family: var(--font-mono); font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>Sybil — handoff</h1>
+<div class="sub">// 4 reference pages · drop into your frontend codebase as design source-of-truth</div>
+<ul>
+  <li><a href="pages/markets.html"><span class="name">Markets</span><span class="desc">/ · all-markets index</span></a></li>
+  <li><a href="pages/market-detail.html"><span class="name">Market detail</span><span class="desc">/m/[id] · batch theater trade page</span></a></li>
+  <li><a href="pages/activity.html"><span class="name">Activity</span><span class="desc">/activity · batches feed</span></a></li>
+  <li><a href="pages/portfolio.html"><span class="name">Portfolio</span><span class="desc">/portfolio · positions, orders, history</span></a></li>
+</ul>
+<div class="docs">
+  <a href="HANDOFF.md">HANDOFF.md →</a>
+  <a href="BRAND.md">BRAND.md →</a>
+  <a href="tokens/colors_and_type.css">tokens →</a>
+</div>
+</body>
+</html>
