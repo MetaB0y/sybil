@@ -55,68 +55,75 @@ export function ClearingTicker({ marketsById }: Props) {
         top: "var(--nav-height)",
         zIndex: 40,
         display: "flex",
-        alignItems: "center",
-        gap: "var(--space-3)",
+        alignItems: "stretch",
         height: 36,
-        padding: "0 var(--space-5)",
-        background: "rgba(10,14,18,0.72)",
-        backdropFilter: "var(--blur-nav)",
-        WebkitBackdropFilter: "var(--blur-nav)",
+        background: "var(--bg-1)",
+        borderTop: "1px solid var(--border-1)",
         borderBottom: "1px solid var(--border-1)",
         overflow: "hidden",
       }}
     >
-      <span
-        className="text-mono"
+      {/* Accented badge — handoff's anchored "Last batch · #N" cell */}
+      <div
         style={{
           flexShrink: 0,
-          color: "var(--fg-3)",
-          fontSize: "10px",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "var(--space-2)",
+          padding: "0 var(--space-4)",
+          background: "var(--accent-soft)",
+          color: "var(--accent)",
+          borderRight: "1px solid var(--border-1)",
+          fontFamily: "var(--font-mono)",
+          fontSize: "11px",
           letterSpacing: "var(--track-wide)",
           textTransform: "uppercase",
         }}
       >
-        cleared
-      </span>
-      <span
-        className="text-mono tabular"
-        style={{
-          flexShrink: 0,
-          color: "var(--fg-1)",
-          fontSize: "var(--fs-12)",
-        }}
-      >
-        #{latest?.height != null ? formatInt(latest.height) : "—"}
-      </span>
-      <span
-        style={{
-          flexShrink: 0,
-          width: 1,
-          height: 16,
-          background: "var(--border-2)",
-        }}
-      />
+        <span
+          aria-hidden
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            background: "var(--accent)",
+          }}
+        />
+        <span>Last batch</span>
+        <span style={{ color: "var(--accent)", opacity: 0.6 }}>·</span>
+        <span className="tabular">
+          #{latest?.height != null ? formatInt(latest.height) : "—"}
+        </span>
+      </div>
 
+      {/* Bordered cell row, scrolls horizontally with mask fade at edge */}
       {entries.length === 0 ? (
-        <span className="text-mono" style={{ color: "var(--fg-4)", fontSize: "var(--fs-12)" }}>
+        <span
+          className="text-mono"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            padding: "0 var(--space-4)",
+            color: "var(--fg-4)",
+            fontSize: "var(--fs-12)",
+          }}
+        >
           no fills this block
         </span>
       ) : (
         <div
           style={{
             display: "flex",
-            gap: "var(--space-3)",
             overflowX: "auto",
             scrollbarWidth: "none",
-            // Hide webkit scrollbar
             WebkitMaskImage:
-              "linear-gradient(to right, transparent 0, black 16px, black calc(100% - 32px), transparent 100%)",
+              "linear-gradient(to right, black 0, black calc(100% - 32px), transparent 100%)",
             maskImage:
-              "linear-gradient(to right, transparent 0, black 16px, black calc(100% - 32px), transparent 100%)",
+              "linear-gradient(to right, black 0, black calc(100% - 32px), transparent 100%)",
           }}
         >
           {entries.map((e) => (
-            <TickerChip key={e.id} id={e.id} name={e.name} yes={e.yes} />
+            <TickerCell key={e.id} id={e.id} name={e.name} yes={e.yes} />
           ))}
         </div>
       )}
@@ -124,8 +131,20 @@ export function ClearingTicker({ marketsById }: Props) {
   );
 }
 
-function TickerChip({ id, name, yes }: { id: number; name: string; yes: bigint }) {
+function TickerCell({
+  id,
+  name,
+  yes,
+}: {
+  id: number;
+  name: string;
+  yes: bigint;
+}) {
   const short = trimChipName(name);
+  // Color the cents by which side of 50% the price sits on — the same visual
+  // signal the handoff conveys with delta24, without needing a per-item fetch.
+  const HALF = 500_000_000n;
+  const tone = yes >= HALF ? "var(--yes)" : "var(--no)";
   return (
     <Link
       href={`/m/${id}`}
@@ -134,20 +153,23 @@ function TickerChip({ id, name, yes }: { id: number; name: string; yes: bigint }
         alignItems: "center",
         gap: "var(--space-2)",
         flexShrink: 0,
-        height: 22,
-        padding: "0 var(--space-2)",
-        background: "var(--surface-1)",
-        border: "1px solid var(--border-1)",
-        borderRadius: "var(--radius-sm)",
+        padding: "0 var(--space-4)",
+        height: 36,
+        borderRight: "1px solid var(--border-1)",
         fontFamily: "var(--font-mono)",
-        fontSize: "11px",
-        color: "var(--fg-2)",
+        fontSize: "var(--fs-12)",
+        color: "var(--fg-3)",
         textDecoration: "none",
         whiteSpace: "nowrap",
-        transition: "border-color var(--dur-fast) var(--ease-standard)",
+        transition: "background var(--dur-fast) var(--ease-standard)",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "var(--surface-1)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "transparent";
       }}
     >
-      <span style={{ color: "var(--fg-3)" }}>#{id}</span>
       <span
         style={{
           maxWidth: 220,
@@ -160,7 +182,7 @@ function TickerChip({ id, name, yes }: { id: number; name: string; yes: bigint }
       <span
         className="tabular"
         style={{
-          color: "var(--yes)",
+          color: tone,
           fontWeight: 600,
         }}
       >
