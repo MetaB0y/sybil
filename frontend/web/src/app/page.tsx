@@ -1,41 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
 import { formatInt } from "@/lib/format/nanos";
-import { getBlockStream } from "@/lib/ws/client";
-import type { ConnectionState } from "@/lib/ws/types";
-
-type WsSnapshot = {
-  state: ConnectionState;
-  lastHeight: number | null;
-};
-
-function useBlockStreamSnapshot(): WsSnapshot {
-  const [snap, setSnap] = useState<WsSnapshot>({
-    state: "idle",
-    lastHeight: null,
-  });
-
-  useEffect(() => {
-    const stream = getBlockStream();
-    const offConn = stream.on("connection", (e) =>
-      setSnap((prev) => ({ ...prev, state: e.state }))
-    );
-    const offBlock = stream.on("block", (e) =>
-      setSnap((prev) => ({ ...prev, lastHeight: e.block.height }))
-    );
-    stream.connect();
-    return () => {
-      offConn();
-      offBlock();
-      stream.disconnect();
-    };
-  }, []);
-
-  return snap;
-}
+import {
+  selectConnection,
+  selectLatestHeight,
+  selectMarketCount,
+  useStore,
+} from "@/lib/store";
 
 export default function Home() {
   const health = useQuery({
@@ -56,7 +29,9 @@ export default function Home() {
     },
   });
 
-  const ws = useBlockStreamSnapshot();
+  const connection = useStore(selectConnection);
+  const liveHeight = useStore(selectLatestHeight);
+  const livePriceMarkets = useStore(selectMarketCount);
 
   return (
     <main
@@ -119,19 +94,18 @@ export default function Home() {
       </section>
 
       <section style={panelStyle}>
-        <div className="eyebrow">{"// ws · /v1/blocks/ws"}</div>
+        <div className="eyebrow">{"// store · ws → zustand"}</div>
         <div style={{ marginTop: "var(--space-2)" }}>
           <span className="text-mono" style={{ fontSize: "var(--fs-20)" }}>
-            state={ws.state}
-            {ws.lastHeight != null
-              ? ` · height=${formatInt(ws.lastHeight)}`
-              : ""}
+            state={connection.state}
+            {liveHeight != null ? ` · height=${formatInt(liveHeight)}` : ""}
+            {livePriceMarkets > 0 ? ` · live_prices=${livePriceMarkets}` : ""}
           </span>
         </div>
       </section>
 
       <footer style={{ marginTop: "var(--space-4)" }}>
-        <div className="text-annotation">scaffolding step 11 · throwaway page · replaced when real markets ship</div>
+        <div className="text-annotation">milestone B · store-backed · throwaway until markets ship</div>
       </footer>
     </main>
   );
