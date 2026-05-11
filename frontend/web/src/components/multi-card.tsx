@@ -90,12 +90,7 @@ export function MultiCard({ groupName, markets, prices }: Props) {
         points={points}
         delta24Pct={delta24Pct}
       />
-      <SecondaryList
-        markets={secondary}
-        prices={prices}
-        hiddenCount={hiddenCount}
-        leaderId={leader?.market_id ?? -1}
-      />
+      <SecondaryList markets={secondary} prices={prices} />
       <FooterRow totalVol={totalVol} totalVolNanos={sumVolumeNanos(markets) ?? 0n} seed={groupName} />
     </article>
   );
@@ -302,49 +297,28 @@ function FeaturedOutcome({
 function SecondaryList({
   markets,
   prices,
-  hiddenCount,
-  leaderId,
 }: {
   markets: Market[];
   prices: Record<number, MarketPrice>;
-  hiddenCount: number;
-  leaderId: number;
 }) {
   return (
     <div
       style={{
         display: "flex",
         flexDirection: "column",
-        gap: "var(--space-2)",
         alignSelf: "start",
         minHeight: 0,
         overflow: "hidden",
       }}
     >
-      {markets.map((m) => (
+      {markets.map((m, i) => (
         <SecondaryRow
           key={m.market_id}
           market={m}
           price={prices[m.market_id]}
+          first={i === 0}
         />
       ))}
-      {hiddenCount > 0 && (
-        <Link
-          href={`/m/${leaderId}`}
-          className="text-mono"
-          style={{
-            paddingTop: "var(--space-2)",
-            borderTop: "1px solid var(--border-1)",
-            fontSize: "11px",
-            color: "var(--fg-3)",
-            textDecoration: "none",
-            letterSpacing: "var(--track-wide)",
-            textTransform: "uppercase",
-          }}
-        >
-          + {hiddenCount} more →
-        </Link>
-      )}
     </div>
   );
 }
@@ -352,9 +326,11 @@ function SecondaryList({
 function SecondaryRow({
   market,
   price,
+  first,
 }: {
   market: Market;
   price: MarketPrice | undefined;
+  first?: boolean;
 }) {
   const label = trimOutcomeLabel(market.name);
   const yesPct = price ? Number(price.yes) / 1e7 : null;
@@ -371,7 +347,8 @@ function SecondaryRow({
         gridTemplateColumns: "minmax(0, 1fr) 44px 52px 52px",
         gap: "var(--space-2)",
         alignItems: "center",
-        padding: "var(--space-1) 0",
+        padding: "10px 0",
+        borderTop: first ? "none" : "1px solid var(--border-1)",
         textDecoration: "none",
         color: "var(--fg-1)",
       }}
