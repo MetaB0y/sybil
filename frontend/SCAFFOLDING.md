@@ -370,16 +370,19 @@ These come AFTER scaffolding, in named milestones:
 
 ---
 
-## Pending decisions — resolve before page work
+## Decisions log + remaining items
 
-These are blocking decisions for the *first real page*, not for scaffolding itself. Park them in this file, settle before milestone A finishes:
+### Settled
 
-1. **Batch cadence reconciliation.** Designs assume 60s; production is 2s. Several handoff copy lines hardcode "every 60s". Decide: slow blocks for UX, redesign the batch theater for a 2s strobe feel, or some hybrid. Affects all four pages.
-2. **Real domain for the backend.** `172-104-31-54.nip.io` is IP-pinned — cert and DNS both tied to the current Linode IP. Strongly recommend a CNAME like `api.sybil.exchange` before frontend hardcodes the URL in env files / Vercel project. Otherwise an IP rotation rewrites every preview deploy's env.
-3. **shadcn vs. raw Radix.** Sybil's design system is strict (yes/no semantics, tight radii, no gradients, no emoji, tabular nums everywhere). shadcn is fine because components copy into the repo, but a senior FE reviewer pushed for using `@radix-ui/*` primitives directly with CVA + tailwind-merge. Decide before installing your first component.
-4. **u64 mapping fix path** (from Step 9). If `_nanos: number` matches: fix Rust `utoipa` to emit `string`, OR add a TS post-process script. Pick one; document it in the project.
-5. **Logo file.** Handoff only ships `sybil-mark.png` (raster). Vector SVG needed before nav extraction in the first page milestone.
-6. **`account_id` lifecycle.** Deferred to wallet milestone, but: the in-memory backend resets state on container restart. A localStorage `account_id` survives the wipe and becomes a ghost identity. Stamp it with backend's boot epoch (e.g. `state-root` from boot) and invalidate on mismatch.
+1. **Batch cadence — keep at 2s.** Backend is the source of truth. Frontend adapts: copy that says "every 60s" gets updated to "every 2s"; the `<V2BatchTheater>` clock uses linear easing keyed to `block.height` rather than wall-clock spring physics (Framer springs jank at 2s). Affects all four pages — adjust during page work, not before.
+2. **shadcn — keep.** Components copy into our repo as plain `.tsx` files; we restyle aggressively per component as Sybil tokens require. If a specific component fights us hard, drop down to raw Radix for that one component only. Both can coexist.
+3. **u64 mapping — frontend workaround in place.** `scripts/patch-bigints.mjs` rewrites `_nanos: number` → `string` after each `pnpm types:generate`. Proper backend fix (`utoipa` → JSON string) is tracked but deferred — backend untouched for now. See `KNOWN_ISSUES.md`.
+
+### Deferred (not blocking dev work)
+
+4. **Real backend domain.** `172-104-31-54.nip.io` is IP-pinned (cert + DNS rotate with the Linode IP). Acceptable while we're dev-only (nothing public yet). Revisit before any public preview deploy — a CNAME like `api.sybil.exchange` is cheap and avoids rewriting envs.
+5. **Vector logo.** Handoff ships `sybil-mark.png` (raster) only. PNG is fine on the demo; minor blur on high-DPI screens. Need SVG before any public surface ships. Owner: design.
+6. **`account_id` ghost-identity guard.** Not relevant until wallet / sign-in lands. When that work begins: stamp the saved `account_id` with the backend's boot epoch and invalidate on mismatch, so a backend restart doesn't leak a previous user's identity into a new account.
 
 ---
 

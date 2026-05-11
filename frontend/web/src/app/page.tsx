@@ -4,51 +4,37 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
 import { formatInt } from "@/lib/format/nanos";
+import { getBlockStream } from "@/lib/ws/client";
+import type { ConnectionState } from "@/lib/ws/types";
 
-type WsState =
-  | { kind: "idle" }
-  | { kind: "open" }
-  | { kind: "ok"; version: number; height?: number }
-  | { kind: "error"; reason: string };
+type WsSnapshot = {
+  state: ConnectionState;
+  lastHeight: number | null;
+};
 
-function useFirstBlockEnvelope() {
-  const [state, setState] = useState<WsState>({ kind: "idle" });
+function useBlockStreamSnapshot(): WsSnapshot {
+  const [snap, setSnap] = useState<WsSnapshot>({
+    state: "idle",
+    lastHeight: null,
+  });
 
-  /* eslint-disable react-hooks/set-state-in-effect -- smoke hook; real WS owner in Milestone B uses a store */
   useEffect(() => {
-    const base = process.env.NEXT_PUBLIC_WS_BASE;
-    if (!base) {
-      setState({ kind: "error", reason: "NEXT_PUBLIC_WS_BASE not set" });
-      return;
-    }
-    const ws = new WebSocket(`${base}/v1/blocks/ws`);
-    setState({ kind: "open" });
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        const height =
-          msg?.payload?.data?.height ?? msg?.payload?.up_to_height ?? undefined;
-        setState({ kind: "ok", version: msg?.v ?? 0, height });
-      } catch (err) {
-        setState({
-          kind: "error",
-          reason: err instanceof Error ? err.message : "parse failed",
-        });
-      } finally {
-        ws.close();
-      }
-    };
-    ws.onerror = () =>
-      setState({ kind: "error", reason: "websocket connection failed" });
+    const stream = getBlockStream();
+    const offConn = stream.on("connection", (e) =>
+      setSnap((prev) => ({ ...prev, state: e.state }))
+    );
+    const offBlock = stream.on("block", (e) =>
+      setSnap((prev) => ({ ...prev, lastHeight: e.block.height }))
+    );
+    stream.connect();
     return () => {
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-        ws.close();
-      }
+      offConn();
+      offBlock();
+      stream.disconnect();
     };
   }, []);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
-  return state;
+  return snap;
 }
 
 export default function Home() {
@@ -70,7 +56,7 @@ export default function Home() {
     },
   });
 
-  const ws = useFirstBlockEnvelope();
+  const ws = useBlockStreamSnapshot();
 
   return (
     <main
@@ -135,15 +121,12 @@ export default function Home() {
       <section style={panelStyle}>
         <div className="eyebrow">{"// ws · /v1/blocks/ws"}</div>
         <div style={{ marginTop: "var(--space-2)" }}>
-          {ws.kind === "idle" && <span style={dimMono}>idle</span>}
-          {ws.kind === "open" && <span style={dimMono}>connecting…</span>}
-          {ws.kind === "ok" && (
-            <span className="text-mono" style={{ fontSize: "var(--fs-20)" }}>
-              WS OK · v{ws.version}
-              {ws.height != null ? ` · height=${formatInt(ws.height)}` : ""}
-            </span>
-          )}
-          {ws.kind === "error" && <span style={errMono}>error: {ws.reason}</span>}
+          <span className="text-mono" style={{ fontSize: "var(--fs-20)" }}>
+            state={ws.state}
+            {ws.lastHeight != null
+              ? ` · height=${formatInt(ws.lastHeight)}`
+              : ""}
+          </span>
         </div>
       </section>
 
