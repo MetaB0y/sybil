@@ -1,8 +1,11 @@
 "use client";
 
 import { BinaryCard } from "@/components/binary-card";
-import { useMarketsList, type Market } from "@/lib/markets/use-markets";
-import { selectPricesByMarketId, useStore, type MarketPrice } from "@/lib/store";
+import { MultiCard } from "@/components/multi-card";
+import { useMarketsList } from "@/lib/markets/use-markets";
+import { selectPricesByMarketId, useStore } from "@/lib/store";
+
+const MULTI_THRESHOLD = 5;
 
 export default function MarketsPage() {
   const { bundle, isPending, error } = useMarketsList();
@@ -52,83 +55,39 @@ export default function MarketsPage() {
       {bundle && (
         <div
           style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--space-7)",
+            display: "grid",
+            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+            gap: "var(--space-4)",
           }}
         >
-          {bundle.groups.map((g) => (
-            <GroupSection
-              key={g.name}
-              name={g.name}
-              markets={g.markets}
-              prices={prices}
+          {bundle.groups.map((g) =>
+            g.markets.length > MULTI_THRESHOLD ? (
+              <MultiCard
+                key={g.name}
+                groupName={g.name}
+                markets={g.markets}
+                prices={prices}
+              />
+            ) : (
+              g.markets.map((m) => (
+                <BinaryCard
+                  key={m.market_id}
+                  market={m}
+                  price={prices[m.market_id]}
+                />
+              ))
+            )
+          )}
+          {bundle.ungrouped.map((m) => (
+            <BinaryCard
+              key={m.market_id}
+              market={m}
+              price={prices[m.market_id]}
             />
           ))}
-          {bundle.ungrouped.length > 0 && (
-            <GroupSection name="Other" markets={bundle.ungrouped} prices={prices} />
-          )}
         </div>
       )}
     </main>
-  );
-}
-
-function GroupSection({
-  name,
-  markets,
-  prices,
-}: {
-  name: string;
-  markets: Market[];
-  prices: Record<number, MarketPrice>;
-}) {
-  return (
-    <section
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "var(--space-4)",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "baseline",
-          gap: "var(--space-3)",
-        }}
-      >
-        <h2
-          style={{
-            fontFamily: "var(--font-sans)",
-            fontWeight: 600,
-            fontSize: "var(--fs-20)",
-            lineHeight: "var(--lh-20)",
-            margin: 0,
-            color: "var(--fg-1)",
-          }}
-        >
-          {name}
-        </h2>
-        <span className="text-meta">{markets.length}</span>
-      </div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-          gap: "var(--space-4)",
-        }}
-      >
-        {markets.map((m) => (
-          <BinaryCard
-            key={m.market_id}
-            market={m}
-            price={prices[m.market_id]}
-          />
-        ))}
-      </div>
-    </section>
   );
 }
 
