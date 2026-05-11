@@ -1,14 +1,20 @@
 "use client";
 
 import Link from "next/link";
+import { useInViewport } from "@/lib/hooks/use-in-viewport";
 import {
+  formatCents,
   formatCompactDollars,
-  formatProbability,
+  formatPctDelta,
 } from "@/lib/format/nanos";
 import type { Market } from "@/lib/markets/use-markets";
+import { useCardHistory } from "@/lib/markets/use-card-history";
 import type { MarketPrice } from "@/lib/store";
+import { MarketThumb } from "./market-thumb";
+import { Sparkline } from "./sparkline";
 
-const TOP_OUTCOMES = 4;
+const SECONDARY_OUTCOMES = 3;
+const CARD_HEIGHT = 360;
 
 type Props = {
   groupName: string;
@@ -17,146 +23,294 @@ type Props = {
 };
 
 /**
- * MultiCard — one card per multi-outcome event (an event group with many
- * child markets, e.g. "2026 FIFA World Cup Winner" → 48 candidates).
+ * MultiCard — one card per multi-outcome event group.
  *
- * Surfaces the top N outcomes by current YES probability, plus an aggregate
- * footer (total volume across the group, count of outcomes). Same 5-row
- * skeleton as BinaryCard for row-for-row alignment.
- *
- * The card itself isn't a link — there's no single "event detail" page yet;
- * tapping an outcome row goes to that child market's detail.
+ * Same 5-row handoff layout as BinaryCard. Featured row shows the leading
+ * outcome (top YES prob) with a sparkline + 24h delta lazy-loaded for the
+ * leader only. Secondary outcomes render below as a tight list.
  */
 export function MultiCard({ groupName, markets, prices }: Props) {
-  // Sort by current YES probability (priced first), descending.
+  const [ref, inView] = useInViewport<HTMLElement>();
+
   const ranked = [...markets].sort((a, b) => {
     const pa = prices[a.market_id]?.yes ?? -1n;
     const pb = prices[b.market_id]?.yes ?? -1n;
     if (pa === pb) return 0;
     return pa > pb ? -1 : 1;
   });
-  const visible = ranked.slice(0, TOP_OUTCOMES);
-  const hiddenCount = ranked.length - visible.length;
+
+  const leader = ranked[0];
+  const secondary = ranked.slice(1, 1 + SECONDARY_OUTCOMES);
+  const hiddenCount = Math.max(0, ranked.length - 1 - secondary.length);
+
+  const { points, delta24Pct } = useCardHistory(
+    leader?.market_id ?? -1,
+    inView && !!leader
+  );
 
   const totalVolumeNanos = sumVolumeNanos(markets);
+  const totalVol = totalVolumeNanos
+    ? formatCompactDollars(totalVolumeNanos)
+    : "—";
 
   return (
     <article
+      ref={ref}
       style={{
-        display: "flex",
-        flexDirection: "column",
+        display: "grid",
+        gridTemplateRows: "22px 56px auto 1fr 18px",
         gap: "var(--space-3)",
-        minHeight: 360,
-        padding: "var(--space-4) var(--space-5)",
+        height: CARD_HEIGHT,
+        padding: "var(--space-4)",
         background: "var(--surface-1)",
         border: "1px solid var(--border-1)",
         borderRadius: "var(--radius-lg)",
         boxShadow: "var(--shadow-inset-top)",
+        boxSizing: "border-box",
       }}
     >
-      {/* Row 1 · meta */}
-      <div
+      <EyebrowRow count={markets.length} />
+      <TitleRow groupName={groupName} leaderId={leader?.market_id} />
+      <FeaturedOutcome
+        leader={leader}
+        price={leader ? prices[leader.market_id] : undefined}
+        points={points}
+        delta24Pct={delta24Pct}
+      />
+      <SecondaryList
+        markets={secondary}
+        prices={prices}
+        hiddenCount={hiddenCount}
+        leaderId={leader?.market_id ?? -1}
+      />
+      <FooterRow totalVol={totalVol} />
+    </article>
+  );
+}
+
+function EyebrowRow({ count }: { count: number }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "var(--space-2)",
+      }}
+    >
+      <span
+        className="text-mono"
         style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "var(--space-2)",
+          fontSize: "10px",
+          letterSpacing: "var(--track-wide)",
+          textTransform: "uppercase",
+          color: "var(--fg-3)",
         }}
       >
-        <span className="text-meta">
-          {markets.length} outcomes
-        </span>
-        <span
-          className="text-mono"
-          style={{
-            fontSize: "10px",
-            letterSpacing: "var(--track-wide)",
-            color: "var(--accent)",
-            textTransform: "uppercase",
-          }}
-        >
-          event
-        </span>
-      </div>
+        {"// event"}
+      </span>
+      <span
+        className="text-mono"
+        style={{
+          fontSize: "10px",
+          letterSpacing: "var(--track-wide)",
+          textTransform: "uppercase",
+          color: "var(--accent)",
+        }}
+      >
+        {count} outcomes
+      </span>
+    </div>
+  );
+}
 
-      {/* Row 2 · title */}
+function TitleRow({
+  groupName,
+  leaderId,
+}: {
+  groupName: string;
+  leaderId: number | undefined;
+}) {
+  const href = leaderId != null ? `/m/${leaderId}` : "#";
+  return (
+    <Link
+      href={href}
+      style={{
+        display: "grid",
+        gridTemplateColumns: "40px 1fr",
+        gap: "var(--space-3)",
+        alignItems: "start",
+        textDecoration: "none",
+        color: "var(--fg-1)",
+      }}
+    >
+      <MarketThumb marketId={leaderId ?? 0} name={groupName} />
       <h3
         style={{
           fontFamily: "var(--font-sans)",
           fontWeight: 600,
-          fontSize: "var(--fs-16)",
-          lineHeight: "var(--lh-20)",
+          fontSize: "var(--fs-14)",
+          lineHeight: "var(--lh-14)",
           margin: 0,
           color: "var(--fg-1)",
           display: "-webkit-box",
-          WebkitLineClamp: 3,
+          WebkitLineClamp: 2,
           WebkitBoxOrient: "vertical",
           overflow: "hidden",
         }}
       >
         {groupName}
       </h3>
-
-      {/* Row 3+4 · top outcomes */}
-      <div
-        style={{
-          marginTop: "var(--space-2)",
-          marginBottom: "auto",
-          display: "flex",
-          flexDirection: "column",
-          gap: "var(--space-2)",
-        }}
-      >
-        {visible.map((m) => (
-          <OutcomeRow
-            key={m.market_id}
-            market={m}
-            price={prices[m.market_id]}
-          />
-        ))}
-        {hiddenCount > 0 && (
-          <div
-            className="text-meta"
-            style={{
-              paddingTop: "var(--space-2)",
-              borderTop: "1px solid var(--border-1)",
-            }}
-          >
-            + {hiddenCount} more
-          </div>
-        )}
-      </div>
-
-      {/* Row 5 · footer */}
-      <footer
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: "var(--space-3)",
-          paddingTop: "var(--space-3)",
-          borderTop: "1px solid var(--border-1)",
-        }}
-      >
-        <span className="text-meta">
-          Vol&nbsp;
-          <span className="text-mono tabular" style={{ color: "var(--fg-2)" }}>
-            {totalVolumeNanos != null
-              ? formatCompactDollars(totalVolumeNanos)
-              : "—"}
-          </span>
-        </span>
-        <span className="text-meta">
-          <span className="text-mono tabular" style={{ color: "var(--fg-2)" }}>
-            {markets.length}
-          </span>
-          &nbsp;markets
-        </span>
-      </footer>
-    </article>
+    </Link>
   );
 }
 
-function OutcomeRow({
+function FeaturedOutcome({
+  leader,
+  price,
+  points,
+  delta24Pct,
+}: {
+  leader: Market | undefined;
+  price: MarketPrice | undefined;
+  points: import("@/lib/markets/use-card-history").PricePoint[];
+  delta24Pct: number | null;
+}) {
+  if (!leader) {
+    return (
+      <div
+        style={{
+          padding: "var(--space-3)",
+          background: "var(--surface-2)",
+          borderRadius: "var(--radius-md)",
+          border: "1px solid var(--border-1)",
+          color: "var(--fg-4)",
+          fontFamily: "var(--font-mono)",
+          fontSize: "var(--fs-12)",
+        }}
+      >
+        no outcomes
+      </div>
+    );
+  }
+  const cents = price ? formatCents(price.yes) : "—";
+  const label = trimOutcomeLabel(leader.name);
+  return (
+    <Link
+      href={`/m/${leader.market_id}`}
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1fr auto",
+        gap: "var(--space-3)",
+        alignItems: "center",
+        padding: "var(--space-3)",
+        background: "var(--surface-2)",
+        borderRadius: "var(--radius-md)",
+        border: "1px solid var(--border-1)",
+        textDecoration: "none",
+        color: "var(--fg-1)",
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+        <span
+          className="text-mono"
+          style={{
+            fontSize: "10px",
+            letterSpacing: "var(--track-wide)",
+            textTransform: "uppercase",
+            color: "var(--accent)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {label}
+        </span>
+        <div
+          style={{
+            display: "flex",
+            gap: "var(--space-2)",
+            alignItems: "baseline",
+          }}
+        >
+          <span
+            className="text-mono tabular"
+            style={{
+              fontSize: "var(--fs-32)",
+              lineHeight: "var(--lh-32)",
+              color: price ? "var(--fg-1)" : "var(--fg-4)",
+              letterSpacing: "var(--track-mono)",
+            }}
+          >
+            {cents}
+          </span>
+          {delta24Pct != null && (
+            <span
+              className="text-mono tabular"
+              style={{
+                fontSize: "var(--fs-12)",
+                color: delta24Pct >= 0 ? "var(--yes)" : "var(--no)",
+              }}
+            >
+              {formatPctDelta(delta24Pct)}
+            </span>
+          )}
+        </div>
+      </div>
+      <Sparkline points={points} />
+    </Link>
+  );
+}
+
+function SecondaryList({
+  markets,
+  prices,
+  hiddenCount,
+  leaderId,
+}: {
+  markets: Market[];
+  prices: Record<number, MarketPrice>;
+  hiddenCount: number;
+  leaderId: number;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--space-2)",
+        alignSelf: "start",
+      }}
+    >
+      {markets.map((m) => (
+        <SecondaryRow
+          key={m.market_id}
+          market={m}
+          price={prices[m.market_id]}
+        />
+      ))}
+      {hiddenCount > 0 && (
+        <Link
+          href={`/m/${leaderId}`}
+          className="text-mono"
+          style={{
+            paddingTop: "var(--space-2)",
+            borderTop: "1px solid var(--border-1)",
+            fontSize: "11px",
+            color: "var(--fg-3)",
+            textDecoration: "none",
+            letterSpacing: "var(--track-wide)",
+            textTransform: "uppercase",
+          }}
+        >
+          + {hiddenCount} more →
+        </Link>
+      )}
+    </div>
+  );
+}
+
+function SecondaryRow({
   market,
   price,
 }: {
@@ -164,41 +318,25 @@ function OutcomeRow({
   price: MarketPrice | undefined;
 }) {
   const label = trimOutcomeLabel(market.name);
-  const pct = price ? probabilityPercent(price.yes) : null;
-  const prob = price ? formatProbability(price.yes) : "—";
+  const cents = price ? formatCents(price.yes) : "—";
   return (
     <Link
       href={`/m/${market.market_id}`}
       style={{
         display: "grid",
-        gridTemplateColumns: "1fr 64px",
-        alignItems: "center",
+        gridTemplateColumns: "1fr auto",
         gap: "var(--space-3)",
-        padding: "var(--space-2) 0",
-        color: "var(--fg-1)",
+        alignItems: "center",
+        padding: "var(--space-1) 0",
         textDecoration: "none",
-        position: "relative",
-        overflow: "hidden",
+        color: "var(--fg-1)",
       }}
     >
-      {/* Probability fill bar — sits behind the row, anchored left */}
-      <span
-        aria-hidden
-        style={{
-          position: "absolute",
-          inset: 0,
-          width: pct != null ? `${Math.max(0, Math.min(100, pct))}%` : "0%",
-          background: "var(--yes-faint)",
-          borderRadius: "var(--radius-sm)",
-          transition: "width var(--dur-base) var(--ease-standard)",
-        }}
-      />
       <span
         style={{
-          position: "relative",
           fontFamily: "var(--font-sans)",
-          fontSize: "var(--fs-14)",
-          color: "var(--fg-1)",
+          fontSize: "var(--fs-13)",
+          color: "var(--fg-2)",
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
@@ -209,20 +347,50 @@ function OutcomeRow({
       <span
         className="text-mono tabular"
         style={{
-          position: "relative",
-          fontSize: "var(--fs-14)",
+          fontSize: "var(--fs-13)",
+          color: price ? "var(--fg-1)" : "var(--fg-4)",
           textAlign: "right",
-          color: pct != null ? "var(--yes)" : "var(--fg-4)",
         }}
       >
-        {prob}
+        {cents}
       </span>
     </Link>
   );
 }
 
-/** Strip the parent event prefix from a child market name when present.
- *  e.g. "Democratic Presidential Nominee 2028: Andy Beshear" → "Andy Beshear" */
+function FooterRow({ totalVol }: { totalVol: string }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: "var(--space-3)",
+        alignItems: "center",
+        justifyContent: "flex-end",
+        fontFamily: "var(--font-mono)",
+        fontSize: "10px",
+        textTransform: "uppercase",
+        letterSpacing: "var(--track-wide)",
+        color: "var(--fg-3)",
+      }}
+    >
+      <FooterChip label="vol" value={totalVol} />
+      <FooterChip label="liq" value="—" />
+      <FooterChip label="traders" value="—" />
+    </div>
+  );
+}
+
+function FooterChip({ label, value }: { label: string; value: string }) {
+  return (
+    <span style={{ display: "inline-flex", gap: 4, alignItems: "baseline" }}>
+      <span>{label}</span>
+      <span className="tabular" style={{ color: "var(--fg-2)" }}>
+        {value}
+      </span>
+    </span>
+  );
+}
+
 function trimOutcomeLabel(name: string): string {
   const idx = name.indexOf(":");
   if (idx < 0 || idx > name.length - 2) return name;
@@ -239,8 +407,4 @@ function sumVolumeNanos(markets: Market[]): bigint | null {
     }
   }
   return any ? total : null;
-}
-
-function probabilityPercent(nanos: bigint): number {
-  return Number(nanos) / 1e7;
 }

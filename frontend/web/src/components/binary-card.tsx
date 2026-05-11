@@ -1,45 +1,53 @@
 "use client";
 
 import Link from "next/link";
+import { useInViewport } from "@/lib/hooks/use-in-viewport";
 import {
+  formatCents,
   formatCompactDollars,
-  formatDate,
-  formatProbability,
+  formatPctDelta,
 } from "@/lib/format/nanos";
 import type { Market } from "@/lib/markets/use-markets";
+import { useCardHistory } from "@/lib/markets/use-card-history";
 import type { MarketPrice } from "@/lib/store";
+import { MarketThumb } from "./market-thumb";
+import { Sparkline } from "./sparkline";
 
 type Props = {
   market: Market;
   price: MarketPrice | undefined;
 };
 
+const CARD_HEIGHT = 360;
+
 /**
  * BinaryCard — one card per YES/NO market.
  *
- * 5-row skeleton (handoff): meta · title · featured price · YES/NO bars · footer.
- * 360px min-height so cards in a row align row-for-row.
+ * 5-row handoff layout: eyebrow · title+thumb · featured price+sparkline ·
+ * YES/NO bars · footer KV. 360px fixed height so cards align row-for-row.
  *
- * Live prices come from the WS-fed Zustand store via `price`. If the market
- * has never traded, the card shows "—" placeholders and grayed bars.
+ * Sparkline + 24h delta lazy-load via IntersectionObserver — the card is
+ * fully usable before history arrives.
  */
 export function BinaryCard({ market, price }: Props) {
-  const yesProb = price ? formatProbability(price.yes) : "—";
-  const noProb = price ? formatProbability(price.no) : "—";
+  const [ref, inView] = useInViewport<HTMLAnchorElement>();
+  const { points, delta24Pct } = useCardHistory(market.market_id, inView);
+
+  const yesCents = price ? formatCents(price.yes) : "—";
+  const noCents = price ? formatCents(price.no) : "—";
   const yesPct = price ? probabilityPercent(price.yes) : null;
   const noPct = price ? probabilityPercent(price.no) : null;
 
-  const statusLabel = (market.status || "active").toUpperCase();
-
   return (
     <Link
+      ref={ref}
       href={`/m/${market.market_id}`}
       style={{
-        display: "flex",
-        flexDirection: "column",
+        display: "grid",
+        gridTemplateRows: "22px 56px auto 1fr 18px",
         gap: "var(--space-3)",
-        minHeight: 360,
-        padding: "var(--space-4) var(--space-5)",
+        height: CARD_HEIGHT,
+        padding: "var(--space-4)",
         background: "var(--surface-1)",
         border: "1px solid var(--border-1)",
         borderRadius: "var(--radius-lg)",
@@ -47,6 +55,7 @@ export function BinaryCard({ market, price }: Props) {
         textDecoration: "none",
         color: "var(--fg-1)",
         transition: "border-color var(--dur-fast) var(--ease-standard)",
+        boxSizing: "border-box",
       }}
       onMouseEnter={(e) =>
         (e.currentTarget.style.borderColor = "var(--border-3)")
@@ -55,107 +64,197 @@ export function BinaryCard({ market, price }: Props) {
         (e.currentTarget.style.borderColor = "var(--border-1)")
       }
     >
-      {/* Row 1 · meta */}
-      <div
+      <EyebrowRow market={market} />
+      <TitleRow market={market} />
+      <FeaturedPriceRow
+        label="Yes"
+        cents={yesCents}
+        delta24Pct={delta24Pct}
+        points={points}
+        hasPrice={!!price}
+      />
+      <BarsRow
+        yesPct={yesPct}
+        noPct={noPct}
+        yesCents={yesCents}
+        noCents={noCents}
+      />
+      <FooterRow market={market} />
+    </Link>
+  );
+}
+
+function EyebrowRow({ market }: { market: Market }) {
+  const category =
+    market.category && market.category.length > 0
+      ? market.category.toUpperCase()
+      : "// market";
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "var(--space-2)",
+      }}
+    >
+      <span
+        className="text-mono"
         style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "var(--space-2)",
+          fontSize: "10px",
+          letterSpacing: "var(--track-wide)",
+          textTransform: "uppercase",
+          color: "var(--fg-3)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
         }}
       >
-        <span className="text-meta">#{market.market_id}</span>
-        <span
-          className="text-mono"
-          style={{
-            fontSize: "10px",
-            letterSpacing: "var(--track-wide)",
-            color: market.status === "active" ? "var(--fg-3)" : "var(--warn)",
-            textTransform: "uppercase",
-          }}
-        >
-          {statusLabel}
-        </span>
-      </div>
+        {category}
+      </span>
+      <span
+        className="text-mono"
+        style={{
+          fontSize: "10px",
+          letterSpacing: "var(--track-wide)",
+          textTransform: "uppercase",
+          color: "var(--fg-3)",
+        }}
+      >
+        yes / no
+      </span>
+    </div>
+  );
+}
 
-      {/* Row 2 · title */}
+function TitleRow({ market }: { market: Market }) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "40px 1fr",
+        gap: "var(--space-3)",
+        alignItems: "start",
+      }}
+    >
+      <MarketThumb marketId={market.market_id} name={market.name} />
       <h3
         style={{
           fontFamily: "var(--font-sans)",
           fontWeight: 600,
-          fontSize: "var(--fs-16)",
-          lineHeight: "var(--lh-20)",
+          fontSize: "var(--fs-14)",
+          lineHeight: "var(--lh-14)",
           margin: 0,
           color: "var(--fg-1)",
           display: "-webkit-box",
-          WebkitLineClamp: 3,
+          WebkitLineClamp: 2,
           WebkitBoxOrient: "vertical",
           overflow: "hidden",
         }}
       >
         {market.name}
       </h3>
+    </div>
+  );
+}
 
-      {/* Row 3 · featured price (YES probability, big) */}
-      <div
-        style={{
-          marginTop: "var(--space-2)",
-          display: "flex",
-          alignItems: "baseline",
-          gap: "var(--space-2)",
-        }}
-      >
+function FeaturedPriceRow({
+  label,
+  cents,
+  delta24Pct,
+  points,
+  hasPrice,
+}: {
+  label: string;
+  cents: string;
+  delta24Pct: number | null;
+  points: import("@/lib/markets/use-card-history").PricePoint[];
+  hasPrice: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1fr auto",
+        gap: "var(--space-3)",
+        alignItems: "center",
+        padding: "var(--space-3)",
+        background: "var(--surface-2)",
+        borderRadius: "var(--radius-md)",
+        border: "1px solid var(--border-1)",
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <span
-          className="text-mono tabular"
+          className="text-mono"
           style={{
-            fontSize: "var(--fs-40)",
-            lineHeight: "var(--lh-40)",
-            color: price ? "var(--fg-1)" : "var(--fg-4)",
-            letterSpacing: "var(--track-mono)",
+            fontSize: "10px",
+            letterSpacing: "var(--track-wide)",
+            textTransform: "uppercase",
+            color: "var(--yes)",
           }}
         >
-          {yesProb}
+          {label}
         </span>
-        <span className="text-meta">YES</span>
-      </div>
-
-      {/* Row 4 · YES/NO bars (visual probability) */}
-      <div
-        style={{
-          marginTop: "auto",
-          display: "flex",
-          flexDirection: "column",
-          gap: "var(--space-2)",
-        }}
-      >
-        <BarRow tone="yes" pct={yesPct} label="YES" probLabel={yesProb} />
-        <BarRow tone="no" pct={noPct} label="NO" probLabel={noProb} />
-      </div>
-
-      {/* Row 5 · footer */}
-      <footer
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: "var(--space-3)",
-          paddingTop: "var(--space-3)",
-          borderTop: "1px solid var(--border-1)",
-        }}
-      >
-        <span className="text-meta">
-          Vol&nbsp;
-          <span className="text-mono tabular" style={{ color: "var(--fg-2)" }}>
-            {market.volume_nanos ? formatCompactDollars(market.volume_nanos) : "—"}
+        <div
+          style={{
+            display: "flex",
+            gap: "var(--space-2)",
+            alignItems: "baseline",
+          }}
+        >
+          <span
+            className="text-mono tabular"
+            style={{
+              fontSize: "var(--fs-32)",
+              lineHeight: "var(--lh-32)",
+              color: hasPrice ? "var(--fg-1)" : "var(--fg-4)",
+              letterSpacing: "var(--track-mono)",
+            }}
+          >
+            {cents}
           </span>
-        </span>
-        <span className="text-meta">
-          Resolves&nbsp;
-          <span className="text-mono tabular" style={{ color: "var(--fg-2)" }}>
-            {formatDate(market.expiry_timestamp_ms)}
-          </span>
-        </span>
-      </footer>
-    </Link>
+          {delta24Pct != null && (
+            <span
+              className="text-mono tabular"
+              style={{
+                fontSize: "var(--fs-12)",
+                color: delta24Pct >= 0 ? "var(--yes)" : "var(--no)",
+              }}
+            >
+              {formatPctDelta(delta24Pct)}
+            </span>
+          )}
+        </div>
+      </div>
+      <Sparkline points={points} />
+    </div>
+  );
+}
+
+function BarsRow({
+  yesPct,
+  noPct,
+  yesCents,
+  noCents,
+}: {
+  yesPct: number | null;
+  noPct: number | null;
+  yesCents: string;
+  noCents: string;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--space-2)",
+        alignSelf: "end",
+      }}
+    >
+      <BarRow tone="yes" pct={yesPct} label="YES" centsLabel={yesCents} />
+      <BarRow tone="no" pct={noPct} label="NO" centsLabel={noCents} />
+    </div>
   );
 }
 
@@ -163,12 +262,12 @@ function BarRow({
   tone,
   pct,
   label,
-  probLabel,
+  centsLabel,
 }: {
   tone: "yes" | "no";
   pct: number | null;
   label: string;
-  probLabel: string;
+  centsLabel: string;
 }) {
   const fillColor = tone === "yes" ? "var(--yes)" : "var(--no)";
   const trackColor = tone === "yes" ? "var(--yes-faint)" : "var(--no-faint)";
@@ -177,7 +276,7 @@ function BarRow({
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "32px 1fr 56px",
+        gridTemplateColumns: "28px 1fr 44px",
         alignItems: "center",
         gap: "var(--space-3)",
       }}
@@ -218,13 +317,48 @@ function BarRow({
           textAlign: "right",
         }}
       >
-        {probLabel}
+        {centsLabel}
       </span>
     </div>
   );
 }
 
-/** 0..1e9 nanos → 0..100 number. Safe (bounded). */
+function FooterRow({ market }: { market: Market }) {
+  const vol = market.volume_nanos
+    ? formatCompactDollars(market.volume_nanos)
+    : "—";
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: "var(--space-3)",
+        alignItems: "center",
+        justifyContent: "flex-end",
+        fontFamily: "var(--font-mono)",
+        fontSize: "10px",
+        textTransform: "uppercase",
+        letterSpacing: "var(--track-wide)",
+        color: "var(--fg-3)",
+      }}
+    >
+      <FooterChip label="vol" value={vol} />
+      <FooterChip label="liq" value="—" />
+      <FooterChip label="traders" value="—" />
+    </div>
+  );
+}
+
+function FooterChip({ label, value }: { label: string; value: string }) {
+  return (
+    <span style={{ display: "inline-flex", gap: 4, alignItems: "baseline" }}>
+      <span>{label}</span>
+      <span className="tabular" style={{ color: "var(--fg-2)" }}>
+        {value}
+      </span>
+    </span>
+  );
+}
+
 function probabilityPercent(nanos: bigint): number {
   return Number(nanos) / 1e7;
 }
