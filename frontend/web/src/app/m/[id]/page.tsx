@@ -4,12 +4,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { use } from "react";
 import { BatchTheater } from "@/components/batch-theater";
+import { PriceChart } from "@/components/price-chart";
 import {
   formatCompactDollars,
   formatDate,
   formatProbability,
 } from "@/lib/format/nanos";
 import { useMarket } from "@/lib/markets/use-market";
+import { usePriceHistory } from "@/lib/markets/use-price-history";
 import { selectPricesByMarketId, useStore } from "@/lib/store";
 
 type RouteParams = { id: string };
@@ -27,10 +29,12 @@ export default function MarketDetailPage({
   }
 
   const marketQ = useMarket(marketId);
+  const historyQ = usePriceHistory(marketId);
   const prices = useStore(selectPricesByMarketId);
   const price = prices[marketId];
 
   const market = marketQ.data;
+  const history = historyQ.data ?? [];
 
   return (
     <main
@@ -55,6 +59,11 @@ export default function MarketDetailPage({
           <>
             <Header market={market} />
             <CurrentPriceBlock yes={price?.yes} no={price?.no} />
+            <ChartSection
+              marketId={marketId}
+              history={history}
+              isPending={historyQ.isPending}
+            />
             <DescriptionBlock market={market} />
           </>
         )}
@@ -234,6 +243,62 @@ function PriceCard({
         </div>
       )}
     </div>
+  );
+}
+
+function ChartSection({
+  marketId,
+  history,
+  isPending,
+}: {
+  marketId: number;
+  history: import("@/lib/markets/use-price-history").PricePoint[];
+  isPending: boolean;
+}) {
+  return (
+    <section
+      style={{
+        padding: "var(--space-4) var(--space-5)",
+        background: "var(--surface-1)",
+        border: "1px solid var(--border-1)",
+        borderRadius: "var(--radius-lg)",
+        boxShadow: "var(--shadow-inset-top)",
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--space-3)",
+      }}
+    >
+      <div className="eyebrow">{"// yes probability"}</div>
+      {isPending && history.length === 0 ? (
+        <div
+          className="text-mono"
+          style={{
+            height: 280,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "var(--fg-3)",
+          }}
+        >
+          loading…
+        </div>
+      ) : history.length === 0 ? (
+        <div
+          className="text-mono"
+          style={{
+            height: 280,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "var(--fg-4)",
+          }}
+        >
+          no clearing history yet — chart will populate as batches clear.
+        </div>
+      ) : (
+        <PriceChart marketId={marketId} history={history} />
+      )}
+    </section>
   );
 }
 
