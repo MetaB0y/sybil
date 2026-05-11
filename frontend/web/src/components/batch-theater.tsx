@@ -147,7 +147,8 @@ export function BatchTheater({ marketId, marketName }: Props) {
               color: "var(--fg-3)",
             }}
           >
-            block #{latest?.height != null ? formatInt(latest.height) : "—"}
+            batch #
+            {latest?.height != null ? formatInt(latest.height + 1) : "—"}
           </span>
         </div>
 
@@ -224,7 +225,7 @@ export function BatchTheater({ marketId, marketName }: Props) {
         >
           {"// last batch"}
         </div>
-        <KV label="Cleared this block">
+        <KV label="Cleared this batch">
           <span
             className="text-mono tabular"
             style={{ color: clearedThisBlock ? "var(--yes)" : "var(--fg-3)" }}
@@ -240,7 +241,7 @@ export function BatchTheater({ marketId, marketName }: Props) {
             {price ? formatCents(price.no) : "—"}
           </span>
         </KV>
-        <KV label="Last block at">
+        <KV label="Last batch at">
           <span className="text-mono tabular">
             {blockTimestampMs != null
               ? new Date(blockTimestampMs).toLocaleTimeString("en-US", {

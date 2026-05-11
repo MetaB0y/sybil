@@ -51,7 +51,10 @@ export function BatchPill() {
   }, []);
 
   const isLive = connection.state === "live";
-  const height = latest?.height ?? connection.lastSeenHeight ?? null;
+  // `latest.height` is the last *committed* batch; the one currently
+  // collecting orders is N+1 (it'll commit when this 2s window closes).
+  const lastCommitted = latest?.height ?? connection.lastSeenHeight ?? null;
+  const currentBatch = lastCommitted != null ? lastCommitted + 1 : null;
 
   const barColor = isLive ? "var(--accent)" : "var(--warn)";
 
@@ -88,10 +91,10 @@ export function BatchPill() {
         }}
       />
       <span style={{ letterSpacing: "var(--track-wide)", textTransform: "uppercase" }}>
-        block
+        batch
       </span>
       <span className="tabular" style={{ color: "var(--fg-1)" }}>
-        {height != null ? formatInt(height) : "—"}
+        {currentBatch != null ? formatInt(currentBatch) : "—"}
       </span>
       {/* Linear 2s progress bar, repeating per block */}
       <span
