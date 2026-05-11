@@ -213,12 +213,10 @@ function FeaturedOutcome({
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
         <span
-          className="text-mono"
           style={{
-            fontSize: "10px",
-            letterSpacing: "var(--track-wide)",
-            textTransform: "uppercase",
-            color: "var(--accent)",
+            fontFamily: "var(--font-sans)",
+            fontSize: "var(--fs-13)",
+            color: "var(--fg-2)",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -238,7 +236,7 @@ function FeaturedOutcome({
             style={{
               fontSize: "var(--fs-32)",
               lineHeight: "var(--lh-32)",
-              color: price ? "var(--fg-1)" : "var(--fg-4)",
+              color: priceTone(price?.yes),
               letterSpacing: "var(--track-mono)",
             }}
           >
@@ -348,7 +346,7 @@ function SecondaryRow({
         className="text-mono tabular"
         style={{
           fontSize: "var(--fs-13)",
-          color: price ? "var(--fg-1)" : "var(--fg-4)",
+          color: priceTone(price?.yes),
           textAlign: "right",
         }}
       >
@@ -363,9 +361,9 @@ function FooterRow({ totalVol }: { totalVol: string }) {
     <div
       style={{
         display: "flex",
-        gap: "var(--space-3)",
         alignItems: "center",
-        justifyContent: "flex-end",
+        justifyContent: "space-between",
+        gap: "var(--space-3)",
         fontFamily: "var(--font-mono)",
         fontSize: "10px",
         textTransform: "uppercase",
@@ -373,11 +371,18 @@ function FooterRow({ totalVol }: { totalVol: string }) {
         color: "var(--fg-3)",
       }}
     >
-      <FooterChip label="vol" value={totalVol} />
-      <FooterChip label="liq" value="—" />
+      <div style={{ display: "flex", gap: "var(--space-3)" }}>
+        <FooterChip label="vol" value={totalVol} />
+        <FooterChip label="liq" value="—" />
+      </div>
       <FooterChip label="traders" value="—" />
     </div>
   );
+}
+
+function priceTone(yes: bigint | undefined): string {
+  if (yes == null) return "var(--fg-4)";
+  return yes >= 500_000_000n ? "var(--yes)" : "var(--no)";
 }
 
 function FooterChip({ label, value }: { label: string; value: string }) {

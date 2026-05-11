@@ -72,6 +72,13 @@ export function BinaryCard({ market, price }: Props) {
         delta24Pct={delta24Pct}
         points={points}
         hasPrice={!!price}
+        priceTone={
+          yesPct == null
+            ? "var(--fg-4)"
+            : yesPct >= 50
+              ? "var(--yes)"
+              : "var(--no)"
+        }
       />
       <BarsRow
         yesPct={yesPct}
@@ -164,12 +171,14 @@ function FeaturedPriceRow({
   delta24Pct,
   points,
   hasPrice,
+  priceTone,
 }: {
   label: string;
   cents: string;
   delta24Pct: number | null;
   points: import("@/lib/markets/use-card-history").PricePoint[];
   hasPrice: boolean;
+  priceTone: string;
 }) {
   return (
     <div
@@ -186,12 +195,10 @@ function FeaturedPriceRow({
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <span
-          className="text-mono"
           style={{
-            fontSize: "10px",
-            letterSpacing: "var(--track-wide)",
-            textTransform: "uppercase",
-            color: "var(--yes)",
+            fontFamily: "var(--font-sans)",
+            fontSize: "var(--fs-13)",
+            color: "var(--fg-2)",
           }}
         >
           {label}
@@ -208,7 +215,7 @@ function FeaturedPriceRow({
             style={{
               fontSize: "var(--fs-32)",
               lineHeight: "var(--lh-32)",
-              color: hasPrice ? "var(--fg-1)" : "var(--fg-4)",
+              color: hasPrice ? priceTone : "var(--fg-4)",
               letterSpacing: "var(--track-mono)",
             }}
           >
@@ -331,9 +338,9 @@ function FooterRow({ market }: { market: Market }) {
     <div
       style={{
         display: "flex",
-        gap: "var(--space-3)",
         alignItems: "center",
-        justifyContent: "flex-end",
+        justifyContent: "space-between",
+        gap: "var(--space-3)",
         fontFamily: "var(--font-mono)",
         fontSize: "10px",
         textTransform: "uppercase",
@@ -341,8 +348,10 @@ function FooterRow({ market }: { market: Market }) {
         color: "var(--fg-3)",
       }}
     >
-      <FooterChip label="vol" value={vol} />
-      <FooterChip label="liq" value="—" />
+      <div style={{ display: "flex", gap: "var(--space-3)" }}>
+        <FooterChip label="vol" value={vol} />
+        <FooterChip label="liq" value="—" />
+      </div>
       <FooterChip label="traders" value="—" />
     </div>
   );
