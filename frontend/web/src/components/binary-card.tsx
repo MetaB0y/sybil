@@ -9,8 +9,15 @@ import {
 } from "@/lib/format/nanos";
 import type { Market } from "@/lib/markets/use-markets";
 import { useCardHistory } from "@/lib/markets/use-card-history";
+import {
+  formatTraders,
+  mockCategory,
+  mockLiq,
+  mockTraders,
+} from "@/lib/mock";
 import type { MarketPrice } from "@/lib/store";
 import { MarketThumb } from "./market-thumb";
+import { MockValue } from "./mock-value";
 import { Sparkline } from "./sparkline";
 
 type Props = {
@@ -93,10 +100,7 @@ export function BinaryCard({ market, price }: Props) {
 }
 
 function EyebrowRow({ market }: { market: Market }) {
-  const category =
-    market.category && market.category.length > 0
-      ? market.category.toUpperCase()
-      : "// market";
+  const cat = mockCategory(market.market_id);
   return (
     <div
       style={{
@@ -109,6 +113,9 @@ function EyebrowRow({ market }: { market: Market }) {
       <span
         className="text-mono"
         style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "var(--space-2)",
           fontSize: "10px",
           letterSpacing: "var(--track-wide)",
           textTransform: "uppercase",
@@ -118,7 +125,17 @@ function EyebrowRow({ market }: { market: Market }) {
           whiteSpace: "nowrap",
         }}
       >
-        {category}
+        <span
+          aria-hidden
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            background: cat.color,
+            flexShrink: 0,
+          }}
+        />
+        <MockValue hint="category">{cat.name}</MockValue>
       </span>
       <span
         className="text-mono"
@@ -332,9 +349,12 @@ function BarRow({
 }
 
 function FooterRow({ market }: { market: Market }) {
-  const vol = market.volume_nanos
-    ? formatCompactDollars(market.volume_nanos)
-    : "—";
+  const volNanos = market.volume_nanos ? BigInt(market.volume_nanos) : 0n;
+  const vol = volNanos > 0n ? formatCompactDollars(volNanos) : "—";
+  const liqNanos = mockLiq(volNanos, market.market_id);
+  const liq = liqNanos > 0n ? formatCompactDollars(liqNanos) : "—";
+  const traderCount = mockTraders(market.market_id, volNanos);
+  const traders = traderCount > 0 ? formatTraders(traderCount) : "—";
   return (
     <div
       style={{
@@ -351,14 +371,26 @@ function FooterRow({ market }: { market: Market }) {
     >
       <div style={{ display: "flex", gap: "var(--space-3)" }}>
         <FooterChip label="vol" value={vol} />
-        <FooterChip label="liq" value="—" />
+        <FooterChip
+          label="liq"
+          value={<MockValue hint="liquidity">{liq}</MockValue>}
+        />
       </div>
-      <FooterChip label="traders" value="—" />
+      <FooterChip
+        label="traders"
+        value={<MockValue hint="trader count">{traders}</MockValue>}
+      />
     </div>
   );
 }
 
-function FooterChip({ label, value }: { label: string; value: string }) {
+function FooterChip({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
   return (
     <span style={{ display: "inline-flex", gap: 4, alignItems: "baseline" }}>
       <span>{label}</span>

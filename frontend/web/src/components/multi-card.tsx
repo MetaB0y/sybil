@@ -9,8 +9,16 @@ import {
 } from "@/lib/format/nanos";
 import type { Market } from "@/lib/markets/use-markets";
 import { useCardHistory } from "@/lib/markets/use-card-history";
+import {
+  formatTraders,
+  mockCategory,
+  mockDelta,
+  mockLiq,
+  mockTraders,
+} from "@/lib/mock";
 import type { MarketPrice } from "@/lib/store";
 import { MarketThumb } from "./market-thumb";
+import { MockValue } from "./mock-value";
 import { Sparkline } from "./sparkline";
 
 const SECONDARY_OUTCOMES = 3;
@@ -70,7 +78,11 @@ export function MultiCard({ groupName, markets, prices }: Props) {
         overflow: "hidden",
       }}
     >
-      <EyebrowRow count={markets.length} />
+      <EyebrowRow
+        groupName={groupName}
+        count={markets.length}
+        hiddenCount={hiddenCount}
+      />
       <TitleRow groupName={groupName} leaderId={leader?.market_id} />
       <FeaturedOutcome
         leader={leader}
@@ -84,12 +96,21 @@ export function MultiCard({ groupName, markets, prices }: Props) {
         hiddenCount={hiddenCount}
         leaderId={leader?.market_id ?? -1}
       />
-      <FooterRow totalVol={totalVol} />
+      <FooterRow totalVol={totalVol} totalVolNanos={sumVolumeNanos(markets) ?? 0n} seed={groupName} />
     </article>
   );
 }
 
-function EyebrowRow({ count }: { count: number }) {
+function EyebrowRow({
+  groupName,
+  count,
+  hiddenCount,
+}: {
+  groupName: string;
+  count: number;
+  hiddenCount: number;
+}) {
+  const cat = mockCategory(groupName);
   return (
     <div
       style={{
@@ -102,24 +123,41 @@ function EyebrowRow({ count }: { count: number }) {
       <span
         className="text-mono"
         style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "var(--space-2)",
           fontSize: "10px",
           letterSpacing: "var(--track-wide)",
           textTransform: "uppercase",
           color: "var(--fg-3)",
         }}
       >
-        {"// event"}
+        <span
+          aria-hidden
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            background: cat.color,
+            flexShrink: 0,
+          }}
+        />
+        <MockValue hint="category">{cat.name}</MockValue>
       </span>
       <span
         className="text-mono"
         style={{
-          fontSize: "10px",
-          letterSpacing: "var(--track-wide)",
-          textTransform: "uppercase",
-          color: "var(--accent)",
+          fontSize: "11px",
+          color: "var(--fg-3)",
         }}
       >
         {count} outcomes
+        {hiddenCount > 0 && (
+          <>
+            <span style={{ margin: "0 4px", color: "var(--fg-4)" }}>·</span>
+            <span style={{ color: "var(--accent)" }}>+{hiddenCount} more</span>
+          </>
+        )}
       </span>
     </div>
   );
@@ -319,14 +357,19 @@ function SecondaryRow({
   price: MarketPrice | undefined;
 }) {
   const label = trimOutcomeLabel(market.name);
+  const yesPct = price ? Number(price.yes) / 1e7 : null;
   const cents = price ? formatCents(price.yes) : "—";
+  const tone = priceTone(price?.yes);
+  const delta = mockDelta(market.market_id, yesPct);
+  const volNanos = market.volume_nanos ? BigInt(market.volume_nanos) : 0n;
+  const vol = volNanos > 0n ? formatCompactDollars(volNanos) : "—";
   return (
     <Link
       href={`/m/${market.market_id}`}
       style={{
         display: "grid",
-        gridTemplateColumns: "1fr auto",
-        gap: "var(--space-3)",
+        gridTemplateColumns: "minmax(0, 1fr) 44px 52px 52px",
+        gap: "var(--space-2)",
         alignItems: "center",
         padding: "var(--space-1) 0",
         textDecoration: "none",
@@ -349,17 +392,53 @@ function SecondaryRow({
         className="text-mono tabular"
         style={{
           fontSize: "var(--fs-13)",
-          color: priceTone(price?.yes),
+          color: tone,
           textAlign: "right",
         }}
       >
         {cents}
       </span>
+      <MockValue hint="24h delta" style={{ textAlign: "right" }}>
+        <span
+          className="text-mono tabular"
+          style={{
+            fontSize: "11px",
+            color: price ? (delta >= 0 ? "var(--yes)" : "var(--no)") : "var(--fg-4)",
+            display: "inline-block",
+            width: "100%",
+            textAlign: "right",
+          }}
+        >
+          {price ? formatPctDelta(delta) : "—"}
+        </span>
+      </MockValue>
+      <span
+        className="text-mono tabular"
+        style={{
+          fontSize: "11px",
+          color: "var(--fg-3)",
+          textAlign: "right",
+        }}
+      >
+        {vol}
+      </span>
     </Link>
   );
 }
 
-function FooterRow({ totalVol }: { totalVol: string }) {
+function FooterRow({
+  totalVol,
+  totalVolNanos,
+  seed,
+}: {
+  totalVol: string;
+  totalVolNanos: bigint;
+  seed: string;
+}) {
+  const liqNanos = mockLiq(totalVolNanos, seed);
+  const liq = liqNanos > 0n ? formatCompactDollars(liqNanos) : "—";
+  const traderCount = mockTraders(seed, totalVolNanos);
+  const traders = traderCount > 0 ? formatTraders(traderCount) : "—";
   return (
     <div
       style={{
@@ -376,9 +455,15 @@ function FooterRow({ totalVol }: { totalVol: string }) {
     >
       <div style={{ display: "flex", gap: "var(--space-3)" }}>
         <FooterChip label="vol" value={totalVol} />
-        <FooterChip label="liq" value="—" />
+        <FooterChip
+          label="liq"
+          value={<MockValue hint="liquidity">{liq}</MockValue>}
+        />
       </div>
-      <FooterChip label="traders" value="—" />
+      <FooterChip
+        label="traders"
+        value={<MockValue hint="trader count">{traders}</MockValue>}
+      />
     </div>
   );
 }
@@ -388,7 +473,13 @@ function priceTone(yes: bigint | undefined): string {
   return yes >= 500_000_000n ? "var(--yes)" : "var(--no)";
 }
 
-function FooterChip({ label, value }: { label: string; value: string }) {
+function FooterChip({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
   return (
     <span style={{ display: "inline-flex", gap: 4, alignItems: "baseline" }}>
       <span>{label}</span>
