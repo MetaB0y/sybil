@@ -25,7 +25,7 @@ type Props = {
   price: MarketPrice | undefined;
 };
 
-const CARD_HEIGHT = 400;
+const CARD_HEIGHT = 340;
 
 /**
  * BinaryCard — one card per YES/NO market.

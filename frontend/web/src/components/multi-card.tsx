@@ -21,8 +21,8 @@ import { MarketThumb } from "./market-thumb";
 import { MockValue } from "./mock-value";
 import { Sparkline } from "./sparkline";
 
-const SECONDARY_OUTCOMES = 3;
-const CARD_HEIGHT = 400;
+const SECONDARY_OUTCOMES = 1;
+const CARD_HEIGHT = 340;
 
 type Props = {
   groupName: string;
@@ -40,11 +40,17 @@ type Props = {
 export function MultiCard({ groupName, markets, prices }: Props) {
   const [ref, inView] = useInViewport<HTMLElement>();
 
+  // Sort by per-outcome volume (desc), then tie-break by YES price (desc).
+  // This is what the eyebrow's "top 2" promises — biggest-traded outcomes
+  // surface first; price-only ranking buried high-conviction-but-no-volume
+  // outcomes.
   const ranked = [...markets].sort((a, b) => {
+    const va = a.volume_nanos ? BigInt(a.volume_nanos) : 0n;
+    const vb = b.volume_nanos ? BigInt(b.volume_nanos) : 0n;
+    if (va !== vb) return va > vb ? -1 : 1;
     const pa = prices[a.market_id]?.yes ?? -1n;
     const pb = prices[b.market_id]?.yes ?? -1n;
-    if (pa === pb) return 0;
-    return pa > pb ? -1 : 1;
+    return pa > pb ? -1 : pa < pb ? 1 : 0;
   });
 
   const leader = ranked[0];
