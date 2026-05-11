@@ -14,7 +14,7 @@ import { MarketThumb } from "./market-thumb";
 import { Sparkline } from "./sparkline";
 
 const SECONDARY_OUTCOMES = 3;
-const CARD_HEIGHT = 360;
+const CARD_HEIGHT = 400;
 
 type Props = {
   groupName: string;
@@ -67,6 +67,7 @@ export function MultiCard({ groupName, markets, prices }: Props) {
         borderRadius: "var(--radius-lg)",
         boxShadow: "var(--shadow-inset-top)",
         boxSizing: "border-box",
+        overflow: "hidden",
       }}
     >
       <EyebrowRow count={markets.length} />
@@ -278,6 +279,8 @@ function SecondaryList({
         flexDirection: "column",
         gap: "var(--space-2)",
         alignSelf: "start",
+        minHeight: 0,
+        overflow: "hidden",
       }}
     >
       {markets.map((m) => (

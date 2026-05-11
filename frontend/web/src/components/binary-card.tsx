@@ -18,7 +18,7 @@ type Props = {
   price: MarketPrice | undefined;
 };
 
-const CARD_HEIGHT = 360;
+const CARD_HEIGHT = 400;
 
 /**
  * BinaryCard — one card per YES/NO market.
@@ -56,6 +56,7 @@ export function BinaryCard({ market, price }: Props) {
         color: "var(--fg-1)",
         transition: "border-color var(--dur-fast) var(--ease-standard)",
         boxSizing: "border-box",
+        overflow: "hidden",
       }}
       onMouseEnter={(e) =>
         (e.currentTarget.style.borderColor = "var(--border-3)")
