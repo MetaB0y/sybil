@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { BinaryCard } from "@/components/binary-card";
+import { ClearingTicker } from "@/components/clearing-ticker";
 import { MultiCard } from "@/components/multi-card";
 import { MarketsFilterBar, type SortKey } from "@/components/markets-filter-bar";
 import { useMarketsList, type Market } from "@/lib/markets/use-markets";
@@ -80,16 +81,18 @@ export default function MarketsPage() {
   }, [items, query, sort]);
 
   return (
-    <main
-      style={{
-        maxWidth: "var(--max-content)",
-        margin: "0 auto",
-        padding: "var(--space-6) var(--space-5) var(--space-9)",
-        display: "flex",
-        flexDirection: "column",
-        gap: "var(--space-5)",
-      }}
-    >
+    <>
+      {bundle && <ClearingTicker marketsById={bundle.byId} />}
+      <main
+        style={{
+          maxWidth: "var(--max-content)",
+          margin: "0 auto",
+          padding: "var(--space-6) var(--space-5) var(--space-9)",
+          display: "flex",
+          flexDirection: "column",
+          gap: "var(--space-5)",
+        }}
+      >
       <header
         style={{
           display: "flex",
@@ -158,7 +161,8 @@ export default function MarketsPage() {
           )}
         </div>
       )}
-    </main>
+      </main>
+    </>
   );
 }
 
