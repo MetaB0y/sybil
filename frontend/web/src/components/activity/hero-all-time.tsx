@@ -6,12 +6,19 @@
  *
  * Most fields are mocked (see OPEN_QUESTIONS #3) — the live ones are
  * `totalBatches` (from latestBlock.height) and `liveMarkets` (from
- * /v1/markets/summary). Mocked values render with a <MockValue> wrap.
+ * /v1/markets/summary).
+ *
+ * MockValue is applied to the **eyebrow** (small label) not the big number,
+ * because the dotted underline at 80px font weight makes the value look
+ * dimmed. The tooltip still works on hover of the underlined eyebrow.
  */
 
 import { MockValue } from "@/components/mock-value";
-import { formatInt } from "@/lib/format/nanos";
+import { formatCompactInt, formatInt } from "@/lib/format/nanos";
 import type { AllTimeStats } from "@/lib/activity/types";
+
+const ALL_TIME_HINT =
+  "all-time rollup — needs /v1/activity/overview (OPEN_QUESTIONS #3)";
 
 export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
   return (
@@ -33,11 +40,13 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
         {/* Left: hero number */}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span className="eyebrow">All-time matched volume</span>
+            <MockValue hint={ALL_TIME_HINT}>
+              <span className="eyebrow">All-time matched volume</span>
+            </MockValue>
             <span className="text-annotation" style={{ fontSize: 11 }}>
               since genesis ·{" "}
-              <MockValue hint="genesis age — backend doesn't track this yet">
-                {allTime.genesisAge}
+              <MockValue hint="genesis age — not tracked on backend">
+                <span>{allTime.genesisAge}</span>
               </MockValue>
             </span>
           </div>
@@ -52,9 +61,7 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
               fontVariantNumeric: "tabular-nums",
             }}
           >
-            <MockValue hint="all-time matched volume — needs /v1/activity/overview backend endpoint (OPEN_QUESTIONS #3)">
-              {allTime.matchedVolume}
-            </MockValue>
+            {allTime.matchedVolume}
           </div>
           <div
             style={{
@@ -75,11 +82,9 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
             >
               {formatInt(allTime.totalBatches)} batches ·{" "}
               {formatInt(allTime.liveMarkets)} live markets · uptime{" "}
-              <span style={{ color: "var(--yes)" }}>
-                <MockValue hint="uptime % — not tracked on backend, leaving as decision">
-                  {allTime.uptime}
-                </MockValue>
-              </span>
+              <MockValue hint="uptime % — not tracked, left as design decision">
+                <span style={{ color: "var(--yes)" }}>{allTime.uptime}</span>
+              </MockValue>
             </span>
           </div>
         </div>
@@ -97,33 +102,29 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
         >
           <BigKv
             label="Active traders"
-            value={formatInt(allTime.traders)}
+            value={formatCompactInt(allTime.traders)}
             sub="addresses placed ≥1 order"
             mocked
-            mockHint="unique-traders-all-time — backend ask (OPEN_QUESTIONS #3)"
           />
           <BigKv
             label="Placed orders"
-            value={formatInt(allTime.ordersPlaced)}
+            value={formatCompactInt(allTime.ordersPlaced)}
             sub="across all batches"
             mocked
-            mockHint="orders all-time — backend ask (OPEN_QUESTIONS #3)"
           />
           <BigKv
             label="Matched orders"
-            value={formatInt(allTime.ordersMatched)}
+            value={formatCompactInt(allTime.ordersMatched)}
             sub="successfully filled at clear"
             accent="var(--yes)"
             mocked
-            mockHint="orders all-time — backend ask (OPEN_QUESTIONS #3)"
           />
           <BigKv
             label="Unmatched orders"
-            value={formatInt(allTime.ordersUnmatched)}
+            value={formatCompactInt(allTime.ordersUnmatched)}
             sub="cancelled or expired"
             accent="var(--fg-2)"
             mocked
-            mockHint="orders all-time — backend ask (OPEN_QUESTIONS #3)"
           />
         </div>
       </div>
@@ -137,33 +138,19 @@ function BigKv({
   sub,
   accent = "var(--fg-1)",
   mocked = false,
-  mockHint = "",
 }: {
   label: string;
   value: string;
   sub: string;
   accent?: string;
   mocked?: boolean;
-  mockHint?: string;
 }) {
-  const numberEl = (
-    <span
-      style={{
-        fontFamily: "var(--font-sans)",
-        fontSize: 30,
-        fontWeight: 600,
-        color: accent,
-        fontVariantNumeric: "tabular-nums",
-        letterSpacing: "-0.01em",
-        lineHeight: 1,
-      }}
-    >
-      {value}
-    </span>
-  );
+  const labelEl = <span className="eyebrow">{label}</span>;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
-      <span className="eyebrow">{label}</span>
+    <div
+      style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}
+    >
+      {mocked ? <MockValue hint={ALL_TIME_HINT}>{labelEl}</MockValue> : labelEl}
       <div
         style={{
           display: "flex",
@@ -172,7 +159,19 @@ function BigKv({
           justifyContent: "space-between",
         }}
       >
-        {mocked ? <MockValue hint={mockHint}>{numberEl}</MockValue> : numberEl}
+        <span
+          style={{
+            fontFamily: "var(--font-sans)",
+            fontSize: 30,
+            fontWeight: 600,
+            color: accent,
+            fontVariantNumeric: "tabular-nums",
+            letterSpacing: "-0.01em",
+            lineHeight: 1,
+          }}
+        >
+          {value}
+        </span>
       </div>
       <span
         style={{

@@ -21,6 +21,7 @@ import { HeroAllTime } from "@/components/activity/hero-all-time";
 import { PulseStrip } from "@/components/activity/pulse-strip";
 import { BatchesTable } from "@/components/activity/batches-table";
 import { BatchDetail } from "@/components/activity/batch-detail";
+import { ActivityBatchChip } from "@/components/activity/batch-chip";
 
 export default function ActivityDevPage() {
   const hydration = useStore(selectHydration);
@@ -65,20 +66,22 @@ export default function ActivityDevPage() {
         <span className="text-annotation" style={{ fontSize: 11 }}>
           everything happening on Sybil · uniform clearing every 2 s
         </span>
-        <span
-          style={{
-            marginLeft: "auto",
-            fontFamily: "var(--font-mono)",
-            fontSize: 10,
-            color: "var(--warn)",
-            background: "var(--warn-soft)",
-            padding: "2px 7px",
-            borderRadius: 9999,
-            letterSpacing: "0.04em",
-            textTransform: "uppercase",
-          }}
-        >
-          dev preview
+        <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+          <ActivityBatchChip />
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+              color: "var(--warn)",
+              background: "var(--warn-soft)",
+              padding: "2px 7px",
+              borderRadius: 9999,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+            }}
+          >
+            dev preview
+          </span>
         </span>
       </div>
 

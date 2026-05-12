@@ -9,7 +9,7 @@
  */
 
 import { MockValue } from "@/components/mock-value";
-import { formatInt, formatPctDelta } from "@/lib/format/nanos";
+import { formatCompactInt, formatPctDelta } from "@/lib/format/nanos";
 import { MOCK_24H } from "@/lib/activity/mocks";
 
 const MOCK_HINT =
@@ -31,21 +31,21 @@ export function PulseStrip() {
     },
     {
       label: "Active traders",
-      value: formatInt(MOCK_24H.traders),
+      value: formatCompactInt(MOCK_24H.traders),
       deltaPct: MOCK_24H.tradersDeltaPct,
     },
     {
       label: "Placed orders",
-      value: formatInt(MOCK_24H.ordersPlaced),
+      value: formatCompactInt(MOCK_24H.ordersPlaced),
     },
     {
       label: "Matched orders",
-      value: formatInt(MOCK_24H.ordersMatched),
+      value: formatCompactInt(MOCK_24H.ordersMatched),
       accent: "var(--yes)",
     },
     {
       label: "Unmatched orders",
-      value: formatInt(MOCK_24H.ordersUnmatched),
+      value: formatCompactInt(MOCK_24H.ordersUnmatched),
       accent: "var(--fg-2)",
     },
   ];
@@ -109,7 +109,9 @@ export function PulseStrip() {
               minWidth: 0,
             }}
           >
-            <span className="eyebrow">{it.label}</span>
+            <MockValue hint={MOCK_HINT}>
+              <span className="eyebrow">{it.label}</span>
+            </MockValue>
             <div
               style={{
                 display: "flex",
@@ -118,21 +120,19 @@ export function PulseStrip() {
                 gap: 10,
               }}
             >
-              <MockValue hint={MOCK_HINT}>
-                <span
-                  style={{
-                    fontFamily: "var(--font-sans)",
-                    fontSize: 22,
-                    fontWeight: 600,
-                    color: it.accent ?? "var(--fg-1)",
-                    fontVariantNumeric: "tabular-nums",
-                    letterSpacing: "-0.01em",
-                    lineHeight: 1,
-                  }}
-                >
-                  {it.value}
-                </span>
-              </MockValue>
+              <span
+                style={{
+                  fontFamily: "var(--font-sans)",
+                  fontSize: 22,
+                  fontWeight: 600,
+                  color: it.accent ?? "var(--fg-1)",
+                  fontVariantNumeric: "tabular-nums",
+                  letterSpacing: "-0.01em",
+                  lineHeight: 1,
+                }}
+              >
+                {it.value}
+              </span>
               {it.deltaPct != null && (
                 <span
                   style={{

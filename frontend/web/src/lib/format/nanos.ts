@@ -74,6 +74,27 @@ export const formatCentsDelta = (cents: number): string => {
 export const formatInt = (v: NanosInput): string =>
   parseNanos(v).toLocaleString("en-US");
 
+/**
+ * Compact integer: 1_234 → "1.2K", 1_234_567 → "1.2M", 1_234_567_890 → "1.2B".
+ * Drops trailing zero in the decimal (1.0K → "1K"). Negatives keep their sign.
+ * Use for stat-strip / hero numbers where space matters; use formatInt for
+ * tables where alignment matters more than width.
+ */
+export const formatCompactInt = (n: number): string => {
+  const abs = Math.abs(n);
+  const sign = n < 0 ? "-" : "";
+  if (abs >= 1_000_000_000)
+    return `${sign}${trimTrailingZero((abs / 1_000_000_000).toFixed(1))}B`;
+  if (abs >= 1_000_000)
+    return `${sign}${trimTrailingZero((abs / 1_000_000).toFixed(2))}M`;
+  if (abs >= 1_000)
+    return `${sign}${trimTrailingZero((abs / 1_000).toFixed(1))}K`;
+  return `${sign}${abs}`;
+};
+
+const trimTrailingZero = (s: string): string =>
+  s.replace(/\.?0+$/, "");
+
 /** Compact dollar formatter: $4.2M, $312K, $84.5K, $12. No decimal under $10. */
 export const formatCompactDollars = (v: NanosInput): string => {
   const nanos = parseNanos(v);

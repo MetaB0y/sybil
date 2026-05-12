@@ -437,6 +437,10 @@ function MetaPair({
   mocked?: boolean;
   mockHint?: string;
 }) {
+  // When both link + mocked, drop the solid link underline — the MockValue
+  // dotted underline already signals interactivity (tooltip on hover). Two
+  // underlines stacked looks broken.
+  const showLinkUnderline = link && !mocked;
   const valueEl = (
     <span
       style={{
@@ -444,19 +448,22 @@ function MetaPair({
         fontSize: 12,
         color: link ? "var(--accent)" : color ?? "var(--fg-1)",
         fontVariantNumeric: "tabular-nums",
-        textDecoration: link ? "underline" : "none",
+        textDecoration: showLinkUnderline ? "underline" : "none",
         textUnderlineOffset: 2,
       }}
     >
       {value}
     </span>
   );
+  const labelEl = (
+    <span className="eyebrow" style={{ color: "var(--fg-3)" }}>
+      {label}
+    </span>
+  );
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <span className="eyebrow" style={{ color: "var(--fg-3)" }}>
-        {label}
-      </span>
-      {mocked ? <MockValue hint={mockHint ?? ""}>{valueEl}</MockValue> : valueEl}
+      {mocked ? <MockValue hint={mockHint ?? ""}>{labelEl}</MockValue> : labelEl}
+      {valueEl}
     </div>
   );
 }
