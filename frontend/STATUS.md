@@ -78,6 +78,16 @@ e69c74b frontend: WS client + reconnect state machine (Milestone A)
 2. **shadcn kept** — copies into the repo as plain `.tsx` files, restyle aggressively per component. We haven't pulled any shadcn components yet (no buttons / dialogs / etc. needed so far). Falls back to raw Radix if a specific component fights us.
 3. **u64 / `*_nanos` workaround** — `scripts/patch-bigints.mjs` rewrites generated schema; see `KNOWN_ISSUES.md`. Backend `utoipa` fix tracked separately. Frontend code uses `parseNanos()` and `bigint` exclusively for money.
 
+## Active design tradeoffs (revisit later)
+
+Phase 2 (Polymarket mirror metadata enrichment — event/market images, end dates, category-derived-from-tags) is planned in `PHASE_2_PLAN.md` (in this folder). **Paused, not started** — blocked on prod SSH access and on the API container recovering from OOM. Five design choices are knowingly "good for now, not sure long-term". Full rationale + revisit triggers in `KNOWN_ISSUES.md` #2. Headline calls:
+
+1. **Off-block storage** — image/category/tags/end_date live in `MarketRefData` (mutable, off the block hash), not `MarketMetadata` (block-committed). Cleaner backfill, no hash drift on Polymarket re-tags, but a verifier can't prove "this market was Sports at block N".
+2. **`end_date` is display-only** — Polymarket's `endDate` is the *expected* resolution date, not a trading cutoff. We don't route it through the matching engine's `expiry_timestamp_ms`. The resolution actor remains the only thing that closes mirrored markets.
+3. **Backfill is one-shot, not recurring** — `sybil-polymarket --backfill-metadata` is run manually; Polymarket re-categorizations don't auto-propagate.
+4. **Tag→category map is hardcoded in code** — new tags fall to "Other" until we extend the table.
+5. **`MarketRefData` persists to JSON on disk** — mirrors the `MappingStore` pattern; write-amplifies on every metadata POST (rare today).
+
 ## Deferred (not blocking dev work)
 
 - **Real backend domain** — `172-104-31-54.nip.io` is IP-pinned. Acceptable while dev-only. Revisit before any public preview.
