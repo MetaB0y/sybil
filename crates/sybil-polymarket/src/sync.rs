@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
-use crate::categorize::derive_category;
+use crate::categorize::derive_categories;
 use crate::config::Config;
 use crate::feed::FeedMessage;
 use crate::mapping::{GroupInfo, MappingStore};
@@ -289,8 +289,11 @@ impl SyncActor {
 ///   and falls back to icon on 404.
 /// - End dates: parsed from ISO-8601 to epoch ms. Display only; matching
 ///   engine doesn't enforce trading cutoffs.
-/// - `category`: derived from `event.tags[].label` via the priority table.
-///   `None` when no tag matches.
+/// - `polymarket_tags`: raw `event.tags[].label` list. Frontend derives one
+///   or more categories from these via its own priority table — moves
+///   categorization out of the build/deploy loop.
+/// - `category`: deliberately left `None` for mirrored markets; superseded
+///   by `polymarket_tags` + frontend derivation.
 /// - `external_url`: Polymarket event page (when slug present), for the
 ///   "view on Polymarket" link.
 fn build_metadata_request(event: &GammaEvent, market: &GammaMarket) -> SetMarketMetadataRequest {
@@ -311,6 +314,8 @@ fn build_metadata_request(event: &GammaEvent, market: &GammaMarket) -> SetMarket
         Some(format!("https://polymarket.com/event/{}", event.slug))
     };
 
+    let categories = derive_categories(&event.tags);
+
     SetMarketMetadataRequest {
         external_url,
         event_id: Some(event.id.clone()),
@@ -321,6 +326,13 @@ fn build_metadata_request(event: &GammaEvent, market: &GammaMarket) -> SetMarket
         market_image_url: market.image.clone(),
         market_icon_url: market.icon.clone(),
         market_end_date_ms,
-        category: derive_category(&event.tags),
+        // `category` (singular) is reserved for sybil-native markets; the
+        // mirror ships `categories` (plural) and lets the frontend pick.
+        category: None,
+        categories: if categories.is_empty() {
+            None
+        } else {
+            Some(categories)
+        },
     }
 }

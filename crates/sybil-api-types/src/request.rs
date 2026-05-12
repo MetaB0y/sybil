@@ -349,7 +349,16 @@ pub struct SetMarketMetadataRequest {
     /// does not enforce trading cutoffs at this time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub market_end_date_ms: Option<u64>,
-    /// Display category bucket (derived from Polymarket tags). Off-block.
+    /// Single display category. **Legacy** — populated only for sybil-native
+    /// markets at create time. Mirrored markets now use `categories` (plural)
+    /// and let the frontend pick one for display via its own priority order.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
+    /// All category buckets the parent event matched in the mirror's tag-to-
+    /// bucket lookup (e.g. `["Sports", "Politics"]` for an NBA + Trump
+    /// event). One per matched row; the frontend picks which to render
+    /// using its own priority list, so reordering display priority is
+    /// frontend-only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub categories: Option<Vec<String>>,
 }

@@ -1,37 +1,35 @@
-//! Polymarket tag → Sybil category derivation.
+//! Polymarket tag → Sybil category-bucket derivation.
 //!
 //! `event.category` is always `null` in Gamma's responses; the real signal
 //! lives in `event.tags[].label`. Tags are noisy and overlap (a Kraken IPO
-//! event might carry `[exchange, Tech, Crypto, Finance, Business, IPOs]`), so
-//! we collapse them onto a fixed 15-bucket taxonomy via a priority-ordered
-//! lookup. The first row whose label set has a case-insensitive intersection
-//! with `event.tags[].label` wins.
+//! event might carry `[exchange, Tech, Crypto, Finance, Business, IPOs]`).
 //!
-//! The table is hardcoded by design: ops shouldn't need a code change to
-//! grow it, but the long tail is small enough today that a config file
-//! would be overkill. New unmatched labels are logged at `info!` so we can
-//! see what to add later.
+//! Each row in [`TABLE`] is a `(bucket, &[labels])` pair. For every market
+//! we walk every row, and a row whose labels intersect the event's tags
+//! contributes its bucket to the result. So a market tagged `[NBA, Trump]`
+//! returns **both** `"Sports"` and `"Politics"`; the frontend has its own
+//! priority list and picks which one to surface.
 //!
-//! Off-block: this category never enters `MarketMetadata` or the block
-//! digest. It rides through `MarketRefData` → `MarketResponse.category` for
-//! display only.
-
-use tracing::info;
+//! Off-block: these category strings never enter `MarketMetadata` or the
+//! block digest. They ride through `MarketRefData` → `MarketResponse.categories`
+//! for display only.
+//!
+//! Changing display priority is a frontend-only edit. Adding a new bucket or
+//! a new label needs a backend rebuild (because matching lives here).
 
 use crate::polymarket::types::GammaTag;
 
-/// One row of the priority table.
+/// One row of the bucket table.
 struct CategoryRule {
     bucket: &'static str,
     /// Tag labels that map to this bucket. Case-insensitive comparison.
     labels: &'static [&'static str],
 }
 
-/// Walks top-to-bottom; the first bucket whose `labels` intersects `tags`
-/// wins. See module doc for rationale.
+/// The bucket table. Row order is **not** display order — the frontend has
+/// its own priority list. The order here only matters for the order entries
+/// land in the result Vec (which the frontend can re-sort freely).
 const TABLE: &[CategoryRule] = &[
-    // Elections wins over Politics: a market tagged with both `Elections`
-    // and `Trump` is conceptually an election market.
     CategoryRule {
         bucket: "Elections",
         labels: &[
@@ -46,10 +44,6 @@ const TABLE: &[CategoryRule] = &[
     },
     CategoryRule {
         bucket: "Politics",
-        // `Politics` (the literal Polymarket tag) was the gap that put 161
-        // election-adjacent events in the "no category" bucket on the first
-        // deploy. The specific Trump/Congress/Senate labels stay so future
-        // single-topic Politics events still bucket correctly.
         labels: &["Politics", "Trump", "Congress", "Senate"],
     },
     CategoryRule {
@@ -131,35 +125,29 @@ const TABLE: &[CategoryRule] = &[
     },
 ];
 
-/// Derive a category bucket from a Polymarket event's tags. Returns `None`
-/// when no tag matches any row (the frontend renders no chip in that case).
-/// Logs each unmatched label at `info!` so the table can be grown from
-/// observed tags.
-pub fn derive_category(tags: &[GammaTag]) -> Option<String> {
+/// Derive every category bucket whose label set intersects the event's
+/// tags. Returns an empty Vec when nothing matches (caller turns that into
+/// `None` for the off-block field).
+///
+/// Comparison is case-insensitive. A bucket appears at most once even if
+/// multiple of its labels match. The returned order matches [`TABLE`] row
+/// order so it's stable, but the frontend re-prioritizes anyway.
+pub fn derive_categories(tags: &[GammaTag]) -> Vec<String> {
     if tags.is_empty() {
-        return None;
+        return Vec::new();
     }
-
     let normalized: Vec<String> = tags.iter().map(|t| t.label.to_lowercase()).collect();
-
+    let mut out = Vec::new();
     for rule in TABLE {
-        for label in rule.labels {
-            if normalized.iter().any(|t| t == &label.to_lowercase()) {
-                return Some(rule.bucket.to_string());
-            }
+        let hit = rule
+            .labels
+            .iter()
+            .any(|lbl| normalized.iter().any(|t| t == &lbl.to_lowercase()));
+        if hit {
+            out.push(rule.bucket.to_string());
         }
     }
-
-    // Log the unmatched labels so we can grow the table later.
-    let unmatched: Vec<&str> = tags
-        .iter()
-        .map(|t| t.label.as_str())
-        .filter(|l| !l.is_empty())
-        .collect();
-    if !unmatched.is_empty() {
-        info!(tags = ?unmatched, "no category match for tags");
-    }
-    None
+    out
 }
 
 #[cfg(test)]
@@ -174,98 +162,60 @@ mod tests {
     }
 
     #[test]
-    fn empty_tags_no_category() {
-        assert_eq!(derive_category(&[]), None);
+    fn empty_tags_returns_empty() {
+        assert!(derive_categories(&[]).is_empty());
     }
 
     #[test]
-    fn each_row_matches() {
-        let cases = [
-            ("Elections", "Elections"),
-            ("World Elections", "Elections"),
-            ("US Election", "Elections"),
-            ("Primaries", "Elections"),
-            ("President", "Elections"),
-            ("Politics", "Politics"),
-            ("Trump", "Politics"),
-            ("Senate", "Politics"),
-            ("Geopolitics", "Geopolitics"),
-            ("AI", "AI"),
-            ("Tech", "Tech"),
-            ("Economy", "Economy"),
-            ("Culture", "Culture"),
-            ("Movies", "Culture"),
-            ("Music", "Culture"),
-            ("Science", "Science"),
-            ("World", "World"),
-            ("Finance", "Finance"),
-            ("IPOs", "Finance"),
-            ("IPO", "Finance"),
-            ("Earnings", "Finance"),
-            ("Stocks", "Finance"),
-            ("Business", "Business"),
-            ("Weather", "Weather"),
-            ("Mentions", "Mentions"),
-            ("NBA", "Sports"),
-            ("Soccer", "Sports"),
-            ("Formula 1", "Sports"),
-            ("Esports", "Sports"),
-            ("Crypto", "Crypto"),
-            ("Commodities", "Commodities"),
-        ];
-        for (label, expected) in cases {
-            let got = derive_category(&[tag(label)]);
-            assert_eq!(
-                got.as_deref(),
-                Some(expected),
-                "tag {:?} should map to {}",
-                label,
-                expected
-            );
-        }
+    fn single_match_returns_one_bucket() {
+        assert_eq!(derive_categories(&[tag("NBA")]), vec!["Sports"]);
+        assert_eq!(derive_categories(&[tag("Trump")]), vec!["Politics"]);
+        assert_eq!(derive_categories(&[tag("Crypto")]), vec!["Crypto"]);
+    }
+
+    #[test]
+    fn multi_match_returns_all_buckets() {
+        // Tags `[NBA, Trump]` → Sports AND Politics (both buckets matched).
+        // Order follows TABLE row order (Politics row 2, Sports row 14).
+        let got = derive_categories(&[tag("NBA"), tag("Trump")]);
+        assert_eq!(got, vec!["Politics", "Sports"]);
+    }
+
+    #[test]
+    fn user_example_sports_politics_football() {
+        // `[Sports, Politics, Football]` → Politics + Sports (Politics row
+        // matches "Politics"; Sports row matches "Sports" + "Football",
+        // but Sports bucket appears once).
+        let got = derive_categories(&[tag("Sports"), tag("Politics"), tag("Football")]);
+        assert_eq!(got, vec!["Politics", "Sports"]);
+    }
+
+    #[test]
+    fn user_example_geopolitics_politics() {
+        let got = derive_categories(&[tag("Geopolitics"), tag("Politics")]);
+        assert_eq!(got, vec!["Politics", "Geopolitics"]);
+    }
+
+    #[test]
+    fn user_example_sports_barcelona_world_cup() {
+        // Only "Sports" matches; "Barcelona" and "World Cup" are not in our
+        // table (we don't map team / tournament names directly).
+        let got = derive_categories(&[tag("Sports"), tag("Barcelona"), tag("World Cup")]);
+        assert_eq!(got, vec!["Sports"]);
     }
 
     #[test]
     fn case_insensitive() {
-        assert_eq!(derive_category(&[tag("nba")]).as_deref(), Some("Sports"));
-        assert_eq!(derive_category(&[tag("TRUMP")]).as_deref(), Some("Politics"));
-        assert_eq!(derive_category(&[tag("CrYpTo")]).as_deref(), Some("Crypto"));
+        assert_eq!(derive_categories(&[tag("nba")]), vec!["Sports"]);
+        assert_eq!(derive_categories(&[tag("TRUMP")]), vec!["Politics"]);
+        assert_eq!(derive_categories(&[tag("CrYpTo")]), vec!["Crypto"]);
     }
 
     #[test]
-    fn priority_resolves_ambiguity() {
-        // Politics (row 2) beats Sports (row 14).
-        let tags = vec![tag("NBA"), tag("Trump")];
-        assert_eq!(derive_category(&tags).as_deref(), Some("Politics"));
-    }
-
-    #[test]
-    fn elections_beats_politics() {
-        // A market tagged with both should land in Elections, not Politics.
-        let tags = vec![tag("Trump"), tag("Elections"), tag("US Election")];
-        assert_eq!(derive_category(&tags).as_deref(), Some("Elections"));
-    }
-
-    #[test]
-    fn live_election_tags_from_prod_logs() {
-        // Real tag set from sybil-polymarket logs that fell through on the
-        // first deploy. After the Elections row, these must categorize.
-        let tags = vec![
-            tag("World Elections"),
-            tag("Global Elections"),
-            tag("Elections"),
-            tag("Politics"),
-            tag("US Election"),
-            tag("Earn 4%"),
-            tag("Primaries"),
-            tag("United States"),
-        ];
-        assert_eq!(derive_category(&tags).as_deref(), Some("Elections"));
-    }
-
-    #[test]
-    fn worked_examples_from_live_api() {
-        // Kraken IPO event tags: Tech wins over Crypto/Finance/Business.
+    fn kraken_event_full() {
+        // The full Kraken IPO tag set must produce Tech + Finance + Business
+        // + Crypto (and not Economy, which the table doesn't map for these
+        // tags). Order is row-order.
         let kraken = vec![
             tag("exchange"),
             tag("Tech"),
@@ -276,24 +226,32 @@ mod tests {
             tag("Featured"),
             tag("IPOs"),
         ];
-        assert_eq!(derive_category(&kraken).as_deref(), Some("Tech"));
-
-        // MicroStrategy event tags: Economy wins over Finance/Business/Crypto.
-        let mstr = vec![
-            tag("Finance"),
-            tag("Economy"),
-            tag("Business"),
-            tag("2025 Predictions"),
-            tag("Crypto"),
-            tag("MicroStrategy"),
-            tag("Stocks"),
-        ];
-        assert_eq!(derive_category(&mstr).as_deref(), Some("Economy"));
+        assert_eq!(
+            derive_categories(&kraken),
+            vec!["Tech", "Finance", "Business", "Crypto"]
+        );
     }
 
     #[test]
-    fn unmatched_tags_return_none() {
+    fn live_election_tags_from_prod_logs() {
+        // Real tag set that fell through pre-Elections. After the Elections
+        // row, these must categorize as Elections + Politics.
+        let tags = vec![
+            tag("World Elections"),
+            tag("Global Elections"),
+            tag("Elections"),
+            tag("Politics"),
+            tag("US Election"),
+            tag("Earn 4%"),
+            tag("Primaries"),
+            tag("United States"),
+        ];
+        assert_eq!(derive_categories(&tags), vec!["Elections", "Politics"]);
+    }
+
+    #[test]
+    fn unmatched_tags_returns_empty() {
         let tags = vec![tag("exchange"), tag("2025 Predictions"), tag("Featured")];
-        assert_eq!(derive_category(&tags), None);
+        assert!(derive_categories(&tags).is_empty());
     }
 }

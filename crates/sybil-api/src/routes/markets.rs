@@ -82,6 +82,7 @@ fn build_market_response(args: BuildMarketResponseArgs<'_>) -> MarketResponse {
         market_image_url: args.ref_data.and_then(|r| r.market_image_url.clone()),
         market_icon_url: args.ref_data.and_then(|r| r.market_icon_url.clone()),
         market_end_date_ms: args.ref_data.and_then(|r| r.market_end_date_ms),
+        categories: args.ref_data.and_then(|r| r.categories.clone()),
     }
 }
 
@@ -695,6 +696,9 @@ pub async fn set_market_metadata(
     }
     if let Some(v) = req.category {
         entry.category = Some(v);
+    }
+    if let Some(v) = req.categories {
+        entry.categories = Some(v);
     }
     save_market_ref_data(&ref_data, state.market_ref_data_path.as_deref());
     Ok(Json(serde_json::json!({"updated": true})))

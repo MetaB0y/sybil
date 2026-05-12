@@ -40,11 +40,16 @@ pub struct MarketRefData {
     pub market_icon_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub market_end_date_ms: Option<u64>,
-    /// Display category (e.g. "Sports", "Politics"). Derived from Polymarket
-    /// tags by the mirror; on-block `MarketMetadata.category` takes priority
-    /// only when this is `None`.
+    /// Single display category. **Legacy** — populated only for sybil-native
+    /// markets at create time. Mirrored markets leave this `None` and use
+    /// `categories` instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
+    /// All category buckets the parent event matched in the mirror's
+    /// tag-to-bucket lookup. Frontend picks one for display via its own
+    /// priority list. Off-block; stored once at sync time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub categories: Option<Vec<String>>,
 }
 
 /// Load `market_ref_data` snapshot from disk, or return an empty map if the

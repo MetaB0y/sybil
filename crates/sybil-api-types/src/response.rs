@@ -77,6 +77,12 @@ pub struct MarketResponse {
     /// Per-market expected end date (epoch ms). Display only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub market_end_date_ms: Option<u64>,
+    /// All category buckets the parent event matched on the mirror's
+    /// tag-to-bucket lookup (e.g. `["Sports", "Politics"]`). Frontend picks
+    /// one for display via its own priority list. None for sybil-native
+    /// markets (use the singular `category` field instead).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub categories: Option<Vec<String>>,
 }
 
 /// Minimal market data for high-throughput dashboards (drops strings & metadata).
