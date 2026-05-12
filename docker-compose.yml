@@ -1,6 +1,8 @@
 services:
   sybil-api:
     image: sybil-api:latest
+    mem_limit: "900m"
+    memswap_limit: "900m"
     ports:
       - "3000:3000"
     environment:
@@ -27,6 +29,8 @@ services:
 
   sybil-polymarket:
     image: sybil-api:latest
+    mem_limit: "256m"
+    memswap_limit: "256m"
     entrypoint: ["sybil-polymarket"]
     command:
       - "--sybil-url=http://sybil-api:3000"
@@ -46,6 +50,8 @@ services:
 
   sybil-prover:
     image: sybil-api:latest
+    mem_limit: "256m"
+    memswap_limit: "256m"
     entrypoint: ["sybil-prover"]
     command:
       - "serve"
@@ -66,6 +72,8 @@ services:
 
   sybil-prover-worker:
     image: sybil-api:latest
+    mem_limit: "256m"
+    memswap_limit: "256m"
     entrypoint: ["sybil-prover"]
     command:
       - "worker"
@@ -79,6 +87,8 @@ services:
 
   sybil-arena:
     image: sybil-arena:latest
+    mem_limit: "512m"
+    memswap_limit: "512m"
     command:
       - "--sybil-url=http://sybil-api:3000"
       - "--api-key=${OPENROUTER_API_KEY}"
@@ -96,6 +106,8 @@ services:
 
   sybil-arena-dashboard:
     image: sybil-arena:latest
+    mem_limit: "512m"
+    memswap_limit: "512m"
     entrypoint: ["uv", "run", "streamlit", "run", "live/dashboard.py"]
     command:
       - "--server.port=8501"
@@ -113,6 +125,8 @@ services:
 
   victoriametrics:
     image: victoriametrics/victoria-metrics:v1.101.0
+    mem_limit: "384m"
+    memswap_limit: "384m"
     ports:
       - "8428:8428"
     volumes:
@@ -127,9 +141,12 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    restart: unless-stopped
 
   vmalert:
     image: victoriametrics/vmalert:v1.101.0
+    mem_limit: "128m"
+    memswap_limit: "128m"
     ports:
       - "8880:8880"
     volumes:
@@ -153,6 +170,8 @@ services:
 
   grafana:
     image: grafana/grafana:11.0.0
+    mem_limit: "256m"
+    memswap_limit: "256m"
     ports:
       - "3001:3000"
     environment:
@@ -170,6 +189,22 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    restart: unless-stopped
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.1
+    mem_limit: "128m"
+    memswap_limit: "128m"
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
+      - "--collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run/docker/.+|var/lib/docker/.+)($$|/)"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro,rslave
+    restart: unless-stopped
 
 volumes:
   vmdata:

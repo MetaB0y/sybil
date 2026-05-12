@@ -40,7 +40,7 @@ Main services:
 - `sybil-arena` - live Python LLM/noise traders
 - `sybil-arena-dashboard` - Streamlit dashboard on port `8501`
 - `caddy` - HTTPS for app and arena dashboard
-- `victoriametrics`, `vmalert`, `grafana` - observability stack
+- `node-exporter`, `victoriametrics`, `vmalert`, `grafana` - observability stack
 
 ## Read-Only Checks
 
@@ -96,6 +96,8 @@ current rule set covers:
 - block production stalled
 - solver latency high
 - actor mailbox backlog
+- API process memory
+- host memory, swap, CPU, and load
 - high order rejection rate
 - live submissions with no fills
 - accepted orders with no fills
@@ -219,12 +221,20 @@ The 2 GB Linode does not run Tempo by default. Metrics and alerts are the
 operational source of truth; tracing can be enabled later by running an OTLP
 collector/Tempo and setting `OTEL_EXPORTER_OTLP_ENDPOINT` for `sybil-api`.
 
+The API runs with a Docker memory cap. If it leaks or retains too much derived
+state, the desired failure mode is a `sybil-api` container restart plus alerts,
+not a host-level swap spiral. The live stack also exports:
+
+- `sybil_process_resident_memory_bytes` from `sybil-api`
+- host memory, swap, CPU, and load from `node-exporter`
+
 Host pressure can still cause brief scrape misses. Confirm the current state
 with:
 
 ```bash
 ssh root@172.104.31.54 'free -h; uptime'
 ssh root@172.104.31.54 'curl -sS http://localhost:8428/api/v1/query?query=up%7Bjob%3D%22sybil-api%22%7D'
+ssh root@172.104.31.54 'curl -sS http://localhost:8428/api/v1/query?query=sybil_process_resident_memory_bytes'
 ```
 
 Do not treat a brief `SequencerDown` firing/resolved pair as evidence that

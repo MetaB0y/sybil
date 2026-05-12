@@ -6,6 +6,13 @@ use matching_engine::{Fill, MarketId, Nanos, Order};
 
 use crate::market_info::PricePoint;
 
+/// Bounded in-memory price history retained per market.
+///
+/// This is a serving cache for live charts, not canonical state. The durable
+/// price-history table is still a future store concern; keeping this bounded
+/// prevents long-running live deployments from retaining every fill forever.
+const MAX_PRICE_HISTORY_POINTS_PER_MARKET: usize = 2_000;
+
 /// Tracks clearing prices, price history, and per-market trading volume.
 #[derive(Clone, Default)]
 pub struct PriceTracker {
@@ -109,6 +116,14 @@ impl PriceTracker {
                     no_price,
                     volume_nanos: vol,
                 });
+                if let Some(history) = self.price_history.get_mut(&mid) {
+                    let overflow = history
+                        .len()
+                        .saturating_sub(MAX_PRICE_HISTORY_POINTS_PER_MARKET);
+                    if overflow > 0 {
+                        history.drain(0..overflow);
+                    }
+                }
             }
             *self.market_volumes.entry(mid).or_insert(0) += vol;
         }
@@ -140,5 +155,41 @@ impl PriceTracker {
     /// Persisted per-market cumulative volume view.
     pub fn market_volumes(&self) -> &HashMap<MarketId, u64> {
         &self.market_volumes
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use matching_engine::{outcome_buy, Fill, MarketSet, NANOS_PER_DOLLAR};
+
+    #[test]
+    fn price_history_is_bounded_per_market() {
+        let mut markets = MarketSet::new();
+        let market = markets.add_binary("bounded");
+        let order = outcome_buy(&markets, 1, market, 0, NANOS_PER_DOLLAR / 2, 1);
+        let mut orders = HashMap::new();
+        orders.insert(order.id, &order);
+        let mut clearing_prices = HashMap::new();
+        clearing_prices.insert(market, vec![NANOS_PER_DOLLAR / 2, NANOS_PER_DOLLAR / 2]);
+
+        let mut tracker = PriceTracker::new();
+        for height in 1..=(MAX_PRICE_HISTORY_POINTS_PER_MARKET as u64 + 5) {
+            tracker.record_block(
+                &[Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2)],
+                &orders,
+                &clearing_prices,
+                height,
+                height * 1_000,
+            );
+        }
+
+        let history = tracker.price_history(market, None, None);
+        assert_eq!(history.len(), MAX_PRICE_HISTORY_POINTS_PER_MARKET);
+        assert_eq!(history.first().unwrap().height, 6);
+        assert_eq!(
+            history.last().unwrap().height,
+            MAX_PRICE_HISTORY_POINTS_PER_MARKET as u64 + 5
+        );
     }
 }

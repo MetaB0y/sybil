@@ -133,6 +133,75 @@ groups:
           summary: "Actor mailbox queue depth is critical"
           description: "{{ $labels.actor }} mailbox queue depth has exceeded 5000 for 1m (current depth: {{ $value }})."
 
+      - alert: SybilApiMemoryHigh
+        expr: sybil_process_resident_memory_bytes > 650 * 1024 * 1024
+        for: 5m
+        labels:
+          severity: warning
+          component: sequencer
+        annotations:
+          summary: "sybil-api memory usage is high"
+          description: "sybil-api RSS has been above 650 MiB for 5m (current: {{ $value | humanize1024 }}B)."
+
+      - alert: SybilApiMemoryCritical
+        expr: sybil_process_resident_memory_bytes > 800 * 1024 * 1024
+        for: 2m
+        labels:
+          severity: critical
+          component: sequencer
+        annotations:
+          summary: "sybil-api memory is near its container limit"
+          description: "sybil-api RSS is above 800 MiB and close to the 900 MiB container limit (current: {{ $value | humanize1024 }}B)."
+
+      - alert: HostMemoryLow
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.15
+        for: 5m
+        labels:
+          severity: warning
+          component: host
+        annotations:
+          summary: "Host memory is low"
+          description: "Available host memory has been below 15% for 5m (current ratio: {{ $value | humanizePercentage }})."
+
+      - alert: HostSwapHigh
+        expr: |
+          node_memory_SwapTotal_bytes > 0
+          and
+          (
+            (node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes)
+            / node_memory_SwapTotal_bytes
+          ) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: host
+        annotations:
+          summary: "Host swap usage is high"
+          description: "More than half of host swap is in use. This often precedes scrape timeouts and SSH/API stalls."
+
+      - alert: HostCpuHigh
+        expr: 1 - avg by (instance, job) (rate(node_cpu_seconds_total{mode="idle"}[5m])) > 0.85
+        for: 10m
+        labels:
+          severity: warning
+          component: host
+        annotations:
+          summary: "Host CPU usage is high"
+          description: "Host CPU has averaged above 85% for 10m (current: {{ $value | humanizePercentage }})."
+
+      - alert: HostLoadVeryHigh
+        expr: |
+          node_load1
+          / count by (instance, job) (node_cpu_seconds_total{mode="idle"})
+          > 4
+        for: 5m
+        labels:
+          severity: critical
+          component: host
+        annotations:
+          summary: "Host load is very high"
+          description: "1m load per CPU is above 4 for 5m. The VM may be approaching the zombie state where TCP accepts but services do not respond."
+
       - alert: ProverDown
         expr: up{job="sybil-prover"} == 0
         for: 2m

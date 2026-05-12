@@ -5,6 +5,8 @@
 services:
   telegram-alerts:
     image: python:3.13-alpine
+    mem_limit: "64m"
+    memswap_limit: "64m"
     command: ["python", "/app/telegram-alerts.py"]
     environment:
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"

@@ -380,9 +380,9 @@ deploy-arena key: deploy-sync
     docker save sybil-arena:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && OPENROUTER_API_KEY={{key}} {{COMPOSE_PROD}} up -d sybil-arena sybil-arena-dashboard caddy'
 
-# Deploy observability stack (VictoriaMetrics + vmalert + Grafana)
+# Deploy observability stack (node-exporter + VictoriaMetrics + vmalert + Grafana)
 deploy-monitoring: deploy-sync
-    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans victoriametrics vmalert grafana telegram-alerts; else {{COMPOSE_PROD}} up -d --remove-orphans victoriametrics vmalert grafana; fi'
+    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans node-exporter victoriametrics vmalert grafana telegram-alerts; else {{COMPOSE_PROD}} up -d --remove-orphans node-exporter victoriametrics vmalert grafana; fi'
 
 # Enable Telegram delivery for vmalert alerts. Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in /opt/sybil/.env on the server.
 deploy-telegram-alerts: deploy-sync

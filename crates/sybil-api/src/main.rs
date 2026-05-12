@@ -23,6 +23,41 @@ struct Telemetry {
     tracer_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
 }
 
+fn spawn_process_metrics_task() {
+    tokio::spawn(async {
+        let mut interval = tokio::time::interval(Duration::from_secs(10));
+        loop {
+            interval.tick().await;
+            record_process_metrics();
+        }
+    });
+}
+
+fn record_process_metrics() {
+    let Ok(status) = std::fs::read_to_string("/proc/self/status") else {
+        return;
+    };
+    for line in status.lines() {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let Some(kib) = value
+            .split_whitespace()
+            .next()
+            .and_then(|value| value.parse::<f64>().ok())
+        else {
+            continue;
+        };
+        match key {
+            "VmRSS" => metrics::gauge!("sybil_process_resident_memory_bytes").set(kib * 1024.0),
+            "VmHWM" => {
+                metrics::gauge!("sybil_process_resident_memory_high_water_bytes").set(kib * 1024.0)
+            }
+            _ => {}
+        }
+    }
+}
+
 fn init_telemetry() -> Telemetry {
     // Prometheus metrics recorder
     let prometheus_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
@@ -85,6 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         prometheus_handle,
         tracer_provider,
     } = init_telemetry();
+    spawn_process_metrics_task();
 
     let config = ApiConfig::parse();
 
