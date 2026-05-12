@@ -12,6 +12,22 @@
 
 import type { AllTimeStats } from "./types";
 
+/**
+ * Handoff-equivalent last-24h figures. Used directly by <PulseStrip> on the
+ * styled /activity page — at 2s batch cadence we can't compute a real 24h
+ * window client-side (would need a backend rollup endpoint, OPEN_QUESTIONS #3).
+ * Each field is shown with a <MockValue> wrap so the placeholder is visible.
+ */
+export const MOCK_24H = {
+  matchedVolume: "$4.82M",
+  matchedVolumeDeltaPct: 12.4,
+  traders: 3_214,
+  tradersDeltaPct: 6.1,
+  ordersPlaced: 58_912,
+  ordersMatched: 47_209,
+  ordersUnmatched: 11_703,
+};
+
 /** Handoff-equivalent all-time figures. Replace when the backend lands a rollup. */
 export const MOCK_ALL_TIME: AllTimeStats = {
   matchedVolume: "$487.2M",
