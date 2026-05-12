@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useInViewport } from "@/lib/hooks/use-in-viewport";
 import {
   formatCents,
+  formatCentsDelta,
   formatCompactDollars,
-  formatPctDelta,
 } from "@/lib/format/nanos";
 import type { Market } from "@/lib/markets/use-markets";
 import { useCardHistory } from "@/lib/markets/use-card-history";
@@ -38,7 +38,7 @@ const CARD_HEIGHT = 340;
  */
 export function BinaryCard({ market, price }: Props) {
   const [ref, inView] = useInViewport<HTMLAnchorElement>();
-  const { points, delta24Pct, noDelta24Pct } = useCardHistory(
+  const { points, delta24Cents, noDelta24Cents } = useCardHistory(
     market.market_id,
     inView
   );
@@ -50,6 +50,10 @@ export function BinaryCard({ market, price }: Props) {
     <Link
       ref={ref}
       href={`/m/${market.market_id}`}
+      draggable={false}
+      onClick={(e) => {
+        if (window.getSelection()?.toString()) e.preventDefault();
+      }}
       style={{
         display: "grid",
         gridTemplateRows: "22px 64px auto 1fr 18px",
@@ -77,17 +81,18 @@ export function BinaryCard({ market, price }: Props) {
       <TitleRow market={market} />
       <FeaturedPriceRow
         cents={yesCents}
-        delta24Pct={delta24Pct}
+        delta24Cents={delta24Cents}
         points={points}
         hasPrice={!!price}
+        tone={deltaTone(delta24Cents, !!price)}
       />
       <SideList
         market={market}
         yesCents={yesCents}
         noCents={noCents}
         hasPrice={!!price}
-        yesDelta={delta24Pct}
-        noDelta={noDelta24Pct}
+        yesDelta={delta24Cents}
+        noDelta={noDelta24Cents}
       />
       <FooterRow market={market} />
     </Link>
@@ -171,6 +176,8 @@ function TitleRow({ market }: { market: Market }) {
           WebkitLineClamp: 2,
           WebkitBoxOrient: "vertical",
           overflow: "hidden",
+          userSelect: "text",
+          cursor: "text",
         }}
       >
         {market.name}
@@ -181,14 +188,16 @@ function TitleRow({ market }: { market: Market }) {
 
 function FeaturedPriceRow({
   cents,
-  delta24Pct,
+  delta24Cents,
   points,
   hasPrice,
+  tone,
 }: {
   cents: string;
-  delta24Pct: number | null;
+  delta24Cents: number | null;
   points: import("@/lib/markets/use-card-history").PricePoint[];
   hasPrice: boolean;
+  tone: string;
 }) {
   return (
     <div
@@ -225,21 +234,21 @@ function FeaturedPriceRow({
             style={{
               fontSize: "var(--fs-32)",
               lineHeight: "var(--lh-32)",
-              color: hasPrice ? "var(--yes)" : "var(--fg-4)",
+              color: tone,
               letterSpacing: "var(--track-mono)",
             }}
           >
             {cents}
           </span>
-          {delta24Pct != null && (
+          {delta24Cents != null && (
             <span
               className="text-mono tabular"
               style={{
                 fontSize: "var(--fs-12)",
-                color: delta24Pct >= 0 ? "var(--yes)" : "var(--no)",
+                color: delta24Cents >= 0 ? "var(--yes)" : "var(--no)",
               }}
             >
-              {formatPctDelta(delta24Pct)}
+              {formatCentsDelta(delta24Cents)}
             </span>
           )}
         </div>
@@ -279,7 +288,7 @@ function SideList({
       <SideRow
         side="Yes"
         cents={yesCents}
-        centsColor={hasPrice ? "var(--yes)" : "var(--fg-4)"}
+        centsColor={deltaTone(yesDelta, hasPrice)}
         delta={yesDelta}
         vol={vol}
         first
@@ -287,7 +296,7 @@ function SideList({
       <SideRow
         side="No"
         cents={noCents}
-        centsColor={hasPrice ? "var(--no)" : "var(--fg-4)"}
+        centsColor={deltaTone(noDelta, hasPrice)}
         delta={noDelta}
         vol={vol}
       />
@@ -353,7 +362,7 @@ function SideRow({
           textAlign: "right",
         }}
       >
-        {delta != null ? formatPctDelta(delta) : "—"}
+        {delta != null ? formatCentsDelta(delta) : "—"}
       </span>
       <span
         className="text-mono tabular"
@@ -388,6 +397,7 @@ function FooterRow({ market }: { market: Market }) {
         textTransform: "uppercase",
         letterSpacing: "var(--track-wide)",
         color: "var(--fg-3)",
+        marginTop: "var(--space-4)",
       }}
     >
       <div style={{ display: "flex", gap: "var(--space-3)" }}>
@@ -420,5 +430,11 @@ function FooterChip({
       </span>
     </span>
   );
+}
+
+function deltaTone(delta: number | null, hasPrice: boolean): string {
+  if (!hasPrice) return "var(--fg-4)";
+  if (delta == null) return "var(--fg-1)";
+  return delta >= 0 ? "var(--yes)" : "var(--no)";
 }
 

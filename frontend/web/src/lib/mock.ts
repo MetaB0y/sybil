@@ -48,7 +48,7 @@ export function mockCategory(seed: string | number): MockCategory {
 }
 
 /**
- * Mock a 24h delta percent. Range -5.0..+5.0, biased toward the
+ * Mock a 24h delta in cents. Range -8..+8, biased toward the
  * direction the current price implies (above 50% → slightly positive).
  * Stable across renders for a given seed.
  */
@@ -58,7 +58,7 @@ export function mockDelta(seed: string | number, yesPct?: number | null): number
   const base = ((h % 1000) / 1000) * 10 - 5;
   // Bias by current price: high prices → small positive bias, low → negative
   const bias = yesPct != null ? (yesPct - 50) / 25 : 0; // -2..+2
-  return Math.max(-9.9, Math.min(9.9, base + bias));
+  return Math.max(-12, Math.min(12, Math.round(base + bias)));
 }
 
 /** Mocked liquidity, expressed as nanos. Derived as ~30% of volume so it

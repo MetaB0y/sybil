@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useInViewport } from "@/lib/hooks/use-in-viewport";
 import {
   formatCents,
+  formatCentsDelta,
   formatCompactDollars,
-  formatPctDelta,
 } from "@/lib/format/nanos";
 import type { Market } from "@/lib/markets/use-markets";
 import { useCardHistory } from "@/lib/markets/use-card-history";
@@ -57,7 +57,7 @@ export function MultiCard({ groupName, markets, prices }: Props) {
   const secondary = ranked.slice(1, 1 + SECONDARY_OUTCOMES);
   const hiddenCount = Math.max(0, ranked.length - 1 - secondary.length);
 
-  const { points, delta24Pct } = useCardHistory(
+  const { points, delta24Cents } = useCardHistory(
     leader?.market_id ?? -1,
     inView && !!leader
   );
@@ -94,7 +94,7 @@ export function MultiCard({ groupName, markets, prices }: Props) {
         leader={leader}
         price={leader ? prices[leader.market_id] : undefined}
         points={points}
-        delta24Pct={delta24Pct}
+        delta24Cents={delta24Cents}
       />
       <SecondaryList markets={secondary} prices={prices} />
       <FooterRow totalVol={totalVol} totalVolNanos={sumVolumeNanos(markets) ?? 0n} seed={groupName} />
@@ -175,6 +175,10 @@ function TitleRow({
   return (
     <Link
       href={href}
+      draggable={false}
+      onClick={(e) => {
+        if (window.getSelection()?.toString()) e.preventDefault();
+      }}
       style={{
         display: "grid",
         gridTemplateColumns: "64px 1fr",
@@ -198,6 +202,8 @@ function TitleRow({
           WebkitLineClamp: 2,
           WebkitBoxOrient: "vertical",
           overflow: "hidden",
+          userSelect: "text",
+          cursor: "text",
         }}
       >
         {groupName}
@@ -210,12 +216,12 @@ function FeaturedOutcome({
   leader,
   price,
   points,
-  delta24Pct,
+  delta24Cents,
 }: {
   leader: Market | undefined;
   price: MarketPrice | undefined;
   points: import("@/lib/markets/use-card-history").PricePoint[];
-  delta24Pct: number | null;
+  delta24Cents: number | null;
 }) {
   if (!leader) {
     return (
@@ -239,6 +245,10 @@ function FeaturedOutcome({
   return (
     <Link
       href={`/m/${leader.market_id}`}
+      draggable={false}
+      onClick={(e) => {
+        if (window.getSelection()?.toString()) e.preventDefault();
+      }}
       style={{
         display: "grid",
         gridTemplateColumns: "1fr auto",
@@ -261,6 +271,8 @@ function FeaturedOutcome({
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
+            userSelect: "text",
+            cursor: "text",
           }}
         >
           {label}
@@ -277,21 +289,21 @@ function FeaturedOutcome({
             style={{
               fontSize: "var(--fs-32)",
               lineHeight: "var(--lh-32)",
-              color: deltaTone(delta24Pct, !!price),
+              color: deltaTone(delta24Cents, !!price),
               letterSpacing: "var(--track-mono)",
             }}
           >
             {cents}
           </span>
-          {delta24Pct != null && (
+          {delta24Cents != null && (
             <span
               className="text-mono tabular"
               style={{
                 fontSize: "var(--fs-12)",
-                color: delta24Pct >= 0 ? "var(--yes)" : "var(--no)",
+                color: delta24Cents >= 0 ? "var(--yes)" : "var(--no)",
               }}
             >
-              {formatPctDelta(delta24Pct)}
+              {formatCentsDelta(delta24Cents)}
             </span>
           )}
         </div>
@@ -349,6 +361,10 @@ function SecondaryRow({
   return (
     <Link
       href={`/m/${market.market_id}`}
+      draggable={false}
+      onClick={(e) => {
+        if (window.getSelection()?.toString()) e.preventDefault();
+      }}
       style={{
         display: "grid",
         gridTemplateColumns: "minmax(0, 1fr) 44px 52px 52px",
@@ -368,6 +384,8 @@ function SecondaryRow({
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
+          userSelect: "text",
+          cursor: "text",
         }}
       >
         {label}
@@ -393,7 +411,7 @@ function SecondaryRow({
             textAlign: "right",
           }}
         >
-          {price ? formatPctDelta(delta) : "—"}
+          {price ? formatCentsDelta(delta) : "—"}
         </span>
       </MockValue>
       <span
@@ -435,6 +453,7 @@ function FooterRow({
         textTransform: "uppercase",
         letterSpacing: "var(--track-wide)",
         color: "var(--fg-3)",
+        marginTop: "var(--space-4)",
       }}
     >
       <div style={{ display: "flex", gap: "var(--space-3)" }}>

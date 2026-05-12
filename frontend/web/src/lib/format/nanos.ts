@@ -62,6 +62,14 @@ export const formatPctDelta = (pct: number): string => {
   return `${sign}${pct.toFixed(1)}%`;
 };
 
+/** Format an absolute price change in cents (e.g. +5¢, -3¢, 0¢). */
+export const formatCentsDelta = (cents: number): string => {
+  const rounded = Math.round(cents);
+  if (rounded === 0) return "0¢";
+  const sign = rounded > 0 ? "+" : "−";
+  return `${sign}${Math.abs(rounded)}¢`;
+};
+
 /** Plain integer formatter for height / block / count values that aren't money. */
 export const formatInt = (v: NanosInput): string =>
   parseNanos(v).toLocaleString("en-US");
