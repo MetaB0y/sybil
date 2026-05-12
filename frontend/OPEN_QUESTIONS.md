@@ -12,10 +12,10 @@ Running list of frontend-related questions to discuss. Keep entries short.
    Missing: no `trader_count` field on `MarketResponse`, no `/v1/markets/{id}/fills` endpoint, no aggregate.
    Question: add a maintained `trader_count` (HashSet of account_ids per market, updated on fills) to `MarketResponse`?
 
-3. **Activity page · all-time unique traders count.**
-   Data exists per fill (`FillResponse.account_id` on every `BlockResponse.fills[]`), but no maintained set or rollup endpoint. Scanning every block since genesis from the frontend is unbounded.
-   Suggested: keep a `unique_traders_total: u64` counter in sequencer state (HashSet of account_ids ever seen on a fill) and expose it on `/v1/health` or a new `/v1/activity/overview` rollup. Same counter, time-windowed for last-24h, would also unblock the 24h pulse strip.
-   For now: mock the all-time number; for 24h, compute client-side over the last N (≈1440) blocks that the WS replay yields — accept it as an approximation until backend lands.
+3. **Activity page · all-time + 24h rollups (volume, traders, orders).**
+   Data exists per block (`BlockResponse.{total_volume_nanos, fills[].account_id, order_count, orders_filled, rejections}`), but no maintained counter / rollup endpoint. Scanning every block since genesis from the frontend is unbounded, and at the **2s FBA batch cadence** even a 24h window is **~43,200 blocks** — not just unbounded, *daily-unbounded*. The store ring buffer (cap 80) only ever covers ~2–3 minutes of history at this cadence, so client-side 24h math is structurally impossible.
+   Suggested: a `/v1/activity/overview` endpoint that returns pre-aggregated rollups for `{all_time, last_24h, prior_24h}` — matched volume, unique traders (HashSet of account_ids), placed/matched/unmatched. Sequencer maintains the counters on every block; the endpoint is a cheap read.
+   For now: mock the all-time + 24h numbers and tag with `<MockValue>`; the prototype's "recent activity" panel shows the honest tiny window we actually have ("last 2m 34s · 79 blocks") so we don't pretend.
 
 4. **Activity page · per-market welfare contribution inside a batch.**
    `Block.total_welfare: i64` is computed by the solver as one aggregate number across all markets (`crates/matching-sequencer/src/sequencer.rs:1468`). Per-market breakdown is not stored.

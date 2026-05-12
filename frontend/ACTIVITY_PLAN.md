@@ -79,11 +79,12 @@ This keeps the happy path at **one WS reconnect, zero parallel REST calls** — 
 
 ### 2.4 24h window and "all-time" — concrete decisions
 
-- **Last 24h** = blocks with `timestamp_ms >= now - 86_400_000`. At 60s cadence that's up to **1440 blocks**. We do **not** scan all 1440 on the frontend. Instead we mock the rollup numbers and label them clearly with `<MockValue>` until the backend `/v1/activity/overview` endpoint lands. (Listed in open Q #3.)
-- **All-time** = same story. Mock with the handoff values (`$487.2M`, `18.4K traders`, …). `<MockValue hint="..."/>` makes it obvious in the UI.
-- **Live "this batch is being filled" stats** = the only thing fully live today — driven entirely by `useStore.latestBlock`. The hero's batch countdown pill is already wired.
+- **Batch cadence is ~2s on this network** (per `frontend/CLAUDE.md`: "2s FBA block cadence"), not the 60s the design doc assumes. That makes 24h = **~43,200 blocks**, and 80-cap ring buffer covers only ~2–3 minutes of history. Client-side 24h math is structurally infeasible regardless of how cleverly we backfill.
+- **Last 24h + prior 24h** are mocked with `<MockValue>` until `/v1/activity/overview` lands (OPEN_QUESTIONS #3). The hero pulse strip displays the mocked numbers; the prototype's debug panel shows the honest tiny window ("last 2m 34s · 79 blocks") for sanity-check.
+- **All-time** = same story. Mock with the handoff values (`$487.2M`, `18.4K traders`, …); only `totalBatches` and `liveMarkets` come from real endpoints (`/v1/blocks/latest.height` and `/v1/markets/summary` count).
+- **Live "this batch is being filled" stats** = fully live today — driven by `useStore.latestBlock`. The hero's batch countdown pill is already wired.
 
-This is a deliberate trade-off. Wiring real all-time/24h aggregates client-side burns ~1440 RPCs against a 1-vCPU box on every page visit. Mocking until the backend rollup lands is the cheap path.
+This is the deliberate trade-off: client-side aggregation isn't just expensive (the architecture review correctly killed the 1440-RPC strawman), it's *physically impossible* at 2s cadence within a bounded buffer. The backend rollup endpoint isn't a "nice to have" — it's the only real path.
 
 ### 2.5 Per-batch row data — all real, no mocks
 

@@ -59,6 +59,11 @@ export type WindowStats = {
   traders: number;
   /** How many blocks contributed — for "based on N blocks" annotations. */
   blockCount: number;
+  /** Earliest / latest timestamps of the blocks that contributed, in epoch ms.
+   *  `null` when the window is empty. Used to label what we *actually* have
+   *  (e.g. "last 2m 34s") when the buffer can't supply a full 24h. */
+  firstTimestampMs: number | null;
+  lastTimestampMs: number | null;
 };
 
 /** All-time stats. Most fields are mocked (see flags + OPEN_QUESTIONS #3). */

@@ -116,10 +116,24 @@ export default function ActivityDevPage() {
         />
       </Panel>
 
-      <Panel title="// last 24h (partial — derived from store buffer)">
+      <Panel
+        title={`// recent activity · ${describeWindow(
+          overview.last24h.firstTimestampMs,
+          overview.last24h.lastTimestampMs,
+          overview.last24h.blockCount
+        )}`}
+      >
         <KV
-          k="blockCount"
-          v={`${overview.last24h.blockCount} blocks in window`}
+          k="window"
+          v={`store buffer holds ${overview.last24h.blockCount} blocks; honest 24h needs backend rollup (OPEN_QUESTIONS #3)`}
+        />
+        <KV
+          k="prior window"
+          v={
+            overview.prior24h.blockCount > 0
+              ? `${overview.prior24h.blockCount} blocks`
+              : "empty — buffer doesn't extend back that far"
+          }
         />
         <KV
           k="matchedVolume"
@@ -388,6 +402,29 @@ function KV({
 function fmtPctOrDash(pct: number | null): string {
   if (pct == null) return "—";
   return formatPctDelta(pct);
+}
+
+function describeWindow(
+  firstMs: number | null,
+  lastMs: number | null,
+  count: number
+): string {
+  if (count === 0 || firstMs == null || lastMs == null) {
+    return "empty";
+  }
+  const spanS = Math.max(0, Math.round((lastMs - firstMs) / 1000));
+  let span: string;
+  if (spanS < 60) span = `${spanS}s`;
+  else if (spanS < 3600) {
+    const m = Math.floor(spanS / 60);
+    const s = spanS % 60;
+    span = s > 0 ? `${m}m ${s}s` : `${m}m`;
+  } else {
+    const h = Math.floor(spanS / 3600);
+    const m = Math.floor((spanS % 3600) / 60);
+    span = m > 0 ? `${h}h ${m}m` : `${h}h`;
+  }
+  return `last ${span} · ${count} blocks`;
 }
 
 const eyebrow: React.CSSProperties = {

@@ -21,6 +21,8 @@ const EMPTY_WINDOW: WindowStats = {
   ordersUnmatched: 0,
   traders: 0,
   blockCount: 0,
+  firstTimestampMs: null,
+  lastTimestampMs: null,
 };
 
 /**
@@ -83,6 +85,7 @@ function accumulate(stats: WindowStats, b: Block): WindowStats {
   const matched = b.orders_filled;
   const rejections = b.rejections?.length ?? 0;
   const unmatched = Math.max(0, placed - matched - rejections);
+  const ts = b.timestamp_ms;
   return {
     matchedVolumeNanos:
       stats.matchedVolumeNanos + parseNanos(b.total_volume_nanos),
@@ -91,6 +94,14 @@ function accumulate(stats: WindowStats, b: Block): WindowStats {
     ordersUnmatched: stats.ordersUnmatched + unmatched,
     traders: 0, // filled at the end after deduping fills across the window
     blockCount: stats.blockCount + 1,
+    firstTimestampMs:
+      stats.firstTimestampMs == null || ts < stats.firstTimestampMs
+        ? ts
+        : stats.firstTimestampMs,
+    lastTimestampMs:
+      stats.lastTimestampMs == null || ts > stats.lastTimestampMs
+        ? ts
+        : stats.lastTimestampMs,
   };
 }
 

@@ -85,5 +85,7 @@ function emptyWindow(): WindowStats {
     ordersUnmatched: 0,
     traders: 0,
     blockCount: 0,
+    firstTimestampMs: null,
+    lastTimestampMs: null,
   };
 }
