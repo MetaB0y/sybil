@@ -5,11 +5,13 @@ use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
+use crate::categorize::derive_category;
 use crate::config::Config;
 use crate::feed::FeedMessage;
 use crate::mapping::{GroupInfo, MappingStore};
 use crate::mm::MmMessage;
 use crate::polymarket::gamma::GammaClient;
+use crate::polymarket::types::{parse_iso8601_to_ms, GammaEvent, GammaMarket};
 use crate::sybil::client::SybilClient;
 use sybil_api_types::*;
 
@@ -178,6 +180,25 @@ impl SyncActor {
                         );
                         sybil_market_ids.push(sybil_id);
 
+                        // Push off-block metadata (event id/title, images, end
+                        // dates, category) so the frontend can render real
+                        // chrome instead of mocks. Failure is non-fatal: the
+                        // market itself was created successfully, and the next
+                        // sync cycle is idempotent on the API side. We
+                        // deliberately do NOT alter NegRisk MarketGroup
+                        // semantics or the MM `in_group` flag here.
+                        let metadata_req = build_metadata_request(event, poly_market);
+                        if let Err(e) =
+                            self.sybil_client.set_market_metadata(sybil_id, &metadata_req).await
+                        {
+                            warn!(
+                                sybil_id,
+                                condition_id = &poly_market.condition_id,
+                                error = %e,
+                                "failed to set market metadata (non-fatal; will retry next cycle)"
+                            );
+                        }
+
                         if self.mapping.read().await.market_count() <= self.config.mm_max_markets {
                             // Notify MM about the new market
                             let initial_mid = poly_market.yes_price().unwrap_or(0.5);
@@ -256,5 +277,50 @@ impl SyncActor {
         }
 
         Ok(())
+    }
+}
+
+/// Compose the off-block metadata POST payload from the Polymarket event +
+/// market pair. Pure function — no I/O — to keep the call site clean.
+///
+/// - `event_id` / `event_title`: frontend grouping signal (independent of
+///   NegRisk `MarketGroup` on the matching engine).
+/// - Image / icon URLs: passed through verbatim; frontend uses image first
+///   and falls back to icon on 404.
+/// - End dates: parsed from ISO-8601 to epoch ms. Display only; matching
+///   engine doesn't enforce trading cutoffs.
+/// - `category`: derived from `event.tags[].label` via the priority table.
+///   `None` when no tag matches.
+/// - `external_url`: Polymarket event page (when slug present), for the
+///   "view on Polymarket" link.
+fn build_metadata_request(event: &GammaEvent, market: &GammaMarket) -> SetMarketMetadataRequest {
+    let event_end_date_ms = event
+        .end_date
+        .as_deref()
+        .and_then(parse_iso8601_to_ms)
+        .and_then(|ms| u64::try_from(ms).ok());
+    let market_end_date_ms = market
+        .end_date
+        .as_deref()
+        .and_then(parse_iso8601_to_ms)
+        .and_then(|ms| u64::try_from(ms).ok());
+
+    let external_url = if event.slug.is_empty() {
+        None
+    } else {
+        Some(format!("https://polymarket.com/event/{}", event.slug))
+    };
+
+    SetMarketMetadataRequest {
+        external_url,
+        event_id: Some(event.id.clone()),
+        event_title: Some(event.title.clone()),
+        event_image_url: event.image.clone(),
+        event_icon_url: event.icon.clone(),
+        event_end_date_ms,
+        market_image_url: market.image.clone(),
+        market_icon_url: market.icon.clone(),
+        market_end_date_ms,
+        category: derive_category(&event.tags),
     }
 }

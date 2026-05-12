@@ -316,10 +316,40 @@ pub struct SetReferencePricesRequest {
     pub prices: std::collections::HashMap<u32, u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SetMarketMetadataRequest {
     /// External URL (e.g., Polymarket link).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_url: Option<String>,
+    /// Polymarket parent event id — used by the frontend to group sibling
+    /// markets (e.g., "Fed Decision in June" sub-questions). Distinct from the
+    /// matching engine's NegRisk `MarketGroup`, which it does not affect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<String>,
+    /// Polymarket parent event title — rendered as the MultiCard header.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_title: Option<String>,
+    /// Event-level image URL (primary).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_image_url: Option<String>,
+    /// Event-level icon URL (secondary; frontend uses as `onError` fallback).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_icon_url: Option<String>,
+    /// Event-level expected end date (epoch ms). Display only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_end_date_ms: Option<u64>,
+    /// Per-market image URL (primary).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub market_image_url: Option<String>,
+    /// Per-market icon URL (secondary; frontend uses as `onError` fallback).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub market_icon_url: Option<String>,
+    /// Per-market expected end date (epoch ms). Display only; matching engine
+    /// does not enforce trading cutoffs at this time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub market_end_date_ms: Option<u64>,
+    /// Display category bucket (derived from Polymarket tags). Off-block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
 }

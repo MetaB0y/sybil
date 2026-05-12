@@ -193,6 +193,26 @@ impl SybilClient {
         Ok(result.accepted)
     }
 
+    /// Push mirror-derived metadata (event id/title, images, end dates,
+    /// category) to sybil-api. Off-block — never enters `MarketMetadata` or
+    /// the block digest. The endpoint is dev-mode-only on the server; in prod
+    /// `SYBIL_DEV_MODE=true` is already set on the mirror's neighbour
+    /// container, so this just works.
+    pub async fn set_market_metadata(
+        &self,
+        market_id: u32,
+        req: &SetMarketMetadataRequest,
+    ) -> Result<(), Error> {
+        let resp = self
+            .http
+            .post(self.url(&format!("/v1/markets/{}/metadata", market_id)))
+            .json(req)
+            .send()
+            .await?;
+        let _ = self.check_response(resp).await?;
+        Ok(())
+    }
+
     /// Push reference prices to sybil-api (display only, not matching logic).
     pub async fn set_reference_prices(
         &self,

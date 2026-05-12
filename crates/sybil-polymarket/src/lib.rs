@@ -1,3 +1,4 @@
+pub mod categorize;
 pub mod config;
 pub mod error;
 pub mod feed;

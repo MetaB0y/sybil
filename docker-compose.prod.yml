@@ -11,6 +11,9 @@ services:
       # recovery work, but run the public demo in explicit in-memory mode.
       SYBIL_DATA_DIR: ""
       SYBIL_ARENA_DB_PATH: "/arena-data/decisions.db"
+      # Off-block Polymarket mirror metadata (event id/title, images, end
+      # dates, category). JSON-on-disk so it survives sybil-api restarts.
+      SYBIL_MARKET_REF_DATA_PATH: "/data/market_ref_data.json"
 
   sybil-polymarket:
     command:

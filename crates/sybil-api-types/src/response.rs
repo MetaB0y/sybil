@@ -53,6 +53,30 @@ pub struct MarketResponse {
     /// External URL (e.g., Polymarket link).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_url: Option<String>,
+    /// Polymarket parent event id — frontend grouping key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<String>,
+    /// Polymarket parent event title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_title: Option<String>,
+    /// Event-level image URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_image_url: Option<String>,
+    /// Event-level icon URL (secondary image fallback).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_icon_url: Option<String>,
+    /// Event-level expected end date (epoch ms). Display only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_end_date_ms: Option<u64>,
+    /// Per-market image URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub market_image_url: Option<String>,
+    /// Per-market icon URL (secondary image fallback).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub market_icon_url: Option<String>,
+    /// Per-market expected end date (epoch ms). Display only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub market_end_date_ms: Option<u64>,
 }
 
 /// Minimal market data for high-throughput dashboards (drops strings & metadata).

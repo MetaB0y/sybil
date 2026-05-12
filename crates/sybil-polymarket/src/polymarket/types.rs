@@ -2,6 +2,50 @@ use serde::{Deserialize, Deserializer};
 
 use crate::error::Error;
 
+/// Parse an ISO-8601 / RFC-3339 UTC timestamp (e.g. `"2025-12-31T12:00:00Z"`)
+/// to epoch milliseconds. Polymarket's `endDate` fields always use `Z`-suffixed
+/// UTC, so we don't bother with offsets. Returns `None` if the string doesn't
+/// match the expected shape.
+///
+/// The civil-to-days formula is Howard Hinnant's well-known algorithm; correct
+/// for any Gregorian date and avoids pulling in a date crate for one helper.
+pub fn parse_iso8601_to_ms(s: &str) -> Option<i64> {
+    // Accept `YYYY-MM-DDTHH:MM:SS` followed by `Z` or `.fff…Z` (fractional secs
+    // tolerated, ignored). Anything else → None.
+    let bytes = s.as_bytes();
+    if bytes.len() < 20 {
+        return None;
+    }
+    let year: i32 = s.get(0..4)?.parse().ok()?;
+    let month: u32 = s.get(5..7)?.parse().ok()?;
+    let day: u32 = s.get(8..10)?.parse().ok()?;
+    let hour: u32 = s.get(11..13)?.parse().ok()?;
+    let minute: u32 = s.get(14..16)?.parse().ok()?;
+    let second: u32 = s.get(17..19)?.parse().ok()?;
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 60
+    {
+        return None;
+    }
+    let days = days_from_civil(year, month, day);
+    let secs_of_day = (hour as i64) * 3600 + (minute as i64) * 60 + (second as i64);
+    Some((days * 86_400 + secs_of_day) * 1_000)
+}
+
+/// Howard Hinnant's `days_from_civil` — number of days since 1970-01-01 for a
+/// Gregorian Y/M/D. Works for any valid date.
+fn days_from_civil(y: i32, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = (y - era * 400) as u32;
+    let doy = (153 * if m > 2 { m - 3 } else { m + 9 } + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era as i64 * 146_097 + doe as i64 - 719_468
+}
+
 /// Deserialize a value that might be a JSON string, number, or null as Option<f64>.
 /// Polymarket returns some numeric fields as strings at market level but numbers at event level.
 fn string_or_float<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<f64>, D::Error> {
@@ -40,6 +84,18 @@ fn string_or_float<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<
     deserializer.deserialize_any(Visitor)
 }
 
+/// Tag attached to a Gamma event. We only care about `label` for category
+/// derivation, but we accept `slug` too for symmetry. Gamma sometimes omits
+/// the slug, so both default to empty.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GammaTag {
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub slug: String,
+}
+
 /// Event from Gamma API. Contains one or more markets.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,6 +127,16 @@ pub struct GammaEvent {
     pub end_date: Option<String>,
     #[serde(default)]
     pub created_at: Option<String>,
+    /// Event-level image URL (primary).
+    #[serde(default)]
+    pub image: Option<String>,
+    /// Event-level icon URL (used as a secondary URL by the frontend).
+    #[serde(default)]
+    pub icon: Option<String>,
+    /// Polymarket category tags. `event.category` itself is null in practice;
+    /// the real signal lives here.
+    #[serde(default)]
+    pub tags: Vec<GammaTag>,
 }
 
 impl GammaEvent {
@@ -123,6 +189,13 @@ pub struct GammaMarket {
     pub end_date: Option<String>,
     #[serde(default)]
     pub resolution_source: Option<String>,
+    /// Per-market image URL (primary). May differ from the event-level image
+    /// on NegRisk markets where each outcome has its own picture.
+    #[serde(default)]
+    pub image: Option<String>,
+    /// Per-market icon URL (secondary).
+    #[serde(default)]
+    pub icon: Option<String>,
     /// True once Polymarket has settled the market. Paired with `outcome_prices`
     /// pinned to 0/1 to derive the YES payout.
     #[serde(default)]
@@ -284,6 +357,8 @@ mod tests {
             description: None,
             end_date: None,
             resolution_source: None,
+            image: None,
+            icon: None,
             umared: None,
             resolved_by: None,
         };
@@ -321,6 +396,8 @@ mod tests {
             description: None,
             end_date: None,
             resolution_source: None,
+            image: None,
+            icon: None,
             umared: None,
             resolved_by: None,
         };
@@ -328,6 +405,31 @@ mod tests {
         assert!(market.parsed_token_ids().unwrap().is_empty());
         assert!(market.parsed_outcome_prices().unwrap().is_empty());
         assert!(market.yes_price().is_none());
+    }
+
+    #[test]
+    fn iso8601_to_ms() {
+        // Polymarket's canonical shape.
+        assert_eq!(
+            parse_iso8601_to_ms("2025-12-31T12:00:00Z"),
+            Some(1_767_182_400_000)
+        );
+        // Epoch zero.
+        assert_eq!(parse_iso8601_to_ms("1970-01-01T00:00:00Z"), Some(0));
+        // Past date (negative epoch).
+        assert_eq!(
+            parse_iso8601_to_ms("1969-12-31T23:59:59Z"),
+            Some(-1_000)
+        );
+        // Fractional seconds tolerated (we read only the first 19 chars).
+        assert_eq!(
+            parse_iso8601_to_ms("2025-12-31T12:00:00.123Z"),
+            Some(1_767_182_400_000)
+        );
+        // Garbage → None.
+        assert_eq!(parse_iso8601_to_ms(""), None);
+        assert_eq!(parse_iso8601_to_ms("not a date"), None);
+        assert_eq!(parse_iso8601_to_ms("2025-13-31T12:00:00Z"), None);
     }
 
     #[test]

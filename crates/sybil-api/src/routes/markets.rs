@@ -6,8 +6,7 @@ use matching_sequencer::{MarketMetadata, ResolutionConfig};
 use sybil_oracle::{FeedPubkey, ResolutionAttestation, SignedAttestation};
 
 use crate::convert::prices_to_response;
-use crate::state::AppState;
-use crate::state::MarketRefData;
+use crate::state::{save_market_ref_data, AppState, MarketRefData};
 use crate::types::error::AppError;
 use crate::types::request::{
     CreateMarketGroupRequest, CreateMarketRequest, MarketSearchParams, ResolveMarketRequest,
@@ -25,11 +24,27 @@ struct BuildMarketResponseArgs<'a> {
     metadata: Option<&'a MarketMetadata>,
     volume_nanos: u64,
     reference_price_nanos: Option<u64>,
-    external_url: Option<String>,
+    /// Off-block reference data (Polymarket mirror metadata). When `Some`,
+    /// its `category` field wins over `metadata.category` and its other
+    /// fields pass through directly (no on-block equivalent).
+    ref_data: Option<&'a MarketRefData>,
 }
 
 /// Helper to build a MarketResponse with optional metadata.
 fn build_market_response(args: BuildMarketResponseArgs<'_>) -> MarketResponse {
+    // Merge rule: ref_data.category (mirror-derived) wins over metadata.category
+    // (on-block, only set for sybil-native markets). Mirrored markets pass
+    // `category: None` to `create_market` and receive the real category via
+    // ref-data.
+    let category = args
+        .ref_data
+        .and_then(|r| r.category.clone())
+        .or_else(|| {
+            args.metadata
+                .map(|m| m.category.clone())
+                .filter(|s| !s.is_empty())
+        });
+
     MarketResponse {
         market_id: args.market_id,
         name: args.name,
@@ -42,10 +57,7 @@ fn build_market_response(args: BuildMarketResponseArgs<'_>) -> MarketResponse {
             .metadata
             .map(|m| m.description.clone())
             .filter(|s| !s.is_empty()),
-        category: args
-            .metadata
-            .map(|m| m.category.clone())
-            .filter(|s| !s.is_empty()),
+        category,
         tags: args
             .metadata
             .map(|m| m.tags.clone())
@@ -61,7 +73,15 @@ fn build_market_response(args: BuildMarketResponseArgs<'_>) -> MarketResponse {
         created_at_ms: args.metadata.map(|m| m.created_at_ms).filter(|&v| v != 0),
         volume_nanos: args.volume_nanos,
         reference_price_nanos: args.reference_price_nanos,
-        external_url: args.external_url,
+        external_url: args.ref_data.and_then(|r| r.external_url.clone()),
+        event_id: args.ref_data.and_then(|r| r.event_id.clone()),
+        event_title: args.ref_data.and_then(|r| r.event_title.clone()),
+        event_image_url: args.ref_data.and_then(|r| r.event_image_url.clone()),
+        event_icon_url: args.ref_data.and_then(|r| r.event_icon_url.clone()),
+        event_end_date_ms: args.ref_data.and_then(|r| r.event_end_date_ms),
+        market_image_url: args.ref_data.and_then(|r| r.market_image_url.clone()),
+        market_icon_url: args.ref_data.and_then(|r| r.market_icon_url.clone()),
+        market_end_date_ms: args.ref_data.and_then(|r| r.market_end_date_ms),
     }
 }
 
@@ -112,9 +132,7 @@ pub async fn list_markets(
                 metadata: metadata.get(&m.id),
                 volume_nanos: volumes.get(&m.id).copied().unwrap_or(0),
                 reference_price_nanos: ref_prices.get(&m.id.0).copied(),
-                external_url: market_ref_data
-                    .get(&m.id.0)
-                    .and_then(|ref_data| ref_data.external_url.clone()),
+                ref_data: market_ref_data.get(&m.id.0),
             })
         })
         .collect();
@@ -208,12 +226,7 @@ pub async fn get_market(
         state.sequencer.get_market_volume(mid),
     )?;
     let ref_price = state.reference_prices.read().await.get(&id).copied();
-    let ext_url = state
-        .market_ref_data
-        .read()
-        .await
-        .get(&id)
-        .and_then(|ref_data| ref_data.external_url.clone());
+    let ref_data = state.market_ref_data.read().await.get(&id).cloned();
 
     Ok(Json(build_market_response(BuildMarketResponseArgs {
         market_id: market.id.0,
@@ -224,7 +237,7 @@ pub async fn get_market(
         metadata: metadata.as_ref(),
         volume_nanos: volume,
         reference_price_nanos: ref_price,
-        external_url: ext_url,
+        ref_data: ref_data.as_ref(),
     })))
 }
 
@@ -538,9 +551,7 @@ pub async fn search_markets(
                 metadata: r.metadata.as_ref(),
                 volume_nanos: r.volume_nanos,
                 reference_price_nanos: ref_prices.get(&mid).copied(),
-                external_url: market_ref_data
-                    .get(&mid)
-                    .and_then(|ref_data| ref_data.external_url.clone()),
+                ref_data: market_ref_data.get(&mid),
             })
         })
         .collect();
@@ -655,8 +666,36 @@ pub async fn set_market_metadata(
     }
     let mut ref_data = state.market_ref_data.write().await;
     let entry = ref_data.entry(id).or_insert_with(MarketRefData::default);
-    if let Some(url) = req.external_url {
-        entry.external_url = Some(url);
+    if let Some(v) = req.external_url {
+        entry.external_url = Some(v);
     }
+    if let Some(v) = req.event_id {
+        entry.event_id = Some(v);
+    }
+    if let Some(v) = req.event_title {
+        entry.event_title = Some(v);
+    }
+    if let Some(v) = req.event_image_url {
+        entry.event_image_url = Some(v);
+    }
+    if let Some(v) = req.event_icon_url {
+        entry.event_icon_url = Some(v);
+    }
+    if let Some(v) = req.event_end_date_ms {
+        entry.event_end_date_ms = Some(v);
+    }
+    if let Some(v) = req.market_image_url {
+        entry.market_image_url = Some(v);
+    }
+    if let Some(v) = req.market_icon_url {
+        entry.market_icon_url = Some(v);
+    }
+    if let Some(v) = req.market_end_date_ms {
+        entry.market_end_date_ms = Some(v);
+    }
+    if let Some(v) = req.category {
+        entry.category = Some(v);
+    }
+    save_market_ref_data(&ref_data, state.market_ref_data_path.as_deref());
     Ok(Json(serde_json::json!({"updated": true})))
 }
