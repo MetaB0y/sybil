@@ -6,11 +6,8 @@
  *
  * Most fields are mocked (see OPEN_QUESTIONS #3) — the live ones are
  * `totalBatches` (from latestBlock.height) and `liveMarkets` (from
- * /v1/markets/summary).
- *
- * MockValue is applied to the **eyebrow** (small label) not the big number,
- * because the dotted underline at 80px font weight makes the value look
- * dimmed. The tooltip still works on hover of the underlined eyebrow.
+ * /v1/markets/summary). MockValue renders an inline `MOCK` pill on the
+ * value itself so it's recognizable at any font size.
  */
 
 import { MockValue } from "@/components/mock-value";
@@ -40,29 +37,32 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
         {/* Left: hero number */}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <MockValue hint={ALL_TIME_HINT}>
-              <span className="eyebrow">All-time matched volume</span>
-            </MockValue>
+            <span className="eyebrow">All-time matched volume</span>
             <span className="text-annotation" style={{ fontSize: 11 }}>
               since genesis ·{" "}
-              <MockValue hint="genesis age — not tracked on backend">
-                <span>{allTime.genesisAge}</span>
+              <MockValue
+                hint="genesis age — not tracked on backend"
+                variant="underline"
+              >
+                {allTime.genesisAge}
               </MockValue>
             </span>
           </div>
-          <div
-            style={{
-              fontFamily: "var(--font-sans)",
-              fontWeight: 600,
-              fontSize: "clamp(48px, 5.4vw, 80px)",
-              lineHeight: 0.95,
-              letterSpacing: "-0.02em",
-              color: "var(--fg-1)",
-              fontVariantNumeric: "tabular-nums",
-            }}
-          >
-            {allTime.matchedVolume}
-          </div>
+          <MockValue hint={ALL_TIME_HINT} variant="pill">
+            <span
+              style={{
+                fontFamily: "var(--font-sans)",
+                fontWeight: 600,
+                fontSize: "clamp(48px, 5.4vw, 80px)",
+                lineHeight: 0.95,
+                letterSpacing: "-0.02em",
+                color: "var(--fg-1)",
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {allTime.matchedVolume}
+            </span>
+          </MockValue>
           <div
             style={{
               display: "flex",
@@ -82,8 +82,12 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
             >
               {formatInt(allTime.totalBatches)} batches ·{" "}
               {formatInt(allTime.liveMarkets)} live markets · uptime{" "}
-              <MockValue hint="uptime % — not tracked, left as design decision">
-                <span style={{ color: "var(--yes)" }}>{allTime.uptime}</span>
+              <MockValue
+                hint="uptime % — not tracked"
+                variant="underline"
+                style={{ color: "var(--yes)" }}
+              >
+                {allTime.uptime}
               </MockValue>
             </span>
           </div>
@@ -145,12 +149,26 @@ function BigKv({
   accent?: string;
   mocked?: boolean;
 }) {
-  const labelEl = <span className="eyebrow">{label}</span>;
+  const numberEl = (
+    <span
+      style={{
+        fontFamily: "var(--font-sans)",
+        fontSize: 30,
+        fontWeight: 600,
+        color: accent,
+        fontVariantNumeric: "tabular-nums",
+        letterSpacing: "-0.01em",
+        lineHeight: 1,
+      }}
+    >
+      {value}
+    </span>
+  );
   return (
     <div
       style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}
     >
-      {mocked ? <MockValue hint={ALL_TIME_HINT}>{labelEl}</MockValue> : labelEl}
+      <span className="eyebrow">{label}</span>
       <div
         style={{
           display: "flex",
@@ -159,19 +177,11 @@ function BigKv({
           justifyContent: "space-between",
         }}
       >
-        <span
-          style={{
-            fontFamily: "var(--font-sans)",
-            fontSize: 30,
-            fontWeight: 600,
-            color: accent,
-            fontVariantNumeric: "tabular-nums",
-            letterSpacing: "-0.01em",
-            lineHeight: 1,
-          }}
-        >
-          {value}
-        </span>
+        {mocked ? (
+          <MockValue hint={ALL_TIME_HINT} variant="pill">{numberEl}</MockValue>
+        ) : (
+          numberEl
+        )}
       </div>
       <span
         style={{

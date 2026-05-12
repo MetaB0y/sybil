@@ -109,9 +109,7 @@ export function PulseStrip() {
               minWidth: 0,
             }}
           >
-            <MockValue hint={MOCK_HINT}>
-              <span className="eyebrow">{it.label}</span>
-            </MockValue>
+            <span className="eyebrow">{it.label}</span>
             <div
               style={{
                 display: "flex",
@@ -120,19 +118,21 @@ export function PulseStrip() {
                 gap: 10,
               }}
             >
-              <span
-                style={{
-                  fontFamily: "var(--font-sans)",
-                  fontSize: 22,
-                  fontWeight: 600,
-                  color: it.accent ?? "var(--fg-1)",
-                  fontVariantNumeric: "tabular-nums",
-                  letterSpacing: "-0.01em",
-                  lineHeight: 1,
-                }}
-              >
-                {it.value}
-              </span>
+              <MockValue hint={MOCK_HINT} variant="pill">
+                <span
+                  style={{
+                    fontFamily: "var(--font-sans)",
+                    fontSize: 22,
+                    fontWeight: 600,
+                    color: it.accent ?? "var(--fg-1)",
+                    fontVariantNumeric: "tabular-nums",
+                    letterSpacing: "-0.01em",
+                    lineHeight: 1,
+                  }}
+                >
+                  {it.value}
+                </span>
+              </MockValue>
               {it.deltaPct != null && (
                 <span
                   style={{

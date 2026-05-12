@@ -190,6 +190,10 @@ function MarketTableHeader() {
   const cell: React.CSSProperties = {
     textAlign: "right",
   };
+  const mockedHeader: React.CSSProperties = {
+    ...cell,
+    color: "var(--warn)",
+  };
   return (
     <div
       style={{
@@ -210,10 +214,30 @@ function MarketTableHeader() {
       <span>Market</span>
       <span style={cell}>Clear</span>
       <span style={cell}>Δ</span>
-      <span style={cell}>Matched vol</span>
-      <span style={cell}>Welfare</span>
-      <span style={cell}>Placed / Matched</span>
-      <span style={cell}>Imbalance</span>
+      <span
+        style={mockedHeader}
+        title="Per-market matched volume is mocked — uniform split of block total (OPEN_QUESTIONS #5)"
+      >
+        Matched vol*
+      </span>
+      <span
+        style={mockedHeader}
+        title="Per-market welfare is mocked — uniform split (OPEN_QUESTIONS #4)"
+      >
+        Welfare*
+      </span>
+      <span
+        style={mockedHeader}
+        title="Per-market placed/matched is mocked (OPEN_QUESTIONS #5)"
+      >
+        Placed / Matched*
+      </span>
+      <span
+        style={mockedHeader}
+        title="Imbalance is mocked — FillResponse has no side (OPEN_QUESTIONS #6)"
+      >
+        Imbalance*
+      </span>
     </div>
   );
 }
@@ -281,34 +305,35 @@ function MarketRow({ row }: { row: BatchMarketRow }) {
           : `${deltaCents >= 0 ? "+" : ""}${deltaCents.toFixed(1)}`}
       </span>
 
-      {/* Matched vol per market (mocked split) */}
-      <span style={cellNumber("var(--fg-2)", 12)}>
-        <MockValue hint="per-market volume — uniform split of block total (OPEN_QUESTIONS #5)">
-          {formatCompactDollars(row.matchedVolumeNanos)}
-        </MockValue>
-      </span>
+      {/* Matched vol per market (mocked split — column header carries the marker) */}
+      <MockValue
+        hint="per-market volume — uniform split of block total (OPEN_QUESTIONS #5)"
+        variant="tint"
+        style={cellNumber("var(--fg-2)", 12)}
+      >
+        {formatCompactDollars(row.matchedVolumeNanos)}
+      </MockValue>
 
       {/* Welfare per market (mocked split) */}
-      <span style={cellNumber("var(--yes)", 12)}>
-        <MockValue hint="per-market welfare — uniform split (OPEN_QUESTIONS #4)">
-          {row.welfareNanos >= 0n ? "+" : ""}
-          {formatCompactDollars(row.welfareNanos)}
-        </MockValue>
-      </span>
+      <MockValue
+        hint="per-market welfare — uniform split (OPEN_QUESTIONS #4)"
+        variant="tint"
+        style={cellNumber("var(--yes)", 12)}
+      >
+        {row.welfareNanos >= 0n ? "+" : ""}
+        {formatCompactDollars(row.welfareNanos)}
+      </MockValue>
 
       {/* Placed / Matched (mocked) */}
-      <span
-        style={{
-          ...cellNumber("var(--fg-2)", 11),
-          textAlign: "right",
-        }}
+      <MockValue
+        hint="per-market placed/matched — uniform split (OPEN_QUESTIONS #5)"
+        variant="tint"
+        style={{ ...cellNumber("var(--fg-2)", 11), textAlign: "right" }}
       >
-        <MockValue hint="per-market placed/matched — uniform split (OPEN_QUESTIONS #5)">
-          <span style={{ color: "var(--fg-2)" }}>{row.ordersPlaced}</span>
-          <span style={{ color: "var(--fg-4)" }}> / </span>
-          <span style={{ color: "var(--yes)" }}>{row.ordersMatched}</span>
-        </MockValue>
-      </span>
+        <span style={{ color: "var(--fg-2)" }}>{row.ordersPlaced}</span>
+        <span style={{ color: "var(--fg-4)" }}> / </span>
+        <span style={{ color: "var(--yes)" }}>{row.ordersMatched}</span>
+      </MockValue>
 
       {/* Imbalance (mocked deterministic) */}
       <ImbalanceCell bps={row.imbalanceBps} />
@@ -321,31 +346,31 @@ function ImbalanceCell({ bps }: { bps: number }) {
   const isBuy = bps >= 0;
   const color = isBuy ? "var(--yes)" : "var(--no)";
   return (
-    <MockValue hint="imbalance — mocked; backend doesn't carry per-fill side (OPEN_QUESTIONS #6)">
-      <div
+    <MockValue
+      hint="imbalance — mocked; backend doesn't carry per-fill side (OPEN_QUESTIONS #6)"
+      variant="tint"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        justifyContent: "flex-end",
+        fontVariantNumeric: "tabular-nums",
+      }}
+    >
+      <span
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          justifyContent: "flex-end",
-          fontVariantNumeric: "tabular-nums",
+          fontFamily: "var(--font-mono)",
+          fontSize: 9.5,
+          color,
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
         }}
       >
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 9.5,
-            color,
-            textTransform: "uppercase",
-            letterSpacing: "0.04em",
-          }}
-        >
-          {isBuy ? "buy" : "sell"}
-        </span>
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color }}>
-          {pct.toFixed(1)}%
-        </span>
-      </div>
+        {isBuy ? "buy" : "sell"}
+      </span>
+      <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color }}>
+        {pct.toFixed(1)}%
+      </span>
     </MockValue>
   );
 }
@@ -437,9 +462,8 @@ function MetaPair({
   mocked?: boolean;
   mockHint?: string;
 }) {
-  // When both link + mocked, drop the solid link underline — the MockValue
-  // dotted underline already signals interactivity (tooltip on hover). Two
-  // underlines stacked looks broken.
+  // When mocked, drop the link underline — the pill is the indicator and a
+  // mock string isn't really clickable anyway.
   const showLinkUnderline = link && !mocked;
   const valueEl = (
     <span
@@ -455,15 +479,18 @@ function MetaPair({
       {value}
     </span>
   );
-  const labelEl = (
-    <span className="eyebrow" style={{ color: "var(--fg-3)" }}>
-      {label}
-    </span>
-  );
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      {mocked ? <MockValue hint={mockHint ?? ""}>{labelEl}</MockValue> : labelEl}
-      {valueEl}
+      <span className="eyebrow" style={{ color: "var(--fg-3)" }}>
+        {label}
+      </span>
+      {mocked ? (
+        <MockValue hint={mockHint ?? ""} variant="pill">
+          {valueEl}
+        </MockValue>
+      ) : (
+        valueEl
+      )}
     </div>
   );
 }
