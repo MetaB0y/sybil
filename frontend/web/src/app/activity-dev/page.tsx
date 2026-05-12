@@ -20,6 +20,7 @@ import { useBatches } from "@/lib/activity/use-batches";
 import { HeroAllTime } from "@/components/activity/hero-all-time";
 import { PulseStrip } from "@/components/activity/pulse-strip";
 import { BatchesTable } from "@/components/activity/batches-table";
+import { BatchDetail } from "@/components/activity/batch-detail";
 
 export default function ActivityDevPage() {
   const hydration = useStore(selectHydration);
@@ -83,7 +84,11 @@ export default function ActivityDevPage() {
 
       <HeroAllTime allTime={overview.allTime} />
       <PulseStrip />
-      <BatchesTable rows={rows} isBackfilling={isBackfilling} />
+      <BatchesTable
+        rows={rows}
+        isBackfilling={isBackfilling}
+        renderDetail={(r) => <BatchDetail row={r} />}
+      />
 
       {/* Debug dashboard — kept on the dev route as a sanity check; not shipped to /activity. */}
       <section
