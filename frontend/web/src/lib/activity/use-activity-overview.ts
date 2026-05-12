@@ -25,7 +25,7 @@ import {
 } from "../store";
 import { deriveWindowedStats } from "./derive-overview";
 import { MOCK_ALL_TIME } from "./mocks";
-import type { ActivityOverview } from "./types";
+import type { ActivityOverview, WindowStats } from "./types";
 
 export type UseActivityOverviewResult = ActivityOverview & {
   isLoading: boolean;
@@ -46,14 +46,18 @@ export function useActivityOverview(): UseActivityOverviewResult {
   });
 
   // Anchor the window to the latest block's timestamp, not wall-clock. Keeps
-  // the rollup stable as React re-renders between live blocks and matches
-  // the actual data we have.
-  const nowMs = latestBlock?.timestamp_ms ?? Date.now();
-
-  const { last24h, prior24h } = useMemo(
-    () => deriveWindowedStats(recentBlocks, nowMs),
-    [recentBlocks, nowMs]
-  );
+  // the rollup stable across re-renders and matches the data we actually have.
+  // Until the first block arrives, both windows are empty — that's correct,
+  // the page hasn't hydrated yet.
+  const { last24h, prior24h } = useMemo(() => {
+    if (latestBlock == null) {
+      return {
+        last24h: emptyWindow(),
+        prior24h: emptyWindow(),
+      };
+    }
+    return deriveWindowedStats(recentBlocks, latestBlock.timestamp_ms);
+  }, [recentBlocks, latestBlock]);
 
   const liveMarkets = summaryQ.data
     ? summaryQ.data.filter((m) => m.status === "active").length
@@ -70,5 +74,16 @@ export function useActivityOverview(): UseActivityOverviewResult {
     last24h,
     prior24h,
     isLoading: summaryQ.isPending,
+  };
+}
+
+function emptyWindow(): WindowStats {
+  return {
+    matchedVolumeNanos: 0n,
+    ordersPlaced: 0,
+    ordersMatched: 0,
+    ordersUnmatched: 0,
+    traders: 0,
+    blockCount: 0,
   };
 }
