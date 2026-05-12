@@ -13,7 +13,10 @@ import { create } from "zustand";
 import { parseNanos } from "../format/nanos";
 import type { Block, ConnectionState } from "../ws/types";
 
-const RECENT_BLOCKS_CAP = 20;
+// Cap sized for the Activity page (60-row batches table + 20 headroom for
+// live-prepend churn). Memory cost: ~80 × ~50–200 KB per block on busy
+// networks → 30–80 MB steady-state. Acceptable on laptop; watch on phone.
+const RECENT_BLOCKS_CAP = 80;
 
 /** Hydration phases for the initial REST snapshot. */
 export type HydrationState = "idle" | "hydrating" | "hydrated" | "error";
