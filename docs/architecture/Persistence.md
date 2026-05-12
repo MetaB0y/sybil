@@ -103,6 +103,13 @@ Still not persisted:
 
 These are reconstructable or refreshable, but expensive or inconvenient to rebuild.
 
+Runtime serving caches are explicitly bounded even when the durable store keeps
+more data. The sequencer config controls the recent block ring, price-history
+points retained per market, and fill records retained per account in actor
+memory. Persisted fill-history rows are not pruned yet; long-lived deployments
+should either add a store retention policy or move fill-history API reads to
+paginated database scans before exposing unbounded historical query windows.
+
 ## Recovery Order
 
 Startup recovery is intentionally fence-driven:

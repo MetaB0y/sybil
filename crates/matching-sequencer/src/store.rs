@@ -661,6 +661,31 @@ impl Store {
                 None => None,
             }
         };
+        let latest_witness_exists = {
+            let table = txn.open_table(BLOCK_WITNESSES)?;
+            table.get(recovery_metadata.height)?.is_some()
+        };
+        if latest_witness_exists {
+            let Some(header) = last_header.as_ref() else {
+                return Err(StoreError::CorruptLayout(format!(
+                    "missing block header for witnessed height {}",
+                    recovery_metadata.height
+                )));
+            };
+            let state_root = self
+                .account_state_store
+                .qmdb_state_root(recovery_metadata.account_state.slot)
+                .await?;
+            if state_root.root != header.state_root {
+                return Err(StoreError::CorruptLayout(format!(
+                    "typed qMDB root mismatch at height {}: fence slot {:?} root={:?} header_root={:?}",
+                    recovery_metadata.height,
+                    state_root.slot,
+                    state_root.root,
+                    header.state_root
+                )));
+            }
+        }
 
         // Pubkey registry
         let pubkey_registry = {
@@ -1659,6 +1684,115 @@ mod tests {
         store.save_block(seq.snapshot()).await.unwrap();
 
         let restored = store.load_state().await.unwrap().unwrap();
+        let restored_seq = BlockSequencer::restore(restored, oracle, SequencerConfig::default());
+        let fills = restored_seq.account_fills(buyer, Some(market_id), 10, 0);
+        assert_eq!(fills.len(), 1);
+        assert_eq!(fills[0].fill_qty, 5);
+        assert_eq!(fills[0].block_height, 1);
+    }
+
+    #[tokio::test]
+    async fn test_store_reopens_after_committed_trade_and_restores_qmdb_state() {
+        use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
+        use matching_engine::{outcome_buy, outcome_sell, NANOS_PER_DOLLAR};
+
+        let path = temp_db_path("store-reopen-smoke");
+        let oracle = Arc::new(AdminOracle::new());
+
+        let mut markets = MarketSet::new();
+        let market_id = markets.add_binary("Persistent restart");
+        let mut accounts = AccountStore::new();
+        let buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let seller = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        accounts
+            .get_mut(seller)
+            .unwrap()
+            .positions
+            .insert((market_id, 0), 10);
+
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            oracle.clone(),
+            SequencerConfig::default(),
+        );
+        let production = seq.produce_block(
+            vec![
+                OrderSubmission {
+                    account_id: buyer,
+                    orders: vec![outcome_buy(&markets, 0, market_id, 0, 700_000_000, 5)],
+                    mm_constraint: None,
+                },
+                OrderSubmission {
+                    account_id: seller,
+                    orders: vec![outcome_sell(&markets, 0, market_id, 0, 300_000_000, 5)],
+                    mm_constraint: None,
+                },
+            ],
+            1_000,
+        );
+        assert_eq!(production.block.header.height, 1);
+        assert!(!production.block.fills.is_empty());
+
+        {
+            let store = Store::open(&path).unwrap();
+            store
+                .save_block_with_witness(seq.snapshot(), &production.witness)
+                .await
+                .unwrap();
+        }
+
+        let reopened = Store::open(&path).unwrap();
+        let qmdb_root = reopened
+            .current_state_qmdb_root()
+            .await
+            .unwrap()
+            .expect("committed qMDB state root exists after reopen");
+        let reopened_leaves = reopened.state_qmdb_leaves(qmdb_root.slot).await.unwrap();
+        let expected_leaves = sybil_verifier::block::state_root_leaves(
+            &production.witness.post_state,
+            &production.witness.state_sidecar,
+        );
+        assert_eq!(reopened_leaves, expected_leaves);
+        assert_eq!(
+            sybil_verifier::block::state_root_from_leaves(&reopened_leaves),
+            production.block.header.state_root
+        );
+        assert_eq!(qmdb_root.root, production.block.header.state_root);
+
+        let buyer_key = sybil_verifier::state_schema::account_leaf_key(buyer.0);
+        let buyer_proof = reopened
+            .current_state_qmdb_leaf_proof(&buyer_key)
+            .await
+            .unwrap()
+            .expect("buyer account leaf proof exists after reopen");
+        assert_eq!(buyer_proof.root, production.block.header.state_root);
+        assert_eq!(buyer_proof.leaf_key, buyer_key);
+
+        let restored = reopened.load_state().await.unwrap().unwrap();
+        assert_eq!(restored.height, 1);
+        assert_eq!(
+            restored.accounts.get(buyer).unwrap().position(market_id, 0),
+            5
+        );
+        assert_eq!(
+            restored
+                .accounts
+                .get(seller)
+                .unwrap()
+                .position(market_id, 0),
+            5
+        );
+        assert!(
+            restored
+                .market_volumes
+                .get(&market_id)
+                .copied()
+                .unwrap_or(0)
+                > 0
+        );
+
         let restored_seq = BlockSequencer::restore(restored, oracle, SequencerConfig::default());
         let fills = restored_seq.account_fills(buyer, Some(market_id), 10, 0);
         assert_eq!(fills.len(), 1);

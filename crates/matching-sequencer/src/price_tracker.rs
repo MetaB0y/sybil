@@ -11,10 +11,10 @@ use crate::market_info::PricePoint;
 /// This is a serving cache for live charts, not canonical state. The durable
 /// price-history table is still a future store concern; keeping this bounded
 /// prevents long-running live deployments from retaining every fill forever.
-const MAX_PRICE_HISTORY_POINTS_PER_MARKET: usize = 2_000;
+pub const DEFAULT_MAX_PRICE_HISTORY_POINTS_PER_MARKET: usize = 2_000;
 
 /// Tracks clearing prices, price history, and per-market trading volume.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct PriceTracker {
     /// Persisted clearing prices across blocks (fallback when no trades happen).
     last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
@@ -22,14 +22,27 @@ pub struct PriceTracker {
     price_history: HashMap<MarketId, Vec<PricePoint>>,
     /// Cumulative per-market volume in nanos.
     market_volumes: HashMap<MarketId, u64>,
+    /// Maximum retained price points per market in the in-memory serving cache.
+    max_history_points_per_market: usize,
+}
+
+impl Default for PriceTracker {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PriceTracker {
     pub fn new() -> Self {
+        Self::with_retention(DEFAULT_MAX_PRICE_HISTORY_POINTS_PER_MARKET)
+    }
+
+    pub fn with_retention(max_history_points_per_market: usize) -> Self {
         Self {
             last_clearing_prices: HashMap::new(),
             price_history: HashMap::new(),
             market_volumes: HashMap::new(),
+            max_history_points_per_market,
         }
     }
 
@@ -39,10 +52,23 @@ impl PriceTracker {
         last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
         market_volumes: HashMap<MarketId, u64>,
     ) -> Self {
+        Self::with_state_and_retention(
+            last_clearing_prices,
+            market_volumes,
+            DEFAULT_MAX_PRICE_HISTORY_POINTS_PER_MARKET,
+        )
+    }
+
+    pub fn with_state_and_retention(
+        last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
+        market_volumes: HashMap<MarketId, u64>,
+        max_history_points_per_market: usize,
+    ) -> Self {
         Self {
             last_clearing_prices,
             price_history: HashMap::new(),
             market_volumes,
+            max_history_points_per_market,
         }
     }
 
@@ -119,7 +145,7 @@ impl PriceTracker {
                 if let Some(history) = self.price_history.get_mut(&mid) {
                     let overflow = history
                         .len()
-                        .saturating_sub(MAX_PRICE_HISTORY_POINTS_PER_MARKET);
+                        .saturating_sub(self.max_history_points_per_market);
                     if overflow > 0 {
                         history.drain(0..overflow);
                     }
@@ -173,8 +199,9 @@ mod tests {
         let mut clearing_prices = HashMap::new();
         clearing_prices.insert(market, vec![NANOS_PER_DOLLAR / 2, NANOS_PER_DOLLAR / 2]);
 
-        let mut tracker = PriceTracker::new();
-        for height in 1..=(MAX_PRICE_HISTORY_POINTS_PER_MARKET as u64 + 5) {
+        let max_points = 8;
+        let mut tracker = PriceTracker::with_retention(max_points);
+        for height in 1..=(max_points as u64 + 5) {
             tracker.record_block(
                 &[Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2)],
                 &orders,
@@ -185,11 +212,8 @@ mod tests {
         }
 
         let history = tracker.price_history(market, None, None);
-        assert_eq!(history.len(), MAX_PRICE_HISTORY_POINTS_PER_MARKET);
+        assert_eq!(history.len(), max_points);
         assert_eq!(history.first().unwrap().height, 6);
-        assert_eq!(
-            history.last().unwrap().height,
-            MAX_PRICE_HISTORY_POINTS_PER_MARKET as u64 + 5
-        );
+        assert_eq!(history.last().unwrap().height, max_points as u64 + 5);
     }
 }

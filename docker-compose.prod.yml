@@ -6,10 +6,9 @@ services:
       - sybil-data:/data
       - arena-data:/arena-data
     environment:
-      # The qmdb-backed account snapshot store currently does not restore
-      # reliably after container restart. Keep the volume mounted for future
-      # recovery work, but run the public demo in explicit in-memory mode.
-      SYBIL_DATA_DIR: ""
+      # Public devnet runs persistent by default. To intentionally reset,
+      # stop sybil-api and remove or replace the sybil-data volume.
+      SYBIL_DATA_DIR: "/data"
       SYBIL_ARENA_DB_PATH: "/arena-data/decisions.db"
       # Off-block Polymarket mirror metadata (event id/title, images, end
       # dates, category). JSON-on-disk so it survives sybil-api restarts.

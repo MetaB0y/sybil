@@ -68,6 +68,12 @@ pub struct SequencerConfig {
     /// In-memory ring buffer size for recent blocks (served by the `/blocks`
     /// history endpoint). Bounds memory use per sequencer.
     pub block_history_capacity: usize,
+    /// Maximum in-memory chart points retained per market. This is a serving
+    /// cache, not canonical state.
+    pub max_price_history_points_per_market: usize,
+    /// Maximum in-memory fill records retained per account for API queries.
+    /// Persistent storage may retain more rows.
+    pub max_fill_history_per_account: usize,
     /// Queue depth where actor mailbox pressure should be logged as a warning.
     /// Set to 0 to disable warning logs.
     pub actor_queue_warn_depth: usize,
@@ -90,6 +96,10 @@ impl Default for SequencerConfig {
             max_open_orders_per_account: 1_000,
             max_pending_bundles_per_account: 100,
             block_history_capacity: 100,
+            max_price_history_points_per_market:
+                crate::price_tracker::DEFAULT_MAX_PRICE_HISTORY_POINTS_PER_MARKET,
+            max_fill_history_per_account:
+                crate::fill_recorder::DEFAULT_MAX_FILL_HISTORY_PER_ACCOUNT,
             actor_queue_warn_depth: 1_000,
             actor_queue_error_depth: 5_000,
         }
@@ -571,8 +581,12 @@ impl BlockSequencer {
             markets,
             market_groups,
             last_header: None,
-            price_tracker: crate::price_tracker::PriceTracker::new(),
-            fill_recorder: crate::fill_recorder::FillRecorder::new(),
+            price_tracker: crate::price_tracker::PriceTracker::with_retention(
+                config.max_price_history_points_per_market,
+            ),
+            fill_recorder: crate::fill_recorder::FillRecorder::with_retention(
+                config.max_fill_history_per_account,
+            ),
             lifecycle: crate::market_lifecycle::MarketLifecycle::new(oracle),
             pubkey_registry: HashMap::new(),
             bridge: BridgeState::default(),
@@ -632,11 +646,15 @@ impl BlockSequencer {
             markets: state.markets,
             market_groups: state.market_groups,
             last_header: state.last_header,
-            price_tracker: crate::price_tracker::PriceTracker::with_state(
+            price_tracker: crate::price_tracker::PriceTracker::with_state_and_retention(
                 state.last_clearing_prices,
                 state.market_volumes,
+                config.max_price_history_points_per_market,
             ),
-            fill_recorder: crate::fill_recorder::FillRecorder::restore(state.account_fills),
+            fill_recorder: crate::fill_recorder::FillRecorder::restore_with_retention(
+                state.account_fills,
+                config.max_fill_history_per_account,
+            ),
             lifecycle,
             pubkey_registry: state.pubkey_registry,
             bridge: state.bridge_state,

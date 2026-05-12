@@ -96,6 +96,22 @@ pub struct ApiConfig {
     #[arg(long, default_value = "100", env = "SYBIL_BLOCK_HISTORY_CAPACITY")]
     pub block_history_capacity: usize,
 
+    /// In-memory price-history cache points retained per market.
+    #[arg(
+        long,
+        default_value = "2000",
+        env = "SYBIL_MAX_PRICE_HISTORY_POINTS_PER_MARKET"
+    )]
+    pub max_price_history_points_per_market: usize,
+
+    /// In-memory fill-history records retained per account for API queries.
+    #[arg(
+        long,
+        default_value = "5000",
+        env = "SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT"
+    )]
+    pub max_fill_history_per_account: usize,
+
     /// Sequencer actor queue depth that logs a warning.
     #[arg(long, default_value = "1000", env = "SYBIL_ACTOR_QUEUE_WARN_DEPTH")]
     pub actor_queue_warn_depth: usize,
@@ -157,6 +173,8 @@ impl Default for ApiConfig {
             http_order_client_rps: 250,
             http_order_client_burst: 1_000,
             block_history_capacity: 100,
+            max_price_history_points_per_market: 2_000,
+            max_fill_history_per_account: 5_000,
             actor_queue_warn_depth: 1_000,
             actor_queue_error_depth: 5_000,
             data_dir: String::new(),

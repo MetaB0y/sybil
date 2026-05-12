@@ -11,31 +11,53 @@ use crate::market_info::AccountFillRecord;
 ///
 /// Persistent deployments can keep full fill history in the store; the actor's
 /// hot state only needs a recent serving window for API queries.
-const MAX_FILL_HISTORY_PER_ACCOUNT: usize = 5_000;
+pub const DEFAULT_MAX_FILL_HISTORY_PER_ACCOUNT: usize = 5_000;
 
 /// Records fill history per account.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct FillRecorder {
     account_fills: HashMap<AccountId, Vec<AccountFillRecord>>,
+    max_history_per_account: usize,
+}
+
+impl Default for FillRecorder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl FillRecorder {
     pub fn new() -> Self {
+        Self::with_retention(DEFAULT_MAX_FILL_HISTORY_PER_ACCOUNT)
+    }
+
+    pub fn with_retention(max_history_per_account: usize) -> Self {
         Self {
             account_fills: HashMap::new(),
+            max_history_per_account,
         }
     }
 
     pub fn restore(records: Vec<(AccountId, AccountFillRecord)>) -> Self {
+        Self::restore_with_retention(records, DEFAULT_MAX_FILL_HISTORY_PER_ACCOUNT)
+    }
+
+    pub fn restore_with_retention(
+        records: Vec<(AccountId, AccountFillRecord)>,
+        max_history_per_account: usize,
+    ) -> Self {
         let mut account_fills: HashMap<AccountId, Vec<AccountFillRecord>> = HashMap::new();
         for (account_id, record) in records {
             account_fills.entry(account_id).or_default().push(record);
         }
         for fills in account_fills.values_mut() {
             fills.sort_by_key(|record| (record.block_height, record.order_id));
-            trim_account_fills(fills);
+            trim_account_fills(fills, max_history_per_account);
         }
-        Self { account_fills }
+        Self {
+            account_fills,
+            max_history_per_account,
+        }
     }
 
     pub fn snapshot(&self) -> Vec<(AccountId, AccountFillRecord)> {
@@ -87,7 +109,7 @@ impl FillRecorder {
                 timestamp_ms,
                 position_deltas,
             });
-            trim_account_fills(records);
+            trim_account_fills(records, self.max_history_per_account);
         }
     }
 
@@ -115,8 +137,8 @@ impl FillRecorder {
     }
 }
 
-fn trim_account_fills(fills: &mut Vec<AccountFillRecord>) {
-    let overflow = fills.len().saturating_sub(MAX_FILL_HISTORY_PER_ACCOUNT);
+fn trim_account_fills(fills: &mut Vec<AccountFillRecord>, max_history_per_account: usize) {
+    let overflow = fills.len().saturating_sub(max_history_per_account);
     if overflow > 0 {
         fills.drain(0..overflow);
     }
@@ -135,26 +157,24 @@ mod tests {
         let mut orders = HashMap::new();
         orders.insert(order.id, &order);
 
-        let mut recorder = FillRecorder::new();
-        for height in 1..=(MAX_FILL_HISTORY_PER_ACCOUNT as u64 + 5) {
+        let max_fills = 8;
+        let mut recorder = FillRecorder::with_retention(max_fills);
+        for height in 1..=(max_fills as u64 + 5) {
             let mut fill = Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2);
             fill.account_id = 42;
             recorder.record_fills(&[fill], &orders, height, height * 1_000);
         }
 
-        let fills =
-            recorder.account_fills(AccountId(42), None, MAX_FILL_HISTORY_PER_ACCOUNT + 10, 0);
-        assert_eq!(fills.len(), MAX_FILL_HISTORY_PER_ACCOUNT);
+        let fills = recorder.account_fills(AccountId(42), None, max_fills + 10, 0);
+        assert_eq!(fills.len(), max_fills);
         assert_eq!(fills.first().unwrap().block_height, 6);
-        assert_eq!(
-            fills.last().unwrap().block_height,
-            MAX_FILL_HISTORY_PER_ACCOUNT as u64 + 5
-        );
+        assert_eq!(fills.last().unwrap().block_height, max_fills as u64 + 5);
     }
 
     #[test]
     fn fill_history_is_bounded_per_account_on_restore() {
-        let records = (1..=(MAX_FILL_HISTORY_PER_ACCOUNT as u64 + 5))
+        let max_fills = 8;
+        let records = (1..=(max_fills as u64 + 5))
             .map(|height| {
                 (
                     AccountId(7),
@@ -170,9 +190,9 @@ mod tests {
             })
             .collect();
 
-        let recorder = FillRecorder::restore(records);
+        let recorder = FillRecorder::restore_with_retention(records, max_fills);
         let fills = recorder.account_fills(AccountId(7), None, usize::MAX, 0);
-        assert_eq!(fills.len(), MAX_FILL_HISTORY_PER_ACCOUNT);
+        assert_eq!(fills.len(), max_fills);
         assert_eq!(fills.first().unwrap().block_height, 6);
     }
 }

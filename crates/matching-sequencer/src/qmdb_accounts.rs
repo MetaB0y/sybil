@@ -258,6 +258,9 @@ async fn replace_snapshot(
     db.apply_batch(merkleized)
         .await
         .map_err(|error| StoreError::Qmdb(format!("failed to apply qmdb batch: {error}")))?;
+    db.commit()
+        .await
+        .map_err(|error| StoreError::Qmdb(format!("failed to commit qmdb batch: {error}")))?;
     Ok(())
 }
 

@@ -42,6 +42,36 @@ Main services:
 - `caddy` - HTTPS for app and arena dashboard
 - `node-exporter`, `victoriametrics`, `vmalert`, `grafana` - observability stack
 
+## Persistence
+
+The public devnet runs `sybil-api` with `SYBIL_DATA_DIR=/data`, backed by the
+named Docker volume `sybil-data`. Sequencer state is persisted at block
+boundaries through the redb/qMDB store described in
+`docs/architecture/Persistence.md`.
+
+Preserved across API/container restarts:
+
+- accounts, balances, positions, and account event digests
+- markets, market metadata, statuses, and groups
+- block headers and latest block witness
+- resting orders and recovery logs for acknowledged-but-not-yet-committed orders
+- clearing prices, market volumes, and fill history rows
+
+Still treated as bounded live serving caches:
+
+- recent block ring buffer
+- price-history chart points
+- in-memory per-account fill-history window
+
+The in-memory cache limits are configured with:
+
+- `SYBIL_BLOCK_HISTORY_CAPACITY`
+- `SYBIL_MAX_PRICE_HISTORY_POINTS_PER_MARKET`
+- `SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT`
+
+To intentionally reset the devnet, stop the API and remove or replace the
+`sybil-data` volume. Do not clear this volume as a routine restart step.
+
 ## Read-Only Checks
 
 Use these before restarting or redeploying anything:
@@ -212,8 +242,9 @@ usually wrong: stale resting orders reserve cash and positions, so later
 rebalance orders get rejected even though the account still appears funded.
 
 The intended live-arena mode is IOC. The Python client supports `time_in_force`
-and `live.runner` defaults live LLM/noise orders to `IOC`; after deploying that
-version, a restart clears the current in-memory book and prevents recurrence.
+and `live.runner` defaults live LLM/noise orders to `IOC`. With persistent mode
+enabled, a normal restart does not clear the book; use the pending-order checks
+above and only reset `sybil-data` when intentionally starting a fresh devnet.
 
 ## Known Observability Caveat
 

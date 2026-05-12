@@ -409,6 +409,9 @@ async fn replace_leaves(db: &mut StateDb, leaves: StateLeafEntries) -> Result<()
     db.apply_batch(merkleized)
         .await
         .map_err(|error| StoreError::Qmdb(format!("failed to apply state qmdb: {error}")))?;
+    db.commit()
+        .await
+        .map_err(|error| StoreError::Qmdb(format!("failed to commit state qmdb: {error}")))?;
     Ok(())
 }
 
