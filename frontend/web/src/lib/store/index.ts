@@ -108,9 +108,28 @@ export const useStore = create<StoreState>((set) => ({
 
   applyBlock: (block) =>
     set((s) => {
-      const recent = [block, ...s.recentBlocks].slice(0, RECENT_BLOCKS_CAP);
-      const prices = { ...s.pricesByMarketId };
-      if (block.clearing_prices_nanos) {
+      // Dedupe the ring buffer by height — a block can arrive twice if a
+      // replay handshake re-streams something we already saw live. Keep the
+      // most recent payload (the new one) and sort desc so the table never
+      // has to reorder.
+      const recent = [
+        block,
+        ...s.recentBlocks.filter((b) => b.height !== block.height),
+      ]
+        .sort((a, b) => b.height - a.height)
+        .slice(0, RECENT_BLOCKS_CAP);
+
+      // latestBlock and prices are monotonic: a replay block is older than
+      // the live tip, so it must not regress these. The buffer above still
+      // carries the replay block for the Activity table, but the rest of the
+      // app sees a stable "newest" view.
+      const isNewest =
+        s.latestBlock == null || block.height >= s.latestBlock.height;
+      const latestBlock = isNewest ? block : s.latestBlock;
+
+      let prices = s.pricesByMarketId;
+      if (isNewest && block.clearing_prices_nanos) {
+        prices = { ...prices };
         for (const [key, vec] of Object.entries(block.clearing_prices_nanos)) {
           const id = Number(key);
           if (!Number.isFinite(id)) continue;
@@ -118,8 +137,9 @@ export const useStore = create<StoreState>((set) => ({
           if (parsed) prices[id] = parsed;
         }
       }
+
       return {
-        latestBlock: block,
+        latestBlock,
         recentBlocks: recent,
         pricesByMarketId: prices,
       };
