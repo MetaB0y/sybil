@@ -30,9 +30,27 @@ struct CategoryRule {
 /// Walks top-to-bottom; the first bucket whose `labels` intersects `tags`
 /// wins. See module doc for rationale.
 const TABLE: &[CategoryRule] = &[
+    // Elections wins over Politics: a market tagged with both `Elections`
+    // and `Trump` is conceptually an election market.
+    CategoryRule {
+        bucket: "Elections",
+        labels: &[
+            "Elections",
+            "World Elections",
+            "Global Elections",
+            "US Election",
+            "Primaries",
+            "Main Election",
+            "President",
+        ],
+    },
     CategoryRule {
         bucket: "Politics",
-        labels: &["Trump", "Congress", "Senate"],
+        // `Politics` (the literal Polymarket tag) was the gap that put 161
+        // election-adjacent events in the "no category" bucket on the first
+        // deploy. The specific Trump/Congress/Senate labels stay so future
+        // single-topic Politics events still bucket correctly.
+        labels: &["Politics", "Trump", "Congress", "Senate"],
     },
     CategoryRule {
         bucket: "Geopolitics",
@@ -163,6 +181,12 @@ mod tests {
     #[test]
     fn each_row_matches() {
         let cases = [
+            ("Elections", "Elections"),
+            ("World Elections", "Elections"),
+            ("US Election", "Elections"),
+            ("Primaries", "Elections"),
+            ("President", "Elections"),
+            ("Politics", "Politics"),
             ("Trump", "Politics"),
             ("Senate", "Politics"),
             ("Geopolitics", "Geopolitics"),
@@ -210,9 +234,33 @@ mod tests {
 
     #[test]
     fn priority_resolves_ambiguity() {
-        // Politics (row 1) beats Sports (row 13).
+        // Politics (row 2) beats Sports (row 14).
         let tags = vec![tag("NBA"), tag("Trump")];
         assert_eq!(derive_category(&tags).as_deref(), Some("Politics"));
+    }
+
+    #[test]
+    fn elections_beats_politics() {
+        // A market tagged with both should land in Elections, not Politics.
+        let tags = vec![tag("Trump"), tag("Elections"), tag("US Election")];
+        assert_eq!(derive_category(&tags).as_deref(), Some("Elections"));
+    }
+
+    #[test]
+    fn live_election_tags_from_prod_logs() {
+        // Real tag set from sybil-polymarket logs that fell through on the
+        // first deploy. After the Elections row, these must categorize.
+        let tags = vec![
+            tag("World Elections"),
+            tag("Global Elections"),
+            tag("Elections"),
+            tag("Politics"),
+            tag("US Election"),
+            tag("Earn 4%"),
+            tag("Primaries"),
+            tag("United States"),
+        ];
+        assert_eq!(derive_category(&tags).as_deref(), Some("Elections"));
     }
 
     #[test]
