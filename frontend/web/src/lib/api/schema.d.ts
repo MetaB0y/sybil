@@ -878,18 +878,47 @@ export interface components {
             };
         };
         MarketResponse: {
+            /**
+             * @description All category buckets the parent event matched on the mirror's
+             *     tag-to-bucket lookup (e.g. `["Sports", "Politics"]`). Frontend picks
+             *     one for display via its own priority list. None for sybil-native
+             *     markets (use the singular `category` field instead).
+             */
+            categories?: string[] | null;
             category?: string | null;
             /** Format: int64 */
             challenge_deadline_ms?: number | null;
             /** Format: int64 */
             created_at_ms?: number | null;
             description?: string | null;
+            /**
+             * Format: int64
+             * @description Event-level expected end date (epoch ms). Display only.
+             */
+            event_end_date_ms?: number | null;
+            /** @description Event-level icon URL (secondary image fallback). */
+            event_icon_url?: string | null;
+            /** @description Polymarket parent event id — frontend grouping key. */
+            event_id?: string | null;
+            /** @description Event-level image URL. */
+            event_image_url?: string | null;
+            /** @description Polymarket parent event title. */
+            event_title?: string | null;
             /** Format: int64 */
             expiry_timestamp_ms?: number | null;
             /** @description External URL (e.g., Polymarket link). */
             external_url?: string | null;
+            /**
+             * Format: int64
+             * @description Per-market expected end date (epoch ms). Display only.
+             */
+            market_end_date_ms?: number | null;
+            /** @description Per-market icon URL (secondary image fallback). */
+            market_icon_url?: string | null;
             /** Format: int32 */
             market_id: number;
+            /** @description Per-market image URL. */
+            market_image_url?: string | null;
             name: string;
             /** Format: int64 */
             no_price_nanos?: string | null;
@@ -1204,8 +1233,49 @@ export interface components {
             status: string;
         };
         SetMarketMetadataRequest: {
+            /**
+             * @description All category buckets the parent event matched in the mirror's tag-to-
+             *     bucket lookup (e.g. `["Sports", "Politics"]` for an NBA + Trump
+             *     event). One per matched row; the frontend picks which to render
+             *     using its own priority list, so reordering display priority is
+             *     frontend-only.
+             */
+            categories?: string[] | null;
+            /**
+             * @description Single display category. **Legacy** — populated only for sybil-native
+             *     markets at create time. Mirrored markets now use `categories` (plural)
+             *     and let the frontend pick one for display via its own priority order.
+             */
+            category?: string | null;
+            /**
+             * Format: int64
+             * @description Event-level expected end date (epoch ms). Display only.
+             */
+            event_end_date_ms?: number | null;
+            /** @description Event-level icon URL (secondary; frontend uses as `onError` fallback). */
+            event_icon_url?: string | null;
+            /**
+             * @description Polymarket parent event id — used by the frontend to group sibling
+             *     markets (e.g., "Fed Decision in June" sub-questions). Distinct from the
+             *     matching engine's NegRisk `MarketGroup`, which it does not affect.
+             */
+            event_id?: string | null;
+            /** @description Event-level image URL (primary). */
+            event_image_url?: string | null;
+            /** @description Polymarket parent event title — rendered as the MultiCard header. */
+            event_title?: string | null;
             /** @description External URL (e.g., Polymarket link). */
             external_url?: string | null;
+            /**
+             * Format: int64
+             * @description Per-market expected end date (epoch ms). Display only; matching engine
+             *     does not enforce trading cutoffs at this time.
+             */
+            market_end_date_ms?: number | null;
+            /** @description Per-market icon URL (secondary; frontend uses as `onError` fallback). */
+            market_icon_url?: string | null;
+            /** @description Per-market image URL (primary). */
+            market_image_url?: string | null;
         };
         SetReferencePricesRequest: {
             /** @description Map of market_id -> reference price in nanos. */
