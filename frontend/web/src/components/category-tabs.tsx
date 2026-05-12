@@ -13,16 +13,20 @@
 const CATEGORIES = [
   "All",
   "Politics",
-  "Elections",
-  "Economy",
+  "Geopolitics",
+  "AI",
   "Tech",
-  "Finance",
+  "Economy",
   "Culture",
-  "Climate",
-  "Mentions",
+  "Science",
   "World",
-  "Crypto",
+  "Finance",
+  "Business",
+  "Weather",
+  "Mentions",
   "Sports",
+  "Crypto",
+  "Commodities",
 ] as const;
 
 export function CategoryTabs() {

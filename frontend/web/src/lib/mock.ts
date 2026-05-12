@@ -17,16 +17,20 @@
 
 const CATEGORIES = [
   { name: "Politics", color: "#9F8FE8" },
-  { name: "Elections", color: "#5BC4E0" },
-  { name: "Economy", color: "#E8B447" },
+  { name: "Geopolitics", color: "#5BC4E0" },
+  { name: "AI", color: "#7AD3D9" },
   { name: "Tech", color: "#7E9AE8" },
-  { name: "Finance", color: "#5BD99A" },
+  { name: "Economy", color: "#E8B447" },
   { name: "Culture", color: "#E89D9F" },
-  { name: "Climate", color: "#4FB5A8" },
-  { name: "Mentions", color: "#C49AE8" },
+  { name: "Science", color: "#4FB5A8" },
   { name: "World", color: "#E89A6B" },
+  { name: "Finance", color: "#5BD99A" },
+  { name: "Business", color: "#B0B89E" },
+  { name: "Weather", color: "#6FB8E0" },
+  { name: "Mentions", color: "#C49AE8" },
+  { name: "Sports", color: "#6FCC8A" },
   { name: "Crypto", color: "#F2B244" },
-  { name: "Sports", color: "#5BD99A" },
+  { name: "Commodities", color: "#C9A87C" },
 ] as const;
 
 export type MockCategory = (typeof CATEGORIES)[number];
