@@ -132,6 +132,10 @@ pub enum SequencerMsg {
     /// All-market 24h volumes — used by `list_markets` to populate
     /// `MarketResponse.volume_24h_nanos` in one round-trip.
     GetAllMarketVolumes24h(u64, RpcReplyPort<HashMap<MarketId, u64>>),
+    /// All-market clearing prices `n` hours ago. Companion to
+    /// `GetAllMarketVolumes24h`; bulks the 24h-ago lookups for
+    /// `MarketResponse.{yes,no}_price_24h_ago_nanos` into one round-trip.
+    GetAllMarketPricesNHoursAgo(u64, u64, RpcReplyPort<HashMap<MarketId, (u64, u64)>>),
 }
 
 /// A market search result enriched with metadata, prices, and volume.
@@ -1264,6 +1268,9 @@ impl Actor for SequencerActor {
             SequencerMsg::GetAllMarketVolumes24h(now_ms, reply) => {
                 let _ = reply.send(state.sequencer.all_market_volumes_24h(now_ms));
             }
+            SequencerMsg::GetAllMarketPricesNHoursAgo(n, now_ms, reply) => {
+                let _ = reply.send(state.sequencer.all_market_prices_n_hours_ago(n, now_ms));
+            }
         }
         Ok(())
     }
@@ -1890,6 +1897,18 @@ impl SequencerHandle {
         now_ms: u64,
     ) -> Result<HashMap<MarketId, u64>, SequencerError> {
         self.rpc(|reply| SequencerMsg::GetAllMarketVolumes24h(now_ms, reply))
+            .await
+    }
+
+    /// All-market clearing prices `n` hours ago in one shot — populates
+    /// `MarketResponse.{yes,no}_price_24h_ago_nanos` in a single round-trip.
+    #[tracing::instrument(skip_all)]
+    pub async fn get_all_market_prices_n_hours_ago(
+        &self,
+        n: u64,
+        now_ms: u64,
+    ) -> Result<HashMap<MarketId, (u64, u64)>, SequencerError> {
+        self.rpc(|reply| SequencerMsg::GetAllMarketPricesNHoursAgo(n, now_ms, reply))
             .await
     }
 }

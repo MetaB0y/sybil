@@ -660,6 +660,7 @@ impl BlockSequencer {
                     config.max_price_history_points_per_market,
                 );
                 pt.restore_volume_extensions(state.price_tracker_volume);
+                pt.restore_clearing_history(state.price_tracker_clearing_history);
                 pt
             },
             fill_recorder: crate::fill_recorder::FillRecorder::restore_with_retention(
@@ -721,6 +722,7 @@ impl BlockSequencer {
             bridge_state: &self.bridge,
             trader_tracker: self.trader_tracker.snapshot(),
             price_tracker_volume: self.price_tracker.volume_extensions_snapshot(),
+            price_tracker_clearing_history: self.price_tracker.clearing_history_snapshot(),
         }
     }
 
@@ -844,6 +846,27 @@ impl BlockSequencer {
             self.price_tracker.platform_volume_total(),
             self.price_tracker.platform_volume_24h(now_ms),
         )
+    }
+
+    /// Per-market clearing prices N hours ago. None when the market is too
+    /// young to have a bucket bracketing `now_ms - n * 3_600_000`.
+    pub fn price_n_hours_ago(
+        &self,
+        market_id: MarketId,
+        n: u64,
+        now_ms: u64,
+    ) -> Option<(u64, u64)> {
+        self.price_tracker.price_n_hours_ago(market_id, n, now_ms)
+    }
+
+    /// All-market N-hours-ago clearing prices in one pass — used by
+    /// `list_markets` so the response stays a single round-trip.
+    pub fn all_market_prices_n_hours_ago(
+        &self,
+        n: u64,
+        now_ms: u64,
+    ) -> HashMap<MarketId, (u64, u64)> {
+        self.price_tracker.all_market_prices_n_hours_ago(n, now_ms)
     }
 
     /// All-time unique trader count for one market.
@@ -2806,6 +2829,7 @@ mod tests {
             account_fills: Vec::new(),
             trader_tracker: Default::default(),
             price_tracker_volume: Default::default(),
+            price_tracker_clearing_history: Default::default(),
         };
 
         let mut seq_b = BlockSequencer::restore(state, oracle, SequencerConfig::default());

@@ -61,7 +61,9 @@ use crate::account_storage::{
 };
 use crate::aggregates::TraderTrackerSnapshot;
 use crate::block::{state_sidecar_snapshot_from_resting_orders, BlockHeader};
-use crate::price_tracker::PriceTrackerVolumeSnapshot;
+use crate::price_tracker::{
+    PriceTrackerClearingHistorySnapshot, PriceTrackerVolumeSnapshot,
+};
 use crate::bridge::{BridgeState, BridgeWithdrawalRequest, L1Deposit};
 use crate::market_info::{AccountFillRecord, MarketMetadata};
 use crate::market_lifecycle::MarketLifecycle;
@@ -163,6 +165,14 @@ const KEY_TRADER_TRACKER_SNAPSHOT: &str = "snapshot";
 const PRICE_TRACKER_VOLUME: TableDefinition<&str, &[u8]> =
     TableDefinition::new("price_tracker_volume");
 const KEY_PRICE_TRACKER_VOLUME_SNAPSHOT: &str = "snapshot";
+
+/// Off-block price-tracker clearing-price history: per-market hourly
+/// snapshot of the first-of-hour clearing price, used by
+/// `price_n_hours_ago` (24h price-delta surfaces). Separate table from
+/// `PRICE_TRACKER_VOLUME` so reverting B3 drops one table cleanly.
+const PRICE_TRACKER_CLEARING_HISTORY: TableDefinition<&str, &[u8]> =
+    TableDefinition::new("price_tracker_clearing_history");
+const KEY_PRICE_TRACKER_CLEARING_HISTORY_SNAPSHOT: &str = "snapshot";
 
 // Counter keys
 const KEY_STORE_LAYOUT_VERSION: &str = "store_layout_version";
@@ -279,6 +289,10 @@ pub struct RestoredState {
     /// Volume-extension slice of `PriceTracker` (platform running total +
     /// hourly buckets). Missing table on load yields the default (cold start).
     pub price_tracker_volume: PriceTrackerVolumeSnapshot,
+    /// Clearing-price-history slice of `PriceTracker` (per-market hourly
+    /// snapshots powering 24h-ago lookups). Missing table on load yields
+    /// the default (cold start).
+    pub price_tracker_clearing_history: PriceTrackerClearingHistorySnapshot,
 }
 
 /// Borrowed view of sequencer state needed to persist one block.
@@ -303,6 +317,9 @@ pub struct SequencerSnapshot<'a> {
     /// Off-block PriceTracker volume extensions (owned — serialized once
     /// into the `PRICE_TRACKER_VOLUME` table).
     pub price_tracker_volume: PriceTrackerVolumeSnapshot,
+    /// Off-block PriceTracker clearing-history slice (owned — serialized
+    /// once into the `PRICE_TRACKER_CLEARING_HISTORY` table).
+    pub price_tracker_clearing_history: PriceTrackerClearingHistorySnapshot,
 }
 
 impl Store {
@@ -337,6 +354,7 @@ impl Store {
         txn.open_table(PENDING_BRIDGE_WITHDRAWALS)?;
         txn.open_table(TRADER_TRACKER)?;
         txn.open_table(PRICE_TRACKER_VOLUME)?;
+        txn.open_table(PRICE_TRACKER_CLEARING_HISTORY)?;
         txn.commit()?;
 
         initialize_or_validate_layout(&db)?;
@@ -579,6 +597,14 @@ impl Store {
             let mut table = txn.open_table(PRICE_TRACKER_VOLUME)?;
             let bytes = rmp_serde::to_vec(&snapshot.price_tracker_volume)?;
             table.insert(KEY_PRICE_TRACKER_VOLUME_SNAPSHOT, bytes.as_slice())?;
+        }
+
+        // Price-tracker clearing-history slice — same pattern as the volume
+        // extensions; separate blob keeps B3's rollback footprint isolated.
+        {
+            let mut table = txn.open_table(PRICE_TRACKER_CLEARING_HISTORY)?;
+            let bytes = rmp_serde::to_vec(&snapshot.price_tracker_clearing_history)?;
+            table.insert(KEY_PRICE_TRACKER_CLEARING_HISTORY_SNAPSHOT, bytes.as_slice())?;
         }
 
         // Counters
@@ -929,6 +955,15 @@ impl Store {
             }
         };
 
+        // Price-tracker clearing-history slice. Missing-row → default.
+        let price_tracker_clearing_history: PriceTrackerClearingHistorySnapshot = {
+            let table = txn.open_table(PRICE_TRACKER_CLEARING_HISTORY)?;
+            match table.get(KEY_PRICE_TRACKER_CLEARING_HISTORY_SNAPSHOT)? {
+                Some(value) => rmp_serde::from_slice(value.value())?,
+                None => PriceTrackerClearingHistorySnapshot::default(),
+            }
+        };
+
         info!(
             height = recovery_metadata.height,
             accounts = num_accounts,
@@ -968,6 +1003,7 @@ impl Store {
             pending_bridge_withdrawals,
             trader_tracker,
             price_tracker_volume,
+            price_tracker_clearing_history,
         }))
     }
 
@@ -1476,6 +1512,7 @@ mod tests {
                 resting_orders,
                 trader_tracker: Default::default(),
                 price_tracker_volume: Default::default(),
+                price_tracker_clearing_history: Default::default(),
             }
         }
 
@@ -1502,6 +1539,7 @@ mod tests {
                 resting_orders: Vec::new(),
                 trader_tracker: Default::default(),
                 price_tracker_volume: Default::default(),
+                price_tracker_clearing_history: Default::default(),
             }
         }
     }

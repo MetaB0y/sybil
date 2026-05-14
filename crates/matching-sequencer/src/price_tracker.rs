@@ -20,6 +20,10 @@ const HOUR_MS: u64 = 3_600_000;
 /// Cap on retained hourly volume buckets (24 closed hours + 1 open hour).
 const HOURLY_VOLUME_CAP: usize = 25;
 
+/// Cap on retained hourly clearing-price snapshots PER MARKET (mirrors
+/// `HOURLY_VOLUME_CAP`; same 24h + 1 open-hour reasoning).
+const HOURLY_CLEARING_HISTORY_CAP: usize = 25;
+
 /// Persisted slice of [`PriceTracker`] covering the volume extensions
 /// introduced in B2: a running platform total plus rolling hourly buckets for
 /// both the per-market split and the platform headline. Stored as one combined
@@ -30,6 +34,17 @@ pub struct PriceTrackerVolumeSnapshot {
     pub platform_volume: u64,
     pub hourly_per_market: VecDeque<(u64, HashMap<MarketId, u64>)>,
     pub hourly_platform: VecDeque<(u64, u64)>,
+}
+
+/// Persisted slice of [`PriceTracker`] covering the clearing-price history
+/// extension introduced in B3: per-market rolling buckets of the first
+/// clearing price seen in each hour. Stored as its own redb blob — separate
+/// from `PriceTrackerVolumeSnapshot` so reverting B3 drops one table cleanly.
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct PriceTrackerClearingHistorySnapshot {
+    /// Per-market `(hour_start_ms, clearing prices at first observation)`
+    /// buckets, cap `HOURLY_CLEARING_HISTORY_CAP` per market.
+    pub hourly_clearing_prices: HashMap<MarketId, VecDeque<(u64, Vec<Nanos>)>>,
 }
 
 /// Tracks clearing prices, price history, and per-market trading volume.
@@ -53,6 +68,10 @@ pub struct PriceTracker {
     /// Rolling platform-wide volume bucketed by hour-start (mirrors
     /// `hourly_per_market` keys so 24h slices stay aligned).
     hourly_platform: VecDeque<(u64, u64)>,
+    /// Per-market hourly clearing-price snapshots. First clearing-price
+    /// observation in each hour wins; subsequent observations the same hour
+    /// don't displace it. Cap `HOURLY_CLEARING_HISTORY_CAP` per market.
+    hourly_clearing_prices: HashMap<MarketId, VecDeque<(u64, Vec<Nanos>)>>,
 }
 
 impl Default for PriceTracker {
@@ -75,6 +94,7 @@ impl PriceTracker {
             platform_volume: 0,
             hourly_per_market: VecDeque::new(),
             hourly_platform: VecDeque::new(),
+            hourly_clearing_prices: HashMap::new(),
         }
     }
 
@@ -104,6 +124,7 @@ impl PriceTracker {
             platform_volume: 0,
             hourly_per_market: VecDeque::new(),
             hourly_platform: VecDeque::new(),
+            hourly_clearing_prices: HashMap::new(),
         }
     }
 
@@ -122,6 +143,19 @@ impl PriceTracker {
             platform_volume: self.platform_volume,
             hourly_per_market: self.hourly_per_market.clone(),
             hourly_platform: self.hourly_platform.clone(),
+        }
+    }
+
+    /// Replace the clearing-price-history state with a persisted snapshot.
+    /// Cold-start hits the `Default::default()` path and this becomes a no-op.
+    pub fn restore_clearing_history(&mut self, snapshot: PriceTrackerClearingHistorySnapshot) {
+        self.hourly_clearing_prices = snapshot.hourly_clearing_prices;
+    }
+
+    /// Owned snapshot of the clearing-price-history state for persistence.
+    pub fn clearing_history_snapshot(&self) -> PriceTrackerClearingHistorySnapshot {
+        PriceTrackerClearingHistorySnapshot {
+            hourly_clearing_prices: self.hourly_clearing_prices.clone(),
         }
     }
 
@@ -231,6 +265,26 @@ impl PriceTracker {
             *platform_bucket = platform_bucket.saturating_add(platform_block_volume);
         }
 
+        // Clearing-price history (B3): first observation per hour wins. Walk
+        // every market with a clearing price this block so markets without
+        // fills still get an hourly anchor (carryover prices count).
+        for (&mid, prices) in clearing_prices {
+            let bucket = self
+                .hourly_clearing_prices
+                .entry(mid)
+                .or_default();
+            let need_new = bucket
+                .back()
+                .map(|(t, _)| *t != hour_start_ms)
+                .unwrap_or(true);
+            if need_new {
+                bucket.push_back((hour_start_ms, prices.clone()));
+                while bucket.len() > HOURLY_CLEARING_HISTORY_CAP {
+                    bucket.pop_front();
+                }
+            }
+        }
+
         per_market_volume
     }
 
@@ -305,6 +359,57 @@ impl PriceTracker {
             .filter(|(hour_start_ms, _)| now_ms.saturating_sub(*hour_start_ms) < cutoff)
             .map(|(_, v)| *v)
             .fold(0u64, |acc, v| acc.saturating_add(v))
+    }
+
+    /// Clearing prices as-of `n` hours before `now_ms`, looked up against
+    /// the per-market hourly buckets recorded in `record_block`. Returns the
+    /// `(yes, no)` pair from the bucket whose `hour_start_ms` is the largest
+    /// one ≤ `target_ms = now_ms - n * HOUR_MS`; `None` if the market has no
+    /// bucket older than `target_ms` (too-young market, or wiped on restart).
+    /// Also `None` when `n * HOUR_MS > now_ms` (target predates the epoch —
+    /// no answer is possible, so the FE renders "—").
+    pub fn price_n_hours_ago(
+        &self,
+        market_id: MarketId,
+        n: u64,
+        now_ms: u64,
+    ) -> Option<(u64, u64)> {
+        let target_ms = now_ms.checked_sub(n.saturating_mul(HOUR_MS))?;
+        let buckets = self.hourly_clearing_prices.get(&market_id)?;
+        let prices = buckets
+            .iter()
+            .rev()
+            .find(|(hour_start_ms, _)| *hour_start_ms <= target_ms)
+            .map(|(_, prices)| prices)?;
+        let yes = prices.first().copied()?;
+        let no = prices.get(1).copied().unwrap_or(0);
+        Some((yes, no))
+    }
+
+    /// All-market 24h-ago clearing prices as a single map. Companion to
+    /// `all_market_volumes_24h` — populated in one pass by `list_markets`.
+    /// Returns an empty map when the target predates the epoch.
+    pub fn all_market_prices_n_hours_ago(
+        &self,
+        n: u64,
+        now_ms: u64,
+    ) -> HashMap<MarketId, (u64, u64)> {
+        let Some(target_ms) = now_ms.checked_sub(n.saturating_mul(HOUR_MS)) else {
+            return HashMap::new();
+        };
+        let mut out = HashMap::new();
+        for (&mid, buckets) in &self.hourly_clearing_prices {
+            if let Some((_, prices)) = buckets
+                .iter()
+                .rev()
+                .find(|(hour_start_ms, _)| *hour_start_ms <= target_ms)
+            {
+                let yes = prices.first().copied().unwrap_or(0);
+                let no = prices.get(1).copied().unwrap_or(0);
+                out.insert(mid, (yes, no));
+            }
+        }
+        out
     }
 
     /// All-market 24h volumes as a single map (used by `list_markets` to
@@ -477,6 +582,141 @@ mod tests {
             tracker.platform_volume_total(),
             price.saturating_mul(qty).saturating_mul(30)
         );
+    }
+
+    /// Two record_block calls in the SAME hour: the first observation wins;
+    /// the second leaves the bucket untouched.
+    #[test]
+    fn hourly_clearing_prices_first_wins() {
+        let (_markets, market, order, _) = single_market_setup();
+        let mut orders = HashMap::new();
+        orders.insert(order.id, &order);
+
+        let mut tracker = PriceTracker::new();
+
+        let prices_a = vec![400_000_000, 600_000_000];
+        let mut cp_a = HashMap::new();
+        cp_a.insert(market, prices_a.clone());
+
+        let prices_b = vec![700_000_000, 300_000_000];
+        let mut cp_b = HashMap::new();
+        cp_b.insert(market, prices_b.clone());
+
+        // Two blocks 5 minutes apart — same hour-start_ms.
+        tracker.record_block(&[], &orders, &cp_a, 1, 100_000);
+        tracker.record_block(&[], &orders, &cp_b, 2, 400_000);
+
+        let bucket = tracker
+            .hourly_clearing_prices
+            .get(&market)
+            .expect("market bucket");
+        assert_eq!(bucket.len(), 1);
+        assert_eq!(bucket.back().unwrap().0, 0);
+        assert_eq!(bucket.back().unwrap().1, prices_a, "first-of-hour wins");
+    }
+
+    /// 25 hours of distinct clearing prices: `price_n_hours_ago(24)` resolves
+    /// to the bucket bracketing `now - 24h`; markets too new return None.
+    #[test]
+    fn price_24h_ago_lookup() {
+        let (_markets, market, order, _) = single_market_setup();
+        let mut orders = HashMap::new();
+        orders.insert(order.id, &order);
+
+        let mut tracker = PriceTracker::new();
+        for h in 0..25u64 {
+            let yes = 400_000_000 + h * 1_000_000;
+            let no = 1_000_000_000 - yes;
+            let mut cp = HashMap::new();
+            cp.insert(market, vec![yes, no]);
+            tracker.record_block(&[], &orders, &cp, h + 1, h * HOUR_MS + 500);
+        }
+
+        // Now sits in hour 25; 24h ago = hour 1 boundary; bucket containing
+        // hour 1 has price observed at h=1.
+        let now_ms = 25 * HOUR_MS + 500;
+        let (yes, no) = tracker
+            .price_n_hours_ago(market, 24, now_ms)
+            .expect("market has 25h of history");
+        assert_eq!(yes, 400_000_000 + 1_000_000);
+        assert_eq!(no, 1_000_000_000 - (400_000_000 + 1_000_000));
+
+        // 26h ago — target predates the epoch given now_ms ≈ 25h → None.
+        assert!(tracker.price_n_hours_ago(market, 26, now_ms).is_none());
+
+        // Unknown market → None.
+        let unknown = MarketId::new(9_999);
+        assert!(tracker.price_n_hours_ago(unknown, 24, now_ms).is_none());
+
+        // Too-young market: only 5 buckets, asked for 24h ago → None.
+        let mut markets2 = MarketSet::new();
+        let young = markets2.add_binary("young");
+        let young_order = outcome_buy(&markets2, 2, young, 0, NANOS_PER_DOLLAR / 2, 1);
+        let mut young_orders = HashMap::new();
+        young_orders.insert(young_order.id, &young_order);
+
+        let mut young_tracker = PriceTracker::new();
+        for h in 100..105u64 {
+            // hours 100..104 — far above 24h
+            let mut cp = HashMap::new();
+            cp.insert(young, vec![500_000_000, 500_000_000]);
+            young_tracker.record_block(&[], &young_orders, &cp, h + 1, h * HOUR_MS + 500);
+        }
+        // Now sits in hour 105; 24h ago = hour 81 boundary. Oldest bucket is
+        // hour 100 > 81h → None.
+        let young_now = 105 * HOUR_MS + 500;
+        assert!(young_tracker
+            .price_n_hours_ago(young, 24, young_now)
+            .is_none());
+    }
+
+    /// Cap at `HOURLY_CLEARING_HISTORY_CAP` per market — oldest bucket drops.
+    #[test]
+    fn clearing_history_cap_drops_oldest_per_market() {
+        let (_markets, market, order, _) = single_market_setup();
+        let mut orders = HashMap::new();
+        orders.insert(order.id, &order);
+
+        let mut tracker = PriceTracker::new();
+        for h in 0..(HOURLY_CLEARING_HISTORY_CAP as u64 + 5) {
+            let mut cp = HashMap::new();
+            cp.insert(market, vec![400_000_000 + h, 600_000_000 - h]);
+            tracker.record_block(&[], &orders, &cp, h + 1, h * HOUR_MS + 500);
+        }
+
+        let bucket = tracker
+            .hourly_clearing_prices
+            .get(&market)
+            .expect("market bucket");
+        assert_eq!(bucket.len(), HOURLY_CLEARING_HISTORY_CAP);
+        // Oldest retained should be hour 5 (30 - 25 dropped from the front).
+        assert_eq!(bucket.front().unwrap().0, 5 * HOUR_MS);
+    }
+
+    /// Snapshot ↔ restore is byte-equivalent for the clearing-history slice.
+    #[test]
+    fn clearing_history_snapshot_roundtrip() {
+        let (_markets, market, order, _) = single_market_setup();
+        let mut orders = HashMap::new();
+        orders.insert(order.id, &order);
+
+        let mut tracker = PriceTracker::new();
+        for h in 0..3u64 {
+            let mut cp = HashMap::new();
+            cp.insert(market, vec![400_000_000 + h, 600_000_000 - h]);
+            tracker.record_block(&[], &orders, &cp, h + 1, h * HOUR_MS + 100);
+        }
+
+        let snapshot = tracker.clearing_history_snapshot();
+        let mut restored = PriceTracker::new();
+        restored.restore_clearing_history(snapshot);
+
+        let now_ms = 3 * HOUR_MS + 100;
+        let (yes, no) = restored
+            .price_n_hours_ago(market, 2, now_ms)
+            .expect("bucket within window");
+        assert_eq!(yes, 400_000_000 + 1);
+        assert_eq!(no, 600_000_000 - 1);
     }
 
     /// Snapshot ↔ restore is byte-equivalent and restored tracker answers

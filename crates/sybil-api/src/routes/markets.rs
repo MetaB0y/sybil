@@ -34,6 +34,9 @@ struct BuildMarketResponseArgs<'a> {
     /// Rolling 24h volume for this market (B2). Same "since last restart"
     /// caveat as `trader_count`.
     volume_24h_nanos: u64,
+    /// Clearing prices 24h ago (B3). `None` for markets too young to have
+    /// a bucket bracketing `now - 24h`.
+    price_24h_ago: Option<(u64, u64)>,
 }
 
 fn now_unix_ms() -> u64 {
@@ -95,6 +98,8 @@ fn build_market_response(args: BuildMarketResponseArgs<'_>) -> MarketResponse {
         categories: args.ref_data.and_then(|r| r.categories.clone()),
         trader_count: args.trader_count,
         volume_24h_nanos: args.volume_24h_nanos,
+        yes_price_24h_ago_nanos: args.price_24h_ago.map(|(y, _)| y),
+        no_price_24h_ago_nanos: args.price_24h_ago.map(|(_, n)| n),
     }
 }
 
@@ -112,7 +117,7 @@ pub async fn list_markets(
 ) -> Result<Json<Vec<MarketResponse>>, AppError> {
     use tracing::Instrument;
     let now_ms = now_unix_ms();
-    let (markets, prices, statuses, volumes, metadata, trader_counts, volumes_24h) = async {
+    let (markets, prices, statuses, volumes, metadata, trader_counts, volumes_24h, prices_24h_ago) = async {
         tokio::try_join!(
             state.sequencer.list_markets(),
             state.sequencer.get_market_prices(),
@@ -121,6 +126,7 @@ pub async fn list_markets(
             state.sequencer.get_all_market_metadata(),
             state.sequencer.get_all_trader_counts(),
             state.sequencer.get_all_market_volumes_24h(now_ms),
+            state.sequencer.get_all_market_prices_n_hours_ago(24, now_ms),
         )
     }
     .instrument(tracing::info_span!("list_markets.fetch"))
@@ -151,6 +157,7 @@ pub async fn list_markets(
                 ref_data: market_ref_data.get(&m.id.0),
                 trader_count: trader_counts.get(&m.id).copied().unwrap_or(0),
                 volume_24h_nanos: volumes_24h.get(&m.id).copied().unwrap_or(0),
+                price_24h_ago: prices_24h_ago.get(&m.id).copied(),
             })
         })
         .collect();
@@ -176,7 +183,7 @@ pub async fn list_markets_summary(
 ) -> Result<Json<Vec<MarketSummaryResponse>>, AppError> {
     use tracing::Instrument;
     let now_ms = now_unix_ms();
-    let (markets, prices, statuses, volumes, trader_counts, volumes_24h) = async {
+    let (markets, prices, statuses, volumes, trader_counts, volumes_24h, prices_24h_ago) = async {
         tokio::try_join!(
             state.sequencer.list_markets(),
             state.sequencer.get_market_prices(),
@@ -184,6 +191,7 @@ pub async fn list_markets_summary(
             state.sequencer.get_all_market_volumes(),
             state.sequencer.get_all_trader_counts(),
             state.sequencer.get_all_market_volumes_24h(now_ms),
+            state.sequencer.get_all_market_prices_n_hours_ago(24, now_ms),
         )
     }
     .instrument(tracing::info_span!("list_markets_summary.fetch"))
@@ -204,6 +212,7 @@ pub async fn list_markets_summary(
                 .get(&m.id)
                 .cloned()
                 .unwrap_or(matching_sequencer::MarketStatus::Active);
+            let price_24h = prices_24h_ago.get(&m.id).copied();
             MarketSummaryResponse {
                 market_id: m.id.0,
                 name: m.name.clone(),
@@ -214,6 +223,8 @@ pub async fn list_markets_summary(
                 status: status.as_str().to_string(),
                 trader_count: trader_counts.get(&m.id).copied().unwrap_or(0),
                 volume_24h_nanos: volumes_24h.get(&m.id).copied().unwrap_or(0),
+                yes_price_24h_ago_nanos: price_24h.map(|(y, _)| y),
+                no_price_24h_ago_nanos: price_24h.map(|(_, n)| n),
             }
         })
         .collect();
@@ -244,12 +255,13 @@ pub async fn get_market(
     let prices = state.sequencer.get_market_prices().await?;
     let market_prices = prices.get(&mid);
     let now_ms = now_unix_ms();
-    let (status, metadata, volume, trader_counts, volume_24h) = tokio::try_join!(
+    let (status, metadata, volume, trader_counts, volume_24h, price_24h_ago_all) = tokio::try_join!(
         state.sequencer.get_market_status(mid),
         state.sequencer.get_market_metadata(mid),
         state.sequencer.get_market_volume(mid),
         state.sequencer.get_all_trader_counts(),
         state.sequencer.get_all_market_volumes_24h(now_ms),
+        state.sequencer.get_all_market_prices_n_hours_ago(24, now_ms),
     )?;
     let ref_price = state.reference_prices.read().await.get(&id).copied();
     let ref_data = state.market_ref_data.read().await.get(&id).cloned();
@@ -266,6 +278,7 @@ pub async fn get_market(
         ref_data: ref_data.as_ref(),
         trader_count: trader_counts.get(&mid).copied().unwrap_or(0),
         volume_24h_nanos: volume_24h.get(&mid).copied().unwrap_or(0),
+        price_24h_ago: price_24h_ago_all.get(&mid).copied(),
     })))
 }
 
@@ -563,10 +576,11 @@ pub async fn search_markets(
     };
 
     let now_ms = now_unix_ms();
-    let (results, trader_counts, volumes_24h) = tokio::try_join!(
+    let (results, trader_counts, volumes_24h, prices_24h_ago) = tokio::try_join!(
         state.sequencer.search_markets(query),
         state.sequencer.get_all_trader_counts(),
         state.sequencer.get_all_market_volumes_24h(now_ms),
+        state.sequencer.get_all_market_prices_n_hours_ago(24, now_ms),
     )?;
     let ref_prices = state.reference_prices.read().await;
     let market_ref_data = state.market_ref_data.read().await;
@@ -577,6 +591,7 @@ pub async fn search_markets(
             let mid = r.market_id.0;
             let count = trader_counts.get(&r.market_id).copied().unwrap_or(0);
             let vol_24h = volumes_24h.get(&r.market_id).copied().unwrap_or(0);
+            let p_24h_ago = prices_24h_ago.get(&r.market_id).copied();
             build_market_response(BuildMarketResponseArgs {
                 market_id: mid,
                 name: r.name,
@@ -589,6 +604,7 @@ pub async fn search_markets(
                 ref_data: market_ref_data.get(&mid),
                 trader_count: count,
                 volume_24h_nanos: vol_24h,
+                price_24h_ago: p_24h_ago,
             })
         })
         .collect();

@@ -92,6 +92,14 @@ pub struct MarketResponse {
     /// "since last restart" until prod persistence is enabled.
     #[serde(default)]
     pub volume_24h_nanos: u64,
+    /// Clearing YES price ~24h ago in nanos, derived from the per-market
+    /// hourly snapshot. `None` for markets younger than 24h or wiped on
+    /// restart. FE computes the 24h delta as `current − snapshot`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yes_price_24h_ago_nanos: Option<u64>,
+    /// Clearing NO price ~24h ago in nanos. See `yes_price_24h_ago_nanos`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_price_24h_ago_nanos: Option<u64>,
 }
 
 /// Minimal market data for high-throughput dashboards (drops strings & metadata).
@@ -114,6 +122,11 @@ pub struct MarketSummaryResponse {
     /// `MarketResponse.volume_24h_nanos`).
     #[serde(default)]
     pub volume_24h_nanos: u64,
+    /// Clearing YES / NO prices ~24h ago (mirror of `MarketResponse`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yes_price_24h_ago_nanos: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_price_24h_ago_nanos: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
