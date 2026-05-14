@@ -36,14 +36,11 @@ fn build_market_response(args: BuildMarketResponseArgs<'_>) -> MarketResponse {
     // (on-block, only set for sybil-native markets). Mirrored markets pass
     // `category: None` to `create_market` and receive the real category via
     // ref-data.
-    let category = args
-        .ref_data
-        .and_then(|r| r.category.clone())
-        .or_else(|| {
-            args.metadata
-                .map(|m| m.category.clone())
-                .filter(|s| !s.is_empty())
-        });
+    let category = args.ref_data.and_then(|r| r.category.clone()).or_else(|| {
+        args.metadata
+            .map(|m| m.category.clone())
+            .filter(|s| !s.is_empty())
+    });
 
     MarketResponse {
         market_id: args.market_id,

@@ -42,6 +42,11 @@ pub struct Config {
     #[arg(long, env = "MIRROR_CATEGORIES", value_delimiter = ',')]
     pub mirror_categories: Vec<String>,
 
+    /// Categories to exclude from mirroring (comma-separated). Matched against
+    /// Polymarket event tag labels and slugs.
+    #[arg(long, env = "MIRROR_EXCLUDED_CATEGORIES", value_delimiter = ',')]
+    pub mirror_excluded_categories: Vec<String>,
+
     /// Minimum Polymarket volume (USD) to mirror. 0 = all.
     #[arg(long, default_value = "0", env = "MIN_VOLUME_USD")]
     pub min_volume_usd: f64,
@@ -74,9 +79,14 @@ pub struct Config {
     #[arg(long, default_value = "5000", env = "MM_MAX_POSITION")]
     pub mm_max_position: u64,
 
-    /// Maximum mirrored markets the live MM should actively quote.
+    /// Maximum mirrored markets the live MM should actively quote. 0 = all.
     #[arg(long, default_value = "200", env = "MM_MAX_MARKETS")]
     pub mm_max_markets: usize,
+
+    /// Maximum MM orders to submit per block. Keeps live quoting inside the
+    /// sybil-api per-submission DOS guard while rotating across tracked markets.
+    #[arg(long, default_value = "64", env = "MM_MAX_ORDERS_PER_BLOCK")]
+    pub mm_max_orders_per_block: usize,
 
     /// Max total dollar exposure across all markets. Budget → 0 as exposure approaches this.
     #[arg(long, default_value = "50000.0", env = "MM_MAX_EXPOSURE_DOLLARS")]

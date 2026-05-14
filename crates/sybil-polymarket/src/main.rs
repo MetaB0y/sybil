@@ -129,16 +129,66 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "created MM account"
     );
 
-    // Channels — size MM channel to fit all existing markets for bootstrap
-    let mut existing = mapping.read().await.all_markets();
+    // Channels — size MM channel to fit all existing markets for bootstrap.
+    // When category filters are configured, apply the same filtered universe to
+    // persisted mappings so an old broad mapping does not silently re-expand MM.
+    let allowed_conditions = if config.mirror_categories.is_empty()
+        && config.mirror_excluded_categories.is_empty()
+    {
+        None
+    } else {
+        match gamma_client
+            .fetch_active_events(
+                config.max_events,
+                &config.mirror_categories,
+                &config.mirror_excluded_categories,
+                config.min_volume_usd,
+            )
+            .await
+        {
+            Ok(events) => {
+                let conditions: HashSet<String> = events
+                    .iter()
+                    .flat_map(|event| event.markets.iter())
+                    .filter(|market| market.active && !market.closed)
+                    .map(|market| market.condition_id.clone())
+                    .collect();
+                info!(
+                    allowed_conditions = conditions.len(),
+                    "filtered existing mapping for MM bootstrap"
+                );
+                Some(conditions)
+            }
+            Err(error) => {
+                warn!(
+                    error = %error,
+                    "failed to fetch category-filtered events; bootstrapping all persisted mapped markets"
+                );
+                None
+            }
+        }
+    };
+
+    let mut existing = {
+        let mapping = mapping.read().await;
+        match &allowed_conditions {
+            Some(conditions) => mapping.all_markets_for_conditions(conditions),
+            None => mapping.all_markets(),
+        }
+    };
     existing.sort_by_key(|(sybil_market_id, _, _)| std::cmp::Reverse(*sybil_market_id));
-    if existing.len() > config.mm_max_markets {
+    if config.mm_max_markets > 0 && existing.len() > config.mm_max_markets {
         info!(
             total = existing.len(),
             active = config.mm_max_markets,
             "limiting MM bootstrap to newest mapped markets"
         );
         existing.truncate(config.mm_max_markets);
+    } else if config.mm_max_markets == 0 {
+        info!(
+            total = existing.len(),
+            "MM market cap disabled; bootstrapping all filtered mapped markets"
+        );
     }
     let mm_channel_size = (existing.len() + 256).max(256);
     let (feed_tx, feed_rx) = mpsc::channel(64);

@@ -111,6 +111,7 @@ impl MarketState {
 struct MmState {
     markets: HashMap<u32, MarketState>,
     last_sync_block: u64,
+    next_quote_index: usize,
 }
 
 impl MmState {
@@ -118,6 +119,7 @@ impl MmState {
         Self {
             markets: HashMap::new(),
             last_sync_block: 0,
+            next_quote_index: 0,
         }
     }
 }
@@ -217,6 +219,53 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
     }
 
     orders
+}
+
+/// Select a bounded, rotating slice of quotes for one block.
+///
+/// The live API intentionally caps orders per submission. When the mirror
+/// tracks hundreds of markets, submitting every quote every block is both too
+/// expensive and rejected by that guardrail. This preserves coverage by
+/// rotating the starting market each block.
+pub fn select_rotating_quotes(
+    quote_inputs: &[QuoteInput],
+    quote_config: &QuoteConfig,
+    start_index: usize,
+    max_orders: usize,
+) -> (Vec<OrderSpec>, usize) {
+    if quote_inputs.is_empty() || max_orders == 0 {
+        return (Vec::new(), start_index);
+    }
+
+    let start = start_index % quote_inputs.len();
+    let mut orders = Vec::new();
+    let mut considered = 0;
+
+    for offset in 0..quote_inputs.len() {
+        let idx = (start + offset) % quote_inputs.len();
+        let market_orders = generate_quotes(&quote_inputs[idx], quote_config);
+        considered = offset + 1;
+
+        if market_orders.is_empty() {
+            continue;
+        }
+
+        if orders.len() + market_orders.len() > max_orders {
+            if !orders.is_empty() {
+                break;
+            }
+            continue;
+        }
+
+        orders.extend(market_orders);
+
+        if orders.len() >= max_orders {
+            break;
+        }
+    }
+
+    let next_index = (start + considered.max(1)) % quote_inputs.len();
+    (orders, next_index)
 }
 
 // --------------------------------------------------------------------------- //
@@ -458,6 +507,7 @@ impl MmActor {
                 in_group: ms.in_group,
             });
         }
+        quote_inputs.sort_by_key(|input| input.market_id);
 
         // 4. Generate quotes (pure pass): no mutation, no IO
         let quote_config = QuoteConfig {
@@ -467,10 +517,14 @@ impl MmActor {
             max_position: self.config.mm_max_position as i64,
             quote_size_dollars: self.config.mm_quote_size_dollars,
         };
-        let orders: Vec<OrderSpec> = quote_inputs
-            .iter()
-            .flat_map(|input| generate_quotes(input, &quote_config))
-            .collect();
+        let start_index = self.state.next_quote_index;
+        let (orders, next_quote_index) = select_rotating_quotes(
+            &quote_inputs,
+            &quote_config,
+            start_index,
+            self.config.mm_max_orders_per_block,
+        );
+        self.state.next_quote_index = next_quote_index;
 
         // 5. Submit (IO)
         self.submit_orders(&orders, budget_nanos, block.height)
@@ -632,6 +686,56 @@ mod tests {
         });
         assert!(sell_qty.is_some());
         assert!(sell_qty.unwrap() <= 3);
+    }
+
+    #[test]
+    fn rotating_selection_caps_orders_and_advances_cursor() {
+        let config = default_config();
+        let inputs: Vec<_> = (1..=10)
+            .map(|market_id| {
+                let mut input = default_input(0.5);
+                input.market_id = market_id;
+                input
+            })
+            .collect();
+
+        let (orders, next_index) = select_rotating_quotes(&inputs, &config, 0, 6);
+
+        assert_eq!(orders.len(), 6);
+        assert_eq!(next_index, 3);
+        assert!(orders.iter().any(|order| match order {
+            OrderSpec::BuyYes { market_id, .. } => *market_id == 1,
+            _ => false,
+        }));
+        assert!(orders.iter().any(|order| match order {
+            OrderSpec::BuyYes { market_id, .. } => *market_id == 3,
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn rotating_selection_resumes_from_cursor() {
+        let config = default_config();
+        let inputs: Vec<_> = (1..=10)
+            .map(|market_id| {
+                let mut input = default_input(0.5);
+                input.market_id = market_id;
+                input
+            })
+            .collect();
+
+        let (orders, next_index) = select_rotating_quotes(&inputs, &config, 3, 4);
+
+        assert_eq!(orders.len(), 4);
+        assert_eq!(next_index, 5);
+        assert!(orders.iter().any(|order| match order {
+            OrderSpec::BuyYes { market_id, .. } => *market_id == 4,
+            _ => false,
+        }));
+        assert!(orders.iter().any(|order| match order {
+            OrderSpec::BuyYes { market_id, .. } => *market_id == 5,
+            _ => false,
+        }));
     }
 
     #[test]

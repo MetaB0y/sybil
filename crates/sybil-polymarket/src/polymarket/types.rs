@@ -117,6 +117,8 @@ pub struct GammaEvent {
     pub neg_risk: bool,
     #[serde(default)]
     pub markets: Vec<GammaMarket>,
+    #[serde(default)]
+    pub tags: Vec<GammaTag>,
     #[serde(default, deserialize_with = "string_or_float")]
     pub volume: Option<f64>,
     #[serde(default, deserialize_with = "string_or_float")]
@@ -133,10 +135,6 @@ pub struct GammaEvent {
     /// Event-level icon URL (used as a secondary URL by the frontend).
     #[serde(default)]
     pub icon: Option<String>,
-    /// Polymarket category tags. `event.category` itself is null in practice;
-    /// the real signal lives here.
-    #[serde(default)]
-    pub tags: Vec<GammaTag>,
 }
 
 impl GammaEvent {
@@ -145,6 +143,57 @@ impl GammaEvent {
     pub fn is_neg_risk(&self) -> bool {
         self.neg_risk || self.enable_neg_risk
     }
+
+    /// Category filters are matched against Polymarket event tag labels and
+    /// slugs. Gamma's top-level `category` field is usually absent for events.
+    pub fn matches_category_filters(&self, include: &[String], exclude: &[String]) -> bool {
+        if tags_match_any(&self.tags, exclude) {
+            return false;
+        }
+        include.is_empty() || tags_match_any(&self.tags, include)
+    }
+
+    pub fn tag_labels(&self) -> Vec<String> {
+        self.tags
+            .iter()
+            .filter_map(|tag| {
+                let label = tag.label.trim();
+                (!label.is_empty()).then(|| label.to_string())
+            })
+            .collect()
+    }
+
+    pub fn primary_category(&self) -> Option<String> {
+        self.tags.iter().find_map(|tag| {
+            let label = tag.label.trim();
+            let force_hidden = tag.slug.starts_with("hide-")
+                || tag.slug.starts_with("rewards-")
+                || tag.slug.starts_with("earn-");
+            (!label.is_empty() && !force_hidden).then(|| label.to_string())
+        })
+    }
+}
+
+fn tags_match_any(tags: &[GammaTag], filters: &[String]) -> bool {
+    if filters.is_empty() {
+        return false;
+    }
+    let filters: Vec<String> = filters.iter().map(|f| normalize_filter(f)).collect();
+    tags.iter().any(|tag| {
+        let label = normalize_filter(&tag.label);
+        let slug = normalize_filter(&tag.slug);
+        filters
+            .iter()
+            .any(|filter| filter == &label || filter == &slug)
+    })
+}
+
+fn normalize_filter(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
 }
 
 /// Market nested inside a GammaEvent.
@@ -376,6 +425,43 @@ mod tests {
     }
 
     #[test]
+    fn category_filters_match_event_tags() {
+        let event = GammaEvent {
+            id: "e1".into(),
+            title: "Election".into(),
+            description: String::new(),
+            slug: String::new(),
+            active: true,
+            closed: false,
+            enable_neg_risk: false,
+            neg_risk: false,
+            markets: Vec::new(),
+            tags: vec![
+                GammaTag {
+                    label: "Global Elections".into(),
+                    slug: "global-elections".into(),
+                },
+                GammaTag {
+                    label: "Politics".into(),
+                    slug: "politics".into(),
+                },
+            ],
+            volume: None,
+            liquidity: None,
+            start_date: None,
+            end_date: None,
+            created_at: None,
+            image: None,
+            icon: None,
+        };
+
+        assert!(event.matches_category_filters(&["global elections".into()], &[]));
+        assert!(event.matches_category_filters(&["global-elections".into()], &[]));
+        assert!(!event.matches_category_filters(&["sports".into()], &[]));
+        assert!(!event.matches_category_filters(&[], &["politics".into()]));
+    }
+
+    #[test]
     fn parse_empty_fields() {
         let market = GammaMarket {
             condition_id: "0x".into(),
@@ -417,10 +503,7 @@ mod tests {
         // Epoch zero.
         assert_eq!(parse_iso8601_to_ms("1970-01-01T00:00:00Z"), Some(0));
         // Past date (negative epoch).
-        assert_eq!(
-            parse_iso8601_to_ms("1969-12-31T23:59:59Z"),
-            Some(-1_000)
-        );
+        assert_eq!(parse_iso8601_to_ms("1969-12-31T23:59:59Z"), Some(-1_000));
         // Fractional seconds tolerated (we read only the first 19 chars).
         assert_eq!(
             parse_iso8601_to_ms("2025-12-31T12:00:00.123Z"),

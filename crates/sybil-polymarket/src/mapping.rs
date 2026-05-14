@@ -151,6 +151,21 @@ impl MappingStore {
 
     /// Iterate all mapped markets: yields (sybil_market_id, yes_token_id, in_group).
     pub fn all_markets(&self) -> Vec<(u32, String, bool)> {
+        self.all_markets_matching(|_| true)
+    }
+
+    /// Iterate mapped markets whose Polymarket condition is in `conditions`.
+    pub fn all_markets_for_conditions(
+        &self,
+        conditions: &HashSet<String>,
+    ) -> Vec<(u32, String, bool)> {
+        self.all_markets_matching(|condition| conditions.contains(condition))
+    }
+
+    fn all_markets_matching(
+        &self,
+        mut condition_matches: impl FnMut(&str) -> bool,
+    ) -> Vec<(u32, String, bool)> {
         let group_market_ids: std::collections::HashSet<u32> = self
             .event_to_group
             .values()
@@ -161,6 +176,11 @@ impl MappingStore {
         self.token_to_sybil
             .iter()
             .filter(|(_, (_, outcome))| *outcome == 0) // YES tokens only
+            .filter(|(_, (sybil_id, _))| {
+                self.sybil_to_condition
+                    .get(sybil_id)
+                    .is_some_and(|condition| condition_matches(condition))
+            })
             .map(|(token_id, (sybil_id, _))| {
                 (
                     *sybil_id,

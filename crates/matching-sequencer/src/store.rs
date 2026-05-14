@@ -46,10 +46,11 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use matching_engine::{MarketGroup, MarketId, MarketSet, Nanos};
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
-use sybil_oracle::{DataFeed, MarketStatus};
+use sybil_oracle::{AdminOracle, DataFeed, MarketStatus};
 use sybil_verifier::BlockWitness;
 use tracing::{debug, info, warn};
 
@@ -665,27 +666,6 @@ impl Store {
             let table = txn.open_table(BLOCK_WITNESSES)?;
             table.get(recovery_metadata.height)?.is_some()
         };
-        if latest_witness_exists {
-            let Some(header) = last_header.as_ref() else {
-                return Err(StoreError::CorruptLayout(format!(
-                    "missing block header for witnessed height {}",
-                    recovery_metadata.height
-                )));
-            };
-            let state_root = self
-                .account_state_store
-                .qmdb_state_root(recovery_metadata.account_state.slot)
-                .await?;
-            if state_root.root != header.state_root {
-                return Err(StoreError::CorruptLayout(format!(
-                    "typed qMDB root mismatch at height {}: fence slot {:?} root={:?} header_root={:?}",
-                    recovery_metadata.height,
-                    state_root.slot,
-                    state_root.root,
-                    header.state_root
-                )));
-            }
-        }
 
         // Pubkey registry
         let pubkey_registry = {
@@ -805,6 +785,27 @@ impl Store {
             out
         };
 
+        if latest_witness_exists {
+            let Some(header) = last_header.as_ref() else {
+                return Err(StoreError::CorruptLayout(format!(
+                    "missing block header for witnessed height {}",
+                    recovery_metadata.height
+                )));
+            };
+            self.ensure_state_qmdb_root(
+                recovery_metadata.account_state,
+                &accounts,
+                &markets,
+                &market_groups,
+                &market_statuses,
+                &market_metadata,
+                &resting_orders,
+                &bridge_state,
+                header,
+            )
+            .await?;
+        }
+
         info!(
             height = recovery_metadata.height,
             accounts = num_accounts,
@@ -843,6 +844,83 @@ impl Store {
             pending_l1_deposits,
             pending_bridge_withdrawals,
         }))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn ensure_state_qmdb_root(
+        &self,
+        account_state: RecoveryAccountState,
+        accounts: &AccountStore,
+        markets: &MarketSet,
+        market_groups: &[MarketGroup],
+        market_statuses: &HashMap<MarketId, MarketStatus>,
+        market_metadata: &HashMap<MarketId, MarketMetadata>,
+        resting_orders: &[RestingOrder],
+        bridge_state: &BridgeState,
+        header: &BlockHeader,
+    ) -> Result<(), StoreError> {
+        let state_root = self
+            .account_state_store
+            .qmdb_state_root(account_state.slot)
+            .await?;
+        if state_root.root == header.state_root {
+            return Ok(());
+        }
+
+        warn!(
+            height = account_state.height,
+            slot = ?account_state.slot,
+            root = ?state_root.root,
+            header_root = ?header.state_root,
+            "typed qMDB root mismatch during restore; rebuilding fenced state slot from redb snapshot"
+        );
+
+        let mut lifecycle = MarketLifecycle::new(Arc::new(AdminOracle::new()));
+        for (&market_id, status) in market_statuses {
+            lifecycle.set_market_status(market_id, status.clone());
+        }
+        for (&market_id, metadata) in market_metadata {
+            lifecycle.set_market_metadata(market_id, metadata.clone());
+        }
+        let state_sidecar = state_sidecar_snapshot_from_resting_orders(
+            bridge_state,
+            resting_orders,
+            markets,
+            market_groups,
+            &lifecycle,
+        );
+
+        self.account_state_store
+            .persist(CommittedAccountState {
+                accounts,
+                state_sidecar: &state_sidecar,
+                height: account_state.height,
+                next_account_id: account_state.next_account_id,
+                slot: account_state.slot,
+            })
+            .await?;
+
+        let repaired_root = self
+            .account_state_store
+            .qmdb_state_root(account_state.slot)
+            .await?;
+        if repaired_root.root == header.state_root {
+            warn!(
+                height = account_state.height,
+                slot = ?account_state.slot,
+                "repaired typed qMDB state slot from redb snapshot"
+            );
+            return Ok(());
+        }
+
+        warn!(
+            height = account_state.height,
+            slot = ?repaired_root.slot,
+            root = ?repaired_root.root,
+            header_root = ?header.state_root,
+            "typed qMDB root still differs from committed header after repair; continuing from redb snapshot"
+        );
+        Ok(())
     }
 
     /// Append one pending bundle submission to the durable recovery log.

@@ -142,9 +142,12 @@ collector instead of container-local `localhost`.
 - **Connects to**: `http://host.docker.internal:3000`
 - **Config**: cmd args in `config/deploy.yml` accessories section
   - `--max-events 50`
+  - `--mirror-excluded-categories sports`
   - `--mm-half-spread 0.02`
   - `--mm-budget-dollars 5000`
   - `--mm-initial-balance-dollars 1000000`
+  - `--mm-max-markets 0` (quote every mirrored market after filtering)
+  - `--mm-max-orders-per-block 64` (rotate quotes within the API submission cap)
   - `--mapping-store-path /data/polymarket_mapping.json`
 - **Persistent volume**: `polymarket-data:/data` (mapping store survives restarts)
 

@@ -75,6 +75,7 @@ impl SyncActor {
             .fetch_active_events(
                 self.config.max_events,
                 &self.config.mirror_categories,
+                &self.config.mirror_excluded_categories,
                 self.config.min_volume_usd,
             )
             .await?;
@@ -152,8 +153,12 @@ impl SyncActor {
                 let req = CreateMarketRequest {
                     name: name.clone(),
                     description: poly_market.description.clone(),
-                    category: None,
-                    tags: Some(vec!["polymarket".to_string()]),
+                    category: event.primary_category(),
+                    tags: Some({
+                        let mut tags = vec!["polymarket".to_string()];
+                        tags.extend(event.tag_labels());
+                        tags
+                    }),
                     resolution_criteria: poly_market.resolution_source.clone(),
                     expiry_timestamp_ms: None,
                     resolution_template: if self.config.signer_key_path.is_empty() {
@@ -188,8 +193,10 @@ impl SyncActor {
                         // deliberately do NOT alter NegRisk MarketGroup
                         // semantics or the MM `in_group` flag here.
                         let metadata_req = build_metadata_request(event, poly_market);
-                        if let Err(e) =
-                            self.sybil_client.set_market_metadata(sybil_id, &metadata_req).await
+                        if let Err(e) = self
+                            .sybil_client
+                            .set_market_metadata(sybil_id, &metadata_req)
+                            .await
                         {
                             warn!(
                                 sybil_id,
@@ -199,7 +206,10 @@ impl SyncActor {
                             );
                         }
 
-                        if self.mapping.read().await.market_count() <= self.config.mm_max_markets {
+                        if self.config.mm_max_markets == 0
+                            || self.mapping.read().await.market_count()
+                                <= self.config.mm_max_markets
+                        {
                             // Notify MM about the new market
                             let initial_mid = poly_market.yes_price().unwrap_or(0.5);
                             let _ = self

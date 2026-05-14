@@ -88,6 +88,7 @@ impl GammaClient {
         &self,
         max_events: usize,
         categories: &[String],
+        excluded_categories: &[String],
         min_volume_usd: f64,
     ) -> Result<Vec<GammaEvent>, Error> {
         let mut all_events = Vec::new();
@@ -123,11 +124,15 @@ impl GammaClient {
             let page_len = events.len();
 
             for event in events {
-                // Filter by category if configured
-                if !categories.is_empty() {
-                    // Gamma events don't have a direct category field, but markets have tags.
-                    // Skip events where no market matches any requested category.
-                    // For now, we pass through all and let the caller filter more precisely.
+                if !event.matches_category_filters(categories, excluded_categories) {
+                    debug!(
+                        event_id = event.id,
+                        title = event.title,
+                        include = ?categories,
+                        exclude = ?excluded_categories,
+                        "skipping event by category filters"
+                    );
+                    continue;
                 }
 
                 // Filter by volume
