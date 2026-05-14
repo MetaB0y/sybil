@@ -156,9 +156,11 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
         .map(system_event_to_response)
         .collect();
 
-    // Union the keys from placers_by_market and volume_by_market — either
-    // can be empty on its own (a block with carried fills but no new admits
-    // has zero placers but non-zero volume; the reverse can also happen).
+    // Union the keys from placers_by_market, volume_by_market, and
+    // orders_by_market — any of the three can be empty on its own (a
+    // block with carried fills but no fresh admits has zero placers but
+    // non-zero volume; a block whose only book activity is expiries has
+    // matched/unmatched but no fresh admits).
     let mut by_market: HashMap<String, BlockMarketStats> = HashMap::new();
     for (mid, count) in &block.placers_by_market {
         by_market
@@ -171,6 +173,12 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
             .entry(mid.0.to_string())
             .or_default()
             .volume_nanos = *vol;
+    }
+    for (mid, stats) in &block.orders_by_market {
+        let entry = by_market.entry(mid.0.to_string()).or_default();
+        entry.placed = stats.placed as u32;
+        entry.matched = stats.matched as u32;
+        entry.unmatched = stats.unmatched as u32;
     }
 
     BlockResponse {

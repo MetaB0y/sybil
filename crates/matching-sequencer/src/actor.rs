@@ -139,6 +139,15 @@ pub enum SequencerMsg {
     /// All-market last-10-batch liquidity score + the band currently in
     /// effect. Bulks `MarketResponse.liquidity_*_nanos` into one round-trip.
     GetLiquiditySnapshot(RpcReplyPort<(HashMap<MarketId, u64>, u64)>),
+    /// All-market all-time `OrderStats` — placed/matched/unmatched per
+    /// market. Bulks `MarketResponse.orders_*_total` into one round-trip.
+    GetOrderStatsByMarket(RpcReplyPort<HashMap<MarketId, crate::aggregates::OrderStats>>),
+    /// Platform-wide `OrderStats`: `(all_time, last_24h)`. Caller-supplied
+    /// `now_ms` keeps the 24h cutoff deterministic.
+    GetPlatformOrderStats(
+        u64,
+        RpcReplyPort<(crate::aggregates::OrderStats, crate::aggregates::OrderStats)>,
+    ),
 }
 
 /// A market search result enriched with metadata, prices, and volume.
@@ -713,10 +722,13 @@ impl SequencerActorState {
                 let markets: Vec<MarketId> = resting_order.order.active_markets().collect();
                 self.sequencer.trader_tracker.record_placed(
                     resting_order.account_id,
-                    markets,
+                    markets.clone(),
                     now_ms,
                     false,
                 );
+                self.sequencer
+                    .order_stats_tracker
+                    .record_placed(markets, now_ms);
                 Ok(())
             }
             crate::sequencer::AdmitOutcome::Deferred(sub) => {
@@ -1278,6 +1290,12 @@ impl Actor for SequencerActor {
                 let liq = state.sequencer.all_liquidity_avg10();
                 let band = state.sequencer.liquidity_band_nanos();
                 let _ = reply.send((liq, band));
+            }
+            SequencerMsg::GetOrderStatsByMarket(reply) => {
+                let _ = reply.send(state.sequencer.all_market_order_stats());
+            }
+            SequencerMsg::GetPlatformOrderStats(now_ms, reply) => {
+                let _ = reply.send(state.sequencer.platform_order_stats(now_ms));
             }
         }
         Ok(())
@@ -1928,6 +1946,26 @@ impl SequencerHandle {
         &self,
     ) -> Result<(HashMap<MarketId, u64>, u64), SequencerError> {
         self.rpc(SequencerMsg::GetLiquiditySnapshot).await
+    }
+
+    /// All-market all-time order stats — populates
+    /// `MarketResponse.orders_*_total` in one round-trip.
+    #[tracing::instrument(skip_all)]
+    pub async fn get_order_stats_by_market(
+        &self,
+    ) -> Result<HashMap<MarketId, crate::aggregates::OrderStats>, SequencerError> {
+        self.rpc(SequencerMsg::GetOrderStatsByMarket).await
+    }
+
+    /// Platform order stats `(all_time, last_24h)` for the activity hero.
+    #[tracing::instrument(skip_all)]
+    pub async fn get_platform_order_stats(
+        &self,
+        now_ms: u64,
+    ) -> Result<(crate::aggregates::OrderStats, crate::aggregates::OrderStats), SequencerError>
+    {
+        self.rpc(|reply| SequencerMsg::GetPlatformOrderStats(now_ms, reply))
+            .await
     }
 }
 

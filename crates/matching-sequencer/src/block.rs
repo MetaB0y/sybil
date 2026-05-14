@@ -88,6 +88,13 @@ pub struct Block {
     /// the platform `total_volume` counts each fill once (so sum-of-by-market
     /// over-counts for bundles, just like `placers_by_market`).
     pub volume_by_market: HashMap<MarketId, u64>,
+    /// Per-market order placement/matching/unmatching counts for this block.
+    /// `placed` counts every active market of every successful non-MM admit;
+    /// `matched` and `unmatched` count exits from the resting book (expire,
+    /// revalidate, post-solve settle). Multi-market orders over-count
+    /// per-market vs. the platform scalars in `BlockFlowMetrics`. Cancels
+    /// are NOT counted here (D1 carries them via OrderCancelled).
+    pub orders_by_market: HashMap<MarketId, crate::aggregates::OrderStats>,
 }
 
 /// Compute a deterministic account-only state root with the verifier's

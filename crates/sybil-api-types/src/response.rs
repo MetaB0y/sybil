@@ -110,6 +110,19 @@ pub struct MarketResponse {
     /// recorded yet.
     #[serde(default)]
     pub liquidity_band_nanos: u64,
+    /// All-time non-MM admissions counted against this market. Multi-market
+    /// orders credit every active market; sum-of-per-market over-counts vs.
+    /// the platform total — that's the documented attribution rule.
+    #[serde(default)]
+    pub orders_placed_total: u64,
+    /// All-time admissions that received at least one fill (B5's
+    /// `has_been_matched` true at removal time). Cancels are NOT counted.
+    #[serde(default)]
+    pub orders_matched_total: u64,
+    /// All-time admissions that exited the book without any fill. Cancels
+    /// are tracked separately and do not count here.
+    #[serde(default)]
+    pub orders_unmatched_total: u64,
 }
 
 /// Minimal market data for high-throughput dashboards (drops strings & metadata).
@@ -142,6 +155,13 @@ pub struct MarketSummaryResponse {
     pub liquidity_avg10_nanos: u64,
     #[serde(default)]
     pub liquidity_band_nanos: u64,
+    /// All-time placed/matched/unmatched (mirrors `MarketResponse`).
+    #[serde(default)]
+    pub orders_placed_total: u64,
+    #[serde(default)]
+    pub orders_matched_total: u64,
+    #[serde(default)]
+    pub orders_unmatched_total: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -243,6 +263,18 @@ pub struct BlockMarketStats {
     /// once.
     #[serde(default)]
     pub volume_nanos: u64,
+    /// Non-MM admissions counted against this market in this block.
+    /// Multi-market orders credit each active market.
+    #[serde(default)]
+    pub placed: u32,
+    /// Resting orders touching this market that exited the book this
+    /// block AFTER at least one fill (B5's `has_been_matched`).
+    #[serde(default)]
+    pub matched: u32,
+    /// Resting orders touching this market that exited the book this
+    /// block WITHOUT any fill. Cancels are excluded.
+    #[serde(default)]
+    pub unmatched: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -43,6 +43,11 @@ struct BuildMarketResponseArgs<'a> {
     /// Width of the band the liquidity score uses (B4). FE labels read
     /// "(±$0.0X)" from this value.
     liquidity_band_nanos: u64,
+    /// All-time placed/matched/unmatched per market (B6). Cancels excluded.
+    /// Same restart caveat as `trader_count` until persistence runs in prod.
+    orders_placed_total: u64,
+    orders_matched_total: u64,
+    orders_unmatched_total: u64,
 }
 
 fn now_unix_ms() -> u64 {
@@ -108,6 +113,9 @@ fn build_market_response(args: BuildMarketResponseArgs<'_>) -> MarketResponse {
         no_price_24h_ago_nanos: args.price_24h_ago.map(|(_, n)| n),
         liquidity_avg10_nanos: args.liquidity_avg10_nanos,
         liquidity_band_nanos: args.liquidity_band_nanos,
+        orders_placed_total: args.orders_placed_total,
+        orders_matched_total: args.orders_matched_total,
+        orders_unmatched_total: args.orders_unmatched_total,
     }
 }
 
@@ -135,6 +143,7 @@ pub async fn list_markets(
         volumes_24h,
         prices_24h_ago,
         liquidity,
+        order_stats_by_market,
     ) = async {
         tokio::try_join!(
             state.sequencer.list_markets(),
@@ -146,6 +155,7 @@ pub async fn list_markets(
             state.sequencer.get_all_market_volumes_24h(now_ms),
             state.sequencer.get_all_market_prices_n_hours_ago(24, now_ms),
             state.sequencer.get_liquidity_snapshot(),
+            state.sequencer.get_order_stats_by_market(),
         )
     }
     .instrument(tracing::info_span!("list_markets.fetch"))
@@ -180,6 +190,18 @@ pub async fn list_markets(
                 price_24h_ago: prices_24h_ago.get(&m.id).copied(),
                 liquidity_avg10_nanos: liquidity_by_market.get(&m.id).copied().unwrap_or(0),
                 liquidity_band_nanos,
+                orders_placed_total: order_stats_by_market
+                    .get(&m.id)
+                    .map(|s| s.placed)
+                    .unwrap_or(0),
+                orders_matched_total: order_stats_by_market
+                    .get(&m.id)
+                    .map(|s| s.matched)
+                    .unwrap_or(0),
+                orders_unmatched_total: order_stats_by_market
+                    .get(&m.id)
+                    .map(|s| s.unmatched)
+                    .unwrap_or(0),
             })
         })
         .collect();
@@ -214,6 +236,7 @@ pub async fn list_markets_summary(
         volumes_24h,
         prices_24h_ago,
         liquidity,
+        order_stats_by_market,
     ) = async {
         tokio::try_join!(
             state.sequencer.list_markets(),
@@ -224,6 +247,7 @@ pub async fn list_markets_summary(
             state.sequencer.get_all_market_volumes_24h(now_ms),
             state.sequencer.get_all_market_prices_n_hours_ago(24, now_ms),
             state.sequencer.get_liquidity_snapshot(),
+            state.sequencer.get_order_stats_by_market(),
         )
     }
     .instrument(tracing::info_span!("list_markets_summary.fetch"))
@@ -260,6 +284,18 @@ pub async fn list_markets_summary(
                 no_price_24h_ago_nanos: price_24h.map(|(_, n)| n),
                 liquidity_avg10_nanos: liquidity_by_market.get(&m.id).copied().unwrap_or(0),
                 liquidity_band_nanos,
+                orders_placed_total: order_stats_by_market
+                    .get(&m.id)
+                    .map(|s| s.placed)
+                    .unwrap_or(0),
+                orders_matched_total: order_stats_by_market
+                    .get(&m.id)
+                    .map(|s| s.matched)
+                    .unwrap_or(0),
+                orders_unmatched_total: order_stats_by_market
+                    .get(&m.id)
+                    .map(|s| s.unmatched)
+                    .unwrap_or(0),
             }
         })
         .collect();
@@ -290,7 +326,16 @@ pub async fn get_market(
     let prices = state.sequencer.get_market_prices().await?;
     let market_prices = prices.get(&mid);
     let now_ms = now_unix_ms();
-    let (status, metadata, volume, trader_counts, volume_24h, price_24h_ago_all, liquidity) = tokio::try_join!(
+    let (
+        status,
+        metadata,
+        volume,
+        trader_counts,
+        volume_24h,
+        price_24h_ago_all,
+        liquidity,
+        order_stats_by_market,
+    ) = tokio::try_join!(
         state.sequencer.get_market_status(mid),
         state.sequencer.get_market_metadata(mid),
         state.sequencer.get_market_volume(mid),
@@ -298,8 +343,10 @@ pub async fn get_market(
         state.sequencer.get_all_market_volumes_24h(now_ms),
         state.sequencer.get_all_market_prices_n_hours_ago(24, now_ms),
         state.sequencer.get_liquidity_snapshot(),
+        state.sequencer.get_order_stats_by_market(),
     )?;
     let (liquidity_by_market, liquidity_band_nanos) = liquidity;
+    let market_order_stats = order_stats_by_market.get(&mid).copied().unwrap_or_default();
     let ref_price = state.reference_prices.read().await.get(&id).copied();
     let ref_data = state.market_ref_data.read().await.get(&id).cloned();
 
@@ -318,6 +365,9 @@ pub async fn get_market(
         price_24h_ago: price_24h_ago_all.get(&mid).copied(),
         liquidity_avg10_nanos: liquidity_by_market.get(&mid).copied().unwrap_or(0),
         liquidity_band_nanos,
+        orders_placed_total: market_order_stats.placed,
+        orders_matched_total: market_order_stats.matched,
+        orders_unmatched_total: market_order_stats.unmatched,
     })))
 }
 
@@ -615,12 +665,13 @@ pub async fn search_markets(
     };
 
     let now_ms = now_unix_ms();
-    let (results, trader_counts, volumes_24h, prices_24h_ago, liquidity) = tokio::try_join!(
+    let (results, trader_counts, volumes_24h, prices_24h_ago, liquidity, order_stats_by_market) = tokio::try_join!(
         state.sequencer.search_markets(query),
         state.sequencer.get_all_trader_counts(),
         state.sequencer.get_all_market_volumes_24h(now_ms),
         state.sequencer.get_all_market_prices_n_hours_ago(24, now_ms),
         state.sequencer.get_liquidity_snapshot(),
+        state.sequencer.get_order_stats_by_market(),
     )?;
     let (liquidity_by_market, liquidity_band_nanos) = liquidity;
     let ref_prices = state.reference_prices.read().await;
@@ -648,6 +699,18 @@ pub async fn search_markets(
                 price_24h_ago: p_24h_ago,
                 liquidity_avg10_nanos: liquidity_by_market.get(&r.market_id).copied().unwrap_or(0),
                 liquidity_band_nanos,
+                orders_placed_total: order_stats_by_market
+                    .get(&r.market_id)
+                    .map(|s| s.placed)
+                    .unwrap_or(0),
+                orders_matched_total: order_stats_by_market
+                    .get(&r.market_id)
+                    .map(|s| s.matched)
+                    .unwrap_or(0),
+                orders_unmatched_total: order_stats_by_market
+                    .get(&r.market_id)
+                    .map(|s| s.unmatched)
+                    .unwrap_or(0),
             })
         })
         .collect();

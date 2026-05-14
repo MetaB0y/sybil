@@ -555,6 +555,8 @@ pub struct BlockSequencer {
     pub trader_tracker: crate::aggregates::TraderTracker,
     /// Off-block liquidity tracker: last-10-batch ±band depth average per market.
     pub liquidity_tracker: crate::aggregates::LiquidityTracker,
+    /// Off-block order stats tracker: placed/matched/unmatched per market + platform + 24h.
+    pub order_stats_tracker: crate::aggregates::OrderStatsTracker,
     /// Market lifecycle: statuses, oracle, metadata.
     pub lifecycle: crate::market_lifecycle::MarketLifecycle,
     /// P256 public key to account mapping.
@@ -603,6 +605,7 @@ impl BlockSequencer {
             ),
             trader_tracker: crate::aggregates::TraderTracker::new(),
             liquidity_tracker: crate::aggregates::LiquidityTracker::new(),
+            order_stats_tracker: crate::aggregates::OrderStatsTracker::new(),
             lifecycle: crate::market_lifecycle::MarketLifecycle::new(oracle),
             pubkey_registry: HashMap::new(),
             bridge: BridgeState::default(),
@@ -678,6 +681,9 @@ impl BlockSequencer {
             ),
             trader_tracker: crate::aggregates::TraderTracker::restore(state.trader_tracker),
             liquidity_tracker: crate::aggregates::LiquidityTracker::restore(state.liquidity_tracker),
+            order_stats_tracker: crate::aggregates::OrderStatsTracker::restore(
+                state.order_stats_tracker,
+            ),
             lifecycle,
             pubkey_registry: state.pubkey_registry,
             bridge: state.bridge_state,
@@ -734,6 +740,7 @@ impl BlockSequencer {
             price_tracker_volume: self.price_tracker.volume_extensions_snapshot(),
             price_tracker_clearing_history: self.price_tracker.clearing_history_snapshot(),
             liquidity_tracker: self.liquidity_tracker.snapshot(),
+            order_stats_tracker: self.order_stats_tracker.snapshot(),
         }
     }
 
@@ -896,6 +903,24 @@ impl BlockSequencer {
     /// the next `record_block` will apply.
     pub fn liquidity_band_nanos(&self) -> u64 {
         self.config.liquidity_band_nanos
+    }
+
+    /// All-market all-time placed/matched/unmatched stats. Single-pass
+    /// companion to `all_market_volumes_24h` for `list_markets`.
+    pub fn all_market_order_stats(&self) -> HashMap<MarketId, crate::aggregates::OrderStats> {
+        self.order_stats_tracker.all_per_market()
+    }
+
+    /// Platform order stats — `(all_time, last_24h)`. Caller supplies
+    /// `now_ms` so the 24h cutoff is deterministic.
+    pub fn platform_order_stats(
+        &self,
+        now_ms: u64,
+    ) -> (crate::aggregates::OrderStats, crate::aggregates::OrderStats) {
+        (
+            self.order_stats_tracker.platform(),
+            self.order_stats_tracker.platform_24h(now_ms),
+        )
     }
 
     /// All-time unique trader count for one market.
@@ -1903,11 +1928,28 @@ impl BlockSequencer {
             .map(|(&id, _)| id)
             .collect();
 
+        // Per-block placed/matched/unmatched per market — accumulated
+        // alongside the OrderStatsTracker hooks below and stamped on the
+        // Block at the end of this function. Cancels are NOT counted here.
+        let mut block_orders_by_market: HashMap<MarketId, crate::aggregates::OrderStats> =
+            HashMap::new();
+
         // ── Order Book: expire stale, remove orders for resolved markets ──
-        let _expired = self.order_book.expire(self.height);
-        let _revalidated = self
+        let expired = self.order_book.expire(self.height);
+        let revalidated = self
             .order_book
             .revalidate(&self.accounts, &active_markets);
+        for ro in expired.iter().chain(revalidated.iter()) {
+            self.order_stats_tracker.record_exit(ro, timestamp_ms);
+            for m in ro.order.active_markets() {
+                let slot = block_orders_by_market.entry(m).or_default();
+                if ro.has_been_matched {
+                    slot.matched += 1;
+                } else {
+                    slot.unmatched += 1;
+                }
+            }
+        }
 
         // Build batch-local account map from resting orders
         let mut order_account_map: HashMap<u64, AccountId> = HashMap::new();
@@ -2068,10 +2110,15 @@ impl BlockSequencer {
                             accepted_orders.push(accepted.order);
                             self.trader_tracker.record_placed(
                                 account_id,
-                                tracker_markets,
+                                tracker_markets.clone(),
                                 timestamp_ms,
                                 false,
                             );
+                            for &m in &tracker_markets {
+                                block_orders_by_market.entry(m).or_default().placed += 1;
+                            }
+                            self.order_stats_tracker
+                                .record_placed(tracker_markets, timestamp_ms);
                         }
                         Err(reason) => {
                             witness_rejections.push(WitnessRejection {
@@ -2207,9 +2254,20 @@ impl BlockSequencer {
         } = self.finalize_block_state_phase(&fills, &problem, &clearing_prices, timestamp_ms);
 
         // Update order book: release filled orders' reservations, adjust partial fills
-        let _post_solve = self
+        let post_solve_removed = self
             .order_book
             .settle(&fills, &mm_order_ids_set, self.height);
+        for ro in &post_solve_removed {
+            self.order_stats_tracker.record_exit(ro, timestamp_ms);
+            for m in ro.order.active_markets() {
+                let slot = block_orders_by_market.entry(m).or_default();
+                if ro.has_been_matched {
+                    slot.matched += 1;
+                } else {
+                    slot.unmatched += 1;
+                }
+            }
+        }
         let pending_orders_after = self.order_book.len();
 
         // Off-block liquidity tracker — score the post-settle book against
@@ -2271,6 +2329,7 @@ impl BlockSequencer {
             unique_placers,
             placers_by_market,
             volume_by_market,
+            orders_by_market: block_orders_by_market,
         };
 
         // Verify the block using all 4 verification layers.
@@ -2872,6 +2931,7 @@ mod tests {
             price_tracker_volume: Default::default(),
             price_tracker_clearing_history: Default::default(),
             liquidity_tracker: Default::default(),
+            order_stats_tracker: Default::default(),
         };
 
         let mut seq_b = BlockSequencer::restore(state, oracle, SequencerConfig::default());
