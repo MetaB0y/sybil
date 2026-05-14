@@ -82,11 +82,16 @@ pub async fn get_open_batch(
     Path(id): Path<u32>,
 ) -> Result<Json<OpenBatchResponse>, AppError> {
     let mid = MarketId::new(id);
-    let unique_placers = state.sequencer.get_open_batch_placers(mid).await?;
+    let (unique_placers, indicative) = tokio::try_join!(
+        state.sequencer.get_open_batch_placers(mid),
+        state.sequencer.get_indicative(mid),
+    )?;
     Ok(Json(OpenBatchResponse {
         unique_placers,
-        // Indicative fields stay zero/None until the C2 scheduler ships.
-        ..Default::default()
+        indicative_yes_price_nanos: indicative.yes_price_nanos,
+        indicative_no_price_nanos: indicative.no_price_nanos,
+        indicative_volume_nanos: indicative.volume_nanos,
+        indicative_computed_at_ms: indicative.computed_at_ms,
     }))
 }
 

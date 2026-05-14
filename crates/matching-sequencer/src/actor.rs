@@ -6,7 +6,8 @@ use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort, SupervisionEvent
 use tokio::sync::broadcast;
 use tokio::time::{interval_at, Instant};
 
-use matching_engine::{MarketGroup, MarketId, MarketSet, Nanos};
+use matching_engine::{MarketGroup, MarketId, MarketSet, Nanos, Order, Problem};
+use matching_solver::LpSolver;
 use sybil_oracle::{
     DataFeed, FeedId, FeedPubkey, MarketStatus, Oracle, ResolutionRecord, SignedAttestation,
 };
@@ -148,6 +149,101 @@ pub enum SequencerMsg {
         u64,
         RpcReplyPort<(crate::aggregates::OrderStats, crate::aggregates::OrderStats)>,
     ),
+    /// Periodic indicative-solve tick (C2). Fires from a dedicated timer
+    /// task at ~750ms cadence, decoupled from block production. The arm
+    /// kicks off a `spawn_blocking` shadow-solve over the resting book and
+    /// self-sends an `IndicativeUpdate` once the solver returns.
+    IndicativeTick,
+    /// Result of one shadow-solve: a per-market cache of indicative prices
+    /// + per-market notional volume + computed_at_ms.
+    IndicativeUpdate(HashMap<MarketId, IndicativeSnapshot>),
+    /// Read the cached indicative snapshot for one market. Returns a
+    /// default (None/None/0/0) snapshot if the market hasn't been seen yet
+    /// (cold start, or market with no resting orders).
+    GetIndicative(MarketId, RpcReplyPort<IndicativeSnapshot>),
+}
+
+/// Shadow-solve snapshot for one market (C2). Off-block — produced by the
+/// indicative scheduler, cached on `SequencerActorState`, served by
+/// `GET /v1/markets/{id}/open-batch`. Pure-core (`BlockSequencer`) never
+/// sees this.
+#[derive(Clone, Debug, Default)]
+pub struct IndicativeSnapshot {
+    /// YES clearing price the solver discovered, or the last-clearing
+    /// fallback when the book has orders but no matchable cross. `None`
+    /// when the book is empty for this market or the solver is infeasible.
+    pub yes_price_nanos: Option<u64>,
+    /// NO clearing price; same semantics as `yes_price_nanos`.
+    pub no_price_nanos: Option<u64>,
+    /// Sum of `fill_price * fill_qty` over fills the shadow-solve produced
+    /// that touched this market. `0` for fallback (no cross) or empty book.
+    pub volume_nanos: u64,
+    /// Wall-clock timestamp (ms since UNIX epoch) when this snapshot was
+    /// computed. FE renders staleness from it.
+    pub computed_at_ms: u64,
+}
+
+/// Extract per-market `IndicativeSnapshot` values from a shadow-solve
+/// result. Markets that produced fills get the solver's discovered prices
+/// and the fill notional; markets that are in the book but had no
+/// matchable cross fall back to the last clearing price (volume = 0).
+/// Markets absent from the book are not included in the map (lookup-miss
+/// returns `IndicativeSnapshot::default()` on the read path).
+fn build_indicative_snapshots(
+    problem: &Problem,
+    result: &matching_solver::PipelineResult,
+    last_clearing: &HashMap<MarketId, Vec<Nanos>>,
+    computed_at_ms: u64,
+) -> HashMap<MarketId, IndicativeSnapshot> {
+    let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
+
+    // Per-market notional volume from the shadow-solve's fills.
+    let mut volume_by_market: HashMap<MarketId, u64> = HashMap::new();
+    for fill in &result.result.fills {
+        if fill.fill_qty == 0 {
+            continue;
+        }
+        let Some(order) = order_map.get(&fill.order_id) else {
+            continue;
+        };
+        let notional = fill.fill_price.saturating_mul(fill.fill_qty);
+        for m in order.active_markets() {
+            let entry = volume_by_market.entry(m).or_insert(0);
+            *entry = entry.saturating_add(notional);
+        }
+    }
+
+    // Every market touched by a resting order in the speculative book.
+    let mut markets_in_book: std::collections::HashSet<MarketId> =
+        std::collections::HashSet::new();
+    for order in &problem.orders {
+        for m in order.active_markets() {
+            markets_in_book.insert(m);
+        }
+    }
+
+    let pd_prices = result.price_discovery.as_ref().map(|pd| &pd.prices);
+
+    let mut snapshots: HashMap<MarketId, IndicativeSnapshot> = HashMap::new();
+    for m in markets_in_book {
+        let (yes, no) = if let Some(prices) = pd_prices.and_then(|p| p.get(&m)) {
+            (prices.first().copied(), prices.get(1).copied())
+        } else if let Some(prices) = last_clearing.get(&m) {
+            (prices.first().copied(), prices.get(1).copied())
+        } else {
+            (None, None)
+        };
+        snapshots.insert(
+            m,
+            IndicativeSnapshot {
+                yes_price_nanos: yes,
+                no_price_nanos: no,
+                volume_nanos: volume_by_market.get(&m).copied().unwrap_or(0),
+                computed_at_ms,
+            },
+        );
+    }
+    snapshots
 }
 
 /// A market search result enriched with metadata, prices, and volume.
@@ -202,6 +298,11 @@ struct SequencerActorState {
     global_submission_bucket: TokenBucket,
     account_submission_buckets: HashMap<AccountId, TokenBucket>,
     mailbox_monitor: MailboxMonitor,
+    /// Per-market indicative snapshots from the C2 shadow-solver. Cache
+    /// lives on the actor (not `BlockSequencer`) so pure-core stays pure.
+    /// Empty until the first `IndicativeUpdate` arrives; lookup-miss
+    /// returns `IndicativeSnapshot::default()` (None/None/0/0).
+    indicative_cache: HashMap<MarketId, IndicativeSnapshot>,
 }
 
 #[derive(Clone, Debug)]
@@ -409,6 +510,61 @@ impl SequencerActorState {
         self.push_to_history(bp.block.clone());
         let _ = self.block_broadcast.send(bp.block.clone());
         self.latest_block = Some(bp.block);
+    }
+
+    /// Indicative scheduler tick (C2). Builds a speculative `Problem` from
+    /// the current resting book (Tier 1: no pending bundles, no MM flash),
+    /// kicks off a `spawn_blocking` solve, and self-sends an
+    /// `IndicativeUpdate` once the solver returns. The cache write happens
+    /// on the actor mailbox, so it serializes against block-production
+    /// ticks naturally — no shared lock, no AtomicBool.
+    fn on_indicative_tick(&mut self, myself: ActorRef<SequencerMsg>) {
+        if self.pause_count > 0 {
+            return;
+        }
+        // Tier 1: single-market only. The LP solver asserts num_markets==1,
+        // and multi-market orders sit in `pending_bundles`, not the book.
+        let resting_orders: Vec<Order> = self
+            .sequencer
+            .order_book()
+            .resting_orders()
+            .filter(|(o, _)| o.num_markets == 1)
+            .map(|(o, _)| o.clone())
+            .collect();
+
+        if resting_orders.is_empty() {
+            // Nothing to solve. Leave the cache untouched so the last good
+            // snapshot remains visible (FE displays staleness via
+            // `computed_at_ms`).
+            return;
+        }
+
+        let mut problem = Problem::new("indicative");
+        problem.markets = self.sequencer.markets().clone();
+        problem.orders = resting_orders;
+        problem.market_groups = self.sequencer.market_groups().to_vec();
+        // mm_constraints intentionally empty (Tier 1 — no MM flash liquidity).
+
+        let last_clearing = self.sequencer.last_clearing_prices().clone();
+        let computed_at_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let target = myself.clone();
+        let mailbox = self.mailbox_monitor.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let result = LpSolver::new().solve(&problem);
+            let snapshots =
+                build_indicative_snapshots(&problem, &result, &last_clearing, computed_at_ms);
+            mailbox.queued();
+            if target
+                .send_message(SequencerMsg::IndicativeUpdate(snapshots))
+                .is_err()
+            {
+                mailbox.send_failed();
+            }
+        });
     }
 
     async fn persist_block(&self, prepared: &PreparedBlock) -> Result<(), SequencerError> {
@@ -995,6 +1151,7 @@ impl Actor for SequencerActor {
             global_submission_bucket,
             account_submission_buckets: HashMap::new(),
             mailbox_monitor: args.mailbox_monitor,
+            indicative_cache: HashMap::new(),
         })
     }
 
@@ -1017,12 +1174,34 @@ impl Actor for SequencerActor {
                 }
             }
         });
+
+        // Indicative scheduler (C2). Separate timer task, NOT an idle
+        // branch in on_tick — block production and indicative refresh are
+        // decoupled. Cadence chosen well under one block period so the
+        // open-batch snapshot refreshes mid-batch.
+        let actor_indicative = myself.clone();
+        let mailbox_indicative = state.mailbox_monitor.clone();
+        let indicative_interval = std::time::Duration::from_millis(750);
+        tokio::spawn(async move {
+            let mut ticker = interval_at(Instant::now() + indicative_interval, indicative_interval);
+            loop {
+                ticker.tick().await;
+                mailbox_indicative.queued();
+                if actor_indicative
+                    .send_message(SequencerMsg::IndicativeTick)
+                    .is_err()
+                {
+                    mailbox_indicative.send_failed();
+                    break;
+                }
+            }
+        });
         Ok(())
     }
 
     async fn handle(
         &self,
-        _myself: ActorRef<Self::Msg>,
+        myself: ActorRef<Self::Msg>,
         message: Self::Msg,
         state: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
@@ -1030,6 +1209,20 @@ impl Actor for SequencerActor {
         match message {
             SequencerMsg::Tick => {
                 state.on_tick().await;
+            }
+            SequencerMsg::IndicativeTick => {
+                state.on_indicative_tick(myself.clone());
+            }
+            SequencerMsg::IndicativeUpdate(snapshots) => {
+                state.indicative_cache = snapshots;
+            }
+            SequencerMsg::GetIndicative(market_id, reply) => {
+                let snap = state
+                    .indicative_cache
+                    .get(&market_id)
+                    .cloned()
+                    .unwrap_or_default();
+                let _ = reply.send(snap);
             }
             SequencerMsg::SubmitOrder(submission, reply) => {
                 let order_count = submission.orders.len();
@@ -1978,6 +2171,19 @@ impl SequencerHandle {
         self.rpc(|reply| SequencerMsg::GetPlatformOrderStats(now_ms, reply))
             .await
     }
+
+    /// Cached indicative snapshot for one market (C2). Returns a default
+    /// `(None, None, 0, 0)` snapshot if the market hasn't been touched by
+    /// the shadow-solver yet — e.g. on cold start or for markets with no
+    /// resting orders.
+    #[tracing::instrument(skip_all)]
+    pub async fn get_indicative(
+        &self,
+        market_id: MarketId,
+    ) -> Result<IndicativeSnapshot, SequencerError> {
+        self.rpc(|reply| SequencerMsg::GetIndicative(market_id, reply))
+            .await
+    }
 }
 
 #[cfg(test)]
@@ -2620,5 +2826,117 @@ mod tests {
 
         let block = rx.recv().await.unwrap();
         assert_eq!(block.header.height, 1);
+    }
+
+    // C2 — indicative scheduler ---------------------------------------------
+
+    fn mk_problem(orders: Vec<Order>, markets: MarketSet) -> Problem {
+        let mut p = Problem::new("test");
+        p.markets = markets;
+        p.orders = orders;
+        p
+    }
+
+    #[test]
+    fn build_indicative_snapshots_empty_book_yields_empty_map() {
+        let problem = mk_problem(Vec::new(), MarketSet::new());
+        let result = matching_solver::PipelineResult::empty();
+        let last_clearing = HashMap::new();
+        let snaps = build_indicative_snapshots(&problem, &result, &last_clearing, 1_000);
+        assert!(snaps.is_empty());
+    }
+
+    #[test]
+    fn build_indicative_snapshots_fallback_to_last_clearing() {
+        // Book has an order on market m, but no fills (no cross). Snapshot
+        // should fall back to the last clearing price for m.
+        let mut markets = MarketSet::new();
+        let m = markets.add_binary("m");
+        let order = outcome_buy(&markets, 0, m, 0, NANOS_PER_DOLLAR / 2, 5);
+        let problem = mk_problem(vec![order], markets);
+        let result = matching_solver::PipelineResult::empty();
+        let mut last_clearing = HashMap::new();
+        last_clearing.insert(m, vec![400_000_000, 600_000_000]);
+
+        let snaps = build_indicative_snapshots(&problem, &result, &last_clearing, 12_345);
+
+        let snap = snaps.get(&m).expect("market should be in the cache");
+        assert_eq!(snap.yes_price_nanos, Some(400_000_000));
+        assert_eq!(snap.no_price_nanos, Some(600_000_000));
+        assert_eq!(snap.volume_nanos, 0);
+        assert_eq!(snap.computed_at_ms, 12_345);
+    }
+
+    #[test]
+    fn build_indicative_snapshots_fills_use_price_discovery_and_volume() {
+        // Book has an order; result has a fill on it. Snapshot should
+        // surface the price_discovery price and a non-zero volume.
+        let mut markets = MarketSet::new();
+        let m = markets.add_binary("m");
+        let order = outcome_buy(&markets, 1, m, 0, NANOS_PER_DOLLAR / 2, 5);
+        let order_id = order.id;
+        let problem = mk_problem(vec![order], markets);
+
+        let mut result = matching_solver::PipelineResult::empty();
+        let mut fill = matching_engine::Fill::new(order_id, 3, 400_000_000);
+        fill.account_id = 7;
+        result.result.fills.push(fill);
+        let mut pd = matching_solver::PriceDiscoveryResult::empty();
+        pd.prices.insert(m, vec![450_000_000, 550_000_000]);
+        result.price_discovery = Some(pd);
+
+        // last_clearing has older values; PD should override.
+        let mut last_clearing = HashMap::new();
+        last_clearing.insert(m, vec![100_000_000, 900_000_000]);
+
+        let snaps = build_indicative_snapshots(&problem, &result, &last_clearing, 0);
+        let snap = snaps.get(&m).expect("market should be in cache");
+        assert_eq!(snap.yes_price_nanos, Some(450_000_000));
+        assert_eq!(snap.no_price_nanos, Some(550_000_000));
+        // 3 qty * 400_000_000 = 1.2e9
+        assert_eq!(snap.volume_nanos, 1_200_000_000);
+    }
+
+    #[tokio::test]
+    async fn get_indicative_returns_default_when_uncached() {
+        let (seq, _) = make_test_sequencer();
+        let handle = SequencerHandle::spawn(seq);
+        let mid = MarketId::new(99);
+        let snap = handle.get_indicative(mid).await.unwrap();
+        assert!(snap.yes_price_nanos.is_none());
+        assert!(snap.no_price_nanos.is_none());
+        assert_eq!(snap.volume_nanos, 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn indicative_timer_populates_cache_after_one_tick() {
+        // With at least one resting order on a market, the 750ms
+        // indicative ticker should populate the cache for that market
+        // within one ticker cycle. We verify by checking `computed_at_ms`
+        // moves off the default `0`.
+        let (seq, aid) = make_test_sequencer();
+        let mut ms = MarketSet::new();
+        let m0 = ms.add_binary("Test");
+        let handle = SequencerHandle::spawn(seq);
+
+        handle
+            .submit_order(OrderSubmission {
+                account_id: aid,
+                orders: vec![outcome_buy(&ms, 0, m0, 0, 500_000_000, 1)],
+                mm_constraint: None,
+            })
+            .await
+            .unwrap();
+
+        // First indicative tick fires at +750ms; the solve + cache-write
+        // round-trip needs a little extra. 1500ms gives generous slack
+        // on a CI box.
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+
+        let snap = handle.get_indicative(m0).await.unwrap();
+        assert!(
+            snap.computed_at_ms > 0,
+            "indicative tick should have written a snapshot by now"
+        );
     }
 }
