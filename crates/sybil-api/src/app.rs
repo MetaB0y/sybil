@@ -1,10 +1,12 @@
-use std::time::Instant;
+use std::path::Path;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use axum::extract::State;
 use axum::http::{header, Request};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
+use rusqlite::{Connection, OpenFlags};
 use tower_http::cors::CorsLayer;
 use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tracing::Level;
@@ -142,7 +144,272 @@ async fn trade() -> impl IntoResponse {
 }
 
 async fn prometheus_metrics(State(state): State<AppState>) -> impl IntoResponse {
+    record_live_market_metrics(&state).await;
+    record_bot_metrics(&state).await;
     state.prometheus.render()
+}
+
+async fn record_live_market_metrics(state: &AppState) {
+    let (markets, prices, statuses, volumes) = match tokio::try_join!(
+        state.sequencer.list_markets(),
+        state.sequencer.get_market_prices(),
+        state.sequencer.get_all_market_statuses(),
+        state.sequencer.get_all_market_volumes(),
+    ) {
+        Ok(values) => values,
+        Err(error) => {
+            tracing::warn!(error = %error, "failed to collect live market metrics");
+            return;
+        }
+    };
+
+    let ref_prices = state.reference_prices.read().await;
+    let updated_at_ms = *state.reference_prices_updated_at_ms.read().await;
+    let mut active_markets = 0u64;
+    let mut priced_markets = 0u64;
+    let mut volume_markets = 0u64;
+    let mut diff_count = 0u64;
+    let mut diff_sum = 0u64;
+    let mut diff_max = 0u64;
+
+    for market in markets.iter() {
+        let status = statuses
+            .get(&market.id)
+            .cloned()
+            .unwrap_or(matching_sequencer::MarketStatus::Active);
+        if status.as_str() == "active" {
+            active_markets += 1;
+        }
+
+        let yes_price = prices
+            .get(&market.id)
+            .and_then(|market_prices| market_prices.first().copied());
+        if yes_price.is_some() {
+            priced_markets += 1;
+        }
+        if volumes.get(&market.id).copied().unwrap_or(0) > 0 {
+            volume_markets += 1;
+        }
+
+        let Some(reference_price) = ref_prices.get(&market.id.0).copied() else {
+            continue;
+        };
+        metrics::gauge!("sybil_reference_price_nanos", "market_id" => market.id.0.to_string())
+            .set(reference_price as f64);
+
+        if let Some(yes_price) = yes_price {
+            let diff = yes_price.abs_diff(reference_price);
+            metrics::gauge!("sybil_price_reference_diff_nanos", "market_id" => market.id.0.to_string())
+                .set(diff as f64);
+            diff_count += 1;
+            diff_sum = diff_sum.saturating_add(diff);
+            diff_max = diff_max.max(diff);
+        }
+    }
+
+    metrics::gauge!("sybil_markets_active_total").set(active_markets as f64);
+    metrics::gauge!("sybil_markets_priced_total").set(priced_markets as f64);
+    metrics::gauge!("sybil_markets_with_volume_total").set(volume_markets as f64);
+    metrics::gauge!("sybil_reference_prices_total").set(ref_prices.len() as f64);
+    metrics::gauge!("sybil_price_reference_pairs_total").set(diff_count as f64);
+    metrics::gauge!("sybil_price_reference_max_abs_diff_nanos").set(diff_max as f64);
+    metrics::gauge!("sybil_price_reference_avg_abs_diff_nanos").set(if diff_count == 0 {
+        0.0
+    } else {
+        diff_sum as f64 / diff_count as f64
+    });
+
+    let updated_at_seconds = updated_at_ms as f64 / 1000.0;
+    metrics::gauge!("sybil_reference_prices_last_updated_seconds").set(updated_at_seconds);
+    metrics::gauge!("sybil_reference_prices_age_seconds").set(if updated_at_ms == 0 {
+        0.0
+    } else {
+        (now_ms().saturating_sub(updated_at_ms) as f64) / 1000.0
+    });
+}
+
+async fn record_bot_metrics(state: &AppState) {
+    let path = state.arena_db_path.clone();
+    let snapshot = match tokio::task::spawn_blocking(move || load_bot_metrics_snapshot(&path)).await
+    {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            tracing::warn!(error = %error, "bot metrics task failed");
+            BotMetricsSnapshot::unavailable()
+        }
+    };
+
+    metrics::gauge!("sybil_bot_db_available").set(if snapshot.db_available { 1.0 } else { 0.0 });
+    metrics::gauge!("sybil_bot_decisions_total").set(snapshot.decisions as f64);
+    metrics::gauge!("sybil_bot_traders_total").set(snapshot.traders.len() as f64);
+    metrics::gauge!("sybil_bot_latest_decision_age_seconds")
+        .set(snapshot.latest_decision_age_seconds.unwrap_or(0) as f64);
+
+    for trader in snapshot.traders {
+        metrics::gauge!("sybil_bot_latest_decision_age_seconds", "trader" => trader.name.clone())
+            .set(trader.latest_decision_age_seconds.unwrap_or(0) as f64);
+        metrics::gauge!("sybil_bot_decisions_total", "trader" => trader.name.clone())
+            .set(trader.decisions as f64);
+        metrics::gauge!("sybil_bot_total_fills", "trader" => trader.name.clone())
+            .set(trader.total_fills.unwrap_or(0) as f64);
+        metrics::gauge!("sybil_bot_total_orders", "trader" => trader.name)
+            .set(trader.total_orders.unwrap_or(0) as f64);
+    }
+}
+
+#[derive(Debug, Default)]
+struct BotMetricsSnapshot {
+    db_available: bool,
+    decisions: i64,
+    latest_decision_age_seconds: Option<u64>,
+    traders: Vec<TraderMetricsSnapshot>,
+}
+
+impl BotMetricsSnapshot {
+    fn unavailable() -> Self {
+        Self::default()
+    }
+}
+
+#[derive(Debug, Default)]
+struct TraderMetricsSnapshot {
+    name: String,
+    decisions: i64,
+    latest_decision_age_seconds: Option<u64>,
+    total_fills: Option<i64>,
+    total_orders: Option<i64>,
+}
+
+fn load_bot_metrics_snapshot(path: &str) -> BotMetricsSnapshot {
+    if path.trim().is_empty() || !Path::new(path).exists() {
+        return BotMetricsSnapshot::unavailable();
+    }
+    let conn = match Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
+        Ok(conn) => conn,
+        Err(error) => {
+            tracing::warn!(path, error = %error, "failed to open arena bot db for metrics");
+            return BotMetricsSnapshot::unavailable();
+        }
+    };
+    if !sqlite_table_exists(&conn, "decisions") {
+        return BotMetricsSnapshot::unavailable();
+    }
+
+    let now = now_secs();
+    let decisions = sqlite_count_rows(&conn, "decisions");
+    let latest_decision_age_seconds = latest_timestamp_seconds(
+        &conn,
+        "SELECT MAX(strftime('%s', timestamp)) FROM decisions",
+    )
+    .map(|ts| now.saturating_sub(ts));
+    let mut traders = load_trader_decision_metrics(&conn, now);
+    load_trader_snapshot_metrics(&conn, &mut traders);
+
+    BotMetricsSnapshot {
+        db_available: true,
+        decisions,
+        latest_decision_age_seconds,
+        traders,
+    }
+}
+
+fn sqlite_table_exists(conn: &Connection, table: &str) -> bool {
+    conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+        [table],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|count| count > 0)
+    .unwrap_or(false)
+}
+
+fn sqlite_count_rows(conn: &Connection, table: &str) -> i64 {
+    let sql = format!("SELECT COUNT(*) FROM {table}");
+    conn.query_row(&sql, [], |row| row.get(0)).unwrap_or(0)
+}
+
+fn latest_timestamp_seconds(conn: &Connection, sql: &str) -> Option<u64> {
+    conn.query_row(sql, [], |row| row.get::<_, Option<String>>(0))
+        .ok()
+        .flatten()
+        .and_then(|value| value.parse::<u64>().ok())
+}
+
+fn load_trader_decision_metrics(conn: &Connection, now: u64) -> Vec<TraderMetricsSnapshot> {
+    let mut stmt = match conn.prepare(
+        "SELECT trader_name, COUNT(*), MAX(strftime('%s', timestamp))
+         FROM decisions GROUP BY trader_name",
+    ) {
+        Ok(stmt) => stmt,
+        Err(error) => {
+            tracing::warn!(error = %error, "failed to prepare trader decision metrics query");
+            return Vec::new();
+        }
+    };
+    let Ok(rows) = stmt.query_map([], |row| {
+        let latest: Option<String> = row.get(2)?;
+        Ok(TraderMetricsSnapshot {
+            name: row.get(0)?,
+            decisions: row.get(1)?,
+            latest_decision_age_seconds: latest
+                .and_then(|value| value.parse::<u64>().ok())
+                .map(|ts| now.saturating_sub(ts)),
+            total_fills: None,
+            total_orders: None,
+        })
+    }) else {
+        return Vec::new();
+    };
+    rows.filter_map(Result::ok).collect()
+}
+
+fn load_trader_snapshot_metrics(conn: &Connection, traders: &mut [TraderMetricsSnapshot]) {
+    if !sqlite_table_exists(conn, "portfolio_snapshots") {
+        return;
+    }
+    let mut stmt = match conn.prepare(
+        "SELECT p.trader_name, p.total_fills, p.total_orders
+         FROM portfolio_snapshots p
+         JOIN (
+           SELECT trader_name, MAX(id) AS id FROM portfolio_snapshots GROUP BY trader_name
+         ) latest ON p.trader_name = latest.trader_name AND p.id = latest.id",
+    ) {
+        Ok(stmt) => stmt,
+        Err(error) => {
+            tracing::warn!(error = %error, "failed to prepare trader snapshot metrics query");
+            return;
+        }
+    };
+    let Ok(rows) = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<i64>>(1)?,
+            row.get::<_, Option<i64>>(2)?,
+        ))
+    }) else {
+        return;
+    };
+    let snapshots: std::collections::HashMap<_, _> = rows
+        .filter_map(Result::ok)
+        .map(|(name, fills, orders)| (name, (fills, orders)))
+        .collect();
+    for trader in traders {
+        if let Some((fills, orders)) = snapshots.get(&trader.name) {
+            trader.total_fills = *fills;
+            trader.total_orders = *orders;
+        }
+    }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+fn now_secs() -> u64 {
+    now_ms() / 1000
 }
 
 async fn http_metrics(req: Request<axum::body::Body>, next: Next) -> Response {

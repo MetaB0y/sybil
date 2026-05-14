@@ -177,6 +177,8 @@ pub struct AppState {
     /// Reference prices from external systems (e.g., Polymarket).
     /// Keyed by market_id (u32). Display-only — not part of matching logic.
     pub reference_prices: Arc<RwLock<HashMap<u32, u64>>>,
+    /// Unix milliseconds when reference prices were last updated.
+    pub reference_prices_updated_at_ms: Arc<RwLock<u64>>,
     /// Reference data per market (external URLs, images, categories, etc.).
     /// Off-block; populated by the Polymarket mirror via
     /// `POST /v1/markets/{id}/metadata`. Persists across restarts when
@@ -213,6 +215,7 @@ impl AppState {
             dev_mode: config.dev_mode,
             prometheus,
             reference_prices: Arc::new(RwLock::new(HashMap::new())),
+            reference_prices_updated_at_ms: Arc::new(RwLock::new(0)),
             market_ref_data: Arc::new(RwLock::new(initial_ref_data)),
             market_ref_data_path,
             arena_db_path: config.arena_db_path.clone(),

@@ -339,11 +339,14 @@ impl Store {
         if witness.is_some() {
             let state_root = self.account_state_store.qmdb_state_root(next_slot).await?;
             if state_root.root != snapshot.header.state_root {
+                metrics::counter!("sybil_store_qmdb_root_mismatch_total", "phase" => "commit")
+                    .increment(1);
                 return Err(StoreError::CorruptLayout(format!(
                     "typed qMDB root mismatch at height {} before commit: slot {:?} root={:?} header_root={:?}",
                     snapshot.header.height, state_root.slot, state_root.root, snapshot.header.state_root
                 )));
             }
+            metrics::counter!("sybil_store_commit_root_verified_total").increment(1);
         }
 
         let txn = self.db.begin_write()?;
@@ -876,6 +879,8 @@ impl Store {
         if state_root.root == header.state_root {
             return Ok(());
         }
+        metrics::counter!("sybil_store_qmdb_root_mismatch_total", "phase" => "restore")
+            .increment(1);
 
         warn!(
             height = account_state.height,
@@ -915,6 +920,7 @@ impl Store {
             .qmdb_state_root(account_state.slot)
             .await?;
         if repaired_root.root == header.state_root {
+            metrics::counter!("sybil_store_qmdb_repair_total", "result" => "success").increment(1);
             warn!(
                 height = account_state.height,
                 slot = ?account_state.slot,
@@ -930,6 +936,7 @@ impl Store {
             header_root = ?header.state_root,
             "typed qMDB root still differs from committed header after repair"
         );
+        metrics::counter!("sybil_store_qmdb_repair_total", "result" => "failed").increment(1);
         Err(StoreError::CorruptLayout(format!(
             "typed qMDB root mismatch at height {}: fence slot {:?} root={:?} header_root={:?}",
             account_state.height, repaired_root.slot, repaired_root.root, header.state_root

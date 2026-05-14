@@ -376,6 +376,138 @@
         "defaults": { "unit": "none", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
         "overrides": []
       }
+    },
+    {
+      "title": "Market Coverage",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 76 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sybil_markets_active_total", "legendFormat": "active", "refId": "A" },
+        { "expr": "sybil_markets_priced_total", "legendFormat": "priced", "refId": "B" },
+        { "expr": "sybil_markets_with_volume_total", "legendFormat": "with volume", "refId": "C" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "thresholds": { "steps": [{ "color": "green", "value": null }] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Reference Price Coverage",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 76 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sybil_reference_prices_total", "legendFormat": "reference prices", "refId": "A" },
+        { "expr": "sybil_price_reference_pairs_total", "legendFormat": "priced pairs", "refId": "B" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [
+          { "color": "red", "value": null },
+          { "color": "orange", "value": 100 },
+          { "color": "green", "value": 200 }
+        ] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Reference Price Age",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 76 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sybil_reference_prices_age_seconds", "refId": "A" }],
+      "options": { "graphMode": "area" },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "orange", "value": 120 },
+          { "color": "red", "value": 180 }
+        ] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Price Divergence",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 76 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sybil_price_reference_avg_abs_diff_nanos / 1000000000", "legendFormat": "avg", "refId": "A" },
+        { "expr": "sybil_price_reference_max_abs_diff_nanos / 1000000000", "legendFormat": "max", "refId": "B" }
+      ],
+      "options": { "graphMode": "area" },
+      "fieldConfig": {
+        "defaults": { "unit": "currencyUSD", "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "orange", "value": 0.025 },
+          { "color": "red", "value": 0.05 }
+        ] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Demo Activity Window",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 80 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sum(increase(sybil_order_submissions_total[15m]))", "legendFormat": "submissions 15m", "refId": "A" },
+        { "expr": "sum(increase(sybil_market_fills_total[15m]))", "legendFormat": "fills 15m", "refId": "B" },
+        { "expr": "count(increase(sybil_market_fills_total[15m]) > 0)", "legendFormat": "markets filled 15m", "refId": "C" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "thresholds": { "steps": [{ "color": "green", "value": null }] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Bot Decision Freshness",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 80 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sybil_bot_latest_decision_age_seconds", "legendFormat": "{{trader}}", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 10 }, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "orange", "value": 600 },
+          { "color": "red", "value": 3600 }
+        ] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Bot Orders and Fills",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 80 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sybil_bot_total_orders", "legendFormat": "orders {{trader}}", "refId": "A" },
+        { "expr": "sybil_bot_total_fills", "legendFormat": "fills {{trader}}", "refId": "B" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "qMDB Root Verification",
+      "type": "timeseries",
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 84 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "increase(sybil_store_commit_root_verified_total[5m])", "legendFormat": "verified commits", "refId": "A" },
+        { "expr": "increase(sybil_store_qmdb_root_mismatch_total[5m])", "legendFormat": "mismatches", "refId": "B" },
+        { "expr": "increase(sybil_store_qmdb_repair_total[5m])", "legendFormat": "repairs {{result}}", "refId": "C" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "custom": { "drawStyle": "bars", "fillOpacity": 50 }, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "red", "value": 1 }
+        ] } },
+        "overrides": []
+      }
     }
   ],
   "schemaVersion": 39,

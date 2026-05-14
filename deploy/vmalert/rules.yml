@@ -70,6 +70,32 @@ groups:
           summary: "Accepted orders are not filling"
           description: "At least 20 order submissions were accepted over 10m, but no fills were recorded. This may indicate stale resting liquidity, non-crossing prices, or an arena strategy issue."
 
+      - alert: LiveTradingLowFillRate
+        expr: |
+          sum(increase(sybil_order_submissions_total[15m])) >= 500
+          and
+          sum(increase(sybil_market_fills_total[15m])) < 30
+        for: 10m
+        labels:
+          severity: warning
+          component: arena
+        annotations:
+          summary: "Live trading fill rate is low"
+          description: "At least 500 submissions arrived in 15m but fewer than 30 fills landed. Trading is not fully stalled, but demo activity is thin."
+
+      - alert: LiveTradingLowMarketCoverage
+        expr: |
+          sum(increase(sybil_order_submissions_total[15m])) >= 500
+          and
+          count(increase(sybil_market_fills_total[15m]) > 0) < 5
+        for: 10m
+        labels:
+          severity: warning
+          component: arena
+        annotations:
+          summary: "Fills are concentrated in very few markets"
+          description: "Fewer than 5 markets filled over 15m despite active submissions. The demo may look narrow even if total fill count is nonzero."
+
       - alert: PendingOrderBookHigh
         expr: sybil_pending_orders > 250
         for: 10m
@@ -103,6 +129,62 @@ groups:
           summary: "sybil-api scrape target is down"
           description: "VictoriaMetrics has not been able to scrape sybil-api for 3m. Check the API container and host pressure before redeploying."
 
+      - alert: ReferencePriceFeedStale
+        expr: |
+          max(sybil_reference_prices_total) > 0
+          and
+          max(sybil_reference_prices_age_seconds) > 180
+        for: 3m
+        labels:
+          severity: critical
+          component: polymarket
+        annotations:
+          summary: "Polymarket reference prices are stale"
+          description: "The API has not received a reference-price update for more than 3m. The mirror, Polymarket feed, or API reference-price endpoint may be broken."
+
+      - alert: ReferencePriceCoverageLow
+        expr: max(sybil_reference_prices_total) < 100
+        for: 10m
+        labels:
+          severity: warning
+          component: polymarket
+        annotations:
+          summary: "Few markets have Polymarket reference prices"
+          description: "Fewer than 100 markets have live reference prices. Polymarket coverage may have dropped or the mirror may not be tracking enough tokens."
+
+      - alert: SybilPriceDivergenceHigh
+        expr: max(sybil_price_reference_max_abs_diff_nanos) > 50 * 1000 * 1000
+        for: 5m
+        labels:
+          severity: warning
+          component: arena
+        annotations:
+          summary: "Sybil prices diverge from Polymarket"
+          description: "At least one Sybil market is more than 5 cents away from its Polymarket reference price for 5m."
+
+      - alert: SybilPriceDivergenceBroad
+        expr: max(sybil_price_reference_avg_abs_diff_nanos) > 25 * 1000 * 1000
+        for: 10m
+        labels:
+          severity: warning
+          component: arena
+        annotations:
+          summary: "Average Sybil/Polymarket price divergence is high"
+          description: "Average absolute price difference across Sybil markets with reference prices is above 2.5 cents for 10m."
+
+      - alert: SybilPricedMarketCoverageLow
+        expr: |
+          max(sybil_markets_active_total) > 100
+          and
+          max(sybil_markets_priced_total) < 10
+        for: 10m
+        labels:
+          severity: warning
+          component: arena
+        annotations:
+          summary: "Few active markets have Sybil clearing prices"
+          description: "The deployment has many active markets but fewer than 10 markets with local prices. The market maker or trader activity may be too narrow."
+
       - alert: BlockProductionStalled
         expr: rate(sybil_blocks_produced[2m]) == 0 and up{job="sybil-api"} == 1
         for: 2m
@@ -132,6 +214,26 @@ groups:
         annotations:
           summary: "Actor mailbox queue depth is critical"
           description: "{{ $labels.actor }} mailbox queue depth has exceeded 5000 for 1m (current depth: {{ $value }})."
+
+      - alert: StoreQmdbRootMismatch
+        expr: increase(sybil_store_qmdb_root_mismatch_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          component: sequencer
+        annotations:
+          summary: "Typed qMDB root invariant mismatch"
+          description: "The sequencer observed a typed qMDB root mismatch. If this is not immediately followed by a successful repair during restart, persistence is unsafe."
+
+      - alert: StoreQmdbRepairFailed
+        expr: increase(sybil_store_qmdb_repair_total{result="failed"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          component: sequencer
+        annotations:
+          summary: "Typed qMDB root repair failed"
+          description: "The sequencer failed to repair the fenced typed-state qMDB root from redb. The API should refuse startup or block commit."
 
       - alert: SybilApiMemoryHigh
         expr: sybil_process_resident_memory_bytes > 650 * 1024 * 1024
@@ -202,6 +304,42 @@ groups:
           summary: "Host load is very high"
           description: "1m load per CPU is above 4 for 5m. The VM may be approaching the zombie state where TCP accepts but services do not respond."
 
+      - alert: BotDecisionDbUnavailable
+        expr: sybil_bot_db_available == 0
+        for: 5m
+        labels:
+          severity: warning
+          component: arena
+        annotations:
+          summary: "Arena bot decision database is unavailable"
+          description: "sybil-api cannot read the arena decisions database, so bot liveness and PnL dashboards may be stale."
+
+      - alert: BotDecisionsStale
+        expr: |
+          sybil_bot_db_available == 1
+          and
+          sybil_bot_latest_decision_age_seconds > 600
+        for: 5m
+        labels:
+          severity: warning
+          component: arena
+        annotations:
+          summary: "Arena bot decisions are stale"
+          description: "No bot decision has been recorded for more than 10m."
+
+      - alert: BotTraderStale
+        expr: |
+          sybil_bot_latest_decision_age_seconds{trader!=""} > 3600
+          and on (trader)
+          sybil_bot_decisions_total{trader!=""} > 20
+        for: 5m
+        labels:
+          severity: warning
+          component: arena
+        annotations:
+          summary: "One arena trader is stale"
+          description: "{{ $labels.trader }} has not recorded a decision for more than 1h after previously producing at least 20 decisions."
+
       - alert: ProverDown
         expr: up{job="sybil-prover"} == 0
         for: 2m
@@ -211,6 +349,19 @@ groups:
         annotations:
           summary: "sybil-prover scrape target is down"
           description: "VictoriaMetrics has not been able to scrape sybil-prover for 2m."
+
+      - alert: ProverInactive
+        expr: |
+          max(sybil_prover_artifact_directories_total) == 0
+          and
+          sum(rate(sybil_blocks_produced[5m])) > 0
+        for: 30m
+        labels:
+          severity: warning
+          component: prover
+        annotations:
+          summary: "Prover has not prepared any artifacts"
+          description: "Blocks are being produced, but the prover artifact store is still empty. The prover service is up, but live proof-job export/worker integration is not active."
 
       - alert: ProverArtifactStoreUnreadable
         expr: sybil_prover_artifact_store_ready == 0

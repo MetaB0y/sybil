@@ -577,7 +577,15 @@ pub async fn set_reference_prices(
     for (market_id, price) in req.prices {
         prices.insert(market_id, price);
     }
+    *state.reference_prices_updated_at_ms.write().await = now_ms();
     Ok(Json(serde_json::json!({"updated": true})))
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 /// GET /v1/markets/{id}/resolution
