@@ -1,4 +1,5 @@
 pub mod accounts;
+pub mod aggregates;
 pub mod blocks;
 pub mod bots;
 pub mod bridge;

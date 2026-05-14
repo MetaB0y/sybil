@@ -115,6 +115,17 @@ pub enum SequencerMsg {
     GetMarketOrderBook(MarketId, RpcReplyPort<Vec<PendingOrderInfo>>),
     PauseBlockProduction(RpcReplyPort<()>),
     ResumeBlockProduction(RpcReplyPort<()>),
+    /// All-time trader count per market — fetched in bulk so `list_markets`
+    /// can populate `MarketResponse.trader_count` in one round-trip.
+    GetAllTraderCounts(RpcReplyPort<HashMap<MarketId, u32>>),
+    /// Platform-wide unique trader counts: `(all_time, last_24h)`. The
+    /// caller passes `now_ms` so the hourly-bucket cutoff is testable.
+    GetPlatformTraderCounts(u64, RpcReplyPort<(u32, u32)>),
+    /// Union of unique placers across an event's markets.
+    GetEventTraderCount(Vec<MarketId>, RpcReplyPort<u32>),
+    /// Unique placers in the open (uncommitted) batch for one market —
+    /// resting book ∪ pending bundles touching the market.
+    GetOpenBatchPlacers(MarketId, RpcReplyPort<u32>),
 }
 
 /// A market search result enriched with metadata, prices, and volume.
@@ -675,6 +686,24 @@ impl SequencerActorState {
                         return Err(SequencerError::Persistence(err.to_string()));
                     }
                 }
+                // Trader tracker hook for the try_admit_direct path. Fires
+                // only after durability succeeds so the rolling counts only
+                // reflect orders that durably landed (cancellation on store
+                // failure walks back the in-memory admit but not the
+                // tracker — acceptable: we still served the place).
+                // try_admit_direct only accepts non-MM single-market
+                // submissions, so `is_mm = false`.
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                let markets: Vec<MarketId> = resting_order.order.active_markets().collect();
+                self.sequencer.trader_tracker.record_placed(
+                    resting_order.account_id,
+                    markets,
+                    now_ms,
+                    false,
+                );
                 Ok(())
             }
             crate::sequencer::AdmitOutcome::Deferred(sub) => {
@@ -1208,6 +1237,20 @@ impl Actor for SequencerActor {
             SequencerMsg::ResumeBlockProduction(reply) => {
                 state.pause_count = state.pause_count.saturating_sub(1);
                 let _ = reply.send(());
+            }
+            SequencerMsg::GetAllTraderCounts(reply) => {
+                let _ = reply.send(state.sequencer.all_trader_counts());
+            }
+            SequencerMsg::GetPlatformTraderCounts(now_ms, reply) => {
+                let all_time = state.sequencer.platform_trader_count();
+                let last_24h = state.sequencer.platform_trader_24h_count(now_ms);
+                let _ = reply.send((all_time, last_24h));
+            }
+            SequencerMsg::GetEventTraderCount(market_ids, reply) => {
+                let _ = reply.send(state.sequencer.event_trader_count(&market_ids));
+            }
+            SequencerMsg::GetOpenBatchPlacers(market_id, reply) => {
+                let _ = reply.send(state.sequencer.open_batch_unique_placers(market_id));
             }
         }
         Ok(())
@@ -1781,6 +1824,42 @@ impl SequencerHandle {
 
     pub async fn resume_block_production(&self) -> Result<(), SequencerError> {
         self.rpc(SequencerMsg::ResumeBlockProduction).await
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn get_all_trader_counts(
+        &self,
+    ) -> Result<HashMap<MarketId, u32>, SequencerError> {
+        self.rpc(SequencerMsg::GetAllTraderCounts).await
+    }
+
+    /// Platform-wide unique-trader counts `(all_time, last_24h)`. Caller
+    /// passes `now_ms` so test paths can synthesise the cutoff.
+    #[tracing::instrument(skip_all)]
+    pub async fn get_platform_trader_counts(
+        &self,
+        now_ms: u64,
+    ) -> Result<(u32, u32), SequencerError> {
+        self.rpc(|reply| SequencerMsg::GetPlatformTraderCounts(now_ms, reply))
+            .await
+    }
+
+    #[tracing::instrument(skip_all, fields(markets = market_ids.len()))]
+    pub async fn get_event_trader_count(
+        &self,
+        market_ids: Vec<MarketId>,
+    ) -> Result<u32, SequencerError> {
+        self.rpc(|reply| SequencerMsg::GetEventTraderCount(market_ids, reply))
+            .await
+    }
+
+    #[tracing::instrument(skip_all, fields(market_id = market_id.0))]
+    pub async fn get_open_batch_placers(
+        &self,
+        market_id: MarketId,
+    ) -> Result<u32, SequencerError> {
+        self.rpc(|reply| SequencerMsg::GetOpenBatchPlacers(market_id, reply))
+            .await
     }
 }
 

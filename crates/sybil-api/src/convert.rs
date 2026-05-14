@@ -156,6 +156,17 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
         .map(system_event_to_response)
         .collect();
 
+    let by_market: HashMap<String, BlockMarketStats> = block
+        .placers_by_market
+        .iter()
+        .map(|(mid, count)| {
+            (
+                mid.0.to_string(),
+                BlockMarketStats { placers: *count },
+            )
+        })
+        .collect();
+
     BlockResponse {
         height: block.header.height,
         parent_hash: hex::encode(block.header.parent_hash),
@@ -172,7 +183,8 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
         total_welfare_nanos: block.total_welfare,
         total_volume_nanos: block.total_volume,
         orders_filled: block.orders_filled,
-        by_market: HashMap::new(),
+        unique_placers: block.unique_placers,
+        by_market,
     }
 }
 

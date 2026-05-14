@@ -83,6 +83,11 @@ pub struct MarketResponse {
     /// markets (use the singular `category` field instead).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub categories: Option<Vec<String>>,
+    /// All-time unique trader count for this market (decision Q-table:
+    /// MM, MINT, multi-market split, etc.). Off-block — "since last
+    /// restart" until prod persistence is enabled.
+    #[serde(default)]
+    pub trader_count: u32,
 }
 
 /// Minimal market data for high-throughput dashboards (drops strings & metadata).
@@ -98,6 +103,9 @@ pub struct MarketSummaryResponse {
     pub reference_price_nanos: Option<u64>,
     pub volume_nanos: u64,
     pub status: String,
+    /// All-time unique trader count (mirrors `MarketResponse.trader_count`).
+    #[serde(default)]
+    pub trader_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -184,11 +192,16 @@ pub struct RejectionResponse {
 
 /// Nested per-market sidecar on `BlockResponse.by_market`. Grows append-only
 /// across steps (each new field carries `#[serde(default)]` so partial
-/// reverts stay clean). Empty struct in A1; producers wire fields in B2 /
-/// B6 / B7.
+/// reverts stay clean). Volume/orders/welfare join in B2 / B6 / B7.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct BlockMarketStats {}
+pub struct BlockMarketStats {
+    /// Unique placers (non-MM accounts) admitted touching this market in
+    /// the block. Multi-market orders credit each active market; the
+    /// platform `unique_placers` scalar counts the account once.
+    #[serde(default)]
+    pub placers: u32,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -213,6 +226,10 @@ pub struct BlockResponse {
     pub total_welfare_nanos: i64,
     pub total_volume_nanos: u64,
     pub orders_filled: usize,
+    /// Unique placers (non-MM accounts) admitted into this block. Platform
+    /// scalar — `by_market[m].placers` is the per-market split.
+    #[serde(default)]
+    pub unique_placers: u32,
     /// Nested per-market scalars (decision Q1 in BACKEND_DATA_PLAN.md). Each
     /// `BlockMarketStats` carries the per-market splits for this block. Old
     /// clients ignore it; new clients consume what they recognise.
@@ -481,6 +498,64 @@ pub struct PendingOrderResponse {
     pub expires_at_block: u64,
 }
 
+// --- Aggregates (B1 onward) ------------------------------------------------
+
+/// Per-bucket platform totals returned by `/v1/activity/overview`. B1
+/// populates `unique_traders` only; volume + orders join in B2 / B6 and
+/// remain zero until then.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct OverviewBucketResponse {
+    #[serde(default)]
+    pub unique_traders: u64,
+    #[serde(default)]
+    pub total_volume_nanos: u64,
+    #[serde(default)]
+    pub orders: OverviewOrderStatsResponse,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct OverviewOrderStatsResponse {
+    #[serde(default)]
+    pub placed: u64,
+    #[serde(default)]
+    pub matched: u64,
+    #[serde(default)]
+    pub unmatched: u64,
+}
+
+/// Response shape for `GET /v1/activity/overview`. All-time + 24h slices.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ActivityOverviewResponse {
+    pub all_time: OverviewBucketResponse,
+    pub last_24h: OverviewBucketResponse,
+}
+
+/// Response shape for `GET /v1/markets/{id}/open-batch`. B1 populates
+/// `unique_placers`; indicative fields stub `None`/`0` until C2.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct OpenBatchResponse {
+    pub unique_placers: u32,
+    #[serde(default)]
+    pub indicative_yes_price_nanos: Option<u64>,
+    #[serde(default)]
+    pub indicative_no_price_nanos: Option<u64>,
+    #[serde(default)]
+    pub indicative_volume_nanos: u64,
+    #[serde(default)]
+    pub indicative_computed_at_ms: u64,
+}
+
+/// Response shape for `GET /v1/events/{event_id}/traders`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct EventTradersResponse {
+    pub trader_count: u32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -502,6 +577,7 @@ mod tests {
             total_welfare_nanos: 0,
             total_volume_nanos: 0,
             orders_filled: 0,
+            unique_placers: 0,
             by_market: HashMap::new(),
         }
     }

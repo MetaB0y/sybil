@@ -76,6 +76,13 @@ pub struct Block {
     pub total_welfare: i64,
     pub total_volume: u64,
     pub orders_filled: usize,
+    /// Unique placers (non-MM accounts) admitted into this block. Platform
+    /// scalar — derived from `WitnessOrder.account_id` after filtering MM.
+    pub unique_placers: u32,
+    /// Per-market unique placers in this block. A multi-market order
+    /// credits each active market; the platform `unique_placers` counts the
+    /// account once (so sum-of-by-market over-counts for spreads).
+    pub placers_by_market: HashMap<MarketId, u32>,
 }
 
 /// Compute a deterministic account-only state root with the verifier's

@@ -541,6 +541,8 @@ pub struct BlockSequencer {
     pub price_tracker: crate::price_tracker::PriceTracker,
     /// Fill recording: per-account fill history.
     pub fill_recorder: crate::fill_recorder::FillRecorder,
+    /// Off-block trader tracker: unique placers per market + platform + 24h.
+    pub trader_tracker: crate::aggregates::TraderTracker,
     /// Market lifecycle: statuses, oracle, metadata.
     pub lifecycle: crate::market_lifecycle::MarketLifecycle,
     /// P256 public key to account mapping.
@@ -587,6 +589,7 @@ impl BlockSequencer {
             fill_recorder: crate::fill_recorder::FillRecorder::with_retention(
                 config.max_fill_history_per_account,
             ),
+            trader_tracker: crate::aggregates::TraderTracker::new(),
             lifecycle: crate::market_lifecycle::MarketLifecycle::new(oracle),
             pubkey_registry: HashMap::new(),
             bridge: BridgeState::default(),
@@ -655,6 +658,7 @@ impl BlockSequencer {
                 state.account_fills,
                 config.max_fill_history_per_account,
             ),
+            trader_tracker: crate::aggregates::TraderTracker::restore(state.trader_tracker),
             lifecycle,
             pubkey_registry: state.pubkey_registry,
             bridge: state.bridge_state,
@@ -707,7 +711,33 @@ impl BlockSequencer {
             account_fills: self.fill_recorder.snapshot(),
             resting_orders: self.order_book.snapshot(),
             bridge_state: &self.bridge,
+            trader_tracker: self.trader_tracker.snapshot(),
         }
+    }
+
+    /// Open-batch unique placers for a market — non-persistent computation
+    /// over the resting book plus pending bundles touching `market_id`.
+    /// Excludes MM-constrained bundles and `AccountId::MINT`.
+    pub fn open_batch_unique_placers(&self, market_id: MarketId) -> u32 {
+        let mut placers: HashSet<AccountId> = HashSet::new();
+        for (_order, account_id) in self.order_book.resting_orders() {
+            if account_id != AccountId::MINT {
+                placers.insert(account_id);
+            }
+        }
+        for bundle in &self.pending_bundles {
+            if bundle.mm_constraint.is_some() || bundle.account_id == AccountId::MINT {
+                continue;
+            }
+            let touches = bundle
+                .orders
+                .iter()
+                .any(|o| o.active_markets().any(|m| m == market_id));
+            if touches {
+                placers.insert(bundle.account_id);
+            }
+        }
+        placers.len() as u32
     }
 
     pub fn markets(&self) -> &MarketSet {
@@ -786,6 +816,33 @@ impl BlockSequencer {
 
     pub fn market_volumes(&self) -> &HashMap<MarketId, u64> {
         self.price_tracker.market_volumes()
+    }
+
+    /// All-time unique trader count for one market.
+    pub fn trader_count(&self, market_id: MarketId) -> u32 {
+        self.trader_tracker.per_market_count(market_id)
+    }
+
+    /// All-time unique trader counts per market (only markets with ≥1
+    /// recorded placer). Used by `list_markets` to populate every
+    /// `MarketResponse.trader_count` in one pass.
+    pub fn all_trader_counts(&self) -> HashMap<MarketId, u32> {
+        self.trader_tracker.all_market_counts()
+    }
+
+    /// All-time platform-wide unique trader count (excludes MM, MINT).
+    pub fn platform_trader_count(&self) -> u32 {
+        self.trader_tracker.platform_count()
+    }
+
+    /// Unique platform traders in the last 24h (±1h resolution).
+    pub fn platform_trader_24h_count(&self, now_ms: u64) -> u32 {
+        self.trader_tracker.platform_24h_count(now_ms)
+    }
+
+    /// Union of per-market placers across an event's markets.
+    pub fn event_trader_count(&self, market_ids: &[MarketId]) -> u32 {
+        self.trader_tracker.event_count(market_ids)
     }
 
     pub fn open_orders_for_account(&self, account_id: AccountId) -> usize {
@@ -1870,12 +1927,21 @@ impl BlockSequencer {
                     submission_idx_to_order_id.insert(sub_idx, order_id);
                     order_account_map.insert(order_id, account_id);
                     mm_order_ids_set.insert(order_id);
+                    let tracker_markets: Vec<MarketId> = order.active_markets().collect();
                     witness_orders.push(WitnessOrder {
                         order: order.clone(),
                         account_id: account_id.0,
                         is_mm: true,
                     });
                     accepted_orders.push(order);
+                    // record_placed early-returns for MM and MINT; harmless
+                    // here but kept for symmetry with the non-MM branch.
+                    self.trader_tracker.record_placed(
+                        account_id,
+                        tracker_markets,
+                        timestamp_ms,
+                        true,
+                    );
                 } else {
                     // Non-MM orders: validate + reserve via OrderBook
                     match self
@@ -1907,12 +1973,20 @@ impl BlockSequencer {
                             }
                             stp.record(account_id, &accepted.order);
                             order_account_map.insert(accepted.order.id, account_id);
+                            let tracker_markets: Vec<MarketId> =
+                                accepted.order.active_markets().collect();
                             witness_orders.push(WitnessOrder {
                                 order: accepted.order.clone(),
                                 account_id: account_id.0,
                                 is_mm: false,
                             });
                             accepted_orders.push(accepted.order);
+                            self.trader_tracker.record_placed(
+                                account_id,
+                                tracker_markets,
+                                timestamp_ms,
+                                false,
+                            );
                         }
                         Err(reason) => {
                             witness_rejections.push(WitnessRejection {
@@ -1997,6 +2071,30 @@ impl BlockSequencer {
             }
         }
 
+        // Capture per-block placers from witness_orders BEFORE it gets
+        // consumed by WitnessAssemblyInput below. MM orders are excluded so
+        // by_market[m].placers tracks real participation (decision Q-table).
+        let mut block_placers: HashSet<AccountId> = HashSet::new();
+        let mut block_placers_by_market: HashMap<MarketId, HashSet<AccountId>> = HashMap::new();
+        for wo in &witness_orders {
+            if wo.is_mm {
+                continue;
+            }
+            let aid = AccountId(wo.account_id);
+            if aid == AccountId::MINT {
+                continue;
+            }
+            block_placers.insert(aid);
+            for m in wo.order.active_markets() {
+                block_placers_by_market.entry(m).or_default().insert(aid);
+            }
+        }
+        let unique_placers = block_placers.len() as u32;
+        let placers_by_market: HashMap<MarketId, u32> = block_placers_by_market
+            .into_iter()
+            .map(|(m, s)| (m, s.len() as u32))
+            .collect();
+
         // Build Problem
         let mut problem = Problem::new("block");
         problem.markets = self.markets.clone();
@@ -2073,6 +2171,8 @@ impl BlockSequencer {
             total_welfare,
             total_volume,
             orders_filled,
+            unique_placers,
+            placers_by_market,
         };
 
         // Verify the block using all 4 verification layers.
@@ -2670,6 +2770,7 @@ mod tests {
             bridge_state: BridgeState::default(),
             admit_log: Vec::new(),
             account_fills: Vec::new(),
+            trader_tracker: Default::default(),
         };
 
         let mut seq_b = BlockSequencer::restore(state, oracle, SequencerConfig::default());

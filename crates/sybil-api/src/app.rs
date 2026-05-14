@@ -60,6 +60,9 @@ use crate::types::response::*;
         routes::blocks::get_block_by_height,
         routes::blocks::stream_blocks,
         routes::blocks::ws_blocks,
+        routes::aggregates::get_activity_overview,
+        routes::aggregates::get_open_batch,
+        routes::aggregates::get_event_traders,
     ),
     components(schemas(
         CreateAccountRequest,
@@ -116,6 +119,12 @@ use crate::types::response::*;
         AccountFillResponse,
         PendingOrderResponse,
         PositionDeltaResponse,
+        BlockMarketStats,
+        ActivityOverviewResponse,
+        OverviewBucketResponse,
+        OverviewOrderStatsResponse,
+        OpenBatchResponse,
+        EventTradersResponse,
     )),
     info(
         title = "Sybil API",
@@ -593,6 +602,18 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/v1/markets/{id}/prices/history",
             axum::routing::get(routes::markets::get_price_history),
+        )
+        .route(
+            "/v1/markets/{id}/open-batch",
+            axum::routing::get(routes::aggregates::get_open_batch),
+        )
+        .route(
+            "/v1/activity/overview",
+            axum::routing::get(routes::aggregates::get_activity_overview),
+        )
+        .route(
+            "/v1/events/{event_id}/traders",
+            axum::routing::get(routes::aggregates::get_event_traders),
         )
         // Feeds
         .route(

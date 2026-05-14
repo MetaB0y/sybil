@@ -12,3 +12,7 @@
 //! - `cost_basis_tracker` (C1) — WAC + realized PnL
 //!
 //! See `frontend/BACKEND_IMPLEMENTATION_PLAN.md` for the full plan.
+
+pub mod trader_tracker;
+
+pub use trader_tracker::{TraderTracker, TraderTrackerSnapshot};

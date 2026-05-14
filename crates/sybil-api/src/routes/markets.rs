@@ -28,6 +28,9 @@ struct BuildMarketResponseArgs<'a> {
     /// its `category` field wins over `metadata.category` and its other
     /// fields pass through directly (no on-block equivalent).
     ref_data: Option<&'a MarketRefData>,
+    /// All-time unique-trader count for this market (B1). Wear a
+    /// `<RestartCaveatBadge />` until persistence is wired in prod.
+    trader_count: u32,
 }
 
 /// Helper to build a MarketResponse with optional metadata.
@@ -80,6 +83,7 @@ fn build_market_response(args: BuildMarketResponseArgs<'_>) -> MarketResponse {
         market_icon_url: args.ref_data.and_then(|r| r.market_icon_url.clone()),
         market_end_date_ms: args.ref_data.and_then(|r| r.market_end_date_ms),
         categories: args.ref_data.and_then(|r| r.categories.clone()),
+        trader_count: args.trader_count,
     }
 }
 
@@ -96,13 +100,14 @@ pub async fn list_markets(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<MarketResponse>>, AppError> {
     use tracing::Instrument;
-    let (markets, prices, statuses, volumes, metadata) = async {
+    let (markets, prices, statuses, volumes, metadata, trader_counts) = async {
         tokio::try_join!(
             state.sequencer.list_markets(),
             state.sequencer.get_market_prices(),
             state.sequencer.get_all_market_statuses(),
             state.sequencer.get_all_market_volumes(),
             state.sequencer.get_all_market_metadata(),
+            state.sequencer.get_all_trader_counts(),
         )
     }
     .instrument(tracing::info_span!("list_markets.fetch"))
@@ -131,6 +136,7 @@ pub async fn list_markets(
                 volume_nanos: volumes.get(&m.id).copied().unwrap_or(0),
                 reference_price_nanos: ref_prices.get(&m.id.0).copied(),
                 ref_data: market_ref_data.get(&m.id.0),
+                trader_count: trader_counts.get(&m.id).copied().unwrap_or(0),
             })
         })
         .collect();
@@ -155,12 +161,13 @@ pub async fn list_markets_summary(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<MarketSummaryResponse>>, AppError> {
     use tracing::Instrument;
-    let (markets, prices, statuses, volumes) = async {
+    let (markets, prices, statuses, volumes, trader_counts) = async {
         tokio::try_join!(
             state.sequencer.list_markets(),
             state.sequencer.get_market_prices(),
             state.sequencer.get_all_market_statuses(),
             state.sequencer.get_all_market_volumes(),
+            state.sequencer.get_all_trader_counts(),
         )
     }
     .instrument(tracing::info_span!("list_markets_summary.fetch"))
@@ -189,6 +196,7 @@ pub async fn list_markets_summary(
                 reference_price_nanos: ref_prices.get(&m.id.0).copied(),
                 volume_nanos: volumes.get(&m.id).copied().unwrap_or(0),
                 status: status.as_str().to_string(),
+                trader_count: trader_counts.get(&m.id).copied().unwrap_or(0),
             }
         })
         .collect();
@@ -218,10 +226,11 @@ pub async fn get_market(
 
     let prices = state.sequencer.get_market_prices().await?;
     let market_prices = prices.get(&mid);
-    let (status, metadata, volume) = tokio::try_join!(
+    let (status, metadata, volume, trader_counts) = tokio::try_join!(
         state.sequencer.get_market_status(mid),
         state.sequencer.get_market_metadata(mid),
         state.sequencer.get_market_volume(mid),
+        state.sequencer.get_all_trader_counts(),
     )?;
     let ref_price = state.reference_prices.read().await.get(&id).copied();
     let ref_data = state.market_ref_data.read().await.get(&id).cloned();
@@ -236,6 +245,7 @@ pub async fn get_market(
         volume_nanos: volume,
         reference_price_nanos: ref_price,
         ref_data: ref_data.as_ref(),
+        trader_count: trader_counts.get(&mid).copied().unwrap_or(0),
     })))
 }
 
@@ -532,7 +542,10 @@ pub async fn search_markets(
         offset: params.offset,
     };
 
-    let results = state.sequencer.search_markets(query).await?;
+    let (results, trader_counts) = tokio::try_join!(
+        state.sequencer.search_markets(query),
+        state.sequencer.get_all_trader_counts(),
+    )?;
     let ref_prices = state.reference_prices.read().await;
     let market_ref_data = state.market_ref_data.read().await;
 
@@ -540,6 +553,7 @@ pub async fn search_markets(
         .into_iter()
         .map(|r| {
             let mid = r.market_id.0;
+            let count = trader_counts.get(&r.market_id).copied().unwrap_or(0);
             build_market_response(BuildMarketResponseArgs {
                 market_id: mid,
                 name: r.name,
@@ -550,6 +564,7 @@ pub async fn search_markets(
                 volume_nanos: r.volume_nanos,
                 reference_price_nanos: ref_prices.get(&mid).copied(),
                 ref_data: market_ref_data.get(&mid),
+                trader_count: count,
             })
         })
         .collect();
