@@ -161,6 +161,8 @@ pub async fn get_portfolio(
         total_position_value_nanos: portfolio.total_position_value_nanos,
         portfolio_value_nanos: portfolio.portfolio_value_nanos,
         pnl_nanos: portfolio.pnl_nanos,
+        first_deposit_ms: portfolio.first_deposit_ms,
+        total_fill_count: portfolio.total_fill_count,
     }))
 }
 

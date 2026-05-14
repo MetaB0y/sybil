@@ -168,6 +168,10 @@ pub struct PendingOrderInfo {
     pub remaining_qty: u64,
     pub created_at_block: u64,
     pub expires_at_block: u64,
+    /// Quantity at admit time (B5/B8). `remaining_qty` shrinks as the
+    /// order is partially filled; this stays constant. Used by the FE to
+    /// draw partial-fill progress.
+    pub original_quantity: u64,
 }
 
 pub struct PreparedBlock {
@@ -257,6 +261,7 @@ impl PendingOrderInfo {
         account_id: AccountId,
         created_at: u64,
         expires_at_block: u64,
+        original_max_fill: u64,
     ) -> Self {
         let market_ids: Vec<_> = order.active_markets().collect();
         let side = classify_order_side(order);
@@ -269,6 +274,14 @@ impl PendingOrderInfo {
             remaining_qty: order.max_fill,
             created_at_block: created_at,
             expires_at_block,
+            // `original_max_fill` is `0` on pre-B5 snapshots (#[serde(default)]).
+            // Fall back to the current `max_fill` so the FE progress bar
+            // still renders sensibly during the rolling transition.
+            original_quantity: if original_max_fill == 0 {
+                order.max_fill
+            } else {
+                original_max_fill
+            },
         }
     }
 }
@@ -562,6 +575,11 @@ pub struct BlockSequencer {
     pub liquidity_tracker: crate::aggregates::LiquidityTracker,
     /// Off-block order stats tracker: placed/matched/unmatched per market + platform + 24h.
     pub order_stats_tracker: crate::aggregates::OrderStatsTracker,
+    /// First-deposit timestamp per account in ms since UNIX epoch.
+    /// Off-block — never enters `state_root` / `events_root`. Populated by
+    /// `fund_account` (dev mode) and `ingest_l1_deposit` on the FIRST
+    /// observation only (subsequent deposits don't overwrite).
+    pub first_deposit_ms: HashMap<AccountId, u64>,
     /// Market lifecycle: statuses, oracle, metadata.
     pub lifecycle: crate::market_lifecycle::MarketLifecycle,
     /// P256 public key to account mapping.
@@ -611,6 +629,7 @@ impl BlockSequencer {
             trader_tracker: crate::aggregates::TraderTracker::new(),
             liquidity_tracker: crate::aggregates::LiquidityTracker::new(),
             order_stats_tracker: crate::aggregates::OrderStatsTracker::new(),
+            first_deposit_ms: HashMap::new(),
             lifecycle: crate::market_lifecycle::MarketLifecycle::new(oracle),
             pubkey_registry: HashMap::new(),
             bridge: BridgeState::default(),
@@ -680,8 +699,9 @@ impl BlockSequencer {
                 pt.restore_clearing_history(state.price_tracker_clearing_history);
                 pt
             },
-            fill_recorder: crate::fill_recorder::FillRecorder::restore_with_retention(
+            fill_recorder: crate::fill_recorder::FillRecorder::restore_with_counts(
                 state.account_fills,
+                state.fill_total_counts,
                 config.max_fill_history_per_account,
             ),
             trader_tracker: crate::aggregates::TraderTracker::restore(state.trader_tracker),
@@ -689,6 +709,7 @@ impl BlockSequencer {
             order_stats_tracker: crate::aggregates::OrderStatsTracker::restore(
                 state.order_stats_tracker,
             ),
+            first_deposit_ms: state.first_deposit_ms,
             lifecycle,
             pubkey_registry: state.pubkey_registry,
             bridge: state.bridge_state,
@@ -746,6 +767,8 @@ impl BlockSequencer {
             price_tracker_clearing_history: self.price_tracker.clearing_history_snapshot(),
             liquidity_tracker: self.liquidity_tracker.snapshot(),
             order_stats_tracker: self.order_stats_tracker.snapshot(),
+            first_deposit_ms: self.first_deposit_ms.clone(),
+            fill_total_counts: self.fill_recorder.total_counts().clone(),
         }
     }
 
@@ -1057,7 +1080,26 @@ impl BlockSequencer {
         account.total_deposited += amount;
         let updated = account.clone();
         self.record_system_event(SystemEvent::Deposit { account_id, amount });
+        self.note_first_deposit(account_id);
         Ok(updated)
+    }
+
+    /// Stamp the first observed deposit time for an account. Subsequent
+    /// deposits are ignored. Off-block sidecar; never enters `state_root`.
+    fn note_first_deposit(&mut self, account_id: AccountId) {
+        self.first_deposit_ms.entry(account_id).or_insert_with(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64
+        });
+    }
+
+    /// First-deposit timestamp for an account, in ms since UNIX epoch.
+    /// Returns `None` if the account never received a recorded deposit
+    /// (e.g., system accounts or a restart that dropped the sidecar).
+    pub fn first_deposit_ms(&self, account_id: AccountId) -> Option<u64> {
+        self.first_deposit_ms.get(&account_id).copied()
     }
 
     pub fn bridge_state(&self) -> &BridgeState {
@@ -1133,6 +1175,7 @@ impl BlockSequencer {
             amount,
             deposit,
         });
+        self.note_first_deposit(account_id);
         Ok(updated)
     }
 
@@ -1355,9 +1398,15 @@ impl BlockSequencer {
     ) -> Vec<PendingOrderInfo> {
         self.order_book
             .resting_orders_full()
-            .filter(|(_, aid, _, _)| account_id_filter.is_none_or(|filter| *aid == filter))
-            .map(|(order, aid, created_at, expires_at_block)| {
-                PendingOrderInfo::from_resting(order, aid, created_at, expires_at_block)
+            .filter(|(_, aid, _, _, _)| account_id_filter.is_none_or(|filter| *aid == filter))
+            .map(|(order, aid, created_at, expires_at_block, original_max_fill)| {
+                PendingOrderInfo::from_resting(
+                    order,
+                    aid,
+                    created_at,
+                    expires_at_block,
+                    original_max_fill,
+                )
             })
             .collect()
     }
@@ -1366,9 +1415,15 @@ impl BlockSequencer {
     pub fn market_orderbook(&self, market_id: MarketId) -> Vec<PendingOrderInfo> {
         self.order_book
             .resting_orders_full()
-            .filter(|(order, _, _, _)| order.active_markets().any(|m| m == market_id))
-            .map(|(order, aid, created_at, expires_at_block)| {
-                PendingOrderInfo::from_resting(order, aid, created_at, expires_at_block)
+            .filter(|(order, _, _, _, _)| order.active_markets().any(|m| m == market_id))
+            .map(|(order, aid, created_at, expires_at_block, original_max_fill)| {
+                PendingOrderInfo::from_resting(
+                    order,
+                    aid,
+                    created_at,
+                    expires_at_block,
+                    original_max_fill,
+                )
             })
             .collect()
     }
@@ -2877,7 +2932,7 @@ mod tests {
         assert_eq!(result.rejections.len(), 0);
 
         assert_eq!(seq.order_book.len(), 1);
-        let (_, resting_aid, resting_created, _) =
+        let (_, resting_aid, resting_created, _, _) =
             seq.order_book.resting_orders_full().next().unwrap();
         assert_eq!(resting_aid, aid);
         assert_eq!(resting_created, 1);
@@ -2962,6 +3017,8 @@ mod tests {
             price_tracker_clearing_history: Default::default(),
             liquidity_tracker: Default::default(),
             order_stats_tracker: Default::default(),
+            first_deposit_ms: HashMap::new(),
+            fill_total_counts: HashMap::new(),
         };
 
         let mut seq_b = BlockSequencer::restore(state, oracle, SequencerConfig::default());
@@ -4184,5 +4241,41 @@ mod tests {
                 other
             ),
         }
+    }
+
+    #[test]
+    fn first_deposit_records_once() {
+        // fund_account stamps first_deposit_ms; a subsequent fund_account
+        // for the same account must NOT overwrite it.
+        let (markets, _m0) = setup();
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(0);
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets,
+            vec![],
+            Arc::new(AdminOracle::new()),
+            SequencerConfig::default(),
+        );
+
+        assert!(seq.first_deposit_ms(aid).is_none());
+
+        seq.fund_account(aid, 10 * NANOS_PER_DOLLAR as i64).unwrap();
+        let ts_first = seq
+            .first_deposit_ms(aid)
+            .expect("first deposit should be recorded after fund_account");
+
+        // Sleep a tiny bit so the second SystemTime::now() differs.
+        std::thread::sleep(std::time::Duration::from_millis(2));
+
+        seq.fund_account(aid, 1 * NANOS_PER_DOLLAR as i64).unwrap();
+        let ts_second = seq
+            .first_deposit_ms(aid)
+            .expect("first_deposit_ms must persist after a second deposit");
+
+        assert_eq!(
+            ts_first, ts_second,
+            "second deposit must not overwrite the first-deposit timestamp"
+        );
     }
 }

@@ -18,6 +18,13 @@ pub const DEFAULT_MAX_FILL_HISTORY_PER_ACCOUNT: usize = 5_000;
 pub struct FillRecorder {
     account_fills: HashMap<AccountId, Vec<AccountFillRecord>>,
     max_history_per_account: usize,
+    /// All-time fill count per account, excluding `AccountId::MINT`. One
+    /// fill record bumps the per-account counter once regardless of how
+    /// many markets the underlying order touches (the fill IS the trade
+    /// event — multi-market orders still produce one fill per match).
+    /// Survives the `MAX_FILL_HISTORY_PER_ACCOUNT` trim, which only drops
+    /// the bounded `account_fills` records.
+    total_count: HashMap<AccountId, u64>,
 }
 
 impl Default for FillRecorder {
@@ -35,6 +42,7 @@ impl FillRecorder {
         Self {
             account_fills: HashMap::new(),
             max_history_per_account,
+            total_count: HashMap::new(),
         }
     }
 
@@ -57,7 +65,24 @@ impl FillRecorder {
         Self {
             account_fills,
             max_history_per_account,
+            // Cold-start the total counter from the visible window. After
+            // trim this under-reports, which is acceptable until snapshot
+            // round-tripping for total_count lands alongside C1.
+            total_count: HashMap::new(),
         }
+    }
+
+    /// Restore both the bounded fill window AND the all-time fill counter
+    /// in one call. Used by the persistence path so total_count survives
+    /// restart even when the visible window has been trimmed.
+    pub fn restore_with_counts(
+        records: Vec<(AccountId, AccountFillRecord)>,
+        total_count: HashMap<AccountId, u64>,
+        max_history_per_account: usize,
+    ) -> Self {
+        let mut recorder = Self::restore_with_retention(records, max_history_per_account);
+        recorder.total_count = total_count;
+        recorder
     }
 
     pub fn snapshot(&self) -> Vec<(AccountId, AccountFillRecord)> {
@@ -75,6 +100,17 @@ impl FillRecorder {
             (account_id.0, record.block_height, record.order_id)
         });
         records
+    }
+
+    /// All-time fill counts per account (MINT excluded by construction).
+    pub fn total_counts(&self) -> &HashMap<AccountId, u64> {
+        &self.total_count
+    }
+
+    /// All-time fill count for one account. Returns 0 for accounts that
+    /// never traded.
+    pub fn total_fills(&self, account_id: AccountId) -> u64 {
+        self.total_count.get(&account_id).copied().unwrap_or(0)
     }
 
     /// Record fills from a block into per-account fill history.
@@ -110,6 +146,11 @@ impl FillRecorder {
                 position_deltas,
             });
             trim_account_fills(records, self.max_history_per_account);
+
+            // All-time counter: skip MINT (system account, not a user trade).
+            if account_id != AccountId::MINT {
+                *self.total_count.entry(account_id).or_insert(0) += 1;
+            }
         }
     }
 
@@ -194,5 +235,67 @@ mod tests {
         let fills = recorder.account_fills(AccountId(7), None, usize::MAX, 0);
         assert_eq!(fills.len(), max_fills);
         assert_eq!(fills.first().unwrap().block_height, 6);
+    }
+
+    #[test]
+    fn total_count_bumps_per_fill_not_per_market() {
+        // Even for a multi-market order, one fill record = one counter bump.
+        // (Multi-market orders still produce one fill at a time — fill_qty
+        // is per-order, not per-market — so the assertion here is that a
+        // single record_fills call with a single Fill bumps by exactly 1.)
+        let mut markets = MarketSet::new();
+        let m = markets.add_binary("M");
+        let mut order = outcome_buy(&markets, 1, m, 0, NANOS_PER_DOLLAR / 2, 4);
+        // Pretend the order spans 2 markets — the counter should still
+        // bump by 1 per fill since multi-market accounting lives in the
+        // welfare/volume layer, not the trade-count layer.
+        order.num_markets = 2;
+        let m2 = markets.add_binary("M2");
+        order.markets[1] = m2;
+        let mut orders = HashMap::new();
+        orders.insert(order.id, &order);
+
+        let mut recorder = FillRecorder::new();
+        let mut fill = Fill::new(order.id, 4, NANOS_PER_DOLLAR / 2);
+        fill.account_id = 42;
+        recorder.record_fills(&[fill], &orders, 1, 1_000);
+
+        assert_eq!(recorder.total_fills(AccountId(42)), 1);
+    }
+
+    #[test]
+    fn total_count_excludes_mint() {
+        let mut markets = MarketSet::new();
+        let m = markets.add_binary("M");
+        let order = outcome_buy(&markets, 1, m, 0, NANOS_PER_DOLLAR / 2, 1);
+        let mut orders = HashMap::new();
+        orders.insert(order.id, &order);
+
+        let mut recorder = FillRecorder::new();
+        let mut fill = Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2);
+        fill.account_id = AccountId::MINT.0;
+        recorder.record_fills(&[fill], &orders, 1, 1_000);
+
+        // MINT fills still land in account_fills (we may want to query
+        // them) but total_count must not include them — MINT is a system
+        // account, not a trader.
+        assert_eq!(recorder.total_fills(AccountId::MINT), 0);
+    }
+
+    #[test]
+    fn total_count_accumulates_across_blocks() {
+        let mut markets = MarketSet::new();
+        let m = markets.add_binary("M");
+        let order = outcome_buy(&markets, 1, m, 0, NANOS_PER_DOLLAR / 2, 1);
+        let mut orders = HashMap::new();
+        orders.insert(order.id, &order);
+
+        let mut recorder = FillRecorder::new();
+        for h in 1..=5 {
+            let mut fill = Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2);
+            fill.account_id = 42;
+            recorder.record_fills(&[fill], &orders, h, h * 1_000);
+        }
+        assert_eq!(recorder.total_fills(AccountId(42)), 5);
     }
 }

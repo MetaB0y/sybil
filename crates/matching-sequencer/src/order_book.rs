@@ -354,11 +354,20 @@ impl OrderBook {
         self.orders.iter().map(|ro| (&ro.order, ro.account_id))
     }
 
-    /// Orders with full metadata (for API exposure).
-    pub fn resting_orders_full(&self) -> impl Iterator<Item = (&Order, AccountId, u64, u64)> {
-        self.orders
-            .iter()
-            .map(|ro| (&ro.order, ro.account_id, ro.created_at, ro.expires_at_block))
+    /// Orders with full metadata (for API exposure). Tuple shape:
+    /// `(order, account, created_at, expires_at_block, original_max_fill)`.
+    pub fn resting_orders_full(
+        &self,
+    ) -> impl Iterator<Item = (&Order, AccountId, u64, u64, u64)> {
+        self.orders.iter().map(|ro| {
+            (
+                &ro.order,
+                ro.account_id,
+                ro.created_at,
+                ro.expires_at_block,
+                ro.original_max_fill,
+            )
+        })
     }
 
     /// TTL value.

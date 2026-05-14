@@ -513,6 +513,17 @@ pub struct PortfolioResponse {
     pub total_position_value_nanos: i64,
     pub portfolio_value_nanos: i64,
     pub pnl_nanos: i64,
+    /// First-deposit timestamp in ms since epoch (B8). `0` for accounts
+    /// with no recorded deposit history (FE renders as "—"). Same
+    /// "since last restart" caveat as the other off-block aggregates
+    /// until persistence runs in prod.
+    #[serde(default)]
+    pub first_deposit_ms: u64,
+    /// All-time fill count (B8). The bounded fill window in
+    /// `account_fills` may cap older trades; this counter never does,
+    /// so FE shows the real number instead of "200+".
+    #[serde(default)]
+    pub total_fill_count: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -576,6 +587,12 @@ pub struct PendingOrderResponse {
     pub remaining_quantity: u64,
     pub created_at_block: u64,
     pub expires_at_block: u64,
+    /// Original `max_fill` at admit time (B8). Lets the FE render a
+    /// partial-fill progress bar as `(original - remaining) / original`.
+    /// `0` for orders persisted before B5/B8 (#[serde(default)] forward
+    /// compat).
+    #[serde(default)]
+    pub original_quantity: u64,
 }
 
 // --- Aggregates (B1 onward) ------------------------------------------------

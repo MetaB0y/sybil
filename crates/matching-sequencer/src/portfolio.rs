@@ -25,12 +25,20 @@ pub struct PortfolioSummary {
     pub portfolio_value_nanos: i64,
     /// portfolio_value - total_deposited
     pub pnl_nanos: i64,
+    /// First-deposit timestamp in ms since epoch (B8). `0` if no
+    /// deposit has been recorded for this account.
+    pub first_deposit_ms: u64,
+    /// All-time fill count for the account (B8). The bounded fill
+    /// window can be smaller than this when trim has happened.
+    pub total_fill_count: u64,
 }
 
 /// Compute a portfolio summary for an account given current market prices.
 pub fn compute_portfolio(
     account: &Account,
     last_prices: &HashMap<MarketId, Vec<Nanos>>,
+    first_deposit_ms: u64,
+    total_fill_count: u64,
 ) -> PortfolioSummary {
     let mut positions = Vec::new();
     let mut total_position_value: i64 = 0;
@@ -72,5 +80,7 @@ pub fn compute_portfolio(
         total_position_value_nanos: total_position_value,
         portfolio_value_nanos: portfolio_value,
         pnl_nanos: pnl,
+        first_deposit_ms,
+        total_fill_count,
     }
 }

@@ -187,6 +187,16 @@ const ORDER_STATS_TRACKER: TableDefinition<&str, &[u8]> =
     TableDefinition::new("order_stats_tracker");
 const KEY_ORDER_STATS_TRACKER_SNAPSHOT: &str = "snapshot";
 
+/// First-deposit timestamps per account (B8). Single blob keyed
+/// "snapshot"; missing-row yields an empty map.
+const FIRST_DEPOSIT_MS: TableDefinition<&str, &[u8]> = TableDefinition::new("first_deposit_ms");
+const KEY_FIRST_DEPOSIT_MS_SNAPSHOT: &str = "snapshot";
+
+/// All-time per-account fill counters (B8). The bounded fill window
+/// lives in FILL_HISTORY; the counter survives trim and restart.
+const FILL_TOTAL_COUNTS: TableDefinition<&str, &[u8]> = TableDefinition::new("fill_total_counts");
+const KEY_FILL_TOTAL_COUNTS_SNAPSHOT: &str = "snapshot";
+
 // Counter keys
 const KEY_STORE_LAYOUT_VERSION: &str = "store_layout_version";
 const KEY_HEIGHT: &str = "height";
@@ -312,6 +322,10 @@ pub struct RestoredState {
     /// Off-block OrderStatsTracker snapshot — placed/matched/unmatched
     /// per market + platform + hourly. Missing table → default.
     pub order_stats_tracker: OrderStatsTrackerSnapshot,
+    /// First-deposit timestamp per account (B8). Empty map on cold start.
+    pub first_deposit_ms: HashMap<AccountId, u64>,
+    /// All-time fill counter per account (B8). Empty map on cold start.
+    pub fill_total_counts: HashMap<AccountId, u64>,
 }
 
 /// Borrowed view of sequencer state needed to persist one block.
@@ -345,6 +359,12 @@ pub struct SequencerSnapshot<'a> {
     /// Off-block OrderStatsTracker snapshot (owned — serialized once into
     /// the `ORDER_STATS_TRACKER` table).
     pub order_stats_tracker: OrderStatsTrackerSnapshot,
+    /// First-deposit timestamps per account (B8). Owned (cloned from the
+    /// live sequencer) so the writer is independent of the in-memory map.
+    pub first_deposit_ms: HashMap<AccountId, u64>,
+    /// All-time per-account fill counters (B8). Owned for the same reason
+    /// as `first_deposit_ms`.
+    pub fill_total_counts: HashMap<AccountId, u64>,
 }
 
 impl Store {
@@ -382,6 +402,8 @@ impl Store {
         txn.open_table(PRICE_TRACKER_CLEARING_HISTORY)?;
         txn.open_table(LIQUIDITY_TRACKER)?;
         txn.open_table(ORDER_STATS_TRACKER)?;
+        txn.open_table(FIRST_DEPOSIT_MS)?;
+        txn.open_table(FILL_TOTAL_COUNTS)?;
         txn.commit()?;
 
         initialize_or_validate_layout(&db)?;
@@ -646,6 +668,33 @@ impl Store {
             let mut table = txn.open_table(ORDER_STATS_TRACKER)?;
             let bytes = rmp_serde::to_vec(&snapshot.order_stats_tracker)?;
             table.insert(KEY_ORDER_STATS_TRACKER_SNAPSHOT, bytes.as_slice())?;
+        }
+
+        // First-deposit timestamps (B8) — single blob, missing → empty map.
+        {
+            let mut table = txn.open_table(FIRST_DEPOSIT_MS)?;
+            // Serialize as Vec<(AccountId, u64)> for stable ordering.
+            let mut entries: Vec<(AccountId, u64)> = snapshot
+                .first_deposit_ms
+                .iter()
+                .map(|(&aid, &ts)| (aid, ts))
+                .collect();
+            entries.sort_by_key(|(aid, _)| aid.0);
+            let bytes = rmp_serde::to_vec(&entries)?;
+            table.insert(KEY_FIRST_DEPOSIT_MS_SNAPSHOT, bytes.as_slice())?;
+        }
+
+        // All-time fill counters per account (B8) — single blob.
+        {
+            let mut table = txn.open_table(FILL_TOTAL_COUNTS)?;
+            let mut entries: Vec<(AccountId, u64)> = snapshot
+                .fill_total_counts
+                .iter()
+                .map(|(&aid, &n)| (aid, n))
+                .collect();
+            entries.sort_by_key(|(aid, _)| aid.0);
+            let bytes = rmp_serde::to_vec(&entries)?;
+            table.insert(KEY_FILL_TOTAL_COUNTS_SNAPSHOT, bytes.as_slice())?;
         }
 
         // Counters
@@ -1023,6 +1072,30 @@ impl Store {
             }
         };
 
+        // First-deposit timestamps (B8). Missing-row → empty.
+        let first_deposit_ms: HashMap<AccountId, u64> = {
+            let table = txn.open_table(FIRST_DEPOSIT_MS)?;
+            match table.get(KEY_FIRST_DEPOSIT_MS_SNAPSHOT)? {
+                Some(value) => {
+                    let entries: Vec<(AccountId, u64)> = rmp_serde::from_slice(value.value())?;
+                    entries.into_iter().collect()
+                }
+                None => HashMap::new(),
+            }
+        };
+
+        // All-time fill counters per account (B8). Missing-row → empty.
+        let fill_total_counts: HashMap<AccountId, u64> = {
+            let table = txn.open_table(FILL_TOTAL_COUNTS)?;
+            match table.get(KEY_FILL_TOTAL_COUNTS_SNAPSHOT)? {
+                Some(value) => {
+                    let entries: Vec<(AccountId, u64)> = rmp_serde::from_slice(value.value())?;
+                    entries.into_iter().collect()
+                }
+                None => HashMap::new(),
+            }
+        };
+
         info!(
             height = recovery_metadata.height,
             accounts = num_accounts,
@@ -1065,6 +1138,8 @@ impl Store {
             price_tracker_clearing_history,
             liquidity_tracker,
             order_stats_tracker,
+            first_deposit_ms,
+            fill_total_counts,
         }))
     }
 
@@ -1576,6 +1651,8 @@ mod tests {
                 price_tracker_clearing_history: Default::default(),
                 liquidity_tracker: Default::default(),
                 order_stats_tracker: Default::default(),
+                first_deposit_ms: HashMap::new(),
+                fill_total_counts: HashMap::new(),
             }
         }
 
@@ -1605,6 +1682,8 @@ mod tests {
                 price_tracker_clearing_history: Default::default(),
                 liquidity_tracker: Default::default(),
                 order_stats_tracker: Default::default(),
+                first_deposit_ms: HashMap::new(),
+                fill_total_counts: HashMap::new(),
             }
         }
     }

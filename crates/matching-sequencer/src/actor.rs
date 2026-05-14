@@ -1216,10 +1216,20 @@ impl Actor for SequencerActor {
             }
             SequencerMsg::GetPortfolio(account_id, reply) => {
                 let result = match state.sequencer.accounts.get(account_id) {
-                    Some(account) => Ok(portfolio::compute_portfolio(
-                        account,
-                        state.sequencer.last_clearing_prices(),
-                    )),
+                    Some(account) => {
+                        let first_deposit_ms = state
+                            .sequencer
+                            .first_deposit_ms(account_id)
+                            .unwrap_or(0);
+                        let total_fill_count =
+                            state.sequencer.fill_recorder.total_fills(account_id);
+                        Ok(portfolio::compute_portfolio(
+                            account,
+                            state.sequencer.last_clearing_prices(),
+                            first_deposit_ms,
+                            total_fill_count,
+                        ))
+                    }
                     None => Err(SequencerError::Rejected(crate::error::Rejection {
                         order_id: 0,
                         account_id,
