@@ -336,6 +336,16 @@ impl Store {
             })
             .await?;
 
+        if witness.is_some() {
+            let state_root = self.account_state_store.qmdb_state_root(next_slot).await?;
+            if state_root.root != snapshot.header.state_root {
+                return Err(StoreError::CorruptLayout(format!(
+                    "typed qMDB root mismatch at height {} before commit: slot {:?} root={:?} header_root={:?}",
+                    snapshot.header.height, state_root.slot, state_root.root, snapshot.header.state_root
+                )));
+            }
+        }
+
         let txn = self.db.begin_write()?;
 
         // Markets
@@ -918,9 +928,12 @@ impl Store {
             slot = ?repaired_root.slot,
             root = ?repaired_root.root,
             header_root = ?header.state_root,
-            "typed qMDB root still differs from committed header after repair; continuing from redb snapshot"
+            "typed qMDB root still differs from committed header after repair"
         );
-        Ok(())
+        Err(StoreError::CorruptLayout(format!(
+            "typed qMDB root mismatch at height {}: fence slot {:?} root={:?} header_root={:?}",
+            account_state.height, repaired_root.slot, repaired_root.root, header.state_root
+        )))
     }
 
     /// Append one pending bundle submission to the durable recovery log.
@@ -1270,6 +1283,35 @@ mod tests {
         }
     }
 
+    fn coherent_header_and_witness(
+        height: u64,
+        accounts: &AccountStore,
+        markets: &MarketSet,
+        lifecycle: &MarketLifecycle,
+        bridge_state: &BridgeState,
+    ) -> (BlockHeader, BlockWitness) {
+        let canonical_accounts = crate::canonical_state::CanonicalState::from_accounts(accounts);
+        let state_sidecar =
+            state_sidecar_snapshot_from_resting_orders(bridge_state, &[], markets, &[], lifecycle);
+        let state_root = sybil_verifier::block::compute_state_root_with_sidecar(
+            canonical_accounts.as_snapshots(),
+            &state_sidecar,
+        );
+        let header = BlockHeader {
+            height,
+            parent_hash: [(height - 1) as u8; 32],
+            state_root,
+            events_root: sybil_verifier::event_commitment::empty_events_root(),
+            order_count: 0,
+            fill_count: 0,
+            timestamp_ms: height * 1000,
+        };
+        let mut witness = sample_witness(&header);
+        witness.post_state = canonical_accounts.into_snapshots();
+        witness.state_sidecar = state_sidecar;
+        (header, witness)
+    }
+
     /// Owns the empty defaults for `SequencerSnapshot` references so test code
     /// doesn't have to repeat the ceremony on every call site.
     struct TestEnv {
@@ -1342,6 +1384,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn witnessed_qmdb_state_root_matches_header_after_slot_reuse() {
+        let path = temp_db_path("store-qmdb-root-reuse");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+        let mut lifecycle = MarketLifecycle::new(oracle);
+        let mut markets = MarketSet::new();
+        let accounts = AccountStore::new();
+        let env = TestEnv::new();
+
+        for height in 1..=3 {
+            for index in 0..40 {
+                let id = markets.add_binary(format!("root regression {height}-{index}"));
+                lifecycle.set_market_metadata(
+                    id,
+                    MarketMetadata {
+                        description: format!("description {height}-{index}"),
+                        category: "regression".to_string(),
+                        tags: vec![format!("height-{height}"), format!("market-{index}")],
+                        resolution_criteria: format!("criteria {height}-{index}"),
+                        expiry_timestamp_ms: 1_800_000_000_000 + height * 1000 + index,
+                        created_at_ms: 1_700_000_000_000 + height * 1000 + index,
+                        resolution_config: Some(crate::market_info::ResolutionConfig {
+                            template: "admin_immediate".to_string(),
+                        }),
+                    },
+                );
+            }
+
+            let (header, witness) = coherent_header_and_witness(
+                height,
+                &accounts,
+                &markets,
+                &lifecycle,
+                &env.bridge_state,
+            );
+            store
+                .save_block_with_witness(
+                    env.snapshot(&accounts, &markets, &lifecycle, &header, 1, None, vec![]),
+                    &witness,
+                )
+                .await
+                .unwrap();
+
+            let qmdb_root = store.current_state_qmdb_root().await.unwrap().unwrap();
+            assert_eq!(
+                qmdb_root.root, header.state_root,
+                "persisted typed-state qMDB root diverged from the committed block header at height {height}"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn test_store_restores_latest_committed_accounts() {
         let path = temp_db_path("store-restore");
         let store = Store::open(&path).unwrap();
@@ -1395,8 +1489,8 @@ mod tests {
         let mut accounts = AccountStore::new();
         accounts.create_account(100);
 
-        let header = sample_header(1);
-        let witness = sample_witness(&header);
+        let (header, witness) =
+            coherent_header_and_witness(1, &accounts, &markets, &lifecycle, &env.bridge_state);
         store
             .save_block_with_witness(
                 env.snapshot(&accounts, &markets, &lifecycle, &header, 1, None, vec![]),
@@ -1454,8 +1548,8 @@ mod tests {
         let env = TestEnv::new();
         let accounts = AccountStore::new();
 
-        let header = sample_header(1);
-        let witness = sample_witness(&header);
+        let (header, witness) =
+            coherent_header_and_witness(1, &accounts, &markets, &lifecycle, &env.bridge_state);
         store
             .save_block_with_witness(
                 env.snapshot(&accounts, &markets, &lifecycle, &header, 1, None, vec![]),

@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::fs;
+use std::io::ErrorKind;
 use std::num::{NonZeroU16, NonZeroU64, NonZeroUsize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
 
@@ -34,6 +35,7 @@ const PAGE_CACHE_PAGES: usize = 128;
 const ITEMS_PER_BLOB: u64 = 1024;
 const WRITE_BUFFER_BYTES: usize = 64 * 1024;
 const MAX_VALUE_BYTES: usize = 1 << 20;
+const GENERATION_FILE: &str = "state-generation";
 
 type StateDb = OrderedVariableDb<
     MmrFamily,
@@ -193,21 +195,28 @@ impl QmdbState {
     pub fn open(path: &Path, slot: AccountSnapshotSlot) -> Result<Self, StoreError> {
         std::fs::create_dir_all(path)?;
         let storage_directory = path.to_path_buf();
+        let generation_file = storage_directory.join(GENERATION_FILE);
         let (sender, receiver) = tokio_mpsc::channel(8);
         let (started_tx, started_rx) = mpsc::sync_channel(1);
 
         thread::Builder::new()
             .name(format!("sybil-qmdb-state-{:?}", slot))
             .spawn(move || {
+                let generation = read_generation_file(&generation_file);
                 let runner = commonware_tokio::Runner::new(
                     commonware_tokio::Config::default().with_storage_directory(storage_directory),
                 );
                 runner.start(|context| async move {
-                    let opened = open_db(context).await;
+                    let opened = match generation {
+                        Ok(generation) => open_db(context.clone(), generation)
+                            .await
+                            .map(|db| (db, generation)),
+                        Err(error) => Err(error),
+                    };
                     match opened {
-                        Ok(db) => {
+                        Ok((db, generation)) => {
                             let _ = started_tx.send(Ok(()));
-                            run(slot, db, receiver).await;
+                            run(slot, context, db, generation, generation_file, receiver).await;
                         }
                         Err(error) => {
                             let _ = started_tx.send(Err(error));
@@ -294,13 +303,19 @@ impl QmdbState {
 
 async fn run(
     slot: AccountSnapshotSlot,
+    context: commonware_tokio::Context,
     mut db: StateDb,
+    mut generation: u64,
+    generation_file: PathBuf,
     mut receiver: tokio_mpsc::Receiver<Command>,
 ) {
     while let Some(command) = receiver.recv().await {
         match command {
             Command::ReplaceLeaves { leaves, respond_to } => {
-                let _ = respond_to.send(replace_leaves(&mut db, leaves).await);
+                let _ = respond_to.send(
+                    replace_leaves(&context, &mut db, &mut generation, &generation_file, leaves)
+                        .await,
+                );
             }
             Command::Root { respond_to } => {
                 let _ = respond_to.send(Ok(root(slot, &db)));
@@ -324,7 +339,10 @@ async fn run(
     }
 }
 
-async fn open_db(context: commonware_tokio::Context) -> Result<StateDb, StoreError> {
+async fn open_db(
+    context: commonware_tokio::Context,
+    generation: u64,
+) -> Result<StateDb, StoreError> {
     let page_cache = CacheRef::from_pooler(
         &context,
         NonZeroU16::new(PAGE_SIZE).unwrap(),
@@ -332,15 +350,15 @@ async fn open_db(context: commonware_tokio::Context) -> Result<StateDb, StoreErr
     );
     let config = VariableConfig {
         merkle_config: MmrConfig {
-            journal_partition: "state-mmr-journal".to_string(),
+            journal_partition: partition("state-mmr-journal", generation),
             items_per_blob: NonZeroU64::new(ITEMS_PER_BLOB).unwrap(),
             write_buffer: NonZeroUsize::new(WRITE_BUFFER_BYTES).unwrap(),
-            metadata_partition: "state-mmr-metadata".to_string(),
+            metadata_partition: partition("state-mmr-metadata", generation),
             thread_pool: None,
             page_cache: page_cache.clone(),
         },
         journal_config: VConfig {
-            partition: "state-log".to_string(),
+            partition: partition("state-log", generation),
             write_buffer: NonZeroUsize::new(WRITE_BUFFER_BYTES).unwrap(),
             compression: None,
             codec_config: (
@@ -350,7 +368,7 @@ async fn open_db(context: commonware_tokio::Context) -> Result<StateDb, StoreErr
             items_per_section: NonZeroU64::new(ITEMS_PER_BLOB).unwrap(),
             page_cache,
         },
-        grafted_metadata_partition: "state-grafted-mmr-metadata".to_string(),
+        grafted_metadata_partition: partition("state-grafted-mmr-metadata", generation),
         translator: OneCap,
     };
 
@@ -359,10 +377,64 @@ async fn open_db(context: commonware_tokio::Context) -> Result<StateDb, StoreErr
         .map_err(|error| StoreError::Qmdb(format!("failed to initialize state qmdb: {error}")))
 }
 
-async fn replace_leaves(db: &mut StateDb, leaves: StateLeafEntries) -> Result<(), StoreError> {
-    let current_entries = collect_entries(db).await?;
-    let mut desired = HashMap::new();
-    for (key, value) in leaves {
+fn partition(prefix: &str, generation: u64) -> String {
+    format!("{prefix}-{generation}")
+}
+
+fn read_generation_file(path: &Path) -> Result<u64, StoreError> {
+    match fs::read_to_string(path) {
+        Ok(contents) => contents.trim().parse::<u64>().map_err(|error| {
+            StoreError::Qmdb(format!("invalid state qMDB generation file: {error}"))
+        }),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(0),
+        Err(error) => Err(StoreError::Qmdb(format!(
+            "failed to read state qMDB generation file: {error}"
+        ))),
+    }
+}
+
+fn write_generation_file(path: &Path, generation: u64) -> Result<(), StoreError> {
+    let tmp_path = path.with_extension("tmp");
+    fs::write(&tmp_path, generation.to_string()).map_err(|error| {
+        StoreError::Qmdb(format!(
+            "failed to write state qMDB generation file: {error}"
+        ))
+    })?;
+    fs::rename(&tmp_path, path).map_err(|error| {
+        StoreError::Qmdb(format!(
+            "failed to install state qMDB generation file: {error}"
+        ))
+    })
+}
+
+fn cleanup_generation(storage_directory: &Path, generation: u64) {
+    let partitions = [
+        format!("state-mmr-journal-{generation}-blobs"),
+        format!("state-mmr-journal-{generation}-metadata"),
+        format!("state-mmr-metadata-{generation}"),
+        format!("state-log-{generation}_data"),
+        format!("state-log-{generation}_offsets-blobs"),
+        format!("state-log-{generation}_offsets-metadata"),
+        format!("state-grafted-mmr-metadata-{generation}"),
+    ];
+    for partition in partitions {
+        let path = storage_directory.join(partition);
+        if let Err(error) = fs::remove_dir_all(&path) {
+            if error.kind() != ErrorKind::NotFound {
+                let _ = fs::remove_file(&path);
+            }
+        }
+    }
+}
+
+async fn replace_leaves(
+    context: &commonware_tokio::Context,
+    db: &mut StateDb,
+    generation: &mut u64,
+    generation_file: &Path,
+    mut leaves: StateLeafEntries,
+) -> Result<(), StoreError> {
+    for (key, value) in &leaves {
         if key.len() > QMDB_STATE_MAX_KEY_BYTES {
             return Err(StoreError::Qmdb(format!(
                 "state qmdb key exceeds {QMDB_STATE_MAX_KEY_BYTES} bytes"
@@ -373,45 +445,46 @@ async fn replace_leaves(db: &mut StateDb, leaves: StateLeafEntries) -> Result<()
                 "state qmdb value exceeds {MAX_VALUE_BYTES} bytes"
             )));
         }
-        desired.insert(key, value);
     }
+    leaves.sort_by(|(left, _), (right, _)| left.cmp(right));
 
-    let mut batch = db.new_batch();
-    let mut has_changes = false;
-
-    for (key, value) in current_entries {
-        match desired.remove(&key) {
-            Some(desired_value) if desired_value != value => {
-                batch = batch.write(key, Some(desired_value));
-                has_changes = true;
-            }
-            Some(_) => {}
-            None => {
-                batch = batch.write(key, None);
-                has_changes = true;
-            }
+    for pair in leaves.windows(2) {
+        if pair[0].0 == pair[1].0 {
+            return Err(StoreError::Qmdb(format!(
+                "duplicate state qMDB leaf key: {:?}",
+                pair[0].0
+            )));
         }
     }
 
-    for (key, value) in desired {
-        batch = batch.write(key, Some(value));
-        has_changes = true;
-    }
+    let previous_generation = *generation;
+    let next_generation = generation.saturating_add(1);
+    let mut next_db = open_db(context.clone(), next_generation).await?;
 
-    if !has_changes {
-        return Ok(());
-    }
+    if !leaves.is_empty() {
+        let mut batch = next_db.new_batch();
+        for (key, value) in leaves {
+            batch = batch.write(key, Some(value));
+        }
 
-    let merkleized = batch
-        .merkleize(db, None)
-        .await
-        .map_err(|error| StoreError::Qmdb(format!("failed to merkleize state qmdb: {error}")))?;
-    db.apply_batch(merkleized)
-        .await
-        .map_err(|error| StoreError::Qmdb(format!("failed to apply state qmdb: {error}")))?;
-    db.commit()
+        let merkleized = batch.merkleize(&next_db, None).await.map_err(|error| {
+            StoreError::Qmdb(format!("failed to merkleize state qmdb: {error}"))
+        })?;
+        next_db
+            .apply_batch(merkleized)
+            .await
+            .map_err(|error| StoreError::Qmdb(format!("failed to apply state qmdb: {error}")))?;
+    }
+    next_db
+        .commit()
         .await
         .map_err(|error| StoreError::Qmdb(format!("failed to commit state qmdb: {error}")))?;
+    write_generation_file(generation_file, next_generation)?;
+    *db = next_db;
+    *generation = next_generation;
+    if let Some(storage_directory) = generation_file.parent() {
+        cleanup_generation(storage_directory, previous_generation);
+    }
     Ok(())
 }
 

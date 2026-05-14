@@ -130,8 +130,8 @@ services:
 
   victoriametrics:
     image: victoriametrics/victoria-metrics:v1.101.0
-    mem_limit: "384m"
-    memswap_limit: "384m"
+    mem_limit: "256m"
+    memswap_limit: "256m"
     ports:
       - "8428:8428"
     volumes:
@@ -140,7 +140,8 @@ services:
     command:
       - "-storageDataPath=/storage"
       - "-promscrape.config=/etc/prometheus/prometheus.yml"
-      - "-retentionPeriod=30d"
+      - "-retentionPeriod=7d"
+      - "-memory.allowedBytes=128MiB"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8428/-/healthy"]
       interval: 5s
