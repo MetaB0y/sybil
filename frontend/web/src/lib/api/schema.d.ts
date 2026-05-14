@@ -140,6 +140,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/activity/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /v1/activity/overview */
+        get: operations["get_activity_overview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/blocks/latest": {
         parameters: {
             query?: never;
@@ -278,6 +295,23 @@ export interface paths {
         };
         /** GET /v1/bridge/withdrawals/{id} */
         get: operations["get_withdrawal"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/events/{event_id}/traders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /v1/events/{event_id}/traders */
+        get: operations["get_event_traders"];
         put?: never;
         post?: never;
         delete?: never;
@@ -463,6 +497,23 @@ export interface paths {
         put?: never;
         /** POST /v1/markets/{id}/metadata — set external metadata for a market (dev mode) */
         post: operations["set_market_metadata"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/markets/{id}/open-batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /v1/markets/{id}/open-batch */
+        get: operations["get_open_batch"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -663,8 +714,69 @@ export interface components {
             balance_nanos: string;
             positions?: components["schemas"]["PositionResponse"][];
         };
+        /** @description Response shape for `GET /v1/activity/overview`. All-time + 24h slices. */
+        ActivityOverviewResponse: {
+            all_time: components["schemas"]["OverviewBucketResponse"];
+            last_24h: components["schemas"]["OverviewBucketResponse"];
+        };
+        /**
+         * @description Nested per-market sidecar on `BlockResponse.by_market`. Grows append-only
+         *     across steps (each new field carries `#[serde(default)]` so partial
+         *     reverts stay clean). Volume/orders/welfare join in B2 / B6 / B7.
+         */
+        BlockMarketStats: {
+            /**
+             * Format: int32
+             * @description Resting orders touching this market that exited the book this
+             *     block AFTER at least one fill (B5's `has_been_matched`).
+             */
+            matched?: number;
+            /**
+             * Format: int32
+             * @description Non-MM admissions counted against this market in this block.
+             *     Multi-market orders credit each active market.
+             */
+            placed?: number;
+            /**
+             * Format: int32
+             * @description Unique placers (non-MM accounts) admitted touching this market in
+             *     the block. Multi-market orders credit each active market; the
+             *     platform `unique_placers` scalar counts the account once.
+             */
+            placers?: number;
+            /**
+             * Format: int32
+             * @description Resting orders touching this market that exited the book this
+             *     block WITHOUT any fill. Cancels are excluded.
+             */
+            unmatched?: number;
+            /**
+             * Format: int64
+             * @description Per-market volume contribution from this block's fills, in nanos.
+             *     Multi-market fills credit each active market with their full
+             *     notional; the platform `total_volume_nanos` scalar counts each fill
+             *     once.
+             */
+            volume_nanos?: string;
+            /**
+             * Format: int64
+             * @description Per-market welfare contribution from this block's fills (B7).
+             *     Multi-market fills credit each active market with their full welfare;
+             *     the platform `total_welfare_nanos` counts each fill once. Signed —
+             *     solver rounding can yield small negatives.
+             */
+            welfare_nanos?: string;
+        };
         BlockResponse: {
             bridge?: components["schemas"]["BridgeBlockResponse"];
+            /**
+             * @description Nested per-market scalars (decision Q1 in BACKEND_DATA_PLAN.md). Each
+             *     `BlockMarketStats` carries the per-market splits for this block. Old
+             *     clients ignore it; new clients consume what they recognise.
+             */
+            by_market?: {
+                [key: string]: components["schemas"]["BlockMarketStats"];
+            };
             clearing_prices_nanos?: {
                 [key: string]: string[];
             };
@@ -687,6 +799,12 @@ export interface components {
             total_volume_nanos: string;
             /** Format: int64 */
             total_welfare_nanos: string;
+            /**
+             * Format: int32
+             * @description Unique placers (non-MM accounts) admitted into this block. Platform
+             *     scalar — `by_market[m].placers` is the per-market split.
+             */
+            unique_placers?: number;
         };
         BridgeAccountKeyResponse: {
             /** Format: int64 */
@@ -839,6 +957,11 @@ export interface components {
             market_id: number;
             name: string;
         };
+        /** @description Response shape for `GET /v1/events/{event_id}/traders`. */
+        EventTradersResponse: {
+            /** Format: int32 */
+            trader_count: number;
+        };
         FillResponse: {
             /** Format: int64 */
             account_id?: number;
@@ -910,6 +1033,20 @@ export interface components {
             external_url?: string | null;
             /**
              * Format: int64
+             * @description Rolling last-10-batch ±band depth average in nanos. Zero for markets
+             *     without a clearing price yet. Pair with `liquidity_band_nanos` for
+             *     labelling.
+             */
+            liquidity_avg10_nanos?: string;
+            /**
+             * Format: int64
+             * @description Width of the band the liquidity score uses (the ± in "$X ±$0.05").
+             *     Always the live config value — `0` when no liquidity has been
+             *     recorded yet.
+             */
+            liquidity_band_nanos?: string;
+            /**
+             * Format: int64
              * @description Per-market expected end date (epoch ms). Display only.
              */
             market_end_date_ms?: number | null;
@@ -920,8 +1057,32 @@ export interface components {
             /** @description Per-market image URL. */
             market_image_url?: string | null;
             name: string;
+            /**
+             * Format: int64
+             * @description Clearing NO price ~24h ago in nanos. See `yes_price_24h_ago_nanos`.
+             */
+            no_price_24h_ago_nanos?: string | null;
             /** Format: int64 */
             no_price_nanos?: string | null;
+            /**
+             * Format: int64
+             * @description All-time admissions that received at least one fill (B5's
+             *     `has_been_matched` true at removal time). Cancels are NOT counted.
+             */
+            orders_matched_total?: number;
+            /**
+             * Format: int64
+             * @description All-time non-MM admissions counted against this market. Multi-market
+             *     orders credit every active market; sum-of-per-market over-counts vs.
+             *     the platform total — that's the documented attribution rule.
+             */
+            orders_placed_total?: number;
+            /**
+             * Format: int64
+             * @description All-time admissions that exited the book without any fill. Cancels
+             *     are tracked separately and do not count here.
+             */
+            orders_unmatched_total?: number;
             /** Format: int64 */
             payout_nanos?: string | null;
             /**
@@ -932,8 +1093,28 @@ export interface components {
             resolution_criteria?: string | null;
             status: string;
             tags?: string[] | null;
+            /**
+             * Format: int32
+             * @description All-time unique trader count for this market (decision Q-table:
+             *     MM, MINT, multi-market split, etc.). Off-block — "since last
+             *     restart" until prod persistence is enabled.
+             */
+            trader_count?: number;
+            /**
+             * Format: int64
+             * @description Rolling 24h trading volume in nanos (±1h bucket resolution). Off-block;
+             *     "since last restart" until prod persistence is enabled.
+             */
+            volume_24h_nanos?: string;
             /** Format: int64 */
             volume_nanos?: string;
+            /**
+             * Format: int64
+             * @description Clearing YES price ~24h ago in nanos, derived from the per-market
+             *     hourly snapshot. `None` for markets younger than 24h or wiped on
+             *     restart. FE computes the 24h delta as `current − snapshot`.
+             */
+            yes_price_24h_ago_nanos?: string | null;
             /** Format: int64 */
             yes_price_nanos?: string | null;
         };
@@ -969,21 +1150,71 @@ export interface components {
         };
         /** @description Minimal market data for high-throughput dashboards (drops strings & metadata). */
         MarketSummaryResponse: {
+            /**
+             * Format: int64
+             * @description Liquidity score + band (mirrors `MarketResponse`).
+             */
+            liquidity_avg10_nanos?: string;
+            /** Format: int64 */
+            liquidity_band_nanos?: string;
             /** Format: int32 */
             market_id: number;
             name: string;
             /** Format: int64 */
+            no_price_24h_ago_nanos?: string | null;
+            /** Format: int64 */
             no_price_nanos?: string | null;
+            /** Format: int64 */
+            orders_matched_total?: number;
+            /**
+             * Format: int64
+             * @description All-time placed/matched/unmatched (mirrors `MarketResponse`).
+             */
+            orders_placed_total?: number;
+            /** Format: int64 */
+            orders_unmatched_total?: number;
             /**
              * Format: int64
              * @description Reference price from external system (e.g., Polymarket), display only.
              */
             reference_price_nanos?: string | null;
             status: string;
+            /**
+             * Format: int32
+             * @description All-time unique trader count (mirrors `MarketResponse.trader_count`).
+             */
+            trader_count?: number;
+            /**
+             * Format: int64
+             * @description Rolling 24h trading volume in nanos (mirrors
+             *     `MarketResponse.volume_24h_nanos`).
+             */
+            volume_24h_nanos?: string;
             /** Format: int64 */
             volume_nanos: string;
+            /**
+             * Format: int64
+             * @description Clearing YES / NO prices ~24h ago (mirror of `MarketResponse`).
+             */
+            yes_price_24h_ago_nanos?: string | null;
             /** Format: int64 */
             yes_price_nanos?: string | null;
+        };
+        /**
+         * @description Response shape for `GET /v1/markets/{id}/open-batch`. B1 populates
+         *     `unique_placers`; indicative fields stub `None`/`0` until C2.
+         */
+        OpenBatchResponse: {
+            /** Format: int64 */
+            indicative_computed_at_ms?: number;
+            /** Format: int64 */
+            indicative_no_price_nanos?: string | null;
+            /** Format: int64 */
+            indicative_volume_nanos?: string;
+            /** Format: int64 */
+            indicative_yes_price_nanos?: string | null;
+            /** Format: int32 */
+            unique_placers: number;
         };
         OrderAcceptedResponse: {
             accepted: boolean;
@@ -1065,6 +1296,26 @@ export interface components {
             /** @enum {string} */
             type: "Custom";
         };
+        /**
+         * @description Per-bucket platform totals returned by `/v1/activity/overview`. B1
+         *     populates `unique_traders` only; volume + orders join in B2 / B6 and
+         *     remain zero until then.
+         */
+        OverviewBucketResponse: {
+            orders?: components["schemas"]["OverviewOrderStatsResponse"];
+            /** Format: int64 */
+            total_volume_nanos?: string;
+            /** Format: int64 */
+            unique_traders?: number;
+        };
+        OverviewOrderStatsResponse: {
+            /** Format: int64 */
+            matched?: number;
+            /** Format: int64 */
+            placed?: number;
+            /** Format: int64 */
+            unmatched?: number;
+        };
         PendingOrderResponse: {
             /** Format: int64 */
             account_id: number;
@@ -1078,6 +1329,14 @@ export interface components {
             market_id: number;
             /** Format: int64 */
             order_id: number;
+            /**
+             * Format: int64
+             * @description Original `max_fill` at admit time (B8). Lets the FE render a
+             *     partial-fill progress bar as `(original - remaining) / original`.
+             *     `0` for orders persisted before B5/B8 (#[serde(default)] forward
+             *     compat).
+             */
+            original_quantity?: number;
             /** Format: int64 */
             remaining_quantity: number;
             side: string;
@@ -1087,15 +1346,43 @@ export interface components {
             account_id: number;
             /** Format: int64 */
             balance_nanos: string;
+            /**
+             * Format: int64
+             * @description First-deposit timestamp in ms since epoch (B8). `0` for accounts
+             *     with no recorded deposit history (FE renders as "—"). Same
+             *     "since last restart" caveat as the other off-block aggregates
+             *     until persistence runs in prod.
+             */
+            first_deposit_ms?: number;
             /** Format: int64 */
             pnl_nanos: string;
             /** Format: int64 */
             portfolio_value_nanos: string;
             positions: components["schemas"]["PositionValueResponse"][];
+            /**
+             * Format: int64
+             * @description Accumulated realized PnL across all closed positions (C1). Signed.
+             *     `pnl_nanos = realized + unrealized` once both fields populate, but
+             *     `pnl_nanos` is kept for backward compatibility with pre-C1 clients.
+             */
+            realized_pnl_nanos?: string;
             /** Format: int64 */
             total_deposited_nanos: string;
+            /**
+             * Format: int64
+             * @description All-time fill count (B8). The bounded fill window in
+             *     `account_fills` may cap older trades; this counter never does,
+             *     so FE shows the real number instead of "200+".
+             */
+            total_fill_count?: number;
             /** Format: int64 */
             total_position_value_nanos: string;
+            /**
+             * Format: int64
+             * @description Mark-to-market PnL on currently open positions (C1). Computed as
+             *     `Σ (current_price - avg_entry) * quantity` across positions.
+             */
+            unrealized_pnl_nanos?: string;
         };
         PositionDeltaResponse: {
             /** Format: int64 */
@@ -1112,6 +1399,13 @@ export interface components {
             quantity: number;
         };
         PositionValueResponse: {
+            /**
+             * Format: int64
+             * @description Weighted-average entry price for this side of the market (C1). `0`
+             *     for positions opened before C1 landed (`#[serde(default)]` forward
+             *     compat). Same units as `current_price_nanos`.
+             */
+            avg_entry_price_nanos?: string;
             /** Format: int64 */
             current_price_nanos: string;
             /** Format: int32 */
@@ -1708,6 +2002,26 @@ export interface operations {
             };
         };
     };
+    get_activity_overview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Platform-wide aggregates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityOverviewResponse"];
+                };
+            };
+        };
+    };
     get_latest_block: {
         parameters: {
             query?: never;
@@ -1913,6 +2227,29 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_event_traders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Polymarket event id */
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Unique placers across the event's markets */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventTradersResponse"];
+                };
             };
         };
     };
@@ -2249,6 +2586,29 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_open_batch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Market ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Open-batch state for this market */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenBatchResponse"];
+                };
             };
         };
     };
