@@ -139,6 +139,41 @@ echo "$PORTFOLIO" | grep -q "positions" && pass "GET /v1/accounts/$ACCT_ID/portf
 FILLS=$(curl -sf "$API/v1/accounts/$ACCT_ID/fills")
 echo "$FILLS" | grep -q "fill_qty" && pass "GET /v1/accounts/$ACCT_ID/fills" || fail "GET fills"
 
+# ── Backend-data plan endpoints (A1-D1, BACKEND_IMPLEMENTATION_PLAN.md) ─────
+# Runs BEFORE market resolution so per-position fields like
+# `avg_entry_price_nanos` still appear in the portfolio response (resolution
+# zeroes positions and folds them into realized_pnl).
+
+step "Backend-data plan surfaces"
+
+OVERVIEW=$(curl -sf "$API/v1/activity/overview")
+echo "$OVERVIEW" | grep -q '"all_time"' && pass "GET /v1/activity/overview (all_time bucket)" || fail "activity overview missing all_time"
+echo "$OVERVIEW" | grep -q '"last_24h"' && pass "GET /v1/activity/overview (last_24h bucket)" || fail "activity overview missing last_24h"
+echo "$OVERVIEW" | grep -q '"unique_traders"' && pass "activity overview carries unique_traders (B1)" || fail "missing unique_traders"
+echo "$OVERVIEW" | grep -q '"total_volume_nanos"' && pass "activity overview carries total_volume_nanos (B2)" || fail "missing total_volume_nanos"
+echo "$OVERVIEW" | grep -q '"orders"' && pass "activity overview carries orders stats (B6)" || fail "missing orders stats"
+
+OPENBATCH=$(curl -sf "$API/v1/markets/$MKT_ID/open-batch")
+echo "$OPENBATCH" | grep -q '"unique_placers"' && pass "GET /v1/markets/{id}/open-batch (B1 unique_placers)" || fail "open-batch missing unique_placers"
+echo "$OPENBATCH" | grep -q '"indicative_volume_nanos"' && pass "open-batch carries indicative_volume_nanos (C2)" || fail "missing indicative_volume_nanos"
+echo "$OPENBATCH" | grep -q '"indicative_computed_at_ms"' && pass "open-batch carries indicative_computed_at_ms (C2)" || fail "missing indicative_computed_at_ms"
+
+MKT_FULL=$(curl -sf "$API/v1/markets/$MKT_ID")
+echo "$MKT_FULL" | grep -q '"trader_count"' && pass "MarketResponse carries trader_count (B1)" || fail "missing trader_count"
+echo "$MKT_FULL" | grep -q '"volume_24h_nanos"' && pass "MarketResponse carries volume_24h_nanos (B2)" || fail "missing volume_24h_nanos"
+echo "$MKT_FULL" | grep -q '"liquidity_avg10_nanos"' && pass "MarketResponse carries liquidity_avg10_nanos (B4)" || fail "missing liquidity_avg10_nanos"
+echo "$MKT_FULL" | grep -q '"liquidity_band_nanos"' && pass "MarketResponse carries liquidity_band_nanos (B4)" || fail "missing liquidity_band_nanos"
+echo "$MKT_FULL" | grep -q '"orders_placed_total"' && pass "MarketResponse carries orders_placed_total (B6)" || fail "missing orders_placed_total"
+echo "$MKT_FULL" | grep -q '"orders_matched_total"' && pass "MarketResponse carries orders_matched_total (B6)" || fail "missing orders_matched_total"
+echo "$MKT_FULL" | grep -q '"orders_unmatched_total"' && pass "MarketResponse carries orders_unmatched_total (B6)" || fail "missing orders_unmatched_total"
+
+PORTFOLIO_FULL=$(curl -sf "$API/v1/accounts/$ACCT_ID/portfolio")
+echo "$PORTFOLIO_FULL" | grep -q '"first_deposit_ms"' && pass "PortfolioResponse carries first_deposit_ms (B8)" || fail "missing first_deposit_ms"
+echo "$PORTFOLIO_FULL" | grep -q '"total_fill_count"' && pass "PortfolioResponse carries total_fill_count (B8)" || fail "missing total_fill_count"
+echo "$PORTFOLIO_FULL" | grep -q '"realized_pnl_nanos"' && pass "PortfolioResponse carries realized_pnl_nanos (C1)" || fail "missing realized_pnl_nanos"
+echo "$PORTFOLIO_FULL" | grep -q '"unrealized_pnl_nanos"' && pass "PortfolioResponse carries unrealized_pnl_nanos (C1)" || fail "missing unrealized_pnl_nanos"
+echo "$PORTFOLIO_FULL" | grep -q '"avg_entry_price_nanos"' && pass "PositionValueResponse carries avg_entry_price_nanos (C1)" || fail "missing avg_entry_price_nanos"
+
 # ── Market resolution ───────────────────────────────────────────────────────
 
 step "Market resolution"
@@ -147,6 +182,19 @@ RESOLVE=$(curl -sf -X POST "$API/v1/markets/$MKT_ID/resolve" \
     -H 'content-type: application/json' \
     -d '{"payout_nanos": 1000000000}')
 echo "$RESOLVE" | grep -q "resolved" && pass "POST /v1/markets/$MKT_ID/resolve (YES wins)" || fail "resolve market"
+
+# ── Realized PnL after resolution (C1's apply_resolution hook) ──────────────
+# Wait for one block so resolution settles, then re-fetch portfolio. With
+# YES winning at $1 payout and ACCT_ID long 10 YES at $0.60, realized PnL
+# should be a positive 4×nanos-per-share = $4 (= 4_000_000_000 nanos).
+sleep 1
+PORTFOLIO_POST=$(curl -sf "$API/v1/accounts/$ACCT_ID/portfolio")
+REALIZED_POST=$(echo "$PORTFOLIO_POST" | sed -n 's/.*"realized_pnl_nanos":\(-\{0,1\}[0-9]*\).*/\1/p')
+if [[ -n "$REALIZED_POST" && "$REALIZED_POST" != "0" ]]; then
+    pass "realized_pnl_nanos populated after resolution (C1 apply_resolution): $REALIZED_POST"
+else
+    fail "realized_pnl_nanos still zero after resolution (got: '$REALIZED_POST')"
+fi
 
 # ── Metrics check ───────────────────────────────────────────────────────────
 
@@ -163,6 +211,13 @@ step "OpenAPI spec"
 
 SPEC=$(curl -sf "$API/openapi.json")
 echo "$SPEC" | grep -q '"openapi"' && pass "GET /openapi.json" || fail "GET /openapi.json"
+
+# Schema-level checks for the new wire surfaces. These bind against the
+# generated openapi spec, so they fail loudly if a Phase B/C/D wire field
+# regresses or gets renamed.
+echo "$SPEC" | grep -q 'order_cancelled' && pass "openapi exposes order_cancelled SystemEvent variant (D1)" || fail "openapi missing order_cancelled"
+echo "$SPEC" | grep -q '"indicative_yes_price_nanos"' && pass "openapi exposes indicative_yes_price_nanos (C2)" || fail "openapi missing indicative_yes_price_nanos"
+echo "$SPEC" | grep -q '"by_market"' && pass "openapi exposes BlockResponse.by_market (A1)" || fail "openapi missing by_market"
 
 # ── Done ────────────────────────────────────────────────────────────────────
 

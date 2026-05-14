@@ -5,10 +5,11 @@
 
 ## TL;DR
 
-- **Branch:** `r/dev` · **Commits ahead of origin/main:** 52 (not pushed)
+- **Branch:** `r/dev` · ahead of origin/main (not pushed)
 - **Stack:** Next.js 16.2.4 + React 19 + Tailwind v4 + TypeScript strict
 - **Live demo:** `pnpm dev` → http://localhost:3000 · backend at `https://172-104-31-54.nip.io`
 - **Built pages:** `/`, `/m/[id]`, `/m-dev/[id]`, `/activity`, `/portfolio`, `/smoke`
+- **Backend-data plan:** A1–D1 + E1 all landed on `r/dev` (Phase A scaffold, Phase B off-block trackers, Phase C cost-basis + indicative scheduler, Phase D `OrderCancelled` SystemEvent, console Aggregates tab). Coordinated sequencer + verifier deploy for D1 is pending. See [`BACKEND_IMPLEMENTATION_PLAN.md`](./BACKEND_IMPLEMENTATION_PLAN.md) for the landed-commits table.
 
 ## What's built
 
@@ -25,7 +26,7 @@
 | `/m/[id]` | ✅ done | Market detail — batch theater, price chart, market rail (degen-rail / batch-hero / next-batch-banner / last-batches-disclosure) |
 | `/m-dev/[id]` | 🛠 prototype | Pro/dev view of market detail; numeric panels exposing every mock with hints |
 | `/activity` | ✅ done | Hero all-time + 24h pulse strip + batches table + expanded batch detail w/ outcome donut. Lifted from `/activity-dev` (deleted). |
-| `/portfolio` | 🟢 mostly done | Hero + positions list + open orders + activity tab + equity chart. PnL split / cost basis / cancellations / equity curve currently mocked (see `BACKEND_DATA_PLAN.md`). |
+| `/portfolio` | 🟢 mostly done | Hero + positions list + open orders + activity tab + equity chart. PnL split + cost basis + first-deposit + lifetime fill count + partial-fill progress are now real (C1 + B8); cancellations land once D1 is deployed; equity curve still mocked (see `BACKEND_DATA_PLAN.md`). |
 | `/smoke` | utility | Wire-things-up debug page |
 
 ### Cross-cutting
@@ -36,28 +37,21 @@
 
 ## Backend-data backlog
 
-The active backlog for backend changes that would replace remaining FE mocks lives in **[`BACKEND_DATA_PLAN.md`](./BACKEND_DATA_PLAN.md)**. Twelve entries (traders, volume, liquidity, orders, indicative, per-batch breakdown, portfolio, price 24h delta, first-deposit, trade count, partial-fill progress, plus a "Not now" list for imbalance / `created_at_height` / equity curve).
+The data-plan catalog of FE surfaces lives in **[`BACKEND_DATA_PLAN.md`](./BACKEND_DATA_PLAN.md)**; the corresponding 15-step backend implementation plan is **[`BACKEND_IMPLEMENTATION_PLAN.md`](./BACKEND_IMPLEMENTATION_PLAN.md)**. Status:
+
+- **Done (A–E1):** traders, 24h + lifetime volume, price-24h-ago delta, liquidity (last-10 ±band), per-block per-market sidecar (placers / volume / placed / matched / unmatched / welfare), partial-fill `original_quantity`, first-deposit / lifetime-fill-count, cost basis (WAC) with realized + unrealized PnL split, indicative open-batch (C2 shadow-solve), on-chain `OrderCancelled` SystemEvent (D1), Sybil console "Aggregates" tab (E1).
+- **Still deferred ("Not now" in the data plan):** per-event imbalance, `created_at_height` (FE approximates from timestamp at the 2s cadence), per-account equity curve.
+- **Deploy:** the D1 sequencer + verifier ship is coordinated and pending a follow-up session. Until that ships, the on-chain cancel feed is empty in prod even though the wire variant is live.
+
+End-to-end smoke for every Phase A–D wire field lives in [`scripts/smoke-test.sh`](../scripts/smoke-test.sh).
 
 ## Phase 2 status
 
 Polymarket mirror metadata (`event_id`, `event_title`, `event_image_url`, `event_icon_url`, `event_end_date_ms`, market-level image/icon/end-date, `categories`) is **shipped** — fields live on `MarketResponse`, populated by `sybil-polymarket` from `gamma-api.polymarket.com`. Archived plan: [`archive/PHASE_2_PLAN.md`](./archive/PHASE_2_PLAN.md).
 
-## Local-only commits (52 ahead of origin)
+## Local-only commits (ahead of origin)
 
-`git push origin r/dev` to publish. CI runs via `.github/workflows/frontend.yml`. Recent landed work (last 10):
-
-```
-d36b5ab mock-value: add pill + tint variants; mark every mock visibly
-bf77f38 activity: lift /activity-dev to /activity, drop prototype
-c29a340 activity: handoff parity pass — compact numbers, subtler mocks, live batch chip
-21de88f activity: expanded batch detail + outcome donut
-7e33158 activity: visual components — hero, pulse strip, batches table
-8cd3a1b activity: be honest about the buffer window
-570ad22 store: make applyBlock idempotent + monotonic
-915ea7b activity: prototype page at /activity-dev
-46b0704 activity: hooks layer
-709378f activity: pure derivers + mock helpers
-```
+`git push origin r/dev` to publish. CI runs via `.github/workflows/frontend.yml`. Use `git log origin/main..r/dev --oneline | wc -l` for the up-to-date count; the most recent landed work is in `BACKEND_IMPLEMENTATION_PLAN.md`'s landed-commits table (A1 → E1).
 
 ## Active design tradeoffs
 
