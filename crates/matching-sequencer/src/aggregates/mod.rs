@@ -13,10 +13,12 @@
 //!
 //! See `frontend/BACKEND_IMPLEMENTATION_PLAN.md` for the full plan.
 
+pub mod cost_basis_tracker;
 pub mod liquidity_tracker;
 pub mod order_stats_tracker;
 pub mod trader_tracker;
 
+pub use cost_basis_tracker::{CostBasisTracker, CostBasisTrackerSnapshot};
 pub use liquidity_tracker::{LiquidityTracker, LiquidityTrackerSnapshot, LIQUIDITY_RING_CAP};
 pub use order_stats_tracker::{OrderStats, OrderStatsTracker, OrderStatsTrackerSnapshot};
 pub use trader_tracker::{TraderTracker, TraderTrackerSnapshot};

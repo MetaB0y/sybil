@@ -150,6 +150,7 @@ pub async fn get_portfolio(
             quantity: p.quantity,
             current_price_nanos: p.current_price_nanos,
             value_nanos: p.value_nanos,
+            avg_entry_price_nanos: p.avg_entry_price_nanos,
         })
         .collect();
 
@@ -163,6 +164,8 @@ pub async fn get_portfolio(
         pnl_nanos: portfolio.pnl_nanos,
         first_deposit_ms: portfolio.first_deposit_ms,
         total_fill_count: portfolio.total_fill_count,
+        realized_pnl_nanos: portfolio.realized_pnl_nanos,
+        unrealized_pnl_nanos: portfolio.unrealized_pnl_nanos,
     }))
 }
 

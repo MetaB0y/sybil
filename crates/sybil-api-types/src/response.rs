@@ -524,6 +524,15 @@ pub struct PortfolioResponse {
     /// so FE shows the real number instead of "200+".
     #[serde(default)]
     pub total_fill_count: u64,
+    /// Accumulated realized PnL across all closed positions (C1). Signed.
+    /// `pnl_nanos = realized + unrealized` once both fields populate, but
+    /// `pnl_nanos` is kept for backward compatibility with pre-C1 clients.
+    #[serde(default)]
+    pub realized_pnl_nanos: i64,
+    /// Mark-to-market PnL on currently open positions (C1). Computed as
+    /// `Σ (current_price - avg_entry) * quantity` across positions.
+    #[serde(default)]
+    pub unrealized_pnl_nanos: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -534,6 +543,11 @@ pub struct PositionValueResponse {
     pub quantity: i64,
     pub current_price_nanos: u64,
     pub value_nanos: i64,
+    /// Weighted-average entry price for this side of the market (C1). `0`
+    /// for positions opened before C1 landed (`#[serde(default)]` forward
+    /// compat). Same units as `current_price_nanos`.
+    #[serde(default)]
+    pub avg_entry_price_nanos: u64,
 }
 
 // --- Price History ---

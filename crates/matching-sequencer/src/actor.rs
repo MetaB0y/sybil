@@ -1228,6 +1228,7 @@ impl Actor for SequencerActor {
                             state.sequencer.last_clearing_prices(),
                             first_deposit_ms,
                             total_fill_count,
+                            &state.sequencer.cost_basis_tracker,
                         ))
                     }
                     None => Err(SequencerError::Rejected(crate::error::Rejection {

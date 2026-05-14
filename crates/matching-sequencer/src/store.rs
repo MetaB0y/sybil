@@ -59,7 +59,10 @@ use crate::account_storage::{
     AccountSnapshotSlot, AccountStateStore, CommittedAccountState, FencedAccountStorage,
     QmdbStateLeafExclusionProof, QmdbStateLeafProof, QmdbStateRoot, RecoveryAccountState,
 };
-use crate::aggregates::{LiquidityTrackerSnapshot, OrderStatsTrackerSnapshot, TraderTrackerSnapshot};
+use crate::aggregates::{
+    CostBasisTrackerSnapshot, LiquidityTrackerSnapshot, OrderStatsTrackerSnapshot,
+    TraderTrackerSnapshot,
+};
 use crate::block::{state_sidecar_snapshot_from_resting_orders, BlockHeader};
 use crate::price_tracker::{
     PriceTrackerClearingHistorySnapshot, PriceTrackerVolumeSnapshot,
@@ -197,6 +200,13 @@ const KEY_FIRST_DEPOSIT_MS_SNAPSHOT: &str = "snapshot";
 const FILL_TOTAL_COUNTS: TableDefinition<&str, &[u8]> = TableDefinition::new("fill_total_counts");
 const KEY_FILL_TOTAL_COUNTS_SNAPSHOT: &str = "snapshot";
 
+/// Off-block cost-basis tracker (C1): weighted-average entry price per
+/// (account, market, outcome) + realized PnL per account. Single blob
+/// keyed "snapshot"; missing row yields `CostBasisTrackerSnapshot::default()`
+/// (cold start until activity accumulates).
+const COST_BASIS_TRACKER: TableDefinition<&str, &[u8]> = TableDefinition::new("cost_basis_tracker");
+const KEY_COST_BASIS_TRACKER_SNAPSHOT: &str = "snapshot";
+
 // Counter keys
 const KEY_STORE_LAYOUT_VERSION: &str = "store_layout_version";
 const KEY_HEIGHT: &str = "height";
@@ -326,6 +336,10 @@ pub struct RestoredState {
     pub first_deposit_ms: HashMap<AccountId, u64>,
     /// All-time fill counter per account (B8). Empty map on cold start.
     pub fill_total_counts: HashMap<AccountId, u64>,
+    /// Off-block CostBasisTracker snapshot (C1). Missing-row → default
+    /// (cold start). Restoring an empty tracker is benign: the FE shows
+    /// `avg_entry = 0` until trades resume.
+    pub cost_basis_tracker: CostBasisTrackerSnapshot,
 }
 
 /// Borrowed view of sequencer state needed to persist one block.
@@ -365,6 +379,9 @@ pub struct SequencerSnapshot<'a> {
     /// All-time per-account fill counters (B8). Owned for the same reason
     /// as `first_deposit_ms`.
     pub fill_total_counts: HashMap<AccountId, u64>,
+    /// Off-block CostBasisTracker snapshot (C1). Owned — serialized once
+    /// into the `COST_BASIS_TRACKER` table.
+    pub cost_basis_tracker: CostBasisTrackerSnapshot,
 }
 
 impl Store {
@@ -404,6 +421,7 @@ impl Store {
         txn.open_table(ORDER_STATS_TRACKER)?;
         txn.open_table(FIRST_DEPOSIT_MS)?;
         txn.open_table(FILL_TOTAL_COUNTS)?;
+        txn.open_table(COST_BASIS_TRACKER)?;
         txn.commit()?;
 
         initialize_or_validate_layout(&db)?;
@@ -695,6 +713,13 @@ impl Store {
             entries.sort_by_key(|(aid, _)| aid.0);
             let bytes = rmp_serde::to_vec(&entries)?;
             table.insert(KEY_FILL_TOTAL_COUNTS_SNAPSHOT, bytes.as_slice())?;
+        }
+
+        // CostBasisTracker snapshot (C1) — single blob keyed "snapshot".
+        {
+            let mut table = txn.open_table(COST_BASIS_TRACKER)?;
+            let bytes = rmp_serde::to_vec(&snapshot.cost_basis_tracker)?;
+            table.insert(KEY_COST_BASIS_TRACKER_SNAPSHOT, bytes.as_slice())?;
         }
 
         // Counters
@@ -1096,6 +1121,15 @@ impl Store {
             }
         };
 
+        // CostBasisTracker snapshot (C1). Missing-row → default (cold start).
+        let cost_basis_tracker: CostBasisTrackerSnapshot = {
+            let table = txn.open_table(COST_BASIS_TRACKER)?;
+            match table.get(KEY_COST_BASIS_TRACKER_SNAPSHOT)? {
+                Some(value) => rmp_serde::from_slice(value.value())?,
+                None => CostBasisTrackerSnapshot::default(),
+            }
+        };
+
         info!(
             height = recovery_metadata.height,
             accounts = num_accounts,
@@ -1140,6 +1174,7 @@ impl Store {
             order_stats_tracker,
             first_deposit_ms,
             fill_total_counts,
+            cost_basis_tracker,
         }))
     }
 
@@ -1653,6 +1688,7 @@ mod tests {
                 order_stats_tracker: Default::default(),
                 first_deposit_ms: HashMap::new(),
                 fill_total_counts: HashMap::new(),
+                cost_basis_tracker: Default::default(),
             }
         }
 
@@ -1684,6 +1720,7 @@ mod tests {
                 order_stats_tracker: Default::default(),
                 first_deposit_ms: HashMap::new(),
                 fill_total_counts: HashMap::new(),
+                cost_basis_tracker: Default::default(),
             }
         }
     }

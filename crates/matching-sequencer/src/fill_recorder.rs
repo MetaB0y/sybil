@@ -4,7 +4,8 @@ use std::collections::HashMap;
 
 use matching_engine::{compute_fill_settlement, Fill, MarketId, Order};
 
-use crate::account::AccountId;
+use crate::account::{AccountId, AccountStore};
+use crate::aggregates::CostBasisTracker;
 use crate::market_info::AccountFillRecord;
 
 /// Bounded in-memory fill history retained per account.
@@ -113,13 +114,18 @@ impl FillRecorder {
         self.total_count.get(&account_id).copied().unwrap_or(0)
     }
 
-    /// Record fills from a block into per-account fill history.
+    /// Record fills from a block into per-account fill history. Also drives
+    /// the cost-basis tracker (C1) so realized PnL accumulates in lockstep
+    /// with the fill window. The tracker reaches into `accounts` for
+    /// post-fill position state (the prior position is `current - delta`).
     pub fn record_fills(
         &mut self,
         fills: &[Fill],
         orders: &HashMap<u64, &Order>,
         height: u64,
         timestamp_ms: u64,
+        cost_basis_tracker: &mut CostBasisTracker,
+        accounts: &AccountStore,
     ) {
         for fill in fills {
             if fill.fill_qty == 0 {
@@ -135,6 +141,18 @@ impl FillRecorder {
                 Some(delta) => delta.position_deltas,
                 None => Vec::new(),
             };
+
+            // Cost-basis hook (MINT short-circuits inside apply_fill). Runs
+            // before the bounded-history push so a tracker panic doesn't
+            // leave the recorder partially advanced.
+            if let Some(account) = accounts.get(account_id) {
+                cost_basis_tracker.apply_fill(
+                    account_id,
+                    &position_deltas,
+                    fill.fill_price as i64,
+                    account,
+                );
+            }
 
             let records = self.account_fills.entry(account_id).or_default();
             records.push(AccountFillRecord {
@@ -200,10 +218,12 @@ mod tests {
 
         let max_fills = 8;
         let mut recorder = FillRecorder::with_retention(max_fills);
+        let mut cb = CostBasisTracker::new();
+        let accounts = AccountStore::new();
         for height in 1..=(max_fills as u64 + 5) {
             let mut fill = Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2);
             fill.account_id = 42;
-            recorder.record_fills(&[fill], &orders, height, height * 1_000);
+            recorder.record_fills(&[fill], &orders, height, height * 1_000, &mut cb, &accounts);
         }
 
         let fills = recorder.account_fills(AccountId(42), None, max_fills + 10, 0);
@@ -256,9 +276,11 @@ mod tests {
         orders.insert(order.id, &order);
 
         let mut recorder = FillRecorder::new();
+        let mut cb = CostBasisTracker::new();
+        let accounts = AccountStore::new();
         let mut fill = Fill::new(order.id, 4, NANOS_PER_DOLLAR / 2);
         fill.account_id = 42;
-        recorder.record_fills(&[fill], &orders, 1, 1_000);
+        recorder.record_fills(&[fill], &orders, 1, 1_000, &mut cb, &accounts);
 
         assert_eq!(recorder.total_fills(AccountId(42)), 1);
     }
@@ -272,9 +294,11 @@ mod tests {
         orders.insert(order.id, &order);
 
         let mut recorder = FillRecorder::new();
+        let mut cb = CostBasisTracker::new();
+        let accounts = AccountStore::new();
         let mut fill = Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2);
         fill.account_id = AccountId::MINT.0;
-        recorder.record_fills(&[fill], &orders, 1, 1_000);
+        recorder.record_fills(&[fill], &orders, 1, 1_000, &mut cb, &accounts);
 
         // MINT fills still land in account_fills (we may want to query
         // them) but total_count must not include them — MINT is a system
@@ -291,10 +315,12 @@ mod tests {
         orders.insert(order.id, &order);
 
         let mut recorder = FillRecorder::new();
+        let mut cb = CostBasisTracker::new();
+        let accounts = AccountStore::new();
         for h in 1..=5 {
             let mut fill = Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2);
             fill.account_id = 42;
-            recorder.record_fills(&[fill], &orders, h, h * 1_000);
+            recorder.record_fills(&[fill], &orders, h, h * 1_000, &mut cb, &accounts);
         }
         assert_eq!(recorder.total_fills(AccountId(42)), 5);
     }

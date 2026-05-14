@@ -575,6 +575,12 @@ pub struct BlockSequencer {
     pub liquidity_tracker: crate::aggregates::LiquidityTracker,
     /// Off-block order stats tracker: placed/matched/unmatched per market + platform + 24h.
     pub order_stats_tracker: crate::aggregates::OrderStatsTracker,
+    /// Off-block cost-basis tracker (C1): weighted-average entry price per
+    /// (account, market, outcome) + realized PnL per account. Driven by
+    /// `FillRecorder.record_fills` (apply_fill) and by `resolve_market` /
+    /// `resolve_market_attested` (apply_resolution). Owned here, not in
+    /// FillRecorder, so rollback footprints stay separated.
+    pub cost_basis_tracker: crate::aggregates::CostBasisTracker,
     /// First-deposit timestamp per account in ms since UNIX epoch.
     /// Off-block — never enters `state_root` / `events_root`. Populated by
     /// `fund_account` (dev mode) and `ingest_l1_deposit` on the FIRST
@@ -629,6 +635,7 @@ impl BlockSequencer {
             trader_tracker: crate::aggregates::TraderTracker::new(),
             liquidity_tracker: crate::aggregates::LiquidityTracker::new(),
             order_stats_tracker: crate::aggregates::OrderStatsTracker::new(),
+            cost_basis_tracker: crate::aggregates::CostBasisTracker::new(),
             first_deposit_ms: HashMap::new(),
             lifecycle: crate::market_lifecycle::MarketLifecycle::new(oracle),
             pubkey_registry: HashMap::new(),
@@ -709,6 +716,9 @@ impl BlockSequencer {
             order_stats_tracker: crate::aggregates::OrderStatsTracker::restore(
                 state.order_stats_tracker,
             ),
+            cost_basis_tracker: crate::aggregates::CostBasisTracker::restore(
+                state.cost_basis_tracker,
+            ),
             first_deposit_ms: state.first_deposit_ms,
             lifecycle,
             pubkey_registry: state.pubkey_registry,
@@ -767,6 +777,7 @@ impl BlockSequencer {
             price_tracker_clearing_history: self.price_tracker.clearing_history_snapshot(),
             liquidity_tracker: self.liquidity_tracker.snapshot(),
             order_stats_tracker: self.order_stats_tracker.snapshot(),
+            cost_basis_tracker: self.cost_basis_tracker.snapshot(),
             first_deposit_ms: self.first_deposit_ms.clone(),
             fill_total_counts: self.fill_recorder.total_counts().clone(),
         }
@@ -1471,12 +1482,19 @@ impl BlockSequencer {
                 payout_nanos,
                 record,
             } => {
+                let mut pre_settle_positions: Vec<(AccountId, u8, i64)> = Vec::new();
                 let affected_accounts: Vec<AccountId> = self
                     .accounts
                     .iter()
                     .filter_map(|(&account_id, account)| {
                         let yes_pos = account.position(market_id, 0);
                         let no_pos = account.position(market_id, 1);
+                        if yes_pos != 0 {
+                            pre_settle_positions.push((account_id, 0, yes_pos));
+                        }
+                        if no_pos != 0 {
+                            pre_settle_positions.push((account_id, 1, no_pos));
+                        }
                         (yes_pos != 0 || no_pos != 0).then_some(account_id)
                     })
                     .collect();
@@ -1485,6 +1503,11 @@ impl BlockSequencer {
                 }
                 let affected_accounts =
                     settlement::resolve_market(&mut self.accounts, market_id, payout_nanos);
+                self.cost_basis_tracker.apply_resolution(
+                    market_id,
+                    payout_nanos as i64,
+                    pre_settle_positions,
+                );
                 self.record_system_event(SystemEvent::MarketResolved {
                     market_id,
                     payout_nanos,
@@ -1527,12 +1550,19 @@ impl BlockSequencer {
                 payout_nanos,
                 record,
             } => {
+                let mut pre_settle_positions: Vec<(AccountId, u8, i64)> = Vec::new();
                 let affected_accounts: Vec<AccountId> = self
                     .accounts
                     .iter()
                     .filter_map(|(&account_id, account)| {
                         let yes_pos = account.position(market_id, 0);
                         let no_pos = account.position(market_id, 1);
+                        if yes_pos != 0 {
+                            pre_settle_positions.push((account_id, 0, yes_pos));
+                        }
+                        if no_pos != 0 {
+                            pre_settle_positions.push((account_id, 1, no_pos));
+                        }
                         (yes_pos != 0 || no_pos != 0).then_some(account_id)
                     })
                     .collect();
@@ -1541,6 +1571,11 @@ impl BlockSequencer {
                 }
                 let affected_accounts =
                     settlement::resolve_market(&mut self.accounts, market_id, payout_nanos);
+                self.cost_basis_tracker.apply_resolution(
+                    market_id,
+                    payout_nanos as i64,
+                    pre_settle_positions,
+                );
                 self.record_system_event(SystemEvent::MarketResolved {
                     market_id,
                     payout_nanos,
@@ -1780,8 +1815,14 @@ impl BlockSequencer {
             self.height,
             timestamp_ms,
         );
-        self.fill_recorder
-            .record_fills(fills, &order_map, self.height, timestamp_ms);
+        self.fill_recorder.record_fills(
+            fills,
+            &order_map,
+            self.height,
+            timestamp_ms,
+            &mut self.cost_basis_tracker,
+            &self.accounts,
+        );
 
         let post_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
         let balance_delta = post_total_balance - pre_total_balance;
@@ -3019,6 +3060,7 @@ mod tests {
             order_stats_tracker: Default::default(),
             first_deposit_ms: HashMap::new(),
             fill_total_counts: HashMap::new(),
+            cost_basis_tracker: Default::default(),
         };
 
         let mut seq_b = BlockSequencer::restore(state, oracle, SequencerConfig::default());
