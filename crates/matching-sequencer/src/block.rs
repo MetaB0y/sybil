@@ -83,6 +83,11 @@ pub struct Block {
     /// credits each active market; the platform `unique_placers` counts the
     /// account once (so sum-of-by-market over-counts for spreads).
     pub placers_by_market: HashMap<MarketId, u32>,
+    /// Per-market volume contribution from this block's fills, in nanos. A
+    /// multi-market fill credits every active market with its full notional;
+    /// the platform `total_volume` counts each fill once (so sum-of-by-market
+    /// over-counts for bundles, just like `placers_by_market`).
+    pub volume_by_market: HashMap<MarketId, u64>,
 }
 
 /// Compute a deterministic account-only state root with the verifier's

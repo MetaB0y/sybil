@@ -34,18 +34,21 @@ fn now_unix_ms() -> u64 {
 pub async fn get_activity_overview(
     State(state): State<AppState>,
 ) -> Result<Json<ActivityOverviewResponse>, AppError> {
-    let (all_time_traders, traders_24h) = state
-        .sequencer
-        .get_platform_trader_counts(now_unix_ms())
-        .await?;
+    let now_ms = now_unix_ms();
+    let ((all_time_traders, traders_24h), (all_time_volume, volume_24h)) = tokio::try_join!(
+        state.sequencer.get_platform_trader_counts(now_ms),
+        state.sequencer.get_platform_volumes(now_ms),
+    )?;
 
     Ok(Json(ActivityOverviewResponse {
         all_time: OverviewBucketResponse {
             unique_traders: all_time_traders as u64,
+            total_volume_nanos: all_time_volume,
             ..Default::default()
         },
         last_24h: OverviewBucketResponse {
             unique_traders: traders_24h as u64,
+            total_volume_nanos: volume_24h,
             ..Default::default()
         },
     }))

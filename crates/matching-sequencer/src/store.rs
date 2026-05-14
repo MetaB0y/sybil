@@ -61,6 +61,7 @@ use crate::account_storage::{
 };
 use crate::aggregates::TraderTrackerSnapshot;
 use crate::block::{state_sidecar_snapshot_from_resting_orders, BlockHeader};
+use crate::price_tracker::PriceTrackerVolumeSnapshot;
 use crate::bridge::{BridgeState, BridgeWithdrawalRequest, L1Deposit};
 use crate::market_info::{AccountFillRecord, MarketMetadata};
 use crate::market_lifecycle::MarketLifecycle;
@@ -155,6 +156,13 @@ const PENDING_BRIDGE_WITHDRAWALS: TableDefinition<u64, &[u8]> =
 /// load yields `Default::default()` (cold start until activity accumulates).
 const TRADER_TRACKER: TableDefinition<&str, &[u8]> = TableDefinition::new("trader_tracker");
 const KEY_TRADER_TRACKER_SNAPSHOT: &str = "snapshot";
+
+/// Off-block price-tracker volume extensions: platform running total +
+/// rolling hourly buckets. Stored as a single blob keyed `"snapshot"`,
+/// matching the pattern set by `TRADER_TRACKER`.
+const PRICE_TRACKER_VOLUME: TableDefinition<&str, &[u8]> =
+    TableDefinition::new("price_tracker_volume");
+const KEY_PRICE_TRACKER_VOLUME_SNAPSHOT: &str = "snapshot";
 
 // Counter keys
 const KEY_STORE_LAYOUT_VERSION: &str = "store_layout_version";
@@ -268,6 +276,9 @@ pub struct RestoredState {
     /// Off-block trader tracker snapshot. Missing table on load yields
     /// `TraderTrackerSnapshot::default()` (cold start).
     pub trader_tracker: TraderTrackerSnapshot,
+    /// Volume-extension slice of `PriceTracker` (platform running total +
+    /// hourly buckets). Missing table on load yields the default (cold start).
+    pub price_tracker_volume: PriceTrackerVolumeSnapshot,
 }
 
 /// Borrowed view of sequencer state needed to persist one block.
@@ -289,6 +300,9 @@ pub struct SequencerSnapshot<'a> {
     /// Off-block trader tracker snapshot (owned — serialized once into the
     /// `TRADER_TRACKER` table).
     pub trader_tracker: TraderTrackerSnapshot,
+    /// Off-block PriceTracker volume extensions (owned — serialized once
+    /// into the `PRICE_TRACKER_VOLUME` table).
+    pub price_tracker_volume: PriceTrackerVolumeSnapshot,
 }
 
 impl Store {
@@ -322,6 +336,7 @@ impl Store {
         txn.open_table(PENDING_L1_DEPOSITS)?;
         txn.open_table(PENDING_BRIDGE_WITHDRAWALS)?;
         txn.open_table(TRADER_TRACKER)?;
+        txn.open_table(PRICE_TRACKER_VOLUME)?;
         txn.commit()?;
 
         initialize_or_validate_layout(&db)?;
@@ -557,6 +572,13 @@ impl Store {
             let mut table = txn.open_table(TRADER_TRACKER)?;
             let bytes = rmp_serde::to_vec(&snapshot.trader_tracker)?;
             table.insert(KEY_TRADER_TRACKER_SNAPSHOT, bytes.as_slice())?;
+        }
+
+        // Price-tracker volume extensions — same shape as TRADER_TRACKER.
+        {
+            let mut table = txn.open_table(PRICE_TRACKER_VOLUME)?;
+            let bytes = rmp_serde::to_vec(&snapshot.price_tracker_volume)?;
+            table.insert(KEY_PRICE_TRACKER_VOLUME_SNAPSHOT, bytes.as_slice())?;
         }
 
         // Counters
@@ -896,6 +918,17 @@ impl Store {
             }
         };
 
+        // Price-tracker volume extensions. Same missing-row → default
+        // semantics as the trader tracker; cold restarts start with empty
+        // hourly buckets and a zero platform total.
+        let price_tracker_volume: PriceTrackerVolumeSnapshot = {
+            let table = txn.open_table(PRICE_TRACKER_VOLUME)?;
+            match table.get(KEY_PRICE_TRACKER_VOLUME_SNAPSHOT)? {
+                Some(value) => rmp_serde::from_slice(value.value())?,
+                None => PriceTrackerVolumeSnapshot::default(),
+            }
+        };
+
         info!(
             height = recovery_metadata.height,
             accounts = num_accounts,
@@ -934,6 +967,7 @@ impl Store {
             pending_l1_deposits,
             pending_bridge_withdrawals,
             trader_tracker,
+            price_tracker_volume,
         }))
     }
 
@@ -1441,6 +1475,7 @@ mod tests {
                 account_fills: Vec::new(),
                 resting_orders,
                 trader_tracker: Default::default(),
+                price_tracker_volume: Default::default(),
             }
         }
 
@@ -1466,6 +1501,7 @@ mod tests {
                 account_fills,
                 resting_orders: Vec::new(),
                 trader_tracker: Default::default(),
+                price_tracker_volume: Default::default(),
             }
         }
     }

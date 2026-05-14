@@ -126,6 +126,12 @@ pub enum SequencerMsg {
     /// Unique placers in the open (uncommitted) batch for one market —
     /// resting book ∪ pending bundles touching the market.
     GetOpenBatchPlacers(MarketId, RpcReplyPort<u32>),
+    /// Platform-wide volume: `(all_time, last_24h)`. Caller supplies
+    /// `now_ms` so 24h-bucket cutoff is testable.
+    GetPlatformVolumes(u64, RpcReplyPort<(u64, u64)>),
+    /// All-market 24h volumes — used by `list_markets` to populate
+    /// `MarketResponse.volume_24h_nanos` in one round-trip.
+    GetAllMarketVolumes24h(u64, RpcReplyPort<HashMap<MarketId, u64>>),
 }
 
 /// A market search result enriched with metadata, prices, and volume.
@@ -1252,6 +1258,12 @@ impl Actor for SequencerActor {
             SequencerMsg::GetOpenBatchPlacers(market_id, reply) => {
                 let _ = reply.send(state.sequencer.open_batch_unique_placers(market_id));
             }
+            SequencerMsg::GetPlatformVolumes(now_ms, reply) => {
+                let _ = reply.send(state.sequencer.platform_volumes(now_ms));
+            }
+            SequencerMsg::GetAllMarketVolumes24h(now_ms, reply) => {
+                let _ = reply.send(state.sequencer.all_market_volumes_24h(now_ms));
+            }
         }
         Ok(())
     }
@@ -1859,6 +1871,25 @@ impl SequencerHandle {
         market_id: MarketId,
     ) -> Result<u32, SequencerError> {
         self.rpc(|reply| SequencerMsg::GetOpenBatchPlacers(market_id, reply))
+            .await
+    }
+
+    /// Platform-wide volume `(all_time, last_24h)` with caller-supplied
+    /// `now_ms` so 24h-bucket cutoff is deterministic for tests.
+    #[tracing::instrument(skip_all)]
+    pub async fn get_platform_volumes(&self, now_ms: u64) -> Result<(u64, u64), SequencerError> {
+        self.rpc(|reply| SequencerMsg::GetPlatformVolumes(now_ms, reply))
+            .await
+    }
+
+    /// All-market 24h volume map — single round-trip companion to
+    /// `get_all_market_volumes` (the cumulative variant).
+    #[tracing::instrument(skip_all)]
+    pub async fn get_all_market_volumes_24h(
+        &self,
+        now_ms: u64,
+    ) -> Result<HashMap<MarketId, u64>, SequencerError> {
+        self.rpc(|reply| SequencerMsg::GetAllMarketVolumes24h(now_ms, reply))
             .await
     }
 }

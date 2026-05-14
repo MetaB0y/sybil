@@ -180,6 +180,10 @@ struct SolvedBatch {
 
 struct FinalizedBlockState {
     post_state: CanonicalState,
+    /// Per-market volume split for this block, returned by
+    /// `PriceTracker::record_block` and plumbed onto the Block so wire
+    /// consumers see `BlockMarketStats.volume_nanos`.
+    volume_by_market: HashMap<MarketId, u64>,
 }
 
 struct WitnessArtifacts {
@@ -649,11 +653,15 @@ impl BlockSequencer {
             markets: state.markets,
             market_groups: state.market_groups,
             last_header: state.last_header,
-            price_tracker: crate::price_tracker::PriceTracker::with_state_and_retention(
-                state.last_clearing_prices,
-                state.market_volumes,
-                config.max_price_history_points_per_market,
-            ),
+            price_tracker: {
+                let mut pt = crate::price_tracker::PriceTracker::with_state_and_retention(
+                    state.last_clearing_prices,
+                    state.market_volumes,
+                    config.max_price_history_points_per_market,
+                );
+                pt.restore_volume_extensions(state.price_tracker_volume);
+                pt
+            },
             fill_recorder: crate::fill_recorder::FillRecorder::restore_with_retention(
                 state.account_fills,
                 config.max_fill_history_per_account,
@@ -712,6 +720,7 @@ impl BlockSequencer {
             resting_orders: self.order_book.snapshot(),
             bridge_state: &self.bridge,
             trader_tracker: self.trader_tracker.snapshot(),
+            price_tracker_volume: self.price_tracker.volume_extensions_snapshot(),
         }
     }
 
@@ -816,6 +825,25 @@ impl BlockSequencer {
 
     pub fn market_volumes(&self) -> &HashMap<MarketId, u64> {
         self.price_tracker.market_volumes()
+    }
+
+    /// Rolling 24h volume for one market (±1h bucket resolution).
+    pub fn market_volume_24h(&self, market_id: MarketId, now_ms: u64) -> u64 {
+        self.price_tracker.market_volume_24h(market_id, now_ms)
+    }
+
+    /// All-market 24h volume map. Used by `list_markets` to populate every
+    /// `MarketResponse.volume_24h_nanos` in one pass.
+    pub fn all_market_volumes_24h(&self, now_ms: u64) -> HashMap<MarketId, u64> {
+        self.price_tracker.all_market_volumes_24h(now_ms)
+    }
+
+    /// Platform-wide volumes `(all_time, last_24h)` in one shot.
+    pub fn platform_volumes(&self, now_ms: u64) -> (u64, u64) {
+        (
+            self.price_tracker.platform_volume_total(),
+            self.price_tracker.platform_volume_24h(now_ms),
+        )
     }
 
     /// All-time unique trader count for one market.
@@ -1585,7 +1613,7 @@ impl BlockSequencer {
         }
 
         let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
-        self.price_tracker.record_block(
+        let volume_by_market = self.price_tracker.record_block(
             fills,
             &order_map,
             clearing_prices,
@@ -1626,7 +1654,10 @@ impl BlockSequencer {
             }
         }
 
-        FinalizedBlockState { post_state }
+        FinalizedBlockState {
+            post_state,
+            volume_by_market,
+        }
     }
 
     fn assemble_witness_artifacts(&self, input: WitnessAssemblyInput<'_>) -> WitnessArtifacts {
@@ -2116,8 +2147,10 @@ impl BlockSequencer {
             build_witness_phase_snapshots(&self.accounts, &system_account_baselines);
 
         // Phase 2: apply fills, derive minting, and validate the finalized account state.
-        let FinalizedBlockState { post_state } =
-            self.finalize_block_state_phase(&fills, &problem, &clearing_prices, timestamp_ms);
+        let FinalizedBlockState {
+            post_state,
+            volume_by_market,
+        } = self.finalize_block_state_phase(&fills, &problem, &clearing_prices, timestamp_ms);
 
         // Update order book: release filled orders' reservations, adjust partial fills
         self.order_book
@@ -2173,6 +2206,7 @@ impl BlockSequencer {
             orders_filled,
             unique_placers,
             placers_by_market,
+            volume_by_market,
         };
 
         // Verify the block using all 4 verification layers.
@@ -2771,6 +2805,7 @@ mod tests {
             admit_log: Vec::new(),
             account_fills: Vec::new(),
             trader_tracker: Default::default(),
+            price_tracker_volume: Default::default(),
         };
 
         let mut seq_b = BlockSequencer::restore(state, oracle, SequencerConfig::default());

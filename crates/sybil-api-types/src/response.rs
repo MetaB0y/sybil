@@ -88,6 +88,10 @@ pub struct MarketResponse {
     /// restart" until prod persistence is enabled.
     #[serde(default)]
     pub trader_count: u32,
+    /// Rolling 24h trading volume in nanos (±1h bucket resolution). Off-block;
+    /// "since last restart" until prod persistence is enabled.
+    #[serde(default)]
+    pub volume_24h_nanos: u64,
 }
 
 /// Minimal market data for high-throughput dashboards (drops strings & metadata).
@@ -106,6 +110,10 @@ pub struct MarketSummaryResponse {
     /// All-time unique trader count (mirrors `MarketResponse.trader_count`).
     #[serde(default)]
     pub trader_count: u32,
+    /// Rolling 24h trading volume in nanos (mirrors
+    /// `MarketResponse.volume_24h_nanos`).
+    #[serde(default)]
+    pub volume_24h_nanos: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,6 +209,12 @@ pub struct BlockMarketStats {
     /// platform `unique_placers` scalar counts the account once.
     #[serde(default)]
     pub placers: u32,
+    /// Per-market volume contribution from this block's fills, in nanos.
+    /// Multi-market fills credit each active market with their full
+    /// notional; the platform `total_volume_nanos` scalar counts each fill
+    /// once.
+    #[serde(default)]
+    pub volume_nanos: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -156,16 +156,22 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
         .map(system_event_to_response)
         .collect();
 
-    let by_market: HashMap<String, BlockMarketStats> = block
-        .placers_by_market
-        .iter()
-        .map(|(mid, count)| {
-            (
-                mid.0.to_string(),
-                BlockMarketStats { placers: *count },
-            )
-        })
-        .collect();
+    // Union the keys from placers_by_market and volume_by_market — either
+    // can be empty on its own (a block with carried fills but no new admits
+    // has zero placers but non-zero volume; the reverse can also happen).
+    let mut by_market: HashMap<String, BlockMarketStats> = HashMap::new();
+    for (mid, count) in &block.placers_by_market {
+        by_market
+            .entry(mid.0.to_string())
+            .or_default()
+            .placers = *count;
+    }
+    for (mid, vol) in &block.volume_by_market {
+        by_market
+            .entry(mid.0.to_string())
+            .or_default()
+            .volume_nanos = *vol;
+    }
 
     BlockResponse {
         height: block.header.height,
