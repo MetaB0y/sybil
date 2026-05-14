@@ -2,7 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use matching_engine::{
-    Fill, MarketGroup, MarketId, MarketSet, MmConstraint, Nanos, Order, Problem,
+    derive_order_direction, Fill, MarketGroup, MarketId, MarketSet, MmConstraint, Nanos, Order,
+    Problem,
 };
 use matching_solver::{PipelineResult, Solver};
 use sybil_oracle::{MarketStatus, Oracle, ResolutionRecord};
@@ -234,7 +235,8 @@ fn bridge_block_data(system_events: &[SystemEvent], bridge_state: &BridgeState) 
             }
             SystemEvent::CreateAccount { .. }
             | SystemEvent::Deposit { .. }
-            | SystemEvent::MarketResolved { .. } => {}
+            | SystemEvent::MarketResolved { .. }
+            | SystemEvent::OrderCancelled { .. } => {}
         }
     }
     BridgeBlockData {
@@ -436,6 +438,19 @@ fn convert_system_event(event: &SystemEvent) -> SystemEventWitness {
             market_id: *market_id,
             payout_nanos: *payout_nanos,
             affected_accounts: affected_accounts.iter().map(|id| id.0).collect(),
+        },
+        SystemEvent::OrderCancelled {
+            account_id,
+            order_id,
+            market_ids,
+            side,
+            remaining_quantity,
+        } => SystemEventWitness::OrderCancelled {
+            account_id: account_id.0,
+            order_id: *order_id,
+            market_ids: market_ids.clone(),
+            side: *side,
+            remaining_quantity: *remaining_quantity,
         },
     }
 }
@@ -1440,13 +1455,32 @@ impl BlockSequencer {
     }
 
     /// Cancel a resting order owned by `account_id`.
+    ///
+    /// On success, stages a `SystemEvent::OrderCancelled` so the next block
+    /// commits an on-chain cancellation record (D1). The active markets and
+    /// categorical direction come from the resting order returned by
+    /// `OrderBook.cancel` (B5's widened return type); `remaining_quantity`
+    /// is the unfilled `max_fill` at cancel time.
     pub fn cancel_pending_order(
         &mut self,
         account_id: AccountId,
         order_id: u64,
     ) -> Result<(), SequencerError> {
         match self.order_book.cancel(account_id, order_id) {
-            Ok(_ro) => Ok(()),
+            Ok(ro) => {
+                let market_ids: Vec<MarketId> = ro.order.active_markets().collect();
+                let primary_market = market_ids.first().copied().unwrap_or(MarketId::NONE);
+                let side = derive_order_direction(&ro.order, primary_market);
+                self.pending_system_events
+                    .push(SystemEvent::OrderCancelled {
+                        account_id,
+                        order_id,
+                        market_ids,
+                        side,
+                        remaining_quantity: ro.order.max_fill,
+                    });
+                Ok(())
+            }
             Err(crate::order_book::CancelError::NotFound) => Err(SequencerError::OrderNotFound),
             Err(crate::order_book::CancelError::WrongOwner) => {
                 Err(SequencerError::OrderOwnershipMismatch)
@@ -2014,6 +2048,25 @@ impl BlockSequencer {
                             account.events_digest =
                                 crate::digest::update_digest(&account.events_digest, &encoded);
                         }
+                    }
+                }
+                SystemEvent::OrderCancelled {
+                    account_id,
+                    order_id,
+                    market_ids,
+                    side,
+                    remaining_quantity,
+                } => {
+                    if let Some(account) = self.accounts.get_mut(*account_id) {
+                        let encoded = crate::digest::encode_order_cancelled_event(
+                            *order_id,
+                            market_ids,
+                            *side,
+                            *remaining_quantity,
+                            self.height,
+                        );
+                        account.events_digest =
+                            crate::digest::update_digest(&account.events_digest, &encoded);
                     }
                 }
             }
@@ -4319,5 +4372,83 @@ mod tests {
             ts_first, ts_second,
             "second deposit must not overwrite the first-deposit timestamp"
         );
+    }
+
+    /// D1: cancelling a resting order must stage a `SystemEvent::OrderCancelled`
+    /// with the order's primary market, derived direction, and unfilled
+    /// remainder. The next produced block surfaces it in `system_events` and
+    /// the cancelling account's `events_digest` advances.
+    #[test]
+    fn cancel_emits_order_cancelled() {
+        let (mut seq, aid, markets, m0, _) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
+
+        let order = outcome_buy(&markets, 0, m0, 0, 400_000_000, 7);
+        let order_id = match seq.try_admit_direct(single_order_sub(aid, order)) {
+            AdmitOutcome::Admitted { order_id, .. } => order_id,
+            other => panic!("expected Admitted, got {:?}", other),
+        };
+
+        seq.produce_block(vec![], 1_000);
+
+        let digest_before = seq
+            .accounts
+            .get(aid)
+            .expect("account exists")
+            .events_digest;
+
+        seq.cancel_pending_order(aid, order_id).expect("cancel ok");
+
+        let pending = &seq.pending_system_events;
+        let event = pending
+            .iter()
+            .find(|e| matches!(e, SystemEvent::OrderCancelled { .. }))
+            .expect("OrderCancelled staged");
+        match event {
+            SystemEvent::OrderCancelled {
+                account_id,
+                order_id: oid,
+                market_ids,
+                side,
+                remaining_quantity,
+            } => {
+                assert_eq!(*account_id, aid);
+                assert_eq!(*oid, order_id);
+                assert_eq!(market_ids, &vec![m0]);
+                assert_eq!(*side, matching_engine::OrderDirection::BuyYes);
+                assert_eq!(*remaining_quantity, 7);
+            }
+            _ => unreachable!(),
+        }
+
+        let bp = seq.produce_block(vec![], 2_000);
+        assert!(
+            bp.block.system_events.iter().any(|e| matches!(
+                e,
+                SystemEvent::OrderCancelled { order_id: oid, .. } if *oid == order_id
+            )),
+            "block must surface the OrderCancelled SystemEvent"
+        );
+
+        let digest_after = seq
+            .accounts
+            .get(aid)
+            .expect("account exists")
+            .events_digest;
+        assert_ne!(
+            digest_before, digest_after,
+            "cancelling account's events_digest must advance"
+        );
+    }
+
+    /// D1: cancelling a non-existent order must NOT stage any SystemEvent.
+    #[test]
+    fn cancel_nonexistent_does_not_emit_order_cancelled() {
+        let (mut seq, aid, _markets, _m0, _m1) =
+            make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
+
+        let pending_before = seq.pending_system_events.len();
+        let result = seq.cancel_pending_order(aid, 9_999);
+        assert!(result.is_err());
+        assert_eq!(seq.pending_system_events.len(), pending_before);
     }
 }

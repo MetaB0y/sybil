@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use matching_engine::{Fill, MarketGroup, MarketId, MmConstraint, Nanos, Order};
+use matching_engine::{Fill, MarketGroup, MarketId, MmConstraint, Nanos, Order, OrderDirection};
 
 /// Everything the verifier needs to check a single block.
 ///
@@ -136,6 +136,14 @@ pub enum SystemEventWitness {
         market_id: MarketId,
         payout_nanos: Nanos,
         affected_accounts: Vec<u64>,
+    },
+    /// A resting order was cancelled by its owner (D1).
+    OrderCancelled {
+        account_id: u64,
+        order_id: u64,
+        market_ids: Vec<MarketId>,
+        side: OrderDirection,
+        remaining_quantity: u64,
     },
 }
 

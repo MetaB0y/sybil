@@ -57,6 +57,19 @@ fn system_event_to_response(event: &matching_sequencer::SystemEvent) -> SystemEv
             payout_nanos: *payout_nanos,
             affected_accounts: affected_accounts.iter().map(|id| id.0).collect(),
         },
+        matching_sequencer::SystemEvent::OrderCancelled {
+            account_id,
+            order_id,
+            market_ids,
+            side,
+            remaining_quantity,
+        } => SystemEventResponse::OrderCancelled {
+            account_id: account_id.0,
+            order_id: *order_id,
+            market_ids: market_ids.iter().map(|m| m.0).collect(),
+            side: side.to_string(),
+            remaining_quantity: *remaining_quantity,
+        },
     }
 }
 

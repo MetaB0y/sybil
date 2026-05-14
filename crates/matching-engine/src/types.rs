@@ -70,6 +70,49 @@ impl fmt::Display for Side {
     }
 }
 
+/// Categorical direction of an order with respect to its primary binary market.
+///
+/// Distinct from `Side` (which is bid/ask in the abstract solver). `OrderDirection`
+/// surfaces in the on-chain `OrderCancelled` system event and the FE-facing cancel
+/// stream, where users think in terms of YES/NO and buy/sell — not bid/ask.
+///
+/// For multi-market orders (spreads, bundles, etc.) the direction reflects the
+/// primary market's dominant exposure as derived by `derive_order_direction`. It
+/// is a categorical label, not an exhaustive description of the order's payoff
+/// structure.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+pub enum OrderDirection {
+    BuyYes,
+    SellYes,
+    BuyNo,
+    SellNo,
+}
+
+impl OrderDirection {
+    /// Stable single-byte encoding used inside witness leaves committed by
+    /// `events_root`. The mapping is fixed for the lifetime of the protocol:
+    /// `BuyYes=0, SellYes=1, BuyNo=2, SellNo=3`.
+    pub fn to_byte(&self) -> u8 {
+        match self {
+            OrderDirection::BuyYes => 0,
+            OrderDirection::SellYes => 1,
+            OrderDirection::BuyNo => 2,
+            OrderDirection::SellNo => 3,
+        }
+    }
+}
+
+impl fmt::Display for OrderDirection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            OrderDirection::BuyYes => write!(f, "BuyYes"),
+            OrderDirection::SellYes => write!(f, "SellYes"),
+            OrderDirection::BuyNo => write!(f, "BuyNo"),
+            OrderDirection::SellNo => write!(f, "SellNo"),
+        }
+    }
+}
+
 /// Helper functions for converting between Nanos and human-readable prices
 pub mod conversions {
     use super::{Nanos, NANOS_PER_DOLLAR};

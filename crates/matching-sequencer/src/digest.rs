@@ -1,4 +1,4 @@
-use matching_engine::{MarketId, MintAdjustment, Nanos, Qty};
+use matching_engine::{MarketId, MintAdjustment, Nanos, OrderDirection, Qty};
 
 pub fn update_digest(current: &[u8; 32], event_bytes: &[u8]) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new();
@@ -81,6 +81,26 @@ pub fn encode_create_account_event(initial_balance: i64, block_height: u64) -> V
     bytes
 }
 
+pub fn encode_order_cancelled_event(
+    order_id: u64,
+    market_ids: &[MarketId],
+    side: OrderDirection,
+    remaining_quantity: u64,
+    block_height: u64,
+) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(1 + 8 + 8 + market_ids.len() * 4 + 1 + 8 + 8);
+    bytes.push(0x08);
+    bytes.extend_from_slice(&order_id.to_le_bytes());
+    bytes.extend_from_slice(&(market_ids.len() as u64).to_le_bytes());
+    for mid in market_ids {
+        bytes.extend_from_slice(&mid.0.to_le_bytes());
+    }
+    bytes.push(side.to_byte());
+    bytes.extend_from_slice(&remaining_quantity.to_le_bytes());
+    bytes.extend_from_slice(&block_height.to_le_bytes());
+    bytes
+}
+
 pub fn encode_mint_event(adjustments: &[MintAdjustment], block_height: u64) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(1 + 8 + adjustments.len() * (4 + 1 + 8 + 8));
     bytes.push(0x05);
@@ -116,5 +136,41 @@ mod tests {
             update_digest(&[0u8; 32], &fill),
             update_digest(&[0u8; 32], &deposit)
         );
+    }
+
+    /// Tag byte 0x08 is the next slot after `withdrawal_created=0x07`. The
+    /// per-account `events_digest` commits this byte; changing it would
+    /// retroactively diverge every account's history.
+    #[test]
+    fn order_cancelled_event_uses_tag_0x08() {
+        let bytes = encode_order_cancelled_event(
+            1234,
+            &[MarketId::new(3)],
+            OrderDirection::BuyYes,
+            5,
+            42,
+        );
+        assert_eq!(bytes[0], 0x08);
+    }
+
+    #[test]
+    fn order_cancelled_event_encoding_is_stable() {
+        let bytes = encode_order_cancelled_event(
+            1234,
+            &[MarketId::new(3), MarketId::new(7)],
+            OrderDirection::SellNo,
+            9,
+            100,
+        );
+        let mut expected: Vec<u8> = Vec::new();
+        expected.push(0x08);
+        expected.extend_from_slice(&1234u64.to_le_bytes());
+        expected.extend_from_slice(&2u64.to_le_bytes());
+        expected.extend_from_slice(&3u32.to_le_bytes());
+        expected.extend_from_slice(&7u32.to_le_bytes());
+        expected.push(OrderDirection::SellNo.to_byte());
+        expected.extend_from_slice(&9u64.to_le_bytes());
+        expected.extend_from_slice(&100u64.to_le_bytes());
+        assert_eq!(bytes, expected);
     }
 }

@@ -236,6 +236,18 @@ pub enum SystemEventResponse {
         payout_nanos: u64,
         affected_accounts: Vec<u64>,
     },
+    /// On-chain cancellation event (D1). `side` is the categorical
+    /// `OrderDirection` ("BuyYes"/"SellYes"/"BuyNo"/"SellNo") and
+    /// `remaining_quantity` is the unfilled portion of `max_fill` at
+    /// cancel time. Forward-additive: old clients ignore unknown
+    /// variants via serde's `#[serde(tag = "type")]` shape.
+    OrderCancelled {
+        account_id: u64,
+        order_id: u64,
+        market_ids: Vec<u32>,
+        side: String,
+        remaining_quantity: u64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

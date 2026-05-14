@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::{MarketId, Nanos, Qty};
+use crate::types::{MarketId, Nanos, OrderDirection, Qty};
 
 /// A (MarketId, value) pair from marginal payoff computation.
 pub type MarginalPayoff<T> = (MarketId, T);
@@ -240,6 +240,56 @@ impl Order {
     }
 }
 
+/// Derive a categorical `OrderDirection` (BuyYes/SellYes/BuyNo/SellNo) for an
+/// order with respect to its primary binary market.
+///
+/// For single-market binary orders this is exact, matching the `outcome_buy` /
+/// `outcome_sell` constructions in [`crate::order_builder`]:
+/// * `BuyYes` ↔ payoffs `[+N, 0]`
+/// * `SellYes` ↔ payoffs `[-N, 0]`
+/// * `BuyNo` ↔ payoffs `[0, +N]`
+/// * `SellNo` ↔ payoffs `[0, -N]`
+///
+/// For multi-market orders (spreads, bundles, butterflies) it picks the side
+/// dominant for `primary_market`. The result is a categorical label used by
+/// the on-chain `OrderCancelled` event and FE cancel feed — not a complete
+/// description of the order's payoff structure.
+pub fn derive_order_direction(order: &Order, primary_market: MarketId) -> OrderDirection {
+    let m_idx = order
+        .markets
+        .iter()
+        .take(order.num_markets as usize)
+        .position(|&m| m == primary_market)
+        .unwrap_or(0);
+
+    let stride = 1usize << m_idx;
+    let num_states = order.num_states as usize;
+
+    let mut sum_yes: i64 = 0;
+    let mut sum_no: i64 = 0;
+    for s in 0..num_states {
+        let outcome = (s / stride) % 2;
+        let p = order.payoffs[s] as i64;
+        if outcome == 0 {
+            sum_yes += p;
+        } else {
+            sum_no += p;
+        }
+    }
+
+    if sum_yes.abs() >= sum_no.abs() {
+        if sum_yes >= 0 {
+            OrderDirection::BuyYes
+        } else {
+            OrderDirection::SellYes
+        }
+    } else if sum_no >= 0 {
+        OrderDirection::BuyNo
+    } else {
+        OrderDirection::SellNo
+    }
+}
+
 impl std::fmt::Display for Order {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let markets: Vec<_> = self.active_markets().map(|m| format!("{}", m)).collect();
@@ -310,5 +360,77 @@ mod tests {
         let welfare = order.welfare_contribution(500_000_000, 100);
         // (0.60 - 0.50) * 100 = 10 in nano-equivalent
         assert_eq!(welfare, 100_000_000 * 100);
+    }
+
+    fn binary_order(payoff_yes: i8, payoff_no: i8) -> Order {
+        let mut o = Order::new(0);
+        o.markets[0] = MarketId::new(7);
+        o.num_markets = 1;
+        o.num_states = 2;
+        o.payoffs[0] = payoff_yes;
+        o.payoffs[1] = payoff_no;
+        o
+    }
+
+    #[test]
+    fn order_direction_derivation() {
+        let m = MarketId::new(7);
+
+        assert_eq!(
+            derive_order_direction(&binary_order(1, 0), m),
+            OrderDirection::BuyYes
+        );
+        assert_eq!(
+            derive_order_direction(&binary_order(-1, 0), m),
+            OrderDirection::SellYes
+        );
+        assert_eq!(
+            derive_order_direction(&binary_order(0, 1), m),
+            OrderDirection::BuyNo
+        );
+        assert_eq!(
+            derive_order_direction(&binary_order(0, -1), m),
+            OrderDirection::SellNo
+        );
+    }
+
+    #[test]
+    fn order_direction_spread_picks_primary_side() {
+        // Buy A YES, Sell B YES (per `spread_order` with sign=+1):
+        //   state 0 [A=YES, B=YES]: 0
+        //   state 1 [A=NO,  B=YES]: -1
+        //   state 2 [A=YES, B=NO ]: +1
+        //   state 3 [A=NO,  B=NO ]: 0
+        let mut o = Order::new(0);
+        o.markets[0] = MarketId::new(1);
+        o.markets[1] = MarketId::new(2);
+        o.num_markets = 2;
+        o.num_states = 4;
+        o.payoffs[0] = 0;
+        o.payoffs[1] = -1;
+        o.payoffs[2] = 1;
+        o.payoffs[3] = 0;
+
+        // Primary market A — long A YES.
+        assert_eq!(
+            derive_order_direction(&o, MarketId::new(1)),
+            OrderDirection::BuyYes
+        );
+        // Primary market B — short B YES.
+        assert_eq!(
+            derive_order_direction(&o, MarketId::new(2)),
+            OrderDirection::SellYes
+        );
+    }
+
+    #[test]
+    fn order_direction_byte_mapping_is_stable() {
+        // The byte mapping is committed by the verifier leaf encoding and
+        // must not drift. If this test fails, an old block's events_root
+        // would no longer verify under the new encoding.
+        assert_eq!(OrderDirection::BuyYes.to_byte(), 0);
+        assert_eq!(OrderDirection::SellYes.to_byte(), 1);
+        assert_eq!(OrderDirection::BuyNo.to_byte(), 2);
+        assert_eq!(OrderDirection::SellNo.to_byte(), 3);
     }
 }
