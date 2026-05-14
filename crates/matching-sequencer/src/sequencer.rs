@@ -1350,7 +1350,7 @@ impl BlockSequencer {
         order_id: u64,
     ) -> Result<(), SequencerError> {
         match self.order_book.cancel(account_id, order_id) {
-            Ok(()) => Ok(()),
+            Ok(_ro) => Ok(()),
             Err(crate::order_book::CancelError::NotFound) => Err(SequencerError::OrderNotFound),
             Err(crate::order_book::CancelError::WrongOwner) => {
                 Err(SequencerError::OrderOwnershipMismatch)
@@ -1904,8 +1904,10 @@ impl BlockSequencer {
             .collect();
 
         // ── Order Book: expire stale, remove orders for resolved markets ──
-        self.order_book.expire(self.height);
-        self.order_book.revalidate(&self.accounts, &active_markets);
+        let _expired = self.order_book.expire(self.height);
+        let _revalidated = self
+            .order_book
+            .revalidate(&self.accounts, &active_markets);
 
         // Build batch-local account map from resting orders
         let mut order_account_map: HashMap<u64, AccountId> = HashMap::new();
@@ -2037,7 +2039,7 @@ impl BlockSequencer {
                                 // (settle with a "fully filled" phantom to release)
                                 let phantom_fill =
                                     Fill::new(accepted.order.id, accepted.order.max_fill, 0);
-                                self.order_book.settle(
+                                let _stp_undo = self.order_book.settle(
                                     &[phantom_fill],
                                     &HashSet::new(),
                                     self.height,
@@ -2205,7 +2207,8 @@ impl BlockSequencer {
         } = self.finalize_block_state_phase(&fills, &problem, &clearing_prices, timestamp_ms);
 
         // Update order book: release filled orders' reservations, adjust partial fills
-        self.order_book
+        let _post_solve = self
+            .order_book
             .settle(&fills, &mm_order_ids_set, self.height);
         let pending_orders_after = self.order_book.len();
 
