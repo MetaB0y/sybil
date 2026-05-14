@@ -80,6 +80,11 @@ pub struct SequencerConfig {
     /// Queue depth where actor mailbox pressure should be logged as an error.
     /// Set to 0 to disable error logs.
     pub actor_queue_error_depth: usize,
+    /// Width of the ±band around each market's midprice used by the
+    /// off-block `LiquidityTracker` to score "near-the-money" depth. Default
+    /// 50_000_000 nanos = $0.05. Ships on the wire alongside the average so
+    /// FE labels can read "(±$0.05)".
+    pub liquidity_band_nanos: u64,
 }
 
 impl Default for SequencerConfig {
@@ -102,6 +107,7 @@ impl Default for SequencerConfig {
                 crate::fill_recorder::DEFAULT_MAX_FILL_HISTORY_PER_ACCOUNT,
             actor_queue_warn_depth: 1_000,
             actor_queue_error_depth: 5_000,
+            liquidity_band_nanos: 50_000_000,
         }
     }
 }
@@ -547,6 +553,8 @@ pub struct BlockSequencer {
     pub fill_recorder: crate::fill_recorder::FillRecorder,
     /// Off-block trader tracker: unique placers per market + platform + 24h.
     pub trader_tracker: crate::aggregates::TraderTracker,
+    /// Off-block liquidity tracker: last-10-batch ±band depth average per market.
+    pub liquidity_tracker: crate::aggregates::LiquidityTracker,
     /// Market lifecycle: statuses, oracle, metadata.
     pub lifecycle: crate::market_lifecycle::MarketLifecycle,
     /// P256 public key to account mapping.
@@ -594,6 +602,7 @@ impl BlockSequencer {
                 config.max_fill_history_per_account,
             ),
             trader_tracker: crate::aggregates::TraderTracker::new(),
+            liquidity_tracker: crate::aggregates::LiquidityTracker::new(),
             lifecycle: crate::market_lifecycle::MarketLifecycle::new(oracle),
             pubkey_registry: HashMap::new(),
             bridge: BridgeState::default(),
@@ -668,6 +677,7 @@ impl BlockSequencer {
                 config.max_fill_history_per_account,
             ),
             trader_tracker: crate::aggregates::TraderTracker::restore(state.trader_tracker),
+            liquidity_tracker: crate::aggregates::LiquidityTracker::restore(state.liquidity_tracker),
             lifecycle,
             pubkey_registry: state.pubkey_registry,
             bridge: state.bridge_state,
@@ -723,6 +733,7 @@ impl BlockSequencer {
             trader_tracker: self.trader_tracker.snapshot(),
             price_tracker_volume: self.price_tracker.volume_extensions_snapshot(),
             price_tracker_clearing_history: self.price_tracker.clearing_history_snapshot(),
+            liquidity_tracker: self.liquidity_tracker.snapshot(),
         }
     }
 
@@ -867,6 +878,24 @@ impl BlockSequencer {
         now_ms: u64,
     ) -> HashMap<MarketId, (u64, u64)> {
         self.price_tracker.all_market_prices_n_hours_ago(n, now_ms)
+    }
+
+    /// Last-10-batch ±band liquidity score for one market.
+    pub fn liquidity_avg10(&self, market_id: MarketId) -> u64 {
+        self.liquidity_tracker.avg_last_n(market_id, 10)
+    }
+
+    /// All-market last-10-batch liquidity in one pass — companion to
+    /// `all_market_volumes_24h` for the `list_markets` round-trip.
+    pub fn all_liquidity_avg10(&self) -> HashMap<MarketId, u64> {
+        self.liquidity_tracker.all_avg_last_n(10)
+    }
+
+    /// Width of the band the LiquidityTracker is currently scoring against.
+    /// Pulled from the live config, not from the snapshot — that's the band
+    /// the next `record_block` will apply.
+    pub fn liquidity_band_nanos(&self) -> u64 {
+        self.config.liquidity_band_nanos
     }
 
     /// All-time unique trader count for one market.
@@ -2180,6 +2209,15 @@ impl BlockSequencer {
             .settle(&fills, &mm_order_ids_set, self.height);
         let pending_orders_after = self.order_book.len();
 
+        // Off-block liquidity tracker — score the post-settle book against
+        // each market's midprice (binary: YES price). One snapshot per block
+        // so the ring tracks "depth available at the close of this batch".
+        self.liquidity_tracker.record_block(
+            &self.order_book,
+            &clearing_prices,
+            self.config.liquidity_band_nanos,
+        );
+
         let previous_header = self
             .last_header
             .as_ref()
@@ -2830,6 +2868,7 @@ mod tests {
             trader_tracker: Default::default(),
             price_tracker_volume: Default::default(),
             price_tracker_clearing_history: Default::default(),
+            liquidity_tracker: Default::default(),
         };
 
         let mut seq_b = BlockSequencer::restore(state, oracle, SequencerConfig::default());

@@ -100,6 +100,16 @@ pub struct MarketResponse {
     /// Clearing NO price ~24h ago in nanos. See `yes_price_24h_ago_nanos`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_price_24h_ago_nanos: Option<u64>,
+    /// Rolling last-10-batch ±band depth average in nanos. Zero for markets
+    /// without a clearing price yet. Pair with `liquidity_band_nanos` for
+    /// labelling.
+    #[serde(default)]
+    pub liquidity_avg10_nanos: u64,
+    /// Width of the band the liquidity score uses (the ± in "$X ±$0.05").
+    /// Always the live config value — `0` when no liquidity has been
+    /// recorded yet.
+    #[serde(default)]
+    pub liquidity_band_nanos: u64,
 }
 
 /// Minimal market data for high-throughput dashboards (drops strings & metadata).
@@ -127,6 +137,11 @@ pub struct MarketSummaryResponse {
     pub yes_price_24h_ago_nanos: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_price_24h_ago_nanos: Option<u64>,
+    /// Liquidity score + band (mirrors `MarketResponse`).
+    #[serde(default)]
+    pub liquidity_avg10_nanos: u64,
+    #[serde(default)]
+    pub liquidity_band_nanos: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

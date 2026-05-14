@@ -136,6 +136,9 @@ pub enum SequencerMsg {
     /// `GetAllMarketVolumes24h`; bulks the 24h-ago lookups for
     /// `MarketResponse.{yes,no}_price_24h_ago_nanos` into one round-trip.
     GetAllMarketPricesNHoursAgo(u64, u64, RpcReplyPort<HashMap<MarketId, (u64, u64)>>),
+    /// All-market last-10-batch liquidity score + the band currently in
+    /// effect. Bulks `MarketResponse.liquidity_*_nanos` into one round-trip.
+    GetLiquiditySnapshot(RpcReplyPort<(HashMap<MarketId, u64>, u64)>),
 }
 
 /// A market search result enriched with metadata, prices, and volume.
@@ -1271,6 +1274,11 @@ impl Actor for SequencerActor {
             SequencerMsg::GetAllMarketPricesNHoursAgo(n, now_ms, reply) => {
                 let _ = reply.send(state.sequencer.all_market_prices_n_hours_ago(n, now_ms));
             }
+            SequencerMsg::GetLiquiditySnapshot(reply) => {
+                let liq = state.sequencer.all_liquidity_avg10();
+                let band = state.sequencer.liquidity_band_nanos();
+                let _ = reply.send((liq, band));
+            }
         }
         Ok(())
     }
@@ -1910,6 +1918,16 @@ impl SequencerHandle {
     ) -> Result<HashMap<MarketId, (u64, u64)>, SequencerError> {
         self.rpc(|reply| SequencerMsg::GetAllMarketPricesNHoursAgo(n, now_ms, reply))
             .await
+    }
+
+    /// All-market liquidity averages + the band width currently in effect.
+    /// Bulks `MarketResponse.liquidity_avg10_nanos` + `.liquidity_band_nanos`
+    /// into one round-trip.
+    #[tracing::instrument(skip_all)]
+    pub async fn get_liquidity_snapshot(
+        &self,
+    ) -> Result<(HashMap<MarketId, u64>, u64), SequencerError> {
+        self.rpc(SequencerMsg::GetLiquiditySnapshot).await
     }
 }
 

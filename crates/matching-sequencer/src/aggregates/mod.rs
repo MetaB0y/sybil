@@ -13,6 +13,8 @@
 //!
 //! See `frontend/BACKEND_IMPLEMENTATION_PLAN.md` for the full plan.
 
+pub mod liquidity_tracker;
 pub mod trader_tracker;
 
+pub use liquidity_tracker::{LiquidityTracker, LiquidityTrackerSnapshot, LIQUIDITY_RING_CAP};
 pub use trader_tracker::{TraderTracker, TraderTrackerSnapshot};

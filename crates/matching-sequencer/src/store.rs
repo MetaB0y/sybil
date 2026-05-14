@@ -59,7 +59,7 @@ use crate::account_storage::{
     AccountSnapshotSlot, AccountStateStore, CommittedAccountState, FencedAccountStorage,
     QmdbStateLeafExclusionProof, QmdbStateLeafProof, QmdbStateRoot, RecoveryAccountState,
 };
-use crate::aggregates::TraderTrackerSnapshot;
+use crate::aggregates::{LiquidityTrackerSnapshot, TraderTrackerSnapshot};
 use crate::block::{state_sidecar_snapshot_from_resting_orders, BlockHeader};
 use crate::price_tracker::{
     PriceTrackerClearingHistorySnapshot, PriceTrackerVolumeSnapshot,
@@ -173,6 +173,12 @@ const KEY_PRICE_TRACKER_VOLUME_SNAPSHOT: &str = "snapshot";
 const PRICE_TRACKER_CLEARING_HISTORY: TableDefinition<&str, &[u8]> =
     TableDefinition::new("price_tracker_clearing_history");
 const KEY_PRICE_TRACKER_CLEARING_HISTORY_SNAPSHOT: &str = "snapshot";
+
+/// Off-block liquidity tracker: per-market ±band depth rings used by the
+/// `liquidity_avg10` surface. Same single-blob shape as `TRADER_TRACKER`.
+const LIQUIDITY_TRACKER: TableDefinition<&str, &[u8]> =
+    TableDefinition::new("liquidity_tracker");
+const KEY_LIQUIDITY_TRACKER_SNAPSHOT: &str = "snapshot";
 
 // Counter keys
 const KEY_STORE_LAYOUT_VERSION: &str = "store_layout_version";
@@ -293,6 +299,9 @@ pub struct RestoredState {
     /// snapshots powering 24h-ago lookups). Missing table on load yields
     /// the default (cold start).
     pub price_tracker_clearing_history: PriceTrackerClearingHistorySnapshot,
+    /// Off-block LiquidityTracker snapshot — per-market ±band depth rings.
+    /// Missing table on load yields the default (cold start).
+    pub liquidity_tracker: LiquidityTrackerSnapshot,
 }
 
 /// Borrowed view of sequencer state needed to persist one block.
@@ -320,6 +329,9 @@ pub struct SequencerSnapshot<'a> {
     /// Off-block PriceTracker clearing-history slice (owned — serialized
     /// once into the `PRICE_TRACKER_CLEARING_HISTORY` table).
     pub price_tracker_clearing_history: PriceTrackerClearingHistorySnapshot,
+    /// Off-block LiquidityTracker snapshot (owned — serialized once into
+    /// the `LIQUIDITY_TRACKER` table).
+    pub liquidity_tracker: LiquidityTrackerSnapshot,
 }
 
 impl Store {
@@ -355,6 +367,7 @@ impl Store {
         txn.open_table(TRADER_TRACKER)?;
         txn.open_table(PRICE_TRACKER_VOLUME)?;
         txn.open_table(PRICE_TRACKER_CLEARING_HISTORY)?;
+        txn.open_table(LIQUIDITY_TRACKER)?;
         txn.commit()?;
 
         initialize_or_validate_layout(&db)?;
@@ -605,6 +618,13 @@ impl Store {
             let mut table = txn.open_table(PRICE_TRACKER_CLEARING_HISTORY)?;
             let bytes = rmp_serde::to_vec(&snapshot.price_tracker_clearing_history)?;
             table.insert(KEY_PRICE_TRACKER_CLEARING_HISTORY_SNAPSHOT, bytes.as_slice())?;
+        }
+
+        // LiquidityTracker snapshot — single blob keyed "snapshot".
+        {
+            let mut table = txn.open_table(LIQUIDITY_TRACKER)?;
+            let bytes = rmp_serde::to_vec(&snapshot.liquidity_tracker)?;
+            table.insert(KEY_LIQUIDITY_TRACKER_SNAPSHOT, bytes.as_slice())?;
         }
 
         // Counters
@@ -964,6 +984,15 @@ impl Store {
             }
         };
 
+        // Liquidity tracker snapshot. Missing-row → default.
+        let liquidity_tracker: LiquidityTrackerSnapshot = {
+            let table = txn.open_table(LIQUIDITY_TRACKER)?;
+            match table.get(KEY_LIQUIDITY_TRACKER_SNAPSHOT)? {
+                Some(value) => rmp_serde::from_slice(value.value())?,
+                None => LiquidityTrackerSnapshot::default(),
+            }
+        };
+
         info!(
             height = recovery_metadata.height,
             accounts = num_accounts,
@@ -1004,6 +1033,7 @@ impl Store {
             trader_tracker,
             price_tracker_volume,
             price_tracker_clearing_history,
+            liquidity_tracker,
         }))
     }
 
@@ -1513,6 +1543,7 @@ mod tests {
                 trader_tracker: Default::default(),
                 price_tracker_volume: Default::default(),
                 price_tracker_clearing_history: Default::default(),
+                liquidity_tracker: Default::default(),
             }
         }
 
@@ -1540,6 +1571,7 @@ mod tests {
                 trader_tracker: Default::default(),
                 price_tracker_volume: Default::default(),
                 price_tracker_clearing_history: Default::default(),
+                liquidity_tracker: Default::default(),
             }
         }
     }
