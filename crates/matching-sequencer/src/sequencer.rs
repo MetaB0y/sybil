@@ -182,6 +182,11 @@ struct SolvedBatch {
     total_welfare: i64,
     total_volume: u64,
     orders_filled: usize,
+    /// Per-market welfare from this batch's fills. A multi-market order
+    /// credits each active market with its full welfare contribution; the
+    /// platform `total_welfare` counts each fill once (so sum-of-per-market
+    /// over-counts for bundles, just like `placers_by_market`).
+    welfare_by_market: HashMap<MarketId, i64>,
 }
 
 struct FinalizedBlockState {
@@ -1652,6 +1657,28 @@ impl BlockSequencer {
             .fold(0u64, |acc, v| acc.saturating_add(v));
         let orders_filled = pipeline_result.result.orders_filled;
 
+        // Per-market welfare. Reuse the same order_map already built above
+        // for markets_with_fills. Multi-market orders credit every active
+        // market with the full welfare contribution — platform's
+        // total_welfare counts each fill once.
+        let mut welfare_by_market: HashMap<MarketId, i64> = HashMap::new();
+        {
+            let order_map: HashMap<u64, &Order> =
+                problem.orders.iter().map(|o| (o.id, o)).collect();
+            for fill in &fills {
+                if fill.fill_qty == 0 {
+                    continue;
+                }
+                let Some(order) = order_map.get(&fill.order_id) else {
+                    continue;
+                };
+                let w = order.welfare_contribution(fill.fill_price, fill.fill_qty);
+                for m in order.active_markets() {
+                    *welfare_by_market.entry(m).or_insert(0) += w;
+                }
+            }
+        }
+
         SolvedBatch {
             pipeline_result,
             fills,
@@ -1659,6 +1686,7 @@ impl BlockSequencer {
             total_welfare,
             total_volume,
             orders_filled,
+            welfare_by_market,
         }
     }
 
@@ -2242,6 +2270,7 @@ impl BlockSequencer {
             total_welfare,
             total_volume,
             orders_filled,
+            welfare_by_market,
         } = self.solve_batch_phase(&problem, &order_account_map, &active_markets);
 
         let (pre_state, post_system_state) =
@@ -2330,6 +2359,7 @@ impl BlockSequencer {
             placers_by_market,
             volume_by_market,
             orders_by_market: block_orders_by_market,
+            welfare_by_market,
         };
 
         // Verify the block using all 4 verification layers.

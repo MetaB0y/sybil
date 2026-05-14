@@ -475,3 +475,38 @@ fn crossing_pair_with_solo_order_still_matches() {
     );
     assert!(bp.block.total_welfare > 0);
 }
+
+/// B7: per-market welfare. For a single-market trade, the sum of
+/// `welfare_by_market` values equals `total_welfare` exactly. For
+/// multi-market orders, sum-of-per-market over-counts (each active market
+/// gets the full welfare contribution); `total_welfare` stays
+/// authoritative.
+#[test]
+fn welfare_by_market_single_market_sums_to_total() {
+    let (mut seq, markets) = make_sequencer();
+    let m0 = MarketId::new(0);
+
+    let buyer_yes = OrderSubmission {
+        account_id: AccountId(0),
+        orders: vec![outcome_buy(&markets, 0, m0, 0, 600_000_000, 1)],
+        mm_constraint: None,
+    };
+    let buyer_no = OrderSubmission {
+        account_id: AccountId(1),
+        orders: vec![outcome_buy(&markets, 0, m0, 1, 600_000_000, 1)],
+        mm_constraint: None,
+    };
+
+    let bp = seq.produce_block(vec![buyer_yes, buyer_no], 1000);
+    assert!(!bp.block.fills.is_empty(), "expected fills from crossing buys");
+    assert!(bp.block.total_welfare > 0);
+    let sum: i64 = bp.block.welfare_by_market.values().sum();
+    assert_eq!(
+        sum, bp.block.total_welfare,
+        "single-market sum-of-per-market should equal total_welfare \
+         (no multi-market over-counting in this scenario)"
+    );
+    // Only m0 had fills, so it's the only key in welfare_by_market.
+    assert_eq!(bp.block.welfare_by_market.len(), 1);
+    assert!(bp.block.welfare_by_market.contains_key(&m0));
+}

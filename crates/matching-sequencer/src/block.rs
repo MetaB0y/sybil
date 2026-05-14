@@ -95,6 +95,12 @@ pub struct Block {
     /// per-market vs. the platform scalars in `BlockFlowMetrics`. Cancels
     /// are NOT counted here (D1 carries them via OrderCancelled).
     pub orders_by_market: HashMap<MarketId, crate::aggregates::OrderStats>,
+    /// Per-market welfare contribution in nanos from this block's fills
+    /// (B7). Multi-market fills credit every active market with their full
+    /// welfare; the platform `total_welfare` counts each fill once, so
+    /// sum-of-per-market over-counts for spreads/bundles. Signed because
+    /// solver rounding can yield small negatives.
+    pub welfare_by_market: HashMap<MarketId, i64>,
 }
 
 /// Compute a deterministic account-only state root with the verifier's

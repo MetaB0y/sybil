@@ -180,6 +180,12 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
         entry.matched = stats.matched as u32;
         entry.unmatched = stats.unmatched as u32;
     }
+    for (mid, welfare) in &block.welfare_by_market {
+        by_market
+            .entry(mid.0.to_string())
+            .or_default()
+            .welfare_nanos = *welfare;
+    }
 
     BlockResponse {
         height: block.header.height,

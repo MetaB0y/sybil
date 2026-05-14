@@ -275,6 +275,12 @@ pub struct BlockMarketStats {
     /// block WITHOUT any fill. Cancels are excluded.
     #[serde(default)]
     pub unmatched: u32,
+    /// Per-market welfare contribution from this block's fills (B7).
+    /// Multi-market fills credit each active market with their full welfare;
+    /// the platform `total_welfare_nanos` counts each fill once. Signed —
+    /// solver rounding can yield small negatives.
+    #[serde(default)]
+    pub welfare_nanos: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
