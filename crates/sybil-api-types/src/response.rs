@@ -182,6 +182,14 @@ pub struct RejectionResponse {
     pub reason: String,
 }
 
+/// Nested per-market sidecar on `BlockResponse.by_market`. Grows append-only
+/// across steps (each new field carries `#[serde(default)]` so partial
+/// reverts stay clean). Empty struct in A1; producers wire fields in B2 /
+/// B6 / B7.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct BlockMarketStats {}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct BlockResponse {
@@ -205,6 +213,11 @@ pub struct BlockResponse {
     pub total_welfare_nanos: i64,
     pub total_volume_nanos: u64,
     pub orders_filled: usize,
+    /// Nested per-market scalars (decision Q1 in BACKEND_DATA_PLAN.md). Each
+    /// `BlockMarketStats` carries the per-market splits for this block. Old
+    /// clients ignore it; new clients consume what they recognise.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub by_market: HashMap<String, BlockMarketStats>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -466,4 +479,58 @@ pub struct PendingOrderResponse {
     pub remaining_quantity: u64,
     pub created_at_block: u64,
     pub expires_at_block: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_block_response() -> BlockResponse {
+        BlockResponse {
+            height: 1,
+            parent_hash: "00".into(),
+            state_root: "11".into(),
+            events_root: "22".into(),
+            order_count: 0,
+            fill_count: 0,
+            timestamp_ms: 0,
+            system_events: vec![],
+            fills: vec![],
+            clearing_prices_nanos: HashMap::new(),
+            rejections: vec![],
+            bridge: BridgeBlockResponse::default(),
+            total_welfare_nanos: 0,
+            total_volume_nanos: 0,
+            orders_filled: 0,
+            by_market: HashMap::new(),
+        }
+    }
+
+    /// `by_market` is `skip_serializing_if = HashMap::is_empty` so an empty
+    /// map produces JSON byte-identical to pre-A1 BlockResponse. Old clients
+    /// that don't know the field see no change.
+    #[test]
+    fn block_response_serde_roundtrip() {
+        let blk = empty_block_response();
+        let json = serde_json::to_string(&blk).expect("serialize");
+        assert!(
+            !json.contains("by_market"),
+            "empty by_market must not serialize: {json}"
+        );
+
+        // Deserialize an "old shape" payload that has no by_market key at all.
+        let old_shape = serde_json::to_string(&blk).expect("serialize");
+        let parsed: BlockResponse = serde_json::from_str(&old_shape).expect("deserialize");
+        assert!(parsed.by_market.is_empty());
+
+        // Round-trip with a populated map.
+        let mut blk2 = empty_block_response();
+        blk2.by_market
+            .insert("7".into(), BlockMarketStats::default());
+        let json2 = serde_json::to_string(&blk2).expect("serialize with map");
+        assert!(json2.contains("by_market"));
+        let parsed2: BlockResponse = serde_json::from_str(&json2).expect("deserialize with map");
+        assert_eq!(parsed2.by_market.len(), 1);
+        assert!(parsed2.by_market.contains_key("7"));
+    }
 }

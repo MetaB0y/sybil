@@ -172,6 +172,7 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
         total_welfare_nanos: block.total_welfare,
         total_volume_nanos: block.total_volume,
         orders_filled: block.orders_filled,
+        by_market: HashMap::new(),
     }
 }
 
