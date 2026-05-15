@@ -128,11 +128,6 @@ pub struct MilpResult {
     /// True SCIP objective value (welfare with minting costs deducted).
     /// This equals real-fill welfare minus minting costs.
     pub objective_welfare: i64,
-    /// Synthetic orders that restore position balance by canceling the net
-    /// position imbalance from minting. These have `limit_price == fill_price`
-    /// so they contribute zero welfare. Include them in the witness for
-    /// verifier position balance checks.
-    pub arbitrage_orders: Vec<Order>,
 }
 
 /// Analysis of dual prices from MILP solution.
@@ -238,7 +233,6 @@ impl MilpSolver {
                 solve_time_secs: start.elapsed().as_secs_f64(),
                 clearing_prices: HashMap::new(),
                 objective_welfare: 0,
-                arbitrage_orders: vec![],
             };
         }
 
@@ -287,73 +281,10 @@ impl MilpSolver {
 
                 let objective_welfare = scip_objective.round() as i64;
 
-                // Generate synthetic arb fills to restore position balance.
-                //
-                // The MILP uses continuous mint_m and group_mint_g variables to
-                // allow minting/burning, but these aren't materialized as fills.
-                // Compute the exact per-market position imbalance from real fills
-                // and create synthetic orders+fills to cancel it.
-                //
-                // All arb fills use limit_price = fill_price → zero welfare.
-                let mut arbitrage_orders = Vec::new();
-                let max_order_id = active_orders.iter().map(|o| o.id).max().unwrap_or(0);
-                let mut next_arb_id = max_order_id + 1_000_000_000;
-
-                // Compute net position delta per market using shared marginal payoff logic
-                let mut net_position: HashMap<MarketId, i64> = HashMap::new();
-                for fill in &result.fills {
-                    if fill.fill_qty == 0 {
-                        continue;
-                    }
-                    let Some(order) = active_orders.iter().find(|o| o.id == fill.order_id) else {
-                        continue;
-                    };
-
-                    for (market_id, normalized) in order.marginal_payoffs_i64() {
-                        *net_position.entry(market_id).or_insert(0) +=
-                            normalized * fill.fill_qty as i64;
-                    }
-                }
-
-                // Create arb fills to cancel each market's imbalance
-                for (&market, &net) in &net_position {
-                    if net == 0 {
-                        continue;
-                    }
-                    let shares = net.unsigned_abs();
-                    let yes_price = clearing_prices
-                        .get(&market)
-                        .and_then(|p| p.first().copied())
-                        .unwrap_or(0);
-
-                    let mut order = Order::new(next_arb_id);
-                    order.markets[0] = market;
-                    order.num_markets = 1;
-                    order.num_states = 2;
-                    if net > 0 {
-                        // Too much YES demand → sell YES to supply it
-                        order.payoffs[0] = -1;
-                        order.payoffs[1] = 0;
-                    } else {
-                        // Too much NO demand (negative net) → buy YES to absorb
-                        order.payoffs[0] = 1;
-                        order.payoffs[1] = 0;
-                    }
-                    order.limit_price = yes_price;
-                    order.max_fill = shares;
-
-                    let fill = Fill::new(next_arb_id, shares, yes_price);
-                    result.add_fill(fill, &order);
-                    arbitrage_orders.push(order);
-                    next_arb_id += 1;
-                }
-
                 // The MILP objective correctly deducts minting cost
                 // (per-market: $1/pair, group: $1/set). The fill-level welfare
-                // doesn't include this cost because arb orders have limit==fill_price
-                // (zero welfare). The discrepancy comes entirely from group minting
-                // when Σp < $1: gap = group_mint_g × ($1 - Σp) per group.
-                // Per-market minting has zero gap (p_YES + p_NO = $1).
+                // records only real orders, while minting is represented by
+                // solver variables and by the sequencer/verifier MINT account.
                 let fill_welfare = result.total_welfare;
                 result.minting_cost = fill_welfare - objective_welfare;
                 result.total_welfare = objective_welfare;
@@ -364,7 +295,6 @@ impl MilpSolver {
                     solve_time_secs: solve_time,
                     clearing_prices,
                     objective_welfare,
-                    arbitrage_orders,
                 }
             }
             Err(err_msg) => {
@@ -378,7 +308,6 @@ impl MilpSolver {
                     solve_time_secs: start.elapsed().as_secs_f64(),
                     clearing_prices: HashMap::new(),
                     objective_welfare: 0,
-                    arbitrage_orders: vec![],
                 }
             }
         }
@@ -933,7 +862,6 @@ impl crate::Solver for MilpSolver {
             total_welfare: pr.result.total_welfare,
         });
         pr.total_time_secs = milp_result.solve_time_secs;
-        pr.group_minting_arb_orders = milp_result.arbitrage_orders;
 
         if pr.result.total_welfare < 0 {
             pr.result = crate::MatchingResult::new();

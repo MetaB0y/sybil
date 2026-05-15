@@ -372,7 +372,16 @@ deploy-sync:
 deploy-api: deploy-sync
     {{LOCAL_COMPOSE}} build sybil-api
     docker save sybil-api:latest | ssh {{SERVER}} docker load
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-api sybil-polymarket sybil-prover sybil-prover-worker'
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-api sybil-polymarket sybil-prover sybil-prover-worker sybil-prover-mock'
+
+# Destructively reset production app state, then restart services.
+# This removes old markets, mirror mappings, arena bot DB, prover artifacts,
+# and metric history from previous deploys. Pass CONFIRM explicitly.
+deploy-reset-state confirm:
+    @test "{{confirm}}" = "CONFIRM" || (echo 'Refusing to reset production state. Run: just deploy-reset-state CONFIRM' >&2; exit 2)
+    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} down; else {{COMPOSE_PROD}} down; fi'
+    ssh {{SERVER}} 'docker volume rm sybil-data polymarket-data arena-data prover-jobs prover-artifacts sybil_prover-jobs sybil_prover-artifacts vmdata || true'
+    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else {{COMPOSE_PROD}} up -d --remove-orphans; fi'
 
 # Build and deploy arena bots + dashboard (pass OpenRouter key)
 deploy-arena key: deploy-sync

@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use matching_engine::{Fill, MarketId, Order, Problem};
+use matching_engine::{Fill, Order, Problem};
 
 use crate::MatchingResult;
 
@@ -33,8 +33,6 @@ pub struct VerificationStats {
     pub computed_welfare: i64,
     /// Reported total welfare
     pub reported_welfare: i64,
-    /// Number of markets checked for position balance
-    pub markets_checked: usize,
     /// Computed total volume (sum of fill quantities)
     pub computed_volume: u64,
     /// Computed number of orders filled
@@ -67,8 +65,6 @@ pub enum ViolationKind {
     MmBudgetExceeded,
     /// Fill has zero quantity (wasteful)
     ZeroQuantityFill,
-    /// Net YES positions ≠ net NO positions for a market (money creation)
-    PositionImbalance,
     /// Reported volume/count totals don't match computed values
     VolumeCountMismatch,
 }
@@ -228,9 +224,6 @@ impl Verifier {
         // Verify MM constraints
         self.verify_mm_constraints(problem, result, &order_map, &mut violations, &mut stats);
 
-        // Verify position balance (catches money creation)
-        self.verify_position_balance(problem, result, &order_map, &mut violations, &mut stats);
-
         // Verify reported totals match computed values
         self.verify_reported_totals(result, &mut violations, &mut stats);
 
@@ -278,64 +271,6 @@ impl Verifier {
                         capital_used,
                         mm.max_capital,
                         capital_used - mm.max_capital
-                    ),
-                });
-            }
-        }
-    }
-
-    /// Verify position balance: for each binary market, net YES == net NO positions.
-    ///
-    /// Minting creates 1 YES + 1 NO share. If fills create an imbalance (e.g.,
-    /// BuyNo fill without a corresponding BuyYes), positions are created from
-    /// thin air — money at resolution.
-    ///
-    /// Uses f64 marginals to account for bundle orders whose per-market marginal
-    /// payoffs are fractional (e.g., "buy YES A and YES B" has marginal 0.5 per
-    /// market — the i64 version truncates this to 0, making bundles invisible).
-    ///
-    /// TODO: Per-market position balance is NECESSARY but NOT SUFFICIENT for
-    /// joint-state solvency with bundle orders. A bundle "buy YES A and YES B"
-    /// creates a joint-state liability that cannot be decomposed into per-market
-    /// shares. Full solvency verification requires tracking positions over the
-    /// joint state space (exponential in the number of coupled markets).
-    /// Until we have joint-state verification, this check catches per-market
-    /// imbalances but does NOT guarantee solvency when bundles are filled.
-    fn verify_position_balance(
-        &self,
-        _problem: &Problem,
-        result: &MatchingResult,
-        order_map: &HashMap<u64, &Order>,
-        violations: &mut Vec<Violation>,
-        stats: &mut VerificationStats,
-    ) {
-        let mut net_position: HashMap<MarketId, f64> = HashMap::new();
-
-        for fill in &result.fills {
-            if fill.fill_qty == 0 {
-                continue;
-            }
-            let Some(order) = order_map.get(&fill.order_id) else {
-                continue; // Already flagged by OrderNotFound
-            };
-
-            for (market_id, marginal) in order.marginal_payoffs_f64() {
-                *net_position.entry(market_id).or_insert(0.0) += marginal * fill.fill_qty as f64;
-            }
-        }
-
-        stats.markets_checked = net_position.len();
-
-        // Allow small float tolerance (< 0.5 shares) for f64 rounding.
-        let tolerance = 0.5;
-        for (market_id, net) in &net_position {
-            if net.abs() > tolerance {
-                violations.push(Violation {
-                    kind: ViolationKind::PositionImbalance,
-                    details: format!(
-                        "Market {}: net position delta = {:.2} (expected 0). \
-                         Positions created from thin air.",
-                        market_id, net,
                     ),
                 });
             }
@@ -561,75 +496,6 @@ mod tests {
             .violations
             .iter()
             .any(|v| v.kind == ViolationKind::WelfareMismatch));
-    }
-
-    // ========== Position balance tests ==========
-
-    #[test]
-    fn test_position_balance_valid() {
-        // Equal BuyYes + BuyNo fills → net zero → passes
-        let problem = create_test_problem();
-
-        let result = build_result(
-            vec![
-                Fill::new(1, 100, 500_000_000),  // BuyYes 100
-                Fill::new(11, 100, 500_000_000), // BuyNo 100
-            ],
-            &problem,
-        );
-
-        let verification = verify(&problem, &result);
-        assert!(
-            verification.valid,
-            "Violations: {:?}",
-            verification.violations
-        );
-        assert!(verification.stats.markets_checked > 0);
-    }
-
-    #[test]
-    fn test_position_imbalance() {
-        // BuyNo fill without corresponding BuyYes → position imbalance
-        let problem = create_test_problem();
-
-        let result = build_result(
-            vec![
-                Fill::new(11, 100, 500_000_000), // BuyNo only, no BuyYes
-            ],
-            &problem,
-        );
-
-        let verification = verify(&problem, &result);
-        assert!(!verification.valid);
-        assert!(
-            verification
-                .violations
-                .iter()
-                .any(|v| v.kind == ViolationKind::PositionImbalance),
-            "Expected PositionImbalance, got: {:?}",
-            verification.violations
-        );
-    }
-
-    #[test]
-    fn test_position_imbalance_unequal_qty() {
-        // BuyYes(100) + BuyNo(50) → net imbalance of 50
-        let problem = create_test_problem();
-
-        let result = build_result(
-            vec![
-                Fill::new(1, 100, 500_000_000), // BuyYes 100
-                Fill::new(11, 50, 500_000_000), // BuyNo 50
-            ],
-            &problem,
-        );
-
-        let verification = verify(&problem, &result);
-        assert!(!verification.valid);
-        assert!(verification
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::PositionImbalance));
     }
 
     // ========== Volume/count consistency tests ==========

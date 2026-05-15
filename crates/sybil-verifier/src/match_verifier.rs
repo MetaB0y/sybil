@@ -1,7 +1,8 @@
 //! Layer 1: Fill-level and market-level match verification.
 //!
-//! Checks that every fill is consistent with its order and that
-//! market-level invariants (UCP, complementarity, balance) hold.
+//! Checks that every fill is consistent with its order and that market-level
+//! price invariants (UCP, complementarity, market groups) hold. Position
+//! solvency is checked by settlement verification through the MINT account.
 
 use std::collections::{HashMap, HashSet};
 
@@ -52,10 +53,6 @@ pub fn verify_match(witness: &BlockWitness, diagnostics: bool) -> VerificationRe
     // UCP: The solver enforces uniform clearing prices by re-pricing all
     // single-market fills at the final clearing price after iteration completes.
     verify_uniform_clearing_prices(witness, &order_map, &mut violations);
-
-    // Position balance: net position delta must be 0 for each market (minting invariant).
-    // Also computes minting cost upper bound from any imbalance.
-    verify_position_balance(witness, &order_map, &mut violations, &mut stats);
 
     // Diagnostic-only checks:
     //
@@ -338,55 +335,6 @@ fn verify_price_complementarity(witness: &BlockWitness, violations: &mut Vec<Vio
                     ),
                 });
             }
-        }
-    }
-}
-
-// NOTE: "Quantity balance" (net position change = 0 per outcome) and "cash conservation"
-// (net cash flow = 0) are standard exchange-market invariants that do NOT hold in
-// prediction markets. In prediction markets, matching a YES buyer with a NO buyer
-// "mints" a complete set: both positions increase, and cash flows into the exchange
-// (P_yes + P_no = $1 per set). Similarly, matching a YES seller with a NO seller
-// "burns" a set. Only same-outcome buyer-vs-seller matching has zero net effect.
-//
-// Settlement verification (Layer 2) correctly handles this by re-deriving exact
-// balance and position transitions per account.
-
-/// Position balance: net position delta must be 0 for each market.
-///
-/// Minting creates 1 YES + 1 NO share. If fills create a net imbalance
-/// (e.g., more YES bought than NO bought), positions are created from
-/// thin air — which would mean free money at resolution.
-fn verify_position_balance(
-    witness: &BlockWitness,
-    order_map: &HashMap<u64, &Order>,
-    violations: &mut Vec<Violation>,
-    _stats: &mut VerificationStats,
-) {
-    let mut net_position: HashMap<MarketId, i64> = HashMap::new();
-
-    for fill in &witness.fills {
-        if fill.fill_qty == 0 {
-            continue;
-        }
-        let Some(order) = order_map.get(&fill.order_id) else {
-            continue;
-        };
-
-        for (market_id, normalized) in order.marginal_payoffs_i64() {
-            *net_position.entry(market_id).or_insert(0) += normalized * fill.fill_qty as i64;
-        }
-    }
-
-    for (market_id, net) in &net_position {
-        if *net != 0 {
-            violations.push(Violation {
-                kind: ViolationKind::PositionBalanceViolation,
-                details: format!(
-                    "Market {}: net position delta = {} (expected 0)",
-                    market_id, net
-                ),
-            });
         }
     }
 }
@@ -775,11 +723,12 @@ mod tests {
     }
 
     #[test]
-    fn test_position_balance_violated() {
+    fn test_match_layer_allows_mint_backed_position_imbalance() {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
 
-        // Unbalanced: 50 YES bought, nothing sold → net position = +50
+        // A one-sided buy creates position imbalance at the fill layer, but
+        // this is valid when settlement derives the MINT counterparty.
         let orders = vec![buy_order(&markets, 1, m0)];
         let fills = vec![Fill::new(1, 50, 500_000_000)];
 
@@ -789,11 +738,7 @@ mod tests {
             .insert(m0, vec![500_000_000, 500_000_000]);
 
         let result = verify_match(&witness, false);
-        assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::PositionBalanceViolation));
+        assert!(result.valid, "Violations: {:?}", result.violations);
     }
 
     #[test]

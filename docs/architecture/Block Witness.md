@@ -36,10 +36,10 @@ that job. Everything else in this doc follows from two invariants:
 | `orders` | orders accepted into this batch, with account mapping |
 | `rejections` | orders rejected, with reasons |
 | `system_events` | state changes applied between blocks (create account, dev deposit, L1 deposit, withdrawal creation, resolution) |
-| `fills` | solver output |
+| `fills` | real accepted-order fills produced by the solver; synthetic minting fills are not allowed |
 | `clearing_prices` | per-market clearing prices produced by the solver |
 | `total_welfare` | sum of `(limit_price - clearing_price) * fill_qty` |
-| `minting_cost` | minting cost not captured in fill welfare (MILP only) |
+| `minting_cost` | solver-reported welfare adjustment; live sequencer blocks set this to zero because minting is represented by MINT account settlement |
 | `mm_constraints` | MM budget constraints active this batch |
 | `market_groups` | market group definitions (for complete-set logic) |
 | `pre_state` | account snapshots at block start |
@@ -54,6 +54,13 @@ each block. Tests and `matching-sim` run the 4-layer verifier over it.
 committed witness plus qMDB proofs from storage and emits
 `StateTransitionProofJob`, while the core builder consumes only that portable
 job and produces `StateTransitionGuestInput` for `sybil-zk`.
+
+Minting/burning is not encoded as synthetic orders or synthetic fills. The
+solver may use minting variables internally to discover welfare-maximizing
+fills and clearing prices, but the witness records only real participant
+orders/fills. Settlement verification independently replays those fills, derives
+the required protocol counterparty adjustment, and checks the reserved MINT
+account in `post_state`.
 
 ## ZK public/private partition
 

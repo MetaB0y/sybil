@@ -34,7 +34,6 @@ pub enum ViolationKind {
     /// Zero-quantity fill (diagnostic only).
     ZeroQuantityFill,
     /// Net position delta != 0 for a market (minting invariant broken).
-    PositionBalanceViolation,
 
     // === Layer 1: Match verification (market-level) ===
     /// A single-market fill's price does not match the clearing price.
@@ -139,9 +138,9 @@ pub struct VerificationStats {
     pub mm_constraints_checked: usize,
     pub computed_welfare: i64,
     pub reported_welfare: i64,
-    /// Upper-bound minting cost from position imbalance (nanos).
-    /// Each unit of positive net position delta requires minting at $1.
-    /// Net welfare = computed_welfare - minting_cost_nanos.
+    /// Solver-reported minting/welfare adjustment in nanos.
+    /// Live block solvency is checked by settlement replaying MINT account
+    /// adjustments rather than by synthetic fills.
     pub minting_cost_nanos: i64,
     pub accounts_checked: usize,
     /// Average |sum_of_YES_prices - $1| across market groups, in nanos.

@@ -90,6 +90,26 @@ services:
       - prover-artifacts:/artifacts
     restart: unless-stopped
 
+  sybil-prover-mock:
+    image: sybil-api:latest
+    mem_limit: "128m"
+    memswap_limit: "128m"
+    entrypoint: ["sybil-prover"]
+    command:
+      - "mock-live"
+      - "--sybil-url=http://sybil-api:3000"
+      - "--artifacts-dir=/artifacts"
+      - "--poll-ms=2000"
+      - "--max-artifacts=1000"
+    volumes:
+      - prover-artifacts:/artifacts
+    depends_on:
+      sybil-api:
+        condition: service_healthy
+      sybil-prover:
+        condition: service_started
+    restart: unless-stopped
+
   sybil-arena:
     image: sybil-arena:latest
     mem_limit: "512m"
@@ -97,7 +117,7 @@ services:
     command:
       - "--sybil-url=http://sybil-api:3000"
       - "--api-key=${OPENROUTER_API_KEY}"
-      - "--max-markets=20"
+      - "--max-markets=0"
       - "--model=deepseek/deepseek-v4-flash"
       - "--db-path=/data/decisions.db"
     environment:

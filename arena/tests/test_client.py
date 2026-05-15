@@ -36,6 +36,17 @@ class TestTypes:
         assert market.yes_price == 0.6
         assert market.no_price == 0.4
 
+    def test_market_reference_price(self):
+        market = Market(
+            id=0,
+            name="Test",
+            yes_price_nanos=0,
+            no_price_nanos=0,
+            status="active",
+            reference_price_nanos=125_000_000,
+        )
+        assert market.reference_price == 0.125
+
     def test_fill_price(self):
         fill = Fill(order_id=1, fill_qty=10, fill_price_nanos=550_000_000)
         assert fill.fill_price == 0.55

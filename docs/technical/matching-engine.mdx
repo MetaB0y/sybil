@@ -81,22 +81,30 @@ This allows bundle orders to influence per-market clearing prices, creating fill
 
 **Output**: Bundle fills + adjusted clearing prices for affected markets.
 
-### Phase 3: NegriskSolver (Arbitrage)
+### Historical Phase 3: NegriskSolver (Arbitrage)
 
-When prices for mutually exclusive outcomes don't sum to exactly \$1, there's an arbitrage opportunity. Instead of artificially adjusting prices (which destroys welfare), the NegriskSolver creates **synthetic arbitrage orders** that influence prices through market forces.
+<Info>
+Current canonical blocks do not contain synthetic orders or synthetic fills.
+Minting/burning is represented by the protocol MINT account during settlement.
+The NegriskSolver description below documents an older solver experiment where
+synthetic orders were used only as internal price pressure.
+</Info>
+
+When prices for mutually exclusive outcomes don't sum to exactly \$1, there's an arbitrage opportunity. The historical NegriskSolver explored internal feedback orders that influence prices through market forces instead of directly rewriting prices.
 
 | Case | Condition | Action |
 |------|-----------|--------|
 | **Negrisk** | Prices sum < \$1 | Buy all outcomes — guaranteed \$1 payout |
 | **Posrisk** | Prices sum > \$1 | Sell all outcomes — only pay \$1 to winner |
 
-In the sequential pipeline, arb orders participate in the next iteration's LocalSolver clearing to push prices toward sum = \$1. The arb fills themselves are filtered out of the final result — they serve as price pressure, not as output.
+In the sequential pipeline, feedback orders participated in the next iteration's LocalSolver clearing to push prices toward sum = \$1. Their fills were filtered out of the final result — they served as price pressure, not as output.
 
 <Info>
 Naively adjusting prices to force consistency can invalidate orders and **destroy welfare**. The NegriskSolver instead creates real market forces that **add welfare** — modeling what an arbitrageur would do, but keeping the surplus for users.
 </Info>
 
-**Output**: Synthetic arb orders that drive prices toward consistency.
+**Output**: Internal price-pressure orders in the historical pipeline. They are
+not canonical fills and must not enter block witnesses.
 
 ### Phase 4: MmAllocator (Budget Allocation)
 
@@ -144,7 +152,7 @@ Step size decays as `alpha_0 / sqrt(t)` to ensure convergence.
 After the dual solver converges, the pipeline runs MultiMarketSolver repricing for bundle orders and any partial solvers for remaining unfilled orders.
 
 <Info>
-The dual solver replaces the NegriskSolver's role — instead of creating synthetic arb orders, it uses bid shading (adjusting limit prices via lambda) to drive prices toward consistency. Both approaches achieve the same goal; dual decomposition is more principled while the sequential pipeline with NegriskSolver can be faster to converge in practice.
+The dual solver replaces the NegriskSolver's role — instead of creating internal feedback orders, it uses bid shading (adjusting limit prices via lambda) to drive prices toward consistency. Both approaches aim at the same price-consistency problem; dual decomposition is more principled while the sequential pipeline was an experiment.
 </Info>
 
 ## Iteration & Convergence

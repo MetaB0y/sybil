@@ -12,6 +12,14 @@ There are two settlement paths. The **simple path** handles single-market binary
 
 The sequencer now settles fills directly from the `Fill` records themselves: each fill carries its own `account_id`, so `settle_batch()` no longer needs a separate `order_account_map`. Settlement also updates each touched account's `events_digest`, the running BLAKE3 accumulator included in the state root.
 
+Complete-set creation and burning go through the reserved MINT account. After
+real fills settle, the sequencer computes market-level YES/NO position totals,
+derives the minimal MINT adjustments needed to restore solvency, and applies
+those adjustments to `AccountId::MINT`. The verifier repeats the same derivation
+from the witness. Synthetic orders/fills are not part of canonical block output:
+they would not correspond to a submitted order, an account signature, or an
+event-root leaf.
+
 Market resolution is also handled through settlement. When a market resolves via the [[Oracle Lifecycle|oracle]] (see [[Market Resolution]]), YES shares pay out `yes_payout_nanos` per share and NO shares pay out `NANOS_PER_DOLLAR - yes_payout_nanos`. Fractional resolution is supported — a market can resolve 70/30 instead of binary 100/0 — which allows for nuanced outcomes. Resolution is irreversible: once settled, positions are converted to balance and the market is marked as resolved. Resolutions are also emitted as `system_events` in the next block so the witness explains why pre-state changed between blocks. The [[Four-Layer Verification|settlement verification layer]] independently re-derives the post-state from pre-state plus fills to confirm correctness.
 
 ## Key Properties
@@ -19,6 +27,8 @@ Market resolution is also handled through settlement. When a market resolves via
 - Simple path: single-market binary orders (most common)
 - Generic path: bundles/spreads via [[Payoff Vectors|payoff vector]] marginals
 - `settle_batch()` uses `fill.account_id`, not a separate order→account lookup
+- MINT account records protocol counterparty positions from complete-set creation/burning
+- Canonical fills are real participant fills only; no synthetic minting fills
 - Settlement updates `events_digest` for touched accounts
 - Market resolution: YES → `payout_nanos`, NO → `NANOS_PER_DOLLAR - payout_nanos`
 - Fractional resolution supported (e.g., 70%/30%)

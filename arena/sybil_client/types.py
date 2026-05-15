@@ -45,6 +45,7 @@ class Market:
     yes_price_nanos: int
     no_price_nanos: int
     status: str
+    reference_price_nanos: int | None = None
     description: str = ""
     category: str = ""
     tags: list[str] = field(default_factory=list)
@@ -60,6 +61,12 @@ class Market:
     @property
     def no_price(self) -> float:
         return self.no_price_nanos / NANOS_PER_DOLLAR
+
+    @property
+    def reference_price(self) -> float | None:
+        if self.reference_price_nanos is None:
+            return None
+        return self.reference_price_nanos / NANOS_PER_DOLLAR
 
     @property
     def volume_dollars(self) -> float:

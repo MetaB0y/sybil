@@ -276,6 +276,7 @@ class SybilClient:
             yes_price_nanos=data.get("yes_price_nanos") or 0,
             no_price_nanos=data.get("no_price_nanos") or 0,
             status=data.get("status", "Active"),
+            reference_price_nanos=data.get("reference_price_nanos"),
             description=data.get("description", ""),
             category=data.get("category", ""),
             tags=data.get("tags", []),

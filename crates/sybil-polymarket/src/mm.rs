@@ -26,8 +26,10 @@ pub enum MmMessage {
         yes_token_id: String,
         /// Initial midpoint from Polymarket.
         initial_mid: f64,
-        /// Whether this market is part of a NegRisk group.
-        in_group: bool,
+        /// Stable Polymarket event/group key for NegRisk groups.
+        group_key: Option<String>,
+        /// Number of markets in the NegRisk group. 0 for standalone markets.
+        group_size: usize,
     },
 }
 
@@ -38,7 +40,8 @@ pub enum MmMessage {
 struct MarketState {
     sybil_market_id: u32,
     yes_token_id: String,
-    in_group: bool,
+    group_key: Option<String>,
+    group_size: usize,
     // Inventory (updated via periodic API sync)
     yes_position: i64,
     no_position: i64,
@@ -51,7 +54,8 @@ impl MarketState {
     fn new(
         sybil_market_id: u32,
         yes_token_id: String,
-        in_group: bool,
+        group_key: Option<String>,
+        group_size: usize,
         initial_mid: f64,
         vol_window: usize,
     ) -> Self {
@@ -60,7 +64,8 @@ impl MarketState {
         Self {
             sybil_market_id,
             yes_token_id,
-            in_group,
+            group_key,
+            group_size,
             yes_position: 0,
             no_position: 0,
             price_history,
@@ -137,7 +142,8 @@ pub struct QuoteInput {
     pub net_inventory: f64,
     pub yes_position: i64,
     pub no_position: i64,
-    pub in_group: bool,
+    pub group_key: Option<String>,
+    pub group_size: usize,
 }
 
 /// Configuration for quote generation.
@@ -194,28 +200,31 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
         });
     }
 
-    // ── NO side (standalone markets only) ──
-    if !input.in_group {
-        let no_bid = (1.0 - r) - half_spread;
-        let no_ask = (1.0 - r) + half_spread;
+    // ── NO side ──
+    //
+    // Buying NO at price (1 - ask_yes) is the collateralized way to provide
+    // the YES ask without requiring existing YES inventory. This matters most
+    // for Polymarket NegRisk groups: disabling the NO side left the live MM as
+    // a one-sided YES bidder on the mirrored multi-outcome markets.
+    let no_bid = (1.0 - r) - half_spread;
+    let no_ask = (1.0 - r) + half_spread;
 
-        if !at_no_limit && no_bid > 0.01 && no_bid < 0.99 {
-            orders.push(OrderSpec::BuyNo {
-                market_id: input.market_id,
-                limit_price_nanos: (no_bid * NANOS_PER_DOLLAR as f64) as u64,
-                quantity: (buy_size / no_bid).max(1.0) as u64,
-            });
-        }
+    if !at_no_limit && no_bid > 0.01 && no_bid < 0.99 {
+        orders.push(OrderSpec::BuyNo {
+            market_id: input.market_id,
+            limit_price_nanos: (no_bid * NANOS_PER_DOLLAR as f64) as u64,
+            quantity: (buy_size / no_bid).max(1.0) as u64,
+        });
+    }
 
-        if input.no_position > 0 && no_ask > 0.01 && no_ask < 0.99 {
-            let max_sell = input.no_position as u64;
-            let desired = (sell_size / no_ask).max(1.0) as u64;
-            orders.push(OrderSpec::SellNo {
-                market_id: input.market_id,
-                limit_price_nanos: (no_ask * NANOS_PER_DOLLAR as f64) as u64,
-                quantity: desired.min(max_sell),
-            });
-        }
+    if input.no_position > 0 && no_ask > 0.01 && no_ask < 0.99 {
+        let max_sell = input.no_position as u64;
+        let desired = (sell_size / no_ask).max(1.0) as u64;
+        orders.push(OrderSpec::SellNo {
+            market_id: input.market_id,
+            limit_price_nanos: (no_ask * NANOS_PER_DOLLAR as f64) as u64,
+            quantity: desired.min(max_sell),
+        });
     }
 
     orders
@@ -239,25 +248,36 @@ pub fn select_rotating_quotes(
 
     let start = start_index % quote_inputs.len();
     let mut orders = Vec::new();
+    let mut group_coverage = HashMap::<String, GroupQuoteCoverage>::new();
     let mut considered = 0;
 
     for offset in 0..quote_inputs.len() {
         let idx = (start + offset) % quote_inputs.len();
-        let market_orders = generate_quotes(&quote_inputs[idx], quote_config);
+        let input = &quote_inputs[idx];
+        let mut market_orders = generate_quotes(input, quote_config);
+        if input.group_key.is_some() {
+            market_orders.sort_by_key(|order| match order {
+                OrderSpec::BuyNo { .. } => 0,
+                OrderSpec::BuyYes { .. } => 1,
+                _ => 2,
+            });
+        }
         considered = offset + 1;
 
         if market_orders.is_empty() {
             continue;
         }
 
-        if orders.len() + market_orders.len() > max_orders {
-            if !orders.is_empty() {
+        for order in market_orders {
+            if orders.len() >= max_orders {
                 break;
             }
-            continue;
+            if would_complete_group_coverage(input, &order, &group_coverage) {
+                continue;
+            }
+            record_group_coverage(input, &order, &mut group_coverage);
+            orders.push(order);
         }
-
-        orders.extend(market_orders);
 
         if orders.len() >= max_orders {
             break;
@@ -266,6 +286,69 @@ pub fn select_rotating_quotes(
 
     let next_index = (start + considered.max(1)) % quote_inputs.len();
     (orders, next_index)
+}
+
+#[derive(Default)]
+struct GroupQuoteCoverage {
+    buy_yes_markets: std::collections::HashSet<u32>,
+    buy_no_markets: std::collections::HashSet<u32>,
+}
+
+fn would_complete_group_coverage(
+    input: &QuoteInput,
+    order: &OrderSpec,
+    coverage: &HashMap<String, GroupQuoteCoverage>,
+) -> bool {
+    let Some(group_key) = &input.group_key else {
+        return false;
+    };
+    let group_size = input.group_size;
+    if group_size < 2 {
+        return false;
+    }
+    let Some(existing) = coverage.get(group_key) else {
+        return false;
+    };
+    match order {
+        OrderSpec::BuyYes { market_id, .. } => {
+            existing.buy_no_markets.contains(market_id)
+                || existing.buy_yes_markets.len()
+                    + usize::from(!existing.buy_yes_markets.contains(market_id))
+                    >= group_size
+        }
+        OrderSpec::BuyNo { market_id, .. } => {
+            existing.buy_yes_markets.contains(market_id)
+                || existing
+                    .buy_no_markets
+                    .iter()
+                    .any(|existing_market_id| existing_market_id != market_id)
+        }
+        _ => false,
+    }
+}
+
+fn record_group_coverage(
+    input: &QuoteInput,
+    order: &OrderSpec,
+    coverage: &mut HashMap<String, GroupQuoteCoverage>,
+) {
+    let Some(group_key) = &input.group_key else {
+        return;
+    };
+    let entry = coverage
+        .entry(group_key.clone())
+        .or_insert_with(|| GroupQuoteCoverage {
+            ..GroupQuoteCoverage::default()
+        });
+    match order {
+        OrderSpec::BuyYes { market_id, .. } => {
+            entry.buy_yes_markets.insert(*market_id);
+        }
+        OrderSpec::BuyNo { market_id, .. } => {
+            entry.buy_no_markets.insert(*market_id);
+        }
+        _ => {}
+    }
 }
 
 // --------------------------------------------------------------------------- //
@@ -380,18 +463,20 @@ impl MmActor {
                 sybil_market_id,
                 yes_token_id,
                 initial_mid,
-                in_group,
+                group_key,
+                group_size,
             } => {
                 info!(
                     sybil_market_id,
-                    yes_token_id, initial_mid, in_group, "MM tracking new market"
+                    yes_token_id, initial_mid, group_key, group_size, "MM tracking new market"
                 );
                 self.state.markets.insert(
                     sybil_market_id,
                     MarketState::new(
                         sybil_market_id,
                         yes_token_id,
-                        in_group,
+                        group_key,
+                        group_size,
                         initial_mid,
                         self.config.mm_vol_window,
                     ),
@@ -504,7 +589,8 @@ impl MmActor {
                 net_inventory: ms.net_inventory(),
                 yes_position: ms.yes_position,
                 no_position: ms.no_position,
-                in_group: ms.in_group,
+                group_key: ms.group_key.clone(),
+                group_size: ms.group_size,
             });
         }
         quote_inputs.sort_by_key(|input| input.market_id);
@@ -603,7 +689,16 @@ mod tests {
             net_inventory: 0.0,
             yes_position: 0,
             no_position: 0,
-            in_group: false,
+            group_key: None,
+            group_size: 0,
+        }
+    }
+
+    fn grouped_input(mid: f64) -> QuoteInput {
+        QuoteInput {
+            group_key: Some("group".to_string()),
+            group_size: 3,
+            ..default_input(mid)
         }
     }
 
@@ -611,6 +706,18 @@ mod tests {
     fn symmetric_quotes_at_midpoint() {
         let orders = generate_quotes(&default_input(0.5), &default_config());
         // Should have BuyYes + BuyNo (no sells since no position)
+        assert!(orders.iter().any(|o| matches!(o, OrderSpec::BuyYes { .. })));
+        assert!(orders.iter().any(|o| matches!(o, OrderSpec::BuyNo { .. })));
+        assert!(!orders
+            .iter()
+            .any(|o| matches!(o, OrderSpec::SellYes { .. })));
+        assert!(!orders.iter().any(|o| matches!(o, OrderSpec::SellNo { .. })));
+    }
+
+    #[test]
+    fn grouped_markets_quote_yes_and_no_from_cash() {
+        let orders = generate_quotes(&grouped_input(0.7), &default_config());
+
         assert!(orders.iter().any(|o| matches!(o, OrderSpec::BuyYes { .. })));
         assert!(orders.iter().any(|o| matches!(o, OrderSpec::BuyNo { .. })));
         assert!(!orders
@@ -650,13 +757,11 @@ mod tests {
     }
 
     #[test]
-    fn group_market_suppresses_no_side() {
+    fn group_market_quotes_no_side() {
         let config = default_config();
-        let mut input = default_input(0.5);
-        input.in_group = true;
+        let input = grouped_input(0.5);
         let orders = generate_quotes(&input, &config);
-        // In group → no BuyNo/SellNo
-        assert!(!orders.iter().any(|o| matches!(o, OrderSpec::BuyNo { .. })));
+        assert!(orders.iter().any(|o| matches!(o, OrderSpec::BuyNo { .. })));
         assert!(!orders.iter().any(|o| matches!(o, OrderSpec::SellNo { .. })));
     }
 
@@ -734,6 +839,38 @@ mod tests {
         }));
         assert!(orders.iter().any(|order| match order {
             OrderSpec::BuyYes { market_id, .. } => *market_id == 5,
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn grouped_selection_filters_self_completing_quotes() {
+        let config = default_config();
+        let inputs: Vec<_> = (1..=3)
+            .map(|market_id| {
+                let mut input = grouped_input(0.5);
+                input.market_id = market_id;
+                input
+            })
+            .collect();
+
+        let (orders, next_index) = select_rotating_quotes(&inputs, &config, 0, 12);
+
+        assert_eq!(next_index, 0);
+        assert_eq!(
+            orders
+                .iter()
+                .filter(|order| matches!(order, OrderSpec::BuyNo { .. }))
+                .count(),
+            1
+        );
+        let buy_no_market = orders.iter().find_map(|order| match order {
+            OrderSpec::BuyNo { market_id, .. } => Some(*market_id),
+            _ => None,
+        });
+        assert!(buy_no_market.is_some());
+        assert!(!orders.iter().any(|order| match order {
+            OrderSpec::BuyYes { market_id, .. } => Some(*market_id) == buy_no_market,
             _ => false,
         }));
     }

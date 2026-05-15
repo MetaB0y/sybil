@@ -307,8 +307,12 @@ fn classify_order_side(order: &Order) -> &'static str {
     }
 }
 
-fn expected_balance_delta_from_fills(fills: &[Fill], order_map: &HashMap<u64, &Order>) -> i64 {
-    fills.iter().fold(0, |net_delta, fill| {
+fn expected_balance_delta_from_fills(
+    fills: &[Fill],
+    order_map: &HashMap<u64, &Order>,
+    mint_adjustments: &[matching_engine::MintAdjustment],
+) -> i64 {
+    let fill_delta = fills.iter().fold(0, |net_delta, fill| {
         if fill.fill_qty == 0 {
             return net_delta;
         }
@@ -317,22 +321,14 @@ fn expected_balance_delta_from_fills(fills: &[Fill], order_map: &HashMap<u64, &O
             return net_delta;
         };
 
-        let has_positive = order.payoffs[..order.num_states as usize]
-            .iter()
-            .any(|&p| p > 0);
-        let has_negative = order.payoffs[..order.num_states as usize]
-            .iter()
-            .any(|&p| p < 0);
-        let cost = (fill.fill_price as i128 * fill.fill_qty as i128) as i64;
+        let Some(delta) = matching_engine::compute_fill_settlement(order, fill) else {
+            return net_delta;
+        };
 
-        if has_positive && !has_negative {
-            net_delta - cost
-        } else if has_negative && !has_positive {
-            net_delta + cost
-        } else {
-            net_delta
-        }
-    })
+        net_delta + delta.balance_delta
+    });
+    let mint_delta: i64 = mint_adjustments.iter().map(|adj| adj.balance_delta).sum();
+    fill_delta + mint_delta
 }
 
 /// Build the witness state snapshots around the system-event boundary.
@@ -1819,7 +1815,8 @@ impl BlockSequencer {
         let post_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
         let balance_delta = post_total_balance - pre_total_balance;
         if balance_delta != 0 {
-            let expected_balance_delta = expected_balance_delta_from_fills(fills, &order_map);
+            let expected_balance_delta =
+                expected_balance_delta_from_fills(fills, &order_map, &mint_adjustments);
             if balance_delta != expected_balance_delta {
                 error!(
                     height = self.height,
@@ -2652,8 +2649,26 @@ mod tests {
             Fill::new(sell.id, 2, 700_000_000),
         ];
 
-        let expected_delta = expected_balance_delta_from_fills(&fills, &order_map);
+        let expected_delta = expected_balance_delta_from_fills(&fills, &order_map, &[]);
         assert_eq!(expected_delta, -(300_000_000i64 * 4) + (700_000_000i64 * 2));
+    }
+
+    #[test]
+    fn test_expected_balance_delta_includes_mint_adjustments() {
+        let (markets, m0) = setup();
+        let buy = outcome_buy(&markets, 1, m0, 0, 300_000_000, 4);
+        let order_map = HashMap::from([(buy.id, &buy)]);
+        let fills = vec![Fill::new(buy.id, 4, 300_000_000)];
+        let mint_adjustments = vec![matching_engine::MintAdjustment {
+            market_id: m0,
+            outcome: 0,
+            position_delta: -4,
+            balance_delta: 300_000_000i64 * 4,
+        }];
+
+        let expected_delta =
+            expected_balance_delta_from_fills(&fills, &order_map, &mint_adjustments);
+        assert_eq!(expected_delta, 0);
     }
 
     #[test]

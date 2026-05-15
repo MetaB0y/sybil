@@ -103,7 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let sybil_ids: HashSet<u32> = sybil_markets.iter().map(|m| m.market_id).collect();
             let missing = mapped_markets
                 .iter()
-                .filter(|(market_id, _, _)| !sybil_ids.contains(market_id))
+                .filter(|(market_id, _, _, _)| !sybil_ids.contains(market_id))
                 .count();
 
             if missing > 0 {
@@ -176,7 +176,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             None => mapping.all_markets(),
         }
     };
-    existing.sort_by_key(|(sybil_market_id, _, _)| std::cmp::Reverse(*sybil_market_id));
+    existing.sort_by_key(|(sybil_market_id, _, _, _)| std::cmp::Reverse(*sybil_market_id));
     if config.mm_max_markets > 0 && existing.len() > config.mm_max_markets {
         info!(
             total = existing.len(),
@@ -201,12 +201,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             count = existing.len(),
             "bootstrapping MM with existing markets"
         );
-        for (sybil_market_id, yes_token_id, in_group) in &existing {
+        for (sybil_market_id, yes_token_id, group_key, group_size) in &existing {
             let _ = mm_tx.try_send(sybil_polymarket::mm::MmMessage::MarketMirrored {
                 sybil_market_id: *sybil_market_id,
                 yes_token_id: yes_token_id.clone(),
                 initial_mid: 0.5,
-                in_group: *in_group,
+                group_key: group_key.clone(),
+                group_size: *group_size,
             });
         }
     }
@@ -214,7 +215,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Bootstrap Feed with existing token subscriptions
     let all_tokens: Vec<String> = existing
         .iter()
-        .map(|(_, yes_token_id, _)| yes_token_id.clone())
+        .map(|(_, yes_token_id, _, _)| yes_token_id.clone())
         .collect();
     if !all_tokens.is_empty() {
         info!(

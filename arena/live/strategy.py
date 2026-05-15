@@ -239,7 +239,7 @@ def position_orders(
     # Scale into target (buy)
     if target_yes > current_yes:
         deficit = target_yes - current_yes
-        cost_per_share = market_price
+        cost_per_share = fair_value
         affordable = int(available_cash / cost_per_share) if cost_per_share > 0 else 0
         qty = min(deficit, affordable)
         if qty > 0:
@@ -247,10 +247,11 @@ def position_orders(
 
     if target_no > current_no:
         deficit = target_no - current_no
-        cost_per_share = 1 - market_price
+        no_limit = 1 - fair_value
+        cost_per_share = no_limit
         affordable = int(available_cash / cost_per_share) if cost_per_share > 0 else 0
         qty = min(deficit, affordable)
         if qty > 0:
-            orders.append(BuyNo.at_price(market_id, 1 - fair_value, qty))
+            orders.append(BuyNo.at_price(market_id, no_limit, qty))
 
     return orders

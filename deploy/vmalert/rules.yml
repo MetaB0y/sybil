@@ -153,24 +153,30 @@ groups:
           description: "Fewer than 100 markets have live reference prices. Polymarket coverage may have dropped or the mirror may not be tracking enough tokens."
 
       - alert: SybilPriceDivergenceHigh
-        expr: max(sybil_price_reference_max_abs_diff_nanos) > 50 * 1000 * 1000
+        expr: |
+          max(sybil_price_reference_pairs_total) >= 20
+          and
+          max(sybil_price_reference_max_abs_diff_nanos) > 50 * 1000 * 1000
         for: 5m
         labels:
           severity: warning
           component: arena
         annotations:
           summary: "Sybil prices diverge from Polymarket"
-          description: "At least one Sybil market is more than 5 cents away from its Polymarket reference price for 5m."
+          description: "At least one Sybil market is more than 5 cents away from its Polymarket reference price for 5m. Requires at least 20 priced/reference intersections so flash-MM batches with tiny samples do not page."
 
       - alert: SybilPriceDivergenceBroad
-        expr: max(sybil_price_reference_avg_abs_diff_nanos) > 25 * 1000 * 1000
+        expr: |
+          max(sybil_price_reference_pairs_total) >= 20
+          and
+          max(sybil_price_reference_avg_abs_diff_nanos) > 25 * 1000 * 1000
         for: 10m
         labels:
           severity: warning
           component: arena
         annotations:
           summary: "Average Sybil/Polymarket price divergence is high"
-          description: "Average absolute price difference across Sybil markets with reference prices is above 2.5 cents for 10m."
+          description: "Average absolute price difference across Sybil markets with reference prices is above 2.5 cents for 10m. Requires at least 20 priced/reference intersections so one IOC batch cannot dominate the average."
 
       - alert: SybilPricedMarketCoverageLow
         expr: |
@@ -184,6 +190,21 @@ groups:
         annotations:
           summary: "Few active markets have Sybil clearing prices"
           description: "The deployment has many active markets but fewer than 10 markets with local prices. The market maker or trader activity may be too narrow."
+
+      - alert: SybilPriceReferenceIntersectionLow
+        expr: |
+          max(sybil_reference_prices_total) >= 100
+          and
+          max(sybil_markets_priced_total) >= 20
+          and
+          max(sybil_price_reference_pairs_total) < 20
+        for: 10m
+        labels:
+          severity: warning
+          component: arena
+        annotations:
+          summary: "Few Sybil priced markets have Polymarket references"
+          description: "Sybil has both local clearing prices and Polymarket reference prices, but fewer than 20 markets are in the intersection. Divergence alerts are suppressed until this sample is large enough."
 
       - alert: BlockProductionStalled
         expr: rate(sybil_blocks_produced[2m]) == 0 and up{job="sybil-api"} == 1

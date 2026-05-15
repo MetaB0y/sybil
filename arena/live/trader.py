@@ -265,15 +265,30 @@ class LiveLlmTrader(BaseAgent):
     # -- Price helpers --
 
     def _get_market_price(self, market_id: int, block: Block) -> float:
+        market = self.markets_info.get(market_id)
+        if market and market.reference_price_nanos is not None and market.reference_price_nanos > 0:
+            return market.reference_price_nanos / NANOS_PER_DOLLAR
+
         poly_price = self.news_feed.polymarket_prices.get_price(market_id)
-        prices = self.filter_markets(block)
-        if market_id in prices:
-            yes_nanos, _ = prices[market_id]
-            sybil_price = yes_nanos / NANOS_PER_DOLLAR
-        else:
-            sybil_price = 0.0
-        ref = poly_price if poly_price and poly_price > 0 else sybil_price
-        return ref if ref > 0 else 0.0
+        if poly_price and poly_price > 0:
+            return poly_price
+
+        if market_id in block.clearing_prices:
+            yes_nanos, _ = block.clearing_prices[market_id]
+            return yes_nanos / NANOS_PER_DOLLAR
+
+        return 0.0
+
+    def _observed_market_prices(self, block: Block) -> dict[int, tuple[int, int]]:
+        """Prices worth recording for live trading, without synthetic 50/50s."""
+        market_ids = self.market_ids or set(block.clearing_prices.keys())
+        prices: dict[int, tuple[int, int]] = {}
+        for market_id in market_ids:
+            ref = self._get_market_price(market_id, block)
+            if ref > 0:
+                yes_nanos = int(ref * NANOS_PER_DOLLAR)
+                prices[market_id] = (yes_nanos, NANOS_PER_DOLLAR - yes_nanos)
+        return prices
 
     def _portfolio_value(self, block: Block) -> float:
         pv = self.current_balance
@@ -449,7 +464,7 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
 
     async def on_block(self, block: Block) -> list[OrderSpec]:
         all_orders: list[OrderSpec] = []
-        prices = self.filter_markets(block)
+        prices = self._observed_market_prices(block)
         now = datetime.now(timezone.utc)
         self._pending_order_logs = []
 

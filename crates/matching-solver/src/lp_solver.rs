@@ -414,12 +414,11 @@ pub(crate) fn collect_markets(orders: &[Order]) -> Vec<MarketId> {
         .collect()
 }
 
-/// Extract fills and clearing prices from the LP solution.
+/// Extract real order fills and clearing prices from the LP solution.
 ///
-/// Rounds continuous q_i to integer fills, derives clearing prices from duals.
-/// All orders must be single-market binary orders.
-/// Does NOT create arb orders — those are added after all post-processing
-/// (MM budget trim) so position balance accounts for final fills.
+/// Rounds continuous q_i to integer fills and derives clearing prices from
+/// duals. Minting/group-minting variables are settled later by the sequencer's
+/// MINT account; they are never represented as synthetic fills.
 pub(crate) fn extract_result(
     solution: &LpSolution,
     orders: &[Order],
@@ -467,68 +466,8 @@ pub(crate) fn extract_result(
         result.add_fill(fill, order);
     }
 
-    // Welfare is recomputed from scratch after all post-processing (trim + arbs).
+    // Welfare is recomputed from scratch after all post-processing.
     (result, clearing_prices)
-}
-
-/// Create synthetic arb orders to restore position balance.
-///
-/// Computes per-market net position from all fills, then creates arb orders
-/// (and fills) to zero out any imbalance from minting or integer rounding.
-pub(crate) fn create_position_arbs(
-    result: &mut MatchingResult,
-    order_map: &HashMap<u64, &Order>,
-    clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
-    max_order_id: u64,
-) -> Vec<Order> {
-    let mut arb_orders = Vec::new();
-    let mut next_arb_id = max_order_id + 3_000_000_000;
-
-    // Compute net position per market from all current fills
-    let mut net_position: HashMap<MarketId, i64> = HashMap::new();
-    for fill in &result.fills {
-        if fill.fill_qty == 0 {
-            continue;
-        }
-        let Some(&order) = order_map.get(&fill.order_id) else {
-            continue;
-        };
-        for (market_id, normalized) in order.marginal_payoffs_i64() {
-            *net_position.entry(market_id).or_insert(0) += normalized * fill.fill_qty as i64;
-        }
-    }
-
-    for (&market, &net) in &net_position {
-        if net == 0 {
-            continue;
-        }
-        let shares = net.unsigned_abs();
-        let yes_price = clearing_prices
-            .get(&market)
-            .and_then(|p| p.first().copied())
-            .unwrap_or(0);
-
-        let mut order = Order::new(next_arb_id);
-        order.markets[0] = market;
-        order.num_markets = 1;
-        order.num_states = 2;
-        if net > 0 {
-            order.payoffs[0] = -1; // Sell YES to offset excess demand
-            order.payoffs[1] = 0;
-        } else {
-            order.payoffs[0] = 1; // Buy YES to offset excess supply
-            order.payoffs[1] = 0;
-        }
-        order.limit_price = yes_price;
-        order.max_fill = shares;
-
-        let fill = Fill::new(next_arb_id, shares, yes_price);
-        result.add_fill(fill, &order);
-        arb_orders.push(order);
-        next_arb_id += 1;
-    }
-
-    arb_orders
 }
 
 /// Check whether any MM budget constraint is violated at current LP solution prices.
@@ -689,9 +628,9 @@ pub(crate) fn build_solver_context(problem: &Problem) -> SolverContext {
 /// Common post-processing shared across all LP-family solvers.
 ///
 /// After the core solving phase (LP, Frank-Wolfe, conic, or μ-iteration),
-/// all solvers share this finalization: extract fills from the LP solution,
-/// trim MM budget overflows, create arb orders for position balance,
-/// recompute welfare, and gate on non-negative welfare.
+/// all solvers share this finalization: extract real order fills from the LP
+/// solution, trim MM budget overflows, recompute welfare, and gate on
+/// non-negative welfare.
 pub(crate) fn finalize_result(
     solution: &LpSolution,
     problem: &Problem,
@@ -703,15 +642,7 @@ pub(crate) fn finalize_result(
     let (mut result, prices) = extract_result(solution, orders, &ctx.markets);
 
     trim_mm_budget_overflows(&mut result, &problem.mm_constraints, &ctx.mm_order_info);
-
-    let max_order_id = orders.iter().map(|o| o.id).max().unwrap_or(0);
-    let arb_orders = create_position_arbs(&mut result, &order_map, &prices, max_order_id);
-
-    let mut order_map_with_arbs = order_map;
-    for arb in &arb_orders {
-        order_map_with_arbs.insert(arb.id, arb);
-    }
-    recompute_welfare(&mut result, &order_map_with_arbs);
+    recompute_welfare(&mut result, &order_map);
 
     let mut pipeline_result = PipelineResult::empty();
     pipeline_result.result = result;
@@ -725,7 +656,6 @@ pub(crate) fn finalize_result(
         price_discovery_secs: start.elapsed().as_secs_f64(),
         ..Default::default()
     };
-    pipeline_result.group_minting_arb_orders = arb_orders;
 
     if pipeline_result.result.total_welfare < 0 {
         pipeline_result.result = MatchingResult::new();
@@ -860,6 +790,14 @@ mod tests {
             result.result.orders_filled >= 3,
             "should fill all 3 via group minting, filled {}",
             result.result.orders_filled
+        );
+        assert!(
+            result
+                .result
+                .fills
+                .iter()
+                .all(|fill| problem.orders.iter().any(|order| order.id == fill.order_id)),
+            "LP finalizer must not leak synthetic minting/arb fills into block output"
         );
         assert!(
             result.result.total_welfare > 0,
