@@ -2,7 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use matching_engine::{
-    Fill, MarketGroup, MarketId, MarketSet, MmConstraint, Nanos, Order, Problem,
+    derive_order_direction, Fill, MarketGroup, MarketId, MarketSet, MmConstraint, Nanos, Order,
+    Problem,
 };
 use matching_solver::{PipelineResult, Solver};
 use sybil_oracle::{MarketStatus, Oracle, ResolutionRecord};
@@ -13,6 +14,7 @@ use sybil_verifier::{
 use tracing::{debug, error};
 
 use crate::account::{Account, AccountId, AccountStore};
+use crate::analytics::AnalyticsState;
 use crate::block::{
     hash_header, state_sidecar_snapshot, Block, BlockFlowMetrics, BlockHeader, BlockProduction,
 };
@@ -80,6 +82,11 @@ pub struct SequencerConfig {
     /// Queue depth where actor mailbox pressure should be logged as an error.
     /// Set to 0 to disable error logs.
     pub actor_queue_error_depth: usize,
+    /// Width of the ±band around each market's midprice used by the
+    /// off-block `LiquidityTracker` to score "near-the-money" depth. Default
+    /// 50_000_000 nanos = $0.05. Ships on the wire alongside the average so
+    /// FE labels can read "(±$0.05)".
+    pub liquidity_band_nanos: u64,
 }
 
 impl Default for SequencerConfig {
@@ -102,6 +109,7 @@ impl Default for SequencerConfig {
                 crate::fill_recorder::DEFAULT_MAX_FILL_HISTORY_PER_ACCOUNT,
             actor_queue_warn_depth: 1_000,
             actor_queue_error_depth: 5_000,
+            liquidity_band_nanos: 50_000_000,
         }
     }
 }
@@ -162,6 +170,10 @@ pub struct PendingOrderInfo {
     pub remaining_qty: u64,
     pub created_at_block: u64,
     pub expires_at_block: u64,
+    /// Quantity at admit time (B5/B8). `remaining_qty` shrinks as the
+    /// order is partially filled; this stays constant. Used by the FE to
+    /// draw partial-fill progress.
+    pub original_quantity: u64,
 }
 
 pub struct PreparedBlock {
@@ -176,10 +188,19 @@ struct SolvedBatch {
     total_welfare: i64,
     total_volume: u64,
     orders_filled: usize,
+    /// Per-market welfare from this batch's fills. A multi-market order
+    /// credits each active market with its full welfare contribution; the
+    /// platform `total_welfare` counts each fill once (so sum-of-per-market
+    /// over-counts for bundles, just like `placers_by_market`).
+    welfare_by_market: HashMap<MarketId, i64>,
 }
 
 struct FinalizedBlockState {
     post_state: CanonicalState,
+    /// Per-market volume split for this block, returned by
+    /// `PriceTracker::record_block` and plumbed onto the Block so wire
+    /// consumers see `BlockMarketStats.volume_nanos`.
+    volume_by_market: HashMap<MarketId, u64>,
 }
 
 struct WitnessArtifacts {
@@ -215,7 +236,8 @@ fn bridge_block_data(system_events: &[SystemEvent], bridge_state: &BridgeState) 
             }
             SystemEvent::CreateAccount { .. }
             | SystemEvent::Deposit { .. }
-            | SystemEvent::MarketResolved { .. } => {}
+            | SystemEvent::MarketResolved { .. }
+            | SystemEvent::OrderCancelled { .. } => {}
         }
     }
     BridgeBlockData {
@@ -242,6 +264,7 @@ impl PendingOrderInfo {
         account_id: AccountId,
         created_at: u64,
         expires_at_block: u64,
+        original_max_fill: u64,
     ) -> Self {
         let market_ids: Vec<_> = order.active_markets().collect();
         let side = classify_order_side(order);
@@ -254,6 +277,14 @@ impl PendingOrderInfo {
             remaining_qty: order.max_fill,
             created_at_block: created_at,
             expires_at_block,
+            // `original_max_fill` is `0` on pre-B5 snapshots (#[serde(default)]).
+            // Fall back to the current `max_fill` so the FE progress bar
+            // still renders sensibly during the rolling transition.
+            original_quantity: if original_max_fill == 0 {
+                order.max_fill
+            } else {
+                original_max_fill
+            },
         }
     }
 }
@@ -409,6 +440,19 @@ fn convert_system_event(event: &SystemEvent) -> SystemEventWitness {
             payout_nanos: *payout_nanos,
             affected_accounts: affected_accounts.iter().map(|id| id.0).collect(),
         },
+        SystemEvent::OrderCancelled {
+            account_id,
+            order_id,
+            market_ids,
+            side,
+            remaining_quantity,
+        } => SystemEventWitness::OrderCancelled {
+            account_id: account_id.0,
+            order_id: *order_id,
+            market_ids: market_ids.clone(),
+            side: *side,
+            remaining_quantity: *remaining_quantity,
+        },
     }
 }
 
@@ -537,10 +581,10 @@ pub struct BlockSequencer {
     market_groups: Vec<MarketGroup>,
     /// Last block header for hash chaining.
     last_header: Option<BlockHeader>,
-    /// Price tracking: clearing prices, history, volume.
-    pub price_tracker: crate::price_tracker::PriceTracker,
-    /// Fill recording: per-account fill history.
-    pub fill_recorder: crate::fill_recorder::FillRecorder,
+    /// In-process derived projections for API/UI surfaces. Updated
+    /// synchronously by the sequencer, but kept separate from core matching,
+    /// settlement, and witness state.
+    analytics: AnalyticsState,
     /// Market lifecycle: statuses, oracle, metadata.
     pub lifecycle: crate::market_lifecycle::MarketLifecycle,
     /// P256 public key to account mapping.
@@ -581,12 +625,7 @@ impl BlockSequencer {
             markets,
             market_groups,
             last_header: None,
-            price_tracker: crate::price_tracker::PriceTracker::with_retention(
-                config.max_price_history_points_per_market,
-            ),
-            fill_recorder: crate::fill_recorder::FillRecorder::with_retention(
-                config.max_fill_history_per_account,
-            ),
+            analytics: AnalyticsState::new(&config),
             lifecycle: crate::market_lifecycle::MarketLifecycle::new(oracle),
             pubkey_registry: HashMap::new(),
             bridge: BridgeState::default(),
@@ -646,15 +685,7 @@ impl BlockSequencer {
             markets: state.markets,
             market_groups: state.market_groups,
             last_header: state.last_header,
-            price_tracker: crate::price_tracker::PriceTracker::with_state_and_retention(
-                state.last_clearing_prices,
-                state.market_volumes,
-                config.max_price_history_points_per_market,
-            ),
-            fill_recorder: crate::fill_recorder::FillRecorder::restore_with_retention(
-                state.account_fills,
-                config.max_fill_history_per_account,
-            ),
+            analytics: AnalyticsState::restore(state.analytics, &config),
             lifecycle,
             pubkey_registry: state.pubkey_registry,
             bridge: state.bridge_state,
@@ -702,12 +733,35 @@ impl BlockSequencer {
             header,
             next_order_id: self.next_order_id,
             pubkey_registry: &self.pubkey_registry,
-            last_clearing_prices: self.price_tracker.last_clearing_prices(),
-            market_volumes: self.price_tracker.market_volumes(),
-            account_fills: self.fill_recorder.snapshot(),
+            analytics: self.analytics.snapshot(),
             resting_orders: self.order_book.snapshot(),
             bridge_state: &self.bridge,
         }
+    }
+
+    /// Open-batch unique placers for a market — non-persistent computation
+    /// over the resting book plus pending bundles touching `market_id`.
+    /// Excludes MM-constrained bundles and `AccountId::MINT`.
+    pub fn open_batch_unique_placers(&self, market_id: MarketId) -> u32 {
+        let mut placers: HashSet<AccountId> = HashSet::new();
+        for (_order, account_id) in self.order_book.resting_orders() {
+            if account_id != AccountId::MINT {
+                placers.insert(account_id);
+            }
+        }
+        for bundle in &self.pending_bundles {
+            if bundle.mm_constraint.is_some() || bundle.account_id == AccountId::MINT {
+                continue;
+            }
+            let touches = bundle
+                .orders
+                .iter()
+                .any(|o| o.active_markets().any(|m| m == market_id));
+            if touches {
+                placers.insert(bundle.account_id);
+            }
+        }
+        placers.len() as u32
     }
 
     pub fn markets(&self) -> &MarketSet {
@@ -768,7 +822,7 @@ impl BlockSequencer {
     }
 
     pub fn last_clearing_prices(&self) -> &HashMap<MarketId, Vec<Nanos>> {
-        self.price_tracker.last_clearing_prices()
+        self.analytics.last_clearing_prices()
     }
 
     pub fn price_history(
@@ -777,15 +831,112 @@ impl BlockSequencer {
         from_ms: Option<u64>,
         to_ms: Option<u64>,
     ) -> Vec<PricePoint> {
-        self.price_tracker.price_history(market_id, from_ms, to_ms)
+        self.analytics.price_history(market_id, from_ms, to_ms)
     }
 
     pub fn market_volume(&self, market_id: MarketId) -> u64 {
-        self.price_tracker.market_volume(market_id)
+        self.analytics.market_volume(market_id)
     }
 
     pub fn market_volumes(&self) -> &HashMap<MarketId, u64> {
-        self.price_tracker.market_volumes()
+        self.analytics.market_volumes()
+    }
+
+    /// Rolling 24h volume for one market (±1h bucket resolution).
+    pub fn market_volume_24h(&self, market_id: MarketId, now_ms: u64) -> u64 {
+        self.analytics.market_volume_24h(market_id, now_ms)
+    }
+
+    /// All-market 24h volume map. Used by `list_markets` to populate every
+    /// `MarketResponse.volume_24h_nanos` in one pass.
+    pub fn all_market_volumes_24h(&self, now_ms: u64) -> HashMap<MarketId, u64> {
+        self.analytics.all_market_volumes_24h(now_ms)
+    }
+
+    /// Platform-wide volumes `(all_time, last_24h)` in one shot.
+    pub fn platform_volumes(&self, now_ms: u64) -> (u64, u64) {
+        self.analytics.platform_volumes(now_ms)
+    }
+
+    /// Per-market clearing prices N hours ago. None when the market is too
+    /// young to have a bucket bracketing `now_ms - n * 3_600_000`.
+    pub fn price_n_hours_ago(
+        &self,
+        market_id: MarketId,
+        n: u64,
+        now_ms: u64,
+    ) -> Option<(u64, u64)> {
+        self.analytics.price_n_hours_ago(market_id, n, now_ms)
+    }
+
+    /// All-market N-hours-ago clearing prices in one pass — used by
+    /// `list_markets` so the response stays a single round-trip.
+    pub fn all_market_prices_n_hours_ago(
+        &self,
+        n: u64,
+        now_ms: u64,
+    ) -> HashMap<MarketId, (u64, u64)> {
+        self.analytics.all_market_prices_n_hours_ago(n, now_ms)
+    }
+
+    /// Last-10-batch ±band liquidity score for one market.
+    pub fn liquidity_avg10(&self, market_id: MarketId) -> u64 {
+        self.analytics.liquidity_avg10(market_id)
+    }
+
+    /// All-market last-10-batch liquidity in one pass — companion to
+    /// `all_market_volumes_24h` for the `list_markets` round-trip.
+    pub fn all_liquidity_avg10(&self) -> HashMap<MarketId, u64> {
+        self.analytics.all_liquidity_avg10()
+    }
+
+    /// Width of the band the LiquidityTracker is currently scoring against.
+    /// Pulled from the live config, not from the snapshot — that's the band
+    /// the next `record_block` will apply.
+    pub fn liquidity_band_nanos(&self) -> u64 {
+        self.config.liquidity_band_nanos
+    }
+
+    /// All-market all-time placed/matched/unmatched stats. Single-pass
+    /// companion to `all_market_volumes_24h` for `list_markets`.
+    pub fn all_market_order_stats(&self) -> HashMap<MarketId, crate::aggregates::OrderStats> {
+        self.analytics.all_market_order_stats()
+    }
+
+    /// Platform order stats — `(all_time, last_24h)`. Caller supplies
+    /// `now_ms` so the 24h cutoff is deterministic.
+    pub fn platform_order_stats(
+        &self,
+        now_ms: u64,
+    ) -> (crate::aggregates::OrderStats, crate::aggregates::OrderStats) {
+        self.analytics.platform_order_stats(now_ms)
+    }
+
+    /// All-time unique trader count for one market.
+    pub fn trader_count(&self, market_id: MarketId) -> u32 {
+        self.analytics.trader_count(market_id)
+    }
+
+    /// All-time unique trader counts per market (only markets with ≥1
+    /// recorded placer). Used by `list_markets` to populate every
+    /// `MarketResponse.trader_count` in one pass.
+    pub fn all_trader_counts(&self) -> HashMap<MarketId, u32> {
+        self.analytics.all_trader_counts()
+    }
+
+    /// All-time platform-wide unique trader count (excludes MM, MINT).
+    pub fn platform_trader_count(&self) -> u32 {
+        self.analytics.platform_trader_count()
+    }
+
+    /// Unique platform traders in the last 24h (±1h resolution).
+    pub fn platform_trader_24h_count(&self, now_ms: u64) -> u32 {
+        self.analytics.platform_trader_24h_count(now_ms)
+    }
+
+    /// Union of per-market placers across an event's markets.
+    pub fn event_trader_count(&self, market_ids: &[MarketId]) -> u32 {
+        self.analytics.event_trader_count(market_ids)
     }
 
     pub fn open_orders_for_account(&self, account_id: AccountId) -> usize {
@@ -816,8 +967,19 @@ impl BlockSequencer {
         limit: usize,
         offset: usize,
     ) -> Vec<AccountFillRecord> {
-        self.fill_recorder
+        self.analytics
             .account_fills(account_id, market_id_filter, limit, offset)
+    }
+
+    pub fn record_trader_placement_analytics(
+        &mut self,
+        account_id: AccountId,
+        markets: Vec<MarketId>,
+        timestamp_ms: u64,
+        is_mm: bool,
+    ) {
+        self.analytics
+            .record_trader_placement(account_id, markets, timestamp_ms, is_mm);
     }
 
     // --- Public key registry ---
@@ -890,7 +1052,41 @@ impl BlockSequencer {
         account.total_deposited += amount;
         let updated = account.clone();
         self.record_system_event(SystemEvent::Deposit { account_id, amount });
+        self.note_first_deposit(account_id);
         Ok(updated)
+    }
+
+    /// Stamp the first observed deposit time for an account. Subsequent
+    /// deposits are ignored. Off-block sidecar; never enters `state_root`.
+    fn note_first_deposit(&mut self, account_id: AccountId) {
+        self.analytics.note_first_deposit(account_id);
+    }
+
+    /// First-deposit timestamp for an account, in ms since UNIX epoch.
+    /// Returns `None` if the account never received a recorded deposit
+    /// (e.g., system accounts or a restart that dropped the sidecar).
+    pub fn first_deposit_ms(&self, account_id: AccountId) -> Option<u64> {
+        self.analytics.first_deposit_ms(account_id)
+    }
+
+    pub fn portfolio_summary(
+        &self,
+        account_id: AccountId,
+    ) -> Result<crate::portfolio::PortfolioSummary, SequencerError> {
+        let account = self.accounts.get(account_id).ok_or({
+            SequencerError::Rejected(Rejection {
+                order_id: 0,
+                account_id,
+                reason: RejectionReason::AccountNotFound,
+            })
+        })?;
+        Ok(crate::portfolio::compute_portfolio(
+            account,
+            self.last_clearing_prices(),
+            self.analytics.first_deposit_ms(account_id).unwrap_or(0),
+            self.analytics.total_fills(account_id),
+            self.analytics.cost_basis_tracker(),
+        ))
     }
 
     pub fn bridge_state(&self) -> &BridgeState {
@@ -966,6 +1162,7 @@ impl BlockSequencer {
             amount,
             deposit,
         });
+        self.note_first_deposit(account_id);
         Ok(updated)
     }
 
@@ -1188,10 +1385,18 @@ impl BlockSequencer {
     ) -> Vec<PendingOrderInfo> {
         self.order_book
             .resting_orders_full()
-            .filter(|(_, aid, _, _)| account_id_filter.is_none_or(|filter| *aid == filter))
-            .map(|(order, aid, created_at, expires_at_block)| {
-                PendingOrderInfo::from_resting(order, aid, created_at, expires_at_block)
-            })
+            .filter(|(_, aid, _, _, _)| account_id_filter.is_none_or(|filter| *aid == filter))
+            .map(
+                |(order, aid, created_at, expires_at_block, original_max_fill)| {
+                    PendingOrderInfo::from_resting(
+                        order,
+                        aid,
+                        created_at,
+                        expires_at_block,
+                        original_max_fill,
+                    )
+                },
+            )
             .collect()
     }
 
@@ -1199,21 +1404,48 @@ impl BlockSequencer {
     pub fn market_orderbook(&self, market_id: MarketId) -> Vec<PendingOrderInfo> {
         self.order_book
             .resting_orders_full()
-            .filter(|(order, _, _, _)| order.active_markets().any(|m| m == market_id))
-            .map(|(order, aid, created_at, expires_at_block)| {
-                PendingOrderInfo::from_resting(order, aid, created_at, expires_at_block)
-            })
+            .filter(|(order, _, _, _, _)| order.active_markets().any(|m| m == market_id))
+            .map(
+                |(order, aid, created_at, expires_at_block, original_max_fill)| {
+                    PendingOrderInfo::from_resting(
+                        order,
+                        aid,
+                        created_at,
+                        expires_at_block,
+                        original_max_fill,
+                    )
+                },
+            )
             .collect()
     }
 
     /// Cancel a resting order owned by `account_id`.
+    ///
+    /// On success, stages a `SystemEvent::OrderCancelled` so the next block
+    /// commits an on-chain cancellation record (D1). The active markets and
+    /// categorical direction come from the resting order returned by
+    /// `OrderBook.cancel` (B5's widened return type); `remaining_quantity`
+    /// is the unfilled `max_fill` at cancel time.
     pub fn cancel_pending_order(
         &mut self,
         account_id: AccountId,
         order_id: u64,
     ) -> Result<(), SequencerError> {
         match self.order_book.cancel(account_id, order_id) {
-            Ok(()) => Ok(()),
+            Ok(ro) => {
+                let market_ids: Vec<MarketId> = ro.order.active_markets().collect();
+                let primary_market = market_ids.first().copied().unwrap_or(MarketId::NONE);
+                let side = derive_order_direction(&ro.order, primary_market);
+                self.pending_system_events
+                    .push(SystemEvent::OrderCancelled {
+                        account_id,
+                        order_id,
+                        market_ids,
+                        side,
+                        remaining_quantity: ro.order.max_fill,
+                    });
+                Ok(())
+            }
             Err(crate::order_book::CancelError::NotFound) => Err(SequencerError::OrderNotFound),
             Err(crate::order_book::CancelError::WrongOwner) => {
                 Err(SequencerError::OrderOwnershipMismatch)
@@ -1249,12 +1481,19 @@ impl BlockSequencer {
                 payout_nanos,
                 record,
             } => {
+                let mut pre_settle_positions: Vec<(AccountId, u8, i64)> = Vec::new();
                 let affected_accounts: Vec<AccountId> = self
                     .accounts
                     .iter()
                     .filter_map(|(&account_id, account)| {
                         let yes_pos = account.position(market_id, 0);
                         let no_pos = account.position(market_id, 1);
+                        if yes_pos != 0 {
+                            pre_settle_positions.push((account_id, 0, yes_pos));
+                        }
+                        if no_pos != 0 {
+                            pre_settle_positions.push((account_id, 1, no_pos));
+                        }
                         (yes_pos != 0 || no_pos != 0).then_some(account_id)
                     })
                     .collect();
@@ -1263,6 +1502,11 @@ impl BlockSequencer {
                 }
                 let affected_accounts =
                     settlement::resolve_market(&mut self.accounts, market_id, payout_nanos);
+                self.analytics.apply_resolution(
+                    market_id,
+                    payout_nanos as i64,
+                    pre_settle_positions,
+                );
                 self.record_system_event(SystemEvent::MarketResolved {
                     market_id,
                     payout_nanos,
@@ -1305,12 +1549,19 @@ impl BlockSequencer {
                 payout_nanos,
                 record,
             } => {
+                let mut pre_settle_positions: Vec<(AccountId, u8, i64)> = Vec::new();
                 let affected_accounts: Vec<AccountId> = self
                     .accounts
                     .iter()
                     .filter_map(|(&account_id, account)| {
                         let yes_pos = account.position(market_id, 0);
                         let no_pos = account.position(market_id, 1);
+                        if yes_pos != 0 {
+                            pre_settle_positions.push((account_id, 0, yes_pos));
+                        }
+                        if no_pos != 0 {
+                            pre_settle_positions.push((account_id, 1, no_pos));
+                        }
                         (yes_pos != 0 || no_pos != 0).then_some(account_id)
                     })
                     .collect();
@@ -1319,6 +1570,11 @@ impl BlockSequencer {
                 }
                 let affected_accounts =
                     settlement::resolve_market(&mut self.accounts, market_id, payout_nanos);
+                self.analytics.apply_resolution(
+                    market_id,
+                    payout_nanos as i64,
+                    pre_settle_positions,
+                );
                 self.record_system_event(SystemEvent::MarketResolved {
                     market_id,
                     payout_nanos,
@@ -1469,7 +1725,7 @@ impl BlockSequencer {
         let position_markets = CanonicalState::from_accounts(&self.accounts)
             .market_position_totals()
             .markets();
-        let clearing_prices = self.price_tracker.merge_prices(
+        let clearing_prices = self.analytics.merge_prices(
             &pipeline_result.price_discovery,
             &markets_with_fills,
             active_markets,
@@ -1490,6 +1746,28 @@ impl BlockSequencer {
             .fold(0u64, |acc, v| acc.saturating_add(v));
         let orders_filled = pipeline_result.result.orders_filled;
 
+        // Per-market welfare. Reuse the same order_map already built above
+        // for markets_with_fills. Multi-market orders credit every active
+        // market with the full welfare contribution — platform's
+        // total_welfare counts each fill once.
+        let mut welfare_by_market: HashMap<MarketId, i64> = HashMap::new();
+        {
+            let order_map: HashMap<u64, &Order> =
+                problem.orders.iter().map(|o| (o.id, o)).collect();
+            for fill in &fills {
+                if fill.fill_qty == 0 {
+                    continue;
+                }
+                let Some(order) = order_map.get(&fill.order_id) else {
+                    continue;
+                };
+                let w = order.welfare_contribution(fill.fill_price, fill.fill_qty);
+                for m in order.active_markets() {
+                    *welfare_by_market.entry(m).or_insert(0) += w;
+                }
+            }
+        }
+
         SolvedBatch {
             pipeline_result,
             fills,
@@ -1497,6 +1775,7 @@ impl BlockSequencer {
             total_welfare,
             total_volume,
             orders_filled,
+            welfare_by_market,
         }
     }
 
@@ -1528,15 +1807,14 @@ impl BlockSequencer {
         }
 
         let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
-        self.price_tracker.record_block(
+        let volume_by_market = self.analytics.record_finalized_block(
             fills,
             &order_map,
             clearing_prices,
             self.height,
             timestamp_ms,
+            &self.accounts,
         );
-        self.fill_recorder
-            .record_fills(fills, &order_map, self.height, timestamp_ms);
 
         let post_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
         let balance_delta = post_total_balance - pre_total_balance;
@@ -1569,7 +1847,10 @@ impl BlockSequencer {
             }
         }
 
-        FinalizedBlockState { post_state }
+        FinalizedBlockState {
+            post_state,
+            volume_by_market,
+        }
     }
 
     fn assemble_witness_artifacts(&self, input: WitnessAssemblyInput<'_>) -> WitnessArtifacts {
@@ -1727,6 +2008,25 @@ impl BlockSequencer {
                         }
                     }
                 }
+                SystemEvent::OrderCancelled {
+                    account_id,
+                    order_id,
+                    market_ids,
+                    side,
+                    remaining_quantity,
+                } => {
+                    if let Some(account) = self.accounts.get_mut(*account_id) {
+                        let encoded = crate::digest::encode_order_cancelled_event(
+                            *order_id,
+                            market_ids,
+                            *side,
+                            *remaining_quantity,
+                            self.height,
+                        );
+                        account.events_digest =
+                            crate::digest::update_digest(&account.events_digest, &encoded);
+                    }
+                }
             }
         }
         let bridge = bridge_block_data(&system_events, &self.bridge);
@@ -1763,9 +2063,26 @@ impl BlockSequencer {
             .map(|(&id, _)| id)
             .collect();
 
+        // Per-block placed/matched/unmatched per market — accumulated
+        // alongside the OrderStatsTracker hooks below and stamped on the
+        // Block at the end of this function. Cancels are NOT counted here.
+        let mut block_orders_by_market: HashMap<MarketId, crate::aggregates::OrderStats> =
+            HashMap::new();
+
         // ── Order Book: expire stale, remove orders for resolved markets ──
-        self.order_book.expire(self.height);
-        self.order_book.revalidate(&self.accounts, &active_markets);
+        let expired = self.order_book.expire(self.height);
+        let revalidated = self.order_book.revalidate(&self.accounts, &active_markets);
+        for ro in expired.iter().chain(revalidated.iter()) {
+            self.analytics.record_order_exit(ro, timestamp_ms);
+            for m in ro.order.active_markets() {
+                let slot = block_orders_by_market.entry(m).or_default();
+                if ro.has_been_matched {
+                    slot.matched += 1;
+                } else {
+                    slot.unmatched += 1;
+                }
+            }
+        }
 
         // Build batch-local account map from resting orders
         let mut order_account_map: HashMap<u64, AccountId> = HashMap::new();
@@ -1870,12 +2187,21 @@ impl BlockSequencer {
                     submission_idx_to_order_id.insert(sub_idx, order_id);
                     order_account_map.insert(order_id, account_id);
                     mm_order_ids_set.insert(order_id);
+                    let tracker_markets: Vec<MarketId> = order.active_markets().collect();
                     witness_orders.push(WitnessOrder {
                         order: order.clone(),
                         account_id: account_id.0,
                         is_mm: true,
                     });
                     accepted_orders.push(order);
+                    // Trader counts exclude MM but calling through the same
+                    // hook keeps the admission paths symmetric.
+                    self.analytics.record_trader_placement(
+                        account_id,
+                        tracker_markets,
+                        timestamp_ms,
+                        true,
+                    );
                 } else {
                     // Non-MM orders: validate + reserve via OrderBook
                     match self
@@ -1888,7 +2214,7 @@ impl BlockSequencer {
                                 // (settle with a "fully filled" phantom to release)
                                 let phantom_fill =
                                     Fill::new(accepted.order.id, accepted.order.max_fill, 0);
-                                self.order_book.settle(
+                                let _stp_undo = self.order_book.settle(
                                     &[phantom_fill],
                                     &HashSet::new(),
                                     self.height,
@@ -1907,12 +2233,20 @@ impl BlockSequencer {
                             }
                             stp.record(account_id, &accepted.order);
                             order_account_map.insert(accepted.order.id, account_id);
+                            let tracker_markets: Vec<MarketId> =
+                                accepted.order.active_markets().collect();
                             witness_orders.push(WitnessOrder {
                                 order: accepted.order.clone(),
                                 account_id: account_id.0,
                                 is_mm: false,
                             });
                             accepted_orders.push(accepted.order);
+                            self.analytics.record_trader_placement(
+                                account_id,
+                                tracker_markets.clone(),
+                                timestamp_ms,
+                                false,
+                            );
                         }
                         Err(reason) => {
                             witness_rejections.push(WitnessRejection {
@@ -1960,6 +2294,18 @@ impl BlockSequencer {
         let order_ids: Vec<u64> = all_orders.iter().map(|o| o.id).collect();
         let orders_submitted = all_orders.len() + rejections.len();
 
+        // `placed` means order live in this batch's solve, not merely admitted
+        // for the first time. Count carried resting orders and MM flash orders
+        // here, after all rejections/evictions have been filtered out.
+        for order in &all_orders {
+            let markets: Vec<MarketId> = order.active_markets().collect();
+            self.analytics
+                .record_order_placed(markets.iter().copied(), timestamp_ms);
+            for market in markets {
+                block_orders_by_market.entry(market).or_default().placed += 1;
+            }
+        }
+
         // Debug: log order and rejection counts per block
         if !all_orders.is_empty() || !rejections.is_empty() {
             let mut buy_yes = 0u32;
@@ -1997,6 +2343,30 @@ impl BlockSequencer {
             }
         }
 
+        // Capture per-block placers from witness_orders BEFORE it gets
+        // consumed by WitnessAssemblyInput below. MM orders are excluded so
+        // by_market[m].placers tracks real participation (decision Q-table).
+        let mut block_placers: HashSet<AccountId> = HashSet::new();
+        let mut block_placers_by_market: HashMap<MarketId, HashSet<AccountId>> = HashMap::new();
+        for wo in &witness_orders {
+            if wo.is_mm {
+                continue;
+            }
+            let aid = AccountId(wo.account_id);
+            if aid == AccountId::MINT {
+                continue;
+            }
+            block_placers.insert(aid);
+            for m in wo.order.active_markets() {
+                block_placers_by_market.entry(m).or_default().insert(aid);
+            }
+        }
+        let unique_placers = block_placers.len() as u32;
+        let placers_by_market: HashMap<MarketId, u32> = block_placers_by_market
+            .into_iter()
+            .map(|(m, s)| (m, s.len() as u32))
+            .collect();
+
         // Build Problem
         let mut problem = Problem::new("block");
         problem.markets = self.markets.clone();
@@ -2012,19 +2382,43 @@ impl BlockSequencer {
             total_welfare,
             total_volume,
             orders_filled,
+            welfare_by_market,
         } = self.solve_batch_phase(&problem, &order_account_map, &active_markets);
 
         let (pre_state, post_system_state) =
             build_witness_phase_snapshots(&self.accounts, &system_account_baselines);
 
         // Phase 2: apply fills, derive minting, and validate the finalized account state.
-        let FinalizedBlockState { post_state } =
-            self.finalize_block_state_phase(&fills, &problem, &clearing_prices, timestamp_ms);
+        let FinalizedBlockState {
+            post_state,
+            volume_by_market,
+        } = self.finalize_block_state_phase(&fills, &problem, &clearing_prices, timestamp_ms);
 
         // Update order book: release filled orders' reservations, adjust partial fills
-        self.order_book
+        let post_solve_removed = self
+            .order_book
             .settle(&fills, &mm_order_ids_set, self.height);
+        for ro in &post_solve_removed {
+            self.analytics.record_order_exit(ro, timestamp_ms);
+            for m in ro.order.active_markets() {
+                let slot = block_orders_by_market.entry(m).or_default();
+                if ro.has_been_matched {
+                    slot.matched += 1;
+                } else {
+                    slot.unmatched += 1;
+                }
+            }
+        }
         let pending_orders_after = self.order_book.len();
+
+        // Off-block liquidity tracker — score the post-settle book against
+        // each market's midprice (binary: YES price). One snapshot per block
+        // so the ring tracks "depth available at the close of this batch".
+        self.analytics.record_liquidity(
+            &self.order_book,
+            &clearing_prices,
+            self.config.liquidity_band_nanos,
+        );
 
         let previous_header = self
             .last_header
@@ -2073,6 +2467,11 @@ impl BlockSequencer {
             total_welfare,
             total_volume,
             orders_filled,
+            unique_placers,
+            placers_by_market,
+            volume_by_market,
+            orders_by_market: block_orders_by_market,
+            welfare_by_market,
         };
 
         // Verify the block using all 4 verification layers.
@@ -2292,7 +2691,7 @@ mod tests {
             oracle,
             SequencerConfig::default(),
         );
-        seq.price_tracker = crate::price_tracker::PriceTracker::with_state(
+        *seq.analytics.price_tracker_mut() = crate::price_tracker::PriceTracker::with_state(
             HashMap::from([(orphaned_market, vec![400_000_000, 600_000_000])]),
             HashMap::new(),
         );
@@ -2320,6 +2719,73 @@ mod tests {
             verification.valid,
             "Violations: {:?}",
             verification.violations
+        );
+    }
+
+    #[test]
+    fn placed_order_stats_count_carried_resting_orders_each_batch() {
+        let (markets, m0) = setup();
+        let mut accounts = AccountStore::new();
+        let buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            oracle,
+            SequencerConfig::default(),
+        );
+
+        let sub = single_order_sub(
+            buyer,
+            outcome_buy(&markets, 0, m0, 0, NANOS_PER_DOLLAR / 2, 10),
+        );
+        let first = seq.produce_block(vec![sub], 1_000).block;
+        assert_eq!(first.orders_by_market.get(&m0).unwrap().placed, 1);
+        assert_eq!(seq.platform_order_stats(1_000).0.placed, 1);
+        assert_eq!(seq.order_book.len(), 1, "unfilled order should rest");
+
+        let second = seq.produce_block(vec![], 2_000).block;
+        assert_eq!(
+            second.orders_by_market.get(&m0).unwrap().placed,
+            1,
+            "carried resting order is live in the next batch"
+        );
+        assert_eq!(
+            seq.platform_order_stats(2_000).0.placed,
+            2,
+            "placed is order-batch participation, not one-time admission"
+        );
+    }
+
+    #[test]
+    fn placed_order_stats_count_mm_batch_orders() {
+        let (markets, m0) = setup();
+        let mut accounts = AccountStore::new();
+        let mm = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            oracle,
+            SequencerConfig::default(),
+        );
+
+        let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
+        constraint.add_order(0, matching_engine::MmSide::BuyYes);
+        let sub = OrderSubmission {
+            account_id: mm,
+            orders: vec![outcome_buy(&markets, 0, m0, 0, NANOS_PER_DOLLAR / 2, 10)],
+            mm_constraint: Some(constraint),
+        };
+
+        let block = seq.produce_block(vec![sub], 1_000).block;
+        assert_eq!(block.orders_by_market.get(&m0).unwrap().placed, 1);
+        assert_eq!(seq.platform_order_stats(1_000).0.placed, 1);
+        assert_eq!(
+            block.unique_placers, 0,
+            "MM orders count as orders but not as unique traders"
         );
     }
 
@@ -2590,7 +3056,7 @@ mod tests {
         assert_eq!(result.rejections.len(), 0);
 
         assert_eq!(seq.order_book.len(), 1);
-        let (_, resting_aid, resting_created, _) =
+        let (_, resting_aid, resting_created, _, _) =
             seq.order_book.resting_orders_full().next().unwrap();
         assert_eq!(resting_aid, aid);
         assert_eq!(resting_created, 1);
@@ -2660,8 +3126,6 @@ mod tests {
             last_header: seq_a.last_header().cloned(),
             next_order_id: seq_a.next_order_id(),
             pubkey_registry: seq_a.pubkey_registry().clone(),
-            last_clearing_prices: seq_a.last_clearing_prices().clone(),
-            market_volumes: seq_a.market_volumes().clone(),
             resting_orders: seq_a.order_book.snapshot(),
             data_feeds: Vec::new(),
             pending_bundles: Vec::new(),
@@ -2669,7 +3133,19 @@ mod tests {
             pending_bridge_withdrawals: Vec::new(),
             bridge_state: BridgeState::default(),
             admit_log: Vec::new(),
-            account_fills: Vec::new(),
+            analytics: crate::store::AnalyticsRestoredState {
+                last_clearing_prices: seq_a.last_clearing_prices().clone(),
+                market_volumes: seq_a.market_volumes().clone(),
+                account_fills: Vec::new(),
+                trader_tracker: Default::default(),
+                price_tracker_volume: Default::default(),
+                price_tracker_clearing_history: Default::default(),
+                liquidity_tracker: Default::default(),
+                order_stats_tracker: Default::default(),
+                first_deposit_ms: HashMap::new(),
+                fill_total_counts: HashMap::new(),
+                cost_basis_tracker: Default::default(),
+            },
         };
 
         let mut seq_b = BlockSequencer::restore(state, oracle, SequencerConfig::default());
@@ -3892,5 +4368,111 @@ mod tests {
                 other
             ),
         }
+    }
+
+    #[test]
+    fn first_deposit_records_once() {
+        // fund_account stamps first_deposit_ms; a subsequent fund_account
+        // for the same account must NOT overwrite it.
+        let (markets, _m0) = setup();
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(0);
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets,
+            vec![],
+            Arc::new(AdminOracle::new()),
+            SequencerConfig::default(),
+        );
+
+        assert!(seq.first_deposit_ms(aid).is_none());
+
+        seq.fund_account(aid, 10 * NANOS_PER_DOLLAR as i64).unwrap();
+        let ts_first = seq
+            .first_deposit_ms(aid)
+            .expect("first deposit should be recorded after fund_account");
+
+        // Sleep a tiny bit so the second SystemTime::now() differs.
+        std::thread::sleep(std::time::Duration::from_millis(2));
+
+        seq.fund_account(aid, 1 * NANOS_PER_DOLLAR as i64).unwrap();
+        let ts_second = seq
+            .first_deposit_ms(aid)
+            .expect("first_deposit_ms must persist after a second deposit");
+
+        assert_eq!(
+            ts_first, ts_second,
+            "second deposit must not overwrite the first-deposit timestamp"
+        );
+    }
+
+    /// D1: cancelling a resting order must stage a `SystemEvent::OrderCancelled`
+    /// with the order's primary market, derived direction, and unfilled
+    /// remainder. The next produced block surfaces it in `system_events` and
+    /// the cancelling account's `events_digest` advances.
+    #[test]
+    fn cancel_emits_order_cancelled() {
+        let (mut seq, aid, markets, m0, _) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
+
+        let order = outcome_buy(&markets, 0, m0, 0, 400_000_000, 7);
+        let order_id = match seq.try_admit_direct(single_order_sub(aid, order)) {
+            AdmitOutcome::Admitted { order_id, .. } => order_id,
+            other => panic!("expected Admitted, got {:?}", other),
+        };
+
+        seq.produce_block(vec![], 1_000);
+
+        let digest_before = seq.accounts.get(aid).expect("account exists").events_digest;
+
+        seq.cancel_pending_order(aid, order_id).expect("cancel ok");
+
+        let pending = &seq.pending_system_events;
+        let event = pending
+            .iter()
+            .find(|e| matches!(e, SystemEvent::OrderCancelled { .. }))
+            .expect("OrderCancelled staged");
+        match event {
+            SystemEvent::OrderCancelled {
+                account_id,
+                order_id: oid,
+                market_ids,
+                side,
+                remaining_quantity,
+            } => {
+                assert_eq!(*account_id, aid);
+                assert_eq!(*oid, order_id);
+                assert_eq!(market_ids, &vec![m0]);
+                assert_eq!(*side, matching_engine::OrderDirection::BuyYes);
+                assert_eq!(*remaining_quantity, 7);
+            }
+            _ => unreachable!(),
+        }
+
+        let bp = seq.produce_block(vec![], 2_000);
+        assert!(
+            bp.block.system_events.iter().any(|e| matches!(
+                e,
+                SystemEvent::OrderCancelled { order_id: oid, .. } if *oid == order_id
+            )),
+            "block must surface the OrderCancelled SystemEvent"
+        );
+
+        let digest_after = seq.accounts.get(aid).expect("account exists").events_digest;
+        assert_ne!(
+            digest_before, digest_after,
+            "cancelling account's events_digest must advance"
+        );
+    }
+
+    /// D1: cancelling a non-existent order must NOT stage any SystemEvent.
+    #[test]
+    fn cancel_nonexistent_does_not_emit_order_cancelled() {
+        let (mut seq, aid, _markets, _m0, _m1) =
+            make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
+
+        let pending_before = seq.pending_system_events.len();
+        let result = seq.cancel_pending_order(aid, 9_999);
+        assert!(result.is_err());
+        assert_eq!(seq.pending_system_events.len(), pending_before);
     }
 }

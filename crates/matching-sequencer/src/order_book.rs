@@ -45,6 +45,15 @@ pub struct RestingOrder {
     pub(crate) reserved_balance: i64,
     /// Position reservations for this order (sell quantities).
     pub(crate) reserved_positions: Vec<(PositionKey, i64)>,
+    /// Whether any positive fill has ever applied to this order.
+    /// Set by `settle` when a fill > 0 is observed; preserved across
+    /// partial-fill remainders. Consumed by OrderStatsTracker (B6).
+    #[serde(default)]
+    pub(crate) has_been_matched: bool,
+    /// Original `max_fill` at admit time. Set once by `accept`, never
+    /// mutated. Consumed by `PendingOrderResponse.original_quantity` (B8).
+    #[serde(default)]
+    pub(crate) original_max_fill: u64,
 }
 
 /// The order book: resting orders + aggregate reservations.
@@ -226,6 +235,8 @@ impl OrderBook {
             expires_at_block: order.effective_expires_at_block(current_height, self.ttl),
             reserved_balance: cost,
             reserved_positions: pos_reservations,
+            has_been_matched: false,
+            original_max_fill: order.max_fill,
         };
         self.orders.push(resting.clone());
 
@@ -237,20 +248,24 @@ impl OrderBook {
     }
 
     /// Remove expired orders and release their reservations.
-    pub fn expire(&mut self, current_height: u64) {
-        self.orders.retain(|ro| {
+    /// Returns the orders that were removed (empty when nothing expired).
+    pub fn expire(&mut self, current_height: u64) -> Vec<RestingOrder> {
+        let mut removed = Vec::new();
+        let mut kept = Vec::with_capacity(self.orders.len());
+        for ro in self.orders.drain(..) {
             if current_height > ro.expires_at_block {
-                // Release reservations
                 Self::release_reservations(
                     &mut self.balance_reservations,
                     &mut self.position_reservations,
-                    ro,
+                    &ro,
                 );
-                false
+                removed.push(ro);
             } else {
-                true
+                kept.push(ro);
             }
-        });
+        }
+        self.orders = kept;
+        removed
     }
 
     /// Re-validate all resting orders against current account state.
@@ -258,7 +273,13 @@ impl OrderBook {
     /// after fills/withdrawals, insufficient position after sells).
     ///
     /// Also removes orders for markets that are no longer active.
-    pub fn revalidate(&mut self, accounts: &AccountStore, active_markets: &HashSet<MarketId>) {
+    ///
+    /// Returns the orders that were removed (empty when nothing changed).
+    pub fn revalidate(
+        &mut self,
+        accounts: &AccountStore,
+        active_markets: &HashSet<MarketId>,
+    ) -> Vec<RestingOrder> {
         // We must re-validate carefully: removing one order releases its reservations,
         // which may make subsequent orders valid again. But for simplicity and safety,
         // we validate conservatively: remove anything that's invalid given current
@@ -315,6 +336,7 @@ impl OrderBook {
         }
 
         // Remove in reverse order to preserve indices
+        let mut removed = Vec::with_capacity(to_remove.len());
         for &i in to_remove.iter().rev() {
             let ro = self.orders.remove(i);
             Self::release_reservations(
@@ -322,7 +344,9 @@ impl OrderBook {
                 &mut self.position_reservations,
                 &ro,
             );
+            removed.push(ro);
         }
+        removed
     }
 
     /// Orders available for the current batch.
@@ -330,11 +354,18 @@ impl OrderBook {
         self.orders.iter().map(|ro| (&ro.order, ro.account_id))
     }
 
-    /// Orders with full metadata (for API exposure).
-    pub fn resting_orders_full(&self) -> impl Iterator<Item = (&Order, AccountId, u64, u64)> {
-        self.orders
-            .iter()
-            .map(|ro| (&ro.order, ro.account_id, ro.created_at, ro.expires_at_block))
+    /// Orders with full metadata (for API exposure). Tuple shape:
+    /// `(order, account, created_at, expires_at_block, original_max_fill)`.
+    pub fn resting_orders_full(&self) -> impl Iterator<Item = (&Order, AccountId, u64, u64, u64)> {
+        self.orders.iter().map(|ro| {
+            (
+                &ro.order,
+                ro.account_id,
+                ro.created_at,
+                ro.expires_at_block,
+                ro.original_max_fill,
+            )
+        })
     }
 
     /// TTL value.
@@ -367,11 +398,13 @@ impl OrderBook {
     }
 
     /// Remove a resting order by ID and release its reservations.
+    /// Returns the cancelled `RestingOrder` on success. Consumed by D1
+    /// (OrderCancelled SystemEvent); unused but bound in B5.
     pub(crate) fn cancel(
         &mut self,
         account_id: AccountId,
         order_id: u64,
-    ) -> Result<(), CancelError> {
+    ) -> Result<RestingOrder, CancelError> {
         let Some(index) = self.orders.iter().position(|ro| ro.order.id == order_id) else {
             return Err(CancelError::NotFound);
         };
@@ -386,14 +419,24 @@ impl OrderBook {
             &mut self.position_reservations,
             &ro,
         );
-        Ok(())
+        Ok(ro)
     }
 
     /// After solving: remove filled orders, adjust partially-filled orders,
     /// release reservations for filled portions.
     ///
     /// `mm_order_ids` are excluded (MM orders never enter the book).
-    pub fn settle(&mut self, fills: &[Fill], mm_order_ids: &HashSet<u64>, current_height: u64) {
+    /// Returns the orders that were removed from the book (fully filled,
+    /// expired, or MM-bypass defensive path). Partially filled orders are
+    /// re-inserted as remainders and are NOT included in the return value.
+    /// `has_been_matched` is set to true on any order (or remainder) that
+    /// received a positive fill in this batch.
+    pub fn settle(
+        &mut self,
+        fills: &[Fill],
+        mm_order_ids: &HashSet<u64>,
+        current_height: u64,
+    ) -> Vec<RestingOrder> {
         // Build fill-qty map
         let mut filled_qty: HashMap<u64, u64> = HashMap::new();
         for f in fills {
@@ -403,8 +446,9 @@ impl OrderBook {
         }
 
         let mut new_orders = Vec::new();
+        let mut removed = Vec::new();
 
-        for ro in self.orders.drain(..) {
+        for mut ro in self.orders.drain(..) {
             if mm_order_ids.contains(&ro.order.id) {
                 // Should never happen (MM orders don't enter book), but defensive
                 Self::release_reservations(
@@ -412,10 +456,14 @@ impl OrderBook {
                     &mut self.position_reservations,
                     &ro,
                 );
+                removed.push(ro);
                 continue;
             }
 
             let filled = filled_qty.get(&ro.order.id).copied().unwrap_or(0);
+            if filled > 0 {
+                ro.has_been_matched = true;
+            }
 
             if filled >= ro.order.max_fill {
                 // Fully filled — release all reservations
@@ -424,6 +472,7 @@ impl OrderBook {
                     &mut self.position_reservations,
                     &ro,
                 );
+                removed.push(ro);
                 continue;
             }
 
@@ -433,6 +482,7 @@ impl OrderBook {
                     &mut self.position_reservations,
                     &ro,
                 );
+                removed.push(ro);
                 continue;
             }
 
@@ -479,6 +529,8 @@ impl OrderBook {
                     expires_at_block: ro.expires_at_block,
                     reserved_balance: new_cost,
                     reserved_positions: new_pos_reservations,
+                    has_been_matched: true,
+                    original_max_fill: ro.original_max_fill,
                 });
             } else {
                 // Unfilled — keep as-is
@@ -487,6 +539,7 @@ impl OrderBook {
         }
 
         self.orders = new_orders;
+        removed
     }
 
     /// Release the reservations held by a resting order.
@@ -775,6 +828,8 @@ mod tests {
             expires_at_block: 10,
             reserved_balance: -100,
             reserved_positions: vec![],
+            has_been_matched: false,
+            original_max_fill: 0,
         };
         let book = OrderBook::restore(vec![bad], 10);
         assert_eq!(book.len(), 0);
@@ -790,6 +845,8 @@ mod tests {
             expires_at_block: 10,
             reserved_balance: 500,
             reserved_positions: vec![],
+            has_been_matched: false,
+            original_max_fill: 0,
         };
         let book = OrderBook::restore(vec![ro], 10);
         assert_eq!(book.len(), 1);
@@ -811,5 +868,120 @@ mod tests {
 
         assert_eq!(book.reserved_balance(aid), 0);
         assert_eq!(book.len(), 0);
+    }
+
+    #[test]
+    fn expire_returns_removed_orders() {
+        let (mut accounts, markets, m0) = setup();
+        let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let mut book = OrderBook::new(10);
+        let account = accounts.get(aid).unwrap();
+
+        for id in 1..=3 {
+            let mut order = buy_yes(&markets, id, m0, NANOS_PER_DOLLAR / 2, 2);
+            order.expires_at_block = Some(1);
+            book.accept(order, aid, account, 0).unwrap();
+        }
+
+        let removed = book.expire(2);
+        assert_eq!(removed.len(), 3);
+        assert_eq!(book.len(), 0);
+        assert!(removed.iter().all(|ro| !ro.has_been_matched));
+        // original_max_fill survives the removal
+        assert!(removed.iter().all(|ro| ro.original_max_fill == 2));
+    }
+
+    #[test]
+    fn settle_marks_matched() {
+        let (mut accounts, markets, m0) = setup();
+        let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+        let mut book = OrderBook::new(10);
+        let account = accounts.get(aid).unwrap();
+
+        let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
+        let accepted = book.accept(order, aid, account, 1).unwrap();
+        let order_id = accepted.order.id;
+
+        let fills = vec![Fill {
+            order_id,
+            fill_qty: 5,
+            fill_price: NANOS_PER_DOLLAR / 2,
+            account_id: 0,
+        }];
+        let removed = book.settle(&fills, &HashSet::new(), 1);
+        assert_eq!(removed.len(), 1);
+        assert!(removed[0].has_been_matched);
+        assert_eq!(removed[0].original_max_fill, 5);
+    }
+
+    #[test]
+    fn cancel_returns_order() {
+        let (mut accounts, markets, m0) = setup();
+        let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+        let mut book = OrderBook::new(10);
+        let account = accounts.get(aid).unwrap();
+
+        let order = buy_yes(&markets, 7, m0, NANOS_PER_DOLLAR / 2, 5);
+        let accepted = book.accept(order, aid, account, 1).unwrap();
+
+        let ro = book.cancel(aid, accepted.order.id).unwrap();
+        assert_eq!(ro.order.id, accepted.order.id);
+        assert_eq!(ro.original_max_fill, 5);
+        assert!(!ro.has_been_matched);
+    }
+
+    #[test]
+    fn resting_order_serde_default() {
+        // Old (pre-B5) layout missing both new fields. Round-trip via rmp_serde
+        // — the same encoder the redb snapshot uses — and confirm the new
+        // fields fall back to their #[serde(default)] values.
+        #[derive(serde::Serialize)]
+        struct OldRestingOrder {
+            order: Order,
+            account_id: AccountId,
+            created_at: u64,
+            expires_at_block: u64,
+            reserved_balance: i64,
+            reserved_positions: Vec<(PositionKey, i64)>,
+        }
+        let old = OldRestingOrder {
+            order: Order::new(1),
+            account_id: AccountId(1),
+            created_at: 0,
+            expires_at_block: 10,
+            reserved_balance: 0,
+            reserved_positions: vec![],
+        };
+        let bytes = rmp_serde::to_vec(&old).unwrap();
+        let ro: RestingOrder = rmp_serde::from_slice(&bytes).unwrap();
+        assert!(!ro.has_been_matched);
+        assert_eq!(ro.original_max_fill, 0);
+    }
+
+    #[test]
+    fn settle_partial_fill_remainder_marks_matched() {
+        let (mut accounts, markets, m0) = setup();
+        let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+        let mut book = OrderBook::new(10);
+        let account = accounts.get(aid).unwrap();
+
+        let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 10);
+        let accepted = book.accept(order, aid, account, 1).unwrap();
+        let order_id = accepted.order.id;
+
+        let fills = vec![Fill {
+            order_id,
+            fill_qty: 3,
+            fill_price: NANOS_PER_DOLLAR / 2,
+            account_id: 0,
+        }];
+        let removed = book.settle(&fills, &HashSet::new(), 1);
+        // Partial fill: nothing removed, but the remaining order in the book
+        // now carries has_been_matched=true and original_max_fill=10.
+        assert!(removed.is_empty());
+        assert_eq!(book.len(), 1);
+        let remainder = book.orders.first().unwrap();
+        assert!(remainder.has_been_matched);
+        assert_eq!(remainder.original_max_fill, 10);
     }
 }

@@ -534,6 +534,271 @@
       </div>
     </section>
 
+    <section x-show="selectedTab === 'aggregates'">
+      <div class="grid stats" style="grid-template-columns: repeat(4, minmax(220px, 1fr));">
+        <div class="stat">
+          <div class="label">Unique Traders (all-time)</div>
+          <div class="value blue" x-text="fmtInt(activityOverview.all_time && activityOverview.all_time.unique_traders) || '—'"></div>
+          <div class="sub">
+            <span x-text="'24h: ' + fmtInt(activityOverview.last_24h && activityOverview.last_24h.unique_traders)"></span>
+            · <span class="dim">since last restart</span>
+          </div>
+        </div>
+        <div class="stat">
+          <div class="label">Platform Volume (all-time)</div>
+          <div class="value blue" x-text="'$' + dollars((activityOverview.all_time && activityOverview.all_time.total_volume_nanos) || 0)"></div>
+          <div class="sub">
+            <span x-text="'24h: $' + dollars((activityOverview.last_24h && activityOverview.last_24h.total_volume_nanos) || 0)"></span>
+          </div>
+        </div>
+        <div class="stat">
+          <div class="label">Orders Matched (all-time)</div>
+          <div class="value green" x-text="fmtInt((activityOverview.all_time && activityOverview.all_time.orders && activityOverview.all_time.orders.matched) || 0)"></div>
+          <div class="sub" x-text="orderStatsSub(activityOverview.all_time)"></div>
+        </div>
+        <div class="stat">
+          <div class="label">Cancels (recent window)</div>
+          <div class="value yellow" x-text="fmtInt(recentCancellations.length)"></div>
+          <div class="sub">
+            <span x-text="recentBlocks.length + ' blocks scanned'"></span>
+            · <span class="dim">D1 OrderCancelled</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:12px;">
+        <div class="panel-head">
+          <h2>Per-Market Aggregates</h2>
+          <span class="muted" x-text="topMarketsByVolume24h.length + ' markets, sorted by 24h volume'"></span>
+        </div>
+        <div class="panel-body">
+          <div class="table-wrap" style="max-height: 460px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Market</th>
+                  <th class="right">Traders</th>
+                  <th class="right">24h Vol</th>
+                  <th class="right">Lifetime Vol</th>
+                  <th class="right">Liquidity ±band</th>
+                  <th class="right">Placed</th>
+                  <th class="right">Matched</th>
+                  <th class="right">Unmatched</th>
+                  <th class="right">Δ24h YES</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="m in topMarketsByVolume24h" :key="m.market_id">
+                  <tr>
+                    <td class="dim num" x-text="m.market_id"></td>
+                    <td class="market-name" :title="m.name" x-text="m.name"></td>
+                    <td class="num" x-text="fmtInt(m.trader_count || 0)"></td>
+                    <td class="num blue" x-text="'$' + dollars(m.volume_24h_nanos || 0)"></td>
+                    <td class="num dim" x-text="'$' + dollars(m.volume_nanos || 0)"></td>
+                    <td class="num" x-text="fmtLiquidity(m)"></td>
+                    <td class="num" x-text="fmtInt(m.orders_placed_total || 0)"></td>
+                    <td class="num green" x-text="fmtInt(m.orders_matched_total || 0)"></td>
+                    <td class="num red" x-text="fmtInt(m.orders_unmatched_total || 0)"></td>
+                    <td class="num" :class="yesDelta24hClass(m)" x-text="fmtYesDelta24h(m)"></td>
+                  </tr>
+                </template>
+                <tr x-show="!topMarketsByVolume24h.length">
+                  <td colspan="10" class="dim" style="text-align:center;">No markets with 24h activity yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid two" style="margin-top:12px;">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Latest Block · Per-Market Sidecar</h2>
+            <span class="muted" x-text="latestBlock ? '#' + latestBlock.height : 'no block yet'"></span>
+          </div>
+          <div class="panel-body">
+            <div class="table-wrap" style="max-height: 320px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Market</th>
+                    <th class="right">Placers</th>
+                    <th class="right">Volume</th>
+                    <th class="right">Placed</th>
+                    <th class="right">Matched</th>
+                    <th class="right">Unmatched</th>
+                    <th class="right">Welfare</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="row in latestBlockByMarketRows" :key="row.market_id">
+                    <tr>
+                      <td class="market-name" :title="row.name" x-text="row.label"></td>
+                      <td class="num" x-text="fmtInt(row.placers)"></td>
+                      <td class="num blue" x-text="'$' + dollars(row.volume_nanos)"></td>
+                      <td class="num" x-text="fmtInt(row.placed)"></td>
+                      <td class="num green" x-text="fmtInt(row.matched)"></td>
+                      <td class="num red" x-text="fmtInt(row.unmatched)"></td>
+                      <td class="num" :class="row.welfare_nanos >= 0 ? 'green' : 'red'" x-text="moneySigned(row.welfare_nanos / 1e9)"></td>
+                    </tr>
+                  </template>
+                  <tr x-show="!latestBlockByMarketRows.length">
+                    <td colspan="7" class="dim" style="text-align:center;">No per-market activity in the latest block.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="row wrap" style="margin-top:8px; color: var(--dim); font-size:11px;">
+              <span x-show="latestBlock">Unique placers (platform): <strong x-text="latestBlock && latestBlock.unique_placers"></strong></span>
+              <span x-show="latestBlock">·</span>
+              <span x-show="latestBlock">Block welfare: <strong x-text="moneySigned((latestBlock && latestBlock.total_welfare_nanos / 1e9) || 0)"></strong></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Recent Cancellations</h2>
+            <span class="muted" x-text="recentCancellations.length + ' in last ' + recentBlocks.length + ' blocks'"></span>
+          </div>
+          <div class="panel-body">
+            <div class="table-wrap" style="max-height: 320px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th class="right">Block</th>
+                    <th class="right">Acct</th>
+                    <th class="right">Order</th>
+                    <th>Market(s)</th>
+                    <th>Side</th>
+                    <th class="right">Remaining</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="evt in recentCancellations.slice(0, 50)" :key="evt.row_key">
+                    <tr>
+                      <td class="num dim right" x-text="'#' + evt.block_height"></td>
+                      <td class="num right" x-text="evt.account_id"></td>
+                      <td class="num right dim" x-text="evt.order_id"></td>
+                      <td class="market-name" :title="cancelMarketTitle(evt)" x-text="cancelMarketLabel(evt)"></td>
+                      <td><span class="tag" :class="cancelSideClass(evt.side)" x-text="evt.side"></span></td>
+                      <td class="num right" x-text="fmtInt(evt.remaining_quantity)"></td>
+                    </tr>
+                  </template>
+                  <tr x-show="!recentCancellations.length">
+                    <td colspan="6" class="dim" style="text-align:center;">No OrderCancelled events in the recent block window.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:12px;">
+        <div class="panel-head">
+          <h2>Open-Batch Indicative</h2>
+          <div class="row">
+            <select x-model.number="openBatchMarketId" @change="loadOpenBatch()" style="min-width: 280px;">
+              <option :value="0">Pick a market…</option>
+              <template x-for="m in markets.slice().sort((a,b) => (b.volume_24h_nanos||0) - (a.volume_24h_nanos||0)).slice(0, 60)" :key="m.market_id">
+                <option :value="m.market_id" x-text="'#' + m.market_id + ' · ' + m.name"></option>
+              </template>
+            </select>
+            <button @click="loadOpenBatch()" :disabled="!openBatchMarketId">Reload</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="grid stats" style="grid-template-columns: repeat(4, minmax(180px, 1fr));" x-show="openBatchMarketId">
+            <div class="stat">
+              <div class="label">Unique Placers (open batch)</div>
+              <div class="value yellow" x-text="fmtInt(openBatch.unique_placers || 0)"></div>
+              <div class="sub dim">non-MM admits</div>
+            </div>
+            <div class="stat">
+              <div class="label">Indicative YES</div>
+              <div class="value green" x-text="fmtPrice(openBatch.indicative_yes_price_nanos)"></div>
+              <div class="sub dim">shadow solve</div>
+            </div>
+            <div class="stat">
+              <div class="label">Indicative NO</div>
+              <div class="value red" x-text="fmtPrice(openBatch.indicative_no_price_nanos)"></div>
+              <div class="sub dim">shadow solve</div>
+            </div>
+            <div class="stat">
+              <div class="label">Indicative Volume</div>
+              <div class="value blue" x-text="'$' + dollars(openBatch.indicative_volume_nanos || 0)"></div>
+              <div class="sub dim" x-text="openBatch.indicative_computed_at_ms ? ('computed ' + shortTime(openBatch.indicative_computed_at_ms)) : 'no data'"></div>
+            </div>
+          </div>
+          <div class="empty" x-show="!openBatchMarketId">Pick a market above to see its open-batch indicative snapshot (C2).</div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:12px;">
+        <div class="panel-head">
+          <h2>Cost Basis · Portfolio Mark</h2>
+          <div class="row">
+            <input x-model.number="portfolioAccountId" @keydown.enter="loadPortfolio()" placeholder="Account ID" style="width: 160px;">
+            <button @click="loadPortfolio()" :disabled="!portfolioAccountId">Load</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="grid stats" style="grid-template-columns: repeat(4, minmax(180px, 1fr));" x-show="portfolio && portfolio.account_id">
+            <div class="stat">
+              <div class="label">Balance</div>
+              <div class="value" x-text="'$' + dollarsSigned(portfolio.balance_nanos || 0)"></div>
+              <div class="sub dim" x-text="'Deposited $' + dollarsSigned(portfolio.total_deposited_nanos || 0)"></div>
+            </div>
+            <div class="stat">
+              <div class="label">Realized PnL (C1)</div>
+              <div class="value" :class="(portfolio.realized_pnl_nanos || 0) >= 0 ? 'green' : 'red'" x-text="moneySigned((portfolio.realized_pnl_nanos || 0) / 1e9)"></div>
+              <div class="sub dim">across closed positions</div>
+            </div>
+            <div class="stat">
+              <div class="label">Unrealized PnL (C1)</div>
+              <div class="value" :class="(portfolio.unrealized_pnl_nanos || 0) >= 0 ? 'green' : 'red'" x-text="moneySigned((portfolio.unrealized_pnl_nanos || 0) / 1e9)"></div>
+              <div class="sub dim">mark-to-market</div>
+            </div>
+            <div class="stat">
+              <div class="label">Lifetime Fills (B8)</div>
+              <div class="value blue" x-text="fmtInt(portfolio.total_fill_count || 0)"></div>
+              <div class="sub dim" x-text="portfolio.first_deposit_ms ? ('first deposit ' + shortTime(portfolio.first_deposit_ms)) : 'no deposit'"></div>
+            </div>
+          </div>
+          <div class="table-wrap" style="margin-top: 10px; max-height: 280px;" x-show="portfolio && (portfolio.positions || []).length">
+            <table>
+              <thead>
+                <tr>
+                  <th>Market</th>
+                  <th>Side</th>
+                  <th class="right">Qty</th>
+                  <th class="right">Avg Entry (C1)</th>
+                  <th class="right">Mark</th>
+                  <th class="right">Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="p in (portfolio.positions || [])" :key="p.market_id + ':' + p.outcome">
+                  <tr>
+                    <td class="market-name" :title="marketName(p.market_id)" x-text="marketName(p.market_id)"></td>
+                    <td><span class="tag" :class="p.outcome === 'YES' ? 'green' : 'red'" x-text="p.outcome"></span></td>
+                    <td class="num right" x-text="fmtInt(p.quantity)"></td>
+                    <td class="num right" x-text="p.avg_entry_price_nanos ? fmtPrice(p.avg_entry_price_nanos) : '—'"></td>
+                    <td class="num right" x-text="fmtPrice(p.current_price_nanos)"></td>
+                    <td class="num right blue" x-text="'$' + dollarsSigned(p.value_nanos)"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+          <div class="empty" x-show="!portfolio || !portfolio.account_id">Load an account to see realized/unrealized PnL and per-position cost basis.</div>
+        </div>
+      </div>
+    </section>
+
     <section x-show="selectedTab === 'participants'">
       <div class="grid two">
         <div class="panel">
@@ -802,6 +1067,7 @@ function consoleApp() {
       { id: 'overview', label: 'Overview' },
       { id: 'markets', label: 'Markets' },
       { id: 'blocks', label: 'Blocks' },
+      { id: 'aggregates', label: 'Aggregates' },
       { id: 'participants', label: 'MM & Accounts' },
       { id: 'bots', label: 'Bot Decisions' },
       { id: 'trade', label: 'Trade' },
@@ -831,6 +1097,11 @@ function consoleApp() {
     isLive: false,
     lastUpdated: '',
     loadingAccounts: false,
+    activityOverview: { all_time: { unique_traders: 0, total_volume_nanos: 0, orders: { placed: 0, matched: 0, unmatched: 0 } }, last_24h: { unique_traders: 0, total_volume_nanos: 0, orders: { placed: 0, matched: 0, unmatched: 0 } } },
+    openBatchMarketId: 0,
+    openBatch: {},
+    portfolioAccountId: null,
+    portfolio: {},
 
     get latestBlock() {
       return this.recentBlocks.length ? this.recentBlocks[this.recentBlocks.length - 1] : null;
@@ -1128,6 +1399,7 @@ function consoleApp() {
     afterTabChange() {
       if (this.selectedTab === 'bots') this.loadBotDecisions();
       if (this.selectedTab === 'participants') this.loadAccounts();
+      if (this.selectedTab === 'aggregates') this.loadActivityOverview();
       this.$nextTick(() => this.drawCharts());
     },
     drawCharts() {
@@ -1330,6 +1602,123 @@ function consoleApp() {
       const d = new Date(value);
       if (Number.isNaN(d.getTime())) return String(value);
       return d.toLocaleString(undefined, { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    },
+
+    // ── Aggregates tab (E1) ───────────────────────────────────────────────
+    get topMarketsByVolume24h() {
+      return this.markets
+        .slice()
+        .sort((a, b) => (b.volume_24h_nanos || 0) - (a.volume_24h_nanos || 0)
+          || (b.volume_nanos || 0) - (a.volume_nanos || 0)
+          || a.market_id - b.market_id)
+        .slice(0, 80);
+    },
+    get latestBlockByMarketRows() {
+      const blk = this.latestBlock;
+      if (!blk || !blk.by_market) return [];
+      return Object.entries(blk.by_market).map(([mid, stats]) => {
+        const id = Number(mid);
+        const m = this.marketById(id);
+        return {
+          market_id: id,
+          name: m ? m.name : '#' + id,
+          label: m ? ('#' + id + ' · ' + m.name) : '#' + id,
+          placers: stats.placers || 0,
+          volume_nanos: stats.volume_nanos || 0,
+          placed: stats.placed || 0,
+          matched: stats.matched || 0,
+          unmatched: stats.unmatched || 0,
+          welfare_nanos: stats.welfare_nanos || 0,
+        };
+      }).sort((a, b) => b.volume_nanos - a.volume_nanos || b.placers - a.placers || a.market_id - b.market_id);
+    },
+    get recentCancellations() {
+      const out = [];
+      for (const b of this.recentBlocks) {
+        const evts = b.system_events || [];
+        for (let i = 0; i < evts.length; i++) {
+          const e = evts[i];
+          if (e && e.type === 'order_cancelled') {
+            out.push({
+              ...e,
+              block_height: b.height,
+              row_key: b.height + ':' + (e.order_id ?? i),
+            });
+          }
+        }
+      }
+      return out.reverse();
+    },
+    orderStatsSub(bucket) {
+      if (!bucket || !bucket.orders) return 'placed 0 · unmatched 0';
+      return 'placed ' + this.fmtInt(bucket.orders.placed)
+        + ' · unmatched ' + this.fmtInt(bucket.orders.unmatched);
+    },
+    fmtLiquidity(m) {
+      if (!m.liquidity_avg10_nanos) return '—';
+      const avg = '$' + (m.liquidity_avg10_nanos / 1e9).toFixed(2);
+      if (!m.liquidity_band_nanos) return avg;
+      const band = '±$' + (m.liquidity_band_nanos / 1e9).toFixed(2);
+      return avg + ' ' + band;
+    },
+    fmtYesDelta24h(m) {
+      if (m.yes_price_24h_ago_nanos == null || m.yes_price_nanos == null) return '—';
+      const delta = (m.yes_price_nanos - m.yes_price_24h_ago_nanos) / 1e9;
+      const sign = delta >= 0 ? '+' : '';
+      return sign + (delta * 100).toFixed(1) + '¢';
+    },
+    yesDelta24hClass(m) {
+      if (m.yes_price_24h_ago_nanos == null || m.yes_price_nanos == null) return 'dim';
+      return m.yes_price_nanos >= m.yes_price_24h_ago_nanos ? 'green' : 'red';
+    },
+    cancelMarketLabel(evt) {
+      const ids = evt.market_ids || [];
+      if (!ids.length) return '—';
+      if (ids.length === 1) return '#' + ids[0] + ' · ' + this.marketName(ids[0]);
+      return ids.length + ' markets';
+    },
+    cancelMarketTitle(evt) {
+      const ids = evt.market_ids || [];
+      return ids.map(id => '#' + id + ' ' + this.marketName(id)).join('\n');
+    },
+    cancelSideClass(side) {
+      if (side === 'BuyYes') return 'green';
+      if (side === 'SellYes') return 'red';
+      if (side === 'BuyNo') return 'red';
+      if (side === 'SellNo') return 'green';
+      return '';
+    },
+    async loadActivityOverview() {
+      try {
+        const r = await fetch('/v1/activity/overview');
+        if (!r.ok) return;
+        this.activityOverview = await r.json();
+      } catch (e) {
+        console.warn('activity overview load failed', e);
+      }
+    },
+    async loadOpenBatch() {
+      if (!this.openBatchMarketId) { this.openBatch = {}; return; }
+      try {
+        const r = await fetch('/v1/markets/' + this.openBatchMarketId + '/open-batch');
+        if (!r.ok) { this.openBatch = {}; return; }
+        this.openBatch = await r.json();
+      } catch (e) {
+        console.warn('open-batch load failed', e);
+        this.openBatch = {};
+      }
+    },
+    async loadPortfolio() {
+      const id = Number(this.portfolioAccountId);
+      if (!Number.isFinite(id) || id <= 0) { this.portfolio = {}; return; }
+      try {
+        const r = await fetch('/v1/accounts/' + id + '/portfolio');
+        if (!r.ok) { this.portfolio = {}; return; }
+        this.portfolio = await r.json();
+      } catch (e) {
+        console.warn('portfolio load failed', e);
+        this.portfolio = {};
+      }
     },
   };
 }

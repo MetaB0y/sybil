@@ -245,11 +245,11 @@ fn verify_qmdb_range_proof(
     };
 
     let mut hasher = Sha256::new();
-    hasher.update(&proof.ops_root);
-    hasher.update(&merkle_root);
+    hasher.update(proof.ops_root);
+    hasher.update(merkle_root);
     if has_partial_chunk {
-        hasher.update(&next_bit.to_be_bytes());
-        hasher.update(&proof.partial_chunk_digest.expect("checked above"));
+        hasher.update(next_bit.to_be_bytes());
+        hasher.update(proof.partial_chunk_digest.expect("checked above"));
     }
     hasher.finalize().as_slice() == root
 }
@@ -403,17 +403,17 @@ fn reconstruct_qmdb_mmr_root(
     let mut element = Some(operation);
     let mut leaf_consumed = false;
     let start_chunk = start_loc / qmdb_chunk_bits();
+    let mut reconstruction = QmdbPeakReconstruction {
+        range: &range,
+        element: &mut element,
+        leaf_consumed: &mut leaf_consumed,
+        siblings,
+        sibling_cursor: &mut sibling_cursor,
+        start_chunk,
+        chunk,
+    };
     for peak in range_peaks {
-        let peak_digest = reconstruct_qmdb_peak(
-            peak,
-            &range,
-            &mut element,
-            &mut leaf_consumed,
-            siblings,
-            &mut sibling_cursor,
-            start_chunk,
-            chunk,
-        )?;
+        let peak_digest = reconstruction.reconstruct_peak(peak)?;
         peak_digests.push(peak_digest);
     }
 
@@ -428,58 +428,43 @@ fn reconstruct_qmdb_mmr_root(
     Some(mmr_root(leaves, &peak_digests))
 }
 
-fn reconstruct_qmdb_peak(
-    node: MmrSubtree,
-    range: &std::ops::Range<u64>,
-    element: &mut Option<&[u8]>,
-    leaf_consumed: &mut bool,
-    siblings: &[[u8; 32]],
-    sibling_cursor: &mut usize,
+struct QmdbPeakReconstruction<'a, 'b> {
+    range: &'a std::ops::Range<u64>,
+    element: &'a mut Option<&'b [u8]>,
+    leaf_consumed: &'a mut bool,
+    siblings: &'a [[u8; 32]],
+    sibling_cursor: &'a mut usize,
     start_chunk: u64,
-    chunk: &[u8; QMDB_STATE_CHUNK_SIZE],
-) -> Option<[u8; 32]> {
-    if node.leaf_end()? <= range.start || node.leaf_start >= range.end {
-        let digest = *siblings.get(*sibling_cursor)?;
-        *sibling_cursor = sibling_cursor.checked_add(1)?;
-        return Some(digest);
+    chunk: &'a [u8; QMDB_STATE_CHUNK_SIZE],
+}
+
+impl QmdbPeakReconstruction<'_, '_> {
+    fn reconstruct_peak(&mut self, node: MmrSubtree) -> Option<[u8; 32]> {
+        if node.leaf_end()? <= self.range.start || node.leaf_start >= self.range.end {
+            let digest = *self.siblings.get(*self.sibling_cursor)?;
+            *self.sibling_cursor = self.sibling_cursor.checked_add(1)?;
+            return Some(digest);
+        }
+
+        if node.height == 0 {
+            let operation = self.element.take()?;
+            *self.leaf_consumed = true;
+            return Some(mmr_leaf_digest(node.pos, operation));
+        }
+
+        let (left, right) = node.children()?;
+        let left_digest = self.reconstruct_peak(left)?;
+        let right_digest = self.reconstruct_peak(right)?;
+
+        Some(grafted_node_digest(
+            node.pos,
+            node.height,
+            &left_digest,
+            &right_digest,
+            self.start_chunk,
+            self.chunk,
+        ))
     }
-
-    if node.height == 0 {
-        let operation = element.take()?;
-        *leaf_consumed = true;
-        return Some(mmr_leaf_digest(node.pos, operation));
-    }
-
-    let (left, right) = node.children()?;
-    let left_digest = reconstruct_qmdb_peak(
-        left,
-        range,
-        element,
-        leaf_consumed,
-        siblings,
-        sibling_cursor,
-        start_chunk,
-        chunk,
-    )?;
-    let right_digest = reconstruct_qmdb_peak(
-        right,
-        range,
-        element,
-        leaf_consumed,
-        siblings,
-        sibling_cursor,
-        start_chunk,
-        chunk,
-    )?;
-
-    Some(grafted_node_digest(
-        node.pos,
-        node.height,
-        &left_digest,
-        &right_digest,
-        start_chunk,
-        chunk,
-    ))
 }
 
 fn grafted_node_digest(

@@ -57,6 +57,19 @@ fn system_event_to_response(event: &matching_sequencer::SystemEvent) -> SystemEv
             payout_nanos: *payout_nanos,
             affected_accounts: affected_accounts.iter().map(|id| id.0).collect(),
         },
+        matching_sequencer::SystemEvent::OrderCancelled {
+            account_id,
+            order_id,
+            market_ids,
+            side,
+            remaining_quantity,
+        } => SystemEventResponse::OrderCancelled {
+            account_id: account_id.0,
+            order_id: *order_id,
+            market_ids: market_ids.iter().map(|m| m.0).collect(),
+            side: side.to_string(),
+            remaining_quantity: *remaining_quantity,
+        },
     }
 }
 
@@ -156,6 +169,31 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
         .map(system_event_to_response)
         .collect();
 
+    // Union the keys from placers_by_market, volume_by_market, and
+    // orders_by_market — any of the three can be empty on its own (a
+    // block with carried fills but no fresh admits has zero placers but
+    // non-zero volume; a block whose only book activity is expiries has
+    // matched/unmatched but no fresh admits).
+    let mut by_market: HashMap<String, BlockMarketStats> = HashMap::new();
+    for (mid, count) in &block.placers_by_market {
+        by_market.entry(mid.0.to_string()).or_default().placers = *count;
+    }
+    for (mid, vol) in &block.volume_by_market {
+        by_market.entry(mid.0.to_string()).or_default().volume_nanos = *vol;
+    }
+    for (mid, stats) in &block.orders_by_market {
+        let entry = by_market.entry(mid.0.to_string()).or_default();
+        entry.placed = stats.placed as u32;
+        entry.matched = stats.matched as u32;
+        entry.unmatched = stats.unmatched as u32;
+    }
+    for (mid, welfare) in &block.welfare_by_market {
+        by_market
+            .entry(mid.0.to_string())
+            .or_default()
+            .welfare_nanos = *welfare;
+    }
+
     BlockResponse {
         height: block.header.height,
         parent_hash: hex::encode(block.header.parent_hash),
@@ -172,6 +210,8 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
         total_welfare_nanos: block.total_welfare,
         total_volume_nanos: block.total_volume,
         orders_filled: block.orders_filled,
+        unique_placers: block.unique_placers,
+        by_market,
     }
 }
 

@@ -2,6 +2,8 @@ pub mod account;
 mod account_storage;
 pub mod actor;
 pub mod agent;
+pub mod aggregates;
+mod analytics;
 pub mod block;
 pub mod bridge;
 pub mod canonical_state;

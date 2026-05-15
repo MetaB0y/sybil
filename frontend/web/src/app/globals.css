@@ -1,0 +1,68 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Sybil tokens — synced from handoff via `pnpm tokens:sync` */
+@import "../styles/sybil-tokens.css";
+
+/*
+ * Selective @theme mapping per SCAFFOLDING.md Step 5.
+ * Only color / font / radius scales are exposed as Tailwind utilities.
+ * For shadows, motion, blurs, and tracking, use raw var(--…) in CSS / style props.
+ */
+@theme inline {
+  /* Surfaces */
+  --color-bg-0: var(--bg-0);
+  --color-bg-1: var(--bg-1);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-overlay: var(--overlay);
+
+  /* Foreground */
+  --color-fg-1: var(--fg-1);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+  --color-fg-4: var(--fg-4);
+  --color-fg-on-accent: var(--fg-on-accent);
+
+  /* Borders */
+  --color-border-1: var(--border-1);
+  --color-border-2: var(--border-2);
+  --color-border-3: var(--border-3);
+  --color-border-focus: var(--border-focus);
+
+  /* Brand */
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-press: var(--accent-press);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-faint: var(--accent-faint);
+
+  /* Market semantics — trading contexts only (numbers and bars) */
+  --color-yes: var(--yes);
+  --color-yes-hover: var(--yes-hover);
+  --color-yes-soft: var(--yes-soft);
+  --color-yes-faint: var(--yes-faint);
+  --color-no: var(--no);
+  --color-no-hover: var(--no-hover);
+  --color-no-soft: var(--no-soft);
+  --color-no-faint: var(--no-faint);
+
+  /* Status */
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+
+  /* Type families */
+  --font-display: var(--font-display);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  /* Radii */
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-pill: var(--radius-pill);
+}

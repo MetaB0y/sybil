@@ -76,6 +76,31 @@ pub struct Block {
     pub total_welfare: i64,
     pub total_volume: u64,
     pub orders_filled: usize,
+    /// Unique placers (non-MM accounts) admitted into this block. Platform
+    /// scalar — derived from `WitnessOrder.account_id` after filtering MM.
+    pub unique_placers: u32,
+    /// Per-market unique placers in this block. A multi-market order
+    /// credits each active market; the platform `unique_placers` counts the
+    /// account once (so sum-of-by-market over-counts for spreads).
+    pub placers_by_market: HashMap<MarketId, u32>,
+    /// Per-market volume contribution from this block's fills, in nanos. A
+    /// multi-market fill credits every active market with its full notional;
+    /// the platform `total_volume` counts each fill once (so sum-of-by-market
+    /// over-counts for bundles, just like `placers_by_market`).
+    pub volume_by_market: HashMap<MarketId, u64>,
+    /// Per-market order placement/matching/unmatching counts for this block.
+    /// `placed` counts every active market of every successful non-MM admit;
+    /// `matched` and `unmatched` count exits from the resting book (expire,
+    /// revalidate, post-solve settle). Multi-market orders over-count
+    /// per-market vs. the platform scalars in `BlockFlowMetrics`. Cancels
+    /// are NOT counted here (D1 carries them via OrderCancelled).
+    pub orders_by_market: HashMap<MarketId, crate::aggregates::OrderStats>,
+    /// Per-market welfare contribution in nanos from this block's fills
+    /// (B7). Multi-market fills credit every active market with their full
+    /// welfare; the platform `total_welfare` counts each fill once, so
+    /// sum-of-per-market over-counts for spreads/bundles. Signed because
+    /// solver rounding can yield small negatives.
+    pub welfare_by_market: HashMap<MarketId, i64>,
 }
 
 /// Compute a deterministic account-only state root with the verifier's

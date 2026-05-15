@@ -59,11 +59,16 @@ use crate::account_storage::{
     AccountSnapshotSlot, AccountStateStore, CommittedAccountState, FencedAccountStorage,
     QmdbStateLeafExclusionProof, QmdbStateLeafProof, QmdbStateRoot, RecoveryAccountState,
 };
+use crate::aggregates::{
+    CostBasisTrackerSnapshot, LiquidityTrackerSnapshot, OrderStatsTrackerSnapshot,
+    TraderTrackerSnapshot,
+};
 use crate::block::{state_sidecar_snapshot_from_resting_orders, BlockHeader};
 use crate::bridge::{BridgeState, BridgeWithdrawalRequest, L1Deposit};
 use crate::market_info::{AccountFillRecord, MarketMetadata};
 use crate::market_lifecycle::MarketLifecycle;
 use crate::order_book::RestingOrder;
+use crate::price_tracker::{PriceTrackerClearingHistorySnapshot, PriceTrackerVolumeSnapshot};
 
 // ---------------------------------------------------------------------------
 // Table definitions
@@ -149,6 +154,56 @@ const PENDING_L1_DEPOSITS: TableDefinition<u64, &[u8]> =
 const PENDING_BRIDGE_WITHDRAWALS: TableDefinition<u64, &[u8]> =
     TableDefinition::new("pending_bridge_withdrawals");
 
+/// Trader tracker snapshot — one row keyed "snapshot" holding the full
+/// `TraderTrackerSnapshot` payload. Off-block sidecar; missing table on
+/// load yields `Default::default()` (cold start until activity accumulates).
+const TRADER_TRACKER: TableDefinition<&str, &[u8]> = TableDefinition::new("trader_tracker");
+const KEY_TRADER_TRACKER_SNAPSHOT: &str = "snapshot";
+
+/// Off-block price-tracker volume extensions: platform running total +
+/// rolling hourly buckets. Stored as a single blob keyed `"snapshot"`,
+/// matching the pattern set by `TRADER_TRACKER`.
+const PRICE_TRACKER_VOLUME: TableDefinition<&str, &[u8]> =
+    TableDefinition::new("price_tracker_volume");
+const KEY_PRICE_TRACKER_VOLUME_SNAPSHOT: &str = "snapshot";
+
+/// Off-block price-tracker clearing-price history: per-market hourly
+/// snapshot of the first-of-hour clearing price, used by
+/// `price_n_hours_ago` (24h price-delta surfaces). Separate table from
+/// `PRICE_TRACKER_VOLUME` so reverting B3 drops one table cleanly.
+const PRICE_TRACKER_CLEARING_HISTORY: TableDefinition<&str, &[u8]> =
+    TableDefinition::new("price_tracker_clearing_history");
+const KEY_PRICE_TRACKER_CLEARING_HISTORY_SNAPSHOT: &str = "snapshot";
+
+/// Off-block liquidity tracker: per-market ±band depth rings used by the
+/// `liquidity_avg10` surface. Same single-blob shape as `TRADER_TRACKER`.
+const LIQUIDITY_TRACKER: TableDefinition<&str, &[u8]> = TableDefinition::new("liquidity_tracker");
+const KEY_LIQUIDITY_TRACKER_SNAPSHOT: &str = "snapshot";
+
+/// Off-block order stats tracker (B6): placed / matched / unmatched
+/// counters per market + platform + hourly platform buckets. Single-blob
+/// shape; missing table on load yields `OrderStatsTrackerSnapshot::default()`.
+const ORDER_STATS_TRACKER: TableDefinition<&str, &[u8]> =
+    TableDefinition::new("order_stats_tracker");
+const KEY_ORDER_STATS_TRACKER_SNAPSHOT: &str = "snapshot";
+
+/// First-deposit timestamps per account (B8). Single blob keyed
+/// "snapshot"; missing-row yields an empty map.
+const FIRST_DEPOSIT_MS: TableDefinition<&str, &[u8]> = TableDefinition::new("first_deposit_ms");
+const KEY_FIRST_DEPOSIT_MS_SNAPSHOT: &str = "snapshot";
+
+/// All-time per-account fill counters (B8). The bounded fill window
+/// lives in FILL_HISTORY; the counter survives trim and restart.
+const FILL_TOTAL_COUNTS: TableDefinition<&str, &[u8]> = TableDefinition::new("fill_total_counts");
+const KEY_FILL_TOTAL_COUNTS_SNAPSHOT: &str = "snapshot";
+
+/// Off-block cost-basis tracker (C1): weighted-average entry price per
+/// (account, market, outcome) + realized PnL per account. Single blob
+/// keyed "snapshot"; missing row yields `CostBasisTrackerSnapshot::default()`
+/// (cold start until activity accumulates).
+const COST_BASIS_TRACKER: TableDefinition<&str, &[u8]> = TableDefinition::new("cost_basis_tracker");
+const KEY_COST_BASIS_TRACKER_SNAPSHOT: &str = "snapshot";
+
 // Counter keys
 const KEY_STORE_LAYOUT_VERSION: &str = "store_layout_version";
 const KEY_HEIGHT: &str = "height";
@@ -225,6 +280,22 @@ pub struct Store {
     account_state_store: Box<dyn AccountStateStore>,
 }
 
+/// Store-restored analytics projections. These are grouped separately from
+/// core sequencer state, but still loaded from the existing redb tables.
+pub struct AnalyticsRestoredState {
+    pub last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
+    pub market_volumes: HashMap<MarketId, u64>,
+    pub account_fills: Vec<(AccountId, AccountFillRecord)>,
+    pub trader_tracker: TraderTrackerSnapshot,
+    pub price_tracker_volume: PriceTrackerVolumeSnapshot,
+    pub price_tracker_clearing_history: PriceTrackerClearingHistorySnapshot,
+    pub liquidity_tracker: LiquidityTrackerSnapshot,
+    pub order_stats_tracker: OrderStatsTrackerSnapshot,
+    pub first_deposit_ms: HashMap<AccountId, u64>,
+    pub fill_total_counts: HashMap<AccountId, u64>,
+    pub cost_basis_tracker: CostBasisTrackerSnapshot,
+}
+
 /// State restored from the store on startup.
 pub struct RestoredState {
     pub accounts: AccountStore,
@@ -236,8 +307,6 @@ pub struct RestoredState {
     pub last_header: Option<BlockHeader>,
     pub next_order_id: u64,
     pub pubkey_registry: HashMap<crate::crypto::PublicKey, AccountId>,
-    pub last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
-    pub market_volumes: HashMap<MarketId, u64>,
     pub resting_orders: Vec<RestingOrder>,
     /// All registered data feeds.
     pub data_feeds: Vec<DataFeed>,
@@ -250,14 +319,29 @@ pub struct RestoredState {
     /// after the last committed block. On restart these are re-inserted
     /// on top of `resting_orders` before the sequencer starts processing.
     pub admit_log: Vec<RestingOrder>,
-    /// Full fill history restored from redb.
-    pub account_fills: Vec<(AccountId, AccountFillRecord)>,
+    /// Derived analytics projections restored from redb.
+    pub analytics: AnalyticsRestoredState,
     /// L1 bridge sidecar state restored from the last committed block.
     pub bridge_state: BridgeState,
     /// L1 deposits durably accepted after the last committed block.
     pub pending_l1_deposits: Vec<L1Deposit>,
     /// Bridge withdrawals durably accepted after the last committed block.
     pub pending_bridge_withdrawals: Vec<BridgeWithdrawalRequest>,
+}
+
+/// Borrowed analytics view needed to persist one block.
+pub struct AnalyticsSnapshot<'a> {
+    pub last_clearing_prices: &'a HashMap<MarketId, Vec<Nanos>>,
+    pub market_volumes: &'a HashMap<MarketId, u64>,
+    pub account_fills: Vec<(AccountId, AccountFillRecord)>,
+    pub trader_tracker: TraderTrackerSnapshot,
+    pub price_tracker_volume: PriceTrackerVolumeSnapshot,
+    pub price_tracker_clearing_history: PriceTrackerClearingHistorySnapshot,
+    pub liquidity_tracker: LiquidityTrackerSnapshot,
+    pub order_stats_tracker: OrderStatsTrackerSnapshot,
+    pub first_deposit_ms: HashMap<AccountId, u64>,
+    pub fill_total_counts: HashMap<AccountId, u64>,
+    pub cost_basis_tracker: CostBasisTrackerSnapshot,
 }
 
 /// Borrowed view of sequencer state needed to persist one block.
@@ -270,9 +354,7 @@ pub struct SequencerSnapshot<'a> {
     pub header: &'a BlockHeader,
     pub next_order_id: u64,
     pub pubkey_registry: &'a HashMap<crate::crypto::PublicKey, AccountId>,
-    pub last_clearing_prices: &'a HashMap<MarketId, Vec<Nanos>>,
-    pub market_volumes: &'a HashMap<MarketId, u64>,
-    pub account_fills: Vec<(AccountId, AccountFillRecord)>,
+    pub analytics: AnalyticsSnapshot<'a>,
     /// Owned because the snapshot clones the live book — cheap for bounded sizes.
     pub resting_orders: Vec<RestingOrder>,
     pub bridge_state: &'a BridgeState,
@@ -308,6 +390,14 @@ impl Store {
         txn.open_table(BRIDGE_STATE)?;
         txn.open_table(PENDING_L1_DEPOSITS)?;
         txn.open_table(PENDING_BRIDGE_WITHDRAWALS)?;
+        txn.open_table(TRADER_TRACKER)?;
+        txn.open_table(PRICE_TRACKER_VOLUME)?;
+        txn.open_table(PRICE_TRACKER_CLEARING_HISTORY)?;
+        txn.open_table(LIQUIDITY_TRACKER)?;
+        txn.open_table(ORDER_STATS_TRACKER)?;
+        txn.open_table(FIRST_DEPOSIT_MS)?;
+        txn.open_table(FILL_TOTAL_COUNTS)?;
+        txn.open_table(COST_BASIS_TRACKER)?;
         txn.commit()?;
 
         initialize_or_validate_layout(&db)?;
@@ -462,7 +552,7 @@ impl Store {
         // Clearing prices
         {
             let mut table = txn.open_table(CLEARING_PRICES)?;
-            for (&market_id, prices) in snapshot.last_clearing_prices {
+            for (&market_id, prices) in snapshot.analytics.last_clearing_prices {
                 let bytes = rmp_serde::to_vec(prices)?;
                 table.insert(market_id.0, bytes.as_slice())?;
             }
@@ -471,7 +561,7 @@ impl Store {
         // Market volumes
         {
             let mut table = txn.open_table(MARKET_VOLUMES)?;
-            for (&market_id, &volume) in snapshot.market_volumes {
+            for (&market_id, &volume) in snapshot.analytics.market_volumes {
                 table.insert(market_id.0, volume)?;
             }
         }
@@ -487,7 +577,7 @@ impl Store {
         // snapshot is idempotent because the key is account/block/order.
         {
             let mut table = txn.open_table(FILL_HISTORY)?;
-            for (account_id, record) in &snapshot.account_fills {
+            for (account_id, record) in &snapshot.analytics.account_fills {
                 let key = fill_history_key(*account_id, record);
                 let bytes = rmp_serde::to_vec(record)?;
                 table.insert(key.as_slice(), bytes.as_slice())?;
@@ -536,6 +626,81 @@ impl Store {
         {
             let mut table = txn.open_table(PENDING_BRIDGE_WITHDRAWALS)?;
             table.retain(|_, _| false)?;
+        }
+
+        // Trader tracker snapshot — rewritten atomically each block.
+        {
+            let mut table = txn.open_table(TRADER_TRACKER)?;
+            let bytes = rmp_serde::to_vec(&snapshot.analytics.trader_tracker)?;
+            table.insert(KEY_TRADER_TRACKER_SNAPSHOT, bytes.as_slice())?;
+        }
+
+        // Price-tracker volume extensions — same shape as TRADER_TRACKER.
+        {
+            let mut table = txn.open_table(PRICE_TRACKER_VOLUME)?;
+            let bytes = rmp_serde::to_vec(&snapshot.analytics.price_tracker_volume)?;
+            table.insert(KEY_PRICE_TRACKER_VOLUME_SNAPSHOT, bytes.as_slice())?;
+        }
+
+        // Price-tracker clearing-history slice — same pattern as the volume
+        // extensions; separate blob keeps B3's rollback footprint isolated.
+        {
+            let mut table = txn.open_table(PRICE_TRACKER_CLEARING_HISTORY)?;
+            let bytes = rmp_serde::to_vec(&snapshot.analytics.price_tracker_clearing_history)?;
+            table.insert(
+                KEY_PRICE_TRACKER_CLEARING_HISTORY_SNAPSHOT,
+                bytes.as_slice(),
+            )?;
+        }
+
+        // LiquidityTracker snapshot — single blob keyed "snapshot".
+        {
+            let mut table = txn.open_table(LIQUIDITY_TRACKER)?;
+            let bytes = rmp_serde::to_vec(&snapshot.analytics.liquidity_tracker)?;
+            table.insert(KEY_LIQUIDITY_TRACKER_SNAPSHOT, bytes.as_slice())?;
+        }
+
+        // OrderStatsTracker snapshot — single blob keyed "snapshot".
+        {
+            let mut table = txn.open_table(ORDER_STATS_TRACKER)?;
+            let bytes = rmp_serde::to_vec(&snapshot.analytics.order_stats_tracker)?;
+            table.insert(KEY_ORDER_STATS_TRACKER_SNAPSHOT, bytes.as_slice())?;
+        }
+
+        // First-deposit timestamps (B8) — single blob, missing → empty map.
+        {
+            let mut table = txn.open_table(FIRST_DEPOSIT_MS)?;
+            // Serialize as Vec<(AccountId, u64)> for stable ordering.
+            let mut entries: Vec<(AccountId, u64)> = snapshot
+                .analytics
+                .first_deposit_ms
+                .iter()
+                .map(|(&aid, &ts)| (aid, ts))
+                .collect();
+            entries.sort_by_key(|(aid, _)| aid.0);
+            let bytes = rmp_serde::to_vec(&entries)?;
+            table.insert(KEY_FIRST_DEPOSIT_MS_SNAPSHOT, bytes.as_slice())?;
+        }
+
+        // All-time fill counters per account (B8) — single blob.
+        {
+            let mut table = txn.open_table(FILL_TOTAL_COUNTS)?;
+            let mut entries: Vec<(AccountId, u64)> = snapshot
+                .analytics
+                .fill_total_counts
+                .iter()
+                .map(|(&aid, &n)| (aid, n))
+                .collect();
+            entries.sort_by_key(|(aid, _)| aid.0);
+            let bytes = rmp_serde::to_vec(&entries)?;
+            table.insert(KEY_FILL_TOTAL_COUNTS_SNAPSHOT, bytes.as_slice())?;
+        }
+
+        // CostBasisTracker snapshot (C1) — single blob keyed "snapshot".
+        {
+            let mut table = txn.open_table(COST_BASIS_TRACKER)?;
+            let bytes = rmp_serde::to_vec(&snapshot.analytics.cost_basis_tracker)?;
+            table.insert(KEY_COST_BASIS_TRACKER_SNAPSHOT, bytes.as_slice())?;
         }
 
         // Counters
@@ -865,6 +1030,87 @@ impl Store {
             .await?;
         }
 
+        // Trader tracker snapshot. Missing row -> cold-start default; the
+        // tracker repopulates as admissions arrive after restart.
+        let trader_tracker: TraderTrackerSnapshot = {
+            let table = txn.open_table(TRADER_TRACKER)?;
+            match table.get(KEY_TRADER_TRACKER_SNAPSHOT)? {
+                Some(value) => rmp_serde::from_slice(value.value())?,
+                None => TraderTrackerSnapshot::default(),
+            }
+        };
+
+        // Price-tracker volume extensions. Same missing-row → default
+        // semantics as the trader tracker; cold restarts start with empty
+        // hourly buckets and a zero platform total.
+        let price_tracker_volume: PriceTrackerVolumeSnapshot = {
+            let table = txn.open_table(PRICE_TRACKER_VOLUME)?;
+            match table.get(KEY_PRICE_TRACKER_VOLUME_SNAPSHOT)? {
+                Some(value) => rmp_serde::from_slice(value.value())?,
+                None => PriceTrackerVolumeSnapshot::default(),
+            }
+        };
+
+        // Price-tracker clearing-history slice. Missing-row → default.
+        let price_tracker_clearing_history: PriceTrackerClearingHistorySnapshot = {
+            let table = txn.open_table(PRICE_TRACKER_CLEARING_HISTORY)?;
+            match table.get(KEY_PRICE_TRACKER_CLEARING_HISTORY_SNAPSHOT)? {
+                Some(value) => rmp_serde::from_slice(value.value())?,
+                None => PriceTrackerClearingHistorySnapshot::default(),
+            }
+        };
+
+        // Liquidity tracker snapshot. Missing-row → default.
+        let liquidity_tracker: LiquidityTrackerSnapshot = {
+            let table = txn.open_table(LIQUIDITY_TRACKER)?;
+            match table.get(KEY_LIQUIDITY_TRACKER_SNAPSHOT)? {
+                Some(value) => rmp_serde::from_slice(value.value())?,
+                None => LiquidityTrackerSnapshot::default(),
+            }
+        };
+
+        // OrderStatsTracker snapshot. Missing-row → default.
+        let order_stats_tracker: OrderStatsTrackerSnapshot = {
+            let table = txn.open_table(ORDER_STATS_TRACKER)?;
+            match table.get(KEY_ORDER_STATS_TRACKER_SNAPSHOT)? {
+                Some(value) => rmp_serde::from_slice(value.value())?,
+                None => OrderStatsTrackerSnapshot::default(),
+            }
+        };
+
+        // First-deposit timestamps (B8). Missing-row → empty.
+        let first_deposit_ms: HashMap<AccountId, u64> = {
+            let table = txn.open_table(FIRST_DEPOSIT_MS)?;
+            match table.get(KEY_FIRST_DEPOSIT_MS_SNAPSHOT)? {
+                Some(value) => {
+                    let entries: Vec<(AccountId, u64)> = rmp_serde::from_slice(value.value())?;
+                    entries.into_iter().collect()
+                }
+                None => HashMap::new(),
+            }
+        };
+
+        // All-time fill counters per account (B8). Missing-row → empty.
+        let fill_total_counts: HashMap<AccountId, u64> = {
+            let table = txn.open_table(FILL_TOTAL_COUNTS)?;
+            match table.get(KEY_FILL_TOTAL_COUNTS_SNAPSHOT)? {
+                Some(value) => {
+                    let entries: Vec<(AccountId, u64)> = rmp_serde::from_slice(value.value())?;
+                    entries.into_iter().collect()
+                }
+                None => HashMap::new(),
+            }
+        };
+
+        // CostBasisTracker snapshot (C1). Missing-row → default (cold start).
+        let cost_basis_tracker: CostBasisTrackerSnapshot = {
+            let table = txn.open_table(COST_BASIS_TRACKER)?;
+            match table.get(KEY_COST_BASIS_TRACKER_SNAPSHOT)? {
+                Some(value) => rmp_serde::from_slice(value.value())?,
+                None => CostBasisTrackerSnapshot::default(),
+            }
+        };
+
         info!(
             height = recovery_metadata.height,
             accounts = num_accounts,
@@ -892,13 +1138,23 @@ impl Store {
             last_header,
             next_order_id: recovery_metadata.next_order_id,
             pubkey_registry,
-            last_clearing_prices,
-            market_volumes,
             resting_orders,
             data_feeds,
             pending_bundles,
             admit_log,
-            account_fills,
+            analytics: AnalyticsRestoredState {
+                last_clearing_prices,
+                market_volumes,
+                account_fills,
+                trader_tracker,
+                price_tracker_volume,
+                price_tracker_clearing_history,
+                liquidity_tracker,
+                order_stats_tracker,
+                first_deposit_ms,
+                fill_total_counts,
+                cost_basis_tracker,
+            },
             bridge_state,
             pending_l1_deposits,
             pending_bridge_withdrawals,
@@ -1403,10 +1659,20 @@ mod tests {
                 header,
                 next_order_id,
                 pubkey_registry: &self.empty_pk,
-                last_clearing_prices: &self.empty_prices,
-                market_volumes: market_volumes.unwrap_or(&self.empty_volumes),
+                analytics: AnalyticsSnapshot {
+                    last_clearing_prices: &self.empty_prices,
+                    market_volumes: market_volumes.unwrap_or(&self.empty_volumes),
+                    account_fills: Vec::new(),
+                    trader_tracker: Default::default(),
+                    price_tracker_volume: Default::default(),
+                    price_tracker_clearing_history: Default::default(),
+                    liquidity_tracker: Default::default(),
+                    order_stats_tracker: Default::default(),
+                    first_deposit_ms: HashMap::new(),
+                    fill_total_counts: HashMap::new(),
+                    cost_basis_tracker: Default::default(),
+                },
                 bridge_state: &self.bridge_state,
-                account_fills: Vec::new(),
                 resting_orders,
             }
         }
@@ -1427,10 +1693,20 @@ mod tests {
                 header,
                 next_order_id: 1,
                 pubkey_registry: &self.empty_pk,
-                last_clearing_prices: &self.empty_prices,
-                market_volumes: &self.empty_volumes,
+                analytics: AnalyticsSnapshot {
+                    last_clearing_prices: &self.empty_prices,
+                    market_volumes: &self.empty_volumes,
+                    account_fills,
+                    trader_tracker: Default::default(),
+                    price_tracker_volume: Default::default(),
+                    price_tracker_clearing_history: Default::default(),
+                    liquidity_tracker: Default::default(),
+                    order_stats_tracker: Default::default(),
+                    first_deposit_ms: HashMap::new(),
+                    fill_total_counts: HashMap::new(),
+                    cost_basis_tracker: Default::default(),
+                },
                 bridge_state: &self.bridge_state,
-                account_fills,
                 resting_orders: Vec::new(),
             }
         }
@@ -1741,7 +2017,7 @@ mod tests {
 
         let restored = store.load_state().await.unwrap().unwrap();
         assert_eq!(
-            restored.market_volumes.get(&market_id),
+            restored.analytics.market_volumes.get(&market_id),
             Some(&42_000_000_000)
         );
     }
@@ -1885,7 +2161,10 @@ mod tests {
             .unwrap();
 
         let restored = store.load_state().await.unwrap().unwrap();
-        assert_eq!(restored.account_fills, vec![(account_id, fill.clone())]);
+        assert_eq!(
+            restored.analytics.account_fills,
+            vec![(account_id, fill.clone())]
+        );
 
         let seq = crate::sequencer::BlockSequencer::restore(
             restored,
@@ -2050,6 +2329,7 @@ mod tests {
         );
         assert!(
             restored
+                .analytics
                 .market_volumes
                 .get(&market_id)
                 .copied()

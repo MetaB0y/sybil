@@ -65,6 +65,8 @@ mod tests {
                     total_welfare_nanos: 0,
                     total_volume_nanos: 0,
                     orders_filled: 0,
+                    unique_placers: 0,
+                    by_market: Default::default(),
                 }),
             },
         };

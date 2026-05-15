@@ -120,6 +120,11 @@ pub struct ApiConfig {
     #[arg(long, default_value = "5000", env = "SYBIL_ACTOR_QUEUE_ERROR_DEPTH")]
     pub actor_queue_error_depth: usize,
 
+    /// Width of the ±band (in nanos) the off-block LiquidityTracker uses to
+    /// score "near-the-money" depth. Default 50_000_000 nanos = $0.05.
+    #[arg(long, default_value = "50000000", env = "SYBIL_LIQUIDITY_BAND_NANOS")]
+    pub liquidity_band_nanos: u64,
+
     /// Data directory for persistent storage. Empty = in-memory only (no persistence).
     #[arg(long, default_value = "", env = "SYBIL_DATA_DIR")]
     pub data_dir: String,
@@ -177,6 +182,7 @@ impl Default for ApiConfig {
             max_fill_history_per_account: 5_000,
             actor_queue_warn_depth: 1_000,
             actor_queue_error_depth: 5_000,
+            liquidity_band_nanos: 50_000_000,
             data_dir: String::new(),
             arena_db_path: String::new(),
             market_ref_data_path: String::new(),

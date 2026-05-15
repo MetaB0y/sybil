@@ -87,6 +87,25 @@ pub fn system_event_leaf_value(event: &SystemEventWitness) -> Vec<u8> {
                 value.extend_from_slice(&account_id.to_le_bytes());
             }
         }
+        SystemEventWitness::OrderCancelled {
+            account_id,
+            order_id,
+            market_ids,
+            side,
+            remaining_quantity,
+        } => {
+            value.push(5);
+            value.extend_from_slice(&account_id.to_le_bytes());
+            value.extend_from_slice(&order_id.to_le_bytes());
+            let mut market_ids = market_ids.clone();
+            market_ids.sort_unstable();
+            value.extend_from_slice(&(market_ids.len() as u64).to_le_bytes());
+            for mid in market_ids {
+                value.extend_from_slice(&mid.0.to_le_bytes());
+            }
+            value.push(side.to_byte());
+            value.extend_from_slice(&remaining_quantity.to_le_bytes());
+        }
     }
     value
 }
@@ -158,6 +177,7 @@ fn append_rejection_reason(value: &mut Vec<u8>, reason: &RejectionReason) {
 mod tests {
     use super::*;
     use crate::types::SystemEventWitness;
+    use matching_engine::{MarketId, OrderDirection};
 
     #[test]
     fn event_leaf_values_encode_deposit() {
@@ -172,5 +192,52 @@ mod tests {
         expected.extend_from_slice(&50u64.to_le_bytes());
 
         assert_eq!(events, vec![expected]);
+    }
+
+    /// Tag byte 5 is the next slot after `MarketResolved=4`. The verifier and
+    /// the FE-facing API rely on this byte being stable. Changing it breaks
+    /// historical `events_root` verification.
+    #[test]
+    fn order_cancelled_tag_byte_5() {
+        let event = SystemEventWitness::OrderCancelled {
+            account_id: 42,
+            order_id: 1234,
+            market_ids: vec![MarketId::new(7), MarketId::new(3)],
+            side: OrderDirection::BuyNo,
+            remaining_quantity: 9,
+        };
+        let leaf = system_event_leaf_value(&event);
+        // Prefix is the literal "sybil/event/system" — 18 bytes.
+        assert_eq!(&leaf[..18], b"sybil/event/system");
+        // Followed by the variant tag.
+        assert_eq!(leaf[18], 5, "OrderCancelled must be tag byte 5");
+    }
+
+    /// Full byte-by-byte encoding of an OrderCancelled leaf. If this breaks,
+    /// it almost certainly means a verifier-incompatible encoding change —
+    /// re-derive carefully before updating the expected bytes.
+    #[test]
+    fn order_cancelled_leaf_encoding_is_stable() {
+        let event = SystemEventWitness::OrderCancelled {
+            account_id: 42,
+            order_id: 1234,
+            market_ids: vec![MarketId::new(7), MarketId::new(3)],
+            side: OrderDirection::BuyNo,
+            remaining_quantity: 9,
+        };
+        let leaf = system_event_leaf_value(&event);
+
+        let mut expected = b"sybil/event/system".to_vec();
+        expected.push(5);
+        expected.extend_from_slice(&42u64.to_le_bytes());
+        expected.extend_from_slice(&1234u64.to_le_bytes());
+        // Sorted: [3, 7]
+        expected.extend_from_slice(&2u64.to_le_bytes());
+        expected.extend_from_slice(&3u32.to_le_bytes());
+        expected.extend_from_slice(&7u32.to_le_bytes());
+        expected.push(OrderDirection::BuyNo.to_byte());
+        expected.extend_from_slice(&9u64.to_le_bytes());
+
+        assert_eq!(leaf, expected);
     }
 }

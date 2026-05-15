@@ -37,14 +37,15 @@ pub use book::{
 pub use market::{Market, MarketSet};
 pub use mm_constraint::{MmConstraint, MmId, MmSide};
 pub use order::{
-    ConditionDir, Fill, MarginalPayoff, Order, PriceCondition, MAX_MARKETS_PER_ORDER, MAX_STATES,
+    derive_order_direction, ConditionDir, Fill, MarginalPayoff, Order, PriceCondition,
+    MAX_MARKETS_PER_ORDER, MAX_STATES,
 };
 pub use order_builder::OrderBuilder;
 pub use problem::{MarketGroup, Problem, ProblemSummary};
 pub use settlement::{compute_fill_settlement, derive_minting, MintAdjustment, SettlementDelta};
 pub use state::{state_index, state_to_outcomes, StateSpace};
 pub use types::conversions::{dollars_to_nanos, nanos_to_dollars, nanos_to_price, price_to_nanos};
-pub use types::{MarketId, Nanos, Qty, Side, NANOS_PER_DOLLAR};
+pub use types::{MarketId, Nanos, OrderDirection, Qty, Side, NANOS_PER_DOLLAR};
 
 // Re-export order_builder convenience functions
 pub use order_builder::{

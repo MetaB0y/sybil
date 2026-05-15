@@ -180,6 +180,7 @@ fn to_pending_response(info: &PendingOrderInfo) -> PendingOrderResponse {
         remaining_quantity: info.remaining_qty,
         created_at_block: info.created_at_block,
         expires_at_block: info.expires_at_block,
+        original_quantity: info.original_quantity,
     }
 }
 

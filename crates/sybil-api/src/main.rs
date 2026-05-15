@@ -179,6 +179,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_fill_history_per_account: config.max_fill_history_per_account,
         actor_queue_warn_depth: config.actor_queue_warn_depth,
         actor_queue_error_depth: config.actor_queue_error_depth,
+        liquidity_band_nanos: config.liquidity_band_nanos,
     };
 
     let handle = if let Some(state) = restored {
