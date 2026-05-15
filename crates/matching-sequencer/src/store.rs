@@ -173,6 +173,41 @@ fn account_id_from_fill_history_key(key: &[u8]) -> Option<AccountId> {
     Some(AccountId(u64::from_be_bytes(account_bytes)))
 }
 
+fn prune_historical_block_rows(db: &Database) -> Result<bool, StoreError> {
+    let txn = db.begin_write()?;
+    let Some(height) = ({
+        let counters = txn.open_table(COUNTERS)?;
+        let height = counters.get(KEY_HEIGHT)?.map(|value| value.value());
+        height
+    }) else {
+        txn.commit()?;
+        return Ok(false);
+    };
+
+    let mut pruned = false;
+    {
+        let mut headers = txn.open_table(BLOCK_HEADERS)?;
+        headers.retain(|key, _| {
+            let keep = key == height;
+            pruned |= !keep;
+            keep
+        })?;
+    }
+    {
+        let mut witnesses = txn.open_table(BLOCK_WITNESSES)?;
+        witnesses.retain(|key, _| {
+            let keep = key == height;
+            pruned |= !keep;
+            keep
+        })?;
+    }
+    txn.commit()?;
+    if pruned {
+        info!(height, "pruned historical block rows from store");
+    }
+    Ok(pruned)
+}
+
 // TODO: Tier 2 tables (remaining)
 // const MM_STATE: TableDefinition<u32, &[u8]> = TableDefinition::new("mm_state");
 
@@ -246,7 +281,7 @@ pub struct SequencerSnapshot<'a> {
 impl Store {
     /// Open (or create) a store at the given path.
     pub fn open(path: &Path) -> Result<Self, StoreError> {
-        let db = Database::create(path)?;
+        let mut db = Database::create(path)?;
         let qmdb_path = path.with_extension("qmdb");
         std::fs::create_dir_all(&qmdb_path)?;
         let account_state_store =
@@ -276,6 +311,13 @@ impl Store {
         txn.commit()?;
 
         initialize_or_validate_layout(&db)?;
+        if prune_historical_block_rows(&db)? {
+            match db.compact() {
+                Ok(true) => info!(?path, "compacted store after pruning historical block rows"),
+                Ok(false) => debug!(?path, "store compaction found no reclaimable pages"),
+                Err(error) => warn!(?path, %error, "store compaction failed after pruning"),
+            }
+        }
 
         info!(?path, "store opened");
         Ok(Self {
@@ -388,14 +430,18 @@ impl Store {
         // Block header
         {
             let mut table = txn.open_table(BLOCK_HEADERS)?;
+            table.retain(|height, _| height == snapshot.header.height)?;
             let bytes = rmp_serde::to_vec(snapshot.header)?;
             table.insert(snapshot.header.height, bytes.as_slice())?;
         }
 
-        // Block witness, when produced by the actor path. If this call path
-        // intentionally omits a witness, remove any stale row for the height.
+        // Block witness, when produced by the actor path. Historical qMDB
+        // slots are not retained yet, so persisted witness export is latest
+        // only. Retaining older full-state witnesses grows redb quickly and
+        // does not produce independently provable historical blocks.
         {
             let mut table = txn.open_table(BLOCK_WITNESSES)?;
+            table.retain(|height, _| height == snapshot.header.height)?;
             if let Some(witness) = witness {
                 let bytes = rmp_serde::to_vec(witness)?;
                 table.insert(snapshot.header.height, bytes.as_slice())?;
@@ -1518,6 +1564,45 @@ mod tests {
         assert_eq!(latest.header.height, header.height);
         assert_eq!(latest.header.state_root, header.state_root);
         assert_eq!(by_height.header.height, header.height);
+    }
+
+    #[tokio::test]
+    async fn save_block_with_witness_prunes_historical_witnesses() {
+        let path = temp_db_path("store-witness-prune");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+        let lifecycle = MarketLifecycle::new(oracle);
+        let markets = MarketSet::new();
+        let env = TestEnv::new();
+        let mut accounts = AccountStore::new();
+        accounts.create_account(100);
+
+        let (header1, witness1) =
+            coherent_header_and_witness(1, &accounts, &markets, &lifecycle, &env.bridge_state);
+        store
+            .save_block_with_witness(
+                env.snapshot(&accounts, &markets, &lifecycle, &header1, 1, None, vec![]),
+                &witness1,
+            )
+            .await
+            .unwrap();
+
+        let (header2, witness2) =
+            coherent_header_and_witness(2, &accounts, &markets, &lifecycle, &env.bridge_state);
+        store
+            .save_block_with_witness(
+                env.snapshot(&accounts, &markets, &lifecycle, &header2, 1, None, vec![]),
+                &witness2,
+            )
+            .await
+            .unwrap();
+
+        assert!(store.block_witness(header1.height).unwrap().is_none());
+        let latest = store
+            .latest_block_witness()
+            .unwrap()
+            .expect("latest witness retained");
+        assert_eq!(latest.header.height, header2.height);
     }
 
     #[tokio::test]

@@ -203,6 +203,9 @@ impl QmdbState {
             .name(format!("sybil-qmdb-state-{:?}", slot))
             .spawn(move || {
                 let generation = read_generation_file(&generation_file);
+                if let Ok(generation) = generation.as_ref() {
+                    cleanup_uncommitted_generations(&storage_directory, *generation);
+                }
                 let runner = commonware_tokio::Runner::new(
                     commonware_tokio::Config::default().with_storage_directory(storage_directory),
                 );
@@ -427,6 +430,62 @@ fn cleanup_generation(storage_directory: &Path, generation: u64) {
     }
 }
 
+fn cleanup_uncommitted_generations(storage_directory: &Path, committed_generation: u64) {
+    let mut generations = Vec::new();
+    let Ok(entries) = fs::read_dir(storage_directory) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
+        if let Some(generation) = generation_from_partition_name(file_name) {
+            if generation > committed_generation {
+                generations.push(generation);
+            }
+        }
+    }
+
+    generations.sort_unstable();
+    generations.dedup();
+    for generation in generations {
+        tracing::warn!(
+            generation,
+            committed_generation,
+            "cleaning uncommitted state qMDB generation"
+        );
+        metrics::counter!("sybil_store_qmdb_uncommitted_generation_cleanup_total").increment(1);
+        cleanup_generation(storage_directory, generation);
+    }
+}
+
+fn generation_from_partition_name(name: &str) -> Option<u64> {
+    const PATTERNS: [(&str, &str); 7] = [
+        ("state-mmr-journal-", "-blobs"),
+        ("state-mmr-journal-", "-metadata"),
+        ("state-mmr-metadata-", ""),
+        ("state-log-", "_data"),
+        ("state-log-", "_offsets-blobs"),
+        ("state-log-", "_offsets-metadata"),
+        ("state-grafted-mmr-metadata-", ""),
+    ];
+
+    PATTERNS.iter().find_map(|(prefix, suffix)| {
+        let rest = name.strip_prefix(prefix)?;
+        let generation = if suffix.is_empty() {
+            rest
+        } else {
+            rest.strip_suffix(suffix)?
+        };
+        if generation.is_empty() || !generation.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        generation.parse().ok()
+    })
+}
+
 async fn replace_leaves(
     context: &commonware_tokio::Context,
     db: &mut StateDb,
@@ -595,4 +654,60 @@ async fn leaf_exclusion_proof(
         leaf_key,
         proof,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_dir(name: &str) -> PathBuf {
+        let path =
+            std::env::temp_dir().join(format!("sybil-qmdb-state-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn generation_parser_only_accepts_numbered_state_partitions() {
+        assert_eq!(
+            generation_from_partition_name("state-mmr-journal-2102-metadata"),
+            Some(2102)
+        );
+        assert_eq!(
+            generation_from_partition_name("state-log-17_offsets-blobs"),
+            Some(17)
+        );
+        assert_eq!(
+            generation_from_partition_name("state-grafted-mmr-metadata-9"),
+            Some(9)
+        );
+        assert_eq!(
+            generation_from_partition_name("state-mmr-journal-metadata"),
+            None
+        );
+        assert_eq!(generation_from_partition_name("state-log-abc_data"), None);
+    }
+
+    #[test]
+    fn cleanup_uncommitted_generations_preserves_committed_and_legacy_partitions() {
+        let path = test_dir("cleanup");
+        fs::create_dir_all(path.join("state-mmr-journal-3-metadata")).unwrap();
+        fs::write(path.join("state-mmr-journal-3-metadata/left"), b"bad").unwrap();
+        fs::create_dir_all(path.join("state-log-4_data")).unwrap();
+        fs::write(path.join("state-log-4_data/0000000000000000"), b"bad").unwrap();
+        fs::create_dir_all(path.join("state-mmr-metadata-2")).unwrap();
+        fs::write(path.join("state-mmr-metadata-2/left"), b"committed").unwrap();
+        fs::create_dir_all(path.join("state-mmr-journal-metadata")).unwrap();
+        fs::write(path.join("state-mmr-journal-metadata/left"), b"legacy").unwrap();
+
+        cleanup_uncommitted_generations(&path, 2);
+
+        assert!(!path.join("state-mmr-journal-3-metadata").exists());
+        assert!(!path.join("state-log-4_data").exists());
+        assert!(path.join("state-mmr-metadata-2/left").exists());
+        assert!(path.join("state-mmr-journal-metadata/left").exists());
+
+        fs::remove_dir_all(path).unwrap();
+    }
 }
