@@ -83,7 +83,6 @@ export function BinaryCard({ market, price }: Props) {
         cents={yesCents}
         delta24Cents={delta24Cents}
         points={points}
-        hasPrice={!!price}
         tone={deltaTone(delta24Cents, !!price)}
       />
       <SideList
@@ -190,13 +189,11 @@ function FeaturedPriceRow({
   cents,
   delta24Cents,
   points,
-  hasPrice,
   tone,
 }: {
   cents: string;
   delta24Cents: number | null;
   points: import("@/lib/markets/use-card-history").PricePoint[];
-  hasPrice: boolean;
   tone: string;
 }) {
   return (
@@ -437,4 +434,3 @@ function deltaTone(delta: number | null, hasPrice: boolean): string {
   if (delta == null) return "var(--fg-1)";
   return delta >= 0 ? "var(--yes)" : "var(--no)";
 }
-

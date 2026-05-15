@@ -116,9 +116,9 @@ pub async fn get_event_traders(
         ref_data
             .iter()
             .filter_map(|(sybil_id, data)| {
-                data.event_id.as_deref().and_then(|eid| {
-                    (eid == event_id).then_some(MarketId::new(*sybil_id))
-                })
+                data.event_id
+                    .as_deref()
+                    .and_then(|eid| (eid == event_id).then_some(MarketId::new(*sybil_id)))
             })
             .collect()
     };

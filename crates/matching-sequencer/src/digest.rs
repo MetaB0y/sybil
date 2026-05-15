@@ -143,13 +143,8 @@ mod tests {
     /// retroactively diverge every account's history.
     #[test]
     fn order_cancelled_event_uses_tag_0x08() {
-        let bytes = encode_order_cancelled_event(
-            1234,
-            &[MarketId::new(3)],
-            OrderDirection::BuyYes,
-            5,
-            42,
-        );
+        let bytes =
+            encode_order_cancelled_event(1234, &[MarketId::new(3)], OrderDirection::BuyYes, 5, 42);
         assert_eq!(bytes[0], 0x08);
     }
 

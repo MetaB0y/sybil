@@ -153,7 +153,9 @@ pub async fn list_markets(
             state.sequencer.get_all_market_metadata(),
             state.sequencer.get_all_trader_counts(),
             state.sequencer.get_all_market_volumes_24h(now_ms),
-            state.sequencer.get_all_market_prices_n_hours_ago(24, now_ms),
+            state
+                .sequencer
+                .get_all_market_prices_n_hours_ago(24, now_ms),
             state.sequencer.get_liquidity_snapshot(),
             state.sequencer.get_order_stats_by_market(),
         )
@@ -245,7 +247,9 @@ pub async fn list_markets_summary(
             state.sequencer.get_all_market_volumes(),
             state.sequencer.get_all_trader_counts(),
             state.sequencer.get_all_market_volumes_24h(now_ms),
-            state.sequencer.get_all_market_prices_n_hours_ago(24, now_ms),
+            state
+                .sequencer
+                .get_all_market_prices_n_hours_ago(24, now_ms),
             state.sequencer.get_liquidity_snapshot(),
             state.sequencer.get_order_stats_by_market(),
         )
@@ -341,7 +345,9 @@ pub async fn get_market(
         state.sequencer.get_market_volume(mid),
         state.sequencer.get_all_trader_counts(),
         state.sequencer.get_all_market_volumes_24h(now_ms),
-        state.sequencer.get_all_market_prices_n_hours_ago(24, now_ms),
+        state
+            .sequencer
+            .get_all_market_prices_n_hours_ago(24, now_ms),
         state.sequencer.get_liquidity_snapshot(),
         state.sequencer.get_order_stats_by_market(),
     )?;
@@ -669,7 +675,9 @@ pub async fn search_markets(
         state.sequencer.search_markets(query),
         state.sequencer.get_all_trader_counts(),
         state.sequencer.get_all_market_volumes_24h(now_ms),
-        state.sequencer.get_all_market_prices_n_hours_ago(24, now_ms),
+        state
+            .sequencer
+            .get_all_market_prices_n_hours_ago(24, now_ms),
         state.sequencer.get_liquidity_snapshot(),
         state.sequencer.get_order_stats_by_market(),
     )?;

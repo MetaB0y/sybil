@@ -240,5 +240,4 @@ mod tests {
 
         assert_eq!(leaf, expected);
     }
-
 }

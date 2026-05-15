@@ -14,6 +14,7 @@ use sybil_verifier::{
 use tracing::{debug, error};
 
 use crate::account::{Account, AccountId, AccountStore};
+use crate::analytics::AnalyticsState;
 use crate::block::{
     hash_header, state_sidecar_snapshot, Block, BlockFlowMetrics, BlockHeader, BlockProduction,
 };
@@ -580,27 +581,10 @@ pub struct BlockSequencer {
     market_groups: Vec<MarketGroup>,
     /// Last block header for hash chaining.
     last_header: Option<BlockHeader>,
-    /// Price tracking: clearing prices, history, volume.
-    pub price_tracker: crate::price_tracker::PriceTracker,
-    /// Fill recording: per-account fill history.
-    pub fill_recorder: crate::fill_recorder::FillRecorder,
-    /// Off-block trader tracker: unique placers per market + platform + 24h.
-    pub trader_tracker: crate::aggregates::TraderTracker,
-    /// Off-block liquidity tracker: last-10-batch ±band depth average per market.
-    pub liquidity_tracker: crate::aggregates::LiquidityTracker,
-    /// Off-block order stats tracker: placed/matched/unmatched per market + platform + 24h.
-    pub order_stats_tracker: crate::aggregates::OrderStatsTracker,
-    /// Off-block cost-basis tracker (C1): weighted-average entry price per
-    /// (account, market, outcome) + realized PnL per account. Driven by
-    /// `FillRecorder.record_fills` (apply_fill) and by `resolve_market` /
-    /// `resolve_market_attested` (apply_resolution). Owned here, not in
-    /// FillRecorder, so rollback footprints stay separated.
-    pub cost_basis_tracker: crate::aggregates::CostBasisTracker,
-    /// First-deposit timestamp per account in ms since UNIX epoch.
-    /// Off-block — never enters `state_root` / `events_root`. Populated by
-    /// `fund_account` (dev mode) and `ingest_l1_deposit` on the FIRST
-    /// observation only (subsequent deposits don't overwrite).
-    pub first_deposit_ms: HashMap<AccountId, u64>,
+    /// In-process derived projections for API/UI surfaces. Updated
+    /// synchronously by the sequencer, but kept separate from core matching,
+    /// settlement, and witness state.
+    analytics: AnalyticsState,
     /// Market lifecycle: statuses, oracle, metadata.
     pub lifecycle: crate::market_lifecycle::MarketLifecycle,
     /// P256 public key to account mapping.
@@ -641,17 +625,7 @@ impl BlockSequencer {
             markets,
             market_groups,
             last_header: None,
-            price_tracker: crate::price_tracker::PriceTracker::with_retention(
-                config.max_price_history_points_per_market,
-            ),
-            fill_recorder: crate::fill_recorder::FillRecorder::with_retention(
-                config.max_fill_history_per_account,
-            ),
-            trader_tracker: crate::aggregates::TraderTracker::new(),
-            liquidity_tracker: crate::aggregates::LiquidityTracker::new(),
-            order_stats_tracker: crate::aggregates::OrderStatsTracker::new(),
-            cost_basis_tracker: crate::aggregates::CostBasisTracker::new(),
-            first_deposit_ms: HashMap::new(),
+            analytics: AnalyticsState::new(&config),
             lifecycle: crate::market_lifecycle::MarketLifecycle::new(oracle),
             pubkey_registry: HashMap::new(),
             bridge: BridgeState::default(),
@@ -711,30 +685,7 @@ impl BlockSequencer {
             markets: state.markets,
             market_groups: state.market_groups,
             last_header: state.last_header,
-            price_tracker: {
-                let mut pt = crate::price_tracker::PriceTracker::with_state_and_retention(
-                    state.last_clearing_prices,
-                    state.market_volumes,
-                    config.max_price_history_points_per_market,
-                );
-                pt.restore_volume_extensions(state.price_tracker_volume);
-                pt.restore_clearing_history(state.price_tracker_clearing_history);
-                pt
-            },
-            fill_recorder: crate::fill_recorder::FillRecorder::restore_with_counts(
-                state.account_fills,
-                state.fill_total_counts,
-                config.max_fill_history_per_account,
-            ),
-            trader_tracker: crate::aggregates::TraderTracker::restore(state.trader_tracker),
-            liquidity_tracker: crate::aggregates::LiquidityTracker::restore(state.liquidity_tracker),
-            order_stats_tracker: crate::aggregates::OrderStatsTracker::restore(
-                state.order_stats_tracker,
-            ),
-            cost_basis_tracker: crate::aggregates::CostBasisTracker::restore(
-                state.cost_basis_tracker,
-            ),
-            first_deposit_ms: state.first_deposit_ms,
+            analytics: AnalyticsState::restore(state.analytics, &config),
             lifecycle,
             pubkey_registry: state.pubkey_registry,
             bridge: state.bridge_state,
@@ -782,19 +733,9 @@ impl BlockSequencer {
             header,
             next_order_id: self.next_order_id,
             pubkey_registry: &self.pubkey_registry,
-            last_clearing_prices: self.price_tracker.last_clearing_prices(),
-            market_volumes: self.price_tracker.market_volumes(),
-            account_fills: self.fill_recorder.snapshot(),
+            analytics: self.analytics.snapshot(),
             resting_orders: self.order_book.snapshot(),
             bridge_state: &self.bridge,
-            trader_tracker: self.trader_tracker.snapshot(),
-            price_tracker_volume: self.price_tracker.volume_extensions_snapshot(),
-            price_tracker_clearing_history: self.price_tracker.clearing_history_snapshot(),
-            liquidity_tracker: self.liquidity_tracker.snapshot(),
-            order_stats_tracker: self.order_stats_tracker.snapshot(),
-            cost_basis_tracker: self.cost_basis_tracker.snapshot(),
-            first_deposit_ms: self.first_deposit_ms.clone(),
-            fill_total_counts: self.fill_recorder.total_counts().clone(),
         }
     }
 
@@ -881,7 +822,7 @@ impl BlockSequencer {
     }
 
     pub fn last_clearing_prices(&self) -> &HashMap<MarketId, Vec<Nanos>> {
-        self.price_tracker.last_clearing_prices()
+        self.analytics.last_clearing_prices()
     }
 
     pub fn price_history(
@@ -890,34 +831,31 @@ impl BlockSequencer {
         from_ms: Option<u64>,
         to_ms: Option<u64>,
     ) -> Vec<PricePoint> {
-        self.price_tracker.price_history(market_id, from_ms, to_ms)
+        self.analytics.price_history(market_id, from_ms, to_ms)
     }
 
     pub fn market_volume(&self, market_id: MarketId) -> u64 {
-        self.price_tracker.market_volume(market_id)
+        self.analytics.market_volume(market_id)
     }
 
     pub fn market_volumes(&self) -> &HashMap<MarketId, u64> {
-        self.price_tracker.market_volumes()
+        self.analytics.market_volumes()
     }
 
     /// Rolling 24h volume for one market (±1h bucket resolution).
     pub fn market_volume_24h(&self, market_id: MarketId, now_ms: u64) -> u64 {
-        self.price_tracker.market_volume_24h(market_id, now_ms)
+        self.analytics.market_volume_24h(market_id, now_ms)
     }
 
     /// All-market 24h volume map. Used by `list_markets` to populate every
     /// `MarketResponse.volume_24h_nanos` in one pass.
     pub fn all_market_volumes_24h(&self, now_ms: u64) -> HashMap<MarketId, u64> {
-        self.price_tracker.all_market_volumes_24h(now_ms)
+        self.analytics.all_market_volumes_24h(now_ms)
     }
 
     /// Platform-wide volumes `(all_time, last_24h)` in one shot.
     pub fn platform_volumes(&self, now_ms: u64) -> (u64, u64) {
-        (
-            self.price_tracker.platform_volume_total(),
-            self.price_tracker.platform_volume_24h(now_ms),
-        )
+        self.analytics.platform_volumes(now_ms)
     }
 
     /// Per-market clearing prices N hours ago. None when the market is too
@@ -928,7 +866,7 @@ impl BlockSequencer {
         n: u64,
         now_ms: u64,
     ) -> Option<(u64, u64)> {
-        self.price_tracker.price_n_hours_ago(market_id, n, now_ms)
+        self.analytics.price_n_hours_ago(market_id, n, now_ms)
     }
 
     /// All-market N-hours-ago clearing prices in one pass — used by
@@ -938,18 +876,18 @@ impl BlockSequencer {
         n: u64,
         now_ms: u64,
     ) -> HashMap<MarketId, (u64, u64)> {
-        self.price_tracker.all_market_prices_n_hours_ago(n, now_ms)
+        self.analytics.all_market_prices_n_hours_ago(n, now_ms)
     }
 
     /// Last-10-batch ±band liquidity score for one market.
     pub fn liquidity_avg10(&self, market_id: MarketId) -> u64 {
-        self.liquidity_tracker.avg_last_n(market_id, 10)
+        self.analytics.liquidity_avg10(market_id)
     }
 
     /// All-market last-10-batch liquidity in one pass — companion to
     /// `all_market_volumes_24h` for the `list_markets` round-trip.
     pub fn all_liquidity_avg10(&self) -> HashMap<MarketId, u64> {
-        self.liquidity_tracker.all_avg_last_n(10)
+        self.analytics.all_liquidity_avg10()
     }
 
     /// Width of the band the LiquidityTracker is currently scoring against.
@@ -962,7 +900,7 @@ impl BlockSequencer {
     /// All-market all-time placed/matched/unmatched stats. Single-pass
     /// companion to `all_market_volumes_24h` for `list_markets`.
     pub fn all_market_order_stats(&self) -> HashMap<MarketId, crate::aggregates::OrderStats> {
-        self.order_stats_tracker.all_per_market()
+        self.analytics.all_market_order_stats()
     }
 
     /// Platform order stats — `(all_time, last_24h)`. Caller supplies
@@ -971,37 +909,34 @@ impl BlockSequencer {
         &self,
         now_ms: u64,
     ) -> (crate::aggregates::OrderStats, crate::aggregates::OrderStats) {
-        (
-            self.order_stats_tracker.platform(),
-            self.order_stats_tracker.platform_24h(now_ms),
-        )
+        self.analytics.platform_order_stats(now_ms)
     }
 
     /// All-time unique trader count for one market.
     pub fn trader_count(&self, market_id: MarketId) -> u32 {
-        self.trader_tracker.per_market_count(market_id)
+        self.analytics.trader_count(market_id)
     }
 
     /// All-time unique trader counts per market (only markets with ≥1
     /// recorded placer). Used by `list_markets` to populate every
     /// `MarketResponse.trader_count` in one pass.
     pub fn all_trader_counts(&self) -> HashMap<MarketId, u32> {
-        self.trader_tracker.all_market_counts()
+        self.analytics.all_trader_counts()
     }
 
     /// All-time platform-wide unique trader count (excludes MM, MINT).
     pub fn platform_trader_count(&self) -> u32 {
-        self.trader_tracker.platform_count()
+        self.analytics.platform_trader_count()
     }
 
     /// Unique platform traders in the last 24h (±1h resolution).
     pub fn platform_trader_24h_count(&self, now_ms: u64) -> u32 {
-        self.trader_tracker.platform_24h_count(now_ms)
+        self.analytics.platform_trader_24h_count(now_ms)
     }
 
     /// Union of per-market placers across an event's markets.
     pub fn event_trader_count(&self, market_ids: &[MarketId]) -> u32 {
-        self.trader_tracker.event_count(market_ids)
+        self.analytics.event_trader_count(market_ids)
     }
 
     pub fn open_orders_for_account(&self, account_id: AccountId) -> usize {
@@ -1032,8 +967,19 @@ impl BlockSequencer {
         limit: usize,
         offset: usize,
     ) -> Vec<AccountFillRecord> {
-        self.fill_recorder
+        self.analytics
             .account_fills(account_id, market_id_filter, limit, offset)
+    }
+
+    pub fn record_trader_placement_analytics(
+        &mut self,
+        account_id: AccountId,
+        markets: Vec<MarketId>,
+        timestamp_ms: u64,
+        is_mm: bool,
+    ) {
+        self.analytics
+            .record_trader_placement(account_id, markets, timestamp_ms, is_mm);
     }
 
     // --- Public key registry ---
@@ -1113,19 +1059,34 @@ impl BlockSequencer {
     /// Stamp the first observed deposit time for an account. Subsequent
     /// deposits are ignored. Off-block sidecar; never enters `state_root`.
     fn note_first_deposit(&mut self, account_id: AccountId) {
-        self.first_deposit_ms.entry(account_id).or_insert_with(|| {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64
-        });
+        self.analytics.note_first_deposit(account_id);
     }
 
     /// First-deposit timestamp for an account, in ms since UNIX epoch.
     /// Returns `None` if the account never received a recorded deposit
     /// (e.g., system accounts or a restart that dropped the sidecar).
     pub fn first_deposit_ms(&self, account_id: AccountId) -> Option<u64> {
-        self.first_deposit_ms.get(&account_id).copied()
+        self.analytics.first_deposit_ms(account_id)
+    }
+
+    pub fn portfolio_summary(
+        &self,
+        account_id: AccountId,
+    ) -> Result<crate::portfolio::PortfolioSummary, SequencerError> {
+        let account = self.accounts.get(account_id).ok_or({
+            SequencerError::Rejected(Rejection {
+                order_id: 0,
+                account_id,
+                reason: RejectionReason::AccountNotFound,
+            })
+        })?;
+        Ok(crate::portfolio::compute_portfolio(
+            account,
+            self.last_clearing_prices(),
+            self.analytics.first_deposit_ms(account_id).unwrap_or(0),
+            self.analytics.total_fills(account_id),
+            self.analytics.cost_basis_tracker(),
+        ))
     }
 
     pub fn bridge_state(&self) -> &BridgeState {
@@ -1425,15 +1386,17 @@ impl BlockSequencer {
         self.order_book
             .resting_orders_full()
             .filter(|(_, aid, _, _, _)| account_id_filter.is_none_or(|filter| *aid == filter))
-            .map(|(order, aid, created_at, expires_at_block, original_max_fill)| {
-                PendingOrderInfo::from_resting(
-                    order,
-                    aid,
-                    created_at,
-                    expires_at_block,
-                    original_max_fill,
-                )
-            })
+            .map(
+                |(order, aid, created_at, expires_at_block, original_max_fill)| {
+                    PendingOrderInfo::from_resting(
+                        order,
+                        aid,
+                        created_at,
+                        expires_at_block,
+                        original_max_fill,
+                    )
+                },
+            )
             .collect()
     }
 
@@ -1442,15 +1405,17 @@ impl BlockSequencer {
         self.order_book
             .resting_orders_full()
             .filter(|(order, _, _, _, _)| order.active_markets().any(|m| m == market_id))
-            .map(|(order, aid, created_at, expires_at_block, original_max_fill)| {
-                PendingOrderInfo::from_resting(
-                    order,
-                    aid,
-                    created_at,
-                    expires_at_block,
-                    original_max_fill,
-                )
-            })
+            .map(
+                |(order, aid, created_at, expires_at_block, original_max_fill)| {
+                    PendingOrderInfo::from_resting(
+                        order,
+                        aid,
+                        created_at,
+                        expires_at_block,
+                        original_max_fill,
+                    )
+                },
+            )
             .collect()
     }
 
@@ -1537,7 +1502,7 @@ impl BlockSequencer {
                 }
                 let affected_accounts =
                     settlement::resolve_market(&mut self.accounts, market_id, payout_nanos);
-                self.cost_basis_tracker.apply_resolution(
+                self.analytics.apply_resolution(
                     market_id,
                     payout_nanos as i64,
                     pre_settle_positions,
@@ -1605,7 +1570,7 @@ impl BlockSequencer {
                 }
                 let affected_accounts =
                     settlement::resolve_market(&mut self.accounts, market_id, payout_nanos);
-                self.cost_basis_tracker.apply_resolution(
+                self.analytics.apply_resolution(
                     market_id,
                     payout_nanos as i64,
                     pre_settle_positions,
@@ -1760,7 +1725,7 @@ impl BlockSequencer {
         let position_markets = CanonicalState::from_accounts(&self.accounts)
             .market_position_totals()
             .markets();
-        let clearing_prices = self.price_tracker.merge_prices(
+        let clearing_prices = self.analytics.merge_prices(
             &pipeline_result.price_discovery,
             &markets_with_fills,
             active_markets,
@@ -1842,19 +1807,12 @@ impl BlockSequencer {
         }
 
         let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
-        let volume_by_market = self.price_tracker.record_block(
+        let volume_by_market = self.analytics.record_finalized_block(
             fills,
             &order_map,
             clearing_prices,
             self.height,
             timestamp_ms,
-        );
-        self.fill_recorder.record_fills(
-            fills,
-            &order_map,
-            self.height,
-            timestamp_ms,
-            &mut self.cost_basis_tracker,
             &self.accounts,
         );
 
@@ -2113,11 +2071,9 @@ impl BlockSequencer {
 
         // ── Order Book: expire stale, remove orders for resolved markets ──
         let expired = self.order_book.expire(self.height);
-        let revalidated = self
-            .order_book
-            .revalidate(&self.accounts, &active_markets);
+        let revalidated = self.order_book.revalidate(&self.accounts, &active_markets);
         for ro in expired.iter().chain(revalidated.iter()) {
-            self.order_stats_tracker.record_exit(ro, timestamp_ms);
+            self.analytics.record_order_exit(ro, timestamp_ms);
             for m in ro.order.active_markets() {
                 let slot = block_orders_by_market.entry(m).or_default();
                 if ro.has_been_matched {
@@ -2238,9 +2194,9 @@ impl BlockSequencer {
                         is_mm: true,
                     });
                     accepted_orders.push(order);
-                    // record_placed early-returns for MM and MINT; harmless
-                    // here but kept for symmetry with the non-MM branch.
-                    self.trader_tracker.record_placed(
+                    // Trader counts exclude MM but calling through the same
+                    // hook keeps the admission paths symmetric.
+                    self.analytics.record_trader_placement(
                         account_id,
                         tracker_markets,
                         timestamp_ms,
@@ -2285,17 +2241,12 @@ impl BlockSequencer {
                                 is_mm: false,
                             });
                             accepted_orders.push(accepted.order);
-                            self.trader_tracker.record_placed(
+                            self.analytics.record_trader_placement(
                                 account_id,
                                 tracker_markets.clone(),
                                 timestamp_ms,
                                 false,
                             );
-                            for &m in &tracker_markets {
-                                block_orders_by_market.entry(m).or_default().placed += 1;
-                            }
-                            self.order_stats_tracker
-                                .record_placed(tracker_markets, timestamp_ms);
                         }
                         Err(reason) => {
                             witness_rejections.push(WitnessRejection {
@@ -2342,6 +2293,18 @@ impl BlockSequencer {
         let rejected_orders = rejections.len();
         let order_ids: Vec<u64> = all_orders.iter().map(|o| o.id).collect();
         let orders_submitted = all_orders.len() + rejections.len();
+
+        // `placed` means order live in this batch's solve, not merely admitted
+        // for the first time. Count carried resting orders and MM flash orders
+        // here, after all rejections/evictions have been filtered out.
+        for order in &all_orders {
+            let markets: Vec<MarketId> = order.active_markets().collect();
+            self.analytics
+                .record_order_placed(markets.iter().copied(), timestamp_ms);
+            for market in markets {
+                block_orders_by_market.entry(market).or_default().placed += 1;
+            }
+        }
 
         // Debug: log order and rejection counts per block
         if !all_orders.is_empty() || !rejections.is_empty() {
@@ -2436,7 +2399,7 @@ impl BlockSequencer {
             .order_book
             .settle(&fills, &mm_order_ids_set, self.height);
         for ro in &post_solve_removed {
-            self.order_stats_tracker.record_exit(ro, timestamp_ms);
+            self.analytics.record_order_exit(ro, timestamp_ms);
             for m in ro.order.active_markets() {
                 let slot = block_orders_by_market.entry(m).or_default();
                 if ro.has_been_matched {
@@ -2451,7 +2414,7 @@ impl BlockSequencer {
         // Off-block liquidity tracker — score the post-settle book against
         // each market's midprice (binary: YES price). One snapshot per block
         // so the ring tracks "depth available at the close of this batch".
-        self.liquidity_tracker.record_block(
+        self.analytics.record_liquidity(
             &self.order_book,
             &clearing_prices,
             self.config.liquidity_band_nanos,
@@ -2728,7 +2691,7 @@ mod tests {
             oracle,
             SequencerConfig::default(),
         );
-        seq.price_tracker = crate::price_tracker::PriceTracker::with_state(
+        *seq.analytics.price_tracker_mut() = crate::price_tracker::PriceTracker::with_state(
             HashMap::from([(orphaned_market, vec![400_000_000, 600_000_000])]),
             HashMap::new(),
         );
@@ -2756,6 +2719,73 @@ mod tests {
             verification.valid,
             "Violations: {:?}",
             verification.violations
+        );
+    }
+
+    #[test]
+    fn placed_order_stats_count_carried_resting_orders_each_batch() {
+        let (markets, m0) = setup();
+        let mut accounts = AccountStore::new();
+        let buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            oracle,
+            SequencerConfig::default(),
+        );
+
+        let sub = single_order_sub(
+            buyer,
+            outcome_buy(&markets, 0, m0, 0, NANOS_PER_DOLLAR / 2, 10),
+        );
+        let first = seq.produce_block(vec![sub], 1_000).block;
+        assert_eq!(first.orders_by_market.get(&m0).unwrap().placed, 1);
+        assert_eq!(seq.platform_order_stats(1_000).0.placed, 1);
+        assert_eq!(seq.order_book.len(), 1, "unfilled order should rest");
+
+        let second = seq.produce_block(vec![], 2_000).block;
+        assert_eq!(
+            second.orders_by_market.get(&m0).unwrap().placed,
+            1,
+            "carried resting order is live in the next batch"
+        );
+        assert_eq!(
+            seq.platform_order_stats(2_000).0.placed,
+            2,
+            "placed is order-batch participation, not one-time admission"
+        );
+    }
+
+    #[test]
+    fn placed_order_stats_count_mm_batch_orders() {
+        let (markets, m0) = setup();
+        let mut accounts = AccountStore::new();
+        let mm = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            oracle,
+            SequencerConfig::default(),
+        );
+
+        let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
+        constraint.add_order(0, matching_engine::MmSide::BuyYes);
+        let sub = OrderSubmission {
+            account_id: mm,
+            orders: vec![outcome_buy(&markets, 0, m0, 0, NANOS_PER_DOLLAR / 2, 10)],
+            mm_constraint: Some(constraint),
+        };
+
+        let block = seq.produce_block(vec![sub], 1_000).block;
+        assert_eq!(block.orders_by_market.get(&m0).unwrap().placed, 1);
+        assert_eq!(seq.platform_order_stats(1_000).0.placed, 1);
+        assert_eq!(
+            block.unique_placers, 0,
+            "MM orders count as orders but not as unique traders"
         );
     }
 
@@ -3096,8 +3126,6 @@ mod tests {
             last_header: seq_a.last_header().cloned(),
             next_order_id: seq_a.next_order_id(),
             pubkey_registry: seq_a.pubkey_registry().clone(),
-            last_clearing_prices: seq_a.last_clearing_prices().clone(),
-            market_volumes: seq_a.market_volumes().clone(),
             resting_orders: seq_a.order_book.snapshot(),
             data_feeds: Vec::new(),
             pending_bundles: Vec::new(),
@@ -3105,15 +3133,19 @@ mod tests {
             pending_bridge_withdrawals: Vec::new(),
             bridge_state: BridgeState::default(),
             admit_log: Vec::new(),
-            account_fills: Vec::new(),
-            trader_tracker: Default::default(),
-            price_tracker_volume: Default::default(),
-            price_tracker_clearing_history: Default::default(),
-            liquidity_tracker: Default::default(),
-            order_stats_tracker: Default::default(),
-            first_deposit_ms: HashMap::new(),
-            fill_total_counts: HashMap::new(),
-            cost_basis_tracker: Default::default(),
+            analytics: crate::store::AnalyticsRestoredState {
+                last_clearing_prices: seq_a.last_clearing_prices().clone(),
+                market_volumes: seq_a.market_volumes().clone(),
+                account_fills: Vec::new(),
+                trader_tracker: Default::default(),
+                price_tracker_volume: Default::default(),
+                price_tracker_clearing_history: Default::default(),
+                liquidity_tracker: Default::default(),
+                order_stats_tracker: Default::default(),
+                first_deposit_ms: HashMap::new(),
+                fill_total_counts: HashMap::new(),
+                cost_basis_tracker: Default::default(),
+            },
         };
 
         let mut seq_b = BlockSequencer::restore(state, oracle, SequencerConfig::default());
@@ -4390,11 +4422,7 @@ mod tests {
 
         seq.produce_block(vec![], 1_000);
 
-        let digest_before = seq
-            .accounts
-            .get(aid)
-            .expect("account exists")
-            .events_digest;
+        let digest_before = seq.accounts.get(aid).expect("account exists").events_digest;
 
         seq.cancel_pending_order(aid, order_id).expect("cancel ok");
 
@@ -4429,11 +4457,7 @@ mod tests {
             "block must surface the OrderCancelled SystemEvent"
         );
 
-        let digest_after = seq
-            .accounts
-            .get(aid)
-            .expect("account exists")
-            .events_digest;
+        let digest_after = seq.accounts.get(aid).expect("account exists").events_digest;
         assert_ne!(
             digest_before, digest_after,
             "cancelling account's events_digest must advance"

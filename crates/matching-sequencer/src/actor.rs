@@ -20,7 +20,7 @@ use crate::crypto::{
 };
 use crate::error::SequencerError;
 use crate::market_info::{AccountFillRecord, MarketMetadata, MarketSearchQuery, PricePoint};
-use crate::portfolio::{self, PortfolioSummary};
+use crate::portfolio::PortfolioSummary;
 use crate::sequencer::{
     BlockSequencer, OrderSubmission, PendingOrderInfo, PreparedBlock, SequencerConfig,
 };
@@ -214,8 +214,7 @@ fn build_indicative_snapshots(
     }
 
     // Every market touched by a resting order in the speculative book.
-    let mut markets_in_book: std::collections::HashSet<MarketId> =
-        std::collections::HashSet::new();
+    let mut markets_in_book: std::collections::HashSet<MarketId> = std::collections::HashSet::new();
     for order in &problem.orders {
         for m in order.active_markets() {
             markets_in_book.insert(m);
@@ -876,15 +875,12 @@ impl SequencerActorState {
                     .unwrap_or_default()
                     .as_millis() as u64;
                 let markets: Vec<MarketId> = resting_order.order.active_markets().collect();
-                self.sequencer.trader_tracker.record_placed(
+                self.sequencer.record_trader_placement_analytics(
                     resting_order.account_id,
                     markets.clone(),
                     now_ms,
                     false,
                 );
-                self.sequencer
-                    .order_stats_tracker
-                    .record_placed(markets, now_ms);
                 Ok(())
             }
             crate::sequencer::AdmitOutcome::Deferred(sub) => {
@@ -1408,28 +1404,7 @@ impl Actor for SequencerActor {
                 let _ = reply.send(state.sequencer.market_metadata_all().clone());
             }
             SequencerMsg::GetPortfolio(account_id, reply) => {
-                let result = match state.sequencer.accounts.get(account_id) {
-                    Some(account) => {
-                        let first_deposit_ms = state
-                            .sequencer
-                            .first_deposit_ms(account_id)
-                            .unwrap_or(0);
-                        let total_fill_count =
-                            state.sequencer.fill_recorder.total_fills(account_id);
-                        Ok(portfolio::compute_portfolio(
-                            account,
-                            state.sequencer.last_clearing_prices(),
-                            first_deposit_ms,
-                            total_fill_count,
-                            &state.sequencer.cost_basis_tracker,
-                        ))
-                    }
-                    None => Err(SequencerError::Rejected(crate::error::Rejection {
-                        order_id: 0,
-                        account_id,
-                        reason: crate::error::RejectionReason::AccountNotFound,
-                    })),
-                };
+                let result = state.sequencer.portfolio_summary(account_id);
                 let _ = reply.send(result);
             }
             SequencerMsg::CreateMarketWithMetadata(name, metadata, reply) => {
@@ -2076,9 +2051,7 @@ impl SequencerHandle {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn get_all_trader_counts(
-        &self,
-    ) -> Result<HashMap<MarketId, u32>, SequencerError> {
+    pub async fn get_all_trader_counts(&self) -> Result<HashMap<MarketId, u32>, SequencerError> {
         self.rpc(SequencerMsg::GetAllTraderCounts).await
     }
 
@@ -2103,10 +2076,7 @@ impl SequencerHandle {
     }
 
     #[tracing::instrument(skip_all, fields(market_id = market_id.0))]
-    pub async fn get_open_batch_placers(
-        &self,
-        market_id: MarketId,
-    ) -> Result<u32, SequencerError> {
+    pub async fn get_open_batch_placers(&self, market_id: MarketId) -> Result<u32, SequencerError> {
         self.rpc(|reply| SequencerMsg::GetOpenBatchPlacers(market_id, reply))
             .await
     }

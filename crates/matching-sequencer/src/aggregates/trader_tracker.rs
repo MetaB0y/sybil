@@ -273,10 +273,7 @@ mod tests {
         let snap = t.snapshot();
         assert_eq!(snap.hourly_buckets.len(), HOURLY_BUCKET_CAP);
         assert_eq!(snap.hourly_buckets[0].0, MILLIS_PER_HOUR);
-        assert_eq!(
-            snap.hourly_buckets.last().unwrap().0,
-            25 * MILLIS_PER_HOUR
-        );
+        assert_eq!(snap.hourly_buckets.last().unwrap().0, 25 * MILLIS_PER_HOUR);
     }
 
     #[test]

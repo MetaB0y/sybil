@@ -269,10 +269,7 @@ impl PriceTracker {
         // every market with a clearing price this block so markets without
         // fills still get an hourly anchor (carryover prices count).
         for (&mid, prices) in clearing_prices {
-            let bucket = self
-                .hourly_clearing_prices
-                .entry(mid)
-                .or_default();
+            let bucket = self.hourly_clearing_prices.entry(mid).or_default();
             let need_new = bucket
                 .back()
                 .map(|(t, _)| *t != hour_start_ms)
@@ -506,7 +503,10 @@ mod tests {
         // The most recent bucket only carries one block of volume.
         let (last_hour, last_market_bucket) = tracker.hourly_per_market.back().unwrap();
         assert_eq!(*last_hour, HOUR_MS);
-        assert_eq!(last_market_bucket.get(&market).copied().unwrap_or(0), per_block);
+        assert_eq!(
+            last_market_bucket.get(&market).copied().unwrap_or(0),
+            per_block
+        );
     }
 
     /// Buckets older than 24h fall out of the 24h window arithmetic.
@@ -544,7 +544,10 @@ mod tests {
             tracker.market_volume_24h(market, now_just_past_24h),
             per_block * 2
         );
-        assert_eq!(tracker.platform_volume_24h(now_just_past_24h), per_block * 2);
+        assert_eq!(
+            tracker.platform_volume_24h(now_just_past_24h),
+            per_block * 2
+        );
 
         // Running totals are always all-time.
         assert_eq!(tracker.platform_volume_total(), per_block * 3);

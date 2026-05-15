@@ -176,16 +176,10 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
     // matched/unmatched but no fresh admits).
     let mut by_market: HashMap<String, BlockMarketStats> = HashMap::new();
     for (mid, count) in &block.placers_by_market {
-        by_market
-            .entry(mid.0.to_string())
-            .or_default()
-            .placers = *count;
+        by_market.entry(mid.0.to_string()).or_default().placers = *count;
     }
     for (mid, vol) in &block.volume_by_market {
-        by_market
-            .entry(mid.0.to_string())
-            .or_default()
-            .volume_nanos = *vol;
+        by_market.entry(mid.0.to_string()).or_default().volume_nanos = *vol;
     }
     for (mid, stats) in &block.orders_by_market {
         let entry = by_market.entry(mid.0.to_string()).or_default();

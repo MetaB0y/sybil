@@ -498,7 +498,10 @@ fn welfare_by_market_single_market_sums_to_total() {
     };
 
     let bp = seq.produce_block(vec![buyer_yes, buyer_no], 1000);
-    assert!(!bp.block.fills.is_empty(), "expected fills from crossing buys");
+    assert!(
+        !bp.block.fills.is_empty(),
+        "expected fills from crossing buys"
+    );
     assert!(bp.block.total_welfare > 0);
     let sum: i64 = bp.block.welfare_by_market.values().sum();
     assert_eq!(

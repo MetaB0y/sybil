@@ -356,9 +356,7 @@ impl OrderBook {
 
     /// Orders with full metadata (for API exposure). Tuple shape:
     /// `(order, account, created_at, expires_at_block, original_max_fill)`.
-    pub fn resting_orders_full(
-        &self,
-    ) -> impl Iterator<Item = (&Order, AccountId, u64, u64, u64)> {
+    pub fn resting_orders_full(&self) -> impl Iterator<Item = (&Order, AccountId, u64, u64, u64)> {
         self.orders.iter().map(|ro| {
             (
                 &ro.order,

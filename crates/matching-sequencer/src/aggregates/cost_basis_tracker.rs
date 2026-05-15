@@ -70,18 +70,12 @@ impl CostBasisTracker {
     }
 
     pub fn snapshot(&self) -> CostBasisTrackerSnapshot {
-        let mut basis: Vec<((AccountId, MarketId, u8), i64)> = self
-            .basis
-            .iter()
-            .map(|(k, v)| (*k, *v))
-            .collect();
+        let mut basis: Vec<((AccountId, MarketId, u8), i64)> =
+            self.basis.iter().map(|(k, v)| (*k, *v)).collect();
         basis.sort_by_key(|((a, m, o), _)| (a.0, m.0, *o));
 
-        let mut realized: Vec<(AccountId, i64)> = self
-            .realized
-            .iter()
-            .map(|(k, v)| (*k, *v))
-            .collect();
+        let mut realized: Vec<(AccountId, i64)> =
+            self.realized.iter().map(|(k, v)| (*k, *v)).collect();
         realized.sort_by_key(|(a, _)| a.0);
 
         CostBasisTrackerSnapshot { basis, realized }
@@ -107,7 +101,14 @@ impl CostBasisTracker {
             let entry_price = entry_price_for_outcome(fill_price, outcome);
             let post_qty = account.position(market_id, outcome);
             let prior_qty = post_qty - delta;
-            self.apply_one_delta(account_id, market_id, outcome, prior_qty, delta, entry_price);
+            self.apply_one_delta(
+                account_id,
+                market_id,
+                outcome,
+                prior_qty,
+                delta,
+                entry_price,
+            );
         }
     }
 
@@ -324,9 +325,19 @@ mod tests {
 
         let mut account = Account::new(a, 0);
         account.positions.insert((m, 0), 5);
-        t.apply_fill(a, &[(m, 0, 5)], (NANOS_PER_DOLLAR as i64) * 3 / 10, &account);
+        t.apply_fill(
+            a,
+            &[(m, 0, 5)],
+            (NANOS_PER_DOLLAR as i64) * 3 / 10,
+            &account,
+        );
         account.positions.insert((m, 0), 10);
-        t.apply_fill(a, &[(m, 0, 5)], (NANOS_PER_DOLLAR as i64) * 5 / 10, &account);
+        t.apply_fill(
+            a,
+            &[(m, 0, 5)],
+            (NANOS_PER_DOLLAR as i64) * 5 / 10,
+            &account,
+        );
         let basis = t.cost_basis(a, m, 0);
         // 0.30 and 0.50 average to 0.40 exactly with equal-quantity legs.
         assert_eq!(basis, (NANOS_PER_DOLLAR as i64) * 4 / 10);

@@ -2,9 +2,9 @@
 //! Sidecar — does not enter `state_root` / `events_root` / `BlockWitness`.
 //!
 //! Inclusion rules (decision Q-table in BACKEND_DATA_PLAN.md):
-//! - MM submissions excluded (caller filters at the hook site — MM orders
-//!   never sit in the resting book, so they have no matched/unmatched
-//!   lifecycle to track).
+//! - MM submissions count as placed when they enter a batch problem. They do
+//!   not rest, so matched/unmatched lifecycle counts only arise if they are
+//!   later represented by an exit hook.
 //! - Cancellations excluded — counted separately via `OrderCancelled` (D1).
 //! - Multi-market orders credit each active market; the platform counter
 //!   advances once per order (sum-of-per-market over-counts vs platform).
@@ -61,14 +61,12 @@ impl OrderStatsTracker {
     }
 
     pub fn snapshot(&self) -> OrderStatsTrackerSnapshot {
-        let mut per_market: Vec<(MarketId, OrderStats)> = self
-            .per_market
-            .iter()
-            .map(|(m, s)| (*m, *s))
-            .collect();
+        let mut per_market: Vec<(MarketId, OrderStats)> =
+            self.per_market.iter().map(|(m, s)| (*m, *s)).collect();
         per_market.sort_by_key(|(m, _)| m.0);
 
-        let hourly_platform: Vec<(u64, OrderStats)> = self.hourly_platform.iter().copied().collect();
+        let hourly_platform: Vec<(u64, OrderStats)> =
+            self.hourly_platform.iter().copied().collect();
 
         OrderStatsTrackerSnapshot {
             per_market,
@@ -79,11 +77,7 @@ impl OrderStatsTracker {
 
     /// Record a non-MM order admit. Per-market +1 for each active market;
     /// platform +1; hourly bucket +1.
-    pub fn record_placed(
-        &mut self,
-        markets: impl IntoIterator<Item = MarketId>,
-        ts_ms: u64,
-    ) {
+    pub fn record_placed(&mut self, markets: impl IntoIterator<Item = MarketId>, ts_ms: u64) {
         for m in markets {
             self.per_market.entry(m).or_default().placed += 1;
         }

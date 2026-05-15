@@ -43,6 +43,27 @@ export const CATEGORY_PRIORITY: readonly string[] = [
 
 export type Category = (typeof CATEGORY_PRIORITY)[number];
 
+const CATEGORY_COLORS: Readonly<Record<Category, string>> = {
+  Politics: "#9F8FE8",
+  Elections: "#B48CF0",
+  Geopolitics: "#7FA7E8",
+  AI: "#5BC4E0",
+  Tech: "#3FB6D9",
+  Economy: "#5BD99A",
+  Culture: "#E58CC8",
+  Science: "#7BCFE8",
+  World: "#89A8C8",
+  Finance: "#6FCC8A",
+  Business: "#A4C86F",
+  Weather: "#76B8E8",
+  Mentions: "#A0A8B8",
+  Sports: "#6FCC8A",
+  Crypto: "#F2B244",
+  Commodities: "#C9A87C",
+};
+
+const FALLBACK_CATEGORY_COLOR = "#7A8494";
+
 export type CategoryPick = {
   /** The single category the card chip should show. `null` when the market has no matched categories. */
   primary: Category | null;
@@ -73,4 +94,11 @@ export function pickDisplayCategory(
     return { primary: fallback as Category, extras: [] };
   }
   return { primary: null, extras: [] };
+}
+
+export function getCategoryColor(category: string | null | undefined): string {
+  if (!category || !(CATEGORY_PRIORITY as readonly string[]).includes(category)) {
+    return FALLBACK_CATEGORY_COLOR;
+  }
+  return CATEGORY_COLORS[category as Category] ?? FALLBACK_CATEGORY_COLOR;
 }

@@ -238,10 +238,7 @@ mod tests {
             tracker.record_block(&book, &midprices, 50_000_000);
         }
 
-        let ring = tracker
-            .last_n_per_market
-            .get(&m0)
-            .expect("ring populated");
+        let ring = tracker.last_n_per_market.get(&m0).expect("ring populated");
         assert_eq!(ring.len(), LIQUIDITY_RING_CAP);
         for v in ring {
             assert_eq!(*v, mid_yes.saturating_mul(1));
