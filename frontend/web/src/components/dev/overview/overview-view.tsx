@@ -2,24 +2,24 @@
 
 import { useState, type CSSProperties } from "react";
 
-import { BlockBarChart } from "../block-bar-chart";
-import { Panel, PanelBody, PanelHead } from "../primitives/panel";
-import { Pill } from "../primitives/pill";
-import { Stat, StatGrid } from "../primitives/stat";
+import { BlockBarChart } from "@/components/dev/block-bar-chart";
+import { Panel, PanelBody, PanelHead } from "@/components/dev/primitives/panel";
+import { Pill } from "@/components/dev/primitives/pill";
+import { Stat, StatGrid } from "@/components/dev/primitives/stat";
 import {
   accountAggregates,
   buildInsights,
   buildQuickAnswer,
   marketIndex,
   pendingByAccount,
-} from "../../../lib/dev/derive";
+} from "@/lib/dev/derive";
 import {
   useDevAccounts,
   useDevMarkets,
   useDevPendingOrders,
-} from "../../../lib/dev/fetchers";
-import { dollars, fmtInt, moneySigned } from "../../../lib/dev/format";
-import { useDevRecentBlocks } from "../../../lib/dev/use-recent-blocks";
+} from "@/lib/dev/fetchers";
+import { dollars, fmtInt, moneySigned } from "@/lib/dev/format";
+import { useDevRecentBlocks } from "@/lib/dev/use-recent-blocks";
 
 type ChartMetric = "volume" | "fills" | "orders";
 type QuestionKind = "prices" | "chain" | "liquidity" | "mm";
