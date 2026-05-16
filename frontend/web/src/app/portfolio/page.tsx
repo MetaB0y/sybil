@@ -275,7 +275,6 @@ function Shell({ children }: { children: React.ReactNode }) {
         display: "flex",
         flexDirection: "column",
         gap: "var(--space-4)",
-        maxWidth: 1280,
       }}
     >
       {children}
