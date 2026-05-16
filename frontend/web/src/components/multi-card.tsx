@@ -9,16 +9,14 @@ import {
 } from "@/lib/format/nanos";
 import type { Market } from "@/lib/markets/use-markets";
 import { useCardHistory } from "@/lib/markets/use-card-history";
+import { formatTraders } from "@/lib/mock";
+import { useEventTraders } from "@/lib/markets/use-event-traders";
 import {
-  formatTraders,
-  mockCategory,
-  mockDelta,
-  mockLiq,
-  mockTraders,
-} from "@/lib/mock";
+  getCategoryColor,
+  pickDisplayCategory,
+} from "@/lib/categorize";
 import type { MarketPrice } from "@/lib/store";
 import { MarketThumb } from "./market-thumb";
-import { MockValue } from "./mock-value";
 import { Sparkline } from "./sparkline";
 
 const SECONDARY_OUTCOMES = 1;
@@ -67,6 +65,11 @@ export function MultiCard({ groupName, markets, prices }: Props) {
     ? formatCompactDollars(totalVolumeNanos)
     : "—";
 
+  // Event-level traders is a set union over the event's markets — not the
+  // sum of per-market `trader_count` (that double-counts cross-market
+  // traders). Fetched per event via the dedicated endpoint.
+  const eventTradersQ = useEventTraders(markets[0]?.event_id ?? undefined);
+
   return (
     <article
       ref={ref}
@@ -82,36 +85,51 @@ export function MultiCard({ groupName, markets, prices }: Props) {
         boxShadow: "var(--shadow-inset-top)",
         boxSizing: "border-box",
         overflow: "hidden",
+        cursor: "pointer",
       }}
     >
       <EyebrowRow
-        groupName={groupName}
+        markets={markets}
         count={markets.length}
         hiddenCount={hiddenCount}
       />
-      <TitleRow groupName={groupName} leaderId={leader?.market_id} />
+      <TitleRow
+        groupName={groupName}
+        leaderId={leader?.market_id}
+        imageUrl={leader?.event_image_url ?? null}
+        fallbackIconUrl={leader?.event_icon_url ?? null}
+      />
       <FeaturedOutcome
         leader={leader}
         price={leader ? prices[leader.market_id] : undefined}
         points={points}
         delta24Cents={delta24Cents}
       />
-      <SecondaryList markets={secondary} prices={prices} />
-      <FooterRow totalVol={totalVol} totalVolNanos={sumVolumeNanos(markets) ?? 0n} seed={groupName} />
+      <SecondaryList markets={secondary} prices={prices} inView={inView} />
+      <FooterRow
+        totalVol={totalVol}
+        totalLiqNanos={sumLiquidityNanos(markets)}
+        traderCount={eventTradersQ.data ?? 0}
+      />
     </article>
   );
 }
 
 function EyebrowRow({
-  groupName,
+  markets,
   count,
   hiddenCount,
 }: {
-  groupName: string;
+  markets: Market[];
   count: number;
   hiddenCount: number;
 }) {
-  const cat = mockCategory(groupName);
+  // All markets in a group share an event, so they share categories. Use
+  // the first market's categories as the source of truth.
+  const first = markets[0];
+  const primary = first
+    ? pickDisplayCategory(first.categories, first.category).primary
+    : null;
   return (
     <div
       style={{
@@ -133,17 +151,23 @@ function EyebrowRow({
           color: "var(--fg-3)",
         }}
       >
-        <span
-          aria-hidden
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: "50%",
-            background: cat.color,
-            flexShrink: 0,
-          }}
-        />
-        <MockValue hint="category">{cat.name}</MockValue>
+        {primary ? (
+          <>
+            <span
+              aria-hidden
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                background: getCategoryColor(primary),
+                flexShrink: 0,
+              }}
+            />
+            {primary}
+          </>
+        ) : (
+          <span style={{ color: "var(--fg-4)" }}>uncategorized</span>
+        )}
       </span>
       <span
         className="text-mono"
@@ -152,7 +176,7 @@ function EyebrowRow({
           color: "var(--fg-3)",
         }}
       >
-        {count} outcomes
+        <span>{count} outcomes</span>
         {hiddenCount > 0 && (
           <>
             <span style={{ margin: "0 4px", color: "var(--fg-4)" }}>·</span>
@@ -167,9 +191,13 @@ function EyebrowRow({
 function TitleRow({
   groupName,
   leaderId,
+  imageUrl,
+  fallbackIconUrl,
 }: {
   groupName: string;
   leaderId: number | undefined;
+  imageUrl: string | null;
+  fallbackIconUrl: string | null;
 }) {
   const href = leaderId != null ? `/m/${leaderId}` : "#";
   return (
@@ -188,7 +216,13 @@ function TitleRow({
         color: "var(--fg-1)",
       }}
     >
-      <MarketThumb marketId={leaderId ?? 0} name={groupName} size={64} />
+      <MarketThumb
+        marketId={leaderId ?? 0}
+        name={groupName}
+        imageUrl={imageUrl}
+        fallbackIconUrl={fallbackIconUrl}
+        size={64}
+      />
       <h3
         style={{
           fontFamily: "var(--font-sans)",
@@ -203,7 +237,7 @@ function TitleRow({
           WebkitBoxOrient: "vertical",
           overflow: "hidden",
           userSelect: "text",
-          cursor: "text",
+          cursor: "pointer",
         }}
       >
         {groupName}
@@ -272,7 +306,7 @@ function FeaturedOutcome({
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
             userSelect: "text",
-            cursor: "text",
+            cursor: "pointer",
           }}
         >
           {label}
@@ -316,9 +350,11 @@ function FeaturedOutcome({
 function SecondaryList({
   markets,
   prices,
+  inView,
 }: {
   markets: Market[];
   prices: Record<number, MarketPrice>;
+  inView: boolean;
 }) {
   return (
     <div
@@ -336,6 +372,7 @@ function SecondaryList({
           market={m}
           price={prices[m.market_id]}
           first={i === 0}
+          inView={inView}
         />
       ))}
     </div>
@@ -346,16 +383,19 @@ function SecondaryRow({
   market,
   price,
   first,
+  inView,
 }: {
   market: Market;
   price: MarketPrice | undefined;
   first?: boolean;
+  inView: boolean;
 }) {
   const label = trimOutcomeLabel(market.name);
-  const yesPct = price ? Number(price.yes) / 1e7 : null;
   const cents = price ? formatCents(price.yes) : "—";
-  const delta = mockDelta(market.market_id, yesPct);
-  const tone = deltaTone(price ? delta : null, !!price);
+  // Same logic as the leader: real 24h delta from price history, lazy-loaded
+  // when the card scrolls into view.
+  const { delta24Cents } = useCardHistory(market.market_id, inView);
+  const tone = deltaTone(delta24Cents, !!price);
   const volNanos = market.volume_nanos ? BigInt(market.volume_nanos) : 0n;
   const vol = volNanos > 0n ? formatCompactDollars(volNanos) : "—";
   return (
@@ -385,7 +425,7 @@ function SecondaryRow({
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
           userSelect: "text",
-          cursor: "text",
+          cursor: "pointer",
         }}
       >
         {label}
@@ -400,20 +440,23 @@ function SecondaryRow({
       >
         {cents}
       </span>
-      <MockValue hint="24h delta" style={{ textAlign: "right" }}>
-        <span
-          className="text-mono tabular"
-          style={{
-            fontSize: "11px",
-            color: price ? (delta >= 0 ? "var(--yes)" : "var(--no)") : "var(--fg-4)",
-            display: "inline-block",
-            width: "100%",
-            textAlign: "right",
-          }}
-        >
-          {price ? formatCentsDelta(delta) : "—"}
-        </span>
-      </MockValue>
+      <span
+        className="text-mono tabular"
+        style={{
+          fontSize: "11px",
+          color:
+            delta24Cents != null
+              ? delta24Cents >= 0
+                ? "var(--yes)"
+                : "var(--no)"
+              : "var(--fg-4)",
+          display: "inline-block",
+          width: "100%",
+          textAlign: "right",
+        }}
+      >
+        {delta24Cents != null ? formatCentsDelta(delta24Cents) : "—"}
+      </span>
       <span
         className="text-mono tabular"
         style={{
@@ -430,16 +473,14 @@ function SecondaryRow({
 
 function FooterRow({
   totalVol,
-  totalVolNanos,
-  seed,
+  totalLiqNanos,
+  traderCount,
 }: {
   totalVol: string;
-  totalVolNanos: bigint;
-  seed: string;
+  totalLiqNanos: bigint;
+  traderCount: number;
 }) {
-  const liqNanos = mockLiq(totalVolNanos, seed);
-  const liq = liqNanos > 0n ? formatCompactDollars(liqNanos) : "—";
-  const traderCount = mockTraders(seed, totalVolNanos);
+  const liq = totalLiqNanos > 0n ? formatCompactDollars(totalLiqNanos) : "—";
   const traders = traderCount > 0 ? formatTraders(traderCount) : "—";
   return (
     <div
@@ -458,15 +499,9 @@ function FooterRow({
     >
       <div style={{ display: "flex", gap: "var(--space-3)" }}>
         <FooterChip label="vol" value={totalVol} />
-        <FooterChip
-          label="liq"
-          value={<MockValue hint="liquidity">{liq}</MockValue>}
-        />
+        <FooterChip label="liq" value={liq} />
       </div>
-      <FooterChip
-        label="traders"
-        value={<MockValue hint="trader count">{traders}</MockValue>}
-      />
+      <FooterChip label="traders" value={traders} />
     </div>
   );
 }
@@ -514,4 +549,19 @@ function sumVolumeNanos(markets: Market[]): bigint | null {
     }
   }
   return any ? total : null;
+}
+
+/**
+ * Event-level liquidity = sum of each member market's `liquidity_avg10_nanos`.
+ * Additive scalar — the backend already excludes multi-market orders, so
+ * summing per-market scores does not double-count.
+ */
+function sumLiquidityNanos(markets: Market[]): bigint {
+  let total = 0n;
+  for (const m of markets) {
+    if (m.liquidity_avg10_nanos != null) {
+      total += BigInt(m.liquidity_avg10_nanos);
+    }
+  }
+  return total;
 }

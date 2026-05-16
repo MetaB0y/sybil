@@ -9,15 +9,13 @@ import {
 } from "@/lib/format/nanos";
 import type { Market } from "@/lib/markets/use-markets";
 import { useCardHistory } from "@/lib/markets/use-card-history";
+import { formatTraders } from "@/lib/mock";
 import {
-  formatTraders,
-  mockCategory,
-  mockLiq,
-  mockTraders,
-} from "@/lib/mock";
+  getCategoryColor,
+  pickDisplayCategory,
+} from "@/lib/categorize";
 import type { MarketPrice } from "@/lib/store";
 import { MarketThumb } from "./market-thumb";
-import { MockValue } from "./mock-value";
 import { Sparkline } from "./sparkline";
 
 type Props = {
@@ -69,6 +67,7 @@ export function BinaryCard({ market, price }: Props) {
         transition: "border-color var(--dur-fast) var(--ease-standard)",
         boxSizing: "border-box",
         overflow: "hidden",
+        cursor: "pointer",
       }}
       onMouseEnter={(e) =>
         (e.currentTarget.style.borderColor = "var(--border-3)")
@@ -99,7 +98,8 @@ export function BinaryCard({ market, price }: Props) {
 }
 
 function EyebrowRow({ market }: { market: Market }) {
-  const cat = mockCategory(market.market_id);
+  const { primary } = pickDisplayCategory(market.categories, market.category);
+  const endDate = formatEndDate(market.market_end_date_ms);
   return (
     <div
       style={{
@@ -124,17 +124,23 @@ function EyebrowRow({ market }: { market: Market }) {
           whiteSpace: "nowrap",
         }}
       >
-        <span
-          aria-hidden
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: "50%",
-            background: cat.color,
-            flexShrink: 0,
-          }}
-        />
-        <MockValue hint="category">{cat.name}</MockValue>
+        {primary ? (
+          <>
+            <span
+              aria-hidden
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                background: getCategoryColor(primary),
+                flexShrink: 0,
+              }}
+            />
+            {primary}
+          </>
+        ) : (
+          <span style={{ color: "var(--fg-4)" }}>uncategorized</span>
+        )}
       </span>
       <span
         className="text-mono"
@@ -145,7 +151,7 @@ function EyebrowRow({ market }: { market: Market }) {
           color: "var(--fg-3)",
         }}
       >
-        yes / no
+        {endDate ?? "yes / no"}
       </span>
     </div>
   );
@@ -161,7 +167,13 @@ function TitleRow({ market }: { market: Market }) {
         alignItems: "start",
       }}
     >
-      <MarketThumb marketId={market.market_id} name={market.name} size={64} />
+      <MarketThumb
+        marketId={market.market_id}
+        name={market.name}
+        imageUrl={market.market_image_url ?? null}
+        fallbackIconUrl={market.market_icon_url ?? null}
+        size={64}
+      />
       <h3
         style={{
           fontFamily: "var(--font-sans)",
@@ -176,7 +188,7 @@ function TitleRow({ market }: { market: Market }) {
           WebkitBoxOrient: "vertical",
           overflow: "hidden",
           userSelect: "text",
-          cursor: "text",
+          cursor: "pointer",
         }}
       >
         {market.name}
@@ -378,9 +390,11 @@ function SideRow({
 function FooterRow({ market }: { market: Market }) {
   const volNanos = market.volume_nanos ? BigInt(market.volume_nanos) : 0n;
   const vol = volNanos > 0n ? formatCompactDollars(volNanos) : "—";
-  const liqNanos = mockLiq(volNanos, market.market_id);
+  const liqNanos = market.liquidity_avg10_nanos
+    ? BigInt(market.liquidity_avg10_nanos)
+    : 0n;
   const liq = liqNanos > 0n ? formatCompactDollars(liqNanos) : "—";
-  const traderCount = mockTraders(market.market_id, volNanos);
+  const traderCount = market.trader_count ?? 0;
   const traders = traderCount > 0 ? formatTraders(traderCount) : "—";
   return (
     <div
@@ -399,15 +413,9 @@ function FooterRow({ market }: { market: Market }) {
     >
       <div style={{ display: "flex", gap: "var(--space-3)" }}>
         <FooterChip label="vol" value={vol} />
-        <FooterChip
-          label="liq"
-          value={<MockValue hint="liquidity">{liq}</MockValue>}
-        />
+        <FooterChip label="liq" value={liq} />
       </div>
-      <FooterChip
-        label="traders"
-        value={<MockValue hint="trader count">{traders}</MockValue>}
-      />
+      <FooterChip label="traders" value={traders} />
     </div>
   );
 }
@@ -434,3 +442,23 @@ function deltaTone(delta: number | null, hasPrice: boolean): string {
   if (delta == null) return "var(--fg-1)";
   return delta >= 0 ? "var(--yes)" : "var(--no)";
 }
+
+/**
+ * "closes Mar 5" if same year, "closes Mar 5 '26" otherwise. Returns null
+ * for absent / past-or-bogus dates so the eyebrow falls back to its
+ * neutral "yes / no" tagline.
+ */
+function formatEndDate(ms: number | null | undefined): string | null {
+  if (ms == null) return null;
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return null;
+  const now = new Date();
+  const month = d.toLocaleString("en-US", { month: "short" });
+  const day = d.getDate();
+  if (d.getFullYear() === now.getFullYear()) {
+    return `closes ${month} ${day}`;
+  }
+  const yy = String(d.getFullYear()).slice(-2);
+  return `closes ${month} ${day} '${yy}`;
+}
+

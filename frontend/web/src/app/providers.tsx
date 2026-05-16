@@ -2,6 +2,7 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
+import { AccountProvider } from "@/lib/account/provider";
 import { RealtimeProvider } from "@/lib/ws/realtime-provider";
 
 export function Providers({ children }: { children: ReactNode }) {
@@ -19,7 +20,9 @@ export function Providers({ children }: { children: ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <RealtimeProvider>{children}</RealtimeProvider>
+      <AccountProvider>
+        <RealtimeProvider>{children}</RealtimeProvider>
+      </AccountProvider>
     </QueryClientProvider>
   );
 }

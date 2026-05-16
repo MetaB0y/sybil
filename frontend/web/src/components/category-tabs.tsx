@@ -1,19 +1,24 @@
 "use client";
 
 /**
- * CategoryTabs — handoff's 12 text-link tabs. Active state is the cyan
- * underline under "All".
+ * CategoryTabs — text-link tabs that filter the markets index by category.
  *
- * Backend `category` is always null today, so only "All" is functional;
- * the other 11 tabs render dimmed + non-interactive with a tooltip. When
- * backend exposes the field, drop the `disabled` flag and wire onClick
- * to a `?category=` URL param.
+ * Drives the `?category=` URL param; the page reads it and filters by
+ * pickDisplayCategory().primary (primary-only semantics — a market only
+ * appears under the tab matching its chip).
+ *
+ * Tab order is independent of categorize.ts priority. Priority controls
+ * which chip wins on a multi-category market; tab order controls UX.
  */
+
+import { useCallback } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 const CATEGORIES = [
   "All",
   "Politics",
   "Geopolitics",
+  "Elections",
   "AI",
   "Tech",
   "Economy",
@@ -30,6 +35,22 @@ const CATEGORIES = [
 ] as const;
 
 export function CategoryTabs() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const active = searchParams.get("category") ?? "All";
+
+  const select = useCallback(
+    (cat: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (cat === "All") params.delete("category");
+      else params.set("category", cat);
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams]
+  );
+
   return (
     <nav
       aria-label="market categories"
@@ -44,17 +65,12 @@ export function CategoryTabs() {
       }}
     >
       {CATEGORIES.map((cat) => {
-        const isAll = cat === "All";
+        const isActive = cat === active;
         return (
           <button
             key={cat}
             type="button"
-            disabled={!isAll}
-            title={
-              isAll
-                ? undefined
-                : "category filter — wired when backend populates the field"
-            }
+            onClick={() => select(cat)}
             style={{
               position: "relative",
               flexShrink: 0,
@@ -64,12 +80,12 @@ export function CategoryTabs() {
               fontFamily: "var(--font-sans)",
               fontSize: "var(--fs-14)",
               fontWeight: 500,
-              color: isAll ? "var(--fg-1)" : "var(--fg-4)",
-              cursor: isAll ? "default" : "not-allowed",
+              color: isActive ? "var(--fg-1)" : "var(--fg-3)",
+              cursor: "pointer",
             }}
           >
             {cat}
-            {isAll && (
+            {isActive && (
               <span
                 aria-hidden
                 style={{

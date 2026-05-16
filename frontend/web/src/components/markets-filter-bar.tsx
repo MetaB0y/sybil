@@ -2,17 +2,12 @@
 
 import { CategoryTabs } from "./category-tabs";
 
-export type SortKey =
-  | "volume"
-  | "topmovers"
-  | "closing"
-  | "new";
+export type SortKey = "volume" | "new" | "traders";
 
 export const SORT_KEYS: readonly SortKey[] = [
   "volume",
-  "topmovers",
-  "closing",
   "new",
+  "traders",
 ] as const;
 
 export function parseSortKey(raw: string | null | undefined): SortKey {
@@ -31,14 +26,8 @@ type ChipDef = {
 
 const SORTS: ChipDef[] = [
   { key: "volume", label: "Volume" },
-  {
-    key: "topmovers",
-    label: "Top movers",
-    disabled: true,
-    title: "top movers — needs 24h delta from backend",
-  },
-  { key: "closing", label: "Closing soon" },
   { key: "new", label: "New" },
+  { key: "traders", label: "Traders" },
 ];
 
 type Props = {

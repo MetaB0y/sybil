@@ -1,0 +1,99 @@
+/**
+ * Domain types for the specific-market page. Money fields are bigint nanos
+ * (1 unit = 1e9 nanos). Counts are plain numbers. See OPEN_QUESTIONS #1-#3,
+ * #5-#9 for what's currently mocked.
+ */
+
+import type { components } from "../api/schema";
+
+export type Market = components["schemas"]["MarketResponse"];
+export type Block = components["schemas"]["BlockResponse"];
+
+/** Aggregate stats panel for one market. */
+export type MarketStats = {
+  marketId: number;
+  /** Lifetime cumulative volume (real). */
+  totalVolumeNanos: bigint;
+  /** Last 24h volume (mocked — OPEN_QUESTIONS #3). */
+  volume24hNanos: bigint;
+  /** Lifetime unique traders (mocked — OPEN_QUESTIONS #2). */
+  traders: number;
+  /** Liquidity proxy in nanos (mocked — OPEN_QUESTIONS #1). */
+  liquidityNanos: bigint;
+  /**
+   * Batches the market has existed for. Real arithmetic but approximate
+   * because backend only exposes `created_at_ms`, not `created_at_height`
+   * (OPEN_QUESTIONS #9). `null` when `created_at_ms` is missing or we
+   * don't have a latest block yet.
+   */
+  batchesExistedFor: number | null;
+  /** `true` when `batchesExistedFor` is the timestamp-based approximation. */
+  batchesExistedIsApproximate: boolean;
+  mocked: {
+    volume24h: boolean;
+    traders: boolean;
+    liquidity: boolean;
+  };
+};
+
+/** Snapshot of the currently-open (in-flight) batch for one market. */
+export type OpenBatchSnapshot = {
+  marketId: number;
+  /** The latest committed block's height — the batch that's open is height+1. */
+  latestHeight: number | null;
+  /** Traders that have placed orders in the open batch (mocked — OPEN_QUESTIONS #7). */
+  tradersInBatch: number;
+  /** Indicative clearing YES price in nanos, if the batch closed now (mocked — #7). */
+  indicativeYesPriceNanos: bigint;
+  /** Indicative total volume that would clear (mocked — #7). */
+  indicativeVolumeNanos: bigint;
+  /** Buys-vs-sells imbalance in basis points, range -10000..+10000 (mocked — #6/#7). */
+  imbalanceBps: number;
+  mocked: {
+    tradersInBatch: boolean;
+    indicativePrice: boolean;
+    indicativeVolume: boolean;
+    imbalance: boolean;
+  };
+};
+
+/** Recent-batches window size — user-selectable on the page. */
+export type WindowSize = 1 | 5 | 10 | 100;
+
+/** Rolled-up stats across the last N batches for one market. */
+export type BatchWindowStats = {
+  marketId: number;
+  /** What the user asked for. */
+  requestedWindow: WindowSize;
+  /** How many blocks the store actually has in this window (≤ requestedWindow). */
+  actualBlockCount: number;
+  /** Earliest / latest heights of the blocks that contributed. */
+  firstHeight: number | null;
+  lastHeight: number | null;
+  /** Unique traders who PLACED orders (mocked — OPEN_QUESTIONS #8). */
+  uniqueTradersPlaced: number;
+  /**
+   * Unique traders who got MATCHED. Chain-level count is real
+   * (block.fills[].account_id union); per-market scoping is mocked because
+   * FillResponse has no `market_id` (OPEN_QUESTIONS #5). The value here is
+   * the per-market split — see `mocked.uniqueTradersMatched`.
+   */
+  uniqueTradersMatched: number;
+  /** Same union without per-market scoping — real chain-level count. */
+  uniqueTradersMatchedChainWide: number;
+  /** Volume placed across the window (mocked — OPEN_QUESTIONS #8). */
+  volumePlacedNanos: bigint;
+  /**
+   * Volume matched across the window for this market. Chain-level sum of
+   * `total_volume_nanos` is real; per-market split is mocked (OPEN_QUESTIONS #5).
+   */
+  volumeMatchedNanos: bigint;
+  /** Same sum without per-market scoping — real chain-level total. */
+  volumeMatchedChainWideNanos: bigint;
+  mocked: {
+    uniqueTradersPlaced: boolean;
+    uniqueTradersMatched: boolean;
+    volumePlaced: boolean;
+    volumeMatched: boolean;
+  };
+};

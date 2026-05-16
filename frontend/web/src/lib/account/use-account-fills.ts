@@ -1,0 +1,56 @@
+"use client";
+
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { api } from "@/lib/api/client";
+import type { components } from "@/lib/api/schema";
+import { selectLatestBlock, useStore } from "@/lib/store";
+
+export type AccountFill = components["schemas"]["AccountFillResponse"];
+
+/**
+ * GET /v1/accounts/{id}/fills — fill history for one account. Optional
+ * market filter + pagination. Invalidates per block so fresh fills appear.
+ */
+export function useAccountFills(
+  accountId: number | null,
+  opts: { marketId?: number; limit?: number; offset?: number } = {},
+) {
+  const qc = useQueryClient();
+  const latest = useStore(selectLatestBlock);
+  const { marketId, limit = 50, offset = 0 } = opts;
+
+  const key = [
+    "account",
+    accountId,
+    "fills",
+    { marketId, limit, offset },
+  ] as const;
+
+  useEffect(() => {
+    if (accountId === null) return;
+    qc.invalidateQueries({ queryKey: ["account", accountId, "fills"] });
+  }, [accountId, latest?.height, qc]);
+
+  return useQuery({
+    enabled: accountId !== null,
+    queryKey: key,
+    queryFn: async (): Promise<AccountFill[]> => {
+      if (accountId === null) throw new Error("no account");
+      const { data, error } = await api.GET("/v1/accounts/{id}/fills", {
+        params: {
+          path: { id: accountId },
+          query: {
+            ...(marketId !== undefined ? { market_id: marketId } : {}),
+            limit,
+            offset,
+          },
+        },
+      });
+      if (error || !data) throw new Error("fetch account fills failed");
+      return data;
+    },
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+  });
+}

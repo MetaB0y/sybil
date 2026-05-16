@@ -347,7 +347,7 @@ function ImbalanceCell({ bps }: { bps: number }) {
   const color = isBuy ? "var(--yes)" : "var(--no)";
   return (
     <MockValue
-      hint="imbalance — mocked; backend doesn't carry per-fill side (OPEN_QUESTIONS #6)"
+      hint="NOT NOW — imbalance — mocked; backend doesn't carry per-fill side (OPEN_QUESTIONS #6)"
       variant="tint"
       style={{
         display: "flex",

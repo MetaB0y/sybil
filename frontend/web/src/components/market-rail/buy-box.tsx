@@ -1,0 +1,728 @@
+"use client";
+
+/**
+ * Pro-mode order entry form. Matches `BuyBox` in
+ * `frontend/handoff/data/fed-fba-panel.jsx:206`.
+ *
+ * Wires the form to the live `/v1/orders/signed` endpoint via
+ * `submitSignedOrder`. Side mapping:
+ *   - buy + YES → BuyYes
+ *   - buy + NO  → BuyNo
+ *   - sell + YES → SellYes
+ *   - sell + NO  → SellNo
+ *
+ * TTL → expires_at_block (relative to latestHeight from the store):
+ *   - "1 batch"     → +1   (effectively IOC)
+ *   - "5 batches"   → +5   (short GTD, replay-safe)
+ *   - "until cancel" → undefined (GTC; backend default)
+ */
+
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import {
+  submitSignedOrder,
+  type OrderSide,
+} from "@/lib/account/orders";
+import {
+  useAccountSession,
+  useSetConnectModalOpen,
+} from "@/lib/account/use-account";
+import { usePortfolio } from "@/lib/account/use-portfolio";
+import { formatDollars, parseNanos } from "@/lib/format/nanos";
+import type { EventOutcome } from "@/lib/market-detail/use-event-group";
+import { useBatchCountdown } from "./use-batch-countdown";
+
+type Direction = "buy" | "sell";
+type OutcomeSide = "YES" | "NO";
+type Unit = "usd" | "shares";
+type Ttl = "1 batch" | "5 batches" | "until cancel";
+
+const TTL_OPTS: Ttl[] = ["1 batch", "5 batches", "until cancel"];
+
+function orderSideFor(dir: Direction, side: OutcomeSide): OrderSide {
+  if (dir === "buy") return side === "YES" ? "BuyYes" : "BuyNo";
+  return side === "YES" ? "SellYes" : "SellNo";
+}
+
+export function BuyBox({ outcome }: { outcome: EventOutcome }) {
+  const session = useAccountSession();
+  const openConnectModal = useSetConnectModalOpen();
+  const qc = useQueryClient();
+  const { secondsLeft, latestHeight } = useBatchCountdown();
+  const batchNumber = latestHeight == null ? null : latestHeight + 1;
+  const portfolio = usePortfolio(session?.accountId ?? null);
+
+  const yesCents = outcome.yesCents ?? 50;
+  const noCents = 100 - yesCents;
+
+  const [dir, setDir] = useState<Direction>("buy");
+  const [outcomeSide, setOutcomeSide] = useState<OutcomeSide>("YES");
+  const [unit, setUnit] = useState<Unit>("usd");
+  const [amount, setAmount] = useState("25");
+  const [shares, setShares] = useState("100");
+  const [ttl, setTtl] = useState<Ttl>("1 batch");
+
+  const indicativeCents = outcomeSide === "YES" ? yesCents : noCents;
+  const [limit, setLimit] = useState<number>(indicativeCents);
+  const [limitText, setLimitText] = useState<string>(String(indicativeCents));
+
+  // When the user flips YES↔NO, default the limit slider to the new side's
+  // indicative. They can still override after.
+  /* eslint-disable react-hooks/set-state-in-effect -- re-anchor limit when side flips */
+  useEffect(() => {
+    setLimit(indicativeCents);
+  }, [outcomeSide, indicativeCents]);
+  // Mirror limit value into the (controlled) text field.
+  useEffect(() => {
+    setLimitText(String(limit));
+  }, [limit]);
+  /* eslint-enable */
+
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitOk, setSubmitOk] = useState<string | null>(null);
+
+  const limitDec = Math.max(1, Math.min(99, limit)) / 100;
+  const usd = parseFloat(amount) || 0;
+  const sh = parseFloat(shares) || 0;
+  const sharesIfUsd = limitDec > 0 ? usd / limitDec : 0;
+  const maxCostIfShares = sh * limitDec;
+
+  const balanceDollars = portfolio.data
+    ? Number(parseNanos(portfolio.data.balance_nanos)) / 1e9
+    : null;
+
+  const accent = outcomeSide === "YES" ? "var(--yes)" : "var(--no)";
+  const accentSoft =
+    outcomeSide === "YES"
+      ? "color-mix(in srgb, var(--yes) 14%, transparent)"
+      : "color-mix(in srgb, var(--no) 14%, transparent)";
+
+  const connected = session !== null;
+  const disabledInputs = !connected || submitting;
+
+  const ctaLabel = (() => {
+    if (!connected) return "Connect to trade";
+    if (submitting) return "Signing…";
+    const sideWord =
+      dir === "buy" ? `buy ${outcomeSide}` : `sell ${outcomeSide}`;
+    const batchSuffix =
+      batchNumber == null ? "" : ` → batch #${batchNumber.toLocaleString()}`;
+    return `${sideWord}${batchSuffix}`;
+  })();
+
+  async function onCtaClick() {
+    if (!connected) {
+      openConnectModal(true);
+      return;
+    }
+    if (!session) return;
+    setSubmitError(null);
+    setSubmitOk(null);
+
+    // Resolve qty (max_fill) and basic validation.
+    const maxFill =
+      unit === "usd"
+        ? Math.max(0, Math.floor(sharesIfUsd))
+        : Math.max(0, Math.floor(sh));
+    if (maxFill < 1) {
+      setSubmitError("max_fill must be at least 1 share");
+      return;
+    }
+    const limitCents = Math.max(1, Math.min(99, Math.round(limit)));
+    const limitPriceNanos = BigInt(limitCents) * 10_000_000n; // cents × 1e7
+
+    let expiresAtBlock: bigint | undefined;
+    if (ttl !== "until cancel") {
+      if (latestHeight == null) {
+        setSubmitError("waiting for latest block — try again in a moment");
+        return;
+      }
+      const horizon = ttl === "1 batch" ? 1 : 5;
+      expiresAtBlock = BigInt(latestHeight + horizon);
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await submitSignedOrder({
+        accountId: session.accountId,
+        publicKeyHex: session.publicKeyHex,
+        marketId: outcome.marketId,
+        side: orderSideFor(dir, outcomeSide),
+        limitPriceNanos,
+        maxFill: BigInt(maxFill),
+        ...(expiresAtBlock !== undefined ? { expiresAtBlock } : {}),
+      });
+      if (!res.accepted) {
+        setSubmitError("server returned accepted=false");
+      } else {
+        setSubmitOk(
+          `queued · ${maxFill} sh @ ${limitCents}¢ (${ttl})`,
+        );
+        // Refresh both per-account caches and the chain-wide pending list
+        // (consumed by market-rail's pending feed).
+        qc.invalidateQueries({
+          queryKey: ["account", session.accountId, "orders"],
+        });
+        qc.invalidateQueries({
+          queryKey: ["account", session.accountId, "portfolio"],
+        });
+        qc.invalidateQueries({ queryKey: ["orders", "pending"] });
+      }
+    } catch (e) {
+      setSubmitError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        background: "var(--surface-1)",
+        border: "1px solid var(--border-1)",
+        borderRadius: 8,
+        padding: "14px 16px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        position: "relative",
+      }}
+    >
+      <div
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          color: "var(--fg-3)",
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
+        }}
+      >
+        place batch order
+      </div>
+
+      {/* Buy/Sell toggle */}
+      <div
+        style={{
+          display: "flex",
+          background: "var(--bg-2)",
+          border: "1px solid var(--border-1)",
+          borderRadius: 4,
+          padding: 2,
+          gap: 2,
+        }}
+      >
+        {(["buy", "sell"] as Direction[]).map((s) => {
+          const active = dir === s;
+          return (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setDir(s)}
+              disabled={disabledInputs}
+              style={{
+                flex: 1,
+                padding: "7px 0",
+                border: 0,
+                borderRadius: 3,
+                cursor: disabledInputs ? "not-allowed" : "pointer",
+                background: active ? "var(--surface-2)" : "transparent",
+                color: active ? "var(--fg-1)" : "var(--fg-3)",
+                fontFamily: "var(--font-sans)",
+                fontSize: 12,
+                fontWeight: active ? 600 : 500,
+                textTransform: "capitalize",
+                opacity: disabledInputs ? 0.7 : 1,
+              }}
+            >
+              {s}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Outcome context + YES/NO sub-toggle */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+            fontFamily: "var(--font-sans)",
+            fontSize: 12,
+            color: "var(--fg-3)",
+          }}
+        >
+          <span
+            style={{
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              minWidth: 0,
+            }}
+            title={outcome.label}
+          >
+            {outcome.label}
+          </span>
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+              color: "var(--fg-4)",
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+            }}
+          >
+            side
+          </span>
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 4,
+          }}
+        >
+          {(["YES", "NO"] as OutcomeSide[]).map((s) => {
+            const active = outcomeSide === s;
+            const cents = s === "YES" ? yesCents : noCents;
+            const sideColor = s === "YES" ? "var(--yes)" : "var(--no)";
+            return (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setOutcomeSide(s)}
+                disabled={disabledInputs}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "8px 10px",
+                  borderRadius: 4,
+                  border: active
+                    ? `1px solid ${sideColor}`
+                    : "1px solid var(--border-1)",
+                  background: active
+                    ? `color-mix(in srgb, ${sideColor} 14%, transparent)`
+                    : "var(--bg-2)",
+                  cursor: disabledInputs ? "not-allowed" : "pointer",
+                  color: active ? sideColor : "var(--fg-2)",
+                  fontFamily: "var(--font-sans)",
+                  fontSize: 12,
+                  fontWeight: active ? 600 : 500,
+                  opacity: disabledInputs ? 0.7 : 1,
+                }}
+              >
+                <span>{s}</span>
+                <span
+                  className="tabular"
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 13,
+                  }}
+                >
+                  {cents}¢
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Order in $ vs shares */}
+      <div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            justifyContent: "space-between",
+            marginBottom: 5,
+          }}
+        >
+          <Eyebrow>order in</Eyebrow>
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+              color: "var(--fg-4)",
+            }}
+          >
+            {balanceDollars == null
+              ? unit === "usd"
+                ? ""
+                : ""
+              : unit === "usd"
+                ? `balance ${formatDollars(BigInt(Math.floor(balanceDollars * 1e9)), { decimals: 2 })}`
+                : `available ${(balanceDollars / limitDec).toFixed(0)} sh`}
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+          {(["usd", "shares"] as Unit[]).map((u) => {
+            const active = unit === u;
+            return (
+              <button
+                key={u}
+                type="button"
+                onClick={() => setUnit(u)}
+                disabled={disabledInputs}
+                style={{
+                  flex: 1,
+                  padding: "6px 0",
+                  borderRadius: 3,
+                  cursor: disabledInputs ? "not-allowed" : "pointer",
+                  background: active ? "var(--surface-2)" : "var(--bg-2)",
+                  border: `1px solid ${active ? "var(--border-3)" : "var(--border-1)"}`,
+                  color: active ? "var(--fg-1)" : "var(--fg-3)",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 10.5,
+                  opacity: disabledInputs ? 0.7 : 1,
+                }}
+              >
+                {u === "usd" ? "$ amount" : "shares"}
+              </button>
+            );
+          })}
+        </div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            background: "var(--bg-2)",
+            border: "1px solid var(--border-1)",
+            borderRadius: 4,
+            padding: "6px 10px",
+          }}
+        >
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 18,
+              color: "var(--fg-3)",
+            }}
+          >
+            {unit === "usd" ? "$" : "#"}
+          </span>
+          <input
+            value={unit === "usd" ? amount : shares}
+            disabled={disabledInputs}
+            onChange={(e) =>
+              unit === "usd"
+                ? setAmount(e.target.value.replace(/[^0-9.]/g, ""))
+                : setShares(e.target.value.replace(/[^0-9.]/g, ""))
+            }
+            style={{
+              flex: 1,
+              background: "transparent",
+              border: 0,
+              outline: 0,
+              padding: "4px 4px",
+              color: "var(--fg-1)",
+              fontFamily: "var(--font-mono)",
+              fontSize: 18,
+              fontVariantNumeric: "tabular-nums",
+              cursor: disabledInputs ? "not-allowed" : "text",
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Limit price input + slider */}
+      <div>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "baseline",
+            marginBottom: 5,
+          }}
+        >
+          <Eyebrow>limit price ({outcomeSide})</Eyebrow>
+          <button
+            type="button"
+            onClick={() => setLimit(indicativeCents)}
+            disabled={disabledInputs}
+            style={{
+              background: "transparent",
+              border: 0,
+              padding: 0,
+              cursor: disabledInputs ? "not-allowed" : "pointer",
+              color:
+                limit === indicativeCents ? "var(--fg-3)" : "var(--accent)",
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+              textDecoration: "underline",
+              textUnderlineOffset: 2,
+            }}
+          >
+            set indicative {indicativeCents}¢
+          </button>
+        </div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            background: "var(--bg-2)",
+            border: "1px solid var(--border-1)",
+            borderRadius: 4,
+            padding: "6px 10px",
+            marginBottom: 8,
+          }}
+        >
+          <input
+            value={limitText}
+            disabled={disabledInputs}
+            onChange={(e) => {
+              const v = e.target.value.replace(/[^0-9.]/g, "");
+              setLimitText(v);
+              const n = parseFloat(v);
+              if (!Number.isNaN(n)) setLimit(Math.max(1, Math.min(99, n)));
+            }}
+            style={{
+              flex: 1,
+              background: "transparent",
+              border: 0,
+              outline: 0,
+              padding: "2px 0",
+              color: "var(--fg-1)",
+              fontFamily: "var(--font-mono)",
+              fontSize: 16,
+              fontVariantNumeric: "tabular-nums",
+              cursor: disabledInputs ? "not-allowed" : "text",
+            }}
+          />
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 14,
+              color: "var(--fg-3)",
+            }}
+          >
+            ¢
+          </span>
+        </div>
+        <input
+          type="range"
+          min={1}
+          max={99}
+          value={limit}
+          disabled={disabledInputs}
+          onChange={(e) => setLimit(Number(e.target.value))}
+          style={{
+            width: "100%",
+            cursor: disabledInputs ? "not-allowed" : "pointer",
+          }}
+        />
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            fontFamily: "var(--font-mono)",
+            fontSize: 9,
+            color: "var(--fg-4)",
+          }}
+        >
+          <span>1¢</span>
+          <span>indicative {indicativeCents}¢</span>
+          <span>99¢</span>
+        </div>
+      </div>
+
+      {/* TTL */}
+      <div>
+        <Eyebrow>good for</Eyebrow>
+        <div style={{ display: "flex", gap: 4, marginTop: 5 }}>
+          {TTL_OPTS.map((t) => {
+            const active = ttl === t;
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTtl(t)}
+                disabled={disabledInputs}
+                style={{
+                  flex: 1,
+                  padding: "6px 0",
+                  borderRadius: 3,
+                  cursor: disabledInputs ? "not-allowed" : "pointer",
+                  background: active ? "var(--surface-2)" : "var(--bg-2)",
+                  border: `1px solid ${active ? "var(--border-3)" : "var(--border-1)"}`,
+                  color: active ? "var(--fg-1)" : "var(--fg-3)",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 10,
+                  opacity: disabledInputs ? 0.7 : 1,
+                }}
+              >
+                {t}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Receipt */}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 5,
+          padding: "10px 12px",
+          background: accentSoft,
+          border: `1px dashed color-mix(in srgb, ${accent} 32%, transparent)`,
+          borderRadius: 4,
+          fontFamily: "var(--font-mono)",
+          fontSize: 11,
+        }}
+      >
+        {unit === "usd" ? (
+          <>
+            <ReceiptRow
+              label={dir === "buy" ? "cost" : "receive (if filled)"}
+              value={`$${usd.toFixed(2)}`}
+            />
+            <ReceiptRow
+              label="shares (if matched)"
+              value={`≥ ${sharesIfUsd.toFixed(1)}`}
+            />
+            <ReceiptRow
+              label="max payout"
+              value={`≥ $${sharesIfUsd.toFixed(2)}`}
+            />
+          </>
+        ) : (
+          <>
+            <ReceiptRow
+              label={dir === "buy" ? "max cost" : "max receive"}
+              value={`≤ $${maxCostIfShares.toFixed(2)}`}
+            />
+            <ReceiptRow label="shares (if matched)" value={sh.toFixed(0)} />
+            <ReceiptRow label="max payout" value={`≥ $${sh.toFixed(2)}`} />
+          </>
+        )}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            color: "var(--fg-3)",
+            borderTop: "1px solid var(--border-1)",
+            paddingTop: 5,
+            marginTop: 2,
+          }}
+        >
+          <span>queued for batch</span>
+          <span style={{ color: "var(--accent)" }}>
+            #{batchNumber == null ? "—" : batchNumber.toLocaleString()} · 0:
+            {secondsLeft.toString().padStart(2, "0")}
+          </span>
+        </div>
+      </div>
+
+      {/* CTA */}
+      <button
+        type="button"
+        onClick={onCtaClick}
+        disabled={submitting}
+        style={{
+          marginTop: 2,
+          padding: "12px 0",
+          border: 0,
+          borderRadius: 4,
+          cursor: submitting ? "not-allowed" : "pointer",
+          background: connected ? accent : "var(--accent)",
+          color: "#0A0E12",
+          fontFamily: "var(--font-sans)",
+          fontSize: 14,
+          fontWeight: 600,
+          letterSpacing: "0.01em",
+          opacity: submitting ? 0.55 : 1,
+        }}
+      >
+        {ctaLabel}
+      </button>
+
+      {submitError && (
+        <div
+          role="alert"
+          style={{
+            padding: "6px 10px",
+            background: "color-mix(in srgb, var(--no) 12%, transparent)",
+            border:
+              "1px solid color-mix(in srgb, var(--no) 32%, transparent)",
+            borderRadius: 4,
+            color: "var(--no)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            wordBreak: "break-word",
+          }}
+        >
+          {submitError}
+        </div>
+      )}
+      {submitOk && !submitError && (
+        <div
+          style={{
+            padding: "6px 10px",
+            background: "color-mix(in srgb, var(--yes) 12%, transparent)",
+            border:
+              "1px solid color-mix(in srgb, var(--yes) 32%, transparent)",
+            borderRadius: 4,
+            color: "var(--yes)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+          }}
+        >
+          {submitOk}
+        </div>
+      )}
+
+      <span
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 9.5,
+          color: "var(--fg-4)",
+          textAlign: "center",
+        }}
+      >
+        clears at the uniform price · could fill better than your limit
+      </span>
+    </div>
+  );
+}
+
+function Eyebrow({ children }: { children: React.ReactNode }) {
+  return (
+    <span
+      style={{
+        fontFamily: "var(--font-mono)",
+        fontSize: 10,
+        color: "var(--fg-3)",
+        textTransform: "uppercase",
+        letterSpacing: "0.04em",
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function ReceiptRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        color: "var(--fg-2)",
+      }}
+    >
+      <span>{label}</span>
+      <span style={{ color: "var(--fg-1)" }}>{value}</span>
+    </div>
+  );
+}
