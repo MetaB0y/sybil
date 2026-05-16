@@ -10,7 +10,6 @@ import {
 } from "@/components/chart-range-bar";
 import { MarketRail } from "@/components/market-rail";
 import { MarketThumb } from "@/components/market-thumb";
-import { MockValue } from "@/components/mock-value";
 import { OutcomeLegend } from "@/components/outcome-legend";
 import { PriceChart } from "@/components/price-chart";
 import {
@@ -244,11 +243,13 @@ function Header({
                 —
               </span>
             ) : (
-              <MockValue hint="NOT NOW — approximate at 2s FBA cadence; backend lacks created_at_height (OPEN_QUESTIONS #9)">
-                <span className="tabular" style={{ color: "var(--fg-2)" }}>
-                  ~{formatInt(stats.batchesExistedFor)}
-                </span>
-              </MockValue>
+              <span
+                className="tabular"
+                title="Approximate — counted from market age at the 2s batch cadence; an exact count needs a backend created_at_height."
+                style={{ color: "var(--fg-2)" }}
+              >
+                ~{formatInt(stats.batchesExistedFor)}
+              </span>
             )}
           </MetaStat>
         </div>
