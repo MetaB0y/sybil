@@ -7,7 +7,6 @@
  * (`fed-variations.jsx:128`).
  *
  * Mocked values shown here (all wrapped in <MockValue>):
- *  - traders joined (OPEN_QUESTIONS #7)
  *  - indicative price (#7)
  *  - indicative volume (#7)
  *  - imbalance label (#6)
@@ -15,25 +14,29 @@
  *
  * Real values:
  *  - circular countdown progress + batch number
+ *  - traders in this batch — polled open-batch unique placers
  *  - past-batch bar heights (matched volume)
  */
 
 import { MockValue } from "@/components/mock-value";
 import {
+  formatBatchSeconds,
   formatCompactDollars,
   formatProbability,
   parseNanos,
 } from "@/lib/format/nanos";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
 import { useOpenBatch } from "@/lib/market-detail/use-open-batch";
+import { useOpenBatchPlacers } from "@/lib/market-detail/use-open-batch-placers";
 import { selectRecentBlocks, useStore } from "@/lib/store";
 import { useBatchCountdown } from "./use-batch-countdown";
 
 const HERO_BATCH_COUNT = 24;
 
 export function BatchHero({ outcome }: { outcome: EventOutcome }) {
-  const { progress01, secondsLeft, latestHeight } = useBatchCountdown();
+  const { progress01, secondsLeftPrecise, latestHeight } = useBatchCountdown();
   const snap = useOpenBatch(outcome.marketId);
+  const placers = useOpenBatchPlacers(outcome.marketId);
   const recent = useStore(selectRecentBlocks);
 
   const batchNumber = latestHeight == null ? null : latestHeight + 1;
@@ -67,7 +70,10 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
 
       {/* Hero clock: large circular gauge + label block */}
       <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
-        <CircularCountdown progress01={progress01} secondsLeft={secondsLeft} />
+        <CircularCountdown
+          progress01={progress01}
+          countdown={formatBatchSeconds(secondsLeftPrecise)}
+        />
         <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
           <div
             style={{
@@ -111,12 +117,13 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
                 boxShadow: "0 0 6px var(--yes)",
               }}
             />
-            <MockValue hint="traders joined this batch — no prod-safe pending-orders endpoint (OPEN_QUESTIONS #7)">
-              <span style={{ color: "var(--fg-1)", fontWeight: 600 }}>
-                {snap.tradersInBatch}
-              </span>
-            </MockValue>
-            <span>traders joined</span>
+            <span
+              style={{ color: "var(--fg-1)", fontWeight: 600 }}
+              title="Distinct traders with a resting order in the open batch — updates ~1s"
+            >
+              {placers ?? "—"}
+            </span>
+            <span>traders in this batch</span>
           </div>
         </div>
       </div>
@@ -192,10 +199,10 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
 
 function CircularCountdown({
   progress01,
-  secondsLeft,
+  countdown,
 }: {
   progress01: number;
-  secondsLeft: number;
+  countdown: string;
 }) {
   const size = 88;
   const stroke = 4;
@@ -249,7 +256,7 @@ function CircularCountdown({
           fontVariantNumeric: "tabular-nums",
         }}
       >
-        0:{secondsLeft.toString().padStart(2, "0")}
+        {countdown}
       </div>
     </div>
   );

@@ -15,7 +15,7 @@ import {
   selectLatestBlock,
   useStore,
 } from "@/lib/store";
-import { formatInt } from "@/lib/format/nanos";
+import { formatBatchSeconds, formatInt } from "@/lib/format/nanos";
 
 const BLOCK_MS = 2000;
 
@@ -52,7 +52,7 @@ export function ActivityBatchChip() {
   if (latest == null) return null;
 
   const isLive = connection.state === "live";
-  const remainingSecs = ((1 - progress) * (BLOCK_MS / 1000)).toFixed(1);
+  const remainingSecs = formatBatchSeconds((1 - progress) * (BLOCK_MS / 1000));
   // The current batch is the *next* one to clear, i.e. latest.height + 1.
   const currentBatchNum = latest.height + 1;
 

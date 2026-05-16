@@ -79,7 +79,7 @@ export function DegenRail({ group }: { group: EventGroup }) {
         }}
       >
         Bet ${amountNum} on {side}
-        {group.isMultiOutcome ? ` · ${truncate(selected.label, 28)}` : ""}
+        {group.isMultiOutcome ? ` · ${selected.shortLabel}` : ""}
       </button>
       <div
         style={{
@@ -115,9 +115,4 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   );
-}
-
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max - 1).trimEnd() + "…";
 }

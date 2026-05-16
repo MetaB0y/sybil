@@ -13,6 +13,7 @@ import { MarketThumb } from "@/components/market-thumb";
 import { OutcomeLegend } from "@/components/outcome-legend";
 import { PriceChart } from "@/components/price-chart";
 import {
+  formatAge,
   formatCompactDollars,
   formatDate,
   formatInt,
@@ -49,32 +50,49 @@ export default function MarketDetailPage({
       style={{
         width: "100%",
         padding: "var(--space-6) var(--space-5) var(--space-9)",
-        display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) 420px",
+        display: "flex",
+        flexDirection: "column",
         gap: "var(--space-6)",
       }}
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
-        {marketQ.isPending && <Placeholder>loading market…</Placeholder>}
-        {marketQ.isError && (
-          <Placeholder error>error: {String(marketQ.error)}</Placeholder>
-        )}
+      {marketQ.isPending && <Placeholder>loading market…</Placeholder>}
+      {marketQ.isError && (
+        <Placeholder error>error: {String(marketQ.error)}</Placeholder>
+      )}
 
-        {market && (
-          <>
-            <Header marketId={marketId} market={market} />
-            <ChartSection
-              marketId={marketId}
-              history={history}
-              isPending={historyQ.isPending}
-            />
-            <DescriptionBlock market={market} />
-            <DiscussionPlaceholder />
-          </>
-        )}
-      </div>
+      {market && (
+        <>
+          {/* Header spans the full width; the chart/rail split sits below it. */}
+          <Header marketId={marketId} market={market} />
 
-      <MarketRail marketId={marketId} />
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1fr) 420px",
+              gap: "var(--space-6)",
+              alignItems: "start",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "var(--space-5)",
+              }}
+            >
+              <ChartSection
+                marketId={marketId}
+                history={history}
+                isPending={historyQ.isPending}
+              />
+              <DescriptionBlock market={market} />
+              <DiscussionPlaceholder />
+            </div>
+
+            <MarketRail marketId={marketId} />
+          </div>
+        </>
+      )}
     </main>
   );
 }
@@ -125,6 +143,15 @@ function Header({
         gridTemplateColumns: "56px 1fr",
         gap: "var(--space-4)",
         alignItems: "start",
+        // Full-bleed divider separating the header from the chart/rail split,
+        // mirroring `MarketHeader` in `fed-primitives.jsx:248`. Negative side
+        // margins cancel `<main>`'s padding so the rule spans edge-to-edge.
+        marginLeft: "calc(-1 * var(--space-5))",
+        marginRight: "calc(-1 * var(--space-5))",
+        paddingLeft: "var(--space-5)",
+        paddingRight: "var(--space-5)",
+        paddingBottom: "var(--space-5)",
+        borderBottom: "1px solid var(--border-1)",
       }}
     >
       <MarketThumb
@@ -178,32 +205,32 @@ function Header({
               <span>resolves {formatDate(resolvesMs)}</span>
             </>
           )}
-          <span style={{ color: "var(--fg-4)", marginLeft: "auto" }}>
-            #{market.market_id}
-          </span>
-          <span
-            style={{
-              color: isActive ? "var(--fg-3)" : "var(--warn)",
-            }}
-          >
-            {(market.status || "active").toUpperCase()}
-          </span>
         </div>
 
-        {/* Title */}
-        <h1
+        {/* Title + status pill */}
+        <div
           style={{
-            fontFamily: "var(--font-display)",
-            fontWeight: 600,
-            fontSize: "var(--fs-32)",
-            lineHeight: "var(--lh-32)",
-            letterSpacing: "var(--track-tight)",
-            margin: 0,
-            color: "var(--fg-1)",
+            display: "flex",
+            alignItems: "baseline",
+            flexWrap: "wrap",
+            gap: "var(--space-3)",
           }}
         >
-          {market.name}
-        </h1>
+          <h1
+            style={{
+              fontFamily: "var(--font-display)",
+              fontWeight: 600,
+              fontSize: "var(--fs-32)",
+              lineHeight: "var(--lh-32)",
+              letterSpacing: "var(--track-tight)",
+              margin: 0,
+              color: "var(--fg-1)",
+            }}
+          >
+            {market.name}
+          </h1>
+          <StatusPill status={market.status} isActive={isActive} />
+        </div>
 
         {/* 5-stat meta row, all scoped to this market. Only `batches` is an
             approximation (OPEN_QUESTIONS #9); vol / 24h / traders / liq are real. */}
@@ -237,20 +264,10 @@ function Header({
               {stats ? formatCompactDollars(stats.liquidityNanos) : "—"}
             </span>
           </MetaStat>
-          <MetaStat label="batches cleared">
-            {stats?.batchesExistedFor == null ? (
-              <span className="tabular" style={{ color: "var(--fg-2)" }}>
-                —
-              </span>
-            ) : (
-              <span
-                className="tabular"
-                title="Approximate — counted from market age at the 2s batch cadence; an exact count needs a backend created_at_height."
-                style={{ color: "var(--fg-2)" }}
-              >
-                ~{formatInt(stats.batchesExistedFor)}
-              </span>
-            )}
+          <MetaStat label="age">
+            <span className="tabular" style={{ color: "var(--fg-2)" }}>
+              {stats?.marketAgeMs == null ? "—" : formatAge(stats.marketAgeMs)}
+            </span>
           </MetaStat>
         </div>
       </div>
@@ -269,6 +286,38 @@ function MetaStat({
     <span style={{ display: "inline-flex", gap: 6 }}>
       <span style={{ color: "var(--fg-4)" }}>{label}</span>
       {children}
+    </span>
+  );
+}
+
+/**
+ * Small uppercase status chip shown beside the market title. `active` markets
+ * read muted; anything else (resolved / paused / cancelled) reads in the warn
+ * color so a non-tradeable market stands out.
+ */
+function StatusPill({
+  status,
+  isActive,
+}: {
+  status: string;
+  isActive: boolean;
+}) {
+  return (
+    <span
+      className="text-mono"
+      style={{
+        flexShrink: 0,
+        padding: "3px 8px",
+        borderRadius: "var(--radius-md)",
+        fontSize: "10px",
+        letterSpacing: "var(--track-wide)",
+        textTransform: "uppercase",
+        color: isActive ? "var(--fg-3)" : "var(--warn)",
+        background: isActive ? "var(--surface-1)" : "var(--warn-soft)",
+        border: `1px solid ${isActive ? "var(--border-2)" : "var(--warn-soft)"}`,
+      }}
+    >
+      {(status || "active").toUpperCase()}
     </span>
   );
 }

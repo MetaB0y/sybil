@@ -6,19 +6,18 @@
  *
  * Live data:
  *  - countdown / progress: REAL (driven by the 2s block cadence)
- *  - batch number: REAL (latest committed height + 1)
- *  - "N traders joined" counter: MOCK — sourced from useOpenBatch's
- *    mockTradersInOpenBatch (OPEN_QUESTIONS #7)
+ *  - "N traders in this batch": REAL — polled open-batch unique placers
+ *    (see use-open-batch-placers.ts)
  */
 
-import { MockValue } from "@/components/mock-value";
-import { useOpenBatch } from "@/lib/market-detail/use-open-batch";
+import { formatBatchSeconds } from "@/lib/format/nanos";
+import { useOpenBatchPlacers } from "@/lib/market-detail/use-open-batch-placers";
 import { useBatchCountdown } from "./use-batch-countdown";
 
 export function NextBatchBanner({ marketId }: { marketId: number }) {
-  const { progress01, secondsLeft, latestHeight } = useBatchCountdown();
-  const snap = useOpenBatch(marketId);
-  const batchNumber = latestHeight == null ? null : latestHeight + 1;
+  const { progress01, secondsLeftPrecise } = useBatchCountdown();
+  const placers = useOpenBatchPlacers(marketId);
+  const countdown = formatBatchSeconds(secondsLeftPrecise);
 
   return (
     <div
@@ -53,7 +52,7 @@ export function NextBatchBanner({ marketId }: { marketId: number }) {
           flexShrink: 0,
         }}
       >
-        0:{secondsLeft.toString().padStart(2, "0")}
+        {countdown}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div
@@ -67,17 +66,6 @@ export function NextBatchBanner({ marketId }: { marketId: number }) {
           }}
         >
           ● next trade in
-          {batchNumber != null && (
-            <span
-              style={{
-                marginLeft: 8,
-                color: "var(--fg-3)",
-                fontVariantNumeric: "tabular-nums",
-              }}
-            >
-              batch #{batchNumber.toLocaleString()}
-            </span>
-          )}
         </div>
         <div
           style={{
@@ -90,7 +78,7 @@ export function NextBatchBanner({ marketId }: { marketId: number }) {
             fontVariantNumeric: "tabular-nums",
           }}
         >
-          {secondsLeft} {secondsLeft === 1 ? "second" : "seconds"}
+          {countdown}s
         </div>
         <div
           style={{
@@ -113,12 +101,13 @@ export function NextBatchBanner({ marketId }: { marketId: number }) {
               boxShadow: "0 0 6px var(--yes)",
             }}
           />
-          <MockValue hint="traders joined this batch — no prod-safe pending-orders endpoint (OPEN_QUESTIONS #7)">
-            <span style={{ color: "var(--fg-1)", fontWeight: 600 }}>
-              {snap.tradersInBatch}
-            </span>
-          </MockValue>
-          <span>traders joined</span>
+          <span
+            style={{ color: "var(--fg-1)", fontWeight: 600 }}
+            title="Distinct traders with a resting order in the open batch — updates ~1s"
+          >
+            {placers ?? "—"}
+          </span>
+          <span>traders in this batch</span>
         </div>
       </div>
       <div

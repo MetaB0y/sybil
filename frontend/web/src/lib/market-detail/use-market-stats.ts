@@ -12,7 +12,7 @@ import type { MarketStats } from "./types";
  * loading/error UI.
  *
  * Re-derives when either the market metadata or the latest block changes —
- * "batches existed for" ticks every block.
+ * market age ticks every block.
  */
 export function useMarketStats(marketId: number): {
   stats: MarketStats | null;

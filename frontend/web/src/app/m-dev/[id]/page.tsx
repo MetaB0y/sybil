@@ -15,6 +15,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MockValue } from "@/components/mock-value";
 import {
+  formatAge,
   formatCompactDollars,
   formatDollars,
   formatInt,
@@ -156,15 +157,9 @@ function MarketStatsPanel({ marketId }: { marketId: number }) {
             }
           />
           <Stat
-            label="batches existed for"
+            label="age"
             value={
-              stats.batchesExistedFor == null ? (
-                "—"
-              ) : (
-                <MockValue hint="NOT NOW — approximate at 2s FBA cadence; backend lacks created_at_height (OPEN_QUESTIONS #9)">
-                  ~{formatInt(stats.batchesExistedFor)}
-                </MockValue>
-              )
+              stats.marketAgeMs == null ? "—" : formatAge(stats.marketAgeMs)
             }
           />
         </Grid>

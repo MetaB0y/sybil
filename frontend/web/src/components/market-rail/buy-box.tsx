@@ -28,7 +28,7 @@ import {
   useSetConnectModalOpen,
 } from "@/lib/account/use-account";
 import { usePortfolio } from "@/lib/account/use-portfolio";
-import { formatDollars, parseNanos } from "@/lib/format/nanos";
+import { formatBatchSeconds, formatDollars, parseNanos } from "@/lib/format/nanos";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
 import { useBatchCountdown } from "./use-batch-countdown";
 
@@ -48,7 +48,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
   const session = useAccountSession();
   const openConnectModal = useSetConnectModalOpen();
   const qc = useQueryClient();
-  const { secondsLeft, latestHeight } = useBatchCountdown();
+  const { secondsLeftPrecise, latestHeight } = useBatchCountdown();
   const batchNumber = latestHeight == null ? null : latestHeight + 1;
   const portfolio = usePortfolio(session?.accountId ?? null);
 
@@ -612,8 +612,8 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
         >
           <span>queued for batch</span>
           <span style={{ color: "var(--accent)" }}>
-            #{batchNumber == null ? "—" : batchNumber.toLocaleString()} · 0:
-            {secondsLeft.toString().padStart(2, "0")}
+            #{batchNumber == null ? "—" : batchNumber.toLocaleString()} ·{" "}
+            {formatBatchSeconds(secondsLeftPrecise)}s
           </span>
         </div>
       </div>

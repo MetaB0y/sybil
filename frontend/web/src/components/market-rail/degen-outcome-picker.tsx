@@ -88,7 +88,7 @@ export function DegenOutcomePicker({
           }}
           title={selected.label}
         >
-          {selected.label}
+          {selected.shortLabel}
         </span>
         <span
           style={{
@@ -198,8 +198,9 @@ export function DegenOutcomePicker({
                       fontSize: 13,
                       color: "var(--fg-1)",
                     }}
+                    title={o.label}
                   >
-                    {o.label}
+                    {o.shortLabel}
                   </span>
                   <span
                     style={{

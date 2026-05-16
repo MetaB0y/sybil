@@ -5,8 +5,9 @@
  * mode tabs and dispatches to the appropriate rail. Replaces the old
  * `BatchTheater` component in this slot.
  *
- * The container is sticky so the rail stays in view as the user scrolls
- * the long left column (chart + description + rules + discussion).
+ * The rail is a plain column that scrolls with the rest of the page — it is
+ * NOT a sticky/independently-scrolling panel. Matches `V2BatchTheater` in
+ * `frontend/handoff/data/fed-variations.jsx:99`.
  */
 
 import { useEventGroup } from "@/lib/market-detail/use-event-group";
@@ -22,17 +23,9 @@ export function MarketRail({ marketId }: { marketId: number }) {
   return (
     <aside
       style={{
-        position: "sticky",
-        top: 72,
-        alignSelf: "start",
         display: "flex",
         flexDirection: "column",
         gap: 14,
-        // Cap the height so internal scrolling can engage if the rail ever
-        // grows past the viewport (Pro mode + multi-outcome + open disclosure).
-        maxHeight: "calc(100vh - 88px)",
-        overflowY: "auto",
-        paddingRight: 2,
       }}
     >
       <ModeTabs value={mode} onChange={setMode} />

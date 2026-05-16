@@ -21,14 +21,11 @@ export type MarketStats = {
   /** Liquidity proxy in nanos (mocked — OPEN_QUESTIONS #1). */
   liquidityNanos: bigint;
   /**
-   * Batches the market has existed for. Real arithmetic but approximate
-   * because backend only exposes `created_at_ms`, not `created_at_height`
-   * (OPEN_QUESTIONS #9). `null` when `created_at_ms` is missing or we
-   * don't have a latest block yet.
+   * Market age in milliseconds — `latestBlock.timestamp_ms − created_at_ms`.
+   * `null` when `created_at_ms` is missing or there's no latest block yet.
+   * Display via `formatAge`.
    */
-  batchesExistedFor: number | null;
-  /** `true` when `batchesExistedFor` is the timestamp-based approximation. */
-  batchesExistedIsApproximate: boolean;
+  marketAgeMs: number | null;
   mocked: {
     volume24h: boolean;
     traders: boolean;

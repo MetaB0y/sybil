@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { formatBatchSeconds } from "@/lib/format/nanos";
 import { selectConnection, selectLatestBlock, useStore } from "@/lib/store";
 
 const BLOCK_MS = 2000; // SYBIL_BLOCK_INTERVAL_MS; tracks the prod cadence.
@@ -51,7 +52,7 @@ export function BatchPill() {
 
   const isLive = connection.state === "live";
   const remainingMs = Math.max(0, BLOCK_MS - progress * BLOCK_MS);
-  const remainingSecs = (remainingMs / 1000).toFixed(1);
+  const remainingSecs = formatBatchSeconds(remainingMs / 1000);
   const remainingPct = 100 - progress * 100;
 
   const accent = isLive ? "var(--accent)" : "var(--warn)";

@@ -4,6 +4,7 @@
  * Shared 2s batch countdown helper. Returns:
  *   - `progress01` — 0..1 linearly across the current batch window
  *   - `secondsLeft` — display-friendly integer (0..2)
+ *   - `secondsLeftPrecise` — float seconds remaining; feed `formatBatchSeconds`
  *   - `latestHeight` — committed block height (the open batch is +1)
  *
  * Animation pattern mirrors `frontend/web/src/components/batch-theater.tsx`:
@@ -19,6 +20,7 @@ const BATCH_MS = 2000;
 export function useBatchCountdown(): {
   progress01: number;
   secondsLeft: number;
+  secondsLeftPrecise: number;
   latestHeight: number | null;
 } {
   const latest = useStore(selectLatestBlock);
@@ -48,11 +50,13 @@ export function useBatchCountdown(): {
     };
   }, []);
 
-  const secondsLeft = Math.max(0, Math.ceil((1 - progress01) * (BATCH_MS / 1000)));
+  const secondsLeftPrecise = Math.max(0, (1 - progress01) * (BATCH_MS / 1000));
+  const secondsLeft = Math.ceil(secondsLeftPrecise);
 
   return {
     progress01,
     secondsLeft,
+    secondsLeftPrecise,
     latestHeight: latest?.height ?? null,
   };
 }

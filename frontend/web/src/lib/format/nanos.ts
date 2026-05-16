@@ -109,6 +109,29 @@ export const formatCompactDollars = (v: NanosInput): string => {
   return `${sign}$${dollars}`;
 };
 
+/**
+ * Format a batch countdown as one-decimal seconds (e.g. "1.8", "0.3").
+ *
+ * The whole app runs a 2s batch cadence — an mm:ss format would only ever
+ * cycle 0:00–0:02 and visibly jump. One decimal is the honest, smooth
+ * representation; this is the single formatter every batch clock shares.
+ */
+export const formatBatchSeconds = (seconds: number): string =>
+  Math.max(0, seconds).toFixed(1);
+
+/**
+ * Format an elapsed duration as a compact human age — "30s", "45m", "19h",
+ * "3d" (largest whole unit only). Pure: the caller passes elapsed ms (e.g.
+ * `latestBlock.timestamp_ms − created_at_ms`) so render stays deterministic.
+ */
+export const formatAge = (elapsedMs: number): string => {
+  const s = Math.max(0, Math.floor(elapsedMs / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86_400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86_400)}d`;
+};
+
 /** Format an epoch-ms timestamp as "MMM D, YYYY" in en-US. */
 export const formatDate = (epochMs: number | null | undefined): string => {
   if (epochMs == null) return "—";

@@ -23,14 +23,17 @@ import { useMemo } from "react";
 import { useMarketsList } from "@/lib/markets/use-markets";
 import { selectPricesByMarketId, useStore } from "@/lib/store";
 import { mockDelta } from "@/lib/mock";
+import { deriveShortLabels } from "@/lib/market-detail/outcome-labels";
 
 export type EventOutcome = {
   marketId: number;
-  /** Display label for this outcome inside the picker. Today this is the
-   *  market's `name` field — for multi-outcome Polymarket events the mirror
-   *  sets `name` to the outcome description (e.g. "25bp cut"). For sybil-native
-   *  binaries the name is just the market title. */
+  /** Full label for this outcome — the market's `name` field. For multi-outcome
+   *  Polymarket events the mirror sets `name` to the full outcome question. */
   label: string;
+  /** `label` with the question text shared by all siblings stripped, so the
+   *  picker/CTA show "(LOW) $70" rather than the whole sentence. Equals
+   *  `label` for singleton (binary) groups. See `outcome-labels.ts`. */
+  shortLabel: string;
   yesPriceNanos: bigint | null;
   noPriceNanos: bigint | null;
   /** YES price in integer cents (0..100), or `null` while prices haven't
@@ -68,7 +71,10 @@ export function useEventGroup(marketId: number): {
             ?.markets ?? [currentMarket]
         : [currentMarket];
 
-    const outcomes: EventOutcome[] = siblings.map((m) => {
+    // Short labels need the full sibling set — derive once, index-aligned.
+    const shortLabels = deriveShortLabels(siblings.map((m) => m.name));
+
+    const outcomes: EventOutcome[] = siblings.map((m, i) => {
       const price = prices[m.market_id];
       const yesNanos = price?.yes ?? null;
       const noNanos = price?.no ?? null;
@@ -76,6 +82,7 @@ export function useEventGroup(marketId: number): {
       return {
         marketId: m.market_id,
         label: m.name,
+        shortLabel: shortLabels[i] ?? m.name,
         yesPriceNanos: yesNanos,
         noPriceNanos: noNanos,
         yesCents,
