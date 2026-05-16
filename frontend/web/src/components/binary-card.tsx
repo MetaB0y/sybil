@@ -86,10 +86,8 @@ export function BinaryCard({ market, price }: Props) {
       />
       <SideList
         market={market}
-        yesCents={yesCents}
         noCents={noCents}
         hasPrice={!!price}
-        yesDelta={delta24Cents}
         noDelta={noDelta24Cents}
       />
       <FooterRow market={market} />
@@ -269,17 +267,13 @@ function FeaturedPriceRow({
 
 function SideList({
   market,
-  yesCents,
   noCents,
   hasPrice,
-  yesDelta,
   noDelta,
 }: {
   market: Market;
-  yesCents: string;
   noCents: string;
   hasPrice: boolean;
-  yesDelta: number | null;
   noDelta: number | null;
 }) {
   const volNanos = market.volume_nanos ? BigInt(market.volume_nanos) : 0n;
@@ -294,20 +288,15 @@ function SideList({
         overflow: "hidden",
       }}
     >
-      <SideRow
-        side="Yes"
-        cents={yesCents}
-        centsColor={deltaTone(yesDelta, hasPrice)}
-        delta={yesDelta}
-        vol={vol}
-        first
-      />
+      {/* Featured panel already shows Yes — mirror MultiCard's
+          "featured + the others" rule and list only the No outcome. */}
       <SideRow
         side="No"
         cents={noCents}
         centsColor={deltaTone(noDelta, hasPrice)}
         delta={noDelta}
         vol={vol}
+        first
       />
     </div>
   );
