@@ -12,6 +12,10 @@
  *              outcome on a shared 0–100% axis, no fill — their prices are
  *              uncorrelated, so a stacked partition would be misleading.
  *
+ * The x-axis is proportional to wall-clock time: a point's x position is
+ * `(t - t0) / span`, so a 4h gap is drawn wide and back-to-back 2s batches
+ * narrow. Ticks fall at even time intervals across the window.
+ *
  * Only the outcomes passed in `drawn` are plotted (the legend caps this at
  * 8). Live ticks come from the recent-block ring buffer — the line advances
  * every 2s batch on a normal render, no imperative chart lifecycle.
@@ -73,7 +77,13 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs }: Props) {
     );
   }
 
-  const stepX = W / (N - 1);
+  const t0 = series.times[0]!;
+  const lastIdx = N - 1;
+  const nowMs = series.times[lastIdx]!;
+  const span = Math.max(1, nowMs - t0);
+
+  // x is proportional to time, not to point index.
+  const xs = series.times.map((t) => ((t - t0) / span) * W);
   const yOf = (v: number) => (1 - v) * PLOT_H;
 
   // Per-mode geometry. `stacked` re-normalizes across the shown outcomes;
@@ -95,40 +105,47 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs }: Props) {
         bottom.push(below);
         top.push(below + self);
       }
-      return { color, fill: bandPath(top, bottom, stepX, yOf), line: linePath(top, stepX, yOf), filled: true };
+      return { color, fill: bandPath(top, bottom, xs, yOf), line: linePath(top, xs, yOf), filled: true };
     }
     if (mode === "area") {
       return {
         color,
-        fill: bandPath(row, new Array(N).fill(0), stepX, yOf),
-        line: linePath(row, stepX, yOf),
+        fill: bandPath(row, new Array(N).fill(0), xs, yOf),
+        line: linePath(row, xs, yOf),
         filled: true,
       };
     }
     // lines — no fill
-    return { color, fill: "", line: linePath(row, stepX, yOf), filled: false };
+    return { color, fill: "", line: linePath(row, xs, yOf), filled: false };
   });
 
-  const lastIdx = N - 1;
-  const nowMs = series.times[lastIdx]!;
-  const spanMs = nowMs - series.times[0]!;
-
-  const xTickIdx: number[] = [];
-  const count = Math.min(X_TICKS, N);
-  for (let i = 0; i < count; i++) {
-    xTickIdx.push(Math.round((i * lastIdx) / (count - 1)));
-  }
+  // Ticks at even time intervals across the window.
+  const count = Math.max(2, Math.min(X_TICKS, N));
+  const xTicks = Array.from({ length: count }, (_, i) => {
+    const frac = i / (count - 1);
+    return { frac, t: t0 + frac * span };
+  });
 
   const onMove = (e: React.MouseEvent) => {
     const el = containerRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    const x = e.clientX - r.left;
-    const idx = Math.max(0, Math.min(lastIdx, Math.round((x / r.width) * lastIdx)));
-    setHover(idx);
+    const frac = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    const targetT = t0 + frac * span;
+    // Nearest point in time to the cursor.
+    let best = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < N; i++) {
+      const d = Math.abs(series.times[i]! - targetT);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    setHover(best);
   };
 
-  const hoverFrac = hover == null ? 0 : hover / lastIdx;
+  const hoverFrac = hover == null ? 0 : xs[hover]! / W;
 
   return (
     <div style={{ width: "100%" }}>
@@ -156,11 +173,11 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs }: Props) {
               strokeDasharray={y === 0 || y === 1 ? undefined : "2 4"}
             />
           ))}
-          {xTickIdx.map((idx) => (
+          {xTicks.map((tick) => (
             <line
-              key={`x${idx}`}
-              x1={idx * stepX}
-              x2={idx * stepX}
+              key={`x${tick.frac}`}
+              x1={tick.frac * W}
+              x2={tick.frac * W}
               y1={0}
               y2={PLOT_H}
               stroke="rgba(255,255,255,0.04)"
@@ -187,8 +204,8 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs }: Props) {
           ))}
           {hover != null && (
             <line
-              x1={hover * stepX}
-              x2={hover * stepX}
+              x1={xs[hover]!}
+              x2={xs[hover]!}
               y1={0}
               y2={PLOT_H}
               stroke="rgba(255,255,255,0.4)"
@@ -299,21 +316,21 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs }: Props) {
           color: "var(--fg-4)",
         }}
       >
-        {xTickIdx.map((idx, i) => {
-          const frac = idx / lastIdx;
-          const align = i === 0 ? "0" : i === xTickIdx.length - 1 ? "-100%" : "-50%";
+        {xTicks.map((tick, i) => {
+          const align =
+            i === 0 ? "0" : i === xTicks.length - 1 ? "-100%" : "-50%";
           return (
             <span
-              key={idx}
+              key={tick.frac}
               style={{
                 position: "absolute",
                 top: 6,
-                left: `${frac * 100}%`,
+                left: `${tick.frac * 100}%`,
                 transform: `translateX(${align})`,
                 whiteSpace: "nowrap",
               }}
             >
-              {formatAxisTime(series.times[idx]!, spanMs)}
+              {formatAxisTime(tick.t, span)}
             </span>
           );
         })}
@@ -322,22 +339,26 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs }: Props) {
   );
 }
 
-/** Axis label — clock for intraday spans, date for longer windows. */
+/** Axis label — resolution scales with the window: seconds for a couple of
+ *  minutes, clock for intraday, date for longer spans. */
 function formatAxisTime(ms: number, spanMs: number): string {
   const d = new Date(ms);
-  if (spanMs <= 36 * 3600_000) {
-    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  if (spanMs <= 10 * 60_000) {
+    return `${hh}:${mm}:${String(d.getSeconds()).padStart(2, "0")}`;
   }
+  if (spanMs <= 36 * 3600_000) return `${hh}:${mm}`;
   const mon = d.toLocaleString("en-US", { month: "short" });
   if (spanMs <= 200 * 24 * 3600_000) return `${mon} ${d.getDate()}`;
   return `${mon} '${String(d.getFullYear()).slice(2)}`;
 }
 
-/** Path of the top edge only — `M`/`L` along the value array. */
-function linePath(vals: number[], stepX: number, yOf: (v: number) => number): string {
+/** Path of the top edge only — `M`/`L` along `(xs[i], yOf(vals[i]))`. */
+function linePath(vals: number[], xs: number[], yOf: (v: number) => number): string {
   let d = "";
   for (let i = 0; i < vals.length; i++) {
-    d += `${i === 0 ? "M" : "L"}${(i * stepX).toFixed(1)} ${yOf(vals[i]!).toFixed(1)} `;
+    d += `${i === 0 ? "M" : "L"}${xs[i]!.toFixed(1)} ${yOf(vals[i]!).toFixed(1)} `;
   }
   return d;
 }
@@ -346,15 +367,15 @@ function linePath(vals: number[], stepX: number, yOf: (v: number) => number): st
 function bandPath(
   top: number[],
   bottom: number[],
-  stepX: number,
+  xs: number[],
   yOf: (v: number) => number,
 ): string {
   let d = "";
   for (let i = 0; i < top.length; i++) {
-    d += `${i === 0 ? "M" : "L"}${(i * stepX).toFixed(1)} ${yOf(top[i]!).toFixed(1)} `;
+    d += `${i === 0 ? "M" : "L"}${xs[i]!.toFixed(1)} ${yOf(top[i]!).toFixed(1)} `;
   }
   for (let i = bottom.length - 1; i >= 0; i--) {
-    d += `L${(i * stepX).toFixed(1)} ${yOf(bottom[i]!).toFixed(1)} `;
+    d += `L${xs[i]!.toFixed(1)} ${yOf(bottom[i]!).toFixed(1)} `;
   }
   return `${d}Z`;
 }
