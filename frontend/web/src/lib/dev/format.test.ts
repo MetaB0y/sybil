@@ -6,8 +6,10 @@ import {
   pctWidth,
   dollars,
   moneySigned,
+  dollarsFloat,
   fmtInt,
   shortRoot,
+  shortTime,
 } from "./format";
 
 describe("dev/format", () => {
@@ -48,5 +50,16 @@ describe("dev/format", () => {
   it("shortRoot takes the first 8 chars", () => {
     expect(shortRoot("abcdef0123456789")).toBe("abcdef01");
     expect(shortRoot(null)).toBe("...");
+  });
+  it("dollarsFloat formats a plain dollar amount with grouping", () => {
+    expect(dollarsFloat(1234.7)).toBe("1,235");
+    expect(dollarsFloat(0)).toBe("0");
+    expect(dollarsFloat(null)).toBe("0");
+  });
+  it("shortTime returns - for falsy and a string for valid input", () => {
+    expect(shortTime(null)).toBe("-");
+    expect(shortTime(0)).toBe("-");
+    expect(typeof shortTime(1_700_000_000_000)).toBe("string");
+    expect(shortTime(1_700_000_000_000)).not.toBe("-");
   });
 });

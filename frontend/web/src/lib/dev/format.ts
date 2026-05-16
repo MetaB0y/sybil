@@ -25,6 +25,11 @@ export function fmtProb(v: Num): string {
   return (x * 100).toFixed(1) + "%";
 }
 
+/**
+ * Format a 0-1 ratio as a percentage. Returns "-" for zero or missing,
+ * treating zero as absent data. Use `fmtProb` instead when zero is a
+ * meaningful value (e.g. a genuine 0.0% probability).
+ */
 export function fmtPct(v: Num): string {
   const x = n(v);
   if (!x || Number.isNaN(x)) return "-";
