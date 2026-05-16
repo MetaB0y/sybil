@@ -90,8 +90,12 @@ function laneFor(
  *                the right edge so the axis ends at the present, not at the
  *                last point that happens to exist.
  */
+/** Probability shown before a market's first clearing — the uninformed
+ *  50/50 prior. Holding it flat makes the market's start a visible jump. */
+const PRE_START = 0.5;
+
 export function buildChartSeries(
-  outcomes: { marketId: number; yesPriceNanos: bigint | null }[],
+  outcomes: { marketId: number }[],
   byMarket: Map<number, PricePoint[]>,
   recentBlocks: Block[],
   sinceMs: number | null,
@@ -131,20 +135,17 @@ export function buildChartSeries(
     return { times: [], raw: outcomes.map(() => []), hasData };
   }
 
-  // Forward-fill each lane onto the grid; back-fill before its first point so
-  // lines have no holes; a lane with no history falls back to current price.
-  const raw: number[][] = lanes.map((lane, k) => {
-    const fallback =
-      outcomes[k]?.yesPriceNanos != null
-        ? Number(outcomes[k]!.yesPriceNanos) / 1e9
-        : 0;
-    if (lane.length === 0) return times.map(() => fallback);
+  // Forward-fill each lane onto the grid. Grid times before the lane's first
+  // real clearing — the pre-start / server-down period — sit at the 50/50
+  // prior, so the market's first price reads as a clean jump off 50%.
+  const raw: number[][] = lanes.map((lane) => {
+    if (lane.length === 0) return times.map(() => PRE_START);
     const row: number[] = [];
     let cursor = 0;
     for (const t of times) {
       while (cursor + 1 < lane.length && lane[cursor + 1]!.t <= t) cursor++;
       const pt = lane[cursor]!;
-      row.push(pt.t <= t ? pt.v : lane[0]!.v);
+      row.push(pt.t <= t ? pt.v : PRE_START);
     }
     return row;
   });
