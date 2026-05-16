@@ -3,27 +3,22 @@
  * doesn't expose yet. Every consumer pulls from this single module so
  * there's one delete-site when OPEN_QUESTIONS #3–#6 land.
  *
- * - All-time stats (#3): handoff-equivalent constants, replaced when a
- *   /v1/activity/overview rollup endpoint exists.
+ * - 24h pulse-strip deltas (#3): mocked ±% vs prior 24h — see
+ *   MOCK_24H_DELTAS below.
  * - Per-market welfare (#4): proportional split of block-level welfare.
  * - Per-market placed/matched (#5): proportional split of block counts.
  * - Per-market imbalance (#6): deterministic hash → ±10% basis points.
  */
 
 /**
- * Handoff-equivalent last-24h figures. Used directly by <PulseStrip> on the
- * styled /activity page — at 2s batch cadence we can't compute a real 24h
- * window client-side (would need a backend rollup endpoint, OPEN_QUESTIONS #3).
- * Each field is shown with a <MockValue> wrap so the placeholder is visible.
+ * Mocked ±% deltas for the 24h pulse strip — change vs the prior 24h. The
+ * `/v1/activity/overview` response has no `prior_24h` bucket and the backend
+ * trackers keep only ~25 hourly buckets, so a real prior-window comparison
+ * needs a backend change. The strip wraps these in a <MockValue> pill.
  */
-export const MOCK_24H = {
-  matchedVolume: "$4.82M",
+export const MOCK_24H_DELTAS = {
   matchedVolumeDeltaPct: 12.4,
-  traders: 3_214,
   tradersDeltaPct: 6.1,
-  ordersPlaced: 58_912,
-  ordersMatched: 47_209,
-  ordersUnmatched: 11_703,
 };
 
 /**

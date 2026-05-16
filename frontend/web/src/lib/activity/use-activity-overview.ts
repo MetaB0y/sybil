@@ -1,38 +1,32 @@
 /**
- * Hook for the Activity page hero + 24h pulse strip.
+ * Hook for the Activity page hero + 24h pulse strip. Both blocks come from
+ * `GET /v1/activity/overview` — the `all_time` and `last_24h` buckets.
  *
- * - All-time block: matched volume, active traders and placed / matched /
- *   unmatched orders are real — `GET /v1/activity/overview` (`all_time`
- *   bucket). `totalBatches` = latestBlock.height; `liveMarkets` = active
- *   markets in /v1/markets/summary. Only genesis age stays mocked.
+ * Every figure is real and reads `"—"` / `null` until the first response
+ * lands. The hero's genesis age and the pulse strip's ±% deltas are the
+ * only mocked values — the overview response has no `prior_24h` bucket.
  *
- * - Last-24h and prior-24h: derived from whatever blocks the store has.
- *   The result is partial — at 60s cadence a full 24h is ~1440 blocks and
- *   we only carry 80 in the ring buffer. The UI surfaces `blockCount` so we
- *   can be honest ("based on N blocks").
+ * `last_24h` equals `all_time` while the chain is younger than 24h (it runs
+ * in-memory and resets on redeploy) — correct, not a bug.
  */
 
 "use client";
 
-import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
+import type { components } from "../api/schema";
 import { formatCompactDollars, parseNanos } from "../format/nanos";
-import {
-  selectLatestBlock,
-  selectRecentBlocks,
-  useStore,
-} from "../store";
-import { deriveWindowedStats } from "./derive-overview";
+import { selectLatestBlock, useStore } from "../store";
 import { MOCK_GENESIS_AGE } from "./mocks";
-import type { ActivityOverview, AllTimeStats, WindowStats } from "./types";
+import type { ActivityOverview, AllTimeStats, Last24hStats } from "./types";
 
 export type UseActivityOverviewResult = ActivityOverview & {
   isLoading: boolean;
 };
 
+type OverviewBucket = components["schemas"]["OverviewBucketResponse"];
+
 export function useActivityOverview(): UseActivityOverviewResult {
-  const recentBlocks = useStore(selectRecentBlocks);
   const latestBlock = useStore(selectLatestBlock);
 
   const summaryQ = useQuery({
@@ -45,7 +39,7 @@ export function useActivityOverview(): UseActivityOverviewResult {
     staleTime: 60_000,
   });
 
-  // All-time hero numbers — slow-moving, so a lazy poll is plenty.
+  // All-time + 24h numbers — slow-moving, so a lazy poll is plenty.
   const overviewQ = useQuery({
     queryKey: ["activity-overview"],
     queryFn: async () => {
@@ -56,57 +50,46 @@ export function useActivityOverview(): UseActivityOverviewResult {
     refetchInterval: 10_000,
   });
 
-  // Anchor the window to the latest block's timestamp, not wall-clock. Keeps
-  // the rollup stable across re-renders and matches the data we actually have.
-  // Until the first block arrives, both windows are empty — that's correct,
-  // the page hasn't hydrated yet.
-  const { last24h, prior24h } = useMemo(() => {
-    if (latestBlock == null) {
-      return {
-        last24h: emptyWindow(),
-        prior24h: emptyWindow(),
-      };
-    }
-    return deriveWindowedStats(recentBlocks, latestBlock.timestamp_ms);
-  }, [recentBlocks, latestBlock]);
-
   const liveMarkets = summaryQ.data
     ? summaryQ.data.filter((m) => m.status === "active").length
     : 0;
 
-  // Real all-time figures from /v1/activity/overview. `null` / "—" until the
-  // first response lands so the hero never flashes a stale mock as if real.
+  // Real figures from /v1/activity/overview. `null` / "—" until the first
+  // response lands, so the page never flashes a stale mock as if real.
   const ov = overviewQ.data;
   const allTime: AllTimeStats = {
-    matchedVolume: ov
-      ? formatCompactDollars(parseNanos(ov.all_time.total_volume_nanos ?? 0))
-      : "—",
-    traders: ov ? (ov.all_time.unique_traders ?? 0) : null,
-    ordersPlaced: ov ? (ov.all_time.orders?.placed ?? 0) : null,
-    ordersMatched: ov ? (ov.all_time.orders?.matched ?? 0) : null,
-    ordersUnmatched: ov ? (ov.all_time.orders?.unmatched ?? 0) : null,
+    ...bucketStats(ov?.all_time),
     totalBatches: latestBlock?.height ?? 0,
     liveMarkets,
     genesisAge: MOCK_GENESIS_AGE,
   };
+  const last24h: Last24hStats = bucketStats(ov?.last_24h);
 
   return {
     allTime,
     last24h,
-    prior24h,
     isLoading: summaryQ.isPending || overviewQ.isPending,
   };
 }
 
-function emptyWindow(): WindowStats {
+/** Shape one `/v1/activity/overview` bucket into display stats. */
+function bucketStats(bucket: OverviewBucket | undefined): Last24hStats {
+  if (!bucket) {
+    return {
+      matchedVolume: "—",
+      traders: null,
+      ordersPlaced: null,
+      ordersMatched: null,
+      ordersUnmatched: null,
+    };
+  }
   return {
-    matchedVolumeNanos: 0n,
-    ordersPlaced: 0,
-    ordersMatched: 0,
-    ordersUnmatched: 0,
-    traders: 0,
-    blockCount: 0,
-    firstTimestampMs: null,
-    lastTimestampMs: null,
+    matchedVolume: formatCompactDollars(
+      parseNanos(bucket.total_volume_nanos ?? 0)
+    ),
+    traders: bucket.unique_traders ?? 0,
+    ordersPlaced: bucket.orders?.placed ?? 0,
+    ordersMatched: bucket.orders?.matched ?? 0,
+    ordersUnmatched: bucket.orders?.unmatched ?? 0,
   };
 }

@@ -49,34 +49,24 @@ export type BatchMarketRow = {
   mocked: MarketRowMockFlags;
 };
 
-/** Time-window rollup (real, derived from blocks the store has seen). */
-export type WindowStats = {
-  matchedVolumeNanos: bigint;
-  ordersPlaced: number;
-  ordersMatched: number;
-  ordersUnmatched: number;
-  /** Distinct account_ids across all fills in this window. */
-  traders: number;
-  /** How many blocks contributed — for "based on N blocks" annotations. */
-  blockCount: number;
-  /** Earliest / latest timestamps of the blocks that contributed, in epoch ms.
-   *  `null` when the window is empty. Used to label what we *actually* have
-   *  (e.g. "last 2m 34s") when the buffer can't supply a full 24h. */
-  firstTimestampMs: number | null;
-  lastTimestampMs: number | null;
+/**
+ * The five count/volume figures shared by the Activity hero and the 24h
+ * pulse strip. Every field is real — `GET /v1/activity/overview` — and
+ * reads `"—"` / `null` until the first response lands.
+ */
+export type Last24hStats = {
+  matchedVolume: string; // formatted; "—" until loaded
+  traders: number | null; // null until loaded
+  ordersPlaced: number | null; // null until loaded
+  ordersMatched: number | null; // null until loaded
+  ordersUnmatched: number | null; // null until loaded
 };
 
 /**
- * All-time stats for the Activity hero. Every count is real —
- * `GET /v1/activity/overview` (`all_time` bucket) — and reads `"—"` / `null`
- * until the first response lands. `genesisAge` is the one mocked field.
+ * All-time stats for the Activity hero — the shared figures plus three
+ * hero-only fields. `genesisAge` is the one mocked field.
  */
-export type AllTimeStats = {
-  matchedVolume: string; // real — formatted; "—" until loaded
-  traders: number | null; // real — null until loaded
-  ordersPlaced: number | null; // real — null until loaded
-  ordersMatched: number | null; // real — null until loaded
-  ordersUnmatched: number | null; // real — null until loaded
+export type AllTimeStats = Last24hStats & {
   totalBatches: number; // real — from latestBlock.height
   liveMarkets: number; // real — from /v1/markets/summary status count
   genesisAge: string; // mocked — not tracked
@@ -84,6 +74,5 @@ export type AllTimeStats = {
 
 export type ActivityOverview = {
   allTime: AllTimeStats;
-  last24h: WindowStats;
-  prior24h: WindowStats;
+  last24h: Last24hStats;
 };

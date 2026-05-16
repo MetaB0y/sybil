@@ -58,7 +58,7 @@ export default function ActivityPage() {
       </div>
 
       <HeroAllTime allTime={overview.allTime} />
-      <PulseStrip />
+      <PulseStrip last24h={overview.last24h} />
       <BatchesTable
         rows={rows}
         isBackfilling={isBackfilling}

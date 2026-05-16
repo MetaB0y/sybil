@@ -270,6 +270,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <main
       style={{
+        width: "100%",
         padding: "var(--space-6) var(--space-5) var(--space-9)",
         display: "flex",
         flexDirection: "column",
