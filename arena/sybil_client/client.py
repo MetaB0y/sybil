@@ -16,6 +16,7 @@ from .types import (
     Fill,
     Market,
     OrderSpec,
+    PendingOrder,
     Portfolio,
     Position,
     PositionDelta,
@@ -57,7 +58,7 @@ class SybilClient:
             raise RuntimeError("Client not initialized. Use 'async with SybilClient():'")
         return self._client
 
-    async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+    async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         response = await self.client.request(method, path, **kwargs)
         if response.status_code >= 400:
             raise SybilClientError(response.status_code, response.text)
@@ -149,6 +150,24 @@ class SybilClient:
                 ],
             )
             for f in data
+        ]
+
+    async def get_pending_orders(self, account_id: int) -> list[PendingOrder]:
+        """Get pending orders for an account."""
+        data = await self._request("GET", f"/v1/accounts/{account_id}/orders")
+        return [
+            PendingOrder(
+                order_id=o["order_id"],
+                account_id=o["account_id"],
+                market_id=o["market_id"],
+                side=o["side"],
+                limit_price_nanos=o["limit_price_nanos"],
+                remaining_quantity=o["remaining_quantity"],
+                created_at_block=o["created_at_block"],
+                expires_at_block=o.get("expires_at_block"),
+                original_quantity=o.get("original_quantity", o["remaining_quantity"]),
+            )
+            for o in data
         ]
 
     def _parse_account(self, data: dict[str, Any]) -> Account:

@@ -152,6 +152,25 @@ class AccountFill:
 
 
 @dataclass
+class PendingOrder:
+    """Pending order currently reserving account balance or positions."""
+
+    order_id: int
+    account_id: int
+    market_id: int
+    side: str
+    limit_price_nanos: int
+    remaining_quantity: int
+    created_at_block: int
+    expires_at_block: int | None
+    original_quantity: int
+
+    @property
+    def limit_price(self) -> float:
+        return self.limit_price_nanos / NANOS_PER_DOLLAR
+
+
+@dataclass
 class PositionValue:
     """A position valued at current market prices."""
 
