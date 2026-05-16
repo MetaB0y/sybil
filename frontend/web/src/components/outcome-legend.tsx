@@ -25,7 +25,7 @@ const VISIBLE_LIMIT = 4;
 
 // Reuse the category palette for outcome accents — same pattern as the
 // markets index legend. Binary YES/NO use the semantic --yes / --no tokens.
-function colorForOutcome(o: EventOutcome, index: number): string {
+export function colorForOutcome(o: EventOutcome, index: number): string {
   if (o.label.toLowerCase() === "yes") return "var(--yes)";
   if (o.label.toLowerCase() === "no") return "var(--no)";
   const PALETTE = ["#6FCC8A", "#E8B447", "#E89D9F", "#7E9AE8", "#5BC4E0", "#9F8FE8"];

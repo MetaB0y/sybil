@@ -6,28 +6,22 @@
  * mini bars. Matches the inline hero block in `V2BatchTheater` ProRail
  * (`fed-variations.jsx:128`).
  *
- * Mocked values shown here (all wrapped in <MockValue>):
- *  - indicative price (#7)
- *  - indicative volume (#7)
- *  - imbalance label (#6)
- *  - side coloring of past-batch bars (#6) — bar HEIGHTS are real volume
- *
- * Real values:
+ * All values are real:
  *  - circular countdown progress + batch number
  *  - traders in this batch — polled open-batch unique placers
+ *  - indicative price / volume — polled open-batch shadow-solve (C2)
  *  - past-batch bar heights (matched volume)
  */
 
-import { MockValue } from "@/components/mock-value";
+import { Glossary } from "@/components/glossary";
 import {
   formatBatchSeconds,
+  formatCents,
   formatCompactDollars,
-  formatProbability,
   parseNanos,
 } from "@/lib/format/nanos";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
-import { useOpenBatch } from "@/lib/market-detail/use-open-batch";
-import { useOpenBatchPlacers } from "@/lib/market-detail/use-open-batch-placers";
+import { useOpenBatchLive } from "@/lib/market-detail/use-open-batch-live";
 import { selectRecentBlocks, useStore } from "@/lib/store";
 import { useBatchCountdown } from "./use-batch-countdown";
 
@@ -35,11 +29,14 @@ const HERO_BATCH_COUNT = 24;
 
 export function BatchHero({ outcome }: { outcome: EventOutcome }) {
   const { progress01, secondsLeftPrecise, latestHeight } = useBatchCountdown();
-  const snap = useOpenBatch(outcome.marketId);
-  const placers = useOpenBatchPlacers(outcome.marketId);
+  const live = useOpenBatchLive(outcome.marketId);
   const recent = useStore(selectRecentBlocks);
 
   const batchNumber = latestHeight == null ? null : latestHeight + 1;
+  const placers = live?.uniquePlacers ?? null;
+  // Indicative YES price falls back to the last clearing price when the
+  // shadow-solve has no resting orders for this market (null).
+  const indicativeYesNanos = live?.indicativeYesPriceNanos ?? outcome.yesPriceNanos;
 
   return (
     <div
@@ -50,7 +47,6 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
         borderRadius: 8,
         padding: "20px 22px",
         position: "relative",
-        overflow: "hidden",
       }}
     >
       <div
@@ -84,7 +80,7 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
               letterSpacing: "0.06em",
             }}
           >
-            next batch clears in
+            <Glossary term="Batch">next batch clears in</Glossary>
           </div>
           <div
             style={{
@@ -123,7 +119,7 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
             >
               {placers ?? "—"}
             </span>
-            <span>traders in this batch</span>
+            <span>{placers === 1 ? "trader" : "traders"} in this batch</span>
           </div>
         </div>
       </div>
@@ -139,37 +135,20 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
       {/* Indicative trio */}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <SubStat
-          label="indicative price"
-          secondary={`for ${truncate(outcome.label, 32)}`}
+          label={
+            <Glossary term="Indicative price">indicative price</Glossary>
+          }
+          secondary={`for ${outcome.shortLabel}`}
           value={
-            <MockValue hint="mid-batch clearing price not exposed (OPEN_QUESTIONS #7)">
-              {formatProbability(snap.indicativeYesPriceNanos)}
-            </MockValue>
+            indicativeYesNanos == null ? "—" : formatCents(indicativeYesNanos)
           }
           valueColor="var(--yes)"
         />
         <SubStat
-          label="indicative volume"
+          label={<Glossary term="IEV">indicative volume</Glossary>}
           secondary="would clear at indicative"
           value={
-            <MockValue hint="mid-batch volume not exposed (OPEN_QUESTIONS #7)">
-              {formatCompactDollars(snap.indicativeVolumeNanos)}
-            </MockValue>
-          }
-        />
-        <SubStat
-          label="imbalance"
-          secondary="net unmatched orders"
-          value={
-            <MockValue hint="NOT NOW — FillResponse has no side; per-batch imbalance is mocked (OPEN_QUESTIONS #6)">
-              <span
-                style={{
-                  color: snap.imbalanceBps >= 0 ? "var(--yes)" : "var(--no)",
-                }}
-              >
-                {snap.imbalanceBps >= 0 ? "↑ buy-side" : "↓ sell-side"}
-              </span>
-            </MockValue>
+            live == null ? "—" : formatCompactDollars(live.indicativeVolumeNanos)
           }
         />
       </div>
@@ -187,10 +166,7 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
             letterSpacing: "0.04em",
           }}
         >
-          last {HERO_BATCH_COUNT} batches · matched volume + side
-          <MockValue hint="NOT NOW — bar HEIGHTS = real matched volume per block. Bar COLORS = mocked side because FillResponse has no side (OPEN_QUESTIONS #6).">
-            <span style={{ marginLeft: 4 }}>·</span>
-          </MockValue>
+          last {HERO_BATCH_COUNT} batches · matched volume
         </div>
       </div>
     </div>
@@ -204,8 +180,9 @@ function CircularCountdown({
   progress01: number;
   countdown: string;
 }) {
-  const size = 88;
-  const stroke = 4;
+  // Large hero gauge — matches the handoff `BatchCountdown size="lg"`.
+  const size = 176;
+  const stroke = 8;
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
   const dashOffset = circumference * (1 - progress01);
@@ -250,7 +227,7 @@ function CircularCountdown({
           alignItems: "center",
           justifyContent: "center",
           fontFamily: "var(--font-mono)",
-          fontSize: 22,
+          fontSize: 32,
           fontWeight: 600,
           color: "var(--fg-1)",
           fontVariantNumeric: "tabular-nums",
@@ -268,7 +245,7 @@ function SubStat({
   value,
   valueColor,
 }: {
-  label: string;
+  label: React.ReactNode;
   secondary?: string;
   value: React.ReactNode;
   valueColor?: string;
@@ -373,9 +350,6 @@ function BatchHistoryBars({
         const vol = parseNanos(b.total_volume_nanos);
         const ratio = max === 0n ? 0 : Number((vol * 1000n) / max) / 1000;
         const h = Math.max(4, ratio * 44);
-        // Mocked side coloring — derived deterministically from height.
-        const sideMockYes = (b.height % 7) % 2 === 0;
-        const color = sideMockYes ? "var(--yes)" : "var(--no)";
         return (
           <div
             key={b.height}
@@ -383,7 +357,7 @@ function BatchHistoryBars({
             style={{
               flex: "1 1 0",
               height: h,
-              background: color,
+              background: "var(--accent)",
               opacity: 0.75,
               borderRadius: "1px 1px 0 0",
             }}
@@ -392,9 +366,4 @@ function BatchHistoryBars({
       })}
     </div>
   );
-}
-
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max - 1).trimEnd() + "…";
 }

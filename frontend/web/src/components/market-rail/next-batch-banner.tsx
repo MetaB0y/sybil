@@ -7,16 +7,16 @@
  * Live data:
  *  - countdown / progress: REAL (driven by the 2s block cadence)
  *  - "N traders in this batch": REAL — polled open-batch unique placers
- *    (see use-open-batch-placers.ts)
+ *    (see use-open-batch-live.ts)
  */
 
 import { formatBatchSeconds } from "@/lib/format/nanos";
-import { useOpenBatchPlacers } from "@/lib/market-detail/use-open-batch-placers";
+import { useOpenBatchLive } from "@/lib/market-detail/use-open-batch-live";
 import { useBatchCountdown } from "./use-batch-countdown";
 
 export function NextBatchBanner({ marketId }: { marketId: number }) {
   const { progress01, secondsLeftPrecise } = useBatchCountdown();
-  const placers = useOpenBatchPlacers(marketId);
+  const placers = useOpenBatchLive(marketId)?.uniquePlacers ?? null;
   const countdown = formatBatchSeconds(secondsLeftPrecise);
 
   return (
@@ -107,7 +107,7 @@ export function NextBatchBanner({ marketId }: { marketId: number }) {
           >
             {placers ?? "—"}
           </span>
-          <span>traders in this batch</span>
+          <span>{placers === 1 ? "trader" : "traders"} in this batch</span>
         </div>
       </div>
       <div

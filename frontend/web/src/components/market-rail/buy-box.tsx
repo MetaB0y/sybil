@@ -92,6 +92,34 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
     ? Number(parseNanos(portfolio.data.balance_nanos)) / 1e9
     : null;
 
+  // Quick-amount chips on the order input. `+N` is additive; `MAX` fills the
+  // available balance (needs a known balance). Mirrors the handoff BuyBox.
+  const quickChips: { label: string; disabled?: boolean; apply: () => void }[] =
+    unit === "usd"
+      ? [
+          { label: "+10", apply: () => setAmount(String((parseFloat(amount) || 0) + 10)) },
+          { label: "+50", apply: () => setAmount(String((parseFloat(amount) || 0) + 50)) },
+          {
+            label: "MAX",
+            disabled: balanceDollars == null,
+            apply: () => {
+              if (balanceDollars != null) setAmount(balanceDollars.toFixed(2));
+            },
+          },
+        ]
+      : [
+          { label: "+10", apply: () => setShares(String((parseFloat(shares) || 0) + 10)) },
+          { label: "+100", apply: () => setShares(String((parseFloat(shares) || 0) + 100)) },
+          {
+            label: "MAX",
+            disabled: balanceDollars == null,
+            apply: () => {
+              if (balanceDollars != null)
+                setShares(String(Math.floor(balanceDollars / limitDec)));
+            },
+          },
+        ];
+
   const accent = outcomeSide === "YES" ? "var(--yes)" : "var(--no)";
   const accentSoft =
     outcomeSide === "YES"
@@ -104,8 +132,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
   const ctaLabel = (() => {
     if (!connected) return "Connect to trade";
     if (submitting) return "Signing…";
-    const sideWord =
-      dir === "buy" ? `buy ${outcomeSide}` : `sell ${outcomeSide}`;
+    const sideWord = dir === "buy" ? "queue buy" : "queue sell";
     const batchSuffix =
       batchNumber == null ? "" : ` → batch #${batchNumber.toLocaleString()}`;
     return `${sideWord}${batchSuffix}`;
@@ -263,7 +290,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
             }}
             title={outcome.label}
           >
-            {outcome.label}
+            {outcome.shortLabel}
           </span>
           <span
             style={{
@@ -426,6 +453,33 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
             }}
           />
         </div>
+        <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
+          {quickChips.map((c) => {
+            const off = disabledInputs || c.disabled;
+            return (
+              <button
+                key={c.label}
+                type="button"
+                disabled={off}
+                onClick={c.apply}
+                style={{
+                  flex: 1,
+                  padding: "6px 0",
+                  borderRadius: 3,
+                  background: "var(--bg-2)",
+                  border: "1px solid var(--border-1)",
+                  color: "var(--fg-3)",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 10.5,
+                  cursor: off ? "not-allowed" : "pointer",
+                  opacity: off ? 0.5 : 1,
+                }}
+              >
+                {c.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Limit price input + slider */}
@@ -438,7 +492,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
             marginBottom: 5,
           }}
         >
-          <Eyebrow>limit price ({outcomeSide})</Eyebrow>
+          <Eyebrow>limit price</Eyebrow>
           <button
             type="button"
             onClick={() => setLimit(indicativeCents)}
