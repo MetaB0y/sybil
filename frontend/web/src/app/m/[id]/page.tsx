@@ -420,6 +420,7 @@ function ChartSection({ marketId }: { marketId: number }) {
           byMarket={byMarket}
           mode={mode}
           sinceMs={sinceMs}
+          nowMs={nowMs}
         />
       )}
     </section>

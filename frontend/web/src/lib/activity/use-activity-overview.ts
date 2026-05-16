@@ -1,11 +1,10 @@
 /**
  * Hook for the Activity page hero + 24h pulse strip.
  *
- * - All-time block: matched volume, active traders and matched / unmatched
- *   orders are real — `GET /v1/activity/overview` (`all_time` bucket).
- *   `totalBatches` = latestBlock.height; `liveMarkets` = active markets in
- *   /v1/markets/summary. Placed orders, uptime and genesis age stay mocked
- *   (see mocks.ts) — the hero wraps those with <MockValue>.
+ * - All-time block: matched volume, active traders and placed / matched /
+ *   unmatched orders are real — `GET /v1/activity/overview` (`all_time`
+ *   bucket). `totalBatches` = latestBlock.height; `liveMarkets` = active
+ *   markets in /v1/markets/summary. Only genesis age stays mocked.
  *
  * - Last-24h and prior-24h: derived from whatever blocks the store has.
  *   The result is partial — at 60s cadence a full 24h is ~1440 blocks and
@@ -25,7 +24,7 @@ import {
   useStore,
 } from "../store";
 import { deriveWindowedStats } from "./derive-overview";
-import { MOCK_ALL_TIME } from "./mocks";
+import { MOCK_GENESIS_AGE } from "./mocks";
 import type { ActivityOverview, AllTimeStats, WindowStats } from "./types";
 
 export type UseActivityOverviewResult = ActivityOverview & {
@@ -83,13 +82,12 @@ export function useActivityOverview(): UseActivityOverviewResult {
       ? formatCompactDollars(parseNanos(ov.all_time.total_volume_nanos ?? 0))
       : "—",
     traders: ov ? (ov.all_time.unique_traders ?? 0) : null,
-    ordersPlaced: MOCK_ALL_TIME.ordersPlaced,
+    ordersPlaced: ov ? (ov.all_time.orders?.placed ?? 0) : null,
     ordersMatched: ov ? (ov.all_time.orders?.matched ?? 0) : null,
     ordersUnmatched: ov ? (ov.all_time.orders?.unmatched ?? 0) : null,
     totalBatches: latestBlock?.height ?? 0,
     liveMarkets,
-    uptime: MOCK_ALL_TIME.uptime,
-    genesisAge: MOCK_ALL_TIME.genesisAge,
+    genesisAge: MOCK_GENESIS_AGE,
   };
 
   return {

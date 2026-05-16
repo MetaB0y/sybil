@@ -5,18 +5,18 @@
  * left, 4-cell stat grid on the right.
  *
  * Real (GET /v1/activity/overview, `all_time` bucket): matched volume, active
- * traders, matched orders, unmatched orders. Also real: `totalBatches`
- * (latestBlock.height) and `liveMarkets` (/v1/markets/summary). Still mocked:
- * placed orders (the backend counter is batch-participation, not an order
- * count — see PLACED_HINT), genesis age, uptime — each wrapped in MockValue.
+ * traders, placed / matched / unmatched orders. Also real: `totalBatches`
+ * (latestBlock.height) and `liveMarkets` (/v1/markets/summary). Genesis age
+ * is the one mocked field, wrapped in MockValue.
+ *
+ * Caveat: backend `placed` counts per-batch participations, not distinct
+ * orders — a real number, but it reads high next to matched/unmatched until
+ * the backend counter is fixed.
  */
 
 import { MockValue } from "@/components/mock-value";
 import { formatCompactInt, formatInt } from "@/lib/format/nanos";
 import type { AllTimeStats } from "@/lib/activity/types";
-
-const PLACED_HINT =
-  "backend 'placed' counts per-batch participations, not distinct orders — pending a backend fix";
 
 export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
   return (
@@ -80,14 +80,7 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
               }}
             >
               {formatInt(allTime.totalBatches)} batches ·{" "}
-              {formatInt(allTime.liveMarkets)} live markets · uptime{" "}
-              <MockValue
-                hint="uptime % — not tracked"
-                variant="underline"
-                style={{ color: "var(--yes)" }}
-              >
-                {allTime.uptime}
-              </MockValue>
+              {formatInt(allTime.liveMarkets)} live markets
             </span>
           </div>
         </div>
@@ -114,9 +107,12 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
           />
           <BigKv
             label="Placed orders"
-            value={formatCompactInt(allTime.ordersPlaced)}
+            value={
+              allTime.ordersPlaced == null
+                ? "—"
+                : formatCompactInt(allTime.ordersPlaced)
+            }
             sub="across all batches"
-            mocked
           />
           <BigKv
             label="Matched orders"
@@ -149,13 +145,11 @@ function BigKv({
   value,
   sub,
   accent = "var(--fg-1)",
-  mocked = false,
 }: {
   label: string;
   value: string;
   sub: string;
   accent?: string;
-  mocked?: boolean;
 }) {
   const numberEl = (
     <span
@@ -185,11 +179,7 @@ function BigKv({
           justifyContent: "space-between",
         }}
       >
-        {mocked ? (
-          <MockValue hint={PLACED_HINT} variant="pill">{numberEl}</MockValue>
-        ) : (
-          numberEl
-        )}
+        {numberEl}
       </div>
       <span
         style={{

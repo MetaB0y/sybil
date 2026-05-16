@@ -13,3 +13,382 @@
 [   51352ms] [LOG] [Fast Refresh] done in 23ms @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
 [ 1449428ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
 [ 1449454ms] [LOG] [Fast Refresh] done in 29ms @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[ 1662562ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[ 1662627ms] [ERROR] ./src/lib/activity/use-activity-overview.ts:28:1
+Export MOCK_ALL_TIME doesn't exist in target module
+  26 | } from "../store";
+  27 | import { deriveWindowedStats } from "./derive-overview";
+> 28 | import { MOCK_ALL_TIME } from "./mocks";
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  29 | import type { ActivityOverview, AllTimeStats, WindowStats } from "./types";
+  30 |
+  31 | export type UseActivityOverviewResult = ActivityOverview & {
+
+The export MOCK_ALL_TIME was not found in module [project]/src/lib/activity/mocks.ts [app-client] (ecmascript).
+Did you mean to import MOCK_24H?
+All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+
+Import traces:
+  Client Component Browser:
+    ./src/lib/activity/use-activity-overview.ts [Client Component Browser]
+    ./src/app/activity/page.tsx [Client Component Browser]
+    ./src/app/activity/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/lib/activity/use-activity-overview.ts [Client Component SSR]
+    ./src/app/activity/page.tsx [Client Component SSR]
+    ./src/app/activity/page.tsx [Server Component] @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:3272
+[ 1662628ms] [ERROR] ./src/lib/activity/use-activity-overview.ts:28:1
+Export MOCK_ALL_TIME doesn't exist in target module
+  26 | } from "../store";
+  27 | import { deriveWindowedStats } from "./derive-overview";
+> 28 | import { MOCK_ALL_TIME } from "./mocks";
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  29 | import type { ActivityOverview, AllTimeStats, WindowStats } from "./types";
+  30 |
+  31 | export type UseActivityOverviewResult = ActivityOverview & {
+
+The export MOCK_ALL_TIME was not found in module [project]/src/lib/activity/mocks.ts [app-ssr] (ecmascript).
+Did you mean to import MOCK_24H?
+All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+
+Import traces:
+  Client Component Browser:
+    ./src/lib/activity/use-activity-overview.ts [Client Component Browser]
+    ./src/app/activity/page.tsx [Client Component Browser]
+    ./src/app/activity/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/lib/activity/use-activity-overview.ts [Client Component SSR]
+    ./src/app/activity/page.tsx [Client Component SSR]
+    ./src/app/activity/page.tsx [Server Component] @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:3272
+[ 1665900ms] [ERROR] ./src/lib/activity/use-activity-overview.ts:27:1
+Export MOCK_ALL_TIME doesn't exist in target module
+  25 | } from "../store";
+  26 | import { deriveWindowedStats } from "./derive-overview";
+> 27 | import { MOCK_ALL_TIME } from "./mocks";
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  28 | import type { ActivityOverview, AllTimeStats, WindowStats } from "./types";
+  29 |
+  30 | export type UseActivityOverviewResult = ActivityOverview & {
+
+The export MOCK_ALL_TIME was not found in module [project]/src/lib/activity/mocks.ts [app-client] (ecmascript).
+Did you mean to import MOCK_24H?
+All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+
+Import traces:
+  Client Component Browser:
+    ./src/lib/activity/use-activity-overview.ts [Client Component Browser]
+    ./src/app/activity/page.tsx [Client Component Browser]
+    ./src/app/activity/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/lib/activity/use-activity-overview.ts [Client Component SSR]
+    ./src/app/activity/page.tsx [Client Component SSR]
+    ./src/app/activity/page.tsx [Server Component] @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:3272
+[ 1665900ms] [ERROR] ./src/lib/activity/use-activity-overview.ts:27:1
+Export MOCK_ALL_TIME doesn't exist in target module
+  25 | } from "../store";
+  26 | import { deriveWindowedStats } from "./derive-overview";
+> 27 | import { MOCK_ALL_TIME } from "./mocks";
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  28 | import type { ActivityOverview, AllTimeStats, WindowStats } from "./types";
+  29 |
+  30 | export type UseActivityOverviewResult = ActivityOverview & {
+
+The export MOCK_ALL_TIME was not found in module [project]/src/lib/activity/mocks.ts [app-ssr] (ecmascript).
+Did you mean to import MOCK_24H?
+All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+
+Import traces:
+  Client Component Browser:
+    ./src/lib/activity/use-activity-overview.ts [Client Component Browser]
+    ./src/app/activity/page.tsx [Client Component Browser]
+    ./src/app/activity/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/lib/activity/use-activity-overview.ts [Client Component SSR]
+    ./src/app/activity/page.tsx [Client Component SSR]
+    ./src/app/activity/page.tsx [Server Component] @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:3272
+[ 1665953ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[ 1667195ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[ 1667294ms] [ERROR] ./src/lib/activity/use-activity-overview.ts:27:1
+Export MOCK_ALL_TIME doesn't exist in target module
+  25 | } from "../store";
+  26 | import { deriveWindowedStats } from "./derive-overview";
+> 27 | import { MOCK_ALL_TIME } from "./mocks";
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  28 | import type { ActivityOverview, AllTimeStats, WindowStats } from "./types";
+  29 |
+  30 | export type UseActivityOverviewResult = ActivityOverview & {
+
+The export MOCK_ALL_TIME was not found in module [project]/src/lib/activity/mocks.ts [app-client] (ecmascript).
+Did you mean to import MOCK_24H?
+All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+
+Import traces:
+  Client Component Browser:
+    ./src/lib/activity/use-activity-overview.ts [Client Component Browser]
+    ./src/app/activity/page.tsx [Client Component Browser]
+    ./src/app/activity/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/lib/activity/use-activity-overview.ts [Client Component SSR]
+    ./src/app/activity/page.tsx [Client Component SSR]
+    ./src/app/activity/page.tsx [Server Component] @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:3272
+[ 1667294ms] [ERROR] ./src/lib/activity/use-activity-overview.ts:27:1
+Export MOCK_ALL_TIME doesn't exist in target module
+  25 | } from "../store";
+  26 | import { deriveWindowedStats } from "./derive-overview";
+> 27 | import { MOCK_ALL_TIME } from "./mocks";
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  28 | import type { ActivityOverview, AllTimeStats, WindowStats } from "./types";
+  29 |
+  30 | export type UseActivityOverviewResult = ActivityOverview & {
+
+The export MOCK_ALL_TIME was not found in module [project]/src/lib/activity/mocks.ts [app-ssr] (ecmascript).
+Did you mean to import MOCK_24H?
+All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+
+Import traces:
+  Client Component Browser:
+    ./src/lib/activity/use-activity-overview.ts [Client Component Browser]
+    ./src/app/activity/page.tsx [Client Component Browser]
+    ./src/app/activity/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/lib/activity/use-activity-overview.ts [Client Component SSR]
+    ./src/app/activity/page.tsx [Client Component SSR]
+    ./src/app/activity/page.tsx [Server Component] @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:3272
+[ 1667355ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[ 1667355ms] [LOG] [Fast Refresh] done in 0ms @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[ 1667499ms] [ERROR] %o
+
+%s ReferenceError: MOCK_ALL_TIME is not defined
+    at useActivityOverview (http://localhost:3000/_next/static/chunks/src_0ahhw89._.js?id=%255Bproject%255D%252Fsrc%252Flib%252Factivity%252Fuse-activity-overview.ts+%255Bapp-client%255D+%2528ecmascript%2529:90:23)
+    at ActivityPage (http://localhost:3000/_next/static/chunks/src_0zfmrx.._.js:3048:202)
+    at Object.react_stack_bottom_frame (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:15037:24)
+    at renderWithHooks (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:4620:24)
+    at updateFunctionComponent (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6081:21)
+    at beginWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6691:24)
+    at runWithFiberInDEV (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:965:74)
+    at performUnitOfWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9555:97)
+    at workLoopSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9449:40)
+    at renderRootSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9433:13)
+    at performWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9061:186)
+    at performSyncWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10263:9)
+    at flushSyncWorkAcrossRoots_impl (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10179:316)
+    at processRootScheduleInMicrotask (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10200:106)
+    at http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10274:158 The above error occurred in the <ActivityPage> component. It was handled by the <ErrorBoundaryHandler> error boundary. @ http://localhost:3000/_next/static/chunks/05w9_next_dist_client_0ppevk9._.js:1998
+[ 1667508ms] [ERROR] ReferenceError: MOCK_ALL_TIME is not defined
+    at useActivityOverview (http://localhost:3000/_next/static/chunks/src_0ahhw89._.js?id=%255Bproject%255D%252Fsrc%252Flib%252Factivity%252Fuse-activity-overview.ts+%255Bapp-client%255D+%2528ecmascript%2529:90:23)
+    at ActivityPage (http://localhost:3000/_next/static/chunks/src_0zfmrx.._.js:3048:202)
+    at Object.react_stack_bottom_frame (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:15037:24)
+    at renderWithHooks (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:4620:24)
+    at updateFunctionComponent (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6081:21)
+    at beginWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6691:24)
+    at runWithFiberInDEV (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:965:74)
+    at performUnitOfWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9555:97)
+    at workLoopSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9449:40)
+    at renderRootSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9433:13)
+    at performWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9061:186)
+    at performSyncWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10263:9)
+    at flushSyncWorkAcrossRoots_impl (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10179:316)
+    at processRootScheduleInMicrotask (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10200:106)
+    at http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10274:158 @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:3272
+[ 1667509ms] [ERROR] ReferenceError: MOCK_ALL_TIME is not defined
+    at useActivityOverview (http://localhost:3000/_next/static/chunks/src_0ahhw89._.js?id=%255Bproject%255D%252Fsrc%252Flib%252Factivity%252Fuse-activity-overview.ts+%255Bapp-client%255D+%2528ecmascript%2529:90:23)
+    at ActivityPage (http://localhost:3000/_next/static/chunks/src_0zfmrx.._.js:3048:202)
+    at Object.react_stack_bottom_frame (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:15037:24)
+    at renderWithHooks (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:4620:24)
+    at updateFunctionComponent (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6081:21)
+    at beginWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6691:24)
+    at runWithFiberInDEV (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:965:74)
+    at performUnitOfWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9555:97)
+    at workLoopSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9449:40)
+    at renderRootSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9433:13)
+    at performWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9061:186)
+    at performSyncWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10263:9)
+    at flushSyncWorkAcrossRoots_impl (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10179:316)
+    at processRootScheduleInMicrotask (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10200:106)
+    at http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10274:158 @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:3272
+[ 1670906ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[ 1670976ms] [LOG] [Fast Refresh] done in 61ms @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[ 1675152ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[ 1675180ms] [LOG] [Fast Refresh] done in 21ms @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[ 1676777ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[ 1676781ms] [ERROR] %o
+
+%s ReferenceError: PLACED_HINT is not defined
+    at BigKv (http://localhost:3000/_next/static/chunks/src_0zfmrx.._.js?id=%255Bproject%255D%252Fsrc%252Fcomponents%252Factivity%252Fhero-all-time.tsx+%255Bapp-client%255D+%2528ecmascript%2529:269:27)
+    at Object.react_stack_bottom_frame (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:15037:24)
+    at renderWithHooks (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:4620:24)
+    at updateFunctionComponent (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6081:21)
+    at beginWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6691:24)
+    at runWithFiberInDEV (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:965:74)
+    at performUnitOfWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9555:97)
+    at workLoopSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9449:40)
+    at renderRootSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9433:13)
+    at performWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9098:47)
+    at performSyncWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10263:9)
+    at flushSyncWorkAcrossRoots_impl (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10179:316)
+    at flushSyncWork$1 (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9230:86)
+    at Object.scheduleRefresh (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:299:13)
+    at http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:391:33
+    at Set.forEach (<anonymous>)
+    at Object.performReactRefresh (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:384:38)
+    at applyUpdate (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:878:31)
+    at http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:886:13 The above error occurred in the <BigKv> component. It was handled by the <ErrorBoundaryHandler> error boundary. @ http://localhost:3000/_next/static/chunks/05w9_next_dist_client_0ppevk9._.js:1998
+[ 1676782ms] [ERROR] ReferenceError: PLACED_HINT is not defined
+    at BigKv (http://localhost:3000/_next/static/chunks/src_0zfmrx.._.js?id=%255Bproject%255D%252Fsrc%252Fcomponents%252Factivity%252Fhero-all-time.tsx+%255Bapp-client%255D+%2528ecmascript%2529:269:27)
+    at Object.react_stack_bottom_frame (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:15037:24)
+    at renderWithHooks (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:4620:24)
+    at updateFunctionComponent (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6081:21)
+    at beginWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6691:24)
+    at runWithFiberInDEV (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:965:74)
+    at performUnitOfWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9555:97)
+    at workLoopSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9449:40)
+    at renderRootSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9433:13)
+    at performWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9098:47)
+    at performSyncWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10263:9)
+    at flushSyncWorkAcrossRoots_impl (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10179:316)
+    at flushSyncWork$1 (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9230:86)
+    at Object.scheduleRefresh (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:299:13)
+    at http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:391:33
+    at Set.forEach (<anonymous>)
+    at Object.performReactRefresh (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:384:38)
+    at applyUpdate (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:878:31)
+    at http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:886:13 @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:3272
+[ 1676782ms] [ERROR] ReferenceError: PLACED_HINT is not defined
+    at BigKv (http://localhost:3000/_next/static/chunks/src_0zfmrx.._.js?id=%255Bproject%255D%252Fsrc%252Fcomponents%252Factivity%252Fhero-all-time.tsx+%255Bapp-client%255D+%2528ecmascript%2529:269:27)
+    at Object.react_stack_bottom_frame (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:15037:24)
+    at renderWithHooks (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:4620:24)
+    at updateFunctionComponent (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6081:21)
+    at beginWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6691:24)
+    at runWithFiberInDEV (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:965:74)
+    at performUnitOfWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9555:97)
+    at workLoopSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9449:40)
+    at renderRootSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9433:13)
+    at performWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9098:47)
+    at performSyncWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10263:9)
+    at flushSyncWorkAcrossRoots_impl (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10179:316)
+    at flushSyncWork$1 (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9230:86)
+    at Object.scheduleRefresh (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:299:13)
+    at http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:391:33
+    at Set.forEach (<anonymous>)
+    at Object.performReactRefresh (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:384:38)
+    at applyUpdate (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:878:31)
+    at http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:886:13 @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:3272
+[ 1676825ms] [LOG] [Fast Refresh] done in 19ms @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[ 1679757ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[ 1679761ms] [ERROR] %o
+
+%s ReferenceError: PLACED_HINT is not defined
+    at BigKv (http://localhost:3000/_next/static/chunks/src_0zfmrx.._.js?id=%255Bproject%255D%252Fsrc%252Fcomponents%252Factivity%252Fhero-all-time.tsx+%255Bapp-client%255D+%2528ecmascript%2529:256:27)
+    at Object.react_stack_bottom_frame (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:15037:24)
+    at renderWithHooks (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:4620:24)
+    at updateFunctionComponent (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6081:21)
+    at beginWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6691:24)
+    at runWithFiberInDEV (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:965:74)
+    at performUnitOfWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9555:97)
+    at workLoopSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9449:40)
+    at renderRootSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9433:13)
+    at performWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9098:47)
+    at performSyncWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10263:9)
+    at flushSyncWorkAcrossRoots_impl (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10179:316)
+    at flushSyncWork$1 (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9230:86)
+    at Object.scheduleRefresh (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:299:13)
+    at http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:391:33
+    at Set.forEach (<anonymous>)
+    at Object.performReactRefresh (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:384:38)
+    at applyUpdate (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:878:31)
+    at http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:886:13 The above error occurred in the <BigKv> component. It was handled by the <ErrorBoundaryHandler> error boundary. @ http://localhost:3000/_next/static/chunks/05w9_next_dist_client_0ppevk9._.js:1998
+[ 1679762ms] [ERROR] ReferenceError: PLACED_HINT is not defined
+    at BigKv (http://localhost:3000/_next/static/chunks/src_0zfmrx.._.js?id=%255Bproject%255D%252Fsrc%252Fcomponents%252Factivity%252Fhero-all-time.tsx+%255Bapp-client%255D+%2528ecmascript%2529:256:27)
+    at Object.react_stack_bottom_frame (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:15037:24)
+    at renderWithHooks (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:4620:24)
+    at updateFunctionComponent (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6081:21)
+    at beginWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6691:24)
+    at runWithFiberInDEV (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:965:74)
+    at performUnitOfWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9555:97)
+    at workLoopSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9449:40)
+    at renderRootSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9433:13)
+    at performWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9098:47)
+    at performSyncWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10263:9)
+    at flushSyncWorkAcrossRoots_impl (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10179:316)
+    at flushSyncWork$1 (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9230:86)
+    at Object.scheduleRefresh (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:299:13)
+    at http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:391:33
+    at Set.forEach (<anonymous>)
+    at Object.performReactRefresh (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:384:38)
+    at applyUpdate (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:878:31)
+    at http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:886:13 @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:3272
+[ 1679802ms] [LOG] [Fast Refresh] done in 18ms @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[ 1681844ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[ 1681873ms] [LOG] [Fast Refresh] done in 19ms @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[ 1684042ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[ 1684044ms] [ERROR] %o
+
+%s ReferenceError: mocked is not defined
+    at BigKv (http://localhost:3000/_next/static/chunks/src_0zfmrx.._.js?id=%255Bproject%255D%252Fsrc%252Fcomponents%252Factivity%252Fhero-all-time.tsx+%255Bapp-client%255D+%2528ecmascript%2529:254:27)
+    at Object.react_stack_bottom_frame (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:15037:24)
+    at renderWithHooks (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:4620:24)
+    at updateFunctionComponent (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6081:21)
+    at beginWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6691:24)
+    at runWithFiberInDEV (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:965:74)
+    at performUnitOfWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9555:97)
+    at workLoopSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9449:40)
+    at renderRootSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9433:13)
+    at performWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9098:47)
+    at performSyncWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10263:9)
+    at flushSyncWorkAcrossRoots_impl (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10179:316)
+    at flushSyncWork$1 (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9230:86)
+    at Object.scheduleRefresh (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:299:13)
+    at http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:391:33
+    at Set.forEach (<anonymous>)
+    at Object.performReactRefresh (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:384:38)
+    at applyUpdate (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:878:31)
+    at http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:886:13 The above error occurred in the <BigKv> component. It was handled by the <ErrorBoundaryHandler> error boundary. @ http://localhost:3000/_next/static/chunks/05w9_next_dist_client_0ppevk9._.js:1998
+[ 1684045ms] [ERROR] ReferenceError: mocked is not defined
+    at BigKv (http://localhost:3000/_next/static/chunks/src_0zfmrx.._.js?id=%255Bproject%255D%252Fsrc%252Fcomponents%252Factivity%252Fhero-all-time.tsx+%255Bapp-client%255D+%2528ecmascript%2529:254:27)
+    at Object.react_stack_bottom_frame (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:15037:24)
+    at renderWithHooks (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:4620:24)
+    at updateFunctionComponent (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6081:21)
+    at beginWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6691:24)
+    at runWithFiberInDEV (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:965:74)
+    at performUnitOfWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9555:97)
+    at workLoopSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9449:40)
+    at renderRootSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9433:13)
+    at performWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9098:47)
+    at performSyncWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10263:9)
+    at flushSyncWorkAcrossRoots_impl (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10179:316)
+    at flushSyncWork$1 (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9230:86)
+    at Object.scheduleRefresh (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:299:13)
+    at http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:391:33
+    at Set.forEach (<anonymous>)
+    at Object.performReactRefresh (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:384:38)
+    at applyUpdate (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:878:31)
+    at http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:886:13 @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:3272
+[ 1684045ms] [ERROR] ReferenceError: mocked is not defined
+    at BigKv (http://localhost:3000/_next/static/chunks/src_0zfmrx.._.js?id=%255Bproject%255D%252Fsrc%252Fcomponents%252Factivity%252Fhero-all-time.tsx+%255Bapp-client%255D+%2528ecmascript%2529:254:27)
+    at Object.react_stack_bottom_frame (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:15037:24)
+    at renderWithHooks (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:4620:24)
+    at updateFunctionComponent (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6081:21)
+    at beginWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:6691:24)
+    at runWithFiberInDEV (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:965:74)
+    at performUnitOfWork (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9555:97)
+    at workLoopSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9449:40)
+    at renderRootSync (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9433:13)
+    at performWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9098:47)
+    at performSyncWorkOnRoot (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10263:9)
+    at flushSyncWorkAcrossRoots_impl (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:10179:316)
+    at flushSyncWork$1 (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:9230:86)
+    at Object.scheduleRefresh (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_react-dom_0r6u5qa._.js:299:13)
+    at http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:391:33
+    at Set.forEach (<anonymous>)
+    at Object.performReactRefresh (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:384:38)
+    at applyUpdate (http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:878:31)
+    at http://localhost:3000/_next/static/chunks/05w9_next_dist_compiled_0kz62jm._.js:886:13 @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:3272
+[ 1684086ms] [LOG] [Fast Refresh] done in 17ms @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[ 1685273ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[ 1685302ms] [LOG] [Fast Refresh] done in 18ms @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431

@@ -15,10 +15,14 @@ import type { PricePoint } from "@/lib/markets/use-price-history";
 type Block = components["schemas"]["BlockResponse"];
 
 export type ChartSeries = {
-  /** Grid timestamps (ms), ascending. */
+  /** Grid timestamps (ms), ascending. Spans the full selected window — the
+   *  range bounds are injected as endpoints even where no point exists. */
   times: number[];
   /** `raw[outcomeIdx][timeIdx]` — real YES probability, 0..1. */
   raw: number[][];
+  /** True when at least one outcome has a real clearing point (history or
+   *  live block) — distinguishes "empty market" from "empty window". */
+  hasData: boolean;
 };
 
 /** Cap on grid resolution — SVG paths past this add nothing visible. */
@@ -80,20 +84,41 @@ function laneFor(
   return out;
 }
 
+/**
+ * @param sinceMs Window start (ms), or `null` for ALL.
+ * @param nowMs   Reference "now" — the latest committed block time. Used as
+ *                the right edge so the axis ends at the present, not at the
+ *                last point that happens to exist.
+ */
 export function buildChartSeries(
   outcomes: { marketId: number; yesPriceNanos: bigint | null }[],
   byMarket: Map<number, PricePoint[]>,
   recentBlocks: Block[],
   sinceMs: number | null,
+  nowMs: number,
 ): ChartSeries {
   const lanes = outcomes.map((o) =>
     laneFor(o.marketId, byMarket.get(o.marketId) ?? [], recentBlocks),
   );
+  const hasData = lanes.some((l) => l.length > 0);
 
   const timeSet = new Set<number>();
   for (const lane of lanes) for (const p of lane) timeSet.add(p.t);
   let times = [...timeSet].sort((a, b) => a - b);
-  if (sinceMs != null) times = times.filter((t) => t >= sinceMs);
+
+  // Right edge = real "now" (or the last point if no block time known).
+  const lastPoint = times[times.length - 1] ?? 0;
+  const domainEnd = Math.max(nowMs || 0, lastPoint);
+
+  // Inject the window bounds as grid endpoints so the line spans the whole
+  // selected range — a sparse market then reads as flat-held, not squeezed.
+  if (sinceMs != null) {
+    times = times.filter((t) => t >= sinceMs && t <= domainEnd);
+    if (times[0] !== sinceMs) times.unshift(sinceMs);
+  }
+  if (times.length === 0 || times[times.length - 1] !== domainEnd) {
+    times.push(domainEnd);
+  }
 
   if (times.length > MAX_POINTS) {
     const stride = Math.ceil(times.length / MAX_POINTS);
@@ -103,7 +128,7 @@ export function buildChartSeries(
   }
 
   if (times.length === 0) {
-    return { times: [], raw: outcomes.map(() => []) };
+    return { times: [], raw: outcomes.map(() => []), hasData };
   }
 
   // Forward-fill each lane onto the grid; back-fill before its first point so
@@ -124,5 +149,5 @@ export function buildChartSeries(
     return row;
   });
 
-  return { times, raw };
+  return { times, raw, hasData };
 }

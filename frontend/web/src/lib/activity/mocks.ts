@@ -27,17 +27,11 @@ export const MOCK_24H = {
 };
 
 /**
- * Activity-hero fields with no real backend source. Matched volume, active
- * traders and matched/unmatched orders now come from /v1/activity/overview;
- * what's left is `ordersPlaced` — the backend counter measures
- * batch-participation, not distinct orders (see hero-all-time.tsx), pending a
- * backend fix — plus `uptime` and `genesisAge`, which aren't tracked at all.
+ * Genesis age for the Activity hero — the chain runs in-memory and has no
+ * persisted genesis timestamp, so this stays a handoff-equivalent placeholder.
+ * Every other hero figure is now real (see use-activity-overview.ts).
  */
-export const MOCK_ALL_TIME = {
-  ordersPlaced: 2_104_877,
-  uptime: "99.97%",
-  genesisAge: "6 mo 17 d",
-};
+export const MOCK_GENESIS_AGE = "6 mo 17 d";
 
 /** Mocked sequencer identity shown in expanded batch detail. */
 export const MOCK_SEQUENCER = "0x4f2c···7a91";

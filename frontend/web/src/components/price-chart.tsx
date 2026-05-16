@@ -47,9 +47,11 @@ type Props = {
   mode: ChartMode;
   /** Lower bound of the selected range (ms), or null for ALL. */
   sinceMs: number | null;
+  /** Reference "now" — latest committed block time; the axis right edge. */
+  nowMs: number;
 };
 
-export function PriceChart({ drawn, byMarket, mode, sinceMs }: Props) {
+export function PriceChart({ drawn, byMarket, mode, sinceMs, nowMs }: Props) {
   const recent = useStore(selectRecentBlocks);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [hover, setHover] = useState<number | null>(null);
@@ -57,20 +59,16 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs }: Props) {
   const outcomes = useMemo(() => drawn.map((d) => d.outcome), [drawn]);
 
   const series = useMemo(
-    () => buildChartSeries(outcomes, byMarket, recent, sinceMs),
-    [outcomes, byMarket, recent, sinceMs],
-  );
-  const everHadData = useMemo(
-    () => buildChartSeries(outcomes, byMarket, recent, null).times.length > 0,
-    [outcomes, byMarket, recent],
+    () => buildChartSeries(outcomes, byMarket, recent, sinceMs, nowMs),
+    [outcomes, byMarket, recent, sinceMs, nowMs],
   );
 
   const N = series.times.length;
 
-  if (N < 2) {
+  if (!series.hasData || N < 2) {
     return (
       <ChartMessage>
-        {everHadData
+        {series.hasData
           ? "no activity in this range — pick a wider window."
           : "no clearing history yet — chart will populate as batches clear."}
       </ChartMessage>
@@ -79,8 +77,8 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs }: Props) {
 
   const t0 = series.times[0]!;
   const lastIdx = N - 1;
-  const nowMs = series.times[lastIdx]!;
-  const span = Math.max(1, nowMs - t0);
+  const tEnd = series.times[lastIdx]!;
+  const span = Math.max(1, tEnd - t0);
 
   // x is proportional to time, not to point index.
   const xs = series.times.map((t) => ((t - t0) / span) * W);
@@ -263,7 +261,7 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs }: Props) {
                 fontSize: 9,
               }}
             >
-              {hover === lastIdx ? "now" : `${formatAge(nowMs - series.times[hover]!)} ago`}
+              {hover === lastIdx ? "now" : `${formatAge(tEnd - series.times[hover]!)} ago`}
             </div>
             {drawn.map((d, k) => (
               <div
