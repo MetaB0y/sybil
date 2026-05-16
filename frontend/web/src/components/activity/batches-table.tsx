@@ -18,7 +18,7 @@ import {
 } from "@/lib/format/nanos";
 import type { BatchRow as BatchRowData } from "@/lib/activity/types";
 
-const GRID = "24px 1fr 1.1fr 0.7fr 1fr 1.1fr 0.7fr 2.6fr";
+const GRID = "24px 1fr 1.2fr 0.7fr 1.1fr 1.1fr 0.7fr 1.9fr";
 const GRID_GAP = 28;
 
 export function BatchesTable({
@@ -129,7 +129,7 @@ function Header() {
       <span>Matched volume</span>
       <span>Welfare</span>
       <span>Traders</span>
-      <span>Orders</span>
+      <span style={{ textAlign: "right" }}>Orders</span>
     </div>
   );
 }
@@ -318,6 +318,7 @@ function OrdersCell({
       style={{
         display: "flex",
         alignItems: "center",
+        justifyContent: "flex-end",
         gap: 18,
         fontVariantNumeric: "tabular-nums",
       }}
