@@ -22,7 +22,7 @@ import { getCategoryColor, pickDisplayCategory } from "@/lib/categorize";
 import { useMarket } from "@/lib/markets/use-market";
 import { useEventGroup } from "@/lib/market-detail/use-event-group";
 import { useMarketStats } from "@/lib/market-detail/use-market-stats";
-import { usePriceHistory } from "@/lib/markets/use-price-history";
+import { useEventPriceHistory } from "@/lib/markets/use-event-price-history";
 import { selectLatestBlock, useStore } from "@/lib/store";
 
 type RouteParams = { id: string };
@@ -40,10 +40,8 @@ export default function MarketDetailPage({
   }
 
   const marketQ = useMarket(marketId);
-  const historyQ = usePriceHistory(marketId);
 
   const market = marketQ.data;
-  const history = historyQ.data ?? [];
 
   return (
     <main
@@ -80,11 +78,7 @@ export default function MarketDetailPage({
                 gap: "var(--space-5)",
               }}
             >
-              <ChartSection
-                marketId={marketId}
-                history={history}
-                isPending={historyQ.isPending}
-              />
+              <ChartSection marketId={marketId} />
               <DescriptionBlock market={market} />
               <DiscussionPlaceholder />
             </div>
@@ -322,31 +316,23 @@ function StatusPill({
   );
 }
 
-function ChartSection({
-  marketId,
-  history,
-  isPending,
-}: {
-  marketId: number;
-  history: import("@/lib/markets/use-price-history").PricePoint[];
-  isPending: boolean;
-}) {
+function ChartSection({ marketId }: { marketId: number }) {
   const [range, setRange] = useState<ChartRange>("1W");
-  const { group } = useEventGroup(marketId);
+  const { group, isPending: groupPending } = useEventGroup(marketId);
   const latestBlock = useStore(selectLatestBlock);
-  // Use the latest committed block as our "now" reference. Ticks every 2s,
-  // so the sliding window stays current without calling Date.now() in render
-  // (which would violate react-hooks/purity).
-  const nowMs = latestBlock?.timestamp_ms ?? history[history.length - 1]?.timestamp_ms ?? 0;
 
-  const filteredHistory = useMemo(() => {
-    const windowMs = RANGE_MS[range];
-    if (windowMs == null || nowMs === 0) return history;
-    const since = nowMs - windowMs;
-    return history.filter((p) => p.timestamp_ms >= since);
-  }, [history, range, nowMs]);
+  const outcomes = useMemo(() => group?.outcomes ?? [], [group]);
+  const marketIds = useMemo(() => outcomes.map((o) => o.marketId), [outcomes]);
+  const { byMarket, isPending: historyPending } =
+    useEventPriceHistory(marketIds);
 
-  const outcomes = group?.outcomes ?? [];
+  // Latest committed block is our "now" reference — ticks every 2s, so the
+  // sliding range window stays current without a Date.now() call in render.
+  const nowMs = latestBlock?.timestamp_ms ?? 0;
+  const windowMs = RANGE_MS[range];
+  const sinceMs = windowMs == null || nowMs === 0 ? null : nowMs - windowMs;
+
+  const loading = groupPending || (historyPending && outcomes.length > 0);
 
   return (
     <section
@@ -377,7 +363,7 @@ function ChartSection({
         )}
         <ChartRangeBar value={range} onChange={setRange} />
       </div>
-      {isPending && filteredHistory.length === 0 ? (
+      {loading ? (
         <div
           className="text-mono"
           style={{
@@ -390,23 +376,13 @@ function ChartSection({
         >
           loading…
         </div>
-      ) : filteredHistory.length === 0 ? (
-        <div
-          className="text-mono"
-          style={{
-            height: 280,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "var(--fg-4)",
-          }}
-        >
-          {history.length === 0
-            ? "no clearing history yet — chart will populate as batches clear."
-            : `no activity in the last ${range.toLowerCase()} — pick a wider range.`}
-        </div>
       ) : (
-        <PriceChart marketId={marketId} history={filteredHistory} />
+        <PriceChart
+          outcomes={outcomes}
+          byMarket={byMarket}
+          isMultiOutcome={group?.isMultiOutcome ?? false}
+          sinceMs={sinceMs}
+        />
       )}
     </section>
   );
