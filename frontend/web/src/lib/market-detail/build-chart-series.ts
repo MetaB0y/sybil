@@ -15,14 +15,18 @@ import type { PricePoint } from "@/lib/markets/use-price-history";
 type Block = components["schemas"]["BlockResponse"];
 
 export type ChartSeries = {
-  /** Grid timestamps (ms), ascending. Spans the full selected window — the
-   *  range bounds are injected as endpoints even where no point exists. */
+  /** Grid timestamps (ms), ascending. Starts at the first real clearing —
+   *  there is no line before the market/server existed. */
   times: number[];
   /** `raw[outcomeIdx][timeIdx]` — real YES probability, 0..1. */
   raw: number[][];
   /** True when at least one outcome has a real clearing point (history or
    *  live block) — distinguishes "empty market" from "empty window". */
   hasData: boolean;
+  /** Axis x-range — the selected window. The plotted line may start later
+   *  than `domainStart` (blank left = before the market started). */
+  domainStart: number;
+  domainEnd: number;
 };
 
 /** Cap on grid resolution — SVG paths past this add nothing visible. */
@@ -90,10 +94,6 @@ function laneFor(
  *                the right edge so the axis ends at the present, not at the
  *                last point that happens to exist.
  */
-/** Probability shown before a market's first clearing — the uninformed
- *  50/50 prior. Holding it flat makes the market's start a visible jump. */
-const PRE_START = 0.5;
-
 export function buildChartSeries(
   outcomes: { marketId: number }[],
   byMarket: Map<number, PricePoint[]>,
@@ -108,21 +108,26 @@ export function buildChartSeries(
 
   const timeSet = new Set<number>();
   for (const lane of lanes) for (const p of lane) timeSet.add(p.t);
-  let times = [...timeSet].sort((a, b) => a - b);
+  const union = [...timeSet].sort((a, b) => a - b);
 
-  // Right edge = real "now" (or the last point if no block time known).
-  const lastPoint = times[times.length - 1] ?? 0;
-  const domainEnd = Math.max(nowMs || 0, lastPoint);
+  const firstReal = union[0] ?? nowMs;
+  const lastReal = union[union.length - 1] ?? nowMs;
+  // Axis spans the selected window; right edge is real "now".
+  const domainEnd = Math.max(nowMs || 0, lastReal);
+  const domainStart = sinceMs != null ? sinceMs : firstReal;
 
-  // Inject the window bounds as grid endpoints so the line spans the whole
-  // selected range — a sparse market then reads as flat-held, not squeezed.
-  if (sinceMs != null) {
-    times = times.filter((t) => t >= sinceMs && t <= domainEnd);
-    if (times[0] !== sinceMs) times.unshift(sinceMs);
+  if (!hasData) {
+    return { times: [], raw: outcomes.map(() => []), hasData, domainStart, domainEnd };
   }
-  if (times.length === 0 || times[times.length - 1] !== domainEnd) {
-    times.push(domainEnd);
-  }
+
+  // The line begins at the first real clearing — never before the market
+  // existed. If data predates the window it begins at the window start
+  // (clamped); if the market started mid-window the left of the axis stays
+  // blank, which is exactly the "this is when it started" signal.
+  const lineStart = Math.max(domainStart, firstReal);
+  let times = union.filter((t) => t >= lineStart && t <= domainEnd);
+  if (times[0] !== lineStart) times.unshift(lineStart);
+  if (times[times.length - 1] !== domainEnd) times.push(domainEnd);
 
   if (times.length > MAX_POINTS) {
     const stride = Math.ceil(times.length / MAX_POINTS);
@@ -131,24 +136,20 @@ export function buildChartSeries(
     if (times[times.length - 1] !== last) times.push(last);
   }
 
-  if (times.length === 0) {
-    return { times: [], raw: outcomes.map(() => []), hasData };
-  }
-
-  // Forward-fill each lane onto the grid. Grid times before the lane's first
-  // real clearing — the pre-start / server-down period — sit at the 50/50
-  // prior, so the market's first price reads as a clean jump off 50%.
+  // Forward-fill each lane onto the grid. The grid never reaches before
+  // `firstReal`, so a back-fill here only spans the seconds between sibling
+  // markets' first clearings (they're mirrored together) — held flat.
   const raw: number[][] = lanes.map((lane) => {
-    if (lane.length === 0) return times.map(() => PRE_START);
+    if (lane.length === 0) return times.map(() => 0.5);
     const row: number[] = [];
     let cursor = 0;
     for (const t of times) {
       while (cursor + 1 < lane.length && lane[cursor + 1]!.t <= t) cursor++;
       const pt = lane[cursor]!;
-      row.push(pt.t <= t ? pt.v : PRE_START);
+      row.push(pt.t <= t ? pt.v : lane[0]!.v);
     }
     return row;
   });
 
-  return { times, raw, hasData };
+  return { times, raw, hasData, domainStart, domainEnd };
 }

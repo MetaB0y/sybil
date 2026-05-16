@@ -75,9 +75,10 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs, nowMs }: Props) {
     );
   }
 
-  const t0 = series.times[0]!;
   const lastIdx = N - 1;
-  const tEnd = series.times[lastIdx]!;
+  // Axis domain = the selected window; the line itself may start later.
+  const t0 = series.domainStart;
+  const tEnd = series.domainEnd;
   const span = Math.max(1, tEnd - t0);
 
   // x is proportional to time, not to point index.
