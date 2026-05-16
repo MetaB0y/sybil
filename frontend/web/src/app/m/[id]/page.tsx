@@ -84,13 +84,15 @@ export default function MarketDetailPage({
  * Page header. Mirrors `MarketHeader` in `frontend/handoff/data/fed-primitives.jsx:246`:
  *
  *   ┌──────┐ Markets / ● Category / resolves <date>
- *   │ thumb│ <title>
- *   │      │ vol $X   24h $Y*   traders N*   liq $Z*   batches ~M*
+ *   │ thumb│ <market name>
+ *   │      │ vol $X   24h $Y   traders N   liq $Z   batches ~M
  *   └──────┘
  *
- * `vol` is real (MarketResponse.volume_nanos). `24h / traders / liq` are
- * mocked via useMarketStats (OPEN_QUESTIONS #3, #2, #1). `batches ~M` is a
- * 2s-cadence timestamp approximation (OPEN_QUESTIONS #9).
+ * Title, thumbnail and all five stats are scoped to the single market in the
+ * URL — never its parent event. `vol / 24h / traders / liq` are real Phase-B
+ * fields (see `derive-market-stats.ts`). `batches ~M` stays a 2s-cadence
+ * timestamp approximation — an exact count needs a backend `created_at_height`
+ * (OPEN_QUESTIONS #9).
  */
 function Header({
   marketId,
@@ -108,7 +110,6 @@ function Header({
     expiry_timestamp_ms?: number | null;
     market_image_url?: string | null;
     market_icon_url?: string | null;
-    event_title?: string | null;
     event_image_url?: string | null;
     event_icon_url?: string | null;
   };
@@ -129,10 +130,10 @@ function Header({
     >
       <MarketThumb
         marketId={market.market_id}
-        name={market.event_title ?? market.name}
-        imageUrl={market.event_image_url ?? market.market_image_url ?? null}
+        name={market.name}
+        imageUrl={market.market_image_url ?? market.event_image_url ?? null}
         fallbackIconUrl={
-          market.event_icon_url ?? market.market_icon_url ?? null
+          market.market_icon_url ?? market.event_icon_url ?? null
         }
         size={56}
       />
@@ -202,11 +203,11 @@ function Header({
             color: "var(--fg-1)",
           }}
         >
-          {market.event_title ?? market.name}
+          {market.name}
         </h1>
 
-        {/* 5-stat meta row. Three values are wrapped in <MockValue> + one
-            in an "approx" wrapper. See OPEN_QUESTIONS #1, #2, #3, #9. */}
+        {/* 5-stat meta row, all scoped to this market. Only `batches` is an
+            approximation (OPEN_QUESTIONS #9); vol / 24h / traders / liq are real. */}
         <div
           className="text-mono"
           style={{
