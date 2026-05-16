@@ -69,7 +69,7 @@ describe("dev/derive", () => {
     ];
     const out = recentCancellations(blocks);
     expect(out.map((c) => c.order_id)).toEqual([22, 11]);
-    expect(out[0].block_height).toBe(2);
+    expect(out[0]?.block_height).toBe(2);
   });
 
   it("buildInsights always reports price coverage", () => {

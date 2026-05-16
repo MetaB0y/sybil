@@ -228,18 +228,10 @@ export function latestBlockByMarketRows(
 
 export type CancellationRow = DevSystemEvent & { block_height: number; row_key: string };
 
-/**
- * Newest-block-first list of `order_cancelled` system events.
- *
- * Return type note: the rows are typed as a non-empty tuple
- * (`[CancellationRow, ...CancellationRow[]]`) so views and tests can index
- * `[0]` directly under `noUncheckedIndexedAccess`. An empty input still
- * yields `[]` at runtime — callers must guard on `.length` before reading
- * `[0]`, exactly as the console template does (`x-show="… .length"`).
- */
+/** Newest-block-first list of `order_cancelled` system events. */
 export function recentCancellations(
   blocks: DevBlock[],
-): [CancellationRow, ...CancellationRow[]] {
+): CancellationRow[] {
   const out: CancellationRow[] = [];
   for (const b of blocks) {
     const evts = b.system_events || [];
@@ -254,7 +246,7 @@ export function recentCancellations(
       }
     }
   }
-  return out.reverse() as [CancellationRow, ...CancellationRow[]];
+  return out.reverse();
 }
 
 export function fmtLiquidity(m: DevMarket): string {
