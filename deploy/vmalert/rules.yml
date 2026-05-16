@@ -154,29 +154,45 @@ groups:
 
       - alert: SybilPriceDivergenceHigh
         expr: |
-          max(sybil_price_reference_pairs_total) >= 20
+          count(
+            sybil_price_reference_diff_nanos
+            and on(market_id)
+            (increase(sybil_market_fills_total[15m]) > 0)
+          ) >= 5
           and
-          max(sybil_price_reference_max_abs_diff_nanos) > 50 * 1000 * 1000
+          max(
+            sybil_price_reference_diff_nanos
+            and on(market_id)
+            (increase(sybil_market_fills_total[15m]) > 0)
+          ) > 50 * 1000 * 1000
         for: 5m
         labels:
           severity: warning
           component: arena
         annotations:
           summary: "Sybil prices diverge from Polymarket"
-          description: "At least one Sybil market is more than 5 cents away from its Polymarket reference price for 5m. Requires at least 20 priced/reference intersections so flash-MM batches with tiny samples do not page."
+          description: "At least one recently filled Sybil market is more than 5 cents away from its Polymarket reference price for 5m. Only markets with fills in the last 15m are considered, so stale local clearing prices do not page."
 
       - alert: SybilPriceDivergenceBroad
         expr: |
-          max(sybil_price_reference_pairs_total) >= 20
+          count(
+            sybil_price_reference_diff_nanos
+            and on(market_id)
+            (increase(sybil_market_fills_total[15m]) > 0)
+          ) >= 5
           and
-          max(sybil_price_reference_avg_abs_diff_nanos) > 25 * 1000 * 1000
+          avg(
+            sybil_price_reference_diff_nanos
+            and on(market_id)
+            (increase(sybil_market_fills_total[15m]) > 0)
+          ) > 25 * 1000 * 1000
         for: 10m
         labels:
           severity: warning
           component: arena
         annotations:
           summary: "Average Sybil/Polymarket price divergence is high"
-          description: "Average absolute price difference across Sybil markets with reference prices is above 2.5 cents for 10m. Requires at least 20 priced/reference intersections so one IOC batch cannot dominate the average."
+          description: "Average absolute price difference across recently filled Sybil markets with reference prices is above 2.5 cents for 10m. Only markets with fills in the last 15m are considered, so stale local clearing prices do not page."
 
       - alert: SybilPricedMarketCoverageLow
         expr: |
