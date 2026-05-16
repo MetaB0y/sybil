@@ -6,8 +6,9 @@
  * the `renderDetail` slot prop so this file stays focused on the table; the
  * detail UI lives in <BatchDetail>.
  *
- * Grid template comes verbatim from `handoff/pages/activity.html`:
- *   24px 120px 130px 80px 130px 120px 80px 1fr  ·  gap 28px
+ * Column layout adapts the handoff `activity.html` template: a fixed-width
+ * chevron, then weighted `fr` columns so the row stretches edge-to-edge of
+ * the table instead of stranding empty space in the last column.
  */
 
 import { useState, Fragment, type ReactNode } from "react";
@@ -17,8 +18,7 @@ import {
 } from "@/lib/format/nanos";
 import type { BatchRow as BatchRowData } from "@/lib/activity/types";
 
-const GRID =
-  "24px 120px 130px 80px 130px 120px 80px 1fr";
+const GRID = "24px 1fr 1.1fr 0.7fr 1fr 1.1fr 0.7fr 2.6fr";
 const GRID_GAP = 28;
 
 export function BatchesTable({
