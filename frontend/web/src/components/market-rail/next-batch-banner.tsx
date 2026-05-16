@@ -69,19 +69,6 @@ export function NextBatchBanner({ marketId }: { marketId: number }) {
         </div>
         <div
           style={{
-            fontFamily: "var(--font-sans)",
-            fontSize: 17,
-            fontWeight: 600,
-            color: "var(--fg-1)",
-            letterSpacing: "-0.01em",
-            lineHeight: 1.2,
-            fontVariantNumeric: "tabular-nums",
-          }}
-        >
-          {countdown}s
-        </div>
-        <div
-          style={{
             marginTop: 4,
             display: "flex",
             alignItems: "center",

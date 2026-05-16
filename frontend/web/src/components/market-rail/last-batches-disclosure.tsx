@@ -2,27 +2,21 @@
 
 /**
  * Collapsible "last batches · stats" panel. Wraps the same hook
- * `useBatchWindowStats` we built for `/m-dev/[id]`, but in a Disclosure with
- * the 1 / 5 / 10 / 100 selector inline. Matches the Disclosure block at
- * `fed-variations.jsx:163`.
+ * `useBatchWindowStats` we built for `/m-dev/[id]`, in a Disclosure with the
+ * 1 / 5 / 10 / 100 window selector. Matches `LastNStats` at
+ * `fed-fba-panel.jsx:99`: a bordered 2×2 stat grid topped by the window
+ * selector, footed by a match-rate progress bar.
  *
  * Mocked values shown (all wrapped <MockValue>):
- *  - unique placers (OPEN_QUESTIONS #8)
- *  - unique matched, per-market scoping (#5)
+ *  - traders placed (OPEN_QUESTIONS #8)
+ *  - traders matched, per-market scoping (#5)
  *  - volume placed (#8)
  *  - volume matched, per-market scoping (#5)
- *
- * Chain-wide totals (without per-market scoping) are real and shown as
- * the small "chain-wide" sub-stat line.
  */
 
 import { useState } from "react";
 import { MockValue } from "@/components/mock-value";
-import {
-  formatCompactDollars,
-  formatDollars,
-  formatInt,
-} from "@/lib/format/nanos";
+import { formatCompactDollars, formatInt } from "@/lib/format/nanos";
 import type { WindowSize } from "@/lib/market-detail/types";
 import {
   WINDOW_SIZES,
@@ -35,6 +29,10 @@ export function LastBatchesDisclosure({ marketId }: { marketId: number }) {
   const stats = useBatchWindowStats(marketId, windowSize);
   const partial = stats.actualBlockCount < windowSize;
 
+  const placed = stats.uniqueTradersPlaced;
+  const matched = stats.uniqueTradersMatched;
+  const matchRate = placed > 0 ? Math.round((matched / placed) * 100) : 0;
+
   return (
     <div
       style={{
@@ -44,83 +42,99 @@ export function LastBatchesDisclosure({ marketId }: { marketId: number }) {
         overflow: "hidden",
       }}
     >
-      <div
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
         style={{
+          width: "100%",
           display: "flex",
+          justifyContent: "space-between",
           alignItems: "center",
-          gap: 10,
+          gap: 12,
           padding: "12px 16px",
+          background: "transparent",
+          border: 0,
+          cursor: "pointer",
+          color: "var(--fg-2)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 10.5,
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
+          textAlign: "left",
         }}
       >
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          aria-expanded={open}
-          style={{
-            flex: 1,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 12,
-            padding: 0,
-            background: "transparent",
-            border: 0,
-            cursor: "pointer",
-            color: "var(--fg-2)",
-            fontFamily: "var(--font-mono)",
-            fontSize: 10.5,
-            textTransform: "uppercase",
-            letterSpacing: "0.04em",
-            textAlign: "left",
-          }}
-        >
-          <span>last batches · stats</span>
-          <span style={{ color: "var(--fg-4)" }}>{open ? "–" : "+"}</span>
-        </button>
-        <WindowSelector value={windowSize} onChange={setWindowSize} />
-      </div>
+        <span>last batches · stats</span>
+        <span style={{ color: "var(--fg-4)" }}>{open ? "–" : "+"}</span>
+      </button>
+
       {open && (
         <div style={{ padding: "4px 16px 16px" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              marginBottom: 8,
+            }}
+          >
+            <span
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                color: "var(--fg-3)",
+                textTransform: "uppercase",
+                letterSpacing: "0.04em",
+              }}
+            >
+              last batches
+            </span>
+            <WindowSelector value={windowSize} onChange={setWindowSize} />
+          </div>
+
           {partial && (
             <div
               style={{
                 fontFamily: "var(--font-mono)",
                 fontSize: 10,
                 color: "var(--fg-4)",
-                marginBottom: 10,
+                marginBottom: 8,
               }}
             >
               showing {stats.actualBlockCount} of {windowSize} (buffer holds{" "}
               {stats.firstHeight ?? "?"}–{stats.lastHeight ?? "?"})
             </div>
           )}
+
           <div
             style={{
               display: "grid",
               gridTemplateColumns: "1fr 1fr",
-              rowGap: 10,
-              columnGap: 16,
+              gap: 1,
+              background: "var(--border-1)",
+              border: "1px solid var(--border-1)",
+              borderRadius: 4,
             }}
           >
             <Cell
-              label="unique placed"
+              label="traders placed"
               value={
                 <MockValue hint="placed-trader counts not on the wire (OPEN_QUESTIONS #8)">
-                  {formatInt(stats.uniqueTradersPlaced)}
+                  {formatInt(placed)}
                 </MockValue>
               }
             />
             <Cell
-              label="unique matched"
+              label="traders matched"
               value={
                 <MockValue hint="per-market scoping is mocked (OPEN_QUESTIONS #5)">
-                  {formatInt(stats.uniqueTradersMatched)}
+                  {formatInt(matched)}
                 </MockValue>
               }
-              sub={`chain ${formatInt(stats.uniqueTradersMatchedChainWide)}`}
             />
             <Cell
-              label="vol placed"
+              label="volume placed"
               value={
                 <MockValue hint="no placed-volume notional on the wire (OPEN_QUESTIONS #8)">
                   {formatCompactDollars(stats.volumePlacedNanos)}
@@ -128,14 +142,45 @@ export function LastBatchesDisclosure({ marketId }: { marketId: number }) {
               }
             />
             <Cell
-              label="vol matched"
+              label="volume matched"
               value={
                 <MockValue hint="per-market scoping is mocked (OPEN_QUESTIONS #5)">
                   {formatCompactDollars(stats.volumeMatchedNanos)}
                 </MockValue>
               }
-              sub={`chain ${formatDollars(stats.volumeMatchedChainWideNanos, { decimals: 0 })}`}
             />
+          </div>
+
+          <div
+            style={{
+              marginTop: 10,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+              color: "var(--fg-3)",
+            }}
+          >
+            <span>match rate</span>
+            <div
+              style={{
+                flex: 1,
+                height: 3,
+                background: "var(--bg-2)",
+                borderRadius: 2,
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  width: `${matchRate}%`,
+                  height: "100%",
+                  background: "var(--accent)",
+                }}
+              />
+            </div>
+            <span style={{ color: "var(--fg-1)" }}>{matchRate}%</span>
           </div>
         </div>
       )}
@@ -190,18 +235,24 @@ function WindowSelector({
 function Cell({
   label,
   value,
-  sub,
 }: {
   label: string;
   value: React.ReactNode;
-  sub?: string;
 }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+    <div
+      style={{
+        background: "var(--surface-1)",
+        padding: "10px 12px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+      }}
+    >
       <span
         style={{
           fontFamily: "var(--font-mono)",
-          fontSize: 10,
+          fontSize: 9.5,
           color: "var(--fg-3)",
           textTransform: "uppercase",
           letterSpacing: "0.04em",
@@ -219,17 +270,6 @@ function Cell({
       >
         {value}
       </span>
-      {sub && (
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 10,
-            color: "var(--fg-4)",
-          }}
-        >
-          {sub}
-        </span>
-      )}
     </div>
   );
 }

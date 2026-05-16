@@ -11,6 +11,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { colorForOutcome } from "@/components/outcome-legend";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
 
 export function DegenOutcomePicker({
@@ -32,12 +33,17 @@ export function DegenOutcomePicker({
     return () => document.removeEventListener("mousedown", close);
   }, []);
 
-  const selected =
-    outcomes.find((o) => o.marketId === currentMarketId) ?? outcomes[0];
+  const selectedIndex = Math.max(
+    0,
+    outcomes.findIndex((o) => o.marketId === currentMarketId),
+  );
+  const selected = outcomes[selectedIndex] ?? outcomes[0];
   if (!selected) return null;
 
-  const others = outcomes.filter((o) => o.marketId !== selected.marketId);
-  const accent = "var(--yes)";
+  const others = outcomes
+    .map((o, i) => ({ o, i }))
+    .filter(({ o }) => o.marketId !== selected.marketId);
+  const accent = colorForOutcome(selected, selectedIndex);
 
   return (
     <div ref={ref} style={{ position: "relative" }}>
@@ -48,7 +54,7 @@ export function DegenOutcomePicker({
           gap: 12,
           padding: "14px 16px",
           borderRadius: 6,
-          background: "color-mix(in srgb, var(--yes) 10%, transparent)",
+          background: `color-mix(in srgb, ${accent} 10%, transparent)`,
           border: `1px solid ${accent}`,
         }}
       >
@@ -161,7 +167,9 @@ export function DegenOutcomePicker({
                 overflowY: "auto",
               }}
             >
-              {others.map((o) => (
+              {others.map(({ o, i }) => {
+                const color = colorForOutcome(o, i);
+                return (
                 <button
                   key={o.marketId}
                   type="button"
@@ -188,6 +196,16 @@ export function DegenOutcomePicker({
                   }
                 >
                   <span
+                    aria-hidden
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: "50%",
+                      background: color,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span
                     style={{
                       flex: 1,
                       minWidth: 0,
@@ -207,7 +225,7 @@ export function DegenOutcomePicker({
                       fontFamily: "var(--font-sans)",
                       fontSize: 13,
                       fontWeight: 600,
-                      color: "var(--yes)",
+                      color,
                       fontVariantNumeric: "tabular-nums",
                       flexShrink: 0,
                     }}
@@ -215,7 +233,8 @@ export function DegenOutcomePicker({
                     {o.yesCents != null ? `${o.yesCents}¢` : "—"}
                   </span>
                 </button>
-              ))}
+                );
+              })}
             </div>
           )}
         </>
