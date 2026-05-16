@@ -1,0 +1,13 @@
+[     193ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[     223ms] [LOG] [HMR] connected @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[    1655ms] [WARNING] WebSocket connection to 'wss://172-104-31-54.nip.io/v1/blocks/ws?from_block=39243' failed: WebSocket is closed before the connection is established. @ http://localhost:3000/_next/static/chunks/src_0ceyhqs._.js:2354
+[   35423ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[   35447ms] [LOG] [Fast Refresh] done in 30ms @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[   40840ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[   40882ms] [LOG] [Fast Refresh] done in 5ms @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[   42406ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[   42454ms] [LOG] [Fast Refresh] done in 31ms @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[   49930ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[   49955ms] [LOG] [Fast Refresh] done in 37ms @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[   51326ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431
+[   51352ms] [LOG] [Fast Refresh] done in 23ms @ http://localhost:3000/_next/static/chunks/05w9_next_dist_04sc5oc._.js:2431

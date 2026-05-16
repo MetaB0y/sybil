@@ -66,24 +66,22 @@ export type WindowStats = {
   lastTimestampMs: number | null;
 };
 
-/** All-time stats. Most fields are mocked (see flags + OPEN_QUESTIONS #3). */
+/**
+ * All-time stats for the Activity hero. `matchedVolume`, `traders`,
+ * `ordersMatched` and `ordersUnmatched` are real — `GET /v1/activity/overview`
+ * (`all_time` bucket) — and read `"—"` / `null` until the first response
+ * lands. `ordersPlaced`, `uptime` and `genesisAge` are still mocked.
+ */
 export type AllTimeStats = {
-  matchedVolume: string; // formatted, e.g. "$487.2M"
-  traders: number;
-  ordersPlaced: number;
-  ordersMatched: number;
-  ordersUnmatched: number;
+  matchedVolume: string; // real — formatted; "—" until loaded
+  traders: number | null; // real — null until loaded
+  ordersPlaced: number; // mocked — backend counter is batch-participation
+  ordersMatched: number | null; // real — null until loaded
+  ordersUnmatched: number | null; // real — null until loaded
   totalBatches: number; // real — from latestBlock.height
   liveMarkets: number; // real — from /v1/markets/summary status count
-  uptime: string;
-  genesisAge: string;
-  mocked: {
-    matchedVolume: boolean;
-    traders: boolean;
-    orders: boolean;
-    uptime: boolean;
-    genesisAge: boolean;
-  };
+  uptime: string; // mocked — not tracked
+  genesisAge: string; // mocked — not tracked
 };
 
 export type ActivityOverview = {

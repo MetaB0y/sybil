@@ -10,8 +10,6 @@
  * - Per-market imbalance (#6): deterministic hash → ±10% basis points.
  */
 
-import type { AllTimeStats } from "./types";
-
 /**
  * Handoff-equivalent last-24h figures. Used directly by <PulseStrip> on the
  * styled /activity page — at 2s batch cadence we can't compute a real 24h
@@ -28,24 +26,17 @@ export const MOCK_24H = {
   ordersUnmatched: 11_703,
 };
 
-/** Handoff-equivalent all-time figures. Replace when the backend lands a rollup. */
-export const MOCK_ALL_TIME: AllTimeStats = {
-  matchedVolume: "$487.2M",
-  traders: 18_402,
+/**
+ * Activity-hero fields with no real backend source. Matched volume, active
+ * traders and matched/unmatched orders now come from /v1/activity/overview;
+ * what's left is `ordersPlaced` — the backend counter measures
+ * batch-participation, not distinct orders (see hero-all-time.tsx), pending a
+ * backend fix — plus `uptime` and `genesisAge`, which aren't tracked at all.
+ */
+export const MOCK_ALL_TIME = {
   ordersPlaced: 2_104_877,
-  ordersMatched: 1_682_711,
-  ordersUnmatched: 422_166,
-  totalBatches: 0, // overridden in the hook with latestBlock.height
-  liveMarkets: 0, // overridden with the markets-summary count
   uptime: "99.97%",
   genesisAge: "6 mo 17 d",
-  mocked: {
-    matchedVolume: true,
-    traders: true,
-    orders: true,
-    uptime: true,
-    genesisAge: true,
-  },
 };
 
 /** Mocked sequencer identity shown in expanded batch detail. */

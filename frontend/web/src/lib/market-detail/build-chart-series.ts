@@ -3,15 +3,10 @@
  * price chart.
  *
  * Each market's `/prices/history` reports points at its own irregular
- * timestamps. To draw a stacked-area (or any multi-line) chart they must
- * share an x-axis, so every lane is forward-filled — step interpolation —
- * onto the union of all timestamps.
- *
- * Two value sets come out:
- *  - `raw`  — each outcome's real YES probability (0..1). Used for tooltips.
- *  - `norm` — `raw` normalized so every column sums to 1. Used for the
- *    100%-stacked band heights, so the stack always fills 0–100% even though
- *    independently-mirrored binaries don't price-sum to exactly 1.
+ * timestamps. To draw any multi-line chart they must share an x-axis, so
+ * every lane is forward-filled — step interpolation — onto the union of all
+ * timestamps. The output `raw` holds each outcome's real YES probability
+ * (0..1); the chart layers stacking / normalization on top per mode.
  */
 
 import type { components } from "@/lib/api/schema";
@@ -24,12 +19,31 @@ export type ChartSeries = {
   times: number[];
   /** `raw[outcomeIdx][timeIdx]` — real YES probability, 0..1. */
   raw: number[][];
-  /** `norm[outcomeIdx][timeIdx]` — column-normalized, sums to 1 per column. */
-  norm: number[][];
 };
 
 /** Cap on grid resolution — SVG paths past this add nothing visible. */
 const MAX_POINTS = 360;
+
+/**
+ * Heuristic NegRisk detector. A mutually-exclusive (NegRisk) event's outcome
+ * YES prices partition probability — they sum to ~100¢. Independent binaries
+ * that merely share an `event_id` do not. The frontend has no NegRisk flag
+ * (the mirror knows it but `MarketResponse` doesn't expose it), so we infer:
+ * every outcome priced AND the sum within tolerance of 1 ⇒ stackable.
+ *
+ * Conservative on purpose — anything ambiguous (partial pricing, off-sum)
+ * falls through to `false`, and the chart defaults such groups to overlaid
+ * lines, which never falsely implies a partition.
+ *
+ * TODO(backend): replace with a real `neg_risk` field on `MarketResponse`
+ * (off-block, mirror-populated like `event_id`).
+ */
+export function detectStackable(outcomes: { yesCents: number | null }[]): boolean {
+  if (outcomes.length < 2) return false;
+  if (outcomes.some((o) => o.yesCents == null)) return false;
+  const sum = outcomes.reduce((a, o) => a + (o.yesCents ?? 0) / 100, 0);
+  return Math.abs(sum - 1) <= 0.12;
+}
 
 function probFromNanos(nanos: string | number | bigint): number {
   const n =
@@ -57,7 +71,6 @@ function laneFor(
     pts.push({ t: b.timestamp_ms, v: probFromNanos(yes) });
   }
   pts.sort((a, b) => a.t - b.t);
-  // Dedupe by timestamp, keeping the last value seen for that instant.
   const out: Pt[] = [];
   for (const p of pts) {
     const prev = out[out.length - 1];
@@ -77,13 +90,11 @@ export function buildChartSeries(
     laneFor(o.marketId, byMarket.get(o.marketId) ?? [], recentBlocks),
   );
 
-  // Union of every timestamp, then window to the selected range.
   const timeSet = new Set<number>();
   for (const lane of lanes) for (const p of lane) timeSet.add(p.t);
   let times = [...timeSet].sort((a, b) => a - b);
   if (sinceMs != null) times = times.filter((t) => t >= sinceMs);
 
-  // Downsample evenly if the grid is denser than we can usefully draw.
   if (times.length > MAX_POINTS) {
     const stride = Math.ceil(times.length / MAX_POINTS);
     const last = times[times.length - 1]!;
@@ -92,12 +103,11 @@ export function buildChartSeries(
   }
 
   if (times.length === 0) {
-    return { times: [], raw: outcomes.map(() => []), norm: outcomes.map(() => []) };
+    return { times: [], raw: outcomes.map(() => []) };
   }
 
-  // Forward-fill each lane onto the grid. Before a lane's first point we
-  // back-fill with its earliest value so bands have no holes; a lane with no
-  // history at all falls back to the outcome's current YES price.
+  // Forward-fill each lane onto the grid; back-fill before its first point so
+  // lines have no holes; a lane with no history falls back to current price.
   const raw: number[][] = lanes.map((lane, k) => {
     const fallback =
       outcomes[k]?.yesPriceNanos != null
@@ -114,15 +124,5 @@ export function buildChartSeries(
     return row;
   });
 
-  // Column-normalize for the stacked-band geometry.
-  const norm: number[][] = outcomes.map(() => new Array(times.length).fill(0));
-  for (let i = 0; i < times.length; i++) {
-    let sum = 0;
-    for (let k = 0; k < raw.length; k++) sum += raw[k]![i]!;
-    for (let k = 0; k < raw.length; k++) {
-      norm[k]![i] = sum > 0 ? raw[k]![i]! / sum : 1 / raw.length;
-    }
-  }
-
-  return { times, raw, norm };
+  return { times, raw };
 }

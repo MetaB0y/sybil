@@ -1,0 +1,103 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - link "Sybil testnet" [ref=e3] [cursor=pointer]:
+      - /url: /
+      - generic [ref=e4]: Sybil
+      - generic [ref=e5]: testnet
+    - navigation [ref=e6]:
+      - link "Markets" [ref=e7] [cursor=pointer]:
+        - /url: /
+      - link "Activity" [ref=e8] [cursor=pointer]:
+        - /url: /activity
+      - link "Portfolio" [ref=e9] [cursor=pointer]:
+        - /url: /portfolio
+    - generic [ref=e10]:
+      - generic [ref=e11]:
+        - generic [ref=e12]: /
+        - textbox "search markets" [ref=e13]:
+          - /placeholder: search events, markets
+      - 'generic "connection: idle" [ref=e14]':
+        - generic [ref=e16]: batch
+        - generic [ref=e17]: "2.0"
+      - button [disabled] [ref=e20] [cursor=pointer]: …
+  - main [ref=e22]:
+    - generic [ref=e23]:
+      - heading "Activity" [level=1] [ref=e24]
+      - generic [ref=e25]: // everything happening on Sybil · uniform clearing every 2 s
+    - generic [ref=e27]:
+      - generic [ref=e28]:
+        - generic [ref=e29]:
+          - generic [ref=e30]: All-time matched volume
+          - generic [ref=e31]: // since genesis · 6 mo 17 d
+        - generic [ref=e32]: —
+        - generic [ref=e34]: 0 batches · 0 live markets · uptime 99.97%
+      - generic [ref=e35]:
+        - generic [ref=e36]:
+          - generic [ref=e37]: Active traders
+          - generic [ref=e39]: —
+          - generic [ref=e40]: addresses placed ≥1 order
+        - generic [ref=e41]:
+          - generic [ref=e42]: Placed orders
+          - generic "backend 'placed' counts per-batch participations, not distinct orders — pending a backend fix — mocked until backend exposes this field" [ref=e44]:
+            - generic [ref=e45]: 2.1M
+            - generic "mocked value" [ref=e46]: mock
+          - generic [ref=e47]: across all batches
+        - generic [ref=e48]:
+          - generic [ref=e49]: Matched orders
+          - generic [ref=e51]: —
+          - generic [ref=e52]: successfully filled at clear
+        - generic [ref=e53]:
+          - generic [ref=e54]: Unmatched orders
+          - generic [ref=e56]: —
+          - generic [ref=e57]: expired without a fill
+    - generic [ref=e58]:
+      - generic [ref=e59]:
+        - heading "Last 24 hours" [level=3] [ref=e60]
+        - generic [ref=e61]: // rolling window · vs prior 24 h
+        - generic [ref=e62]: mocked
+      - generic [ref=e63]:
+        - generic [ref=e64]:
+          - generic [ref=e65]: Matched volume
+          - generic [ref=e66]:
+            - 'generic "last-24h rollups — needs /v1/activity/overview (OPEN_QUESTIONS #3, infeasible client-side at 2s cadence) — mocked until backend exposes this field" [ref=e67]':
+              - generic [ref=e68]: $4.82M
+              - generic "mocked value" [ref=e69]: mock
+            - generic [ref=e70]: +12.4%
+        - generic [ref=e71]:
+          - generic [ref=e72]: Active traders
+          - generic [ref=e73]:
+            - 'generic "last-24h rollups — needs /v1/activity/overview (OPEN_QUESTIONS #3, infeasible client-side at 2s cadence) — mocked until backend exposes this field" [ref=e74]':
+              - generic [ref=e75]: 3.2K
+              - generic "mocked value" [ref=e76]: mock
+            - generic [ref=e77]: +6.1%
+        - generic [ref=e78]:
+          - generic [ref=e79]: Placed orders
+          - 'generic "last-24h rollups — needs /v1/activity/overview (OPEN_QUESTIONS #3, infeasible client-side at 2s cadence) — mocked until backend exposes this field" [ref=e81]':
+            - generic [ref=e82]: 58.9K
+            - generic "mocked value" [ref=e83]: mock
+        - generic [ref=e84]:
+          - generic [ref=e85]: Matched orders
+          - 'generic "last-24h rollups — needs /v1/activity/overview (OPEN_QUESTIONS #3, infeasible client-side at 2s cadence) — mocked until backend exposes this field" [ref=e87]':
+            - generic [ref=e88]: 47.2K
+            - generic "mocked value" [ref=e89]: mock
+        - generic [ref=e90]:
+          - generic [ref=e91]: Unmatched orders
+          - 'generic "last-24h rollups — needs /v1/activity/overview (OPEN_QUESTIONS #3, infeasible client-side at 2s cadence) — mocked until backend exposes this field" [ref=e93]':
+            - generic [ref=e94]: 11.7K
+            - generic "mocked value" [ref=e95]: mock
+    - generic [ref=e96]:
+      - generic [ref=e97]:
+        - heading "Batches" [level=3] [ref=e98]
+        - generic [ref=e99]: // showing last 0 · click any row to expand
+      - generic [ref=e100]:
+        - generic [ref=e101]:
+          - generic [ref=e102]: Batch
+          - generic [ref=e103]: Cleared
+          - generic [ref=e104]: Markets
+          - generic [ref=e105]: Matched volume
+          - generic [ref=e106]: Welfare
+          - generic [ref=e107]: Traders
+          - generic [ref=e108]: Orders
+        - generic [ref=e109]: no batches yet — waiting for hydration
+  - button "Open Next.js Dev Tools" [ref=e115] [cursor=pointer]:
+    - img [ref=e116]

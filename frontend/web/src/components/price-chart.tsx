@@ -3,14 +3,18 @@
 /**
  * PriceChart — hand-rolled SVG, no charting library.
  *
- * Two modes share one crosshair/tooltip shell:
- *  - multi-outcome events → 100%-stacked area, one colored band per outcome
- *    (favourite at the bottom), heights from the column-normalized series.
- *  - binary markets → a single YES-probability area on a 0–100% axis.
+ * Three modes share one crosshair / tooltip / time-axis shell:
+ *  - `area`    binary single market → one YES-probability area, 0–100% axis.
+ *  - `stacked` NegRisk multi-outcome → 100%-stacked bands. Heights are
+ *              normalized across the *shown* outcomes, so hiding some still
+ *              fills 0–100% ("share among shown"); tooltip shows raw ¢.
+ *  - `lines`   non-NegRisk grouped event → one independent YES line per
+ *              outcome on a shared 0–100% axis, no fill — their prices are
+ *              uncorrelated, so a stacked partition would be misleading.
  *
- * Live: re-derives from the store's recent-block ring buffer, so the line
- * advances every 2s batch on a normal React render — no imperative chart
- * lifecycle. Matches `StackedAreaChart` in `fed-primitives.jsx:82`.
+ * Only the outcomes passed in `drawn` are plotted (the legend caps this at
+ * 8). Live ticks come from the recent-block ring buffer — the line advances
+ * every 2s batch on a normal render, no imperative chart lifecycle.
  */
 
 import { useMemo, useRef, useState } from "react";
@@ -22,33 +26,36 @@ import type { PricePoint } from "@/lib/markets/use-price-history";
 import { selectRecentBlocks, useStore } from "@/lib/store";
 
 const W = 1000;
-const H = 280;
+/** Plot height; the time axis sits in an extra strip below. */
+const PLOT_H = 280;
+const AXIS_H = 24;
 const Y_TICKS = [1, 0.75, 0.5, 0.25, 0];
+const X_TICKS = 5;
+
+export type ChartMode = "area" | "stacked" | "lines";
+
+/** An outcome to plot, plus its stable color index in the full group. */
+export type DrawnOutcome = { outcome: EventOutcome; colorIndex: number };
 
 type Props = {
-  outcomes: EventOutcome[];
+  drawn: DrawnOutcome[];
   byMarket: Map<number, PricePoint[]>;
-  isMultiOutcome: boolean;
+  mode: ChartMode;
   /** Lower bound of the selected range (ms), or null for ALL. */
   sinceMs: number | null;
 };
 
-export function PriceChart({
-  outcomes,
-  byMarket,
-  isMultiOutcome,
-  sinceMs,
-}: Props) {
+export function PriceChart({ drawn, byMarket, mode, sinceMs }: Props) {
   const recent = useStore(selectRecentBlocks);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [hover, setHover] = useState<number | null>(null);
+
+  const outcomes = useMemo(() => drawn.map((d) => d.outcome), [drawn]);
 
   const series = useMemo(
     () => buildChartSeries(outcomes, byMarket, recent, sinceMs),
     [outcomes, byMarket, recent, sinceMs],
   );
-  // Whether any history exists at all — distinguishes "nothing yet" from
-  // "nothing in this range".
   const everHadData = useMemo(
     () => buildChartSeries(outcomes, byMarket, recent, null).times.length > 0,
     [outcomes, byMarket, recent],
@@ -67,31 +74,50 @@ export function PriceChart({
   }
 
   const stepX = W / (N - 1);
-  const yOf = (v: number) => (1 - v) * H;
+  const yOf = (v: number) => (1 - v) * PLOT_H;
 
-  // Stacked: favourite (index 0) at the bottom. Each band sits between the
-  // cumulative normalized total below it and including it.
-  const bands = outcomes.map((o, k) => {
-    const color = colorForOutcome(o, k);
-    if (isMultiOutcome) {
+  // Per-mode geometry. `stacked` re-normalizes across the shown outcomes;
+  // `lines` / `area` plot raw probabilities directly.
+  const layers = drawn.map((d, k) => {
+    const color = colorForOutcome(d.outcome, d.colorIndex);
+    const row = series.raw[k]!;
+    if (mode === "stacked") {
       const top: number[] = [];
       const bottom: number[] = [];
       for (let i = 0; i < N; i++) {
+        let sum = 0;
+        for (let j = 0; j < drawn.length; j++) sum += series.raw[j]![i]!;
         let below = 0;
-        for (let j = 0; j < k; j++) below += series.norm[j]![i]!;
+        for (let j = 0; j < k; j++) {
+          below += sum > 0 ? series.raw[j]![i]! / sum : 1 / drawn.length;
+        }
+        const self = sum > 0 ? row[i]! / sum : 1 / drawn.length;
         bottom.push(below);
-        top.push(below + series.norm[k]![i]!);
+        top.push(below + self);
       }
-      return { color, fill: bandPath(top, bottom, stepX, yOf), line: linePath(top, stepX, yOf) };
+      return { color, fill: bandPath(top, bottom, stepX, yOf), line: linePath(top, stepX, yOf), filled: true };
     }
-    // Binary: single area from the 0 baseline to the YES probability.
-    const top = series.raw[k]!;
-    const base = new Array(N).fill(0);
-    return { color, fill: bandPath(top, base, stepX, yOf), line: linePath(top, stepX, yOf) };
+    if (mode === "area") {
+      return {
+        color,
+        fill: bandPath(row, new Array(N).fill(0), stepX, yOf),
+        line: linePath(row, stepX, yOf),
+        filled: true,
+      };
+    }
+    // lines — no fill
+    return { color, fill: "", line: linePath(row, stepX, yOf), filled: false };
   });
 
   const lastIdx = N - 1;
   const nowMs = series.times[lastIdx]!;
+  const spanMs = nowMs - series.times[0]!;
+
+  const xTickIdx: number[] = [];
+  const count = Math.min(X_TICKS, N);
+  for (let i = 0; i < count; i++) {
+    xTickIdx.push(Math.round((i * lastIdx) / (count - 1)));
+  }
 
   const onMove = (e: React.MouseEvent) => {
     const el = containerRef.current;
@@ -105,139 +131,206 @@ export function PriceChart({
   const hoverFrac = hover == null ? 0 : hover / lastIdx;
 
   return (
-    <div
-      ref={containerRef}
-      onMouseMove={onMove}
-      onMouseLeave={() => setHover(null)}
-      style={{ position: "relative", width: "100%", height: H }}
-    >
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        width="100%"
-        height={H}
-        preserveAspectRatio="none"
-        style={{ display: "block" }}
-      >
-        {Y_TICKS.map((y) => (
-          <line
-            key={y}
-            x1={0}
-            x2={W}
-            y1={yOf(y)}
-            y2={yOf(y)}
-            stroke="rgba(255,255,255,0.05)"
-            strokeDasharray={y === 0 || y === 1 ? undefined : "2 4"}
-          />
-        ))}
-        {bands.map((b, k) => (
-          <g key={outcomes[k]!.marketId}>
-            <path d={b.fill} fill={b.color} fillOpacity={isMultiOutcome ? 0.34 : 0.18} />
-            <path
-              d={b.line}
-              fill="none"
-              stroke={b.color}
-              strokeWidth={1.5}
-              strokeLinejoin="round"
-              vectorEffect="non-scaling-stroke"
-            />
-          </g>
-        ))}
-        {hover != null && (
-          <line
-            x1={hover * stepX}
-            x2={hover * stepX}
-            y1={0}
-            y2={H}
-            stroke="rgba(255,255,255,0.4)"
-            strokeDasharray="2 3"
-          />
-        )}
-      </svg>
-
-      {/* y-axis labels, overlaid top-right of each gridline */}
+    <div style={{ width: "100%" }}>
       <div
-        style={{
-          position: "absolute",
-          top: 0,
-          right: 0,
-          height: H,
-          pointerEvents: "none",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "space-between",
-          fontFamily: "var(--font-mono)",
-          fontSize: 9,
-          color: "var(--fg-4)",
-          padding: "2px 2px 0",
-        }}
+        ref={containerRef}
+        onMouseMove={onMove}
+        onMouseLeave={() => setHover(null)}
+        style={{ position: "relative", width: "100%", height: PLOT_H }}
       >
-        {Y_TICKS.map((y) => (
-          <span key={y}>{Math.round(y * 100)}%</span>
-        ))}
-      </div>
+        <svg
+          viewBox={`0 0 ${W} ${PLOT_H}`}
+          width="100%"
+          height={PLOT_H}
+          preserveAspectRatio="none"
+          style={{ display: "block" }}
+        >
+          {Y_TICKS.map((y) => (
+            <line
+              key={`y${y}`}
+              x1={0}
+              x2={W}
+              y1={yOf(y)}
+              y2={yOf(y)}
+              stroke="rgba(255,255,255,0.05)"
+              strokeDasharray={y === 0 || y === 1 ? undefined : "2 4"}
+            />
+          ))}
+          {xTickIdx.map((idx) => (
+            <line
+              key={`x${idx}`}
+              x1={idx * stepX}
+              x2={idx * stepX}
+              y1={0}
+              y2={PLOT_H}
+              stroke="rgba(255,255,255,0.04)"
+            />
+          ))}
+          {layers.map((l, k) => (
+            <g key={drawn[k]!.outcome.marketId}>
+              {l.filled && (
+                <path
+                  d={l.fill}
+                  fill={l.color}
+                  fillOpacity={mode === "stacked" ? 0.34 : 0.16}
+                />
+              )}
+              <path
+                d={l.line}
+                fill="none"
+                stroke={l.color}
+                strokeWidth={1.5}
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            </g>
+          ))}
+          {hover != null && (
+            <line
+              x1={hover * stepX}
+              x2={hover * stepX}
+              y1={0}
+              y2={PLOT_H}
+              stroke="rgba(255,255,255,0.4)"
+              strokeDasharray="2 3"
+            />
+          )}
+        </svg>
 
-      {hover != null && (
+        {/* y-axis labels, overlaid top-right of each gridline */}
         <div
           style={{
             position: "absolute",
-            top: 8,
-            left: `${hoverFrac * 100}%`,
-            transform: `translateX(${hoverFrac > 0.6 ? "calc(-100% - 12px)" : "12px"})`,
-            background: "var(--surface-3, var(--surface-2))",
-            border: "1px solid var(--border-2)",
-            borderRadius: 4,
-            padding: "8px 10px",
-            minWidth: 168,
+            top: 0,
+            right: 0,
+            height: PLOT_H,
             pointerEvents: "none",
-            boxShadow: "var(--shadow-popover, 0 8px 24px rgba(0,0,0,0.4))",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "space-between",
             fontFamily: "var(--font-mono)",
-            fontSize: 10,
+            fontSize: 9,
+            color: "var(--fg-4)",
+            padding: "2px 2px 0",
           }}
         >
-          <div
-            style={{
-              color: "var(--fg-3)",
-              textTransform: "uppercase",
-              letterSpacing: "0.04em",
-              marginBottom: 6,
-              fontSize: 9,
-            }}
-          >
-            {hover === lastIdx ? "now" : formatAge(nowMs - series.times[hover]!)}
-          </div>
-          {outcomes.map((o, k) => (
-            <div
-              key={o.marketId}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: 14,
-                lineHeight: "16px",
-              }}
-            >
-              <span style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--fg-2)", minWidth: 0 }}>
-                <span
-                  style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: 1,
-                    background: colorForOutcome(o, k),
-                    flexShrink: 0,
-                  }}
-                />
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {o.shortLabel}
-                </span>
-              </span>
-              <span style={{ color: "var(--fg-1)", flexShrink: 0 }}>
-                {Math.round(series.raw[k]![hover]! * 100)}¢
-              </span>
-            </div>
+          {Y_TICKS.map((y) => (
+            <span key={y}>{Math.round(y * 100)}%</span>
           ))}
         </div>
-      )}
+
+        {hover != null && (
+          <div
+            style={{
+              position: "absolute",
+              top: 8,
+              left: `${hoverFrac * 100}%`,
+              transform: `translateX(${hoverFrac > 0.6 ? "calc(-100% - 12px)" : "12px"})`,
+              background: "var(--surface-3, var(--surface-2))",
+              border: "1px solid var(--border-2)",
+              borderRadius: 4,
+              padding: "8px 10px",
+              minWidth: 168,
+              pointerEvents: "none",
+              boxShadow: "var(--shadow-popover, 0 8px 24px rgba(0,0,0,0.4))",
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+            }}
+          >
+            <div
+              style={{
+                color: "var(--fg-3)",
+                textTransform: "uppercase",
+                letterSpacing: "0.04em",
+                marginBottom: 6,
+                fontSize: 9,
+              }}
+            >
+              {hover === lastIdx ? "now" : `${formatAge(nowMs - series.times[hover]!)} ago`}
+            </div>
+            {drawn.map((d, k) => (
+              <div
+                key={d.outcome.marketId}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 14,
+                  lineHeight: "16px",
+                }}
+              >
+                <span
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    color: "var(--fg-2)",
+                    minWidth: 0,
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: 1,
+                      background: colorForOutcome(d.outcome, d.colorIndex),
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {d.outcome.shortLabel}
+                  </span>
+                </span>
+                <span style={{ color: "var(--fg-1)", flexShrink: 0 }}>
+                  {Math.round(series.raw[k]![hover]! * 100)}¢
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* time axis */}
+      <div
+        style={{
+          position: "relative",
+          height: AXIS_H,
+          fontFamily: "var(--font-mono)",
+          fontSize: 9,
+          color: "var(--fg-4)",
+        }}
+      >
+        {xTickIdx.map((idx, i) => {
+          const frac = idx / lastIdx;
+          const align = i === 0 ? "0" : i === xTickIdx.length - 1 ? "-100%" : "-50%";
+          return (
+            <span
+              key={idx}
+              style={{
+                position: "absolute",
+                top: 6,
+                left: `${frac * 100}%`,
+                transform: `translateX(${align})`,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {formatAxisTime(series.times[idx]!, spanMs)}
+            </span>
+          );
+        })}
+      </div>
     </div>
   );
+}
+
+/** Axis label — clock for intraday spans, date for longer windows. */
+function formatAxisTime(ms: number, spanMs: number): string {
+  const d = new Date(ms);
+  if (spanMs <= 36 * 3600_000) {
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }
+  const mon = d.toLocaleString("en-US", { month: "short" });
+  if (spanMs <= 200 * 24 * 3600_000) return `${mon} ${d.getDate()}`;
+  return `${mon} '${String(d.getFullYear()).slice(2)}`;
 }
 
 /** Path of the top edge only — `M`/`L` along the value array. */
@@ -271,7 +364,7 @@ function ChartMessage({ children }: { children: React.ReactNode }) {
     <div
       className="text-mono"
       style={{
-        height: H,
+        height: PLOT_H + AXIS_H,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",

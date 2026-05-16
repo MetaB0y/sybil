@@ -20,6 +20,7 @@ import {
 } from "@/lib/format/nanos";
 import { getCategoryColor, pickDisplayCategory } from "@/lib/categorize";
 import { useMarket } from "@/lib/markets/use-market";
+import { detectStackable } from "@/lib/market-detail/build-chart-series";
 import { useEventGroup } from "@/lib/market-detail/use-event-group";
 import { useMarketStats } from "@/lib/market-detail/use-market-stats";
 import { useEventPriceHistory } from "@/lib/markets/use-event-price-history";
@@ -318,13 +319,46 @@ function StatusPill({
 
 function ChartSection({ marketId }: { marketId: number }) {
   const [range, setRange] = useState<ChartRange>("1W");
+  // marketIds drawn on the chart. `null` = use the favourite-first default.
+  const [selectedIds, setSelectedIds] = useState<number[] | null>(null);
   const { group, isPending: groupPending } = useEventGroup(marketId);
   const latestBlock = useStore(selectLatestBlock);
 
   const outcomes = useMemo(() => group?.outcomes ?? [], [group]);
-  const marketIds = useMemo(() => outcomes.map((o) => o.marketId), [outcomes]);
+  const idSet = useMemo(
+    () => new Set(outcomes.map((o) => o.marketId)),
+    [outcomes],
+  );
+  const defaultIds = useMemo(
+    () => outcomes.slice(0, 4).map((o) => o.marketId),
+    [outcomes],
+  );
+  // Self-heals across navigation: stale ids from another event drop out, and
+  // an empty result falls back to the favourite-first default.
+  const effectiveSelected = useMemo(() => {
+    const valid = (selectedIds ?? []).filter((id) => idSet.has(id));
+    return valid.length > 0 ? valid : defaultIds;
+  }, [selectedIds, idSet, defaultIds]);
+
+  // Fetch history only for the outcomes actually shown (legend caps at 8).
   const { byMarket, isPending: historyPending } =
-    useEventPriceHistory(marketIds);
+    useEventPriceHistory(effectiveSelected);
+
+  const drawn = useMemo(
+    () =>
+      outcomes
+        .map((outcome, colorIndex) => ({ outcome, colorIndex }))
+        .filter((d) => effectiveSelected.includes(d.outcome.marketId)),
+    [outcomes, effectiveSelected],
+  );
+
+  // Binary → area. Multi → stacked when the group looks NegRisk (prices
+  // partition to ~100¢), else overlaid independent lines.
+  const mode = !group?.isMultiOutcome
+    ? "area"
+    : detectStackable(outcomes)
+      ? "stacked"
+      : "lines";
 
   // Latest committed block is our "now" reference — ticks every 2s, so the
   // sliding range window stays current without a Date.now() call in render.
@@ -332,7 +366,7 @@ function ChartSection({ marketId }: { marketId: number }) {
   const windowMs = RANGE_MS[range];
   const sinceMs = windowMs == null || nowMs === 0 ? null : nowMs - windowMs;
 
-  const loading = groupPending || (historyPending && outcomes.length > 0);
+  const loading = groupPending || (historyPending && drawn.length > 0);
 
   return (
     <section
@@ -357,7 +391,11 @@ function ChartSection({ marketId }: { marketId: number }) {
         }}
       >
         {outcomes.length > 0 ? (
-          <OutcomeLegend outcomes={outcomes} />
+          <OutcomeLegend
+            outcomes={outcomes}
+            selectedIds={effectiveSelected}
+            onChange={setSelectedIds}
+          />
         ) : (
           <div className="eyebrow">{"// yes probability"}</div>
         )}
@@ -367,7 +405,7 @@ function ChartSection({ marketId }: { marketId: number }) {
         <div
           className="text-mono"
           style={{
-            height: 280,
+            height: 304,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -378,9 +416,9 @@ function ChartSection({ marketId }: { marketId: number }) {
         </div>
       ) : (
         <PriceChart
-          outcomes={outcomes}
+          drawn={drawn}
           byMarket={byMarket}
-          isMultiOutcome={group?.isMultiOutcome ?? false}
+          mode={mode}
           sinceMs={sinceMs}
         />
       )}
