@@ -56,12 +56,12 @@ export function PortfolioHero({
         <div
           className="tabular"
           style={{
-            fontFamily: "var(--font-display)",
-            fontSize: "clamp(40px, 6vw, 56px)",
+            fontFamily: "var(--font-sans)",
+            fontSize: "clamp(46px, 4.6vw, 64px)",
             fontWeight: 600,
-            letterSpacing: "var(--track-tight)",
+            letterSpacing: "-0.02em",
             color: "var(--fg-1)",
-            lineHeight: 1,
+            lineHeight: 0.95,
           }}
         >
           {totalValue == null ? "—" : formatDollars(totalValue, { decimals: 2 })}
@@ -82,6 +82,7 @@ export function PortfolioHero({
             <span
               style={{
                 color: deltaPositive ? "var(--yes)" : "var(--no)",
+                fontSize: 16,
               }}
             >
               {deltaPositive ? "▲" : "▼"} ${Math.abs(deltaAbs).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
@@ -106,11 +107,11 @@ export function PortfolioHero({
         style={{
           display: "grid",
           gridTemplateColumns: "1fr 1fr",
-          gap: 1,
-          background: "var(--border-1)",
-          border: "1px solid var(--border-1)",
-          borderRadius: 6,
-          overflow: "hidden",
+          columnGap: 32,
+          rowGap: 18,
+          paddingTop: 22,
+          marginTop: 6,
+          borderTop: "1px solid var(--border-1)",
         }}
       >
         <Stat
@@ -192,20 +193,21 @@ function Stat({
   return (
     <div
       style={{
-        background: "var(--surface-1)",
-        padding: "12px 14px",
         display: "flex",
         flexDirection: "column",
         gap: 4,
+        minWidth: 0,
       }}
     >
       <Eyebrow>{label}</Eyebrow>
       <span
         className="tabular"
         style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 18,
-          fontWeight: 500,
+          fontFamily: "var(--font-sans)",
+          fontSize: 20,
+          fontWeight: 600,
+          letterSpacing: "-0.01em",
+          lineHeight: 1,
           color,
         }}
       >
@@ -215,7 +217,7 @@ function Stat({
         style={{
           fontFamily: "var(--font-mono)",
           fontSize: 10,
-          color: "var(--fg-4)",
+          color: "var(--fg-3)",
           letterSpacing: "var(--track-wide)",
           textTransform: "uppercase",
         }}

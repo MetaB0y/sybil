@@ -181,44 +181,57 @@ export function EquityChart({ curve }: Props) {
 
 function Wrapper({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      style={{
-        position: "relative",
-        background: "var(--surface-1)",
-        border: "1px solid var(--border-1)",
-        borderRadius: 6,
-        padding: 4,
-        minHeight: 220,
-        overflow: "hidden",
-      }}
-    >
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div
         style={{
           display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: "6px 10px",
-          fontFamily: "var(--font-mono)",
-          fontSize: 10,
-          color: "var(--fg-4)",
-          letterSpacing: "var(--track-wide)",
-          textTransform: "uppercase",
+          alignItems: "baseline",
+          gap: 10,
         }}
       >
-        <span>
-          equity curve //{" "}
-          <span style={{ color: "var(--fg-3)" }}>marked-to-batch</span>
-          {" — "}
-          <span style={{ color: "var(--fg-4)" }}>dashed = net deposits</span>
-        </span>
-        <MockValue
-          hint="NOT NOW — equity history is mocked; backend has no per-account time series (OPEN_QUESTIONS #12)"
-          variant="pill"
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            color: "var(--fg-3)",
+            letterSpacing: "var(--track-wide)",
+            textTransform: "uppercase",
+          }}
         >
-          {" "}
-        </MockValue>
+          Equity curve
+        </span>
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            color: "var(--fg-3)",
+          }}
+        >
+          <span style={{ color: "var(--fg-4)" }}>{"// "}</span>
+          marked-to-batch · dashed = net deposits
+        </span>
+        <span style={{ marginLeft: "auto" }}>
+          <MockValue
+            hint="NOT NOW — equity history is mocked; backend has no per-account time series (OPEN_QUESTIONS #12)"
+            variant="pill"
+          >
+            {" "}
+          </MockValue>
+        </span>
       </div>
-      {children}
+      <div
+        style={{
+          position: "relative",
+          background: "var(--surface-1)",
+          border: "1px solid var(--border-1)",
+          borderRadius: 6,
+          padding: 4,
+          minHeight: 220,
+          overflow: "hidden",
+        }}
+      >
+        {children}
+      </div>
     </div>
   );
 }

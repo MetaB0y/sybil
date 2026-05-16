@@ -75,7 +75,6 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs, nowMs }: Props) {
     );
   }
 
-  const lastIdx = N - 1;
   // Axis domain = the selected window; the line itself may start later.
   const t0 = series.domainStart;
   const tEnd = series.domainEnd;
@@ -129,22 +128,13 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs, nowMs }: Props) {
     const el = containerRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    const frac = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
-    const targetT = t0 + frac * span;
-    // Nearest point in time to the cursor.
-    let best = 0;
-    let bestD = Infinity;
-    for (let i = 0; i < N; i++) {
-      const d = Math.abs(series.times[i]! - targetT);
-      if (d < bestD) {
-        bestD = d;
-        best = i;
-      }
-    }
-    setHover(best);
+    setHover(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)));
   };
 
-  const hoverFrac = hover == null ? 0 : xs[hover]! / W;
+  // The crosshair follows the cursor itself; the readout is the line's value
+  // at that exact time (flat-held between clearings), not snapped to a point.
+  const hoverT = hover == null ? null : t0 + hover * span;
+  const showHover = hoverT != null && hoverT >= series.times[0]!;
 
   return (
     <div style={{ width: "100%" }}>
@@ -201,10 +191,10 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs, nowMs }: Props) {
               />
             </g>
           ))}
-          {hover != null && (
+          {showHover && (
             <line
-              x1={xs[hover]!}
-              x2={xs[hover]!}
+              x1={hover! * W}
+              x2={hover! * W}
               y1={0}
               y2={PLOT_H}
               stroke="rgba(255,255,255,0.4)"
@@ -235,13 +225,13 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs, nowMs }: Props) {
           ))}
         </div>
 
-        {hover != null && (
+        {showHover && (
           <div
             style={{
               position: "absolute",
               top: 8,
-              left: `${hoverFrac * 100}%`,
-              transform: `translateX(${hoverFrac > 0.6 ? "calc(-100% - 12px)" : "12px"})`,
+              left: `${hover! * 100}%`,
+              transform: `translateX(${hover! > 0.6 ? "calc(-100% - 12px)" : "12px"})`,
               background: "var(--surface-3, var(--surface-2))",
               border: "1px solid var(--border-2)",
               borderRadius: 4,
@@ -262,7 +252,9 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs, nowMs }: Props) {
                 fontSize: 9,
               }}
             >
-              {hover === lastIdx ? "now" : `${formatAge(tEnd - series.times[hover]!)} ago`}
+              {tEnd - hoverT! < 1500
+                ? "now"
+                : `${formatAge(tEnd - hoverT!)} ago`}
             </div>
             {drawn.map((d, k) => (
               <div
@@ -297,7 +289,7 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs, nowMs }: Props) {
                   </span>
                 </span>
                 <span style={{ color: "var(--fg-1)", flexShrink: 0 }}>
-                  {Math.round(series.raw[k]![hover]! * 100)}¢
+                  {Math.round(valueAt(series.times, series.raw[k]!, hoverT!) * 100)}¢
                 </span>
               </div>
             ))}
@@ -351,6 +343,23 @@ function formatAxisTime(ms: number, spanMs: number): string {
   const mon = d.toLocaleString("en-US", { month: "short" });
   if (spanMs <= 200 * 24 * 3600_000) return `${mon} ${d.getDate()}`;
   return `${mon} '${String(d.getFullYear()).slice(2)}`;
+}
+
+/**
+ * Value of a series at an arbitrary time — linear interpolation between the
+ * two surrounding grid points, matching what the SVG line draws. Over a gap
+ * (no clearings) the two endpoints are equal, so this reads the held price.
+ */
+function valueAt(times: number[], row: number[], t: number): number {
+  const last = times.length - 1;
+  if (t <= times[0]!) return row[0]!;
+  if (t >= times[last]!) return row[last]!;
+  let i = 0;
+  while (i < last && times[i + 1]! <= t) i++;
+  const ta = times[i]!;
+  const tb = times[i + 1]!;
+  const f = tb > ta ? (t - ta) / (tb - ta) : 0;
+  return row[i]! + f * (row[i + 1]! - row[i]!);
 }
 
 /** Path of the top edge only — `M`/`L` along `(xs[i], yOf(vals[i]))`. */

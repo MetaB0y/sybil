@@ -31,7 +31,44 @@ const ALIAS_RIGHT = [
   "specter",
 ];
 
-export function IdentityHeader({
+export function IdentityHeader({ publicKeyHex }: { publicKeyHex: string }) {
+  const address = shortAddress(publicKeyHex);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <h1
+        style={{
+          margin: 0,
+          fontFamily: "var(--font-display)",
+          fontWeight: 600,
+          fontSize: "var(--fs-32)",
+          lineHeight: "var(--lh-32)",
+          letterSpacing: "var(--track-tight)",
+          color: "var(--fg-1)",
+        }}
+      >
+        Portfolio
+      </h1>
+      <p
+        style={{
+          margin: 0,
+          fontFamily: "var(--font-mono)",
+          fontSize: 11,
+          color: "var(--fg-4)",
+          letterSpacing: "var(--track-wide)",
+        }}
+      >
+        {"// "}positions · orders · history for {address}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Avatar tile + short address + generated alias. Sits on the identity/range
+ * row above the hero grid. Matches the handoff `IdentityStrip`.
+ */
+export function IdentityStrip({
   accountId,
   publicKeyHex,
 }: {
@@ -42,73 +79,38 @@ export function IdentityHeader({
   const address = shortAddress(publicKeyHex);
 
   return (
-    <header
+    <div
       style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "var(--space-3)",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 12,
       }}
     >
+      <AvatarTile publicKeyHex={publicKeyHex} />
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <h1
+        <span
+          className="tabular"
           style={{
-            margin: 0,
-            fontFamily: "var(--font-display)",
-            fontWeight: 600,
-            fontSize: "var(--fs-32)",
-            lineHeight: "var(--lh-32)",
-            letterSpacing: "var(--track-tight)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 14,
             color: "var(--fg-1)",
           }}
         >
-          Portfolio
-        </h1>
-        <p
+          {address}
+        </span>
+        <span
           style={{
-            margin: 0,
             fontFamily: "var(--font-mono)",
-            fontSize: 11,
-            color: "var(--fg-4)",
+            fontSize: 10,
+            color: "var(--fg-3)",
             letterSpacing: "var(--track-wide)",
+            textTransform: "uppercase",
           }}
         >
-          {"// "}positions · orders · history for {address}
-        </p>
+          {alias}
+        </span>
       </div>
-
-      <div
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 12,
-        }}
-      >
-        <AvatarTile publicKeyHex={publicKeyHex} />
-        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <span
-            className="tabular"
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 14,
-              color: "var(--fg-1)",
-            }}
-          >
-            {address}
-          </span>
-          <span
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 10,
-              color: "var(--fg-3)",
-              letterSpacing: "var(--track-wide)",
-              textTransform: "uppercase",
-            }}
-          >
-            {alias}
-          </span>
-        </div>
-      </div>
-    </header>
+    </div>
   );
 }
 

@@ -14,7 +14,10 @@ import { useMemo, useState } from "react";
 import { ActivityList } from "@/components/portfolio/activity-list";
 import { EquityChart } from "@/components/portfolio/equity-chart";
 import { HistoryList } from "@/components/portfolio/history-list";
-import { IdentityHeader } from "@/components/portfolio/identity-header";
+import {
+  IdentityHeader,
+  IdentityStrip,
+} from "@/components/portfolio/identity-header";
 import { OpenOrdersList } from "@/components/portfolio/open-orders-list";
 import { PortfolioHero } from "@/components/portfolio/portfolio-hero";
 import {
@@ -130,35 +133,48 @@ function Connected({
 
   return (
     <>
-      <IdentityHeader accountId={accountId} publicKeyHex={publicKeyHex} />
+      <IdentityHeader publicKeyHex={publicKeyHex} />
 
-      <div
+      <section
         style={{
           display: "flex",
-          justifyContent: "flex-end",
+          flexDirection: "column",
+          gap: "var(--space-4)",
+          paddingBottom: "var(--space-5)",
+          borderBottom: "1px solid var(--border-1)",
         }}
       >
-        <RangeTabs value={range} onChange={setRange} />
-      </div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "var(--space-4)",
+          }}
+        >
+          <IdentityStrip accountId={accountId} publicKeyHex={publicKeyHex} />
+          <RangeTabs value={range} onChange={setRange} />
+        </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.3fr)",
-          gap: "var(--space-5)",
-          alignItems: "stretch",
-        }}
-      >
-        <PortfolioHero
-          portfolio={portfolioData}
-          pnlSplit={pnlSplit}
-          curve={curve}
-          tradeCount={tradeCount}
-          tradeCountCapped={tradeCountCapped}
-          rangeLabel={RANGE_COPY[range]}
-        />
-        <EquityChart curve={curve} />
-      </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 0.85fr) minmax(0, 1.15fr)",
+            gap: 48,
+            alignItems: "start",
+          }}
+        >
+          <PortfolioHero
+            portfolio={portfolioData}
+            pnlSplit={pnlSplit}
+            curve={curve}
+            tradeCount={tradeCount}
+            tradeCountCapped={tradeCountCapped}
+            rangeLabel={RANGE_COPY[range]}
+          />
+          <EquityChart curve={curve} />
+        </div>
+      </section>
 
       <PortfolioTabs value={tab} onChange={setTab} counts={counts} />
 
