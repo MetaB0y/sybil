@@ -6,9 +6,8 @@
  * grid with a market-row table on the left and a donut + composition KV on
  * the right.
  *
- * Data comes from `useBatchDetail(height)` — the per-market rows are
- * mocked-split (volume, welfare, placed/matched, imbalance) until the backend
- * denormalizes market_id + side onto FillResponse (OPEN_QUESTIONS #4–#6).
+ * Data comes from `useBatchDetail(height)`. The per-market rows are real —
+ * volume, welfare and placed/matched come from `BlockResponse.by_market`.
  */
 
 import { useState } from "react";
@@ -27,7 +26,7 @@ import { DonutOutcome } from "./donut-outcome";
 const ROWS_INITIAL = 6;
 const ROWS_STEP = 10;
 
-const GRID = "2fr 70px 60px 110px 100px 130px 1fr";
+const GRID = "2fr 70px 60px 110px 100px 130px";
 const GRID_GAP = 12;
 
 export function BatchDetail({ row }: { row: BatchRow }) {
@@ -190,10 +189,6 @@ function MarketTableHeader() {
   const cell: React.CSSProperties = {
     textAlign: "right",
   };
-  const mockedHeader: React.CSSProperties = {
-    ...cell,
-    color: "var(--warn)",
-  };
   return (
     <div
       style={{
@@ -214,30 +209,9 @@ function MarketTableHeader() {
       <span>Market</span>
       <span style={cell}>Clear</span>
       <span style={cell}>Δ</span>
-      <span
-        style={mockedHeader}
-        title="Per-market matched volume is mocked — uniform split of block total (OPEN_QUESTIONS #5)"
-      >
-        Matched vol*
-      </span>
-      <span
-        style={mockedHeader}
-        title="Per-market welfare is mocked — uniform split (OPEN_QUESTIONS #4)"
-      >
-        Welfare*
-      </span>
-      <span
-        style={mockedHeader}
-        title="Per-market placed/matched is mocked (OPEN_QUESTIONS #5)"
-      >
-        Placed / Matched*
-      </span>
-      <span
-        style={mockedHeader}
-        title="Imbalance is mocked — FillResponse has no side (OPEN_QUESTIONS #6)"
-      >
-        Imbalance*
-      </span>
+      <span style={cell}>Matched vol</span>
+      <span style={cell}>Welfare</span>
+      <span style={cell}>Placed / Matched</span>
     </div>
   );
 }
@@ -305,73 +279,24 @@ function MarketRow({ row }: { row: BatchMarketRow }) {
           : `${deltaCents >= 0 ? "+" : ""}${deltaCents.toFixed(1)}`}
       </span>
 
-      {/* Matched vol per market (mocked split — column header carries the marker) */}
-      <MockValue
-        hint="per-market volume — uniform split of block total (OPEN_QUESTIONS #5)"
-        variant="tint"
-        style={cellNumber("var(--fg-2)", 12)}
-      >
+      {/* Matched volume — real, per-market from by_market */}
+      <span style={cellNumber("var(--fg-2)", 12)}>
         {formatCompactDollars(row.matchedVolumeNanos)}
-      </MockValue>
+      </span>
 
-      {/* Welfare per market (mocked split) */}
-      <MockValue
-        hint="per-market welfare — uniform split (OPEN_QUESTIONS #4)"
-        variant="tint"
-        style={cellNumber("var(--yes)", 12)}
-      >
+      {/* Welfare — real, per-market from by_market */}
+      <span style={cellNumber("var(--yes)", 12)}>
         {row.welfareNanos >= 0n ? "+" : ""}
         {formatCompactDollars(row.welfareNanos)}
-      </MockValue>
+      </span>
 
-      {/* Placed / Matched (mocked) */}
-      <MockValue
-        hint="per-market placed/matched — uniform split (OPEN_QUESTIONS #5)"
-        variant="tint"
-        style={{ ...cellNumber("var(--fg-2)", 11), textAlign: "right" }}
-      >
+      {/* Placed / Matched — real, per-market from by_market */}
+      <span style={cellNumber("var(--fg-2)", 11)}>
         <span style={{ color: "var(--fg-2)" }}>{row.ordersPlaced}</span>
         <span style={{ color: "var(--fg-4)" }}> / </span>
         <span style={{ color: "var(--yes)" }}>{row.ordersMatched}</span>
-      </MockValue>
-
-      {/* Imbalance (mocked deterministic) */}
-      <ImbalanceCell bps={row.imbalanceBps} />
+      </span>
     </div>
-  );
-}
-
-function ImbalanceCell({ bps }: { bps: number }) {
-  const pct = Math.abs(bps) / 100;
-  const isBuy = bps >= 0;
-  const color = isBuy ? "var(--yes)" : "var(--no)";
-  return (
-    <MockValue
-      hint="NOT NOW — imbalance — mocked; backend doesn't carry per-fill side (OPEN_QUESTIONS #6)"
-      variant="tint"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        justifyContent: "flex-end",
-        fontVariantNumeric: "tabular-nums",
-      }}
-    >
-      <span
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 9.5,
-          color,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-        }}
-      >
-        {isBuy ? "buy" : "sell"}
-      </span>
-      <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color }}>
-        {pct.toFixed(1)}%
-      </span>
-    </MockValue>
   );
 }
 

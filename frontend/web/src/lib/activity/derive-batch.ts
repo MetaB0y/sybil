@@ -5,11 +5,6 @@
  */
 
 import { parseNanos } from "../format/nanos";
-import {
-  mockImbalanceBps,
-  splitBigintByMarket,
-  splitIntByMarket,
-} from "./mocks";
 import type { BatchMarketRow, BatchRow, Block } from "./types";
 
 /** Derive the collapsed-row data for one block. */
@@ -48,10 +43,9 @@ export function deriveBatchRow(block: Block): BatchRow {
 /**
  * Per-market rows for an expanded batch detail.
  *
- * The block-level totals (volume, welfare, placed/matched) are split uniformly
- * across markets that cleared this batch — this is mocked until the backend
- * denormalizes market_id onto FillResponse (OPEN_QUESTIONS #4–#5). Imbalance is
- * mocked deterministically from (market_id, height) (#6).
+ * Volume, welfare and placed/matched counts are real per-market figures from
+ * `BlockResponse.by_market` — `0` for a market that cleared a price but had
+ * no order activity that block.
  *
  * `prev` is the immediately-previous block; pass `null` if unavailable and the
  * `deltaNanos` field will be `null` for every row.
@@ -66,22 +60,13 @@ export function deriveBatchMarketRows(
 ): BatchMarketRow[] {
   const clearing = block.clearing_prices_nanos ?? {};
   const prevClearing = prev?.clearing_prices_nanos ?? {};
+  const byMarket = block.by_market ?? {};
   const marketIds = Object.keys(clearing)
     .map((k) => Number(k))
     .filter((n) => Number.isFinite(n))
     .sort((a, b) => a - b);
 
   if (marketIds.length === 0) return [];
-
-  const totalVolume = parseNanos(block.total_volume_nanos);
-  const totalWelfare = parseNanos(block.total_welfare_nanos);
-  const totalPlaced = block.order_count;
-  const totalMatched = block.orders_filled;
-
-  const volByMarket = splitBigintByMarket(totalVolume, marketIds);
-  const welfareByMarket = splitBigintByMarket(totalWelfare, marketIds);
-  const placedByMarket = splitIntByMarket(totalPlaced, marketIds);
-  const matchedByMarket = splitIntByMarket(totalMatched, marketIds);
 
   return marketIds.map((marketId) => {
     const yesArr = clearing[String(marketId)];
@@ -93,6 +78,9 @@ export function deriveBatchMarketRows(
         : null;
 
     const meta = marketMeta(marketId);
+    // Real per-market stats for this block; absent when the market cleared a
+    // price but saw no non-MM order activity and no fills.
+    const stats = byMarket[String(marketId)];
 
     return {
       marketId,
@@ -100,17 +88,10 @@ export function deriveBatchMarketRows(
       category: meta.category,
       clearPriceNanos: yesNow,
       deltaNanos: yesPrev == null ? null : yesNow - yesPrev,
-      matchedVolumeNanos: volByMarket.get(marketId) ?? 0n,
-      welfareNanos: welfareByMarket.get(marketId) ?? 0n,
-      ordersPlaced: placedByMarket.get(marketId) ?? 0,
-      ordersMatched: matchedByMarket.get(marketId) ?? 0,
-      imbalanceBps: mockImbalanceBps(marketId, block.height),
-      mocked: {
-        matchedVolume: true,
-        welfare: true,
-        placedMatched: true,
-        imbalance: true,
-      },
+      matchedVolumeNanos: parseNanos(stats?.volume_nanos ?? 0),
+      welfareNanos: parseNanos(stats?.welfare_nanos ?? 0),
+      ordersPlaced: stats?.placed ?? 0,
+      ordersMatched: stats?.matched ?? 0,
     };
   });
 }

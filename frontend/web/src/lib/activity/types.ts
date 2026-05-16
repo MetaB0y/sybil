@@ -22,14 +22,6 @@ export type BatchRow = {
   uniqueTraders: number;
 };
 
-/** Marks per-market fields that are placeholder values today (see OPEN_QUESTIONS #4–#6). */
-export type MarketRowMockFlags = {
-  matchedVolume: boolean;
-  welfare: boolean;
-  placedMatched: boolean;
-  imbalance: boolean;
-};
-
 /** One row inside an expanded batch detail. */
 export type BatchMarketRow = {
   marketId: number;
@@ -40,13 +32,11 @@ export type BatchMarketRow = {
   /** Signed delta vs the same market's price in the previous batch, in nanos.
    *  `null` when there's no prior batch available. */
   deltaNanos: bigint | null;
+  /** Per-market figures from `BlockResponse.by_market` — real, per batch. */
   matchedVolumeNanos: bigint;
   welfareNanos: bigint;
   ordersPlaced: number;
   ordersMatched: number;
-  /** Buys-vs-sells imbalance in basis points, range -10000..+10000. */
-  imbalanceBps: number;
-  mocked: MarketRowMockFlags;
 };
 
 /**
