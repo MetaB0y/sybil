@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, type ChangeEvent } from "react";
 import { AccountChip } from "./auth/account-chip";
 import { BatchPill } from "./batch-pill";
+import { DevZoneNav } from "./dev/dev-zone-nav";
 
 type NavTab = { href: string; label: string; match: (path: string) => boolean };
 
@@ -106,6 +107,7 @@ export function GlobalNav() {
             </Link>
           );
         })}
+        <DevZoneNav />
       </nav>
 
       {/* Right side — search + batch pill + (placeholder) account chip */}
