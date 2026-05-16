@@ -14,6 +14,6 @@ describe("mergeBlocks", () => {
   });
   it("live block wins over backfill at the same height", () => {
     const out = mergeBlocks([{ height: 5, fill_count: 0 }], [{ height: 5, fill_count: 9 }], 80);
-    expect(out[0].fill_count).toBe(9);
+    expect(out[0]?.fill_count).toBe(9);
   });
 });
