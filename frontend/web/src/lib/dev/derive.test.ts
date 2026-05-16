@@ -10,8 +10,15 @@ import {
   buildInsights,
   fmtLiquidity,
   fmtYesDelta24h,
+  accountAggregates,
+  formatOrder,
 } from "./derive";
-import type { DevMarket, DevBlock, DevPendingOrder } from "./types";
+import type {
+  DevMarket,
+  DevBlock,
+  DevPendingOrder,
+  DevAccountPortfolio,
+} from "./types";
 
 const mkt = (o: Partial<DevMarket> & { market_id: number; name: string }): DevMarket => o;
 
@@ -85,5 +92,29 @@ describe("dev/derive", () => {
   it("fmtYesDelta24h shows a signed cent delta", () => {
     expect(fmtYesDelta24h(mkt({ market_id: 1, name: "a", yes_price_nanos: 6e8, yes_price_24h_ago_nanos: 5e8 }))).toBe("+10.0¢");
     expect(fmtYesDelta24h(mkt({ market_id: 1, name: "a" }))).toBe("—");
+  });
+
+  it("accountAggregates sums cash and flags an inactive account 0", () => {
+    const accounts: DevAccountPortfolio[] = [
+      { account_id: 0, balance_nanos: 1e9, positions: [] },
+      {
+        account_id: 1,
+        balance_nanos: 5e9,
+        positions: [{ market_id: 1, outcome: "YES", quantity: 10 }],
+      },
+      { account_id: 2, balance_nanos: 3e9, pnl_nanos: 2e9, positions: [] },
+    ];
+    const marketIdx = new Map<number, DevMarket>([
+      [1, mkt({ market_id: 1, name: "a", reference_price_nanos: 5e8 })],
+    ]);
+    const agg = accountAggregates(accounts, marketIdx, null);
+    expect(agg.mmCashNanos).toBe(8e9);
+    expect(agg.accountZeroIsInactive).toBe(true);
+    expect(agg.activeTradingAccounts.map((a) => a.account_id)).toEqual([1, 2]);
+  });
+
+  it("formatOrder formats side, quantity and price for both price branches", () => {
+    expect(formatOrder({ side: "BuyYes", quantity: 10, price: 6e8 })).toBe("BuyYes 10 @ $0.600");
+    expect(formatOrder({ side: "BuyNo", quantity: 5, price: 0.42 })).toBe("BuyNo 5 @ 42.0%");
   });
 });

@@ -81,14 +81,14 @@ export function pendingIndex(orders: DevPendingOrder[]): PendingIndex {
   const map: PendingIndex = new Map();
   for (const o of orders) {
     const id = Number(o.market_id);
-    const row: PendingRow =
-      map.get(id) ||
-      { market_id: id, count: 0, BuyYes: 0, BuyNo: 0, SellYes: 0, SellNo: 0 };
+    if (!map.has(id)) {
+      map.set(id, { market_id: id, count: 0, BuyYes: 0, BuyNo: 0, SellYes: 0, SellNo: 0 });
+    }
+    const row = map.get(id)!;
     row.count++;
     if (o.side === "BuyYes" || o.side === "BuyNo" || o.side === "SellYes" || o.side === "SellNo") {
-      row[o.side] = (row[o.side] || 0) + 1;
+      row[o.side] += 1;
     }
-    map.set(id, row);
   }
   return map;
 }
@@ -211,11 +211,11 @@ export function latestBlockByMarketRows(
         name: m ? m.name : "#" + id,
         label: m ? "#" + id + " · " + m.name : "#" + id,
         placers: stats.placers || 0,
-        volume_nanos: stats.volume_nanos || 0,
+        volume_nanos: n(stats.volume_nanos) || 0,
         placed: stats.placed || 0,
         matched: stats.matched || 0,
         unmatched: stats.unmatched || 0,
-        welfare_nanos: stats.welfare_nanos || 0,
+        welfare_nanos: n(stats.welfare_nanos) || 0,
       };
     })
     .sort(
@@ -340,6 +340,8 @@ export function formatOrder(o: OrderLike): string {
   const side = o.side || o.action || o.type || "order";
   const qty = o.quantity ?? o.qty ?? o.size ?? o.shares ?? "";
   const price = o.price ?? o.limit_price ?? o.limit ?? o.limit_price_nanos;
+  // Heuristic: a value > 1 is treated as nanos, <= 1 as a probability —
+  // ambiguous for a literal price of exactly 1.
   const px =
     price == null
       ? ""
@@ -512,7 +514,7 @@ export function buildQuickAnswer(
     const latest = blocks.length ? blocks[blocks.length - 1] : null;
     const recentFills = blocks.reduce((s, b) => s + (b.fill_count || 0), 0);
     const recentVolumeNanos = blocks.reduce(
-      (s, b) => s + (b.total_volume_nanos || 0),
+      (s, b) => s + (n(b.total_volume_nanos) || 0),
       0,
     );
     const uniqueStateRoots = new Set(
@@ -596,15 +598,12 @@ export interface AccountAggregates {
 
 export function accountAggregates(
   accounts: DevAccountPortfolio[],
-  pendingIdx: PendingIndex,
   marketIdx: Map<number, DevMarket>,
   selectedAccountId: number | null,
   pendingByAccountIdx?: Map<number, number>,
 ): AccountAggregates {
   // The console keys pending counts by account separately (pendingByAccount).
-  // Callers may pass that map; if absent we cannot reconstruct it from the
-  // market-keyed pendingIdx, so it degrades to zero counts.
-  void pendingIdx;
+  // Callers may pass that map; if absent it degrades to zero counts.
   const byAccount = pendingByAccountIdx || new Map<number, number>();
   const pendCount = (id: number): number => accountPendingCount(byAccount, id);
 
