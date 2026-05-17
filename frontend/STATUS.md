@@ -28,6 +28,7 @@
 | `/activity` | ✅ done | Hero all-time + 24h pulse strip + batches table + expanded batch detail w/ outcome donut. Lifted from `/activity-dev` (deleted). |
 | `/portfolio` | 🟢 mostly done | Hero + positions list + open orders + activity tab + equity chart. PnL split + cost basis + first-deposit + lifetime fill count + partial-fill progress are now real (C1 + B8); cancellations land once D1 is deployed; equity curve still mocked (see `BACKEND_DATA_PLAN.md`). |
 | `/smoke` | utility | Wire-things-up debug page |
+| `/dev/*` | ✅ done | Dev Zone — restyled port of the sybil-api console (Overview, Markets, Blocks, Aggregates, MM & Accounts, Bot Decisions). Manual snapshot port; re-sync by hand when the console (`crates/sybil-api/static/index.html`) changes meaningfully. Trade tab excluded. |
 
 ### Cross-cutting
 - `src/lib/format/nanos.ts` — `parseNanos`, `formatDollars`, `formatProbability`, `formatInt`, `formatCompactDollars`, `formatDate`, `formatCentsDelta`. All money math goes through bigint here.
