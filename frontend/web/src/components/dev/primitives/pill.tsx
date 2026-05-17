@@ -21,7 +21,7 @@ export function Pill({
   if (tone) {
     const c = toneColor(tone);
     style.color = c;
-    style.borderColor = `color-mix(in srgb, ${c} 35%, transparent)`;
+    style.border = `1px solid color-mix(in srgb, ${c} 35%, transparent)`;
   }
   return <span style={style}>{children}</span>;
 }

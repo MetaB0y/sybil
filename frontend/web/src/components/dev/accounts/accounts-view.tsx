@@ -125,7 +125,7 @@ export function AccountsView() {
                   selectedAccountId === null
                     ? {
                         ...chipBase,
-                        borderColor: "var(--accent)",
+                        border: "1px solid var(--accent)",
                         color: "var(--accent)",
                       }
                     : chipBase
@@ -147,7 +147,7 @@ export function AccountsView() {
                       active
                         ? {
                             ...chipBase,
-                            borderColor: "var(--accent)",
+                            border: "1px solid var(--accent)",
                             color: "var(--accent)",
                           }
                         : chipBase

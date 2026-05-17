@@ -37,7 +37,7 @@ const buttonStyle: CSSProperties = {
 
 const activeButtonStyle: CSSProperties = {
   ...buttonStyle,
-  borderColor: "var(--accent)",
+  border: "1px solid var(--accent)",
   color: "var(--accent)",
 };
 
