@@ -5,7 +5,7 @@ use matching_engine::{
     bundle_sell, bundle_yes, outcome_buy, outcome_sell, spread, MarketId, MarketSet, Nanos, Order,
     NANOS_PER_DOLLAR,
 };
-use matching_sequencer::block::Block;
+use matching_sequencer::block::SealedBlock;
 use matching_sequencer::error::Rejection;
 use matching_sequencer::Account;
 
@@ -119,11 +119,12 @@ pub fn bridge_withdrawal_to_response(
     }
 }
 
-fn bridge_block_to_response(block: &Block) -> BridgeBlockResponse {
+fn bridge_block_to_response(block: &SealedBlock) -> BridgeBlockResponse {
     BridgeBlockResponse {
-        deposit_count: block.bridge.deposit_count,
-        deposit_root_hex: hex::encode(block.bridge.deposit_root),
+        deposit_count: block.canonical.bridge.deposit_count,
+        deposit_root_hex: hex::encode(block.canonical.bridge.deposit_root),
         consumed_deposits: block
+            .canonical
             .bridge
             .consumed_deposits
             .iter()
@@ -135,6 +136,7 @@ fn bridge_block_to_response(block: &Block) -> BridgeBlockResponse {
             })
             .collect(),
         withdrawal_leaves: block
+            .canonical
             .bridge
             .withdrawal_leaves
             .iter()
@@ -143,9 +145,10 @@ fn bridge_block_to_response(block: &Block) -> BridgeBlockResponse {
     }
 }
 
-/// Convert a Block to a BlockResponse.
-pub fn block_to_response(block: &Block) -> BlockResponse {
+/// Convert a sealed block to a BlockResponse.
+pub fn block_to_response(block: &SealedBlock) -> BlockResponse {
     let fills = block
+        .canonical
         .fills
         .iter()
         .map(|f| FillResponse {
@@ -157,13 +160,20 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
         .collect();
 
     let clearing_prices_nanos: HashMap<String, Vec<u64>> = block
+        .canonical
         .clearing_prices
         .iter()
         .map(|(mid, prices)| (mid.0.to_string(), prices.to_vec()))
         .collect();
 
-    let rejections = block.rejections.iter().map(rejection_to_response).collect();
+    let rejections = block
+        .canonical
+        .rejections
+        .iter()
+        .map(rejection_to_response)
+        .collect();
     let system_events = block
+        .canonical
         .system_events
         .iter()
         .map(system_event_to_response)
@@ -175,19 +185,19 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
     // non-zero volume; a block whose only book activity is expiries has
     // matched/unmatched but no fresh admits).
     let mut by_market: HashMap<String, BlockMarketStats> = HashMap::new();
-    for (mid, count) in &block.placers_by_market {
+    for (mid, count) in &block.analytics.placers_by_market {
         by_market.entry(mid.0.to_string()).or_default().placers = *count;
     }
-    for (mid, vol) in &block.volume_by_market {
+    for (mid, vol) in &block.analytics.volume_by_market {
         by_market.entry(mid.0.to_string()).or_default().volume_nanos = *vol;
     }
-    for (mid, stats) in &block.orders_by_market {
+    for (mid, stats) in &block.analytics.orders_by_market {
         let entry = by_market.entry(mid.0.to_string()).or_default();
         entry.placed = stats.placed as u32;
         entry.matched = stats.matched as u32;
         entry.unmatched = stats.unmatched as u32;
     }
-    for (mid, welfare) in &block.welfare_by_market {
+    for (mid, welfare) in &block.analytics.welfare_by_market {
         by_market
             .entry(mid.0.to_string())
             .or_default()
@@ -195,22 +205,22 @@ pub fn block_to_response(block: &Block) -> BlockResponse {
     }
 
     BlockResponse {
-        height: block.header.height,
-        parent_hash: hex::encode(block.header.parent_hash),
-        state_root: hex::encode(block.header.state_root),
-        events_root: hex::encode(block.header.events_root),
-        order_count: block.header.order_count,
-        fill_count: block.header.fill_count,
-        timestamp_ms: block.header.timestamp_ms,
+        height: block.canonical.header.height,
+        parent_hash: hex::encode(block.canonical.header.parent_hash),
+        state_root: hex::encode(block.canonical.header.state_root),
+        events_root: hex::encode(block.canonical.header.events_root),
+        order_count: block.canonical.header.order_count,
+        fill_count: block.canonical.header.fill_count,
+        timestamp_ms: block.canonical.header.timestamp_ms,
         system_events,
         fills,
         clearing_prices_nanos,
         rejections,
         bridge: bridge_block_to_response(block),
-        total_welfare_nanos: block.total_welfare,
-        total_volume_nanos: block.total_volume,
-        orders_filled: block.orders_filled,
-        unique_placers: block.unique_placers,
+        total_welfare_nanos: block.analytics.total_welfare,
+        total_volume_nanos: block.analytics.total_volume,
+        orders_filled: block.analytics.orders_filled,
+        unique_placers: block.analytics.unique_placers,
         by_market,
     }
 }

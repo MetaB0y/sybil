@@ -73,7 +73,7 @@ pub async fn handle_block_ws(mut socket: WebSocket, handle: &SequencerHandle, qu
         tokio::select! {
             recv = rx.recv() => match recv {
                 Ok(block) => {
-                    let h = block.header.height;
+                    let h = block.canonical.header.height;
                     if replay_watermark.is_some_and(|w| h <= w) {
                         continue;
                     }
@@ -123,7 +123,7 @@ enum ReplayOutcome {
 
 async fn replay(socket: &mut WebSocket, handle: &SequencerHandle, from: u64) -> ReplayOutcome {
     let head = match handle.get_latest_block().await {
-        Ok(Some(b)) => b.header.height,
+        Ok(Some(b)) => b.canonical.header.height,
         Ok(None) => return ReplayOutcome::NoBlocks,
         Err(e) => return ReplayOutcome::Error(format!("get_latest_block failed: {e}")),
     };
@@ -153,7 +153,10 @@ async fn replay(socket: &mut WebSocket, handle: &SequencerHandle, from: u64) -> 
     ReplayOutcome::Streamed(head)
 }
 
-async fn send_block(socket: &mut WebSocket, block: &matching_sequencer::block::Block) -> bool {
+async fn send_block(
+    socket: &mut WebSocket,
+    block: &matching_sequencer::block::SealedBlock,
+) -> bool {
     let payload = BlockStreamPayload::Block {
         data: Box::new(block_to_response(block)),
     };

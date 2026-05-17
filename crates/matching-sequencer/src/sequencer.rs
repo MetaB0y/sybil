@@ -16,7 +16,8 @@ use tracing::{debug, error};
 use crate::account::{Account, AccountId, AccountStore};
 use crate::analytics::AnalyticsState;
 use crate::block::{
-    hash_header, state_sidecar_snapshot, Block, BlockFlowMetrics, BlockHeader, BlockProduction,
+    hash_header, state_sidecar_snapshot, Block, BlockAnalytics, BlockFlowMetrics, BlockHeader,
+    BlockProduction,
 };
 use crate::bridge::{
     account_key, amount_token_units_to_i64_nanos, amount_token_units_to_nanos, BridgeBlockData,
@@ -2461,6 +2462,8 @@ impl BlockSequencer {
             fills,
             clearing_prices,
             rejections,
+        };
+        let analytics = BlockAnalytics {
             total_welfare,
             total_volume,
             orders_filled,
@@ -2487,6 +2490,7 @@ impl BlockSequencer {
 
         BlockProduction {
             block,
+            analytics,
             pipeline: pipeline_result,
             witness,
             flow_metrics: BlockFlowMetrics {
@@ -2502,16 +2506,20 @@ impl BlockSequencer {
 }
 
 /// Convert a Block + PipelineResult into a BatchResult for simulation compatibility.
-pub fn batch_result_from_block(block: &Block, pipeline_result: PipelineResult) -> BatchResult {
+pub fn batch_result_from_block(
+    block: &Block,
+    analytics: &BlockAnalytics,
+    pipeline_result: PipelineResult,
+) -> BatchResult {
     BatchResult {
         pipeline_result,
         fills: block.fills.clone(),
         clearing_prices: block.clearing_prices.clone(),
-        total_welfare: block.total_welfare,
-        total_volume: block.total_volume,
+        total_welfare: analytics.total_welfare,
+        total_volume: analytics.total_volume,
         rejections: block.rejections.clone(),
         orders_submitted: block.header.order_count as usize,
-        orders_filled: block.orders_filled,
+        orders_filled: analytics.orders_filled,
     }
 }
 
@@ -2755,14 +2763,14 @@ mod tests {
             buyer,
             outcome_buy(&markets, 0, m0, 0, NANOS_PER_DOLLAR / 2, 10),
         );
-        let first = seq.produce_block(vec![sub], 1_000).block;
-        assert_eq!(first.orders_by_market.get(&m0).unwrap().placed, 1);
+        let first = seq.produce_block(vec![sub], 1_000);
+        assert_eq!(first.analytics.orders_by_market.get(&m0).unwrap().placed, 1);
         assert_eq!(seq.platform_order_stats(1_000).0.placed, 1);
         assert_eq!(seq.order_book.len(), 1, "unfilled order should rest");
 
-        let second = seq.produce_block(vec![], 2_000).block;
+        let second = seq.produce_block(vec![], 2_000);
         assert_eq!(
-            second.orders_by_market.get(&m0).unwrap().placed,
+            second.analytics.orders_by_market.get(&m0).unwrap().placed,
             1,
             "carried resting order is live in the next batch"
         );
@@ -2795,11 +2803,19 @@ mod tests {
             mm_constraint: Some(constraint),
         };
 
-        let block = seq.produce_block(vec![sub], 1_000).block;
-        assert_eq!(block.orders_by_market.get(&m0).unwrap().placed, 1);
+        let production = seq.produce_block(vec![sub], 1_000);
+        assert_eq!(
+            production
+                .analytics
+                .orders_by_market
+                .get(&m0)
+                .unwrap()
+                .placed,
+            1
+        );
         assert_eq!(seq.platform_order_stats(1_000).0.placed, 1);
         assert_eq!(
-            block.unique_placers, 0,
+            production.analytics.unique_placers, 0,
             "MM orders count as orders but not as unique traders"
         );
     }
@@ -2817,7 +2833,7 @@ mod tests {
         let bp = seq.produce_block(submissions, 0);
         seq.markets = old_markets;
         seq.market_groups = old_groups;
-        batch_result_from_block(&bp.block, bp.pipeline)
+        batch_result_from_block(&bp.block, &bp.analytics, bp.pipeline)
     }
 
     fn snapshot_by_id(

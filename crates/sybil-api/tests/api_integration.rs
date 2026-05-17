@@ -222,10 +222,10 @@ async fn state_proof_returns_inclusion_for_committed_account_leaf() {
 
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
     let proof = parse_json(&body);
-    assert_eq!(proof["block_height"], json!(block.header.height));
+    assert_eq!(proof["block_height"], json!(block.canonical.header.height));
     assert_eq!(
         proof["state_root"],
-        json!(hex::encode(block.header.state_root))
+        json!(hex::encode(block.canonical.header.state_root))
     );
     assert_eq!(proof["leaf_key_hex"], json!(hex::encode(leaf_key)));
     assert_eq!(proof["proof_kind"], json!("inclusion"));
@@ -247,10 +247,10 @@ async fn state_proof_returns_exclusion_for_missing_leaf() {
 
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
     let proof = parse_json(&body);
-    assert_eq!(proof["block_height"], json!(block.header.height));
+    assert_eq!(proof["block_height"], json!(block.canonical.header.height));
     assert_eq!(
         proof["state_root"],
-        json!(hex::encode(block.header.state_root))
+        json!(hex::encode(block.canonical.header.state_root))
     );
     assert_eq!(proof["leaf_key_ascii"], json!("acct/missing"));
     assert_eq!(proof["proof_kind"], json!("exclusion"));
@@ -703,7 +703,7 @@ async fn list_markets_reports_traded_volume() {
     assert_eq!(status, StatusCode::OK);
 
     let block = handle.produce_block().await.unwrap();
-    assert!(!block.fills.is_empty());
+    assert!(!block.canonical.fills.is_empty());
 
     let (status, body) = get(app.clone(), "/v1/markets").await;
     assert_eq!(status, StatusCode::OK);
@@ -1003,7 +1003,7 @@ async fn end_to_end_trade_lifecycle() {
     // Force block production
     let block = handle.produce_block().await.unwrap();
     assert!(
-        !block.fills.is_empty(),
+        !block.canonical.fills.is_empty(),
         "Expected fills from matching orders"
     );
 

@@ -57,7 +57,9 @@ async fn ws_streams_live_block_envelope() {
     let msg = recv_envelope(&mut stream).await;
     assert_eq!(msg.v, 1);
     match msg.payload {
-        BlockStreamPayload::Block { data } => assert_eq!(data.height, block.header.height),
+        BlockStreamPayload::Block { data } => {
+            assert_eq!(data.height, block.canonical.header.height)
+        }
         other => panic!("expected block envelope, got {:?}", other),
     }
 }
@@ -71,8 +73,8 @@ async fn ws_from_block_replays_history_then_goes_live() {
     let b1 = handle.produce_block().await.unwrap();
     let _b2 = handle.produce_block().await.unwrap();
 
-    let from = b0.header.height;
-    let head_at_connect = _b2.header.height;
+    let from = b0.canonical.header.height;
+    let head_at_connect = _b2.canonical.header.height;
     let url = format!("ws://{}/v1/blocks/ws?from_block={}", addr, from);
     let (ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
     let (_sink, mut stream) = ws.split();
@@ -88,7 +90,11 @@ async fn ws_from_block_replays_history_then_goes_live() {
     }
     assert_eq!(
         seen_heights,
-        vec![b0.header.height, b1.header.height, _b2.header.height]
+        vec![
+            b0.canonical.header.height,
+            b1.canonical.header.height,
+            _b2.canonical.header.height
+        ]
     );
 
     let complete = recv_envelope(&mut stream).await;
@@ -103,7 +109,7 @@ async fn ws_from_block_replays_history_then_goes_live() {
     let live = handle.produce_block().await.unwrap();
     let msg = recv_envelope(&mut stream).await;
     match msg.payload {
-        BlockStreamPayload::Block { data } => assert_eq!(data.height, live.header.height),
+        BlockStreamPayload::Block { data } => assert_eq!(data.height, live.canonical.header.height),
         other => panic!("expected live block after replay, got {:?}", other),
     }
 }

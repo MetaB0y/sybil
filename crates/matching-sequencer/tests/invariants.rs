@@ -180,7 +180,7 @@ proptest! {
 
         assert_eq!(pre_balance, post_balance, "Empty block changed balances");
         assert!(bp1.block.fills.is_empty(), "Empty block produced fills");
-        assert_eq!(bp1.block.total_welfare, 0);
+        assert_eq!(bp1.analytics.total_welfare, 0);
 
         // Second empty block should produce the same state root
         let state_root_after_first = bp1.block.header.state_root;
@@ -255,7 +255,7 @@ proptest! {
         let bp2 = seq2.produce_block(shuffled, 1000);
 
         assert_eq!(
-            bp1.block.total_welfare, bp2.block.total_welfare,
+            bp1.analytics.total_welfare, bp2.analytics.total_welfare,
             "Shuffled submissions produced different welfare"
         );
     }
@@ -354,15 +354,15 @@ proptest! {
         // Welfare MUST double — no silent pass when welfare is 0.
         // With crossing pairs, we should always get trades.
         assert!(
-            bp1.block.total_welfare > 0,
+            bp1.analytics.total_welfare > 0,
             "Base batch produced zero welfare — strategy isn't generating crossing orders"
         );
         assert_eq!(
-            bp2.block.total_welfare,
-            bp1.block.total_welfare * 2,
+            bp2.analytics.total_welfare,
+            bp1.analytics.total_welfare * 2,
             "Doubled quantities didn't double welfare: base={} doubled={}",
-            bp1.block.total_welfare,
-            bp2.block.total_welfare
+            bp1.analytics.total_welfare,
+            bp2.analytics.total_welfare
         );
     }
 }
@@ -473,7 +473,7 @@ fn crossing_pair_with_solo_order_still_matches() {
         !bp.block.fills.is_empty(),
         "Crossing pair must still match when an unfilled solo order is present"
     );
-    assert!(bp.block.total_welfare > 0);
+    assert!(bp.analytics.total_welfare > 0);
 }
 
 /// B7: per-market welfare. For a single-market trade, the sum of
@@ -502,14 +502,14 @@ fn welfare_by_market_single_market_sums_to_total() {
         !bp.block.fills.is_empty(),
         "expected fills from crossing buys"
     );
-    assert!(bp.block.total_welfare > 0);
-    let sum: i64 = bp.block.welfare_by_market.values().sum();
+    assert!(bp.analytics.total_welfare > 0);
+    let sum: i64 = bp.analytics.welfare_by_market.values().sum();
     assert_eq!(
-        sum, bp.block.total_welfare,
+        sum, bp.analytics.total_welfare,
         "single-market sum-of-per-market should equal total_welfare \
          (no multi-market over-counting in this scenario)"
     );
     // Only m0 had fills, so it's the only key in welfare_by_market.
-    assert_eq!(bp.block.welfare_by_market.len(), 1);
-    assert!(bp.block.welfare_by_market.contains_key(&m0));
+    assert_eq!(bp.analytics.welfare_by_market.len(), 1);
+    assert!(bp.analytics.welfare_by_market.contains_key(&m0));
 }

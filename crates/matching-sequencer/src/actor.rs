@@ -13,7 +13,7 @@ use sybil_oracle::{
 };
 
 use crate::account::{Account, AccountId};
-use crate::block::{Block, BlockProduction};
+use crate::block::{BlockProduction, SealedBlock};
 use crate::bridge::{BridgeState, BridgeWithdrawalRequest, L1Deposit, WithdrawalLeaf};
 use crate::crypto::{
     verify_signed_cancel, verify_signed_order, PublicKey, SignedCancel, SignedOrder,
@@ -37,14 +37,14 @@ pub enum SequencerMsg {
     SubmitOrder(OrderSubmission, RpcReplyPort<Result<(), SequencerError>>),
     SubmitSignedOrder(SignedOrder, RpcReplyPort<Result<(), SequencerError>>),
     CancelSignedOrder(SignedCancel, RpcReplyPort<Result<(), SequencerError>>),
-    GetLatestBlock(RpcReplyPort<Option<Block>>),
+    GetLatestBlock(RpcReplyPort<Option<SealedBlock>>),
     GetAccount(AccountId, RpcReplyPort<Option<Account>>),
     GetStateRoot(RpcReplyPort<[u8; 32]>),
     GetStateProof(
         Vec<u8>,
         RpcReplyPort<Result<SequencerStateProof, SequencerError>>,
     ),
-    ProduceBlock(RpcReplyPort<Result<Block, SequencerError>>),
+    ProduceBlock(RpcReplyPort<Result<SealedBlock, SequencerError>>),
     CreateAccount(i64, RpcReplyPort<Account>),
     FundAccount(
         AccountId,
@@ -87,7 +87,7 @@ pub enum SequencerMsg {
     TemplateExists(String, RpcReplyPort<bool>),
     GetMarketStatus(MarketId, RpcReplyPort<MarketStatus>),
     GetAllMarketStatuses(RpcReplyPort<HashMap<MarketId, MarketStatus>>),
-    GetBlock(u64, RpcReplyPort<Result<Block, SequencerError>>),
+    GetBlock(u64, RpcReplyPort<Result<SealedBlock, SequencerError>>),
     GetMarketPrices(RpcReplyPort<HashMap<MarketId, Vec<Nanos>>>),
     GetMarketVolume(MarketId, RpcReplyPort<u64>),
     GetAllMarketVolumes(RpcReplyPort<HashMap<MarketId, u64>>),
@@ -181,6 +181,25 @@ pub struct IndicativeSnapshot {
     /// Wall-clock timestamp (ms since UNIX epoch) when this snapshot was
     /// computed. FE renders staleness from it.
     pub computed_at_ms: u64,
+}
+
+#[derive(Debug, Default)]
+struct IndicativeSolveGate {
+    in_flight: bool,
+}
+
+impl IndicativeSolveGate {
+    fn try_start(&mut self) -> bool {
+        if self.in_flight {
+            return false;
+        }
+        self.in_flight = true;
+        true
+    }
+
+    fn finish(&mut self) {
+        self.in_flight = false;
+    }
 }
 
 /// Extract per-market `IndicativeSnapshot` values from a shadow-solve
@@ -283,15 +302,15 @@ struct SequencerActor;
 struct SequencerActorArgs {
     sequencer: BlockSequencer,
     store: Option<Arc<crate::store::Store>>,
-    block_broadcast: broadcast::Sender<Block>,
+    block_broadcast: broadcast::Sender<SealedBlock>,
     mailbox_monitor: MailboxMonitor,
 }
 
 struct SequencerActorState {
     sequencer: BlockSequencer,
-    latest_block: Option<Block>,
-    block_history: VecDeque<Block>,
-    block_broadcast: broadcast::Sender<Block>,
+    latest_block: Option<SealedBlock>,
+    block_history: VecDeque<SealedBlock>,
+    block_broadcast: broadcast::Sender<SealedBlock>,
     pause_count: u32,
     store: Option<Arc<crate::store::Store>>,
     global_submission_bucket: TokenBucket,
@@ -302,6 +321,7 @@ struct SequencerActorState {
     /// Empty until the first `IndicativeUpdate` arrives; lookup-miss
     /// returns `IndicativeSnapshot::default()` (None/None/0/0).
     indicative_cache: HashMap<MarketId, IndicativeSnapshot>,
+    indicative_solve_gate: IndicativeSolveGate,
 }
 
 #[derive(Clone, Debug)]
@@ -506,19 +526,23 @@ impl SequencerActorState {
 
         let bp = self.sequencer.commit_prepared_block(prepared);
         self.record_metrics(&bp, pending_bundles);
-        self.push_to_history(bp.block.clone());
-        let _ = self.block_broadcast.send(bp.block.clone());
-        self.latest_block = Some(bp.block);
+        let sealed = bp.sealed_block();
+        self.push_to_history(sealed.clone());
+        let _ = self.block_broadcast.send(sealed.clone());
+        self.latest_block = Some(sealed);
     }
 
     /// Indicative scheduler tick (C2). Builds a speculative `Problem` from
     /// the current resting book (Tier 1: no pending bundles, no MM flash),
     /// kicks off a `spawn_blocking` solve, and self-sends an
-    /// `IndicativeUpdate` once the solver returns. The cache write happens
-    /// on the actor mailbox, so it serializes against block-production
-    /// ticks naturally — no shared lock, no AtomicBool.
+    /// `IndicativeUpdate` once the solver returns. An actor-local in-flight
+    /// gate prevents the ~750ms timer from stacking LP jobs when one solve is
+    /// slower than the cadence.
     fn on_indicative_tick(&mut self, myself: ActorRef<SequencerMsg>) {
         if self.pause_count > 0 {
+            return;
+        }
+        if !self.indicative_solve_gate.try_start() {
             return;
         }
         // Tier 1: single-market only. The LP solver asserts num_markets==1,
@@ -535,6 +559,7 @@ impl SequencerActorState {
             // Nothing to solve. Leave the cache untouched so the last good
             // snapshot remains visible (FE displays staleness via
             // `computed_at_ms`).
+            self.indicative_solve_gate.finish();
             return;
         }
 
@@ -596,8 +621,8 @@ impl SequencerActorState {
         metrics::histogram!("sybil_rejections_per_block")
             .record(bp.flow_metrics.rejected_orders as f64);
         metrics::histogram!("sybil_fills_per_block").record(bp.block.header.fill_count as f64);
-        metrics::gauge!("sybil_welfare_nanos").set(bp.block.total_welfare as f64);
-        metrics::gauge!("sybil_volume_nanos").set(bp.block.total_volume as f64);
+        metrics::gauge!("sybil_welfare_nanos").set(bp.analytics.total_welfare as f64);
+        metrics::gauge!("sybil_volume_nanos").set(bp.analytics.total_volume as f64);
         metrics::gauge!("sybil_pending_bundles").set(pending_bundles_before as f64);
         metrics::gauge!("sybil_pending_orders").set(bp.flow_metrics.pending_orders_after as f64);
         metrics::histogram!("sybil_solve_time_seconds").record(bp.pipeline.total_time_secs);
@@ -680,7 +705,7 @@ impl SequencerActorState {
             .increment(1);
     }
 
-    fn push_to_history(&mut self, block: Block) {
+    fn push_to_history(&mut self, block: SealedBlock) {
         if self.block_history.len() >= self.sequencer.config.block_history_capacity {
             self.block_history.pop_front();
         }
@@ -1148,6 +1173,7 @@ impl Actor for SequencerActor {
             account_submission_buckets: HashMap::new(),
             mailbox_monitor: args.mailbox_monitor,
             indicative_cache: HashMap::new(),
+            indicative_solve_gate: IndicativeSolveGate::default(),
         })
     }
 
@@ -1211,6 +1237,7 @@ impl Actor for SequencerActor {
             }
             SequencerMsg::IndicativeUpdate(snapshots) => {
                 state.indicative_cache = snapshots;
+                state.indicative_solve_gate.finish();
             }
             SequencerMsg::GetIndicative(market_id, reply) => {
                 let snap = state
@@ -1387,7 +1414,7 @@ impl Actor for SequencerActor {
                 let block = state
                     .block_history
                     .iter()
-                    .find(|b| b.header.height == height)
+                    .find(|b| b.canonical.header.height == height)
                     .cloned();
                 let _ = reply.send(block.ok_or(SequencerError::BlockNotFound));
             }
@@ -1484,7 +1511,7 @@ impl Actor for SequencerActor {
 #[derive(Clone)]
 struct SequencerHandleInner {
     actor: Arc<RwLock<Option<ActorRef<SequencerMsg>>>>,
-    block_broadcast: broadcast::Sender<Block>,
+    block_broadcast: broadcast::Sender<SealedBlock>,
     mailbox_monitor: MailboxMonitor,
 }
 
@@ -1758,7 +1785,7 @@ impl SequencerHandle {
             .await?
     }
 
-    pub async fn get_latest_block(&self) -> Result<Option<Block>, SequencerError> {
+    pub async fn get_latest_block(&self) -> Result<Option<SealedBlock>, SequencerError> {
         self.rpc(SequencerMsg::GetLatestBlock).await
     }
 
@@ -1782,7 +1809,7 @@ impl SequencerHandle {
             .await?
     }
 
-    pub async fn produce_block(&self) -> Result<Block, SequencerError> {
+    pub async fn produce_block(&self) -> Result<SealedBlock, SequencerError> {
         self.rpc(SequencerMsg::ProduceBlock).await?
     }
 
@@ -1941,12 +1968,14 @@ impl SequencerHandle {
         self.rpc(SequencerMsg::GetAllMarketStatuses).await
     }
 
-    pub async fn get_block(&self, height: u64) -> Result<Block, SequencerError> {
+    pub async fn get_block(&self, height: u64) -> Result<SealedBlock, SequencerError> {
         self.rpc(|reply| SequencerMsg::GetBlock(height, reply))
             .await?
     }
 
-    pub async fn subscribe_blocks(&self) -> Result<broadcast::Receiver<Block>, SequencerError> {
+    pub async fn subscribe_blocks(
+        &self,
+    ) -> Result<broadcast::Receiver<SealedBlock>, SequencerError> {
         Ok(self.inner.block_broadcast.subscribe())
     }
 
@@ -2210,7 +2239,7 @@ mod tests {
         let handle = SequencerHandle::spawn(seq);
 
         let block = handle.produce_block().await.unwrap();
-        assert_eq!(block.header.height, 1);
+        assert_eq!(block.canonical.header.height, 1);
     }
 
     #[tokio::test]
@@ -2230,8 +2259,8 @@ mod tests {
         handle.submit_order(sub).await.unwrap();
 
         let block = handle.produce_block().await.unwrap();
-        assert_eq!(block.header.height, 1);
-        assert!(block.header.order_count >= 1);
+        assert_eq!(block.canonical.header.height, 1);
+        assert!(block.canonical.header.order_count >= 1);
     }
 
     #[tokio::test]
@@ -2411,7 +2440,7 @@ mod tests {
 
         let block = handle.get_latest_block().await.unwrap();
         assert!(block.is_some());
-        assert_eq!(block.unwrap().header.height, 1);
+        assert_eq!(block.unwrap().canonical.header.height, 1);
     }
 
     #[tokio::test]
@@ -2431,13 +2460,13 @@ mod tests {
         let handle = SequencerHandle::spawn(seq);
 
         let block1 = handle.produce_block().await.unwrap();
-        assert_eq!(block1.header.height, 1);
-        assert_eq!(block1.header.parent_hash, [0u8; 32]); // genesis
+        assert_eq!(block1.canonical.header.height, 1);
+        assert_eq!(block1.canonical.header.parent_hash, [0u8; 32]); // genesis
 
         let block2 = handle.produce_block().await.unwrap();
-        assert_eq!(block2.header.height, 2);
-        let expected = crate::block::hash_header(&block1.header);
-        assert_eq!(block2.header.parent_hash, expected);
+        assert_eq!(block2.canonical.header.height, 2);
+        let expected = crate::block::hash_header(&block1.canonical.header);
+        assert_eq!(block2.canonical.header.parent_hash, expected);
     }
 
     #[tokio::test]
@@ -2487,7 +2516,7 @@ mod tests {
 
         let block = handle.produce_block().await.unwrap();
 
-        if block.orders_filled > 0 {
+        if block.analytics.orders_filled > 0 {
             let root_after = handle.get_state_root().await.unwrap();
             assert_ne!(root_before, root_after);
         }
@@ -2536,9 +2565,9 @@ mod tests {
             .unwrap();
 
         let block = handle.produce_block().await.unwrap();
-        assert_eq!(block.system_events.len(), 2);
+        assert_eq!(block.canonical.system_events.len(), 2);
 
-        match &block.system_events[0] {
+        match &block.canonical.system_events[0] {
             SystemEvent::CreateAccount {
                 account_id,
                 initial_balance,
@@ -2549,7 +2578,7 @@ mod tests {
             other => panic!("expected CreateAccount event, got {:?}", other),
         }
 
-        match &block.system_events[1] {
+        match &block.canonical.system_events[1] {
             SystemEvent::Deposit { account_id, amount } => {
                 assert_eq!(*account_id, account.id);
                 assert_eq!(*amount, 25 * NANOS_PER_DOLLAR as i64);
@@ -2587,7 +2616,7 @@ mod tests {
         handle.submit_signed_order(signed).await.unwrap();
 
         let block = handle.produce_block().await.unwrap();
-        assert!(block.header.order_count >= 1);
+        assert!(block.canonical.header.order_count >= 1);
     }
 
     #[tokio::test]
@@ -2741,8 +2770,8 @@ mod tests {
         handle.resolve_market(m0, NANOS_PER_DOLLAR).await.unwrap();
         let block = handle.produce_block().await.unwrap();
 
-        assert_eq!(block.system_events.len(), 1);
-        match &block.system_events[0] {
+        assert_eq!(block.canonical.system_events.len(), 1);
+        match &block.canonical.system_events[0] {
             SystemEvent::MarketResolved {
                 market_id,
                 payout_nanos,
@@ -2776,10 +2805,10 @@ mod tests {
         handle.produce_block().await.unwrap();
 
         let block = handle.get_block(1).await.unwrap();
-        assert_eq!(block.header.height, 1);
+        assert_eq!(block.canonical.header.height, 1);
 
         let block = handle.get_block(2).await.unwrap();
-        assert_eq!(block.header.height, 2);
+        assert_eq!(block.canonical.header.height, 2);
 
         let result = handle.get_block(99).await;
         assert!(matches!(result, Err(SequencerError::BlockNotFound)));
@@ -2795,7 +2824,7 @@ mod tests {
         handle.produce_block().await.unwrap();
 
         let block = rx.recv().await.unwrap();
-        assert_eq!(block.header.height, 1);
+        assert_eq!(block.canonical.header.height, 1);
     }
 
     // C2 — indicative scheduler ---------------------------------------------
@@ -2865,6 +2894,20 @@ mod tests {
         assert_eq!(snap.no_price_nanos, Some(550_000_000));
         // 3 qty * 400_000_000 = 1.2e9
         assert_eq!(snap.volume_nanos, 1_200_000_000);
+    }
+
+    #[test]
+    fn indicative_solve_gate_prevents_stacked_solves() {
+        let mut gate = IndicativeSolveGate::default();
+
+        assert!(gate.try_start(), "first tick should start a solve");
+        assert!(
+            !gate.try_start(),
+            "second tick must not start while solve is in flight"
+        );
+
+        gate.finish();
+        assert!(gate.try_start(), "next tick may start after update arrives");
     }
 
     #[tokio::test]

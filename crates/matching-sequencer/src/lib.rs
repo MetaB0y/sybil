@@ -36,7 +36,7 @@ pub use account_storage::{
 pub use actor::{
     MarketSearchResult, SequencerHandle, SequencerStateProof, SequencerStateProofKind,
 };
-pub use block::{Block, BlockProduction};
+pub use block::{Block, BlockAnalytics, BlockProduction, SealedBlock};
 pub use bridge::{
     BridgeBlockData, BridgeState, BridgeWithdrawalRequest, EthAddress, L1Deposit, WithdrawalLeaf,
 };
