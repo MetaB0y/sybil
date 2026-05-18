@@ -72,29 +72,34 @@ groups:
 
       - alert: LiveTradingLowFillRate
         expr: |
-          sum(increase(sybil_order_submissions_total[15m])) >= 500
+          sum(increase(sybil_order_submissions_total{result="accepted"}[30m])) >= 1000
           and
-          sum(increase(sybil_market_fills_total[15m])) < 30
-        for: 10m
+          (
+            sum(increase(sybil_market_fills_total[30m]))
+            / clamp_min(sum(increase(sybil_order_submissions_total{result="accepted"}[30m])), 1)
+          ) < 0.005
+          and
+          sum(increase(sybil_market_fills_total[30m])) < 10
+        for: 30m
         labels:
           severity: warning
           component: arena
         annotations:
           summary: "Live trading fill rate is low"
-          description: "At least 500 submissions arrived in 15m but fewer than 30 fills landed. Trading is not fully stalled, but demo activity is thin."
+          description: "At least 1000 accepted submissions arrived in 30m, fewer than 0.5% filled, and fewer than 10 fills landed. Trading is not fully stalled, but live activity is abnormally thin."
 
       - alert: LiveTradingLowMarketCoverage
         expr: |
-          sum(increase(sybil_order_submissions_total[15m])) >= 500
+          sum(increase(sybil_order_submissions_total{result="accepted"}[30m])) >= 1000
           and
-          count(increase(sybil_market_fills_total[15m]) > 0) < 5
-        for: 10m
+          count(increase(sybil_market_fills_total[30m]) > 0) < 3
+        for: 30m
         labels:
           severity: warning
           component: arena
         annotations:
           summary: "Fills are concentrated in very few markets"
-          description: "Fewer than 5 markets filled over 15m despite active submissions. The demo may look narrow even if total fill count is nonzero."
+          description: "Fewer than 3 markets filled over 30m despite at least 1000 accepted submissions. The demo may look narrow even if total fill count is nonzero."
 
       - alert: PendingOrderBookHigh
         expr: sybil_pending_orders > 250
@@ -293,14 +298,14 @@ groups:
           description: "sybil-api RSS is above 800 MiB and close to the 900 MiB container limit (current: {{ $value | humanize1024 }}B)."
 
       - alert: HostMemoryLow
-        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.15
-        for: 5m
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
+        for: 10m
         labels:
           severity: warning
           component: host
         annotations:
           summary: "Host memory is low"
-          description: "Available host memory has been below 15% for 5m (current ratio: {{ $value | humanizePercentage }})."
+          description: "Available host memory has been below 10% for 10m (current ratio: {{ $value | humanizePercentage }})."
 
       - alert: HostSwapHigh
         expr: |
@@ -369,13 +374,17 @@ groups:
           sybil_bot_latest_decision_age_seconds{trader!=""} > 3600
           and on (trader)
           sybil_bot_decisions_total{trader!=""} > 20
+          and on (trader)
+          increase(sybil_bot_decisions_total{trader!=""}[6h]) > 0
+          and on (trader)
+          increase(sybil_bot_decisions_total{trader!=""}[1h]) == 0
         for: 5m
         labels:
           severity: warning
           component: arena
         annotations:
           summary: "One arena trader is stale"
-          description: "{{ $labels.trader }} has not recorded a decision for more than 1h after previously producing at least 20 decisions."
+          description: "{{ $labels.trader }} has not recorded a decision for more than 1h after being active during the last 6h. Historical disabled traders are intentionally ignored."
 
       - alert: ProverDown
         expr: up{job="sybil-prover"} == 0
