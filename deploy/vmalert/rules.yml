@@ -160,44 +160,38 @@ groups:
       - alert: SybilPriceDivergenceHigh
         expr: |
           count(
-            sybil_price_reference_diff_nanos
+            (sybil_price_reference_diff_nanos > 250 * 1000 * 1000)
             and on(market_id)
-            (increase(sybil_market_fills_total[15m]) > 0)
-          ) >= 5
-          and
-          max(
-            sybil_price_reference_diff_nanos
-            and on(market_id)
-            (increase(sybil_market_fills_total[15m]) > 0)
-          ) > 50 * 1000 * 1000
-        for: 5m
+            (increase(sybil_market_fills_total[30m]) > 0)
+          ) >= 3
+        for: 30m
         labels:
           severity: warning
           component: arena
         annotations:
           summary: "Sybil prices diverge from Polymarket"
-          description: "At least one recently filled Sybil market is more than 5 cents away from its Polymarket reference price for 5m. Only markets with fills in the last 15m are considered, so stale local clearing prices do not page."
+          description: "At least 3 recently filled Sybil markets are more than 25 cents away from Polymarket references for 30m. Single-market divergence remains visible in Grafana without paging Telegram."
 
       - alert: SybilPriceDivergenceBroad
         expr: |
           count(
             sybil_price_reference_diff_nanos
             and on(market_id)
-            (increase(sybil_market_fills_total[15m]) > 0)
-          ) >= 5
+            (increase(sybil_market_fills_total[30m]) > 0)
+          ) >= 20
           and
           avg(
             sybil_price_reference_diff_nanos
             and on(market_id)
-            (increase(sybil_market_fills_total[15m]) > 0)
-          ) > 25 * 1000 * 1000
-        for: 10m
+            (increase(sybil_market_fills_total[30m]) > 0)
+          ) > 50 * 1000 * 1000
+        for: 30m
         labels:
           severity: warning
           component: arena
         annotations:
           summary: "Average Sybil/Polymarket price divergence is high"
-          description: "Average absolute price difference across recently filled Sybil markets with reference prices is above 2.5 cents for 10m. Only markets with fills in the last 15m are considered, so stale local clearing prices do not page."
+          description: "Average absolute price difference across at least 20 recently filled Sybil markets with reference prices is above 5 cents for 30m. Smaller divergence remains visible in Grafana without paging Telegram."
 
       - alert: SybilPricedMarketCoverageLow
         expr: |
