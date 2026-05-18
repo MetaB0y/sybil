@@ -32,6 +32,7 @@ log = logging.getLogger(__name__)
 
 GATE_MODEL = "google/gemma-4-31b-it"
 MAX_FEED_FETCH_CONCURRENCY = 32
+MAX_GATE_HEADLINES_PER_MARKET = 8
 
 # Default path where sybil-polymarket writes the mapping
 DEFAULT_MAPPING_PATH = "/data/polymarket_mapping.json"
@@ -282,6 +283,7 @@ class NewsFeed:
 
         # All articles (for DB logging)
         self._all_articles: list[LiveArticle] = []
+        self._warmed_up = False
 
         # LLM client for the gate (cheap model)
         self._llm_client: openai.AsyncOpenAI | None = None
@@ -400,6 +402,16 @@ class NewsFeed:
 
         total_candidates = sum(len(v) for v in per_market.values())
         if total_candidates == 0:
+            self._warmed_up = True
+            return 0
+
+        if not self._warmed_up:
+            self._warmed_up = True
+            log.info(
+                "Warm-started news feed: marked %d existing candidates across %d markets as seen",
+                total_candidates,
+                len(per_market),
+            )
             return 0
 
         log.info("Poll: %d new candidates across %d markets",
@@ -408,6 +420,11 @@ class NewsFeed:
         # Batch LLM gate per market (1 LLM call per market, not per article)
         for market_id, entries in per_market.items():
             market = market_by_id[market_id]
+            entries = sorted(
+                entries,
+                key=lambda entry: entry["published"],
+                reverse=True,
+            )[:MAX_GATE_HEADLINES_PER_MARKET]
             headlines = [e["title"] for e in entries]
 
             if self._llm_client:
