@@ -264,7 +264,7 @@ class NewsFeed:
         markets: list[Market],
         api_key: str | None = None,
         poll_interval_s: int = 300,
-        max_seen: int = 10_000,
+        max_seen: int = 100_000,
         mapping_path: str | None = None,
     ):
         self.markets = markets
@@ -274,7 +274,7 @@ class NewsFeed:
         self.polymarket_prices = PolymarketPrices(mapping_path)
 
         # Dedup
-        self._seen_urls: deque[str] = deque(maxlen=max_seen)
+        self._seen_urls: deque[str] = deque()
         self._seen_set: set[str] = set()
 
         # Pending articles per market
