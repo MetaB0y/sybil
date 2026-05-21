@@ -185,7 +185,7 @@ function RowComponent({
       </span>
       <RightCell mono>{formatCents(row.priceNanos)}</RightCell>
       <RightCell mono>
-        {formatDollars(row.amountNanos / 1_000_000_000n, { decimals: 2 })}
+        {formatDollars(row.amountNanos, { decimals: 2 })}
       </RightCell>
       <RightCell>
         <span

@@ -86,7 +86,7 @@ function PositionRow({
   const markNanos = parseNanos(position.current_price_nanos);
 
   const costNanos =
-    avgNanos == null ? null : (BigInt(position.quantity) * avgNanos) / 1_000_000_000n;
+    avgNanos == null ? null : BigInt(position.quantity) * avgNanos;
   const pnlNanos = costNanos == null ? null : valueNanos - costNanos;
   const pnlPct =
     costNanos == null || costNanos === 0n

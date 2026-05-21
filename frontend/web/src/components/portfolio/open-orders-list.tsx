@@ -170,7 +170,7 @@ function OrderRow({
       </RightCell>
       <RightCell mono>{formatCents(limitNanos)}</RightCell>
       <RightCell mono>
-        {formatDollars(valueNanos / 1_000_000_000n, { decimals: 2 })}
+        {formatDollars(valueNanos, { decimals: 2 })}
       </RightCell>
       <RightCell>
         <TifCell expiresAtBlock={order.expires_at_block} />
