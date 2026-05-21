@@ -157,7 +157,13 @@ class TestPositionOrders:
     def test_cash_limited_buy(self):
         orders = position_orders(1, 100, 0, 0, 0, 0.70, 0.50, 25.0)
         assert len(orders) == 1
-        assert orders[0].quantity == 50  # $25 / $0.50
+        assert orders[0].quantity == 35  # $25 / $0.70 limit
+
+    def test_cash_limited_buy_no_uses_no_limit(self):
+        orders = position_orders(1, 0, 100, 0, 0, 0.20, 0.50, 25.0)
+        assert len(orders) == 1
+        assert isinstance(orders[0], BuyNo)
+        assert orders[0].quantity == 31  # $25 / $0.80 NO limit
 
     def test_already_at_target(self):
         orders = position_orders(1, 100, 0, 100, 0, 0.70, 0.50, 100.0)

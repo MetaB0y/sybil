@@ -62,13 +62,13 @@ This is the computational payoff of the Fisher market structure — with log uti
 `matching-solver::PipelineResult` — the output from all solvers:
 - `result: MatchingResult` — fills, welfare, volume
 - `price_discovery: PriceDiscoveryResult` — clearing prices per market
-- Timing data, arb orders, phase breakdowns
+- Timing data and phase breakdowns
 
 ### Verification
 
 `sybil-verifier` validates solver output independently:
 - Order constraints (quantity, price limits)
-- Position balance (no phantom shares)
+- Settlement-derived MINT account adjustments (no phantom shares)
 - MM budget compliance
 - Welfare computation correctness
 

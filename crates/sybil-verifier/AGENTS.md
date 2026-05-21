@@ -25,6 +25,7 @@ Before modifying this crate, read these vault notes (`docs/architecture/`):
 
 ### Layer 2: Settlement Verification (`settlement.rs`)
 - Re-derives post-state from `pre_state + fills`
+- Derives protocol MINT account adjustments from post-fill position imbalance
 - Verifies balances and positions after settlement
 - Uses i128 intermediates to avoid overflow
 

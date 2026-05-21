@@ -72,6 +72,9 @@ class BaseAgent(ABC):
                 # Update our state
                 await self._update_state(block)
 
+                if await self._has_pending_orders():
+                    continue
+
                 # Record block-level stats (welfare, volume, fills)
                 self.block_stats[block.height] = (
                     block.total_welfare, block.total_volume, block.orders_filled,
@@ -137,6 +140,17 @@ class BaseAgent(ABC):
 
         except Exception as e:
             print(f"[{self.name}] Failed to update state: {e}")
+
+    async def _has_pending_orders(self) -> bool:
+        """Avoid stacking reservations from previously accepted orders."""
+        get_pending = getattr(self.client, "get_pending_orders", None)
+        if get_pending is None:
+            return False
+        try:
+            return bool(await get_pending(self.account_id))
+        except Exception as e:
+            print(f"[{self.name}] Failed to check pending orders: {e}")
+            return False
 
     @property
     def current_balance(self) -> float:

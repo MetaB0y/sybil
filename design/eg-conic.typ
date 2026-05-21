@@ -253,7 +253,7 @@ The Clarabel path is straightforward to implement (days of work). The augmented-
 + Build the conic program from the same data structures as `build_and_solve_lp()`. Reuse `precompute_coefficients`, `collect_markets`, etc.
 + Construct sparse $A$ matrix: stack exponential cone rows, position balance rows, box constraint rows. Build $bold(b)$ and $bold(c)$ vectors. Pass cone specification.
 + Extract primal fills ($bold(q)$) and dual prices ($bold(lambda)$) from `solver.solution`.
-+ Round fills to integers, normalize prices, run `trim_mm_budget_overflows`, create arb orders — same post-processing pipeline as current solvers.
++ Round fills to integers, normalize prices, run `trim_mm_budget_overflows`; minting/burning is represented by the MINT account during settlement, not by synthetic fills.
 + Validate: compare fills and welfare against Frank-Wolfe EG on all existing test cases.
 
 == Phase 2: Augmented LP (future)

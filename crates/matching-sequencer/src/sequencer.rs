@@ -16,7 +16,8 @@ use tracing::{debug, error};
 use crate::account::{Account, AccountId, AccountStore};
 use crate::analytics::AnalyticsState;
 use crate::block::{
-    hash_header, state_sidecar_snapshot, Block, BlockFlowMetrics, BlockHeader, BlockProduction,
+    hash_header, state_sidecar_snapshot, Block, BlockAnalytics, BlockFlowMetrics, BlockHeader,
+    BlockProduction,
 };
 use crate::bridge::{
     account_key, amount_token_units_to_i64_nanos, amount_token_units_to_nanos, BridgeBlockData,
@@ -312,8 +313,12 @@ fn classify_order_side(order: &Order) -> &'static str {
     }
 }
 
-fn expected_balance_delta_from_fills(fills: &[Fill], order_map: &HashMap<u64, &Order>) -> i64 {
-    fills.iter().fold(0, |net_delta, fill| {
+fn expected_balance_delta_from_fills(
+    fills: &[Fill],
+    order_map: &HashMap<u64, &Order>,
+    mint_adjustments: &[matching_engine::MintAdjustment],
+) -> i64 {
+    let fill_delta = fills.iter().fold(0, |net_delta, fill| {
         if fill.fill_qty == 0 {
             return net_delta;
         }
@@ -322,22 +327,14 @@ fn expected_balance_delta_from_fills(fills: &[Fill], order_map: &HashMap<u64, &O
             return net_delta;
         };
 
-        let has_positive = order.payoffs[..order.num_states as usize]
-            .iter()
-            .any(|&p| p > 0);
-        let has_negative = order.payoffs[..order.num_states as usize]
-            .iter()
-            .any(|&p| p < 0);
-        let cost = (fill.fill_price as i128 * fill.fill_qty as i128) as i64;
+        let Some(delta) = matching_engine::compute_fill_settlement(order, fill) else {
+            return net_delta;
+        };
 
-        if has_positive && !has_negative {
-            net_delta - cost
-        } else if has_negative && !has_positive {
-            net_delta + cost
-        } else {
-            net_delta
-        }
-    })
+        net_delta + delta.balance_delta
+    });
+    let mint_delta: i64 = mint_adjustments.iter().map(|adj| adj.balance_delta).sum();
+    fill_delta + mint_delta
 }
 
 /// Build the witness state snapshots around the system-event boundary.
@@ -1861,7 +1858,8 @@ impl BlockSequencer {
         let post_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
         let balance_delta = post_total_balance - pre_total_balance;
         if balance_delta != 0 {
-            let expected_balance_delta = expected_balance_delta_from_fills(fills, &order_map);
+            let expected_balance_delta =
+                expected_balance_delta_from_fills(fills, &order_map, &mint_adjustments);
             if balance_delta != expected_balance_delta {
                 error!(
                     height = self.height,
@@ -2641,6 +2639,8 @@ impl BlockSequencer {
             fills,
             clearing_prices,
             rejections,
+        };
+        let analytics = BlockAnalytics {
             total_welfare,
             total_volume,
             orders_filled,
@@ -2667,6 +2667,7 @@ impl BlockSequencer {
 
         BlockProduction {
             block,
+            analytics,
             pipeline: pipeline_result,
             witness,
             flow_metrics: BlockFlowMetrics {
@@ -2682,16 +2683,20 @@ impl BlockSequencer {
 }
 
 /// Convert a Block + PipelineResult into a BatchResult for simulation compatibility.
-pub fn batch_result_from_block(block: &Block, pipeline_result: PipelineResult) -> BatchResult {
+pub fn batch_result_from_block(
+    block: &Block,
+    analytics: &BlockAnalytics,
+    pipeline_result: PipelineResult,
+) -> BatchResult {
     BatchResult {
         pipeline_result,
         fills: block.fills.clone(),
         clearing_prices: block.clearing_prices.clone(),
-        total_welfare: block.total_welfare,
-        total_volume: block.total_volume,
+        total_welfare: analytics.total_welfare,
+        total_volume: analytics.total_volume,
         rejections: block.rejections.clone(),
         orders_submitted: block.header.order_count as usize,
-        orders_filled: block.orders_filled,
+        orders_filled: analytics.orders_filled,
     }
 }
 
@@ -2829,8 +2834,26 @@ mod tests {
             Fill::new(sell.id, 2, 700_000_000),
         ];
 
-        let expected_delta = expected_balance_delta_from_fills(&fills, &order_map);
+        let expected_delta = expected_balance_delta_from_fills(&fills, &order_map, &[]);
         assert_eq!(expected_delta, -(300_000_000i64 * 4) + (700_000_000i64 * 2));
+    }
+
+    #[test]
+    fn test_expected_balance_delta_includes_mint_adjustments() {
+        let (markets, m0) = setup();
+        let buy = outcome_buy(&markets, 1, m0, 0, 300_000_000, 4);
+        let order_map = HashMap::from([(buy.id, &buy)]);
+        let fills = vec![Fill::new(buy.id, 4, 300_000_000)];
+        let mint_adjustments = vec![matching_engine::MintAdjustment {
+            market_id: m0,
+            outcome: 0,
+            position_delta: -4,
+            balance_delta: 300_000_000i64 * 4,
+        }];
+
+        let expected_delta =
+            expected_balance_delta_from_fills(&fills, &order_map, &mint_adjustments);
+        assert_eq!(expected_delta, 0);
     }
 
     #[test]
@@ -2917,14 +2940,14 @@ mod tests {
             buyer,
             outcome_buy(&markets, 0, m0, 0, NANOS_PER_DOLLAR / 2, 10),
         );
-        let first = seq.produce_block(vec![sub], 1_000).block;
-        assert_eq!(first.orders_by_market.get(&m0).unwrap().placed, 1);
+        let first = seq.produce_block(vec![sub], 1_000);
+        assert_eq!(first.analytics.orders_by_market.get(&m0).unwrap().placed, 1);
         assert_eq!(seq.platform_order_stats(1_000).0.placed, 1);
         assert_eq!(seq.order_book.len(), 1, "unfilled order should rest");
 
-        let second = seq.produce_block(vec![], 2_000).block;
+        let second = seq.produce_block(vec![], 2_000);
         assert_eq!(
-            second.orders_by_market.get(&m0).unwrap().placed,
+            second.analytics.orders_by_market.get(&m0).unwrap().placed,
             1,
             "carried resting order is live in the next batch"
         );
@@ -2957,11 +2980,19 @@ mod tests {
             mm_constraint: Some(constraint),
         };
 
-        let block = seq.produce_block(vec![sub], 1_000).block;
-        assert_eq!(block.orders_by_market.get(&m0).unwrap().placed, 1);
+        let production = seq.produce_block(vec![sub], 1_000);
+        assert_eq!(
+            production
+                .analytics
+                .orders_by_market
+                .get(&m0)
+                .unwrap()
+                .placed,
+            1
+        );
         assert_eq!(seq.platform_order_stats(1_000).0.placed, 1);
         assert_eq!(
-            block.unique_placers, 0,
+            production.analytics.unique_placers, 0,
             "MM orders count as orders but not as unique traders"
         );
     }
@@ -2979,7 +3010,7 @@ mod tests {
         let bp = seq.produce_block(submissions, 0);
         seq.markets = old_markets;
         seq.market_groups = old_groups;
-        batch_result_from_block(&bp.block, bp.pipeline)
+        batch_result_from_block(&bp.block, &bp.analytics, bp.pipeline)
     }
 
     fn snapshot_by_id(

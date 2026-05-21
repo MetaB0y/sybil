@@ -18,9 +18,19 @@ use crate::system_event::SystemEvent;
 /// Named result of [`BlockSequencer::produce_block`].
 pub struct BlockProduction {
     pub block: Block,
+    pub analytics: BlockAnalytics,
     pub pipeline: PipelineResult,
     pub witness: BlockWitness,
     pub flow_metrics: BlockFlowMetrics,
+}
+
+impl BlockProduction {
+    pub fn sealed_block(&self) -> SealedBlock {
+        SealedBlock {
+            canonical: self.block.clone(),
+            analytics: self.analytics.clone(),
+        }
+    }
 }
 
 /// Per-block flow composition for metrics and observability.
@@ -63,6 +73,13 @@ impl BlockHeader {
     }
 }
 
+/// A canonical block plus derived, API-facing analytics.
+#[derive(Clone)]
+pub struct SealedBlock {
+    pub canonical: Block,
+    pub analytics: BlockAnalytics,
+}
+
 /// A sequencer block produced each tick.
 #[derive(Clone)]
 pub struct Block {
@@ -73,6 +90,15 @@ pub struct Block {
     pub fills: Vec<Fill>,
     pub clearing_prices: HashMap<MarketId, Vec<Nanos>>,
     pub rejections: Vec<Rejection>,
+}
+
+/// Per-block sidecar data derived during block production.
+///
+/// This is not canonical protocol data: it is not part of the block hash,
+/// state root, events root, or witness. API/SSE consumers receive it next to
+/// the block so product views do not have to reconstruct common summaries.
+#[derive(Clone, Default)]
+pub struct BlockAnalytics {
     pub total_welfare: i64,
     pub total_volume: u64,
     pub orders_filled: usize,

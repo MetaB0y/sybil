@@ -619,23 +619,17 @@ fn run_detailed_pipeline(
             // Print sample market details
             print_market_details(&problem, &result, &sample_markets);
 
-            // Add arbitrage orders to problem for stats and verification
-            let mut problem_with_arb = problem.clone();
-            for order in &result.group_minting_arb_orders {
-                problem_with_arb.orders.push(order.clone());
-            }
-
             // Print fill statistics
-            let fill_stats = FillStats::compute(&problem_with_arb, &result, &order_stats);
+            let fill_stats = FillStats::compute(&problem, &result, &order_stats);
             print_fill_stats(&fill_stats, &order_stats, problem.markets.len());
 
             // Verify the result using the new comprehensive verifier
-            let witness = witness_from_problem(&problem_with_arb, &result);
+            let witness = witness_from_problem(&problem, &result);
             let verification = verify_match(&witness, false);
             print_verification_result(&verification);
 
-            // Also run matching-solver's verifier which checks position balance
-            let solver_verification = matching_solver::verify(&problem_with_arb, &result.result);
+            // Also run matching-solver's fill/order/MM verifier.
+            let solver_verification = matching_solver::verify(&problem, &result.result);
             print_solver_verification(&solver_verification);
         }
 
@@ -791,39 +785,14 @@ fn print_verification_result(result: &VerificationResult) {
 
 fn print_solver_verification(result: &matching_solver::VerificationResult) {
     if result.valid {
-        println!(
-            "  Position Balance: \u{2713} VALID ({} markets checked)",
-            result.stats.markets_checked
-        );
+        println!("  Solver result: \u{2713} VALID");
     } else {
-        let pos_violations: Vec<_> = result
-            .violations
-            .iter()
-            .filter(|v| v.kind == matching_solver::ViolationKind::PositionImbalance)
-            .collect();
-        let other_violations: Vec<_> = result
-            .violations
-            .iter()
-            .filter(|v| v.kind != matching_solver::ViolationKind::PositionImbalance)
-            .collect();
-
-        if !pos_violations.is_empty() {
-            println!(
-                "  Position Balance: \u{2717} {} markets imbalanced",
-                pos_violations.len()
-            );
-            for v in pos_violations.iter().take(5) {
-                println!("    {}", v.details);
-            }
-            if pos_violations.len() > 5 {
-                println!("    ... and {} more", pos_violations.len() - 5);
-            }
-        }
-        if !other_violations.is_empty() {
-            println!("  Other violations: {} found", other_violations.len());
-            for v in other_violations.iter().take(5) {
-                println!("    {:?}: {}", v.kind, v.details);
-            }
+        println!(
+            "  Solver result: \u{2717} {} violations",
+            result.violations.len()
+        );
+        for v in result.violations.iter().take(5) {
+            println!("    {:?}: {}", v.kind, v.details);
         }
     }
 }
@@ -1324,26 +1293,18 @@ fn run_solver_with_witness(
     }
 }
 
-/// Build a BlockWitness from a PipelineResult (includes arb orders for position balance).
+/// Build a BlockWitness from a PipelineResult using real orders and real fills.
 fn witness_from_pipeline(problem: &Problem, result: &PipelineResult) -> BlockWitness {
-    let mut problem_with_arb = problem.clone();
-    // Include group minting arb orders
-    for order in &result.group_minting_arb_orders {
-        problem_with_arb.orders.push(order.clone());
-    }
-    witness_from_problem(&problem_with_arb, result)
+    witness_from_problem(problem, result)
 }
 
-/// Build a BlockWitness from a MilpResult.
-/// Includes synthetic arb orders so verifier can validate position balance.
+/// Build a BlockWitness from a MilpResult using real orders and real fills.
 fn witness_from_milp(problem: &Problem, result: &matching_solver::MilpResult) -> BlockWitness {
-    let mut all_orders: Vec<&Order> = problem.orders.iter().collect();
-    all_orders.extend(result.arbitrage_orders.iter());
-
-    let witness_orders: Vec<WitnessOrder> = all_orders
+    let witness_orders: Vec<WitnessOrder> = problem
+        .orders
         .iter()
         .map(|o| WitnessOrder {
-            order: (*o).clone(),
+            order: o.clone(),
             account_id: 0,
             is_mm: problem
                 .mm_constraints
@@ -1358,7 +1319,7 @@ fn witness_from_milp(problem: &Problem, result: &matching_solver::MilpResult) ->
             parent_hash: [0u8; 32],
             state_root: [0u8; 32],
             events_root: [0u8; 32],
-            order_count: all_orders.len() as u32,
+            order_count: problem.orders.len() as u32,
             fill_count: result.result.fills.len() as u32,
             timestamp_ms: 0,
         },

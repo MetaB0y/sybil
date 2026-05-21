@@ -31,7 +31,7 @@ class LiveConfig:
     api_key: str = ""
     model_name: str = "deepseek/deepseek-v4-flash"
     initial_balance: float = 500.0
-    max_markets: int = 20
+    max_markets: int = 0
     order_time_in_force: TimeInForce = "IOC"
     news_poll_interval: int = 300
     min_llm_interval: float = 60.0
@@ -43,12 +43,15 @@ class LiveConfig:
     mapping_path: str | None = None  # Path to polymarket_mapping.json
 
 
-def select_markets(markets, max_n: int = 20):
+def select_markets(markets, max_n: int = 0):
     """Pick diverse Polymarket-mirrored markets for trading.
 
-    Avoids picking many markets from the same group (e.g. 18 NBA MVP candidates).
-    Prefers standalone markets and picks at most 2 per group prefix.
+    With max_n <= 0, returns every suitable mirrored market. For bounded
+    selections, avoids picking many markets from the same group (e.g. 18 NBA MVP
+    candidates) by preferring standalone markets and picking at most 2 per group
+    prefix.
     """
+    all_suitable = max_n <= 0
     active = [
         m for m in markets
         if "polymarket" in m.tags
@@ -65,7 +68,8 @@ def select_markets(markets, max_n: int = 20):
     standalone.sort(key=lambda m: (-m.volume_nanos, m.id))
     selected.extend(standalone)
 
-    # From grouped markets, pick at most 2 per group prefix
+    # From grouped markets, pick at most 2 per group prefix unless the caller
+    # explicitly requested every suitable mirrored market.
     from collections import defaultdict
     groups = defaultdict(list)
     for m in grouped:
@@ -76,8 +80,10 @@ def select_markets(markets, max_n: int = 20):
         # Sort within group by yes_price closeness to 0.5 (most uncertain = most interesting)
         members = groups[prefix]
         members.sort(key=lambda m: abs(m.yes_price - 0.5))
-        selected.extend(members[:2])
+        selected.extend(members if all_suitable else members[:2])
 
+    if all_suitable:
+        return selected
     return selected[:max_n]
 
 
@@ -300,7 +306,12 @@ def main():
     parser.add_argument("--sybil-url", default="http://172.104.31.54:3000")
     parser.add_argument("--api-key", required=True, help="OpenRouter API key")
     parser.add_argument("--model", default="deepseek/deepseek-v4-flash")
-    parser.add_argument("--max-markets", type=int, default=20)
+    parser.add_argument(
+        "--max-markets",
+        type=int,
+        default=0,
+        help="Maximum markets for bots to trade; 0 means all suitable mirrored markets",
+    )
     parser.add_argument(
         "--order-time-in-force",
         choices=["GTC", "IOC", "GTD"],

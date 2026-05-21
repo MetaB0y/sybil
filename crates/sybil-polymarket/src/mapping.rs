@@ -149,8 +149,8 @@ impl MappingStore {
             .collect()
     }
 
-    /// Iterate all mapped markets: yields (sybil_market_id, yes_token_id, in_group).
-    pub fn all_markets(&self) -> Vec<(u32, String, bool)> {
+    /// Iterate all mapped markets: yields (sybil_market_id, yes_token_id, group_key, group_size).
+    pub fn all_markets(&self) -> Vec<(u32, String, Option<String>, usize)> {
         self.all_markets_matching(|_| true)
     }
 
@@ -158,20 +158,24 @@ impl MappingStore {
     pub fn all_markets_for_conditions(
         &self,
         conditions: &HashSet<String>,
-    ) -> Vec<(u32, String, bool)> {
+    ) -> Vec<(u32, String, Option<String>, usize)> {
         self.all_markets_matching(|condition| conditions.contains(condition))
     }
 
     fn all_markets_matching(
         &self,
         mut condition_matches: impl FnMut(&str) -> bool,
-    ) -> Vec<(u32, String, bool)> {
-        let group_market_ids: std::collections::HashSet<u32> = self
-            .event_to_group
-            .values()
-            .filter(|g| g.neg_risk)
-            .flat_map(|g| g.sybil_market_ids.iter().copied())
-            .collect();
+    ) -> Vec<(u32, String, Option<String>, usize)> {
+        let mut group_by_market = HashMap::new();
+        for (event_id, group) in &self.event_to_group {
+            if !group.neg_risk {
+                continue;
+            }
+            let group_size = group.sybil_market_ids.len();
+            for &market_id in &group.sybil_market_ids {
+                group_by_market.insert(market_id, (event_id.clone(), group_size));
+            }
+        }
 
         self.token_to_sybil
             .iter()
@@ -182,10 +186,12 @@ impl MappingStore {
                     .is_some_and(|condition| condition_matches(condition))
             })
             .map(|(token_id, (sybil_id, _))| {
+                let group = group_by_market.get(sybil_id).cloned();
                 (
                     *sybil_id,
                     token_id.clone(),
-                    group_market_ids.contains(sybil_id),
+                    group.as_ref().map(|(group_key, _)| group_key.clone()),
+                    group.map(|(_, group_size)| group_size).unwrap_or(0),
                 )
             })
             .collect()

@@ -7,7 +7,7 @@ pub struct AccountId(pub u64);
 
 impl AccountId {
     /// Reserved system account for minting/burning operations.
-    /// Holds the counterparty positions from group minting arb orders.
+    /// Holds protocol counterparty positions derived from MINT adjustments.
     pub const MINT: AccountId = AccountId(u64::MAX);
 }
 
@@ -50,7 +50,7 @@ pub struct AccountStore {
 impl AccountStore {
     pub fn new() -> Self {
         let mut store = Self::default();
-        // Create the system mint account (zero balance, holds arb positions).
+        // Create the system mint account (zero balance, protocol counterparty positions).
         store
             .accounts
             .insert(AccountId::MINT, Account::new(AccountId::MINT, 0));

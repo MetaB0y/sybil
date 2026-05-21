@@ -17,7 +17,7 @@ import asyncio
 import logging
 import re
 import urllib.parse
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -31,6 +31,8 @@ from sybil_client.types import Market
 log = logging.getLogger(__name__)
 
 GATE_MODEL = "google/gemma-4-31b-it"
+MAX_FEED_FETCH_CONCURRENCY = 32
+MAX_GATE_HEADLINES_PER_MARKET = 8
 
 # Default path where sybil-polymarket writes the mapping
 DEFAULT_MAPPING_PATH = "/data/polymarket_mapping.json"
@@ -262,7 +264,7 @@ class NewsFeed:
         markets: list[Market],
         api_key: str | None = None,
         poll_interval_s: int = 300,
-        max_seen: int = 10_000,
+        max_seen: int = 100_000,
         mapping_path: str | None = None,
     ):
         self.markets = markets
@@ -272,7 +274,7 @@ class NewsFeed:
         self.polymarket_prices = PolymarketPrices(mapping_path)
 
         # Dedup
-        self._seen_urls: deque[str] = deque(maxlen=max_seen)
+        self._seen_urls: deque[str] = deque()
         self._seen_set: set[str] = set()
 
         # Pending articles per market
@@ -281,6 +283,7 @@ class NewsFeed:
 
         # All articles (for DB logging)
         self._all_articles: list[LiveArticle] = []
+        self._warmed_up = False
 
         # LLM client for the gate (cheap model)
         self._llm_client: openai.AsyncOpenAI | None = None
@@ -314,35 +317,50 @@ class NewsFeed:
 
     async def _fetch_feed(self, http: httpx.AsyncClient, url: str) -> list[dict]:
         """Fetch and parse a single RSS feed."""
-        try:
-            resp = await http.get(
-                url, timeout=15.0, follow_redirects=True,
-                headers={"User-Agent": "Mozilla/5.0 (compatible; SybilBot/1.0)"},
+        resp = await http.get(
+            url, timeout=15.0, follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; SybilBot/1.0)"},
+        )
+        if resp.status_code != 200:
+            raise httpx.HTTPStatusError(
+                f"status={resp.status_code}",
+                request=resp.request,
+                response=resp,
             )
-            if resp.status_code != 200:
-                return []
-            feed = feedparser.parse(resp.text)
-            entries = []
-            for entry in feed.entries:
-                link = entry.get("link", "")
-                title = entry.get("title", "")
-                published = entry.get("published_parsed")
-                pub_dt = (
-                    datetime(*published[:6], tzinfo=timezone.utc)
-                    if published
-                    else datetime.now(timezone.utc)
-                )
-                source = entry.get("source", {}).get("title", "")
-                entries.append({
-                    "url": link,
-                    "title": title,
-                    "source": source or "google",
-                    "published": pub_dt,
-                })
-            return entries
-        except Exception as e:
-            log.warning("Feed fetch error: %s", e)
-            return []
+        feed = feedparser.parse(resp.text)
+        entries = []
+        for entry in feed.entries:
+            link = entry.get("link", "")
+            title = entry.get("title", "")
+            published = entry.get("published_parsed")
+            pub_dt = (
+                datetime(*published[:6], tzinfo=timezone.utc)
+                if published
+                else datetime.now(timezone.utc)
+            )
+            source = entry.get("source", {}).get("title", "")
+            entries.append({
+                "url": link,
+                "title": title,
+                "source": source or "google",
+                "published": pub_dt,
+            })
+        return entries
+
+    async def _fetch_feed_limited(
+        self,
+        http: httpx.AsyncClient,
+        url: str,
+        semaphore: asyncio.Semaphore,
+    ) -> list[dict]:
+        async with semaphore:
+            return await self._fetch_feed(http, url)
+
+    @staticmethod
+    def _feed_error_key(error: Exception) -> str:
+        if isinstance(error, httpx.HTTPStatusError):
+            return f"HTTP {error.response.status_code}"
+        return type(error).__name__
 
     async def _poll_once(self, http: httpx.AsyncClient) -> int:
         """Poll Google News for each market, batch-gate with LLM, fetch text."""
@@ -350,11 +368,26 @@ class NewsFeed:
         gate_yes = 0
         gate_no = 0
 
-        # Fetch all market feeds concurrently
+        # Fetch market feeds concurrently, but keep the fan-out bounded. The
+        # live deployment may track hundreds of markets, and unbounded RSS
+        # fetches create timeout bursts plus log spam without improving latency.
+        semaphore = asyncio.Semaphore(MAX_FEED_FETCH_CONCURRENCY)
         feed_tasks = [
-            self._fetch_feed(http, url) for _, url in self._market_feeds
+            self._fetch_feed_limited(http, url, semaphore)
+            for _, url in self._market_feeds
         ]
         feed_results = await asyncio.gather(*feed_tasks, return_exceptions=True)
+        feed_errors = Counter(
+            self._feed_error_key(result)
+            for result in feed_results
+            if isinstance(result, Exception)
+        )
+        if feed_errors:
+            summary = ", ".join(
+                f"{key}={count}" for key, count in feed_errors.most_common()
+            )
+            log.warning("Feed fetch errors across %d markets: %s",
+                        sum(feed_errors.values()), summary)
 
         # Group candidates by market (dedup first)
         per_market: dict[int, list[dict]] = {}
@@ -369,6 +402,16 @@ class NewsFeed:
 
         total_candidates = sum(len(v) for v in per_market.values())
         if total_candidates == 0:
+            self._warmed_up = True
+            return 0
+
+        if not self._warmed_up:
+            self._warmed_up = True
+            log.info(
+                "Warm-started news feed: marked %d existing candidates across %d markets as seen",
+                total_candidates,
+                len(per_market),
+            )
             return 0
 
         log.info("Poll: %d new candidates across %d markets",
@@ -377,6 +420,11 @@ class NewsFeed:
         # Batch LLM gate per market (1 LLM call per market, not per article)
         for market_id, entries in per_market.items():
             market = market_by_id[market_id]
+            entries = sorted(
+                entries,
+                key=lambda entry: entry["published"],
+                reverse=True,
+            )[:MAX_GATE_HEADLINES_PER_MARKET]
             headlines = [e["title"] for e in entries]
 
             if self._llm_client:

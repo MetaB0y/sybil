@@ -26,7 +26,7 @@ pub async fn health(State(state): State<AppState>) -> (StatusCode, Json<HealthRe
             StatusCode::OK,
             Json(HealthResponse {
                 status: "ok".to_string(),
-                height: block.map(|b| b.header.height),
+                height: block.map(|b| b.canonical.header.height),
             }),
         ),
         Err(err) => {

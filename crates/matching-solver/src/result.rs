@@ -99,10 +99,6 @@ pub struct PipelineResult {
     /// Diagnostics from UCP enforcement (if it ran).
     pub ucp_stats: Option<UcpStats>,
 
-    /// Synthetic arb orders from group minting (needed for witness/verification).
-    #[serde(skip)]
-    pub group_minting_arb_orders: Vec<matching_engine::Order>,
-
     /// Per-phase snapshots for detailed visualization (viz feature only).
     #[cfg(feature = "viz")]
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -177,7 +173,6 @@ impl PipelineResult {
             total_time_secs: 0.0,
             phase_times: PipelineTimings::default(),
             ucp_stats: None,
-            group_minting_arb_orders: Vec::new(),
             #[cfg(feature = "viz")]
             phase_snapshots: Vec::new(),
         }

@@ -211,7 +211,7 @@ impl SyncActor {
                         // market itself was created successfully, and the next
                         // sync cycle is idempotent on the API side. We
                         // deliberately do NOT alter NegRisk MarketGroup
-                        // semantics or the MM `in_group` flag here.
+                        // semantics here.
                         let metadata_req = build_metadata_request(event, poly_market);
                         if let Err(e) = self
                             .sybil_client
@@ -238,7 +238,12 @@ impl SyncActor {
                                     sybil_market_id: sybil_id,
                                     yes_token_id: token_ids[0].clone(),
                                     initial_mid,
-                                    in_group: event.is_neg_risk(),
+                                    group_key: event.is_neg_risk().then(|| event.id.clone()),
+                                    group_size: if event.is_neg_risk() {
+                                        active_markets.len()
+                                    } else {
+                                        0
+                                    },
                                 })
                                 .await;
 

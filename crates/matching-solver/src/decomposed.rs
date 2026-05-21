@@ -104,7 +104,7 @@ impl<S: crate::Solver> DecomposedSolver<S> {
             )
         };
 
-        // Step 8: Aggregate results (excluding per-component arb orders)
+        // Step 8: Aggregate results. Component fills are disjoint real order fills.
         let mut result = aggregate_results(component_results, self.inner.name());
 
         // Post-aggregation: enforce global MM budgets + restore position balance.
@@ -129,37 +129,8 @@ impl<S: crate::Solver> DecomposedSolver<S> {
             );
         }
 
-        // Re-create position arb orders globally (trim may have broken balance).
-        // We need two passes to avoid borrow conflicts.
-        let prices = result
-            .price_discovery
-            .as_ref()
-            .map(|pd| pd.prices.clone())
-            .unwrap_or_default();
-        let max_order_id = problem.orders.iter().map(|o| o.id).max().unwrap_or(0);
-
-        // Pass 1: create new arb orders using existing arbs + problem orders as map
-        let new_arbs = {
-            let mut order_map: HashMap<u64, &Order> =
-                problem.orders.iter().map(|o| (o.id, o)).collect();
-            for arb in &result.group_minting_arb_orders {
-                order_map.insert(arb.id, arb);
-            }
-            crate::lp_solver::create_position_arbs(
-                &mut result.result,
-                &order_map,
-                &prices,
-                max_order_id,
-            )
-        };
-        result.group_minting_arb_orders.extend(new_arbs);
-
-        // Pass 2: recompute welfare with complete order map
-        let mut order_map_full: HashMap<u64, &Order> =
+        let order_map_full: HashMap<u64, &Order> =
             problem.orders.iter().map(|o| (o.id, o)).collect();
-        for arb in &result.group_minting_arb_orders {
-            order_map_full.insert(arb.id, arb);
-        }
         crate::lp_solver::recompute_welfare(&mut result.result, &order_map_full);
 
         result.total_time_secs = start.elapsed().as_secs_f64();
@@ -820,7 +791,6 @@ fn aggregate_results(component_results: Vec<PipelineResult>, solver_name: &str) 
     let mut merged = MatchingResult::new();
     let mut prices: HashMap<MarketId, Vec<u64>> = HashMap::new();
     let mut total_solve_time = 0.0f64;
-    let mut arb_orders = Vec::new();
 
     for result in &component_results {
         // Merge fills (disjoint order sets → no conflicts)
@@ -841,9 +811,6 @@ fn aggregate_results(component_results: Vec<PipelineResult>, solver_name: &str) 
         }
 
         total_solve_time += result.total_time_secs;
-
-        // Merge arb orders
-        arb_orders.extend(result.group_minting_arb_orders.iter().cloned());
     }
 
     let mut pipeline_result = PipelineResult::empty();
@@ -862,7 +829,6 @@ fn aggregate_results(component_results: Vec<PipelineResult>, solver_name: &str) 
         price_discovery_secs: total_solve_time,
         ..Default::default()
     };
-    pipeline_result.group_minting_arb_orders = arb_orders;
 
     pipeline_result
 }

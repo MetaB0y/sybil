@@ -49,7 +49,7 @@ fn parse_signature(signature_hex: &str) -> Result<Signature, AppError> {
 async fn next_block_height(state: &AppState) -> Result<u64, AppError> {
     let latest = state.sequencer.get_latest_block().await?;
     Ok(latest
-        .map(|block| block.header.height)
+        .map(|block| block.canonical.header.height)
         .unwrap_or(0)
         .saturating_add(1))
 }

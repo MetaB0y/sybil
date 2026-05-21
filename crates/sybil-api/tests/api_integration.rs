@@ -223,10 +223,10 @@ async fn state_proof_returns_inclusion_for_committed_account_leaf() {
 
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
     let proof = parse_json(&body);
-    assert_eq!(proof["block_height"], json!(block.header.height));
+    assert_eq!(proof["block_height"], json!(block.canonical.header.height));
     assert_eq!(
         proof["state_root"],
-        json!(hex::encode(block.header.state_root))
+        json!(hex::encode(block.canonical.header.state_root))
     );
     assert_eq!(proof["leaf_key_hex"], json!(hex::encode(leaf_key)));
     assert_eq!(proof["proof_kind"], json!("inclusion"));
@@ -248,10 +248,10 @@ async fn state_proof_returns_exclusion_for_missing_leaf() {
 
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
     let proof = parse_json(&body);
-    assert_eq!(proof["block_height"], json!(block.header.height));
+    assert_eq!(proof["block_height"], json!(block.canonical.header.height));
     assert_eq!(
         proof["state_root"],
-        json!(hex::encode(block.header.state_root))
+        json!(hex::encode(block.canonical.header.state_root))
     );
     assert_eq!(proof["leaf_key_ascii"], json!("acct/missing"));
     assert_eq!(proof["proof_kind"], json!("exclusion"));
@@ -704,7 +704,7 @@ async fn list_markets_reports_traded_volume() {
     assert_eq!(status, StatusCode::OK);
 
     let block = handle.produce_block().await.unwrap();
-    assert!(!block.fills.is_empty());
+    assert!(!block.canonical.fills.is_empty());
 
     let (status, body) = get(app.clone(), "/v1/markets").await;
     assert_eq!(status, StatusCode::OK);
@@ -1004,7 +1004,7 @@ async fn end_to_end_trade_lifecycle() {
     // Force block production
     let block = handle.produce_block().await.unwrap();
     assert!(
-        !block.fills.is_empty(),
+        !block.canonical.fills.is_empty(),
         "Expected fills from matching orders"
     );
 
@@ -1236,7 +1236,10 @@ async fn recent_blocks_returns_newest_first() {
     let b0 = handle.produce_block().await.unwrap();
     let b1 = handle.produce_block().await.unwrap();
     let b2 = handle.produce_block().await.unwrap();
-    assert!(b2.header.height > b1.header.height && b1.header.height > b0.header.height);
+    assert!(
+        b2.canonical.header.height > b1.canonical.header.height
+            && b1.canonical.header.height > b0.canonical.header.height
+    );
 
     // newest-first, clamped to the requested limit
     let (status, body) = get(app.clone(), "/v1/blocks?limit=2").await;
@@ -1244,8 +1247,14 @@ async fn recent_blocks_returns_newest_first() {
     let arr = parse_json(&body);
     let arr = arr.as_array().unwrap();
     assert_eq!(arr.len(), 2, "got {arr:?}");
-    assert_eq!(arr[0]["height"].as_u64().unwrap(), b2.header.height);
-    assert_eq!(arr[1]["height"].as_u64().unwrap(), b1.header.height);
+    assert_eq!(
+        arr[0]["height"].as_u64().unwrap(),
+        b2.canonical.header.height
+    );
+    assert_eq!(
+        arr[1]["height"].as_u64().unwrap(),
+        b1.canonical.header.height
+    );
 
     // asking for more than exist returns all produced
     let (status, body) = get(app.clone(), "/v1/blocks?limit=1000").await;
@@ -1361,7 +1370,7 @@ async fn account_equity_series_populates_after_trades() {
     // Produce a block so the orders fill and equity is sampled.
     let block = handle.produce_block().await.unwrap();
     assert!(
-        !block.fills.is_empty(),
+        !block.canonical.fills.is_empty(),
         "expected fills from crossing orders"
     );
 

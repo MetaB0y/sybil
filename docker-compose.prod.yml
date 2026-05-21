@@ -33,7 +33,7 @@ services:
     command:
       - "--sybil-url=http://sybil-api:3000"
       - "--api-key=${OPENROUTER_API_KEY}"
-      - "--max-markets=20"
+      - "--max-markets=0"
       - "--model=deepseek/deepseek-v4-flash"
       - "--db-path=/data/decisions.db"
       - "--mapping-path=/polymarket-data/polymarket_mapping.json"

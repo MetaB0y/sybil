@@ -93,7 +93,11 @@ That's what Mechanisms 2 and 3 address.
 
 ---
 
-## Mechanism 2: Negrisk Arbitrage Feedback
+## Historical Mechanism 2: Negrisk Arbitrage Feedback
+
+The canonical sequencer path does not emit synthetic orders or synthetic fills.
+Minting/burning is represented by the protocol MINT account during settlement.
+This section documents the older feedback mechanism as solver history only.
 
 **File:** `negrisk.rs` (NegriskSolver) + `pipeline.rs` (feedback loop)
 
@@ -144,23 +148,24 @@ The pipeline runs a fixed-point loop (max 5 iterations):
 
 ```
 for each iteration:
-    1. Price Discovery (LocalSolver) — includes arb orders from previous iteration
-    2. Negrisk detection — creates new arb orders for next iteration
+    1. Price Discovery (LocalSolver) — historical internal feedback orders only
+    2. Negrisk detection — creates historical feedback orders for next iteration
     3. MM Allocation — activates orders within budget
     check convergence (welfare delta < threshold)
 ```
 
-#### Step 4: Arb fill filtering
+#### Step 4: Historical internal fill filtering
 
-Arb orders participate in clearing (consume liquidity, influence prices) but
-their fills are filtered out of the final output. Only real participant fills
-appear in the MatchingResult. The last iteration's arb orders never clear — a
-small welfare loss accepted for soundness.
+Historical feedback orders participated in clearing (consume liquidity,
+influence prices), but their fills were filtered out of final output. The
+current canonical path is stricter: `MatchingResult`, blocks, and witnesses
+contain only real participant fills, and minting/burning is accounted for by
+MINT settlement.
 
 ### What it guarantees
 
 - Price sum error decreases over iterations (empirically converges to ~2%)
-- All output fills are real (no synthetic fills in result)
+- All canonical output fills are real participant fills
 - Individual market clearing remains exact (P_YES + P_NO = $1)
 
 ### What it does NOT guarantee
@@ -494,19 +499,19 @@ Two modes:
 
 ## Architecture: What happens per batch
 
-### Negrisk Pipeline
+### Historical Negrisk Pipeline
 
 ```
 Pipeline::with_negrisk().solve(&problem)
   |
   +-- Iteration 1..5:
   |   +-- LocalSolver (unified binary clearing per market)
-  |   +-- NegriskSolver (detect price sum deviations, create arb orders)
+  |   +-- NegriskSolver (historical: detect price sum deviations)
   |   +-- MmAllocator (greedy budget-constrained activation)
   |   +-- MultiMarketSolver (complement match + leg decomposition)
   |   +-- Check convergence (welfare delta)
   |
-  +-- Filter arb fills from output
+  +-- Return only real participant fills
   +-- Combine partial solutions (MWIS on conflict graph)
   +-- Report cumulative MM allocation stats
   +-- Return fills, prices, welfare
@@ -595,10 +600,9 @@ Pipeline::with_dual_decomposition().solve(&problem)
    payoff. Complex derivatives (spreads, straddles) may be misclassified,
    leading to incorrect welfare calculation or bid shading direction.
 
-4. **Negrisk arb orders are non-atomic**. Individual legs can fill while
-   others don't. The synthetic arbitrageur has exposed risk. This is
-   internal to the solver (doesn't affect real participants) but makes arb
-   welfare accounting inaccurate.
+4. **Historical Negrisk feedback was non-atomic**. Individual legs could fill
+   while others did not. This is one reason the canonical path now keeps
+   minting/burning in MINT settlement rather than synthetic order output.
 
 5. **No adaptive step size in dual decomposition**. Fixed α_0/√t schedule.
    If convergence stalls, there's no recovery mechanism (e.g., Polyak step
