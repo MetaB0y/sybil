@@ -1,4 +1,4 @@
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::error::Error;
 
@@ -87,7 +87,7 @@ fn string_or_float<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<
 /// Tag attached to a Gamma event. We only care about `label` for category
 /// derivation, but we accept `slug` too for symmetry. Gamma sometimes omits
 /// the slug, so both default to empty.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GammaTag {
     #[serde(default)]
@@ -97,7 +97,7 @@ pub struct GammaTag {
 }
 
 /// Event from Gamma API. Contains one or more markets.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GammaEvent {
     pub id: String,
@@ -135,6 +135,10 @@ pub struct GammaEvent {
     /// Event-level icon URL (used as a secondary URL by the frontend).
     #[serde(default)]
     pub icon: Option<String>,
+    /// Any Gamma fields not modelled above, preserved verbatim so stored
+    /// snapshots stay complete as Polymarket's schema evolves.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl GammaEvent {
@@ -197,7 +201,7 @@ fn normalize_filter(value: &str) -> String {
 }
 
 /// Market nested inside a GammaEvent.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GammaMarket {
     pub condition_id: String,
@@ -251,6 +255,8 @@ pub struct GammaMarket {
     pub umared: Option<bool>,
     #[serde(default)]
     pub resolved_by: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl GammaMarket {
@@ -410,6 +416,7 @@ mod tests {
             icon: None,
             umared: None,
             resolved_by: None,
+            extra: Default::default(),
         };
 
         let ids = market.parsed_token_ids().unwrap();
@@ -453,6 +460,7 @@ mod tests {
             created_at: None,
             image: None,
             icon: None,
+            extra: Default::default(),
         };
 
         assert!(event.matches_category_filters(&["global elections".into()], &[]));
@@ -486,6 +494,7 @@ mod tests {
             icon: None,
             umared: None,
             resolved_by: None,
+            extra: Default::default(),
         };
 
         assert!(market.parsed_token_ids().unwrap().is_empty());
@@ -513,6 +522,23 @@ mod tests {
         assert_eq!(parse_iso8601_to_ms(""), None);
         assert_eq!(parse_iso8601_to_ms("not a date"), None);
         assert_eq!(parse_iso8601_to_ms("2025-13-31T12:00:00Z"), None);
+    }
+
+    #[test]
+    fn gamma_event_roundtrips_including_unknown_fields() {
+        let raw = serde_json::json!({
+            "id": "1",
+            "title": "T",
+            "negRisk": true,
+            "markets": [],
+            "someBrandNewField": { "a": 1 }
+        });
+        let ev: GammaEvent = serde_json::from_value(raw).unwrap();
+        let back = serde_json::to_value(&ev).unwrap();
+        assert_eq!(back["id"], "1");
+        assert_eq!(back["negRisk"], true);
+        // A field the struct doesn't model survives via the flatten catch-all.
+        assert_eq!(back["someBrandNewField"], serde_json::json!({ "a": 1 }));
     }
 
     #[test]
