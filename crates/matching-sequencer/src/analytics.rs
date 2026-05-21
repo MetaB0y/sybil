@@ -259,6 +259,7 @@ impl AnalyticsState {
             timestamp_ms,
             &mut self.cost_basis_tracker,
             accounts,
+            &mut self.account_event_log,
         );
         volume_by_market
     }

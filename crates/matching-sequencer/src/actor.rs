@@ -883,6 +883,24 @@ impl SequencerActorState {
                     now_ms,
                     false,
                 );
+                {
+                    use crate::aggregates::{HistoryEvent, HistoryKind};
+                    let o = &resting_order.order;
+                    let mut e = HistoryEvent::new(
+                        resting_order.account_id,
+                        HistoryKind::Placed,
+                        self.sequencer.height(),
+                        now_ms,
+                    );
+                    e.order_id = Some(order_id);
+                    e.market_id = o.active_markets().next();
+                    e.qty = Some(o.max_fill);
+                    e.price_nanos = Some(o.limit_price);
+                    let (side, outcome) = crate::aggregates::side_outcome_from_order(o);
+                    e.side = side;
+                    e.outcome = outcome;
+                    self.sequencer.record_history(e);
+                }
                 Ok(())
             }
             crate::sequencer::AdmitOutcome::Deferred(sub) => {

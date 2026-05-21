@@ -1469,6 +1469,22 @@ impl BlockSequencer {
                         side,
                         remaining_quantity: ro.order.max_fill,
                     });
+                {
+                    use crate::aggregates::{HistoryEvent, HistoryKind};
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+                    let mut e =
+                        HistoryEvent::new(account_id, HistoryKind::Cancelled, self.height, now_ms);
+                    e.order_id = Some(order_id);
+                    e.market_id = ro.order.active_markets().next();
+                    e.qty = Some(ro.order.max_fill);
+                    let (side, outcome) = crate::aggregates::side_outcome_from_order(&ro.order);
+                    e.side = side;
+                    e.outcome = outcome;
+                    self.analytics.record_history(e);
+                }
                 Ok(())
             }
             Err(crate::order_book::CancelError::NotFound) => Err(SequencerError::OrderNotFound),
@@ -2056,6 +2072,84 @@ impl BlockSequencer {
         }
         let bridge = bridge_block_data(&system_events, &self.bridge);
 
+        for event in &system_events {
+            use crate::aggregates::{HistoryEvent, HistoryKind};
+            match event {
+                SystemEvent::CreateAccount {
+                    account_id,
+                    initial_balance,
+                } => {
+                    let mut e = HistoryEvent::new(
+                        *account_id,
+                        HistoryKind::Created,
+                        self.height,
+                        timestamp_ms,
+                    );
+                    e.amount_nanos = Some(*initial_balance);
+                    self.analytics.record_history(e);
+                }
+                SystemEvent::Deposit { account_id, amount } => {
+                    let mut e = HistoryEvent::new(
+                        *account_id,
+                        HistoryKind::Deposit,
+                        self.height,
+                        timestamp_ms,
+                    );
+                    e.amount_nanos = Some(*amount);
+                    self.analytics.record_history(e);
+                }
+                SystemEvent::L1Deposit {
+                    account_id, amount, ..
+                } => {
+                    let mut e = HistoryEvent::new(
+                        *account_id,
+                        HistoryKind::Deposit,
+                        self.height,
+                        timestamp_ms,
+                    );
+                    e.amount_nanos = Some(*amount);
+                    self.analytics.record_history(e);
+                }
+                SystemEvent::WithdrawalCreated {
+                    account_id, amount, ..
+                } => {
+                    let mut e = HistoryEvent::new(
+                        *account_id,
+                        HistoryKind::Withdrawal,
+                        self.height,
+                        timestamp_ms,
+                    );
+                    e.amount_nanos = Some(-*amount);
+                    self.analytics.record_history(e);
+                }
+                SystemEvent::MarketResolved {
+                    market_id,
+                    payout_nanos,
+                    affected_accounts,
+                } => {
+                    let payout_outcome = if *payout_nanos >= matching_engine::NANOS_PER_DOLLAR {
+                        Some("YES")
+                    } else if *payout_nanos == 0 {
+                        Some("NO")
+                    } else {
+                        None
+                    };
+                    for aid in affected_accounts {
+                        let mut e = HistoryEvent::new(
+                            *aid,
+                            HistoryKind::Resolved,
+                            self.height,
+                            timestamp_ms,
+                        );
+                        e.market_id = Some(*market_id);
+                        e.payout_outcome = payout_outcome;
+                        self.analytics.record_history(e);
+                    }
+                }
+                SystemEvent::OrderCancelled { .. } => {} // recorded at cancel_pending_order (3c)
+            }
+        }
+
         let fresh_submissions = submissions.len();
         let fresh_orders_received: usize = submissions
             .iter()
@@ -2107,6 +2201,22 @@ impl BlockSequencer {
                     slot.unmatched += 1;
                 }
             }
+        }
+        for ro in &expired {
+            use crate::aggregates::{HistoryEvent, HistoryKind};
+            let mut e = HistoryEvent::new(
+                ro.account_id,
+                HistoryKind::Expired,
+                self.height,
+                timestamp_ms,
+            );
+            e.order_id = Some(ro.order.id);
+            e.market_id = ro.order.active_markets().next();
+            e.qty = Some(ro.order.max_fill);
+            let (side, outcome) = crate::aggregates::side_outcome_from_order(&ro.order);
+            e.side = side;
+            e.outcome = outcome;
+            self.analytics.record_history(e);
         }
 
         // Build batch-local account map from resting orders
@@ -2268,6 +2378,24 @@ impl BlockSequencer {
                                 account_id: account_id.0,
                                 is_mm: false,
                             });
+                            {
+                                use crate::aggregates::{HistoryEvent, HistoryKind};
+                                let o = &accepted.order;
+                                let mut e = HistoryEvent::new(
+                                    account_id,
+                                    HistoryKind::Placed,
+                                    self.height,
+                                    timestamp_ms,
+                                );
+                                e.order_id = Some(o.id);
+                                e.market_id = o.active_markets().next();
+                                e.qty = Some(o.max_fill);
+                                e.price_nanos = Some(o.limit_price);
+                                let (side, outcome) = crate::aggregates::side_outcome_from_order(o);
+                                e.side = side;
+                                e.outcome = outcome;
+                                self.analytics.record_history(e);
+                            }
                             accepted_orders.push(accepted.order);
                             self.analytics.record_trader_placement(
                                 account_id,
