@@ -975,6 +975,10 @@ impl BlockSequencer {
             .account_fills(account_id, market_id_filter, limit, offset)
     }
 
+    pub fn equity_series(&self, account_id: AccountId) -> Vec<crate::aggregates::EquityPoint> {
+        self.analytics.equity_series(account_id)
+    }
+
     pub fn record_trader_placement_analytics(
         &mut self,
         account_id: AccountId,
@@ -2433,6 +2437,20 @@ impl BlockSequencer {
             &mm_orders,
             &clearing_prices,
             self.config.liquidity_band_nanos,
+        );
+
+        // Off-block per-account equity series — sample accounts that traded
+        // this block (the tracker also periodically sweeps all known accounts).
+        let touched: std::collections::HashSet<AccountId> = fills
+            .iter()
+            .filter_map(|f| order_account_map.get(&f.order_id).copied())
+            .collect();
+        self.analytics.record_equity(
+            &touched,
+            &self.accounts,
+            &clearing_prices,
+            self.height,
+            timestamp_ms,
         );
 
         let previous_header = self

@@ -10,8 +10,9 @@ use matching_engine::{Fill, MarketId, Nanos, Order};
 
 use crate::account::{AccountId, AccountStore};
 use crate::aggregates::{
-    CostBasisTracker, CostBasisTrackerSnapshot, LiquidityTracker, LiquidityTrackerSnapshot,
-    OrderStats, OrderStatsTracker, OrderStatsTrackerSnapshot, TraderTracker, TraderTrackerSnapshot,
+    CostBasisTracker, CostBasisTrackerSnapshot, EquityTracker, LiquidityTracker,
+    LiquidityTrackerSnapshot, OrderStats, OrderStatsTracker, OrderStatsTrackerSnapshot,
+    TraderTracker, TraderTrackerSnapshot,
 };
 use crate::fill_recorder::FillRecorder;
 use crate::market_info::{AccountFillRecord, PricePoint};
@@ -31,6 +32,7 @@ pub struct AnalyticsState {
     order_stats_tracker: OrderStatsTracker,
     cost_basis_tracker: CostBasisTracker,
     first_deposit_ms: HashMap<AccountId, u64>,
+    equity_tracker: EquityTracker,
 }
 
 impl AnalyticsState {
@@ -43,6 +45,7 @@ impl AnalyticsState {
             order_stats_tracker: OrderStatsTracker::new(),
             cost_basis_tracker: CostBasisTracker::new(),
             first_deposit_ms: HashMap::new(),
+            equity_tracker: EquityTracker::new(),
         }
     }
 
@@ -67,6 +70,7 @@ impl AnalyticsState {
             order_stats_tracker: OrderStatsTracker::restore(input.order_stats_tracker),
             cost_basis_tracker: CostBasisTracker::restore(input.cost_basis_tracker),
             first_deposit_ms: input.first_deposit_ms,
+            equity_tracker: EquityTracker::new(),
         }
     }
 
@@ -290,6 +294,22 @@ impl AnalyticsState {
     ) {
         self.liquidity_tracker
             .record_block(order_book, mm_orders, clearing_prices, band_nanos);
+    }
+
+    pub fn record_equity(
+        &mut self,
+        touched: &std::collections::HashSet<AccountId>,
+        accounts: &AccountStore,
+        prices: &HashMap<MarketId, Vec<Nanos>>,
+        height: u64,
+        timestamp_ms: u64,
+    ) {
+        self.equity_tracker
+            .record(touched, accounts, prices, height, timestamp_ms);
+    }
+
+    pub fn equity_series(&self, account_id: AccountId) -> Vec<crate::aggregates::EquityPoint> {
+        self.equity_tracker.series(account_id)
     }
 
     pub fn apply_resolution(
