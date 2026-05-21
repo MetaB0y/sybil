@@ -8,14 +8,14 @@
 //! so the FE can read a smoothed average.
 //!
 //! Multi-market orders are excluded entirely — their `limit_price` is the
-//! bundle total, not attributable to one market. MM orders never sit in the
-//! resting book (they live in pending_bundles until the solver clears
-//! them), so no MM-specific gating is needed here; the resting-book walk
-//! captures only real participation.
+//! bundle total, not attributable to one market. Flash market-maker (MM)
+//! orders never enter the resting book, so they are passed into
+//! `record_block` separately and scored in a dedicated MM pass using the
+//! same band rule (by quoted `max_fill`).
 
 use std::collections::{HashMap, VecDeque};
 
-use matching_engine::{MarketId, Nanos};
+use matching_engine::{MarketId, Nanos, Order};
 use serde::{Deserialize, Serialize};
 
 use crate::order_book::OrderBook;
@@ -66,6 +66,7 @@ impl LiquidityTracker {
     pub fn record_block(
         &mut self,
         book: &OrderBook,
+        mm_orders: &[&Order],
         midprices: &HashMap<MarketId, Vec<Nanos>>,
         band_nanos: u64,
     ) {
@@ -73,6 +74,30 @@ impl LiquidityTracker {
         // resting book in O(N) over orders.
         let mut depth_by_market: HashMap<MarketId, u64> = HashMap::new();
         for (order, _account_id) in book.resting_orders() {
+            if order.num_markets != 1 {
+                continue;
+            }
+            let market = order.markets[0];
+            let Some(prices) = midprices.get(&market) else {
+                continue;
+            };
+            let mid = prices.first().copied().unwrap_or(0);
+            if mid == 0 {
+                continue;
+            }
+            let band_lo = mid.saturating_sub(band_nanos);
+            let band_hi = mid.saturating_add(band_nanos);
+            if order.limit_price >= band_lo && order.limit_price <= band_hi {
+                let value = order.limit_price.saturating_mul(order.max_fill);
+                let entry = depth_by_market.entry(market).or_insert(0);
+                *entry = entry.saturating_add(value);
+            }
+        }
+
+        // MM pass: flash MM orders never enter the book, but they provide
+        // real near-the-money depth for this batch. Score them with the same
+        // single-market band rule (by quoted `max_fill`).
+        for order in mm_orders {
             if order.num_markets != 1 {
                 continue;
             }
@@ -209,7 +234,7 @@ mod tests {
         midprices.insert(m0, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
         midprices.insert(m1, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
 
-        tracker.record_block(&book, &midprices, 50_000_000);
+        tracker.record_block(&book, &[], &midprices, 50_000_000);
 
         assert_eq!(tracker.current(m0), mid_yes.saturating_mul(4));
         assert_eq!(tracker.avg_last_n(m0, 10), mid_yes.saturating_mul(4));
@@ -235,7 +260,7 @@ mod tests {
         midprices.insert(m0, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
 
         for _ in 0..12 {
-            tracker.record_block(&book, &midprices, 50_000_000);
+            tracker.record_block(&book, &[], &midprices, 50_000_000);
         }
 
         let ring = tracker.last_n_per_market.get(&m0).expect("ring populated");
@@ -261,7 +286,7 @@ mod tests {
         let mut tracker = LiquidityTracker::new();
         let mut midprices = HashMap::new();
         midprices.insert(m0, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
-        tracker.record_block(&book, &midprices, 50_000_000);
+        tracker.record_block(&book, &[], &midprices, 50_000_000);
 
         assert_eq!(tracker.current(m0), 0);
     }
@@ -283,7 +308,7 @@ mod tests {
         let mut midprices = HashMap::new();
         midprices.insert(m0, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
         for _ in 0..3 {
-            tracker.record_block(&book, &midprices, 50_000_000);
+            tracker.record_block(&book, &[], &midprices, 50_000_000);
         }
 
         let snapshot = tracker.snapshot();
@@ -293,6 +318,51 @@ mod tests {
             restored.band_nanos_at_last_update(),
             tracker.band_nanos_at_last_update()
         );
+    }
+
+    /// MM orders never sit in the book but must still count toward liquidity.
+    /// A resting order (qty 4) + an MM order (qty 6), both in-band, score as
+    /// mid*(4+6).
+    #[test]
+    fn record_block_includes_mm_orders() {
+        let (markets, accounts, trader, m0, _m1) = two_market_setup();
+        let mut book = OrderBook::new(1_000);
+        let mid_yes = NANOS_PER_DOLLAR / 2;
+        admit(
+            &mut book,
+            &accounts,
+            outcome_buy(&markets, 1, m0, 0, mid_yes, 4),
+            trader,
+        );
+
+        // Flash MM order — built but NOT accepted into the book.
+        let mm = outcome_buy(&markets, 99, m0, 0, mid_yes, 6);
+        let mm_slice: Vec<&matching_engine::Order> = vec![&mm];
+
+        let mut tracker = LiquidityTracker::new();
+        let mut midprices = HashMap::new();
+        midprices.insert(m0, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
+
+        tracker.record_block(&book, &mm_slice, &midprices, 50_000_000);
+
+        assert_eq!(tracker.current(m0), mid_yes.saturating_mul(10));
+    }
+
+    /// An out-of-band MM order is excluded, same as resting orders.
+    #[test]
+    fn record_block_excludes_out_of_band_mm() {
+        let (markets, _accounts, _trader, m0, _m1) = two_market_setup();
+        let book = OrderBook::new(1_000);
+        let mid_yes = NANOS_PER_DOLLAR / 2;
+        let mm = outcome_buy(&markets, 99, m0, 0, mid_yes - 100_000_000, 6);
+        let mm_slice: Vec<&matching_engine::Order> = vec![&mm];
+
+        let mut tracker = LiquidityTracker::new();
+        let mut midprices = HashMap::new();
+        midprices.insert(m0, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
+        tracker.record_block(&book, &mm_slice, &midprices, 50_000_000);
+
+        assert_eq!(tracker.current(m0), 0);
     }
 
     /// Markets with a clearing price but no near-the-money resting orders
@@ -308,7 +378,7 @@ mod tests {
         midprices.insert(m0, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
 
         for _ in 0..5 {
-            tracker.record_block(&book, &midprices, 50_000_000);
+            tracker.record_block(&book, &[], &midprices, 50_000_000);
         }
 
         let ring = tracker.last_n_per_market.get(&m0).expect("market present");

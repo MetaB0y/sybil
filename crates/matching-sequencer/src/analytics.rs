@@ -284,11 +284,12 @@ impl AnalyticsState {
     pub fn record_liquidity(
         &mut self,
         order_book: &OrderBook,
+        mm_orders: &[&Order],
         clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
         band_nanos: u64,
     ) {
         self.liquidity_tracker
-            .record_block(order_book, clearing_prices, band_nanos);
+            .record_block(order_book, mm_orders, clearing_prices, band_nanos);
     }
 
     pub fn apply_resolution(

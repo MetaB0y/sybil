@@ -2420,11 +2420,17 @@ impl BlockSequencer {
         }
         let pending_orders_after = self.order_book.len();
 
-        // Off-block liquidity tracker — score the post-settle book against
-        // each market's midprice (binary: YES price). One snapshot per block
-        // so the ring tracks "depth available at the close of this batch".
+        // Off-block liquidity tracker — score the post-settle resting book
+        // PLUS this batch's flash MM orders against each market's midprice.
+        // MM orders never enter the book, so pull them from the solver input.
+        let mm_orders: Vec<&Order> = problem
+            .orders
+            .iter()
+            .filter(|o| mm_order_ids_set.contains(&o.id))
+            .collect();
         self.analytics.record_liquidity(
             &self.order_book,
+            &mm_orders,
             &clearing_prices,
             self.config.liquidity_band_nanos,
         );
