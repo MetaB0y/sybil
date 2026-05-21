@@ -1227,3 +1227,32 @@ async fn health_endpoint() {
     let resp = parse_json(&body);
     assert_eq!(resp["status"].as_str().unwrap(), "ok");
 }
+
+#[tokio::test]
+async fn recent_blocks_returns_newest_first() {
+    let (app, handle) = test_app(true).await;
+
+    let b0 = handle.produce_block().await.unwrap();
+    let b1 = handle.produce_block().await.unwrap();
+    let b2 = handle.produce_block().await.unwrap();
+    assert!(b2.header.height > b1.header.height && b1.header.height > b0.header.height);
+
+    // newest-first, clamped to the requested limit
+    let (status, body) = get(app.clone(), "/v1/blocks?limit=2").await;
+    assert_eq!(status, StatusCode::OK);
+    let arr = parse_json(&body);
+    let arr = arr.as_array().unwrap();
+    assert_eq!(arr.len(), 2, "got {arr:?}");
+    assert_eq!(arr[0]["height"].as_u64().unwrap(), b2.header.height);
+    assert_eq!(arr[1]["height"].as_u64().unwrap(), b1.header.height);
+
+    // asking for more than exist returns all produced
+    let (status, body) = get(app.clone(), "/v1/blocks?limit=1000").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(parse_json(&body).as_array().unwrap().len(), 3);
+
+    // limit=0 → empty
+    let (status, body) = get(app, "/v1/blocks?limit=0").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(parse_json(&body).as_array().unwrap().is_empty());
+}

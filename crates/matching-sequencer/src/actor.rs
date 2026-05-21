@@ -38,6 +38,7 @@ pub enum SequencerMsg {
     SubmitSignedOrder(SignedOrder, RpcReplyPort<Result<(), SequencerError>>),
     CancelSignedOrder(SignedCancel, RpcReplyPort<Result<(), SequencerError>>),
     GetLatestBlock(RpcReplyPort<Option<Block>>),
+    GetRecentBlocks(usize, RpcReplyPort<Vec<Block>>),
     GetAccount(AccountId, RpcReplyPort<Option<Account>>),
     GetStateRoot(RpcReplyPort<[u8; 32]>),
     GetStateProof(
@@ -1391,6 +1392,18 @@ impl Actor for SequencerActor {
                     .cloned();
                 let _ = reply.send(block.ok_or(SequencerError::BlockNotFound));
             }
+            SequencerMsg::GetRecentBlocks(n, reply) => {
+                let cap = state.sequencer.config.block_history_capacity;
+                let take = n.min(cap);
+                let blocks: Vec<Block> = state
+                    .block_history
+                    .iter()
+                    .rev()
+                    .take(take)
+                    .cloned()
+                    .collect();
+                let _ = reply.send(blocks);
+            }
             SequencerMsg::GetMarketPrices(reply) => {
                 let _ = reply.send(state.sequencer.last_clearing_prices().clone());
             }
@@ -1944,6 +1957,11 @@ impl SequencerHandle {
     pub async fn get_block(&self, height: u64) -> Result<Block, SequencerError> {
         self.rpc(|reply| SequencerMsg::GetBlock(height, reply))
             .await?
+    }
+
+    pub async fn get_recent_blocks(&self, n: usize) -> Result<Vec<Block>, SequencerError> {
+        self.rpc(|reply| SequencerMsg::GetRecentBlocks(n, reply))
+            .await
     }
 
     pub async fn subscribe_blocks(&self) -> Result<broadcast::Receiver<Block>, SequencerError> {

@@ -56,6 +56,7 @@ use crate::types::response::*;
         routes::orders::get_account_orders,
         routes::orders::get_market_orderbook,
         routes::orders::get_all_pending_orders,
+        routes::blocks::get_recent_blocks,
         routes::blocks::get_latest_block,
         routes::blocks::get_block_by_height,
         routes::blocks::stream_blocks,
@@ -650,6 +651,10 @@ pub fn create_router(state: AppState) -> Router {
             axum::routing::post(routes::markets::set_market_metadata),
         )
         // Blocks
+        .route(
+            "/v1/blocks",
+            axum::routing::get(routes::blocks::get_recent_blocks),
+        )
         .route(
             "/v1/blocks/latest",
             axum::routing::get(routes::blocks::get_latest_block),
