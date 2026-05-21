@@ -1,0 +1,26 @@
+# Keep the Docker build context small. The image compiles fresh inside the
+# builder and only needs Cargo.toml, Cargo.lock, and crates/. Everything below
+# is either huge, irrelevant to the backend image, or rebuilt internally.
+
+# Rust build artifacts (tens of GB) — compiled fresh in the builder
+target/
+**/target/
+
+# VCS
+.git/
+
+# Frontend app (~1 GB) — not part of the backend image
+frontend/
+
+# Node
+node_modules/
+**/node_modules/
+
+# Logs and tool scratch
+*.log
+.playwright-mcp/
+
+# Arena runtime data / zk scratch — not used by the sybil-api image
+arena/markets/
+arena/decisions/
+zk/
