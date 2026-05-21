@@ -1,20 +1,32 @@
 "use client";
 
 /**
- * Open orders tab. Grid rows matching `PortfolioVariants.jsx:104-194`:
- *   dot · market · action · side · remaining · limit · value · TIF · queued · cancel
+ * Open orders tab. Grid rows:
+ *   dot · market · action · side · created · placed/filled · limit · avg fill · value · TIF · cancel
  *
- * Partial-fill progress is shown as `(original − remaining) / original`
- * using B8's `original_quantity` wire field. Orders persisted before B8
- * landed report `original_quantity: 0`; we hide the progress for them.
+ * - Placed/filled uses B8's `original_quantity` (placed) and `original −
+ *   remaining` (filled). Orders persisted before B8 report `original_quantity:
+ *   0`; we fall back to the bare remaining count for them.
+ * - Fill count + avg fill price are derived from the account's `/fills` feed by
+ *   `order_id`. Bounded by the fills window, so very old / heavily-filled orders
+ *   may undercount — fine for typical recent open orders.
+ * - Created time is approximated from the 2s block cadence (MockValue) until the
+ *   backend exposes `created_at_ms` on `PendingOrderResponse`.
  */
 
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { MockValue } from "@/components/mock-value";
 import { cancelSignedOrder } from "@/lib/account/orders";
+import type { AccountFill } from "@/lib/account/use-account-fills";
 import type { AccountOrder } from "@/lib/account/use-account-orders";
-import { formatCents, formatDollars, parseNanos } from "@/lib/format/nanos";
-import { selectLatestHeight, useStore } from "@/lib/store";
+import {
+  formatAge,
+  formatCents,
+  formatDollars,
+  parseNanos,
+} from "@/lib/format/nanos";
+import { selectLatestBlock, useStore } from "@/lib/store";
 import type { components } from "@/lib/api/schema";
 import { CategoryDot } from "./category-dot";
 import { SidePill } from "./side-pill";
@@ -22,10 +34,18 @@ import { TifCell } from "./tif-cell";
 
 type Market = components["schemas"]["MarketResponse"];
 
+const CADENCE_MS = 2000; // 2s FBA block heartbeat
+
+interface OrderFillAgg {
+  count: number;
+  avgPriceNanos: bigint | null;
+}
+
 interface Props {
   accountId: number;
   publicKeyHex: string;
   orders: AccountOrder[];
+  fills: AccountFill[];
   marketsById: Map<number, Market>;
 }
 
@@ -33,8 +53,31 @@ export function OpenOrdersList({
   accountId,
   publicKeyHex,
   orders,
+  fills,
   marketsById,
 }: Props) {
+  // Aggregate the account's visible fills by order_id → count + WAC fill price.
+  const fillsByOrder = useMemo(() => {
+    const acc = new Map<number, { count: number; qty: bigint; cost: bigint }>();
+    for (const f of fills) {
+      const e = acc.get(f.order_id) ?? { count: 0, qty: 0n, cost: 0n };
+      const qty = BigInt(f.fill_qty);
+      const price = parseNanos(f.fill_price_nanos);
+      e.count += 1;
+      e.qty += qty;
+      e.cost += qty * price;
+      acc.set(f.order_id, e);
+    }
+    const out = new Map<number, OrderFillAgg>();
+    for (const [id, e] of acc) {
+      out.set(id, {
+        count: e.count,
+        avgPriceNanos: e.qty > 0n ? e.cost / e.qty : null,
+      });
+    }
+    return out;
+  }, [fills]);
+
   if (orders.length === 0) {
     return <Empty>No open orders.</Empty>;
   }
@@ -53,6 +96,7 @@ export function OpenOrdersList({
           key={o.order_id}
           order={o}
           market={marketsById.get(o.market_id)}
+          agg={fillsByOrder.get(o.order_id)}
           accountId={accountId}
           publicKeyHex={publicKeyHex}
         />
@@ -68,11 +112,12 @@ function HeaderRow() {
       <span>Market</span>
       <span>Action</span>
       <span>Side</span>
-      <RightCell>Remaining</RightCell>
+      <span>Created</span>
+      <RightCell>Placed / Filled</RightCell>
       <RightCell>Limit</RightCell>
+      <RightCell>Avg fill</RightCell>
       <RightCell>Value</RightCell>
       <RightCell>TIF</RightCell>
-      <RightCell>Queued</RightCell>
       <RightCell>{""}</RightCell>
     </div>
   );
@@ -81,17 +126,19 @@ function HeaderRow() {
 function OrderRow({
   order,
   market,
+  agg,
   accountId,
   publicKeyHex,
 }: {
   order: AccountOrder;
   market: Market | undefined;
+  agg: OrderFillAgg | undefined;
   accountId: number;
   publicKeyHex: string;
 }) {
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const latestHeight = useStore(selectLatestHeight);
+  const latestBlock = useStore(selectLatestBlock);
 
   const sideRaw = order.side.toLowerCase();
   const isBuy = sideRaw.includes("buy");
@@ -100,8 +147,17 @@ function OrderRow({
   const limitNanos = parseNanos(order.limit_price_nanos);
   // value = limit × remaining (nanos × shares = dollars-nanos)
   const valueNanos = limitNanos * BigInt(order.remaining_quantity);
-  const queuedFor =
-    typeof latestHeight === "number" ? latestHeight + 1 : null;
+
+  const placed = order.original_quantity ?? 0;
+  const filled = placed > 0 ? Math.max(0, placed - order.remaining_quantity) : 0;
+
+  // Approximate created wall-clock from the fixed 2s cadence (no created_at_ms
+  // on the wire yet). createdMs may land slightly in the future if cadence
+  // drifted; the relative formatter clamps negatives to 0.
+  const createdMs = latestBlock
+    ? latestBlock.timestamp_ms -
+      (latestBlock.height - order.created_at_block) * CADENCE_MS
+    : null;
 
   async function onCancel(e: React.MouseEvent) {
     e.preventDefault();
@@ -162,21 +218,21 @@ function OrderRow({
         {isBuy ? "BUY" : "SELL"}
       </span>
       <SidePill outcome={outcome} />
+      <CreatedCell ms={createdMs} block={order.created_at_block} />
       <RightCell mono>
-        <RemainingCell
+        <FilledCell
+          placed={placed}
+          filled={filled}
           remaining={order.remaining_quantity}
-          original={order.original_quantity ?? 0}
         />
       </RightCell>
       <RightCell mono>{formatCents(limitNanos)}</RightCell>
       <RightCell mono>
-        {formatDollars(valueNanos, { decimals: 2 })}
+        <AvgFillCell agg={agg} />
       </RightCell>
+      <RightCell mono>{formatDollars(valueNanos, { decimals: 2 })}</RightCell>
       <RightCell>
         <TifCell expiresAtBlock={order.expires_at_block} />
-      </RightCell>
-      <RightCell mono>
-        {queuedFor == null ? "—" : `#${queuedFor.toLocaleString()}`}
       </RightCell>
       <RightCell>
         <button
@@ -204,20 +260,53 @@ function OrderRow({
   );
 }
 
-function RemainingCell({
+/** Created-time cell — cadence approximation, flagged until `created_at_ms` ships. */
+function CreatedCell({ ms, block }: { ms: number | null; block: number }) {
+  return (
+    <MockValue
+      hint="approximated from the 2s block cadence; exact created time needs backend created_at_ms (PendingOrderResponse)"
+      variant="underline"
+    >
+      <span
+        style={{
+          display: "inline-flex",
+          flexDirection: "column",
+          gap: 1,
+          fontFamily: "var(--font-mono)",
+        }}
+      >
+        <span style={{ fontSize: 11, color: "var(--fg-2)" }}>
+          {ms == null ? "—" : `${formatAge(Date.now() - ms)} ago`}
+        </span>
+        <span
+          style={{
+            fontSize: 9.5,
+            color: "var(--fg-4)",
+            letterSpacing: "var(--track-wide)",
+          }}
+        >
+          #{block.toLocaleString()}
+        </span>
+      </span>
+    </MockValue>
+  );
+}
+
+/** Placed / filled cell with a thin filled-fraction progress bar. */
+function FilledCell({
+  placed,
+  filled,
   remaining,
-  original,
 }: {
+  placed: number;
+  filled: number;
   remaining: number;
-  original: number;
 }) {
-  // Pre-B8 orders persisted without an `original_quantity` show
-  // `original = 0`. Skip the progress bar for those — just the count.
-  if (original === 0 || remaining >= original) {
+  // Pre-B8 orders have no authoritative placed count — show bare remaining.
+  if (placed === 0) {
     return <>{remaining}</>;
   }
-  const filled = original - remaining;
-  const pct = Math.min(1, Math.max(0, filled / original));
+  const pct = Math.min(1, Math.max(0, filled / placed));
   return (
     <span
       style={{
@@ -226,9 +315,9 @@ function RemainingCell({
         alignItems: "flex-end",
         gap: 2,
       }}
-      title={`${filled} of ${original} filled`}
+      title={`${filled} filled of ${placed} placed`}
     >
-      <span>{`${remaining} / ${original}`}</span>
+      <span>{`${placed} / ${filled}`}</span>
       <span
         style={{
           height: 2,
@@ -251,11 +340,40 @@ function RemainingCell({
   );
 }
 
+/** Avg fill price (WAC of matched fills) with fill count beneath. */
+function AvgFillCell({ agg }: { agg: OrderFillAgg | undefined }) {
+  const count = agg?.count ?? 0;
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        flexDirection: "column",
+        alignItems: "flex-end",
+        gap: 1,
+        fontFamily: "var(--font-mono)",
+      }}
+    >
+      <span style={{ fontSize: 12, color: count > 0 ? "var(--fg-1)" : "var(--fg-3)" }}>
+        {agg?.avgPriceNanos != null ? formatCents(agg.avgPriceNanos) : "—"}
+      </span>
+      <span
+        style={{
+          fontSize: 9.5,
+          color: "var(--fg-4)",
+          letterSpacing: "var(--track-wide)",
+        }}
+      >
+        {count === 1 ? "1 fill" : `${count} fills`}
+      </span>
+    </span>
+  );
+}
+
 function rowGrid(color: string): React.CSSProperties {
   return {
     display: "grid",
     gridTemplateColumns:
-      "14px minmax(0, 1.4fr) 50px 50px 80px 60px 80px 110px 90px 70px",
+      "14px minmax(0, 1.25fr) 46px 44px 80px 96px 52px 70px 78px 96px 60px",
     gap: 10,
     alignItems: "center",
     padding: "10px 14px",

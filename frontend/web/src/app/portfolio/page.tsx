@@ -190,6 +190,7 @@ function Connected({
           accountId={accountId}
           publicKeyHex={publicKeyHex}
           orders={ordersData}
+          fills={fillsData}
           marketsById={marketsById}
         />
       )}
