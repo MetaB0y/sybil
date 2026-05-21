@@ -13,11 +13,13 @@
  *  - past-batch bar heights (matched volume)
  */
 
+import { useState } from "react";
 import { Glossary } from "@/components/glossary";
 import {
   formatBatchSeconds,
   formatCents,
   formatCompactDollars,
+  formatInt,
   parseNanos,
 } from "@/lib/format/nanos";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
@@ -155,7 +157,10 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
 
       {/* Last N batches mini-bars */}
       <div style={{ marginTop: 14 }}>
-        <BatchHistoryBars blocks={recent.slice(0, HERO_BATCH_COUNT)} />
+        <BatchHistoryBars
+          marketId={outcome.marketId}
+          blocks={recent.slice(0, HERO_BATCH_COUNT)}
+        />
         <div
           style={{
             marginTop: 6,
@@ -166,7 +171,7 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
             letterSpacing: "0.04em",
           }}
         >
-          last {HERO_BATCH_COUNT} batches · matched volume
+          last {HERO_BATCH_COUNT} batches · matched vol · price move
         </div>
       </div>
     </div>
@@ -302,27 +307,69 @@ function SubStat({
   );
 }
 
+/** One bar's worth of derived, market-scoped batch stats. */
+type BatchBar = {
+  height: number;
+  /** This market's matched volume in the batch (nanos). */
+  volNanos: bigint;
+  /** This market's YES clearing price this batch, or null if it didn't clear. */
+  yesNanos: bigint | null;
+  /**
+   * YES price change vs the previous *clearing* batch, in percentage points.
+   * null when this batch didn't clear or there's no prior clear in the window.
+   */
+  ppChange: number | null;
+};
+
+/** ±N.N pp with an explicit sign (true minus glyph for negatives). */
+function formatPp(pp: number): string {
+  if (Math.abs(pp) < 0.05) return "0.0 pp";
+  const sign = pp > 0 ? "+" : "−";
+  return `${sign}${Math.abs(pp).toFixed(1)} pp`;
+}
+
+/** Green when YES rose this batch, red when it fell, neutral otherwise. */
+function barColor(ppChange: number | null): string {
+  if (ppChange == null || Math.abs(ppChange) < 0.05)
+    return "color-mix(in srgb, var(--fg-4) 45%, transparent)";
+  return ppChange > 0 ? "var(--yes)" : "var(--no)";
+}
+
 function BatchHistoryBars({
+  marketId,
   blocks,
 }: {
+  marketId: number;
   blocks: import("@/lib/api/schema").components["schemas"]["BlockResponse"][];
 }) {
-  // Sort oldest-first so the bars read left-to-right chronologically.
-  const ordered = [...blocks].reverse();
-  // Pad up to HERO_BATCH_COUNT with empty placeholders so the row width stays
-  // stable while the ring buffer is still filling.
-  const padded = [
-    ...Array(Math.max(0, HERO_BATCH_COUNT - ordered.length)).fill(null),
-    ...ordered,
-  ] as (typeof ordered[number] | null)[];
+  const [hoverHeight, setHoverHeight] = useState<number | null>(null);
+  const key = String(marketId);
 
-  // Compute max volume across the window for bar scaling.
-  let max = 0n;
-  for (const b of ordered) {
-    if (!b) continue;
-    const v = parseNanos(b.total_volume_nanos);
-    if (v > max) max = v;
+  // Sort oldest-first so the bars read left-to-right chronologically, then
+  // derive this market's volume + price move per batch in one pass. Price
+  // change compares against the previous batch that actually cleared this
+  // market (batches may skip a market when it has no crossing orders).
+  const bars: BatchBar[] = [];
+  let prevYes: bigint | null = null;
+  for (const b of [...blocks].reverse()) {
+    const rawYes = b.clearing_prices_nanos?.[key]?.[0];
+    const yesNanos = rawYes == null ? null : parseNanos(rawYes);
+    const volNanos = parseNanos(b.by_market?.[key]?.volume_nanos ?? 0);
+    let ppChange: number | null = null;
+    if (yesNanos != null) {
+      if (prevYes != null) ppChange = Number(yesNanos - prevYes) / 1e7;
+      prevYes = yesNanos;
+    }
+    bars.push({ height: b.height, volNanos, yesNanos, ppChange });
   }
+
+  // Pad on the left with empty placeholders so the row width stays stable
+  // while the ring buffer is still filling.
+  const padCount = Math.max(0, HERO_BATCH_COUNT - bars.length);
+
+  // Scale bar heights to this market's busiest batch in the window.
+  let max = 0n;
+  for (const bar of bars) if (bar.volNanos > max) max = bar.volNanos;
 
   return (
     <div
@@ -331,39 +378,108 @@ function BatchHistoryBars({
         alignItems: "flex-end",
         gap: 2,
         height: 48,
+        position: "relative",
       }}
     >
-      {padded.map((b, i) => {
-        if (!b) {
-          return (
-            <div
-              key={`empty-${i}`}
-              style={{
-                flex: "1 1 0",
-                height: 4,
-                background: "color-mix(in srgb, var(--fg-4) 12%, transparent)",
-                borderRadius: 1,
-              }}
-            />
-          );
-        }
-        const vol = parseNanos(b.total_volume_nanos);
-        const ratio = max === 0n ? 0 : Number((vol * 1000n) / max) / 1000;
+      {Array.from({ length: padCount }).map((_, i) => (
+        <div
+          key={`empty-${i}`}
+          style={{
+            flex: "1 1 0",
+            alignSelf: "flex-end",
+            height: 4,
+            background: "color-mix(in srgb, var(--fg-4) 12%, transparent)",
+            borderRadius: 1,
+          }}
+        />
+      ))}
+      {bars.map((bar) => {
+        const ratio = max === 0n ? 0 : Number((bar.volNanos * 1000n) / max) / 1000;
         const h = Math.max(4, ratio * 44);
+        const isHover = hoverHeight === bar.height;
         return (
           <div
-            key={b.height}
-            title={`batch #${b.height} · matched vol ${vol}n`}
+            key={bar.height}
+            onMouseEnter={() => setHoverHeight(bar.height)}
+            onMouseLeave={() =>
+              setHoverHeight((cur) => (cur === bar.height ? null : cur))
+            }
             style={{
               flex: "1 1 0",
-              height: h,
-              background: "var(--accent)",
-              opacity: 0.75,
-              borderRadius: "1px 1px 0 0",
+              height: "100%",
+              display: "flex",
+              alignItems: "flex-end",
+              position: "relative",
+              cursor: "default",
             }}
-          />
+          >
+            <div
+              style={{
+                width: "100%",
+                height: h,
+                background: barColor(bar.ppChange),
+                opacity: isHover ? 1 : 0.8,
+                borderRadius: "1px 1px 0 0",
+                transition: "opacity 80ms linear",
+              }}
+            />
+            {isHover && <BatchBarTooltip bar={bar} />}
+          </div>
         );
       })}
+    </div>
+  );
+}
+
+function BatchBarTooltip({ bar }: { bar: BatchBar }) {
+  const cleared = bar.yesNanos != null;
+  const ppColor =
+    bar.ppChange == null || Math.abs(bar.ppChange) < 0.05
+      ? "var(--fg-3)"
+      : bar.ppChange > 0
+        ? "var(--yes)"
+        : "var(--no)";
+  return (
+    <div
+      role="tooltip"
+      style={{
+        position: "absolute",
+        bottom: "calc(100% + 6px)",
+        left: "50%",
+        transform: "translateX(-50%)",
+        zIndex: 10,
+        pointerEvents: "none",
+        whiteSpace: "nowrap",
+        background: "var(--surface-3)",
+        border: "1px solid var(--border-1)",
+        borderRadius: 6,
+        boxShadow: "var(--shadow-popover)",
+        padding: "6px 8px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 3,
+        fontFamily: "var(--font-mono)",
+        fontSize: 10,
+        fontVariantNumeric: "tabular-nums",
+      }}
+    >
+      <span style={{ color: "var(--fg-3)" }}>batch #{formatInt(bar.height)}</span>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+        <span style={{ color: "var(--fg-3)" }}>matched vol</span>
+        <span style={{ color: "var(--fg-1)" }}>
+          {formatCompactDollars(bar.volNanos)}
+        </span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+        <span style={{ color: "var(--fg-3)" }}>price move</span>
+        <span style={{ color: ppColor }}>
+          {!cleared
+            ? "no clear"
+            : bar.ppChange == null
+              ? "—"
+              : formatPp(bar.ppChange)}
+        </span>
+      </div>
     </div>
   );
 }
