@@ -10,6 +10,8 @@
 //! - `liquidity_tracker` (B4) — last-10-batch ±band depth average
 //! - `order_stats_tracker` (B6) — placed / matched / unmatched
 //! - `cost_basis_tracker` (C1) — WAC + realized PnL
+//! - `equity_tracker` — per-account equity series (volatile; resets on restart,
+//!   no snapshot round-trip)
 //!
 //! See `frontend/BACKEND_IMPLEMENTATION_PLAN.md` for the full plan.
 
