@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::order_book::OrderBook;
 
-/// Ring length per market — 10 blocks ≈ 20s at 2s cadence.
+/// Ring length per market — 10 blocks ≈ 100s at the 10s cadence.
 pub const LIQUIDITY_RING_CAP: usize = 10;
 
 /// Persisted slice of [`LiquidityTracker`]: per-market rolling rings plus

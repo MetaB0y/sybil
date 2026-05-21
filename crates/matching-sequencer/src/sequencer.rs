@@ -32,7 +32,8 @@ use crate::settlement;
 use crate::store::{RestoredState, SequencerSnapshot};
 use crate::system_event::SystemEvent;
 
-/// Default order TTL in blocks. At 500ms block intervals this is ~1 year (GTC).
+/// Default order TTL in blocks. At the 10s cadence this is ~20 years —
+/// i.e. effectively never expires (GTC).
 pub const DEFAULT_ORDER_TTL_BLOCKS: u64 = 63_072_000;
 
 /// All tunable parameters for a [`BlockSequencer`] and its surrounding actor.
