@@ -1,6 +1,6 @@
 "use client";
 
-export type PortfolioTab = "positions" | "orders" | "history" | "activity";
+export type PortfolioTab = "positions" | "orders" | "history";
 
 interface TabSpec {
   id: PortfolioTab;
@@ -11,7 +11,6 @@ const TABS: TabSpec[] = [
   { id: "positions", label: "Positions" },
   { id: "orders", label: "Open orders" },
   { id: "history", label: "History" },
-  { id: "activity", label: "Activity" },
 ];
 
 export function PortfolioTabs({

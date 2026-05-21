@@ -11,9 +11,8 @@
  */
 
 import { useMemo, useState } from "react";
-import { ActivityList } from "@/components/portfolio/activity-list";
 import { EquityChart } from "@/components/portfolio/equity-chart";
-import { HistoryList } from "@/components/portfolio/history-list";
+import { HistoryFeed } from "@/components/portfolio/history-feed";
 import {
   IdentityHeader,
   IdentityStrip,
@@ -32,9 +31,8 @@ import {
   useSetConnectModalOpen,
 } from "@/lib/account/use-account";
 import { useAccountFills } from "@/lib/account/use-account-fills";
+import { useAccountHistory } from "@/lib/account/use-account-history";
 import { useAccountOrders } from "@/lib/account/use-account-orders";
-import { useTrackedCancels } from "@/lib/account/use-cancelled-orders";
-import { useClosedPositions } from "@/lib/account/use-closed-positions";
 import {
   useEquityCurve,
   type EquityRange,
@@ -90,19 +88,19 @@ function Connected({
   const portfolio = usePortfolio(accountId);
   const orders = useAccountOrders(accountId);
   const fills = useAccountFills(accountId, { limit: FILLS_PAGE });
-  const cancels = useTrackedCancels(accountId);
   const markets = useMarketsList();
 
   const fillsData = fills.data ?? [];
   const ordersData = orders.data ?? [];
   const portfolioData = portfolio.data ?? null;
-  const closed = useClosedPositions(fillsData, portfolioData);
   const pnlSplit = usePnlSplit(portfolioData);
 
   const marketsById = useMemo(
     () => markets.bundle?.byId ?? new Map(),
     [markets.bundle],
   );
+  const marketIds = useMemo(() => Array.from(marketsById.keys()), [marketsById]);
+  const history = useAccountHistory(accountId, marketIds);
 
   const [range, setRange] = useState<EquityRange>("ALL");
   const [tab, setTab] = useState<PortfolioTab>("positions");
@@ -127,8 +125,7 @@ function Connected({
   const counts: Record<PortfolioTab, number> = {
     positions: portfolioData?.positions.length ?? 0,
     orders: ordersData.length,
-    history: closed.length,
-    activity: fillsData.length + cancels.length,
+    history: history.events.length,
   };
 
   return (
@@ -195,13 +192,10 @@ function Connected({
         />
       )}
       {tab === "history" && (
-        <HistoryList closed={closed} marketsById={marketsById} />
-      )}
-      {tab === "activity" && (
-        <ActivityList
-          fills={fillsData}
-          cancels={cancels}
+        <HistoryFeed
+          events={history.events}
           marketsById={marketsById}
+          isMock={history.isMock}
         />
       )}
     </>
