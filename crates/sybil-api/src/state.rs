@@ -212,7 +212,12 @@ impl AppState {
         let event_snapshot_dir = if config.event_snapshot_dir.is_empty() {
             None
         } else {
-            Some(PathBuf::from(&config.event_snapshot_dir))
+            // Enabled only if the dir exists. `main` wipes+recreates it on
+            // startup; if that creation failed, self-disable (the endpoints
+            // return a clean "snapshots disabled" 404) instead of serving
+            // misleading per-event errors.
+            let p = PathBuf::from(&config.event_snapshot_dir);
+            p.is_dir().then_some(p)
         };
         let initial_ref_data = match &market_ref_data_path {
             Some(p) => load_market_ref_data(p),

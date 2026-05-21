@@ -42,6 +42,8 @@ pub async fn put_event_raw(
 }
 
 /// GET /v1/events/{event_id}/raw — return the stored event JSON, or 404.
+/// Readable in any mode (only the PUT is dev-mode gated) so the frontend can
+/// fetch snapshots without dev mode.
 pub async fn get_event_raw(
     State(state): State<AppState>,
     Path(event_id): Path<String>,
