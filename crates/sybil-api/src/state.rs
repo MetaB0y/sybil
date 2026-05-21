@@ -188,6 +188,9 @@ pub struct AppState {
     /// means volatile-in-memory only (state lost on restart; mirror re-fills
     /// on the next sync cycle).
     pub market_ref_data_path: Option<PathBuf>,
+    /// Directory for full Polymarket event JSON snapshots (`{event_id}.json`).
+    /// `None` disables the raw-event endpoints. Wiped on startup in `main`.
+    pub event_snapshot_dir: Option<PathBuf>,
     /// Path to arena's live decision database, when configured.
     pub arena_db_path: String,
     /// Cheap pre-handler limiter for order endpoints. Sequencer admission has
@@ -206,6 +209,16 @@ impl AppState {
         } else {
             Some(PathBuf::from(&config.market_ref_data_path))
         };
+        let event_snapshot_dir = if config.event_snapshot_dir.is_empty() {
+            None
+        } else {
+            // Enabled only if the dir exists. `main` wipes+recreates it on
+            // startup; if that creation failed, self-disable (the endpoints
+            // return a clean "snapshots disabled" 404) instead of serving
+            // misleading per-event errors.
+            let p = PathBuf::from(&config.event_snapshot_dir);
+            p.is_dir().then_some(p)
+        };
         let initial_ref_data = match &market_ref_data_path {
             Some(p) => load_market_ref_data(p),
             None => HashMap::new(),
@@ -218,6 +231,7 @@ impl AppState {
             reference_prices_updated_at_ms: Arc::new(RwLock::new(0)),
             market_ref_data: Arc::new(RwLock::new(initial_ref_data)),
             market_ref_data_path,
+            event_snapshot_dir,
             arena_db_path: config.arena_db_path.clone(),
             http_order_limiter: Arc::new(Mutex::new(HttpOrderRateLimiter::new(config))),
         }

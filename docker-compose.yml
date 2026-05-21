@@ -8,10 +8,11 @@ services:
     environment:
       SYBIL_PORT: "3000"
       SYBIL_DEV_MODE: "true"
-      SYBIL_BLOCK_INTERVAL_MS: "2000"
+      SYBIL_BLOCK_INTERVAL_MS: "10000"
       SYBIL_ARENA_DB_PATH: "/arena-data/decisions.db"
       SYBIL_MAX_PRICE_HISTORY_POINTS_PER_MARKET: "2000"
       SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT: "5000"
+      SYBIL_EVENT_SNAPSHOT_DIR: "/data/event_snapshots"
       RUST_LOG: "warn,sybil_api=info,matching_sequencer=info,sybil_prover=info,commonware_storage=error,tower_http=warn"
     volumes:
       - arena-data:/arena-data

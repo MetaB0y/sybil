@@ -581,6 +581,24 @@ pub struct PricePointResponse {
     pub volume_nanos: u64,
 }
 
+// --- Equity Series ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct EquityPointResponse {
+    pub timestamp_ms: u64,
+    pub height: u64,
+    pub portfolio_value_nanos: i64,
+    pub deposited_nanos: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct EquitySeriesResponse {
+    pub account_id: u64,
+    pub points: Vec<EquityPointResponse>,
+}
+
 // --- Account Fills ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -619,6 +637,10 @@ pub struct PendingOrderResponse {
     /// compat).
     #[serde(default)]
     pub original_quantity: u64,
+    /// Wall-clock admit time, ms since epoch. `0` for orders admitted before
+    /// this field shipped (#[serde(default)] forward compat).
+    #[serde(default)]
+    pub created_at_ms: u64,
 }
 
 // --- Aggregates (B1 onward) ------------------------------------------------
@@ -677,6 +699,36 @@ pub struct OpenBatchResponse {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct EventTradersResponse {
     pub trader_count: u32,
+}
+
+/// One entry in the per-account history feed (`GET /v1/accounts/{id}/events`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct HistoryEventResponse {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub category: String,
+    pub timestamp_ms: u64,
+    pub block_height: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub market_id: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub side: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qty: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub price_nanos: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount_nanos: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub realized_pnl_nanos: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payout_outcome: Option<String>,
 }
 
 #[cfg(test)]

@@ -38,6 +38,7 @@ pub enum SequencerMsg {
     SubmitSignedOrder(SignedOrder, RpcReplyPort<Result<(), SequencerError>>),
     CancelSignedOrder(SignedCancel, RpcReplyPort<Result<(), SequencerError>>),
     GetLatestBlock(RpcReplyPort<Option<SealedBlock>>),
+    GetRecentBlocks(usize, RpcReplyPort<Vec<SealedBlock>>),
     GetAccount(AccountId, RpcReplyPort<Option<Account>>),
     GetStateRoot(RpcReplyPort<[u8; 32]>),
     GetStateProof(
@@ -110,6 +111,14 @@ pub enum SequencerMsg {
         usize,
         usize,
         RpcReplyPort<Vec<AccountFillRecord>>,
+    ),
+    GetEquitySeries(AccountId, RpcReplyPort<Vec<crate::aggregates::EquityPoint>>),
+    GetAccountEvents(
+        AccountId,
+        usize,
+        Option<(u64, u64)>,
+        Option<String>,
+        RpcReplyPort<Vec<crate::aggregates::HistoryEvent>>,
     ),
     SearchMarkets(MarketSearchQuery, RpcReplyPort<Vec<MarketSearchResult>>),
     GetPendingOrders(Option<AccountId>, RpcReplyPort<Vec<PendingOrderInfo>>),
@@ -864,7 +873,11 @@ impl SequencerActorState {
     /// the client.
     async fn admit_or_defer(&mut self, submission: OrderSubmission) -> Result<(), SequencerError> {
         self.check_account_submission_limits(&submission)?;
-        match self.sequencer.try_admit_direct(submission) {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        match self.sequencer.try_admit_direct(submission, now_ms) {
             crate::sequencer::AdmitOutcome::Admitted {
                 order_id,
                 resting_order,
@@ -895,10 +908,6 @@ impl SequencerActorState {
                 // tracker — acceptable: we still served the place).
                 // try_admit_direct only accepts non-MM single-market
                 // submissions, so `is_mm = false`.
-                let now_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
                 let markets: Vec<MarketId> = resting_order.order.active_markets().collect();
                 self.sequencer.record_trader_placement_analytics(
                     resting_order.account_id,
@@ -906,6 +915,24 @@ impl SequencerActorState {
                     now_ms,
                     false,
                 );
+                {
+                    use crate::aggregates::{HistoryEvent, HistoryKind};
+                    let o = &resting_order.order;
+                    let mut e = HistoryEvent::new(
+                        resting_order.account_id,
+                        HistoryKind::Placed,
+                        self.sequencer.height(),
+                        now_ms,
+                    );
+                    e.order_id = Some(order_id);
+                    e.market_id = o.active_markets().next();
+                    e.qty = Some(o.max_fill);
+                    e.price_nanos = Some(o.limit_price);
+                    let (side, outcome) = crate::aggregates::side_outcome_from_order(o);
+                    e.side = side;
+                    e.outcome = outcome;
+                    self.sequencer.record_history(e);
+                }
                 Ok(())
             }
             crate::sequencer::AdmitOutcome::Deferred(sub) => {
@@ -1418,6 +1445,18 @@ impl Actor for SequencerActor {
                     .cloned();
                 let _ = reply.send(block.ok_or(SequencerError::BlockNotFound));
             }
+            SequencerMsg::GetRecentBlocks(n, reply) => {
+                let cap = state.sequencer.config.block_history_capacity;
+                let take = n.min(cap);
+                let blocks: Vec<SealedBlock> = state
+                    .block_history
+                    .iter()
+                    .rev()
+                    .take(take)
+                    .cloned()
+                    .collect();
+                let _ = reply.send(blocks);
+            }
             SequencerMsg::GetMarketPrices(reply) => {
                 let _ = reply.send(state.sequencer.last_clearing_prices().clone());
             }
@@ -1451,6 +1490,17 @@ impl Actor for SequencerActor {
                         .sequencer
                         .account_fills(account_id, market_id, limit, offset),
                 );
+            }
+            SequencerMsg::GetEquitySeries(account_id, reply) => {
+                let _ = reply.send(state.sequencer.equity_series(account_id));
+            }
+            SequencerMsg::GetAccountEvents(account_id, limit, before, category, reply) => {
+                let _ = reply.send(state.sequencer.account_history(
+                    account_id,
+                    limit,
+                    before,
+                    category.as_deref(),
+                ));
             }
             SequencerMsg::SearchMarkets(query, reply) => {
                 let _ = reply.send(state.handle_search_markets(query));
@@ -1973,6 +2023,11 @@ impl SequencerHandle {
             .await?
     }
 
+    pub async fn get_recent_blocks(&self, n: usize) -> Result<Vec<SealedBlock>, SequencerError> {
+        self.rpc(|reply| SequencerMsg::GetRecentBlocks(n, reply))
+            .await
+    }
+
     pub async fn subscribe_blocks(
         &self,
     ) -> Result<broadcast::Receiver<SealedBlock>, SequencerError> {
@@ -2027,6 +2082,25 @@ impl SequencerHandle {
         offset: usize,
     ) -> Result<Vec<AccountFillRecord>, SequencerError> {
         self.rpc(|reply| SequencerMsg::GetAccountFills(account_id, market_id, limit, offset, reply))
+            .await
+    }
+
+    pub async fn get_equity_series(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Vec<crate::aggregates::EquityPoint>, SequencerError> {
+        self.rpc(|reply| SequencerMsg::GetEquitySeries(account_id, reply))
+            .await
+    }
+
+    pub async fn get_account_events(
+        &self,
+        account_id: AccountId,
+        limit: usize,
+        before: Option<(u64, u64)>,
+        category: Option<String>,
+    ) -> Result<Vec<crate::aggregates::HistoryEvent>, SequencerError> {
+        self.rpc(|reply| SequencerMsg::GetAccountEvents(account_id, limit, before, category, reply))
             .await
     }
 

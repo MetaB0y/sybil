@@ -118,6 +118,7 @@ impl FillRecorder {
     /// the cost-basis tracker (C1) so realized PnL accumulates in lockstep
     /// with the fill window. The tracker reaches into `accounts` for
     /// post-fill position state (the prior position is `current - delta`).
+    #[allow(clippy::too_many_arguments)]
     pub fn record_fills(
         &mut self,
         fills: &[Fill],
@@ -126,6 +127,7 @@ impl FillRecorder {
         timestamp_ms: u64,
         cost_basis_tracker: &mut CostBasisTracker,
         accounts: &AccountStore,
+        event_log: &mut crate::aggregates::AccountEventLog,
     ) {
         for fill in fills {
             if fill.fill_qty == 0 {
@@ -142,6 +144,8 @@ impl FillRecorder {
                 None => Vec::new(),
             };
 
+            let realized_before = cost_basis_tracker.realized_pnl(account_id);
+
             // Cost-basis hook (MINT short-circuits inside apply_fill). Runs
             // before the bounded-history push so a tracker panic doesn't
             // leave the recorder partially advanced.
@@ -152,6 +156,29 @@ impl FillRecorder {
                     fill.fill_price as i64,
                     account,
                 );
+            }
+
+            if account_id != AccountId::MINT {
+                use crate::aggregates::{HistoryEvent, HistoryKind};
+                let realized_after = cost_basis_tracker.realized_pnl(account_id);
+                let kind = if fill.fill_qty == order.max_fill {
+                    HistoryKind::Filled
+                } else {
+                    HistoryKind::PartialFill
+                };
+                let mut e = HistoryEvent::new(account_id, kind, height, timestamp_ms);
+                e.order_id = Some(fill.order_id);
+                e.qty = Some(fill.fill_qty);
+                e.price_nanos = Some(fill.fill_price);
+                let (mid, side, outcome, cash) =
+                    crate::aggregates::fill_facets(&position_deltas, fill.fill_price);
+                e.market_id = mid;
+                e.side = side;
+                e.outcome = outcome;
+                e.amount_nanos = Some(cash);
+                let delta = realized_after - realized_before;
+                e.realized_pnl_nanos = (delta != 0).then_some(delta);
+                event_log.append(e);
             }
 
             let records = self.account_fills.entry(account_id).or_default();
@@ -220,10 +247,19 @@ mod tests {
         let mut recorder = FillRecorder::with_retention(max_fills);
         let mut cb = CostBasisTracker::new();
         let accounts = AccountStore::new();
+        let mut log = crate::aggregates::AccountEventLog::new();
         for height in 1..=(max_fills as u64 + 5) {
             let mut fill = Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2);
             fill.account_id = 42;
-            recorder.record_fills(&[fill], &orders, height, height * 1_000, &mut cb, &accounts);
+            recorder.record_fills(
+                &[fill],
+                &orders,
+                height,
+                height * 1_000,
+                &mut cb,
+                &accounts,
+                &mut log,
+            );
         }
 
         let fills = recorder.account_fills(AccountId(42), None, max_fills + 10, 0);
@@ -280,7 +316,8 @@ mod tests {
         let accounts = AccountStore::new();
         let mut fill = Fill::new(order.id, 4, NANOS_PER_DOLLAR / 2);
         fill.account_id = 42;
-        recorder.record_fills(&[fill], &orders, 1, 1_000, &mut cb, &accounts);
+        let mut log = crate::aggregates::AccountEventLog::new();
+        recorder.record_fills(&[fill], &orders, 1, 1_000, &mut cb, &accounts, &mut log);
 
         assert_eq!(recorder.total_fills(AccountId(42)), 1);
     }
@@ -298,7 +335,8 @@ mod tests {
         let accounts = AccountStore::new();
         let mut fill = Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2);
         fill.account_id = AccountId::MINT.0;
-        recorder.record_fills(&[fill], &orders, 1, 1_000, &mut cb, &accounts);
+        let mut log = crate::aggregates::AccountEventLog::new();
+        recorder.record_fills(&[fill], &orders, 1, 1_000, &mut cb, &accounts, &mut log);
 
         // MINT fills still land in account_fills (we may want to query
         // them) but total_count must not include them — MINT is a system
@@ -317,10 +355,11 @@ mod tests {
         let mut recorder = FillRecorder::new();
         let mut cb = CostBasisTracker::new();
         let accounts = AccountStore::new();
+        let mut log = crate::aggregates::AccountEventLog::new();
         for h in 1..=5 {
             let mut fill = Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2);
             fill.account_id = 42;
-            recorder.record_fills(&[fill], &orders, h, h * 1_000, &mut cb, &accounts);
+            recorder.record_fills(&[fill], &orders, h, h * 1_000, &mut cb, &accounts, &mut log);
         }
         assert_eq!(recorder.total_fills(AccountId(42)), 5);
     }

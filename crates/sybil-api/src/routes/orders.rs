@@ -181,6 +181,7 @@ fn to_pending_response(info: &PendingOrderInfo) -> PendingOrderResponse {
         created_at_block: info.created_at_block,
         expires_at_block: info.expires_at_block,
         original_quantity: info.original_quantity,
+        created_at_ms: info.created_at_ms,
     }
 }
 

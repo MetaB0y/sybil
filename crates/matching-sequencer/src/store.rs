@@ -2041,7 +2041,7 @@ mod tests {
 
         let mut book = OrderBook::new(10);
         let order = outcome_buy(&markets, 1, market_id, 0, NANOS_PER_DOLLAR / 2, 5);
-        book.accept(order, aid, accounts.get(aid).unwrap(), 1)
+        book.accept(order, aid, accounts.get(aid).unwrap(), 1, 0)
             .unwrap();
         let expected_reserved = book.reserved_balance(aid);
         assert!(expected_reserved > 0);
@@ -2095,7 +2095,7 @@ mod tests {
         // Block 1: save with a resting order.
         let mut book = OrderBook::new(10);
         let order = outcome_buy(&markets, 1, market_id, 0, NANOS_PER_DOLLAR / 2, 5);
-        book.accept(order, aid, accounts.get(aid).unwrap(), 1)
+        book.accept(order, aid, accounts.get(aid).unwrap(), 1, 0)
             .unwrap();
         store
             .save_block(env.snapshot(
@@ -2401,7 +2401,7 @@ mod tests {
         let mut book = OrderBook::new(10);
         let order = outcome_buy(&markets, 1, market_id, 0, NANOS_PER_DOLLAR / 2, 5);
         let accepted = book
-            .accept(order, aid, accounts.get(aid).unwrap(), 1)
+            .accept(order, aid, accounts.get(aid).unwrap(), 1, 0)
             .unwrap();
         store
             .append_admit_log(&accepted.resting_order)

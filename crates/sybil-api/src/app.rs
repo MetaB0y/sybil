@@ -30,6 +30,8 @@ use crate::types::response::*;
         routes::accounts::register_key,
         routes::accounts::get_portfolio,
         routes::accounts::get_account_fills,
+        routes::accounts::get_equity,
+        routes::accounts::get_account_history,
         routes::bridge::status,
         routes::bridge::account_key,
         routes::bridge::submit_l1_deposit,
@@ -56,6 +58,7 @@ use crate::types::response::*;
         routes::orders::get_account_orders,
         routes::orders::get_market_orderbook,
         routes::orders::get_all_pending_orders,
+        routes::blocks::get_recent_blocks,
         routes::blocks::get_latest_block,
         routes::blocks::get_block_by_height,
         routes::blocks::stream_blocks,
@@ -117,6 +120,8 @@ use crate::types::response::*;
         PriceHistoryResponse,
         PricePointResponse,
         AccountFillResponse,
+        EquityPointResponse,
+        EquitySeriesResponse,
         PendingOrderResponse,
         PositionDeltaResponse,
         BlockMarketStats,
@@ -125,6 +130,7 @@ use crate::types::response::*;
         OverviewOrderStatsResponse,
         OpenBatchResponse,
         EventTradersResponse,
+        HistoryEventResponse,
     )),
     info(
         title = "Sybil API",
@@ -541,6 +547,14 @@ pub fn create_router(state: AppState) -> Router {
             axum::routing::get(routes::accounts::get_account_fills),
         )
         .route(
+            "/v1/accounts/{id}/equity",
+            axum::routing::get(routes::accounts::get_equity),
+        )
+        .route(
+            "/v1/accounts/{id}/events",
+            axum::routing::get(routes::accounts::get_account_history),
+        )
+        .route(
             "/v1/accounts/{id}/bridge-key",
             axum::routing::get(routes::bridge::account_key),
         )
@@ -615,6 +629,10 @@ pub fn create_router(state: AppState) -> Router {
             "/v1/events/{event_id}/traders",
             axum::routing::get(routes::aggregates::get_event_traders),
         )
+        .route(
+            "/v1/events/{event_id}/raw",
+            axum::routing::get(routes::events::get_event_raw).put(routes::events::put_event_raw),
+        )
         // Feeds
         .route(
             "/v1/feeds",
@@ -650,6 +668,10 @@ pub fn create_router(state: AppState) -> Router {
             axum::routing::post(routes::markets::set_market_metadata),
         )
         // Blocks
+        .route(
+            "/v1/blocks",
+            axum::routing::get(routes::blocks::get_recent_blocks),
+        )
         .route(
             "/v1/blocks/latest",
             axum::routing::get(routes::blocks::get_latest_block),

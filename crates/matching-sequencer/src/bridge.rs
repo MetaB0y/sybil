@@ -8,7 +8,10 @@ pub type Bytes32 = [u8; 32];
 pub type EthAddress = [u8; 20];
 
 pub const NANOS_PER_TOKEN_UNIT: u64 = 1_000;
-pub const DEFAULT_WITHDRAWAL_EXPIRY_BLOCKS: u64 = 604_800;
+/// Withdrawal challenge window, in blocks. 14 days of wall-clock at the 10s
+/// block cadence (14 * 86_400 / 10). Block-count-based — keep in sync with
+/// `SYBIL_BLOCK_INTERVAL_MS` (see `cadence_tests`).
+pub const DEFAULT_WITHDRAWAL_EXPIRY_BLOCKS: u64 = 120_960;
 
 const DEPOSIT_TREE_DEPTH: usize = 32;
 
@@ -341,5 +344,24 @@ mod tests {
             amount_token_units_to_nanos(0),
             Err(BridgeError::AmountZero)
         ));
+    }
+}
+
+#[cfg(test)]
+mod cadence_tests {
+    use super::DEFAULT_WITHDRAWAL_EXPIRY_BLOCKS;
+
+    /// Withdrawal expiry is block-count-based, so it must track the block
+    /// cadence. At the 10s production cadence the default must still equal a
+    /// 14-day wall-clock challenge window (the value in effect at the prior
+    /// 2s cadence). If the cadence changes again, change this constant.
+    #[test]
+    fn withdrawal_expiry_is_14_days_at_10s_cadence() {
+        const CADENCE_S: u64 = 10;
+        const FOURTEEN_DAYS_S: u64 = 14 * 86_400;
+        assert_eq!(
+            DEFAULT_WITHDRAWAL_EXPIRY_BLOCKS * CADENCE_S,
+            FOURTEEN_DAYS_S
+        );
     }
 }

@@ -9,6 +9,27 @@ use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::response::BlockResponse;
 
+#[derive(serde::Deserialize)]
+pub struct RecentBlocksQuery {
+    limit: Option<usize>,
+}
+
+/// GET /v1/blocks?limit=N — last N blocks, newest-first, from in-memory history.
+#[utoipa::path(
+    get,
+    path = "/v1/blocks",
+    params(("limit" = Option<usize>, Query, description = "Recent blocks, newest-first; clamped to history capacity (default 20)")),
+    responses((status = 200, description = "Recent blocks, newest-first", body = [BlockResponse]))
+)]
+pub async fn get_recent_blocks(
+    State(state): State<AppState>,
+    Query(q): Query<RecentBlocksQuery>,
+) -> Result<Json<Vec<BlockResponse>>, AppError> {
+    let limit = q.limit.unwrap_or(20);
+    let blocks = state.sequencer.get_recent_blocks(limit).await?;
+    Ok(Json(blocks.iter().map(block_to_response).collect()))
+}
+
 /// GET /v1/blocks/latest
 #[utoipa::path(
     get,

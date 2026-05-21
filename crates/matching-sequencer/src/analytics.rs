@@ -10,8 +10,9 @@ use matching_engine::{Fill, MarketId, Nanos, Order};
 
 use crate::account::{AccountId, AccountStore};
 use crate::aggregates::{
-    CostBasisTracker, CostBasisTrackerSnapshot, LiquidityTracker, LiquidityTrackerSnapshot,
-    OrderStats, OrderStatsTracker, OrderStatsTrackerSnapshot, TraderTracker, TraderTrackerSnapshot,
+    AccountEventLog, CostBasisTracker, CostBasisTrackerSnapshot, EquityTracker, HistoryEvent,
+    LiquidityTracker, LiquidityTrackerSnapshot, OrderStats, OrderStatsTracker,
+    OrderStatsTrackerSnapshot, TraderTracker, TraderTrackerSnapshot,
 };
 use crate::fill_recorder::FillRecorder;
 use crate::market_info::{AccountFillRecord, PricePoint};
@@ -31,6 +32,8 @@ pub struct AnalyticsState {
     order_stats_tracker: OrderStatsTracker,
     cost_basis_tracker: CostBasisTracker,
     first_deposit_ms: HashMap<AccountId, u64>,
+    equity_tracker: EquityTracker,
+    account_event_log: AccountEventLog,
 }
 
 impl AnalyticsState {
@@ -43,6 +46,8 @@ impl AnalyticsState {
             order_stats_tracker: OrderStatsTracker::new(),
             cost_basis_tracker: CostBasisTracker::new(),
             first_deposit_ms: HashMap::new(),
+            equity_tracker: EquityTracker::new(),
+            account_event_log: AccountEventLog::new(),
         }
     }
 
@@ -67,6 +72,8 @@ impl AnalyticsState {
             order_stats_tracker: OrderStatsTracker::restore(input.order_stats_tracker),
             cost_basis_tracker: CostBasisTracker::restore(input.cost_basis_tracker),
             first_deposit_ms: input.first_deposit_ms,
+            equity_tracker: EquityTracker::new(),
+            account_event_log: AccountEventLog::new(),
         }
     }
 
@@ -252,6 +259,7 @@ impl AnalyticsState {
             timestamp_ms,
             &mut self.cost_basis_tracker,
             accounts,
+            &mut self.account_event_log,
         );
         volume_by_market
     }
@@ -284,11 +292,43 @@ impl AnalyticsState {
     pub fn record_liquidity(
         &mut self,
         order_book: &OrderBook,
+        mm_orders: &[&Order],
         clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
         band_nanos: u64,
     ) {
         self.liquidity_tracker
-            .record_block(order_book, clearing_prices, band_nanos);
+            .record_block(order_book, mm_orders, clearing_prices, band_nanos);
+    }
+
+    pub fn record_equity(
+        &mut self,
+        touched: &std::collections::HashSet<AccountId>,
+        accounts: &AccountStore,
+        prices: &HashMap<MarketId, Vec<Nanos>>,
+        height: u64,
+        timestamp_ms: u64,
+    ) {
+        self.equity_tracker
+            .record(touched, accounts, prices, height, timestamp_ms);
+    }
+
+    pub fn equity_series(&self, account_id: AccountId) -> Vec<crate::aggregates::EquityPoint> {
+        self.equity_tracker.series(account_id)
+    }
+
+    pub fn record_history(&mut self, event: HistoryEvent) {
+        self.account_event_log.append(event);
+    }
+
+    pub fn account_history(
+        &self,
+        account_id: AccountId,
+        limit: usize,
+        before: Option<(u64, u64)>,
+        category: Option<&str>,
+    ) -> Vec<HistoryEvent> {
+        self.account_event_log
+            .query(account_id, limit, before, category)
     }
 
     pub fn apply_resolution(

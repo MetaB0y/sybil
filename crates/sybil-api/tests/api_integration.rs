@@ -11,7 +11,8 @@ use p256::ecdsa::{Signature, SigningKey};
 use serde_json::{json, Value};
 
 use common::{
-    get, post_json, post_json_with_headers, test_app, test_app_with_config, test_app_with_store,
+    get, post_json, post_json_with_headers, put_json, test_app, test_app_with_config,
+    test_app_with_store,
 };
 use matching_engine::MarketSet;
 use matching_sequencer::crypto::{canonical_cancel_bytes, canonical_order_bytes};
@@ -1226,4 +1227,212 @@ async fn health_endpoint() {
     assert_eq!(status, StatusCode::OK);
     let resp = parse_json(&body);
     assert_eq!(resp["status"].as_str().unwrap(), "ok");
+}
+
+#[tokio::test]
+async fn recent_blocks_returns_newest_first() {
+    let (app, handle) = test_app(true).await;
+
+    let b0 = handle.produce_block().await.unwrap();
+    let b1 = handle.produce_block().await.unwrap();
+    let b2 = handle.produce_block().await.unwrap();
+    assert!(
+        b2.canonical.header.height > b1.canonical.header.height
+            && b1.canonical.header.height > b0.canonical.header.height
+    );
+
+    // newest-first, clamped to the requested limit
+    let (status, body) = get(app.clone(), "/v1/blocks?limit=2").await;
+    assert_eq!(status, StatusCode::OK);
+    let arr = parse_json(&body);
+    let arr = arr.as_array().unwrap();
+    assert_eq!(arr.len(), 2, "got {arr:?}");
+    assert_eq!(
+        arr[0]["height"].as_u64().unwrap(),
+        b2.canonical.header.height
+    );
+    assert_eq!(
+        arr[1]["height"].as_u64().unwrap(),
+        b1.canonical.header.height
+    );
+
+    // asking for more than exist returns all produced
+    let (status, body) = get(app.clone(), "/v1/blocks?limit=1000").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(parse_json(&body).as_array().unwrap().len(), 3);
+
+    // limit=0 → empty
+    let (status, body) = get(app, "/v1/blocks?limit=0").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(parse_json(&body).as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn account_orders_include_created_at_ms() {
+    let (app, _) = test_app(true).await;
+
+    let (_, body) = post_json(app.clone(), "/v1/markets", json!({ "name": "ts?" })).await;
+    let market_id = parse_json(&body)["market_id"].as_u64().unwrap();
+
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 10_000_000_000u64 }),
+    )
+    .await;
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+
+    let before = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+
+    let (status, _) = post_json(
+        app.clone(),
+        "/v1/orders",
+        json!({
+            "account_id": account_id,
+            "orders": [{ "type": "BuyYes", "market_id": market_id, "limit_price_nanos": 500_000_000u64, "quantity": 10 }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = get(app, &format!("/v1/accounts/{account_id}/orders")).await;
+    assert_eq!(status, StatusCode::OK);
+    let pending = parse_json(&body);
+    let pending = pending.as_array().unwrap();
+    assert_eq!(pending.len(), 1, "got {pending:?}");
+    let created_at_ms = pending[0]["created_at_ms"].as_u64().unwrap();
+    assert!(
+        created_at_ms >= before,
+        "created_at_ms {created_at_ms} not >= submit time {before}"
+    );
+}
+
+#[tokio::test]
+async fn event_raw_snapshot_put_then_get() {
+    let dir = std::env::temp_dir().join(format!("sybil-snap-{}-{}", std::process::id(), 1));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let (app, _) = test_app_with_config(ApiConfig {
+        dev_mode: true,
+        event_snapshot_dir: dir.to_string_lossy().into_owned(),
+        ..ApiConfig::default()
+    })
+    .await;
+
+    let payload = json!({ "id": "evt123", "description": "hi", "negRisk": true });
+    let (status, _) = put_json(app.clone(), "/v1/events/evt123/raw", payload.clone()).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = get(app.clone(), "/v1/events/evt123/raw").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(parse_json(&body), payload);
+
+    // Unknown event → 404.
+    let (status, _) = get(app, "/v1/events/nope/raw").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn account_equity_series_populates_after_trades() {
+    let (app, handle) = test_app(true).await;
+
+    let (_, body) = post_json(app.clone(), "/v1/markets", json!({ "name": "Eq?" })).await;
+    let market_id = parse_json(&body)["market_id"].as_u64().unwrap();
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 10_000_000_000u64 }),
+    )
+    .await;
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 10_000_000_000u64 }),
+    )
+    .await;
+    let account_b = parse_json(&body)["account_id"].as_u64().unwrap();
+
+    // Two crossing orders so fills are generated and the accounts enter `touched`.
+    post_json(app.clone(), "/v1/orders", json!({
+        "account_id": account_id,
+        "orders": [{ "type": "BuyYes", "market_id": market_id, "limit_price_nanos": 600_000_000u64, "quantity": 10 }]
+    })).await;
+    post_json(app.clone(), "/v1/orders", json!({
+        "account_id": account_b,
+        "orders": [{ "type": "BuyNo", "market_id": market_id, "limit_price_nanos": 500_000_000u64, "quantity": 10 }]
+    })).await;
+
+    // Produce a block so the orders fill and equity is sampled.
+    let block = handle.produce_block().await.unwrap();
+    assert!(
+        !block.canonical.fills.is_empty(),
+        "expected fills from crossing orders"
+    );
+
+    let (status, body) = get(app, &format!("/v1/accounts/{account_id}/equity?range=all")).await;
+    assert_eq!(status, StatusCode::OK);
+    let v = parse_json(&body);
+    assert_eq!(v["account_id"].as_u64().unwrap(), account_id);
+    assert!(
+        !v["points"].as_array().unwrap().is_empty(),
+        "expected >=1 equity point: {v}"
+    );
+}
+
+#[tokio::test]
+async fn account_history_shows_placed_then_cancelled() {
+    let (app, handle) = test_app(true).await;
+
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 100_000_000_000u64 }),
+    )
+    .await;
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+    post_json(app.clone(), "/v1/markets", json!({ "name": "Test" })).await;
+
+    let key = new_signing_key();
+    let public_key_hex = to_hex(key.verifying_key().to_sec1_point(true).as_bytes());
+    let (status, _) = post_json(
+        app.clone(),
+        &format!("/v1/accounts/{}/keys", account_id),
+        json!({ "public_key_hex": public_key_hex }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let order_payload = signed_buy_yes_payload(account_id, 0, 500_000_000, 3, &key);
+    let (status, _) = post_json(app.clone(), "/v1/orders/signed", order_payload).await;
+    assert_eq!(status, StatusCode::OK);
+
+    handle.produce_block().await.unwrap();
+
+    let (status, body) = get(app.clone(), &format!("/v1/accounts/{}/orders", account_id)).await;
+    assert_eq!(status, StatusCode::OK);
+    let pending = parse_json(&body);
+    let order_id = pending.as_array().unwrap()[0]["order_id"].as_u64().unwrap();
+
+    let cancel_payload = signed_cancel_payload(account_id, order_id, &key);
+    let (status, body) = post_json(app.clone(), "/v1/orders/cancel/signed", cancel_payload).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(parse_json(&body)["cancelled"].as_bool().unwrap());
+
+    // Assert the history feed
+    let (status, body) = get(app, &format!("/v1/accounts/{}/events?limit=20", account_id)).await;
+    assert_eq!(status, StatusCode::OK);
+    let events = parse_json(&body);
+    let events = events.as_array().unwrap();
+    let types: Vec<&str> = events.iter().map(|e| e["type"].as_str().unwrap()).collect();
+    assert!(types.contains(&"placed"), "history: {types:?}");
+    assert!(types.contains(&"cancelled"), "history: {types:?}");
+    // newest-first: cancelled appears before placed
+    let pc = types.iter().position(|t| *t == "cancelled").unwrap();
+    let pp = types.iter().position(|t| *t == "placed").unwrap();
+    assert!(pc < pp, "expected cancelled newest-first: {types:?}");
 }

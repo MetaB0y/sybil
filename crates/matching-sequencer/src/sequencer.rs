@@ -33,7 +33,8 @@ use crate::settlement;
 use crate::store::{RestoredState, SequencerSnapshot};
 use crate::system_event::SystemEvent;
 
-/// Default order TTL in blocks. At 500ms block intervals this is ~1 year (GTC).
+/// Default order TTL in blocks. At the 10s cadence this is ~20 years —
+/// i.e. effectively never expires (GTC).
 pub const DEFAULT_ORDER_TTL_BLOCKS: u64 = 63_072_000;
 
 /// All tunable parameters for a [`BlockSequencer`] and its surrounding actor.
@@ -175,6 +176,8 @@ pub struct PendingOrderInfo {
     /// order is partially filled; this stays constant. Used by the FE to
     /// draw partial-fill progress.
     pub original_quantity: u64,
+    /// Wall-clock admit time, ms since epoch. `0` for pre-existing orders.
+    pub created_at_ms: u64,
 }
 
 pub struct PreparedBlock {
@@ -266,6 +269,7 @@ impl PendingOrderInfo {
         created_at: u64,
         expires_at_block: u64,
         original_max_fill: u64,
+        created_at_ms: u64,
     ) -> Self {
         let market_ids: Vec<_> = order.active_markets().collect();
         let side = classify_order_side(order);
@@ -286,6 +290,7 @@ impl PendingOrderInfo {
             } else {
                 original_max_fill
             },
+            created_at_ms,
         }
     }
 }
@@ -968,6 +973,25 @@ impl BlockSequencer {
             .account_fills(account_id, market_id_filter, limit, offset)
     }
 
+    pub fn equity_series(&self, account_id: AccountId) -> Vec<crate::aggregates::EquityPoint> {
+        self.analytics.equity_series(account_id)
+    }
+
+    pub fn record_history(&mut self, event: crate::aggregates::HistoryEvent) {
+        self.analytics.record_history(event);
+    }
+
+    pub fn account_history(
+        &self,
+        account_id: AccountId,
+        limit: usize,
+        before: Option<(u64, u64)>,
+        category: Option<&str>,
+    ) -> Vec<crate::aggregates::HistoryEvent> {
+        self.analytics
+            .account_history(account_id, limit, before, category)
+    }
+
     pub fn record_trader_placement_analytics(
         &mut self,
         account_id: AccountId,
@@ -1267,7 +1291,7 @@ impl BlockSequencer {
     /// `prepare_block` at block time, because they rely on batch-local state
     /// (STP across the whole bundle, MM flash liquidity) that the resting
     /// book doesn't model.
-    pub fn try_admit_direct(&mut self, submission: OrderSubmission) -> AdmitOutcome {
+    pub fn try_admit_direct(&mut self, submission: OrderSubmission, now_ms: u64) -> AdmitOutcome {
         for order in &submission.orders {
             for market_id in order.active_markets() {
                 if self.markets.get(market_id).is_none() {
@@ -1329,7 +1353,7 @@ impl BlockSequencer {
 
         match self
             .order_book
-            .accept(order, account_id, account, self.height)
+            .accept(order, account_id, account, self.height, now_ms)
         {
             Ok(accepted) => AdmitOutcome::Admitted {
                 order_id: accepted.order.id,
@@ -1382,15 +1406,16 @@ impl BlockSequencer {
     ) -> Vec<PendingOrderInfo> {
         self.order_book
             .resting_orders_full()
-            .filter(|(_, aid, _, _, _)| account_id_filter.is_none_or(|filter| *aid == filter))
+            .filter(|(_, aid, _, _, _, _)| account_id_filter.is_none_or(|filter| *aid == filter))
             .map(
-                |(order, aid, created_at, expires_at_block, original_max_fill)| {
+                |(order, aid, created_at, expires_at_block, original_max_fill, created_at_ms)| {
                     PendingOrderInfo::from_resting(
                         order,
                         aid,
                         created_at,
                         expires_at_block,
                         original_max_fill,
+                        created_at_ms,
                     )
                 },
             )
@@ -1401,15 +1426,16 @@ impl BlockSequencer {
     pub fn market_orderbook(&self, market_id: MarketId) -> Vec<PendingOrderInfo> {
         self.order_book
             .resting_orders_full()
-            .filter(|(order, _, _, _, _)| order.active_markets().any(|m| m == market_id))
+            .filter(|(order, _, _, _, _, _)| order.active_markets().any(|m| m == market_id))
             .map(
-                |(order, aid, created_at, expires_at_block, original_max_fill)| {
+                |(order, aid, created_at, expires_at_block, original_max_fill, created_at_ms)| {
                     PendingOrderInfo::from_resting(
                         order,
                         aid,
                         created_at,
                         expires_at_block,
                         original_max_fill,
+                        created_at_ms,
                     )
                 },
             )
@@ -1441,6 +1467,22 @@ impl BlockSequencer {
                         side,
                         remaining_quantity: ro.order.max_fill,
                     });
+                {
+                    use crate::aggregates::{HistoryEvent, HistoryKind};
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+                    let mut e =
+                        HistoryEvent::new(account_id, HistoryKind::Cancelled, self.height, now_ms);
+                    e.order_id = Some(order_id);
+                    e.market_id = ro.order.active_markets().next();
+                    e.qty = Some(ro.order.max_fill);
+                    let (side, outcome) = crate::aggregates::side_outcome_from_order(&ro.order);
+                    e.side = side;
+                    e.outcome = outcome;
+                    self.analytics.record_history(e);
+                }
                 Ok(())
             }
             Err(crate::order_book::CancelError::NotFound) => Err(SequencerError::OrderNotFound),
@@ -2029,6 +2071,84 @@ impl BlockSequencer {
         }
         let bridge = bridge_block_data(&system_events, &self.bridge);
 
+        for event in &system_events {
+            use crate::aggregates::{HistoryEvent, HistoryKind};
+            match event {
+                SystemEvent::CreateAccount {
+                    account_id,
+                    initial_balance,
+                } => {
+                    let mut e = HistoryEvent::new(
+                        *account_id,
+                        HistoryKind::Created,
+                        self.height,
+                        timestamp_ms,
+                    );
+                    e.amount_nanos = Some(*initial_balance);
+                    self.analytics.record_history(e);
+                }
+                SystemEvent::Deposit { account_id, amount } => {
+                    let mut e = HistoryEvent::new(
+                        *account_id,
+                        HistoryKind::Deposit,
+                        self.height,
+                        timestamp_ms,
+                    );
+                    e.amount_nanos = Some(*amount);
+                    self.analytics.record_history(e);
+                }
+                SystemEvent::L1Deposit {
+                    account_id, amount, ..
+                } => {
+                    let mut e = HistoryEvent::new(
+                        *account_id,
+                        HistoryKind::Deposit,
+                        self.height,
+                        timestamp_ms,
+                    );
+                    e.amount_nanos = Some(*amount);
+                    self.analytics.record_history(e);
+                }
+                SystemEvent::WithdrawalCreated {
+                    account_id, amount, ..
+                } => {
+                    let mut e = HistoryEvent::new(
+                        *account_id,
+                        HistoryKind::Withdrawal,
+                        self.height,
+                        timestamp_ms,
+                    );
+                    e.amount_nanos = Some(-*amount);
+                    self.analytics.record_history(e);
+                }
+                SystemEvent::MarketResolved {
+                    market_id,
+                    payout_nanos,
+                    affected_accounts,
+                } => {
+                    let payout_outcome = if *payout_nanos >= matching_engine::NANOS_PER_DOLLAR {
+                        Some("YES")
+                    } else if *payout_nanos == 0 {
+                        Some("NO")
+                    } else {
+                        None
+                    };
+                    for aid in affected_accounts {
+                        let mut e = HistoryEvent::new(
+                            *aid,
+                            HistoryKind::Resolved,
+                            self.height,
+                            timestamp_ms,
+                        );
+                        e.market_id = Some(*market_id);
+                        e.payout_outcome = payout_outcome;
+                        self.analytics.record_history(e);
+                    }
+                }
+                SystemEvent::OrderCancelled { .. } => {} // recorded at cancel_pending_order (3c)
+            }
+        }
+
         let fresh_submissions = submissions.len();
         let fresh_orders_received: usize = submissions
             .iter()
@@ -2080,6 +2200,22 @@ impl BlockSequencer {
                     slot.unmatched += 1;
                 }
             }
+        }
+        for ro in &expired {
+            use crate::aggregates::{HistoryEvent, HistoryKind};
+            let mut e = HistoryEvent::new(
+                ro.account_id,
+                HistoryKind::Expired,
+                self.height,
+                timestamp_ms,
+            );
+            e.order_id = Some(ro.order.id);
+            e.market_id = ro.order.active_markets().next();
+            e.qty = Some(ro.order.max_fill);
+            let (side, outcome) = crate::aggregates::side_outcome_from_order(&ro.order);
+            e.side = side;
+            e.outcome = outcome;
+            self.analytics.record_history(e);
         }
 
         // Build batch-local account map from resting orders
@@ -2202,10 +2338,13 @@ impl BlockSequencer {
                     );
                 } else {
                     // Non-MM orders: validate + reserve via OrderBook
-                    match self
-                        .order_book
-                        .accept(order.clone(), account_id, account, self.height)
-                    {
+                    match self.order_book.accept(
+                        order.clone(),
+                        account_id,
+                        account,
+                        self.height,
+                        timestamp_ms,
+                    ) {
                         Ok(accepted) => {
                             if stp.would_complete_set(account_id, &accepted.order) {
                                 // Undo the book acceptance — release reservations
@@ -2238,6 +2377,24 @@ impl BlockSequencer {
                                 account_id: account_id.0,
                                 is_mm: false,
                             });
+                            {
+                                use crate::aggregates::{HistoryEvent, HistoryKind};
+                                let o = &accepted.order;
+                                let mut e = HistoryEvent::new(
+                                    account_id,
+                                    HistoryKind::Placed,
+                                    self.height,
+                                    timestamp_ms,
+                                );
+                                e.order_id = Some(o.id);
+                                e.market_id = o.active_markets().next();
+                                e.qty = Some(o.max_fill);
+                                e.price_nanos = Some(o.limit_price);
+                                let (side, outcome) = crate::aggregates::side_outcome_from_order(o);
+                                e.side = side;
+                                e.outcome = outcome;
+                                self.analytics.record_history(e);
+                            }
                             accepted_orders.push(accepted.order);
                             self.analytics.record_trader_placement(
                                 account_id,
@@ -2409,13 +2566,33 @@ impl BlockSequencer {
         }
         let pending_orders_after = self.order_book.len();
 
-        // Off-block liquidity tracker — score the post-settle book against
-        // each market's midprice (binary: YES price). One snapshot per block
-        // so the ring tracks "depth available at the close of this batch".
+        // Off-block liquidity tracker — score the post-settle resting book
+        // PLUS this batch's flash MM orders against each market's midprice.
+        // MM orders never enter the book, so pull them from the solver input.
+        let mm_orders: Vec<&Order> = problem
+            .orders
+            .iter()
+            .filter(|o| mm_order_ids_set.contains(&o.id))
+            .collect();
         self.analytics.record_liquidity(
             &self.order_book,
+            &mm_orders,
             &clearing_prices,
             self.config.liquidity_band_nanos,
+        );
+
+        // Off-block per-account equity series — sample accounts that traded
+        // this block (the tracker also periodically sweeps all known accounts).
+        let touched: std::collections::HashSet<AccountId> = fills
+            .iter()
+            .filter_map(|f| order_account_map.get(&f.order_id).copied())
+            .collect();
+        self.analytics.record_equity(
+            &touched,
+            &self.accounts,
+            &clearing_prices,
+            self.height,
+            timestamp_ms,
         );
 
         let previous_header = self
@@ -3087,7 +3264,7 @@ mod tests {
         assert_eq!(result.rejections.len(), 0);
 
         assert_eq!(seq.order_book.len(), 1);
-        let (_, resting_aid, resting_created, _, _) =
+        let (_, resting_aid, resting_created, _, _, _) =
             seq.order_book.resting_orders_full().next().unwrap();
         assert_eq!(resting_aid, aid);
         assert_eq!(resting_created, 1);
@@ -4178,14 +4355,14 @@ mod tests {
         let (mut seq, aid, markets, m0, m1) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
 
         let first = single_order_sub(aid, outcome_buy(&markets, 0, m0, 0, 400_000_000, 10));
-        let outcome = seq.try_admit_direct(first);
+        let outcome = seq.try_admit_direct(first, 0);
         assert!(matches!(outcome, AdmitOutcome::Admitted { .. }));
 
         seq.produce_block(vec![], 1000);
         assert_eq!(seq.height, 1);
 
         let second = single_order_sub(aid, outcome_buy(&markets, 0, m1, 0, 400_000_000, 10));
-        let outcome = seq.try_admit_direct(second);
+        let outcome = seq.try_admit_direct(second, 0);
         match outcome {
             AdmitOutcome::Rejected(SequencerError::Rejected(r)) => {
                 assert!(matches!(r.reason, RejectionReason::CompleteSetFormation));
@@ -4199,7 +4376,7 @@ mod tests {
         let (mut seq, aid, markets, m0, m1) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
 
         let first = single_order_sub(aid, outcome_buy(&markets, 0, m0, 0, 400_000_000, 10));
-        let first_id = match seq.try_admit_direct(first) {
+        let first_id = match seq.try_admit_direct(first, 0) {
             AdmitOutcome::Admitted { order_id, .. } => order_id,
             other => panic!("expected Admitted, got {:?}", other),
         };
@@ -4209,7 +4386,7 @@ mod tests {
         seq.cancel_pending_order(aid, first_id).expect("cancel ok");
 
         let second = single_order_sub(aid, outcome_buy(&markets, 0, m1, 0, 400_000_000, 10));
-        let outcome = seq.try_admit_direct(second);
+        let outcome = seq.try_admit_direct(second, 0);
         assert!(
             matches!(outcome, AdmitOutcome::Admitted { .. }),
             "expected Admitted after cancel, got {:?}",
@@ -4224,7 +4401,7 @@ mod tests {
         order.expires_at_block = Some(1);
 
         assert!(matches!(
-            seq.try_admit_direct(single_order_sub(aid, order)),
+            seq.try_admit_direct(single_order_sub(aid, order), 0),
             AdmitOutcome::Admitted { .. }
         ));
 
@@ -4240,7 +4417,7 @@ mod tests {
         order.expires_at_block = Some(2);
 
         assert!(matches!(
-            seq.try_admit_direct(single_order_sub(aid, order)),
+            seq.try_admit_direct(single_order_sub(aid, order), 0),
             AdmitOutcome::Admitted { .. }
         ));
 
@@ -4257,7 +4434,7 @@ mod tests {
         let mut order = outcome_buy(&markets, 0, m0, 0, 400_000_000, 10);
         order.expires_at_block = Some(0);
 
-        match seq.try_admit_direct(single_order_sub(aid, order)) {
+        match seq.try_admit_direct(single_order_sub(aid, order), 0) {
             AdmitOutcome::Rejected(SequencerError::Rejected(rejection)) => {
                 assert!(matches!(rejection.reason, RejectionReason::Expired { .. }));
             }
@@ -4281,14 +4458,14 @@ mod tests {
 
         let first = single_order_sub(aid, outcome_buy(&markets, 0, m0, 1, 800_000_000, 10));
         assert!(matches!(
-            seq.try_admit_direct(first),
+            seq.try_admit_direct(first, 0),
             AdmitOutcome::Admitted { .. }
         ));
 
         seq.produce_block(vec![], 1000);
 
         let second = single_order_sub(aid, outcome_buy(&markets, 0, m1, 1, 800_000_000, 10));
-        match seq.try_admit_direct(second) {
+        match seq.try_admit_direct(second, 0) {
             AdmitOutcome::Rejected(SequencerError::Rejected(r)) => {
                 assert!(matches!(r.reason, RejectionReason::CompleteSetFormation));
             }
@@ -4308,7 +4485,7 @@ mod tests {
 
         let sell_first = single_order_sub(aid, outcome_sell(&markets, 0, m0, 0, 400_000_000, 10));
         assert!(matches!(
-            seq.try_admit_direct(sell_first),
+            seq.try_admit_direct(sell_first, 0),
             AdmitOutcome::Admitted { .. }
         ));
 
@@ -4317,7 +4494,7 @@ mod tests {
         let buy_other = single_order_sub(aid, outcome_buy(&markets, 0, m1, 0, 400_000_000, 10));
         assert!(
             matches!(
-                seq.try_admit_direct(buy_other),
+                seq.try_admit_direct(buy_other, 0),
                 AdmitOutcome::Admitted { .. }
             ),
             "sell on m0 + buy on m1 is only partial coverage — must be admitted"
@@ -4334,7 +4511,7 @@ mod tests {
 
         let first = single_order_sub(aid, outcome_buy(&markets, 0, m0, 0, 400_000_000, 10));
         assert!(matches!(
-            seq.try_admit_direct(first),
+            seq.try_admit_direct(first, 0),
             AdmitOutcome::Admitted { .. }
         ));
         seq.produce_block(vec![], 1000);
@@ -4384,13 +4561,13 @@ mod tests {
             ],
             mm_constraint: None,
         };
-        match seq.try_admit_direct(bundle) {
+        match seq.try_admit_direct(bundle, 0) {
             AdmitOutcome::Deferred(sub) => seq.push_pending_bundle(sub),
             other => panic!("expected Deferred for multi-order bundle, got {:?}", other),
         }
 
         let completing = single_order_sub(aid, outcome_buy(&markets, 0, m2, 0, 400_000_000, 10));
-        match seq.try_admit_direct(completing) {
+        match seq.try_admit_direct(completing, 0) {
             AdmitOutcome::Rejected(SequencerError::Rejected(r)) => {
                 assert!(matches!(r.reason, RejectionReason::CompleteSetFormation));
             }
@@ -4446,7 +4623,7 @@ mod tests {
         let (mut seq, aid, markets, m0, _) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
 
         let order = outcome_buy(&markets, 0, m0, 0, 400_000_000, 7);
-        let order_id = match seq.try_admit_direct(single_order_sub(aid, order)) {
+        let order_id = match seq.try_admit_direct(single_order_sub(aid, order), 0) {
             AdmitOutcome::Admitted { order_id, .. } => order_id,
             other => panic!("expected Admitted, got {:?}", other),
         };

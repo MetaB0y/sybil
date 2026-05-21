@@ -188,6 +188,7 @@ mod tests {
             reserved_positions: vec![] as Vec<(PositionKey, i64)>,
             has_been_matched: false,
             original_max_fill: 5,
+            created_at_ms: 0,
         }
     }
 
