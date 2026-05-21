@@ -17,7 +17,6 @@ import { MockValue } from "@/components/mock-value";
 import {
   formatAge,
   formatCompactDollars,
-  formatDollars,
   formatInt,
   formatProbability,
 } from "@/lib/format/nanos";
@@ -247,54 +246,38 @@ function RecentBatchesPanel({ marketId }: { marketId: number }) {
     >
       <Grid>
         <Stat
-          label="unique traders placed"
-          value={
-            <MockValue hint="placed-trader counts not on the wire (OPEN_QUESTIONS #8)">
-              {formatInt(stats.uniqueTradersPlaced)}
-            </MockValue>
-          }
+          label="orders placed"
+          value={formatInt(stats.ordersPlaced)}
           sub={
             <span style={{ color: "var(--fg-3)" }}>
-              per-market split of mock placers
+              Σ by_market[{marketId}].placed
             </span>
           }
         />
         <Stat
-          label="unique traders matched"
-          value={
-            <MockValue hint="per-market scoping is mocked (OPEN_QUESTIONS #5)">
-              {formatInt(stats.uniqueTradersMatched)}
-            </MockValue>
-          }
+          label="orders matched"
+          value={formatInt(stats.ordersMatched)}
           sub={
             <span style={{ color: "var(--fg-3)" }}>
-              chain-wide real: {formatInt(stats.uniqueTradersMatchedChainWide)}
-            </span>
-          }
-        />
-        <Stat
-          label="volume placed"
-          value={
-            <MockValue hint="no placed-volume notional on the wire (OPEN_QUESTIONS #8)">
-              {formatCompactDollars(stats.volumePlacedNanos)}
-            </MockValue>
-          }
-          sub={
-            <span style={{ color: "var(--fg-3)" }}>
-              ≈ matched × 1.3-1.7
+              Σ by_market[{marketId}].matched
             </span>
           }
         />
         <Stat
           label="volume matched"
-          value={
-            <MockValue hint="per-market scoping is mocked (OPEN_QUESTIONS #5)">
-              {formatCompactDollars(stats.volumeMatchedNanos)}
-            </MockValue>
-          }
+          value={formatCompactDollars(stats.volumeMatchedNanos)}
           sub={
             <span style={{ color: "var(--fg-3)" }}>
-              chain-wide real: {formatDollars(stats.volumeMatchedChainWideNanos, { decimals: 0 })}
+              Σ by_market[{marketId}].volume_nanos
+            </span>
+          }
+        />
+        <Stat
+          label="avg volume / batch"
+          value={formatCompactDollars(stats.avgVolumePerBatchNanos)}
+          sub={
+            <span style={{ color: "var(--fg-3)" }}>
+              matched ÷ {stats.actualBlockCount || 0} batches
             </span>
           }
         />

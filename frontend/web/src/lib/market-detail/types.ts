@@ -55,9 +55,12 @@ export type OpenBatchSnapshot = {
 };
 
 /** Recent-batches window size — user-selectable on the page. */
-export type WindowSize = 1 | 5 | 10 | 100;
+export type WindowSize = 1 | 5 | 10 | 50;
 
-/** Rolled-up stats across the last N batches for one market. */
+/**
+ * Rolled-up stats across the last N batches for one market. Every field is
+ * real, summed from the per-block per-market sidecar (`BlockResponse.by_market`).
+ */
 export type BatchWindowStats = {
   marketId: number;
   /** What the user asked for. */
@@ -67,30 +70,12 @@ export type BatchWindowStats = {
   /** Earliest / latest heights of the blocks that contributed. */
   firstHeight: number | null;
   lastHeight: number | null;
-  /** Unique traders who PLACED orders (mocked — OPEN_QUESTIONS #8). */
-  uniqueTradersPlaced: number;
-  /**
-   * Unique traders who got MATCHED. Chain-level count is real
-   * (block.fills[].account_id union); per-market scoping is mocked because
-   * FillResponse has no `market_id` (OPEN_QUESTIONS #5). The value here is
-   * the per-market split — see `mocked.uniqueTradersMatched`.
-   */
-  uniqueTradersMatched: number;
-  /** Same union without per-market scoping — real chain-level count. */
-  uniqueTradersMatchedChainWide: number;
-  /** Volume placed across the window (mocked — OPEN_QUESTIONS #8). */
-  volumePlacedNanos: bigint;
-  /**
-   * Volume matched across the window for this market. Chain-level sum of
-   * `total_volume_nanos` is real; per-market split is mocked (OPEN_QUESTIONS #5).
-   */
+  /** Orders touching this market across the window (Σ `by_market[mid].placed`). */
+  ordersPlaced: number;
+  /** Orders that exited the book after ≥1 fill (Σ `by_market[mid].matched`). */
+  ordersMatched: number;
+  /** Matched volume for this market across the window (Σ `by_market[mid].volume_nanos`). */
   volumeMatchedNanos: bigint;
-  /** Same sum without per-market scoping — real chain-level total. */
-  volumeMatchedChainWideNanos: bigint;
-  mocked: {
-    uniqueTradersPlaced: boolean;
-    uniqueTradersMatched: boolean;
-    volumePlaced: boolean;
-    volumeMatched: boolean;
-  };
+  /** Matched volume divided by the number of batches in the window. */
+  avgVolumePerBatchNanos: bigint;
 };

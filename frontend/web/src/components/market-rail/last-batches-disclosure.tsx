@@ -3,19 +3,16 @@
 /**
  * Collapsible "last batches · stats" panel. Wraps the same hook
  * `useBatchWindowStats` we built for `/m-dev/[id]`, in a Disclosure with the
- * 1 / 5 / 10 / 100 window selector. Matches `LastNStats` at
+ * 1 / 5 / 10 / 50 window selector. Matches `LastNStats` at
  * `fed-fba-panel.jsx:99`: a bordered 2×2 stat grid topped by the window
  * selector, footed by a match-rate progress bar.
  *
- * Mocked values shown (all wrapped <MockValue>):
- *  - traders placed (OPEN_QUESTIONS #8)
- *  - traders matched, per-market scoping (#5)
- *  - volume placed (#8)
- *  - volume matched, per-market scoping (#5)
+ * Every value is real, summed from the per-market block sidecar
+ * (`BlockResponse.by_market[mid]`): orders placed, orders matched, matched
+ * volume, and avg volume per batch. Match rate is matched/placed (orders).
  */
 
 import { useState } from "react";
-import { MockValue } from "@/components/mock-value";
 import { formatCompactDollars, formatInt } from "@/lib/format/nanos";
 import type { WindowSize } from "@/lib/market-detail/types";
 import {
@@ -29,8 +26,8 @@ export function LastBatchesDisclosure({ marketId }: { marketId: number }) {
   const stats = useBatchWindowStats(marketId, windowSize);
   const partial = stats.actualBlockCount < windowSize;
 
-  const placed = stats.uniqueTradersPlaced;
-  const matched = stats.uniqueTradersMatched;
+  const placed = stats.ordersPlaced;
+  const matched = stats.ordersMatched;
   const matchRate = placed > 0 ? Math.round((matched / placed) * 100) : 0;
 
   return (
@@ -117,37 +114,15 @@ export function LastBatchesDisclosure({ marketId }: { marketId: number }) {
               borderRadius: 4,
             }}
           >
-            <Cell
-              label="traders placed"
-              value={
-                <MockValue hint="placed-trader counts not on the wire (OPEN_QUESTIONS #8)">
-                  {formatInt(placed)}
-                </MockValue>
-              }
-            />
-            <Cell
-              label="traders matched"
-              value={
-                <MockValue hint="per-market scoping is mocked (OPEN_QUESTIONS #5)">
-                  {formatInt(matched)}
-                </MockValue>
-              }
-            />
-            <Cell
-              label="volume placed"
-              value={
-                <MockValue hint="no placed-volume notional on the wire (OPEN_QUESTIONS #8)">
-                  {formatCompactDollars(stats.volumePlacedNanos)}
-                </MockValue>
-              }
-            />
+            <Cell label="orders placed" value={formatInt(placed)} />
+            <Cell label="orders matched" value={formatInt(matched)} />
             <Cell
               label="volume matched"
-              value={
-                <MockValue hint="per-market scoping is mocked (OPEN_QUESTIONS #5)">
-                  {formatCompactDollars(stats.volumeMatchedNanos)}
-                </MockValue>
-              }
+              value={formatCompactDollars(stats.volumeMatchedNanos)}
+            />
+            <Cell
+              label="avg volume / batch"
+              value={formatCompactDollars(stats.avgVolumePerBatchNanos)}
             />
           </div>
 

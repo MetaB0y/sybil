@@ -2,26 +2,17 @@
  * Pure derivation of the recent-batches window panel for one market.
  *
  * The store's ring buffer is capped at ~80 blocks (lib/store/index.ts), so a
- * `requestedWindow` of 100 will always be partial today. We surface
- * `actualBlockCount`, `firstHeight`, and `lastHeight` so the UI can be
- * honest about what we actually have — same pattern as the activity page's
+ * `requestedWindow` larger than that will always be partial. We surface
+ * `actualBlockCount`, `firstHeight`, and `lastHeight` so the UI can be honest
+ * about what we actually have — same pattern as the activity page's
  * "buffer window" annotation.
  *
- * What's real vs mocked:
- *  - uniqueTradersMatched (chain-wide): REAL — union of fills[].account_id
- *  - volumeMatched (chain-wide): REAL — sum of total_volume_nanos
- *  - per-market scoping of both: MOCK (OPEN_QUESTIONS #5)
- *  - uniqueTradersPlaced: MOCK (OPEN_QUESTIONS #8)
- *  - volumePlaced: MOCK (OPEN_QUESTIONS #8)
+ * Every value is REAL: orders placed/matched and matched volume come straight
+ * from the per-block per-market sidecar (`BlockResponse.by_market[mid]`),
+ * summed across the window. No mocks.
  */
 
 import { parseNanos } from "../format/nanos";
-import {
-  mockUniquePlacersInWindow,
-  mockVolumePlacedNanos,
-  splitBigintUniform,
-  splitIntUniform,
-} from "./mocks";
 import type { BatchWindowStats, Block, WindowSize } from "./types";
 
 export function deriveBatchWindowStats(
@@ -37,57 +28,24 @@ export function deriveBatchWindowStats(
     return emptyWindow(marketId, requestedWindow);
   }
 
-  // Chain-level aggregates — real numbers.
-  let totalOrdersPlaced = 0;
-  let volumeMatchedChainWideNanos = 0n;
-  const matchedTraderIds = new Set<number>();
-  // Track distinct markets the window touched — used for the uniform per-market split.
-  const touchedMarketIds = new Set<number>();
+  const key = String(marketId);
+  let ordersPlaced = 0;
+  let ordersMatched = 0;
+  let volumeMatchedNanos = 0n;
 
   for (const b of window) {
-    totalOrdersPlaced += b.order_count;
-    volumeMatchedChainWideNanos += parseNanos(b.total_volume_nanos);
-    if (b.fills) {
-      for (const f of b.fills) {
-        if (f.account_id != null) matchedTraderIds.add(f.account_id);
-      }
-    }
-    if (b.clearing_prices_nanos) {
-      for (const k of Object.keys(b.clearing_prices_nanos)) {
-        const id = Number(k);
-        if (Number.isFinite(id)) touchedMarketIds.add(id);
-      }
+    const stats = b.by_market?.[key];
+    if (!stats) continue;
+    ordersPlaced += stats.placed ?? 0;
+    ordersMatched += stats.matched ?? 0;
+    if (stats.volume_nanos != null) {
+      volumeMatchedNanos += parseNanos(stats.volume_nanos);
     }
   }
 
-  const uniqueTradersMatchedChainWide = matchedTraderIds.size;
-  const marketCount = Math.max(1, touchedMarketIds.size);
+  const avgVolumePerBatchNanos = volumeMatchedNanos / BigInt(actualBlockCount);
 
-  // Per-market scoping is mocked via uniform split (OPEN_QUESTIONS #5).
-  const uniqueTradersMatched = splitIntUniform(
-    uniqueTradersMatchedChainWide,
-    marketCount,
-  );
-  const volumeMatchedNanos = splitBigintUniform(
-    volumeMatchedChainWideNanos,
-    marketCount,
-  );
-
-  // Placed-side is fully mocked (OPEN_QUESTIONS #8).
-  const uniquePlacersChainWide = mockUniquePlacersInWindow(
-    marketId,
-    totalOrdersPlaced,
-  );
-  const uniqueTradersPlaced = splitIntUniform(
-    uniquePlacersChainWide,
-    marketCount,
-  );
-  const volumePlacedNanos = mockVolumePlacedNanos(
-    marketId,
-    volumeMatchedNanos,
-  );
-
-  // Newest-first array, so last in array is the oldest.
+  // Newest-first array, so index 0 is newest, last is oldest.
   const lastHeight = window[0]!.height;
   const firstHeight = window[actualBlockCount - 1]!.height;
 
@@ -97,18 +55,10 @@ export function deriveBatchWindowStats(
     actualBlockCount,
     firstHeight,
     lastHeight,
-    uniqueTradersPlaced,
-    uniqueTradersMatched,
-    uniqueTradersMatchedChainWide,
-    volumePlacedNanos,
+    ordersPlaced,
+    ordersMatched,
     volumeMatchedNanos,
-    volumeMatchedChainWideNanos,
-    mocked: {
-      uniqueTradersPlaced: true,
-      uniqueTradersMatched: true, // because of per-market scoping
-      volumePlaced: true,
-      volumeMatched: true, // because of per-market scoping
-    },
+    avgVolumePerBatchNanos,
   };
 }
 
@@ -122,17 +72,9 @@ function emptyWindow(
     actualBlockCount: 0,
     firstHeight: null,
     lastHeight: null,
-    uniqueTradersPlaced: 0,
-    uniqueTradersMatched: 0,
-    uniqueTradersMatchedChainWide: 0,
-    volumePlacedNanos: 0n,
+    ordersPlaced: 0,
+    ordersMatched: 0,
     volumeMatchedNanos: 0n,
-    volumeMatchedChainWideNanos: 0n,
-    mocked: {
-      uniqueTradersPlaced: true,
-      uniqueTradersMatched: true,
-      volumePlaced: true,
-      volumeMatched: true,
-    },
+    avgVolumePerBatchNanos: 0n,
   };
 }
