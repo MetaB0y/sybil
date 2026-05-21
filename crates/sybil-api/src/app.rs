@@ -30,6 +30,7 @@ use crate::types::response::*;
         routes::accounts::register_key,
         routes::accounts::get_portfolio,
         routes::accounts::get_account_fills,
+        routes::accounts::get_equity,
         routes::bridge::status,
         routes::bridge::account_key,
         routes::bridge::submit_l1_deposit,
@@ -118,6 +119,8 @@ use crate::types::response::*;
         PriceHistoryResponse,
         PricePointResponse,
         AccountFillResponse,
+        EquityPointResponse,
+        EquitySeriesResponse,
         PendingOrderResponse,
         PositionDeltaResponse,
         BlockMarketStats,
@@ -540,6 +543,10 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/v1/accounts/{id}/fills",
             axum::routing::get(routes::accounts::get_account_fills),
+        )
+        .route(
+            "/v1/accounts/{id}/equity",
+            axum::routing::get(routes::accounts::get_equity),
         )
         .route(
             "/v1/accounts/{id}/bridge-key",

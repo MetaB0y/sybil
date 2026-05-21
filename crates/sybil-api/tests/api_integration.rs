@@ -1326,3 +1326,51 @@ async fn event_raw_snapshot_put_then_get() {
     let (status, _) = get(app, "/v1/events/nope/raw").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn account_equity_series_populates_after_trades() {
+    let (app, handle) = test_app(true).await;
+
+    let (_, body) = post_json(app.clone(), "/v1/markets", json!({ "name": "Eq?" })).await;
+    let market_id = parse_json(&body)["market_id"].as_u64().unwrap();
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 10_000_000_000u64 }),
+    )
+    .await;
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 10_000_000_000u64 }),
+    )
+    .await;
+    let account_b = parse_json(&body)["account_id"].as_u64().unwrap();
+
+    // Two crossing orders so fills are generated and the accounts enter `touched`.
+    post_json(app.clone(), "/v1/orders", json!({
+        "account_id": account_id,
+        "orders": [{ "type": "BuyYes", "market_id": market_id, "limit_price_nanos": 600_000_000u64, "quantity": 10 }]
+    })).await;
+    post_json(app.clone(), "/v1/orders", json!({
+        "account_id": account_b,
+        "orders": [{ "type": "BuyNo", "market_id": market_id, "limit_price_nanos": 500_000_000u64, "quantity": 10 }]
+    })).await;
+
+    // Produce a block so the orders fill and equity is sampled.
+    let block = handle.produce_block().await.unwrap();
+    assert!(
+        !block.fills.is_empty(),
+        "expected fills from crossing orders"
+    );
+
+    let (status, body) = get(app, &format!("/v1/accounts/{account_id}/equity?range=all")).await;
+    assert_eq!(status, StatusCode::OK);
+    let v = parse_json(&body);
+    assert_eq!(v["account_id"].as_u64().unwrap(), account_id);
+    assert!(
+        !v["points"].as_array().unwrap().is_empty(),
+        "expected >=1 equity point: {v}"
+    );
+}

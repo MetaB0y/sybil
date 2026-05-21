@@ -581,6 +581,24 @@ pub struct PricePointResponse {
     pub volume_nanos: u64,
 }
 
+// --- Equity Series ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct EquityPointResponse {
+    pub timestamp_ms: u64,
+    pub height: u64,
+    pub portfolio_value_nanos: i64,
+    pub deposited_nanos: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct EquitySeriesResponse {
+    pub account_id: u64,
+    pub points: Vec<EquityPointResponse>,
+}
+
 // --- Account Fills ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

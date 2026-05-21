@@ -230,3 +230,53 @@ pub struct AccountFillParams {
     pub limit: Option<usize>,
     pub offset: Option<usize>,
 }
+
+#[derive(Debug, serde::Deserialize)]
+pub struct EquityRangeParams {
+    /// "24h" | "7d" | "30d" | "all" (default "all").
+    pub range: Option<String>,
+}
+
+/// GET /v1/accounts/{id}/equity?range=
+#[utoipa::path(
+    get,
+    path = "/v1/accounts/{id}/equity",
+    params(
+        ("id" = u64, Path, description = "Account ID"),
+        ("range" = Option<String>, Query, description = "Time range: 24h | 7d | 30d | all (default all)"),
+    ),
+    responses(
+        (status = 200, description = "Per-account equity series", body = EquitySeriesResponse)
+    )
+)]
+pub async fn get_equity(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    Query(params): Query<EquityRangeParams>,
+) -> Result<Json<EquitySeriesResponse>, AppError> {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let since_ms = match params.range.as_deref() {
+        Some("24h") => now_ms.saturating_sub(24 * 3_600_000),
+        Some("7d") => now_ms.saturating_sub(7 * 24 * 3_600_000),
+        Some("30d") => now_ms.saturating_sub(30 * 24 * 3_600_000),
+        _ => 0,
+    };
+    let points = state.sequencer.get_equity_series(AccountId(id)).await?;
+    let points: Vec<EquityPointResponse> = points
+        .into_iter()
+        .filter(|p| p.timestamp_ms >= since_ms)
+        .map(|p| EquityPointResponse {
+            timestamp_ms: p.timestamp_ms,
+            height: p.height,
+            portfolio_value_nanos: p.portfolio_value_nanos,
+            deposited_nanos: p.deposited_nanos,
+        })
+        .collect();
+    Ok(Json(EquitySeriesResponse {
+        account_id: id,
+        points,
+    }))
+}
