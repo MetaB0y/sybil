@@ -3,6 +3,7 @@ pub mod aggregates;
 pub mod blocks;
 pub mod bots;
 pub mod bridge;
+pub mod events;
 pub mod feeds;
 pub mod markets;
 pub mod orders;

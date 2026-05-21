@@ -11,7 +11,8 @@ use p256::ecdsa::{Signature, SigningKey};
 use serde_json::{json, Value};
 
 use common::{
-    get, post_json, post_json_with_headers, test_app, test_app_with_config, test_app_with_store,
+    get, post_json, post_json_with_headers, put_json, test_app, test_app_with_config,
+    test_app_with_store,
 };
 use matching_engine::MarketSet;
 use matching_sequencer::crypto::{canonical_cancel_bytes, canonical_order_bytes};
@@ -1298,4 +1299,30 @@ async fn account_orders_include_created_at_ms() {
         created_at_ms >= before,
         "created_at_ms {created_at_ms} not >= submit time {before}"
     );
+}
+
+#[tokio::test]
+async fn event_raw_snapshot_put_then_get() {
+    let dir = std::env::temp_dir().join(format!("sybil-snap-{}-{}", std::process::id(), 1));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let (app, _) = test_app_with_config(ApiConfig {
+        dev_mode: true,
+        event_snapshot_dir: dir.to_string_lossy().into_owned(),
+        ..ApiConfig::default()
+    })
+    .await;
+
+    let payload = json!({ "id": "evt123", "description": "hi", "negRisk": true });
+    let (status, _) = put_json(app.clone(), "/v1/events/evt123/raw", payload.clone()).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = get(app.clone(), "/v1/events/evt123/raw").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(parse_json(&body), payload);
+
+    // Unknown event → 404.
+    let (status, _) = get(app, "/v1/events/nope/raw").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }

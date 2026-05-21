@@ -616,6 +616,10 @@ pub fn create_router(state: AppState) -> Router {
             "/v1/events/{event_id}/traders",
             axum::routing::get(routes::aggregates::get_event_traders),
         )
+        .route(
+            "/v1/events/{event_id}/raw",
+            axum::routing::get(routes::events::get_event_raw).put(routes::events::put_event_raw),
+        )
         // Feeds
         .route(
             "/v1/feeds",

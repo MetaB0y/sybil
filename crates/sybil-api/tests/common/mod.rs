@@ -175,6 +175,27 @@ pub async fn post_json(app: Router, uri: &str, body: serde_json::Value) -> (Stat
     (status, body)
 }
 
+/// Send a PUT request with a JSON body and return (status, body bytes).
+#[allow(dead_code)]
+pub async fn put_json(app: Router, uri: &str, body: serde_json::Value) -> (StatusCode, Vec<u8>) {
+    let req = Request::builder()
+        .method(Method::PUT)
+        .uri(uri)
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let status = resp.status();
+    let body = resp
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes()
+        .to_vec();
+    (status, body)
+}
+
 /// Send a POST request with JSON body and return (status, headers, body bytes).
 #[allow(dead_code)]
 pub async fn post_json_with_headers(
