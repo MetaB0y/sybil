@@ -10,13 +10,12 @@
  * - Fill count + avg fill price are derived from the account's `/fills` feed by
  *   `order_id`. Bounded by the fills window, so very old / heavily-filled orders
  *   may undercount — fine for typical recent open orders.
- * - Created time is approximated from the 2s block cadence (MockValue) until the
- *   backend exposes `created_at_ms` on `PendingOrderResponse`.
+ * - Created time is the exact `created_at_ms` from `PendingOrderResponse`
+ *   (falls back to the block height for orders admitted before that field).
  */
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { MockValue } from "@/components/mock-value";
 import { cancelSignedOrder } from "@/lib/account/orders";
 import type { AccountFill } from "@/lib/account/use-account-fills";
 import type { AccountOrder } from "@/lib/account/use-account-orders";
@@ -33,8 +32,6 @@ import { SidePill } from "./side-pill";
 import { TifCell } from "./tif-cell";
 
 type Market = components["schemas"]["MarketResponse"];
-
-const CADENCE_MS = 2000; // 2s FBA block heartbeat
 
 interface OrderFillAgg {
   count: number;
@@ -151,13 +148,11 @@ function OrderRow({
   const placed = order.original_quantity ?? 0;
   const filled = placed > 0 ? Math.max(0, placed - order.remaining_quantity) : 0;
 
-  // Approximate created wall-clock from the fixed 2s cadence (no created_at_ms
-  // on the wire yet). createdMs may land slightly in the future if cadence
-  // drifted; the relative formatter clamps negatives to 0.
-  const createdMs = latestBlock
-    ? latestBlock.timestamp_ms -
-      (latestBlock.height - order.created_at_block) * CADENCE_MS
-    : null;
+  // Exact created time from the backend (created_at_ms on PendingOrderResponse).
+  // Falls back to null (→ block-height display) for orders admitted before the
+  // field shipped, which report created_at_ms: 0.
+  const createdMs =
+    order.created_at_ms && order.created_at_ms > 0 ? order.created_at_ms : null;
 
   async function onCancel(e: React.MouseEvent) {
     e.preventDefault();
@@ -218,7 +213,11 @@ function OrderRow({
         {isBuy ? "BUY" : "SELL"}
       </span>
       <SidePill outcome={outcome} />
-      <CreatedCell ms={createdMs} block={order.created_at_block} />
+      <CreatedCell
+        ms={createdMs}
+        block={order.created_at_block}
+        nowMs={latestBlock?.timestamp_ms ?? null}
+      />
       <RightCell mono>
         <FilledCell
           placed={placed}
@@ -260,35 +259,38 @@ function OrderRow({
   );
 }
 
-/** Created-time cell — cadence approximation, flagged until `created_at_ms` ships. */
-function CreatedCell({ ms, block }: { ms: number | null; block: number }) {
+/** Created-time cell — exact wall-clock from backend `created_at_ms`. */
+function CreatedCell({
+  ms,
+  block,
+  nowMs,
+}: {
+  ms: number | null;
+  block: number;
+  nowMs: number | null;
+}) {
   return (
-    <MockValue
-      hint="approximated from the 2s block cadence; exact created time needs backend created_at_ms (PendingOrderResponse)"
-      variant="underline"
+    <span
+      style={{
+        display: "inline-flex",
+        flexDirection: "column",
+        gap: 1,
+        fontFamily: "var(--font-mono)",
+      }}
     >
+      <span style={{ fontSize: 11, color: "var(--fg-2)" }}>
+        {ms == null || nowMs == null ? "—" : `${formatAge(nowMs - ms)} ago`}
+      </span>
       <span
         style={{
-          display: "inline-flex",
-          flexDirection: "column",
-          gap: 1,
-          fontFamily: "var(--font-mono)",
+          fontSize: 9.5,
+          color: "var(--fg-4)",
+          letterSpacing: "var(--track-wide)",
         }}
       >
-        <span style={{ fontSize: 11, color: "var(--fg-2)" }}>
-          {ms == null ? "—" : `${formatAge(Date.now() - ms)} ago`}
-        </span>
-        <span
-          style={{
-            fontSize: 9.5,
-            color: "var(--fg-4)",
-            letterSpacing: "var(--track-wide)",
-          }}
-        >
-          #{block.toLocaleString()}
-        </span>
+        #{block.toLocaleString()}
       </span>
-    </MockValue>
+    </span>
   );
 }
 

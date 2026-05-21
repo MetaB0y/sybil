@@ -157,6 +157,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/blocks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /v1/blocks?limit=N — last N blocks, newest-first, from in-memory history. */
+        get: operations["get_recent_blocks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/blocks/latest": {
         parameters: {
             query?: never;
@@ -1321,6 +1338,12 @@ export interface components {
             account_id: number;
             /** Format: int64 */
             created_at_block: number;
+            /**
+             * Format: int64
+             * @description Wall-clock admit time, ms since epoch. `0` for orders admitted before
+             *     this field shipped (#[serde(default)] forward compat).
+             */
+            created_at_ms?: number;
             /** Format: int64 */
             expires_at_block: number;
             /** Format: int64 */
@@ -1736,6 +1759,17 @@ export interface components {
             payout_nanos: string;
             /** @enum {string} */
             type: "market_resolved";
+        } | {
+            /** Format: int64 */
+            account_id: number;
+            market_ids: number[];
+            /** Format: int64 */
+            order_id: number;
+            /** Format: int64 */
+            remaining_quantity: number;
+            side: string;
+            /** @enum {string} */
+            type: "order_cancelled";
         };
         /** @enum {string} */
         TimeInForce: "GTC" | "IOC" | "GTD";
@@ -2018,6 +2052,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActivityOverviewResponse"];
+                };
+            };
+        };
+    };
+    get_recent_blocks: {
+        parameters: {
+            query?: {
+                /** @description Recent blocks, newest-first; clamped to history capacity (default 20) */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recent blocks, newest-first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlockResponse"][];
                 };
             };
         };
