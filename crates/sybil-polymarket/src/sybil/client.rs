@@ -213,6 +213,23 @@ impl SybilClient {
         Ok(())
     }
 
+    /// Push the full Polymarket event JSON to sybil-api's snapshot store.
+    /// Idempotent upsert; dev-mode-only on the server (same as metadata).
+    pub async fn put_event_raw(
+        &self,
+        event_id: &str,
+        value: &serde_json::Value,
+    ) -> Result<(), Error> {
+        let resp = self
+            .http
+            .put(self.url(&format!("/v1/events/{}/raw", event_id)))
+            .json(value)
+            .send()
+            .await?;
+        let _ = self.check_response(resp).await?;
+        Ok(())
+    }
+
     /// Push reference prices to sybil-api (display only, not matching logic).
     pub async fn set_reference_prices(
         &self,

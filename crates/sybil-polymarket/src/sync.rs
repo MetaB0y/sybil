@@ -87,6 +87,26 @@ impl SyncActor {
             "fetched events from Polymarket"
         );
 
+        // Push the full event JSON to sybil-api so the FE can read it. We
+        // already hold the parsed event (no extra Polymarket fetch); this is
+        // an idempotent upsert each cycle, so the folder self-heals after a
+        // restart of either process. Only events with a tradeable market.
+        for event in &events {
+            if !event.markets.iter().any(|m| m.active && !m.closed) {
+                continue;
+            }
+            match serde_json::to_value(event) {
+                Ok(value) => {
+                    if let Err(e) = self.sybil_client.put_event_raw(&event.id, &value).await {
+                        warn!(event_id = &event.id, error = %e, "failed to push event snapshot");
+                    }
+                }
+                Err(e) => {
+                    warn!(event_id = &event.id, error = %e, "failed to serialize event snapshot")
+                }
+            }
+        }
+
         let mut new_token_ids = Vec::new();
 
         for event in &events {
