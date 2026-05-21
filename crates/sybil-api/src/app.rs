@@ -31,6 +31,7 @@ use crate::types::response::*;
         routes::accounts::get_portfolio,
         routes::accounts::get_account_fills,
         routes::accounts::get_equity,
+        routes::accounts::get_account_history,
         routes::bridge::status,
         routes::bridge::account_key,
         routes::bridge::submit_l1_deposit,
@@ -129,6 +130,7 @@ use crate::types::response::*;
         OverviewOrderStatsResponse,
         OpenBatchResponse,
         EventTradersResponse,
+        HistoryEventResponse,
     )),
     info(
         title = "Sybil API",
@@ -547,6 +549,10 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/v1/accounts/{id}/equity",
             axum::routing::get(routes::accounts::get_equity),
+        )
+        .route(
+            "/v1/accounts/{id}/events",
+            axum::routing::get(routes::accounts::get_account_history),
         )
         .route(
             "/v1/accounts/{id}/bridge-key",

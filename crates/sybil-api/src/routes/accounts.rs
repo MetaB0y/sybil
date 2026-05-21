@@ -225,6 +225,67 @@ pub async fn get_account_fills(
 }
 
 #[derive(Debug, serde::Deserialize)]
+pub struct HistoryParams {
+    pub limit: Option<usize>,
+    /// Cursor "<block>.<seq>" — return events strictly before it.
+    pub before: Option<String>,
+    /// "trades" | "funding" | "settlement".
+    pub category: Option<String>,
+}
+
+fn parse_cursor(s: &str) -> Option<(u64, u64)> {
+    let (b, q) = s.split_once('.')?;
+    Some((b.parse().ok()?, q.parse().ok()?))
+}
+
+/// GET /v1/accounts/{id}/events?limit&before&category
+#[utoipa::path(
+    get,
+    path = "/v1/accounts/{id}/events",
+    params(
+        ("id" = u64, Path, description = "Account ID"),
+        ("limit" = Option<usize>, Query, description = "Max events (default 50, cap 500)"),
+        ("before" = Option<String>, Query, description = "Cursor \"<block>.<seq>\"; returns events strictly before it"),
+        ("category" = Option<String>, Query, description = "trades | funding | settlement"),
+    ),
+    responses(
+        (status = 200, description = "Account history feed, newest-first", body = [HistoryEventResponse])
+    )
+)]
+pub async fn get_account_history(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    Query(params): Query<HistoryParams>,
+) -> Result<Json<Vec<HistoryEventResponse>>, AppError> {
+    let limit = params.limit.unwrap_or(50).min(500);
+    let before = params.before.as_deref().and_then(parse_cursor);
+    let events = state
+        .sequencer
+        .get_account_events(AccountId(id), limit, before, params.category)
+        .await?;
+    let out: Vec<HistoryEventResponse> = events
+        .into_iter()
+        .map(|e| HistoryEventResponse {
+            id: e.id(),
+            event_type: e.kind.as_str().to_string(),
+            category: e.kind.category().to_string(),
+            timestamp_ms: e.timestamp_ms,
+            block_height: e.block_height,
+            market_id: e.market_id.map(|m| m.0),
+            order_id: e.order_id,
+            side: e.side.map(|s| s.to_string()),
+            outcome: e.outcome.map(|o| o.to_string()),
+            qty: e.qty,
+            price_nanos: e.price_nanos,
+            amount_nanos: e.amount_nanos,
+            realized_pnl_nanos: e.realized_pnl_nanos,
+            payout_outcome: e.payout_outcome.map(|p| p.to_string()),
+        })
+        .collect();
+    Ok(Json(out))
+}
+
+#[derive(Debug, serde::Deserialize)]
 pub struct AccountFillParams {
     pub market_id: Option<u32>,
     pub limit: Option<usize>,

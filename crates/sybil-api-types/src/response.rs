@@ -701,6 +701,36 @@ pub struct EventTradersResponse {
     pub trader_count: u32,
 }
 
+/// One entry in the per-account history feed (`GET /v1/accounts/{id}/events`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct HistoryEventResponse {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub category: String,
+    pub timestamp_ms: u64,
+    pub block_height: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub market_id: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub side: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qty: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub price_nanos: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount_nanos: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub realized_pnl_nanos: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payout_outcome: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

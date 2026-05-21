@@ -113,6 +113,13 @@ pub enum SequencerMsg {
         RpcReplyPort<Vec<AccountFillRecord>>,
     ),
     GetEquitySeries(AccountId, RpcReplyPort<Vec<crate::aggregates::EquityPoint>>),
+    GetAccountEvents(
+        AccountId,
+        usize,
+        Option<(u64, u64)>,
+        Option<String>,
+        RpcReplyPort<Vec<crate::aggregates::HistoryEvent>>,
+    ),
     SearchMarkets(MarketSearchQuery, RpcReplyPort<Vec<MarketSearchResult>>),
     GetPendingOrders(Option<AccountId>, RpcReplyPort<Vec<PendingOrderInfo>>),
     GetMarketOrderBook(MarketId, RpcReplyPort<Vec<PendingOrderInfo>>),
@@ -1460,6 +1467,14 @@ impl Actor for SequencerActor {
             SequencerMsg::GetEquitySeries(account_id, reply) => {
                 let _ = reply.send(state.sequencer.equity_series(account_id));
             }
+            SequencerMsg::GetAccountEvents(account_id, limit, before, category, reply) => {
+                let _ = reply.send(state.sequencer.account_history(
+                    account_id,
+                    limit,
+                    before,
+                    category.as_deref(),
+                ));
+            }
             SequencerMsg::SearchMarkets(query, reply) => {
                 let _ = reply.send(state.handle_search_markets(query));
             }
@@ -2046,6 +2061,17 @@ impl SequencerHandle {
         account_id: AccountId,
     ) -> Result<Vec<crate::aggregates::EquityPoint>, SequencerError> {
         self.rpc(|reply| SequencerMsg::GetEquitySeries(account_id, reply))
+            .await
+    }
+
+    pub async fn get_account_events(
+        &self,
+        account_id: AccountId,
+        limit: usize,
+        before: Option<(u64, u64)>,
+        category: Option<String>,
+    ) -> Result<Vec<crate::aggregates::HistoryEvent>, SequencerError> {
+        self.rpc(|reply| SequencerMsg::GetAccountEvents(account_id, limit, before, category, reply))
             .await
     }
 

@@ -1374,3 +1374,56 @@ async fn account_equity_series_populates_after_trades() {
         "expected >=1 equity point: {v}"
     );
 }
+
+#[tokio::test]
+async fn account_history_shows_placed_then_cancelled() {
+    let (app, handle) = test_app(true).await;
+
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 100_000_000_000u64 }),
+    )
+    .await;
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+    post_json(app.clone(), "/v1/markets", json!({ "name": "Test" })).await;
+
+    let key = new_signing_key();
+    let public_key_hex = to_hex(key.verifying_key().to_sec1_point(true).as_bytes());
+    let (status, _) = post_json(
+        app.clone(),
+        &format!("/v1/accounts/{}/keys", account_id),
+        json!({ "public_key_hex": public_key_hex }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let order_payload = signed_buy_yes_payload(account_id, 0, 500_000_000, 3, &key);
+    let (status, _) = post_json(app.clone(), "/v1/orders/signed", order_payload).await;
+    assert_eq!(status, StatusCode::OK);
+
+    handle.produce_block().await.unwrap();
+
+    let (status, body) = get(app.clone(), &format!("/v1/accounts/{}/orders", account_id)).await;
+    assert_eq!(status, StatusCode::OK);
+    let pending = parse_json(&body);
+    let order_id = pending.as_array().unwrap()[0]["order_id"].as_u64().unwrap();
+
+    let cancel_payload = signed_cancel_payload(account_id, order_id, &key);
+    let (status, body) = post_json(app.clone(), "/v1/orders/cancel/signed", cancel_payload).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(parse_json(&body)["cancelled"].as_bool().unwrap());
+
+    // Assert the history feed
+    let (status, body) = get(app, &format!("/v1/accounts/{}/events?limit=20", account_id)).await;
+    assert_eq!(status, StatusCode::OK);
+    let events = parse_json(&body);
+    let events = events.as_array().unwrap();
+    let types: Vec<&str> = events.iter().map(|e| e["type"].as_str().unwrap()).collect();
+    assert!(types.contains(&"placed"), "history: {types:?}");
+    assert!(types.contains(&"cancelled"), "history: {types:?}");
+    // newest-first: cancelled appears before placed
+    let pc = types.iter().position(|t| *t == "cancelled").unwrap();
+    let pp = types.iter().position(|t| *t == "placed").unwrap();
+    assert!(pc < pp, "expected cancelled newest-first: {types:?}");
+}
