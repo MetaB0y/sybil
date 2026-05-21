@@ -840,7 +840,11 @@ impl SequencerActorState {
     /// the client.
     async fn admit_or_defer(&mut self, submission: OrderSubmission) -> Result<(), SequencerError> {
         self.check_account_submission_limits(&submission)?;
-        match self.sequencer.try_admit_direct(submission) {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        match self.sequencer.try_admit_direct(submission, now_ms) {
             crate::sequencer::AdmitOutcome::Admitted {
                 order_id,
                 resting_order,
@@ -871,10 +875,6 @@ impl SequencerActorState {
                 // tracker — acceptable: we still served the place).
                 // try_admit_direct only accepts non-MM single-market
                 // submissions, so `is_mm = false`.
-                let now_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
                 let markets: Vec<MarketId> = resting_order.order.active_markets().collect();
                 self.sequencer.record_trader_placement_analytics(
                     resting_order.account_id,

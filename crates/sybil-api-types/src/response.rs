@@ -619,6 +619,10 @@ pub struct PendingOrderResponse {
     /// compat).
     #[serde(default)]
     pub original_quantity: u64,
+    /// Wall-clock admit time, ms since epoch. `0` for orders admitted before
+    /// this field shipped (#[serde(default)] forward compat).
+    #[serde(default)]
+    pub created_at_ms: u64,
 }
 
 // --- Aggregates (B1 onward) ------------------------------------------------

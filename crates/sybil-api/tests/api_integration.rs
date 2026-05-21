@@ -1256,3 +1256,46 @@ async fn recent_blocks_returns_newest_first() {
     assert_eq!(status, StatusCode::OK);
     assert!(parse_json(&body).as_array().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn account_orders_include_created_at_ms() {
+    let (app, _) = test_app(true).await;
+
+    let (_, body) = post_json(app.clone(), "/v1/markets", json!({ "name": "ts?" })).await;
+    let market_id = parse_json(&body)["market_id"].as_u64().unwrap();
+
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 10_000_000_000u64 }),
+    )
+    .await;
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+
+    let before = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+
+    let (status, _) = post_json(
+        app.clone(),
+        "/v1/orders",
+        json!({
+            "account_id": account_id,
+            "orders": [{ "type": "BuyYes", "market_id": market_id, "limit_price_nanos": 500_000_000u64, "quantity": 10 }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = get(app, &format!("/v1/accounts/{account_id}/orders")).await;
+    assert_eq!(status, StatusCode::OK);
+    let pending = parse_json(&body);
+    let pending = pending.as_array().unwrap();
+    assert_eq!(pending.len(), 1, "got {pending:?}");
+    let created_at_ms = pending[0]["created_at_ms"].as_u64().unwrap();
+    assert!(
+        created_at_ms >= before,
+        "created_at_ms {created_at_ms} not >= submit time {before}"
+    );
+}

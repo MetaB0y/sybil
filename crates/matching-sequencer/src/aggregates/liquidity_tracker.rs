@@ -180,7 +180,7 @@ mod tests {
         trader: crate::account::AccountId,
     ) {
         let account = accounts.get(trader).expect("trader exists");
-        book.accept(order, trader, account, 1).expect("admit");
+        book.accept(order, trader, account, 1, 0).expect("admit");
     }
 
     /// Multi-market resting orders (spreads/bundles) are excluded from the

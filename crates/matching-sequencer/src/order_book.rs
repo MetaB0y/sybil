@@ -54,6 +54,11 @@ pub struct RestingOrder {
     /// mutated. Consumed by `PendingOrderResponse.original_quantity` (B8).
     #[serde(default)]
     pub(crate) original_max_fill: u64,
+    /// Wall-clock admit time, ms since epoch. Set once by `accept`, never
+    /// mutated. `0` on snapshots written before this field (#[serde(default)]).
+    /// Surfaced as `PendingOrderResponse.created_at_ms`.
+    #[serde(default)]
+    pub(crate) created_at_ms: u64,
 }
 
 /// The order book: resting orders + aggregate reservations.
@@ -208,6 +213,7 @@ impl OrderBook {
         account_id: AccountId,
         account: &crate::account::Account,
         current_height: u64,
+        created_at_ms: u64,
     ) -> Result<Accepted, RejectionReason> {
         let reserved = self.reserved_balance(account_id);
         let acct_positions = self.acct_position_reservations(account_id);
@@ -237,6 +243,7 @@ impl OrderBook {
             reserved_positions: pos_reservations,
             has_been_matched: false,
             original_max_fill: order.max_fill,
+            created_at_ms,
         };
         self.orders.push(resting.clone());
 
@@ -355,8 +362,10 @@ impl OrderBook {
     }
 
     /// Orders with full metadata (for API exposure). Tuple shape:
-    /// `(order, account, created_at, expires_at_block, original_max_fill)`.
-    pub fn resting_orders_full(&self) -> impl Iterator<Item = (&Order, AccountId, u64, u64, u64)> {
+    /// `(order, account, created_at, expires_at_block, original_max_fill, created_at_ms)`.
+    pub fn resting_orders_full(
+        &self,
+    ) -> impl Iterator<Item = (&Order, AccountId, u64, u64, u64, u64)> {
         self.orders.iter().map(|ro| {
             (
                 &ro.order,
@@ -364,6 +373,7 @@ impl OrderBook {
                 ro.created_at,
                 ro.expires_at_block,
                 ro.original_max_fill,
+                ro.created_at_ms,
             )
         })
     }
@@ -531,6 +541,7 @@ impl OrderBook {
                     reserved_positions: new_pos_reservations,
                     has_been_matched: true,
                     original_max_fill: ro.original_max_fill,
+                    created_at_ms: ro.created_at_ms,
                 });
             } else {
                 // Unfilled — keep as-is
@@ -683,7 +694,7 @@ mod tests {
 
         let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
         let account = accounts.get(aid).unwrap();
-        book.accept(order, aid, account, 1).unwrap();
+        book.accept(order, aid, account, 1, 0).unwrap();
 
         // Should have reserved 5 * 0.5 = 2.5 dollars
         let reserved = book.reserved_balance(aid);
@@ -700,11 +711,11 @@ mod tests {
 
         // First order: costs $2
         let o1 = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 4);
-        book.accept(o1, aid, account, 1).unwrap();
+        book.accept(o1, aid, account, 1, 0).unwrap();
 
         // Second order: costs $2 — would exceed $3 balance
         let o2 = buy_yes(&markets, 2, m0, NANOS_PER_DOLLAR / 2, 4);
-        let result = book.accept(o2, aid, account, 1);
+        let result = book.accept(o2, aid, account, 1, 0);
         assert!(result.is_err());
     }
 
@@ -716,7 +727,7 @@ mod tests {
         let account = accounts.get(aid).unwrap();
 
         let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
-        book.accept(order, aid, account, 1).unwrap();
+        book.accept(order, aid, account, 1, 0).unwrap();
         assert!(book.reserved_balance(aid) > 0);
 
         // Expire at height 5 (TTL=3, created_at=1, 5-1=4 > 3)
@@ -733,7 +744,7 @@ mod tests {
         let account = accounts.get(aid).unwrap();
 
         let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
-        let accepted = book.accept(order, aid, account, 1).unwrap();
+        let accepted = book.accept(order, aid, account, 1, 0).unwrap();
         let order_id = accepted.order.id;
         assert!(book.reserved_balance(aid) > 0);
 
@@ -758,7 +769,7 @@ mod tests {
         let account = accounts.get(aid).unwrap();
 
         let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 10);
-        let accepted = book.accept(order, aid, account, 1).unwrap();
+        let accepted = book.accept(order, aid, account, 1, 0).unwrap();
         let order_id = accepted.order.id;
 
         let original_reserved = book.reserved_balance(aid);
@@ -792,7 +803,7 @@ mod tests {
 
         let mut order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
         order.expires_at_block = Some(1);
-        book.accept(order, aid, account, 0).unwrap();
+        book.accept(order, aid, account, 0, 0).unwrap();
 
         book.settle(&[], &HashSet::new(), 1);
 
@@ -809,7 +820,7 @@ mod tests {
 
         let mut order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
         order.expires_at_block = Some(2);
-        book.accept(order, aid, account, 1).unwrap();
+        book.accept(order, aid, account, 1, 0).unwrap();
 
         book.expire(2);
         assert_eq!(book.len(), 1);
@@ -830,6 +841,7 @@ mod tests {
             reserved_positions: vec![],
             has_been_matched: false,
             original_max_fill: 0,
+            created_at_ms: 0,
         };
         let book = OrderBook::restore(vec![bad], 10);
         assert_eq!(book.len(), 0);
@@ -847,6 +859,7 @@ mod tests {
             reserved_positions: vec![],
             has_been_matched: false,
             original_max_fill: 0,
+            created_at_ms: 0,
         };
         let book = OrderBook::restore(vec![ro], 10);
         assert_eq!(book.len(), 1);
@@ -861,7 +874,7 @@ mod tests {
         let account = accounts.get(aid).unwrap();
 
         let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
-        let accepted = book.accept(order, aid, account, 1).unwrap();
+        let accepted = book.accept(order, aid, account, 1, 0).unwrap();
         assert!(book.reserved_balance(aid) > 0);
 
         book.cancel(aid, accepted.order.id).unwrap();
@@ -880,7 +893,7 @@ mod tests {
         for id in 1..=3 {
             let mut order = buy_yes(&markets, id, m0, NANOS_PER_DOLLAR / 2, 2);
             order.expires_at_block = Some(1);
-            book.accept(order, aid, account, 0).unwrap();
+            book.accept(order, aid, account, 0, 0).unwrap();
         }
 
         let removed = book.expire(2);
@@ -899,7 +912,7 @@ mod tests {
         let account = accounts.get(aid).unwrap();
 
         let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
-        let accepted = book.accept(order, aid, account, 1).unwrap();
+        let accepted = book.accept(order, aid, account, 1, 0).unwrap();
         let order_id = accepted.order.id;
 
         let fills = vec![Fill {
@@ -922,7 +935,7 @@ mod tests {
         let account = accounts.get(aid).unwrap();
 
         let order = buy_yes(&markets, 7, m0, NANOS_PER_DOLLAR / 2, 5);
-        let accepted = book.accept(order, aid, account, 1).unwrap();
+        let accepted = book.accept(order, aid, account, 1, 0).unwrap();
 
         let ro = book.cancel(aid, accepted.order.id).unwrap();
         assert_eq!(ro.order.id, accepted.order.id);
@@ -966,7 +979,7 @@ mod tests {
         let account = accounts.get(aid).unwrap();
 
         let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 10);
-        let accepted = book.accept(order, aid, account, 1).unwrap();
+        let accepted = book.accept(order, aid, account, 1, 0).unwrap();
         let order_id = accepted.order.id;
 
         let fills = vec![Fill {

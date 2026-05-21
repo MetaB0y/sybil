@@ -174,6 +174,8 @@ pub struct PendingOrderInfo {
     /// order is partially filled; this stays constant. Used by the FE to
     /// draw partial-fill progress.
     pub original_quantity: u64,
+    /// Wall-clock admit time, ms since epoch. `0` for pre-existing orders.
+    pub created_at_ms: u64,
 }
 
 pub struct PreparedBlock {
@@ -265,6 +267,7 @@ impl PendingOrderInfo {
         created_at: u64,
         expires_at_block: u64,
         original_max_fill: u64,
+        created_at_ms: u64,
     ) -> Self {
         let market_ids: Vec<_> = order.active_markets().collect();
         let side = classify_order_side(order);
@@ -285,6 +288,7 @@ impl PendingOrderInfo {
             } else {
                 original_max_fill
             },
+            created_at_ms,
         }
     }
 }
@@ -1270,7 +1274,7 @@ impl BlockSequencer {
     /// `prepare_block` at block time, because they rely on batch-local state
     /// (STP across the whole bundle, MM flash liquidity) that the resting
     /// book doesn't model.
-    pub fn try_admit_direct(&mut self, submission: OrderSubmission) -> AdmitOutcome {
+    pub fn try_admit_direct(&mut self, submission: OrderSubmission, now_ms: u64) -> AdmitOutcome {
         for order in &submission.orders {
             for market_id in order.active_markets() {
                 if self.markets.get(market_id).is_none() {
@@ -1332,7 +1336,7 @@ impl BlockSequencer {
 
         match self
             .order_book
-            .accept(order, account_id, account, self.height)
+            .accept(order, account_id, account, self.height, now_ms)
         {
             Ok(accepted) => AdmitOutcome::Admitted {
                 order_id: accepted.order.id,
@@ -1385,15 +1389,16 @@ impl BlockSequencer {
     ) -> Vec<PendingOrderInfo> {
         self.order_book
             .resting_orders_full()
-            .filter(|(_, aid, _, _, _)| account_id_filter.is_none_or(|filter| *aid == filter))
+            .filter(|(_, aid, _, _, _, _)| account_id_filter.is_none_or(|filter| *aid == filter))
             .map(
-                |(order, aid, created_at, expires_at_block, original_max_fill)| {
+                |(order, aid, created_at, expires_at_block, original_max_fill, created_at_ms)| {
                     PendingOrderInfo::from_resting(
                         order,
                         aid,
                         created_at,
                         expires_at_block,
                         original_max_fill,
+                        created_at_ms,
                     )
                 },
             )
@@ -1404,15 +1409,16 @@ impl BlockSequencer {
     pub fn market_orderbook(&self, market_id: MarketId) -> Vec<PendingOrderInfo> {
         self.order_book
             .resting_orders_full()
-            .filter(|(order, _, _, _, _)| order.active_markets().any(|m| m == market_id))
+            .filter(|(order, _, _, _, _, _)| order.active_markets().any(|m| m == market_id))
             .map(
-                |(order, aid, created_at, expires_at_block, original_max_fill)| {
+                |(order, aid, created_at, expires_at_block, original_max_fill, created_at_ms)| {
                     PendingOrderInfo::from_resting(
                         order,
                         aid,
                         created_at,
                         expires_at_block,
                         original_max_fill,
+                        created_at_ms,
                     )
                 },
             )
@@ -2204,10 +2210,13 @@ impl BlockSequencer {
                     );
                 } else {
                     // Non-MM orders: validate + reserve via OrderBook
-                    match self
-                        .order_book
-                        .accept(order.clone(), account_id, account, self.height)
-                    {
+                    match self.order_book.accept(
+                        order.clone(),
+                        account_id,
+                        account,
+                        self.height,
+                        timestamp_ms,
+                    ) {
                         Ok(accepted) => {
                             if stp.would_complete_set(account_id, &accepted.order) {
                                 // Undo the book acceptance — release reservations
@@ -3056,7 +3065,7 @@ mod tests {
         assert_eq!(result.rejections.len(), 0);
 
         assert_eq!(seq.order_book.len(), 1);
-        let (_, resting_aid, resting_created, _, _) =
+        let (_, resting_aid, resting_created, _, _, _) =
             seq.order_book.resting_orders_full().next().unwrap();
         assert_eq!(resting_aid, aid);
         assert_eq!(resting_created, 1);
@@ -4147,14 +4156,14 @@ mod tests {
         let (mut seq, aid, markets, m0, m1) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
 
         let first = single_order_sub(aid, outcome_buy(&markets, 0, m0, 0, 400_000_000, 10));
-        let outcome = seq.try_admit_direct(first);
+        let outcome = seq.try_admit_direct(first, 0);
         assert!(matches!(outcome, AdmitOutcome::Admitted { .. }));
 
         seq.produce_block(vec![], 1000);
         assert_eq!(seq.height, 1);
 
         let second = single_order_sub(aid, outcome_buy(&markets, 0, m1, 0, 400_000_000, 10));
-        let outcome = seq.try_admit_direct(second);
+        let outcome = seq.try_admit_direct(second, 0);
         match outcome {
             AdmitOutcome::Rejected(SequencerError::Rejected(r)) => {
                 assert!(matches!(r.reason, RejectionReason::CompleteSetFormation));
@@ -4168,7 +4177,7 @@ mod tests {
         let (mut seq, aid, markets, m0, m1) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
 
         let first = single_order_sub(aid, outcome_buy(&markets, 0, m0, 0, 400_000_000, 10));
-        let first_id = match seq.try_admit_direct(first) {
+        let first_id = match seq.try_admit_direct(first, 0) {
             AdmitOutcome::Admitted { order_id, .. } => order_id,
             other => panic!("expected Admitted, got {:?}", other),
         };
@@ -4178,7 +4187,7 @@ mod tests {
         seq.cancel_pending_order(aid, first_id).expect("cancel ok");
 
         let second = single_order_sub(aid, outcome_buy(&markets, 0, m1, 0, 400_000_000, 10));
-        let outcome = seq.try_admit_direct(second);
+        let outcome = seq.try_admit_direct(second, 0);
         assert!(
             matches!(outcome, AdmitOutcome::Admitted { .. }),
             "expected Admitted after cancel, got {:?}",
@@ -4193,7 +4202,7 @@ mod tests {
         order.expires_at_block = Some(1);
 
         assert!(matches!(
-            seq.try_admit_direct(single_order_sub(aid, order)),
+            seq.try_admit_direct(single_order_sub(aid, order), 0),
             AdmitOutcome::Admitted { .. }
         ));
 
@@ -4209,7 +4218,7 @@ mod tests {
         order.expires_at_block = Some(2);
 
         assert!(matches!(
-            seq.try_admit_direct(single_order_sub(aid, order)),
+            seq.try_admit_direct(single_order_sub(aid, order), 0),
             AdmitOutcome::Admitted { .. }
         ));
 
@@ -4226,7 +4235,7 @@ mod tests {
         let mut order = outcome_buy(&markets, 0, m0, 0, 400_000_000, 10);
         order.expires_at_block = Some(0);
 
-        match seq.try_admit_direct(single_order_sub(aid, order)) {
+        match seq.try_admit_direct(single_order_sub(aid, order), 0) {
             AdmitOutcome::Rejected(SequencerError::Rejected(rejection)) => {
                 assert!(matches!(rejection.reason, RejectionReason::Expired { .. }));
             }
@@ -4250,14 +4259,14 @@ mod tests {
 
         let first = single_order_sub(aid, outcome_buy(&markets, 0, m0, 1, 800_000_000, 10));
         assert!(matches!(
-            seq.try_admit_direct(first),
+            seq.try_admit_direct(first, 0),
             AdmitOutcome::Admitted { .. }
         ));
 
         seq.produce_block(vec![], 1000);
 
         let second = single_order_sub(aid, outcome_buy(&markets, 0, m1, 1, 800_000_000, 10));
-        match seq.try_admit_direct(second) {
+        match seq.try_admit_direct(second, 0) {
             AdmitOutcome::Rejected(SequencerError::Rejected(r)) => {
                 assert!(matches!(r.reason, RejectionReason::CompleteSetFormation));
             }
@@ -4277,7 +4286,7 @@ mod tests {
 
         let sell_first = single_order_sub(aid, outcome_sell(&markets, 0, m0, 0, 400_000_000, 10));
         assert!(matches!(
-            seq.try_admit_direct(sell_first),
+            seq.try_admit_direct(sell_first, 0),
             AdmitOutcome::Admitted { .. }
         ));
 
@@ -4286,7 +4295,7 @@ mod tests {
         let buy_other = single_order_sub(aid, outcome_buy(&markets, 0, m1, 0, 400_000_000, 10));
         assert!(
             matches!(
-                seq.try_admit_direct(buy_other),
+                seq.try_admit_direct(buy_other, 0),
                 AdmitOutcome::Admitted { .. }
             ),
             "sell on m0 + buy on m1 is only partial coverage — must be admitted"
@@ -4303,7 +4312,7 @@ mod tests {
 
         let first = single_order_sub(aid, outcome_buy(&markets, 0, m0, 0, 400_000_000, 10));
         assert!(matches!(
-            seq.try_admit_direct(first),
+            seq.try_admit_direct(first, 0),
             AdmitOutcome::Admitted { .. }
         ));
         seq.produce_block(vec![], 1000);
@@ -4353,13 +4362,13 @@ mod tests {
             ],
             mm_constraint: None,
         };
-        match seq.try_admit_direct(bundle) {
+        match seq.try_admit_direct(bundle, 0) {
             AdmitOutcome::Deferred(sub) => seq.push_pending_bundle(sub),
             other => panic!("expected Deferred for multi-order bundle, got {:?}", other),
         }
 
         let completing = single_order_sub(aid, outcome_buy(&markets, 0, m2, 0, 400_000_000, 10));
-        match seq.try_admit_direct(completing) {
+        match seq.try_admit_direct(completing, 0) {
             AdmitOutcome::Rejected(SequencerError::Rejected(r)) => {
                 assert!(matches!(r.reason, RejectionReason::CompleteSetFormation));
             }
@@ -4415,7 +4424,7 @@ mod tests {
         let (mut seq, aid, markets, m0, _) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
 
         let order = outcome_buy(&markets, 0, m0, 0, 400_000_000, 7);
-        let order_id = match seq.try_admit_direct(single_order_sub(aid, order)) {
+        let order_id = match seq.try_admit_direct(single_order_sub(aid, order), 0) {
             AdmitOutcome::Admitted { order_id, .. } => order_id,
             other => panic!("expected Admitted, got {:?}", other),
         };
