@@ -979,6 +979,21 @@ impl BlockSequencer {
         self.analytics.equity_series(account_id)
     }
 
+    pub fn record_history(&mut self, event: crate::aggregates::HistoryEvent) {
+        self.analytics.record_history(event);
+    }
+
+    pub fn account_history(
+        &self,
+        account_id: AccountId,
+        limit: usize,
+        before: Option<(u64, u64)>,
+        category: Option<&str>,
+    ) -> Vec<crate::aggregates::HistoryEvent> {
+        self.analytics
+            .account_history(account_id, limit, before, category)
+    }
+
     pub fn record_trader_placement_analytics(
         &mut self,
         account_id: AccountId,

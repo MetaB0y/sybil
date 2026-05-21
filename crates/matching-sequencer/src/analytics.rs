@@ -10,9 +10,9 @@ use matching_engine::{Fill, MarketId, Nanos, Order};
 
 use crate::account::{AccountId, AccountStore};
 use crate::aggregates::{
-    CostBasisTracker, CostBasisTrackerSnapshot, EquityTracker, LiquidityTracker,
-    LiquidityTrackerSnapshot, OrderStats, OrderStatsTracker, OrderStatsTrackerSnapshot,
-    TraderTracker, TraderTrackerSnapshot,
+    AccountEventLog, CostBasisTracker, CostBasisTrackerSnapshot, EquityTracker, HistoryEvent,
+    LiquidityTracker, LiquidityTrackerSnapshot, OrderStats, OrderStatsTracker,
+    OrderStatsTrackerSnapshot, TraderTracker, TraderTrackerSnapshot,
 };
 use crate::fill_recorder::FillRecorder;
 use crate::market_info::{AccountFillRecord, PricePoint};
@@ -33,6 +33,7 @@ pub struct AnalyticsState {
     cost_basis_tracker: CostBasisTracker,
     first_deposit_ms: HashMap<AccountId, u64>,
     equity_tracker: EquityTracker,
+    account_event_log: AccountEventLog,
 }
 
 impl AnalyticsState {
@@ -46,6 +47,7 @@ impl AnalyticsState {
             cost_basis_tracker: CostBasisTracker::new(),
             first_deposit_ms: HashMap::new(),
             equity_tracker: EquityTracker::new(),
+            account_event_log: AccountEventLog::new(),
         }
     }
 
@@ -71,6 +73,7 @@ impl AnalyticsState {
             cost_basis_tracker: CostBasisTracker::restore(input.cost_basis_tracker),
             first_deposit_ms: input.first_deposit_ms,
             equity_tracker: EquityTracker::new(),
+            account_event_log: AccountEventLog::new(),
         }
     }
 
@@ -310,6 +313,21 @@ impl AnalyticsState {
 
     pub fn equity_series(&self, account_id: AccountId) -> Vec<crate::aggregates::EquityPoint> {
         self.equity_tracker.series(account_id)
+    }
+
+    pub fn record_history(&mut self, event: HistoryEvent) {
+        self.account_event_log.append(event);
+    }
+
+    pub fn account_history(
+        &self,
+        account_id: AccountId,
+        limit: usize,
+        before: Option<(u64, u64)>,
+        category: Option<&str>,
+    ) -> Vec<HistoryEvent> {
+        self.account_event_log
+            .query(account_id, limit, before, category)
     }
 
     pub fn apply_resolution(
