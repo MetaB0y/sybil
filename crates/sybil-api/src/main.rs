@@ -124,6 +124,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = ApiConfig::parse();
 
+    if !config.event_snapshot_dir.is_empty() {
+        let dir = std::path::Path::new(&config.event_snapshot_dir);
+        if dir.exists() {
+            if let Err(e) = std::fs::remove_dir_all(dir) {
+                tracing::warn!(dir = %dir.display(), error = %e, "failed to wipe event snapshot dir");
+            }
+        }
+        match std::fs::create_dir_all(dir) {
+            Ok(()) => {
+                tracing::info!(dir = %dir.display(), "event snapshot dir ready (wiped on startup)")
+            }
+            Err(e) => {
+                tracing::warn!(dir = %dir.display(), error = %e, "failed to create event snapshot dir")
+            }
+        }
+    }
+
     tracing::info!(
         port = config.port,
         dev_mode = config.dev_mode,

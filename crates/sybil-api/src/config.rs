@@ -141,6 +141,12 @@ pub struct ApiConfig {
     #[arg(long, default_value = "", env = "SYBIL_MARKET_REF_DATA_PATH")]
     pub market_ref_data_path: String,
 
+    /// Directory holding full Polymarket event JSON snapshots, served at
+    /// `GET /v1/events/{id}/raw` and wiped+recreated on startup. Empty =
+    /// disabled (the raw endpoints return 404).
+    #[arg(long, default_value = "", env = "SYBIL_EVENT_SNAPSHOT_DIR")]
+    pub event_snapshot_dir: String,
+
     /// Path to the P256 signing key used by the admin feed. The file stores
     /// the raw 32-byte SEC1 scalar, hex-encoded. Empty = generate a fresh
     /// ephemeral key at startup (dev-mode convenience; will NOT persist
@@ -186,6 +192,7 @@ impl Default for ApiConfig {
             data_dir: String::new(),
             arena_db_path: String::new(),
             market_ref_data_path: String::new(),
+            event_snapshot_dir: String::new(),
             admin_feed_key_path: String::new(),
             polymarket_feed_pubkey_hex: String::new(),
         }
