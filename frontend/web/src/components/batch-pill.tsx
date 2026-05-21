@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { formatBatchSeconds } from "@/lib/format/nanos";
 import { selectConnection, selectLatestBlock, useStore } from "@/lib/store";
+import { BLOCK_INTERVAL_MS } from "@/lib/constants";
 
-const BLOCK_MS = 2000; // SYBIL_BLOCK_INTERVAL_MS; tracks the prod cadence.
+const BLOCK_MS = BLOCK_INTERVAL_MS;
 
 /**
  * Live batch countdown pill — mirrors the handoff layout:

@@ -14,8 +14,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { selectLatestBlock, useStore } from "@/lib/store";
+import { BLOCK_INTERVAL_MS } from "@/lib/constants";
 
-const BATCH_MS = 2000;
+const BATCH_MS = BLOCK_INTERVAL_MS;
 
 export function useBatchCountdown(): {
   progress01: number;

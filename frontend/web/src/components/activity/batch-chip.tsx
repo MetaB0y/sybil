@@ -16,8 +16,9 @@ import {
   useStore,
 } from "@/lib/store";
 import { formatBatchSeconds, formatInt } from "@/lib/format/nanos";
+import { BLOCK_INTERVAL_MS } from "@/lib/constants";
 
-const BLOCK_MS = 2000;
+const BLOCK_MS = BLOCK_INTERVAL_MS;
 
 export function ActivityBatchChip() {
   const latest = useStore(selectLatestBlock);
