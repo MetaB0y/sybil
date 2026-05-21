@@ -324,3 +324,11 @@ hr {
   vertical-align: 1px;
   animation: sybil-pulse 1.6s ease-in-out infinite;
 }
+
+/* Utility: continuous right-to-left marquee for the recent-trades ticker.
+   The track renders its content twice; -50% scrolls exactly one copy so the
+   loop is seamless regardless of content width. */
+@keyframes sybil-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
