@@ -62,10 +62,14 @@ export const formatPctDelta = (pct: number): string => {
   return `${sign}${pct.toFixed(1)}%`;
 };
 
-/** Format an absolute price change in cents (e.g. +5¢, -3¢, 0¢). */
+/**
+ * Format an absolute price change in cents (e.g. +5¢, −3¢, ±0¢). The flat
+ * case renders as "±0¢" (not a bare "0¢") so it reads as a *delta* rather
+ * than being mistaken for a price or for missing data.
+ */
 export const formatCentsDelta = (cents: number): string => {
   const rounded = Math.round(cents);
-  if (rounded === 0) return "0¢";
+  if (rounded === 0) return "±0¢";
   const sign = rounded > 0 ? "+" : "−";
   return `${sign}${Math.abs(rounded)}¢`;
 };
@@ -112,8 +116,8 @@ export const formatCompactDollars = (v: NanosInput): string => {
 /**
  * Format a batch countdown as one-decimal seconds (e.g. "1.8", "0.3").
  *
- * The whole app runs a 2s batch cadence — an mm:ss format would only ever
- * cycle 0:00–0:02 and visibly jump. One decimal is the honest, smooth
+ * The app's batch cadence is short (BLOCK_INTERVAL_MS) — an mm:ss format would
+ * barely move and visibly jump. One decimal is the honest, smooth
  * representation; this is the single formatter every batch clock shares.
  */
 export const formatBatchSeconds = (seconds: number): string =>

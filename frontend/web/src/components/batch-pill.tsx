@@ -14,9 +14,9 @@ const BLOCK_MS = BLOCK_INTERVAL_MS;
  *
  * Dot · BATCH label · countdown (seconds remaining until the current
  * batch clears) · inline horizontal progress bar that shrinks from full
- * to empty over each 2s window. The handoff renders `0:56` because it
- * assumed a 60s cadence; we adapt to 2s with a one-decimal seconds
- * display since `0:00 → 0:00` at 2s would be useless.
+ * to empty over each batch window. The handoff renders `0:56` because it
+ * assumed a 60s cadence; we use a one-decimal seconds display (e.g. `9.7`)
+ * driven by BLOCK_INTERVAL_MS.
  *
  * Anchored to performance.now() at each new block so the countdown
  * doesn't drift across tab sleeps.
@@ -99,7 +99,20 @@ export function BatchPill() {
       >
         batch
       </span>
-      <span className="tabular">{remainingSecs}</span>
+      <span
+        className="tabular"
+        style={{
+          // Reserve room for the widest value (e.g. "10.0") so the pill
+          // doesn't jump a char-width when a new batch resets the countdown
+          // from 3 digits ("9.9") to 4 ("10.0"). Right-aligned keeps the
+          // decimal point fixed as the number shrinks.
+          display: "inline-block",
+          width: `${formatBatchSeconds(BLOCK_MS / 1000).length}ch`,
+          textAlign: "right",
+        }}
+      >
+        {remainingSecs}
+      </span>
       <span
         aria-hidden
         style={{

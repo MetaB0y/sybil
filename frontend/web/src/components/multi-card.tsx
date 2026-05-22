@@ -334,7 +334,7 @@ function FeaturedOutcome({
               className="text-mono tabular"
               style={{
                 fontSize: "var(--fs-12)",
-                color: delta24Cents >= 0 ? "var(--yes)" : "var(--no)",
+                color: deltaValueColor(delta24Cents),
               }}
             >
               {formatCentsDelta(delta24Cents)}
@@ -442,14 +442,10 @@ function SecondaryRow({
       </span>
       <span
         className="text-mono tabular"
+        title={delta24Cents == null ? "no 24h history yet" : undefined}
         style={{
           fontSize: "11px",
-          color:
-            delta24Cents != null
-              ? delta24Cents >= 0
-                ? "var(--yes)"
-                : "var(--no)"
-              : "var(--fg-4)",
+          color: deltaValueColor(delta24Cents),
           display: "inline-block",
           width: "100%",
           textAlign: "right",
@@ -514,6 +510,17 @@ function deltaTone(delta: number | null, hasPrice: boolean): string {
   if (!hasPrice) return "var(--fg-4)";
   if (delta == null) return "var(--fg-1)";
   return delta >= 0 ? "var(--yes)" : "var(--no)";
+}
+
+/**
+ * Color for the 24h-delta value token itself (not the price): dim when there's
+ * no history, neutral grey when flat (rounds to ±0¢), else green/red by sign.
+ * Rounds first so the color matches what `formatCentsDelta` actually prints.
+ */
+function deltaValueColor(delta: number | null): string {
+  if (delta == null) return "var(--fg-4)";
+  if (Math.round(delta) === 0) return "var(--fg-3)";
+  return delta > 0 ? "var(--yes)" : "var(--no)";
 }
 
 function FooterChip({
