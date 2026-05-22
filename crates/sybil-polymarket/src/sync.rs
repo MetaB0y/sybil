@@ -117,15 +117,31 @@ impl SyncActor {
         // existing markets without wiping market_ref_data.json. Collect under
         // the lock, then POST after releasing it.
         if self.first_sync {
+            // Fully-closed events drop out of the active fetch, so pull the
+            // closed-event list once too — that's how their markets get flagged
+            // `closed` for the frontend to hide.
+            let closed_events = self
+                .gamma_client
+                .fetch_closed_events(self.config.max_events)
+                .await
+                .unwrap_or_else(|e| {
+                    warn!(error = %e, "failed to fetch closed events for backfill");
+                    Vec::new()
+                });
             let refresh: Vec<(u32, SetMarketMetadataRequest)> = {
                 let map = self.mapping.read().await;
+                // Re-push display metadata for every mapped market — active
+                // events (open + closed children) AND fully-closed events. No
+                // active/closed filter: `filter_map` already gates on the market
+                // being mapped, the POST is idempotent, and closed markets MUST
+                // be included so they receive `closed: true` + `group_item_title`.
                 events
                     .iter()
+                    .chain(closed_events.iter())
                     .flat_map(|event| {
                         event
                             .markets
                             .iter()
-                            .filter(|m| m.active && !m.closed)
                             .filter_map(|m| {
                                 map.sybil_market_id(&m.condition_id)
                                     .map(|sid| (sid, build_metadata_request(event, m)))
@@ -418,5 +434,7 @@ fn build_metadata_request(event: &GammaEvent, market: &GammaMarket) -> SetMarket
         polymarket_condition_id: Some(market.condition_id.clone()),
         event_start_date_ms,
         market_start_date_ms,
+        group_item_title: market.group_item_title.clone(),
+        closed: Some(market.closed),
     }
 }
