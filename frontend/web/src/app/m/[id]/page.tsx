@@ -365,11 +365,20 @@ function ChartSection({ marketId }: { marketId: number }) {
     [outcomes, effectiveSelected],
   );
 
-  // Binary → area. Multi → stacked when the group looks NegRisk (prices
-  // partition to ~100¢), else overlaid independent lines.
+  // Binary → area. Multi → stacked only for true NegRisk (mutually-exclusive)
+  // events, else overlaid independent lines. Use the real `negRisk` flag from
+  // the Polymarket event JSON (event-wide, so any market's value works); fall
+  // back to the price-sum heuristic only when the event has no /raw snapshot.
+  const rawMarkets = useEventRaw(
+    group?.eventId ?? undefined,
+    !!group?.eventId,
+  ).data;
+  const negRisk = rawMarkets
+    ? [...rawMarkets.values()][0]?.negRisk
+    : undefined;
   const mode = !group?.isMultiOutcome
     ? "area"
-    : detectStackable(outcomes)
+    : (negRisk ?? detectStackable(outcomes))
       ? "stacked"
       : "lines";
 

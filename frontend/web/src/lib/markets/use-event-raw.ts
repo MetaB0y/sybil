@@ -16,6 +16,10 @@ export type RawEventMarket = {
   /** Resolution source URL. Frequently an empty string on Gamma (the criteria
    *  live in `description`); rendered as a link only when non-empty. */
   resolutionSource?: string;
+  /** Real NegRisk (mutually-exclusive outcomes) flag from the Gamma event,
+   *  mirrored onto every market. Lets the chart stack only true NegRisk events
+   *  instead of inferring it from a price sum. */
+  negRisk?: boolean;
 };
 
 const DEFAULT_API_BASE = "https://172-104-31-54.nip.io";
