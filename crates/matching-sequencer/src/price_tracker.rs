@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use matching_engine::{Fill, MarketId, Nanos, Order};
+use matching_engine::{mark_yes_no, Fill, MarketId, Nanos, Order, NANOS_PER_DOLLAR};
 use serde::{Deserialize, Serialize};
 
 use crate::market_info::PricePoint;
@@ -52,6 +52,12 @@ pub struct PriceTrackerClearingHistorySnapshot {
 pub struct PriceTracker {
     /// Persisted clearing prices across blocks (fallback when no trades happen).
     last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
+    /// Sibling of `last_clearing_prices`: the most recent **mark** per market
+    /// (clearing when traded, else book midpoint, else carry-over). Serving
+    /// layer only — never persisted or sent to consensus. Seeded from
+    /// `last_clearing_prices` on restore so the portfolio has a mark before the
+    /// first post-restart block.
+    last_mark_prices: HashMap<MarketId, Vec<Nanos>>,
     /// Price history per market.
     price_history: HashMap<MarketId, Vec<PricePoint>>,
     /// Cumulative per-market volume in nanos.
@@ -88,6 +94,7 @@ impl PriceTracker {
     pub fn with_retention(max_history_points_per_market: usize) -> Self {
         Self {
             last_clearing_prices: HashMap::new(),
+            last_mark_prices: HashMap::new(),
             price_history: HashMap::new(),
             market_volumes: HashMap::new(),
             max_history_points_per_market,
@@ -116,8 +123,10 @@ impl PriceTracker {
         market_volumes: HashMap<MarketId, u64>,
         max_history_points_per_market: usize,
     ) -> Self {
+        let last_clearing_prices_seed = last_clearing_prices.clone();
         Self {
             last_clearing_prices,
+            last_mark_prices: last_clearing_prices_seed,
             price_history: HashMap::new(),
             market_volumes,
             max_history_points_per_market,
@@ -164,6 +173,12 @@ impl PriceTracker {
         &self.last_clearing_prices
     }
 
+    /// Current mark prices (clearing-or-indicative). Always at least as
+    /// populated as `last_clearing_prices` after the first block.
+    pub fn last_mark_prices(&self) -> &HashMap<MarketId, Vec<Nanos>> {
+        &self.last_mark_prices
+    }
+
     /// Merge solver output with persisted prices.
     ///
     /// Fresh prices from the solver replace stored prices only for markets that
@@ -194,22 +209,21 @@ impl PriceTracker {
             .collect()
     }
 
-    /// Record price history and volume for this block. Returns the per-market
-    /// volume split (already computed for the price-history append) so callers
-    /// can plumb it onto the Block without recomputing.
+    /// Record the per-block price series, volumes, and mark prices. Returns
+    /// `(per_market_volume, mark_prices)`. The mark series powers live charts
+    /// and 24h deltas; `mark_prices` is also reused by the liquidity and
+    /// equity trackers so they value markets that have a book but no cross.
     pub fn record_block(
         &mut self,
         fills: &[Fill],
         orders: &HashMap<u64, &Order>,
         clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
+        midpoints: &HashMap<MarketId, Nanos>,
         height: u64,
         timestamp_ms: u64,
-    ) -> HashMap<MarketId, u64> {
-        // Compute per-market volume and the platform-block total from raw
-        // fills. Each fill credits ALL of its order's active markets (a
-        // multi-market bundle multiplies into N per-market entries), but the
-        // platform total counts each fill once — summing per-market values
-        // would over-count for multi-market orders.
+    ) -> (HashMap<MarketId, u64>, HashMap<MarketId, Vec<Nanos>>) {
+        // Per-market and platform volume from raw fills (multi-market orders
+        // credit each active market; the platform total counts each fill once).
         let mut per_market_volume: HashMap<MarketId, u64> = HashMap::new();
         let mut platform_block_volume: u64 = 0;
         for fill in fills {
@@ -225,33 +239,62 @@ impl PriceTracker {
             }
         }
 
-        // Append PricePoint for each market that had fills
-        for (&mid, &vol) in &per_market_volume {
-            if let Some(prices) = clearing_prices.get(&mid) {
-                let yes_price = prices.first().copied().unwrap_or(0);
-                let no_price = prices.get(1).copied().unwrap_or(0);
-                self.price_history.entry(mid).or_default().push(PricePoint {
+        // Universe of markets to mark this block: anything with a (carry-over)
+        // clearing price, anything with a fresh midpoint, plus filled markets.
+        let mut universe: HashSet<MarketId> = clearing_prices.keys().copied().collect();
+        universe.extend(midpoints.keys().copied());
+        universe.extend(per_market_volume.keys().copied());
+
+        let mut mark_prices: HashMap<MarketId, Vec<Nanos>> = HashMap::new();
+        for &mid in &universe {
+            let vol = per_market_volume.get(&mid).copied().unwrap_or(0);
+            let had_fill = vol > 0;
+            let mark = mark_yes_no(
+                had_fill,
+                clearing_prices.get(&mid).map(|v| v.as_slice()),
+                midpoints.get(&mid).copied(),
+                self.last_mark_prices.get(&mid).map(|v| v.as_slice()),
+            );
+            let yes_price = mark.first().copied().unwrap_or(NANOS_PER_DOLLAR / 2);
+            let no_price = mark
+                .get(1)
+                .copied()
+                .unwrap_or_else(|| NANOS_PER_DOLLAR.saturating_sub(yes_price));
+
+            // Coalesce flat no-trade ticks: skip the append when the price is
+            // unchanged AND nothing traded. Trades always produce a point.
+            let unchanged = vol == 0
+                && self
+                    .price_history
+                    .get(&mid)
+                    .and_then(|h| h.last())
+                    .map(|p| p.yes_price == yes_price && p.no_price == no_price)
+                    .unwrap_or(false);
+            if !unchanged {
+                let history = self.price_history.entry(mid).or_default();
+                history.push(PricePoint {
                     height,
                     timestamp_ms,
                     yes_price,
                     no_price,
                     volume_nanos: vol,
                 });
-                if let Some(history) = self.price_history.get_mut(&mid) {
-                    let overflow = history
-                        .len()
-                        .saturating_sub(self.max_history_points_per_market);
-                    if overflow > 0 {
-                        history.drain(0..overflow);
-                    }
+                let overflow = history
+                    .len()
+                    .saturating_sub(self.max_history_points_per_market);
+                if overflow > 0 {
+                    history.drain(0..overflow);
                 }
             }
-            *self.market_volumes.entry(mid).or_insert(0) += vol;
+
+            if vol > 0 {
+                *self.market_volumes.entry(mid).or_insert(0) += vol;
+            }
+            self.last_mark_prices.insert(mid, mark.clone());
+            mark_prices.insert(mid, mark);
         }
 
-        // Volume extensions: bump running platform total + route into the
-        // current hourly bucket (push a fresh one on hour roll, drop oldest
-        // once we exceed `HOURLY_VOLUME_CAP`).
+        // Volume extensions: running platform total + current hourly buckets.
         self.platform_volume = self.platform_volume.saturating_add(platform_block_volume);
         let hour_start_ms = timestamp_ms - (timestamp_ms % HOUR_MS);
         self.ensure_current_volume_bucket(hour_start_ms);
@@ -265,24 +308,23 @@ impl PriceTracker {
             *platform_bucket = platform_bucket.saturating_add(platform_block_volume);
         }
 
-        // Clearing-price history (B3): first observation per hour wins. Walk
-        // every market with a clearing price this block so markets without
-        // fills still get an hourly anchor (carryover prices count).
-        for (&mid, prices) in clearing_prices {
+        // Hourly clearing/mark history (24h delta anchor): first observation per
+        // hour wins. Use the mark so deltas reflect indicative movement too.
+        for (&mid, mark) in &mark_prices {
             let bucket = self.hourly_clearing_prices.entry(mid).or_default();
             let need_new = bucket
                 .back()
                 .map(|(t, _)| *t != hour_start_ms)
                 .unwrap_or(true);
             if need_new {
-                bucket.push_back((hour_start_ms, prices.clone()));
+                bucket.push_back((hour_start_ms, mark.clone()));
                 while bucket.len() > HOURLY_CLEARING_HISTORY_CAP {
                     bucket.pop_front();
                 }
             }
         }
 
-        per_market_volume
+        (per_market_volume, mark_prices)
     }
 
     fn ensure_current_volume_bucket(&mut self, hour_start_ms: u64) {
@@ -449,6 +491,7 @@ mod tests {
                 &[Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2)],
                 &orders,
                 &clearing_prices,
+                &HashMap::new(),
                 height,
                 height * 1_000,
             );
@@ -486,6 +529,7 @@ mod tests {
             &[Fill::new(order.id, qty, price)],
             &orders,
             &clearing_prices,
+            &HashMap::new(),
             1,
             500_000, // hour 0
         );
@@ -493,6 +537,7 @@ mod tests {
             &[Fill::new(order.id, qty, price)],
             &orders,
             &clearing_prices,
+            &HashMap::new(),
             2,
             HOUR_MS + 100, // hour 1
         );
@@ -527,6 +572,7 @@ mod tests {
                 &[Fill::new(order.id, qty, price)],
                 &orders,
                 &clearing_prices,
+                &HashMap::new(),
                 h + 1,
                 h * HOUR_MS + 1_000,
             );
@@ -570,6 +616,7 @@ mod tests {
                 &[Fill::new(order.id, qty, price)],
                 &orders,
                 &clearing_prices,
+                &HashMap::new(),
                 h + 1,
                 h * HOUR_MS + 1_000,
             );
@@ -606,8 +653,8 @@ mod tests {
         cp_b.insert(market, prices_b.clone());
 
         // Two blocks 5 minutes apart — same hour-start_ms.
-        tracker.record_block(&[], &orders, &cp_a, 1, 100_000);
-        tracker.record_block(&[], &orders, &cp_b, 2, 400_000);
+        tracker.record_block(&[], &orders, &cp_a, &HashMap::new(), 1, 100_000);
+        tracker.record_block(&[], &orders, &cp_b, &HashMap::new(), 2, 400_000);
 
         let bucket = tracker
             .hourly_clearing_prices
@@ -632,7 +679,15 @@ mod tests {
             let no = 1_000_000_000 - yes;
             let mut cp = HashMap::new();
             cp.insert(market, vec![yes, no]);
-            tracker.record_block(&[], &orders, &cp, h + 1, h * HOUR_MS + 500);
+            // Use a fill so the clearing price flows into the mark (had_fill=true).
+            tracker.record_block(
+                &[Fill::new(order.id, 1, yes)],
+                &orders,
+                &cp,
+                &HashMap::new(),
+                h + 1,
+                h * HOUR_MS + 500,
+            );
         }
 
         // Now sits in hour 25; 24h ago = hour 1 boundary; bucket containing
@@ -663,7 +718,14 @@ mod tests {
             // hours 100..104 — far above 24h
             let mut cp = HashMap::new();
             cp.insert(young, vec![500_000_000, 500_000_000]);
-            young_tracker.record_block(&[], &young_orders, &cp, h + 1, h * HOUR_MS + 500);
+            young_tracker.record_block(
+                &[],
+                &young_orders,
+                &cp,
+                &HashMap::new(),
+                h + 1,
+                h * HOUR_MS + 500,
+            );
         }
         // Now sits in hour 105; 24h ago = hour 81 boundary. Oldest bucket is
         // hour 100 > 81h → None.
@@ -684,7 +746,7 @@ mod tests {
         for h in 0..(HOURLY_CLEARING_HISTORY_CAP as u64 + 5) {
             let mut cp = HashMap::new();
             cp.insert(market, vec![400_000_000 + h, 600_000_000 - h]);
-            tracker.record_block(&[], &orders, &cp, h + 1, h * HOUR_MS + 500);
+            tracker.record_block(&[], &orders, &cp, &HashMap::new(), h + 1, h * HOUR_MS + 500);
         }
 
         let bucket = tracker
@@ -705,9 +767,19 @@ mod tests {
 
         let mut tracker = PriceTracker::new();
         for h in 0..3u64 {
+            let yes = 400_000_000 + h;
+            let no = 600_000_000 - h;
             let mut cp = HashMap::new();
-            cp.insert(market, vec![400_000_000 + h, 600_000_000 - h]);
-            tracker.record_block(&[], &orders, &cp, h + 1, h * HOUR_MS + 100);
+            cp.insert(market, vec![yes, no]);
+            // Use a fill so the clearing price flows into the mark (had_fill=true).
+            tracker.record_block(
+                &[Fill::new(order.id, 1, yes)],
+                &orders,
+                &cp,
+                &HashMap::new(),
+                h + 1,
+                h * HOUR_MS + 100,
+            );
         }
 
         let snapshot = tracker.clearing_history_snapshot();
@@ -740,6 +812,7 @@ mod tests {
                 &[Fill::new(order.id, qty, price)],
                 &orders,
                 &clearing_prices,
+                &HashMap::new(),
                 h + 1,
                 h * HOUR_MS + 1_000,
             );
@@ -757,5 +830,43 @@ mod tests {
             restored.all_market_volumes_24h(now).get(&market).copied(),
             Some(per_block * 3)
         );
+    }
+
+    #[test]
+    fn record_block_emits_midpoint_point_for_no_cross_market() {
+        use matching_engine::{MarketId, NANOS_PER_DOLLAR};
+        let mut pt = PriceTracker::new();
+
+        let m0 = MarketId::new(0);
+        let clearing: HashMap<MarketId, Vec<Nanos>> = HashMap::new(); // never traded
+        let mut midpoints: HashMap<MarketId, Nanos> = HashMap::new();
+        midpoints.insert(m0, 450_000_000);
+        let orders: HashMap<u64, &Order> = HashMap::new();
+
+        let (vol, mark) = pt.record_block(&[], &orders, &clearing, &midpoints, 1, 1_000);
+
+        assert!(vol.is_empty(), "no fills => no volume");
+        assert_eq!(
+            mark.get(&m0).cloned(),
+            Some(vec![450_000_000, NANOS_PER_DOLLAR - 450_000_000])
+        );
+
+        let hist = pt.price_history(m0, None, None);
+        assert_eq!(hist.len(), 1);
+        assert_eq!(hist[0].yes_price, 450_000_000);
+        assert_eq!(hist[0].volume_nanos, 0);
+
+        // A second identical no-cross block coalesces (no new flat point).
+        pt.record_block(&[], &orders, &clearing, &midpoints, 2, 2_000);
+        assert_eq!(
+            pt.price_history(m0, None, None).len(),
+            1,
+            "flat tick coalesced"
+        );
+
+        // Midpoint moves => new point.
+        midpoints.insert(m0, 470_000_000);
+        pt.record_block(&[], &orders, &clearing, &midpoints, 3, 3_000);
+        assert_eq!(pt.price_history(m0, None, None).len(), 2);
     }
 }
