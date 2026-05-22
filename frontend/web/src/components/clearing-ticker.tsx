@@ -245,18 +245,18 @@ function TickerCell({
           The marquee scrolls, so a wide cell is fine. */}
       <span style={{ color: "var(--fg-2)", whiteSpace: "nowrap" }}>{name}</span>
       <span className="tabular" style={{ color: "var(--fg-4)" }}>
-        {formatCompactDollars(volNanos)}
+        {formatCompactDollars(volNanos)} vol
       </span>
-      {ppChange != null && (
-        <span
-          className="tabular"
-          style={{ color: ppColor(ppChange), fontWeight: 600 }}
-        >
-          {formatPp(ppChange)}
-        </span>
-      )}
+      {/* Always show the price move, including flat. A market's first clear in
+          the window has no prior to diff against, so it reads "0.0pp" too. */}
+      <span
+        className="tabular"
+        style={{ color: ppColor(ppChange), fontWeight: 600 }}
+      >
+        {ppChange == null ? "0.0pp" : formatPp(ppChange)}
+      </span>
       <span className="tabular" style={{ color: "var(--fg-4)" }}>
-        {formatAge(Math.max(0, now - ts))}
+        {formatAge(Math.max(0, now - ts))} ago
       </span>
     </Link>
   );
@@ -270,6 +270,8 @@ function formatPp(pp: number): string {
 }
 
 function ppColor(pp: number | null): string {
-  if (pp == null || Math.abs(pp) < 0.05) return "var(--fg-4)";
+  // Flat/unknown reads in a legible neutral (not the faint fg-4) so a "0.0pp"
+  // is actually visible; only real moves take the green/red accents.
+  if (pp == null || Math.abs(pp) < 0.05) return "var(--fg-3)";
   return pp > 0 ? "var(--yes)" : "var(--no)";
 }
