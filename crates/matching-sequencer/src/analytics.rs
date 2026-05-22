@@ -97,6 +97,10 @@ impl AnalyticsState {
         self.price_tracker.last_clearing_prices()
     }
 
+    pub fn last_mark_prices(&self) -> &HashMap<MarketId, Vec<Nanos>> {
+        self.price_tracker.last_mark_prices()
+    }
+
     pub fn market_volumes(&self) -> &HashMap<MarketId, u64> {
         self.price_tracker.market_volumes()
     }
@@ -240,18 +244,25 @@ impl AnalyticsState {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn record_finalized_block(
         &mut self,
         fills: &[Fill],
         orders: &HashMap<u64, &Order>,
         clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
+        midpoints: &HashMap<MarketId, Nanos>,
         height: u64,
         timestamp_ms: u64,
         accounts: &AccountStore,
-    ) -> HashMap<MarketId, u64> {
-        let volume_by_market =
-            self.price_tracker
-                .record_block(fills, orders, clearing_prices, height, timestamp_ms);
+    ) -> (HashMap<MarketId, u64>, HashMap<MarketId, Vec<Nanos>>) {
+        let (volume_by_market, mark_prices) = self.price_tracker.record_block(
+            fills,
+            orders,
+            clearing_prices,
+            midpoints,
+            height,
+            timestamp_ms,
+        );
         self.fill_recorder.record_fills(
             fills,
             orders,
@@ -261,7 +272,7 @@ impl AnalyticsState {
             accounts,
             &mut self.account_event_log,
         );
-        volume_by_market
+        (volume_by_market, mark_prices)
     }
 
     pub fn record_trader_placement(

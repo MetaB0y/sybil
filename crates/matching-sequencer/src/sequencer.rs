@@ -205,6 +205,7 @@ struct FinalizedBlockState {
     /// `PriceTracker::record_block` and plumbed onto the Block so wire
     /// consumers see `BlockMarketStats.volume_nanos`.
     volume_by_market: HashMap<MarketId, u64>,
+    mark_prices: HashMap<MarketId, Vec<Nanos>>,
 }
 
 struct WitnessArtifacts {
@@ -825,6 +826,10 @@ impl BlockSequencer {
 
     pub fn last_clearing_prices(&self) -> &HashMap<MarketId, Vec<Nanos>> {
         self.analytics.last_clearing_prices()
+    }
+
+    pub fn last_mark_prices(&self) -> &HashMap<MarketId, Vec<Nanos>> {
+        self.analytics.last_mark_prices()
     }
 
     pub fn price_history(
@@ -1846,10 +1851,19 @@ impl BlockSequencer {
         }
 
         let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
-        let volume_by_market = self.analytics.record_finalized_block(
+        // Touch midpoints from the resting single-market book for markets that
+        // did not cross this batch. Scoped so the immutable book borrow is
+        // released before the &mut self.analytics call below.
+        let midpoints = {
+            let resting: Vec<&Order> =
+                self.order_book.resting_orders().map(|(o, _)| o).collect();
+            matching_engine::book_midprices(resting.iter().copied())
+        };
+        let (volume_by_market, mark_prices) = self.analytics.record_finalized_block(
             fills,
             &order_map,
             clearing_prices,
+            &midpoints,
             self.height,
             timestamp_ms,
             &self.accounts,
@@ -1890,6 +1904,7 @@ impl BlockSequencer {
         FinalizedBlockState {
             post_state,
             volume_by_market,
+            mark_prices,
         }
     }
 
@@ -2547,7 +2562,9 @@ impl BlockSequencer {
         let FinalizedBlockState {
             post_state,
             volume_by_market,
+            mark_prices,
         } = self.finalize_block_state_phase(&fills, &problem, &clearing_prices, timestamp_ms);
+        let _ = &mark_prices;
 
         // Update order book: release filled orders' reservations, adjust partial fills
         let post_solve_removed = self
