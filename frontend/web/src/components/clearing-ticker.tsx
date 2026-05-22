@@ -30,15 +30,17 @@ type ClearEvent = {
   yes: bigint;
   /** Matched volume this market contributed this batch (nanos, $). */
   volNanos: bigint;
-  /** YES price change vs this market's previous clear, in pp (null if first). */
-  ppChange: number | null;
+  /** YES price change vs this market's previous clear, in pp. Always a real
+   *  (non-flat) move — flat and first-seen clears are filtered out of the feed. */
+  ppChange: number;
   /** Block timestamp (epoch ms) → "seconds ago". */
   ts: number;
 };
 
 /**
  * ClearingTicker — a continuously scrolling strip of recent clears across the
- * last committed blocks. Each entry is one market that traded in one batch:
+ * last committed blocks. Each entry is one market whose clearing price moved
+ * in a batch (flat / first-seen clears are skipped):
  * `name  $vol  ±pp  age` (title · volume · price change · age). The buffer
  * accumulates across blocks (rather
  * than being replaced each batch) so the marquee has stable content to scroll;
@@ -80,6 +82,11 @@ export function ClearingTicker({ marketsById }: Props) {
         const prior = prevYes.get(id);
         const ppChange = prior == null ? null : Number(yes - prior) / 1e7;
         prevYes.set(id, yes);
+        // Only surface clears that actually moved the price: skip a market's
+        // first clear in the window (no prior to diff) and flat ticks (which
+        // would read "0.0pp"). prevYes is updated above regardless, so the next
+        // clear's delta stays correct.
+        if (ppChange == null || Math.abs(ppChange) < 0.05) continue;
         const m = marketsById.get(id);
         all.push({
           key: `${b.height}-${id}`,
@@ -247,13 +254,11 @@ function TickerCell({
       <span className="tabular" style={{ color: "var(--fg-4)" }}>
         {formatCompactDollars(volNanos)} vol
       </span>
-      {/* Always show the price move, including flat. A market's first clear in
-          the window has no prior to diff against, so it reads "0.0pp" too. */}
       <span
         className="tabular"
         style={{ color: ppColor(ppChange), fontWeight: 600 }}
       >
-        {ppChange == null ? "0.0pp" : formatPp(ppChange)}
+        {formatPp(ppChange)}
       </span>
       <span className="tabular" style={{ color: "var(--fg-4)" }}>
         {formatAge(Math.max(0, now - ts))} ago
