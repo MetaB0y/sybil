@@ -1108,7 +1108,7 @@ impl BlockSequencer {
         })?;
         Ok(crate::portfolio::compute_portfolio(
             account,
-            self.last_clearing_prices(),
+            self.last_mark_prices(),
             self.analytics.first_deposit_ms(account_id).unwrap_or(0),
             self.analytics.total_fills(account_id),
             self.analytics.cost_basis_tracker(),
@@ -2606,7 +2606,7 @@ impl BlockSequencer {
         self.analytics.record_equity(
             &touched,
             &self.accounts,
-            &clearing_prices,
+            &mark_prices,
             self.height,
             timestamp_ms,
         );
@@ -4698,5 +4698,120 @@ mod tests {
         let result = seq.cancel_pending_order(aid, 9_999);
         assert!(result.is_err());
         assert_eq!(seq.pending_system_events.len(), pending_before);
+    }
+
+    // --- Mark-price portfolio valuation ---
+
+    /// After a crossing batch at price P, the mark is set to the clearing
+    /// price P.  In the next batch, two resting orders form a two-sided
+    /// spread (bid 40c / ask 60c) but do NOT cross.  The mark should move
+    /// to the book midpoint (50c), and `portfolio_summary` must reflect
+    /// that midpoint — not the old clearing price — for the holder's
+    /// unrealized PnL valuation.
+    #[test]
+    fn portfolio_summary_values_positions_at_book_midpoint_mark() {
+        let (markets, m0) = setup();
+        let mut accounts = AccountStore::new();
+        // buyer: will end up holding YES after the crossing batch
+        let buyer_id = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        // seller: provides YES supply so the cross can happen
+        let seller_id = accounts.create_account(0);
+        accounts
+            .get_mut(seller_id)
+            .unwrap()
+            .positions
+            .insert((m0, 0), 50);
+        // maker accounts for the resting spread in batch 2
+        let bidder_id = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let asker_id = accounts.create_account(0);
+        accounts
+            .get_mut(asker_id)
+            .unwrap()
+            .positions
+            .insert((m0, 0), 50);
+
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            oracle,
+            SequencerConfig::default(),
+        );
+
+        // --- Batch 1: crossing at 70c (buyer) / 30c (seller) ---
+        // buyer buys YES at 70c, seller sells YES at 30c — they must cross.
+        let buy_sub = OrderSubmission {
+            account_id: buyer_id,
+            orders: vec![outcome_buy(&markets, 0, m0, 0, 700_000_000, 10)],
+            mm_constraint: None,
+        };
+        let sell_sub = OrderSubmission {
+            account_id: seller_id,
+            orders: vec![outcome_sell(&markets, 0, m0, 0, 300_000_000, 10)],
+            mm_constraint: None,
+        };
+        seq.produce_block(vec![buy_sub, sell_sub], 1_000);
+
+        // Sanity: the buyer now holds YES units.
+        assert!(
+            seq.accounts.get(buyer_id).unwrap().position(m0, 0) > 0,
+            "buyer must have a YES position after the crossing batch"
+        );
+
+        // The clearing price after a 70c bid / 30c ask cross is NOT 50c.
+        // Verify the mark at this point differs from 50c so the subsequent
+        // assertion is meaningful.
+        let mark_after_cross = seq
+            .last_mark_prices()
+            .get(&m0)
+            .and_then(|v| v.first().copied())
+            .expect("mark price must be set after a filled batch");
+        assert_ne!(
+            mark_after_cross,
+            500_000_000,
+            "clearing mark must differ from 50c so the midpoint assertion is non-trivial"
+        );
+
+        // --- Batch 2: resting spread, no cross ---
+        // bid at 40c, ask at 60c → midpoint = 50c, nothing crosses.
+        let bid_sub = OrderSubmission {
+            account_id: bidder_id,
+            orders: vec![outcome_buy(&markets, 0, m0, 0, 400_000_000, 5)],
+            mm_constraint: None,
+        };
+        let ask_sub = OrderSubmission {
+            account_id: asker_id,
+            orders: vec![outcome_sell(&markets, 0, m0, 0, 600_000_000, 5)],
+            mm_constraint: None,
+        };
+        seq.produce_block(vec![bid_sub, ask_sub], 2_000);
+
+        // The mark must now be the book midpoint: (400_000_000 + 600_000_000) / 2 = 500_000_000.
+        let mark_after_spread = seq
+            .last_mark_prices()
+            .get(&m0)
+            .and_then(|v| v.first().copied())
+            .expect("mark price must be set after a no-cross batch with a two-sided book");
+        assert_eq!(
+            mark_after_spread, 500_000_000,
+            "mark must equal the 50c book midpoint after a non-crossing batch"
+        );
+
+        // portfolio_summary must value the YES position at the 50c mark.
+        let summary = seq
+            .portfolio_summary(buyer_id)
+            .expect("portfolio_summary must succeed for a known account");
+
+        let pos = summary
+            .positions
+            .iter()
+            .find(|p| p.market_id == m0 && p.outcome == 0)
+            .expect("buyer must have a valued YES position in portfolio summary");
+
+        assert_eq!(
+            pos.current_price_nanos, 500_000_000,
+            "portfolio must value the YES position at the 50c book-midpoint mark, not the old clearing price"
+        );
     }
 }
