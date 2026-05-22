@@ -1855,8 +1855,7 @@ impl BlockSequencer {
         // did not cross this batch. Scoped so the immutable book borrow is
         // released before the &mut self.analytics call below.
         let midpoints = {
-            let resting: Vec<&Order> =
-                self.order_book.resting_orders().map(|(o, _)| o).collect();
+            let resting: Vec<&Order> = self.order_book.resting_orders().map(|(o, _)| o).collect();
             matching_engine::book_midprices(resting.iter().copied())
         };
         let (volume_by_market, mark_prices) = self.analytics.record_finalized_block(
@@ -4768,8 +4767,7 @@ mod tests {
             .and_then(|v| v.first().copied())
             .expect("mark price must be set after a filled batch");
         assert_ne!(
-            mark_after_cross,
-            500_000_000,
+            mark_after_cross, 500_000_000,
             "clearing mark must differ from 50c so the midpoint assertion is non-trivial"
         );
 

@@ -279,7 +279,9 @@ impl PriceTracker {
                     no_price,
                     volume_nanos: vol,
                 });
-                let overflow = history.len().saturating_sub(self.max_history_points_per_market);
+                let overflow = history
+                    .len()
+                    .saturating_sub(self.max_history_points_per_market);
                 if overflow > 0 {
                     history.drain(0..overflow);
                 }
@@ -678,7 +680,14 @@ mod tests {
             let mut cp = HashMap::new();
             cp.insert(market, vec![yes, no]);
             // Use a fill so the clearing price flows into the mark (had_fill=true).
-            tracker.record_block(&[Fill::new(order.id, 1, yes)], &orders, &cp, &HashMap::new(), h + 1, h * HOUR_MS + 500);
+            tracker.record_block(
+                &[Fill::new(order.id, 1, yes)],
+                &orders,
+                &cp,
+                &HashMap::new(),
+                h + 1,
+                h * HOUR_MS + 500,
+            );
         }
 
         // Now sits in hour 25; 24h ago = hour 1 boundary; bucket containing
@@ -709,7 +718,14 @@ mod tests {
             // hours 100..104 — far above 24h
             let mut cp = HashMap::new();
             cp.insert(young, vec![500_000_000, 500_000_000]);
-            young_tracker.record_block(&[], &young_orders, &cp, &HashMap::new(), h + 1, h * HOUR_MS + 500);
+            young_tracker.record_block(
+                &[],
+                &young_orders,
+                &cp,
+                &HashMap::new(),
+                h + 1,
+                h * HOUR_MS + 500,
+            );
         }
         // Now sits in hour 105; 24h ago = hour 81 boundary. Oldest bucket is
         // hour 100 > 81h → None.
@@ -756,7 +772,14 @@ mod tests {
             let mut cp = HashMap::new();
             cp.insert(market, vec![yes, no]);
             // Use a fill so the clearing price flows into the mark (had_fill=true).
-            tracker.record_block(&[Fill::new(order.id, 1, yes)], &orders, &cp, &HashMap::new(), h + 1, h * HOUR_MS + 100);
+            tracker.record_block(
+                &[Fill::new(order.id, 1, yes)],
+                &orders,
+                &cp,
+                &HashMap::new(),
+                h + 1,
+                h * HOUR_MS + 100,
+            );
         }
 
         let snapshot = tracker.clearing_history_snapshot();
@@ -823,7 +846,10 @@ mod tests {
         let (vol, mark) = pt.record_block(&[], &orders, &clearing, &midpoints, 1, 1_000);
 
         assert!(vol.is_empty(), "no fills => no volume");
-        assert_eq!(mark.get(&m0).cloned(), Some(vec![450_000_000, NANOS_PER_DOLLAR - 450_000_000]));
+        assert_eq!(
+            mark.get(&m0).cloned(),
+            Some(vec![450_000_000, NANOS_PER_DOLLAR - 450_000_000])
+        );
 
         let hist = pt.price_history(m0, None, None);
         assert_eq!(hist.len(), 1);
@@ -832,7 +858,11 @@ mod tests {
 
         // A second identical no-cross block coalesces (no new flat point).
         pt.record_block(&[], &orders, &clearing, &midpoints, 2, 2_000);
-        assert_eq!(pt.price_history(m0, None, None).len(), 1, "flat tick coalesced");
+        assert_eq!(
+            pt.price_history(m0, None, None).len(),
+            1,
+            "flat tick coalesced"
+        );
 
         // Midpoint moves => new point.
         midpoints.insert(m0, 470_000_000);
