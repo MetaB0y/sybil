@@ -59,6 +59,12 @@ pub struct MarketRefData {
     /// Per-market start date (epoch ms) from Polymarket. Display/sort only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub market_start_date_ms: Option<u64>,
+    /// Polymarket short outcome label (`groupItemTitle`). Off-block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_item_title: Option<String>,
+    /// Whether Polymarket has closed this market. Off-block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed: Option<bool>,
 }
 
 /// Load `market_ref_data` snapshot from disk, or return an empty map if the

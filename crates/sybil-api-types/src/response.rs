@@ -133,6 +133,15 @@ pub struct MarketResponse {
     /// Per-market start date (epoch ms) from Polymarket. Display/sort only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub market_start_date_ms: Option<u64>,
+    /// Polymarket short outcome label (`groupItemTitle`, e.g. "May 15"). Off-
+    /// block; the frontend uses it as the per-outcome name so it needn't fetch
+    /// the raw event JSON just for labels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_item_title: Option<String>,
+    /// Whether Polymarket has closed this market. Off-block; the frontend
+    /// filters closed markets out of the listing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed: Option<bool>,
 }
 
 /// Minimal market data for high-throughput dashboards (drops strings & metadata).
