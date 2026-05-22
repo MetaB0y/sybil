@@ -98,21 +98,8 @@ export function WhyWaiting() {
           >
             frequent batch auction
           </div>
-          Every 10 seconds, every pending order settles together at one fair
-          price — a whale can&apos;t jump the queue and bots can&apos;t snipe
-          you. Your order joins the next batch and clears with everyone
-          else&apos;s.
-          <div
-            style={{
-              marginTop: 8,
-              paddingTop: 8,
-              borderTop: "1px solid var(--border-1)",
-              fontSize: 11,
-              color: "var(--fg-3)",
-            }}
-          >
-            tl;dr — same price for everyone, no front-running.
-          </div>
+          Every 10s all bets lock in together at one price — nobody cuts the
+          line, no bots snipe you.
         </div>
       )}
     </div>
