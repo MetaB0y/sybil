@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   formatAge,
-  formatCents,
   formatCompactDollars,
   formatInt,
   parseNanos,
@@ -40,7 +39,8 @@ type ClearEvent = {
 /**
  * ClearingTicker — a continuously scrolling strip of recent clears across the
  * last committed blocks. Each entry is one market that traded in one batch:
- * `name  $vol  price  ±pp  age`. The buffer accumulates across blocks (rather
+ * `name  $vol  ±pp  age` (title · volume · price change · age). The buffer
+ * accumulates across blocks (rather
  * than being replaced each batch) so the marquee has stable content to scroll;
  * new clears enter at the head and old ones fall off after MAX_TICKER_ITEMS.
  *
@@ -212,9 +212,7 @@ function TickerCell({
   now: number;
   ariaHidden?: boolean;
 }) {
-  const { id, name, yes, volNanos, ppChange, ts } = event;
-  const HALF = 500_000_000n;
-  const tone = yes >= HALF ? "var(--yes)" : "var(--no)";
+  const { id, name, volNanos, ppChange, ts } = event;
   return (
     <Link
       href={`/m/${id}`}
@@ -249,11 +247,11 @@ function TickerCell({
       <span className="tabular" style={{ color: "var(--fg-4)" }}>
         {formatCompactDollars(volNanos)}
       </span>
-      <span className="tabular" style={{ color: tone, fontWeight: 600 }}>
-        {formatCents(yes)}
-      </span>
       {ppChange != null && (
-        <span className="tabular" style={{ color: ppColor(ppChange) }}>
+        <span
+          className="tabular"
+          style={{ color: ppColor(ppChange), fontWeight: 600 }}
+        >
           {formatPp(ppChange)}
         </span>
       )}
