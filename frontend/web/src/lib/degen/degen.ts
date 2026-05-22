@@ -1,3 +1,4 @@
+import type { OrderSide } from "@/lib/account/orders";
 import { DEGEN_BATCHES, DEGEN_EXPONENT, DEGEN_PEAK_NANOS, ONE_DOLLAR_NANOS } from "./constants";
 
 /**
@@ -48,4 +49,44 @@ export function resolveMarkNanos(
   if (historyMarkNanos !== null && historyMarkNanos > 0n) return historyMarkNanos;
   if (clearingNanos !== null && clearingNanos > 0n) return clearingNanos;
   return ONE_DOLLAR_NANOS / 2n;
+}
+
+/** The side a degen bet backs. Maps to a buy on the order path. */
+export type DegenSide = "YES" | "NO";
+
+/** An order spec ready to spread into `submitSignedOrder` (caller adds account/market). */
+export interface DegenOrder {
+  side: OrderSide;
+  limitPriceNanos: bigint;
+  maxFill: bigint;
+  expiresAtBlock: bigint;
+}
+
+export type DegenOrderResult =
+  | { ok: true; order: DegenOrder }
+  | { ok: false; reason: "below-minimum" };
+
+/**
+ * Compose the degen math into an order spec. `markNanos` is the already-resolved
+ * mark for the chosen side (see `resolveMarkNanos`). Returns `below-minimum`
+ * when the budget can't afford a single share at the degen limit price.
+ */
+export function buildDegenOrder(params: {
+  side: DegenSide;
+  betUsdNanos: bigint;
+  markNanos: bigint;
+  latestHeight: bigint;
+}): DegenOrderResult {
+  const limitPriceNanos = degenLimitPrice(params.markNanos);
+  const maxFill = degenQuantity(params.betUsdNanos, limitPriceNanos);
+  if (maxFill <= 0n) return { ok: false, reason: "below-minimum" };
+  return {
+    ok: true,
+    order: {
+      side: params.side === "YES" ? "BuyYes" : "BuyNo",
+      limitPriceNanos,
+      maxFill,
+      expiresAtBlock: degenExpiry(params.latestHeight),
+    },
+  };
 }

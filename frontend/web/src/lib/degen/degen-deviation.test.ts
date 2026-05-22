@@ -33,7 +33,7 @@ describe("degenDeviation", () => {
   it("decreases monotonically from the center toward the edge", () => {
     const seq = [50, 25, 10, 5, 1].map((c) => degenDeviation(cents(c)));
     for (let i = 1; i < seq.length; i++) {
-      expect(seq[i]).toBeLessThan(seq[i - 1]);
+      expect(seq[i]!).toBeLessThan(seq[i - 1]!);
     }
   });
 
