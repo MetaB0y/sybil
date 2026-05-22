@@ -41,7 +41,7 @@ type ClearEvent = {
  * ClearingTicker — a continuously scrolling strip of recent clears across the
  * last committed blocks. Each entry is one market that traded in one batch:
  * `name  $vol  price  ±pp  age`. The buffer accumulates across blocks (rather
- * than being replaced every 2s) so the marquee has stable content to scroll;
+ * than being replaced each batch) so the marquee has stable content to scroll;
  * new clears enter at the head and old ones fall off after MAX_TICKER_ITEMS.
  *
  * Side (buy/sell) is intentionally absent: block-level fills carry no

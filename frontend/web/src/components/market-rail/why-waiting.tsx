@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
  * language. Matches `WhyWaiting` in `fed-right-rail-modes.jsx:250`.
  *
  * The handoff prototype mentions "every 60 seconds"; Sybil's actual cadence
- * is 2s. Copy reflects the real cadence.
+ * is 10s. Copy reflects the real cadence.
  */
 export function WhyWaiting() {
   const [open, setOpen] = useState(false);
@@ -98,7 +98,7 @@ export function WhyWaiting() {
           >
             frequent batch auction
           </div>
-          Every 2 seconds, every pending order settles together at one fair
+          Every 10 seconds, every pending order settles together at one fair
           price — a whale can&apos;t jump the queue and bots can&apos;t snipe
           you. Your order joins the next batch and clears with everyone
           else&apos;s.

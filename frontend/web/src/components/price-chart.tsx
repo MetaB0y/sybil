@@ -13,12 +13,12 @@
  *              uncorrelated, so a stacked partition would be misleading.
  *
  * The x-axis is proportional to wall-clock time: a point's x position is
- * `(t - t0) / span`, so a 4h gap is drawn wide and back-to-back 2s batches
+ * `(t - t0) / span`, so a 4h gap is drawn wide and back-to-back batches
  * narrow. Ticks fall at even time intervals across the window.
  *
  * Only the outcomes passed in `drawn` are plotted (the legend caps this at
  * 8). Live ticks come from the recent-block ring buffer — the line advances
- * every 2s batch on a normal render, no imperative chart lifecycle.
+ * each batch on a normal render, no imperative chart lifecycle.
  */
 
 import { useMemo, useRef, useState } from "react";

@@ -1,15 +1,16 @@
 "use client";
 
 /**
- * Shared 2s batch countdown helper. Returns:
+ * Shared batch countdown helper (window = BLOCK_INTERVAL_MS). Returns:
  *   - `progress01` — 0..1 linearly across the current batch window
- *   - `secondsLeft` — display-friendly integer (0..2)
+ *   - `secondsLeft` — display-friendly integer seconds remaining
  *   - `secondsLeftPrecise` — float seconds remaining; feed `formatBatchSeconds`
  *   - `latestHeight` — committed block height (the open batch is +1)
  *
  * Animation pattern mirrors `frontend/web/src/components/batch-theater.tsx`:
  * anchor on every new committed block via useEffect, then RAF-tick locally.
- * Linear easing keyed to height — not wall-clock springs (would jank at 2s).
+ * Linear easing keyed to height — not wall-clock springs (which would drift
+ * from the block clock).
  */
 
 import { useEffect, useRef, useState } from "react";

@@ -17,6 +17,7 @@
  */
 
 import { useMemo } from "react";
+import { BLOCK_INTERVAL_MS } from "@/lib/constants";
 
 export type HistoryEventType =
   | "created"
@@ -83,7 +84,7 @@ export function useAccountHistory(
 
 // ---- mock generator (delete when wired to /events) ------------------------
 
-const CADENCE_MS = 2000;
+const CADENCE_MS = BLOCK_INTERVAL_MS;
 
 function mockHistory(accountId: number, marketIds: number[]): HistoryEvent[] {
   const rand = seeded((accountId | 0) ^ 0x5bd1e995);

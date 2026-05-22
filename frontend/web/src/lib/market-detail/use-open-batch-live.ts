@@ -21,9 +21,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
 import { parseNanos } from "@/lib/format/nanos";
+import { BLOCK_INTERVAL_MS } from "@/lib/constants";
 
-/** Poll cadence. The FBA batch is 2s, so ~1s gives two samples per batch. */
-const OPEN_BATCH_POLL_MS = 1_000;
+/** Poll cadence — scales with the batch cadence (BLOCK_INTERVAL_MS) so the rail
+ *  samples the open batch ~4× per window: live enough to show orders resting in,
+ *  without hammering the ~750ms shadow-solve. (Was 1s, tuned to the old 2s batch.) */
+const OPEN_BATCH_POLL_MS = Math.round(BLOCK_INTERVAL_MS / 4);
 
 export type OpenBatchLive = {
   /** Distinct non-MM traders with a resting order in the open batch. */

@@ -5,7 +5,7 @@
  * `NextBatchBanner` in `fed-right-rail-modes.jsx:42`.
  *
  * Live data:
- *  - countdown / progress: REAL (driven by the 2s block cadence)
+ *  - countdown / progress: REAL (driven by the block cadence)
  *  - "N traders in this batch": REAL — polled open-batch unique placers
  *    (see use-open-batch-live.ts)
  */

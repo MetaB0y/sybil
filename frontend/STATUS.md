@@ -41,7 +41,7 @@
 The data-plan catalog of FE surfaces lives in **[`BACKEND_DATA_PLAN.md`](./BACKEND_DATA_PLAN.md)**; the corresponding 15-step backend implementation plan is **[`BACKEND_IMPLEMENTATION_PLAN.md`](./BACKEND_IMPLEMENTATION_PLAN.md)**. Status:
 
 - **Done (A–E1):** traders, 24h + lifetime volume, price-24h-ago delta, liquidity (last-10 ±band), per-block per-market sidecar (placers / volume / placed / matched / unmatched / welfare), partial-fill `original_quantity`, first-deposit / lifetime-fill-count, cost basis (WAC) with realized + unrealized PnL split, indicative open-batch (C2 shadow-solve), on-chain `OrderCancelled` SystemEvent (D1), Sybil console "Aggregates" tab (E1).
-- **Still deferred ("Not now" in the data plan):** per-event imbalance, `created_at_height` (FE approximates from timestamp at the 2s cadence), per-account equity curve.
+- **Still deferred ("Not now" in the data plan):** per-event imbalance, `created_at_height` (FE approximates from timestamp at the 10s cadence), per-account equity curve.
 - **Deploy:** the D1 sequencer + verifier ship is coordinated and pending a follow-up session. Until that ships, the on-chain cancel feed is empty in prod even though the wire variant is live.
 
 End-to-end smoke for every Phase A–D wire field lives in [`scripts/smoke-test.sh`](../scripts/smoke-test.sh).
@@ -56,7 +56,7 @@ Polymarket mirror metadata (`event_id`, `event_title`, `event_image_url`, `event
 
 ## Active design tradeoffs
 
-1. **2s batch cadence** is the source of truth — Framer Motion springs avoided on block-clock animations (linear easing keyed to `block.height`).
+1. **10s batch cadence** is the source of truth (`BLOCK_INTERVAL_MS` in `src/lib/constants.ts`, mirrors backend `SYBIL_BLOCK_INTERVAL_MS`) — Framer Motion springs avoided on block-clock animations (linear easing keyed to `block.height`).
 2. **u64 / `*_nanos` workaround** — `scripts/patch-bigints.mjs` rewrites the generated OpenAPI schema (`number` → `string` for `*_nanos`). Frontend uses `parseNanos()` and `bigint` exclusively for money. See [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) #1.
 3. **Off-block storage for mirror metadata** (Phase 2) — `event_id`, `categories`, images, end_date live in `MarketRefData`, not block-hashed `MarketMetadata`. Clean backfill, no hash drift on Polymarket re-tags; verifier can't prove "this market was Sports at block N".
 4. **Mock-marker discipline** — every value backed by mock data is wrapped in `<MockValue>`. New `NOT NOW —` prefix flags items deferred per the backend plan's "Not now" section.

@@ -102,7 +102,7 @@ export default function MarketDetailPage({
  *
  * Title, thumbnail and all five stats are scoped to the single market in the
  * URL — never its parent event. `vol / 24h / traders / liq` are real Phase-B
- * fields (see `derive-market-stats.ts`). `batches ~M` stays a 2s-cadence
+ * fields (see `derive-market-stats.ts`). `batches ~M` stays a cadence-based
  * timestamp approximation — an exact count needs a backend `created_at_height`
  * (OPEN_QUESTIONS #9).
  */
@@ -360,7 +360,7 @@ function ChartSection({ marketId }: { marketId: number }) {
       ? "stacked"
       : "lines";
 
-  // Latest committed block is our "now" reference — ticks every 2s, so the
+  // Latest committed block is our "now" reference — ticks each batch, so the
   // sliding range window stays current without a Date.now() call in render.
   const nowMs = latestBlock?.timestamp_ms ?? 0;
   const windowMs = RANGE_MS[range];

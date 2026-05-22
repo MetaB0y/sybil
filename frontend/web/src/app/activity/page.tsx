@@ -50,7 +50,7 @@ export default function ActivityPage() {
           Activity
         </h1>
         <span className="text-annotation" style={{ fontSize: 11 }}>
-          everything happening on Sybil · uniform clearing every 2 s
+          everything happening on Sybil · uniform clearing every 10 s
         </span>
         <span style={{ marginLeft: "auto" }}>
           <ActivityBatchChip />

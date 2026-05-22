@@ -5,7 +5,7 @@
  *
  * Distinct from the global <BatchPill> in the nav: this one names the
  * specific batch # currently clearing. Lifted from the handoff's right-aligned
- * indicator. At the 2s FBA cadence the remaining seconds tick fast — we show
+ * indicator. At the FBA cadence the remaining seconds tick down — we show
  * a single decimal so the number is at least readable.
  */
 
