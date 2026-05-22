@@ -62,9 +62,9 @@ Reference values at `PEAK = 4¢`, `EXPONENT = 1.3` (symmetric: 95¢ ≈ 5¢, etc
 | 25¢   | 2.74¢     |
 | 10¢   | 1.06¢     |
 | 5¢    | 0.46¢     |
-| 2¢    | 0.15¢     |
-| 1¢    | 0.067¢    |
-| 0.2¢  | 0.010¢    |
+| 2¢    | 0.146¢    |
+| 1¢    | 0.060¢    |
+| 0.2¢  | 0.0075¢   |
 
 ### 2. `degenLimitPrice(sideMarkNanos): bigint` → **Y**
 

@@ -20,8 +20,8 @@ describe("degenDeviation", () => {
     within(25, 2.74);
     within(10, 1.06);
     within(5, 0.46);
-    within(2, 0.15);
-    within(1, 0.067);
+    within(2, 0.146);
+    within(1, 0.06);
   });
 
   it("is symmetric around 50¢", () => {
