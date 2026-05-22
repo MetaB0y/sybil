@@ -123,6 +123,16 @@ pub struct MarketResponse {
     /// are tracked separately and do not count here.
     #[serde(default)]
     pub orders_unmatched_total: u64,
+    /// Polymarket on-chain condition id — FE join key into
+    /// `GET /v1/events/{event_id}/raw` `markets[].conditionId`. Off-block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub polymarket_condition_id: Option<String>,
+    /// Parent event start date (epoch ms) from Polymarket. Display/sort only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_start_date_ms: Option<u64>,
+    /// Per-market start date (epoch ms) from Polymarket. Display/sort only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub market_start_date_ms: Option<u64>,
 }
 
 /// Minimal market data for high-throughput dashboards (drops strings & metadata).
