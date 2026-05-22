@@ -35,3 +35,17 @@ export function degenQuantity(budgetNanos: bigint, limitNanos: bigint): bigint {
 export function degenExpiry(latestHeight: bigint): bigint {
   return latestHeight + DEGEN_BATCHES;
 }
+
+/**
+ * Pick the mark to price against, in priority order: the (already-extracted)
+ * history last-point mark, else the clearing price, else 50¢. `null` means the
+ * source is unavailable; non-positive values are treated as unavailable.
+ */
+export function resolveMarkNanos(
+  historyMarkNanos: bigint | null,
+  clearingNanos: bigint | null,
+): bigint {
+  if (historyMarkNanos !== null && historyMarkNanos > 0n) return historyMarkNanos;
+  if (clearingNanos !== null && clearingNanos > 0n) return clearingNanos;
+  return ONE_DOLLAR_NANOS / 2n;
+}
