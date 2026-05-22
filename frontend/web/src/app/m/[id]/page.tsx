@@ -24,6 +24,7 @@ import { detectStackable } from "@/lib/market-detail/build-chart-series";
 import { useEventGroup } from "@/lib/market-detail/use-event-group";
 import { useMarketStats } from "@/lib/market-detail/use-market-stats";
 import { useEventPriceHistory } from "@/lib/markets/use-event-price-history";
+import { useEventRaw } from "@/lib/markets/use-event-raw";
 import { selectLatestBlock, useStore } from "@/lib/store";
 
 type RouteParams = { id: string };
@@ -318,7 +319,7 @@ function StatusPill({
 }
 
 function ChartSection({ marketId }: { marketId: number }) {
-  const [range, setRange] = useState<ChartRange>("1W");
+  const [range, setRange] = useState<ChartRange>("1D");
   // marketIds drawn on the chart. `null` = use the favourite-first default.
   const [selectedIds, setSelectedIds] = useState<number[] | null>(null);
   const { group, isPending: groupPending } = useEventGroup(marketId);
@@ -329,8 +330,20 @@ function ChartSection({ marketId }: { marketId: number }) {
     () => new Set(outcomes.map((o) => o.marketId)),
     [outcomes],
   );
+  // Default chart lines: top 5 outcomes by 24h volume, tie-broken by the larger
+  // absolute 24h price move (so a busy — or, when all are quiet, a fast-moving —
+  // outcome leads). The user can still toggle the rest via the legend.
   const defaultIds = useMemo(
-    () => outcomes.slice(0, 4).map((o) => o.marketId),
+    () =>
+      [...outcomes]
+        .sort((a, b) => {
+          if (a.volume24hNanos !== b.volume24hNanos) {
+            return a.volume24hNanos > b.volume24hNanos ? -1 : 1;
+          }
+          return Math.abs(b.delta24Cents) - Math.abs(a.delta24Cents);
+        })
+        .slice(0, 5)
+        .map((o) => o.marketId),
     [outcomes],
   );
   // Self-heals across navigation: stale ids from another event drop out, and
@@ -366,7 +379,15 @@ function ChartSection({ marketId }: { marketId: number }) {
   const windowMs = RANGE_MS[range];
   const sinceMs = windowMs == null || nowMs === 0 ? null : nowMs - windowMs;
 
-  const loading = groupPending || (historyPending && drawn.length > 0);
+  // Keep the chart mounted once any drawn line has data, so toggling an outcome
+  // doesn't blank the whole chart while the newly-selected line's history loads
+  // (its lane just appears when the fetch resolves — cached siblings are
+  // instant). Full-screen "loading" only while the group resolves or before the
+  // first line has any points.
+  const hasDrawnData = drawn.some(
+    (d) => (byMarket.get(d.outcome.marketId)?.length ?? 0) > 0,
+  );
+  const loading = groupPending || (historyPending && !hasDrawnData);
 
   return (
     <section
@@ -430,9 +451,28 @@ function ChartSection({ marketId }: { marketId: number }) {
 function DescriptionBlock({
   market,
 }: {
-  market: { description?: string | null; resolution_criteria?: string | null; external_url?: string | null };
+  market: {
+    description?: string | null;
+    resolution_criteria?: string | null;
+    external_url?: string | null;
+    event_id?: string | null;
+    polymarket_condition_id?: string | null;
+  };
 }) {
-  if (!market.description && !market.resolution_criteria && !market.external_url) {
+  // Prefer the live Polymarket event JSON (full description + resolution source)
+  // over the sparse on-block metadata; join per market by condition id. Falls
+  // back to on-block fields when the event has no `/raw` snapshot.
+  const raw = useEventRaw(market.event_id ?? undefined, !!market.event_id).data;
+  const rawMarket = market.polymarket_condition_id
+    ? raw?.get(market.polymarket_condition_id)
+    : undefined;
+  const description =
+    rawMarket?.description?.trim() || market.description?.trim() || null;
+  const resolutionCriteria = market.resolution_criteria?.trim() || null;
+  const sourceUrl =
+    rawMarket?.resolutionSource?.trim() || market.external_url?.trim() || null;
+
+  if (!description && !resolutionCriteria && !sourceUrl) {
     return null;
   }
   return (
@@ -448,7 +488,7 @@ function DescriptionBlock({
         gap: "var(--space-3)",
       }}
     >
-      {market.description && (
+      {description && (
         <div>
           <div className="eyebrow" style={{ marginBottom: "var(--space-2)" }}>
             {"// description"}
@@ -462,11 +502,11 @@ function DescriptionBlock({
               whiteSpace: "pre-wrap",
             }}
           >
-            {market.description}
+            {description}
           </p>
         </div>
       )}
-      {market.resolution_criteria && (
+      {resolutionCriteria && (
         <div>
           <div className="eyebrow" style={{ marginBottom: "var(--space-2)" }}>
             {"// resolution"}
@@ -480,13 +520,13 @@ function DescriptionBlock({
               whiteSpace: "pre-wrap",
             }}
           >
-            {market.resolution_criteria}
+            {resolutionCriteria}
           </p>
         </div>
       )}
-      {market.external_url && (
+      {sourceUrl && (
         <a
-          href={market.external_url}
+          href={sourceUrl}
           target="_blank"
           rel="noreferrer noopener"
           style={{

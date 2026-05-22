@@ -22,7 +22,6 @@
 import { useMemo } from "react";
 import { useMarketsList } from "@/lib/markets/use-markets";
 import { selectPricesByMarketId, useStore } from "@/lib/store";
-import { mockDelta } from "@/lib/mock";
 import { deriveShortLabels } from "@/lib/market-detail/outcome-labels";
 
 export type EventOutcome = {
@@ -39,8 +38,12 @@ export type EventOutcome = {
   /** YES price in integer cents (0..100), or `null` while prices haven't
    *  arrived. Provided as a convenience for picker UI. */
   yesCents: number | null;
-  /** Signed 24h delta in cents. MOCK — see `lib/mock.ts:33`. */
+  /** Signed 24h delta in cents, derived from `yes_price_24h_ago_nanos`. `0`
+   *  when the 24h-ago snapshot is missing (market younger than 24h or wiped on
+   *  restart). */
   delta24Cents: number;
+  /** Rolling 24h trading volume in nanos ($). Used to rank chart lines. */
+  volume24hNanos: bigint;
 };
 
 export type EventGroup = {
@@ -79,6 +82,16 @@ export function useEventGroup(marketId: number): {
       const yesNanos = price?.yes ?? null;
       const noNanos = price?.no ?? null;
       const yesCents = yesNanos == null ? null : Math.round(Number(yesNanos) / 1e7);
+      // Real 24h delta from the list snapshot (current YES − YES 24h ago), in
+      // cents; both fields ride `/v1/markets`. Self-consistent (same payload)
+      // and independent of the live store price.
+      const curYes = m.yes_price_nanos != null ? BigInt(m.yes_price_nanos) : null;
+      const agoYes =
+        m.yes_price_24h_ago_nanos != null
+          ? BigInt(m.yes_price_24h_ago_nanos)
+          : null;
+      const delta24Cents =
+        curYes != null && agoYes != null ? Number(curYes - agoYes) / 1e7 : 0;
       return {
         marketId: m.market_id,
         label: m.name,
@@ -86,7 +99,8 @@ export function useEventGroup(marketId: number): {
         yesPriceNanos: yesNanos,
         noPriceNanos: noNanos,
         yesCents,
-        delta24Cents: mockDelta(m.market_id, yesCents),
+        delta24Cents,
+        volume24hNanos: m.volume_24h_nanos ? BigInt(m.volume_24h_nanos) : 0n,
       };
     });
 

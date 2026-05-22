@@ -28,7 +28,12 @@ import {
   useSetConnectModalOpen,
 } from "@/lib/account/use-account";
 import { usePortfolio } from "@/lib/account/use-portfolio";
-import { formatBatchSeconds, formatDollars, parseNanos } from "@/lib/format/nanos";
+import {
+  formatBatchSeconds,
+  formatDollars,
+  formatInt,
+  parseNanos,
+} from "@/lib/format/nanos";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
 import { useBatchCountdown } from "./use-batch-countdown";
 
@@ -92,32 +97,54 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
     ? Number(parseNanos(portfolio.data.balance_nanos)) / 1e9
     : null;
 
+  // Shares of THIS outcome+side the user currently holds — what they can sell.
+  // Positions carry the outcome as "YES"/"NO" (accounts route), matching
+  // `outcomeSide`.
+  const heldShares =
+    portfolio.data?.positions?.find(
+      (p) => p.market_id === outcome.marketId && p.outcome === outcomeSide,
+    )?.quantity ?? 0;
+
   // Quick-amount chips on the order input. `+N` is additive; `MAX` fills the
   // available balance (needs a known balance). Mirrors the handoff BuyBox.
+  // On a sell, MAX means "all the shares you hold"; on a buy it fills the
+  // available cash balance (as $ or balance/limit shares).
   const quickChips: { label: string; disabled?: boolean; apply: () => void }[] =
     unit === "usd"
       ? [
           { label: "+10", apply: () => setAmount(String((parseFloat(amount) || 0) + 10)) },
           { label: "+50", apply: () => setAmount(String((parseFloat(amount) || 0) + 50)) },
-          {
-            label: "MAX",
-            disabled: balanceDollars == null,
-            apply: () => {
-              if (balanceDollars != null) setAmount(balanceDollars.toFixed(2));
-            },
-          },
+          dir === "sell"
+            ? {
+                label: "MAX",
+                disabled: heldShares <= 0,
+                apply: () => setAmount((heldShares * limitDec).toFixed(2)),
+              }
+            : {
+                label: "MAX",
+                disabled: balanceDollars == null,
+                apply: () => {
+                  if (balanceDollars != null) setAmount(balanceDollars.toFixed(2));
+                },
+              },
         ]
       : [
           { label: "+10", apply: () => setShares(String((parseFloat(shares) || 0) + 10)) },
           { label: "+100", apply: () => setShares(String((parseFloat(shares) || 0) + 100)) },
-          {
-            label: "MAX",
-            disabled: balanceDollars == null,
-            apply: () => {
-              if (balanceDollars != null)
-                setShares(String(Math.floor(balanceDollars / limitDec)));
-            },
-          },
+          dir === "sell"
+            ? {
+                label: "MAX",
+                disabled: heldShares <= 0,
+                apply: () => setShares(String(heldShares)),
+              }
+            : {
+                label: "MAX",
+                disabled: balanceDollars == null,
+                apply: () => {
+                  if (balanceDollars != null)
+                    setShares(String(Math.floor(balanceDollars / limitDec)));
+                },
+              },
         ];
 
   const accent = outcomeSide === "YES" ? "var(--yes)" : "var(--no)";
@@ -375,13 +402,13 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
               color: "var(--fg-4)",
             }}
           >
-            {balanceDollars == null
-              ? unit === "usd"
+            {dir === "sell"
+              ? `balance ${formatInt(heldShares)} sh`
+              : balanceDollars == null
                 ? ""
-                : ""
-              : unit === "usd"
-                ? `balance ${formatDollars(BigInt(Math.floor(balanceDollars * 1e9)), { decimals: 2 })}`
-                : `available ${(balanceDollars / limitDec).toFixed(0)} sh`}
+                : unit === "usd"
+                  ? `balance ${formatDollars(BigInt(Math.floor(balanceDollars * 1e9)), { decimals: 2 })}`
+                  : `available ${(balanceDollars / limitDec).toFixed(0)} sh`}
           </span>
         </div>
         <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>

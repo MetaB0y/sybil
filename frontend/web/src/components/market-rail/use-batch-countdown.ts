@@ -39,8 +39,15 @@ export function useBatchCountdown(): {
   /* eslint-enable */
 
   useEffect(() => {
-    const step = () => {
-      if (anchorRef.current != null) {
+    // Throttle to ~10fps. At 60fps this setState re-renders every consumer each
+    // frame, and the rail mounts two countdowns (hero gauge + buy-box), so the
+    // page churned ~120 renders/sec and the gauge stuttered. 100ms steps plus
+    // the ring's 60ms CSS transition stay visually smooth at a fraction of the
+    // render cost.
+    let lastTickMs = 0;
+    const step = (frameMs: number) => {
+      if (anchorRef.current != null && frameMs - lastTickMs >= 100) {
+        lastTickMs = frameMs;
         const elapsed = performance.now() - anchorRef.current;
         setProgress01(Math.min(1, elapsed / BATCH_MS));
       }

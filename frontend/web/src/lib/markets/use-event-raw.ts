@@ -10,6 +10,12 @@ export type RawEventMarket = {
   /** Full Polymarket question — used to label markets whose `conditionId` link
    *  is missing, by matching against a non-NegRisk market's `name`. */
   question?: string;
+  /** Full Polymarket market description (usually includes the resolution
+   *  criteria text). Shown on the market detail page. */
+  description?: string;
+  /** Resolution source URL. Frequently an empty string on Gamma (the criteria
+   *  live in `description`); rendered as a link only when non-empty. */
+  resolutionSource?: string;
 };
 
 const DEFAULT_API_BASE = "https://172-104-31-54.nip.io";
