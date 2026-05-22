@@ -55,6 +55,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/accounts/{id}/equity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /v1/accounts/{id}/equity?range= */
+        get: operations["get_equity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/accounts/{id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /v1/accounts/{id}/events?limit&before&category */
+        get: operations["get_account_history"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/accounts/{id}/fills": {
         parameters: {
             query?: never;
@@ -974,6 +1008,21 @@ export interface components {
             market_id: number;
             name: string;
         };
+        EquityPointResponse: {
+            /** Format: int64 */
+            deposited_nanos: string;
+            /** Format: int64 */
+            height: number;
+            /** Format: int64 */
+            portfolio_value_nanos: string;
+            /** Format: int64 */
+            timestamp_ms: number;
+        };
+        EquitySeriesResponse: {
+            /** Format: int64 */
+            account_id: number;
+            points: components["schemas"]["EquityPointResponse"][];
+        };
         /** @description Response shape for `GET /v1/events/{event_id}/traders`. */
         EventTradersResponse: {
             /** Format: int32 */
@@ -1001,6 +1050,31 @@ export interface components {
             /** Format: int64 */
             height?: number | null;
             status: string;
+        };
+        /** @description One entry in the per-account history feed (`GET /v1/accounts/{id}/events`). */
+        HistoryEventResponse: {
+            /** Format: int64 */
+            amount_nanos?: string | null;
+            /** Format: int64 */
+            block_height: number;
+            category: string;
+            id: string;
+            /** Format: int32 */
+            market_id?: number | null;
+            /** Format: int64 */
+            order_id?: number | null;
+            outcome?: string | null;
+            payout_outcome?: string | null;
+            /** Format: int64 */
+            price_nanos?: string | null;
+            /** Format: int64 */
+            qty?: number | null;
+            /** Format: int64 */
+            realized_pnl_nanos?: string | null;
+            side?: string | null;
+            /** Format: int64 */
+            timestamp_ms: number;
+            type: string;
         };
         MarketGroupResponse: {
             market_ids: number[];
@@ -1042,6 +1116,11 @@ export interface components {
             event_id?: string | null;
             /** @description Event-level image URL. */
             event_image_url?: string | null;
+            /**
+             * Format: int64
+             * @description Parent event start date (epoch ms) from Polymarket. Display/sort only.
+             */
+            event_start_date_ms?: number | null;
             /** @description Polymarket parent event title. */
             event_title?: string | null;
             /** Format: int64 */
@@ -1073,6 +1152,11 @@ export interface components {
             market_id: number;
             /** @description Per-market image URL. */
             market_image_url?: string | null;
+            /**
+             * Format: int64
+             * @description Per-market start date (epoch ms) from Polymarket. Display/sort only.
+             */
+            market_start_date_ms?: number | null;
             name: string;
             /**
              * Format: int64
@@ -1102,6 +1186,11 @@ export interface components {
             orders_unmatched_total?: number;
             /** Format: int64 */
             payout_nanos?: string | null;
+            /**
+             * @description Polymarket on-chain condition id — FE join key into
+             *     `GET /v1/events/{event_id}/raw` `markets[].conditionId`. Off-block.
+             */
+            polymarket_condition_id?: string | null;
             /**
              * Format: int64
              * @description Reference price from external system (e.g., Polymarket), display only.
@@ -1579,6 +1668,11 @@ export interface components {
             event_id?: string | null;
             /** @description Event-level image URL (primary). */
             event_image_url?: string | null;
+            /**
+             * Format: int64
+             * @description Parent event start date (epoch ms). Display/sort only.
+             */
+            event_start_date_ms?: number | null;
             /** @description Polymarket parent event title — rendered as the MultiCard header. */
             event_title?: string | null;
             /** @description External URL (e.g., Polymarket link). */
@@ -1593,6 +1687,16 @@ export interface components {
             market_icon_url?: string | null;
             /** @description Per-market image URL (primary). */
             market_image_url?: string | null;
+            /**
+             * Format: int64
+             * @description Per-market start date (epoch ms). Display/sort only.
+             */
+            market_start_date_ms?: number | null;
+            /**
+             * @description Polymarket on-chain condition id — the FE join key into the event JSON
+             *     snapshot (`/v1/events/{id}/raw` `markets[].conditionId`).
+             */
+            polymarket_condition_id?: string | null;
         };
         SetReferencePricesRequest: {
             /** @description Map of market_id -> reference price in nanos. */
@@ -1870,6 +1974,62 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_equity: {
+        parameters: {
+            query?: {
+                /** @description Time range: 24h | 7d | 30d | all (default all) */
+                range?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Account ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per-account equity series */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EquitySeriesResponse"];
+                };
+            };
+        };
+    };
+    get_account_history: {
+        parameters: {
+            query?: {
+                /** @description Max events (default 50, cap 500) */
+                limit?: number;
+                /** @description Cursor "<block>.<seq>"; returns events strictly before it */
+                before?: string;
+                /** @description trades | funding | settlement */
+                category?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Account ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Account history feed, newest-first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistoryEventResponse"][];
+                };
             };
         };
     };

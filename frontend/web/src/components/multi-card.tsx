@@ -18,6 +18,7 @@ import {
 import type { MarketPrice } from "@/lib/store";
 import { MarketThumb } from "./market-thumb";
 import { Sparkline } from "./sparkline";
+import { useEventRaw, type RawEventMarket } from "@/lib/markets/use-event-raw";
 
 const SECONDARY_OUTCOMES = 1;
 const CARD_HEIGHT = 340;
@@ -70,6 +71,10 @@ export function MultiCard({ groupName, markets, prices }: Props) {
   // traders). Fetched per event via the dedicated endpoint.
   const eventTradersQ = useEventTraders(markets[0]?.event_id ?? undefined);
 
+  // Outcome short-labels (e.g. "↑ 200,000") live only in the raw Polymarket
+  // event JSON; join by polymarket_condition_id. Lazy + cached per event.
+  const rawMarkets = useEventRaw(markets[0]?.event_id ?? undefined, inView).data;
+
   return (
     <article
       ref={ref}
@@ -104,8 +109,14 @@ export function MultiCard({ groupName, markets, prices }: Props) {
         price={leader ? prices[leader.market_id] : undefined}
         points={points}
         delta24Cents={delta24Cents}
+        rawMarkets={rawMarkets}
       />
-      <SecondaryList markets={secondary} prices={prices} inView={inView} />
+      <SecondaryList
+        markets={secondary}
+        prices={prices}
+        inView={inView}
+        rawMarkets={rawMarkets}
+      />
       <FooterRow
         totalVol={totalVol}
         totalLiqNanos={sumLiquidityNanos(markets)}
@@ -251,11 +262,13 @@ function FeaturedOutcome({
   price,
   points,
   delta24Cents,
+  rawMarkets,
 }: {
   leader: Market | undefined;
   price: MarketPrice | undefined;
   points: import("@/lib/markets/use-card-history").PricePoint[];
   delta24Cents: number | null;
+  rawMarkets: Map<string, RawEventMarket> | undefined;
 }) {
   if (!leader) {
     return (
@@ -275,7 +288,7 @@ function FeaturedOutcome({
     );
   }
   const cents = price ? formatCents(price.yes) : "—";
-  const label = trimOutcomeLabel(leader.name);
+  const label = labelFor(leader, rawMarkets);
   return (
     <Link
       href={`/m/${leader.market_id}`}
@@ -351,10 +364,12 @@ function SecondaryList({
   markets,
   prices,
   inView,
+  rawMarkets,
 }: {
   markets: Market[];
   prices: Record<number, MarketPrice>;
   inView: boolean;
+  rawMarkets: Map<string, RawEventMarket> | undefined;
 }) {
   return (
     <div
@@ -373,6 +388,7 @@ function SecondaryList({
           price={prices[m.market_id]}
           first={i === 0}
           inView={inView}
+          rawMarkets={rawMarkets}
         />
       ))}
     </div>
@@ -384,13 +400,15 @@ function SecondaryRow({
   price,
   first,
   inView,
+  rawMarkets,
 }: {
   market: Market;
   price: MarketPrice | undefined;
   first?: boolean;
   inView: boolean;
+  rawMarkets: Map<string, RawEventMarket> | undefined;
 }) {
-  const label = trimOutcomeLabel(market.name);
+  const label = labelFor(market, rawMarkets);
   const cents = price ? formatCents(price.yes) : "—";
   // Same logic as the leader: real 24h delta from price history, lazy-loaded
   // when the card scrolls into view.
@@ -538,6 +556,22 @@ function FooterChip({
       </span>
     </span>
   );
+}
+
+/**
+ * Outcome label for a card row: the Polymarket `groupItemTitle` (e.g.
+ * "↑ 200,000") joined from the raw event JSON by `polymarket_condition_id`,
+ * falling back to the trimmed market name when the snapshot isn't loaded yet or
+ * the market predates the link field.
+ */
+function labelFor(
+  m: Market,
+  rawMarkets: Map<string, RawEventMarket> | undefined
+): string {
+  const gt = m.polymarket_condition_id
+    ? rawMarkets?.get(m.polymarket_condition_id)?.groupItemTitle
+    : undefined;
+  return gt?.trim() || trimOutcomeLabel(m.name);
 }
 
 function trimOutcomeLabel(name: string): string {
