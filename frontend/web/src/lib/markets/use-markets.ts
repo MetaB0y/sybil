@@ -54,7 +54,13 @@ export function useMarketsList() {
   return { bundle, isPending, error };
 }
 
-function assemble(markets: Market[]): MarketsListBundle {
+function assemble(allMarkets: Market[]): MarketsListBundle {
+  // Hide markets Polymarket has closed (resolved or past their deadline). The
+  // mirror flags these off-block, so closed markets carry `closed: true`; an
+  // absent/false flag (e.g. pre-deploy, or sybil-native markets) shows
+  // everything as before.
+  const markets = allMarkets.filter((m) => m.closed !== true);
+
   const byId = new Map<number, Market>();
   for (const m of markets) byId.set(m.market_id, m);
 

@@ -7,6 +7,9 @@ export type RawEventMarket = {
   conditionId?: string;
   groupItemTitle?: string;
   startDate?: string;
+  /** Full Polymarket question — used to label markets whose `conditionId` link
+   *  is missing, by matching against a non-NegRisk market's `name`. */
+  question?: string;
 };
 
 const DEFAULT_API_BASE = "https://172-104-31-54.nip.io";

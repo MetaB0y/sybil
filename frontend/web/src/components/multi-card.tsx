@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
 import { useInViewport } from "@/lib/hooks/use-in-viewport";
 import {
@@ -20,8 +21,8 @@ import { MarketThumb } from "./market-thumb";
 import { Sparkline } from "./sparkline";
 import { useEventRaw, type RawEventMarket } from "@/lib/markets/use-event-raw";
 
-const SECONDARY_OUTCOMES = 1;
-const CARD_HEIGHT = 340;
+const SECONDARY_OUTCOMES = 2;
+const CARD_HEIGHT = 384;
 
 type Props = {
   groupName: string;
@@ -74,6 +75,7 @@ export function MultiCard({ groupName, markets, prices }: Props) {
   // Outcome short-labels (e.g. "↑ 200,000") live only in the raw Polymarket
   // event JSON; join by polymarket_condition_id. Lazy + cached per event.
   const rawMarkets = useEventRaw(markets[0]?.event_id ?? undefined, inView).data;
+  const getLabel = useMemo(() => makeLabelResolver(rawMarkets), [rawMarkets]);
 
   return (
     <article
@@ -109,13 +111,13 @@ export function MultiCard({ groupName, markets, prices }: Props) {
         price={leader ? prices[leader.market_id] : undefined}
         points={points}
         delta24Cents={delta24Cents}
-        rawMarkets={rawMarkets}
+        getLabel={getLabel}
       />
       <SecondaryList
         markets={secondary}
         prices={prices}
         inView={inView}
-        rawMarkets={rawMarkets}
+        getLabel={getLabel}
       />
       <FooterRow
         totalVol={totalVol}
@@ -262,13 +264,13 @@ function FeaturedOutcome({
   price,
   points,
   delta24Cents,
-  rawMarkets,
+  getLabel,
 }: {
   leader: Market | undefined;
   price: MarketPrice | undefined;
   points: import("@/lib/markets/use-card-history").PricePoint[];
   delta24Cents: number | null;
-  rawMarkets: Map<string, RawEventMarket> | undefined;
+  getLabel: (m: Market) => string;
 }) {
   if (!leader) {
     return (
@@ -288,7 +290,7 @@ function FeaturedOutcome({
     );
   }
   const cents = price ? formatCents(price.yes) : "—";
-  const label = labelFor(leader, rawMarkets);
+  const label = getLabel(leader);
   return (
     <Link
       href={`/m/${leader.market_id}`}
@@ -364,12 +366,12 @@ function SecondaryList({
   markets,
   prices,
   inView,
-  rawMarkets,
+  getLabel,
 }: {
   markets: Market[];
   prices: Record<number, MarketPrice>;
   inView: boolean;
-  rawMarkets: Map<string, RawEventMarket> | undefined;
+  getLabel: (m: Market) => string;
 }) {
   return (
     <div
@@ -388,7 +390,7 @@ function SecondaryList({
           price={prices[m.market_id]}
           first={i === 0}
           inView={inView}
-          rawMarkets={rawMarkets}
+          getLabel={getLabel}
         />
       ))}
     </div>
@@ -400,15 +402,15 @@ function SecondaryRow({
   price,
   first,
   inView,
-  rawMarkets,
+  getLabel,
 }: {
   market: Market;
   price: MarketPrice | undefined;
   first?: boolean;
   inView: boolean;
-  rawMarkets: Map<string, RawEventMarket> | undefined;
+  getLabel: (m: Market) => string;
 }) {
-  const label = labelFor(market, rawMarkets);
+  const label = getLabel(market);
   const cents = price ? formatCents(price.yes) : "—";
   // Same logic as the leader: real 24h delta from price history, lazy-loaded
   // when the card scrolls into view.
@@ -559,19 +561,35 @@ function FooterChip({
 }
 
 /**
- * Outcome label for a card row: the Polymarket `groupItemTitle` (e.g.
- * "↑ 200,000") joined from the raw event JSON by `polymarket_condition_id`,
- * falling back to the trimmed market name when the snapshot isn't loaded yet or
- * the market predates the link field.
+ * Build an outcome-label resolver for one event's cards. Prefers the Polymarket
+ * `groupItemTitle`, sourced in order: (1) `market.group_item_title` on the
+ * markets payload — instant, no extra fetch, so the label doesn't blink; (2) the
+ * raw event JSON joined by `polymarket_condition_id`; (3) exact question text
+ * (for markets missing a condition id, since a non-NegRisk market's `name` IS
+ * its Polymarket question). Falls back to the trimmed name until those resolve
+ * (and for NegRisk "event: outcome" names, where the trim already yields the
+ * outcome). Sources 2–3 are a pre-deploy/edge fallback for the in-view snapshot.
  */
-function labelFor(
-  m: Market,
-  rawMarkets: Map<string, RawEventMarket> | undefined
-): string {
-  const gt = m.polymarket_condition_id
-    ? rawMarkets?.get(m.polymarket_condition_id)?.groupItemTitle
-    : undefined;
-  return gt?.trim() || trimOutcomeLabel(m.name);
+function makeLabelResolver(
+  raw: Map<string, RawEventMarket> | undefined
+): (m: Market) => string {
+  const byQuestion = new Map<string, string>();
+  if (raw) {
+    for (const rm of raw.values()) {
+      if (rm.question && rm.groupItemTitle) {
+        byQuestion.set(rm.question, rm.groupItemTitle);
+      }
+    }
+  }
+  return (m: Market) => {
+    const gt =
+      m.group_item_title ??
+      (m.polymarket_condition_id
+        ? raw?.get(m.polymarket_condition_id)?.groupItemTitle
+        : undefined) ??
+      byQuestion.get(m.name);
+    return gt?.trim() || trimOutcomeLabel(m.name);
+  };
 }
 
 function trimOutcomeLabel(name: string): string {

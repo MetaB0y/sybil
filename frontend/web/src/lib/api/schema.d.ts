@@ -1102,6 +1102,8 @@ export interface components {
             category?: string | null;
             /** Format: int64 */
             challenge_deadline_ms?: number | null;
+            /** @description Whether Polymarket has closed this market. Off-block; the frontend filters closed markets out of the listing. */
+            closed?: boolean | null;
             /** Format: int64 */
             created_at_ms?: number | null;
             description?: string | null;
@@ -1127,6 +1129,8 @@ export interface components {
             expiry_timestamp_ms?: number | null;
             /** @description External URL (e.g., Polymarket link). */
             external_url?: string | null;
+            /** @description Polymarket short outcome label (`groupItemTitle`, e.g. "May 15"). Off-block; the frontend uses it as the per-outcome name so it needn't fetch the raw event JSON just for labels. */
+            group_item_title?: string | null;
             /**
              * Format: int64
              * @description Rolling last-10-batch ±band depth average in nanos. Zero for markets

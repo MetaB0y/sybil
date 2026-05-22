@@ -213,7 +213,6 @@ function TickerCell({
   ariaHidden?: boolean;
 }) {
   const { id, name, yes, volNanos, ppChange, ts } = event;
-  const short = trimChipName(name);
   const HALF = 500_000_000n;
   const tone = yes >= HALF ? "var(--yes)" : "var(--no)";
   return (
@@ -243,16 +242,10 @@ function TickerCell({
         e.currentTarget.style.background = "transparent";
       }}
     >
-      <span
-        style={{
-          maxWidth: 180,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          color: "var(--fg-2)",
-        }}
-      >
-        {short}
-      </span>
+      {/* Full market question, untruncated. For grouped (NegRisk) outcomes the
+          name is "{event}: {outcome}"; for binaries it's the bare question.
+          The marquee scrolls, so a wide cell is fine. */}
+      <span style={{ color: "var(--fg-2)", whiteSpace: "nowrap" }}>{name}</span>
       <span className="tabular" style={{ color: "var(--fg-4)" }}>
         {formatCompactDollars(volNanos)}
       </span>
@@ -281,11 +274,4 @@ function formatPp(pp: number): string {
 function ppColor(pp: number | null): string {
   if (pp == null || Math.abs(pp) < 0.05) return "var(--fg-4)";
   return pp > 0 ? "var(--yes)" : "var(--no)";
-}
-
-function trimChipName(name: string): string {
-  // For "Group Name: Outcome" → "Outcome"; otherwise return as-is.
-  const idx = name.indexOf(":");
-  if (idx > 0 && idx < name.length - 2) return name.slice(idx + 1).trim();
-  return name;
 }
