@@ -239,6 +239,8 @@ pub struct GammaMarket {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
+    pub start_date: Option<String>,
+    #[serde(default)]
     pub end_date: Option<String>,
     #[serde(default)]
     pub resolution_source: Option<String>,
@@ -410,6 +412,7 @@ mod tests {
             liquidity: None,
             slug: None,
             description: None,
+            start_date: None,
             end_date: None,
             resolution_source: None,
             image: None,
@@ -488,6 +491,7 @@ mod tests {
             liquidity: None,
             slug: None,
             description: None,
+            start_date: None,
             end_date: None,
             resolution_source: None,
             image: None,

@@ -24,6 +24,10 @@ pub struct SyncActor {
     mapping: Arc<RwLock<MappingStore>>,
     feed_tx: mpsc::Sender<FeedMessage>,
     mm_tx: mpsc::Sender<MmMessage>,
+    /// Re-push off-block metadata for all mapped markets on the first cycle
+    /// after start, so schema additions backfill onto existing markets
+    /// without wiping `market_ref_data.json`.
+    first_sync: bool,
 }
 
 impl SyncActor {
@@ -42,6 +46,7 @@ impl SyncActor {
             mapping,
             feed_tx,
             mm_tx,
+            first_sync: true,
         }
     }
 
@@ -105,6 +110,37 @@ impl SyncActor {
                     warn!(event_id = &event.id, error = %e, "failed to serialize event snapshot")
                 }
             }
+        }
+
+        // One-time backfill: re-push off-block metadata for all already-mapped
+        // markets on the first cycle after start, so schema additions land on
+        // existing markets without wiping market_ref_data.json. Collect under
+        // the lock, then POST after releasing it.
+        if self.first_sync {
+            let refresh: Vec<(u32, SetMarketMetadataRequest)> = {
+                let map = self.mapping.read().await;
+                events
+                    .iter()
+                    .flat_map(|event| {
+                        event
+                            .markets
+                            .iter()
+                            .filter(|m| m.active && !m.closed)
+                            .filter_map(|m| {
+                                map.sybil_market_id(&m.condition_id)
+                                    .map(|sid| (sid, build_metadata_request(event, m)))
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .collect()
+            };
+            info!(count = refresh.len(), "backfilling market metadata (one-time)");
+            for (sid, req) in refresh {
+                if let Err(e) = self.sybil_client.set_market_metadata(sid, &req).await {
+                    warn!(sybil_id = sid, error = %e, "metadata backfill failed");
+                }
+            }
+            self.first_sync = false;
         }
 
         let mut new_token_ids = Vec::new();
@@ -342,6 +378,16 @@ fn build_metadata_request(event: &GammaEvent, market: &GammaMarket) -> SetMarket
         .as_deref()
         .and_then(parse_iso8601_to_ms)
         .and_then(|ms| u64::try_from(ms).ok());
+    let event_start_date_ms = event
+        .start_date
+        .as_deref()
+        .and_then(parse_iso8601_to_ms)
+        .and_then(|ms| u64::try_from(ms).ok());
+    let market_start_date_ms = market
+        .start_date
+        .as_deref()
+        .and_then(parse_iso8601_to_ms)
+        .and_then(|ms| u64::try_from(ms).ok());
 
     let external_url = if event.slug.is_empty() {
         None
@@ -369,5 +415,8 @@ fn build_metadata_request(event: &GammaEvent, market: &GammaMarket) -> SetMarket
         } else {
             Some(categories)
         },
+        polymarket_condition_id: Some(market.condition_id.clone()),
+        event_start_date_ms,
+        market_start_date_ms,
     }
 }

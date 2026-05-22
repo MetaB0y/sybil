@@ -361,4 +361,14 @@ pub struct SetMarketMetadataRequest {
     /// frontend-only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub categories: Option<Vec<String>>,
+    /// Polymarket on-chain condition id — the FE join key into the event JSON
+    /// snapshot (`/v1/events/{id}/raw` `markets[].conditionId`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub polymarket_condition_id: Option<String>,
+    /// Parent event start date (epoch ms). Display/sort only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_start_date_ms: Option<u64>,
+    /// Per-market start date (epoch ms). Display/sort only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub market_start_date_ms: Option<u64>,
 }

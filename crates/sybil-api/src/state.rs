@@ -50,6 +50,15 @@ pub struct MarketRefData {
     /// priority list. Off-block; stored once at sync time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub categories: Option<Vec<String>>,
+    /// Polymarket on-chain condition id — FE join key into the event JSON.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub polymarket_condition_id: Option<String>,
+    /// Parent event start date (epoch ms) from Polymarket. Display/sort only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_start_date_ms: Option<u64>,
+    /// Per-market start date (epoch ms) from Polymarket. Display/sort only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub market_start_date_ms: Option<u64>,
 }
 
 /// Load `market_ref_data` snapshot from disk, or return an empty map if the
