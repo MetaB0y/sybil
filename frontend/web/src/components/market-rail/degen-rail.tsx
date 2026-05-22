@@ -1,19 +1,27 @@
 "use client";
 
 /**
- * Degen rail — "tap & win" betting flow. Banner → outcome picker → yes/no
- * → amount → big CTA → FBA explainer. Matches `DegenRail` in
- * `fed-right-rail-modes.jsx:293`.
- *
- * The CTA is disabled until wallet/auth lands. All numbers shown are real
- * (countdown, prices, payout math); the only mocked value is "N traders
- * joined" inside the banner.
+ * Degen rail — "tap & win" betting flow. Banner → outcome picker → yes/no →
+ * amount → CTA. On submit the form area is replaced inline by a live
+ * fill-progress card and then a result (DegenProgress). One bet at a time.
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { submitSignedOrder } from "@/lib/account/orders";
+import { useAccountSession, useSetConnectModalOpen } from "@/lib/account/use-account";
+import { ONE_DOLLAR_NANOS, buildDegenOrder, resolveMarkNanos } from "@/lib/degen";
+import {
+  useDegenBetTracker,
+  type DegenActive,
+} from "@/lib/degen/use-degen-bet-tracker";
+import { parseNanos } from "@/lib/format/nanos";
 import type { EventGroup } from "@/lib/market-detail/use-event-group";
+import { usePriceHistory } from "@/lib/markets/use-price-history";
+import { selectLatestHeight, useStore } from "@/lib/store";
 import { DegenAmount } from "./degen-amount";
 import { DegenOutcomePicker } from "./degen-outcome-picker";
+import { DegenProgress } from "./degen-progress";
 import { NextBatchBanner } from "./next-batch-banner";
 import type { Side } from "./yes-no-toggle";
 import { YesNoToggle } from "./yes-no-toggle";
@@ -22,78 +30,184 @@ import { WhyWaiting } from "./why-waiting";
 export function DegenRail({ group }: { group: EventGroup }) {
   const [side, setSide] = useState<Side>("YES");
   const [amount, setAmount] = useState<string>("100");
+  const [active, setActive] = useState<DegenActive | null>(null);
+  const [signing, setSigning] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const session = useAccountSession();
+  const openConnectModal = useSetConnectModalOpen();
+  const qc = useQueryClient();
+  const latestHeight = useStore(selectLatestHeight);
 
   const selected =
     group.outcomes.find((o) => o.marketId === group.currentMarketId) ??
     group.outcomes[0];
+
+  const { data: pricePoints } = usePriceHistory(selected?.marketId ?? -1);
+  const tracking = useDegenBetTracker(active);
+
+  // mark price for the selected side: last price-history point, else clearing.
+  const markNanos = useMemo(() => {
+    if (!selected) return ONE_DOLLAR_NANOS / 2n;
+    const last = pricePoints?.[pricePoints.length - 1];
+    const histYes = last ? parseNanos(last.yes_price_nanos) : null;
+    const histNo = last ? parseNanos(last.no_price_nanos) : null;
+    const clearYes =
+      selected.yesCents == null
+        ? null
+        : BigInt(Math.round(selected.yesCents * 1e7));
+    const clearNo = clearYes == null ? null : ONE_DOLLAR_NANOS - clearYes;
+    return side === "YES"
+      ? resolveMarkNanos(histYes, clearYes)
+      : resolveMarkNanos(histNo, clearNo);
+  }, [pricePoints, selected, side]);
+
+  const amountNum = parseFloat(amount) || 0;
+  const built = useMemo(() => {
+    const betUsdNanos = BigInt(Math.round(amountNum * 1e9));
+    return buildDegenOrder({
+      side,
+      betUsdNanos,
+      markNanos,
+      latestHeight: BigInt(latestHeight ?? 0),
+    });
+  }, [amountNum, side, markNanos, latestHeight]);
+
   if (!selected) return null;
   const yesCents = selected.yesCents;
-  const amountNum = parseFloat(amount) || 0;
+
+  async function onBet() {
+    if (!session) {
+      openConnectModal(true);
+      return;
+    }
+    // selected is narrowed to non-undefined by the early return above, but
+    // TypeScript can't see across the function boundary — guard here too.
+    if (!selected || !built.ok || latestHeight == null) return;
+    setSigning(true);
+    setSubmitError(null);
+    try {
+      const res = await submitSignedOrder({
+        accountId: session.accountId,
+        publicKeyHex: session.publicKeyHex,
+        marketId: selected.marketId,
+        side: built.order.side,
+        limitPriceNanos: built.order.limitPriceNanos,
+        maxFill: built.order.maxFill,
+        expiresAtBlock: built.order.expiresAtBlock,
+      });
+      if (!res.accepted) throw new Error("order not accepted");
+      setActive({
+        accountId: session.accountId,
+        marketId: selected.marketId,
+        outcome: side,
+        targetQty: built.order.maxFill,
+        limitPriceNanos: built.order.limitPriceNanos,
+        submitHeight: latestHeight,
+        // DegenActive.expiresAtBlock is number; built.order.expiresAtBlock is bigint.
+        expiresAtBlock: Number(built.order.expiresAtBlock),
+      });
+      qc.invalidateQueries({ queryKey: ["account", session.accountId, "events"] });
+      qc.invalidateQueries({ queryKey: ["account", session.accountId, "orders"] });
+      qc.invalidateQueries({ queryKey: ["account", session.accountId, "portfolio"] });
+      qc.invalidateQueries({ queryKey: ["orders", "pending"] });
+    } catch (e) {
+      setSubmitError(e instanceof Error ? e.message : "submit failed");
+    } finally {
+      setSigning(false);
+    }
+  }
+
+  const connected = session !== null;
+  const ctaLabel = !connected
+    ? "Connect to bet"
+    : signing
+      ? "Signing…"
+      : !built.ok
+        ? "Raise your bet"
+        : `Bet $${amountNum} on ${side}${group.isMultiOutcome ? ` · ${selected.shortLabel}` : ""}`;
+  const ctaDisabled = connected && (signing || !built.ok);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <NextBatchBanner marketId={selected.marketId} />
 
-      {group.isMultiOutcome && (
-        <div>
-          <SectionLabel>pick outcome</SectionLabel>
-          <DegenOutcomePicker
-            outcomes={group.outcomes}
-            currentMarketId={group.currentMarketId}
-          />
-        </div>
-      )}
-
-      <div>
-        <SectionLabel>will it happen?</SectionLabel>
-        <YesNoToggle value={side} onChange={setSide} />
-      </div>
-
-      <div>
-        <SectionLabel>your bet</SectionLabel>
-        <DegenAmount
-          amount={amount}
-          setAmount={setAmount}
-          yesPriceCents={yesCents}
-          side={side}
+      {active ? (
+        <DegenProgress
+          phase={tracking?.phase ?? "tracking"}
+          side={active.outcome}
+          secondsLeft={tracking?.secondsLeft ?? 0}
+          timeProgress01={tracking?.timeProgress01 ?? 0}
+          filledQty={tracking?.filledQty ?? 0n}
+          targetQty={active.targetQty}
+          limitPriceNanos={active.limitPriceNanos}
+          avgPriceNanos={tracking?.avgPriceNanos ?? null}
+          onBetAgain={() => setActive(null)}
         />
-      </div>
+      ) : (
+        <>
+          {group.isMultiOutcome && (
+            <div>
+              <SectionLabel>pick outcome</SectionLabel>
+              <DegenOutcomePicker
+                outcomes={group.outcomes}
+                currentMarketId={group.currentMarketId}
+              />
+            </div>
+          )}
 
-      <button
-        type="button"
-        disabled
-        title="preview · wallet auth coming soon"
-        style={{
-          marginTop: 4,
-          padding: "16px 0",
-          borderRadius: 6,
-          border: 0,
-          cursor: "not-allowed",
-          background: side === "YES" ? "var(--yes)" : "var(--no)",
-          color: "#0A0E12",
-          fontFamily: "var(--font-sans)",
-          fontSize: 15,
-          fontWeight: 700,
-          letterSpacing: "-0.005em",
-          opacity: 0.65,
-        }}
-      >
-        Bet ${amountNum} on {side}
-        {group.isMultiOutcome ? ` · ${selected.shortLabel}` : ""}
-      </button>
-      <div
-        style={{
-          marginTop: -6,
-          fontFamily: "var(--font-mono)",
-          fontSize: 9.5,
-          color: "var(--fg-4)",
-          textAlign: "center",
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-        }}
-      >
-        preview · wallet auth coming soon
-      </div>
+          <div>
+            <SectionLabel>will it happen?</SectionLabel>
+            <YesNoToggle value={side} onChange={setSide} />
+          </div>
+
+          <div>
+            <SectionLabel>your bet</SectionLabel>
+            <DegenAmount
+              amount={amount}
+              setAmount={setAmount}
+              yesPriceCents={yesCents}
+              side={side}
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={onBet}
+            disabled={ctaDisabled}
+            style={{
+              marginTop: 4,
+              padding: "16px 0",
+              borderRadius: 6,
+              border: 0,
+              cursor: ctaDisabled ? "not-allowed" : "pointer",
+              background: side === "YES" ? "var(--yes)" : "var(--no)",
+              color: "#0A0E12",
+              fontFamily: "var(--font-sans)",
+              fontSize: 15,
+              fontWeight: 700,
+              letterSpacing: "-0.005em",
+              opacity: ctaDisabled ? 0.65 : 1,
+            }}
+          >
+            {ctaLabel}
+          </button>
+
+          {submitError && (
+            <div
+              role="alert"
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 11,
+                color: "var(--no)",
+                textAlign: "center",
+              }}
+            >
+              {submitError}
+            </div>
+          )}
+        </>
+      )}
 
       <WhyWaiting />
     </div>
