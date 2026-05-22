@@ -11,3 +11,16 @@ export function degenDeviation(priceNanos: bigint): bigint {
   const factor = (4 * p * (1 - p)) ** DEGEN_EXPONENT; // dimensionless, 0..1
   return BigInt(Math.round(Number(DEGEN_PEAK_NANOS) * factor));
 }
+
+/**
+ * The degen limit price `Y` for a buy: the side's mark made worse (higher) by
+ * the degen tax, clamped strictly inside `(0, $1)` so a near-edge buy can never
+ * exceed the $1 payout.
+ */
+export function degenLimitPrice(sideMarkNanos: bigint): bigint {
+  const raw = sideMarkNanos + degenDeviation(sideMarkNanos);
+  const max = ONE_DOLLAR_NANOS - 1n;
+  if (raw < 1n) return 1n;
+  if (raw > max) return max;
+  return raw;
+}
