@@ -194,11 +194,11 @@ impl AnalyticsState {
     }
 
     pub fn liquidity_avg10(&self, market_id: MarketId) -> u64 {
-        self.liquidity_tracker.avg_last_n(market_id, 10)
+        self.liquidity_tracker.sum_last_n(market_id, 10)
     }
 
     pub fn all_liquidity_avg10(&self) -> HashMap<MarketId, u64> {
-        self.liquidity_tracker.all_avg_last_n(10)
+        self.liquidity_tracker.all_sum_last_n(10)
     }
 
     pub fn all_market_order_stats(&self) -> HashMap<MarketId, OrderStats> {
@@ -304,11 +304,11 @@ impl AnalyticsState {
         &mut self,
         order_book: &OrderBook,
         mm_orders: &[&Order],
-        clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
+        mark_prices: &HashMap<MarketId, Vec<Nanos>>,
         band_nanos: u64,
     ) {
         self.liquidity_tracker
-            .record_block(order_book, mm_orders, clearing_prices, band_nanos);
+            .record_block(order_book, mm_orders, mark_prices, band_nanos);
     }
 
     pub fn record_equity(

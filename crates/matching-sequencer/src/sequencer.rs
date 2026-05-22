@@ -2564,7 +2564,6 @@ impl BlockSequencer {
             volume_by_market,
             mark_prices,
         } = self.finalize_block_state_phase(&fills, &problem, &clearing_prices, timestamp_ms);
-        let _ = &mark_prices;
 
         // Update order book: release filled orders' reservations, adjust partial fills
         let post_solve_removed = self
@@ -2594,7 +2593,7 @@ impl BlockSequencer {
         self.analytics.record_liquidity(
             &self.order_book,
             &mm_orders,
-            &clearing_prices,
+            &mark_prices,
             self.config.liquidity_band_nanos,
         );
 

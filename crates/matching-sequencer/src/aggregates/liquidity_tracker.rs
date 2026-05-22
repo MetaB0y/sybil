@@ -152,6 +152,24 @@ impl LiquidityTracker {
         sum / (take as u64)
     }
 
+    /// Sum over the last `n` ring entries (capped at the ring length). This is
+    /// the windowed near-the-money depth across recent blocks — the headline
+    /// liquidity metric. Returns 0 when the market has never been recorded.
+    pub fn sum_last_n(&self, market_id: MarketId, n: usize) -> u64 {
+        let Some(ring) = self.last_n_per_market.get(&market_id) else {
+            return 0;
+        };
+        if ring.is_empty() || n == 0 {
+            return 0;
+        }
+        let take = n.min(ring.len());
+        ring.iter()
+            .rev()
+            .take(take)
+            .copied()
+            .fold(0u64, |acc, v| acc.saturating_add(v))
+    }
+
     /// Most recent entry pushed for `market_id`, or 0 if none yet.
     pub fn current(&self, market_id: MarketId) -> u64 {
         self.last_n_per_market
@@ -167,12 +185,12 @@ impl LiquidityTracker {
         self.band_nanos_at_last_update
     }
 
-    /// Bulk view: `avg_last_n(m, n)` for every market the tracker knows about.
+    /// Bulk view: `sum_last_n(m, n)` for every market the tracker knows about.
     /// Used by `list_markets` so the response is a single round-trip.
-    pub fn all_avg_last_n(&self, n: usize) -> HashMap<MarketId, u64> {
+    pub fn all_sum_last_n(&self, n: usize) -> HashMap<MarketId, u64> {
         self.last_n_per_market
             .keys()
-            .map(|&m| (m, self.avg_last_n(m, n)))
+            .map(|&m| (m, self.sum_last_n(m, n)))
             .collect()
     }
 }
@@ -365,6 +383,30 @@ mod tests {
         assert_eq!(tracker.current(m0), 0);
     }
 
+    /// `sum_last_n` totals the ring instead of averaging it.
+    #[test]
+    fn sum_last_n_totals_the_ring() {
+        let (markets, accounts, trader, m0, _m1) = two_market_setup();
+        let mut book = OrderBook::new(1_000);
+        let mid_yes = NANOS_PER_DOLLAR / 2;
+        admit(
+            &mut book,
+            &accounts,
+            outcome_buy(&markets, 1, m0, 0, mid_yes, 2),
+            trader,
+        );
+
+        let mut tracker = LiquidityTracker::new();
+        let mut midprices = HashMap::new();
+        midprices.insert(m0, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
+
+        for _ in 0..3 {
+            tracker.record_block(&book, &[], &midprices, 50_000_000);
+        }
+        let per_block = mid_yes.saturating_mul(2);
+        assert_eq!(tracker.sum_last_n(m0, 10), per_block * 3);
+    }
+
     /// Markets with a clearing price but no near-the-money resting orders
     /// get 0s pushed into their ring — `avg_last_n` reflects the quiet state.
     #[test]
@@ -387,5 +429,28 @@ mod tests {
             assert_eq!(*v, 0);
         }
         assert_eq!(tracker.avg_last_n(m0, 10), 0);
+        assert_eq!(tracker.sum_last_n(m0, 10), 0);
+    }
+
+    /// `all_sum_last_n` returns the per-market summed ring for every known market.
+    #[test]
+    fn all_sum_last_n_covers_known_markets() {
+        let (markets, accounts, trader, m0, _m1) = two_market_setup();
+        let mut book = OrderBook::new(1_000);
+        let mid_yes = NANOS_PER_DOLLAR / 2;
+        admit(
+            &mut book,
+            &accounts,
+            outcome_buy(&markets, 1, m0, 0, mid_yes, 2),
+            trader,
+        );
+        let mut tracker = LiquidityTracker::new();
+        let mut midprices = HashMap::new();
+        midprices.insert(m0, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
+        for _ in 0..2 {
+            tracker.record_block(&book, &[], &midprices, 50_000_000);
+        }
+        let all = tracker.all_sum_last_n(10);
+        assert_eq!(all.get(&m0).copied(), Some(mid_yes.saturating_mul(2) * 2));
     }
 }
