@@ -1,4 +1,4 @@
-import { DEGEN_EXPONENT, DEGEN_PEAK_NANOS, ONE_DOLLAR_NANOS } from "./constants";
+import { DEGEN_BATCHES, DEGEN_EXPONENT, DEGEN_PEAK_NANOS, ONE_DOLLAR_NANOS } from "./constants";
 
 /**
  * The degen tax in nanos: a symmetric power-law hump that peaks at 50¢ and
@@ -23,4 +23,15 @@ export function degenLimitPrice(sideMarkNanos: bigint): bigint {
   if (raw < 1n) return 1n;
   if (raw > max) return max;
   return raw;
+}
+
+/** Shares affordable for `budgetNanos` at limit `limitNanos` (integer floor). */
+export function degenQuantity(budgetNanos: bigint, limitNanos: bigint): bigint {
+  if (budgetNanos <= 0n || limitNanos <= 0n) return 0n;
+  return budgetNanos / limitNanos;
+}
+
+/** Last eligible block height: the next `DEGEN_BATCHES` batches. */
+export function degenExpiry(latestHeight: bigint): bigint {
+  return latestHeight + DEGEN_BATCHES;
 }
