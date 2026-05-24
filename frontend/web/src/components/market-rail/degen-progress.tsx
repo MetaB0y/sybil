@@ -11,7 +11,14 @@ export interface DegenProgressProps {
   timeProgress01: number;
   filledQty: bigint;
   targetQty: bigint;
+  /** The dollar amount the user bet (the full intended stake). */
+  betUsd: number;
   onBetAgain: () => void;
+}
+
+/** "$10" for whole amounts, "$12.50" otherwise. */
+function money(n: number): string {
+  return Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`;
 }
 
 export function DegenProgress(props: DegenProgressProps) {
@@ -42,12 +49,21 @@ export function DegenProgress(props: DegenProgressProps) {
     );
   }
 
+  // Partial fill: the filled portion of the intended stake, proportional to
+  // shares filled (rounded to cents to avoid float dust).
+  const filledUsd =
+    props.targetQty > 0n
+      ? Math.round(
+          ((props.betUsd * Number(props.filledQty)) / Number(props.targetQty)) *
+            100,
+        ) / 100
+      : 0;
   const result =
     props.phase === "filled"
-      ? `✅ Bet placed — ${props.targetQty.toString()} shares`
+      ? `🎉 Congratulations! Successfully bet ${money(props.betUsd)} on ${props.side}!`
       : props.phase === "partial"
-        ? `◐ Half in — ${props.filledQty.toString()} of ${props.targetQty.toString()}, rest returned`
-        : `✕ Missed — no one took the other side`;
+        ? `◐ Half in! Successfully bet ${money(filledUsd)} out of ${money(props.betUsd)} on ${props.side}!`
+        : `✕ Missed :( No one took the other side — try again!`;
 
   return (
     <div style={cardStyle}>

@@ -8,6 +8,7 @@ const common = {
   timeProgress01: 0.4,
   filledQty: 12n,
   targetQty: 20n,
+  betUsd: 10,
   onBetAgain: () => {},
 };
 
@@ -23,20 +24,24 @@ describe("DegenProgress", () => {
     expect(html).not.toMatch(/Bet again/i);
   });
 
-  it("shows a filled result and a reset", () => {
+  it("shows a filled result with the bet amount + side and a reset", () => {
     const html = renderToStaticMarkup(
       <DegenProgress {...common} phase="filled" filledQty={20n} />,
     );
-    expect(html).toMatch(/Bet placed/i);
+    expect(html).toMatch(/Congratulations/i);
+    expect(html).toContain("$10");
+    expect(html).toContain("YES");
     expect(html).toMatch(/Bet again/i);
   });
 
-  it("shows a partial result", () => {
+  it("shows a partial result with the filled dollars out of the stake", () => {
+    // 12 of 20 shares of a $10 bet -> $6 out of $10.
     const html = renderToStaticMarkup(
       <DegenProgress {...common} phase="partial" />,
     );
     expect(html).toMatch(/Half in/i);
-    expect(html).toContain("12");
+    expect(html).toContain("$6");
+    expect(html).toContain("$10");
     expect(html).toMatch(/Bet again/i);
   });
 

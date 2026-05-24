@@ -153,6 +153,7 @@ export function DegenRail({ group }: { group: EventGroup }) {
           timeProgress01={tracking?.timeProgress01 ?? 0}
           filledQty={tracking?.filledQty ?? 0n}
           targetQty={active.targetQty}
+          betUsd={amountNum}
           onBetAgain={() => setActive(null)}
         />
       ) : (
