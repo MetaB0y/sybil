@@ -16,7 +16,7 @@ pub const EQUITY_SAMPLE_INTERVAL_MS: u64 = 60_000;
 /// Max points retained per account (~30 days at one point/minute).
 pub const MAX_EQUITY_POINTS: usize = 43_200;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EquityPoint {
     pub height: u64,
     pub timestamp_ms: u64,
