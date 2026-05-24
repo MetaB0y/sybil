@@ -46,8 +46,8 @@ impl AnalyticsState {
             order_stats_tracker: OrderStatsTracker::new(),
             cost_basis_tracker: CostBasisTracker::new(),
             first_deposit_ms: HashMap::new(),
-            equity_tracker: EquityTracker::new(),
-            account_event_log: AccountEventLog::new(),
+            equity_tracker: EquityTracker::with_retention(config.max_equity_points_per_account),
+            account_event_log: AccountEventLog::with_retention(config.max_history_events_per_account),
         }
     }
 
@@ -72,8 +72,8 @@ impl AnalyticsState {
             order_stats_tracker: OrderStatsTracker::restore(input.order_stats_tracker),
             cost_basis_tracker: CostBasisTracker::restore(input.cost_basis_tracker),
             first_deposit_ms: input.first_deposit_ms,
-            equity_tracker: EquityTracker::new(),
-            account_event_log: AccountEventLog::new(),
+            equity_tracker: EquityTracker::with_retention(config.max_equity_points_per_account),
+            account_event_log: AccountEventLog::with_retention(config.max_history_events_per_account),
         }
     }
 
@@ -90,6 +90,13 @@ impl AnalyticsState {
             first_deposit_ms: self.first_deposit_snapshot(),
             fill_total_counts: self.total_fill_counts(),
             cost_basis_tracker: self.cost_basis_snapshot(),
+            equity_points_delta: self.equity_tracker.pending().to_vec(),
+            history_events_delta: self
+                .account_event_log
+                .pending()
+                .iter()
+                .map(crate::aggregates::StoredHistoryEvent::from_event)
+                .collect(),
         }
     }
 

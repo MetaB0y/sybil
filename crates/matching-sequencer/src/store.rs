@@ -365,6 +365,8 @@ pub struct AnalyticsSnapshot<'a> {
     pub first_deposit_ms: HashMap<AccountId, u64>,
     pub fill_total_counts: HashMap<AccountId, u64>,
     pub cost_basis_tracker: CostBasisTrackerSnapshot,
+    pub equity_points_delta: Vec<(AccountId, crate::aggregates::EquityPoint)>,
+    pub history_events_delta: Vec<crate::aggregates::StoredHistoryEvent>,
 }
 
 /// Borrowed view of sequencer state needed to persist one block.
@@ -606,6 +608,26 @@ impl Store {
                 let key = fill_history_key(*account_id, record);
                 let bytes = rmp_serde::to_vec(record)?;
                 table.insert(key.as_slice(), bytes.as_slice())?;
+            }
+        }
+
+        // Equity points delta — append new per-account equity rows from this block.
+        {
+            let mut eq = txn.open_table(EQUITY_POINTS)?;
+            for (aid, p) in &snapshot.analytics.equity_points_delta {
+                let key = equity_key(*aid, p.height);
+                let bytes = rmp_serde::to_vec(p)?;
+                eq.insert(key.as_slice(), bytes.as_slice())?;
+            }
+        }
+
+        // History events delta — append new per-account history events from this block.
+        {
+            let mut hist = txn.open_table(HISTORY_EVENTS)?;
+            for ev in &snapshot.analytics.history_events_delta {
+                let key = history_event_key(AccountId(ev.account_id), ev.block_height, ev.seq);
+                let bytes = rmp_serde::to_vec(ev)?;
+                hist.insert(key.as_slice(), bytes.as_slice())?;
             }
         }
 
@@ -1776,6 +1798,8 @@ mod tests {
                     first_deposit_ms: HashMap::new(),
                     fill_total_counts: HashMap::new(),
                     cost_basis_tracker: Default::default(),
+                    equity_points_delta: Vec::new(),
+                    history_events_delta: Vec::new(),
                 },
                 bridge_state: &self.bridge_state,
                 resting_orders,
@@ -1810,6 +1834,8 @@ mod tests {
                     first_deposit_ms: HashMap::new(),
                     fill_total_counts: HashMap::new(),
                     cost_basis_tracker: Default::default(),
+                    equity_points_delta: Vec::new(),
+                    history_events_delta: Vec::new(),
                 },
                 bridge_state: &self.bridge_state,
                 resting_orders: Vec::new(),

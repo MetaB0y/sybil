@@ -78,6 +78,12 @@ pub struct SequencerConfig {
     /// Maximum in-memory fill records retained per account for API queries.
     /// Persistent storage may retain more rows.
     pub max_fill_history_per_account: usize,
+    /// In-memory equity points retained per account (serving fallback only;
+    /// full series lives in redb). Set to 0 in prod.
+    pub max_equity_points_per_account: usize,
+    /// In-memory history events retained per account (serving fallback only).
+    /// Set to 0 in prod.
+    pub max_history_events_per_account: usize,
     /// Queue depth where actor mailbox pressure should be logged as a warning.
     /// Set to 0 to disable warning logs.
     pub actor_queue_warn_depth: usize,
@@ -109,6 +115,8 @@ impl Default for SequencerConfig {
                 crate::price_tracker::DEFAULT_MAX_PRICE_HISTORY_POINTS_PER_MARKET,
             max_fill_history_per_account:
                 crate::fill_recorder::DEFAULT_MAX_FILL_HISTORY_PER_ACCOUNT,
+            max_equity_points_per_account: crate::aggregates::MAX_EQUITY_POINTS,
+            max_history_events_per_account: crate::aggregates::MAX_HISTORY_EVENTS_PER_ACCOUNT,
             actor_queue_warn_depth: 1_000,
             actor_queue_error_depth: 5_000,
             liquidity_band_nanos: 50_000_000,
@@ -1720,6 +1728,7 @@ impl BlockSequencer {
             production,
         } = prepared;
         *self = next_sequencer;
+        self.analytics.clear_offblock_pending();
         production
     }
 
