@@ -68,6 +68,7 @@ export function BinaryCard({ market, price }: Props) {
         boxSizing: "border-box",
         overflow: "hidden",
         cursor: "pointer",
+        opacity: market.closed === true ? 0.5 : 1,
       }}
       onMouseEnter={(e) =>
         (e.currentTarget.style.borderColor = "var(--border-3)")
@@ -149,7 +150,7 @@ function EyebrowRow({ market }: { market: Market }) {
           color: "var(--fg-3)",
         }}
       >
-        {endDate ?? "yes / no"}
+        {market.closed === true ? "closed" : (endDate ?? "yes / no")}
       </span>
     </div>
   );
