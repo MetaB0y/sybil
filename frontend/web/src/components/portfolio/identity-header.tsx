@@ -6,6 +6,8 @@
  * and a shortened address chip. Matches the handoff `IdentityStrip`.
  */
 
+import { PageHeader } from "@/components/page-header";
+
 const ALIAS_LEFT = [
   "anon",
   "fuzz",
@@ -35,32 +37,10 @@ export function IdentityHeader({ publicKeyHex }: { publicKeyHex: string }) {
   const address = shortAddress(publicKeyHex);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <h1
-        style={{
-          margin: 0,
-          fontFamily: "var(--font-display)",
-          fontWeight: 600,
-          fontSize: "var(--fs-56)",
-          lineHeight: "var(--lh-56)",
-          letterSpacing: "var(--track-tight)",
-          color: "var(--fg-1)",
-        }}
-      >
-        Portfolio
-      </h1>
-      <p
-        style={{
-          margin: 0,
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          color: "var(--fg-4)",
-          letterSpacing: "var(--track-wide)",
-        }}
-      >
-        {"// "}positions · orders · history for {address}
-      </p>
-    </div>
+    <PageHeader
+      title="Portfolio"
+      meta={`positions · orders · history for ${address}`}
+    />
   );
 }
 

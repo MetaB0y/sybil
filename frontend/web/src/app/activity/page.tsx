@@ -13,6 +13,8 @@ import { PulseStrip } from "@/components/activity/pulse-strip";
 import { BatchesTable } from "@/components/activity/batches-table";
 import { BatchDetail } from "@/components/activity/batch-detail";
 import { ActivityBatchChip } from "@/components/activity/batch-chip";
+import { PageHeader } from "@/components/page-header";
+import { BLOCK_INTERVAL_MS } from "@/lib/constants";
 
 export default function ActivityPage() {
   const overview = useActivityOverview();
@@ -34,30 +36,13 @@ export default function ActivityPage() {
           // +36px = markets ClearingTicker height, so the title aligns
           // with /'s "All markets" across pages
           padding: "calc(var(--space-6) + 36px) var(--space-5) 0",
-          display: "flex",
-          alignItems: "baseline",
-          gap: 14,
         }}
       >
-        <h1
-          style={{
-            fontFamily: "var(--font-display)",
-            fontWeight: 600,
-            fontSize: "var(--fs-56)",
-            lineHeight: "var(--lh-56)",
-            letterSpacing: "var(--track-tight)",
-            color: "var(--fg-1)",
-            margin: 0,
-          }}
-        >
-          Activity
-        </h1>
-        <span className="text-annotation" style={{ fontSize: 11 }}>
-          everything happening on Sybil · uniform clearing every 10 s
-        </span>
-        <span style={{ marginLeft: "auto" }}>
-          <ActivityBatchChip />
-        </span>
+        <PageHeader
+          title="Activity"
+          meta={`everything happening on Sybil · uniform clearing every ${BLOCK_INTERVAL_MS / 1000}s`}
+          action={<ActivityBatchChip />}
+        />
       </div>
 
       <HeroAllTime allTime={overview.allTime} />
