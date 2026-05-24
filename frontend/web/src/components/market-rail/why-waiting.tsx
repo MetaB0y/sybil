@@ -7,11 +7,11 @@ type Variant = "waiting" | "failed";
 const COPY: Record<Variant, { trigger: string; body: string }> = {
   waiting: {
     trigger: "why am I waiting?",
-    body: "Every 10s, all bets settle together at one shared price — so nobody jumps the line or beats you to it.",
+    body: "Every 10 seconds, all open bets settle together at one fair price.",
   },
   failed: {
     trigger: "why failed?",
-    body: "Nobody took the other side in time, so nothing was charged. Tap Bet again to retry.",
+    body: "No one took the other side in time. Tap Bet again to retry.",
   },
 };
 

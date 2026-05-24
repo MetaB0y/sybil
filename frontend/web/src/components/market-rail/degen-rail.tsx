@@ -9,6 +9,7 @@
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { submitSignedOrder } from "@/lib/account/orders";
+import { humanizeOrderError } from "@/lib/account/order-errors";
 import { useAccountSession, useSetConnectModalOpen } from "@/lib/account/use-account";
 import { usePortfolio } from "@/lib/account/use-portfolio";
 import { ONE_DOLLAR_NANOS, buildDegenOrder, resolveMarkNanos } from "@/lib/degen";
@@ -116,7 +117,8 @@ export function DegenRail({ group }: { group: EventGroup }) {
       qc.invalidateQueries({ queryKey: ["account", session.accountId, "portfolio"] });
       qc.invalidateQueries({ queryKey: ["orders", "pending"] });
     } catch (e) {
-      setSubmitError(e instanceof Error ? e.message : "submit failed");
+      console.error("degen bet submit failed:", e);
+      setSubmitError(humanizeOrderError(e, "bet"));
     } finally {
       setSigning(false);
     }

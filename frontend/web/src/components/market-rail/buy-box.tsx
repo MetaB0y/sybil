@@ -23,6 +23,7 @@ import {
   submitSignedOrder,
   type OrderSide,
 } from "@/lib/account/orders";
+import { humanizeOrderError } from "@/lib/account/order-errors";
 import {
   useAccountSession,
   useSetConnectModalOpen,
@@ -224,7 +225,8 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
         qc.invalidateQueries({ queryKey: ["orders", "pending"] });
       }
     } catch (e) {
-      setSubmitError(e instanceof Error ? e.message : String(e));
+      console.error("order submit failed:", e);
+      setSubmitError(humanizeOrderError(e, "order"));
     } finally {
       setSubmitting(false);
     }
