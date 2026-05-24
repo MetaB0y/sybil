@@ -61,6 +61,9 @@ export function MultiCard({ groupName, markets, prices }: Props) {
   const secondary = ranked.slice(1, 1 + SECONDARY_OUTCOMES);
   const hiddenCount = Math.max(0, ranked.length - 1 - secondary.length);
 
+  const allClosed =
+    markets.length > 0 && markets.every((m) => m.closed === true);
+
   const { points, delta24Cents } = useCardHistory(
     leader?.market_id ?? -1,
     inView && !!leader
@@ -97,12 +100,14 @@ export function MultiCard({ groupName, markets, prices }: Props) {
         boxSizing: "border-box",
         overflow: "hidden",
         cursor: "pointer",
+        opacity: allClosed ? 0.5 : 1,
       }}
     >
       <EyebrowRow
         markets={markets}
         count={markets.length}
         hiddenCount={hiddenCount}
+        allClosed={allClosed}
       />
       <TitleRow
         groupName={groupName}
@@ -122,6 +127,7 @@ export function MultiCard({ groupName, markets, prices }: Props) {
         prices={prices}
         inView={inView}
         getLabel={getLabel}
+        cardClosed={allClosed}
       />
       <FooterRow
         totalVol={totalVol}
@@ -136,10 +142,12 @@ function EyebrowRow({
   markets,
   count,
   hiddenCount,
+  allClosed,
 }: {
   markets: Market[];
   count: number;
   hiddenCount: number;
+  allClosed: boolean;
 }) {
   // All markets in a group share an event, so they share categories. Use
   // the first market's categories as the source of truth.
@@ -193,6 +201,12 @@ function EyebrowRow({
           color: "var(--fg-3)",
         }}
       >
+        {allClosed && (
+          <>
+            <span style={{ color: "var(--fg-4)" }}>closed</span>
+            <span style={{ margin: "0 4px", color: "var(--fg-4)" }}>·</span>
+          </>
+        )}
         <span>{count} outcomes</span>
         {hiddenCount > 0 && (
           <>
@@ -371,11 +385,13 @@ function SecondaryList({
   prices,
   inView,
   getLabel,
+  cardClosed,
 }: {
   markets: Market[];
   prices: Record<number, MarketPrice>;
   inView: boolean;
   getLabel: (m: Market) => string;
+  cardClosed: boolean;
 }) {
   return (
     <div
@@ -395,6 +411,7 @@ function SecondaryList({
           first={i === 0}
           inView={inView}
           getLabel={getLabel}
+          cardClosed={cardClosed}
         />
       ))}
     </div>
@@ -407,14 +424,20 @@ function SecondaryRow({
   first,
   inView,
   getLabel,
+  cardClosed,
 }: {
   market: Market;
   price: MarketPrice | undefined;
   first?: boolean;
   inView: boolean;
   getLabel: (m: Market) => string;
+  cardClosed: boolean;
 }) {
   const label = getLabel(market);
+  // Per-row greying only when this row is closed inside an OPEN card. When the
+  // whole card is closed the <article> already dims at 0.5 — self-dimming here
+  // would compound to 0.25.
+  const rowClosed = market.closed === true && !cardClosed;
   const cents = price ? formatCents(price.yes) : "—";
   // Same logic as the leader: real 24h delta from price history, lazy-loaded
   // when the card scrolls into view.
@@ -438,14 +461,14 @@ function SecondaryRow({
         borderTop: first ? "none" : "1px solid var(--border-1)",
         textDecoration: "none",
         color: "var(--fg-1)",
-        opacity: market.closed === true ? 0.5 : 1,
+        opacity: rowClosed ? 0.5 : 1,
       }}
     >
       <span
         style={{
           fontFamily: "var(--font-sans)",
           fontSize: "var(--fs-13)",
-          color: market.closed === true ? "var(--fg-4)" : "var(--fg-2)",
+          color: rowClosed ? "var(--fg-4)" : "var(--fg-2)",
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
@@ -454,7 +477,7 @@ function SecondaryRow({
         }}
       >
         {label}
-        {market.closed === true && (
+        {rowClosed && (
           <span
             className="text-mono"
             style={{
