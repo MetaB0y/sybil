@@ -5,7 +5,6 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { BinaryCard } from "@/components/binary-card";
 import { ClearingTicker } from "@/components/clearing-ticker";
 import { MultiCard } from "@/components/multi-card";
-import { PageHeader } from "@/components/page-header";
 import {
   MarketsFilterBar,
   parseSortKey,
@@ -176,14 +175,32 @@ function MarketsPageInner() {
           gap: "var(--space-5)",
         }}
       >
-        <PageHeader
-          title="All markets"
-          meta={
-            bundle == null
+        <header
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-2)",
+          }}
+        >
+          <h1
+            style={{
+              fontFamily: "var(--font-display)",
+              fontWeight: 600,
+              fontSize: "var(--fs-56)",
+              lineHeight: "var(--lh-56)",
+              letterSpacing: "var(--track-tight)",
+              margin: 0,
+              color: "var(--fg-1)",
+            }}
+          >
+            All markets
+          </h1>
+          <p className="text-annotation">
+            {bundle == null
               ? "loading…"
-              : `${shownMarkets} markets · ${shownEvents} events · uniform clearing every ${BLOCK_INTERVAL_MS / 1000}s`
-          }
-        />
+              : `${shownMarkets} markets · ${shownEvents} events · uniform clearing every ${BLOCK_INTERVAL_MS / 1000}s`}
+          </p>
+        </header>
 
         <MarketsFilterBar
           sort={sort}
