@@ -26,6 +26,24 @@ function binary(
   };
 }
 
+function multi(
+  eventId: string,
+  opts: { closed?: boolean; vol?: bigint; name?: string } = {},
+): CardItem {
+  const name = opts.name ?? eventId;
+  return {
+    kind: "multi",
+    name,
+    eventId,
+    markets: [],
+    volumeNanos: opts.vol ?? 0n,
+    sortKey: name.toLowerCase(),
+    createdMs: 0,
+    primaryCategory: null,
+    closed: opts.closed ?? false,
+  };
+}
+
 const NO_TRADERS = new Map<string, number>();
 const base = {
   query: "",
@@ -101,5 +119,18 @@ describe("selectIndexCards", () => {
     const snapshot = [...items];
     selectIndexCards(items, { ...base, showClosed: true });
     expect(items).toEqual(snapshot);
+  });
+
+  it("keeps a partially-closed multi event visible when showClosed=false", () => {
+    // A multi event with at least one open outcome is tagged closed:false by
+    // the page, so it must survive the hide-closed filter.
+    const partial = multi("ev-partial", { closed: false });
+    const fullyClosed = multi("ev-closed", { closed: true });
+    const out = selectIndexCards([partial, fullyClosed], {
+      ...base,
+      showClosed: false,
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.kind === "multi" && out[0]!.eventId).toBe("ev-partial");
   });
 });
