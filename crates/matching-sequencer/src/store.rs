@@ -140,6 +140,14 @@ const ADMIT_LOG: TableDefinition<u64, &[u8]> = TableDefinition::new("admit_log")
 /// account and ordered by block for efficient restoration and future scans.
 const FILL_HISTORY: TableDefinition<&[u8], &[u8]> = TableDefinition::new("fill_history");
 
+/// Per-account equity series. Key = account_id(8B BE) ++ height(8B BE); one
+/// point per (account, block). Value = rmp-serde EquityPoint. Off-block.
+const EQUITY_POINTS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("equity_points");
+
+/// Per-account history feed. Key = account_id(8B BE) ++ block_height(8B BE) ++
+/// seq(8B BE). Value = rmp-serde StoredHistoryEvent. Off-block.
+const HISTORY_EVENTS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("history_events");
+
 /// L1 bridge sidecar state: consumed deposit cursor/root and withdrawal leaves.
 const BRIDGE_STATE: TableDefinition<&str, &[u8]> = TableDefinition::new("bridge_state");
 const KEY_BRIDGE_STATE: &str = "state";
@@ -221,6 +229,21 @@ fn fill_history_key(account_id: AccountId, record: &AccountFillRecord) -> [u8; 2
     key[8..16].copy_from_slice(&record.block_height.to_be_bytes());
     key[16..24].copy_from_slice(&record.order_id.to_be_bytes());
     key
+}
+
+fn equity_key(account_id: AccountId, height: u64) -> [u8; 16] {
+    let mut k = [0u8; 16];
+    k[..8].copy_from_slice(&account_id.0.to_be_bytes());
+    k[8..].copy_from_slice(&height.to_be_bytes());
+    k
+}
+
+fn history_event_key(account_id: AccountId, block_height: u64, seq: u64) -> [u8; 24] {
+    let mut k = [0u8; 24];
+    k[..8].copy_from_slice(&account_id.0.to_be_bytes());
+    k[8..16].copy_from_slice(&block_height.to_be_bytes());
+    k[16..].copy_from_slice(&seq.to_be_bytes());
+    k
 }
 
 fn account_id_from_fill_history_key(key: &[u8]) -> Option<AccountId> {
@@ -386,6 +409,8 @@ impl Store {
         txn.open_table(PENDING_BUNDLES)?;
         txn.open_table(ADMIT_LOG)?;
         txn.open_table(FILL_HISTORY)?;
+        txn.open_table(EQUITY_POINTS)?;
+        txn.open_table(HISTORY_EVENTS)?;
         txn.open_table(DATA_FEEDS)?;
         txn.open_table(BRIDGE_STATE)?;
         txn.open_table(PENDING_L1_DEPOSITS)?;
@@ -1311,6 +1336,86 @@ impl Store {
         request: &BridgeWithdrawalRequest,
     ) -> Result<(), StoreError> {
         append_msgpack_row(&self.db, PENDING_BRIDGE_WITHDRAWALS, request)
+    }
+
+    /// Append this block's equity points and history events as individual rows.
+    /// Append-only; standalone version used by tests and as a fallback.
+    pub fn append_offblock_rows(
+        &self,
+        equity: &[(AccountId, crate::aggregates::EquityPoint)],
+        history: &[crate::aggregates::StoredHistoryEvent],
+    ) -> Result<(), StoreError> {
+        let txn = self.db.begin_write()?;
+        {
+            let mut t = txn.open_table(EQUITY_POINTS)?;
+            for (aid, p) in equity {
+                let key = equity_key(*aid, p.height);
+                let bytes = rmp_serde::to_vec(p)?;
+                t.insert(key.as_slice(), bytes.as_slice())?;
+            }
+            let mut h = txn.open_table(HISTORY_EVENTS)?;
+            for ev in history {
+                let key = history_event_key(AccountId(ev.account_id), ev.block_height, ev.seq);
+                let bytes = rmp_serde::to_vec(ev)?;
+                h.insert(key.as_slice(), bytes.as_slice())?;
+            }
+        }
+        txn.commit()?;
+        Ok(())
+    }
+
+    /// All equity points for an account, oldest-first (matches `EquityTracker::series`).
+    pub fn equity_series(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Vec<crate::aggregates::EquityPoint>, StoreError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(EQUITY_POINTS)?;
+        let lo = equity_key(account_id, 0);
+        let hi = equity_key(account_id, u64::MAX);
+        let mut out = Vec::new();
+        for entry in table.range::<&[u8]>(lo.as_slice()..=hi.as_slice())? {
+            let (_k, v) = entry?;
+            out.push(rmp_serde::from_slice(v.value())?);
+        }
+        Ok(out)
+    }
+
+    /// Newest-first page of an account's history, replicating
+    /// `AccountEventLog::query` (cursor `before = (block_height, seq)`,
+    /// `category` filter via `HistoryKind::category`).
+    pub fn account_events(
+        &self,
+        account_id: AccountId,
+        limit: usize,
+        before: Option<(u64, u64)>,
+        category: Option<String>,
+    ) -> Result<Vec<crate::aggregates::HistoryEvent>, StoreError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(HISTORY_EVENTS)?;
+        let lo = history_event_key(account_id, 0, 0);
+        let hi = history_event_key(account_id, u64::MAX, u64::MAX);
+        let mut out = Vec::new();
+        for entry in table.range::<&[u8]>(lo.as_slice()..=hi.as_slice())?.rev() {
+            let (_k, v) = entry?;
+            let stored: crate::aggregates::StoredHistoryEvent =
+                rmp_serde::from_slice(v.value())?;
+            if let Some((b, s)) = before {
+                if !((stored.block_height, stored.seq) < (b, s)) {
+                    continue;
+                }
+            }
+            if let Some(ref c) = category {
+                if stored.kind.category() != c.as_str() {
+                    continue;
+                }
+            }
+            out.push(stored.into_event());
+            if out.len() >= limit {
+                break;
+            }
+        }
+        Ok(out)
     }
 }
 
@@ -2540,5 +2645,53 @@ mod tests {
 
         let restored_after = store.load_state().await.unwrap().unwrap();
         assert!(restored_after.pending_bundles.is_empty());
+    }
+
+    #[test]
+    fn equity_and_history_rows_roundtrip() {
+        use crate::account::AccountId;
+        use crate::aggregates::{EquityPoint, HistoryEvent, HistoryKind, StoredHistoryEvent};
+
+        let path = temp_db_path("equity-history-roundtrip");
+        let store = Store::open(&path).unwrap();
+        let aid = AccountId(7);
+
+        let pts = vec![
+            EquityPoint { height: 1, timestamp_ms: 1_000, portfolio_value_nanos: 100, deposited_nanos: 100 },
+            EquityPoint { height: 2, timestamp_ms: 2_000, portfolio_value_nanos: 150, deposited_nanos: 100 },
+        ];
+        let mut e1 = HistoryEvent::new(aid, HistoryKind::Placed, 1, 1_000);
+        e1.seq = 0;
+        let mut e2 = HistoryEvent::new(aid, HistoryKind::Filled, 2, 2_000);
+        e2.seq = 1;
+        let events: Vec<StoredHistoryEvent> =
+            vec![StoredHistoryEvent::from_event(&e1), StoredHistoryEvent::from_event(&e2)];
+
+        store
+            .append_offblock_rows(
+                &pts.iter().map(|p| (aid, *p)).collect::<Vec<_>>(),
+                &events,
+            )
+            .unwrap();
+
+        // Equity: oldest-first, all points.
+        let got = store.equity_series(aid).unwrap();
+        assert_eq!(got, pts);
+
+        // History: newest-first, filtered + paged like AccountEventLog::query.
+        let all = store.account_events(aid, 10, None, None).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].kind, HistoryKind::Filled); // newest first
+
+        let trades = store.account_events(aid, 10, None, Some("trades".into())).unwrap();
+        assert_eq!(trades.len(), 2);
+
+        // Cursor before (2, 1) excludes the Filled@(2,1) event.
+        let page = store.account_events(aid, 10, Some((2, 1)), None).unwrap();
+        assert!(page.iter().all(|e| !(e.block_height == 2 && e.seq == 1)));
+
+        // Unknown account → empty.
+        assert!(store.equity_series(AccountId(99)).unwrap().is_empty());
+        assert!(store.account_events(AccountId(99), 10, None, None).unwrap().is_empty());
     }
 }

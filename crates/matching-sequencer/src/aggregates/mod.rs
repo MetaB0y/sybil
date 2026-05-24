@@ -25,9 +25,10 @@ pub mod trader_tracker;
 
 pub use account_event_log::{
     fill_facets, side_outcome_from_order, AccountEventLog, HistoryEvent, HistoryKind,
+    StoredHistoryEvent, MAX_HISTORY_EVENTS_PER_ACCOUNT,
 };
 pub use cost_basis_tracker::{CostBasisTracker, CostBasisTrackerSnapshot};
-pub use equity_tracker::{EquityPoint, EquityTracker};
+pub use equity_tracker::{EquityPoint, EquityTracker, MAX_EQUITY_POINTS};
 pub use liquidity_tracker::{LiquidityTracker, LiquidityTrackerSnapshot, LIQUIDITY_RING_CAP};
 pub use order_stats_tracker::{OrderStats, OrderStatsTracker, OrderStatsTrackerSnapshot};
 pub use trader_tracker::{TraderTracker, TraderTrackerSnapshot};
