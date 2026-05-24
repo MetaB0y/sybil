@@ -2,16 +2,32 @@
 
 import { useEffect, useRef, useState } from "react";
 
+type Variant = "waiting" | "failed";
+
+const COPY: Record<Variant, { trigger: string; body: string }> = {
+  waiting: {
+    trigger: "why am I waiting?",
+    body: "Every 10s, all bets settle together at one shared price — so nobody jumps the line or beats you to it.",
+  },
+  failed: {
+    trigger: "why failed?",
+    body: "Nobody took the other side in time, so nothing was charged. Tap Bet again to retry.",
+  },
+};
+
 /**
- * "Why am I waiting?" — small hover/tap popover explaining FBA in plain
- * language. Matches `WhyWaiting` in `fed-right-rail-modes.jsx:250`.
+ * Small hover/tap explainer at the bottom of the Degen rail. Two variants:
+ *  - `waiting` — plain-language FBA explainer (the default, shown while the
+ *    bet is pending or before placing one).
+ *  - `failed`  — shown after a bet finds no taker.
  *
- * The handoff prototype mentions "every 60 seconds"; Sybil's actual cadence
- * is 10s. Copy reflects the real cadence.
+ * The popover opens *downward* (below the trigger, which is the last element
+ * in the rail) so it never overlaps the Bet button above it.
  */
-export function WhyWaiting() {
+export function WhyWaiting({ variant = "waiting" }: { variant?: Variant }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+  const { trigger, body } = COPY[variant];
 
   useEffect(() => {
     function close(e: MouseEvent) {
@@ -64,14 +80,14 @@ export function WhyWaiting() {
             textDecorationColor: "var(--border-3)",
           }}
         >
-          why am I waiting?
+          {trigger}
         </span>
       </button>
       {open && (
         <div
           style={{
             position: "absolute",
-            bottom: "calc(100% + 8px)",
+            top: "calc(100% + 8px)",
             left: 0,
             right: 0,
             background: "var(--surface-3, var(--surface-2))",
@@ -86,20 +102,7 @@ export function WhyWaiting() {
             color: "var(--fg-2)",
           }}
         >
-          <div
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 9.5,
-              color: "var(--fg-3)",
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-              marginBottom: 6,
-            }}
-          >
-            frequent batch auction
-          </div>
-          Every 10s all bets lock in together at one price — nobody cuts the
-          line, no bots snipe you.
+          {body}
         </div>
       )}
     </div>

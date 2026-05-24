@@ -4,36 +4,33 @@
  * Degen rail amount input + quick-add chips + "to win up to" readout.
  * Matches `DegenAmount` in `fed-right-rail-modes.jsx:187`.
  *
- * Payout math is real:
- *   For YES at p¢: pay p, win 100 → multiplier = 100/p
- *   For NO at (100-p)¢: same shape with the complement.
- * `priceCents` here is the YES-side cents; we flip for NO.
+ * Payout is computed from the *actual* degen order the rail will submit
+ * (`maxFill` shares at the degen-taxed limit price), not the indicative
+ * clearing price — each share pays $1 if the bet wins, so the max payout is
+ * `maxFill × $1` and the multiplier is `payout / bet`. `maxFill` is `null`
+ * when the bet is below the one-share minimum.
  */
-
-import type { Side } from "./yes-no-toggle";
 
 const CHIPS = [10, 25, 100, 500] as const;
 
 export function DegenAmount({
   amount,
   setAmount,
-  yesPriceCents,
-  side,
+  maxFill,
+  balanceDollars,
 }: {
   amount: string;
   setAmount: (a: string) => void;
-  yesPriceCents: number | null;
-  side: Side;
+  /** Shares the built degen order will buy, or null when below minimum. */
+  maxFill: bigint | null;
+  /** Connected account's cash balance in dollars, or null if unknown. */
+  balanceDollars: number | null;
 }) {
-  const effPrice =
-    yesPriceCents == null
-      ? null
-      : side === "YES"
-        ? yesPriceCents
-        : 100 - yesPriceCents;
-  const mult = effPrice != null && effPrice > 0 ? 100 / effPrice : null;
-  const num = parseFloat(amount) || 0;
-  const win = mult == null ? null : num * mult;
+  const bet = parseFloat(amount) || 0;
+  const win = maxFill == null ? null : Number(maxFill);
+  const mult = win != null && bet > 0 ? win / bet : null;
+  const add = (delta: number) =>
+    setAmount(String(Math.round(((parseFloat(amount) || 0) + delta) * 100) / 100));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -82,10 +79,25 @@ export function DegenAmount({
         />
       </div>
 
+      {/* Balance line — mirrors Pro mode so the bettor sees their headroom. */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          color: "var(--fg-4)",
+          marginTop: -4,
+          minHeight: 12,
+        }}
+      >
+        {balanceDollars != null && <span>balance ${balanceDollars.toFixed(2)}</span>}
+      </div>
+
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
+          gridTemplateColumns: "repeat(5, 1fr)",
           gap: 6,
         }}
       >
@@ -93,7 +105,7 @@ export function DegenAmount({
           <button
             key={c}
             type="button"
-            onClick={() => setAmount(String(c))}
+            onClick={() => add(c)}
             style={{
               padding: "8px 0",
               background: "var(--bg-2)",
@@ -108,6 +120,32 @@ export function DegenAmount({
             +${c}
           </button>
         ))}
+        <button
+          type="button"
+          disabled={balanceDollars == null}
+          onClick={() => {
+            if (balanceDollars != null) setAmount(balanceDollars.toFixed(2));
+          }}
+          title={
+            balanceDollars == null
+              ? "Connect to bet your full balance"
+              : "Bet your full balance"
+          }
+          style={{
+            padding: "8px 0",
+            background: "var(--bg-2)",
+            border: "1px solid var(--border-1)",
+            borderRadius: 4,
+            color: balanceDollars == null ? "var(--fg-4)" : "var(--accent)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            fontWeight: 600,
+            cursor: balanceDollars == null ? "not-allowed" : "pointer",
+            opacity: balanceDollars == null ? 0.5 : 1,
+          }}
+        >
+          MAX
+        </button>
       </div>
 
       <div
@@ -145,7 +183,7 @@ export function DegenAmount({
               fontVariantNumeric: "tabular-nums",
             }}
           >
-            {win == null ? "—" : `$${win.toFixed(4)}`}
+            {win == null ? "—" : `$${win.toFixed(2)}`}
           </span>
         </div>
         <span

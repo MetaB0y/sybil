@@ -4,11 +4,6 @@ import type React from "react";
 import type { DegenSide } from "@/lib/degen";
 import type { DegenPhase } from "@/lib/degen/track";
 
-/** Format price nanos as cents with one decimal (5.4e8 -> "54.0"). */
-function cents(n: bigint): string {
-  return (Number(n) / 1e7).toFixed(1);
-}
-
 export interface DegenProgressProps {
   phase: DegenPhase;
   side: DegenSide;
@@ -16,8 +11,6 @@ export interface DegenProgressProps {
   timeProgress01: number;
   filledQty: bigint;
   targetQty: bigint;
-  limitPriceNanos: bigint;
-  avgPriceNanos: bigint | null;
   onBetAgain: () => void;
 }
 
@@ -28,7 +21,7 @@ export function DegenProgress(props: DegenProgressProps) {
     return (
       <div style={cardStyle}>
         <div style={rowStyle}>
-          <span style={labelStyle}>FILLING…</span>
+          <span style={labelStyle}>Placing your bet…</span>
           <span style={monoStyle}>⏱ {props.secondsLeft}s</span>
         </div>
         <div style={barTrackStyle}>
@@ -42,8 +35,8 @@ export function DegenProgress(props: DegenProgressProps) {
           />
         </div>
         <div style={monoStyle}>
-          {props.filledQty.toString()} / {props.targetQty.toString()} sh @ ≤
-          {cents(props.limitPriceNanos)}¢
+          {props.filledQty.toString()} / {props.targetQty.toString()} shares
+          bought
         </div>
       </div>
     );
@@ -51,12 +44,10 @@ export function DegenProgress(props: DegenProgressProps) {
 
   const result =
     props.phase === "filled"
-      ? `✅ FILLED ${props.targetQty.toString()} sh @ ${cents(
-          props.avgPriceNanos ?? props.limitPriceNanos,
-        )}¢`
+      ? `✅ Bet placed — ${props.targetQty.toString()} shares`
       : props.phase === "partial"
-        ? `◐ PARTIAL — ${props.filledQty.toString()} of ${props.targetQty.toString()} filled, rest expired`
-        : `✕ NO FILL — nobody took the other side`;
+        ? `◐ Half in — ${props.filledQty.toString()} of ${props.targetQty.toString()}, rest returned`
+        : `✕ Missed — no one took the other side`;
 
   return (
     <div style={cardStyle}>
@@ -88,10 +79,9 @@ const rowStyle: React.CSSProperties = {
 };
 const labelStyle: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
-  fontSize: 10,
-  textTransform: "uppercase",
-  letterSpacing: "0.06em",
-  color: "var(--fg-3)",
+  fontSize: 12.5,
+  fontWeight: 500,
+  color: "var(--fg-2)",
 };
 const monoStyle: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
@@ -104,14 +94,18 @@ const barTrackStyle: React.CSSProperties = {
   background: "var(--border-1)",
   overflow: "hidden",
 };
+// Filled accent button so "Bet again" reads as the obvious next tap, not a
+// faint outline.
 const betAgainStyle: React.CSSProperties = {
-  padding: "12px 0",
+  padding: "13px 0",
   borderRadius: 6,
-  border: "1px solid var(--border-2)",
-  background: "transparent",
-  color: "var(--fg-1)",
+  border: 0,
+  background: "var(--accent)",
+  color: "#0A0E12",
   fontFamily: "var(--font-sans)",
   fontSize: 14,
-  fontWeight: 600,
+  fontWeight: 700,
+  letterSpacing: "-0.005em",
   cursor: "pointer",
+  boxShadow: "0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent)",
 };

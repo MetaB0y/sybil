@@ -10,6 +10,7 @@ import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { submitSignedOrder } from "@/lib/account/orders";
 import { useAccountSession, useSetConnectModalOpen } from "@/lib/account/use-account";
+import { usePortfolio } from "@/lib/account/use-portfolio";
 import { ONE_DOLLAR_NANOS, buildDegenOrder, resolveMarkNanos } from "@/lib/degen";
 import {
   useDegenBetTracker,
@@ -38,6 +39,10 @@ export function DegenRail({ group }: { group: EventGroup }) {
   const openConnectModal = useSetConnectModalOpen();
   const qc = useQueryClient();
   const latestHeight = useStore(selectLatestHeight);
+  const portfolio = usePortfolio(session?.accountId ?? null);
+  const balanceDollars = portfolio.data
+    ? Number(parseNanos(portfolio.data.balance_nanos)) / 1e9
+    : null;
 
   const selected =
     group.outcomes.find((o) => o.marketId === group.currentMarketId) ??
@@ -74,7 +79,6 @@ export function DegenRail({ group }: { group: EventGroup }) {
   }, [amountNum, side, markNanos, latestHeight]);
 
   if (!selected) return null;
-  const yesCents = selected.yesCents;
 
   async function onBet() {
     if (!session) {
@@ -128,6 +132,13 @@ export function DegenRail({ group }: { group: EventGroup }) {
         : `Bet $${amountNum} on ${side}${group.isMultiOutcome ? ` · ${selected.shortLabel}` : ""}`;
   const ctaDisabled = connected && (signing || !built.ok);
 
+  // Bottom explainer: "why am I waiting?" while placing or before a bet,
+  // "why failed?" after a missed bet, and nothing once a bet lands (the result
+  // card already explains itself).
+  const resultPhase = active ? tracking?.phase ?? "tracking" : null;
+  const showExplainer = resultPhase !== "filled" && resultPhase !== "partial";
+  const explainerVariant = resultPhase === "none" ? "failed" : "waiting";
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <NextBatchBanner marketId={selected.marketId} />
@@ -140,8 +151,6 @@ export function DegenRail({ group }: { group: EventGroup }) {
           timeProgress01={tracking?.timeProgress01 ?? 0}
           filledQty={tracking?.filledQty ?? 0n}
           targetQty={active.targetQty}
-          limitPriceNanos={active.limitPriceNanos}
-          avgPriceNanos={tracking?.avgPriceNanos ?? null}
           onBetAgain={() => setActive(null)}
         />
       ) : (
@@ -166,8 +175,8 @@ export function DegenRail({ group }: { group: EventGroup }) {
             <DegenAmount
               amount={amount}
               setAmount={setAmount}
-              yesPriceCents={yesCents}
-              side={side}
+              maxFill={built.ok ? built.order.maxFill : null}
+              balanceDollars={balanceDollars}
             />
           </div>
 
@@ -209,7 +218,7 @@ export function DegenRail({ group }: { group: EventGroup }) {
         </>
       )}
 
-      <WhyWaiting />
+      {showExplainer && <WhyWaiting variant={explainerVariant} />}
     </div>
   );
 }
