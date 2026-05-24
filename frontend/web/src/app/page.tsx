@@ -11,7 +11,12 @@ import {
   type SortKey,
 } from "@/components/markets-filter-bar";
 import { pickDisplayCategory } from "@/lib/categorize";
-import { useMarketsList, type Market } from "@/lib/markets/use-markets";
+import {
+  useMarketsList,
+  eventVisibleOnIndex,
+  isClosed,
+  type Market,
+} from "@/lib/markets/use-markets";
 import { useEventTradersMap } from "@/lib/markets/use-event-traders";
 import { selectPricesByMarketId, useStore } from "@/lib/store";
 import { BLOCK_INTERVAL_MS } from "@/lib/constants";
@@ -50,6 +55,18 @@ export default function MarketsPage() {
 function MarketsPageInner() {
   const { bundle, isPending, error } = useMarketsList();
   const prices = useStore(selectPricesByMarketId);
+
+  // The clearing ticker is an active-board readout — exclude closed markets,
+  // which the bundle now retains for detail/multi-card use.
+  const openById = useMemo(() => {
+    if (!bundle) return null;
+    const m = new Map<number, Market>();
+    for (const [id, mk] of bundle.byId) {
+      if (mk.closed !== true) m.set(id, mk);
+    }
+    return m;
+  }, [bundle]);
+
   const { query, sort, setSort, category } = useFilterParams();
 
   const items = useMemo(() => {
@@ -57,6 +74,9 @@ function MarketsPageInner() {
     const all: CardItem[] = [];
     for (const g of bundle.groups) {
       if (g.markets.length >= 2) {
+        // Hide a multi-outcome event only when every outcome is closed; a
+        // partially-closed event stays (its closed rows render greyed).
+        if (!eventVisibleOnIndex(g.markets)) continue;
         // Group-level category: use any market's categories (they share an
         // event so the buckets are the same; pick the first market's).
         const first = g.markets[0]!;
@@ -73,6 +93,7 @@ function MarketsPageInner() {
         });
       } else {
         for (const m of g.markets) {
+          if (isClosed(m)) continue; // closed standalone binary -> hide
           all.push({
             kind: "binary",
             market: m,
@@ -85,6 +106,7 @@ function MarketsPageInner() {
       }
     }
     for (const m of bundle.ungrouped) {
+      if (isClosed(m)) continue; // closed standalone binary -> hide
       all.push({
         kind: "binary",
         market: m,
@@ -188,7 +210,7 @@ function MarketsPageInner() {
 
   return (
     <>
-      {bundle && <ClearingTicker marketsById={bundle.byId} />}
+      {openById && <ClearingTicker marketsById={openById} />}
       <main
         style={{
           width: "100%",
