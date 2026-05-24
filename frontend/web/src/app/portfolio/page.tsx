@@ -99,8 +99,7 @@ function Connected({
     () => markets.bundle?.byId ?? new Map(),
     [markets.bundle],
   );
-  const marketIds = useMemo(() => Array.from(marketsById.keys()), [marketsById]);
-  const history = useAccountHistory(accountId, marketIds);
+  const history = useAccountHistory(accountId);
 
   const [range, setRange] = useState<EquityRange>("ALL");
   const [tab, setTab] = useState<PortfolioTab>("positions");
@@ -266,7 +265,9 @@ function Shell({ children }: { children: React.ReactNode }) {
     <main
       style={{
         width: "100%",
-        padding: "var(--space-6) var(--space-5) var(--space-9)",
+        // +36px = markets ClearingTicker height, so the title aligns
+        // with /'s "All markets" across pages
+        padding: "calc(var(--space-6) + 36px) var(--space-5) var(--space-9)",
         display: "flex",
         flexDirection: "column",
         gap: "var(--space-4)",

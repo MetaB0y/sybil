@@ -31,7 +31,9 @@ export default function ActivityPage() {
     >
       <div
         style={{
-          padding: "20px 24px 0",
+          // +36px = markets ClearingTicker height, so the title aligns
+          // with /'s "All markets" across pages
+          padding: "calc(var(--space-6) + 36px) var(--space-5) 0",
           display: "flex",
           alignItems: "baseline",
           gap: 14,
@@ -39,10 +41,11 @@ export default function ActivityPage() {
       >
         <h1
           style={{
-            fontFamily: "var(--font-sans)",
-            fontSize: 22,
+            fontFamily: "var(--font-display)",
             fontWeight: 600,
-            letterSpacing: "-0.01em",
+            fontSize: "var(--fs-56)",
+            lineHeight: "var(--lh-56)",
+            letterSpacing: "var(--track-tight)",
             color: "var(--fg-1)",
             margin: 0,
           }}

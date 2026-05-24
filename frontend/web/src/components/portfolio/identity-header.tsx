@@ -41,8 +41,8 @@ export function IdentityHeader({ publicKeyHex }: { publicKeyHex: string }) {
           margin: 0,
           fontFamily: "var(--font-display)",
           fontWeight: 600,
-          fontSize: "var(--fs-32)",
-          lineHeight: "var(--lh-32)",
+          fontSize: "var(--fs-56)",
+          lineHeight: "var(--lh-56)",
           letterSpacing: "var(--track-tight)",
           color: "var(--fg-1)",
         }}

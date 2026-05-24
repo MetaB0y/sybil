@@ -231,8 +231,8 @@ function MarketsPageInner() {
             style={{
               fontFamily: "var(--font-display)",
               fontWeight: 600,
-              fontSize: "var(--fs-32)",
-              lineHeight: "var(--lh-32)",
+              fontSize: "var(--fs-56)",
+              lineHeight: "var(--lh-56)",
               letterSpacing: "var(--track-tight)",
               margin: 0,
               color: "var(--fg-1)",
