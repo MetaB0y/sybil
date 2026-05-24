@@ -19,7 +19,7 @@ export const GLOSSARY: Record<string, string> = {
   Imbalance:
     "Net direction of unmatched orders. Buy = more demand than supply at current price; sell = the reverse. Tells you which side is leaning.",
   Batch:
-    "Sybil clears all orders in fixed time windows at one uniform price. No order has time priority within a batch — front-running becomes geometrically harder.",
+    "Sybil clears all orders in fixed time windows at one uniform price. No order has time priority within a batch.",
   "Uniform clearing":
     "Every order in a batch trades at the same single price. Eliminates the “sniper’s tax” continuous order books leak to fast actors.",
   FBA: "Frequent Batch Auction. The market mechanism Sybil uses instead of a continuous limit order book.",
