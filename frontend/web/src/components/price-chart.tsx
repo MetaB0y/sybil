@@ -49,9 +49,19 @@ type Props = {
   sinceMs: number | null;
   /** Reference "now" — latest committed block time; the axis right edge. */
   nowMs: number;
+  /** The chosen outcome (market in the URL). Its line is drawn bold and on
+   *  top; the others dim back. Omit (or single-line modes) for no emphasis. */
+  highlightId?: number | undefined;
 };
 
-export function PriceChart({ drawn, byMarket, mode, sinceMs, nowMs }: Props) {
+export function PriceChart({
+  drawn,
+  byMarket,
+  mode,
+  sinceMs,
+  nowMs,
+  highlightId,
+}: Props) {
   const recent = useStore(selectRecentBlocks);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [hover, setHover] = useState<number | null>(null);
@@ -117,6 +127,24 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs, nowMs }: Props) {
     return { color, fill: "", line: linePath(row, xs, yOf), filled: false };
   });
 
+  // Emphasis only kicks in when there's more than one line to distinguish the
+  // chosen outcome from, and it's actually among the drawn lines.
+  const highlightActive =
+    highlightId != null &&
+    drawn.length > 1 &&
+    drawn.some((d) => d.outcome.marketId === highlightId);
+  // Draw the chosen line last so its bold stroke sits on top of the dimmed
+  // ones. Pure z-order — doesn't touch the stacked-band geometry above (that's
+  // keyed to each layer's index `k`).
+  const renderOrder = layers.map((_, k) => k);
+  if (highlightActive) {
+    renderOrder.sort(
+      (a, b) =>
+        (drawn[a]!.outcome.marketId === highlightId ? 1 : 0) -
+        (drawn[b]!.outcome.marketId === highlightId ? 1 : 0),
+    );
+  }
+
   // Ticks at even time intervals across the window.
   const count = Math.max(2, Math.min(X_TICKS, N));
   const xTicks = Array.from({ length: count }, (_, i) => {
@@ -172,25 +200,32 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs, nowMs }: Props) {
               stroke="rgba(255,255,255,0.04)"
             />
           ))}
-          {layers.map((l, k) => (
-            <g key={drawn[k]!.outcome.marketId}>
-              {l.filled && (
+          {renderOrder.map((k) => {
+            const l = layers[k]!;
+            const isHi = highlightActive && drawn[k]!.outcome.marketId === highlightId;
+            const dimmed = highlightActive && !isHi;
+            const baseFill = mode === "stacked" ? 0.34 : 0.16;
+            return (
+              <g key={drawn[k]!.outcome.marketId}>
+                {l.filled && (
+                  <path
+                    d={l.fill}
+                    fill={l.color}
+                    fillOpacity={dimmed ? baseFill * 0.4 : baseFill}
+                  />
+                )}
                 <path
-                  d={l.fill}
-                  fill={l.color}
-                  fillOpacity={mode === "stacked" ? 0.34 : 0.16}
+                  d={l.line}
+                  fill="none"
+                  stroke={l.color}
+                  strokeWidth={isHi ? 2.75 : dimmed ? 1.25 : 1.5}
+                  strokeOpacity={dimmed ? 0.38 : 1}
+                  strokeLinejoin="round"
+                  vectorEffect="non-scaling-stroke"
                 />
-              )}
-              <path
-                d={l.line}
-                fill="none"
-                stroke={l.color}
-                strokeWidth={1.5}
-                strokeLinejoin="round"
-                vectorEffect="non-scaling-stroke"
-              />
-            </g>
-          ))}
+              </g>
+            );
+          })}
           {showHover && (
             <line
               x1={hover! * W}
@@ -256,7 +291,10 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs, nowMs }: Props) {
                 ? "now"
                 : `${formatAge(tEnd - hoverT!)} ago`}
             </div>
-            {drawn.map((d, k) => (
+            {drawn.map((d, k) => {
+              const isHi =
+                highlightActive && d.outcome.marketId === highlightId;
+              return (
               <div
                 key={d.outcome.marketId}
                 style={{
@@ -264,6 +302,8 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs, nowMs }: Props) {
                   justifyContent: "space-between",
                   gap: 14,
                   lineHeight: "16px",
+                  fontWeight: isHi ? 700 : 400,
+                  opacity: highlightActive && !isHi ? 0.6 : 1,
                 }}
               >
                 <span
@@ -271,7 +311,7 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs, nowMs }: Props) {
                     display: "flex",
                     alignItems: "center",
                     gap: 6,
-                    color: "var(--fg-2)",
+                    color: isHi ? "var(--fg-1)" : "var(--fg-2)",
                     minWidth: 0,
                   }}
                 >
@@ -292,7 +332,8 @@ export function PriceChart({ drawn, byMarket, mode, sinceMs, nowMs }: Props) {
                   {Math.round(valueAt(series.times, series.raw[k]!, hoverT!) * 100)}¢
                 </span>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

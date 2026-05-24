@@ -347,11 +347,22 @@ function ChartSection({ marketId }: { marketId: number }) {
     [outcomes],
   );
   // Self-heals across navigation: stale ids from another event drop out, and
-  // an empty result falls back to the favourite-first default.
+  // an empty result falls back to the favourite-first default. The chosen
+  // outcome (the market in the URL) is always pinned to the chart so it can be
+  // highlighted — prepended if neither the user's selection nor the volume
+  // default already includes it.
   const effectiveSelected = useMemo(() => {
     const valid = (selectedIds ?? []).filter((id) => idSet.has(id));
-    return valid.length > 0 ? valid : defaultIds;
-  }, [selectedIds, idSet, defaultIds]);
+    const base = valid.length > 0 ? valid : defaultIds;
+    if (idSet.has(marketId) && !base.includes(marketId)) {
+      return [marketId, ...base];
+    }
+    return base;
+  }, [selectedIds, idSet, defaultIds, marketId]);
+
+  // Only emphasize a single line when there's more than one to distinguish it
+  // from. Binary (area) markets have one line, so highlighting is moot there.
+  const highlightId = group?.isMultiOutcome ? marketId : undefined;
 
   // Fetch history only for the outcomes actually shown (legend caps at 8).
   const { byMarket, isPending: historyPending } =
@@ -425,6 +436,7 @@ function ChartSection({ marketId }: { marketId: number }) {
             outcomes={outcomes}
             selectedIds={effectiveSelected}
             onChange={setSelectedIds}
+            highlightId={highlightId}
           />
         ) : (
           <div className="eyebrow">{"// yes probability"}</div>
@@ -451,6 +463,7 @@ function ChartSection({ marketId }: { marketId: number }) {
           mode={mode}
           sinceMs={sinceMs}
           nowMs={nowMs}
+          highlightId={highlightId}
         />
       )}
     </section>

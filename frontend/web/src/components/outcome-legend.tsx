@@ -1,10 +1,11 @@
 "use client";
 
 /**
- * Interactive per-outcome legend above the price chart. Each chip is a
- * toggle: the chips shown here are exactly the lines/bands drawn on the
- * chart. Clicking a chip removes its outcome from the chart; "+N more"
- * opens a dropdown to add hidden outcomes, up to `maxSelected` (8).
+ * Interactive per-outcome legend above the price chart. The chips shown here
+ * are exactly the lines/bands drawn on the chart. Tapping a chip's body
+ * switches to that outcome (navigates to its /m/[id], same as the rail's
+ * outcome picker); tapping its ✕ removes it from the chart. "+N more" opens a
+ * dropdown to add hidden outcomes, up to `maxSelected` (8).
  *
  * Colors are keyed to each outcome's index in the full favourite-first
  * group, so a given outcome keeps its color whether shown or hidden — and
@@ -12,6 +13,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { getCategoryColor } from "@/lib/categorize";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
 
@@ -29,6 +31,7 @@ export function OutcomeLegend({
   selectedIds,
   onChange,
   maxSelected = 8,
+  highlightId,
 }: {
   /** Full favourite-first group. */
   outcomes: EventOutcome[];
@@ -36,7 +39,11 @@ export function OutcomeLegend({
   selectedIds: number[];
   onChange: (next: number[]) => void;
   maxSelected?: number;
+  /** The chosen outcome (the market in the URL). Its chip is floated first,
+   *  accent-ringed, and pinned (non-removable) so it stays on the chart. */
+  highlightId?: number | undefined;
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -50,13 +57,24 @@ export function OutcomeLegend({
 
   const sel = new Set(selectedIds);
   const colorOf = (o: EventOutcome) => colorForOutcome(o, outcomes.indexOf(o));
-  const shown = outcomes.filter((o) => sel.has(o.marketId));
+  const shownRaw = outcomes.filter((o) => sel.has(o.marketId));
+  // Float the chosen outcome to the front so it leads the legend.
+  const shown =
+    highlightId == null
+      ? shownRaw
+      : [
+          ...shownRaw.filter((o) => o.marketId === highlightId),
+          ...shownRaw.filter((o) => o.marketId !== highlightId),
+        ];
   const hidden = outcomes.filter((o) => !sel.has(o.marketId));
   const atCap = shown.length >= maxSelected;
   const interactive = outcomes.length > 1;
 
   const remove = (id: number) => {
-    if (shown.length > 1) onChange(selectedIds.filter((x) => x !== id));
+    // The pinned (chosen) outcome can't be removed.
+    if (id !== highlightId && shown.length > 1) {
+      onChange(selectedIds.filter((x) => x !== id));
+    }
   };
   const add = (id: number) => {
     if (!atCap) onChange([...selectedIds, id]);
@@ -76,56 +94,109 @@ export function OutcomeLegend({
     >
       {shown.map((o) => {
         const color = colorOf(o);
-        const removable = interactive && shown.length > 1;
+        const isHighlight = o.marketId === highlightId;
+        // The chosen outcome is pinned: shown but not removable. The "+N more"
+        // dropdown is the only way it could leave, and it's excluded there too.
+        const removable = interactive && shown.length > 1 && !isHighlight;
         return (
-          <button
+          // Chip = a styled container holding two sibling buttons (kept
+          // separate so the ✕ isn't nested inside the navigate button):
+          //   · body  → switch to this outcome (navigate to its /m/[id])
+          //   · ✕     → remove this line from the chart
+          <span
             key={o.marketId}
-            type="button"
-            disabled={!removable}
-            onClick={() => remove(o.marketId)}
-            title={
-              removable ? `${o.label} — click to hide` : o.label
-            }
             style={{
               display: "inline-flex",
               alignItems: "center",
-              gap: 7,
               flexShrink: 0,
-              padding: "3px 7px",
+              overflow: "hidden",
               borderRadius: 4,
-              border: "1px solid var(--border-1)",
-              background: "var(--bg-2)",
-              cursor: removable ? "pointer" : "default",
+              border: isHighlight
+                ? `1px solid ${color}`
+                : "1px solid var(--border-1)",
+              background: isHighlight
+                ? `color-mix(in srgb, ${color} 16%, transparent)`
+                : "var(--bg-2)",
+              boxShadow: isHighlight
+                ? `0 0 0 1px color-mix(in srgb, ${color} 45%, transparent)`
+                : "none",
               fontFamily: "var(--font-sans)",
               fontSize: 12,
-              color: "var(--fg-2)",
+              fontWeight: isHighlight ? 600 : 400,
+              color: isHighlight ? "var(--fg-1)" : "var(--fg-2)",
             }}
           >
-            <span
-              aria-hidden
-              style={{ width: 8, height: 8, background: color, borderRadius: 1, flexShrink: 0 }}
-            />
-            <span
+            <button
+              type="button"
+              onClick={() => {
+                if (!isHighlight) router.push(`/m/${o.marketId}`);
+              }}
+              title={
+                isHighlight
+                  ? `${o.label} — current outcome`
+                  : `${o.label} — switch to this outcome`
+              }
               style={{
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                maxWidth: 150,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 7,
+                padding: removable ? "3px 4px 3px 7px" : "3px 7px",
+                border: 0,
+                background: "transparent",
+                cursor: isHighlight ? "default" : "pointer",
+                font: "inherit",
+                fontWeight: "inherit",
+                color: "inherit",
               }}
             >
-              {o.shortLabel}
-            </span>
-            <span
-              style={{ fontFamily: "var(--font-mono)", color, flexShrink: 0 }}
-            >
-              {o.yesCents == null ? "—" : `${o.yesCents}¢`}
-            </span>
-            {removable && (
-              <span aria-hidden style={{ color: "var(--fg-4)", fontSize: 11, marginLeft: 1 }}>
-                ✕
+              <span
+                aria-hidden
+                style={{ width: 8, height: 8, background: color, borderRadius: 1, flexShrink: 0 }}
+              />
+              <span
+                style={{
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  maxWidth: 150,
+                }}
+              >
+                {o.shortLabel}
               </span>
+              <span
+                style={{ fontFamily: "var(--font-mono)", color, flexShrink: 0 }}
+              >
+                {o.yesCents == null ? "—" : `${o.yesCents}¢`}
+              </span>
+            </button>
+            {removable && (
+              <button
+                type="button"
+                onClick={() => remove(o.marketId)}
+                aria-label={`Remove ${o.label} from chart`}
+                title={`${o.label} — remove from chart`}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  padding: "3px 7px 3px 3px",
+                  border: 0,
+                  background: "transparent",
+                  cursor: "pointer",
+                  color: "var(--fg-4)",
+                  fontSize: 11,
+                  lineHeight: 1,
+                }}
+                onMouseEnter={(e) =>
+                  (e.currentTarget.style.color = "var(--fg-2)")
+                }
+                onMouseLeave={(e) =>
+                  (e.currentTarget.style.color = "var(--fg-4)")
+                }
+              >
+                ✕
+              </button>
             )}
-          </button>
+          </span>
         );
       })}
 
