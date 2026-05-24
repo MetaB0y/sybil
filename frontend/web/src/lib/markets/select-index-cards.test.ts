@@ -8,11 +8,16 @@ function mk(partial: Partial<Market> & { market_id: number }): Market {
 
 function binary(
   id: number,
-  opts: { vol?: bigint; closed?: boolean; category?: string | null } = {},
+  opts: {
+    vol?: bigint;
+    closed?: boolean;
+    category?: string | null;
+    traders?: number;
+  } = {},
 ): CardItem {
   return {
     kind: "binary",
-    market: mk({ market_id: id }),
+    market: mk({ market_id: id, ...(opts.traders !== undefined ? { trader_count: opts.traders } : {}) }),
     volumeNanos: opts.vol ?? 0n,
     sortKey: `m${id}`,
     createdMs: 0,
@@ -78,13 +83,12 @@ describe("selectIndexCards", () => {
   });
 
   it("sinks closed cards below open ones under 'traders' sort, even with more traders", () => {
-    const open1: CardItem = { ...binary(1), market: mk({ market_id: 1, trader_count: 5 }) };
-    const closedTop: CardItem = {
-      ...binary(2, { closed: true }),
-      market: mk({ market_id: 2, trader_count: 999 }),
-    };
-    const open2: CardItem = { ...binary(3), market: mk({ market_id: 3, trader_count: 10 }) };
-    const out = selectIndexCards([open1, closedTop, open2], {
+    const items = [
+      binary(1, { traders: 5 }),
+      binary(2, { closed: true, traders: 999 }),
+      binary(3, { traders: 10 }),
+    ];
+    const out = selectIndexCards(items, {
       ...base,
       sort: "traders",
       showClosed: true,
