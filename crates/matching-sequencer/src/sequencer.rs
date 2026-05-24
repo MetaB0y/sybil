@@ -715,6 +715,8 @@ impl BlockSequencer {
                 .request_bridge_withdrawal(request)
                 .expect("pending bridge withdrawal replay should be valid");
         }
+        let account_ids: Vec<AccountId> = restored.accounts.iter().map(|(id, _)| *id).collect();
+        restored.analytics.seed_equity_known(account_ids);
         restored
     }
 
