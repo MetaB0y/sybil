@@ -26,6 +26,8 @@ import { deriveShortLabels } from "@/lib/market-detail/outcome-labels";
 
 export type EventOutcome = {
   marketId: number;
+  /** Polymarket has closed/resolved this outcome — render read-only / greyed. */
+  closed: boolean;
   /** Full label for this outcome — the market's `name` field. For multi-outcome
    *  Polymarket events the mirror sets `name` to the full outcome question. */
   label: string;
@@ -94,6 +96,7 @@ export function useEventGroup(marketId: number): {
         curYes != null && agoYes != null ? Number(curYes - agoYes) / 1e7 : 0;
       return {
         marketId: m.market_id,
+        closed: m.closed === true,
         label: m.name,
         shortLabel: shortLabels[i] ?? m.name,
         yesPriceNanos: yesNanos,
@@ -104,11 +107,14 @@ export function useEventGroup(marketId: number): {
       };
     });
 
-    // Sort by YES probability descending — favourite first. Markets without a
-    // price land last (use -1 sentinel so undefineds cluster at the bottom).
-    outcomes.sort(
-      (a, b) => (b.yesCents ?? -1) - (a.yesCents ?? -1),
-    );
+    // Sort closed outcomes last so the picker/chart default lands on a
+    // tradeable outcome; within each tier sort by YES probability descending.
+    outcomes.sort((a, b) => {
+      // Closed outcomes always sort below open ones, so the picker/chart
+      // default lands on a tradeable outcome.
+      if (a.closed !== b.closed) return a.closed ? 1 : -1;
+      return (b.yesCents ?? -1) - (a.yesCents ?? -1);
+    });
 
     return {
       eventId: currentMarket.event_id ?? null,
