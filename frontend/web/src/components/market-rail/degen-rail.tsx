@@ -30,7 +30,7 @@ import { WhyWaiting } from "./why-waiting";
 
 export function DegenRail({ group }: { group: EventGroup }) {
   const [side, setSide] = useState<Side>("YES");
-  const [amount, setAmount] = useState<string>("100");
+  const [amount, setAmount] = useState<string>("10");
   const [active, setActive] = useState<DegenActive | null>(null);
   const [signing, setSigning] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
