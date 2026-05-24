@@ -3,21 +3,29 @@
 /**
  * Unified portfolio history feed (event log).
  *
- * TARGET: GET /v1/accounts/{id}/events — a per-account, off-block event log
+ * Backed by `GET /v1/accounts/{id}/events` — a per-account, off-block event log
  * merging order lifecycle (placed / partial_fill / filled / cancelled /
- * expired), funding (deposit / withdrawal), settlement (resolved) and account
- * creation, newest-first and paginated. See
- * docs/superpowers/specs/2026-05-21-portfolio-history-feed-design.md.
+ * expired), funding (created / deposit / withdrawal) and settlement (resolved),
+ * newest-first. The log is in-memory and bounded (5k events/account); it resets
+ * on backend restart, same as the equity curve and price chart.
  *
- * INTERIM: that endpoint doesn't exist yet, so this hook returns a deterministic
- * MOCK stream seeded by accountId — enough to render and review the full feed.
- * `HistoryEvent` is the FE↔BE contract; when the endpoint lands, replace the
- * body of `useAccountHistory` with the fetch and drop `mockHistory`. The whole
- * feed wears a MockValue banner until then.
+ * We fetch a single page (`HISTORY_PAGE`) and invalidate per block so fresh
+ * events appear as batches clear. The endpoint also supports a `before` cursor
+ * (`"<block>.<seq>"`, i.e. an event's `id`) for pagination, which a future
+ * load-more can use; `hasMore` reports whether the page came back full.
  */
 
-import { useMemo } from "react";
-import { BLOCK_INTERVAL_MS } from "@/lib/constants";
+import { useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api/client";
+import type { components } from "@/lib/api/schema";
+import { parseNanos } from "@/lib/format/nanos";
+import { selectLatestBlock, useStore } from "@/lib/store";
+
+type HistoryEventResponse = components["schemas"]["HistoryEventResponse"];
+
+/** Default page size — the endpoint caps at 500. */
+const HISTORY_PAGE = 200;
 
 export type HistoryEventType =
   | "created"
@@ -44,6 +52,7 @@ export interface HistoryEvent {
   qty?: number;
   priceNanos?: bigint; // limit (placed) or fill price (fills)
   amountNanos?: bigint; // signed cash impact, nanos-dollars (+in / -out)
+  realizedPnlNanos?: bigint; // filled / resolved
   payoutOutcome?: "YES" | "NO"; // resolved only
 }
 
@@ -66,115 +75,62 @@ export const CATEGORY_OF: Record<
 export interface AccountHistory {
   events: HistoryEvent[];
   isMock: boolean;
-  // Pagination stubs for the future /events endpoint.
+  // Pagination stubs for the future load-more (the endpoint takes a `before`
+  // cursor). `hasMore` is true when the first page came back full.
   hasMore: boolean;
   loadMore: () => void;
 }
 
-export function useAccountHistory(
-  accountId: number | null,
-  marketIds: number[] = [],
-): AccountHistory {
-  const events = useMemo(
-    () => (accountId == null ? [] : mockHistory(accountId, marketIds)),
-    [accountId, marketIds],
-  );
-  return { events, isMock: true, hasMore: false, loadMore: () => {} };
-}
+export function useAccountHistory(accountId: number | null): AccountHistory {
+  const qc = useQueryClient();
+  const latest = useStore(selectLatestBlock);
 
-// ---- mock generator (delete when wired to /events) ------------------------
+  useEffect(() => {
+    if (accountId === null) return;
+    qc.invalidateQueries({ queryKey: ["account", accountId, "history"] });
+  }, [accountId, latest?.height, qc]);
 
-const CADENCE_MS = BLOCK_INTERVAL_MS;
+  const q = useQuery({
+    enabled: accountId !== null,
+    queryKey: ["account", accountId, "history", { limit: HISTORY_PAGE }],
+    queryFn: async (): Promise<HistoryEvent[]> => {
+      if (accountId === null) throw new Error("no account");
+      const { data, error } = await api.GET("/v1/accounts/{id}/events", {
+        params: { path: { id: accountId }, query: { limit: HISTORY_PAGE } },
+      });
+      if (error || !data) throw new Error("fetch account history failed");
+      return data.map(mapEvent);
+    },
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+  });
 
-function mockHistory(accountId: number, marketIds: number[]): HistoryEvent[] {
-  const rand = seeded((accountId | 0) ^ 0x5bd1e995);
-  const pickMarket = () =>
-    marketIds.length
-      ? marketIds[Math.floor(rand() * marketIds.length)]!
-      : 1 + Math.floor(rand() * 40);
-
-  const out: HistoryEvent[] = [];
-  let block = 240_000 + Math.floor(rand() * 1000);
-  let t = Date.now();
-  let seq = 0;
-
-  const push = (
-    e: Omit<HistoryEvent, "id" | "timestampMs" | "blockHeight">,
-  ) => {
-    out.push({ ...e, id: `${block}.${seq++}`, timestampMs: t, blockHeight: block });
+  const events = q.data ?? [];
+  return {
+    events,
+    isMock: false,
+    hasMore: events.length >= HISTORY_PAGE,
+    loadMore: () => {},
   };
-  const step = () => {
-    const dBlocks = 1 + Math.floor(rand() * 4000);
-    block = Math.max(1, block - dBlocks);
-    t -= dBlocks * CADENCE_MS;
+}
+
+/** Normalize a wire `HistoryEventResponse` into the FE `HistoryEvent` model. */
+function mapEvent(r: HistoryEventResponse): HistoryEvent {
+  const e: HistoryEvent = {
+    id: r.id,
+    type: r.type as HistoryEventType,
+    timestampMs: r.timestamp_ms,
+    blockHeight: r.block_height,
   };
-
-  push({ type: "deposit", amountNanos: dollars(250 + Math.floor(rand() * 750)) });
-  step();
-
-  for (let i = 0; i < 8; i++) {
-    const mid = pickMarket();
-    const orderId = 15_000_000 + Math.floor(rand() * 1_000_000);
-    const side: "BUY" | "SELL" = rand() < 0.7 ? "BUY" : "SELL";
-    const outcome: "YES" | "NO" = rand() < 0.55 ? "YES" : "NO";
-    const placed = (1 + Math.floor(rand() * 20)) * 50;
-    const limit = cents(15 + Math.floor(rand() * 70));
-
-    push({ type: "placed", marketId: mid, orderId, side, outcome, qty: placed, priceNanos: limit });
-    step();
-
-    const roll = rand();
-    if (roll < 0.45) {
-      const part = Math.max(1, Math.floor(placed * (0.3 + rand() * 0.3)));
-      const fp1 = cents(15 + Math.floor(rand() * 70));
-      push({ type: "partial_fill", marketId: mid, orderId, side, outcome, qty: part, priceNanos: fp1, amountNanos: cashImpact(side, part, fp1) });
-      step();
-      const rest = placed - part;
-      const fp2 = cents(15 + Math.floor(rand() * 70));
-      push({ type: "filled", marketId: mid, orderId, side, outcome, qty: rest, priceNanos: fp2, amountNanos: cashImpact(side, rest, fp2) });
-    } else if (roll < 0.7) {
-      const fp = cents(15 + Math.floor(rand() * 70));
-      push({ type: "filled", marketId: mid, orderId, side, outcome, qty: placed, priceNanos: fp, amountNanos: cashImpact(side, placed, fp) });
-    } else if (roll < 0.88) {
-      push({ type: "cancelled", marketId: mid, orderId, side, outcome, qty: placed });
-    } else {
-      push({ type: "expired", marketId: mid, orderId, side, outcome, qty: placed });
-    }
-    step();
-
-    if (rand() < 0.25) {
-      const mid2 = pickMarket();
-      const po: "YES" | "NO" = rand() < 0.5 ? "YES" : "NO";
-      push({ type: "resolved", marketId: mid2, payoutOutcome: po, amountNanos: dollars(Math.floor(rand() * 400)) });
-      step();
-    }
-    if (rand() < 0.15) {
-      push({ type: "withdrawal", amountNanos: -dollars(50 + Math.floor(rand() * 200)) });
-      step();
-    }
-  }
-
-  push({ type: "created" });
-  return out;
-}
-
-function cashImpact(side: "BUY" | "SELL", qty: number, priceNanos: bigint): bigint {
-  const gross = BigInt(qty) * priceNanos; // shares × price = nanos-dollars
-  return side === "BUY" ? -gross : gross;
-}
-function dollars(d: number): bigint {
-  return BigInt(Math.round(d)) * 1_000_000_000n;
-}
-function cents(c: number): bigint {
-  return BigInt(Math.round(c)) * 10_000_000n; // 1¢ = 1e7 nanos
-}
-function seeded(seed: number): () => number {
-  let s = seed >>> 0;
-  return () => {
-    s ^= s << 13;
-    s ^= s >>> 17;
-    s ^= s << 5;
-    s >>>= 0;
-    return s / 0x100000000;
-  };
+  if (r.market_id != null) e.marketId = r.market_id;
+  if (r.order_id != null) e.orderId = r.order_id;
+  if (r.side != null) e.side = r.side as "BUY" | "SELL";
+  if (r.outcome != null) e.outcome = r.outcome as "YES" | "NO";
+  if (r.qty != null) e.qty = r.qty;
+  if (r.price_nanos != null) e.priceNanos = parseNanos(r.price_nanos);
+  if (r.amount_nanos != null) e.amountNanos = parseNanos(r.amount_nanos);
+  if (r.realized_pnl_nanos != null)
+    e.realizedPnlNanos = parseNanos(r.realized_pnl_nanos);
+  if (r.payout_outcome != null) e.payoutOutcome = r.payout_outcome as "YES" | "NO";
+  return e;
 }

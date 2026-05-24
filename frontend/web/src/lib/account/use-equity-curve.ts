@@ -1,36 +1,50 @@
 "use client";
 
 /**
- * Deterministic mock equity curve over time.
+ * Real per-account equity series.
  *
- * Backend has no per-account portfolio-value history (OPEN_QUESTIONS #12).
- * For now we synthesise a curve from `(accountId, range)` as the seed,
- * anchored to the real endpoints (start = total_deposited, end = current
- * portfolio_value). The shape is consistent per account so the page
- * doesn't flicker on every render.
+ * Backed by `GET /v1/accounts/{id}/equity?range=` — the backend samples each
+ * account's portfolio value at block finalize (on every fill) plus a periodic
+ * 60s sweep, into a bounded ring (~30 days). Each point carries the real
+ * timestamp, portfolio value, and net-deposits baseline.
  *
- * Always render with a `<MockValue>` marker on the chart frame.
+ * Caveats (both backend, until off-block aggregates are persisted):
+ *   - The series resets on backend restart, so it reaches back only to the last
+ *     restart, not to account creation.
+ *   - Sampling starts at an account's first fill; a deposited-but-never-traded
+ *     account returns an empty series. We surface that as `isEmpty`.
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api/client";
+import { parseNanos } from "@/lib/format/nanos";
+import { selectLatestBlock, useStore } from "@/lib/store";
 
 export type EquityRange = "24H" | "7D" | "30D" | "ALL";
 
-const POINTS_PER_RANGE: Record<EquityRange, number> = {
-  "24H": 24,
-  "7D": 30,
-  "30D": 60,
-  ALL: 142,
+const RANGE_QUERY: Record<EquityRange, string> = {
+  "24H": "24h",
+  "7D": "7d",
+  "30D": "30d",
+  ALL: "all",
 };
+
+export interface EquityPoint {
+  t: number; // timestamp, ms
+  value: number; // portfolio value, dollars
+}
 
 export interface EquityCurve {
   range: EquityRange;
-  points: number[]; // dollars (Number, not bigint — chart precision OK at $)
-  baseline: number; // dashed-line floor: net deposits
+  points: EquityPoint[]; // real samples, oldest-first (+ a live tip at "now")
+  baseline: number; // net deposits (dollars) — the dashed floor
   startEquity: number;
   endEquity: number;
-  deltaAbs: number; // endEquity − startForRange (NOT baseline)
-  deltaPct: number; // delta / startForRange
+  deltaAbs: number; // endEquity − startEquity over the range
+  deltaPct: number; // delta / startEquity
+  isLoading: boolean;
+  isEmpty: boolean; // fewer than 2 points → nothing to draw
 }
 
 export function useEquityCurve(args: {
@@ -39,90 +53,70 @@ export function useEquityCurve(args: {
   currentValueDollars: number;
   baselineDepositsDollars: number;
 }): EquityCurve {
-  const { accountId, range, currentValueDollars, baselineDepositsDollars } = args;
+  const { accountId, range, currentValueDollars, baselineDepositsDollars } =
+    args;
+  const qc = useQueryClient();
+  const latest = useStore(selectLatestBlock);
+
+  // Refresh as blocks land so new samples (and the live tip) stay current.
+  useEffect(() => {
+    qc.invalidateQueries({ queryKey: ["account", accountId, "equity"] });
+  }, [accountId, latest?.height, qc]);
+
+  const q = useQuery({
+    queryKey: ["account", accountId, "equity", range],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/v1/accounts/{id}/equity", {
+        params: {
+          path: { id: accountId },
+          query: { range: RANGE_QUERY[range] },
+        },
+      });
+      if (error || !data) throw new Error("fetch equity series failed");
+      return data;
+    },
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+  });
+
+  const nowMs = latest?.timestamp_ms ?? 0;
 
   return useMemo(() => {
-    const n = POINTS_PER_RANGE[range];
-    const seed = hashSeed(accountId, range);
-    const rand = seededRand(seed);
+    const points: EquityPoint[] = (q.data?.points ?? []).map((p) => ({
+      t: p.timestamp_ms,
+      value: Number(parseNanos(p.portfolio_value_nanos)) / 1e9,
+    }));
 
-    const baseline = baselineDepositsDollars;
-    const end = currentValueDollars;
-
-    // Start-of-range value: scale the baseline-to-end trajectory back so
-    // that the shorter ranges show a shallower swing than ALL.
-    const rangeStart =
-      range === "ALL"
-        ? baseline
-        : baseline + (end - baseline) * (1 - rangeFraction(range));
-
-    const points: number[] = new Array(n);
-    // Pre-roll the noise sequence so we taper at endpoints.
-    const noise: number[] = [];
-    let acc = 0;
-    for (let i = 0; i < n; i++) {
-      acc += (rand() - 0.5) * 2; // random walk -1..+1 step
-      noise.push(acc);
+    // Append a live tip at the latest block time so the curve ends on the same
+    // value as the hero's portfolio number (samples can lag up to ~60s between
+    // sweeps). Block time keeps this pure — no `Date.now()` during render.
+    if (points.length > 0 && currentValueDollars > 0 && nowMs > 0) {
+      const last = points[points.length - 1]!;
+      if (nowMs > last.t) points.push({ t: nowMs, value: currentValueDollars });
     }
-    const noiseMax = Math.max(1, ...noise.map((v) => Math.abs(v)));
-    const swing = Math.max(Math.abs(end - rangeStart), 1) * 0.18;
 
-    for (let i = 0; i < n; i++) {
-      const t = n === 1 ? 1 : i / (n - 1);
-      const trend = rangeStart + (end - rangeStart) * t;
-      const taper = Math.sin(t * Math.PI); // 0 at endpoints, 1 at middle
-      const noiseAmt = (noise[i]! / noiseMax) * swing * taper;
-      points[i] = trend + noiseAmt;
-    }
-    // Anchor the endpoints exactly (taper already minimises drift).
-    points[0] = rangeStart;
-    points[n - 1] = end;
-
-    const deltaAbs = end - rangeStart;
-    const deltaPct = rangeStart === 0 ? 0 : (deltaAbs / rangeStart) * 100;
+    const startEquity = points.length ? points[0]!.value : 0;
+    const endEquity = points.length ? points[points.length - 1]!.value : 0;
+    const deltaAbs = endEquity - startEquity;
+    const deltaPct = startEquity === 0 ? 0 : (deltaAbs / startEquity) * 100;
 
     return {
       range,
       points,
-      baseline,
-      startEquity: rangeStart,
-      endEquity: end,
+      baseline: baselineDepositsDollars,
+      startEquity,
+      endEquity,
       deltaAbs,
       deltaPct,
+      isLoading: q.isPending,
+      isEmpty: points.length < 2,
     };
-  }, [accountId, range, currentValueDollars, baselineDepositsDollars]);
-}
-
-function rangeFraction(range: EquityRange): number {
-  // What portion of the full baseline→current span this range covers.
-  switch (range) {
-    case "24H":
-      return 0.08;
-    case "7D":
-      return 0.28;
-    case "30D":
-      return 0.55;
-    case "ALL":
-      return 1;
-  }
-}
-
-function hashSeed(accountId: number, range: EquityRange): number {
-  let h = (accountId | 0) ^ 0x9e3779b1;
-  for (const c of range) {
-    h = Math.imul(h ^ c.charCodeAt(0), 0x85ebca6b);
-    h = (h ^ (h >>> 13)) >>> 0;
-  }
-  return h >>> 0;
-}
-
-function seededRand(seed: number): () => number {
-  let s = seed >>> 0;
-  return () => {
-    s ^= s << 13;
-    s ^= s >>> 17;
-    s ^= s << 5;
-    s >>>= 0;
-    return s / 0x100000000;
-  };
+  }, [
+    q.data,
+    q.isPending,
+    range,
+    currentValueDollars,
+    baselineDepositsDollars,
+    nowMs,
+  ]);
 }

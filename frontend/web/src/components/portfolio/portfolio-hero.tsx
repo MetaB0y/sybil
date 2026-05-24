@@ -5,7 +5,6 @@
  * number + delta + 2×2 stat grid. Matches handoff `VariantClassic` hero.
  */
 
-import { MockValue } from "@/components/mock-value";
 import { formatDollars, parseNanos } from "@/lib/format/nanos";
 import type { PnlSplit } from "@/lib/account/use-pnl-split";
 import type { Portfolio } from "@/lib/account/use-portfolio";
@@ -37,11 +36,38 @@ export function PortfolioHero({
     : null;
   const positionCount = portfolio?.positions.length ?? 0;
 
-  // Delta line: use mocked equity curve for ranges; for ALL we still get
-  // a real-ish number because curve.deltaAbs is anchored on total_deposited.
-  const deltaAbs = curve?.deltaAbs ?? 0;
-  const deltaPct = curve?.deltaPct ?? 0;
+  // Delta line, all real. For the ALL range it's P&L since first deposit,
+  // straight from the portfolio (`pnl_nanos` over `total_deposited`). For the
+  // windowed ranges (24H/7D/30D) it's end−start over the real equity series.
+  const isAllRange = curve?.range === "ALL";
+  const pnlNanos = portfolio ? parseNanos(portfolio.pnl_nanos) : 0n;
+  const depositedNanos = portfolio
+    ? parseNanos(portfolio.total_deposited_nanos)
+    : 0n;
+  const realDeltaAbs = Number(pnlNanos) / 1e9;
+  const realDeltaPct =
+    depositedNanos === 0n ? 0 : (Number(pnlNanos) / Number(depositedNanos)) * 100;
+
+  const deltaAbs = isAllRange ? realDeltaAbs : curve?.deltaAbs ?? 0;
+  const deltaPct = isAllRange ? realDeltaPct : curve?.deltaPct ?? 0;
   const deltaPositive = deltaAbs >= 0;
+
+  const deltaSpan = (
+    <span
+      style={{
+        color: deltaPositive ? "var(--yes)" : "var(--no)",
+        fontSize: 16,
+      }}
+    >
+      {deltaPositive ? "▲" : "▼"} $
+      {Math.abs(deltaAbs).toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}{" "}
+      {deltaPositive ? "+" : ""}
+      {deltaPct.toFixed(2)}%
+    </span>
+  );
 
   return (
     <div
@@ -75,21 +101,7 @@ export function PortfolioHero({
             fontSize: 13,
           }}
         >
-          <MockValue
-            hint="NOT NOW — delta is computed against a mocked equity curve (OPEN_QUESTIONS #12)"
-            variant="underline"
-          >
-            <span
-              style={{
-                color: deltaPositive ? "var(--yes)" : "var(--no)",
-                fontSize: 16,
-              }}
-            >
-              {deltaPositive ? "▲" : "▼"} ${Math.abs(deltaAbs).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
-              {deltaPositive ? "+" : ""}
-              {deltaPct.toFixed(2)}%
-            </span>
-          </MockValue>
+          {deltaSpan}
           <span
             style={{
               color: "var(--fg-4)",
