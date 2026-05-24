@@ -170,26 +170,55 @@ impl StoredHistoryEvent {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct AccountEventLog {
     events: HashMap<AccountId, VecDeque<HistoryEvent>>,
     next_seq: u64,
+    max_events: usize,
+    /// Events appended since the last `clear_pending`. Cleared after commit.
+    pending: Vec<HistoryEvent>,
+}
+
+impl Default for AccountEventLog {
+    fn default() -> Self {
+        Self::with_retention(MAX_HISTORY_EVENTS_PER_ACCOUNT)
+    }
 }
 
 impl AccountEventLog {
     pub fn new() -> Self {
-        Self::default()
+        Self::with_retention(MAX_HISTORY_EVENTS_PER_ACCOUNT)
+    }
+
+    pub fn with_retention(max_events: usize) -> Self {
+        Self {
+            events: HashMap::new(),
+            next_seq: 0,
+            max_events,
+            pending: Vec::new(),
+        }
+    }
+
+    pub fn pending(&self) -> &[HistoryEvent] {
+        &self.pending
+    }
+
+    pub fn clear_pending(&mut self) {
+        self.pending.clear();
     }
 
     /// Append one event (assigns the global seq, trims the per-account ring).
     pub fn append(&mut self, mut event: HistoryEvent) {
         event.seq = self.next_seq;
         self.next_seq += 1;
-        let ring = self.events.entry(event.account_id).or_default();
-        ring.push_back(event);
-        while ring.len() > MAX_HISTORY_EVENTS_PER_ACCOUNT {
-            ring.pop_front();
+        if self.max_events > 0 {
+            let ring = self.events.entry(event.account_id).or_default();
+            ring.push_back(event.clone());
+            while ring.len() > self.max_events {
+                ring.pop_front();
+            }
         }
+        self.pending.push(event);
     }
 
     /// Newest-first page. `before` = exclusive cursor `(block_height, seq)`;

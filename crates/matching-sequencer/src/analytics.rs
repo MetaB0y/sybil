@@ -384,4 +384,13 @@ impl AnalyticsState {
     pub(crate) fn price_tracker_mut(&mut self) -> &mut PriceTracker {
         &mut self.price_tracker
     }
+
+    pub fn clear_offblock_pending(&mut self) {
+        self.equity_tracker.clear_pending();
+        self.account_event_log.clear_pending();
+    }
+
+    pub fn seed_equity_known(&mut self, ids: impl IntoIterator<Item = AccountId>) {
+        self.equity_tracker.seed_known(ids);
+    }
 }
