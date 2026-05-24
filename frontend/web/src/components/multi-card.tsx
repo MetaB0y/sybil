@@ -45,6 +45,10 @@ export function MultiCard({ groupName, markets, prices }: Props) {
   // surface first; price-only ranking buried high-conviction-but-no-volume
   // outcomes.
   const ranked = [...markets].sort((a, b) => {
+    // Closed outcomes always sink below open ones (still shown, just greyed).
+    const ca = a.closed === true ? 1 : 0;
+    const cb = b.closed === true ? 1 : 0;
+    if (ca !== cb) return ca - cb;
     const va = a.volume_nanos ? BigInt(a.volume_nanos) : 0n;
     const vb = b.volume_nanos ? BigInt(b.volume_nanos) : 0n;
     if (va !== vb) return va > vb ? -1 : 1;
@@ -434,13 +438,14 @@ function SecondaryRow({
         borderTop: first ? "none" : "1px solid var(--border-1)",
         textDecoration: "none",
         color: "var(--fg-1)",
+        opacity: market.closed === true ? 0.5 : 1,
       }}
     >
       <span
         style={{
           fontFamily: "var(--font-sans)",
           fontSize: "var(--fs-13)",
-          color: "var(--fg-2)",
+          color: market.closed === true ? "var(--fg-4)" : "var(--fg-2)",
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
@@ -449,6 +454,20 @@ function SecondaryRow({
         }}
       >
         {label}
+        {market.closed === true && (
+          <span
+            className="text-mono"
+            style={{
+              marginLeft: 6,
+              fontSize: "9px",
+              letterSpacing: "var(--track-wide)",
+              textTransform: "uppercase",
+              color: "var(--fg-4)",
+            }}
+          >
+            closed
+          </span>
+        )}
       </span>
       <span
         className="text-mono tabular"
