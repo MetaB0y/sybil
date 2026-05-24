@@ -138,6 +138,35 @@ pub async fn test_app_with_store(dev_mode: bool) -> (Router, SequencerHandle) {
     (create_router(state), handle)
 }
 
+/// Store-backed test app with the in-memory off-block caps set to 0 — the
+/// production config. Equity/history are served ONLY from redb (the in-memory
+/// rings stay empty), so tests using this prove the store read path rather than
+/// the in-memory fallback.
+#[allow(dead_code)]
+pub async fn test_app_with_store_zero_caps(dev_mode: bool) -> (Router, SequencerHandle) {
+    let accounts = AccountStore::new();
+    let markets = MarketSet::new();
+    let oracle = Arc::new(AdminOracle::new());
+    let config = SequencerConfig {
+        max_equity_points_per_account: 0,
+        max_history_events_per_account: 0,
+        ..SequencerConfig::default()
+    };
+    let sequencer =
+        BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, config);
+    let store = Store::open(&temp_store_path()).expect("test store opens");
+    let handle = SequencerHandle::spawn_with_store(sequencer, Some(store));
+    let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .build_recorder()
+        .handle();
+    let api_config = ApiConfig {
+        dev_mode,
+        ..ApiConfig::default()
+    };
+    let state = AppState::new(handle.clone(), &api_config, prometheus);
+    (create_router(state), handle)
+}
+
 /// Send a GET request and return (status, body bytes).
 #[allow(dead_code)]
 pub async fn get(app: Router, uri: &str) -> (StatusCode, Vec<u8>) {
