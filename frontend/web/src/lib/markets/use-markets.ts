@@ -19,6 +19,16 @@ import { api } from "@/lib/api/client";
 
 export type Market = components["schemas"]["MarketResponse"];
 
+/** A market Polymarket has closed (resolved / past deadline). */
+export function isClosed(m: Market): boolean {
+  return m.closed === true;
+}
+
+/** An event is shown on the index if at least one of its markets is still open. */
+export function eventVisibleOnIndex(markets: Market[]): boolean {
+  return markets.some((m) => !isClosed(m));
+}
+
 export type MarketsListBundle = {
   /** Every market keyed by id. */
   byId: Map<number, Market>;
@@ -54,12 +64,13 @@ export function useMarketsList() {
   return { bundle, isPending, error };
 }
 
-function assemble(allMarkets: Market[]): MarketsListBundle {
-  // Hide markets Polymarket has closed (resolved or past their deadline). The
-  // mirror flags these off-block, so closed markets carry `closed: true`; an
-  // absent/false flag (e.g. pre-deploy, or sybil-native markets) shows
-  // everything as before.
-  const markets = allMarkets.filter((m) => m.closed !== true);
+export function assemble(allMarkets: Market[]): MarketsListBundle {
+  // Keep ALL markets (open + closed) in the bundle. Closed markets are needed
+  // by the detail page (read-only state) and by multi-cards (greyed outcome
+  // rows). Index-level visibility — hiding fully-closed events and standalone
+  // closed binaries — is applied by the markets page, not here. Each market
+  // carries its own `closed` flag (`isClosed`) for downstream display logic.
+  const markets = allMarkets;
 
   const byId = new Map<number, Market>();
   for (const m of markets) byId.set(m.market_id, m);
