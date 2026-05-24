@@ -174,6 +174,18 @@ function MarketsPageInner() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
+  // Header counts — same "{markets} markets · {events} events" shape whether or
+  // not a filter is active. Derived from `filtered` (≡ all cards when nothing
+  // is filtered), so picking a category just narrows both numbers instead of
+  // switching to a different "N of M cards" wording. Summing markets per card
+  // equals bundle.total when unfiltered (every market lives in exactly one card).
+  const shownEvents = filtered?.length ?? 0;
+  const shownMarkets =
+    filtered?.reduce(
+      (n, it) => n + (it.kind === "multi" ? it.markets.length : 1),
+      0,
+    ) ?? 0;
+
   return (
     <>
       {bundle && <ClearingTicker marketsById={bundle.byId} />}
@@ -209,9 +221,7 @@ function MarketsPageInner() {
           <p className="text-annotation">
             {bundle == null
               ? "loading…"
-              : filtered && filtered.length !== items?.length
-                ? `${filtered.length} of ${items?.length ?? 0} cards · uniform clearing every ${BLOCK_INTERVAL_MS / 1000}s`
-                : `${bundle.total} markets · ${bundle.groups.length + bundle.ungrouped.length} events · uniform clearing every ${BLOCK_INTERVAL_MS / 1000}s`}
+              : `${shownMarkets} markets · ${shownEvents} events · uniform clearing every ${BLOCK_INTERVAL_MS / 1000}s`}
           </p>
         </header>
 
