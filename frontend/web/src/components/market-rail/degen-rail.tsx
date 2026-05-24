@@ -29,10 +29,19 @@ import type { Side } from "./yes-no-toggle";
 import { YesNoToggle } from "./yes-no-toggle";
 import { WhyWaiting } from "./why-waiting";
 
-export function DegenRail({ group }: { group: EventGroup }) {
+export function DegenRail({
+  group,
+  active,
+  setActive,
+}: {
+  group: EventGroup;
+  // Lifted into the (always-mounted) MarketRail so an in-flight bet survives a
+  // toggle to Pro and back — this rail unmounts on mode switch.
+  active: DegenActive | null;
+  setActive: (a: DegenActive | null) => void;
+}) {
   const [side, setSide] = useState<Side>("YES");
   const [amount, setAmount] = useState<string>("10");
-  const [active, setActive] = useState<DegenActive | null>(null);
   const [signing, setSigning] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -107,6 +116,7 @@ export function DegenRail({ group }: { group: EventGroup }) {
         marketId: selected.marketId,
         outcome: side,
         targetQty: built.order.maxFill,
+        betUsd: amountNum,
         limitPriceNanos: built.order.limitPriceNanos,
         submitHeight: latestHeight,
         // DegenActive.expiresAtBlock is number; built.order.expiresAtBlock is bigint.
@@ -153,7 +163,7 @@ export function DegenRail({ group }: { group: EventGroup }) {
           timeProgress01={tracking?.timeProgress01 ?? 0}
           filledQty={tracking?.filledQty ?? 0n}
           targetQty={active.targetQty}
-          betUsd={amountNum}
+          betUsd={active.betUsd}
           onBetAgain={() => setActive(null)}
         />
       ) : (

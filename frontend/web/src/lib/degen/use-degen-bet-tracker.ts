@@ -18,6 +18,10 @@ export interface DegenActive {
   marketId: number;
   outcome: DegenSide;
   targetQty: bigint;
+  /** The dollar stake at submit time. Carried here (not read from the live
+   *  form) so the result card stays correct after the rail unmounts/remounts
+   *  — e.g. when the user toggles to Pro and back. */
+  betUsd: number;
   limitPriceNanos: bigint; // for display only
   submitHeight: number;
   expiresAtBlock: number;
@@ -46,10 +50,12 @@ export function useDegenBetTracker(
   const submitHeight = active?.submitHeight ?? null;
   const expiresAtBlock = active?.expiresAtBlock ?? null;
 
+  /* eslint-disable react-hooks/set-state-in-effect -- reset the countdown when the tracked bet's identity changes (new bet / cleared) */
   useEffect(() => {
     anchorRef.current = active ? performance.now() : null;
     setTimeProgress01(0);
   }, [active?.accountId, submitHeight, active?.marketId, active?.outcome]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (submitHeight === null || expiresAtBlock === null) return;
