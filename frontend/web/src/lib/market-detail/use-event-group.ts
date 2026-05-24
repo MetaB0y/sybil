@@ -52,7 +52,7 @@ export type EventGroup = {
   eventId: string | null;
   eventTitle: string | null;
   isMultiOutcome: boolean;
-  /** Outcomes sorted by descending YES probability. */
+  /** Outcomes sorted closed-last, then by descending YES probability. */
   outcomes: EventOutcome[];
   /** The market_id the user landed on. Always present in `outcomes`. */
   currentMarketId: number;
