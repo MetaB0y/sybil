@@ -19,7 +19,7 @@ import {
 } from "@/lib/account/use-account-fills";
 import { avgEntryPriceNanos } from "@/lib/account/positions";
 import { usePortfolio, type Portfolio } from "@/lib/account/use-portfolio";
-import { formatDollars, parseNanos } from "@/lib/format/nanos";
+import { formatCents, formatDollars, parseNanos } from "@/lib/format/nanos";
 import { useEventGroup } from "@/lib/market-detail/use-event-group";
 import { SidePill } from "@/components/portfolio/side-pill";
 
@@ -64,6 +64,8 @@ export function EventHoldings({ marketId }: { marketId: number }) {
           <span>Outcome</span>
           <span>Side</span>
           <Right>Shares</Right>
+          <Right>Entry</Right>
+          <Right>Mark</Right>
           <Right>Value</Right>
           <Right>P&amp;L</Right>
         </Row>
@@ -90,6 +92,7 @@ function HoldingRow({
   fills: AccountFill[];
 }) {
   const valueNanos = parseNanos(position.value_nanos);
+  const markNanos = parseNanos(position.current_price_nanos);
   const avgNanos = avgEntryPriceNanos(
     fills,
     position.market_id,
@@ -119,6 +122,8 @@ function HoldingRow({
         <SidePill outcome={position.outcome} />
       </span>
       <Right mono>{position.quantity}</Right>
+      <Right mono>{avgNanos == null ? "—" : formatCents(avgNanos)}</Right>
+      <Right mono>{formatCents(markNanos)}</Right>
       <Right mono>{formatDollars(valueNanos, { decimals: 2 })}</Right>
       <Right>
         <span
@@ -153,7 +158,7 @@ function Row({
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) 52px 64px 80px 80px",
+        gridTemplateColumns: "minmax(0, 1fr) 52px 64px 60px 60px 80px 80px",
         gap: 10,
         alignItems: "center",
         padding: "9px 0",

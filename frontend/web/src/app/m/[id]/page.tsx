@@ -494,8 +494,15 @@ function DescriptionBlock({
   const description =
     rawMarket?.description?.trim() || market.description?.trim() || null;
   const resolutionCriteria = market.resolution_criteria?.trim() || null;
-  const sourceUrl =
-    rawMarket?.resolutionSource?.trim() || market.external_url?.trim() || null;
+  // The "source" must be the *specific* resolution source, not a generic page.
+  // For Polymarket markets (those with a `/raw` entry) `external_url` is just
+  // the Polymarket event page, so we only trust Gamma's `resolutionSource`
+  // (e.g. oil markets link pythdata / cmegroup). When that's empty we say so
+  // rather than passing off the event page as a source. Sybil-native markets
+  // (no `/raw`) have no Gamma field, so there `external_url` is the source.
+  const sourceUrl = rawMarket
+    ? rawMarket.resolutionSource?.trim() || null
+    : market.external_url?.trim() || null;
 
   return (
     <section
@@ -548,7 +555,7 @@ function DescriptionBlock({
       )}
       <div>
         <div className="eyebrow" style={{ marginBottom: "var(--space-2)" }}>
-          {"// source"}
+          {"// source link"}
         </div>
         {sourceUrl ? (
           <a
@@ -579,7 +586,7 @@ function DescriptionBlock({
               textTransform: "uppercase",
             }}
           >
-            no specific source
+            no specific link
           </span>
         )}
       </div>
@@ -600,8 +607,9 @@ function ProposeResolution() {
     <div
       style={{
         display: "flex",
-        flexDirection: "column",
-        gap: "var(--space-2)",
+        flexDirection: "row",
+        alignItems: "center",
+        gap: "var(--space-3)",
         paddingTop: "var(--space-3)",
         borderTop: "1px solid var(--border-1)",
       }}
@@ -610,7 +618,7 @@ function ProposeResolution() {
         type="button"
         disabled
         style={{
-          alignSelf: "flex-start",
+          flexShrink: 0,
           padding: "10px 16px",
           borderRadius: "var(--radius-md)",
           border: "1px solid var(--border-2)",
