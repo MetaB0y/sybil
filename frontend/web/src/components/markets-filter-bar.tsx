@@ -92,42 +92,43 @@ export function MarketsFilterBar({
             </button>
           );
         })}
-          <span
-            aria-hidden
-            style={{
-              width: 1,
-              height: 16,
-              background: "var(--border-2)",
-              margin: "0 var(--space-1)",
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => onHideClosedChange(!hideClosed)}
-            title={
-              hideClosed
-                ? "Closed markets hidden — click to show them greyed out"
-                : "Closed markets shown — click to hide"
-            }
-            style={{
-              height: 26,
-              padding: "0 var(--space-3)",
-              background: hideClosed ? "var(--surface-2)" : "transparent",
-              color: hideClosed ? "var(--fg-1)" : "var(--fg-3)",
-              border: `1px solid ${
-                hideClosed ? "var(--border-3)" : "var(--border-2)"
-              }`,
-              borderRadius: "var(--radius-sm)",
-              fontFamily: "var(--font-mono)",
-              fontSize: "11px",
-              letterSpacing: "var(--track-wide)",
-              textTransform: "uppercase",
-              cursor: "pointer",
-              transition: "all var(--dur-fast) var(--ease-standard)",
-            }}
-          >
-            Hide closed
-          </button>
+        <span
+          aria-hidden
+          style={{
+            width: 1,
+            height: 16,
+            background: "var(--border-2)",
+            margin: "0 var(--space-1)",
+          }}
+        />
+        <button
+          type="button"
+          aria-pressed={hideClosed}
+          onClick={() => onHideClosedChange(!hideClosed)}
+          title={
+            hideClosed
+              ? "Closed markets hidden — click to show them greyed out"
+              : "Closed markets shown — click to hide"
+          }
+          style={{
+            height: 26,
+            padding: "0 var(--space-3)",
+            background: hideClosed ? "var(--surface-2)" : "transparent",
+            color: hideClosed ? "var(--fg-1)" : "var(--fg-3)",
+            border: `1px solid ${
+              hideClosed ? "var(--border-3)" : "var(--border-2)"
+            }`,
+            borderRadius: "var(--radius-sm)",
+            fontFamily: "var(--font-mono)",
+            fontSize: "11px",
+            letterSpacing: "var(--track-wide)",
+            textTransform: "uppercase",
+            cursor: "pointer",
+            transition: "all var(--dur-fast) var(--ease-standard)",
+          }}
+        >
+          Hide closed
+        </button>
       </div>
     </div>
   );
