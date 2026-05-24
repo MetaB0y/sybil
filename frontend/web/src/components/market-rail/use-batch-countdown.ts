@@ -7,17 +7,29 @@
  *   - `secondsLeftPrecise` — float seconds remaining; feed `formatBatchSeconds`
  *   - `latestHeight` — committed block height (the open batch is +1)
  *
- * Animation pattern mirrors `frontend/web/src/components/batch-theater.tsx`:
- * anchor on every new committed block via useEffect, then RAF-tick locally.
- * Linear easing keyed to height — not wall-clock springs (which would drift
- * from the block clock).
+ * Progress is derived from a single monotonic anchor stamped in the store when
+ * each block is received (`latestBlockAnchorPerf`), NOT from a per-component
+ * mount timestamp. That's the fix for the timer restarting at the full window
+ * when the rail remounts (e.g. switching outcomes) — the anchor is shared and
+ * outlives any one mount, so the countdown stays glued to the real block clock.
+ * Linear easing keyed to the block cadence — not wall-clock springs (which
+ * would drift) and not Date.now() (which would be wrong under client clock skew).
  */
 
 import { useEffect, useRef, useState } from "react";
-import { selectLatestBlock, useStore } from "@/lib/store";
+import {
+  selectLatestBlock,
+  selectLatestBlockAnchor,
+  useStore,
+} from "@/lib/store";
 import { BLOCK_INTERVAL_MS } from "@/lib/constants";
 
 const BATCH_MS = BLOCK_INTERVAL_MS;
+
+function progressFor(anchorPerf: number | null): number {
+  if (anchorPerf == null) return 0;
+  return Math.min(1, Math.max(0, (performance.now() - anchorPerf) / BATCH_MS));
+}
 
 export function useBatchCountdown(): {
   progress01: number;
@@ -26,30 +38,21 @@ export function useBatchCountdown(): {
   latestHeight: number | null;
 } {
   const latest = useStore(selectLatestBlock);
+  const anchorPerf = useStore(selectLatestBlockAnchor);
+  // Start at 0 (matches SSR) and let the first RAF tick fill in the real
+  // value within ~one frame, so a mid-batch remount snaps to the correct
+  // remaining time instead of flashing the full window.
   const [progress01, setProgress01] = useState(0);
-  const anchorRef = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
 
-  /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps -- reset on new block */
   useEffect(() => {
-    if (latest == null) return;
-    anchorRef.current = performance.now();
-    setProgress01(0);
-  }, [latest?.height]);
-  /* eslint-enable */
-
-  useEffect(() => {
-    // Throttle to ~10fps. At 60fps this setState re-renders every consumer each
-    // frame, and the rail mounts two countdowns (hero gauge + buy-box), so the
-    // page churned ~120 renders/sec and the gauge stuttered. 100ms steps plus
-    // the ring's 60ms CSS transition stay visually smooth at a fraction of the
-    // render cost.
+    // Throttle to ~10fps (see git history: 60fps churned ~120 renders/sec
+    // across the rail's two countdowns and stuttered the gauge).
     let lastTickMs = 0;
     const step = (frameMs: number) => {
-      if (anchorRef.current != null && frameMs - lastTickMs >= 100) {
+      if (frameMs - lastTickMs >= 100) {
         lastTickMs = frameMs;
-        const elapsed = performance.now() - anchorRef.current;
-        setProgress01(Math.min(1, elapsed / BATCH_MS));
+        setProgress01(progressFor(anchorPerf));
       }
       rafRef.current = requestAnimationFrame(step);
     };
@@ -57,7 +60,7 @@ export function useBatchCountdown(): {
     return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
-  }, []);
+  }, [anchorPerf]);
 
   const secondsLeftPrecise = Math.max(0, (1 - progress01) * (BATCH_MS / 1000));
   const secondsLeft = Math.ceil(secondsLeftPrecise);
