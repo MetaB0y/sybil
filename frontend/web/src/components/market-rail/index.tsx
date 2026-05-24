@@ -10,6 +10,8 @@
  * `frontend/handoff/data/fed-variations.jsx:99`.
  */
 
+import { useState } from "react";
+import type { DegenActive } from "@/lib/degen/use-degen-bet-tracker";
 import { useEventGroup } from "@/lib/market-detail/use-event-group";
 import { DegenRail } from "./degen-rail";
 import { ModeTabs } from "./mode-tabs";
@@ -19,6 +21,15 @@ import { useRailMode } from "./use-rail-mode";
 export function MarketRail({ marketId }: { marketId: number }) {
   const [mode, setMode] = useRailMode();
   const { group, isPending } = useEventGroup(marketId);
+  // Held here, not inside DegenRail, so an in-flight bet's status survives a
+  // Degen↔Pro toggle (which unmounts the rail body below).
+  const [degenActive, setDegenActive] = useState<DegenActive | null>(null);
+
+  const selected = group
+    ? group.outcomes.find((o) => o.marketId === group.currentMarketId) ??
+      group.outcomes[0]
+    : undefined;
+  const closed = selected?.closed === true;
 
   return (
     <aside
@@ -28,7 +39,7 @@ export function MarketRail({ marketId }: { marketId: number }) {
         gap: 14,
       }}
     >
-      <ModeTabs value={mode} onChange={setMode} />
+      {!closed && <ModeTabs value={mode} onChange={setMode} />}
       {isPending && (
         <div
           style={{
@@ -42,8 +53,36 @@ export function MarketRail({ marketId }: { marketId: number }) {
           loading rail…
         </div>
       )}
-      {group && mode === "degen" && <DegenRail group={group} />}
-      {group && mode === "pro" && <ProRail group={group} />}
+      {group && closed && <ClosedRail />}
+      {group && !closed && mode === "degen" && (
+        <DegenRail
+          group={group}
+          active={degenActive}
+          setActive={setDegenActive}
+        />
+      )}
+      {group && !closed && mode === "pro" && <ProRail group={group} />}
     </aside>
+  );
+}
+
+/** Read-only replacement for the trade rail on a closed/resolved market. */
+function ClosedRail() {
+  return (
+    <div
+      className="text-mono"
+      style={{
+        padding: "24px 16px",
+        borderRadius: "var(--radius-md)",
+        background: "var(--surface-1)",
+        border: "1px solid var(--border-1)",
+        color: "var(--fg-3)",
+        fontSize: 12,
+        lineHeight: "18px",
+        textAlign: "center",
+      }}
+    >
+      This market has closed. Trading is disabled.
+    </div>
   );
 }

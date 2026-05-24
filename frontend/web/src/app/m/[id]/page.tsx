@@ -8,6 +8,7 @@ import {
   RANGE_MS,
   type ChartRange,
 } from "@/components/chart-range-bar";
+import { EventHoldings } from "@/components/event-holdings";
 import { MarketRail } from "@/components/market-rail";
 import { MarketThumb } from "@/components/market-thumb";
 import { OutcomeLegend } from "@/components/outcome-legend";
@@ -62,6 +63,7 @@ export default function MarketDetailPage({
 
       {market && (
         <>
+          {market.closed === true && <ClosedBanner />}
           {/* Header spans the full width; the chart/rail split sits below it. */}
           <Header marketId={marketId} market={market} />
 
@@ -81,6 +83,7 @@ export default function MarketDetailPage({
               }}
             >
               <ChartSection marketId={marketId} />
+              <EventHoldings marketId={marketId} />
               <DescriptionBlock market={market} />
               <DiscussionPlaceholder />
             </div>
@@ -494,9 +497,6 @@ function DescriptionBlock({
   const sourceUrl =
     rawMarket?.resolutionSource?.trim() || market.external_url?.trim() || null;
 
-  if (!description && !resolutionCriteria && !sourceUrl) {
-    return null;
-  }
   return (
     <section
       style={{
@@ -546,27 +546,96 @@ function DescriptionBlock({
           </p>
         </div>
       )}
-      {sourceUrl && (
-        <a
-          href={sourceUrl}
-          target="_blank"
-          rel="noreferrer noopener"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "var(--space-2)",
-            color: "var(--accent)",
-            textDecoration: "none",
-            fontFamily: "var(--font-mono)",
-            fontSize: "var(--fs-12)",
-            letterSpacing: "var(--track-wide)",
-            textTransform: "uppercase",
-          }}
-        >
-          source ↗
-        </a>
-      )}
+      <div>
+        <div className="eyebrow" style={{ marginBottom: "var(--space-2)" }}>
+          {"// source"}
+        </div>
+        {sourceUrl ? (
+          <a
+            href={sourceUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "var(--space-2)",
+              color: "var(--accent)",
+              textDecoration: "none",
+              fontFamily: "var(--font-mono)",
+              fontSize: "var(--fs-12)",
+              letterSpacing: "var(--track-wide)",
+              textTransform: "uppercase",
+            }}
+          >
+            source ↗
+          </a>
+        ) : (
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "var(--fs-12)",
+              color: "var(--fg-4)",
+              letterSpacing: "var(--track-wide)",
+              textTransform: "uppercase",
+            }}
+          >
+            no specific source
+          </span>
+        )}
+      </div>
+
+      <ProposeResolution />
     </section>
+  );
+}
+
+/**
+ * Inactive "Propose resolution" affordance. Resolution proposals aren't wired
+ * to the backend yet, so the button is disabled with a "coming soon" hint —
+ * it reserves the spot next to the resolution criteria the way the Discussion
+ * card reserves the comments slot.
+ */
+function ProposeResolution() {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--space-2)",
+        paddingTop: "var(--space-3)",
+        borderTop: "1px solid var(--border-1)",
+      }}
+    >
+      <button
+        type="button"
+        disabled
+        style={{
+          alignSelf: "flex-start",
+          padding: "10px 16px",
+          borderRadius: "var(--radius-md)",
+          border: "1px solid var(--border-2)",
+          background: "var(--surface-2)",
+          color: "var(--fg-3)",
+          fontFamily: "var(--font-sans)",
+          fontSize: "var(--fs-13)",
+          fontWeight: 600,
+          cursor: "not-allowed",
+        }}
+      >
+        Propose resolution
+      </button>
+      <span
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          color: "var(--fg-4)",
+          textTransform: "uppercase",
+          letterSpacing: "var(--track-wide)",
+        }}
+      >
+        coming soon
+      </span>
+    </div>
   );
 }
 
@@ -630,6 +699,36 @@ function DiscussionPlaceholder() {
         the spot so the layout stays stable.
       </p>
     </section>
+  );
+}
+
+/**
+ * Shown atop a market whose Polymarket event has closed/resolved. Trading is
+ * disabled in the rail; this explains why. Best-effort — the market is still
+ * mirrored in the engine; after a sybil-api restart closed markets drop out
+ * entirely and this page 404s (acceptable per product decision).
+ */
+function ClosedBanner() {
+  return (
+    <div
+      role="status"
+      className="text-mono"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "var(--space-2)",
+        padding: "var(--space-3) var(--space-4)",
+        borderRadius: "var(--radius-md)",
+        background: "var(--warn-soft)",
+        color: "var(--warn)",
+        border: "1px solid var(--warn-soft)",
+        fontSize: "var(--fs-12)",
+        letterSpacing: "var(--track-wide)",
+        textTransform: "uppercase",
+      }}
+    >
+      market closed · trading disabled · view only
+    </div>
   );
 }
 
