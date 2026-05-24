@@ -39,9 +39,11 @@ describe("selectIndexCards", () => {
     expect(ids(selectIndexCards(items, { ...base, showClosed: false }))).toEqual([1]);
   });
 
-  it("shows closed cards when showClosed=true", () => {
+  it("shows closed cards (open first) when showClosed=true", () => {
     const items = [binary(1, { closed: false }), binary(2, { closed: true })];
-    expect(selectIndexCards(items, { ...base, showClosed: true })).toHaveLength(2);
+    const out = selectIndexCards(items, { ...base, showClosed: true });
+    expect(out).toHaveLength(2);
+    expect(ids(out)).toEqual([1, 2]); // open before closed
   });
 
   it("sinks closed cards below open ones under volume sort, even with higher volume", () => {
@@ -73,5 +75,27 @@ describe("selectIndexCards", () => {
     ];
     expect(ids(selectIndexCards(items, { ...base, category: "Sports", showClosed: true }))).toEqual([2]);
     expect(ids(selectIndexCards([...items], { ...base, query: "m1", showClosed: true }))).toEqual([1]);
+  });
+
+  it("sinks closed cards below open ones under 'traders' sort, even with more traders", () => {
+    const open1: CardItem = { ...binary(1), market: mk({ market_id: 1, trader_count: 5 }) };
+    const closedTop: CardItem = {
+      ...binary(2, { closed: true }),
+      market: mk({ market_id: 2, trader_count: 999 }),
+    };
+    const open2: CardItem = { ...binary(3), market: mk({ market_id: 3, trader_count: 10 }) };
+    const out = selectIndexCards([open1, closedTop, open2], {
+      ...base,
+      sort: "traders",
+      showClosed: true,
+    });
+    expect(ids(out)).toEqual([3, 1, 2]);
+  });
+
+  it("does not mutate the input array", () => {
+    const items = [binary(1, { vol: 1n }), binary(2, { vol: 2n })];
+    const snapshot = [...items];
+    selectIndexCards(items, { ...base, showClosed: true });
+    expect(items).toEqual(snapshot);
   });
 });

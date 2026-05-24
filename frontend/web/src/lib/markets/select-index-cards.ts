@@ -8,7 +8,7 @@
  */
 
 import type { Market } from "./use-markets";
-import type { SortKey } from "@/components/markets-filter-bar";
+import type { SortKey } from "./sort";
 
 export type CardItem =
   | {

@@ -2,20 +2,10 @@
 
 import { CategoryTabs } from "./category-tabs";
 
-export type SortKey = "volume" | "new" | "traders";
+import type { SortKey } from "@/lib/markets/sort";
 
-export const SORT_KEYS: readonly SortKey[] = [
-  "volume",
-  "new",
-  "traders",
-] as const;
-
-export function parseSortKey(raw: string | null | undefined): SortKey {
-  if (raw && (SORT_KEYS as readonly string[]).includes(raw)) {
-    return raw as SortKey;
-  }
-  return "volume";
-}
+export { SORT_KEYS, parseSortKey } from "@/lib/markets/sort";
+export type { SortKey } from "@/lib/markets/sort";
 
 type ChipDef = {
   key: SortKey;
