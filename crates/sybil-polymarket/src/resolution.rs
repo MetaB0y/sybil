@@ -11,7 +11,8 @@
 //! ambiguous (non-binary, UMA-challenged, voided) is skipped with a log line.
 //! Richer ingest is tracked in the design doc.
 
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::sync::RwLock;
@@ -25,6 +26,7 @@ use crate::polymarket::gamma::GammaClient;
 use crate::polymarket::types::{GammaEvent, GammaMarket};
 use crate::signer::ResolutionSigner;
 use crate::sybil::client::SybilClient;
+use sybil_api_types::SetMarketMetadataRequest;
 
 /// Periodic resolver. Polls closed Polymarket events, attests to clean
 /// binary resolutions, and sends them to sybil-api.
@@ -34,6 +36,11 @@ pub struct ResolutionActor {
     sybil: SybilClient,
     mapping: Arc<RwLock<MappingStore>>,
     signer: ResolutionSigner,
+    /// Condition ids already pushed `closed: true` this process lifetime, so we
+    /// write the off-block flag once per market instead of every tick. In-memory
+    /// only — a restart re-flags each once via this path (and the sync actor's
+    /// first-sync backfill), which is harmless and idempotent on the API side.
+    flagged_closed: Mutex<HashSet<String>>,
 }
 
 impl ResolutionActor {
@@ -50,6 +57,7 @@ impl ResolutionActor {
             sybil,
             mapping,
             signer,
+            flagged_closed: Mutex::new(HashSet::new()),
         }
     }
 
@@ -84,7 +92,7 @@ impl ResolutionActor {
             .await
             .all_condition_mappings()
             .into_iter()
-            .collect::<std::collections::HashMap<_, _>>();
+            .collect::<HashMap<_, _>>();
 
         if mirrors.is_empty() {
             return Ok(());
@@ -94,6 +102,35 @@ impl ResolutionActor {
             .gamma
             .fetch_closed_events(self.config.max_events)
             .await?;
+
+        // Mark-once: push `closed: true` off-block for any mapped market
+        // Polymarket reports closed, so the frontend hides/greys it. Independent
+        // of settlement (`maybe_resolve` only handles clean binary payouts);
+        // this fires for every close, clean or not. Skips ids already flagged
+        // this lifetime so we don't re-POST every tick.
+        let to_flag = {
+            let flagged = self.flagged_closed.lock().expect("flagged_closed poisoned");
+            pending_close_flags(&events, &mirrors, &flagged)
+        };
+        if !to_flag.is_empty() {
+            let req = SetMarketMetadataRequest {
+                closed: Some(true),
+                ..Default::default()
+            };
+            for (sybil_id, condition_id) in to_flag {
+                match self.sybil.set_market_metadata(sybil_id, &req).await {
+                    Ok(()) => {
+                        self.flagged_closed
+                            .lock()
+                            .expect("flagged_closed poisoned")
+                            .insert(condition_id);
+                    }
+                    Err(e) => {
+                        warn!(sybil_id, error = %e, "failed to flag market closed")
+                    }
+                }
+            }
+        }
 
         let mut resolved = 0usize;
         for event in events {
@@ -166,8 +203,8 @@ impl ResolutionActor {
 /// `(sybil_market_id, condition_id)` pairs. No I/O — unit-tested in isolation.
 fn pending_close_flags(
     events: &[GammaEvent],
-    mirrors: &std::collections::HashMap<String, u32>,
-    already_flagged: &std::collections::HashSet<String>,
+    mirrors: &HashMap<String, u32>,
+    already_flagged: &HashSet<String>,
 ) -> Vec<(u32, String)> {
     let mut out = Vec::new();
     for event in events {
