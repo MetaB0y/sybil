@@ -3,25 +3,15 @@
 /**
  * 24h pulse strip — five real `last_24h` figures from
  * `GET /v1/activity/overview` (see use-activity-overview.ts), one per cell.
- *
- * The ±% deltas on Matched volume and Active traders stay mocked — the
- * overview response carries no `prior_24h` bucket — and wear a MockValue
- * pill so they read as placeholders. Values show "—" until the first
- * response lands.
+ * Values show "—" until the first response lands.
  */
 
-import { MockValue } from "@/components/mock-value";
-import { formatCompactInt, formatPctDelta } from "@/lib/format/nanos";
-import { MOCK_24H_DELTAS } from "@/lib/activity/mocks";
+import { formatCompactInt } from "@/lib/format/nanos";
 import type { Last24hStats } from "@/lib/activity/types";
-
-const DELTA_HINT = "vs prior 24h — backend has no prior_24h bucket";
 
 type Cell = {
   label: string;
   value: string;
-  /** Mocked ±% vs prior 24h — only the first two cells carry one. */
-  deltaPct?: number;
   accent?: string;
 };
 
@@ -33,15 +23,13 @@ export function PulseStrip({ last24h }: { last24h: Last24hStats }) {
     {
       label: "Matched volume",
       value: last24h.matchedVolume,
-      deltaPct: MOCK_24H_DELTAS.matchedVolumeDeltaPct,
     },
     {
       label: "Active traders",
       value: fmtCount(last24h.traders),
-      deltaPct: MOCK_24H_DELTAS.tradersDeltaPct,
     },
     {
-      label: "Placed orders",
+      label: "Orders processed",
       value: fmtCount(last24h.ordersPlaced),
     },
     {
@@ -79,7 +67,7 @@ export function PulseStrip({ last24h }: { last24h: Last24hStats }) {
           Last 24 hours
         </h3>
         <span className="text-annotation" style={{ fontSize: 11 }}>
-          rolling window · vs prior 24 h
+          rolling window
         </span>
       </div>
       <div
@@ -104,42 +92,19 @@ export function PulseStrip({ last24h }: { last24h: Last24hStats }) {
             }}
           >
             <span className="eyebrow">{it.label}</span>
-            <div
+            <span
               style={{
-                display: "flex",
-                alignItems: "baseline",
-                justifyContent: "space-between",
-                gap: 10,
+                fontFamily: "var(--font-sans)",
+                fontSize: 22,
+                fontWeight: 600,
+                color: it.accent ?? "var(--fg-1)",
+                fontVariantNumeric: "tabular-nums",
+                letterSpacing: "-0.01em",
+                lineHeight: 1,
               }}
             >
-              <span
-                style={{
-                  fontFamily: "var(--font-sans)",
-                  fontSize: 22,
-                  fontWeight: 600,
-                  color: it.accent ?? "var(--fg-1)",
-                  fontVariantNumeric: "tabular-nums",
-                  letterSpacing: "-0.01em",
-                  lineHeight: 1,
-                }}
-              >
-                {it.value}
-              </span>
-              {it.deltaPct != null && (
-                <MockValue hint={DELTA_HINT} variant="pill">
-                  <span
-                    style={{
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 11,
-                      color: it.deltaPct >= 0 ? "var(--yes)" : "var(--no)",
-                      fontVariantNumeric: "tabular-nums",
-                    }}
-                  >
-                    {formatPctDelta(it.deltaPct)}
-                  </span>
-                </MockValue>
-              )}
-            </div>
+              {it.value}
+            </span>
           </div>
         ))}
       </div>

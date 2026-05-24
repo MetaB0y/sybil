@@ -53,13 +53,12 @@ export type Last24hStats = {
 };
 
 /**
- * All-time stats for the Activity hero — the shared figures plus three
- * hero-only fields. `genesisAge` is the one mocked field.
+ * All-time stats for the Activity hero — the shared figures plus two
+ * hero-only fields.
  */
 export type AllTimeStats = Last24hStats & {
   totalBatches: number; // real — from latestBlock.height
   liveMarkets: number; // real — from /v1/markets/summary status count
-  genesisAge: string; // mocked — not tracked
 };
 
 export type ActivityOverview = {

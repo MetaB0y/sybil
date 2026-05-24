@@ -3,8 +3,7 @@
  * `GET /v1/activity/overview` — the `all_time` and `last_24h` buckets.
  *
  * Every figure is real and reads `"—"` / `null` until the first response
- * lands. The hero's genesis age and the pulse strip's ±% deltas are the
- * only mocked values — the overview response has no `prior_24h` bucket.
+ * lands.
  *
  * `last_24h` equals `all_time` while the chain is younger than 24h (it runs
  * in-memory and resets on redeploy) — correct, not a bug.
@@ -17,7 +16,6 @@ import { api } from "../api/client";
 import type { components } from "../api/schema";
 import { formatCompactDollars, parseNanos } from "../format/nanos";
 import { selectLatestBlock, useStore } from "../store";
-import { MOCK_GENESIS_AGE } from "./mocks";
 import type { ActivityOverview, AllTimeStats, Last24hStats } from "./types";
 
 export type UseActivityOverviewResult = ActivityOverview & {
@@ -61,7 +59,6 @@ export function useActivityOverview(): UseActivityOverviewResult {
     ...bucketStats(ov?.all_time),
     totalBatches: latestBlock?.height ?? 0,
     liveMarkets,
-    genesisAge: MOCK_GENESIS_AGE,
   };
   const last24h: Last24hStats = bucketStats(ov?.last_24h);
 

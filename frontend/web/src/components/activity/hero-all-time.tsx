@@ -6,15 +6,13 @@
  *
  * Real (GET /v1/activity/overview, `all_time` bucket): matched volume, active
  * traders, placed / matched / unmatched orders. Also real: `totalBatches`
- * (latestBlock.height) and `liveMarkets` (/v1/markets/summary). Genesis age
- * is the one mocked field, wrapped in MockValue.
+ * (latestBlock.height) and `liveMarkets` (/v1/markets/summary).
  *
  * Caveat: backend `placed` counts per-batch participations, not distinct
  * orders — a real number, but it reads high next to matched/unmatched until
  * the backend counter is fixed.
  */
 
-import { MockValue } from "@/components/mock-value";
 import { formatCompactInt, formatInt } from "@/lib/format/nanos";
 import type { AllTimeStats } from "@/lib/activity/types";
 
@@ -39,15 +37,6 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span className="eyebrow">All-time matched volume</span>
-            <span className="text-annotation" style={{ fontSize: 11 }}>
-              since genesis ·{" "}
-              <MockValue
-                hint="genesis age — not tracked on backend"
-                variant="underline"
-              >
-                {allTime.genesisAge}
-              </MockValue>
-            </span>
           </div>
           <span
             style={{
@@ -106,7 +95,7 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
             sub="addresses placed ≥1 order"
           />
           <BigKv
-            label="Placed orders"
+            label="Orders processed"
             value={
               allTime.ordersPlaced == null
                 ? "—"
