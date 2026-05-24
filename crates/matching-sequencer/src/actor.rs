@@ -1492,15 +1492,39 @@ impl Actor for SequencerActor {
                 );
             }
             SequencerMsg::GetEquitySeries(account_id, reply) => {
-                let _ = reply.send(state.sequencer.equity_series(account_id));
+                // NOTE: in prod the in-memory caps are 0, so this fallback returns
+                // an empty series. A persistent store read error therefore surfaces
+                // as an empty (200 OK) response plus the warn! below — not an error.
+                let result = match &state.store {
+                    Some(store) => store.equity_series(account_id).unwrap_or_else(|e| {
+                        tracing::warn!(error = %e, account_id = account_id.0, "equity_series read failed; falling back to memory");
+                        state.sequencer.equity_series(account_id)
+                    }),
+                    None => state.sequencer.equity_series(account_id),
+                };
+                let _ = reply.send(result);
             }
             SequencerMsg::GetAccountEvents(account_id, limit, before, category, reply) => {
-                let _ = reply.send(state.sequencer.account_history(
-                    account_id,
-                    limit,
-                    before,
-                    category.as_deref(),
-                ));
+                let result = match &state.store {
+                    Some(store) => store
+                        .account_events(account_id, limit, before, category.clone())
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(error = %e, account_id = account_id.0, "account_events read failed; falling back to memory");
+                            state.sequencer.account_history(
+                                account_id,
+                                limit,
+                                before,
+                                category.as_deref(),
+                            )
+                        }),
+                    None => state.sequencer.account_history(
+                        account_id,
+                        limit,
+                        before,
+                        category.as_deref(),
+                    ),
+                };
+                let _ = reply.send(result);
             }
             SequencerMsg::SearchMarkets(query, reply) => {
                 let _ = reply.send(state.handle_search_markets(query));
