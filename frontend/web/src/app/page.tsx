@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { BinaryCard } from "@/components/binary-card";
 import { ClearingTicker } from "@/components/clearing-ticker";
 import { MultiCard } from "@/components/multi-card";
+import { PageHeader } from "@/components/page-header";
 import {
   MarketsFilterBar,
   parseSortKey,
@@ -20,26 +21,7 @@ import {
 import { useEventTradersMap } from "@/lib/markets/use-event-traders";
 import { selectPricesByMarketId, useStore } from "@/lib/store";
 import { BLOCK_INTERVAL_MS } from "@/lib/constants";
-
-type CardItem =
-  | {
-      kind: "multi";
-      name: string;
-      eventId: string;
-      markets: Market[];
-      volumeNanos: bigint;
-      sortKey: string;
-      createdMs: number;
-      primaryCategory: string | null;
-    }
-  | {
-      kind: "binary";
-      market: Market;
-      volumeNanos: bigint;
-      sortKey: string;
-      createdMs: number;
-      primaryCategory: string | null;
-    };
+import { selectIndexCards, type CardItem } from "@/lib/markets/select-index-cards";
 
 /** Cards (events) shown per page on the markets index. */
 const PAGE_SIZE = 15;
@@ -67,18 +49,16 @@ function MarketsPageInner() {
     return m;
   }, [bundle]);
 
-  const { query, sort, setSort, category } = useFilterParams();
+  const { query, sort, setSort, category, showClosed, setHideClosed } =
+    useFilterParams();
 
   const items = useMemo(() => {
     if (!bundle) return null;
     const all: CardItem[] = [];
     for (const g of bundle.groups) {
       if (g.markets.length >= 2) {
-        // Hide a multi-outcome event only when every outcome is closed; a
-        // partially-closed event stays (its closed rows render greyed).
-        if (!eventVisibleOnIndex(g.markets)) continue;
-        // Group-level category: use any market's categories (they share an
-        // event so the buckets are the same; pick the first market's).
+        // Multi-outcome event. Closed only when EVERY outcome is closed; a
+        // partially-closed event stays open (its closed rows render greyed).
         const first = g.markets[0]!;
         const primary = pickDisplayCategory(first.categories, first.category).primary;
         all.push({
@@ -90,10 +70,10 @@ function MarketsPageInner() {
           sortKey: g.name.toLowerCase(),
           createdMs: eventNewnessMs(g.markets),
           primaryCategory: primary,
+          closed: !eventVisibleOnIndex(g.markets),
         });
       } else {
         for (const m of g.markets) {
-          if (isClosed(m)) continue; // closed standalone binary -> hide
           all.push({
             kind: "binary",
             market: m,
@@ -101,12 +81,12 @@ function MarketsPageInner() {
             sortKey: m.name.toLowerCase(),
             createdMs: marketNewnessMs(m),
             primaryCategory: pickDisplayCategory(m.categories, m.category).primary,
+            closed: isClosed(m),
           });
         }
       }
     }
     for (const m of bundle.ungrouped) {
-      if (isClosed(m)) continue; // closed standalone binary -> hide
       all.push({
         kind: "binary",
         market: m,
@@ -114,6 +94,7 @@ function MarketsPageInner() {
         sortKey: m.name.toLowerCase(),
         createdMs: m.created_at_ms ?? 0,
         primaryCategory: pickDisplayCategory(m.categories, m.category).primary,
+        closed: isClosed(m),
       });
     }
     return all;
@@ -136,46 +117,21 @@ function MarketsPageInner() {
 
   const filtered = useMemo(() => {
     if (!items) return null;
-    const q = query.trim().toLowerCase();
-    let out = items;
-    if (q) {
-      out = out.filter((it) => it.sortKey.includes(q));
-    }
-    if (category) {
-      out = out.filter((it) => it.primaryCategory === category);
-    }
-    out = [...out];
-    if (sort === "new") {
-      out.sort((a, b) => b.createdMs - a.createdMs);
-    } else if (sort === "traders") {
-      // Event total traders desc; tie-break by volume desc. While the
-      // per-event queries resolve, missing events read as 0 and the list
-      // settles as data lands.
-      out.sort((a, b) => {
-        const ta = traderCountOf(a, eventTradersMap);
-        const tb = traderCountOf(b, eventTradersMap);
-        if (ta !== tb) return tb - ta;
-        if (a.volumeNanos === b.volumeNanos) return 0;
-        return a.volumeNanos < b.volumeNanos ? 1 : -1;
-      });
-    } else {
-      // volume desc; tie-break by size desc.
-      out.sort((a, b) => {
-        if (a.volumeNanos !== b.volumeNanos) {
-          return a.volumeNanos < b.volumeNanos ? 1 : -1;
-        }
-        return sizeOf(b) - sizeOf(a);
-      });
-    }
-    return out;
-  }, [items, query, sort, category, eventTradersMap]);
+    return selectIndexCards(items, {
+      query,
+      sort,
+      category,
+      showClosed,
+      eventTraders: eventTradersMap,
+    });
+  }, [items, query, sort, category, showClosed, eventTradersMap]);
 
   const [page, setPage] = useState(1);
 
   // Reset to the first page whenever the active filter set changes. Done
   // during render (not in an effect) per the React "adjust state on prop
   // change" pattern — avoids an extra commit.
-  const filterKey = `${query} ${sort} ${category ?? ""}`;
+  const filterKey = `${query} ${sort} ${category ?? ""} ${showClosed}`;
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
   if (filterKey !== prevFilterKey) {
     setPrevFilterKey(filterKey);
@@ -220,34 +176,21 @@ function MarketsPageInner() {
           gap: "var(--space-5)",
         }}
       >
-        <header
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--space-2)",
-          }}
-        >
-          <h1
-            style={{
-              fontFamily: "var(--font-display)",
-              fontWeight: 600,
-              fontSize: "var(--fs-56)",
-              lineHeight: "var(--lh-56)",
-              letterSpacing: "var(--track-tight)",
-              margin: 0,
-              color: "var(--fg-1)",
-            }}
-          >
-            All markets
-          </h1>
-          <p className="text-annotation">
-            {bundle == null
+        <PageHeader
+          title="All markets"
+          meta={
+            bundle == null
               ? "loading…"
-              : `${shownMarkets} markets · ${shownEvents} events · uniform clearing every ${BLOCK_INTERVAL_MS / 1000}s`}
-          </p>
-        </header>
+              : `${shownMarkets} markets · ${shownEvents} events · uniform clearing every ${BLOCK_INTERVAL_MS / 1000}s`
+          }
+        />
 
-        <MarketsFilterBar sort={sort} onSortChange={setSort} />
+        <MarketsFilterBar
+          sort={sort}
+          onSortChange={setSort}
+          hideClosed={!showClosed}
+          onHideClosedChange={setHideClosed}
+        />
 
         {isPending && <Placeholder>loading markets…</Placeholder>}
         {error && <Placeholder error>error: {String(error)}</Placeholder>}
@@ -309,9 +252,10 @@ function useFilterParams() {
   const query = searchParams.get("q") ?? "";
   const sort = parseSortKey(searchParams.get("sort"));
   const category = searchParams.get("category");
+  const showClosed = searchParams.get("closed") === "show";
 
   const update = useCallback(
-    (next: { q?: string; sort?: SortKey }) => {
+    (next: { q?: string; sort?: SortKey; showClosed?: boolean }) => {
       const params = new URLSearchParams(searchParams.toString());
       if (next.q !== undefined) {
         if (next.q) params.set("q", next.q);
@@ -320,6 +264,11 @@ function useFilterParams() {
       if (next.sort !== undefined) {
         if (next.sort !== "volume") params.set("sort", next.sort);
         else params.delete("sort");
+      }
+      if (next.showClosed !== undefined) {
+        // Default is hide-closed; only write the param when showing them.
+        if (next.showClosed) params.set("closed", "show");
+        else params.delete("closed");
       }
       const qs = params.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
@@ -331,12 +280,10 @@ function useFilterParams() {
     query,
     sort,
     category,
+    showClosed,
     setSort: (s: SortKey) => update({ sort: s }),
+    setHideClosed: (hide: boolean) => update({ showClosed: !hide }),
   };
-}
-
-function sizeOf(item: CardItem): number {
-  return item.kind === "multi" ? item.markets.length : 1;
 }
 
 function sumVolume(markets: Market[]): bigint {
@@ -345,15 +292,6 @@ function sumVolume(markets: Market[]): bigint {
     if (m.volume_nanos != null) total += BigInt(m.volume_nanos);
   }
   return total;
-}
-
-/** Trader count for sorting: per-market for binary, event union for multi. */
-function traderCountOf(
-  item: CardItem,
-  eventTraders: Map<string, number>
-): number {
-  if (item.kind === "binary") return item.market.trader_count ?? 0;
-  return eventTraders.get(item.eventId) ?? 0;
 }
 
 /**
