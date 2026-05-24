@@ -1420,10 +1420,10 @@ impl Store {
         let mut out = Vec::new();
         for entry in table.range::<&[u8]>(lo.as_slice()..=hi.as_slice())?.rev() {
             let (_k, v) = entry?;
-            let stored: crate::aggregates::StoredHistoryEvent =
-                rmp_serde::from_slice(v.value())?;
+            let stored: crate::aggregates::StoredHistoryEvent = rmp_serde::from_slice(v.value())?;
             if let Some((b, s)) = before {
-                if !((stored.block_height, stored.seq) < (b, s)) {
+                // Keep only events strictly before the cursor; skip the rest.
+                if (stored.block_height, stored.seq) >= (b, s) {
                     continue;
                 }
             }
@@ -2683,21 +2683,30 @@ mod tests {
         let aid = AccountId(7);
 
         let pts = vec![
-            EquityPoint { height: 1, timestamp_ms: 1_000, portfolio_value_nanos: 100, deposited_nanos: 100 },
-            EquityPoint { height: 2, timestamp_ms: 2_000, portfolio_value_nanos: 150, deposited_nanos: 100 },
+            EquityPoint {
+                height: 1,
+                timestamp_ms: 1_000,
+                portfolio_value_nanos: 100,
+                deposited_nanos: 100,
+            },
+            EquityPoint {
+                height: 2,
+                timestamp_ms: 2_000,
+                portfolio_value_nanos: 150,
+                deposited_nanos: 100,
+            },
         ];
         let mut e1 = HistoryEvent::new(aid, HistoryKind::Placed, 1, 1_000);
         e1.seq = 0;
         let mut e2 = HistoryEvent::new(aid, HistoryKind::Filled, 2, 2_000);
         e2.seq = 1;
-        let events: Vec<StoredHistoryEvent> =
-            vec![StoredHistoryEvent::from_event(&e1), StoredHistoryEvent::from_event(&e2)];
+        let events: Vec<StoredHistoryEvent> = vec![
+            StoredHistoryEvent::from_event(&e1),
+            StoredHistoryEvent::from_event(&e2),
+        ];
 
         store
-            .append_offblock_rows(
-                &pts.iter().map(|p| (aid, *p)).collect::<Vec<_>>(),
-                &events,
-            )
+            .append_offblock_rows(&pts.iter().map(|p| (aid, *p)).collect::<Vec<_>>(), &events)
             .unwrap();
 
         // Equity: oldest-first, all points.
@@ -2709,7 +2718,9 @@ mod tests {
         assert_eq!(all.len(), 2);
         assert_eq!(all[0].kind, HistoryKind::Filled); // newest first
 
-        let trades = store.account_events(aid, 10, None, Some("trades".into())).unwrap();
+        let trades = store
+            .account_events(aid, 10, None, Some("trades".into()))
+            .unwrap();
         assert_eq!(trades.len(), 2);
 
         // Cursor before (2, 1) excludes the Filled@(2,1) event.
@@ -2718,6 +2729,9 @@ mod tests {
 
         // Unknown account → empty.
         assert!(store.equity_series(AccountId(99)).unwrap().is_empty());
-        assert!(store.account_events(AccountId(99), 10, None, None).unwrap().is_empty());
+        assert!(store
+            .account_events(AccountId(99), 10, None, None)
+            .unwrap()
+            .is_empty());
     }
 }

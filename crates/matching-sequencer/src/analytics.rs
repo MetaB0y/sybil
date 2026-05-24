@@ -47,7 +47,9 @@ impl AnalyticsState {
             cost_basis_tracker: CostBasisTracker::new(),
             first_deposit_ms: HashMap::new(),
             equity_tracker: EquityTracker::with_retention(config.max_equity_points_per_account),
-            account_event_log: AccountEventLog::with_retention(config.max_history_events_per_account),
+            account_event_log: AccountEventLog::with_retention(
+                config.max_history_events_per_account,
+            ),
         }
     }
 
@@ -73,7 +75,9 @@ impl AnalyticsState {
             cost_basis_tracker: CostBasisTracker::restore(input.cost_basis_tracker),
             first_deposit_ms: input.first_deposit_ms,
             equity_tracker: EquityTracker::with_retention(config.max_equity_points_per_account),
-            account_event_log: AccountEventLog::with_retention(config.max_history_events_per_account),
+            account_event_log: AccountEventLog::with_retention(
+                config.max_history_events_per_account,
+            ),
         }
     }
 

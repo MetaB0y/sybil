@@ -118,7 +118,11 @@ pub struct ApiConfig {
     pub max_equity_points_per_account: usize,
     /// In-memory history events retained per account (serving fallback only).
     /// Set to 0 in prod.
-    #[arg(long, default_value = "0", env = "SYBIL_MAX_HISTORY_EVENTS_PER_ACCOUNT")]
+    #[arg(
+        long,
+        default_value = "0",
+        env = "SYBIL_MAX_HISTORY_EVENTS_PER_ACCOUNT"
+    )]
     pub max_history_events_per_account: usize,
 
     /// Sequencer actor queue depth that logs a warning.

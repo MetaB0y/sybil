@@ -152,8 +152,7 @@ pub async fn test_app_with_store_zero_caps(dev_mode: bool) -> (Router, Sequencer
         max_history_events_per_account: 0,
         ..SequencerConfig::default()
     };
-    let sequencer =
-        BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, config);
+    let sequencer = BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, config);
     let store = Store::open(&temp_store_path()).expect("test store opens");
     let handle = SequencerHandle::spawn_with_store(sequencer, Some(store));
     let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
