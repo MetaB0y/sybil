@@ -78,7 +78,9 @@ export function useBatchDetail(height: number | null): UseBatchDetailResult {
     const map = new Map<number, { title: string; category: string | null }>();
     for (const m of marketsQ.data ?? []) {
       map.set(m.market_id, {
-        title: m.event_title ?? m.name,
+        // Per-market title (e.g. "Will X win…"), not the shared event title —
+        // sibling markets in one event would otherwise read identically.
+        title: m.name ?? m.event_title ?? `Market #${m.market_id}`,
         category:
           (m.categories && m.categories[0]) ??
           m.category ??
@@ -102,8 +104,13 @@ export function useBatchDetail(height: number | null): UseBatchDetailResult {
     block,
     prev,
     rows,
-    isPending:
-      currentQ.isPending || prevQ.isPending || marketsQ.isPending,
+    // Only "pending" when we actually lack the data to render: no block yet, or
+    // the markets lookup hasn't loaded. Note React Query reports `isPending` for
+    // *disabled* queries too — `currentQ`/`prevQ` are disabled in the common
+    // case (block already in the store), so we must not gate on them, or the
+    // panel would show "loading…" forever. The prev block only affects the Δ
+    // column, so it never blocks the table.
+    isPending: !block || (marketsQ.isPending && !marketsQ.data),
   };
 }
 
