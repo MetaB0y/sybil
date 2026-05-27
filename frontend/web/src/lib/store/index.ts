@@ -41,6 +41,11 @@ export type StoreState = {
 
   /** Most recent committed block. */
   latestBlock: Block | null;
+  /** `performance.now()` captured when `latestBlock` was received — a monotonic
+   *  anchor for the batch countdown. Living in the store (not a component ref)
+   *  means the countdown survives remounts, so switching pages/outcomes no
+   *  longer restarts the timer mid-batch. Null until the first block arrives. */
+  latestBlockAnchorPerf: number | null;
   /** Ring buffer of recent blocks (newest first), capped. */
   recentBlocks: Block[];
   /** Current YES / NO clearing price per market_id, in nanos as bigint. */
@@ -79,6 +84,7 @@ export const useStore = create<StoreState>((set) => ({
   hydratedAtHeight: null,
 
   latestBlock: null,
+  latestBlockAnchorPerf: null,
   recentBlocks: [],
   pricesByMarketId: {},
 
@@ -127,6 +133,15 @@ export const useStore = create<StoreState>((set) => ({
         s.latestBlock == null || block.height >= s.latestBlock.height;
       const latestBlock = isNewest ? block : s.latestBlock;
 
+      // Re-anchor the batch countdown only on a strictly newer height. A
+      // replayed/duplicate block at the same height refreshes prices but must
+      // NOT restart the timer.
+      const isNewHeight =
+        s.latestBlock == null || block.height > s.latestBlock.height;
+      const latestBlockAnchorPerf = isNewHeight
+        ? performance.now()
+        : s.latestBlockAnchorPerf;
+
       let prices = s.pricesByMarketId;
       if (isNewest && block.clearing_prices_nanos) {
         prices = { ...prices };
@@ -140,6 +155,7 @@ export const useStore = create<StoreState>((set) => ({
 
       return {
         latestBlock,
+        latestBlockAnchorPerf,
         recentBlocks: recent,
         pricesByMarketId: prices,
       };
@@ -148,6 +164,7 @@ export const useStore = create<StoreState>((set) => ({
   resetForFreshSnapshot: () =>
     set({
       latestBlock: null,
+      latestBlockAnchorPerf: null,
       recentBlocks: [],
       pricesByMarketId: {},
       hydration: "idle",
@@ -161,6 +178,8 @@ export const selectConnection = (s: StoreState) => s.connection;
 export const selectHydration = (s: StoreState) => s.hydration;
 export const selectHydratedAtHeight = (s: StoreState) => s.hydratedAtHeight;
 export const selectLatestBlock = (s: StoreState) => s.latestBlock;
+export const selectLatestBlockAnchor = (s: StoreState) =>
+  s.latestBlockAnchorPerf;
 export const selectLatestHeight = (s: StoreState) =>
   s.latestBlock?.height ?? null;
 export const selectRecentBlocks = (s: StoreState) => s.recentBlocks;

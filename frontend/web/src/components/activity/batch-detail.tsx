@@ -6,12 +6,12 @@
  * grid with a market-row table on the left and a donut + composition KV on
  * the right.
  *
- * Data comes from `useBatchDetail(height)` — the per-market rows are
- * mocked-split (volume, welfare, placed/matched, imbalance) until the backend
- * denormalizes market_id + side onto FillResponse (OPEN_QUESTIONS #4–#6).
+ * Data comes from `useBatchDetail(height)`. The per-market rows are real —
+ * volume, welfare and placed/matched come from `BlockResponse.by_market`.
  */
 
-import { useState } from "react";
+import Link from "next/link";
+import { useMemo, useState } from "react";
 import { MockValue } from "@/components/mock-value";
 import { getCategoryColor } from "@/lib/categorize";
 import {
@@ -27,15 +27,37 @@ import { DonutOutcome } from "./donut-outcome";
 const ROWS_INITIAL = 6;
 const ROWS_STEP = 10;
 
-const GRID = "2fr 70px 60px 110px 100px 130px 1fr";
+const GRID = "2fr 70px 60px 110px 100px 130px";
 const GRID_GAP = 12;
+
+type SortKey = "clear" | "delta" | "volume" | "welfare" | "orders";
+type SortDir = "asc" | "desc";
 
 export function BatchDetail({ row }: { row: BatchRow }) {
   const { rows, isPending } = useBatchDetail(row.height);
   const [shown, setShown] = useState(ROWS_INITIAL);
+  // Default order: biggest matched volume first, then most matched, then most
+  // placed (see sortMarketRows tiebreakers).
+  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({
+    key: "volume",
+    dir: "desc",
+  });
 
-  const visible = rows.slice(0, shown);
-  const remaining = rows.length - visible.length;
+  const sortedRows = useMemo(
+    () => sortMarketRows(rows, sort.key, sort.dir),
+    [rows, sort],
+  );
+  const visible = sortedRows.slice(0, shown);
+  const remaining = sortedRows.length - visible.length;
+
+  // First click on a column sorts it descending; clicking the active column
+  // again flips direction.
+  const onSort = (key: SortKey) =>
+    setSort((cur) =>
+      cur.key === key
+        ? { key, dir: cur.dir === "desc" ? "asc" : "desc" }
+        : { key, dir: "desc" },
+    );
 
   return (
     <div
@@ -93,7 +115,7 @@ export function BatchDetail({ row }: { row: BatchRow }) {
               overflow: "hidden",
             }}
           >
-            <MarketTableHeader />
+            <MarketTableHeader sort={sort} onSort={onSort} />
             {isPending && (
               <div
                 style={{
@@ -106,7 +128,7 @@ export function BatchDetail({ row }: { row: BatchRow }) {
                 loading market rows…
               </div>
             )}
-            {!isPending && rows.length === 0 && (
+            {!isPending && sortedRows.length === 0 && (
               <div
                 style={{
                   padding: "16px 14px",
@@ -186,14 +208,13 @@ export function BatchDetail({ row }: { row: BatchRow }) {
 
 // ── Market row inside the detail table ────────────────────────────────────
 
-function MarketTableHeader() {
-  const cell: React.CSSProperties = {
-    textAlign: "right",
-  };
-  const mockedHeader: React.CSSProperties = {
-    ...cell,
-    color: "var(--warn)",
-  };
+function MarketTableHeader({
+  sort,
+  onSort,
+}: {
+  sort: { key: SortKey; dir: SortDir };
+  onSort: (key: SortKey) => void;
+}) {
   return (
     <div
       style={{
@@ -212,34 +233,105 @@ function MarketTableHeader() {
       }}
     >
       <span>Market</span>
-      <span style={cell}>Clear</span>
-      <span style={cell}>Δ</span>
-      <span
-        style={mockedHeader}
-        title="Per-market matched volume is mocked — uniform split of block total (OPEN_QUESTIONS #5)"
-      >
-        Matched vol*
-      </span>
-      <span
-        style={mockedHeader}
-        title="Per-market welfare is mocked — uniform split (OPEN_QUESTIONS #4)"
-      >
-        Welfare*
-      </span>
-      <span
-        style={mockedHeader}
-        title="Per-market placed/matched is mocked (OPEN_QUESTIONS #5)"
-      >
-        Placed / Matched*
-      </span>
-      <span
-        style={mockedHeader}
-        title="Imbalance is mocked — FillResponse has no side (OPEN_QUESTIONS #6)"
-      >
-        Imbalance*
-      </span>
+      <SortTh label="Clear" col="clear" sort={sort} onSort={onSort} />
+      <SortTh label="Δ" col="delta" sort={sort} onSort={onSort} />
+      <SortTh label="Matched vol" col="volume" sort={sort} onSort={onSort} />
+      <SortTh label="Welfare" col="welfare" sort={sort} onSort={onSort} />
+      <SortTh
+        label="Placed / Matched"
+        col="orders"
+        sort={sort}
+        onSort={onSort}
+      />
     </div>
   );
+}
+
+/** A right-aligned, clickable column header with an active-sort arrow. */
+function SortTh({
+  label,
+  col,
+  sort,
+  onSort,
+}: {
+  label: string;
+  col: SortKey;
+  sort: { key: SortKey; dir: SortDir };
+  onSort: (key: SortKey) => void;
+}) {
+  const active = sort.key === col;
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(col)}
+      title={`Sort by ${label}`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "flex-end",
+        gap: 3,
+        width: "100%",
+        background: "transparent",
+        border: 0,
+        padding: 0,
+        cursor: "pointer",
+        font: "inherit",
+        textTransform: "inherit",
+        letterSpacing: "inherit",
+        color: active ? "var(--fg-1)" : "var(--fg-3)",
+      }}
+    >
+      {label}
+      <span aria-hidden style={{ fontSize: 8, opacity: active ? 1 : 0.3 }}>
+        {active ? (sort.dir === "desc" ? "▼" : "▲") : "↕"}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * Sort the market rows by the active column/direction. Missing Δ values always
+ * sink to the bottom. Equal-key rows fall back to volume → matched → placed
+ * (all descending), which is also the default ordering when sorting by volume.
+ */
+function sortMarketRows(
+  rows: BatchMarketRow[],
+  key: SortKey,
+  dir: SortDir,
+): BatchMarketRow[] {
+  const sign = dir === "asc" ? 1 : -1;
+  const cmpBig = (x: bigint, y: bigint) => (x < y ? -1 : x > y ? 1 : 0);
+  const primary = (a: BatchMarketRow, b: BatchMarketRow): number => {
+    switch (key) {
+      case "clear":
+        return cmpBig(a.clearPriceNanos, b.clearPriceNanos) * sign;
+      case "welfare":
+        return cmpBig(a.welfareNanos, b.welfareNanos) * sign;
+      case "volume":
+        return cmpBig(a.matchedVolumeNanos, b.matchedVolumeNanos) * sign;
+      case "orders": {
+        const d = a.ordersMatched - b.ordersMatched;
+        return (d !== 0 ? d : a.ordersPlaced - b.ordersPlaced) * sign;
+      }
+      case "delta": {
+        if (a.deltaNanos == null && b.deltaNanos == null) return 0;
+        if (a.deltaNanos == null) return 1; // nulls last, direction-independent
+        if (b.deltaNanos == null) return -1;
+        return cmpBig(a.deltaNanos, b.deltaNanos) * sign;
+      }
+      default:
+        return 0;
+    }
+  };
+  return [...rows].sort((a, b) => {
+    const p = primary(a, b);
+    if (p !== 0) return p;
+    const v = cmpBig(a.matchedVolumeNanos, b.matchedVolumeNanos);
+    if (v !== 0) return -v;
+    if (a.ordersMatched !== b.ordersMatched) return b.ordersMatched - a.ordersMatched;
+    if (a.ordersPlaced !== b.ordersPlaced) return b.ordersPlaced - a.ordersPlaced;
+    return a.marketId - b.marketId;
+  });
 }
 
 function MarketRow({ row }: { row: BatchMarketRow }) {
@@ -268,18 +360,21 @@ function MarketRow({ row }: { row: BatchMarketRow }) {
             flexShrink: 0,
           }}
         />
-        <span
+        <Link
+          href={`/m/${row.marketId}`}
+          className="market-link"
+          title={row.title}
           style={{
             fontFamily: "var(--font-sans)",
             fontSize: 12,
-            color: "var(--fg-2)",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
+            minWidth: 0,
           }}
         >
           {row.title}
-        </span>
+        </Link>
       </div>
 
       {/* Clear price (real) */}
@@ -305,73 +400,24 @@ function MarketRow({ row }: { row: BatchMarketRow }) {
           : `${deltaCents >= 0 ? "+" : ""}${deltaCents.toFixed(1)}`}
       </span>
 
-      {/* Matched vol per market (mocked split — column header carries the marker) */}
-      <MockValue
-        hint="per-market volume — uniform split of block total (OPEN_QUESTIONS #5)"
-        variant="tint"
-        style={cellNumber("var(--fg-2)", 12)}
-      >
+      {/* Matched volume — real, per-market from by_market */}
+      <span style={cellNumber("var(--fg-2)", 12)}>
         {formatCompactDollars(row.matchedVolumeNanos)}
-      </MockValue>
+      </span>
 
-      {/* Welfare per market (mocked split) */}
-      <MockValue
-        hint="per-market welfare — uniform split (OPEN_QUESTIONS #4)"
-        variant="tint"
-        style={cellNumber("var(--yes)", 12)}
-      >
+      {/* Welfare — real, per-market from by_market */}
+      <span style={cellNumber("var(--yes)", 12)}>
         {row.welfareNanos >= 0n ? "+" : ""}
         {formatCompactDollars(row.welfareNanos)}
-      </MockValue>
+      </span>
 
-      {/* Placed / Matched (mocked) */}
-      <MockValue
-        hint="per-market placed/matched — uniform split (OPEN_QUESTIONS #5)"
-        variant="tint"
-        style={{ ...cellNumber("var(--fg-2)", 11), textAlign: "right" }}
-      >
+      {/* Placed / Matched — real, per-market from by_market */}
+      <span style={cellNumber("var(--fg-2)", 11)}>
         <span style={{ color: "var(--fg-2)" }}>{row.ordersPlaced}</span>
         <span style={{ color: "var(--fg-4)" }}> / </span>
         <span style={{ color: "var(--yes)" }}>{row.ordersMatched}</span>
-      </MockValue>
-
-      {/* Imbalance (mocked deterministic) */}
-      <ImbalanceCell bps={row.imbalanceBps} />
+      </span>
     </div>
-  );
-}
-
-function ImbalanceCell({ bps }: { bps: number }) {
-  const pct = Math.abs(bps) / 100;
-  const isBuy = bps >= 0;
-  const color = isBuy ? "var(--yes)" : "var(--no)";
-  return (
-    <MockValue
-      hint="imbalance — mocked; backend doesn't carry per-fill side (OPEN_QUESTIONS #6)"
-      variant="tint"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        justifyContent: "flex-end",
-        fontVariantNumeric: "tabular-nums",
-      }}
-    >
-      <span
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 9.5,
-          color,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-        }}
-      >
-        {isBuy ? "buy" : "sell"}
-      </span>
-      <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color }}>
-        {pct.toFixed(1)}%
-      </span>
-    </MockValue>
   );
 }
 

@@ -225,6 +225,17 @@ h4, .h-card {
   color: var(--fg-3);
 }
 
+/* Inline market-name link — readable by default, accent + underline on hover */
+.market-link {
+  color: var(--fg-2);
+  text-decoration: none;
+}
+.market-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* Body */
 p, .text-body {
   font-family: var(--font-sans);
@@ -323,4 +334,12 @@ hr {
   margin-right: var(--space-2);
   vertical-align: 1px;
   animation: sybil-pulse 1.6s ease-in-out infinite;
+}
+
+/* Utility: continuous right-to-left marquee for the recent-trades ticker.
+   The track renders its content twice; -50% scrolls exactly one copy so the
+   loop is seamless regardless of content width. */
+@keyframes sybil-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
 }

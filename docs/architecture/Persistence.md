@@ -2,7 +2,7 @@
 tags: [infrastructure, storage]
 layer: sequencer
 status: current
-last_verified: 2026-05-02
+last_verified: 2026-05-27
 ---
 
 # Persistence
@@ -94,6 +94,8 @@ The order state tables protect the API's 200 OK contract: anything acknowledged 
 Persisted today:
 
 - **Fill history**: per-account fill records in `fill_history`, keyed by `(account_id, block_height, order_id)`. See [[Fill History Persistence]].
+- **Account event history**: per-account portfolio history rows in `history_events`, keyed by `(account_id, block_height, seq)`. The sequencer persists the global `history_event_next_seq` cursor so restart cannot overwrite rows at the same height.
+- **Account equity series**: per-account equity points in `equity_points`, keyed by `(account_id, height)`.
 
 Still not persisted:
 
@@ -105,10 +107,12 @@ These are reconstructable or refreshable, but expensive or inconvenient to rebui
 
 Runtime serving caches are explicitly bounded even when the durable store keeps
 more data. The sequencer config controls the recent block ring, price-history
-points retained per market, and fill records retained per account in actor
-memory. Persisted fill-history rows are not pruned yet; long-lived deployments
-should either add a store retention policy or move fill-history API reads to
-paginated database scans before exposing unbounded historical query windows.
+points retained per market, fill records retained per account, and the
+in-memory fallback windows for account events/equity. Production deployments
+serve account events/equity from redb and set those fallback windows to zero.
+Persisted fill-history, event-history, and equity rows are not pruned yet;
+long-lived deployments should add store retention policies or paginated indexed
+scans before exposing unbounded historical query windows.
 
 ## Recovery Order
 

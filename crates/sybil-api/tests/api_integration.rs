@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 
 use common::{
     get, post_json, post_json_with_headers, put_json, test_app, test_app_with_config,
-    test_app_with_store,
+    test_app_with_store, test_app_with_store_zero_caps,
 };
 use matching_engine::MarketSet;
 use matching_sequencer::crypto::{canonical_cancel_bytes, canonical_order_bytes};
@@ -1435,4 +1435,88 @@ async fn account_history_shows_placed_then_cancelled() {
     let pc = types.iter().position(|t| *t == "cancelled").unwrap();
     let pp = types.iter().position(|t| *t == "placed").unwrap();
     assert!(pc < pp, "expected cancelled newest-first: {types:?}");
+}
+
+#[tokio::test]
+async fn account_equity_series_persists_to_store() {
+    // Zero in-memory caps (the prod config) so the rings stay empty and the
+    // data can only come back from redb.
+    let (app, handle) = test_app_with_store_zero_caps(true).await;
+
+    let (_, body) = post_json(app.clone(), "/v1/markets", json!({ "name": "EqDb?" })).await;
+    let market_id = parse_json(&body)["market_id"].as_u64().unwrap();
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 10_000_000_000u64 }),
+    )
+    .await;
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 10_000_000_000u64 }),
+    )
+    .await;
+    let account_b = parse_json(&body)["account_id"].as_u64().unwrap();
+
+    // Two crossing orders so fills are generated.
+    post_json(app.clone(), "/v1/orders", json!({
+        "account_id": account_id,
+        "orders": [{ "type": "BuyYes", "market_id": market_id, "limit_price_nanos": 600_000_000u64, "quantity": 10 }]
+    })).await;
+    post_json(app.clone(), "/v1/orders", json!({
+        "account_id": account_b,
+        "orders": [{ "type": "BuyNo", "market_id": market_id, "limit_price_nanos": 500_000_000u64, "quantity": 10 }]
+    })).await;
+
+    // Produce a block — this persists equity to the redb store.
+    let block = handle.produce_block().await.unwrap();
+    assert!(
+        !block.canonical.fills.is_empty(),
+        "expected fills from crossing orders"
+    );
+
+    let (status, body) = get(app, &format!("/v1/accounts/{account_id}/equity?range=all")).await;
+    assert_eq!(status, StatusCode::OK);
+    let v = parse_json(&body);
+    assert_eq!(v["account_id"].as_u64().unwrap(), account_id);
+    assert!(
+        !v["points"].as_array().unwrap().is_empty(),
+        "equity must come back from redb: {v}"
+    );
+}
+
+#[tokio::test]
+async fn account_history_persists_to_store() {
+    // Zero in-memory caps (the prod config) so events can only come from redb.
+    let (app, handle) = test_app_with_store_zero_caps(true).await;
+
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 100_000_000_000u64 }),
+    )
+    .await;
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+    let (_, body) = post_json(app.clone(), "/v1/markets", json!({ "name": "HistDb" })).await;
+    let market_id = parse_json(&body)["market_id"].as_u64().unwrap();
+
+    post_json(app.clone(), "/v1/orders", json!({
+        "account_id": account_id,
+        "orders": [{ "type": "BuyYes", "market_id": market_id, "limit_price_nanos": 500_000_000u64, "quantity": 5 }]
+    })).await;
+
+    // Produce a block — this persists history events to the redb store.
+    handle.produce_block().await.unwrap();
+
+    let (status, body) = get(app, &format!("/v1/accounts/{account_id}/events?limit=20")).await;
+    assert_eq!(status, StatusCode::OK);
+    let v = parse_json(&body);
+    let arr = v.as_array().unwrap();
+    assert!(!arr.is_empty(), "history must come back from redb: {v}");
+    assert!(
+        arr.iter().any(|e| e["type"] == "placed"),
+        "expected a 'placed' event from redb: {v}"
+    );
 }

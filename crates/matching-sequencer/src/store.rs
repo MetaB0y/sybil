@@ -140,6 +140,14 @@ const ADMIT_LOG: TableDefinition<u64, &[u8]> = TableDefinition::new("admit_log")
 /// account and ordered by block for efficient restoration and future scans.
 const FILL_HISTORY: TableDefinition<&[u8], &[u8]> = TableDefinition::new("fill_history");
 
+/// Per-account equity series. Key = account_id(8B BE) ++ height(8B BE); one
+/// point per (account, block). Value = rmp-serde EquityPoint. Off-block.
+const EQUITY_POINTS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("equity_points");
+
+/// Per-account history feed. Key = account_id(8B BE) ++ block_height(8B BE) ++
+/// seq(8B BE). Value = rmp-serde StoredHistoryEvent. Off-block.
+const HISTORY_EVENTS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("history_events");
+
 /// L1 bridge sidecar state: consumed deposit cursor/root and withdrawal leaves.
 const BRIDGE_STATE: TableDefinition<&str, &[u8]> = TableDefinition::new("bridge_state");
 const KEY_BRIDGE_STATE: &str = "state";
@@ -212,6 +220,7 @@ const KEY_NEXT_MARKET_ID: &str = "next_market_id";
 const KEY_NEXT_ORDER_ID: &str = "next_order_id";
 const KEY_ACCOUNT_STATE_HEIGHT: &str = "account_state_height";
 const KEY_ACCOUNT_STATE_SLOT: &str = "account_state_slot";
+const KEY_HISTORY_EVENT_NEXT_SEQ: &str = "history_event_next_seq";
 
 const STORE_LAYOUT_VERSION: u64 = 1;
 
@@ -221,6 +230,26 @@ fn fill_history_key(account_id: AccountId, record: &AccountFillRecord) -> [u8; 2
     key[8..16].copy_from_slice(&record.block_height.to_be_bytes());
     key[16..24].copy_from_slice(&record.order_id.to_be_bytes());
     key
+}
+
+fn equity_key(account_id: AccountId, height: u64) -> [u8; 16] {
+    let mut k = [0u8; 16];
+    k[..8].copy_from_slice(&account_id.0.to_be_bytes());
+    k[8..].copy_from_slice(&height.to_be_bytes());
+    k
+}
+
+fn history_event_key(account_id: AccountId, block_height: u64, seq: u64) -> [u8; 24] {
+    let mut k = [0u8; 24];
+    k[..8].copy_from_slice(&account_id.0.to_be_bytes());
+    k[8..16].copy_from_slice(&block_height.to_be_bytes());
+    k[16..].copy_from_slice(&seq.to_be_bytes());
+    k
+}
+
+fn seq_from_history_event_key(key: &[u8]) -> Option<u64> {
+    let seq_bytes: [u8; 8] = key.get(16..24)?.try_into().ok()?;
+    Some(u64::from_be_bytes(seq_bytes))
 }
 
 fn account_id_from_fill_history_key(key: &[u8]) -> Option<AccountId> {
@@ -294,6 +323,7 @@ pub struct AnalyticsRestoredState {
     pub first_deposit_ms: HashMap<AccountId, u64>,
     pub fill_total_counts: HashMap<AccountId, u64>,
     pub cost_basis_tracker: CostBasisTrackerSnapshot,
+    pub history_event_next_seq: u64,
 }
 
 /// State restored from the store on startup.
@@ -342,6 +372,9 @@ pub struct AnalyticsSnapshot<'a> {
     pub first_deposit_ms: HashMap<AccountId, u64>,
     pub fill_total_counts: HashMap<AccountId, u64>,
     pub cost_basis_tracker: CostBasisTrackerSnapshot,
+    pub history_event_next_seq: u64,
+    pub equity_points_delta: Vec<(AccountId, crate::aggregates::EquityPoint)>,
+    pub history_events_delta: Vec<crate::aggregates::StoredHistoryEvent>,
 }
 
 /// Borrowed view of sequencer state needed to persist one block.
@@ -386,6 +419,8 @@ impl Store {
         txn.open_table(PENDING_BUNDLES)?;
         txn.open_table(ADMIT_LOG)?;
         txn.open_table(FILL_HISTORY)?;
+        txn.open_table(EQUITY_POINTS)?;
+        txn.open_table(HISTORY_EVENTS)?;
         txn.open_table(DATA_FEEDS)?;
         txn.open_table(BRIDGE_STATE)?;
         txn.open_table(PENDING_L1_DEPOSITS)?;
@@ -582,6 +617,33 @@ impl Store {
                 let bytes = rmp_serde::to_vec(record)?;
                 table.insert(key.as_slice(), bytes.as_slice())?;
             }
+        }
+
+        // Equity points delta — append new per-account equity rows from this block.
+        {
+            let mut eq = txn.open_table(EQUITY_POINTS)?;
+            for (aid, p) in &snapshot.analytics.equity_points_delta {
+                let key = equity_key(*aid, p.height);
+                let bytes = rmp_serde::to_vec(p)?;
+                eq.insert(key.as_slice(), bytes.as_slice())?;
+            }
+        }
+
+        // History events delta — append new per-account history events from this block.
+        {
+            let mut hist = txn.open_table(HISTORY_EVENTS)?;
+            for ev in &snapshot.analytics.history_events_delta {
+                let key = history_event_key(AccountId(ev.account_id), ev.block_height, ev.seq);
+                let bytes = rmp_serde::to_vec(ev)?;
+                hist.insert(key.as_slice(), bytes.as_slice())?;
+            }
+        }
+        {
+            let mut counters = txn.open_table(COUNTERS)?;
+            counters.insert(
+                KEY_HISTORY_EVENT_NEXT_SEQ,
+                snapshot.analytics.history_event_next_seq,
+            )?;
         }
 
         // Data feeds
@@ -1111,6 +1173,29 @@ impl Store {
             }
         };
 
+        let history_event_next_seq = {
+            let counters = txn.open_table(COUNTERS)?;
+            counters
+                .get(KEY_HISTORY_EVENT_NEXT_SEQ)?
+                .map(|value| value.value())
+        };
+        let history_event_next_seq = match history_event_next_seq {
+            Some(seq) => seq,
+            None => {
+                let table = txn.open_table(HISTORY_EVENTS)?;
+                let mut max_seq = None;
+                for entry in table.iter()? {
+                    let (key, _) = entry?;
+                    let Some(seq) = seq_from_history_event_key(key.value()) else {
+                        warn!("invalid history event key in store, skipping for next_seq recovery");
+                        continue;
+                    };
+                    max_seq = Some(max_seq.map_or(seq, |current: u64| current.max(seq)));
+                }
+                max_seq.map_or(0, |seq| seq.saturating_add(1))
+            }
+        };
+
         info!(
             height = recovery_metadata.height,
             accounts = num_accounts,
@@ -1154,6 +1239,7 @@ impl Store {
                 first_deposit_ms,
                 fill_total_counts,
                 cost_basis_tracker,
+                history_event_next_seq,
             },
             bridge_state,
             pending_l1_deposits,
@@ -1311,6 +1397,86 @@ impl Store {
         request: &BridgeWithdrawalRequest,
     ) -> Result<(), StoreError> {
         append_msgpack_row(&self.db, PENDING_BRIDGE_WITHDRAWALS, request)
+    }
+
+    /// Append this block's equity points and history events as individual rows.
+    /// Append-only; standalone version used by tests and as a fallback.
+    pub fn append_offblock_rows(
+        &self,
+        equity: &[(AccountId, crate::aggregates::EquityPoint)],
+        history: &[crate::aggregates::StoredHistoryEvent],
+    ) -> Result<(), StoreError> {
+        let txn = self.db.begin_write()?;
+        {
+            let mut t = txn.open_table(EQUITY_POINTS)?;
+            for (aid, p) in equity {
+                let key = equity_key(*aid, p.height);
+                let bytes = rmp_serde::to_vec(p)?;
+                t.insert(key.as_slice(), bytes.as_slice())?;
+            }
+            let mut h = txn.open_table(HISTORY_EVENTS)?;
+            for ev in history {
+                let key = history_event_key(AccountId(ev.account_id), ev.block_height, ev.seq);
+                let bytes = rmp_serde::to_vec(ev)?;
+                h.insert(key.as_slice(), bytes.as_slice())?;
+            }
+        }
+        txn.commit()?;
+        Ok(())
+    }
+
+    /// All equity points for an account, oldest-first (matches `EquityTracker::series`).
+    pub fn equity_series(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Vec<crate::aggregates::EquityPoint>, StoreError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(EQUITY_POINTS)?;
+        let lo = equity_key(account_id, 0);
+        let hi = equity_key(account_id, u64::MAX);
+        let mut out = Vec::new();
+        for entry in table.range::<&[u8]>(lo.as_slice()..=hi.as_slice())? {
+            let (_k, v) = entry?;
+            out.push(rmp_serde::from_slice(v.value())?);
+        }
+        Ok(out)
+    }
+
+    /// Newest-first page of an account's history, replicating
+    /// `AccountEventLog::query` (cursor `before = (block_height, seq)`,
+    /// `category` filter via `HistoryKind::category`).
+    pub fn account_events(
+        &self,
+        account_id: AccountId,
+        limit: usize,
+        before: Option<(u64, u64)>,
+        category: Option<String>,
+    ) -> Result<Vec<crate::aggregates::HistoryEvent>, StoreError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(HISTORY_EVENTS)?;
+        let lo = history_event_key(account_id, 0, 0);
+        let hi = history_event_key(account_id, u64::MAX, u64::MAX);
+        let mut out = Vec::new();
+        for entry in table.range::<&[u8]>(lo.as_slice()..=hi.as_slice())?.rev() {
+            let (_k, v) = entry?;
+            let stored: crate::aggregates::StoredHistoryEvent = rmp_serde::from_slice(v.value())?;
+            if let Some((b, s)) = before {
+                // Keep only events strictly before the cursor; skip the rest.
+                if (stored.block_height, stored.seq) >= (b, s) {
+                    continue;
+                }
+            }
+            if let Some(ref c) = category {
+                if stored.kind.category() != c.as_str() {
+                    continue;
+                }
+            }
+            out.push(stored.into_event());
+            if out.len() >= limit {
+                break;
+            }
+        }
+        Ok(out)
     }
 }
 
@@ -1671,6 +1837,9 @@ mod tests {
                     first_deposit_ms: HashMap::new(),
                     fill_total_counts: HashMap::new(),
                     cost_basis_tracker: Default::default(),
+                    history_event_next_seq: 0,
+                    equity_points_delta: Vec::new(),
+                    history_events_delta: Vec::new(),
                 },
                 bridge_state: &self.bridge_state,
                 resting_orders,
@@ -1705,6 +1874,47 @@ mod tests {
                     first_deposit_ms: HashMap::new(),
                     fill_total_counts: HashMap::new(),
                     cost_basis_tracker: Default::default(),
+                    history_event_next_seq: 0,
+                    equity_points_delta: Vec::new(),
+                    history_events_delta: Vec::new(),
+                },
+                bridge_state: &self.bridge_state,
+                resting_orders: Vec::new(),
+            }
+        }
+
+        fn snapshot_with_history_events<'a>(
+            &'a self,
+            accounts: &'a AccountStore,
+            markets: &'a MarketSet,
+            lifecycle: &'a MarketLifecycle,
+            header: &'a BlockHeader,
+            history_event_next_seq: u64,
+            history_events_delta: Vec<crate::aggregates::StoredHistoryEvent>,
+        ) -> SequencerSnapshot<'a> {
+            SequencerSnapshot {
+                accounts,
+                markets,
+                market_groups: &[],
+                lifecycle,
+                header,
+                next_order_id: 1,
+                pubkey_registry: &self.empty_pk,
+                analytics: AnalyticsSnapshot {
+                    last_clearing_prices: &self.empty_prices,
+                    market_volumes: &self.empty_volumes,
+                    account_fills: Vec::new(),
+                    trader_tracker: Default::default(),
+                    price_tracker_volume: Default::default(),
+                    price_tracker_clearing_history: Default::default(),
+                    liquidity_tracker: Default::default(),
+                    order_stats_tracker: Default::default(),
+                    first_deposit_ms: HashMap::new(),
+                    fill_total_counts: HashMap::new(),
+                    cost_basis_tracker: Default::default(),
+                    history_event_next_seq,
+                    equity_points_delta: Vec::new(),
+                    history_events_delta,
                 },
                 bridge_state: &self.bridge_state,
                 resting_orders: Vec::new(),
@@ -1805,6 +2015,67 @@ mod tests {
         let restored = store.load_state().await.unwrap().unwrap();
         assert_eq!(restored.height, 2);
         assert_eq!(restored.accounts.get(account_id).unwrap().balance, 200);
+    }
+
+    #[tokio::test]
+    async fn test_store_restores_history_event_next_seq() {
+        use crate::aggregates::{HistoryEvent, HistoryKind, StoredHistoryEvent};
+
+        let path = temp_db_path("store-history-next-seq");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+        let lifecycle = MarketLifecycle::new(oracle);
+        let markets = MarketSet::new();
+        let env = TestEnv::new();
+
+        let mut accounts = AccountStore::new();
+        let account_id = accounts.create_account(100);
+        let header = sample_header(1);
+        let mut placed = HistoryEvent::new(
+            account_id,
+            HistoryKind::Placed,
+            header.height,
+            header.timestamp_ms,
+        );
+        placed.seq = 0;
+        let mut filled = HistoryEvent::new(
+            account_id,
+            HistoryKind::Filled,
+            header.height,
+            header.timestamp_ms,
+        );
+        filled.seq = 1;
+        let history_events_delta = vec![
+            StoredHistoryEvent::from_event(&placed),
+            StoredHistoryEvent::from_event(&filled),
+        ];
+
+        store
+            .save_block(env.snapshot_with_history_events(
+                &accounts,
+                &markets,
+                &lifecycle,
+                &header,
+                2,
+                history_events_delta,
+            ))
+            .await
+            .unwrap();
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        assert_eq!(restored.analytics.history_event_next_seq, 2);
+
+        // Backward compatibility for stores created before the explicit counter:
+        // derive the next cursor from existing history-event keys.
+        let txn = store.db.begin_write().unwrap();
+        {
+            let mut counters = txn.open_table(COUNTERS).unwrap();
+            counters.remove(KEY_HISTORY_EVENT_NEXT_SEQ).unwrap();
+        }
+        txn.commit().unwrap();
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        assert_eq!(restored.analytics.history_event_next_seq, 2);
     }
 
     #[tokio::test]
@@ -2540,5 +2811,67 @@ mod tests {
 
         let restored_after = store.load_state().await.unwrap().unwrap();
         assert!(restored_after.pending_bundles.is_empty());
+    }
+
+    #[test]
+    fn equity_and_history_rows_roundtrip() {
+        use crate::account::AccountId;
+        use crate::aggregates::{EquityPoint, HistoryEvent, HistoryKind, StoredHistoryEvent};
+
+        let path = temp_db_path("equity-history-roundtrip");
+        let store = Store::open(&path).unwrap();
+        let aid = AccountId(7);
+
+        let pts = vec![
+            EquityPoint {
+                height: 1,
+                timestamp_ms: 1_000,
+                portfolio_value_nanos: 100,
+                deposited_nanos: 100,
+            },
+            EquityPoint {
+                height: 2,
+                timestamp_ms: 2_000,
+                portfolio_value_nanos: 150,
+                deposited_nanos: 100,
+            },
+        ];
+        let mut e1 = HistoryEvent::new(aid, HistoryKind::Placed, 1, 1_000);
+        e1.seq = 0;
+        let mut e2 = HistoryEvent::new(aid, HistoryKind::Filled, 2, 2_000);
+        e2.seq = 1;
+        let events: Vec<StoredHistoryEvent> = vec![
+            StoredHistoryEvent::from_event(&e1),
+            StoredHistoryEvent::from_event(&e2),
+        ];
+
+        store
+            .append_offblock_rows(&pts.iter().map(|p| (aid, *p)).collect::<Vec<_>>(), &events)
+            .unwrap();
+
+        // Equity: oldest-first, all points.
+        let got = store.equity_series(aid).unwrap();
+        assert_eq!(got, pts);
+
+        // History: newest-first, filtered + paged like AccountEventLog::query.
+        let all = store.account_events(aid, 10, None, None).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].kind, HistoryKind::Filled); // newest first
+
+        let trades = store
+            .account_events(aid, 10, None, Some("trades".into()))
+            .unwrap();
+        assert_eq!(trades.len(), 2);
+
+        // Cursor before (2, 1) excludes the Filled@(2,1) event.
+        let page = store.account_events(aid, 10, Some((2, 1)), None).unwrap();
+        assert!(page.iter().all(|e| !(e.block_height == 2 && e.seq == 1)));
+
+        // Unknown account → empty.
+        assert!(store.equity_series(AccountId(99)).unwrap().is_empty());
+        assert!(store
+            .account_events(AccountId(99), 10, None, None)
+            .unwrap()
+            .is_empty());
     }
 }

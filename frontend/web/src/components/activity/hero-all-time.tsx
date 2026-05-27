@@ -4,18 +4,17 @@
  * Editorial hero for the Activity page: giant matched-volume number on the
  * left, 4-cell stat grid on the right.
  *
- * Most fields are mocked (see OPEN_QUESTIONS #3) — the live ones are
- * `totalBatches` (from latestBlock.height) and `liveMarkets` (from
- * /v1/markets/summary). MockValue renders an inline `MOCK` pill on the
- * value itself so it's recognizable at any font size.
+ * Real (GET /v1/activity/overview, `all_time` bucket): matched volume, active
+ * traders, placed / matched / unmatched orders. Also real: `totalBatches`
+ * (latestBlock.height) and `liveMarkets` (/v1/markets/summary).
+ *
+ * Caveat: backend `placed` counts per-batch participations, not distinct
+ * orders — a real number, but it reads high next to matched/unmatched until
+ * the backend counter is fixed.
  */
 
-import { MockValue } from "@/components/mock-value";
 import { formatCompactInt, formatInt } from "@/lib/format/nanos";
 import type { AllTimeStats } from "@/lib/activity/types";
-
-const ALL_TIME_HINT =
-  "all-time rollup — needs /v1/activity/overview (OPEN_QUESTIONS #3)";
 
 export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
   return (
@@ -38,31 +37,20 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span className="eyebrow">All-time matched volume</span>
-            <span className="text-annotation" style={{ fontSize: 11 }}>
-              since genesis ·{" "}
-              <MockValue
-                hint="genesis age — not tracked on backend"
-                variant="underline"
-              >
-                {allTime.genesisAge}
-              </MockValue>
-            </span>
           </div>
-          <MockValue hint={ALL_TIME_HINT} variant="pill">
-            <span
-              style={{
-                fontFamily: "var(--font-sans)",
-                fontWeight: 600,
-                fontSize: "clamp(48px, 5.4vw, 80px)",
-                lineHeight: 0.95,
-                letterSpacing: "-0.02em",
-                color: "var(--fg-1)",
-                fontVariantNumeric: "tabular-nums",
-              }}
-            >
-              {allTime.matchedVolume}
-            </span>
-          </MockValue>
+          <span
+            style={{
+              fontFamily: "var(--font-sans)",
+              fontWeight: 600,
+              fontSize: "clamp(48px, 5.4vw, 80px)",
+              lineHeight: 0.95,
+              letterSpacing: "-0.02em",
+              color: "var(--fg-1)",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {allTime.matchedVolume}
+          </span>
           <div
             style={{
               display: "flex",
@@ -81,14 +69,7 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
               }}
             >
               {formatInt(allTime.totalBatches)} batches ·{" "}
-              {formatInt(allTime.liveMarkets)} live markets · uptime{" "}
-              <MockValue
-                hint="uptime % — not tracked"
-                variant="underline"
-                style={{ color: "var(--yes)" }}
-              >
-                {allTime.uptime}
-              </MockValue>
+              {formatInt(allTime.liveMarkets)} live markets
             </span>
           </div>
         </div>
@@ -106,29 +87,41 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
         >
           <BigKv
             label="Active traders"
-            value={formatCompactInt(allTime.traders)}
+            value={
+              allTime.traders == null
+                ? "—"
+                : formatCompactInt(allTime.traders)
+            }
             sub="addresses placed ≥1 order"
-            mocked
           />
           <BigKv
-            label="Placed orders"
-            value={formatCompactInt(allTime.ordersPlaced)}
+            label="Orders processed"
+            value={
+              allTime.ordersPlaced == null
+                ? "—"
+                : formatCompactInt(allTime.ordersPlaced)
+            }
             sub="across all batches"
-            mocked
           />
           <BigKv
             label="Matched orders"
-            value={formatCompactInt(allTime.ordersMatched)}
+            value={
+              allTime.ordersMatched == null
+                ? "—"
+                : formatCompactInt(allTime.ordersMatched)
+            }
             sub="successfully filled at clear"
             accent="var(--yes)"
-            mocked
           />
           <BigKv
             label="Unmatched orders"
-            value={formatCompactInt(allTime.ordersUnmatched)}
-            sub="cancelled or expired"
+            value={
+              allTime.ordersUnmatched == null
+                ? "—"
+                : formatCompactInt(allTime.ordersUnmatched)
+            }
+            sub="expired without a fill"
             accent="var(--fg-2)"
-            mocked
           />
         </div>
       </div>
@@ -141,13 +134,11 @@ function BigKv({
   value,
   sub,
   accent = "var(--fg-1)",
-  mocked = false,
 }: {
   label: string;
   value: string;
   sub: string;
   accent?: string;
-  mocked?: boolean;
 }) {
   const numberEl = (
     <span
@@ -177,11 +168,7 @@ function BigKv({
           justifyContent: "space-between",
         }}
       >
-        {mocked ? (
-          <MockValue hint={ALL_TIME_HINT} variant="pill">{numberEl}</MockValue>
-        ) : (
-          numberEl
-        )}
+        {numberEl}
       </div>
       <span
         style={{

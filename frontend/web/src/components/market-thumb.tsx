@@ -1,19 +1,26 @@
 "use client";
 
 /**
- * Deterministic placeholder tile for a market — colored 40×40 square with
- * the first character of the market's name. Reserves the slot for when
- * backend exposes a real image URL: pass `imageUrl` and the placeholder is
- * skipped. Pure CSS (no next/image) to avoid having to register a remote
- * domain config until we know what host the real images live at.
+ * Market thumbnail with two-step fallback chain:
+ *
+ *   imageUrl (404) → fallbackIconUrl (404) → deterministic colored tile
+ *
+ * Pure `<img>` (no next/image) — avoids registering remote domain config
+ * for the Polymarket S3 bucket. Fallback tile uses the first glyph of
+ * the market name on a palette-keyed background.
  */
+
+import { useState } from "react";
 
 type Props = {
   marketId: number;
   name: string;
   imageUrl?: string | null;
+  fallbackIconUrl?: string | null;
   size?: number;
 };
+
+type Stage = "image" | "icon" | "tile";
 
 const PALETTE = [
   "var(--accent-soft)",
@@ -26,26 +33,57 @@ const PALETTE = [
   "var(--accent-faint)",
 ];
 
-export function MarketThumb({ marketId, name, imageUrl, size = 40 }: Props) {
-  const tone = PALETTE[Math.abs(marketId) % PALETTE.length];
-  const initial = firstGlyph(name);
+export function MarketThumb({
+  marketId,
+  name,
+  imageUrl,
+  fallbackIconUrl,
+  size = 40,
+}: Props) {
+  const initialStage: Stage = imageUrl
+    ? "image"
+    : fallbackIconUrl
+      ? "icon"
+      : "tile";
+  const [stage, setStage] = useState<Stage>(initialStage);
 
-  if (imageUrl) {
+  // Reset stage when input URLs change (parent reuses this component for a
+  // different market). React's documented "reset state when prop changes"
+  // pattern: track prev props in state and reset during render rather than
+  // in an effect.
+  const [prevImage, setPrevImage] = useState(imageUrl);
+  const [prevIcon, setPrevIcon] = useState(fallbackIconUrl);
+  if (prevImage !== imageUrl || prevIcon !== fallbackIconUrl) {
+    setPrevImage(imageUrl);
+    setPrevIcon(fallbackIconUrl);
+    setStage(initialStage);
+  }
+
+  if (stage !== "tile") {
+    const src = stage === "image" ? imageUrl! : fallbackIconUrl!;
     return (
-      <div
-        style={thumbStyles(size)}
-        aria-hidden
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element -- placeholder slot; remote domains not yet decided */}
+      <div style={thumbStyles(size)} aria-hidden>
+        {/* eslint-disable-next-line @next/next/no-img-element -- pure CSS; remote-domain config out of scope */}
         <img
-          src={imageUrl}
+          src={src}
           alt=""
-          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            display: "block",
+          }}
+          onError={() => {
+            if (stage === "image" && fallbackIconUrl) setStage("icon");
+            else setStage("tile");
+          }}
         />
       </div>
     );
   }
 
+  const tone = PALETTE[Math.abs(marketId) % PALETTE.length];
+  const initial = firstGlyph(name);
   return (
     <div
       style={{
@@ -82,7 +120,6 @@ function thumbStyles(size: number): React.CSSProperties {
 function firstGlyph(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) return "·";
-  // Skip leading "Will " for binary questions so the glyph is more meaningful.
   const stripped = trimmed.replace(/^(will|the)\s+/i, "");
   const ch = stripped[0] ?? trimmed[0] ?? "·";
   return ch.toUpperCase();

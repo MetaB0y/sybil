@@ -6,19 +6,19 @@
  * the `renderDetail` slot prop so this file stays focused on the table; the
  * detail UI lives in <BatchDetail>.
  *
- * Grid template comes verbatim from `handoff/pages/activity.html`:
- *   24px 120px 130px 80px 130px 120px 80px 1fr  ·  gap 28px
+ * Column layout adapts the handoff `activity.html` template: a fixed-width
+ * chevron, then weighted `fr` columns so the row stretches edge-to-edge of
+ * the table instead of stranding empty space in the last column.
  */
 
-import { useState, Fragment, type ReactNode } from "react";
+import { useEffect, useState, Fragment, type ReactNode } from "react";
 import {
   formatCompactDollars,
   formatInt,
 } from "@/lib/format/nanos";
 import type { BatchRow as BatchRowData } from "@/lib/activity/types";
 
-const GRID =
-  "24px 120px 130px 80px 130px 120px 80px 1fr";
+const GRID = "24px 1fr 1.2fr 0.7fr 1.1fr 1.1fr 0.7fr 1.9fr";
 const GRID_GAP = 28;
 
 export function BatchesTable({
@@ -32,6 +32,29 @@ export function BatchesTable({
   renderDetail?: (row: BatchRowData) => ReactNode;
 }) {
   const [expanded, setExpanded] = useState<number | null>(null);
+  // Re-render every second so the "Xs ago" column ticks live — the table
+  // otherwise only re-renders on a new batch (~10s) or on interaction.
+  useRelativeTimeTick();
+
+  // Live tail vs. frozen. Freezing snapshots the current rows so the user can
+  // expand and inspect a batch without rows shifting as new batches arrive.
+  // The 1s ticker keeps running either way, so "Xs ago" stays live even when
+  // frozen.
+  const [live, setLive] = useState(true);
+  const [frozenRows, setFrozenRows] = useState<BatchRowData[]>([]);
+  const displayRows = live ? rows : frozenRows;
+  const newWhileFrozen =
+    !live && rows[0] && frozenRows[0]
+      ? Math.max(0, rows[0].height - frozenRows[0].height)
+      : 0;
+  const toggleLive = () => {
+    if (live) {
+      setFrozenRows(rows); // freezing → snapshot what's on screen now
+      setLive(false);
+    } else {
+      setLive(true);
+    }
+  };
 
   return (
     <section style={{ padding: "26px 24px 40px" }}>
@@ -57,8 +80,15 @@ export function BatchesTable({
           Batches
         </h3>
         <span className="text-annotation" style={{ fontSize: 11 }}>
-          showing last {rows.length}
+          showing last {displayRows.length}
           {isBackfilling ? " · backfilling…" : ""} · click any row to expand
+        </span>
+        <span style={{ marginLeft: "auto" }}>
+          <LiveToggle
+            live={live}
+            newWhileFrozen={newWhileFrozen}
+            onToggle={toggleLive}
+          />
         </span>
       </div>
 
@@ -71,7 +101,7 @@ export function BatchesTable({
         }}
       >
         <Header />
-        {rows.length === 0 && (
+        {displayRows.length === 0 && (
           <div
             style={{
               padding: "20px 22px",
@@ -83,7 +113,7 @@ export function BatchesTable({
             no batches yet — waiting for hydration
           </div>
         )}
-        {rows.map((r) => (
+        {displayRows.map((r) => (
           <Fragment key={r.height}>
             <Row
               row={r}
@@ -97,6 +127,69 @@ export function BatchesTable({
         ))}
       </div>
     </section>
+  );
+}
+
+/**
+ * Live ⇄ Frozen toggle. Live = table tails new batches; Frozen = rows are held
+ * so the user can inspect a batch in peace (relative times still tick). While
+ * frozen, shows how many batches have queued up so the jump on resume isn't a
+ * surprise.
+ */
+function LiveToggle({
+  live,
+  newWhileFrozen,
+  onToggle,
+}: {
+  live: boolean;
+  newWhileFrozen: number;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={live}
+      title={
+        live
+          ? "Pause the live tail to inspect a batch — rows stop updating"
+          : "Resume live updates"
+      }
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "4px 10px",
+        borderRadius: 999,
+        cursor: "pointer",
+        border: `1px solid ${live ? "var(--border-2)" : "var(--accent)"}`,
+        background: live ? "var(--surface-1)" : "color-mix(in srgb, var(--accent) 12%, transparent)",
+        color: live ? "var(--fg-2)" : "var(--accent)",
+        fontFamily: "var(--font-mono)",
+        fontSize: 10,
+        textTransform: "uppercase",
+        letterSpacing: "0.05em",
+        lineHeight: 1,
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: "50%",
+          background: live ? "var(--yes)" : "var(--fg-4)",
+          boxShadow: live
+            ? "0 0 0 3px color-mix(in srgb, var(--yes) 25%, transparent)"
+            : "none",
+        }}
+      />
+      {live
+        ? "Live"
+        : newWhileFrozen > 0
+          ? `Frozen · ${newWhileFrozen} new`
+          : "Frozen"}
+    </button>
   );
 }
 
@@ -129,7 +222,7 @@ function Header() {
       <span>Matched volume</span>
       <span>Welfare</span>
       <span>Traders</span>
-      <span>Orders</span>
+      <span style={{ textAlign: "right" }}>Orders</span>
     </div>
   );
 }
@@ -318,6 +411,7 @@ function OrdersCell({
       style={{
         display: "flex",
         alignItems: "center",
+        justifyContent: "flex-end",
         gap: 18,
         fontVariantNumeric: "tabular-nums",
       }}
@@ -366,4 +460,34 @@ function fmtRelTime(ms: number): string {
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86400)}d ago`;
+}
+
+/**
+ * Force a re-render once a second so relative timestamps stay current.
+ * Pauses while the tab is hidden — no point re-rendering an unseen table.
+ */
+function useRelativeTimeTick(): void {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    let id: ReturnType<typeof setInterval> | null = null;
+    const start = () => {
+      if (id == null) id = setInterval(() => setTick((t) => t + 1), 1000);
+    };
+    const stop = () => {
+      if (id != null) {
+        clearInterval(id);
+        id = null;
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") start();
+      else stop();
+    };
+    onVisibility();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
 }

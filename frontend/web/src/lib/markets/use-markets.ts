@@ -1,10 +1,16 @@
 /**
- * Domain hook for the markets index page. Combines /v1/markets (full list
- * with descriptions) and /v1/markets/groups (Polymarket-style event groupings).
+ * Domain hook for the markets index page.
+ *
+ * Groups markets by Polymarket `event_id` (off-block metadata from the
+ * mirror). This is independent of the matching engine's NegRisk
+ * `MarketGroup` rejection logic — frontend grouping is purely cosmetic.
+ *
+ * Markets without an `event_id` (sybil-native, or a mirror cycle that
+ * hasn't filled metadata yet) fall into `ungrouped`.
  *
  * Output shape:
- *   groups: [{ name, marketIds, markets }]   — non-empty groups
- *   ungrouped: Market[]                       — markets not in any group
+ *   groups: [{ name, eventId, markets }]   — events with ≥1 market
+ *   ungrouped: Market[]                     — markets with no event_id
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -12,28 +18,31 @@ import type { components } from "@/lib/api/schema";
 import { api } from "@/lib/api/client";
 
 export type Market = components["schemas"]["MarketResponse"];
-export type MarketGroup = components["schemas"]["MarketGroupResponse"];
+
+/** A market Polymarket has closed (resolved / past deadline). */
+export function isClosed(m: Market): boolean {
+  return m.closed === true;
+}
+
+/** An event is shown on the index if at least one of its markets is still open. */
+export function eventVisibleOnIndex(markets: Market[]): boolean {
+  return markets.some((m) => !isClosed(m));
+}
 
 export type MarketsListBundle = {
   /** Every market keyed by id. */
   byId: Map<number, Market>;
-  /** Groups (events) with their resolved markets. Empty groups dropped. */
-  groups: Array<{ name: string; marketIds: number[]; markets: Market[] }>;
-  /** Markets not in any group. */
+  /** Event-grouped markets. */
+  groups: Array<{ name: string; eventId: string; markets: Market[] }>;
+  /** Markets with no `event_id`. */
   ungrouped: Market[];
-  /** Total market count (active + others). */
+  /** Total market count. */
   total: number;
 };
 
 async function fetchMarkets(): Promise<Market[]> {
   const { data, error } = await api.GET("/v1/markets");
   if (error || !data) throw new Error("fetch /v1/markets failed");
-  return data;
-}
-
-async function fetchGroups(): Promise<MarketGroup[]> {
-  const { data, error } = await api.GET("/v1/markets/groups");
-  if (error || !data) throw new Error("fetch /v1/markets/groups failed");
   return data;
 }
 
@@ -44,49 +53,56 @@ export function useMarketsList() {
     staleTime: 60_000,
   });
 
-  const groupsQ = useQuery({
-    queryKey: ["markets", "groups"],
-    queryFn: fetchGroups,
-    staleTime: 60_000,
-  });
-
-  const isPending = marketsQ.isPending || groupsQ.isPending;
-  const error = marketsQ.error ?? groupsQ.error;
+  const isPending = marketsQ.isPending;
+  const error = marketsQ.error;
 
   let bundle: MarketsListBundle | null = null;
-  if (marketsQ.data && groupsQ.data) {
-    bundle = assemble(marketsQ.data, groupsQ.data);
+  if (marketsQ.data) {
+    bundle = assemble(marketsQ.data);
   }
 
   return { bundle, isPending, error };
 }
 
-function assemble(markets: Market[], groups: MarketGroup[]): MarketsListBundle {
+export function assemble(allMarkets: Market[]): MarketsListBundle {
+  // Keep ALL markets (open + closed) in the bundle. Closed markets are needed
+  // by the detail page (read-only state) and by multi-cards (greyed outcome
+  // rows). Index-level visibility — hiding fully-closed events and standalone
+  // closed binaries — is applied by the markets page, not here. Each market
+  // carries its own `closed` flag (`isClosed`) for downstream display logic.
+  const markets = allMarkets;
+
   const byId = new Map<number, Market>();
   for (const m of markets) byId.set(m.market_id, m);
 
-  const groupedIds = new Set<number>();
-  const out: MarketsListBundle["groups"] = [];
+  const grouped = new Map<string, { name: string; markets: Market[] }>();
+  const ungrouped: Market[] = [];
 
-  for (const g of groups) {
-    const ms: Market[] = [];
-    for (const id of g.market_ids) {
-      const m = byId.get(id);
-      if (m) {
-        ms.push(m);
-        groupedIds.add(id);
-      }
+  for (const m of markets) {
+    const eid = m.event_id;
+    if (!eid) {
+      ungrouped.push(m);
+      continue;
     }
-    if (ms.length > 0) {
-      out.push({ name: g.name, marketIds: g.market_ids, markets: ms });
+    let entry = grouped.get(eid);
+    if (!entry) {
+      // First market in this event sets the display name. event_title is the
+      // authoritative source; we fall back to the market name only when the
+      // mirror hasn't filled it (shouldn't happen post-Phase 2).
+      entry = { name: m.event_title ?? m.name, markets: [] };
+      grouped.set(eid, entry);
     }
+    entry.markets.push(m);
   }
 
-  const ungrouped = markets.filter((m) => !groupedIds.has(m.market_id));
+  const groups: MarketsListBundle["groups"] = [];
+  for (const [eventId, { name, markets: ms }] of grouped) {
+    groups.push({ name, eventId, markets: ms });
+  }
 
   return {
     byId,
-    groups: out,
+    groups,
     ungrouped,
     total: markets.length,
   };

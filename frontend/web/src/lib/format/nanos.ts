@@ -62,10 +62,14 @@ export const formatPctDelta = (pct: number): string => {
   return `${sign}${pct.toFixed(1)}%`;
 };
 
-/** Format an absolute price change in cents (e.g. +5¢, -3¢, 0¢). */
+/**
+ * Format an absolute price change in cents (e.g. +5¢, −3¢, ±0¢). The flat
+ * case renders as "±0¢" (not a bare "0¢") so it reads as a *delta* rather
+ * than being mistaken for a price or for missing data.
+ */
 export const formatCentsDelta = (cents: number): string => {
   const rounded = Math.round(cents);
-  if (rounded === 0) return "0¢";
+  if (rounded === 0) return "±0¢";
   const sign = rounded > 0 ? "+" : "−";
   return `${sign}${Math.abs(rounded)}¢`;
 };
@@ -107,6 +111,29 @@ export const formatCompactDollars = (v: NanosInput): string => {
   if (dollars >= 10_000) return `${sign}$${Math.round(dollars / 1_000)}K`;
   if (dollars >= 1_000) return `${sign}$${(dollars / 1_000).toFixed(1)}K`;
   return `${sign}$${dollars}`;
+};
+
+/**
+ * Format a batch countdown as one-decimal seconds (e.g. "1.8", "0.3").
+ *
+ * The app's batch cadence is short (BLOCK_INTERVAL_MS) — an mm:ss format would
+ * barely move and visibly jump. One decimal is the honest, smooth
+ * representation; this is the single formatter every batch clock shares.
+ */
+export const formatBatchSeconds = (seconds: number): string =>
+  Math.max(0, seconds).toFixed(1);
+
+/**
+ * Format an elapsed duration as a compact human age — "30s", "45m", "19h",
+ * "3d" (largest whole unit only). Pure: the caller passes elapsed ms (e.g.
+ * `latestBlock.timestamp_ms − created_at_ms`) so render stays deterministic.
+ */
+export const formatAge = (elapsedMs: number): string => {
+  const s = Math.max(0, Math.floor(elapsedMs / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86_400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86_400)}d`;
 };
 
 /** Format an epoch-ms timestamp as "MMM D, YYYY" in en-US. */

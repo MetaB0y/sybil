@@ -7,33 +7,14 @@
  * see at a glance which numbers are placeholders.
  *
  * When backend exposes the real fields:
- *   - category → swap mockCategory() for market.category, drop the dot/MockValue wrap
  *   - 24h delta → fetch per-outcome history, drop mockDelta()
- *   - liquidity → market.liq_nanos? drop mockLiq()
- *   - trader count → market.trader_count? drop mockTraders()
  *
- * grep this file's exports to find every mocked surface.
+ * liquidity and trader counts are now real — cards read
+ * `market.liquidity_avg10_nanos` / `market.trader_count`, and MultiCard
+ * fetches the per-event trader union via `useEventTraders`.
+ *
+ * Categories already come from backend; see lib/categorize.ts.
  */
-
-const CATEGORIES = [
-  { name: "Politics", color: "#9F8FE8" },
-  { name: "Geopolitics", color: "#5BC4E0" },
-  { name: "AI", color: "#7AD3D9" },
-  { name: "Tech", color: "#7E9AE8" },
-  { name: "Economy", color: "#E8B447" },
-  { name: "Culture", color: "#E89D9F" },
-  { name: "Science", color: "#4FB5A8" },
-  { name: "World", color: "#E89A6B" },
-  { name: "Finance", color: "#5BD99A" },
-  { name: "Business", color: "#B0B89E" },
-  { name: "Weather", color: "#6FB8E0" },
-  { name: "Mentions", color: "#C49AE8" },
-  { name: "Sports", color: "#6FCC8A" },
-  { name: "Crypto", color: "#F2B244" },
-  { name: "Commodities", color: "#C9A87C" },
-] as const;
-
-export type MockCategory = (typeof CATEGORIES)[number];
 
 /** Hash a string to a non-negative integer. */
 function hashSeed(seed: string | number): number {
@@ -44,11 +25,6 @@ function hashSeed(seed: string | number): number {
     h = Math.imul(h, 16777619);
   }
   return Math.abs(h | 0);
-}
-
-export function mockCategory(seed: string | number): MockCategory {
-  const h = hashSeed(seed);
-  return CATEGORIES[h % CATEGORIES.length]!;
 }
 
 /**
@@ -63,28 +39,6 @@ export function mockDelta(seed: string | number, yesPct?: number | null): number
   // Bias by current price: high prices → small positive bias, low → negative
   const bias = yesPct != null ? (yesPct - 50) / 25 : 0; // -2..+2
   return Math.max(-12, Math.min(12, Math.round(base + bias)));
-}
-
-/** Mocked liquidity, expressed as nanos. Derived as ~30% of volume so it
- *  scales with real activity rather than being a flat number. */
-export function mockLiq(volumeNanos: bigint, seed: string | number): bigint {
-  if (volumeNanos === 0n) return 0n;
-  const h = hashSeed(seed);
-  const pct = 20 + (h % 25); // 20..44%
-  return (volumeNanos * BigInt(pct)) / 100n;
-}
-
-/**
- * Mocked trader count. Roughly proportional to volume (a $1M-volume
- * market has more traders than a $1K-volume market) with jitter.
- */
-export function mockTraders(seed: string | number, volumeNanos: bigint): number {
-  if (volumeNanos === 0n) return 0;
-  const h = hashSeed(seed);
-  const vol = Number(volumeNanos / 1_000_000_000n); // dollars
-  const base = Math.max(8, Math.round(Math.sqrt(vol) * 1.4));
-  const jitter = (h % 40) - 20; // ±20
-  return Math.max(1, base + jitter);
 }
 
 /** Compact trader count formatter: 4.2K · 1.8K · 240 · 8. */

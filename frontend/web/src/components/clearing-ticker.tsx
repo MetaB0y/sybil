@@ -1,52 +1,112 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
-import { formatCents, formatInt } from "@/lib/format/nanos";
+import { useEffect, useMemo, useState } from "react";
+import {
+  formatAge,
+  formatCompactDollars,
+  formatInt,
+  parseNanos,
+} from "@/lib/format/nanos";
 import type { Market } from "@/lib/markets/use-markets";
-import { selectLatestBlock, useStore } from "@/lib/store";
-import { parseNanos } from "@/lib/format/nanos";
+import { selectLatestBlock, selectRecentBlocks, useStore } from "@/lib/store";
 
 type Props = {
   /** Lookup table for resolving market_id → name. */
   marketsById: Map<number, Market>;
 };
 
+/** Most recent clears to keep on the strip. */
+const MAX_TICKER_ITEMS = 40;
+/** Below this many items the content won't overflow, so don't animate. */
+const MARQUEE_MIN_ITEMS = 6;
+
+/** One market clearing in one batch — a single "trade" entry on the ticker. */
+type ClearEvent = {
+  key: string;
+  id: number;
+  name: string;
+  /** Clearing YES price this batch (nanos). */
+  yes: bigint;
+  /** Matched volume this market contributed this batch (nanos, $). */
+  volNanos: bigint;
+  /** YES price change vs this market's previous clear, in pp. Always a real
+   *  (non-flat) move — flat and first-seen clears are filtered out of the feed. */
+  ppChange: number;
+  /** Block timestamp (epoch ms) → "seconds ago". */
+  ts: number;
+};
+
 /**
- * ClearingTicker — 36px strip showing the markets that cleared in the last
- * committed block. Re-renders every block. If clearing_prices_nanos is
- * empty for that block (no fills landed), shows a neutral idle state.
+ * ClearingTicker — a continuously scrolling strip of recent clears across the
+ * last committed blocks. Each entry is one market whose clearing price moved
+ * in a batch (flat / first-seen clears are skipped):
+ * `name  $vol  ±pp  age` (title · volume · price change · age). The buffer
+ * accumulates across blocks (rather
+ * than being replaced each batch) so the marquee has stable content to scroll;
+ * new clears enter at the head and old ones fall off after MAX_TICKER_ITEMS.
  *
- * Visual is a horizontal row of chips: `#ID name 87.3%`. Overflows with
- * native horizontal scroll (no marquee animation — content changes every
- * 2s, a marquee would visually fight the data update).
+ * Side (buy/sell) is intentionally absent: block-level fills carry no
+ * market_id or side, so a global feed can only speak in per-batch clears.
  */
 export function ClearingTicker({ marketsById }: Props) {
   const latest = useStore(selectLatestBlock);
+  const recent = useStore(selectRecentBlocks);
+  const [paused, setPaused] = useState(false);
 
-  const entries = useMemo(() => {
-    if (!latest?.clearing_prices_nanos) return [];
-    const out: Array<{ id: number; name: string; yes: bigint }> = [];
-    for (const [key, arr] of Object.entries(latest.clearing_prices_nanos)) {
-      const id = Number(key);
-      if (!Number.isFinite(id)) continue;
-      const yesStr = arr[0];
-      if (yesStr == null) continue;
-      const m = marketsById.get(id);
-      out.push({
-        id,
-        name: m?.name ?? `#${id}`,
-        yes: parseNanos(yesStr),
-      });
+  // Live "now" so the age column ticks every second between blocks.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const events = useMemo(() => {
+    // Walk oldest → newest so each market's previous clear price is known when
+    // we reach its next clear (price change is vs the prior *clearing* batch).
+    const prevYes = new Map<number, bigint>();
+    const all: ClearEvent[] = [];
+    for (const b of [...recent].reverse()) {
+      const cp = b.clearing_prices_nanos;
+      if (!cp) continue;
+      for (const [key, arr] of Object.entries(cp)) {
+        const id = Number(key);
+        if (!Number.isFinite(id)) continue;
+        const yesStr = arr[0];
+        if (yesStr == null) continue;
+        const volStr = b.by_market?.[key]?.volume_nanos;
+        const volNanos = volStr == null ? 0n : parseNanos(volStr);
+        // Only batches where this market actually traded — a "purchase".
+        if (volNanos <= 0n) continue;
+        const yes = parseNanos(yesStr);
+        const prior = prevYes.get(id);
+        const ppChange = prior == null ? null : Number(yes - prior) / 1e7;
+        prevYes.set(id, yes);
+        // Only surface clears that actually moved the price: skip a market's
+        // first clear in the window (no prior to diff) and flat ticks (which
+        // would read "0.0pp"). prevYes is updated above regardless, so the next
+        // clear's delta stays correct.
+        if (ppChange == null || Math.abs(ppChange) < 0.05) continue;
+        const m = marketsById.get(id);
+        all.push({
+          key: `${b.height}-${id}`,
+          id,
+          name: m?.name ?? `#${id}`,
+          yes,
+          volNanos,
+          ppChange,
+          ts: b.timestamp_ms,
+        });
+      }
     }
-    // Most extreme moves first (anything far from 50% is "interesting").
-    out.sort((a, b) => {
-      const da = absDistanceFromHalf(a.yes);
-      const db = absDistanceFromHalf(b.yes);
-      return da > db ? -1 : da < db ? 1 : 0;
-    });
-    return out;
-  }, [latest, marketsById]);
+    // Newest first, capped.
+    all.reverse();
+    return all.slice(0, MAX_TICKER_ITEMS);
+  }, [recent, marketsById]);
+
+  const animate = events.length >= MARQUEE_MIN_ITEMS;
+  // ~one cell-width per ~3s keeps the scroll readable as the list grows.
+  const durationSec = Math.max(18, events.length * 3.2);
 
   return (
     <div
@@ -63,7 +123,7 @@ export function ClearingTicker({ marketsById }: Props) {
         overflow: "hidden",
       }}
     >
-      {/* Accented badge — handoff's anchored "Last batch · #N" cell */}
+      {/* Anchored badge — pulsing dot + latest committed height */}
       <div
         style={{
           flexShrink: 0,
@@ -87,17 +147,17 @@ export function ClearingTicker({ marketsById }: Props) {
             height: 6,
             borderRadius: "50%",
             background: "var(--accent)",
+            animation: "sybil-pulse 1.6s ease-in-out infinite",
           }}
         />
-        <span>Last batch</span>
+        <span>Recent trades</span>
         <span style={{ color: "var(--accent)", opacity: 0.6 }}>·</span>
         <span className="tabular">
           #{latest?.height != null ? formatInt(latest.height) : "—"}
         </span>
       </div>
 
-      {/* Bordered cell row, scrolls horizontally with mask fade at edge */}
-      {entries.length === 0 ? (
+      {events.length === 0 ? (
         <span
           className="text-mono"
           style={{
@@ -108,23 +168,42 @@ export function ClearingTicker({ marketsById }: Props) {
             fontSize: "var(--fs-12)",
           }}
         >
-          no fills this block
+          awaiting fills…
         </span>
       ) : (
         <div
+          onMouseEnter={() => setPaused(true)}
+          onMouseLeave={() => setPaused(false)}
           style={{
-            display: "flex",
-            overflowX: "auto",
-            scrollbarWidth: "none",
+            flex: 1,
+            minWidth: 0,
+            overflow: "hidden",
             WebkitMaskImage:
-              "linear-gradient(to right, black 0, black calc(100% - 32px), transparent 100%)",
+              "linear-gradient(to right, transparent 0, black 24px, black calc(100% - 32px), transparent 100%)",
             maskImage:
-              "linear-gradient(to right, black 0, black calc(100% - 32px), transparent 100%)",
+              "linear-gradient(to right, transparent 0, black 24px, black calc(100% - 32px), transparent 100%)",
           }}
         >
-          {entries.map((e) => (
-            <TickerCell key={e.id} id={e.id} name={e.name} yes={e.yes} />
-          ))}
+          <div
+            style={{
+              display: "inline-flex",
+              flexWrap: "nowrap",
+              willChange: animate ? "transform" : undefined,
+              animation: animate
+                ? `sybil-marquee ${durationSec}s linear infinite`
+                : undefined,
+              animationPlayState: paused ? "paused" : "running",
+            }}
+          >
+            {events.map((e) => (
+              <TickerCell key={e.key} event={e} now={now} />
+            ))}
+            {/* Second copy makes the -50% loop seamless. */}
+            {animate &&
+              events.map((e) => (
+                <TickerCell key={`dup-${e.key}`} event={e} now={now} ariaHidden />
+              ))}
+          </div>
         </div>
       )}
     </div>
@@ -132,22 +211,20 @@ export function ClearingTicker({ marketsById }: Props) {
 }
 
 function TickerCell({
-  id,
-  name,
-  yes,
+  event,
+  now,
+  ariaHidden,
 }: {
-  id: number;
-  name: string;
-  yes: bigint;
+  event: ClearEvent;
+  now: number;
+  ariaHidden?: boolean;
 }) {
-  const short = trimChipName(name);
-  // Color the cents by which side of 50% the price sits on — the same visual
-  // signal the handoff conveys with delta24, without needing a per-item fetch.
-  const HALF = 500_000_000n;
-  const tone = yes >= HALF ? "var(--yes)" : "var(--no)";
+  const { id, name, volNanos, ppChange, ts } = event;
   return (
     <Link
       href={`/m/${id}`}
+      aria-hidden={ariaHidden}
+      tabIndex={ariaHidden ? -1 : undefined}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -170,36 +247,36 @@ function TickerCell({
         e.currentTarget.style.background = "transparent";
       }}
     >
-      <span
-        style={{
-          maxWidth: 220,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-        }}
-      >
-        {short}
+      {/* Full market question, untruncated. For grouped (NegRisk) outcomes the
+          name is "{event}: {outcome}"; for binaries it's the bare question.
+          The marquee scrolls, so a wide cell is fine. */}
+      <span style={{ color: "var(--fg-2)", whiteSpace: "nowrap" }}>{name}</span>
+      <span className="tabular" style={{ color: "var(--fg-4)" }}>
+        {formatCompactDollars(volNanos)} vol
       </span>
       <span
         className="tabular"
-        style={{
-          color: tone,
-          fontWeight: 600,
-        }}
+        style={{ color: ppColor(ppChange), fontWeight: 600 }}
       >
-        {formatCents(yes)}
+        {formatPp(ppChange)}
+      </span>
+      <span className="tabular" style={{ color: "var(--fg-4)" }}>
+        {formatAge(Math.max(0, now - ts))} ago
       </span>
     </Link>
   );
 }
 
-function trimChipName(name: string): string {
-  // For "Group Name: Outcome" → "Outcome"; otherwise return as-is.
-  const idx = name.indexOf(":");
-  if (idx > 0 && idx < name.length - 2) return name.slice(idx + 1).trim();
-  return name;
+/** ±N.N pp with explicit sign; ~flat collapses to "0.0pp". */
+function formatPp(pp: number): string {
+  if (Math.abs(pp) < 0.05) return "0.0pp";
+  const sign = pp > 0 ? "+" : "−";
+  return `${sign}${Math.abs(pp).toFixed(1)}pp`;
 }
 
-function absDistanceFromHalf(nanos: bigint): bigint {
-  const HALF = 500_000_000n;
-  return nanos > HALF ? nanos - HALF : HALF - nanos;
+function ppColor(pp: number | null): string {
+  // Flat/unknown reads in a legible neutral (not the faint fg-4) so a "0.0pp"
+  // is actually visible; only real moves take the green/red accents.
+  if (pp == null || Math.abs(pp) < 0.05) return "var(--fg-3)";
+  return pp > 0 ? "var(--yes)" : "var(--no)";
 }

@@ -1,51 +1,45 @@
 "use client";
 
 /**
- * 24h pulse strip — 5 cells with big numbers + ±% delta vs prior 24h.
- *
- * Every cell is mocked until /v1/activity/overview lands (OPEN_QUESTIONS #3).
- * At the 2s FBA cadence on this network we can't compute a 24h window
- * client-side. The MockValue underline makes the placeholder visible.
+ * 24h pulse strip — five real `last_24h` figures from
+ * `GET /v1/activity/overview` (see use-activity-overview.ts), one per cell.
+ * Values show "—" until the first response lands.
  */
 
-import { MockValue } from "@/components/mock-value";
-import { formatCompactInt, formatPctDelta } from "@/lib/format/nanos";
-import { MOCK_24H } from "@/lib/activity/mocks";
-
-const MOCK_HINT =
-  "last-24h rollups — needs /v1/activity/overview (OPEN_QUESTIONS #3, infeasible client-side at 2s cadence)";
+import { formatCompactInt } from "@/lib/format/nanos";
+import type { Last24hStats } from "@/lib/activity/types";
 
 type Cell = {
   label: string;
   value: string;
-  deltaPct?: number;
   accent?: string;
 };
 
-export function PulseStrip() {
+const fmtCount = (n: number | null): string =>
+  n == null ? "—" : formatCompactInt(n);
+
+export function PulseStrip({ last24h }: { last24h: Last24hStats }) {
   const items: Cell[] = [
     {
       label: "Matched volume",
-      value: MOCK_24H.matchedVolume,
-      deltaPct: MOCK_24H.matchedVolumeDeltaPct,
+      value: last24h.matchedVolume,
     },
     {
       label: "Active traders",
-      value: formatCompactInt(MOCK_24H.traders),
-      deltaPct: MOCK_24H.tradersDeltaPct,
+      value: fmtCount(last24h.traders),
     },
     {
-      label: "Placed orders",
-      value: formatCompactInt(MOCK_24H.ordersPlaced),
+      label: "Orders processed",
+      value: fmtCount(last24h.ordersPlaced),
     },
     {
       label: "Matched orders",
-      value: formatCompactInt(MOCK_24H.ordersMatched),
+      value: fmtCount(last24h.ordersMatched),
       accent: "var(--yes)",
     },
     {
       label: "Unmatched orders",
-      value: formatCompactInt(MOCK_24H.ordersUnmatched),
+      value: fmtCount(last24h.ordersUnmatched),
       accent: "var(--fg-2)",
     },
   ];
@@ -73,19 +67,7 @@ export function PulseStrip() {
           Last 24 hours
         </h3>
         <span className="text-annotation" style={{ fontSize: 11 }}>
-          rolling window · vs prior 24 h
-        </span>
-        <span
-          style={{
-            marginLeft: "auto",
-            fontFamily: "var(--font-mono)",
-            fontSize: 10,
-            color: "var(--fg-3)",
-            textTransform: "uppercase",
-            letterSpacing: "0.04em",
-          }}
-        >
-          mocked
+          rolling window
         </span>
       </div>
       <div
@@ -110,42 +92,19 @@ export function PulseStrip() {
             }}
           >
             <span className="eyebrow">{it.label}</span>
-            <div
+            <span
               style={{
-                display: "flex",
-                alignItems: "baseline",
-                justifyContent: "space-between",
-                gap: 10,
+                fontFamily: "var(--font-sans)",
+                fontSize: 22,
+                fontWeight: 600,
+                color: it.accent ?? "var(--fg-1)",
+                fontVariantNumeric: "tabular-nums",
+                letterSpacing: "-0.01em",
+                lineHeight: 1,
               }}
             >
-              <MockValue hint={MOCK_HINT} variant="pill">
-                <span
-                  style={{
-                    fontFamily: "var(--font-sans)",
-                    fontSize: 22,
-                    fontWeight: 600,
-                    color: it.accent ?? "var(--fg-1)",
-                    fontVariantNumeric: "tabular-nums",
-                    letterSpacing: "-0.01em",
-                    lineHeight: 1,
-                  }}
-                >
-                  {it.value}
-                </span>
-              </MockValue>
-              {it.deltaPct != null && (
-                <span
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 11,
-                    color: it.deltaPct >= 0 ? "var(--yes)" : "var(--no)",
-                    fontVariantNumeric: "tabular-nums",
-                  }}
-                >
-                  {formatPctDelta(it.deltaPct)}
-                </span>
-              )}
-            </div>
+              {it.value}
+            </span>
           </div>
         ))}
       </div>

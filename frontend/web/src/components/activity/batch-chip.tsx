@@ -5,7 +5,7 @@
  *
  * Distinct from the global <BatchPill> in the nav: this one names the
  * specific batch # currently clearing. Lifted from the handoff's right-aligned
- * indicator. At the 2s FBA cadence the remaining seconds tick fast — we show
+ * indicator. At the FBA cadence the remaining seconds tick down — we show
  * a single decimal so the number is at least readable.
  */
 
@@ -15,9 +15,10 @@ import {
   selectLatestBlock,
   useStore,
 } from "@/lib/store";
-import { formatInt } from "@/lib/format/nanos";
+import { formatBatchSeconds, formatInt } from "@/lib/format/nanos";
+import { BLOCK_INTERVAL_MS } from "@/lib/constants";
 
-const BLOCK_MS = 2000;
+const BLOCK_MS = BLOCK_INTERVAL_MS;
 
 export function ActivityBatchChip() {
   const latest = useStore(selectLatestBlock);
@@ -52,7 +53,7 @@ export function ActivityBatchChip() {
   if (latest == null) return null;
 
   const isLive = connection.state === "live";
-  const remainingSecs = ((1 - progress) * (BLOCK_MS / 1000)).toFixed(1);
+  const remainingSecs = formatBatchSeconds((1 - progress) * (BLOCK_MS / 1000));
   // The current batch is the *next* one to clear, i.e. latest.height + 1.
   const currentBatchNum = latest.height + 1;
 

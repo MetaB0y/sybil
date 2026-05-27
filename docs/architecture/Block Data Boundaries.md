@@ -3,7 +3,7 @@ tags: [infrastructure, analytics]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-05-17
+last_verified: 2026-05-27
 ---
 
 Sybil keeps canonical block data separate from derived product data. A
@@ -57,6 +57,13 @@ analytics trackers owned by the sequencer sidecar state. They are derived from
 blocks, orders, fills, and account state; they are not canonical block fields.
 Some of these trackers are persisted for operational continuity, but
 persistence does not make them protocol source-of-truth.
+
+Per-account equity series and account history feeds are store-backed product
+analytics. New points/events are accumulated as a small block-local delta and
+appended to redb at the same commit boundary as the block snapshot. The actor
+keeps only a configurable in-memory serving fallback; production sets that
+fallback to zero and serves these endpoints from redb. This prevents account UI
+history from growing with total account cardinality in the hot sequencer heap.
 
 ## Indicative Cache
 

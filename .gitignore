@@ -33,3 +33,4 @@ lean/.lake/
 arena/live/decisions.db
 arena/live/__pycache__/
 frontend/CLAUDE.md
+.playwright-mcp/

@@ -11,7 +11,8 @@
 //! ambiguous (non-binary, UMA-challenged, voided) is skipped with a log line.
 //! Richer ingest is tracked in the design doc.
 
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::sync::RwLock;
@@ -22,9 +23,10 @@ use crate::config::Config;
 use crate::error::Error;
 use crate::mapping::MappingStore;
 use crate::polymarket::gamma::GammaClient;
-use crate::polymarket::types::GammaMarket;
+use crate::polymarket::types::{GammaEvent, GammaMarket};
 use crate::signer::ResolutionSigner;
 use crate::sybil::client::SybilClient;
+use sybil_api_types::SetMarketMetadataRequest;
 
 /// Periodic resolver. Polls closed Polymarket events, attests to clean
 /// binary resolutions, and sends them to sybil-api.
@@ -34,6 +36,11 @@ pub struct ResolutionActor {
     sybil: SybilClient,
     mapping: Arc<RwLock<MappingStore>>,
     signer: ResolutionSigner,
+    /// Condition ids already pushed `closed: true` this process lifetime, so we
+    /// write the off-block flag once per market instead of every tick. In-memory
+    /// only — a restart re-flags each once via this path (and the sync actor's
+    /// first-sync backfill), which is harmless and idempotent on the API side.
+    flagged_closed: Mutex<HashSet<String>>,
 }
 
 impl ResolutionActor {
@@ -50,6 +57,7 @@ impl ResolutionActor {
             sybil,
             mapping,
             signer,
+            flagged_closed: Mutex::new(HashSet::new()),
         }
     }
 
@@ -84,7 +92,7 @@ impl ResolutionActor {
             .await
             .all_condition_mappings()
             .into_iter()
-            .collect::<std::collections::HashMap<_, _>>();
+            .collect::<HashMap<_, _>>();
 
         if mirrors.is_empty() {
             return Ok(());
@@ -94,6 +102,35 @@ impl ResolutionActor {
             .gamma
             .fetch_closed_events(self.config.max_events)
             .await?;
+
+        // Mark-once: push `closed: true` off-block for any mapped market
+        // Polymarket reports closed, so the frontend hides/greys it. Independent
+        // of settlement (`maybe_resolve` only handles clean binary payouts);
+        // this fires for every close, clean or not. Skips ids already flagged
+        // this lifetime so we don't re-POST every tick.
+        let to_flag = {
+            let flagged = self.flagged_closed.lock().expect("flagged_closed poisoned");
+            pending_close_flags(&events, &mirrors, &flagged)
+        };
+        if !to_flag.is_empty() {
+            let req = SetMarketMetadataRequest {
+                closed: Some(true),
+                ..Default::default()
+            };
+            for (sybil_id, condition_id) in to_flag {
+                match self.sybil.set_market_metadata(sybil_id, &req).await {
+                    Ok(()) => {
+                        self.flagged_closed
+                            .lock()
+                            .expect("flagged_closed poisoned")
+                            .insert(condition_id);
+                    }
+                    Err(e) => {
+                        warn!(sybil_id, error = %e, "failed to flag market closed")
+                    }
+                }
+            }
+        }
 
         let mut resolved = 0usize;
         for event in events {
@@ -156,5 +193,113 @@ impl ResolutionActor {
             payout_nanos, "attested and submitted resolution"
         );
         Ok(true)
+    }
+}
+
+/// Pure decision: which mapped markets in `events` still need their off-block
+/// `closed` flag written. A market qualifies when Polymarket reports it
+/// `closed`, it is in the `mirrors` map (condition_id -> sybil_market_id), and
+/// it has not already been flagged this process lifetime. Returns
+/// `(sybil_market_id, condition_id)` pairs. No I/O — unit-tested in isolation.
+fn pending_close_flags(
+    events: &[GammaEvent],
+    mirrors: &HashMap<String, u32>,
+    already_flagged: &HashSet<String>,
+) -> Vec<(u32, String)> {
+    let mut out = Vec::new();
+    for event in events {
+        for market in &event.markets {
+            if !market.closed {
+                continue;
+            }
+            let Some(&sybil_id) = mirrors.get(&market.condition_id) else {
+                continue;
+            };
+            if already_flagged.contains(&market.condition_id) {
+                continue;
+            }
+            out.push((sybil_id, market.condition_id.clone()));
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pending_close_flags;
+    use crate::polymarket::types::{GammaEvent, GammaMarket};
+    use std::collections::{HashMap, HashSet};
+
+    fn market(condition_id: &str, closed: bool) -> GammaMarket {
+        GammaMarket {
+            condition_id: condition_id.into(),
+            question: "Q?".into(),
+            outcomes: String::new(),
+            outcome_prices: String::new(),
+            clob_token_ids: String::new(),
+            active: !closed,
+            closed,
+            neg_risk: false,
+            group_item_title: None,
+            best_bid: None,
+            best_ask: None,
+            last_trade_price: None,
+            volume: None,
+            liquidity: None,
+            slug: None,
+            description: None,
+            start_date: None,
+            end_date: None,
+            resolution_source: None,
+            image: None,
+            icon: None,
+            umared: None,
+            resolved_by: None,
+            extra: Default::default(),
+        }
+    }
+
+    fn event(markets: Vec<GammaMarket>) -> GammaEvent {
+        GammaEvent {
+            id: "e1".into(),
+            title: "T".into(),
+            description: String::new(),
+            slug: String::new(),
+            active: false,
+            closed: true,
+            enable_neg_risk: false,
+            neg_risk: false,
+            markets,
+            tags: Vec::new(),
+            volume: None,
+            liquidity: None,
+            start_date: None,
+            end_date: None,
+            created_at: None,
+            image: None,
+            icon: None,
+            extra: Default::default(),
+        }
+    }
+
+    #[test]
+    fn flags_mapped_closed_markets_once() {
+        let events = vec![event(vec![
+            market("0xaaa", true),  // mapped + closed -> flag
+            market("0xbbb", false), // mapped but still open -> skip
+            market("0xccc", true),  // closed but NOT mapped -> skip
+        ])];
+        let mut mirrors = HashMap::new();
+        mirrors.insert("0xaaa".to_string(), 10u32);
+        mirrors.insert("0xbbb".to_string(), 11u32);
+        let already = HashSet::new();
+
+        let out = pending_close_flags(&events, &mirrors, &already);
+        assert_eq!(out, vec![(10u32, "0xaaa".to_string())]);
+
+        // Once 0xaaa is flagged, it is not returned again.
+        let already: HashSet<String> = ["0xaaa".to_string()].into_iter().collect();
+        let out = pending_close_flags(&events, &mirrors, &already);
+        assert!(out.is_empty());
     }
 }

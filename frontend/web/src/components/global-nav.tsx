@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, type ChangeEvent } from "react";
+import { AccountChip } from "./auth/account-chip";
 import { BatchPill } from "./batch-pill";
+import { DevZoneNav } from "./dev/dev-zone-nav";
 
 type NavTab = { href: string; label: string; match: (path: string) => boolean };
 
@@ -105,6 +107,7 @@ export function GlobalNav() {
             </Link>
           );
         })}
+        <DevZoneNav />
       </nav>
 
       {/* Right side — search + batch pill + (placeholder) account chip */}
@@ -120,26 +123,7 @@ export function GlobalNav() {
           <NavSearch />
         </Suspense>
         <BatchPill />
-        <button
-          type="button"
-          style={{
-            height: 32,
-            padding: "0 var(--space-3)",
-            background: "var(--surface-2)",
-            border: "1px solid var(--border-2)",
-            borderRadius: "var(--radius-md)",
-            color: "var(--fg-2)",
-            fontFamily: "var(--font-mono)",
-            fontSize: "var(--fs-12)",
-            letterSpacing: "var(--track-wide)",
-            textTransform: "uppercase",
-            cursor: "not-allowed",
-          }}
-          disabled
-          title="Wallet — coming soon"
-        >
-          connect
-        </button>
+        <AccountChip />
       </div>
     </header>
   );

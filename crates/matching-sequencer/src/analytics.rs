@@ -46,8 +46,10 @@ impl AnalyticsState {
             order_stats_tracker: OrderStatsTracker::new(),
             cost_basis_tracker: CostBasisTracker::new(),
             first_deposit_ms: HashMap::new(),
-            equity_tracker: EquityTracker::new(),
-            account_event_log: AccountEventLog::new(),
+            equity_tracker: EquityTracker::with_retention(config.max_equity_points_per_account),
+            account_event_log: AccountEventLog::with_retention(
+                config.max_history_events_per_account,
+            ),
         }
     }
 
@@ -72,8 +74,11 @@ impl AnalyticsState {
             order_stats_tracker: OrderStatsTracker::restore(input.order_stats_tracker),
             cost_basis_tracker: CostBasisTracker::restore(input.cost_basis_tracker),
             first_deposit_ms: input.first_deposit_ms,
-            equity_tracker: EquityTracker::new(),
-            account_event_log: AccountEventLog::new(),
+            equity_tracker: EquityTracker::with_retention(config.max_equity_points_per_account),
+            account_event_log: AccountEventLog::with_retention_and_next_seq(
+                config.max_history_events_per_account,
+                input.history_event_next_seq,
+            ),
         }
     }
 
@@ -90,11 +95,23 @@ impl AnalyticsState {
             first_deposit_ms: self.first_deposit_snapshot(),
             fill_total_counts: self.total_fill_counts(),
             cost_basis_tracker: self.cost_basis_snapshot(),
+            history_event_next_seq: self.account_event_log.next_seq(),
+            equity_points_delta: self.equity_tracker.pending().to_vec(),
+            history_events_delta: self
+                .account_event_log
+                .pending()
+                .iter()
+                .map(crate::aggregates::StoredHistoryEvent::from_event)
+                .collect(),
         }
     }
 
     pub fn last_clearing_prices(&self) -> &HashMap<MarketId, Vec<Nanos>> {
         self.price_tracker.last_clearing_prices()
+    }
+
+    pub fn last_mark_prices(&self) -> &HashMap<MarketId, Vec<Nanos>> {
+        self.price_tracker.last_mark_prices()
     }
 
     pub fn market_volumes(&self) -> &HashMap<MarketId, u64> {
@@ -190,11 +207,11 @@ impl AnalyticsState {
     }
 
     pub fn liquidity_avg10(&self, market_id: MarketId) -> u64 {
-        self.liquidity_tracker.avg_last_n(market_id, 10)
+        self.liquidity_tracker.sum_last_n(market_id, 10)
     }
 
     pub fn all_liquidity_avg10(&self) -> HashMap<MarketId, u64> {
-        self.liquidity_tracker.all_avg_last_n(10)
+        self.liquidity_tracker.all_sum_last_n(10)
     }
 
     pub fn all_market_order_stats(&self) -> HashMap<MarketId, OrderStats> {
@@ -240,18 +257,25 @@ impl AnalyticsState {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn record_finalized_block(
         &mut self,
         fills: &[Fill],
         orders: &HashMap<u64, &Order>,
         clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
+        midpoints: &HashMap<MarketId, Nanos>,
         height: u64,
         timestamp_ms: u64,
         accounts: &AccountStore,
-    ) -> HashMap<MarketId, u64> {
-        let volume_by_market =
-            self.price_tracker
-                .record_block(fills, orders, clearing_prices, height, timestamp_ms);
+    ) -> (HashMap<MarketId, u64>, HashMap<MarketId, Vec<Nanos>>) {
+        let (volume_by_market, mark_prices) = self.price_tracker.record_block(
+            fills,
+            orders,
+            clearing_prices,
+            midpoints,
+            height,
+            timestamp_ms,
+        );
         self.fill_recorder.record_fills(
             fills,
             orders,
@@ -261,7 +285,7 @@ impl AnalyticsState {
             accounts,
             &mut self.account_event_log,
         );
-        volume_by_market
+        (volume_by_market, mark_prices)
     }
 
     pub fn record_trader_placement(
@@ -293,11 +317,11 @@ impl AnalyticsState {
         &mut self,
         order_book: &OrderBook,
         mm_orders: &[&Order],
-        clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
+        mark_prices: &HashMap<MarketId, Vec<Nanos>>,
         band_nanos: u64,
     ) {
         self.liquidity_tracker
-            .record_block(order_book, mm_orders, clearing_prices, band_nanos);
+            .record_block(order_book, mm_orders, mark_prices, band_nanos);
     }
 
     pub fn record_equity(
@@ -372,5 +396,29 @@ impl AnalyticsState {
     #[cfg(test)]
     pub(crate) fn price_tracker_mut(&mut self) -> &mut PriceTracker {
         &mut self.price_tracker
+    }
+
+    pub fn clear_offblock_pending(&mut self) {
+        self.equity_tracker.clear_pending();
+        self.account_event_log.clear_pending();
+    }
+
+    pub fn seed_equity_known(&mut self, ids: impl IntoIterator<Item = AccountId>) {
+        self.equity_tracker.seed_known(ids);
+    }
+
+    pub fn memory_stats(&self) -> crate::sequencer::AnalyticsMemoryStats {
+        crate::sequencer::AnalyticsMemoryStats {
+            equity_known_accounts: self.equity_tracker.known_account_count(),
+            equity_cached_accounts: self.equity_tracker.retained_account_count(),
+            equity_cached_points: self.equity_tracker.retained_point_count(),
+            equity_pending_points: self.equity_tracker.pending().len(),
+            equity_points_per_account_capacity: self.equity_tracker.retention_per_account(),
+            history_cached_accounts: self.account_event_log.retained_account_count(),
+            history_cached_events: self.account_event_log.retained_event_count(),
+            history_pending_events: self.account_event_log.pending().len(),
+            history_events_per_account_capacity: self.account_event_log.retention_per_account(),
+            history_event_next_seq: self.account_event_log.next_seq(),
+        }
     }
 }

@@ -116,9 +116,13 @@ fn build_market_response(args: BuildMarketResponseArgs<'_>) -> MarketResponse {
         orders_placed_total: args.orders_placed_total,
         orders_matched_total: args.orders_matched_total,
         orders_unmatched_total: args.orders_unmatched_total,
-        polymarket_condition_id: args.ref_data.and_then(|r| r.polymarket_condition_id.clone()),
+        polymarket_condition_id: args
+            .ref_data
+            .and_then(|r| r.polymarket_condition_id.clone()),
         event_start_date_ms: args.ref_data.and_then(|r| r.event_start_date_ms),
         market_start_date_ms: args.ref_data.and_then(|r| r.market_start_date_ms),
+        group_item_title: args.ref_data.and_then(|r| r.group_item_title.clone()),
+        closed: args.ref_data.and_then(|r| r.closed),
     }
 }
 
@@ -885,6 +889,12 @@ pub async fn set_market_metadata(
     }
     if let Some(v) = req.market_start_date_ms {
         entry.market_start_date_ms = Some(v);
+    }
+    if let Some(v) = req.group_item_title {
+        entry.group_item_title = Some(v);
+    }
+    if let Some(v) = req.closed {
+        entry.closed = Some(v);
     }
     save_market_ref_data(&ref_data, state.market_ref_data_path.as_deref());
     Ok(Json(serde_json::json!({"updated": true})))

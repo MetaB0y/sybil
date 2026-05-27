@@ -371,4 +371,12 @@ pub struct SetMarketMetadataRequest {
     /// Per-market start date (epoch ms). Display/sort only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub market_start_date_ms: Option<u64>,
+    /// Polymarket short outcome label (`groupItemTitle`, e.g. "May 15"). The
+    /// frontend renders this as the per-outcome name on multi-cards.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_item_title: Option<String>,
+    /// Whether Polymarket has closed this market. The frontend hides closed
+    /// markets from the listing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed: Option<bool>,
 }

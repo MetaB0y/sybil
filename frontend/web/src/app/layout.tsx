@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Syne, Inter, JetBrains_Mono } from "next/font/google";
+import { ConnectModal } from "@/components/auth/connect-modal";
 import { GlobalNav } from "@/components/global-nav";
 import { Providers } from "./providers";
 import "./globals.css";
@@ -41,6 +42,7 @@ export default function RootLayout({
         <Providers>
           <GlobalNav />
           <div style={{ paddingTop: "var(--nav-height)" }}>{children}</div>
+          <ConnectModal />
         </Providers>
       </body>
     </html>

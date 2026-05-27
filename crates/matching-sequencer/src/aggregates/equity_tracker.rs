@@ -16,7 +16,7 @@ pub const EQUITY_SAMPLE_INTERVAL_MS: u64 = 60_000;
 /// Max points retained per account (~30 days at one point/minute).
 pub const MAX_EQUITY_POINTS: usize = 43_200;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EquityPoint {
     pub height: u64,
     pub timestamp_ms: u64,
@@ -24,11 +24,20 @@ pub struct EquityPoint {
     pub deposited_nanos: i64,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct EquityTracker {
     points: HashMap<AccountId, VecDeque<EquityPoint>>,
     known: HashSet<AccountId>,
     last_sweep_ms: u64,
+    max_points: usize,
+    /// Points appended since the last `clear_pending`. Cleared after commit.
+    pending: Vec<(AccountId, EquityPoint)>,
+}
+
+impl Default for EquityTracker {
+    fn default() -> Self {
+        Self::with_retention(MAX_EQUITY_POINTS)
+    }
 }
 
 /// Portfolio value = balance + Σ qty·price (price defaults to $0.50 when a
@@ -53,7 +62,48 @@ fn portfolio_value_nanos(
 
 impl EquityTracker {
     pub fn new() -> Self {
-        Self::default()
+        Self::with_retention(MAX_EQUITY_POINTS)
+    }
+
+    pub fn with_retention(max_points: usize) -> Self {
+        Self {
+            points: HashMap::new(),
+            known: HashSet::new(),
+            last_sweep_ms: 0,
+            max_points,
+            pending: Vec::new(),
+        }
+    }
+
+    /// Seed the swept-account set on restore so periodic sweeps resume for
+    /// accounts that existed before restart (otherwise they'd be skipped until
+    /// they trade again).
+    pub fn seed_known(&mut self, ids: impl IntoIterator<Item = AccountId>) {
+        self.known.extend(ids);
+    }
+
+    pub fn pending(&self) -> &[(AccountId, EquityPoint)] {
+        &self.pending
+    }
+
+    pub fn clear_pending(&mut self) {
+        self.pending.clear();
+    }
+
+    pub fn known_account_count(&self) -> usize {
+        self.known.len()
+    }
+
+    pub fn retained_account_count(&self) -> usize {
+        self.points.len()
+    }
+
+    pub fn retained_point_count(&self) -> usize {
+        self.points.values().map(VecDeque::len).sum()
+    }
+
+    pub fn retention_per_account(&self) -> usize {
+        self.max_points
     }
 
     /// Record equity at block finalize. `touched` = accounts that traded this
@@ -88,10 +138,13 @@ impl EquityTracker {
                 portfolio_value_nanos: portfolio_value_nanos(account, prices),
                 deposited_nanos: account.total_deposited,
             };
-            let ring = self.points.entry(aid).or_default();
-            ring.push_back(point);
-            while ring.len() > MAX_EQUITY_POINTS {
-                ring.pop_front();
+            self.pending.push((aid, point));
+            if self.max_points > 0 {
+                let ring = self.points.entry(aid).or_default();
+                ring.push_back(point);
+                while ring.len() > self.max_points {
+                    ring.pop_front();
+                }
             }
         }
     }

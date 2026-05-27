@@ -194,6 +194,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         block_history_capacity: config.block_history_capacity,
         max_price_history_points_per_market: config.max_price_history_points_per_market,
         max_fill_history_per_account: config.max_fill_history_per_account,
+        max_equity_points_per_account: config.max_equity_points_per_account,
+        max_history_events_per_account: config.max_history_events_per_account,
         actor_queue_warn_depth: config.actor_queue_warn_depth,
         actor_queue_error_depth: config.actor_queue_error_depth,
         liquidity_band_nanos: config.liquidity_band_nanos,

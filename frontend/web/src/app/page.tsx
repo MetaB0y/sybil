@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useMemo } from "react";
+import { Suspense, useCallback, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { BinaryCard } from "@/components/binary-card";
 import { ClearingTicker } from "@/components/clearing-ticker";
@@ -10,29 +10,20 @@ import {
   parseSortKey,
   type SortKey,
 } from "@/components/markets-filter-bar";
-import { useMarketsList, type Market } from "@/lib/markets/use-markets";
+import { pickDisplayCategory } from "@/lib/categorize";
+import {
+  useMarketsList,
+  eventVisibleOnIndex,
+  isClosed,
+  type Market,
+} from "@/lib/markets/use-markets";
+import { useEventTradersMap } from "@/lib/markets/use-event-traders";
 import { selectPricesByMarketId, useStore } from "@/lib/store";
+import { BLOCK_INTERVAL_MS } from "@/lib/constants";
+import { selectIndexCards, type CardItem } from "@/lib/markets/select-index-cards";
 
-const MULTI_THRESHOLD = 5;
-
-type CardItem =
-  | {
-      kind: "multi";
-      name: string;
-      markets: Market[];
-      volumeNanos: bigint;
-      sortKey: string;
-      expiryMs: number;
-      createdMs: number;
-    }
-  | {
-      kind: "binary";
-      market: Market;
-      volumeNanos: bigint;
-      sortKey: string;
-      expiryMs: number;
-      createdMs: number;
-    };
+/** Cards (events) shown per page on the markets index. */
+const PAGE_SIZE = 15;
 
 export default function MarketsPage() {
   return (
@@ -45,21 +36,40 @@ export default function MarketsPage() {
 function MarketsPageInner() {
   const { bundle, isPending, error } = useMarketsList();
   const prices = useStore(selectPricesByMarketId);
-  const { query, sort, setSort } = useFilterParams();
+
+  // The clearing ticker is an active-board readout — exclude closed markets,
+  // which the bundle now retains for detail/multi-card use.
+  const openById = useMemo(() => {
+    if (!bundle) return null;
+    const m = new Map<number, Market>();
+    for (const [id, mk] of bundle.byId) {
+      if (mk.closed !== true) m.set(id, mk);
+    }
+    return m;
+  }, [bundle]);
+
+  const { query, sort, setSort, category, showClosed, setHideClosed } =
+    useFilterParams();
 
   const items = useMemo(() => {
     if (!bundle) return null;
     const all: CardItem[] = [];
     for (const g of bundle.groups) {
-      if (g.markets.length > MULTI_THRESHOLD) {
+      if (g.markets.length >= 2) {
+        // Multi-outcome event. Closed only when EVERY outcome is closed; a
+        // partially-closed event stays open (its closed rows render greyed).
+        const first = g.markets[0]!;
+        const primary = pickDisplayCategory(first.categories, first.category).primary;
         all.push({
           kind: "multi",
           name: g.name,
+          eventId: g.eventId,
           markets: g.markets,
           volumeNanos: sumVolume(g.markets),
           sortKey: g.name.toLowerCase(),
-          expiryMs: minExpiry(g.markets),
-          createdMs: maxCreated(g.markets),
+          createdMs: eventNewnessMs(g.markets),
+          primaryCategory: primary,
+          closed: !eventVisibleOnIndex(g.markets),
         });
       } else {
         for (const m of g.markets) {
@@ -68,8 +78,9 @@ function MarketsPageInner() {
             market: m,
             volumeNanos: m.volume_nanos ? BigInt(m.volume_nanos) : 0n,
             sortKey: m.name.toLowerCase(),
-            expiryMs: m.expiry_timestamp_ms ?? Number.POSITIVE_INFINITY,
-            createdMs: m.created_at_ms ?? 0,
+            createdMs: marketNewnessMs(m),
+            primaryCategory: pickDisplayCategory(m.categories, m.category).primary,
+            closed: isClosed(m),
           });
         }
       }
@@ -80,41 +91,81 @@ function MarketsPageInner() {
         market: m,
         volumeNanos: m.volume_nanos ? BigInt(m.volume_nanos) : 0n,
         sortKey: m.name.toLowerCase(),
-        expiryMs: m.expiry_timestamp_ms ?? Number.POSITIVE_INFINITY,
         createdMs: m.created_at_ms ?? 0,
+        primaryCategory: pickDisplayCategory(m.categories, m.category).primary,
+        closed: isClosed(m),
       });
     }
     return all;
   }, [bundle]);
 
+  // Event ids for MultiCard items — the "traders" sort ranks events by their
+  // union trader count, fetched per event. Gated to that sort so the fan-out
+  // of requests only fires when the user actually picks it.
+  const multiEventIds = useMemo(
+    () =>
+      items
+        ? items.flatMap((it) => (it.kind === "multi" ? [it.eventId] : []))
+        : [],
+    [items]
+  );
+  const eventTradersMap = useEventTradersMap(
+    multiEventIds,
+    sort === "traders"
+  );
+
   const filtered = useMemo(() => {
     if (!items) return null;
-    const q = query.trim().toLowerCase();
-    let out = items;
-    if (q) {
-      out = out.filter((it) => it.sortKey.includes(q));
-    }
-    out = [...out];
-    if (sort === "closing") {
-      out.sort((a, b) => a.expiryMs - b.expiryMs);
-    } else if (sort === "new") {
-      out.sort((a, b) => b.createdMs - a.createdMs);
-    } else {
-      // volume desc; tie-break by size desc. "topmovers" falls here for now
-      // (it's a disabled chip — never actually selected from the UI).
-      out.sort((a, b) => {
-        if (a.volumeNanos !== b.volumeNanos) {
-          return a.volumeNanos < b.volumeNanos ? 1 : -1;
-        }
-        return sizeOf(b) - sizeOf(a);
-      });
-    }
-    return out;
-  }, [items, query, sort]);
+    return selectIndexCards(items, {
+      query,
+      sort,
+      category,
+      showClosed,
+      eventTraders: eventTradersMap,
+    });
+  }, [items, query, sort, category, showClosed, eventTradersMap]);
+
+  const [page, setPage] = useState(1);
+
+  // Reset to the first page whenever the active filter set changes. Done
+  // during render (not in an effect) per the React "adjust state on prop
+  // change" pattern — avoids an extra commit.
+  const filterKey = `${query} ${sort} ${category ?? ""} ${showClosed}`;
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
+  if (filterKey !== prevFilterKey) {
+    setPrevFilterKey(filterKey);
+    setPage(1);
+  }
+
+  const totalPages = filtered
+    ? Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+    : 1;
+  // Clamp: a filter change can shrink the result set below the current page.
+  const currentPage = Math.min(page, totalPages);
+  const paged = filtered
+    ? filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+    : null;
+
+  const goToPage = useCallback((next: number) => {
+    setPage(next);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+
+  // Header counts — same "{markets} markets · {events} events" shape whether or
+  // not a filter is active. Derived from `filtered` (≡ all cards when nothing
+  // is filtered), so picking a category just narrows both numbers instead of
+  // switching to a different "N of M cards" wording. Summing markets per card
+  // equals bundle.total when unfiltered (every market lives in exactly one card).
+  const shownEvents = filtered?.length ?? 0;
+  const shownMarkets =
+    filtered?.reduce(
+      (n, it) => n + (it.kind === "multi" ? it.markets.length : 1),
+      0,
+    ) ?? 0;
 
   return (
     <>
-      {bundle && <ClearingTicker marketsById={bundle.byId} />}
+      {openById && <ClearingTicker marketsById={openById} />}
       <main
         style={{
           width: "100%",
@@ -135,8 +186,8 @@ function MarketsPageInner() {
             style={{
               fontFamily: "var(--font-display)",
               fontWeight: 600,
-              fontSize: "var(--fs-32)",
-              lineHeight: "var(--lh-32)",
+              fontSize: "var(--fs-56)",
+              lineHeight: "var(--lh-56)",
               letterSpacing: "var(--track-tight)",
               margin: 0,
               color: "var(--fg-1)",
@@ -147,13 +198,16 @@ function MarketsPageInner() {
           <p className="text-annotation">
             {bundle == null
               ? "loading…"
-              : filtered && filtered.length !== items?.length
-                ? `${filtered.length} of ${bundle.total} events · uniform clearing every 2s`
-                : `${bundle.total} events · ${bundle.groups.length} groups · uniform clearing every 2s`}
+              : `${shownMarkets} markets · ${shownEvents} events · uniform clearing every ${BLOCK_INTERVAL_MS / 1000}s`}
           </p>
         </header>
 
-        <MarketsFilterBar sort={sort} onSortChange={setSort} />
+        <MarketsFilterBar
+          sort={sort}
+          onSortChange={setSort}
+          hideClosed={!showClosed}
+          onHideClosedChange={setHideClosed}
+        />
 
         {isPending && <Placeholder>loading markets…</Placeholder>}
         {error && <Placeholder error>error: {String(error)}</Placeholder>}
@@ -162,31 +216,40 @@ function MarketsPageInner() {
           <Placeholder>no events match these filters.</Placeholder>
         )}
 
-        {filtered && filtered.length > 0 && (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-              gap: "var(--space-4)",
-            }}
-          >
-            {filtered.map((it) =>
-              it.kind === "multi" ? (
-                <MultiCard
-                  key={`g-${it.name}`}
-                  groupName={it.name}
-                  markets={it.markets}
-                  prices={prices}
-                />
-              ) : (
-                <BinaryCard
-                  key={`m-${it.market.market_id}`}
-                  market={it.market}
-                  price={prices[it.market.market_id]}
-                />
-              )
+        {paged && paged.length > 0 && (
+          <>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                gap: "var(--space-4)",
+              }}
+            >
+              {paged.map((it) =>
+                it.kind === "multi" ? (
+                  <MultiCard
+                    key={`g-${it.name}`}
+                    groupName={it.name}
+                    markets={it.markets}
+                    prices={prices}
+                  />
+                ) : (
+                  <BinaryCard
+                    key={`m-${it.market.market_id}`}
+                    market={it.market}
+                    price={prices[it.market.market_id]}
+                  />
+                )
+              )}
+            </div>
+            {totalPages > 1 && (
+              <Pagination
+                page={currentPage}
+                totalPages={totalPages}
+                onChange={goToPage}
+              />
             )}
-          </div>
+          </>
         )}
       </main>
     </>
@@ -205,9 +268,11 @@ function useFilterParams() {
 
   const query = searchParams.get("q") ?? "";
   const sort = parseSortKey(searchParams.get("sort"));
+  const category = searchParams.get("category");
+  const showClosed = searchParams.get("closed") === "show";
 
   const update = useCallback(
-    (next: { q?: string; sort?: SortKey }) => {
+    (next: { q?: string; sort?: SortKey; showClosed?: boolean }) => {
       const params = new URLSearchParams(searchParams.toString());
       if (next.q !== undefined) {
         if (next.q) params.set("q", next.q);
@@ -216,6 +281,11 @@ function useFilterParams() {
       if (next.sort !== undefined) {
         if (next.sort !== "volume") params.set("sort", next.sort);
         else params.delete("sort");
+      }
+      if (next.showClosed !== undefined) {
+        // Default is hide-closed; only write the param when showing them.
+        if (next.showClosed) params.set("closed", "show");
+        else params.delete("closed");
       }
       const qs = params.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
@@ -226,12 +296,11 @@ function useFilterParams() {
   return {
     query,
     sort,
+    category,
+    showClosed,
     setSort: (s: SortKey) => update({ sort: s }),
+    setHideClosed: (hide: boolean) => update({ showClosed: !hide }),
   };
-}
-
-function sizeOf(item: CardItem): number {
-  return item.kind === "multi" ? item.markets.length : 1;
 }
 
 function sumVolume(markets: Market[]): bigint {
@@ -242,24 +311,96 @@ function sumVolume(markets: Market[]): bigint {
   return total;
 }
 
-function minExpiry(markets: Market[]): number {
-  let min = Number.POSITIVE_INFINITY;
-  for (const m of markets) {
-    if (m.expiry_timestamp_ms != null && m.expiry_timestamp_ms < min) {
-      min = m.expiry_timestamp_ms;
-    }
-  }
-  return min;
+/**
+ * "New" sort key: the most recent of the Polymarket event-start and
+ * market-start dates, so a brand-new event AND a newly-added outcome inside an
+ * existing event both surface. `created_at_ms` (the mirror's admit time, which
+ * clusters at sync) is only a last-resort fallback.
+ */
+function marketNewnessMs(m: Market): number {
+  return Math.max(
+    m.event_start_date_ms ?? 0,
+    m.market_start_date_ms ?? 0,
+    m.created_at_ms ?? 0
+  );
 }
 
-function maxCreated(markets: Market[]): number {
+function eventNewnessMs(markets: Market[]): number {
   let max = 0;
-  for (const m of markets) {
-    if (m.created_at_ms != null && m.created_at_ms > max) {
-      max = m.created_at_ms;
-    }
-  }
+  for (const m of markets) max = Math.max(max, marketNewnessMs(m));
   return max;
+}
+
+function Pagination({
+  page,
+  totalPages,
+  onChange,
+}: {
+  page: number;
+  totalPages: number;
+  onChange: (next: number) => void;
+}) {
+  return (
+    <div
+      className="text-mono"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "var(--space-4)",
+        padding: "var(--space-4) 0",
+        fontSize: "11px",
+        textTransform: "uppercase",
+        letterSpacing: "var(--track-wide)",
+      }}
+    >
+      <PageButton disabled={page <= 1} onClick={() => onChange(page - 1)}>
+        ← prev
+      </PageButton>
+      <span style={{ color: "var(--fg-3)" }}>
+        page {page} / {totalPages}
+      </span>
+      <PageButton
+        disabled={page >= totalPages}
+        onClick={() => onChange(page + 1)}
+      >
+        next →
+      </PageButton>
+    </div>
+  );
+}
+
+function PageButton({
+  children,
+  disabled,
+  onClick,
+}: {
+  children: React.ReactNode;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="text-mono"
+      style={{
+        padding: "var(--space-2) var(--space-3)",
+        fontSize: "11px",
+        textTransform: "uppercase",
+        letterSpacing: "var(--track-wide)",
+        color: disabled ? "var(--fg-4)" : "var(--fg-1)",
+        background: "var(--surface-1)",
+        border: "1px solid var(--border-1)",
+        borderRadius: "var(--radius-md)",
+        cursor: disabled ? "default" : "pointer",
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      {children}
+    </button>
+  );
 }
 
 function Placeholder({

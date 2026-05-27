@@ -1,0 +1,134 @@
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import { api } from "../api/client";
+import type {
+  DevMarket,
+  DevMarketGroup,
+  DevPendingOrder,
+  DevAccountPortfolio,
+  DevActivityOverview,
+  DevOpenBatch,
+  DevBotsResponse,
+} from "./types";
+
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE ?? "https://172-104-31-54.nip.io";
+
+/** Raw fetch for endpoints/params not modelled in the generated schema. */
+async function rawGet<T>(path: string): Promise<T | null> {
+  try {
+    const r = await fetch(API_BASE + path);
+    if (!r.ok) return null;
+    return (await r.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+/** /v1/markets/summary — markets with volume/liquidity/24h fields. */
+export function useDevMarkets() {
+  return useQuery({
+    queryKey: ["dev", "markets-summary"],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/v1/markets/summary");
+      if (error || !data) throw new Error("/v1/markets/summary failed");
+      return data as unknown as DevMarket[];
+    },
+    refetchInterval: 10_000,
+  });
+}
+
+export function useDevGroups() {
+  return useQuery({
+    queryKey: ["dev", "market-groups"],
+    queryFn: async () => (await rawGet<DevMarketGroup[]>("/v1/markets/groups")) ?? [],
+    staleTime: 60_000,
+  });
+}
+
+export function useDevPendingOrders() {
+  return useQuery({
+    queryKey: ["dev", "pending-orders"],
+    queryFn: async () => (await rawGet<DevPendingOrder[]>("/v1/orders/pending")) ?? [],
+    refetchInterval: 10_000,
+  });
+}
+
+/** Account portfolios for ids 0..47 plus any id seen in pending orders. */
+export function useDevAccounts(extraIds: number[] = []) {
+  return useQuery({
+    queryKey: ["dev", "accounts", [...extraIds].sort((a, b) => a - b)],
+    queryFn: async () => {
+      const ids = Array.from(
+        new Set([...Array.from({ length: 48 }, (_, i) => i), ...extraIds])
+      ).sort((a, b) => a - b);
+      const rows = await Promise.all(
+        ids.map((id) => rawGet<DevAccountPortfolio>(`/v1/accounts/${id}/portfolio`))
+      );
+      return rows
+        .filter((r): r is DevAccountPortfolio => r != null)
+        .sort((a, b) => a.account_id - b.account_id);
+    },
+    refetchInterval: 60_000,
+  });
+}
+
+export function useDevActivityOverview() {
+  return useQuery({
+    queryKey: ["dev", "activity-overview"],
+    queryFn: async () =>
+      (await rawGet<DevActivityOverview>("/v1/activity/overview")) ?? {},
+    refetchInterval: 10_000,
+  });
+}
+
+export function useDevBots() {
+  return useQuery({
+    queryKey: ["dev", "bots-decisions"],
+    queryFn: async () => {
+      const data = await rawGet<DevBotsResponse>("/v1/bots/decisions?limit=80");
+      return data ?? { db_available: false, error: "failed to load bot decision feed" };
+    },
+    refetchInterval: 30_000,
+  });
+}
+
+/** On-demand: open-batch indicative snapshot for one market. */
+export function useDevOpenBatch(marketId: number) {
+  return useQuery({
+    queryKey: ["dev", "open-batch", marketId],
+    queryFn: async () =>
+      (await rawGet<DevOpenBatch>(`/v1/markets/${marketId}/open-batch`)) ?? {},
+    enabled: marketId > 0,
+  });
+}
+
+/** On-demand: a single account's portfolio (Aggregates cost-basis panel). */
+export function useDevPortfolio(accountId: number) {
+  return useQuery({
+    queryKey: ["dev", "portfolio", accountId],
+    queryFn: async () =>
+      (await rawGet<DevAccountPortfolio>(`/v1/accounts/${accountId}/portfolio`)) ?? null,
+    enabled: accountId > 0,
+  });
+}
+
+/** Recent fills per account, for the Participants table fill counts. */
+export function useDevAccountFills(ids: number[]) {
+  const sorted = [...new Set(ids)].slice(0, 24).sort((a, b) => a - b);
+  return useQuery({
+    queryKey: ["dev", "account-fills", sorted],
+    queryFn: async () => {
+      const entries = await Promise.all(
+        sorted.map(async (id) => {
+          const rows = await rawGet<unknown[]>(`/v1/accounts/${id}/fills?limit=25`);
+          return [id, rows ?? []] as const;
+        })
+      );
+      return Object.fromEntries(entries) as Record<number, unknown[]>;
+    },
+    enabled: sorted.length > 0,
+    refetchInterval: 60_000,
+  });
+}

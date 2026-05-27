@@ -14,31 +14,32 @@
  */
 
 /**
- * Priority order: highest first.
+ * Priority order: strongest first (the strongest category overrides every
+ * other when a market matches several).
  *
- * For a market with `categories = ["Sports", "Politics"]`, we walk this list
+ * For a market with `categories = ["Crypto", "Politics"]`, we walk this list
  * top-to-bottom and pick the first bucket that's in the market's list. The
  * other matched categories are still accessible (`pickDisplayCategory` also
  * returns them as `extras`) — useful if we ever want a tooltip or
  * multi-chip layout.
  */
 export const CATEGORY_PRIORITY: readonly string[] = [
-  "Politics",
-  "Elections",
-  "Geopolitics",
-  "AI",
-  "Tech",
-  "Economy",
-  "Culture",
-  "Science",
-  "World",
-  "Finance",
-  "Business",
-  "Weather",
-  "Mentions",
-  "Sports",
-  "Crypto",
   "Commodities",
+  "Crypto",
+  "Sports",
+  "Mentions",
+  "Weather",
+  "Finance",
+  "AI",
+  "Geopolitics",
+  "Science",
+  "Culture",
+  "Tech",
+  "Business",
+  "Elections",
+  "Economy",
+  "Politics",
+  "World",
 ] as const;
 
 export type Category = (typeof CATEGORY_PRIORITY)[number];

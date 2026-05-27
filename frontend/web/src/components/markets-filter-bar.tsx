@@ -2,25 +2,10 @@
 
 import { CategoryTabs } from "./category-tabs";
 
-export type SortKey =
-  | "volume"
-  | "topmovers"
-  | "closing"
-  | "new";
+import type { SortKey } from "@/lib/markets/sort";
 
-export const SORT_KEYS: readonly SortKey[] = [
-  "volume",
-  "topmovers",
-  "closing",
-  "new",
-] as const;
-
-export function parseSortKey(raw: string | null | undefined): SortKey {
-  if (raw && (SORT_KEYS as readonly string[]).includes(raw)) {
-    return raw as SortKey;
-  }
-  return "volume";
-}
+export { SORT_KEYS, parseSortKey } from "@/lib/markets/sort";
+export type { SortKey } from "@/lib/markets/sort";
 
 type ChipDef = {
   key: SortKey;
@@ -31,22 +16,23 @@ type ChipDef = {
 
 const SORTS: ChipDef[] = [
   { key: "volume", label: "Volume" },
-  {
-    key: "topmovers",
-    label: "Top movers",
-    disabled: true,
-    title: "top movers — needs 24h delta from backend",
-  },
-  { key: "closing", label: "Closing soon" },
   { key: "new", label: "New" },
+  { key: "traders", label: "Traders" },
 ];
 
 type Props = {
   sort: SortKey;
   onSortChange: (s: SortKey) => void;
+  hideClosed: boolean;
+  onHideClosedChange: (hide: boolean) => void;
 };
 
-export function MarketsFilterBar({ sort, onSortChange }: Props) {
+export function MarketsFilterBar({
+  sort,
+  onSortChange,
+  hideClosed,
+  onHideClosedChange,
+}: Props) {
   return (
     <div
       style={{
@@ -106,6 +92,43 @@ export function MarketsFilterBar({ sort, onSortChange }: Props) {
             </button>
           );
         })}
+        <span
+          aria-hidden
+          style={{
+            width: 1,
+            height: 16,
+            background: "var(--border-2)",
+            margin: "0 var(--space-1)",
+          }}
+        />
+        <button
+          type="button"
+          aria-pressed={hideClosed}
+          onClick={() => onHideClosedChange(!hideClosed)}
+          title={
+            hideClosed
+              ? "Closed markets hidden — click to show them greyed out"
+              : "Closed markets shown — click to hide"
+          }
+          style={{
+            height: 26,
+            padding: "0 var(--space-3)",
+            background: hideClosed ? "var(--surface-2)" : "transparent",
+            color: hideClosed ? "var(--fg-1)" : "var(--fg-3)",
+            border: `1px solid ${
+              hideClosed ? "var(--border-3)" : "var(--border-2)"
+            }`,
+            borderRadius: "var(--radius-sm)",
+            fontFamily: "var(--font-mono)",
+            fontSize: "11px",
+            letterSpacing: "var(--track-wide)",
+            textTransform: "uppercase",
+            cursor: "pointer",
+            transition: "all var(--dur-fast) var(--ease-standard)",
+          }}
+        >
+          Hide closed
+        </button>
       </div>
     </div>
   );
