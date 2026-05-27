@@ -291,6 +291,37 @@ groups:
           summary: "sybil-api memory is near its container limit"
           description: "sybil-api RSS is above 800 MiB and close to the 900 MiB container limit (current: {{ $value | humanize1024 }}B)."
 
+      - alert: SybilAnalyticsHotFallbackUnexpected
+        expr: |
+          (
+            sybil_analytics_equity_points_per_account_capacity == 0
+            and sybil_analytics_equity_cached_points > 0
+          )
+          or
+          (
+            sybil_analytics_history_events_per_account_capacity == 0
+            and sybil_analytics_history_cached_events > 0
+          )
+        for: 5m
+        labels:
+          severity: warning
+          component: sequencer
+        annotations:
+          summary: "Analytics hot fallback is retaining rows"
+          description: "The prod analytics serving fallback is configured with zero retention, but cached equity/history rows are present. Account history/equity should normally be served from redb."
+
+      - alert: SybilAnalyticsPendingRowsHigh
+        expr: |
+          sybil_analytics_equity_pending_points > 5000
+          or sybil_analytics_history_pending_events > 5000
+        for: 5m
+        labels:
+          severity: warning
+          component: sequencer
+        annotations:
+          summary: "Analytics pending row buffer is high"
+          description: "The in-memory equity/history delta buffer is unusually large. This can mean persistence is not committing/clearing, or a single block is producing too many derived analytics rows."
+
       - alert: HostMemoryLow
         expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
         for: 10m

@@ -37,6 +37,20 @@ use crate::system_event::SystemEvent;
 /// i.e. effectively never expires (GTC).
 pub const DEFAULT_ORDER_TTL_BLOCKS: u64 = 63_072_000;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AnalyticsMemoryStats {
+    pub equity_known_accounts: usize,
+    pub equity_cached_accounts: usize,
+    pub equity_cached_points: usize,
+    pub equity_pending_points: usize,
+    pub equity_points_per_account_capacity: usize,
+    pub history_cached_accounts: usize,
+    pub history_cached_events: usize,
+    pub history_pending_events: usize,
+    pub history_events_per_account_capacity: usize,
+    pub history_event_next_seq: u64,
+}
+
 /// All tunable parameters for a [`BlockSequencer`] and its surrounding actor.
 ///
 /// Construct via [`SequencerConfig::default()`] for sensible defaults, then
@@ -1005,6 +1019,10 @@ impl BlockSequencer {
     ) -> Vec<crate::aggregates::HistoryEvent> {
         self.analytics
             .account_history(account_id, limit, before, category)
+    }
+
+    pub fn analytics_memory_stats(&self) -> AnalyticsMemoryStats {
+        self.analytics.memory_stats()
     }
 
     pub fn record_trader_placement_analytics(
@@ -3379,6 +3397,7 @@ mod tests {
                 first_deposit_ms: HashMap::new(),
                 fill_total_counts: HashMap::new(),
                 cost_basis_tracker: Default::default(),
+                history_event_next_seq: 0,
             },
         };
 
@@ -4629,7 +4648,7 @@ mod tests {
         // Sleep a tiny bit so the second SystemTime::now() differs.
         std::thread::sleep(std::time::Duration::from_millis(2));
 
-        seq.fund_account(aid, 1 * NANOS_PER_DOLLAR as i64).unwrap();
+        seq.fund_account(aid, NANOS_PER_DOLLAR as i64).unwrap();
         let ts_second = seq
             .first_deposit_ms(aid)
             .expect("first_deposit_ms must persist after a second deposit");

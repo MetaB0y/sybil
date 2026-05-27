@@ -90,6 +90,22 @@ impl EquityTracker {
         self.pending.clear();
     }
 
+    pub fn known_account_count(&self) -> usize {
+        self.known.len()
+    }
+
+    pub fn retained_account_count(&self) -> usize {
+        self.points.len()
+    }
+
+    pub fn retained_point_count(&self) -> usize {
+        self.points.values().map(VecDeque::len).sum()
+    }
+
+    pub fn retention_per_account(&self) -> usize {
+        self.max_points
+    }
+
     /// Record equity at block finalize. `touched` = accounts that traded this
     /// block (always sampled); on a periodic sweep, every known account is
     /// sampled too.

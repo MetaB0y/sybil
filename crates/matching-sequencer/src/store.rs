@@ -220,6 +220,7 @@ const KEY_NEXT_MARKET_ID: &str = "next_market_id";
 const KEY_NEXT_ORDER_ID: &str = "next_order_id";
 const KEY_ACCOUNT_STATE_HEIGHT: &str = "account_state_height";
 const KEY_ACCOUNT_STATE_SLOT: &str = "account_state_slot";
+const KEY_HISTORY_EVENT_NEXT_SEQ: &str = "history_event_next_seq";
 
 const STORE_LAYOUT_VERSION: u64 = 1;
 
@@ -244,6 +245,11 @@ fn history_event_key(account_id: AccountId, block_height: u64, seq: u64) -> [u8;
     k[8..16].copy_from_slice(&block_height.to_be_bytes());
     k[16..].copy_from_slice(&seq.to_be_bytes());
     k
+}
+
+fn seq_from_history_event_key(key: &[u8]) -> Option<u64> {
+    let seq_bytes: [u8; 8] = key.get(16..24)?.try_into().ok()?;
+    Some(u64::from_be_bytes(seq_bytes))
 }
 
 fn account_id_from_fill_history_key(key: &[u8]) -> Option<AccountId> {
@@ -317,6 +323,7 @@ pub struct AnalyticsRestoredState {
     pub first_deposit_ms: HashMap<AccountId, u64>,
     pub fill_total_counts: HashMap<AccountId, u64>,
     pub cost_basis_tracker: CostBasisTrackerSnapshot,
+    pub history_event_next_seq: u64,
 }
 
 /// State restored from the store on startup.
@@ -365,6 +372,7 @@ pub struct AnalyticsSnapshot<'a> {
     pub first_deposit_ms: HashMap<AccountId, u64>,
     pub fill_total_counts: HashMap<AccountId, u64>,
     pub cost_basis_tracker: CostBasisTrackerSnapshot,
+    pub history_event_next_seq: u64,
     pub equity_points_delta: Vec<(AccountId, crate::aggregates::EquityPoint)>,
     pub history_events_delta: Vec<crate::aggregates::StoredHistoryEvent>,
 }
@@ -629,6 +637,13 @@ impl Store {
                 let bytes = rmp_serde::to_vec(ev)?;
                 hist.insert(key.as_slice(), bytes.as_slice())?;
             }
+        }
+        {
+            let mut counters = txn.open_table(COUNTERS)?;
+            counters.insert(
+                KEY_HISTORY_EVENT_NEXT_SEQ,
+                snapshot.analytics.history_event_next_seq,
+            )?;
         }
 
         // Data feeds
@@ -1158,6 +1173,29 @@ impl Store {
             }
         };
 
+        let history_event_next_seq = {
+            let counters = txn.open_table(COUNTERS)?;
+            counters
+                .get(KEY_HISTORY_EVENT_NEXT_SEQ)?
+                .map(|value| value.value())
+        };
+        let history_event_next_seq = match history_event_next_seq {
+            Some(seq) => seq,
+            None => {
+                let table = txn.open_table(HISTORY_EVENTS)?;
+                let mut max_seq = None;
+                for entry in table.iter()? {
+                    let (key, _) = entry?;
+                    let Some(seq) = seq_from_history_event_key(key.value()) else {
+                        warn!("invalid history event key in store, skipping for next_seq recovery");
+                        continue;
+                    };
+                    max_seq = Some(max_seq.map_or(seq, |current: u64| current.max(seq)));
+                }
+                max_seq.map_or(0, |seq| seq.saturating_add(1))
+            }
+        };
+
         info!(
             height = recovery_metadata.height,
             accounts = num_accounts,
@@ -1201,6 +1239,7 @@ impl Store {
                 first_deposit_ms,
                 fill_total_counts,
                 cost_basis_tracker,
+                history_event_next_seq,
             },
             bridge_state,
             pending_l1_deposits,
@@ -1798,6 +1837,7 @@ mod tests {
                     first_deposit_ms: HashMap::new(),
                     fill_total_counts: HashMap::new(),
                     cost_basis_tracker: Default::default(),
+                    history_event_next_seq: 0,
                     equity_points_delta: Vec::new(),
                     history_events_delta: Vec::new(),
                 },
@@ -1834,8 +1874,47 @@ mod tests {
                     first_deposit_ms: HashMap::new(),
                     fill_total_counts: HashMap::new(),
                     cost_basis_tracker: Default::default(),
+                    history_event_next_seq: 0,
                     equity_points_delta: Vec::new(),
                     history_events_delta: Vec::new(),
+                },
+                bridge_state: &self.bridge_state,
+                resting_orders: Vec::new(),
+            }
+        }
+
+        fn snapshot_with_history_events<'a>(
+            &'a self,
+            accounts: &'a AccountStore,
+            markets: &'a MarketSet,
+            lifecycle: &'a MarketLifecycle,
+            header: &'a BlockHeader,
+            history_event_next_seq: u64,
+            history_events_delta: Vec<crate::aggregates::StoredHistoryEvent>,
+        ) -> SequencerSnapshot<'a> {
+            SequencerSnapshot {
+                accounts,
+                markets,
+                market_groups: &[],
+                lifecycle,
+                header,
+                next_order_id: 1,
+                pubkey_registry: &self.empty_pk,
+                analytics: AnalyticsSnapshot {
+                    last_clearing_prices: &self.empty_prices,
+                    market_volumes: &self.empty_volumes,
+                    account_fills: Vec::new(),
+                    trader_tracker: Default::default(),
+                    price_tracker_volume: Default::default(),
+                    price_tracker_clearing_history: Default::default(),
+                    liquidity_tracker: Default::default(),
+                    order_stats_tracker: Default::default(),
+                    first_deposit_ms: HashMap::new(),
+                    fill_total_counts: HashMap::new(),
+                    cost_basis_tracker: Default::default(),
+                    history_event_next_seq,
+                    equity_points_delta: Vec::new(),
+                    history_events_delta,
                 },
                 bridge_state: &self.bridge_state,
                 resting_orders: Vec::new(),
@@ -1936,6 +2015,67 @@ mod tests {
         let restored = store.load_state().await.unwrap().unwrap();
         assert_eq!(restored.height, 2);
         assert_eq!(restored.accounts.get(account_id).unwrap().balance, 200);
+    }
+
+    #[tokio::test]
+    async fn test_store_restores_history_event_next_seq() {
+        use crate::aggregates::{HistoryEvent, HistoryKind, StoredHistoryEvent};
+
+        let path = temp_db_path("store-history-next-seq");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+        let lifecycle = MarketLifecycle::new(oracle);
+        let markets = MarketSet::new();
+        let env = TestEnv::new();
+
+        let mut accounts = AccountStore::new();
+        let account_id = accounts.create_account(100);
+        let header = sample_header(1);
+        let mut placed = HistoryEvent::new(
+            account_id,
+            HistoryKind::Placed,
+            header.height,
+            header.timestamp_ms,
+        );
+        placed.seq = 0;
+        let mut filled = HistoryEvent::new(
+            account_id,
+            HistoryKind::Filled,
+            header.height,
+            header.timestamp_ms,
+        );
+        filled.seq = 1;
+        let history_events_delta = vec![
+            StoredHistoryEvent::from_event(&placed),
+            StoredHistoryEvent::from_event(&filled),
+        ];
+
+        store
+            .save_block(env.snapshot_with_history_events(
+                &accounts,
+                &markets,
+                &lifecycle,
+                &header,
+                2,
+                history_events_delta,
+            ))
+            .await
+            .unwrap();
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        assert_eq!(restored.analytics.history_event_next_seq, 2);
+
+        // Backward compatibility for stores created before the explicit counter:
+        // derive the next cursor from existing history-event keys.
+        let txn = store.db.begin_write().unwrap();
+        {
+            let mut counters = txn.open_table(COUNTERS).unwrap();
+            counters.remove(KEY_HISTORY_EVENT_NEXT_SEQ).unwrap();
+        }
+        txn.commit().unwrap();
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        assert_eq!(restored.analytics.history_event_next_seq, 2);
     }
 
     #[tokio::test]

@@ -191,12 +191,20 @@ impl AccountEventLog {
     }
 
     pub fn with_retention(max_events: usize) -> Self {
+        Self::with_retention_and_next_seq(max_events, 0)
+    }
+
+    pub fn with_retention_and_next_seq(max_events: usize, next_seq: u64) -> Self {
         Self {
             events: HashMap::new(),
-            next_seq: 0,
+            next_seq,
             max_events,
             pending: Vec::new(),
         }
+    }
+
+    pub fn next_seq(&self) -> u64 {
+        self.next_seq
     }
 
     pub fn pending(&self) -> &[HistoryEvent] {
@@ -205,6 +213,18 @@ impl AccountEventLog {
 
     pub fn clear_pending(&mut self) {
         self.pending.clear();
+    }
+
+    pub fn retained_account_count(&self) -> usize {
+        self.events.len()
+    }
+
+    pub fn retained_event_count(&self) -> usize {
+        self.events.values().map(VecDeque::len).sum()
+    }
+
+    pub fn retention_per_account(&self) -> usize {
+        self.max_events
     }
 
     /// Append one event (assigns the global seq, trims the per-account ring).
@@ -329,6 +349,16 @@ mod tests {
         let filled_seq = all[0].seq;
         let page = log.query(AccountId(1), 10, Some((3, filled_seq)), None);
         assert!(page.iter().all(|e| e.kind != HistoryKind::Filled));
+    }
+
+    #[test]
+    fn restored_next_seq_is_used_for_new_events() {
+        let mut log = AccountEventLog::with_retention_and_next_seq(10, 42);
+        ev(&mut log, 1, HistoryKind::Placed, 9, 900);
+
+        let all = log.query(AccountId(1), 10, None, None);
+        assert_eq!(all[0].seq, 42);
+        assert_eq!(log.next_seq(), 43);
     }
 
     /// Round-trip a fully-populated `HistoryEvent` through `StoredHistoryEvent`
