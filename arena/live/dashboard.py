@@ -9,7 +9,6 @@ Data queries are in live/queries.py (shared with live/status.py CLI).
 """
 
 import json
-import sqlite3
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -20,8 +19,10 @@ import streamlit as st
 
 try:
     from . import queries
+    from .sqlite_utils import connect_reader
 except ImportError:
     import queries  # type: ignore[no-redef]  # Streamlit runs file directly
+    from sqlite_utils import connect_reader  # type: ignore[no-redef]
 
 DB_DEFAULT = os.environ.get(
     "ARENA_DB_PATH",
@@ -29,10 +30,8 @@ DB_DEFAULT = os.environ.get(
 )
 
 
-def get_conn(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+def get_conn(db_path: str):
+    return connect_reader(db_path, check_same_thread=False)
 
 
 # --------------------------------------------------------------------------- #

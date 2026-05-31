@@ -5,13 +5,14 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 
+from .sqlite_utils import connect_writer
+
 
 class DecisionDB:
     """Thread-safe SQLite wrapper for logging bot decisions and articles."""
 
     def __init__(self, db_path: str = "live/decisions.db"):
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
+        self.conn = connect_writer(db_path, check_same_thread=False)
         self._lock = threading.Lock()
         self._create_tables()
 

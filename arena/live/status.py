@@ -6,15 +6,15 @@ Usage:
 """
 
 import json
-import sqlite3
-import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 try:
     from . import queries
+    from .sqlite_utils import connect_reader
 except ImportError:
     import queries  # type: ignore[no-redef]
+    from sqlite_utils import connect_reader  # type: ignore[no-redef]
 
 
 def run(db_path: str | None = None, hours: int = 24):
@@ -24,8 +24,7 @@ def run(db_path: str | None = None, hours: int = 24):
         print(f"DB not found: {db_path}")
         return
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = connect_reader(db_path)
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
 
