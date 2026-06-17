@@ -4,8 +4,8 @@ import { useMemo } from "react";
 import Link from "next/link";
 import { useInViewport } from "@/lib/hooks/use-in-viewport";
 import {
-  formatCents,
-  formatCentsDelta,
+  formatPercent,
+  formatPercentDelta,
   formatCompactDollars,
 } from "@/lib/format/nanos";
 import type { Market } from "@/lib/markets/use-markets";
@@ -307,8 +307,11 @@ function FeaturedOutcome({
       </div>
     );
   }
-  const cents = price ? formatCents(price.yes) : "—";
+  const cents = price ? formatPercent(price.yes) : "—";
   const label = getLabel(leader);
+  const leaderVolNanos = leader.volume_nanos ? BigInt(leader.volume_nanos) : 0n;
+  const leaderVol =
+    leaderVolNanos > 0n ? formatCompactDollars(leaderVolNanos) : "—";
   return (
     <Link
       href={`/m/${leader.market_id}`}
@@ -362,20 +365,41 @@ function FeaturedOutcome({
           >
             {cents}
           </span>
-          {delta24Cents != null && (
-            <span
-              className="text-mono tabular"
-              style={{
-                fontSize: "var(--fs-12)",
-                color: deltaValueColor(delta24Cents),
-              }}
-            >
-              {formatCentsDelta(delta24Cents)}
-            </span>
-          )}
+          <span
+            className="text-mono tabular"
+            title={delta24Cents == null ? "no 24h history yet" : undefined}
+            style={{
+              fontSize: "var(--fs-12)",
+              color: deltaValueColor(delta24Cents ?? 0),
+            }}
+          >
+            {formatPercentDelta(delta24Cents ?? 0)}
+          </span>
         </div>
       </div>
-      <Sparkline points={points} />
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "flex-end",
+          gap: 4,
+        }}
+      >
+        <Sparkline points={points} />
+        <span
+          className="tabular"
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: "10px",
+            textTransform: "uppercase",
+            letterSpacing: "var(--track-wide)",
+            color: "var(--fg-3)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {"vol " + leaderVol}
+        </span>
+      </div>
     </Link>
   );
 }
@@ -438,7 +462,7 @@ function SecondaryRow({
   // whole card is closed the <article> already dims at 0.5 — self-dimming here
   // would compound to 0.25.
   const rowClosed = market.closed === true && !cardClosed;
-  const cents = price ? formatCents(price.yes) : "—";
+  const cents = price ? formatPercent(price.yes) : "—";
   // Same logic as the leader: real 24h delta from price history, lazy-loaded
   // when the card scrolls into view.
   const { delta24Cents } = useCardHistory(market.market_id, inView);
@@ -507,13 +531,13 @@ function SecondaryRow({
         title={delta24Cents == null ? "no 24h history yet" : undefined}
         style={{
           fontSize: "11px",
-          color: deltaValueColor(delta24Cents),
+          color: deltaValueColor(delta24Cents ?? 0),
           display: "inline-block",
           width: "100%",
           textAlign: "right",
         }}
       >
-        {delta24Cents != null ? formatCentsDelta(delta24Cents) : "—"}
+        {formatPercentDelta(delta24Cents ?? 0)}
       </span>
       <span
         className="text-mono tabular"
@@ -565,7 +589,7 @@ function FooterRow({
 }
 
 /**
- * Color an outcome's cents by delta sign (handoff convention).
+ * Color an outcome's odds by delta sign (handoff convention).
  * No price → fg-4 (dim). No delta yet → neutral fg-1.
  */
 function deltaTone(delta: number | null, hasPrice: boolean): string {
@@ -576,8 +600,8 @@ function deltaTone(delta: number | null, hasPrice: boolean): string {
 
 /**
  * Color for the 24h-delta value token itself (not the price): dim when there's
- * no history, neutral grey when flat (rounds to ±0¢), else green/red by sign.
- * Rounds first so the color matches what `formatCentsDelta` actually prints.
+ * no history, neutral grey when flat (rounds to +0%), else green/red by sign.
+ * Rounds first so the color matches what `formatPercentDelta` actually prints.
  */
 function deltaValueColor(delta: number | null): string {
   if (delta == null) return "var(--fg-4)";

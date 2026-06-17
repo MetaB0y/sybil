@@ -105,8 +105,8 @@ export function ClearingTicker({ marketsById }: Props) {
   }, [recent, marketsById]);
 
   const animate = events.length >= MARQUEE_MIN_ITEMS;
-  // ~one cell-width per ~3s keeps the scroll readable as the list grows.
-  const durationSec = Math.max(18, events.length * 3.2);
+  // ~one cell-width per ~6s keeps the scroll slow and readable as the list grows.
+  const durationSec = Math.max(36, events.length * 6.4);
 
   return (
     <div
@@ -189,9 +189,12 @@ export function ClearingTicker({ marketsById }: Props) {
               display: "inline-flex",
               flexWrap: "nowrap",
               willChange: animate ? "transform" : undefined,
-              animation: animate
-                ? `sybil-marquee ${durationSec}s linear infinite`
-                : undefined,
+              // Longhand (not the `animation` shorthand) so toggling
+              // animationPlayState on hover doesn't conflict with the shorthand.
+              animationName: animate ? "sybil-marquee" : undefined,
+              animationDuration: animate ? `${durationSec}s` : undefined,
+              animationTimingFunction: animate ? "linear" : undefined,
+              animationIterationCount: animate ? "infinite" : undefined,
               animationPlayState: paused ? "paused" : "running",
             }}
           >

@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useInViewport } from "@/lib/hooks/use-in-viewport";
 import {
-  formatCents,
-  formatCentsDelta,
+  formatPercent,
+  formatPercentDelta,
   formatCompactDollars,
 } from "@/lib/format/nanos";
 import type { Market } from "@/lib/markets/use-markets";
@@ -41,8 +41,9 @@ export function BinaryCard({ market, price }: Props) {
     inView
   );
 
-  const yesCents = price ? formatCents(price.yes) : "—";
-  const noCents = price ? formatCents(price.no) : "—";
+  // Prices are odds → render as % (number is unchanged; see formatPercent).
+  const yesCents = price ? formatPercent(price.yes) : "—";
+  const noCents = price ? formatPercent(price.no) : "—";
 
   return (
     <Link
@@ -98,7 +99,6 @@ export function BinaryCard({ market, price }: Props) {
 
 function EyebrowRow({ market }: { market: Market }) {
   const { primary } = pickDisplayCategory(market.categories, market.category);
-  const endDate = formatEndDate(market.market_end_date_ms);
   return (
     <div
       style={{
@@ -150,7 +150,7 @@ function EyebrowRow({ market }: { market: Market }) {
           color: "var(--fg-3)",
         }}
       >
-        {market.closed === true ? "closed" : (endDate ?? "yes / no")}
+        {market.closed === true ? "closed" : "yes / no"}
       </span>
     </div>
   );
@@ -248,17 +248,16 @@ function FeaturedPriceRow({
           >
             {cents}
           </span>
-          {delta24Cents != null && (
-            <span
-              className="text-mono tabular"
-              style={{
-                fontSize: "var(--fs-12)",
-                color: deltaValueColor(delta24Cents),
-              }}
-            >
-              {formatCentsDelta(delta24Cents)}
-            </span>
-          )}
+          <span
+            className="text-mono tabular"
+            title={delta24Cents == null ? "no 24h history yet" : undefined}
+            style={{
+              fontSize: "var(--fs-12)",
+              color: deltaValueColor(delta24Cents ?? 0),
+            }}
+          >
+            {formatPercentDelta(delta24Cents ?? 0)}
+          </span>
         </div>
       </div>
       <Sparkline points={points} tone="yes" />
@@ -353,11 +352,11 @@ function SideRow({
         title={delta == null ? "no 24h history yet" : undefined}
         style={{
           fontSize: "11px",
-          color: deltaValueColor(delta),
+          color: deltaValueColor(delta ?? 0),
           textAlign: "right",
         }}
       >
-        {delta != null ? formatCentsDelta(delta) : "—"}
+        {formatPercentDelta(delta ?? 0)}
       </span>
       <span
         className="text-mono tabular"
@@ -431,31 +430,12 @@ function deltaTone(delta: number | null, hasPrice: boolean): string {
 
 /**
  * Color for the 24h-delta value token itself (not the price): dim when there's
- * no history, neutral grey when flat (rounds to ±0¢), else green/red by sign.
- * Rounds first so the color matches what `formatCentsDelta` actually prints.
+ * no history, neutral grey when flat (rounds to +0%), else green/red by sign.
+ * Rounds first so the color matches what `formatPercentDelta` actually prints.
  */
 function deltaValueColor(delta: number | null): string {
   if (delta == null) return "var(--fg-4)";
   if (Math.round(delta) === 0) return "var(--fg-3)";
   return delta > 0 ? "var(--yes)" : "var(--no)";
-}
-
-/**
- * "closes Mar 5" if same year, "closes Mar 5 '26" otherwise. Returns null
- * for absent / past-or-bogus dates so the eyebrow falls back to its
- * neutral "yes / no" tagline.
- */
-function formatEndDate(ms: number | null | undefined): string | null {
-  if (ms == null) return null;
-  const d = new Date(ms);
-  if (Number.isNaN(d.getTime())) return null;
-  const now = new Date();
-  const month = d.toLocaleString("en-US", { month: "short" });
-  const day = d.getDate();
-  if (d.getFullYear() === now.getFullYear()) {
-    return `closes ${month} ${day}`;
-  }
-  const yy = String(d.getFullYear()).slice(-2);
-  return `closes ${month} ${day} '${yy}`;
 }
 

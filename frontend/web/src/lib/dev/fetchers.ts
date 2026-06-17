@@ -39,10 +39,36 @@ export function useDevMarkets() {
   });
 }
 
+/**
+ * The backend occasionally emits two groups that share one event title (a stale
+ * copy plus a near-superset that adds a market). Merge same-named groups into a
+ * single entry holding the union of their market_ids. This keeps the dropdown's
+ * option keys/values unique and makes the group filter complete — `filterMarkets`
+ * looks up groups by name and would otherwise see only the first arbitrary copy.
+ */
+function mergeGroupsByName(groups: DevMarketGroup[]): DevMarketGroup[] {
+  const byName = new Map<string, Set<number>>();
+  const order: string[] = [];
+  for (const g of groups) {
+    let ids = byName.get(g.name);
+    if (!ids) {
+      ids = new Set<number>();
+      byName.set(g.name, ids);
+      order.push(g.name);
+    }
+    for (const id of g.market_ids) ids.add(id);
+  }
+  return order.map((name) => ({
+    name,
+    market_ids: [...byName.get(name)!].sort((a, b) => a - b),
+  }));
+}
+
 export function useDevGroups() {
   return useQuery({
     queryKey: ["dev", "market-groups"],
-    queryFn: async () => (await rawGet<DevMarketGroup[]>("/v1/markets/groups")) ?? [],
+    queryFn: async () =>
+      mergeGroupsByName((await rawGet<DevMarketGroup[]>("/v1/markets/groups")) ?? []),
     staleTime: 60_000,
   });
 }

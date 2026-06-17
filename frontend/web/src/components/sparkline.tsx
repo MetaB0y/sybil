@@ -16,8 +16,8 @@ type Props = {
  * Inline SVG area sparkline driven by yes_price_nanos. Pure presentational —
  * doesn't fetch, doesn't subscribe. Hand it a points array.
  *
- * Renders nothing when there are fewer than 2 points (caller decides what to
- * show in the empty slot).
+ * With fewer than 2 points (no history yet) it draws a neutral flat baseline so
+ * the slot reads as "no movement" rather than an empty gap.
  */
 export function Sparkline({
   points,
@@ -50,7 +50,30 @@ export function Sparkline({
     return { line, area, direction };
   }, [points, width, height]);
 
-  if (!path) return null;
+  if (!path) {
+    // No history yet → flat baseline at mid-height, neutral tone (there's no
+    // up/down direction to color).
+    const midY = height / 2;
+    return (
+      <svg
+        width={width}
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        aria-hidden
+        style={{ display: "block" }}
+      >
+        <line
+          x1={0}
+          y1={midY}
+          x2={width}
+          y2={midY}
+          stroke="var(--fg-4)"
+          strokeWidth={1.5}
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
 
   const effectiveTone = tone === "auto" ? path.direction : tone;
   const stroke =

@@ -56,6 +56,34 @@ export const formatCents = (v: NanosInput): string => {
   return `${Math.round(cents)}¢`;
 };
 
+/**
+ * Format probability nanos as an integer percent 0–100 with a `%` suffix — the
+ * "odds" representation used on the markets index. Same underlying number as
+ * `formatCents` (a binary price *is* the implied probability), just relabeled so
+ * users read it as odds. Edge cases mirror `formatCents`: >99.5% → ">99%",
+ * (0, 0.5%) → "<1%".
+ */
+export const formatPercent = (v: NanosInput): string => {
+  const nanos = parseNanos(v);
+  const pct = Number(nanos) / 1e7;
+  if (pct > 99.5) return ">99%";
+  if (pct < 0.5 && pct > 0) return "<1%";
+  return `${Math.round(pct)}%`;
+};
+
+/**
+ * Format an odds change as a signed percent (e.g. +5%, −3%, +0%) — the delta
+ * counterpart to `formatPercent`. The flat case (no change, or caller passes 0
+ * because there's no 24h history yet) renders "+0%" so the slot reads as "flat"
+ * rather than empty/missing.
+ */
+export const formatPercentDelta = (pct: number): string => {
+  const rounded = Math.round(pct);
+  if (rounded === 0) return "+0%";
+  const sign = rounded > 0 ? "+" : "−";
+  return `${sign}${Math.abs(rounded)}%`;
+};
+
 /** Format a percent change (e.g. +4.2%, -1.4%) with a leading sign. */
 export const formatPctDelta = (pct: number): string => {
   const sign = pct >= 0 ? "+" : "";
