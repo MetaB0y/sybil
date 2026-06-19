@@ -21,7 +21,7 @@ import { useMemo, useState } from "react";
 import { cancelSignedOrder } from "@/lib/account/orders";
 import type { AccountFill } from "@/lib/account/use-account-fills";
 import type { AccountOrder } from "@/lib/account/use-account-orders";
-import { formatAge, formatCents, parseNanos } from "@/lib/format/nanos";
+import { formatAge, formatCents, formatDollars, parseNanos } from "@/lib/format/nanos";
 import { selectLatestBlock, useStore } from "@/lib/store";
 import { Pager, usePaged } from "@/components/event-list-pager";
 import { SidePill } from "@/components/portfolio/side-pill";
@@ -42,6 +42,8 @@ interface OpenRow {
   placed: number;
   filled: number;
   limitNanos: bigint;
+  /** Notional $ of the resting order = limit × remaining (nanos). */
+  valueNanos: bigint;
   /** Avg fill price (WAC of visible fills) — already side-relative, like Limit. */
   avgPriceNanos: bigint | null;
   fillCount: number;
@@ -57,7 +59,8 @@ type SortKey =
   | "placed"
   | "limit"
   | "avgfill"
-  | "age"
+  | "value"
+  | "created"
   | "tif";
 type SortDir = "asc" | "desc";
 type Sort = { key: SortKey; dir: SortDir };
@@ -69,7 +72,8 @@ const COLUMNS: { key: SortKey; label: string; align: "left" | "right" }[] = [
   { key: "placed", label: "Placed/Filled", align: "right" },
   { key: "limit", label: "Limit", align: "right" },
   { key: "avgfill", label: "Avg fill", align: "right" },
-  { key: "age", label: "Age", align: "right" },
+  { key: "value", label: "Value", align: "right" },
+  { key: "created", label: "Created", align: "right" },
   { key: "tif", label: "TIF", align: "right" },
 ];
 
@@ -82,7 +86,8 @@ function nextSort(prev: Sort | null, key: SortKey): Sort {
     key === "placed" ||
     key === "limit" ||
     key === "avgfill" ||
-    key === "age" ||
+    key === "value" ||
+    key === "created" ||
     key === "tif";
   return { key, dir: numeric ? "desc" : "asc" };
 }
@@ -109,7 +114,9 @@ function compareBy(a: OpenRow, b: OpenRow, key: SortKey): number {
       if (a.avgPriceNanos == null) return -1;
       if (b.avgPriceNanos == null) return 1;
       return cmpBig(a.avgPriceNanos, b.avgPriceNanos);
-    case "age":
+    case "value":
+      return cmpBig(a.valueNanos, b.valueNanos);
+    case "created":
       // Older (smaller ms) sorts first ascending; unknown (0) sorts oldest.
       return a.placedAtMs - b.placedAtMs;
     case "tif":
@@ -164,6 +171,7 @@ export function EventOpenOrders({
       const outcome = sideRaw.includes("yes") ? "YES" : sideRaw.includes("no") ? "NO" : "";
       // agg.avgPriceNanos is already this side's own price (matches Limit).
       const avgPriceNanos = agg?.avgPriceNanos ?? null;
+      const limitNanos = parseNanos(o.limit_price_nanos);
       return {
         order: o,
         label: labelByMarket.get(o.market_id) ?? `#${o.market_id}`,
@@ -171,7 +179,9 @@ export function EventOpenOrders({
         outcome,
         placed,
         filled: placed > 0 ? Math.max(0, placed - o.remaining_quantity) : 0,
-        limitNanos: parseNanos(o.limit_price_nanos),
+        limitNanos,
+        // Notional still resting = limit × remaining (nanos × shares = $-nanos).
+        valueNanos: limitNanos * BigInt(o.remaining_quantity),
         avgPriceNanos,
         fillCount: agg?.count ?? 0,
         expiresAtBlock: o.expires_at_block,
@@ -254,6 +264,7 @@ function OrderRow({
     placed,
     filled,
     limitNanos,
+    valueNanos,
     avgPriceNanos,
     fillCount,
     placedAtMs,
@@ -324,8 +335,9 @@ function OrderRow({
       <Right mono>
         <AvgFillCell priceNanos={avgPriceNanos} count={fillCount} />
       </Right>
+      <Right mono>{formatDollars(valueNanos, { decimals: 2 })}</Right>
       <Right mono>
-        <AgeCell placedAtMs={placedAtMs} nowMs={nowMs} />
+        <CreatedCell placedAtMs={placedAtMs} nowMs={nowMs} />
       </Right>
       <Right>
         <TifCell expiresAtBlock={order.expires_at_block} />
@@ -357,9 +369,10 @@ function OrderRow({
   );
 }
 
-/** How long ago the order was placed — "5m", "2h" — vs the latest block time.
- *  Unknown (pre-B8 orders without created_at_ms) or no block yet → "—". */
-function AgeCell({ placedAtMs, nowMs }: { placedAtMs: number; nowMs: number | null }) {
+/** When the order was created — shown as time-since ("5m ago", "2h ago") vs the
+ *  latest block time. Unknown (pre-B8 orders without created_at_ms) or no block
+ *  yet → "—". */
+function CreatedCell({ placedAtMs, nowMs }: { placedAtMs: number; nowMs: number | null }) {
   if (placedAtMs <= 0 || nowMs == null) {
     return <span style={{ color: "var(--fg-4)" }}>—</span>;
   }
@@ -449,7 +462,7 @@ function Row({
       style={{
         display: "grid",
         gridTemplateColumns:
-          "minmax(0, 1fr) 44px 44px 100px 52px 66px 60px 76px 64px",
+          "minmax(0, 1fr) 44px 44px 100px 52px 66px 72px 68px 76px 64px",
         gap: 10,
         alignItems: "center",
         padding: "9px 0",
