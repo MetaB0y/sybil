@@ -10,17 +10,12 @@ import {
   parseSortKey,
   type SortKey,
 } from "@/components/markets-filter-bar";
-import { pickDisplayCategory } from "@/lib/categorize";
-import {
-  useMarketsList,
-  eventVisibleOnIndex,
-  isClosed,
-  type Market,
-} from "@/lib/markets/use-markets";
+import { useMarketsList, type Market } from "@/lib/markets/use-markets";
 import { useEventTradersMap } from "@/lib/markets/use-event-traders";
 import { selectPricesByMarketId, useStore } from "@/lib/store";
 import { BLOCK_INTERVAL_MS } from "@/lib/constants";
-import { selectIndexCards, type CardItem } from "@/lib/markets/select-index-cards";
+import { selectIndexCards } from "@/lib/markets/select-index-cards";
+import { buildIndexCards } from "@/lib/markets/build-index-cards";
 
 /** Cards (events) shown per page on the markets index. */
 const PAGE_SIZE = 15;
@@ -51,53 +46,10 @@ function MarketsPageInner() {
   const { query, sort, setSort, category, showClosed, setHideClosed } =
     useFilterParams();
 
-  const items = useMemo(() => {
-    if (!bundle) return null;
-    const all: CardItem[] = [];
-    for (const g of bundle.groups) {
-      if (g.markets.length >= 2) {
-        // Multi-outcome event. Closed only when EVERY outcome is closed; a
-        // partially-closed event stays open (its closed rows render greyed).
-        const first = g.markets[0]!;
-        const primary = pickDisplayCategory(first.categories, first.category).primary;
-        all.push({
-          kind: "multi",
-          name: g.name,
-          eventId: g.eventId,
-          markets: g.markets,
-          volumeNanos: sumVolume(g.markets),
-          sortKey: g.name.toLowerCase(),
-          createdMs: eventNewnessMs(g.markets),
-          primaryCategory: primary,
-          closed: !eventVisibleOnIndex(g.markets),
-        });
-      } else {
-        for (const m of g.markets) {
-          all.push({
-            kind: "binary",
-            market: m,
-            volumeNanos: m.volume_nanos ? BigInt(m.volume_nanos) : 0n,
-            sortKey: m.name.toLowerCase(),
-            createdMs: marketNewnessMs(m),
-            primaryCategory: pickDisplayCategory(m.categories, m.category).primary,
-            closed: isClosed(m),
-          });
-        }
-      }
-    }
-    for (const m of bundle.ungrouped) {
-      all.push({
-        kind: "binary",
-        market: m,
-        volumeNanos: m.volume_nanos ? BigInt(m.volume_nanos) : 0n,
-        sortKey: m.name.toLowerCase(),
-        createdMs: m.created_at_ms ?? 0,
-        primaryCategory: pickDisplayCategory(m.categories, m.category).primary,
-        closed: isClosed(m),
-      });
-    }
-    return all;
-  }, [bundle]);
+  const items = useMemo(
+    () => (bundle ? buildIndexCards(bundle) : null),
+    [bundle]
+  );
 
   // Event ids for MultiCard items — the "traders" sort ranks events by their
   // union trader count, fetched per event. Gated to that sort so the fan-out
@@ -301,34 +253,6 @@ function useFilterParams() {
     setSort: (s: SortKey) => update({ sort: s }),
     setHideClosed: (hide: boolean) => update({ showClosed: !hide }),
   };
-}
-
-function sumVolume(markets: Market[]): bigint {
-  let total = 0n;
-  for (const m of markets) {
-    if (m.volume_nanos != null) total += BigInt(m.volume_nanos);
-  }
-  return total;
-}
-
-/**
- * "New" sort key: the most recent of the Polymarket event-start and
- * market-start dates, so a brand-new event AND a newly-added outcome inside an
- * existing event both surface. `created_at_ms` (the mirror's admit time, which
- * clusters at sync) is only a last-resort fallback.
- */
-function marketNewnessMs(m: Market): number {
-  return Math.max(
-    m.event_start_date_ms ?? 0,
-    m.market_start_date_ms ?? 0,
-    m.created_at_ms ?? 0
-  );
-}
-
-function eventNewnessMs(markets: Market[]): number {
-  let max = 0;
-  for (const m of markets) max = Math.max(max, marketNewnessMs(m));
-  return max;
 }
 
 function Pagination({
