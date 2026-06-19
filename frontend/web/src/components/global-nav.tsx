@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, type ChangeEvent } from "react";
+import { usePathname } from "next/navigation";
+import { Suspense } from "react";
 import { AccountChip } from "./auth/account-chip";
 import { BatchPill } from "./batch-pill";
 import { DevZoneNav } from "./dev/dev-zone-nav";
+import { NavSearch, NavSearchSkeleton } from "./nav-search";
 
 type NavTab = { href: string; label: string; match: (path: string) => boolean };
 
@@ -119,7 +120,7 @@ export function GlobalNav() {
           gap: "var(--space-3)",
         }}
       >
-        <Suspense fallback={<SearchSkeleton />}>
+        <Suspense fallback={<NavSearchSkeleton />}>
           <NavSearch />
         </Suspense>
         <BatchPill />
@@ -129,83 +130,3 @@ export function GlobalNav() {
   );
 }
 
-/**
- * Search input live-bound to `?q=` on the markets index. If the user is on
- * another route (e.g. /m/123), typing routes them to / with the query
- * applied so the filtered grid is what they see next.
- */
-function NavSearch() {
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const pathname = usePathname();
-  const value = searchParams.get("q") ?? "";
-
-  const onChange = useCallback(
-    (e: ChangeEvent<HTMLInputElement>) => {
-      const next = e.target.value;
-      const params = new URLSearchParams(searchParams.toString());
-      if (next) params.set("q", next);
-      else params.delete("q");
-      const qs = params.toString();
-      const target = pathname === "/" ? "/" : "/";
-      if (pathname === "/") {
-        router.replace(qs ? `${target}?${qs}` : target, { scroll: false });
-      } else {
-        router.push(qs ? `${target}?${qs}` : target, { scroll: false });
-      }
-    },
-    [pathname, router, searchParams]
-  );
-
-  return (
-    <div style={searchShellStyle}>
-      <span
-        aria-hidden
-        className="text-mono"
-        style={searchSlashStyle}
-      >
-        /
-      </span>
-      <input
-        value={value}
-        onChange={onChange}
-        placeholder="search events, markets"
-        aria-label="search markets"
-        style={searchInputStyle}
-      />
-    </div>
-  );
-}
-
-function SearchSkeleton() {
-  return <div style={searchShellStyle} aria-hidden />;
-}
-
-const searchShellStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  height: 32,
-  width: 280,
-  padding: "0 var(--space-3)",
-  background: "var(--surface-1)",
-  border: "1px solid var(--border-2)",
-  borderRadius: "var(--radius-md)",
-};
-
-const searchSlashStyle: React.CSSProperties = {
-  color: "var(--fg-4)",
-  fontSize: "var(--fs-12)",
-  letterSpacing: "var(--track-wide)",
-  marginRight: "var(--space-2)",
-};
-
-const searchInputStyle: React.CSSProperties = {
-  flex: 1,
-  background: "transparent",
-  border: 0,
-  outline: "none",
-  color: "var(--fg-1)",
-  fontFamily: "var(--font-mono)",
-  fontSize: "var(--fs-12)",
-  padding: 0,
-};
