@@ -17,6 +17,7 @@ import { getCategoryColor } from "@/lib/categorize";
 import {
   formatCents,
   formatCompactDollars,
+  formatCompactDollarsCents,
   formatInt,
 } from "@/lib/format/nanos";
 import { mockClearingMs, mockTxHash, MOCK_SEQUENCER } from "@/lib/activity/mocks";
@@ -408,7 +409,7 @@ function MarketRow({ row }: { row: BatchMarketRow }) {
       {/* Welfare — real, per-market from by_market */}
       <span style={cellNumber("var(--yes)", 12)}>
         {row.welfareNanos >= 0n ? "+" : ""}
-        {formatCompactDollars(row.welfareNanos)}
+        {formatCompactDollarsCents(row.welfareNanos)}
       </span>
 
       {/* Placed / Matched — real, per-market from by_market */}

@@ -25,7 +25,11 @@ export const GLOSSARY: Record<string, string> = {
     "Every order in a batch trades at the same single price. Eliminates the “sniper’s tax” continuous order books leak to fast actors.",
   FBA: "Frequent Batch Auction. The market mechanism Sybil uses instead of a continuous limit order book.",
   Welfare:
-    "Your surplus on the fills: how much better than your limit price you traded, times quantity filled. A buy that filled below your limit — or a sell that filled above it — earns positive welfare. It's the edge Sybil's uniform clearing price handed you over the worst price you'd have accepted.",
+    "Your surplus on the fills: how much better than your limit price you traded, times quantity filled. A buy that filled below your limit — or a sell that filled above it — earns positive welfare.",
+  "Portfolio value":
+    "Your cash balance plus the current value of every open position, marked at the latest batch clearing price.",
+  "Net deposits":
+    "Everything you've deposited minus what you've withdrawn. When your portfolio line sits above it you're in profit; below it, at a loss.",
 };
 
 export function Glossary({

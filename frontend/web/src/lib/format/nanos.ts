@@ -142,6 +142,26 @@ export const formatCompactDollars = (v: NanosInput): string => {
 };
 
 /**
+ * Like `formatCompactDollars` but keeps cents for sub-$1k magnitudes, so small
+ * values render as "$0.11" instead of truncating to "$0". Large values still
+ * compact (K/M/B). Used where the amount is typically sub-dollar — e.g. the
+ * welfare/surplus cells in the activity views.
+ */
+export const formatCompactDollarsCents = (v: NanosInput): string => {
+  const nanos = parseNanos(v);
+  const negative = nanos < 0n;
+  const abs = negative ? -nanos : nanos;
+  const sign = negative ? "-" : "";
+  const dollars = Number(abs / NANOS_PER_UNIT); // whole dollars (safe)
+  if (dollars >= 1_000_000_000) return `${sign}$${(dollars / 1_000_000_000).toFixed(1)}B`;
+  if (dollars >= 1_000_000) return `${sign}$${(dollars / 1_000_000).toFixed(1)}M`;
+  if (dollars >= 10_000) return `${sign}$${Math.round(dollars / 1_000)}K`;
+  if (dollars >= 1_000) return `${sign}$${(dollars / 1_000).toFixed(1)}K`;
+  // Sub-$1k: precise float is safe (abs < 1e12 nanos ≪ 2^53), so cents survive.
+  return `${sign}$${(Number(abs) / Number(NANOS_PER_UNIT)).toFixed(2)}`;
+};
+
+/**
  * Format a batch countdown as one-decimal seconds (e.g. "1.8", "0.3").
  *
  * The app's batch cadence is short (BLOCK_INTERVAL_MS) — an mm:ss format would

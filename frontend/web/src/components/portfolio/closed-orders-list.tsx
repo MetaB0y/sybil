@@ -1,89 +1,92 @@
 "use client";
 
 /**
- * EventClosedOrders — terminal (filled / cancelled / expired) orders for this
- * event's markets, reconstructed from the account history feed and grouped by
- * `order_id`.
+ * Closed orders tab — terminal (filled / cancelled / expired) orders, rebuilt
+ * from the account history feed and grouped by `order_id`. Shares the exact
+ * design language of `OpenOrdersList` (card, market thumbnail, click-to-sort
+ * headers, `Link` rows, paginated footer) so the two order tabs read as one
+ * family. Grid rows:
+ *   thumb · market · action · side · status · qty · price · welfare · value ·
+ *   P&L · closed
  *
  * Why reconstruct from history rather than a dedicated endpoint: the open-orders
  * feed only carries *resting* orders, so once an order fills/cancels/expires it
- * drops out of there. The history log (`useAccountHistory`) keeps the lifecycle
- * events, so we fold them per order_id:
- *   - status = the chronologically-last terminal event's type
- *     (filled → FILLED, cancelled → CANCELLED, expired → EXPIRED).
- *   - qty = that terminal event's qty (filled count / returned / expired count);
- *     `partial_fill` events are only used to surface a price when the terminal
- *     event lacks one.
- *   - price = the terminal event's price, else the last fill price seen; the
- *     order's limit (requested) price from its `placed` event is shown
- *     struck-through before it when the two differ.
- *   - welfare = Σ (limit − fill) × qty over the order's fills, signed by side
- *     (buyer below limit / seller above = positive surplus). Mirrors the engine's
- *     `welfare_contribution`. Null when the limit price has aged out of the feed.
- *   - value = qty × price (notional $), shown for orders that carry both.
- *   - P&L = realized PnL summed across the order's fill events
- *     (`partial_fill` + `filled`), shown for SELL orders only — a buy opens or
- *     adds to a position and realizes nothing. The backend supplies it per fill
- *     (`realized_pnl_nanos`), so no FE cost-basis math is needed.
- * Default order is newest-first by the terminal event's `timestamp_ms`; every
- * column is click-to-sort.
- *
- * Failed/rejected orders never reach the history log (product decision — not
- * persisted), so they're naturally excluded.
+ * drops out of there. The history log keeps the lifecycle events, so we fold
+ * them per order_id (same logic as the market-page `EventClosedOrders`):
+ *   - status  = the last terminal event's type.
+ *   - qty     = that terminal event's qty (filled / returned / expired count).
+ *   - price   = the terminal event's price, else the last fill price; the order's
+ *               limit (requested) price shows struck-through before it when they
+ *               differ.
+ *   - welfare = Σ (limit − fill) × qty over fills, signed by side (buyer below
+ *               limit / seller above = positive surplus). Null without a known
+ *               limit/side/fill.
+ *   - value   = qty × price (notional $).
+ *   - P&L     = realized PnL summed across fill events — SELL orders only.
+ * Default order is newest-first by close time; every column is click-to-sort.
  */
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
+import { MarketThumb } from "@/components/market-thumb";
+import { Pager, usePaged, PORTFOLIO_PAGE_SIZE } from "@/components/event-list-pager";
+import { Glossary } from "@/components/glossary";
 import type { HistoryEvent } from "@/lib/account/use-account-history";
 import { formatCents, formatDollars } from "@/lib/format/nanos";
-import { Pager, usePaged } from "@/components/event-list-pager";
-import { SidePill } from "@/components/portfolio/side-pill";
-import { Glossary } from "@/components/glossary";
+import type { components } from "@/lib/api/schema";
+import { SidePill } from "./side-pill";
 
+type Market = components["schemas"]["MarketResponse"];
 type Status = "FILLED" | "CANCELLED" | "EXPIRED";
 
-/** The terminal history event types that close an order. */
 const TERMINAL = new Set<HistoryEvent["type"]>(["filled", "cancelled", "expired"]);
-
 const STATUS_OF: Record<"filled" | "cancelled" | "expired", Status> = {
   filled: "FILLED",
   cancelled: "CANCELLED",
   expired: "EXPIRED",
 };
 
-interface ClosedOrder {
+/** Per-order accumulator used while folding the history feed. */
+interface Slot {
+  marketId: number;
+  side?: "BUY" | "SELL";
+  outcome?: "YES" | "NO";
+  terminal: HistoryEvent | null;
+  lastFillPrice: bigint | null;
+  realizedPnl: bigint | null;
+  requestedPrice: bigint | null;
+  filledQty: bigint;
+  filledNotional: bigint;
+}
+
+/** A closed order with every sortable value derived once. */
+interface ClosedRowData {
   orderId: number;
   marketId: number;
+  market: Market | undefined;
   label: string;
   status: Status;
   closedAtMs: number;
   side?: "BUY" | "SELL";
   outcome?: "YES" | "NO";
   qty: number | null;
-  /** Settled (fill) price shown in the Price cell. */
   priceNanos: bigint | null;
-  /** Limit price from the order's `placed` event; null once it ages out of the
-   * feed. Rendered struck-through before the settled price when the two differ. */
   requestedPriceNanos: bigint | null;
-  /** qty × price (notional $), or null when either is unknown. */
   valueNanos: bigint | null;
-  /** Realized PnL (nanos) summed over fill events — SELL orders only, else null. */
   realizedPnlNanos: bigint | null;
-  /** Consumer surplus (nanos) = Σ (limit − fill) × qty over fills, signed by side
-   * (buyer fills below limit / seller above = positive). Null without a known
-   * limit, side, or any fill. Mirrors the engine's `welfare_contribution`. */
   welfareNanos: bigint | null;
 }
 
 type SortKey =
-  | "outcome"
+  | "market"
   | "action"
   | "side"
   | "status"
   | "qty"
   | "price"
+  | "welfare"
   | "value"
   | "pnl"
-  | "welfare"
   | "closed";
 type SortDir = "asc" | "desc";
 type Sort = { key: SortKey; dir: SortDir };
@@ -92,13 +95,12 @@ const COLUMNS: {
   key: SortKey;
   label: string;
   align: "left" | "right";
-  /** Glossary term — renders a "?" tooltip badge beside the sort label. */
   info?: string;
 }[] = [
-  { key: "outcome", label: "Outcome", align: "left" },
+  { key: "market", label: "Market", align: "left" },
   { key: "action", label: "Action", align: "left" },
   { key: "side", label: "Side", align: "left" },
-  { key: "status", label: "Status", align: "right" },
+  { key: "status", label: "Status", align: "left" },
   { key: "qty", label: "Qty", align: "right" },
   { key: "price", label: "Price", align: "right" },
   { key: "welfare", label: "Welfare", align: "right", info: "Welfare" },
@@ -115,9 +117,9 @@ function nextSort(prev: Sort | null, key: SortKey): Sort {
   const numeric =
     key === "qty" ||
     key === "price" ||
+    key === "welfare" ||
     key === "value" ||
     key === "pnl" ||
-    key === "welfare" ||
     key === "closed";
   return { key, dir: numeric ? "desc" : "asc" };
 }
@@ -126,10 +128,10 @@ function cmpBig(a: bigint, b: bigint): number {
   return a > b ? 1 : a < b ? -1 : 0;
 }
 
-/** Ascending comparison for a key; null numbers sort lowest. */
-function compareBy(a: ClosedOrder, b: ClosedOrder, key: SortKey): number {
+/** Ascending comparison; null numbers sort lowest. */
+function compareBy(a: ClosedRowData, b: ClosedRowData, key: SortKey): number {
   switch (key) {
-    case "outcome":
+    case "market":
       return a.label.localeCompare(b.label);
     case "action":
       return (a.side ?? "").localeCompare(b.side ?? "");
@@ -144,6 +146,11 @@ function compareBy(a: ClosedOrder, b: ClosedOrder, key: SortKey): number {
       if (a.priceNanos == null) return -1;
       if (b.priceNanos == null) return 1;
       return cmpBig(a.priceNanos, b.priceNanos);
+    case "welfare":
+      if (a.welfareNanos == null && b.welfareNanos == null) return 0;
+      if (a.welfareNanos == null) return -1;
+      if (b.welfareNanos == null) return 1;
+      return cmpBig(a.welfareNanos, b.welfareNanos);
     case "value":
       if (a.valueNanos == null && b.valueNanos == null) return 0;
       if (a.valueNanos == null) return -1;
@@ -154,105 +161,54 @@ function compareBy(a: ClosedOrder, b: ClosedOrder, key: SortKey): number {
       if (a.realizedPnlNanos == null) return -1;
       if (b.realizedPnlNanos == null) return 1;
       return cmpBig(a.realizedPnlNanos, b.realizedPnlNanos);
-    case "welfare":
-      if (a.welfareNanos == null && b.welfareNanos == null) return 0;
-      if (a.welfareNanos == null) return -1;
-      if (b.welfareNanos == null) return 1;
-      return cmpBig(a.welfareNanos, b.welfareNanos);
     case "closed":
       return a.closedAtMs - b.closedAtMs;
   }
 }
 
-export function EventClosedOrders({
-  events,
-  labelByMarket,
-  pageSize,
-}: {
-  /** Full account history feed (unfiltered). */
+interface Props {
   events: HistoryEvent[];
-  /** market_id → short outcome label (same map EventHoldings builds). */
-  labelByMarket: Map<number, string>;
-  /** Rows per page; defaults to the compact market-detail PAGE_SIZE. */
-  pageSize?: number;
-}) {
+  marketsById: Map<number, Market>;
+}
+
+export function ClosedOrdersList({ events, marketsById }: Props) {
   const [sort, setSort] = useState<Sort | null>(null);
 
-  const closed = useMemo<ClosedOrder[]>(() => {
-    const eventMarketIds = new Set(labelByMarket.keys());
-    // Fold order lifecycle events per order_id, scoped to this event's markets.
-    // We track the latest terminal event (sets status/qty/close-time) plus a
-    // last-seen price fallback from partial fills.
-    const byOrder = new Map<
-      number,
-      {
-        marketId: number;
-        side?: "BUY" | "SELL";
-        outcome?: "YES" | "NO";
-        terminal: HistoryEvent | null;
-        lastFillPrice: bigint | null;
-        /** Σ realized PnL over the order's fill events; null until one carries it. */
-        realizedPnl: bigint | null;
-        /** Limit price from the `placed` event; null if it aged out of the feed. */
-        requestedPrice: bigint | null;
-        /** Σ qty over fill events — denominator side of the welfare sum. */
-        filledQty: bigint;
-        /** Σ (fill price × qty) over fill events, for the welfare sum. */
-        filledNotional: bigint;
-      }
-    >();
+  const rows = useMemo<ClosedRowData[]>(() => {
+    // Fold order lifecycle events per order_id: latest terminal event sets
+    // status/qty/close-time; placed event carries the limit; fills accumulate
+    // realized PnL and the welfare numerator/denominator.
+    const byOrder = new Map<number, Slot>();
 
     for (const e of events) {
       if (e.orderId == null || e.marketId == null) continue;
-      if (!eventMarketIds.has(e.marketId)) continue;
-      // `placed` joins so we can surface the requested (limit) price + welfare;
-      // everything else here is a partial fill or a terminal close.
       if (e.type !== "placed" && e.type !== "partial_fill" && !TERMINAL.has(e.type))
         continue;
 
-      const slot =
-        byOrder.get(e.orderId) ??
-        ({
-          marketId: e.marketId,
-          terminal: null,
-          lastFillPrice: null,
-          realizedPnl: null,
-          requestedPrice: null,
-          filledQty: 0n,
-          filledNotional: 0n,
-        } as {
-          marketId: number;
-          side?: "BUY" | "SELL";
-          outcome?: "YES" | "NO";
-          terminal: HistoryEvent | null;
-          lastFillPrice: bigint | null;
-          realizedPnl: bigint | null;
-          requestedPrice: bigint | null;
-          filledQty: bigint;
-          filledNotional: bigint;
-        });
+      const slot: Slot = byOrder.get(e.orderId) ?? {
+        marketId: e.marketId,
+        terminal: null,
+        lastFillPrice: null,
+        realizedPnl: null,
+        requestedPrice: null,
+        filledQty: 0n,
+        filledNotional: 0n,
+      };
 
-      // Carry side/outcome from whichever event has them (the `placed` event and
-      // fills both do).
       if (e.side && slot.side == null) slot.side = e.side;
       if (e.outcome && slot.outcome == null) slot.outcome = e.outcome;
-      // The `placed` event carries the order's limit (requested) price.
       if (e.type === "placed" && e.priceNanos != null && slot.requestedPrice == null) {
         slot.requestedPrice = e.priceNanos;
       }
       if (e.type === "partial_fill" && e.priceNanos != null) {
         slot.lastFillPrice = e.priceNanos;
       }
-      // Accumulate realized PnL across every fill event (partial + final), so a
-      // sell that filled in pieces — even one later cancelled — totals correctly.
       if (
         (e.type === "partial_fill" || e.type === "filled") &&
         e.realizedPnlNanos != null
       ) {
         slot.realizedPnl = (slot.realizedPnl ?? 0n) + e.realizedPnlNanos;
       }
-      // Accumulate Σqty and Σ(price × qty) across every fill (partial + final) so
-      // welfare is exact even when an order fills in pieces at different prices.
       if (
         (e.type === "partial_fill" || e.type === "filled") &&
         e.priceNanos != null &&
@@ -270,81 +226,100 @@ export function EventClosedOrders({
       byOrder.set(e.orderId, slot);
     }
 
-    const rows: ClosedOrder[] = [];
+    const decorated: ClosedRowData[] = [];
     for (const [orderId, slot] of byOrder) {
       const t = slot.terminal;
       if (t == null) continue; // only partial fills so far — still resting
       const qty = t.qty ?? null;
       const priceNanos = t.priceNanos ?? slot.lastFillPrice;
-      // Welfare = Σ (limit − fill) × qty, signed by side: a buyer gains when it
-      // fills below the limit, a seller when above. Needs a known limit, side,
-      // and at least one fill; else null ("—").
       let welfareNanos: bigint | null = null;
       if (slot.requestedPrice != null && slot.side != null && slot.filledQty > 0n) {
         const edge = slot.requestedPrice * slot.filledQty - slot.filledNotional;
         welfareNanos = slot.side === "BUY" ? edge : -edge;
       }
-      const row: ClosedOrder = {
+      const row: ClosedRowData = {
         orderId,
         marketId: slot.marketId,
-        label: labelByMarket.get(slot.marketId) ?? `#${slot.marketId}`,
+        market: marketsById.get(slot.marketId),
+        label: marketsById.get(slot.marketId)?.name ?? `#${slot.marketId}`,
         status: STATUS_OF[t.type as "filled" | "cancelled" | "expired"],
         closedAtMs: t.timestampMs,
         qty,
         priceNanos,
         requestedPriceNanos: slot.requestedPrice,
         valueNanos: qty != null && priceNanos != null ? BigInt(qty) * priceNanos : null,
-        // PnL is realized on the closing trade — show it for sells only.
         realizedPnlNanos: slot.side === "SELL" ? slot.realizedPnl : null,
         welfareNanos,
       };
       if (slot.side) row.side = slot.side;
       if (slot.outcome) row.outcome = slot.outcome;
-      rows.push(row);
+      decorated.push(row);
     }
-    rows.sort((a, b) => b.closedAtMs - a.closedAtMs);
 
-    if (!sort) return rows;
+    if (!sort) {
+      return decorated.sort((a, b) => b.closedAtMs - a.closedAtMs);
+    }
     const factor = sort.dir === "asc" ? 1 : -1;
-    return rows.sort((a, b) => compareBy(a, b, sort.key) * factor);
-  }, [events, labelByMarket, sort]);
+    return decorated.sort((a, b) => compareBy(a, b, sort.key) * factor);
+  }, [events, marketsById, sort]);
 
-  const paged = usePaged(closed, pageSize);
+  const paged = usePaged(rows, PORTFOLIO_PAGE_SIZE);
 
-  if (closed.length === 0) {
-    return <Empty>No closed orders for this event.</Empty>;
+  const onSort = (key: SortKey) => {
+    setSort((s) => nextSort(s, key));
+    paged.setPage(0);
+  };
+
+  if (rows.length === 0) {
+    return <Empty>No closed orders.</Empty>;
   }
-
   return (
-    <div>
-      <Row header>
+    <div
+      style={{
+        background: "var(--surface-1)",
+        border: "1px solid var(--border-1)",
+        borderRadius: 6,
+        overflow: "hidden",
+      }}
+    >
+      <div style={rowGrid("var(--fg-4)")}>
+        <span />
         {COLUMNS.map((col) => (
-          <HeaderCell
-            key={col.key}
-            col={col}
-            sort={sort}
-            onSort={() => {
-              setSort((s) => nextSort(s, col.key));
-              paged.setPage(0);
-            }}
-          />
+          <SortHeader key={col.key} col={col} sort={sort} onSort={onSort} />
         ))}
-      </Row>
-      {paged.visible.map((o) => (
-        <ClosedRow key={o.orderId} order={o} />
+      </div>
+      {paged.visible.map((r) => (
+        <ClosedRow key={r.orderId} row={r} />
       ))}
-      <Pager paged={paged} />
+      <div style={{ padding: "0 14px" }}>
+        <Pager paged={paged} />
+      </div>
     </div>
   );
 }
 
-function ClosedRow({ order }: { order: ClosedOrder }) {
-  const isBuy = order.side === "BUY";
-  const isSell = order.side === "SELL";
+function ClosedRow({ row }: { row: ClosedRowData }) {
+  const { market, label, marketId } = row;
+  const isBuy = row.side === "BUY";
+  const isSell = row.side === "SELL";
   return (
-    <Row>
+    <Link
+      href={`/m/${marketId}`}
+      style={{
+        ...rowGrid("var(--fg-2)"),
+        textDecoration: "none",
+        color: "inherit",
+        borderTop: "1px solid var(--border-1)",
+      }}
+    >
+      <MarketThumb
+        marketId={marketId}
+        name={label}
+        imageUrl={market?.market_image_url ?? market?.event_image_url ?? null}
+        fallbackIconUrl={market?.market_icon_url ?? market?.event_icon_url ?? null}
+        size={28}
+      />
       <span
-        title={order.label}
         style={{
           overflow: "hidden",
           textOverflow: "ellipsis",
@@ -353,8 +328,9 @@ function ClosedRow({ order }: { order: ClosedOrder }) {
           fontFamily: "var(--font-sans)",
           fontSize: 13,
         }}
+        title={label}
       >
-        {order.label}
+        {label}
       </span>
       <span
         style={{
@@ -367,38 +343,36 @@ function ClosedRow({ order }: { order: ClosedOrder }) {
       >
         {isBuy ? "BUY" : isSell ? "SELL" : "—"}
       </span>
-      <span>{order.outcome ? <SidePill outcome={order.outcome} /> : <Muted>—</Muted>}</span>
-      <Right>
-        <StatusBadge status={order.status} />
-      </Right>
-      <Right mono>{order.qty ?? "—"}</Right>
-      <Right mono>
+      {row.outcome ? <SidePill outcome={row.outcome} /> : <Muted>—</Muted>}
+      <span>
+        <StatusBadge status={row.status} />
+      </span>
+      <RightCell mono>{row.qty ?? "—"}</RightCell>
+      <RightCell mono>
         <PriceCell
-          settledNanos={order.priceNanos}
-          requestedNanos={order.requestedPriceNanos}
+          settledNanos={row.priceNanos}
+          requestedNanos={row.requestedPriceNanos}
         />
-      </Right>
-      <Right>
-        <WelfareCell welfareNanos={order.welfareNanos} />
-      </Right>
-      <Right mono>
-        {order.valueNanos != null ? formatDollars(order.valueNanos, { decimals: 2 }) : "—"}
-      </Right>
-      <Right>
-        <PnlCell pnlNanos={order.realizedPnlNanos} />
-      </Right>
-      <Right>
-        <ClosedTime ms={order.closedAtMs} />
-      </Right>
-    </Row>
+      </RightCell>
+      <RightCell>
+        <WelfareCell welfareNanos={row.welfareNanos} />
+      </RightCell>
+      <RightCell mono>
+        {row.valueNanos != null ? formatDollars(row.valueNanos, { decimals: 2 }) : "—"}
+      </RightCell>
+      <RightCell>
+        <PnlCell pnlNanos={row.realizedPnlNanos} />
+      </RightCell>
+      <RightCell>
+        <ClosedTime ms={row.closedAtMs} />
+      </RightCell>
+    </Link>
   );
 }
 
 /**
  * Price cell — the settled (fill) price, with the requested (limit) price shown
- * struck-through before it when the two differ. Falls back to settled-only when
- * the requested price is unknown (aged out of the feed) or rounds to the same
- * cents, and to "—" when nothing filled.
+ * struck-through before it when the two differ. "—" when nothing filled.
  */
 function PriceCell({
   settledNanos,
@@ -423,10 +397,9 @@ function PriceCell({
 
 /**
  * Welfare cell — highlights how much better than your limit the order filled.
- * A positive surplus (you beat your limit) reads as a green pill, a negative one
- * (you paid up to your limit's edge) as a red pill; an exact-limit fill or an
- * unknown welfare stays muted and flat, so the eye lands on the orders that
- * actually gained. The signed $ amount answers "how much better".
+ * A positive surplus reads as a green pill, a negative one as a red pill; an
+ * exact-limit fill or unknown welfare stays muted and flat. The signed $ amount
+ * answers "how much better".
  */
 function WelfareCell({ welfareNanos }: { welfareNanos: bigint | null }) {
   if (welfareNanos == null) {
@@ -435,12 +408,11 @@ function WelfareCell({ welfareNanos }: { welfareNanos: bigint | null }) {
   const positive = welfareNanos > 0n;
   const negative = welfareNanos < 0n;
   const tone = positive ? "var(--yes)" : negative ? "var(--no)" : "var(--fg-3)";
-  const bg =
-    positive
-      ? "color-mix(in srgb, var(--yes) 16%, transparent)"
-      : negative
-        ? "color-mix(in srgb, var(--no) 14%, transparent)"
-        : "transparent";
+  const bg = positive
+    ? "color-mix(in srgb, var(--yes) 16%, transparent)"
+    : negative
+      ? "color-mix(in srgb, var(--no) 14%, transparent)"
+      : "transparent";
   return (
     <span
       title={
@@ -495,9 +467,7 @@ function PnlCell({ pnlNanos }: { pnlNanos: bigint | null }) {
               : "var(--no)",
       }}
     >
-      {pnlNanos == null
-        ? "—"
-        : formatDollars(pnlNanos, { decimals: 2, sign: true })}
+      {pnlNanos == null ? "—" : formatDollars(pnlNanos, { decimals: 2, sign: true })}
     </span>
   );
 }
@@ -511,6 +481,7 @@ function StatusBadge({ status }: { status: Status }) {
   return (
     <span
       style={{
+        justifySelf: "start",
         padding: "1px 7px",
         background: tone.bg,
         color: tone.fg,
@@ -556,20 +527,21 @@ function ClosedTime({ ms }: { ms: number }) {
   );
 }
 
-function HeaderCell({
+function SortHeader({
   col,
   sort,
   onSort,
 }: {
   col: (typeof COLUMNS)[number];
   sort: Sort | null;
-  onSort: () => void;
+  onSort: (key: SortKey) => void;
 }) {
   const active = sort?.key === col.key;
-  const sortButton = (
+  const button = (
     <button
       type="button"
-      onClick={onSort}
+      onClick={() => onSort(col.key)}
+      title={`Sort by ${col.label}`}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -581,21 +553,18 @@ function HeaderCell({
         background: "transparent",
         cursor: "pointer",
         font: "inherit",
-        textTransform: "uppercase",
         letterSpacing: "var(--track-wide)",
         color: active ? "var(--fg-2)" : "var(--fg-4)",
       }}
-      title={`Sort by ${col.label}`}
     >
-      <span>{col.label}</span>
+      <span style={{ whiteSpace: "nowrap" }}>{col.label}</span>
       <span style={{ fontSize: 8, lineHeight: 1, opacity: active ? 1 : 0.3 }}>
         {active ? (sort!.dir === "asc" ? "▲" : "▼") : "↕"}
       </span>
     </button>
   );
-  // A `?` glossary badge sits beside the sort label as a sibling (not nested in
-  // the button — that would be invalid markup) for columns that explain a term.
-  if (!col.info) return sortButton;
+  if (!col.info) return button;
+  // A `?` glossary badge sits beside the sort label (not nested in the button).
   return (
     <span
       style={{
@@ -606,42 +575,28 @@ function HeaderCell({
         justifyContent: col.align === "right" ? "flex-end" : "flex-start",
       }}
     >
-      {sortButton}
+      {button}
       <Glossary term={col.info} />
     </span>
   );
 }
 
-function Row({
-  children,
-  header,
-}: {
-  children: React.ReactNode;
-  header?: boolean;
-}) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns:
-          "minmax(0, 1fr) 52px 46px 66px 38px 76px 86px 60px 56px 58px",
-        gap: 13,
-        alignItems: "center",
-        padding: "9px 0",
-        borderTop: header ? undefined : "1px solid var(--border-1)",
-        fontFamily: "var(--font-mono)",
-        fontSize: header ? 10 : 11,
-        letterSpacing: "var(--track-wide)",
-        textTransform: header ? "uppercase" : undefined,
-        color: header ? "var(--fg-4)" : "var(--fg-2)",
-      }}
-    >
-      {children}
-    </div>
-  );
+function rowGrid(color: string): React.CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateColumns:
+      "28px minmax(0, 1.3fr) 56px 48px 78px 46px 74px 94px 82px 70px 96px",
+    gap: 14,
+    alignItems: "center",
+    padding: "10px 14px",
+    color,
+    fontFamily: "var(--font-mono)",
+    fontSize: 11,
+    letterSpacing: "var(--track-wide)",
+  };
 }
 
-function Right({
+function RightCell({
   children,
   mono,
 }: {
@@ -652,10 +607,10 @@ function Right({
     <span
       style={{
         textAlign: "right",
-        whiteSpace: "nowrap",
         fontFamily: mono ? "var(--font-mono)" : "inherit",
         fontSize: mono ? 12 : undefined,
         color: mono ? "var(--fg-1)" : undefined,
+        whiteSpace: "nowrap",
       }}
     >
       {children}
@@ -671,11 +626,13 @@ function Empty({ children }: { children: React.ReactNode }) {
   return (
     <div
       style={{
-        padding: "24px 0",
+        padding: "32px 16px",
+        background: "var(--surface-1)",
+        border: "1px dashed var(--border-1)",
+        borderRadius: 6,
         color: "var(--fg-4)",
         fontFamily: "var(--font-mono)",
         fontSize: 12,
-        letterSpacing: "var(--track-wide)",
         textAlign: "center",
       }}
     >

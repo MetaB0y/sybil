@@ -11,7 +11,7 @@
  */
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MockValue } from "@/components/mock-value";
 import { Pager, usePaged, PORTFOLIO_PAGE_SIZE } from "@/components/event-list-pager";
 import {
@@ -173,15 +173,27 @@ export function HistoryFeed({ events, marketsById, isMock }: Props) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-      {/* Filters: category chips + type / market / side dropdowns */}
+      {/* Filters — right-aligned: category chips + type / market / side
+          dropdowns. The mock pill (when present) pins to the far left. */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
           flexWrap: "wrap",
-          gap: 8,
+          gap: 10,
+          justifyContent: "flex-end",
         }}
       >
+        {isMock && (
+          <span style={{ marginRight: "auto" }}>
+            <MockValue
+              hint="history feed is mocked; pending backend /events endpoint (per-account event log)"
+              variant="pill"
+            >
+              {" "}
+            </MockValue>
+          </span>
+        )}
         <div style={{ display: "flex", gap: 6 }}>
           {CHIPS.map((c) => (
             <Chip
@@ -195,16 +207,18 @@ export function HistoryFeed({ events, marketsById, isMock }: Props) {
             />
           ))}
         </div>
-        <div style={{ display: "flex", gap: 6, marginLeft: 4 }}>
-          <Select
-            value={type}
+        <div style={{ display: "flex", gap: 8 }}>
+          <FilterDropdown
+            ariaLabel="Filter by event type"
+            value={String(type)}
             onChange={(v) => {
               setType(v as HistoryEventType | "all");
               paged.setPage(0);
             }}
             options={TYPE_OPTIONS.map((o) => ({ value: String(o.value), label: o.label }))}
           />
-          <Select
+          <FilterDropdown
+            ariaLabel="Filter by market"
             value={String(marketId)}
             onChange={(v) => {
               setMarketId(v === "all" ? "all" : Number(v));
@@ -215,7 +229,8 @@ export function HistoryFeed({ events, marketsById, isMock }: Props) {
               ...marketOptions.map((m) => ({ value: String(m.id), label: m.name })),
             ]}
           />
-          <Select
+          <FilterDropdown
+            ariaLabel="Filter by side"
             value={side}
             onChange={(v) => {
               setSide(v as "BUY" | "SELL" | "all");
@@ -228,16 +243,6 @@ export function HistoryFeed({ events, marketsById, isMock }: Props) {
             ]}
           />
         </div>
-        {isMock && (
-          <span style={{ marginLeft: "auto" }}>
-            <MockValue
-              hint="history feed is mocked; pending backend /events endpoint (per-account event log)"
-              variant="pill"
-            >
-              {" "}
-            </MockValue>
-          </span>
-        )}
       </div>
 
       {rows.length === 0 ? (
@@ -493,39 +498,177 @@ function SortHeader({
   );
 }
 
-function Select({
+/**
+ * Themed filter dropdown — a pill trigger + an anchored popover menu, replacing
+ * the native `<select>` (whose option list is unstyled OS chrome that clashes
+ * with the dark theme). Closes on outside-click / Escape; the trigger border
+ * goes accent when a non-default value is active so set filters read at a
+ * glance. The menu right-aligns to the trigger since the filter bar sits at the
+ * right edge.
+ */
+function FilterDropdown({
   value,
   onChange,
   options,
+  ariaLabel,
 }: {
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
+  ariaLabel: string;
 }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const current = options.find((o) => o.value === value) ?? options[0];
+  const isActive = value !== "all";
+
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: PointerEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={ariaLabel}
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "5px 11px",
+          background: open ? "var(--surface-2)" : "var(--bg-2)",
+          border: `1px solid ${isActive ? "var(--accent)" : "var(--border-1)"}`,
+          borderRadius: 999,
+          color: isActive ? "var(--fg-1)" : "var(--fg-2)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 11,
+          letterSpacing: "var(--track-wide)",
+          cursor: "pointer",
+          maxWidth: 220,
+        }}
+      >
+        <span
+          style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+        >
+          {current?.label}
+        </span>
+        <span
+          aria-hidden
+          style={{
+            fontSize: 8,
+            opacity: 0.7,
+            transform: open ? "rotate(180deg)" : "none",
+            transition: "transform var(--dur-fast) var(--ease-standard)",
+          }}
+        >
+          ▾
+        </span>
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          aria-label={ariaLabel}
+          style={{
+            position: "absolute",
+            top: "calc(100% + 6px)",
+            right: 0,
+            zIndex: 30,
+            minWidth: 168,
+            maxWidth: 280,
+            maxHeight: 300,
+            overflowY: "auto",
+            background: "var(--surface-3)",
+            border: "1px solid var(--border-2)",
+            borderRadius: 8,
+            padding: 4,
+            boxShadow: "var(--shadow-popover, 0 8px 24px rgba(0,0,0,0.4))",
+          }}
+        >
+          {options.map((o) => (
+            <DropdownOption
+              key={o.value}
+              label={o.label}
+              selected={o.value === value}
+              onClick={() => {
+                onChange(o.value);
+                setOpen(false);
+              }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One option row in `FilterDropdown` — hover/selected states via local state
+ *  (avoids global CSS for this scoped menu). */
+function DropdownOption({
+  label,
+  selected,
+  onClick,
+}: {
+  label: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={selected}
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       style={{
-        appearance: "none",
-        padding: "4px 10px",
-        background: "var(--bg-2)",
-        border: "1px solid var(--border-1)",
-        borderRadius: 999,
-        color: "var(--fg-2)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 8,
+        width: "100%",
+        padding: "6px 9px",
+        background: selected
+          ? "color-mix(in srgb, var(--accent) 16%, transparent)"
+          : hover
+            ? "var(--surface-2)"
+            : "transparent",
+        border: 0,
+        borderRadius: 5,
+        color: selected ? "var(--fg-1)" : "var(--fg-2)",
         fontFamily: "var(--font-mono)",
         fontSize: 11,
         letterSpacing: "var(--track-wide)",
+        textAlign: "left",
         cursor: "pointer",
-        maxWidth: 200,
       }}
     >
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
-    </select>
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {label}
+      </span>
+      {selected && (
+        <span aria-hidden style={{ color: "var(--accent)", fontSize: 10, flexShrink: 0 }}>
+          ✓
+        </span>
+      )}
+    </button>
   );
 }
 

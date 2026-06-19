@@ -14,6 +14,7 @@
 import { useEffect, useState, Fragment, type ReactNode } from "react";
 import {
   formatCompactDollars,
+  formatCompactDollarsCents,
   formatInt,
 } from "@/lib/format/nanos";
 import type { BatchRow as BatchRowData } from "@/lib/activity/types";
@@ -360,7 +361,7 @@ function Row({
         }}
       >
         {row.welfareNanos > 0n ? "+" : ""}
-        {formatCompactDollars(row.welfareNanos)}
+        {formatCompactDollarsCents(row.welfareNanos)}
         {row.welfareNanos !== 0n && (
           <span
             style={{

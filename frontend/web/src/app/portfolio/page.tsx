@@ -11,14 +11,10 @@
  */
 
 import { useMemo, useState } from "react";
-import { EventClosedOrders } from "@/components/event-closed-orders";
-import { PORTFOLIO_PAGE_SIZE } from "@/components/event-list-pager";
+import { ClosedOrdersList } from "@/components/portfolio/closed-orders-list";
 import { EquityChart } from "@/components/portfolio/equity-chart";
 import { HistoryFeed } from "@/components/portfolio/history-feed";
-import {
-  IdentityHeader,
-  IdentityStrip,
-} from "@/components/portfolio/identity-header";
+import { IdentityHeader } from "@/components/portfolio/identity-header";
 import { OpenOrdersList } from "@/components/portfolio/open-orders-list";
 import { PortfolioHero } from "@/components/portfolio/portfolio-hero";
 import {
@@ -123,21 +119,9 @@ function Connected({
   const tradeCount = fillsData.length;
   const tradeCountCapped = tradeCount >= FILLS_PAGE;
 
-  // Closed orders are reconstructed from the history feed (same logic as the
-  // market-page EventClosedOrders): one row per order_id with a terminal event,
-  // labelled by full market name. We build the label map here and let the
-  // component do the fold; the count below mirrors its "distinct closed order"
-  // notion for the tab badge.
-  const closedLabelByMarket = useMemo(() => {
-    const m = new Map<number, string>();
-    for (const e of history.events) {
-      if (e.marketId != null && !m.has(e.marketId)) {
-        m.set(e.marketId, marketsById.get(e.marketId)?.name ?? `#${e.marketId}`);
-      }
-    }
-    return m;
-  }, [history.events, marketsById]);
-
+  // Closed orders are reconstructed from the history feed inside
+  // ClosedOrdersList (one row per order_id with a terminal event). The count
+  // below mirrors its "distinct closed order" notion for the tab badge.
   const closedCount = useMemo(() => {
     const ids = new Set<number>();
     for (const e of history.events) {
@@ -164,43 +148,30 @@ function Connected({
 
       <section
         style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "var(--space-4)",
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 0.85fr) minmax(0, 1.15fr)",
+          gap: 48,
+          alignItems: "stretch",
           paddingBottom: "var(--space-5)",
           borderBottom: "1px solid var(--border-1)",
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "var(--space-4)",
-          }}
-        >
-          <IdentityStrip accountId={accountId} publicKeyHex={publicKeyHex} />
-          <RangeTabs value={range} onChange={setRange} />
-        </div>
+        {/* Left: portfolio hero. */}
+        <PortfolioHero
+          portfolio={portfolioData}
+          pnlSplit={pnlSplit}
+          curve={curve}
+          tradeCount={tradeCount}
+          tradeCountCapped={tradeCountCapped}
+          rangeLabel={RANGE_COPY[range]}
+        />
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 0.85fr) minmax(0, 1.15fr)",
-            gap: 48,
-            alignItems: "start",
-          }}
-        >
-          <PortfolioHero
-            portfolio={portfolioData}
-            pnlSplit={pnlSplit}
-            curve={curve}
-            tradeCount={tradeCount}
-            tradeCountCapped={tradeCountCapped}
-            rangeLabel={RANGE_COPY[range]}
-          />
-          <EquityChart curve={curve} />
-        </div>
+        {/* Right: the equity chart fills the row height, range tabs in its
+            header so the selector sits directly above the curve. */}
+        <EquityChart
+          curve={curve}
+          headerRight={<RangeTabs value={range} onChange={setRange} />}
+        />
       </section>
 
       <PortfolioTabs value={tab} onChange={setTab} counts={counts} />
@@ -222,11 +193,7 @@ function Connected({
         />
       )}
       {tab === "closed" && (
-        <EventClosedOrders
-          events={history.events}
-          labelByMarket={closedLabelByMarket}
-          pageSize={PORTFOLIO_PAGE_SIZE}
-        />
+        <ClosedOrdersList events={history.events} marketsById={marketsById} />
       )}
       {tab === "history" && (
         <HistoryFeed

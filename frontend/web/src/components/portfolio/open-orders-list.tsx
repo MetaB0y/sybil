@@ -30,8 +30,8 @@ import {
 } from "@/lib/format/nanos";
 import { selectLatestBlock, useStore } from "@/lib/store";
 import type { components } from "@/lib/api/schema";
+import { MarketThumb } from "@/components/market-thumb";
 import { Pager, usePaged, PORTFOLIO_PAGE_SIZE } from "@/components/event-list-pager";
-import { CategoryDot } from "./category-dot";
 import { SidePill } from "./side-pill";
 import { TifCell } from "./tif-cell";
 
@@ -290,7 +290,13 @@ function OrderRow({
         borderTop: "1px solid var(--border-1)",
       }}
     >
-      <CategoryDot market={market} />
+      <MarketThumb
+        marketId={order.market_id}
+        name={market?.name ?? `#${order.market_id}`}
+        imageUrl={market?.market_image_url ?? market?.event_image_url ?? null}
+        fallbackIconUrl={market?.market_icon_url ?? market?.event_icon_url ?? null}
+        size={28}
+      />
       <span
         style={{
           overflow: "hidden",
@@ -512,8 +518,8 @@ function rowGrid(color: string): React.CSSProperties {
   return {
     display: "grid",
     gridTemplateColumns:
-      "14px minmax(0, 1.25fr) 46px 44px 96px 52px 70px 78px 80px 96px 60px",
-    gap: 10,
+      "28px minmax(0, 1.3fr) 56px 48px 108px 56px 76px 82px 88px 92px 64px",
+    gap: 14,
     alignItems: "center",
     padding: "10px 14px",
     color,

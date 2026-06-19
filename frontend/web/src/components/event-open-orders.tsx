@@ -462,8 +462,8 @@ function Row({
       style={{
         display: "grid",
         gridTemplateColumns:
-          "minmax(0, 1fr) 44px 44px 100px 52px 66px 72px 68px 76px 64px",
-        gap: 10,
+          "minmax(0, 1fr) 56px 48px 108px 56px 74px 78px 70px 76px 62px",
+        gap: 14,
         alignItems: "center",
         padding: "9px 0",
         borderTop: header ? undefined : "1px solid var(--border-1)",

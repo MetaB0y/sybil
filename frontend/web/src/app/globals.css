@@ -78,3 +78,18 @@
   height: 0;
   display: none;
 }
+
+/* Hide the page-level scrollbar on every route (portfolio, activity, home, …)
+ * while keeping the document scrollable — matches the chrome-free look the
+ * market detail page already gets from `.no-scrollbar`. */
+html,
+body {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* old Edge */
+}
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
