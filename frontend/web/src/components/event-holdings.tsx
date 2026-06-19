@@ -40,6 +40,7 @@ import {
 import { colorForOutcome } from "@/components/outcome-legend";
 import { EventClosedOrders } from "@/components/event-closed-orders";
 import { EventOpenOrders } from "@/components/event-open-orders";
+import { Pager, usePaged } from "@/components/event-list-pager";
 import { SidePill } from "@/components/portfolio/side-pill";
 
 /** Which sub-view the "your holdings" section is showing. */
@@ -226,6 +227,9 @@ export function EventHoldings({ marketId }: { marketId: number }) {
         : sorted.filter((h) => h.position.market_id === selectedMarket),
     [sorted, selectedMarket],
   );
+  // Holdings tab paginates the (outcome-filtered) holdings 10/page; the open +
+  // closed tabs paginate inside their own components.
+  const holdingsPage = usePaged(visibleHoldings);
   const visibleOrders = useMemo(
     () =>
       selectedMarket == null
@@ -283,7 +287,10 @@ export function EventHoldings({ marketId }: { marketId: number }) {
             <OutcomeFilter
               outcomes={outcomes}
               selected={selectedMarket}
-              onChange={setSelectedMarket}
+              onChange={(id) => {
+                setSelectedMarket(id);
+                holdingsPage.setPage(0);
+              }}
             />
           )}
         </div>
@@ -305,16 +312,20 @@ export function EventHoldings({ marketId }: { marketId: number }) {
                   key={col.key}
                   col={col}
                   sort={sort}
-                  onSort={() => setSort((s) => nextSort(s, col.key))}
+                  onSort={() => {
+                    setSort((s) => nextSort(s, col.key));
+                    holdingsPage.setPage(0);
+                  }}
                 />
               ))}
             </Row>
-            {visibleHoldings.map((h) => (
+            {holdingsPage.visible.map((h) => (
               <HoldingRow
                 key={`${h.position.market_id}:${h.outcome}`}
                 holding={h}
               />
             ))}
+            <Pager paged={holdingsPage} />
           </div>
         )
       ) : view === "open" ? (
@@ -322,6 +333,8 @@ export function EventHoldings({ marketId }: { marketId: number }) {
           orders={visibleOrders}
           fills={fillsData ?? []}
           labelByMarket={scopedLabelByMarket}
+          accountId={accountId}
+          publicKeyHex={session?.publicKeyHex ?? ""}
         />
       ) : (
         <EventClosedOrders

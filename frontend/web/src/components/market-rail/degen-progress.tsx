@@ -22,8 +22,6 @@ function money(n: number): string {
 }
 
 export function DegenProgress(props: DegenProgressProps) {
-  const accent = props.side === "YES" ? "var(--yes)" : "var(--no)";
-
   if (props.phase === "tracking") {
     return (
       <div style={cardStyle}>
@@ -58,16 +56,21 @@ export function DegenProgress(props: DegenProgressProps) {
             100,
         ) / 100
       : 0;
+  // Success (full or partial fill) always reads green; a miss always reads red
+  // — independent of whether the user bet YES or NO, so the colour signals
+  // outcome, not side.
+  const success = props.phase === "filled" || props.phase === "partial";
+  const resultColor = success ? "var(--yes)" : "var(--no)";
   const result =
     props.phase === "filled"
-      ? `🎉 Congratulations! Successfully bet ${money(props.betUsd)} on ${props.side}!`
+      ? `Successfully bet ${money(props.betUsd)} on ${props.side}!`
       : props.phase === "partial"
         ? `◐ Half in! Successfully bet ${money(filledUsd)} out of ${money(props.betUsd)} on ${props.side}!`
-        : `✕ Missed :( No one took the other side — try again!`;
+        : `Oops, your order failed. Try again!`;
 
   return (
     <div style={cardStyle}>
-      <div style={{ ...rowStyle, color: accent }}>
+      <div style={{ ...rowStyle, color: resultColor }}>
         <span style={{ fontFamily: "var(--font-sans)", fontSize: 14, fontWeight: 700 }}>
           {result}
         </span>

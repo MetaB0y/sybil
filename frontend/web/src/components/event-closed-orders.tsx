@@ -30,6 +30,7 @@
 import { useMemo, useState } from "react";
 import type { HistoryEvent } from "@/lib/account/use-account-history";
 import { formatCents, formatDollars } from "@/lib/format/nanos";
+import { Pager, usePaged } from "@/components/event-list-pager";
 import { SidePill } from "@/components/portfolio/side-pill";
 
 type Status = "FILLED" | "CANCELLED" | "EXPIRED";
@@ -237,6 +238,8 @@ export function EventClosedOrders({
     return rows.sort((a, b) => compareBy(a, b, sort.key) * factor);
   }, [events, labelByMarket, sort]);
 
+  const paged = usePaged(closed);
+
   if (closed.length === 0) {
     return <Empty>No closed orders for this event.</Empty>;
   }
@@ -249,13 +252,17 @@ export function EventClosedOrders({
             key={col.key}
             col={col}
             sort={sort}
-            onSort={() => setSort((s) => nextSort(s, col.key))}
+            onSort={() => {
+              setSort((s) => nextSort(s, col.key));
+              paged.setPage(0);
+            }}
           />
         ))}
       </Row>
-      {closed.map((o) => (
+      {paged.visible.map((o) => (
         <ClosedRow key={o.orderId} order={o} />
       ))}
+      <Pager paged={paged} />
     </div>
   );
 }

@@ -9,7 +9,8 @@
  * price, IEV, imbalance, batch) without cluttering the dense layout.
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { FloatingTooltip } from "./floating-tooltip";
 
 /** Term → definition. Keep copy in sync with the handoff GLOSSARY. */
 export const GLOSSARY: Record<string, string> = {
@@ -28,27 +29,31 @@ export const GLOSSARY: Record<string, string> = {
 export function Glossary({
   term,
   children,
-  side = "top",
 }: {
   term: keyof typeof GLOSSARY | string;
   children: React.ReactNode;
-  side?: "top" | "bottom";
 }) {
-  const [open, setOpen] = useState(false);
+  // The trigger's bounding box, captured in the open handlers (reading layout
+  // in render is disallowed). `null` = closed; a rect = open + anchored.
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const ref = useRef<HTMLSpanElement>(null);
   const content = GLOSSARY[term] ?? "";
+  const openAt = (el: HTMLElement | null) =>
+    setRect(el ? el.getBoundingClientRect() : null);
 
   return (
     <span
+      ref={ref}
       style={{
         position: "relative",
         display: "inline-flex",
         alignItems: "center",
         gap: 4,
       }}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-      onFocus={() => setOpen(true)}
-      onBlur={() => setOpen(false)}
+      onMouseEnter={(e) => openAt(e.currentTarget)}
+      onMouseLeave={() => setRect(null)}
+      onFocus={(e) => openAt(e.currentTarget)}
+      onBlur={() => setRect(null)}
     >
       {children}
       <button
@@ -57,7 +62,7 @@ export function Glossary({
         aria-label={`What is ${term}?`}
         onClick={(e) => {
           e.preventDefault();
-          setOpen((o) => !o);
+          setRect((r) => (r ? null : ref.current?.getBoundingClientRect() ?? null));
         }}
         style={{
           width: 13,
@@ -79,43 +84,40 @@ export function Glossary({
       >
         ?
       </button>
-      {open && content && (
-        <span
-          role="tooltip"
-          style={{
-            position: "absolute",
-            zIndex: 50,
-            [side === "top" ? "bottom" : "top"]: "calc(100% + 6px)",
-            left: 0,
-            width: 240,
-            background: "var(--surface-3)",
-            border: "1px solid var(--border-2)",
-            borderRadius: 4,
-            padding: "10px 12px",
-            fontFamily: "var(--font-sans)",
-            fontSize: 12,
-            lineHeight: "17px",
-            color: "var(--fg-2)",
-            textTransform: "none",
-            letterSpacing: "normal",
-            boxShadow: "var(--shadow-popover, 0 8px 24px rgba(0,0,0,0.4))",
-          }}
-        >
+      {rect && content && (
+        <FloatingTooltip anchor={rect} width={240} estHeight={150}>
           <span
             style={{
               display: "block",
-              fontFamily: "var(--font-mono)",
-              fontSize: 10,
-              color: "var(--fg-3)",
-              textTransform: "uppercase",
-              letterSpacing: "0.04em",
-              marginBottom: 4,
+              background: "var(--surface-3)",
+              border: "1px solid var(--border-2)",
+              borderRadius: 4,
+              padding: "10px 12px",
+              fontFamily: "var(--font-sans)",
+              fontSize: 12,
+              lineHeight: "17px",
+              color: "var(--fg-2)",
+              textTransform: "none",
+              letterSpacing: "normal",
+              boxShadow: "var(--shadow-popover, 0 8px 24px rgba(0,0,0,0.4))",
             }}
           >
-            {term}
+            <span
+              style={{
+                display: "block",
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                color: "var(--fg-3)",
+                textTransform: "uppercase",
+                letterSpacing: "0.04em",
+                marginBottom: 4,
+              }}
+            >
+              {term}
+            </span>
+            {content}
           </span>
-          {content}
-        </span>
+        </FloatingTooltip>
       )}
     </span>
   );

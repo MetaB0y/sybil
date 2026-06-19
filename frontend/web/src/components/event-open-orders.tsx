@@ -16,10 +16,13 @@
  * pre-sorts by `created_at_ms` desc, preserved while no sort is picked).
  */
 
+import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { cancelSignedOrder } from "@/lib/account/orders";
 import type { AccountFill } from "@/lib/account/use-account-fills";
 import type { AccountOrder } from "@/lib/account/use-account-orders";
 import { formatCents, parseNanos } from "@/lib/format/nanos";
+import { Pager, usePaged } from "@/components/event-list-pager";
 import { SidePill } from "@/components/portfolio/side-pill";
 import { TifCell } from "@/components/portfolio/tif-cell";
 
@@ -61,7 +64,7 @@ const COLUMNS: { key: SortKey; label: string; align: "left" | "right" }[] = [
   { key: "outcome", label: "Outcome", align: "left" },
   { key: "action", label: "Action", align: "left" },
   { key: "side", label: "Side", align: "left" },
-  { key: "placed", label: "Placed / Filled", align: "right" },
+  { key: "placed", label: "Placed/Filled", align: "right" },
   { key: "limit", label: "Limit", align: "right" },
   { key: "avgfill", label: "Avg fill", align: "right" },
   { key: "tif", label: "TIF", align: "right" },
@@ -107,12 +110,17 @@ export function EventOpenOrders({
   orders,
   fills,
   labelByMarket,
+  accountId,
+  publicKeyHex,
 }: {
   /** Already filtered to this event's markets + sorted newest-first. */
   orders: AccountOrder[];
   fills: AccountFill[];
   /** market_id → short outcome label (same map EventHoldings builds). */
   labelByMarket: Map<number, string>;
+  /** Connected account — these are always its own orders, so cancel is allowed. */
+  accountId: number;
+  publicKeyHex: string;
 }) {
   const [sort, setSort] = useState<Sort | null>(null);
 
@@ -165,6 +173,18 @@ export function EventOpenOrders({
     return [...decorated].sort((a, b) => compareBy(a, b, sort.key) * factor);
   }, [orders, fillsByOrder, labelByMarket, sort]);
 
+  const paged = usePaged(rows);
+  const qc = useQueryClient();
+
+  // Cancellation refresh: the resting-orders feed (useAccountOrders) self-
+  // refetches per block, but invalidate immediately so the row drops as soon as
+  // the cancel is acknowledged rather than on the next batch.
+  function onCancelled() {
+    qc.invalidateQueries({ queryKey: ["account", accountId, "orders"] });
+    qc.invalidateQueries({ queryKey: ["account", accountId, "portfolio"] });
+    qc.invalidateQueries({ queryKey: ["orders", "pending"] });
+  }
+
   if (orders.length === 0) {
     return <Empty>No open orders for this event.</Empty>;
   }
@@ -177,21 +197,66 @@ export function EventOpenOrders({
             key={col.key}
             col={col}
             sort={sort}
-            onSort={() => setSort((s) => nextSort(s, col.key))}
+            onSort={() => {
+              setSort((s) => nextSort(s, col.key));
+              paged.setPage(0);
+            }}
           />
         ))}
+        <span />
       </Row>
-      {rows.map((r) => (
-        <OrderRow key={r.order.order_id} row={r} />
+      {paged.visible.map((r) => (
+        <OrderRow
+          key={r.order.order_id}
+          row={r}
+          accountId={accountId}
+          publicKeyHex={publicKeyHex}
+          onCancelled={onCancelled}
+        />
       ))}
+      <Pager paged={paged} />
     </div>
   );
 }
 
-function OrderRow({ row }: { row: OpenRow }) {
+function OrderRow({
+  row,
+  accountId,
+  publicKeyHex,
+  onCancelled,
+}: {
+  row: OpenRow;
+  accountId: number;
+  publicKeyHex: string;
+  onCancelled: () => void;
+}) {
   const { order, label, action, outcome, placed, filled, limitNanos, avgPriceNanos, fillCount } =
     row;
   const isBuy = action === "BUY";
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
+  async function onCancel() {
+    setCancelError(null);
+    setCancelling(true);
+    try {
+      await cancelSignedOrder({
+        accountId,
+        publicKeyHex,
+        orderId: order.order_id,
+        context: {
+          marketId: order.market_id,
+          side: order.side,
+          qty: order.remaining_quantity,
+          limitPriceNanos: String(order.limit_price_nanos),
+        },
+      });
+      onCancelled();
+    } catch (e) {
+      setCancelError(e instanceof Error ? e.message : String(e));
+      setCancelling(false);
+    }
+  }
 
   return (
     <Row>
@@ -235,6 +300,29 @@ function OrderRow({ row }: { row: OpenRow }) {
       </Right>
       <Right>
         <TifCell expiresAtBlock={order.expires_at_block} />
+      </Right>
+      <Right>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={cancelling}
+          title={cancelError ?? "Cancel order"}
+          style={{
+            padding: "3px 8px",
+            background: "transparent",
+            border: "1px solid color-mix(in srgb, var(--no) 32%, transparent)",
+            borderRadius: 3,
+            color: "var(--no)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 9.5,
+            cursor: cancelling ? "not-allowed" : "pointer",
+            textTransform: "uppercase",
+            letterSpacing: "var(--track-wide)",
+            opacity: cancelling ? 0.6 : 1,
+          }}
+        >
+          {cancelling ? "…" : "Cancel"}
+        </button>
       </Right>
     </Row>
   );
@@ -299,7 +387,7 @@ function HeaderCell({
       }}
       title={`Sort by ${col.label}`}
     >
-      <span>{col.label}</span>
+      <span style={{ whiteSpace: "nowrap" }}>{col.label}</span>
       <span style={{ fontSize: 8, lineHeight: 1, opacity: active ? 1 : 0.3 }}>
         {active ? (sort!.dir === "asc" ? "▲" : "▼") : "↕"}
       </span>
@@ -318,7 +406,8 @@ function Row({
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) 44px 44px 92px 56px 70px 84px",
+        gridTemplateColumns:
+          "minmax(0, 1fr) 44px 44px 100px 52px 66px 76px 64px",
         gap: 10,
         alignItems: "center",
         padding: "9px 0",

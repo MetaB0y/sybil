@@ -14,8 +14,10 @@
  */
 
 import { useState } from "react";
+import { FloatingTooltip } from "@/components/floating-tooltip";
 import { Glossary } from "@/components/glossary";
 import {
+  formatAge,
   formatBatchSeconds,
   formatCents,
   formatCompactDollars,
@@ -36,9 +38,16 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
 
   const batchNumber = latestHeight == null ? null : latestHeight + 1;
   const placers = live?.uniquePlacers ?? null;
-  // Indicative YES price falls back to the last clearing price when the
-  // shadow-solve has no resting orders for this market (null).
-  const indicativeYesNanos = live?.indicativeYesPriceNanos ?? outcome.yesPriceNanos;
+  // Indicative YES price: only trust the live shadow-solve when something would
+  // actually clear (indicative volume > 0). A thin / one-sided open batch still
+  // reports a degenerate clearing price (often >99¢) that bears no relation to
+  // the market — so when nothing crosses we fall back to the mark, keeping this
+  // number in agreement with the chart and the BuyBox limit default.
+  const liveIndicativeYesNanos =
+    live != null && live.indicativeVolumeNanos > 0n
+      ? live.indicativeYesPriceNanos
+      : null;
+  const indicativeYesNanos = liveIndicativeYesNanos ?? outcome.yesPriceNanos;
 
   return (
     <div
@@ -310,6 +319,8 @@ function SubStat({
 /** One bar's worth of derived, market-scoped batch stats. */
 type BatchBar = {
   height: number;
+  /** Wall-clock the batch settled (ms), for the "settled N ago" tooltip line. */
+  timestampMs: number;
   /** This market's matched volume in the batch (nanos). */
   volNanos: bigint;
   /** This market's YES clearing price this batch, or null if it didn't clear. */
@@ -342,8 +353,14 @@ function BatchHistoryBars({
   marketId: number;
   blocks: import("@/lib/api/schema").components["schemas"]["BlockResponse"][];
 }) {
-  const [hoverHeight, setHoverHeight] = useState<number | null>(null);
+  const [hover, setHover] = useState<{ height: number; rect: DOMRect } | null>(
+    null,
+  );
   const key = String(marketId);
+
+  // "Now" reference for the settled-ago line — the newest committed batch.
+  // `blocks` arrives newest-first (we reverse it below for the bars).
+  const nowMs = blocks[0]?.timestamp_ms ?? 0;
 
   // Sort oldest-first so the bars read left-to-right chronologically, then
   // derive this market's volume + price move per batch in one pass. Price
@@ -360,7 +377,13 @@ function BatchHistoryBars({
       if (prevYes != null) ppChange = Number(yesNanos - prevYes) / 1e7;
       prevYes = yesNanos;
     }
-    bars.push({ height: b.height, volNanos, yesNanos, ppChange });
+    bars.push({
+      height: b.height,
+      timestampMs: b.timestamp_ms ?? 0,
+      volNanos,
+      yesNanos,
+      ppChange,
+    });
   }
 
   // Pad on the left with empty placeholders so the row width stays stable
@@ -396,13 +419,18 @@ function BatchHistoryBars({
       {bars.map((bar) => {
         const ratio = max === 0n ? 0 : Number((bar.volNanos * 1000n) / max) / 1000;
         const h = Math.max(4, ratio * 44);
-        const isHover = hoverHeight === bar.height;
+        const isHover = hover?.height === bar.height;
         return (
           <div
             key={bar.height}
-            onMouseEnter={() => setHoverHeight(bar.height)}
+            onMouseEnter={(e) =>
+              setHover({
+                height: bar.height,
+                rect: e.currentTarget.getBoundingClientRect(),
+              })
+            }
             onMouseLeave={() =>
-              setHoverHeight((cur) => (cur === bar.height ? null : cur))
+              setHover((cur) => (cur?.height === bar.height ? null : cur))
             }
             style={{
               flex: "1 1 0",
@@ -423,7 +451,13 @@ function BatchHistoryBars({
                 transition: "opacity 80ms linear",
               }}
             />
-            {isHover && <BatchBarTooltip bar={bar} />}
+            {isHover && hover && (
+              <BatchBarTooltip
+                bar={bar}
+                anchor={hover.rect}
+                settledAgoMs={nowMs > 0 ? Math.max(0, nowMs - bar.timestampMs) : null}
+              />
+            )}
           </div>
         );
       })}
@@ -431,7 +465,16 @@ function BatchHistoryBars({
   );
 }
 
-function BatchBarTooltip({ bar }: { bar: BatchBar }) {
+function BatchBarTooltip({
+  bar,
+  anchor,
+  settledAgoMs,
+}: {
+  bar: BatchBar;
+  anchor: DOMRect;
+  /** ms since the batch settled, or null when no "now" reference is known. */
+  settledAgoMs: number | null;
+}) {
   const cleared = bar.yesNanos != null;
   const ppColor =
     bar.ppChange == null || Math.abs(bar.ppChange) < 0.05
@@ -439,47 +482,52 @@ function BatchBarTooltip({ bar }: { bar: BatchBar }) {
       : bar.ppChange > 0
         ? "var(--yes)"
         : "var(--no)";
+  const settledLabel =
+    settledAgoMs == null
+      ? "—"
+      : settledAgoMs < 5000
+        ? "just now"
+        : `${formatAge(settledAgoMs)} ago`;
   return (
-    <div
-      role="tooltip"
-      style={{
-        position: "absolute",
-        bottom: "calc(100% + 6px)",
-        left: "50%",
-        transform: "translateX(-50%)",
-        zIndex: 10,
-        pointerEvents: "none",
-        whiteSpace: "nowrap",
-        background: "var(--surface-3)",
-        border: "1px solid var(--border-1)",
-        borderRadius: 6,
-        boxShadow: "var(--shadow-popover)",
-        padding: "6px 8px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 3,
-        fontFamily: "var(--font-mono)",
-        fontSize: 10,
-        fontVariantNumeric: "tabular-nums",
-      }}
-    >
-      <span style={{ color: "var(--fg-3)" }}>batch #{formatInt(bar.height)}</span>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-        <span style={{ color: "var(--fg-3)" }}>matched vol</span>
-        <span style={{ color: "var(--fg-1)" }}>
-          {formatCompactDollars(bar.volNanos)}
-        </span>
+    <FloatingTooltip anchor={anchor} width={170} align="center" estHeight={92}>
+      <div
+        style={{
+          whiteSpace: "nowrap",
+          background: "var(--surface-3)",
+          border: "1px solid var(--border-1)",
+          borderRadius: 6,
+          boxShadow: "var(--shadow-popover)",
+          padding: "6px 8px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 3,
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        <span style={{ color: "var(--fg-3)" }}>batch #{formatInt(bar.height)}</span>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+          <span style={{ color: "var(--fg-3)" }}>settled</span>
+          <span style={{ color: "var(--fg-1)" }}>{settledLabel}</span>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+          <span style={{ color: "var(--fg-3)" }}>matched vol</span>
+          <span style={{ color: "var(--fg-1)" }}>
+            {formatCompactDollars(bar.volNanos)}
+          </span>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+          <span style={{ color: "var(--fg-3)" }}>price move</span>
+          <span style={{ color: ppColor }}>
+            {!cleared
+              ? "no clear"
+              : bar.ppChange == null
+                ? "—"
+                : formatPp(bar.ppChange)}
+          </span>
+        </div>
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-        <span style={{ color: "var(--fg-3)" }}>price move</span>
-        <span style={{ color: ppColor }}>
-          {!cleared
-            ? "no clear"
-            : bar.ppChange == null
-              ? "—"
-              : formatPp(bar.ppChange)}
-        </span>
-      </div>
-    </div>
+    </FloatingTooltip>
   );
 }

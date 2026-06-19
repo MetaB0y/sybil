@@ -95,6 +95,18 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
   const sharesIfUsd = limitDec > 0 ? usd / limitDec : 0;
   const maxCostIfShares = sh * limitDec;
 
+  // Unified receipt quantities. `qtyShares` is the order size the engine will
+  // see (`max_fill`), floored to whole shares exactly like onCtaClick — so the
+  // receipt matches what's actually submitted in all four modes (buy/sell ×
+  // $/shares). `grossAtLimit` is the cash value of that order at the limit
+  // price; `payoutIfWin` is what those shares return ($1 each) if in-the-money.
+  const qtyShares = Math.max(
+    0,
+    Math.floor(unit === "usd" ? sharesIfUsd : sh),
+  );
+  const grossAtLimit = qtyShares * limitDec;
+  const payoutIfWin = qtyShares; // qty × $1
+
   // Cash available to BUY = balance − cash reserved by resting buy orders.
   // (Sells are gated by held shares below, not cash.) Matches the engine so a
   // buy MAX / headroom never proposes more than will be accepted.
@@ -174,7 +186,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
   const ctaLabel = (() => {
     if (!connected) return "Connect to trade";
     if (submitting) return "Signing…";
-    if (insufficientBuy) return "Not enough available";
+    if (insufficientBuy) return "Not enough funds";
     const sideWord = dir === "buy" ? "queue buy" : "queue sell";
     const batchSuffix =
       batchNumber == null ? "" : ` → batch #${batchNumber.toLocaleString()}`;
@@ -673,29 +685,26 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
           fontSize: 11,
         }}
       >
-        {unit === "usd" ? (
+        {dir === "buy" ? (
           <>
+            {/* Buy: pay AT MOST limit×qty (uniform clearing may be cheaper),
+                receive qty shares, each worth $1 if the outcome resolves in. */}
+            <ReceiptRow label="max cost" value={`≤ $${grossAtLimit.toFixed(2)}`} />
+            <ReceiptRow label="shares (if filled)" value={`${qtyShares}`} />
             <ReceiptRow
-              label={dir === "buy" ? "cost" : "receive (if filled)"}
-              value={`$${usd.toFixed(2)}`}
-            />
-            <ReceiptRow
-              label="shares (if matched)"
-              value={`≥ ${sharesIfUsd.toFixed(1)}`}
-            />
-            <ReceiptRow
-              label="max payout"
-              value={`≥ $${sharesIfUsd.toFixed(2)}`}
+              label="payout if it wins"
+              value={`$${payoutIfWin.toFixed(2)}`}
             />
           </>
         ) : (
           <>
+            {/* Sell: receive AT LEAST limit×qty (uniform clearing may pay more)
+                in exchange for the shares you're selling. */}
             <ReceiptRow
-              label={dir === "buy" ? "max cost" : "max receive"}
-              value={`≤ $${maxCostIfShares.toFixed(2)}`}
+              label="min receive"
+              value={`≥ $${grossAtLimit.toFixed(2)}`}
             />
-            <ReceiptRow label="shares (if matched)" value={sh.toFixed(0)} />
-            <ReceiptRow label="max payout" value={`≥ $${sh.toFixed(2)}`} />
+            <ReceiptRow label="shares to sell" value={`${qtyShares}`} />
           </>
         )}
         <div
