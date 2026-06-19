@@ -7,7 +7,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use crate::account::AccountId;
-use matching_engine::{MarketId, Order, NANOS_PER_DOLLAR};
+use matching_engine::{MarketId, Order};
 
 pub const MAX_HISTORY_EVENTS_PER_ACCOUNT: usize = 5_000;
 
@@ -280,8 +280,8 @@ pub fn side_outcome_from_order(order: &Order) -> (Option<&'static str>, Option<&
     }
 }
 
-/// From a fill's `position_deltas` + YES clearing price, derive the primary
-/// market, side, outcome, and signed cash impact (+in / -out).
+/// From a fill's `position_deltas` + the filled side's own price, derive the
+/// primary market, side, outcome, and signed cash impact (+in / -out).
 pub fn fill_facets(
     position_deltas: &[(MarketId, u8, i64)],
     fill_price: u64,
@@ -297,11 +297,9 @@ pub fn fill_facets(
         if delta == 0 {
             continue;
         }
-        let entry = if outcome == 0 {
-            fill_price as i64
-        } else {
-            NANOS_PER_DOLLAR as i64 - fill_price as i64
-        };
+        // `fill_price` is already this side's own price (NO orders fill at the
+        // NO price), matching on-block settlement — use it directly, no flip.
+        let entry = fill_price as i64;
         // buying (delta>0) spends cash; selling (delta<0) receives cash
         cash -= delta as i128 * entry as i128;
         if primary.is_none_or(|(_, _, d)| delta.unsigned_abs() > d.unsigned_abs()) {
@@ -424,5 +422,41 @@ mod tests {
         assert_eq!(back.amount_nanos, None);
         assert_eq!(back.realized_pnl_nanos, None);
         assert_eq!(back.payout_outcome, None);
+    }
+
+    // --- fill_facets: cash is signed `fill_price * qty` (side price, no flip) ---
+
+    #[test]
+    fn fill_facets_no_buy_cash_is_side_price() {
+        // Buy 10 NO at 0.09 → spend 0.90 (the NO price), NOT 0.91-flipped 9.10.
+        let m = MarketId::new(1);
+        let (mid, side, outcome, cash) = fill_facets(&[(m, 1, 10)], 90_000_000);
+        assert_eq!(mid, Some(m));
+        assert_eq!(side, Some("BUY"));
+        assert_eq!(outcome, Some("NO"));
+        assert_eq!(cash, -900_000_000); // matches on-block balance_delta
+    }
+
+    #[test]
+    fn fill_facets_no_sell_cash_is_side_price() {
+        // Sell 10 NO at 0.30 → receive 3.00.
+        let m = MarketId::new(1);
+        let (_, side, outcome, cash) = fill_facets(&[(m, 1, -10)], 300_000_000);
+        assert_eq!(side, Some("SELL"));
+        assert_eq!(outcome, Some("NO"));
+        assert_eq!(cash, 3_000_000_000);
+    }
+
+    #[test]
+    fn fill_facets_yes_unaffected() {
+        let m = MarketId::new(1);
+        // Buy 10 YES at 0.60 → spend 6.00.
+        let (_, side, outcome, cash) = fill_facets(&[(m, 0, 10)], 600_000_000);
+        assert_eq!(side, Some("BUY"));
+        assert_eq!(outcome, Some("YES"));
+        assert_eq!(cash, -6_000_000_000);
+        // Sell 10 YES at 0.60 → receive 6.00.
+        let (_, _, _, cash_sell) = fill_facets(&[(m, 0, -10)], 600_000_000);
+        assert_eq!(cash_sell, 6_000_000_000);
     }
 }
