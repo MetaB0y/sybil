@@ -157,7 +157,7 @@ export function DegenRail({
       : !built.ok
         ? "Raise your bet"
         : insufficient
-          ? "Not enough available"
+          ? "Not enough funds"
           : `Bet $${amountNum} on ${side}${group.isMultiOutcome ? ` · ${selected.shortLabel}` : ""}`;
   const ctaDisabled = connected && (signing || !built.ok || insufficient);
 

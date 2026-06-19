@@ -28,10 +28,24 @@ describe("DegenProgress", () => {
     const html = renderToStaticMarkup(
       <DegenProgress {...common} phase="filled" filledQty={20n} />,
     );
-    expect(html).toMatch(/Congratulations/i);
+    expect(html).toMatch(/Successfully bet/i);
+    expect(html).not.toMatch(/Congratulations/i);
     expect(html).toContain("$10");
     expect(html).toContain("YES");
     expect(html).toMatch(/Bet again/i);
+  });
+
+  it("colours success green even on a NO bet, and a miss red", () => {
+    const filledNo = renderToStaticMarkup(
+      <DegenProgress {...common} side="NO" phase="filled" filledQty={20n} />,
+    );
+    expect(filledNo).toContain("var(--yes)");
+    expect(filledNo).not.toContain("color:var(--no)");
+
+    const missedYes = renderToStaticMarkup(
+      <DegenProgress {...common} side="YES" phase="none" filledQty={0n} />,
+    );
+    expect(missedYes).toContain("var(--no)");
   });
 
   it("shows a partial result with the filled dollars out of the stake", () => {
@@ -49,7 +63,7 @@ describe("DegenProgress", () => {
     const html = renderToStaticMarkup(
       <DegenProgress {...common} phase="none" filledQty={0n} />,
     );
-    expect(html).toMatch(/Missed/i);
+    expect(html).toMatch(/failed/i);
     expect(html).toMatch(/Bet again/i);
   });
 });

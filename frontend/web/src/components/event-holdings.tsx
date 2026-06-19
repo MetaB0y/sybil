@@ -36,6 +36,7 @@ import { formatCents, formatDollars, parseNanos } from "@/lib/format/nanos";
 import { useEventGroup } from "@/lib/market-detail/use-event-group";
 import { EventClosedOrders } from "@/components/event-closed-orders";
 import { EventOpenOrders } from "@/components/event-open-orders";
+import { Pager, usePaged } from "@/components/event-list-pager";
 import { SidePill } from "@/components/portfolio/side-pill";
 
 /** Which sub-view the "your holdings" section is showing. */
@@ -186,6 +187,10 @@ export function EventHoldings({ marketId }: { marketId: number }) {
     return [...holdings].sort((a, b) => compareBy(a, b, sort.key) * factor);
   }, [holdings, sort]);
 
+  // Holdings tab paginates here (10/page); the open + closed tabs paginate
+  // inside their own components.
+  const holdingsPage = usePaged(sorted);
+
   // Resting orders for this event's markets, newest-first (created_at_ms desc).
   const eventOrders = useMemo(() => {
     const eventMarketIds = new Set(labelByMarket.keys());
@@ -251,16 +256,20 @@ export function EventHoldings({ marketId }: { marketId: number }) {
                   key={col.key}
                   col={col}
                   sort={sort}
-                  onSort={() => setSort((s) => nextSort(s, col.key))}
+                  onSort={() => {
+                    setSort((s) => nextSort(s, col.key));
+                    holdingsPage.setPage(0);
+                  }}
                 />
               ))}
             </Row>
-            {sorted.map((h) => (
+            {holdingsPage.visible.map((h) => (
               <HoldingRow
                 key={`${h.position.market_id}:${h.outcome}`}
                 holding={h}
               />
             ))}
+            <Pager paged={holdingsPage} />
           </div>
         )
       ) : view === "open" ? (
@@ -268,6 +277,8 @@ export function EventHoldings({ marketId }: { marketId: number }) {
           orders={eventOrders}
           fills={fillsData ?? []}
           labelByMarket={labelByMarket}
+          accountId={accountId}
+          publicKeyHex={session?.publicKeyHex ?? ""}
         />
       ) : (
         <EventClosedOrders events={historyData} labelByMarket={labelByMarket} />
