@@ -1,68 +1,72 @@
 /**
  * Hook for the batches table (last N batches, newest first).
  *
- * Source of truth = `recentBlocks` in the global store. On mount, if the
- * buffer doesn't already contain `limit` blocks, trigger a WS replay by
- * seeding the singleton stream back to `latestHeight - limit` and forcing
- * a reconnect. The server streams the historical blocks over the existing
- * socket; `applyBlock` writes each one into the store via the normal path.
+ * Source of truth = `recentBlocks` in the global store. On mount we do a
+ * one-shot REST backfill: `GET /v1/blocks?limit=N` returns the server's
+ * in-memory block ring (newest-first), clamped to whatever it actually holds.
+ * We feed those into the store via `applyBlocks`; the table then shows however
+ * many blocks exist instead of nothing.
  *
- * No REST per-height fetches on the happy path. REST is only used as a
- * fallback when the server returns `block not found` (replay window pruned
- * past our target) — handled inside BlockStream, which transitions to
- * `failed`; the UI shows a banner and we accept a partial table.
+ * Why REST and not a WS replay handshake: the replay path is all-or-nothing —
+ * asking for `latest - N` when the server's ring is shallower than N makes the
+ * server close with `block not found` and we get zero history. REST clamps to
+ * the ring depth and always returns what's available. The live tail (new
+ * blocks) is owned by RealtimeProvider's singleton socket; `applyBlocks` /
+ * `applyBlock` dedupe + sort by height, so the REST seed and live blocks merge
+ * cleanly. We intentionally do NOT touch the stream here — the old code forced
+ * a disconnect/reconnect on the shared singleton, which interrupted live data
+ * for every other page too.
  */
 
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { deriveBatchRow } from "./derive-batch";
 import type { BatchRow } from "./types";
-import {
-  selectLatestHeight,
-  selectRecentBlocks,
-  useStore,
-} from "../store";
-import { getBlockStream } from "../ws/client";
+import { selectRecentBlocks, useStore } from "../store";
+import { api } from "../api/client";
 
 export type UseBatchesResult = {
   rows: BatchRow[];
-  /** True while we know the buffer is shy of `limit`. */
+  /** True only while the initial REST backfill is in flight and the table is
+   *  still empty. */
   isBackfilling: boolean;
 };
 
 export function useBatches(limit = 60): UseBatchesResult {
   const recentBlocks = useStore(selectRecentBlocks);
-  const latestHeight = useStore(selectLatestHeight);
+  const [loading, setLoading] = useState(true);
 
-  // Trigger the WS replay once per mount, after hydration has populated the
-  // first block. We intentionally don't re-trigger when the buffer grows past
-  // the limit — that's the success signal, not a reason to reconnect.
-  const triggered = useRef(false);
+  // One-shot backfill per mount. The server clamps `limit` to its ring depth,
+  // so over-asking is safe and future-proofs the table if the ring grows.
+  const backfilled = useRef(false);
   useEffect(() => {
-    if (triggered.current) return;
-    if (latestHeight == null) return;
-    if (recentBlocks.length >= limit) {
-      triggered.current = true;
-      return;
-    }
-    triggered.current = true;
-    const stream = getBlockStream();
-    const target = Math.max(0, latestHeight - limit);
-    stream.seedLastSeenHeight(target);
-    // Force re-handshake. The singleton handles the reconnect; live consumers
-    // (markets, market-detail) keep receiving blocks once replay catches up.
-    stream.disconnect();
-    stream.connect();
-  }, [latestHeight, recentBlocks.length, limit]);
+    if (backfilled.current) return;
+    backfilled.current = true;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await api.GET("/v1/blocks", {
+          params: { query: { limit } },
+        });
+        if (cancelled || error || !data || data.length === 0) return;
+        useStore.getState().applyBlocks(data);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [limit]);
 
-  const rows = useMemo(() => {
-    return recentBlocks.slice(0, limit).map(deriveBatchRow);
-  }, [recentBlocks, limit]);
+  const rows = useMemo(
+    () => recentBlocks.slice(0, limit).map(deriveBatchRow),
+    [recentBlocks, limit]
+  );
 
   return {
     rows,
-    isBackfilling:
-      latestHeight != null && recentBlocks.length < limit,
+    isBackfilling: loading && recentBlocks.length === 0,
   };
 }

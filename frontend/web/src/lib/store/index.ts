@@ -65,6 +65,11 @@ export type StoreState = {
   /** Apply a committed block: update latest, ring buffer, and any prices it
    *  carried in clearing_prices_nanos. */
   applyBlock: (block: Block) => void;
+  /** Seed many blocks at once (e.g. the REST backfill for the Activity table)
+   *  in a single atomic update. Dedupes against the ring by height; only the
+   *  newest incoming block is allowed to advance latest/prices/anchor, so a
+   *  historical backfill never regresses the live tip. */
+  applyBlocks: (blocks: Block[]) => void;
   /** Wipe live caches; used when the WS reports "block not found" and we
    *  need to re-hydrate from REST. */
   resetForFreshSnapshot: () => void;
@@ -146,6 +151,51 @@ export const useStore = create<StoreState>((set) => ({
       if (isNewest && block.clearing_prices_nanos) {
         prices = { ...prices };
         for (const [key, vec] of Object.entries(block.clearing_prices_nanos)) {
+          const id = Number(key);
+          if (!Number.isFinite(id)) continue;
+          const parsed = parseClearingPair(vec);
+          if (parsed) prices[id] = parsed;
+        }
+      }
+
+      return {
+        latestBlock,
+        latestBlockAnchorPerf,
+        recentBlocks: recent,
+        pricesByMarketId: prices,
+      };
+    }),
+
+  applyBlocks: (blocks) =>
+    set((s) => {
+      if (blocks.length === 0) return {};
+
+      // Merge into the ring in one pass: dedupe by height (incoming wins),
+      // newest-first, capped. Equivalent to calling applyBlock per block but
+      // produces a single store snapshot / render instead of N intermediate ones.
+      const byHeight = new Map<number, Block>();
+      for (const b of s.recentBlocks) byHeight.set(b.height, b);
+      for (const b of blocks) byHeight.set(b.height, b);
+      const recent = [...byHeight.values()]
+        .sort((a, b) => b.height - a.height)
+        .slice(0, RECENT_BLOCKS_CAP);
+
+      // Only the newest incoming block may move latest/prices/anchor — these
+      // are usually historical backfill blocks older than the live tip.
+      const newest = blocks.reduce((m, b) => (b.height > m.height ? b : m));
+      const isNewest =
+        s.latestBlock == null || newest.height >= s.latestBlock.height;
+      const latestBlock = isNewest ? newest : s.latestBlock;
+      const isNewHeight =
+        s.latestBlock == null || newest.height > s.latestBlock.height;
+      const latestBlockAnchorPerf = isNewHeight
+        ? performance.now()
+        : s.latestBlockAnchorPerf;
+
+      let prices = s.pricesByMarketId;
+      if (isNewest && newest.clearing_prices_nanos) {
+        prices = { ...prices };
+        for (const [key, vec] of Object.entries(newest.clearing_prices_nanos)) {
           const id = Number(key);
           if (!Number.isFinite(id)) continue;
           const parsed = parseClearingPair(vec);
