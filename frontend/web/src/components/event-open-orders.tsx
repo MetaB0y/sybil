@@ -26,8 +26,6 @@ import { Pager, usePaged } from "@/components/event-list-pager";
 import { SidePill } from "@/components/portfolio/side-pill";
 import { TifCell } from "@/components/portfolio/tif-cell";
 
-const ONE_DOLLAR_NANOS = 1_000_000_000n;
-
 /** WAC avg fill price (nanos) + fill count for one order. */
 interface OrderFillAgg {
   count: number;
@@ -43,7 +41,7 @@ interface OpenRow {
   placed: number;
   filled: number;
   limitNanos: bigint;
-  /** Side-adjusted avg fill price (NO = $1 − yes_clearing), matching Limit. */
+  /** Avg fill price (WAC of visible fills) — already side-relative, like Limit. */
   avgPriceNanos: bigint | null;
   fillCount: number;
   expiresAtBlock: number;
@@ -151,10 +149,8 @@ export function EventOpenOrders({
       const agg = fillsByOrder.get(o.order_id);
       const placed = o.original_quantity ?? 0;
       const outcome = sideRaw.includes("yes") ? "YES" : sideRaw.includes("no") ? "NO" : "";
-      // agg.avgPriceNanos is raw YES clearing; flip for NO so it matches Limit.
-      const rawAvg = agg?.avgPriceNanos ?? null;
-      const avgPriceNanos =
-        rawAvg == null ? null : outcome === "NO" ? ONE_DOLLAR_NANOS - rawAvg : rawAvg;
+      // agg.avgPriceNanos is already this side's own price (matches Limit).
+      const avgPriceNanos = agg?.avgPriceNanos ?? null;
       return {
         order: o,
         label: labelByMarket.get(o.market_id) ?? `#${o.market_id}`,

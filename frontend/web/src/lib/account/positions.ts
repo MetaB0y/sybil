@@ -8,17 +8,15 @@
  * the field is zero (positions opened before C1 ramped, or any missing
  * row) we fall back to a qty-weighted average over visible fills.
  *
- * Side convention: `AccountFillResponse.fill_price_nanos` is the raw YES
- * clearing price, NOT side-adjusted (unlike the cost-basis tracker and the
- * event log, which both flip it for NO). So the fills fallback must convert:
- * a NO entry price is `$1 − yes_clearing`. Without this, a NO position's entry
- * shows the YES price (e.g. 48¢ instead of the 52¢ actually paid).
+ * Side convention: `AccountFillResponse.fill_price_nanos` is the filled order's
+ * OWN side price (a NO fill carries the NO price) — NOT a YES-clearing price —
+ * so use it directly, no flip. The backend `avg_entry_price_nanos` is likewise
+ * already side-correct (since the 2026-06-19 cost-basis fix). (Earlier code here
+ * wrongly flipped NO via `$1 − fill_price`, which double-flipped the side price.)
  */
 
 import type { components } from "@/lib/api/schema";
 import { parseNanos } from "@/lib/format/nanos";
-
-const ONE_DOLLAR_NANOS = 1_000_000_000n;
 
 type Fill = components["schemas"]["AccountFillResponse"];
 type Position = components["schemas"]["PositionValueResponse"];
@@ -49,10 +47,8 @@ export function avgEntryPriceNanos(
     );
     if (!delta || delta.delta <= 0) continue;
     const qty = BigInt(delta.delta);
-    // fill_price_nanos is the YES clearing price; side-adjust for NO.
-    const yesClearing = parseNanos(fill.fill_price_nanos);
-    const priceNanos =
-      outcome === "NO" ? ONE_DOLLAR_NANOS - yesClearing : yesClearing;
+    // fill_price_nanos is already this side's own price — use it directly.
+    const priceNanos = parseNanos(fill.fill_price_nanos);
     totalQty += qty;
     totalCost += qty * priceNanos;
   }

@@ -5,14 +5,19 @@ import { avgEntryPriceNanos } from "./positions";
 type Fill = components["schemas"]["AccountFillResponse"];
 type Position = components["schemas"]["PositionValueResponse"];
 
-const ONE = 1_000_000_000n;
-const YES_CLEARING = 480_000_000n; // 48¢ YES → 52¢ NO
+const NO_PRICE = 520_000_000n; // 52¢ — the NO price actually paid
 
-function fill(marketId: number, outcome: string, delta: number): Fill {
+function fill(
+  marketId: number,
+  outcome: string,
+  delta: number,
+  priceNanos: bigint,
+): Fill {
   return {
     block_height: 1,
-    // fill_price_nanos is always the YES clearing price, regardless of side.
-    fill_price_nanos: String(YES_CLEARING),
+    // fill_price_nanos is the filled side's OWN price (a NO fill carries the
+    // NO price), NOT a YES-clearing price — used directly, no flip.
+    fill_price_nanos: String(priceNanos),
     fill_qty: Math.abs(delta),
     order_id: 1,
     timestamp_ms: 0,
@@ -32,24 +37,27 @@ function pos(marketId: number, outcome: string, avgEntryNanos: bigint): Position
 }
 
 describe("avgEntryPriceNanos", () => {
-  it("YES position: entry is the YES clearing price", () => {
-    expect(avgEntryPriceNanos([fill(7, "YES", 18)], 7, "YES")).toBe(YES_CLEARING);
+  it("YES position: entry is the fill's side price, used directly", () => {
+    expect(avgEntryPriceNanos([fill(7, "YES", 18, 480_000_000n)], 7, "YES")).toBe(
+      480_000_000n,
+    );
   });
 
-  it("NO position: entry is side-adjusted ($1 − YES clearing)", () => {
-    // Regression: the fills fallback used the raw YES clearing price (48¢)
-    // instead of the NO price actually paid (52¢).
-    expect(avgEntryPriceNanos([fill(7, "NO", 18)], 7, "NO")).toBe(ONE - YES_CLEARING);
+  it("NO position: entry is the fill's NO side price, used directly (no flip)", () => {
+    // Regression: fill_price is already the NO price (52¢) — do NOT flip it to 48¢.
+    expect(avgEntryPriceNanos([fill(7, "NO", 18, NO_PRICE)], 7, "NO")).toBe(NO_PRICE);
   });
 
   it("prefers the backend avg_entry_price_nanos when it is > 0", () => {
-    const p = pos(7, "NO", 520_000_000n);
-    expect(avgEntryPriceNanos([fill(7, "NO", 18)], 7, "NO", p)).toBe(520_000_000n);
+    const p = pos(7, "NO", NO_PRICE);
+    expect(avgEntryPriceNanos([fill(7, "NO", 18, 100_000_000n)], 7, "NO", p)).toBe(
+      NO_PRICE,
+    );
   });
 
-  it("falls back to fills (side-adjusted) when backend avg_entry is 0", () => {
+  it("falls back to fills (side price) when backend avg_entry is 0", () => {
     const p = pos(7, "NO", 0n);
-    expect(avgEntryPriceNanos([fill(7, "NO", 18)], 7, "NO", p)).toBe(ONE - YES_CLEARING);
+    expect(avgEntryPriceNanos([fill(7, "NO", 18, NO_PRICE)], 7, "NO", p)).toBe(NO_PRICE);
   });
 
   it("returns null when no matching fills", () => {
