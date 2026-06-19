@@ -13,8 +13,8 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { getCategoryColor } from "@/lib/categorize";
+import { useSelectOutcome } from "@/lib/market-detail/active-outcome";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
 
 // Reuse the category palette for outcome accents. Binary YES/NO use the
@@ -43,7 +43,7 @@ export function OutcomeLegend({
    *  accent-ringed, and pinned (non-removable) so it stays on the chart. */
   highlightId?: number | undefined;
 }) {
-  const router = useRouter();
+  const selectOutcome = useSelectOutcome();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -57,15 +57,9 @@ export function OutcomeLegend({
 
   const sel = new Set(selectedIds);
   const colorOf = (o: EventOutcome) => colorForOutcome(o, outcomes.indexOf(o));
-  const shownRaw = outcomes.filter((o) => sel.has(o.marketId));
-  // Float the chosen outcome to the front so it leads the legend.
-  const shown =
-    highlightId == null
-      ? shownRaw
-      : [
-          ...shownRaw.filter((o) => o.marketId === highlightId),
-          ...shownRaw.filter((o) => o.marketId !== highlightId),
-        ];
+  // Keep the group's favourite-first order; the chosen outcome is highlighted
+  // in place rather than floated to the front.
+  const shown = outcomes.filter((o) => sel.has(o.marketId));
   const hidden = outcomes.filter((o) => !sel.has(o.marketId));
   const atCap = shown.length >= maxSelected;
   const interactive = outcomes.length > 1;
@@ -95,6 +89,7 @@ export function OutcomeLegend({
       {shown.map((o) => {
         const color = colorOf(o);
         const isHighlight = o.marketId === highlightId;
+        const isClosed = o.closed;
         // The chosen outcome is pinned: shown but not removable. The "+N more"
         // dropdown is the only way it could leave, and it's excluded there too.
         const removable = interactive && shown.length > 1 && !isHighlight;
@@ -124,12 +119,13 @@ export function OutcomeLegend({
               fontSize: 12,
               fontWeight: isHighlight ? 600 : 400,
               color: isHighlight ? "var(--fg-1)" : "var(--fg-2)",
+              opacity: isClosed ? 0.5 : 1,
             }}
           >
             <button
               type="button"
               onClick={() => {
-                if (!isHighlight) router.push(`/m/${o.marketId}`);
+                if (!isHighlight) selectOutcome(o.marketId);
               }}
               title={
                 isHighlight
@@ -164,9 +160,17 @@ export function OutcomeLegend({
                 {o.shortLabel}
               </span>
               <span
-                style={{ fontFamily: "var(--font-mono)", color, flexShrink: 0 }}
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  color: isClosed ? "var(--fg-4)" : color,
+                  flexShrink: 0,
+                }}
               >
-                {o.yesCents == null ? "—" : `${o.yesCents}¢`}
+                {isClosed
+                  ? "closed"
+                  : o.yesCents == null
+                    ? "—"
+                    : `${o.yesCents}¢`}
               </span>
             </button>
             {removable && (
@@ -250,6 +254,7 @@ export function OutcomeLegend({
               </div>
               {hidden.map((o) => {
                 const color = colorOf(o);
+                const isClosed = o.closed;
                 return (
                   <button
                     key={o.marketId}
@@ -266,7 +271,7 @@ export function OutcomeLegend({
                       background: "transparent",
                       border: 0,
                       cursor: atCap ? "not-allowed" : "pointer",
-                      opacity: atCap ? 0.4 : 1,
+                      opacity: atCap ? 0.4 : isClosed ? 0.5 : 1,
                       textAlign: "left",
                     }}
                     onMouseEnter={(e) => {
@@ -299,11 +304,15 @@ export function OutcomeLegend({
                       style={{
                         fontFamily: "var(--font-mono)",
                         fontSize: 12,
-                        color,
+                        color: isClosed ? "var(--fg-4)" : color,
                         flexShrink: 0,
                       }}
                     >
-                      {o.yesCents == null ? "—" : `${o.yesCents}¢`}
+                      {isClosed
+                        ? "closed"
+                        : o.yesCents == null
+                          ? "—"
+                          : `${o.yesCents}¢`}
                     </span>
                   </button>
                 );

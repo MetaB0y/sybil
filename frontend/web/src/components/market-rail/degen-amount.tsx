@@ -17,14 +17,18 @@ export function DegenAmount({
   amount,
   setAmount,
   maxFill,
-  balanceDollars,
+  availableDollars,
+  reservedDollars = 0,
 }: {
   amount: string;
   setAmount: (a: string) => void;
   /** Shares the built degen order will buy, or null when below minimum. */
   maxFill: bigint | null;
-  /** Connected account's cash balance in dollars, or null if unknown. */
-  balanceDollars: number | null;
+  /** Cash available to bet (balance − cash reserved by open orders), or null
+   *  if unknown. This is what the engine checks, so MAX/headroom use it. */
+  availableDollars: number | null;
+  /** Cash reserved by resting buy orders, surfaced as a small hint. */
+  reservedDollars?: number;
 }) {
   const bet = parseFloat(amount) || 0;
   const win = maxFill == null ? null : Number(maxFill);
@@ -79,7 +83,8 @@ export function DegenAmount({
         />
       </div>
 
-      {/* Balance line — mirrors Pro mode so the bettor sees their headroom. */}
+      {/* Available-to-bet line — balance minus cash locked by open orders, so
+          the headroom shown matches what the engine will actually accept. */}
       <div
         style={{
           display: "flex",
@@ -91,7 +96,23 @@ export function DegenAmount({
           minHeight: 12,
         }}
       >
-        {balanceDollars != null && <span>balance ${balanceDollars.toFixed(2)}</span>}
+        {availableDollars != null && (
+          <span
+            title={
+              reservedDollars > 0
+                ? `$${reservedDollars.toFixed(2)} reserved by your open orders`
+                : undefined
+            }
+          >
+            available ${availableDollars.toFixed(2)}
+            {reservedDollars > 0 && (
+              <span style={{ opacity: 0.7 }}>
+                {" "}
+                · ${reservedDollars.toFixed(2)} in orders
+              </span>
+            )}
+          </span>
+        )}
       </div>
 
       <div
@@ -122,26 +143,26 @@ export function DegenAmount({
         ))}
         <button
           type="button"
-          disabled={balanceDollars == null}
+          disabled={availableDollars == null}
           onClick={() => {
-            if (balanceDollars != null) setAmount(balanceDollars.toFixed(2));
+            if (availableDollars != null) setAmount(availableDollars.toFixed(2));
           }}
           title={
-            balanceDollars == null
+            availableDollars == null
               ? "Connect to bet your full balance"
-              : "Bet your full balance"
+              : "Bet your full available balance"
           }
           style={{
             padding: "8px 0",
             background: "var(--bg-2)",
             border: "1px solid var(--border-1)",
             borderRadius: 4,
-            color: balanceDollars == null ? "var(--fg-4)" : "var(--accent)",
+            color: availableDollars == null ? "var(--fg-4)" : "var(--accent)",
             fontFamily: "var(--font-mono)",
             fontSize: 11,
             fontWeight: 600,
-            cursor: balanceDollars == null ? "not-allowed" : "pointer",
-            opacity: balanceDollars == null ? 0.5 : 1,
+            cursor: availableDollars == null ? "not-allowed" : "pointer",
+            opacity: availableDollars == null ? 0.5 : 1,
           }}
         >
           MAX

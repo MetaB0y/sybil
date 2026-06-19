@@ -203,7 +203,10 @@ export function PriceChart({
           {renderOrder.map((k) => {
             const l = layers[k]!;
             const isHi = highlightActive && drawn[k]!.outcome.marketId === highlightId;
-            const dimmed = highlightActive && !isHi;
+            const isClosed = drawn[k]!.outcome.closed;
+            // Closed outcomes always read back — faded line, faded fill —
+            // regardless of the highlight emphasis.
+            const dimmed = (highlightActive && !isHi) || isClosed;
             const baseFill = mode === "stacked" ? 0.34 : 0.16;
             return (
               <g key={drawn[k]!.outcome.marketId}>
@@ -218,7 +221,7 @@ export function PriceChart({
                   d={l.line}
                   fill="none"
                   stroke={l.color}
-                  strokeWidth={isHi ? 2.75 : dimmed ? 1.25 : 1.5}
+                  strokeWidth={isClosed ? 1.25 : isHi ? 2.75 : dimmed ? 1.25 : 1.5}
                   strokeOpacity={dimmed ? 0.38 : 1}
                   strokeLinejoin="round"
                   vectorEffect="non-scaling-stroke"
@@ -329,7 +332,9 @@ export function PriceChart({
                   </span>
                 </span>
                 <span style={{ color: "var(--fg-1)", flexShrink: 0 }}>
-                  {Math.round(valueAt(series.times, series.raw[k]!, hoverT!) * 100)}¢
+                  {d.outcome.closed
+                    ? "closed"
+                    : `${Math.round(valueAt(series.times, series.raw[k]!, hoverT!) * 100)}¢`}
                 </span>
               </div>
               );

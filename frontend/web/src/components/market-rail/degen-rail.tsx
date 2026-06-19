@@ -11,7 +11,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { submitSignedOrder } from "@/lib/account/orders";
 import { humanizeOrderError } from "@/lib/account/order-errors";
 import { useAccountSession, useSetConnectModalOpen } from "@/lib/account/use-account";
-import { usePortfolio } from "@/lib/account/use-portfolio";
+import { useAvailableBalance } from "@/lib/account/use-available-balance";
 import { ONE_DOLLAR_NANOS, buildDegenOrder, resolveMarkNanos } from "@/lib/degen";
 import {
   useDegenBetTracker,
@@ -24,9 +24,9 @@ import { selectLatestHeight, useStore } from "@/lib/store";
 import { DegenAmount } from "./degen-amount";
 import { DegenOutcomePicker } from "./degen-outcome-picker";
 import { DegenProgress } from "./degen-progress";
-import { NextBatchBanner } from "./next-batch-banner";
 import type { Side } from "./yes-no-toggle";
 import { YesNoToggle } from "./yes-no-toggle";
+import { WaitingAlert } from "./waiting-alert";
 import { WhyWaiting } from "./why-waiting";
 
 export function DegenRail({
@@ -49,10 +49,14 @@ export function DegenRail({
   const openConnectModal = useSetConnectModalOpen();
   const qc = useQueryClient();
   const latestHeight = useStore(selectLatestHeight);
-  const portfolio = usePortfolio(session?.accountId ?? null);
-  const balanceDollars = portfolio.data
-    ? Number(parseNanos(portfolio.data.balance_nanos)) / 1e9
-    : null;
+  // "Available for betting" = balance minus cash reserved by resting buy orders
+  // (the engine rejects against this, not raw balance). See useAvailableBalance.
+  const { availableNanos, reservedNanos } = useAvailableBalance(
+    session?.accountId ?? null,
+  );
+  const availableDollars =
+    availableNanos == null ? null : Number(availableNanos) / 1e9;
+  const reservedDollars = Number(reservedNanos) / 1e9;
 
   const selected =
     group.outcomes.find((o) => o.marketId === group.currentMarketId) ??
@@ -135,26 +139,40 @@ export function DegenRail({
   }
 
   const connected = session !== null;
+  // Cash the engine would reserve for this bet (limit × shares). Block the CTA
+  // when it exceeds what's available so we never trip a server-side
+  // InsufficientBalance rejection.
+  const requiredNanos = built.ok
+    ? built.order.limitPriceNanos * built.order.maxFill
+    : 0n;
+  const insufficient =
+    connected &&
+    built.ok &&
+    availableNanos != null &&
+    requiredNanos > availableNanos;
   const ctaLabel = !connected
     ? "Connect to bet"
     : signing
       ? "Signing…"
       : !built.ok
         ? "Raise your bet"
-        : `Bet $${amountNum} on ${side}${group.isMultiOutcome ? ` · ${selected.shortLabel}` : ""}`;
-  const ctaDisabled = connected && (signing || !built.ok);
+        : insufficient
+          ? "Not enough available"
+          : `Bet $${amountNum} on ${side}${group.isMultiOutcome ? ` · ${selected.shortLabel}` : ""}`;
+  const ctaDisabled = connected && (signing || !built.ok || insufficient);
 
-  // Bottom explainer: "why am I waiting?" while placing or before a bet,
-  // "why failed?" after a missed bet, and nothing once a bet lands (the result
-  // card already explains itself).
+  // Explainer slot below the form/progress area:
+  //  - while a bet is in flight ("tracking"): a compact WaitingAlert with the
+  //    "why am I waiting?" copy tucked into an ⓘ tooltip;
+  //  - after a missed bet ("none"): the short "why failed?" explainer;
+  //  - pre-bet (null) and once a bet lands ("filled"/"partial"): nothing (the
+  //    result card already explains itself).
   const resultPhase = active ? tracking?.phase ?? "tracking" : null;
-  const showExplainer = resultPhase !== "filled" && resultPhase !== "partial";
-  const explainerVariant = resultPhase === "none" ? "failed" : "waiting";
+  const showWaiting = resultPhase === "tracking";
+  const showFailed = resultPhase === "none";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <NextBatchBanner marketId={selected.marketId} />
-
       {active ? (
         <DegenProgress
           phase={tracking?.phase ?? "tracking"}
@@ -189,7 +207,8 @@ export function DegenRail({
               amount={amount}
               setAmount={setAmount}
               maxFill={built.ok ? built.order.maxFill : null}
-              balanceDollars={balanceDollars}
+              availableDollars={availableDollars}
+              reservedDollars={reservedDollars}
             />
           </div>
 
@@ -231,7 +250,8 @@ export function DegenRail({
         </>
       )}
 
-      {showExplainer && <WhyWaiting variant={explainerVariant} />}
+      {showWaiting && <WaitingAlert />}
+      {showFailed && <WhyWaiting variant="failed" />}
     </div>
   );
 }

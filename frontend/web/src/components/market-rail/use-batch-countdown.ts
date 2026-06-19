@@ -62,7 +62,14 @@ export function useBatchCountdown(): {
     };
   }, [anchorPerf]);
 
-  const secondsLeftPrecise = Math.max(0, (1 - progress01) * (BATCH_MS / 1000));
+  // Open the countdown one tenth below the full window (9.9 at a 10s batch) so
+  // every batch clock — the Pro hero gauge and the "queued for batch" timer —
+  // reads as already ticking down, never a momentary static "10.0".
+  const fullSeconds = BATCH_MS / 1000;
+  const secondsLeftPrecise = Math.min(
+    fullSeconds - 0.1,
+    Math.max(0, (1 - progress01) * fullSeconds),
+  );
   const secondsLeft = Math.ceil(secondsLeftPrecise);
 
   return {

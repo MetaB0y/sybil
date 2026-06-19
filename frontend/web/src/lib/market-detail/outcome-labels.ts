@@ -16,8 +16,19 @@
  * full label whenever stripping would leave nothing (lone binary market, no
  * shared text, etc.). Output is index-aligned with the input.
  */
+/**
+ * Drop trailing sentence punctuation (",", "?", ".", "!", ";", ":") and any
+ * trailing whitespace from an outcome chip. Polymarket questions end in "?" and
+ * sliced fragments often end in a stray comma — neither reads well as a label.
+ * Never strips down to empty (falls back to the original).
+ */
+function trimTrailingPunctuation(s: string): string {
+  const out = s.replace(/[\s,.?!;:]+$/u, "");
+  return out.length > 0 ? out : s;
+}
+
 export function deriveShortLabels(labels: string[]): string[] {
-  if (labels.length < 2) return labels;
+  if (labels.length < 2) return labels.map(trimTrailingPunctuation);
 
   let prefix = labels[0]!;
   let suffix = labels[0]!;
@@ -44,6 +55,6 @@ export function deriveShortLabels(labels: string[]): string[] {
 
   return labels.map((l) => {
     const short = l.slice(cutHead, l.length - cutTail).trim();
-    return short.length > 0 ? short : l;
+    return trimTrailingPunctuation(short.length > 0 ? short : l);
   });
 }

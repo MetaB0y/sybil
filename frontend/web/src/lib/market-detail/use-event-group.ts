@@ -50,6 +50,10 @@ export type EventOutcome = {
    *  far back the price chart holds the line flat — never before the market
    *  existed. See `build-chart-series`. */
   createdAtMs: number | null;
+  /** Resolution / end date (epoch ms), or `null`. For a closed outcome this is
+   *  the best proxy for "when it closed" — used to sort closed outcomes most-
+   *  recently-closed first in the outcome picker. */
+  endDateMs: number | null;
 };
 
 export type EventGroup = {
@@ -109,6 +113,7 @@ export function useEventGroup(marketId: number): {
         delta24Cents,
         volume24hNanos: m.volume_24h_nanos ? BigInt(m.volume_24h_nanos) : 0n,
         createdAtMs: m.created_at_ms ?? null,
+        endDateMs: m.market_end_date_ms ?? m.expiry_timestamp_ms ?? null,
       };
     });
 

@@ -33,10 +33,18 @@ export function MarketRail({ marketId }: { marketId: number }) {
 
   return (
     <aside
+      className="no-scrollbar"
       style={{
         display: "flex",
         flexDirection: "column",
         gap: 14,
+        // The rail is its own scroll column (the grid row gives it a bounded
+        // height), so the user can scroll down to the bet CTA without moving
+        // the left column at all.
+        minHeight: 0,
+        overflowY: "auto",
+        overscrollBehavior: "contain",
+        paddingBottom: "var(--space-5)",
       }}
     >
       {!closed && <ModeTabs value={mode} onChange={setMode} />}

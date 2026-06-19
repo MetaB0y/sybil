@@ -66,3 +66,15 @@
   --radius-xl: var(--radius-xl);
   --radius-pill: var(--radius-pill);
 }
+
+/* Scrollable regions that should scroll without showing a scrollbar (e.g. the
+ * market detail page's independent chart + rail columns). */
+.no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* old Edge */
+}
+.no-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}

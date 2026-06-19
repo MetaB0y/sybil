@@ -28,12 +28,12 @@ import {
   useAccountSession,
   useSetConnectModalOpen,
 } from "@/lib/account/use-account";
+import { useAvailableBalance } from "@/lib/account/use-available-balance";
 import { usePortfolio } from "@/lib/account/use-portfolio";
 import {
   formatBatchSeconds,
   formatDollars,
   formatInt,
-  parseNanos,
 } from "@/lib/format/nanos";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
 import { useBatchCountdown } from "./use-batch-countdown";
@@ -57,6 +57,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
   const { secondsLeftPrecise, latestHeight } = useBatchCountdown();
   const batchNumber = latestHeight == null ? null : latestHeight + 1;
   const portfolio = usePortfolio(session?.accountId ?? null);
+  const { availableNanos } = useAvailableBalance(session?.accountId ?? null);
 
   const yesCents = outcome.yesCents ?? 50;
   const noCents = 100 - yesCents;
@@ -66,7 +67,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
   const [unit, setUnit] = useState<Unit>("usd");
   const [amount, setAmount] = useState("25");
   const [shares, setShares] = useState("100");
-  const [ttl, setTtl] = useState<Ttl>("1 batch");
+  const [ttl, setTtl] = useState<Ttl>("until cancel");
 
   const indicativeCents = outcomeSide === "YES" ? yesCents : noCents;
   const [limit, setLimit] = useState<number>(indicativeCents);
@@ -94,9 +95,11 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
   const sharesIfUsd = limitDec > 0 ? usd / limitDec : 0;
   const maxCostIfShares = sh * limitDec;
 
-  const balanceDollars = portfolio.data
-    ? Number(parseNanos(portfolio.data.balance_nanos)) / 1e9
-    : null;
+  // Cash available to BUY = balance − cash reserved by resting buy orders.
+  // (Sells are gated by held shares below, not cash.) Matches the engine so a
+  // buy MAX / headroom never proposes more than will be accepted.
+  const availableDollars =
+    availableNanos == null ? null : Number(availableNanos) / 1e9;
 
   // Shares of THIS outcome+side the user currently holds — what they can sell.
   // Positions carry the outcome as "YES"/"NO" (accounts route), matching
@@ -123,9 +126,10 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
               }
             : {
                 label: "MAX",
-                disabled: balanceDollars == null,
+                disabled: availableDollars == null,
                 apply: () => {
-                  if (balanceDollars != null) setAmount(balanceDollars.toFixed(2));
+                  if (availableDollars != null)
+                    setAmount(availableDollars.toFixed(2));
                 },
               },
         ]
@@ -140,10 +144,10 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
               }
             : {
                 label: "MAX",
-                disabled: balanceDollars == null,
+                disabled: availableDollars == null,
                 apply: () => {
-                  if (balanceDollars != null)
-                    setShares(String(Math.floor(balanceDollars / limitDec)));
+                  if (availableDollars != null)
+                    setShares(String(Math.floor(availableDollars / limitDec)));
                 },
               },
         ];
@@ -157,9 +161,20 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
   const connected = session !== null;
   const disabledInputs = !connected || submitting;
 
+  // Block a BUY whose cost exceeds available cash, so we never trip a
+  // server-side InsufficientBalance. Sells are gated by held shares instead.
+  const buyCostDollars = unit === "usd" ? usd : maxCostIfShares;
+  const insufficientBuy =
+    connected &&
+    dir === "buy" &&
+    availableDollars != null &&
+    buyCostDollars > availableDollars;
+  const ctaOff = submitting || insufficientBuy;
+
   const ctaLabel = (() => {
     if (!connected) return "Connect to trade";
     if (submitting) return "Signing…";
+    if (insufficientBuy) return "Not enough available";
     const sideWord = dir === "buy" ? "queue buy" : "queue sell";
     const batchSuffix =
       batchNumber == null ? "" : ` → batch #${batchNumber.toLocaleString()}`;
@@ -254,7 +269,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
           letterSpacing: "0.04em",
         }}
       >
-        place batch order
+        place order
       </div>
 
       {/* Buy/Sell toggle */}
@@ -406,11 +421,11 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
           >
             {dir === "sell"
               ? `balance ${formatInt(heldShares)} sh`
-              : balanceDollars == null
+              : availableDollars == null
                 ? ""
                 : unit === "usd"
-                  ? `balance ${formatDollars(BigInt(Math.floor(balanceDollars * 1e9)), { decimals: 2 })}`
-                  : `available ${(balanceDollars / limitDec).toFixed(0)} sh`}
+                  ? `available ${formatDollars(BigInt(Math.floor(availableDollars * 1e9)), { decimals: 2 })}`
+                  : `max ${(availableDollars / limitDec).toFixed(0)} sh`}
           </span>
         </div>
         <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
@@ -705,20 +720,20 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
       <button
         type="button"
         onClick={onCtaClick}
-        disabled={submitting}
+        disabled={ctaOff}
         style={{
           marginTop: 2,
           padding: "12px 0",
           border: 0,
           borderRadius: 4,
-          cursor: submitting ? "not-allowed" : "pointer",
+          cursor: ctaOff ? "not-allowed" : "pointer",
           background: connected ? accent : "var(--accent)",
           color: "#0A0E12",
           fontFamily: "var(--font-sans)",
           fontSize: 14,
           fontWeight: 600,
           letterSpacing: "0.01em",
-          opacity: submitting ? 0.55 : 1,
+          opacity: ctaOff ? 0.55 : 1,
         }}
       >
         {ctaLabel}

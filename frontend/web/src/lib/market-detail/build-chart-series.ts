@@ -157,14 +157,21 @@ export function buildChartSeries(
     return { times: [], raw: outcomes.map(() => []), hasData, domainStart, domainEnd };
   }
 
-  // ALL with no real series has no data to bound the axis (`firstReal`
-  // collapsed to `now`), so span the market's lifetime (creation→now) — or a
-  // day as a last resort — otherwise the held flat line is an invisible dot.
-  if (!hasReal && sinceMs == null) {
-    domainStart =
-      creationMs != null && creationMs < domainEnd
-        ? creationMs
-        : domainEnd - FLAT_FALLBACK_SPAN_MS;
+  // ALL spans the market's whole lifetime — creation → now — not merely this
+  // session's clearing history. `firstReal` is only the first clearing THIS
+  // session: the series lives in the in-memory recent-block ring buffer (~the
+  // last several minutes) and rebuilds on restart, so leaving `domainStart` at
+  // `firstReal` collapses ALL to those few minutes even for a days-old market.
+  // Extend the axis back to real creation and let the line hold flat across the
+  // gap, exactly as the fixed windows hold flat back to their left edge. With
+  // no creation time AND no real series, span a day so the held flat line is
+  // wide enough to see rather than an invisible dot.
+  if (sinceMs == null) {
+    if (creationMs != null && creationMs < domainEnd) {
+      domainStart = creationMs;
+    } else if (!hasReal) {
+      domainStart = domainEnd - FLAT_FALLBACK_SPAN_MS;
+    }
   }
 
   // Where the drawn line starts. It spans the full selected window — held flat

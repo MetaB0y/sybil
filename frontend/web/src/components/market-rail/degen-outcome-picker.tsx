@@ -10,8 +10,8 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { colorForOutcome } from "@/components/outcome-legend";
+import { useSelectOutcome } from "@/lib/market-detail/active-outcome";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
 
 export function DegenOutcomePicker({
@@ -21,7 +21,7 @@ export function DegenOutcomePicker({
   outcomes: EventOutcome[];
   currentMarketId: number;
 }) {
-  const router = useRouter();
+  const selectOutcome = useSelectOutcome();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -29,8 +29,15 @@ export function DegenOutcomePicker({
     function close(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
     document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", onKey);
+    };
   }, []);
 
   const selectedIndex = Math.max(
@@ -42,113 +49,133 @@ export function DegenOutcomePicker({
 
   const others = outcomes
     .map((o, i) => ({ o, i }))
-    .filter(({ o }) => o.marketId !== selected.marketId);
+    .filter(({ o }) => o.marketId !== selected.marketId)
+    // Open outcomes first, by price (highest first); closed outcomes last,
+    // most-recently-closed first. `i` is kept so colors stay group-stable.
+    .sort((a, b) => {
+      if (a.o.closed !== b.o.closed) return a.o.closed ? 1 : -1;
+      if (!a.o.closed) return (b.o.yesCents ?? -1) - (a.o.yesCents ?? -1);
+      return (b.o.endDateMs ?? 0) - (a.o.endDateMs ?? 0);
+    });
   const accent = colorForOutcome(selected, selectedIndex);
+  const interactive = others.length > 0;
 
-  return (
-    <div ref={ref} style={{ position: "relative" }}>
-      <div
+  const boxStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    width: "100%",
+    padding: "14px 16px",
+    borderRadius: 6,
+    background: `color-mix(in srgb, ${accent} 10%, transparent)`,
+    border: `1px solid ${accent}`,
+    textAlign: "left",
+    cursor: interactive ? "pointer" : "default",
+  };
+
+  const boxContent = (
+    <>
+      <span
+        aria-hidden
         style={{
+          width: 14,
+          height: 14,
+          borderRadius: "50%",
+          border: `2px solid ${accent}`,
           display: "flex",
           alignItems: "center",
-          gap: 12,
-          padding: "14px 16px",
-          borderRadius: 6,
-          background: `color-mix(in srgb, ${accent} 10%, transparent)`,
-          border: `1px solid ${accent}`,
+          justifyContent: "center",
+          flexShrink: 0,
         }}
       >
         <span
-          aria-hidden
           style={{
-            width: 14,
-            height: 14,
+            width: 6,
+            height: 6,
             borderRadius: "50%",
-            border: `2px solid ${accent}`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0,
+            background: accent,
           }}
-        >
-          <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              background: accent,
-            }}
-          />
-        </span>
-        <span
+        />
+      </span>
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          fontFamily: "var(--font-sans)",
+          fontSize: 15,
+          fontWeight: 600,
+          color: "var(--fg-1)",
+        }}
+        title={selected.label}
+      >
+        {selected.shortLabel}
+      </span>
+      <span
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 18,
+          fontWeight: 600,
+          color: accent,
+          fontVariantNumeric: "tabular-nums",
+          flexShrink: 0,
+        }}
+      >
+        {selected.yesCents != null ? `${selected.yesCents}¢` : "—"}
+      </span>
+      {interactive && (
+        <svg
+          aria-hidden
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="none"
+          stroke={accent}
+          strokeWidth="1.5"
           style={{
-            flex: 1,
-            minWidth: 0,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            fontFamily: "var(--font-sans)",
-            fontSize: 15,
-            fontWeight: 600,
-            color: "var(--fg-1)",
-          }}
-          title={selected.label}
-        >
-          {selected.shortLabel}
-        </span>
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 18,
-            fontWeight: 600,
-            color: accent,
-            fontVariantNumeric: "tabular-nums",
             flexShrink: 0,
+            transform: open ? "rotate(180deg)" : "none",
+            transition: "transform 120ms",
           }}
         >
-          {selected.yesCents != null ? `${selected.yesCents}¢` : "—"}
-        </span>
-      </div>
+          <path d="m3 4.5 3 3 3-3" />
+        </svg>
+      )}
+    </>
+  );
 
-      {others.length > 0 && (
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      {interactive ? (
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          style={{
+            ...boxStyle,
+            outlineOffset: 2,
+          }}
+          onFocus={(e) => {
+            e.currentTarget.style.outline = `2px solid ${accent}`;
+          }}
+          onBlur={(e) => {
+            e.currentTarget.style.outline = "none";
+          }}
+        >
+          {boxContent}
+        </button>
+      ) : (
+        <div style={boxStyle}>{boxContent}</div>
+      )}
+
+      {interactive && (
         <>
-          <button
-            type="button"
-            onClick={() => setOpen((o) => !o)}
-            style={{
-              marginTop: 6,
-              width: "100%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              padding: "8px 14px",
-              borderRadius: 4,
-              background: "transparent",
-              border: "1px solid var(--border-1)",
-              color: "var(--fg-3)",
-              fontFamily: "var(--font-sans)",
-              fontSize: 11.5,
-              cursor: "pointer",
-            }}
-          >
-            <span>switch outcome ({others.length} more)</span>
-            <svg
-              width="10"
-              height="10"
-              viewBox="0 0 12 12"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              style={{
-                transform: open ? "rotate(180deg)" : "none",
-                transition: "transform 120ms",
-              }}
-            >
-              <path d="m3 4.5 3 3 3-3" />
-            </svg>
-          </button>
           {open && (
             <div
+              role="listbox"
               style={{
                 position: "absolute",
                 top: "calc(100% + 4px)",
@@ -169,13 +196,18 @@ export function DegenOutcomePicker({
             >
               {others.map(({ o, i }) => {
                 const color = colorForOutcome(o, i);
+                const isClosed = o.closed;
                 return (
                 <button
                   key={o.marketId}
                   type="button"
+                  role="option"
+                  aria-selected={false}
+                  disabled={isClosed}
                   onClick={() => {
+                    if (isClosed) return;
                     setOpen(false);
-                    router.push(`/m/${o.marketId}`);
+                    selectOutcome(o.marketId);
                   }}
                   style={{
                     display: "flex",
@@ -185,12 +217,13 @@ export function DegenOutcomePicker({
                     borderRadius: 4,
                     background: "transparent",
                     border: 0,
-                    cursor: "pointer",
+                    cursor: isClosed ? "not-allowed" : "pointer",
+                    opacity: isClosed ? 0.5 : 1,
                     textAlign: "left",
                   }}
-                  onMouseEnter={(e) =>
-                    (e.currentTarget.style.background = "var(--bg-2)")
-                  }
+                  onMouseEnter={(e) => {
+                    if (!isClosed) e.currentTarget.style.background = "var(--bg-2)";
+                  }}
                   onMouseLeave={(e) =>
                     (e.currentTarget.style.background = "transparent")
                   }
@@ -225,12 +258,16 @@ export function DegenOutcomePicker({
                       fontFamily: "var(--font-sans)",
                       fontSize: 13,
                       fontWeight: 600,
-                      color,
+                      color: isClosed ? "var(--fg-4)" : color,
                       fontVariantNumeric: "tabular-nums",
                       flexShrink: 0,
                     }}
                   >
-                    {o.yesCents != null ? `${o.yesCents}¢` : "—"}
+                    {isClosed
+                      ? "closed"
+                      : o.yesCents != null
+                        ? `${o.yesCents}¢`
+                        : "—"}
                   </span>
                 </button>
                 );

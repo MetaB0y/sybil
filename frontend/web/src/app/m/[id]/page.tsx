@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { use, useMemo, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChartRangeBar,
   RANGE_MS,
@@ -21,6 +21,7 @@ import {
 } from "@/lib/format/nanos";
 import { getCategoryColor, pickDisplayCategory } from "@/lib/categorize";
 import { useMarket } from "@/lib/markets/use-market";
+import { SelectOutcomeProvider } from "@/lib/market-detail/active-outcome";
 import { detectStackable } from "@/lib/market-detail/build-chart-series";
 import { useEventGroup } from "@/lib/market-detail/use-event-group";
 import { useMarketStats } from "@/lib/market-detail/use-market-stats";
@@ -30,69 +31,110 @@ import { selectLatestBlock, useStore } from "@/lib/store";
 
 type RouteParams = { id: string };
 
+/**
+ * Chart outcome selection, kept per event id. In-page outcome switches keep the
+ * selection via component state, but a real navigation away and back (or landing
+ * fresh on a sibling) remounts the chart; keying by event restores the user's
+ * added lines instead of snapping back to the favourite-first default.
+ */
+const chartSelectionByEvent = new Map<string, number[]>();
+
+/** Max simultaneous chart lines — matches the legend's `maxSelected`. */
+const MAX_CHART_LINES = 8;
+
 export default function MarketDetailPage({
   params,
 }: {
   params: Promise<RouteParams>;
 }) {
   const { id } = use(params);
-  const marketId = Number(id);
+  const initialId = Number(id);
 
-  if (!Number.isFinite(marketId) || marketId < 0) {
+  if (!Number.isFinite(initialId) || initialId < 0) {
     notFound();
   }
 
-  const marketQ = useMarket(marketId);
+  // The active outcome lives in page state, seeded from the route param. Switching
+  // outcomes updates this + rewrites the URL via replaceState (see selectOutcome)
+  // rather than navigating, so the [id] segment never remounts and the screen
+  // doesn't blink. A fresh load / real navigation re-seeds from the new param.
+  const [marketId, setMarketId] = useState(initialId);
+  const selectOutcome = useCallback((next: number) => {
+    setMarketId(next);
+    window.history.replaceState(window.history.state, "", `/m/${next}`);
+  }, []);
 
+  const marketQ = useMarket(marketId);
   const market = marketQ.data;
 
   return (
-    <main
-      style={{
-        width: "100%",
-        padding: "var(--space-6) var(--space-5) var(--space-9)",
-        display: "flex",
-        flexDirection: "column",
-        gap: "var(--space-6)",
-      }}
-    >
-      {marketQ.isPending && <Placeholder>loading market…</Placeholder>}
-      {marketQ.isError && (
-        <Placeholder error>error: {String(marketQ.error)}</Placeholder>
-      )}
+    <SelectOutcomeProvider value={selectOutcome}>
+      <main
+        style={{
+          width: "100%",
+          // App-shell: fill the viewport below the nav and never scroll as a
+          // whole. The header is fixed; the chart column and the trading rail
+          // each scroll on their own (see the two columns below).
+          height: "calc(100dvh - var(--nav-height))",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        {marketQ.isPending && <Placeholder>loading market…</Placeholder>}
+        {marketQ.isError && (
+          <Placeholder error>error: {String(marketQ.error)}</Placeholder>
+        )}
 
-      {market && (
-        <>
-          {market.closed === true && <ClosedBanner />}
-          {/* Header spans the full width; the chart/rail split sits below it. */}
-          <Header marketId={marketId} market={market} />
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "minmax(0, 1fr) 420px",
-              gap: "var(--space-6)",
-              alignItems: "start",
-            }}
-          >
+        {market && (
+          <>
+            {/* Header band — fixed; the chart/rail split scrolls below it. Closed
+                state shows in the status pill + the rail's read-only notice, not
+                a separate banner row (which shifted the page). */}
             <div
               style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "var(--space-5)",
+                flex: "0 0 auto",
+                padding: "var(--space-6) var(--space-5) 0",
               }}
             >
-              <ChartSection marketId={marketId} />
-              <EventHoldings marketId={marketId} />
-              <DescriptionBlock market={market} />
-              <DiscussionPlaceholder />
+              <Header marketId={marketId} market={market} />
             </div>
 
-            <MarketRail marketId={marketId} />
-          </div>
-        </>
-      )}
-    </main>
+            <div
+              style={{
+                flex: "1 1 auto",
+                minHeight: 0,
+                display: "grid",
+                gridTemplateColumns: "minmax(0, 1fr) 420px",
+                gap: "var(--space-6)",
+                padding: "var(--space-6) var(--space-5) 0",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                className="no-scrollbar"
+                style={{
+                  minHeight: 0,
+                  overflowY: "auto",
+                  overscrollBehavior: "contain",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "var(--space-5)",
+                  paddingBottom: "var(--space-5)",
+                }}
+              >
+                <ChartSection marketId={marketId} />
+                <EventHoldings marketId={marketId} />
+                <DescriptionBlock market={market} />
+                <DiscussionPlaceholder />
+              </div>
+
+              <MarketRail marketId={marketId} />
+            </div>
+          </>
+        )}
+      </main>
+    </SelectOutcomeProvider>
   );
 }
 
@@ -118,6 +160,7 @@ function Header({
   market: {
     name: string;
     status: string;
+    closed?: boolean | null;
     volume_nanos?: string;
     market_id: number;
     categories?: string[] | null;
@@ -133,7 +176,6 @@ function Header({
   const { stats } = useMarketStats(marketId);
   const { primary } = pickDisplayCategory(market.categories, market.category);
   const resolvesMs = market.market_end_date_ms ?? market.expiry_timestamp_ms ?? null;
-  const isActive = market.status === "active";
 
   return (
     <header
@@ -228,7 +270,7 @@ function Header({
           >
             {market.name}
           </h1>
-          <StatusPill status={market.status} isActive={isActive} />
+          <StatusPill status={market.status} closed={market.closed === true} />
         </div>
 
         {/* 5-stat meta row, all scoped to this market. Only `batches` is an
@@ -290,17 +332,20 @@ function MetaStat({
 }
 
 /**
- * Small uppercase status chip shown beside the market title. `active` markets
- * read muted; anything else (resolved / paused / cancelled) reads in the warn
- * color so a non-tradeable market stands out.
+ * Small uppercase status chip shown beside the market title. An active market
+ * reads muted; a closed one shows CLOSED (the backend may still report
+ * `status: "active"`, so `closed` wins), as does anything else non-tradeable —
+ * all in the warn color so it stands out.
  */
 function StatusPill({
   status,
-  isActive,
+  closed,
 }: {
   status: string;
-  isActive: boolean;
+  closed: boolean;
 }) {
+  const label = closed ? "CLOSED" : (status || "active").toUpperCase();
+  const muted = !closed && status === "active";
   return (
     <span
       className="text-mono"
@@ -311,22 +356,42 @@ function StatusPill({
         fontSize: "10px",
         letterSpacing: "var(--track-wide)",
         textTransform: "uppercase",
-        color: isActive ? "var(--fg-3)" : "var(--warn)",
-        background: isActive ? "var(--surface-1)" : "var(--warn-soft)",
-        border: `1px solid ${isActive ? "var(--border-2)" : "var(--warn-soft)"}`,
+        color: muted ? "var(--fg-3)" : "var(--warn)",
+        background: muted ? "var(--surface-1)" : "var(--warn-soft)",
+        border: `1px solid ${muted ? "var(--border-2)" : "var(--warn-soft)"}`,
       }}
     >
-      {(status || "active").toUpperCase()}
+      {label}
     </span>
   );
 }
 
 function ChartSection({ marketId }: { marketId: number }) {
   const [range, setRange] = useState<ChartRange>("1D");
-  // marketIds drawn on the chart. `null` = use the favourite-first default.
-  const [selectedIds, setSelectedIds] = useState<number[] | null>(null);
   const { group, isPending: groupPending } = useEventGroup(marketId);
   const latestBlock = useStore(selectLatestBlock);
+  const eventKey = group?.eventId ?? null;
+
+  // marketIds drawn on the chart. `null` = use the favourite-first default.
+  // Persisted per event (see `chartSelectionByEvent`) so highlighting a sibling
+  // outcome — which routes to its /m/[id] and remounts this section — keeps the
+  // user's added lines instead of snapping back to the default.
+  const [selectedIds, setSelectedIdsState] = useState<number[] | null>(null);
+  const hydratedEvent = useRef<string | null>(null);
+  useEffect(() => {
+    if (eventKey == null || hydratedEvent.current === eventKey) return;
+    hydratedEvent.current = eventKey;
+    setSelectedIdsState(chartSelectionByEvent.get(eventKey) ?? null);
+  }, [eventKey]);
+  const setSelectedIds = useCallback(
+    (next: number[] | null) => {
+      setSelectedIdsState(next);
+      if (eventKey == null) return;
+      if (next && next.length > 0) chartSelectionByEvent.set(eventKey, next);
+      else chartSelectionByEvent.delete(eventKey);
+    },
+    [eventKey],
+  );
 
   const outcomes = useMemo(() => group?.outcomes ?? [], [group]);
   const idSet = useMemo(
@@ -350,15 +415,18 @@ function ChartSection({ marketId }: { marketId: number }) {
     [outcomes],
   );
   // Self-heals across navigation: stale ids from another event drop out, and
-  // an empty result falls back to the favourite-first default. The chosen
-  // outcome (the market in the URL) is always pinned to the chart so it can be
-  // highlighted — prepended if neither the user's selection nor the volume
-  // default already includes it.
+  // an empty result falls back to the favourite-first default. The active
+  // outcome is always on the chart so it can be highlighted — but APPENDED as
+  // the last line (replacing the last when already at the cap), never prepended.
+  // Switching to an off-chart outcome then just adds a line at the end instead
+  // of reshuffling the whole chart.
   const effectiveSelected = useMemo(() => {
     const valid = (selectedIds ?? []).filter((id) => idSet.has(id));
     const base = valid.length > 0 ? valid : defaultIds;
     if (idSet.has(marketId) && !base.includes(marketId)) {
-      return [marketId, ...base];
+      return base.length >= MAX_CHART_LINES
+        ? [...base.slice(0, MAX_CHART_LINES - 1), marketId]
+        : [...base, marketId];
     }
     return base;
   }, [selectedIds, idSet, defaultIds, marketId]);
@@ -368,8 +436,7 @@ function ChartSection({ marketId }: { marketId: number }) {
   const highlightId = group?.isMultiOutcome ? marketId : undefined;
 
   // Fetch history only for the outcomes actually shown (legend caps at 8).
-  const { byMarket, isPending: historyPending } =
-    useEventPriceHistory(effectiveSelected);
+  const { byMarket } = useEventPriceHistory(effectiveSelected);
 
   const drawn = useMemo(
     () =>
@@ -402,15 +469,12 @@ function ChartSection({ marketId }: { marketId: number }) {
   const windowMs = RANGE_MS[range];
   const sinceMs = windowMs == null || nowMs === 0 ? null : nowMs - windowMs;
 
-  // Keep the chart mounted once any drawn line has data, so toggling an outcome
-  // doesn't blank the whole chart while the newly-selected line's history loads
-  // (its lane just appears when the fetch resolves — cached siblings are
-  // instant). Full-screen "loading" only while the group resolves or before the
-  // first line has any points.
-  const hasDrawnData = drawn.some(
-    (d) => (byMarket.get(d.outcome.marketId)?.length ?? 0) > 0,
-  );
-  const loading = groupPending || (historyPending && !hasDrawnData);
+  // Full-screen "loading…" only while the event group itself resolves. Once the
+  // outcomes are known the chart stays mounted across outcome switches and added
+  // lines — buildChartSeries handles a not-yet-loaded lane (holds flat / uses
+  // live blocks), so a new line just pops in when its history resolves instead
+  // of blanking and rebuilding the whole chart.
+  const loading = groupPending;
 
   return (
     <section
@@ -428,23 +492,30 @@ function ChartSection({ marketId }: { marketId: number }) {
       <div
         style={{
           display: "flex",
-          alignItems: "center",
+          // Top-align + never wrap: the legend chips wrap INSIDE their own
+          // flex:1 column while the range bar stays pinned top-right, so adding
+          // outcomes can't push the 1H/6H/…/ALL bar onto a second row.
+          alignItems: "flex-start",
           justifyContent: "space-between",
           gap: "var(--space-3)",
-          flexWrap: "wrap",
+          flexWrap: "nowrap",
         }}
       >
         {outcomes.length > 0 ? (
-          <OutcomeLegend
-            outcomes={outcomes}
-            selectedIds={effectiveSelected}
-            onChange={setSelectedIds}
-            highlightId={highlightId}
-          />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <OutcomeLegend
+              outcomes={outcomes}
+              selectedIds={effectiveSelected}
+              onChange={setSelectedIds}
+              highlightId={highlightId}
+            />
+          </div>
         ) : (
           <div className="eyebrow">{"// yes probability"}</div>
         )}
-        <ChartRangeBar value={range} onChange={setRange} />
+        <div style={{ flexShrink: 0 }}>
+          <ChartRangeBar value={range} onChange={setRange} />
+        </div>
       </div>
       {loading ? (
         <div
@@ -707,36 +778,6 @@ function DiscussionPlaceholder() {
         the spot so the layout stays stable.
       </p>
     </section>
-  );
-}
-
-/**
- * Shown atop a market whose Polymarket event has closed/resolved. Trading is
- * disabled in the rail; this explains why. Best-effort — the market is still
- * mirrored in the engine; after a sybil-api restart closed markets drop out
- * entirely and this page 404s (acceptable per product decision).
- */
-function ClosedBanner() {
-  return (
-    <div
-      role="status"
-      className="text-mono"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "var(--space-2)",
-        padding: "var(--space-3) var(--space-4)",
-        borderRadius: "var(--radius-md)",
-        background: "var(--warn-soft)",
-        color: "var(--warn)",
-        border: "1px solid var(--warn-soft)",
-        fontSize: "var(--fs-12)",
-        letterSpacing: "var(--track-wide)",
-        textTransform: "uppercase",
-      }}
-    >
-      market closed · trading disabled · view only
-    </div>
   );
 }
 
