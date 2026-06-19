@@ -167,11 +167,14 @@ function compareBy(a: ClosedOrder, b: ClosedOrder, key: SortKey): number {
 export function EventClosedOrders({
   events,
   labelByMarket,
+  pageSize,
 }: {
   /** Full account history feed (unfiltered). */
   events: HistoryEvent[];
   /** market_id → short outcome label (same map EventHoldings builds). */
   labelByMarket: Map<number, string>;
+  /** Rows per page; defaults to the compact market-detail PAGE_SIZE. */
+  pageSize?: number;
 }) {
   const [sort, setSort] = useState<Sort | null>(null);
 
@@ -306,7 +309,7 @@ export function EventClosedOrders({
     return rows.sort((a, b) => compareBy(a, b, sort.key) * factor);
   }, [events, labelByMarket, sort]);
 
-  const paged = usePaged(closed);
+  const paged = usePaged(closed, pageSize);
 
   if (closed.length === 0) {
     return <Empty>No closed orders for this event.</Empty>;
