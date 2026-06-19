@@ -24,6 +24,8 @@ export const GLOSSARY: Record<string, string> = {
   "Uniform clearing":
     "Every order in a batch trades at the same single price. Eliminates the “sniper’s tax” continuous order books leak to fast actors.",
   FBA: "Frequent Batch Auction. The market mechanism Sybil uses instead of a continuous limit order book.",
+  Welfare:
+    "Your surplus on the fills: how much better than your limit price you traded, times quantity filled. A buy that filled below your limit — or a sell that filled above it — earns positive welfare. It's the edge Sybil's uniform clearing price handed you over the worst price you'd have accepted.",
 };
 
 export function Glossary({
@@ -31,7 +33,8 @@ export function Glossary({
   children,
 }: {
   term: keyof typeof GLOSSARY | string;
-  children: React.ReactNode;
+  /** Optional inline content the badge sits beside; omit for a standalone "?". */
+  children?: React.ReactNode;
 }) {
   // The trigger's bounding box, captured in the open handlers (reading layout
   // in render is disallowed). `null` = closed; a rect = open + anchored.
