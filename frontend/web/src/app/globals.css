@@ -67,6 +67,16 @@
   --radius-pill: var(--radius-pill);
 }
 
+/* Smooth the dark↔light theme switch — only color properties, and respect
+ * reduced-motion. Keeps the flip from being jarring without animating layout. */
+@media (prefers-reduced-motion: no-preference) {
+  html[data-theme],
+  html:not([data-theme]) {
+    transition: background-color 200ms var(--ease-standard, ease),
+      color 200ms var(--ease-standard, ease);
+  }
+}
+
 /* Scrollable regions that should scroll without showing a scrollbar (e.g. the
  * market detail page's independent chart + rail columns). */
 .no-scrollbar {

@@ -7,6 +7,7 @@ import { AccountChip } from "./auth/account-chip";
 import { BatchPill } from "./batch-pill";
 import { DevZoneNav } from "./dev/dev-zone-nav";
 import { NavSearch, NavSearchSkeleton } from "./nav-search";
+import { ThemeToggle } from "./theme-toggle";
 
 type NavTab = { href: string; label: string; match: (path: string) => boolean };
 
@@ -28,7 +29,7 @@ export function GlobalNav() {
         right: 0,
         height: "var(--nav-height)",
         zIndex: 50,
-        background: "rgba(10,14,18,0.72)",
+        background: "var(--nav-bg)",
         backdropFilter: "var(--blur-nav)",
         WebkitBackdropFilter: "var(--blur-nav)",
         borderBottom: "1px solid var(--border-1)",
@@ -123,6 +124,7 @@ export function GlobalNav() {
         <Suspense fallback={<NavSearchSkeleton />}>
           <NavSearch />
         </Suspense>
+        <ThemeToggle />
         <BatchPill />
         <AccountChip />
       </div>

@@ -4,24 +4,26 @@
  * Interactive SVG equity-curve chart. Data is real, from `useEquityCurve`
  * (`GET /v1/accounts/{id}/equity`): X = sample time, Y = portfolio value.
  *
- * Design follows the conventions of exchange value charts (Polymarket / Kalshi /
- * Robinhood):
+ * REDESIGN (drop-in replacement — same props, same tokens, same data hook):
  *   - A *fitted* Y-axis — scaled to the data's own range with ~8% headroom and
- *     rounded "nice" gridlines/labels — not anchored to $0, so real movement is
- *     visible instead of a flat band. The equity series here can be genuinely
- *     volatile (positions mark up/down between batches); a fitted axis keeps
- *     that legible rather than gluing the line to an edge.
- *   - A clean single line (no heavy area fill, which turns a volatile series
- *     into solid columns).
- *   - Sparse, rounded axis labels + a few horizontal gridlines for reference.
- *   - Hover: crosshair + dot + a compact readout (time + value) pinned to the
- *     corner opposite the cursor, so the text never covers the curve.
+ *     rounded "nice" gridlines/labels — not anchored to $0. (Unchanged.)
+ *   - A gradient AREA FILL under the line, tinted by the range's net P&L:
+ *     mint (`--yes`) when up, coral (`--no`) when down, neutral cyan when flat.
+ *     The fill gives the volatile "canyon" marks visible mass so they read as
+ *     real movement rather than rendering glitches. The stroke itself is
+ *     ALWAYS brand cyan (`--accent`) — direction is carried by the fill.
+ *   - An end-value tag pinned to the right axis at the last point.
+ *   - Hover: a single crosshair + dot snapped to the nearest sample, with a
+ *     readout pill that TRACKS the crosshair (clamped to the box) instead of
+ *     sitting in a fixed corner — so value never floats away from the cursor.
+ *   - Smart X labels: intraday ranges show times; multi-day show dates; never
+ *     three identical labels.
  *
  * Fully responsive: a ResizeObserver feeds the plot box's px size into the
  * viewBox (1 unit = 1px), so it fills whatever space the layout gives it.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { EquityCurve, EquityRange } from "@/lib/account/use-equity-curve";
 
 interface Props {
@@ -31,17 +33,22 @@ interface Props {
 }
 
 const PAD_L = 12;
-const PAD_R = 52;
-const PAD_T = 14;
-const PAD_B = 26;
+const PAD_R = 56;
+const PAD_T = 16;
+const PAD_B = 28;
 const MIN_W = 320;
 const MIN_H = 200;
+
+// Below this fractional move over the visible range, treat as "flat" and use a
+// neutral cyan fill instead of mint/coral.
+const FLAT_EPS = 0.001;
 
 export function EquityChart({ curve, headerRight }: Props) {
   const { points, range, isLoading, isEmpty } = curve;
   const boxRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 560, h: 320 });
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const gradId = useId();
 
   // Track the plot box size so the SVG renders at 1 viewBox-unit-per-pixel.
   useEffect(() => {
@@ -62,8 +69,7 @@ export function EquityChart({ curve, headerRight }: Props) {
   const bottom = H - PAD_B;
 
   // Fitted Y-axis: scale to the data range + 8% headroom, snapped to "nice"
-  // round gridlines. Never anchored at $0 — that would flatten a $1k±$200
-  // series into a band hugging the top edge.
+  // round gridlines. Never anchored at $0.
   const values = points.map((p) => p.value);
   let dMin = values.length ? Math.min(...values) : 0;
   let dMax = values.length ? Math.max(...values) : 1;
@@ -89,10 +95,30 @@ export function EquityChart({ curve, headerRight }: Props) {
   const lineD = points
     .map((p, i) => `${i === 0 ? "M" : "L"} ${xFor(p.t).toFixed(2)} ${yFor(p.value).toFixed(2)}`)
     .join(" ");
+  // Close the area down to the plot floor for the gradient fill.
+  const areaD =
+    points.length >= 2
+      ? `${lineD} L ${xFor(tMax).toFixed(2)} ${bottom.toFixed(2)} L ${xFor(tMin).toFixed(2)} ${bottom.toFixed(2)} Z`
+      : "";
+
+  // Sign of the move over the visible range → fill tone. Line stays cyan.
+  const startV = points.length ? points[0]!.value : 0;
+  const endV = points.length ? points[points.length - 1]!.value : 0;
+  const pctMove = startV !== 0 ? Math.abs((endV - startV) / startV) : 0;
+  const fillTone =
+    pctMove < FLAT_EPS ? "var(--accent)" : endV >= startV ? "var(--yes)" : "var(--no)";
 
   const last = points[points.length - 1];
   const hovered = hoverIdx != null ? points[hoverIdx] : null;
   const gridTicks = scale.ticks.filter((t) => t >= yMin - 1e-6 && t <= yMax + 1e-6);
+
+  const intraday = points.length >= 2 && sameDay(tMin, tMax);
+
+  // End-value tag geometry.
+  const tagW = 54;
+  const tagH = 17;
+  const tagX = Math.min(W - PAD_R + 4, W - tagW - 1);
+  const tagY = last ? Math.max(1, Math.min(H - tagH - 1, yFor(last.value) - tagH / 2)) : 0;
 
   function onMove(e: React.PointerEvent<SVGSVGElement>) {
     if (points.length < 2) return;
@@ -123,6 +149,7 @@ export function EquityChart({ curve, headerRight }: Props) {
             color: "var(--fg-3)",
             letterSpacing: "var(--track-wide)",
             textTransform: "uppercase",
+            whiteSpace: "nowrap",
           }}
         >
           Equity curve
@@ -139,6 +166,7 @@ export function EquityChart({ curve, headerRight }: Props) {
           border: "1px solid var(--border-1)",
           borderRadius: 6,
           overflow: "hidden",
+          boxShadow: "var(--shadow-inset-top)",
         }}
       >
         {isEmpty ? (
@@ -154,6 +182,14 @@ export function EquityChart({ curve, headerRight }: Props) {
               onPointerMove={onMove}
               onPointerLeave={() => setHoverIdx(null)}
             >
+              <defs>
+                <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stopColor={fillTone} stopOpacity={0.24} />
+                  <stop offset="0.55" stopColor={fillTone} stopOpacity={0.08} />
+                  <stop offset="1" stopColor={fillTone} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+
               {/* Horizontal gridlines at nice round values + right-axis labels */}
               {gridTicks.map((t) => {
                 const gy = yFor(t);
@@ -164,13 +200,12 @@ export function EquityChart({ curve, headerRight }: Props) {
                       x2={W - PAD_R}
                       y1={gy}
                       y2={gy}
-                      stroke="var(--border-1)"
+                      stroke="var(--chart-grid)"
                       strokeWidth={1}
-                      strokeOpacity={0.55}
                       vectorEffect="non-scaling-stroke"
                     />
                     <text
-                      x={W - PAD_R + 7}
+                      x={W - PAD_R + 8}
                       y={gy + 3}
                       fill="var(--fg-4)"
                       fontFamily="var(--font-mono)"
@@ -184,16 +219,38 @@ export function EquityChart({ curve, headerRight }: Props) {
                 );
               })}
 
-              {/* Equity line */}
+              {/* Gradient area fill — sign-tinted */}
+              {areaD && <path d={areaD} fill={`url(#${gradId})`} stroke="none" />}
+
+              {/* Equity line — ALWAYS cyan */}
               <path
                 d={lineD}
                 fill="none"
                 stroke="var(--accent)"
-                strokeWidth={1.6}
+                strokeWidth={1.75}
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 vectorEffect="non-scaling-stroke"
               />
+
+              {/* End dot + value tag (hidden while scrubbing) */}
+              {!hovered && last && (
+                <>
+                  <circle cx={xFor(last.t)} cy={yFor(last.value)} r={3} fill="var(--accent)" vectorEffect="non-scaling-stroke" />
+                  <rect x={tagX} y={tagY} width={tagW} height={tagH} rx={3} fill="var(--accent)" />
+                  <text
+                    x={tagX + tagW / 2}
+                    y={tagY + tagH / 2 + 3}
+                    fill="var(--fg-on-accent)"
+                    fontFamily="var(--font-mono)"
+                    fontSize={9.5}
+                    fontWeight={600}
+                    textAnchor="middle"
+                  >
+                    {fmtAxisY(last.value)}
+                  </text>
+                </>
+              )}
 
               {/* Crosshair + hover dot */}
               {hovered && (
@@ -203,27 +260,30 @@ export function EquityChart({ curve, headerRight }: Props) {
                     x2={xFor(hovered.t)}
                     y1={PAD_T}
                     y2={bottom}
-                    stroke="var(--fg-3)"
+                    stroke="var(--chart-axis)"
                     strokeWidth={1}
                     strokeDasharray="3 3"
                     vectorEffect="non-scaling-stroke"
                   />
-                  <circle cx={xFor(hovered.t)} cy={yFor(hovered.value)} r={4.5} fill="var(--accent)" stroke="var(--surface-1)" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+                  <circle
+                    cx={xFor(hovered.t)}
+                    cy={yFor(hovered.value)}
+                    r={4.5}
+                    fill="var(--accent)"
+                    stroke="var(--surface-1)"
+                    strokeWidth={2}
+                    vectorEffect="non-scaling-stroke"
+                  />
                 </>
               )}
 
-              {/* End dot when not hovering */}
-              {!hovered && last && (
-                <circle cx={xFor(last.t)} cy={yFor(last.value)} r={3} fill="var(--accent)" vectorEffect="non-scaling-stroke" />
-              )}
-
-              {/* Bottom-axis date labels */}
-              <AxisLabel x={PAD_L} y={H - 6} text={fmtAxisDate(tMin, range)} anchor="start" />
-              <AxisLabel x={PAD_L + innerW / 2} y={H - 6} text={fmtAxisDate((tMin + tMax) / 2, range)} anchor="middle" />
-              <AxisLabel x={W - PAD_R} y={H - 6} text={fmtAxisDate(tMax, range)} anchor="end" />
+              {/* Bottom-axis labels — intraday → times, else dates */}
+              <AxisLabel x={PAD_L} y={H - 8} text={fmtAxisX(tMin, range, intraday)} anchor="start" />
+              <AxisLabel x={PAD_L + innerW / 2} y={H - 8} text={fmtAxisX((tMin + tMax) / 2, range, intraday)} anchor="middle" />
+              <AxisLabel x={W - PAD_R} y={H - 8} text={fmtAxisX(tMax, range, intraday)} anchor="end" />
             </svg>
 
-            {hovered && <HoverReadout point={hovered} />}
+            {hovered && <HoverReadout point={hovered} x={xFor(hovered.t)} W={W} boxW={box.w} intraday={intraday} />}
           </>
         )}
       </div>
@@ -231,27 +291,46 @@ export function EquityChart({ curve, headerRight }: Props) {
   );
 }
 
-/** Compact readout pinned to the top-left, so it stays put while you scrub the
- *  curve (no jumping). Pointer-transparent. */
-function HoverReadout({ point }: { point: { t: number; value: number } }) {
+/** Readout pill that tracks the crosshair, clamped within the box so it never
+ *  overflows the edges. Pointer-transparent. */
+function HoverReadout({
+  point,
+  x,
+  W,
+  boxW,
+  intraday,
+}: {
+  point: { t: number; value: number };
+  x: number; // crosshair X in viewBox units
+  W: number; // viewBox width
+  boxW: number; // box width in px
+  intraday: boolean;
+}) {
+  const HALF = 64; // approx half the pill width, for edge clamping
+  const px = (x / W) * boxW;
+  const left = Math.max(HALF + 6, Math.min(boxW - HALF - 6, px));
   return (
     <div
       style={{
         position: "absolute",
-        top: 8,
-        left: 8,
+        top: 12,
+        left,
+        transform: "translateX(-50%)",
         pointerEvents: "none",
-        background: "color-mix(in srgb, var(--surface-3) 90%, transparent)",
+        background: "color-mix(in srgb, var(--surface-3) 92%, transparent)",
         border: "1px solid var(--border-2)",
-        borderRadius: 6,
-        padding: "6px 9px",
-        fontFamily: "var(--font-mono)",
+        borderRadius: 4,
+        padding: "7px 11px",
+        boxShadow: "var(--shadow-popover)",
+        whiteSpace: "nowrap",
       }}
     >
-      <div style={{ fontSize: 9.5, color: "var(--fg-4)", letterSpacing: "0.04em", textTransform: "uppercase" }}>
-        {fmtReadoutDate(point.t)}
+      <div style={{ fontSize: 9.5, color: "var(--fg-4)", letterSpacing: "0.04em", textTransform: "uppercase", fontFamily: "var(--font-mono)" }}>
+        {fmtReadoutDate(point.t, intraday)}
       </div>
-      <div style={{ fontSize: 16, color: "var(--fg-1)", marginTop: 2 }}>{usd(point.value)}</div>
+      <div style={{ fontSize: 16, color: "var(--fg-1)", marginTop: 3, fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+        {usd(point.value)}
+      </div>
     </div>
   );
 }
@@ -268,15 +347,7 @@ function AxisLabel({
   anchor?: "start" | "middle" | "end";
 }) {
   return (
-    <text
-      x={x}
-      y={y}
-      fill="var(--fg-4)"
-      fontFamily="var(--font-mono)"
-      fontSize={9}
-      letterSpacing="0.04em"
-      textAnchor={anchor}
-    >
+    <text x={x} y={y} fill="var(--fg-4)" fontFamily="var(--font-mono)" fontSize={9} letterSpacing="0.04em" textAnchor={anchor}>
       {text}
     </text>
   );
@@ -329,21 +400,26 @@ function niceNum(range: number, round: boolean): number {
   return nf * Math.pow(10, exp);
 }
 
-function fmtAxisDate(t: number, range: EquityRange): string {
+function sameDay(a: number, b: number): boolean {
+  const x = new Date(a);
+  const y = new Date(b);
+  return (
+    x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate()
+  );
+}
+
+function fmtAxisX(t: number, range: EquityRange, intraday: boolean): string {
   const d = new Date(t);
-  if (range === "24H") {
+  if (range === "24H" || intraday) {
     return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   }
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function fmtReadoutDate(t: number): string {
-  return new Date(t).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+function fmtReadoutDate(t: number, intraday: boolean): string {
+  const d = new Date(t);
+  if (intraday) return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 function usd(v: number): string {

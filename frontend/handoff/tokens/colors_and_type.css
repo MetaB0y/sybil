@@ -15,6 +15,7 @@
   --surface-2:  #161C24;   /* nested card, hovered card, table row hover     */
   --surface-3:  #1D242E;   /* menus, popovers, tooltips                       */
   --overlay:    rgba(7,9,12,0.72);  /* modal scrim                            */
+  --nav-bg:     rgba(10,14,18,0.72);  /* sticky top-nav fill (sits behind blur) */
 
   /* ── Color: foreground (text) ────────────────────────────────────────── */
   --fg-1:       rgba(245,245,242,0.92);  /* primary text. warm-white, never #fff */
@@ -53,6 +54,13 @@
   --info:          var(--accent);
   --info-soft:     var(--accent-soft);
 
+  /* ── Color: component fills & data-viz ───────────────────────────────
+     Semantic stand-ins for the few hardcoded white-alpha values that don't
+     survive a light field. Use these instead of literal rgba in components. */
+  --fill-subtle:   rgba(255,255,255,0.04);  /* muted table-row / chip background */
+  --chart-grid:    rgba(255,255,255,0.05);  /* price-chart gridlines             */
+  --chart-axis:    rgba(255,255,255,0.40);  /* price-chart axis / crosshair line */
+
   /* ── Type: families ──────────────────────────────────────────────────── */
   --font-display:  'Syne', ui-sans-serif, system-ui, sans-serif;
   --font-sans:     'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -72,14 +80,14 @@
   --fs-72: 72px;   --lh-72: 76px;
 
   /* ── Type: weights ───────────────────────────────────────────────────── */
-  --fw-regular:    400;
-  --fw-medium:     500;
-  --fw-semibold:   600;
-  --fw-bold:       700;
+  --fw-regular:    400;   /* @kind font */
+  --fw-medium:     500;   /* @kind font */
+  --fw-semibold:   600;   /* @kind font */
+  --fw-bold:       700;   /* @kind font */
 
   /* ── Type: tracking ──────────────────────────────────────────────────── */
   --track-tight:   -0.02em;   /* display headlines */
-  --track-normal:  0;
+  --track-normal:  0;         /* @kind font */
   --track-wide:    0.04em;    /* small caps, eyebrow labels */
   --track-mono:    -0.005em;  /* mono numbers, tighter than default */
 
@@ -115,15 +123,92 @@
   --side-rail:         260px;
 
   /* ── Motion ──────────────────────────────────────────────────────────── */
-  --ease-standard:  cubic-bezier(0.2, 0, 0, 1);
-  --ease-in-out:    cubic-bezier(0.4, 0, 0.6, 1);
-  --dur-fast:       120ms;
-  --dur-base:       200ms;
-  --dur-slow:       320ms;
+  --ease-standard:  cubic-bezier(0.2, 0, 0, 1);   /* @kind other */
+  --ease-in-out:    cubic-bezier(0.4, 0, 0.6, 1);  /* @kind other */
+  --dur-fast:       120ms;   /* @kind other */
+  --dur-base:       200ms;   /* @kind other */
+  --dur-slow:       320ms;   /* @kind other */
 
   /* ── Backdrop ────────────────────────────────────────────────────────── */
-  --blur-nav: blur(12px) saturate(140%);
+  --blur-nav: blur(12px) saturate(140%);   /* @kind other */
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   LIGHT THEME — "Slate Daylight"
+   Opt-in. Set data-theme="light" on <html> (dark stays the default at :root).
+   Same token names, re-pointed to a cool neutral-white palette so every
+   surface, text, border, accent and shadow flips automatically.
+   Temperature matches dark Sybil — a faint blue-grey cast, never pure paper.
+   ────────────────────────────────────────────────────────────────────────── */
+
+[data-theme="light"] {
+  /* ── Color: surfaces (deepest → highest; "deeper" reads darker on light) ── */
+  --bg-0:       #E7EBEF;   /* deepest field — behind the page                 */
+  --bg-1:       #EEF1F4;   /* canonical light background (the "daylight")      */
+  --surface-1:  #FFFFFF;   /* default card / panel                            */
+  --surface-2:  #F4F7F9;   /* nested card, hovered card, table row hover      */
+  --surface-3:  #FFFFFF;   /* menus, popovers, tooltips (lifted by shadow)     */
+  --overlay:    rgba(15,23,32,0.45);  /* modal scrim                          */
+  --nav-bg:     rgba(255,255,255,0.90);  /* sticky top-nav fill (behind blur)  */
+
+  /* ── Color: foreground (text) — slate ink, never pure black ───────────── */
+  --fg-1:       #0E1A26;   /* primary text                                    */
+  --fg-2:       #3C4B59;   /* body / secondary                                */
+  --fg-3:       #6A7886;   /* meta, captions, table headers                   */
+  --fg-4:       #9AA6B2;   /* disabled, placeholder                           */
+  --fg-on-accent: #FFFFFF; /* text on cyan / yes / no fills (all dark enough) */
+
+  /* ── Color: borders — dark-alpha hairlines on light ──────────────────── */
+  --border-1:   rgba(15,32,48,0.08);   /* hairline divider — the default     */
+  --border-2:   rgba(15,32,48,0.12);   /* card outline, table row line       */
+  --border-3:   rgba(15,32,48,0.20);   /* hover / active                     */
+  --border-focus: #0E80A8;
+
+  /* ── Color: brand & accents — deepened cyan for AA contrast on white ──── */
+  --accent:        #0E80A8;  /* links, focus, brand spotlight                 */
+  --accent-hover:  #0B6E91;  /* links DARKEN on hover in light                */
+  --accent-press:  #095A78;
+  --accent-soft:   rgba(14,128,168,0.12);
+  --accent-faint:  rgba(14,128,168,0.05);
+
+  /* ── Color: market semantics — re-tuned deeper for white bg ──────────── */
+  --yes:           #138558;
+  --yes-hover:     #0F7049;
+  --yes-soft:      rgba(19,133,88,0.12);
+  --yes-faint:     rgba(19,133,88,0.05);
+
+  --no:            #CD3450;
+  --no-hover:      #B82A44;
+  --no-soft:       rgba(205,52,80,0.12);
+  --no-faint:      rgba(205,52,80,0.05);
+
+  /* ── Color: status ───────────────────────────────────────────────────── */
+  --warn:          #A9740F;
+  --warn-soft:     rgba(169,116,15,0.14);
+  --info:          var(--accent);
+  --info-soft:     var(--accent-soft);
+
+  /* ── Color: component fills & data-viz ─────────────────────────────── */
+  --fill-subtle:   rgba(15,32,48,0.04);   /* muted table-row / chip background  */
+  --chart-grid:    rgba(15,32,48,0.07);   /* price-chart gridlines              */
+  --chart-axis:    rgba(15,32,48,0.45);   /* price-chart axis / crosshair line  */
+
+  /* ── Shadows — cool slate shadows + a top highlight, not heavy black ──── */
+  --shadow-inset-top:  inset 0 1px 0 rgba(255,255,255,0.6);
+  --shadow-floating:   0 16px 32px -16px rgba(15,32,48,0.20);
+  --shadow-popover:    0 8px 24px -8px rgba(15,32,48,0.18),
+                       0 0 0 1px rgba(15,32,48,0.04);
+  --shadow-focus-ring: 0 0 0 3px rgba(14,128,168,0.20);
+}
+
+/* Light-theme base overrides — the few base rules that hardcode white-alpha
+   (selection + scrollbar) so they don't vanish on a light field. */
+[data-theme="light"] ::selection {
+  background: var(--accent-soft);
+  color: var(--fg-1);
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb     { background: rgba(15,32,48,0.18); }
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: rgba(15,32,48,0.30); }
 
 /* ──────────────────────────────────────────────────────────────────────────
    Base / reset
@@ -218,6 +303,18 @@ h4, .h-card {
   letter-spacing: var(--track-wide);
   text-transform: uppercase;
   color: var(--fg-3);
+}
+
+/* Inline market-name link — readable by default, accent + underline on hover.
+   Used on market titles inside cards/tables where the whole row is a link. */
+.market-link {
+  color: var(--fg-2);
+  text-decoration: none;
+}
+.market-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* Body */
@@ -318,4 +415,12 @@ hr {
   margin-right: var(--space-2);
   vertical-align: 1px;
   animation: sybil-pulse 1.6s ease-in-out infinite;
+}
+
+/* Utility: continuous right-to-left marquee for the recent-trades ticker.
+   The track renders its content twice; -50% scrolls exactly one copy so the
+   loop is seamless regardless of content width. */
+@keyframes sybil-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
 }

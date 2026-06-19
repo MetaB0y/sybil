@@ -28,6 +28,17 @@ export const metadata: Metadata = {
   description: "Prediction market on frequent batch auctions.",
 };
 
+// Runs before first paint: applies the persisted light theme so there's no
+// flash of dark before React hydrates. Dark is the default (no attribute).
+const THEME_INIT = `
+(function () {
+  try {
+    var t = localStorage.getItem('sybil-theme');
+    if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+  } catch (e) {}
+})();
+`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -37,7 +48,11 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${display.variable} ${sans.variable} ${mono.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
+      </head>
       <body className="min-h-full flex flex-col">
         <Providers>
           <GlobalNav />

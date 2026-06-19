@@ -757,7 +757,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
           borderRadius: 4,
           cursor: ctaOff ? "not-allowed" : "pointer",
           background: connected ? accent : "var(--accent)",
-          color: "#0A0E12",
+          color: "var(--fg-on-accent)",
           fontFamily: "var(--font-sans)",
           fontSize: 14,
           fontWeight: 600,

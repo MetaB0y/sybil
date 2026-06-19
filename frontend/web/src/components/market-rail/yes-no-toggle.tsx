@@ -33,7 +33,7 @@ export function YesNoToggle({
               cursor: "pointer",
               background: active ? s.color : "var(--bg-2)",
               border: `1px solid ${active ? s.color : "var(--border-1)"}`,
-              color: active ? "#0A0E12" : "var(--fg-2)",
+              color: active ? "var(--fg-on-accent)" : "var(--fg-2)",
               fontFamily: "var(--font-sans)",
               fontSize: 17,
               fontWeight: 700,

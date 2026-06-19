@@ -186,7 +186,7 @@ export function PriceChart({
               x2={W}
               y1={yOf(y)}
               y2={yOf(y)}
-              stroke="rgba(255,255,255,0.05)"
+              stroke="var(--chart-grid)"
               strokeDasharray={y === 0 || y === 1 ? undefined : "2 4"}
             />
           ))}
@@ -197,7 +197,7 @@ export function PriceChart({
               x2={tick.frac * W}
               y1={0}
               y2={PLOT_H}
-              stroke="rgba(255,255,255,0.04)"
+              stroke="var(--chart-grid)"
             />
           ))}
           {renderOrder.map((k) => {
@@ -235,7 +235,7 @@ export function PriceChart({
               x2={hover! * W}
               y1={0}
               y2={PLOT_H}
-              stroke="rgba(255,255,255,0.4)"
+              stroke="var(--chart-axis)"
               strokeDasharray="2 3"
             />
           )}

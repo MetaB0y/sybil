@@ -60,7 +60,7 @@ export function ConnectModal() {
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(2,6,10,0.62)",
+        background: "var(--overlay)",
         backdropFilter: "blur(6px)",
         WebkitBackdropFilter: "blur(6px)",
         zIndex: 100,

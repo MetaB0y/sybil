@@ -477,7 +477,7 @@ function StatusBadge({ status }: { status: Status }) {
   const tone =
     status === "FILLED"
       ? { fg: "var(--yes)", bg: "color-mix(in srgb, var(--yes) 14%, transparent)" }
-      : { fg: "var(--fg-3)", bg: "rgba(255,255,255,0.04)" };
+      : { fg: "var(--fg-3)", bg: "var(--fill-subtle)" };
   return (
     <span
       style={{

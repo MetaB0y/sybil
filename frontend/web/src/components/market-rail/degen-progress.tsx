@@ -120,7 +120,7 @@ const betAgainStyle: React.CSSProperties = {
   borderRadius: 6,
   border: 0,
   background: "var(--accent)",
-  color: "#0A0E12",
+  color: "var(--fg-on-accent)",
   fontFamily: "var(--font-sans)",
   fontSize: 14,
   fontWeight: 700,

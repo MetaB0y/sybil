@@ -411,7 +411,7 @@ function TypeBadge({
       fg: "var(--accent)",
       bg: "color-mix(in srgb, var(--accent) 14%, transparent)",
     },
-    muted: { fg: "var(--fg-3)", bg: "rgba(255,255,255,0.04)" },
+    muted: { fg: "var(--fg-3)", bg: "var(--fill-subtle)" },
   };
   const c = palette[tone]!;
   return (

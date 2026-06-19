@@ -230,7 +230,7 @@ export function DegenRail({
               border: 0,
               cursor: ctaDisabled ? "not-allowed" : "pointer",
               background: side === "YES" ? "var(--yes)" : "var(--no)",
-              color: "#0A0E12",
+              color: "var(--fg-on-accent)",
               fontFamily: "var(--font-sans)",
               fontSize: 15,
               fontWeight: 700,
