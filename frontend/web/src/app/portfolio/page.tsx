@@ -11,6 +11,8 @@
  */
 
 import { useMemo, useState } from "react";
+import { EventClosedOrders } from "@/components/event-closed-orders";
+import { PORTFOLIO_PAGE_SIZE } from "@/components/event-list-pager";
 import { EquityChart } from "@/components/portfolio/equity-chart";
 import { HistoryFeed } from "@/components/portfolio/history-feed";
 import {
@@ -121,9 +123,38 @@ function Connected({
   const tradeCount = fillsData.length;
   const tradeCountCapped = tradeCount >= FILLS_PAGE;
 
+  // Closed orders are reconstructed from the history feed (same logic as the
+  // market-page EventClosedOrders): one row per order_id with a terminal event,
+  // labelled by full market name. We build the label map here and let the
+  // component do the fold; the count below mirrors its "distinct closed order"
+  // notion for the tab badge.
+  const closedLabelByMarket = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const e of history.events) {
+      if (e.marketId != null && !m.has(e.marketId)) {
+        m.set(e.marketId, marketsById.get(e.marketId)?.name ?? `#${e.marketId}`);
+      }
+    }
+    return m;
+  }, [history.events, marketsById]);
+
+  const closedCount = useMemo(() => {
+    const ids = new Set<number>();
+    for (const e of history.events) {
+      if (
+        e.orderId != null &&
+        (e.type === "filled" || e.type === "cancelled" || e.type === "expired")
+      ) {
+        ids.add(e.orderId);
+      }
+    }
+    return ids.size;
+  }, [history.events]);
+
   const counts: Record<PortfolioTab, number> = {
     positions: portfolioData?.positions.length ?? 0,
     orders: ordersData.length,
+    closed: closedCount,
     history: history.events.length,
   };
 
@@ -188,6 +219,13 @@ function Connected({
           orders={ordersData}
           fills={fillsData}
           marketsById={marketsById}
+        />
+      )}
+      {tab === "closed" && (
+        <EventClosedOrders
+          events={history.events}
+          labelByMarket={closedLabelByMarket}
+          pageSize={PORTFOLIO_PAGE_SIZE}
         />
       )}
       {tab === "history" && (

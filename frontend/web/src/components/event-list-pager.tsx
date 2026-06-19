@@ -14,6 +14,9 @@ import type React from "react";
 import { useState } from "react";
 
 export const PAGE_SIZE = 10;
+/** Page size for the full-page portfolio tables (positions / orders / history /
+ *  closed). Larger than the compact market-detail lists (PAGE_SIZE). */
+export const PORTFOLIO_PAGE_SIZE = 15;
 
 export interface Paged<T> {
   /** Active page index, clamped into range. */

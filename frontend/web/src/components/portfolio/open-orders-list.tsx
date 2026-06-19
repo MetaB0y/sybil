@@ -2,7 +2,8 @@
 
 /**
  * Open orders tab. Grid rows:
- *   dot · market · action · side · created · placed/filled · limit · avg fill · value · TIF · cancel
+ *   dot · market · action · side · placed/filled · limit · avg fill · value ·
+ *   created · TIF · cancel
  *
  * - Placed/filled uses B8's `original_quantity` (placed) and `original −
  *   remaining` (filled). Orders persisted before B8 report `original_quantity:
@@ -12,6 +13,8 @@
  *   may undercount — fine for typical recent open orders.
  * - Created time is the exact `created_at_ms` from `PendingOrderResponse`
  *   (falls back to the block height for orders admitted before that field).
+ * - Every column is click-to-sort; default order is newest-first by created
+ *   time. Paginated at PORTFOLIO_PAGE_SIZE rows/page.
  */
 
 import Link from "next/link";
@@ -27,6 +30,7 @@ import {
 } from "@/lib/format/nanos";
 import { selectLatestBlock, useStore } from "@/lib/store";
 import type { components } from "@/lib/api/schema";
+import { Pager, usePaged, PORTFOLIO_PAGE_SIZE } from "@/components/event-list-pager";
 import { CategoryDot } from "./category-dot";
 import { SidePill } from "./side-pill";
 import { TifCell } from "./tif-cell";
@@ -36,6 +40,90 @@ type Market = components["schemas"]["MarketResponse"];
 interface OrderFillAgg {
   count: number;
   avgPriceNanos: bigint | null;
+}
+
+/** An order with every sortable value derived once. */
+interface OpenRow {
+  order: AccountOrder;
+  market: Market | undefined;
+  label: string;
+  action: "BUY" | "SELL";
+  outcome: string;
+  placed: number;
+  filled: number;
+  remaining: number;
+  limitNanos: bigint;
+  valueNanos: bigint;
+  avgPriceNanos: bigint | null;
+  fillCount: number;
+  createdMs: number | null;
+  createdBlock: number;
+  expiresAtBlock: number;
+}
+
+type SortKey =
+  | "market"
+  | "action"
+  | "side"
+  | "placed"
+  | "limit"
+  | "avgfill"
+  | "value"
+  | "created"
+  | "tif";
+type SortDir = "asc" | "desc";
+type Sort = { key: SortKey; dir: SortDir };
+
+const COLUMNS: { key: SortKey; label: string; align: "left" | "right" }[] = [
+  { key: "market", label: "Market", align: "left" },
+  { key: "action", label: "Action", align: "left" },
+  { key: "side", label: "Side", align: "left" },
+  { key: "placed", label: "Placed / Filled", align: "right" },
+  { key: "limit", label: "Limit", align: "right" },
+  { key: "avgfill", label: "Avg fill", align: "right" },
+  { key: "value", label: "Value", align: "right" },
+  { key: "created", label: "Created", align: "right" },
+  { key: "tif", label: "TIF", align: "right" },
+];
+
+/** Text columns sort A→Z first; numeric columns sort high→low first. */
+function nextSort(prev: Sort | null, key: SortKey): Sort {
+  if (prev && prev.key === key) {
+    return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
+  }
+  const numeric = key !== "market" && key !== "action" && key !== "side";
+  return { key, dir: numeric ? "desc" : "asc" };
+}
+
+function cmpBig(a: bigint, b: bigint): number {
+  return a > b ? 1 : a < b ? -1 : 0;
+}
+
+/** Ascending comparison; null avg-fill / created sort lowest. */
+function compareBy(a: OpenRow, b: OpenRow, key: SortKey): number {
+  switch (key) {
+    case "market":
+      return a.label.localeCompare(b.label);
+    case "action":
+      return a.action.localeCompare(b.action);
+    case "side":
+      return a.outcome.localeCompare(b.outcome);
+    case "placed":
+      return (a.placed || a.remaining) - (b.placed || b.remaining);
+    case "limit":
+      return cmpBig(a.limitNanos, b.limitNanos);
+    case "avgfill":
+      if (a.avgPriceNanos == null && b.avgPriceNanos == null) return 0;
+      if (a.avgPriceNanos == null) return -1;
+      if (b.avgPriceNanos == null) return 1;
+      return cmpBig(a.avgPriceNanos, b.avgPriceNanos);
+    case "value":
+      return cmpBig(a.valueNanos, b.valueNanos);
+    case "created":
+      return (a.createdMs ?? 0) - (b.createdMs ?? 0);
+    case "tif":
+      return a.expiresAtBlock - b.expiresAtBlock;
+  }
 }
 
 interface Props {
@@ -53,6 +141,9 @@ export function OpenOrdersList({
   fills,
   marketsById,
 }: Props) {
+  const [sort, setSort] = useState<Sort | null>(null);
+  const nowMs = useStore(selectLatestBlock)?.timestamp_ms ?? null;
+
   // Aggregate the account's visible fills by order_id → count + WAC fill price.
   const fillsByOrder = useMemo(() => {
     const acc = new Map<number, { count: number; qty: bigint; cost: bigint }>();
@@ -75,6 +166,46 @@ export function OpenOrdersList({
     return out;
   }, [fills]);
 
+  const rows = useMemo<OpenRow[]>(() => {
+    const decorated = orders.map((o) => {
+      const sideRaw = o.side.toLowerCase();
+      const agg = fillsByOrder.get(o.order_id);
+      const placed = o.original_quantity ?? 0;
+      const limitNanos = parseNanos(o.limit_price_nanos);
+      return {
+        order: o,
+        market: marketsById.get(o.market_id),
+        label: marketsById.get(o.market_id)?.name ?? `#${o.market_id}`,
+        action: sideRaw.includes("buy") ? "BUY" : "SELL",
+        outcome: sideRaw.includes("yes") ? "YES" : sideRaw.includes("no") ? "NO" : "",
+        placed,
+        filled: placed > 0 ? Math.max(0, placed - o.remaining_quantity) : 0,
+        remaining: o.remaining_quantity,
+        limitNanos,
+        valueNanos: limitNanos * BigInt(o.remaining_quantity),
+        avgPriceNanos: agg?.avgPriceNanos ?? null,
+        fillCount: agg?.count ?? 0,
+        createdMs:
+          o.created_at_ms && o.created_at_ms > 0 ? o.created_at_ms : null,
+        createdBlock: o.created_at_block,
+        expiresAtBlock: o.expires_at_block,
+      } satisfies OpenRow;
+    });
+    if (!sort) {
+      // Default: newest-first by created time.
+      return [...decorated].sort((a, b) => (b.createdMs ?? 0) - (a.createdMs ?? 0));
+    }
+    const factor = sort.dir === "asc" ? 1 : -1;
+    return [...decorated].sort((a, b) => compareBy(a, b, sort.key) * factor);
+  }, [orders, fillsByOrder, marketsById, sort]);
+
+  const paged = usePaged(rows, PORTFOLIO_PAGE_SIZE);
+
+  const onSort = (key: SortKey) => {
+    setSort((s) => nextSort(s, key));
+    paged.setPage(0);
+  };
+
   if (orders.length === 0) {
     return <Empty>No open orders.</Empty>;
   }
@@ -87,72 +218,44 @@ export function OpenOrdersList({
         overflow: "hidden",
       }}
     >
-      <HeaderRow />
-      {orders.map((o) => (
+      <div style={rowGrid("var(--fg-4)")}>
+        <span />
+        {COLUMNS.map((col) => (
+          <SortHeader key={col.key} col={col} sort={sort} onSort={onSort} />
+        ))}
+        <span />
+      </div>
+      {paged.visible.map((r) => (
         <OrderRow
-          key={o.order_id}
-          order={o}
-          market={marketsById.get(o.market_id)}
-          agg={fillsByOrder.get(o.order_id)}
+          key={r.order.order_id}
+          row={r}
+          nowMs={nowMs}
           accountId={accountId}
           publicKeyHex={publicKeyHex}
         />
       ))}
-    </div>
-  );
-}
-
-function HeaderRow() {
-  return (
-    <div style={rowGrid("var(--fg-4)")}>
-      <span />
-      <span>Market</span>
-      <span>Action</span>
-      <span>Side</span>
-      <span>Created</span>
-      <RightCell>Placed / Filled</RightCell>
-      <RightCell>Limit</RightCell>
-      <RightCell>Avg fill</RightCell>
-      <RightCell>Value</RightCell>
-      <RightCell>TIF</RightCell>
-      <RightCell>{""}</RightCell>
+      <div style={{ padding: "0 14px" }}>
+        <Pager paged={paged} />
+      </div>
     </div>
   );
 }
 
 function OrderRow({
-  order,
-  market,
-  agg,
+  row,
+  nowMs,
   accountId,
   publicKeyHex,
 }: {
-  order: AccountOrder;
-  market: Market | undefined;
-  agg: OrderFillAgg | undefined;
+  row: OpenRow;
+  nowMs: number | null;
   accountId: number;
   publicKeyHex: string;
 }) {
+  const { order, market, action, outcome, placed, filled, remaining } = row;
+  const isBuy = action === "BUY";
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const latestBlock = useStore(selectLatestBlock);
-
-  const sideRaw = order.side.toLowerCase();
-  const isBuy = sideRaw.includes("buy");
-  const outcome = sideRaw.includes("yes") ? "YES" : sideRaw.includes("no") ? "NO" : "";
-
-  const limitNanos = parseNanos(order.limit_price_nanos);
-  // value = limit × remaining (nanos × shares = dollars-nanos)
-  const valueNanos = limitNanos * BigInt(order.remaining_quantity);
-
-  const placed = order.original_quantity ?? 0;
-  const filled = placed > 0 ? Math.max(0, placed - order.remaining_quantity) : 0;
-
-  // Exact created time from the backend (created_at_ms on PendingOrderResponse).
-  // Falls back to null (→ block-height display) for orders admitted before the
-  // field shipped, which report created_at_ms: 0.
-  const createdMs =
-    order.created_at_ms && order.created_at_ms > 0 ? order.created_at_ms : null;
 
   async function onCancel(e: React.MouseEvent) {
     e.preventDefault();
@@ -171,8 +274,8 @@ function OrderRow({
           limitPriceNanos: String(order.limit_price_nanos),
         },
       });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
       setCancelling(false);
     }
   }
@@ -213,23 +316,17 @@ function OrderRow({
         {isBuy ? "BUY" : "SELL"}
       </span>
       <SidePill outcome={outcome} />
-      <CreatedCell
-        ms={createdMs}
-        block={order.created_at_block}
-        nowMs={latestBlock?.timestamp_ms ?? null}
-      />
       <RightCell mono>
-        <FilledCell
-          placed={placed}
-          filled={filled}
-          remaining={order.remaining_quantity}
+        <FilledCell placed={placed} filled={filled} remaining={remaining} />
+      </RightCell>
+      <RightCell mono>{formatCents(row.limitNanos)}</RightCell>
+      <RightCell mono>
+        <AvgFillCell
+          agg={{ count: row.fillCount, avgPriceNanos: row.avgPriceNanos }}
         />
       </RightCell>
-      <RightCell mono>{formatCents(limitNanos)}</RightCell>
-      <RightCell mono>
-        <AvgFillCell agg={agg} />
-      </RightCell>
-      <RightCell mono>{formatDollars(valueNanos, { decimals: 2 })}</RightCell>
+      <RightCell mono>{formatDollars(row.valueNanos, { decimals: 2 })}</RightCell>
+      <CreatedCell ms={row.createdMs} block={row.createdBlock} nowMs={nowMs} />
       <RightCell>
         <TifCell expiresAtBlock={order.expires_at_block} />
       </RightCell>
@@ -272,10 +369,12 @@ function CreatedCell({
   return (
     <span
       style={{
-        display: "inline-flex",
+        display: "flex",
         flexDirection: "column",
+        alignItems: "flex-end",
         gap: 1,
         fontFamily: "var(--font-mono)",
+        textAlign: "right",
       }}
     >
       <span style={{ fontSize: 11, color: "var(--fg-2)" }}>
@@ -343,8 +442,8 @@ function FilledCell({
 }
 
 /** Avg fill price (WAC of matched fills) with fill count beneath. */
-function AvgFillCell({ agg }: { agg: OrderFillAgg | undefined }) {
-  const count = agg?.count ?? 0;
+function AvgFillCell({ agg }: { agg: OrderFillAgg }) {
+  const count = agg.count;
   return (
     <span
       style={{
@@ -356,7 +455,7 @@ function AvgFillCell({ agg }: { agg: OrderFillAgg | undefined }) {
       }}
     >
       <span style={{ fontSize: 12, color: count > 0 ? "var(--fg-1)" : "var(--fg-3)" }}>
-        {agg?.avgPriceNanos != null ? formatCents(agg.avgPriceNanos) : "—"}
+        {agg.avgPriceNanos != null ? formatCents(agg.avgPriceNanos) : "—"}
       </span>
       <span
         style={{
@@ -371,11 +470,49 @@ function AvgFillCell({ agg }: { agg: OrderFillAgg | undefined }) {
   );
 }
 
+function SortHeader({
+  col,
+  sort,
+  onSort,
+}: {
+  col: (typeof COLUMNS)[number];
+  sort: Sort | null;
+  onSort: (key: SortKey) => void;
+}) {
+  const active = sort?.key === col.key;
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(col.key)}
+      title={`Sort by ${col.label}`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 3,
+        width: "100%",
+        justifyContent: col.align === "right" ? "flex-end" : "flex-start",
+        padding: 0,
+        border: 0,
+        background: "transparent",
+        cursor: "pointer",
+        font: "inherit",
+        letterSpacing: "var(--track-wide)",
+        color: active ? "var(--fg-2)" : "var(--fg-4)",
+      }}
+    >
+      <span style={{ whiteSpace: "nowrap" }}>{col.label}</span>
+      <span style={{ fontSize: 8, lineHeight: 1, opacity: active ? 1 : 0.3 }}>
+        {active ? (sort!.dir === "asc" ? "▲" : "▼") : "↕"}
+      </span>
+    </button>
+  );
+}
+
 function rowGrid(color: string): React.CSSProperties {
   return {
     display: "grid",
     gridTemplateColumns:
-      "14px minmax(0, 1.25fr) 46px 44px 80px 96px 52px 70px 78px 96px 60px",
+      "14px minmax(0, 1.25fr) 46px 44px 96px 52px 70px 78px 80px 96px 60px",
     gap: 10,
     alignItems: "center",
     padding: "10px 14px",
