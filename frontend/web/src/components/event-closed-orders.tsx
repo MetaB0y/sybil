@@ -16,6 +16,10 @@
  *     event lacks one.
  *   - price = the terminal event's price, else the last fill price seen.
  *   - value = qty × price (notional $), shown for orders that carry both.
+ *   - P&L = realized PnL summed across the order's fill events
+ *     (`partial_fill` + `filled`), shown for SELL orders only — a buy opens or
+ *     adds to a position and realizes nothing. The backend supplies it per fill
+ *     (`realized_pnl_nanos`), so no FE cost-basis math is needed.
  * Default order is newest-first by the terminal event's `timestamp_ms`; every
  * column is click-to-sort.
  *
@@ -51,6 +55,8 @@ interface ClosedOrder {
   priceNanos: bigint | null;
   /** qty × price (notional $), or null when either is unknown. */
   valueNanos: bigint | null;
+  /** Realized PnL (nanos) summed over fill events — SELL orders only, else null. */
+  realizedPnlNanos: bigint | null;
 }
 
 type SortKey =
@@ -61,6 +67,7 @@ type SortKey =
   | "qty"
   | "price"
   | "value"
+  | "pnl"
   | "closed";
 type SortDir = "asc" | "desc";
 type Sort = { key: SortKey; dir: SortDir };
@@ -73,6 +80,7 @@ const COLUMNS: { key: SortKey; label: string; align: "left" | "right" }[] = [
   { key: "qty", label: "Qty", align: "right" },
   { key: "price", label: "Price", align: "right" },
   { key: "value", label: "Value", align: "right" },
+  { key: "pnl", label: "P&L", align: "right" },
   { key: "closed", label: "Closed", align: "right" },
 ];
 
@@ -81,7 +89,12 @@ function nextSort(prev: Sort | null, key: SortKey): Sort {
   if (prev && prev.key === key) {
     return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
   }
-  const numeric = key === "qty" || key === "price" || key === "value" || key === "closed";
+  const numeric =
+    key === "qty" ||
+    key === "price" ||
+    key === "value" ||
+    key === "pnl" ||
+    key === "closed";
   return { key, dir: numeric ? "desc" : "asc" };
 }
 
@@ -112,6 +125,11 @@ function compareBy(a: ClosedOrder, b: ClosedOrder, key: SortKey): number {
       if (a.valueNanos == null) return -1;
       if (b.valueNanos == null) return 1;
       return cmpBig(a.valueNanos, b.valueNanos);
+    case "pnl":
+      if (a.realizedPnlNanos == null && b.realizedPnlNanos == null) return 0;
+      if (a.realizedPnlNanos == null) return -1;
+      if (b.realizedPnlNanos == null) return 1;
+      return cmpBig(a.realizedPnlNanos, b.realizedPnlNanos);
     case "closed":
       return a.closedAtMs - b.closedAtMs;
   }
@@ -141,6 +159,8 @@ export function EventClosedOrders({
         outcome?: "YES" | "NO";
         terminal: HistoryEvent | null;
         lastFillPrice: bigint | null;
+        /** Σ realized PnL over the order's fill events; null until one carries it. */
+        realizedPnl: bigint | null;
       }
     >();
 
@@ -151,12 +171,18 @@ export function EventClosedOrders({
 
       const slot =
         byOrder.get(e.orderId) ??
-        ({ marketId: e.marketId, terminal: null, lastFillPrice: null } as {
+        ({
+          marketId: e.marketId,
+          terminal: null,
+          lastFillPrice: null,
+          realizedPnl: null,
+        } as {
           marketId: number;
           side?: "BUY" | "SELL";
           outcome?: "YES" | "NO";
           terminal: HistoryEvent | null;
           lastFillPrice: bigint | null;
+          realizedPnl: bigint | null;
         });
 
       // Carry side/outcome from whichever event has them (fills usually do).
@@ -164,6 +190,14 @@ export function EventClosedOrders({
       if (e.outcome && slot.outcome == null) slot.outcome = e.outcome;
       if (e.type === "partial_fill" && e.priceNanos != null) {
         slot.lastFillPrice = e.priceNanos;
+      }
+      // Accumulate realized PnL across every fill event (partial + final), so a
+      // sell that filled in pieces — even one later cancelled — totals correctly.
+      if (
+        (e.type === "partial_fill" || e.type === "filled") &&
+        e.realizedPnlNanos != null
+      ) {
+        slot.realizedPnl = (slot.realizedPnl ?? 0n) + e.realizedPnlNanos;
       }
       if (
         TERMINAL.has(e.type) &&
@@ -189,6 +223,8 @@ export function EventClosedOrders({
         qty,
         priceNanos,
         valueNanos: qty != null && priceNanos != null ? BigInt(qty) * priceNanos : null,
+        // PnL is realized on the closing trade — show it for sells only.
+        realizedPnlNanos: slot.side === "SELL" ? slot.realizedPnl : null,
       };
       if (slot.side) row.side = slot.side;
       if (slot.outcome) row.outcome = slot.outcome;
@@ -263,9 +299,34 @@ function ClosedRow({ order }: { order: ClosedOrder }) {
         {order.valueNanos != null ? formatDollars(order.valueNanos, { decimals: 2 }) : "—"}
       </Right>
       <Right>
+        <PnlCell pnlNanos={order.realizedPnlNanos} />
+      </Right>
+      <Right>
         <ClosedTime ms={order.closedAtMs} />
       </Right>
     </Row>
+  );
+}
+
+/** Realized PnL for a sell — green/red signed $; "—" for buys and unknowns. */
+function PnlCell({ pnlNanos }: { pnlNanos: bigint | null }) {
+  return (
+    <span
+      style={{
+        fontFamily: "var(--font-mono)",
+        fontSize: 12,
+        color:
+          pnlNanos == null
+            ? "var(--fg-4)"
+            : pnlNanos >= 0n
+              ? "var(--yes)"
+              : "var(--no)",
+      }}
+    >
+      {pnlNanos == null
+        ? "—"
+        : formatDollars(pnlNanos, { decimals: 2, sign: true })}
+    </span>
   );
 }
 
@@ -374,8 +435,8 @@ function Row({
       style={{
         display: "grid",
         gridTemplateColumns:
-          "minmax(0, 1fr) 38px 38px 70px 38px 46px 58px 60px",
-        gap: 10,
+          "minmax(0, 1fr) 38px 36px 62px 32px 44px 52px 58px 56px",
+        gap: 8,
         alignItems: "center",
         padding: "9px 0",
         borderTop: header ? undefined : "1px solid var(--border-1)",

@@ -25,7 +25,7 @@
  * every column is click-to-sort.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAccountSession } from "@/lib/account/use-account";
 import { useAccountFills } from "@/lib/account/use-account-fills";
 import { useAccountHistory } from "@/lib/account/use-account-history";
@@ -33,7 +33,11 @@ import { useAccountOrders } from "@/lib/account/use-account-orders";
 import { avgEntryPriceNanos } from "@/lib/account/positions";
 import { usePortfolio, type Portfolio } from "@/lib/account/use-portfolio";
 import { formatCents, formatDollars, parseNanos } from "@/lib/format/nanos";
-import { useEventGroup } from "@/lib/market-detail/use-event-group";
+import {
+  useEventGroup,
+  type EventOutcome,
+} from "@/lib/market-detail/use-event-group";
+import { colorForOutcome } from "@/components/outcome-legend";
 import { EventClosedOrders } from "@/components/event-closed-orders";
 import { EventOpenOrders } from "@/components/event-open-orders";
 import { SidePill } from "@/components/portfolio/side-pill";
@@ -125,6 +129,8 @@ export function EventHoldings({ marketId }: { marketId: number }) {
 
   const [sort, setSort] = useState<Sort | null>(null);
   const [view, setView] = useState<View>("holdings");
+  // Outcome filter (null = all outcomes). Scopes every view to one market.
+  const [selectedMarket, setSelectedMarket] = useState<number | null>(null);
 
   // shortLabel per market, so each holding reads like the outcome picker. Its
   // keys are exactly this event's market_ids — the single source of truth for
@@ -208,6 +214,33 @@ export function EventHoldings({ marketId }: { marketId: number }) {
     );
   }, [historyData, labelByMarket]);
 
+  // Apply the outcome filter for display. The render gate below still considers
+  // the *full* event, so picking an outcome with no rows narrows the table
+  // rather than hiding the whole section. A scoped label map both relabels and
+  // re-scopes the closed-orders view, which keys off `labelByMarket`.
+  const outcomes = group?.outcomes ?? [];
+  const visibleHoldings = useMemo(
+    () =>
+      selectedMarket == null
+        ? sorted
+        : sorted.filter((h) => h.position.market_id === selectedMarket),
+    [sorted, selectedMarket],
+  );
+  const visibleOrders = useMemo(
+    () =>
+      selectedMarket == null
+        ? eventOrders
+        : eventOrders.filter((o) => o.market_id === selectedMarket),
+    [eventOrders, selectedMarket],
+  );
+  const scopedLabelByMarket = useMemo(() => {
+    if (selectedMarket == null) return labelByMarket;
+    const label = labelByMarket.get(selectedMarket);
+    return new Map<number, string>(
+      label != null ? [[selectedMarket, label]] : [],
+    );
+  }, [labelByMarket, selectedMarket]);
+
   // Render when connected AND this event has at least one of: positions, open
   // orders, or closed orders. Each view shows its own empty state. Default view
   // stays "holdings" — no effect-driven auto-select (avoids set-state-in-effect).
@@ -236,13 +269,34 @@ export function EventHoldings({ marketId }: { marketId: number }) {
           flexWrap: "wrap",
         }}
       >
-        <div className="eyebrow">{"// your holdings"}</div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--space-3)",
+            minWidth: 0,
+            flexWrap: "wrap",
+          }}
+        >
+          <div className="eyebrow">{"// your positions & orders"}</div>
+          {outcomes.length > 1 && (
+            <OutcomeFilter
+              outcomes={outcomes}
+              selected={selectedMarket}
+              onChange={setSelectedMarket}
+            />
+          )}
+        </div>
         <ViewSwitcher value={view} onChange={setView} />
       </div>
 
       {view === "holdings" ? (
-        holdings.length === 0 ? (
-          <Empty>No holdings in this event.</Empty>
+        visibleHoldings.length === 0 ? (
+          <Empty>
+            {selectedMarket == null
+              ? "No holdings in this event."
+              : "No holdings in this outcome."}
+          </Empty>
         ) : (
           <div>
             <Row header>
@@ -255,7 +309,7 @@ export function EventHoldings({ marketId }: { marketId: number }) {
                 />
               ))}
             </Row>
-            {sorted.map((h) => (
+            {visibleHoldings.map((h) => (
               <HoldingRow
                 key={`${h.position.market_id}:${h.outcome}`}
                 holding={h}
@@ -265,12 +319,15 @@ export function EventHoldings({ marketId }: { marketId: number }) {
         )
       ) : view === "open" ? (
         <EventOpenOrders
-          orders={eventOrders}
+          orders={visibleOrders}
           fills={fillsData ?? []}
-          labelByMarket={labelByMarket}
+          labelByMarket={scopedLabelByMarket}
         />
       ) : (
-        <EventClosedOrders events={historyData} labelByMarket={labelByMarket} />
+        <EventClosedOrders
+          events={historyData}
+          labelByMarket={scopedLabelByMarket}
+        />
       )}
     </section>
   );
@@ -326,6 +383,222 @@ function ViewSwitcher({
         );
       })}
     </div>
+  );
+}
+
+/**
+ * Outcome filter — a compact dropdown that scopes every view (holdings / open /
+ * closed) to one of the event's outcomes, defaulting to all. Only rendered for
+ * multi-outcome events; a single binary market has nothing to filter. Colored
+ * dots match the chart legend (`colorForOutcome`). Mirrors the rail picker's
+ * click-outside + Escape close.
+ */
+function OutcomeFilter({
+  outcomes,
+  selected,
+  onChange,
+}: {
+  outcomes: EventOutcome[];
+  selected: number | null;
+  onChange: (id: number | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    function close(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
+  const selectedIndex = outcomes.findIndex((o) => o.marketId === selected);
+  const selectedOutcome = selectedIndex >= 0 ? outcomes[selectedIndex] : null;
+  const selectedColor =
+    selectedOutcome != null ? colorForOutcome(selectedOutcome, selectedIndex) : null;
+
+  function pick(id: number | null) {
+    setOpen(false);
+    onChange(id);
+  }
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        title="Filter by outcome"
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          maxWidth: 200,
+          padding: "4px 8px",
+          borderRadius: 4,
+          background: "var(--bg-2)",
+          border: "1px solid var(--border-1)",
+          cursor: "pointer",
+          fontFamily: "var(--font-mono)",
+          fontSize: 11,
+          letterSpacing: "var(--track-wide)",
+          color: "var(--fg-2)",
+        }}
+      >
+        {selectedColor != null && (
+          <span
+            aria-hidden
+            style={{
+              width: 7,
+              height: 7,
+              borderRadius: "50%",
+              background: selectedColor,
+              flexShrink: 0,
+            }}
+          />
+        )}
+        <span
+          style={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {selectedOutcome != null ? selectedOutcome.shortLabel : "All outcomes"}
+        </span>
+        <svg
+          aria-hidden
+          width="10"
+          height="10"
+          viewBox="0 0 12 12"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          style={{
+            flexShrink: 0,
+            transform: open ? "rotate(180deg)" : "none",
+            transition: "transform 120ms",
+          }}
+        >
+          <path d="m3 4.5 3 3 3-3" />
+        </svg>
+      </button>
+
+      {open && (
+        <div
+          role="listbox"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            zIndex: 30,
+            minWidth: 200,
+            background: "var(--surface-2)",
+            border: "1px solid var(--border-2)",
+            borderRadius: 6,
+            padding: 4,
+            boxShadow: "var(--shadow-popover, 0 8px 24px rgba(0,0,0,0.4))",
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            maxHeight: 280,
+            overflowY: "auto",
+          }}
+        >
+          <OutcomeOption
+            label="All outcomes"
+            selected={selected == null}
+            onClick={() => pick(null)}
+          />
+          {outcomes.map((o, i) => (
+            <OutcomeOption
+              key={o.marketId}
+              label={o.shortLabel}
+              title={o.label}
+              color={colorForOutcome(o, i)}
+              selected={selected === o.marketId}
+              onClick={() => pick(o.marketId)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OutcomeOption({
+  label,
+  title,
+  color,
+  selected,
+  onClick,
+}: {
+  label: string;
+  title?: string;
+  color?: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={selected}
+      onClick={onClick}
+      title={title ?? label}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "7px 10px",
+        borderRadius: 4,
+        background: selected ? "var(--bg-2)" : "transparent",
+        border: 0,
+        cursor: "pointer",
+        textAlign: "left",
+        width: "100%",
+      }}
+      onMouseEnter={(e) => {
+        if (!selected) e.currentTarget.style.background = "var(--bg-2)";
+      }}
+      onMouseLeave={(e) => {
+        if (!selected) e.currentTarget.style.background = "transparent";
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: "50%",
+          background: color ?? "var(--fg-4)",
+          flexShrink: 0,
+        }}
+      />
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          fontFamily: "var(--font-sans)",
+          fontSize: 13,
+          color: "var(--fg-1)",
+        }}
+      >
+        {label}
+      </span>
+    </button>
   );
 }
 
