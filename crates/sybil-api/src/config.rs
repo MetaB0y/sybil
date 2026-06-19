@@ -112,6 +112,19 @@ pub struct ApiConfig {
     )]
     pub max_fill_history_per_account: usize,
 
+    /// In-memory equity points retained per account (serving fallback only;
+    /// full series lives in redb). Set to 0 in prod.
+    #[arg(long, default_value = "0", env = "SYBIL_MAX_EQUITY_POINTS_PER_ACCOUNT")]
+    pub max_equity_points_per_account: usize,
+    /// In-memory history events retained per account (serving fallback only).
+    /// Set to 0 in prod.
+    #[arg(
+        long,
+        default_value = "0",
+        env = "SYBIL_MAX_HISTORY_EVENTS_PER_ACCOUNT"
+    )]
+    pub max_history_events_per_account: usize,
+
     /// Sequencer actor queue depth that logs a warning.
     #[arg(long, default_value = "1000", env = "SYBIL_ACTOR_QUEUE_WARN_DEPTH")]
     pub actor_queue_warn_depth: usize,
@@ -186,6 +199,8 @@ impl Default for ApiConfig {
             block_history_capacity: 100,
             max_price_history_points_per_market: 2_000,
             max_fill_history_per_account: 5_000,
+            max_equity_points_per_account: 0,
+            max_history_events_per_account: 0,
             actor_queue_warn_depth: 1_000,
             actor_queue_error_depth: 5_000,
             liquidity_band_nanos: 50_000_000,

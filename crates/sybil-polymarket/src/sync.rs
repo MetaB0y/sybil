@@ -150,7 +150,10 @@ impl SyncActor {
                     })
                     .collect()
             };
-            info!(count = refresh.len(), "backfilling market metadata (one-time)");
+            info!(
+                count = refresh.len(),
+                "backfilling market metadata (one-time)"
+            );
             for (sid, req) in refresh {
                 if let Err(e) = self.sybil_client.set_market_metadata(sid, &req).await {
                     warn!(sybil_id = sid, error = %e, "metadata backfill failed");

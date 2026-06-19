@@ -46,8 +46,10 @@ impl AnalyticsState {
             order_stats_tracker: OrderStatsTracker::new(),
             cost_basis_tracker: CostBasisTracker::new(),
             first_deposit_ms: HashMap::new(),
-            equity_tracker: EquityTracker::new(),
-            account_event_log: AccountEventLog::new(),
+            equity_tracker: EquityTracker::with_retention(config.max_equity_points_per_account),
+            account_event_log: AccountEventLog::with_retention(
+                config.max_history_events_per_account,
+            ),
         }
     }
 
@@ -72,8 +74,11 @@ impl AnalyticsState {
             order_stats_tracker: OrderStatsTracker::restore(input.order_stats_tracker),
             cost_basis_tracker: CostBasisTracker::restore(input.cost_basis_tracker),
             first_deposit_ms: input.first_deposit_ms,
-            equity_tracker: EquityTracker::new(),
-            account_event_log: AccountEventLog::new(),
+            equity_tracker: EquityTracker::with_retention(config.max_equity_points_per_account),
+            account_event_log: AccountEventLog::with_retention_and_next_seq(
+                config.max_history_events_per_account,
+                input.history_event_next_seq,
+            ),
         }
     }
 
@@ -90,6 +95,14 @@ impl AnalyticsState {
             first_deposit_ms: self.first_deposit_snapshot(),
             fill_total_counts: self.total_fill_counts(),
             cost_basis_tracker: self.cost_basis_snapshot(),
+            history_event_next_seq: self.account_event_log.next_seq(),
+            equity_points_delta: self.equity_tracker.pending().to_vec(),
+            history_events_delta: self
+                .account_event_log
+                .pending()
+                .iter()
+                .map(crate::aggregates::StoredHistoryEvent::from_event)
+                .collect(),
         }
     }
 
@@ -383,5 +396,29 @@ impl AnalyticsState {
     #[cfg(test)]
     pub(crate) fn price_tracker_mut(&mut self) -> &mut PriceTracker {
         &mut self.price_tracker
+    }
+
+    pub fn clear_offblock_pending(&mut self) {
+        self.equity_tracker.clear_pending();
+        self.account_event_log.clear_pending();
+    }
+
+    pub fn seed_equity_known(&mut self, ids: impl IntoIterator<Item = AccountId>) {
+        self.equity_tracker.seed_known(ids);
+    }
+
+    pub fn memory_stats(&self) -> crate::sequencer::AnalyticsMemoryStats {
+        crate::sequencer::AnalyticsMemoryStats {
+            equity_known_accounts: self.equity_tracker.known_account_count(),
+            equity_cached_accounts: self.equity_tracker.retained_account_count(),
+            equity_cached_points: self.equity_tracker.retained_point_count(),
+            equity_pending_points: self.equity_tracker.pending().len(),
+            equity_points_per_account_capacity: self.equity_tracker.retention_per_account(),
+            history_cached_accounts: self.account_event_log.retained_account_count(),
+            history_cached_events: self.account_event_log.retained_event_count(),
+            history_pending_events: self.account_event_log.pending().len(),
+            history_events_per_account_capacity: self.account_event_log.retention_per_account(),
+            history_event_next_seq: self.account_event_log.next_seq(),
+        }
     }
 }

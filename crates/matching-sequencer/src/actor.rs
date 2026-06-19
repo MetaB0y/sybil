@@ -635,6 +635,29 @@ impl SequencerActorState {
         metrics::gauge!("sybil_pending_bundles").set(pending_bundles_before as f64);
         metrics::gauge!("sybil_pending_orders").set(bp.flow_metrics.pending_orders_after as f64);
         metrics::histogram!("sybil_solve_time_seconds").record(bp.pipeline.total_time_secs);
+        metrics::gauge!("sybil_recent_block_history_len").set(self.block_history.len() as f64);
+
+        let analytics = self.sequencer.analytics_memory_stats();
+        metrics::gauge!("sybil_analytics_equity_known_accounts")
+            .set(analytics.equity_known_accounts as f64);
+        metrics::gauge!("sybil_analytics_equity_cached_accounts")
+            .set(analytics.equity_cached_accounts as f64);
+        metrics::gauge!("sybil_analytics_equity_cached_points")
+            .set(analytics.equity_cached_points as f64);
+        metrics::gauge!("sybil_analytics_equity_pending_points")
+            .set(analytics.equity_pending_points as f64);
+        metrics::gauge!("sybil_analytics_equity_points_per_account_capacity")
+            .set(analytics.equity_points_per_account_capacity as f64);
+        metrics::gauge!("sybil_analytics_history_cached_accounts")
+            .set(analytics.history_cached_accounts as f64);
+        metrics::gauge!("sybil_analytics_history_cached_events")
+            .set(analytics.history_cached_events as f64);
+        metrics::gauge!("sybil_analytics_history_pending_events")
+            .set(analytics.history_pending_events as f64);
+        metrics::gauge!("sybil_analytics_history_events_per_account_capacity")
+            .set(analytics.history_events_per_account_capacity as f64);
+        metrics::gauge!("sybil_analytics_history_event_next_seq")
+            .set(analytics.history_event_next_seq as f64);
 
         self.record_per_market_metrics(bp);
     }
@@ -1492,15 +1515,39 @@ impl Actor for SequencerActor {
                 );
             }
             SequencerMsg::GetEquitySeries(account_id, reply) => {
-                let _ = reply.send(state.sequencer.equity_series(account_id));
+                // NOTE: in prod the in-memory caps are 0, so this fallback returns
+                // an empty series. A persistent store read error therefore surfaces
+                // as an empty (200 OK) response plus the warn! below — not an error.
+                let result = match &state.store {
+                    Some(store) => store.equity_series(account_id).unwrap_or_else(|e| {
+                        tracing::warn!(error = %e, account_id = account_id.0, "equity_series read failed; falling back to memory");
+                        state.sequencer.equity_series(account_id)
+                    }),
+                    None => state.sequencer.equity_series(account_id),
+                };
+                let _ = reply.send(result);
             }
             SequencerMsg::GetAccountEvents(account_id, limit, before, category, reply) => {
-                let _ = reply.send(state.sequencer.account_history(
-                    account_id,
-                    limit,
-                    before,
-                    category.as_deref(),
-                ));
+                let result = match &state.store {
+                    Some(store) => store
+                        .account_events(account_id, limit, before, category.clone())
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(error = %e, account_id = account_id.0, "account_events read failed; falling back to memory");
+                            state.sequencer.account_history(
+                                account_id,
+                                limit,
+                                before,
+                                category.as_deref(),
+                            )
+                        }),
+                    None => state.sequencer.account_history(
+                        account_id,
+                        limit,
+                        before,
+                        category.as_deref(),
+                    ),
+                };
+                let _ = reply.send(result);
             }
             SequencerMsg::SearchMarkets(query, reply) => {
                 let _ = reply.send(state.handle_search_markets(query));
@@ -2681,7 +2728,7 @@ mod tests {
             <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
                 &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
             );
-        let pubkey = PublicKey(signing_key.verifying_key().clone());
+        let pubkey = PublicKey(*signing_key.verifying_key());
 
         handle.register_pubkey(aid, pubkey).await.unwrap();
 
@@ -2704,7 +2751,7 @@ mod tests {
             <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
                 &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
             );
-        let pubkey = PublicKey(signing_key.verifying_key().clone());
+        let pubkey = PublicKey(*signing_key.verifying_key());
         handle.register_pubkey(aid, pubkey).await.unwrap();
 
         handle
@@ -2739,7 +2786,7 @@ mod tests {
             <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
                 &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
             );
-        let pubkey = PublicKey(signing_key.verifying_key().clone());
+        let pubkey = PublicKey(*signing_key.verifying_key());
         handle.register_pubkey(aid, pubkey).await.unwrap();
 
         handle
@@ -2767,7 +2814,7 @@ mod tests {
             <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
                 &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
             );
-        let pubkey = PublicKey(signing_key.verifying_key().clone());
+        let pubkey = PublicKey(*signing_key.verifying_key());
 
         handle.register_pubkey(aid, pubkey.clone()).await.unwrap();
         let result = handle.register_pubkey(aid, pubkey).await;

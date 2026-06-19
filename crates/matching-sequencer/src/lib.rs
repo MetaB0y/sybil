@@ -49,8 +49,8 @@ pub use market_info::{
 pub use portfolio::{PortfolioSummary, PositionValue};
 pub use scenario::Scenario;
 pub use sequencer::{
-    BatchResult, BatchSequencer, BlockSequencer, OrderSubmission, PendingOrderInfo,
-    SequencerConfig, DEFAULT_ORDER_TTL_BLOCKS,
+    AnalyticsMemoryStats, BatchResult, BatchSequencer, BlockSequencer, OrderSubmission,
+    PendingOrderInfo, SequencerConfig, DEFAULT_ORDER_TTL_BLOCKS,
 };
 pub use simulation::{SimulationResult, SimulationRunner};
 pub use system_event::SystemEvent;

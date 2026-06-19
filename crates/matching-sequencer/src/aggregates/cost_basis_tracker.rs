@@ -9,11 +9,18 @@
 //!
 //! `position_deltas` is the `Vec<(MarketId, u8, i64)>` returned by
 //! `compute_fill_settlement`. `outcome == 0` → YES, `outcome == 1` → NO.
-//! `fill_price` is the YES clearing price in nanos. The cost-basis
-//! side-price is:
+//! `fill_price` is the filled order's OWN side price in nanos — a NO order
+//! fills at the NO price — matching on-block `compute_fill_settlement`, which
+//! debits `fill_price * qty` directly with no flip. So the cost-basis entry
+//! price is simply `fill_price` for both sides:
 //!
 //! - YES (outcome=0): `entry_price = fill_price`
-//! - NO  (outcome=1): `entry_price = NANOS_PER_DOLLAR - fill_price`
+//! - NO  (outcome=1): `entry_price = fill_price`   (NOT `1 - fill_price`)
+//!
+//! (Resolution differs: `apply_resolution` receives the YES-terms
+//! `payout_nanos`, so it converts the NO close-price as
+//! `NANOS_PER_DOLLAR - payout_nanos` via `entry_price_for_outcome` — that
+//! flip is correct there, because the input really is in YES terms.)
 //!
 //! ### WAC update rule
 //!
@@ -98,7 +105,10 @@ impl CostBasisTracker {
             if delta == 0 {
                 continue;
             }
-            let entry_price = entry_price_for_outcome(fill_price, outcome);
+            // `fill_price` is already this side's own price (NO orders fill at
+            // the NO price), so use it directly — no YES→NO flip. (Resolution
+            // still flips, because its input is the YES-terms payout.)
+            let entry_price = fill_price;
             let post_qty = account.position(market_id, outcome);
             let prior_qty = post_qty - delta;
             self.apply_one_delta(
@@ -344,5 +354,100 @@ mod tests {
 
         t.apply_resolution(m, 0, [(a, 0u8, 10i64)]);
         assert_eq!(t.realized_pnl(a), -basis * 10);
+    }
+
+    // --- NO-side regression tests (the side-price fix) ---
+
+    #[test]
+    fn no_open_basis_is_side_price() {
+        // Regression: buy 10 NO at 0.09 → basis is the NO price (0.09), NOT the
+        // flipped YES-equivalent (0.91). `fill_price` is already side-relative.
+        let mut t = CostBasisTracker::new();
+        let m = mid(1);
+        let a = aid(7);
+
+        let mut account = Account::new(a, 0);
+        account.positions.insert((m, 1), 10);
+        let no_price = (NANOS_PER_DOLLAR as i64) * 9 / 100; // 0.09
+        t.apply_fill(a, &[(m, 1, 10)], no_price, &account);
+
+        assert_eq!(t.cost_basis(a, m, 1), no_price);
+        assert_eq!(t.realized_pnl(a), 0);
+    }
+
+    #[test]
+    fn no_wac_across_two_fills() {
+        // Buy 5 NO at 0.20, then 5 more at 0.40 → WAC = 0.30 in NO space.
+        let mut t = CostBasisTracker::new();
+        let m = mid(1);
+        let a = aid(7);
+
+        let mut account = Account::new(a, 0);
+        account.positions.insert((m, 1), 5);
+        let p1 = (NANOS_PER_DOLLAR as i64) * 2 / 10;
+        t.apply_fill(a, &[(m, 1, 5)], p1, &account);
+        account.positions.insert((m, 1), 10);
+        let p2 = (NANOS_PER_DOLLAR as i64) * 4 / 10;
+        t.apply_fill(a, &[(m, 1, 5)], p2, &account);
+
+        assert_eq!(t.cost_basis(a, m, 1), (p1 + p2) / 2);
+    }
+
+    #[test]
+    fn no_long_resolves_no_realizes_gain() {
+        // Long 10 NO at 0.09; market resolves NO (YES payout = 0) → NO pays $1.
+        // realized = (1.00 - 0.09) * 10.
+        let mut t = CostBasisTracker::new();
+        let m = mid(1);
+        let a = aid(7);
+
+        let mut account = Account::new(a, 0);
+        account.positions.insert((m, 1), 10);
+        let no_price = (NANOS_PER_DOLLAR as i64) * 9 / 100;
+        t.apply_fill(a, &[(m, 1, 10)], no_price, &account);
+
+        t.apply_resolution(m, 0, [(a, 1u8, 10i64)]);
+        let expected = ((NANOS_PER_DOLLAR as i64) - no_price) * 10;
+        assert_eq!(t.realized_pnl(a), expected);
+        assert_eq!(t.cost_basis(a, m, 1), 0); // dropped after resolution
+    }
+
+    #[test]
+    fn no_long_resolves_yes_realizes_loss() {
+        // Long 10 NO at 0.09; market resolves YES (payout = $1) → NO pays $0.
+        // realized = (0 - 0.09) * 10 (lost the stake).
+        let mut t = CostBasisTracker::new();
+        let m = mid(1);
+        let a = aid(7);
+
+        let mut account = Account::new(a, 0);
+        account.positions.insert((m, 1), 10);
+        let no_price = (NANOS_PER_DOLLAR as i64) * 9 / 100;
+        t.apply_fill(a, &[(m, 1, 10)], no_price, &account);
+
+        t.apply_resolution(m, NANOS_PER_DOLLAR as i64, [(a, 1u8, 10i64)]);
+        assert_eq!(t.realized_pnl(a), -no_price * 10);
+    }
+
+    #[test]
+    fn no_partial_close_realizes_in_side_space() {
+        // Buy 10 NO at 0.10, sell 4 NO at 0.25 → realized = (0.25 - 0.10) * 4,
+        // residual basis unchanged.
+        let mut t = CostBasisTracker::new();
+        let m = mid(1);
+        let a = aid(7);
+
+        let mut account = Account::new(a, 0);
+        account.positions.insert((m, 1), 10);
+        let buy = (NANOS_PER_DOLLAR as i64) / 10; // 0.10
+        t.apply_fill(a, &[(m, 1, 10)], buy, &account);
+
+        // Sell 4 (delta -4) at 0.25 → post qty 6.
+        account.positions.insert((m, 1), 6);
+        let sell = (NANOS_PER_DOLLAR as i64) * 25 / 100; // 0.25
+        t.apply_fill(a, &[(m, 1, -4)], sell, &account);
+
+        assert_eq!(t.realized_pnl(a), (sell - buy) * 4);
+        assert_eq!(t.cost_basis(a, m, 1), buy);
     }
 }

@@ -37,6 +37,20 @@ use crate::system_event::SystemEvent;
 /// i.e. effectively never expires (GTC).
 pub const DEFAULT_ORDER_TTL_BLOCKS: u64 = 63_072_000;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AnalyticsMemoryStats {
+    pub equity_known_accounts: usize,
+    pub equity_cached_accounts: usize,
+    pub equity_cached_points: usize,
+    pub equity_pending_points: usize,
+    pub equity_points_per_account_capacity: usize,
+    pub history_cached_accounts: usize,
+    pub history_cached_events: usize,
+    pub history_pending_events: usize,
+    pub history_events_per_account_capacity: usize,
+    pub history_event_next_seq: u64,
+}
+
 /// All tunable parameters for a [`BlockSequencer`] and its surrounding actor.
 ///
 /// Construct via [`SequencerConfig::default()`] for sensible defaults, then
@@ -78,6 +92,12 @@ pub struct SequencerConfig {
     /// Maximum in-memory fill records retained per account for API queries.
     /// Persistent storage may retain more rows.
     pub max_fill_history_per_account: usize,
+    /// In-memory equity points retained per account (serving fallback only;
+    /// full series lives in redb). Set to 0 in prod.
+    pub max_equity_points_per_account: usize,
+    /// In-memory history events retained per account (serving fallback only).
+    /// Set to 0 in prod.
+    pub max_history_events_per_account: usize,
     /// Queue depth where actor mailbox pressure should be logged as a warning.
     /// Set to 0 to disable warning logs.
     pub actor_queue_warn_depth: usize,
@@ -109,6 +129,8 @@ impl Default for SequencerConfig {
                 crate::price_tracker::DEFAULT_MAX_PRICE_HISTORY_POINTS_PER_MARKET,
             max_fill_history_per_account:
                 crate::fill_recorder::DEFAULT_MAX_FILL_HISTORY_PER_ACCOUNT,
+            max_equity_points_per_account: crate::aggregates::MAX_EQUITY_POINTS,
+            max_history_events_per_account: crate::aggregates::MAX_HISTORY_EVENTS_PER_ACCOUNT,
             actor_queue_warn_depth: 1_000,
             actor_queue_error_depth: 5_000,
             liquidity_band_nanos: 50_000_000,
@@ -707,6 +729,8 @@ impl BlockSequencer {
                 .request_bridge_withdrawal(request)
                 .expect("pending bridge withdrawal replay should be valid");
         }
+        let account_ids: Vec<AccountId> = restored.accounts.iter().map(|(id, _)| *id).collect();
+        restored.analytics.seed_equity_known(account_ids);
         restored
     }
 
@@ -995,6 +1019,10 @@ impl BlockSequencer {
     ) -> Vec<crate::aggregates::HistoryEvent> {
         self.analytics
             .account_history(account_id, limit, before, category)
+    }
+
+    pub fn analytics_memory_stats(&self) -> AnalyticsMemoryStats {
+        self.analytics.memory_stats()
     }
 
     pub fn record_trader_placement_analytics(
@@ -1720,6 +1748,7 @@ impl BlockSequencer {
             production,
         } = prepared;
         *self = next_sequencer;
+        self.analytics.clear_offblock_pending();
         production
     }
 
@@ -3368,6 +3397,7 @@ mod tests {
                 first_deposit_ms: HashMap::new(),
                 fill_total_counts: HashMap::new(),
                 cost_basis_tracker: Default::default(),
+                history_event_next_seq: 0,
             },
         };
 
@@ -4618,7 +4648,7 @@ mod tests {
         // Sleep a tiny bit so the second SystemTime::now() differs.
         std::thread::sleep(std::time::Duration::from_millis(2));
 
-        seq.fund_account(aid, 1 * NANOS_PER_DOLLAR as i64).unwrap();
+        seq.fund_account(aid, NANOS_PER_DOLLAR as i64).unwrap();
         let ts_second = seq
             .first_deposit_ms(aid)
             .expect("first_deposit_ms must persist after a second deposit");
