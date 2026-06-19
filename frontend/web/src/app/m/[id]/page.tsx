@@ -42,6 +42,17 @@ const chartSelectionByEvent = new Map<string, number[]>();
 /** Max simultaneous chart lines — matches the legend's `maxSelected`. */
 const MAX_CHART_LINES = 8;
 
+/** Wrap gap (px) between legend chip rows — mirrors OutcomeLegend's `gap`. */
+const LEGEND_ROW_GAP = 10;
+/**
+ * Fallback reserved height (px) for the legend before its real row height has
+ * been measured (first paint). Once OutcomeLegend reports a measured row height
+ * we reserve exactly two rows; see ChartSection. Multi-outcome events get this
+ * as a min-height so adding lines wraps the legend into the already-reserved
+ * second row instead of growing the header band and shoving the chart down.
+ */
+const LEGEND_RESERVED_H = 72;
+
 export default function MarketDetailPage({
   params,
 }: {
@@ -332,10 +343,11 @@ function MetaStat({
 }
 
 /**
- * Small uppercase status chip shown beside the market title. An active market
- * reads muted; a closed one shows CLOSED (the backend may still report
- * `status: "active"`, so `closed` wins), as does anything else non-tradeable —
- * all in the warn color so it stands out.
+ * Small uppercase status chip shown beside the market title, color-coded so the
+ * market's state reads at a glance: a tradeable market is ACTIVE in the live
+ * green (--yes) with a glowing dot; a closed one shows CLOSED in amber (--warn),
+ * as does anything else non-tradeable. `closed` wins over `status` since the
+ * backend may still report `status: "active"` for a resolved market.
  */
 function StatusPill({
   status,
@@ -344,30 +356,54 @@ function StatusPill({
   status: string;
   closed: boolean;
 }) {
+  const isActive = !closed && status === "active";
   const label = closed ? "CLOSED" : (status || "active").toUpperCase();
-  const muted = !closed && status === "active";
+  const color = isActive ? "var(--yes)" : "var(--warn)";
+  const soft = isActive ? "var(--yes-soft)" : "var(--warn-soft)";
   return (
     <span
       className="text-mono"
       style={{
         flexShrink: 0,
-        padding: "3px 8px",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "3px 9px",
         borderRadius: "var(--radius-md)",
         fontSize: "10px",
         letterSpacing: "var(--track-wide)",
         textTransform: "uppercase",
-        color: muted ? "var(--fg-3)" : "var(--warn)",
-        background: muted ? "var(--surface-1)" : "var(--warn-soft)",
-        border: `1px solid ${muted ? "var(--border-2)" : "var(--warn-soft)"}`,
+        color,
+        background: soft,
+        border: `1px solid color-mix(in srgb, ${color} 32%, transparent)`,
       }}
     >
+      <span
+        aria-hidden
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: "50%",
+          background: color,
+          flexShrink: 0,
+          // A soft halo on the live state reads as "trading now"; closed is a
+          // flat dot.
+          boxShadow: isActive
+            ? `0 0 0 3px color-mix(in srgb, ${color} 24%, transparent)`
+            : "none",
+        }}
+      />
       {label}
     </span>
   );
 }
 
 function ChartSection({ marketId }: { marketId: number }) {
-  const [range, setRange] = useState<ChartRange>("1D");
+  const [range, setRange] = useState<ChartRange>("ALL");
+  // Measured height of one legend chip row (reported by OutcomeLegend). We
+  // reserve two of these above the chart so wrapping onto a second row fills
+  // already-reserved space instead of pushing the chart down.
+  const [legendRowH, setLegendRowH] = useState(0);
   const { group, isPending: groupPending } = useEventGroup(marketId);
   const latestBlock = useStore(selectLatestBlock);
   const eventKey = group?.eventId ?? null;
@@ -502,12 +538,30 @@ function ChartSection({ marketId }: { marketId: number }) {
         }}
       >
         {outcomes.length > 0 ? (
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              flex: 1,
+              minWidth: 0,
+              // Reserve two chip rows up front (multi-outcome only) so the chart
+              // stays put as the user adds lines. Uses the measured row height
+              // once known; LEGEND_RESERVED_H covers the first paint. The legend
+              // sits at the top of this block wrapper, so the reserved space
+              // falls below it.
+              minHeight: group?.isMultiOutcome
+                ? legendRowH > 0
+                  ? // two rows + the wrap gap, plus a few px of slack so a row
+                    // with the slightly-taller "+N more" chip can't nudge it
+                    legendRowH * 2 + LEGEND_ROW_GAP + 6
+                  : LEGEND_RESERVED_H
+                : undefined,
+            }}
+          >
             <OutcomeLegend
               outcomes={outcomes}
               selectedIds={effectiveSelected}
               onChange={setSelectedIds}
               highlightId={highlightId}
+              onRowHeight={setLegendRowH}
             />
           </div>
         ) : (

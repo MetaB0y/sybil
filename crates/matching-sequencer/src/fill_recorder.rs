@@ -199,7 +199,13 @@ impl FillRecorder {
         }
     }
 
-    /// Get fill records for an account, optionally filtered by market.
+    /// Get fill records for an account, optionally filtered by market, served
+    /// **newest-first**. The stored vec is sorted ascending by `(block_height,
+    /// order_id)`, so we reverse before paginating: `limit`/`offset` then page
+    /// from the most recent fill. This keeps the default window glued to recent
+    /// activity — so avg-fill / fill-count on freshly-filled open orders are
+    /// covered — and only fills older than the window fall off the tail (rather
+    /// than recent ones never appearing).
     pub fn account_fills(
         &self,
         account_id: AccountId,
@@ -212,6 +218,7 @@ impl FillRecorder {
         };
         fills
             .iter()
+            .rev()
             .filter(|f| {
                 market_id_filter
                     .is_none_or(|mid| f.position_deltas.iter().any(|(m, _, _)| *m == mid))
@@ -264,8 +271,9 @@ mod tests {
 
         let fills = recorder.account_fills(AccountId(42), None, max_fills + 10, 0);
         assert_eq!(fills.len(), max_fills);
-        assert_eq!(fills.first().unwrap().block_height, 6);
-        assert_eq!(fills.last().unwrap().block_height, max_fills as u64 + 5);
+        // Served newest-first: most recent retained fill leads, oldest trails.
+        assert_eq!(fills.first().unwrap().block_height, max_fills as u64 + 5);
+        assert_eq!(fills.last().unwrap().block_height, 6);
     }
 
     #[test]
@@ -290,7 +298,8 @@ mod tests {
         let recorder = FillRecorder::restore_with_retention(records, max_fills);
         let fills = recorder.account_fills(AccountId(7), None, usize::MAX, 0);
         assert_eq!(fills.len(), max_fills);
-        assert_eq!(fills.first().unwrap().block_height, 6);
+        // Served newest-first after restore + trim: most recent retained leads.
+        assert_eq!(fills.first().unwrap().block_height, max_fills as u64 + 5);
     }
 
     #[test]

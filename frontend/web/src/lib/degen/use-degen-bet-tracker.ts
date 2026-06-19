@@ -24,6 +24,11 @@ export interface DegenActive {
   betUsd: number;
   limitPriceNanos: bigint; // for display only
   submitHeight: number;
+  /** `performance.now()` captured at submit. The countdown anchors to this
+   *  (persisted in the lifted DegenActive) rather than to a mount timestamp, so
+   *  it reflects true elapsed time and doesn't restart — or over-run — when the
+   *  rail unmounts/remounts on a Degen↔Pro toggle. */
+  submitPerfMs: number;
   expiresAtBlock: number;
 }
 
@@ -43,38 +48,39 @@ export function useDegenBetTracker(
   const { data: rawEvents } = useAccountEvents(active?.accountId ?? null);
   const latestHeight = useStore(selectLatestHeight);
 
-  const [timeProgress01, setTimeProgress01] = useState(0);
-  const anchorRef = useRef<number | null>(null);
-  const rafRef = useRef<number>(0);
-
   const submitHeight = active?.submitHeight ?? null;
   const expiresAtBlock = active?.expiresAtBlock ?? null;
+  const submitPerfMs = active?.submitPerfMs ?? null;
 
-  /* eslint-disable react-hooks/set-state-in-effect -- reset the countdown when the tracked bet's identity changes (new bet / cleared) */
-  useEffect(() => {
-    anchorRef.current = active ? performance.now() : null;
-    setTimeProgress01(0);
-  }, [active?.accountId, submitHeight, active?.marketId, active?.outcome]);
-  /* eslint-enable react-hooks/set-state-in-effect */
+  // Wall-clock GTD window (ms) for the bet.
+  const windowMs =
+    submitHeight === null || expiresAtBlock === null
+      ? null
+      : Math.max(1, (expiresAtBlock - submitHeight) * BLOCK_INTERVAL_MS);
+
+  // Progress over that window, anchored to the PERSISTED submit time (carried in
+  // DegenActive), not a per-mount timestamp. So a Degen↔Pro toggle — which
+  // unmounts this hook — resumes at the true elapsed point and ends when the
+  // order actually expires, instead of restarting from 0 over a fresh full
+  // window. Start at 0 and let the first RAF tick fill in the real value within
+  // ~one frame, mirroring useBatchCountdown (which fixed the same remount bug).
+  const [timeProgress01, setTimeProgress01] = useState(0);
+  const rafRef = useRef<number>(0);
 
   useEffect(() => {
-    if (submitHeight === null || expiresAtBlock === null) return;
-    const totalMs = Math.max(
-      1,
-      (expiresAtBlock - submitHeight) * BLOCK_INTERVAL_MS,
-    );
+    if (submitPerfMs === null || windowMs === null) return;
     let last = 0;
     const step = (t: number) => {
-      if (anchorRef.current !== null && t - last >= 100) {
+      if (t - last >= 100) {
         last = t;
-        const elapsed = performance.now() - anchorRef.current;
-        setTimeProgress01(Math.min(1, elapsed / totalMs));
+        const elapsed = performance.now() - submitPerfMs;
+        setTimeProgress01(Math.min(1, Math.max(0, elapsed / windowMs)));
       }
       rafRef.current = requestAnimationFrame(step);
     };
     rafRef.current = requestAnimationFrame(step);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [submitHeight, expiresAtBlock]);
+  }, [submitPerfMs, windowMs]);
 
   if (!active) return null;
 

@@ -89,6 +89,16 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitOk, setSubmitOk] = useState<string | null>(null);
 
+  // Any edit in the trader section makes the last submit's receipt stale — drop
+  // the "queued …" confirmation (and any prior error) so it doesn't linger while
+  // the user lines up a different order (e.g. flips to Sell NO).
+  /* eslint-disable react-hooks/set-state-in-effect -- clear stale receipt on edit */
+  useEffect(() => {
+    setSubmitOk(null);
+    setSubmitError(null);
+  }, [dir, outcomeSide, unit, amount, shares, ttl, limit]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
   const limitDec = Math.max(1, Math.min(99, limit)) / 100;
   const usd = parseFloat(amount) || 0;
   const sh = parseFloat(shares) || 0;
@@ -181,12 +191,20 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
     dir === "buy" &&
     availableDollars != null &&
     buyCostDollars > availableDollars;
-  const ctaOff = submitting || insufficientBuy;
+  // Block a SELL of more shares than held — the mirror of insufficientBuy — so
+  // we never trip a server-side InsufficientPosition. Only enforced once the
+  // portfolio has loaded (heldShares defaults to 0 while that query is pending,
+  // which would otherwise reject every sell).
+  const positionsLoaded = portfolio.data != null;
+  const insufficientSell =
+    connected && dir === "sell" && positionsLoaded && qtyShares > heldShares;
+  const ctaOff = submitting || insufficientBuy || insufficientSell;
 
   const ctaLabel = (() => {
     if (!connected) return "Connect to trade";
     if (submitting) return "Signing…";
     if (insufficientBuy) return "Not enough funds";
+    if (insufficientSell) return "Not enough shares";
     const sideWord = dir === "buy" ? "queue buy" : "queue sell";
     const batchSuffix =
       batchNumber == null ? "" : ` → batch #${batchNumber.toLocaleString()}`;
@@ -252,7 +270,9 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
         qc.invalidateQueries({ queryKey: ["orders", "pending"] });
       }
     } catch (e) {
-      console.error("order submit failed:", e);
+      // warn (not error): the rejection is handled and shown humanized below;
+      // console.error would trip the Next dev overlay with the raw Rust string.
+      console.warn("order submit failed:", e);
       setSubmitError(humanizeOrderError(e, "order"));
     } finally {
       setSubmitting(false);

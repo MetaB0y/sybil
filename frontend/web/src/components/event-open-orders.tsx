@@ -21,7 +21,8 @@ import { useMemo, useState } from "react";
 import { cancelSignedOrder } from "@/lib/account/orders";
 import type { AccountFill } from "@/lib/account/use-account-fills";
 import type { AccountOrder } from "@/lib/account/use-account-orders";
-import { formatCents, parseNanos } from "@/lib/format/nanos";
+import { formatAge, formatCents, parseNanos } from "@/lib/format/nanos";
+import { selectLatestBlock, useStore } from "@/lib/store";
 import { Pager, usePaged } from "@/components/event-list-pager";
 import { SidePill } from "@/components/portfolio/side-pill";
 import { TifCell } from "@/components/portfolio/tif-cell";
@@ -45,6 +46,8 @@ interface OpenRow {
   avgPriceNanos: bigint | null;
   fillCount: number;
   expiresAtBlock: number;
+  /** Wall-clock admit time (ms). 0 for pre-B8 orders that don't report it. */
+  placedAtMs: number;
 }
 
 type SortKey =
@@ -54,6 +57,7 @@ type SortKey =
   | "placed"
   | "limit"
   | "avgfill"
+  | "age"
   | "tif";
 type SortDir = "asc" | "desc";
 type Sort = { key: SortKey; dir: SortDir };
@@ -65,6 +69,7 @@ const COLUMNS: { key: SortKey; label: string; align: "left" | "right" }[] = [
   { key: "placed", label: "Placed/Filled", align: "right" },
   { key: "limit", label: "Limit", align: "right" },
   { key: "avgfill", label: "Avg fill", align: "right" },
+  { key: "age", label: "Age", align: "right" },
   { key: "tif", label: "TIF", align: "right" },
 ];
 
@@ -73,7 +78,12 @@ function nextSort(prev: Sort | null, key: SortKey): Sort {
   if (prev && prev.key === key) {
     return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
   }
-  const numeric = key === "placed" || key === "limit" || key === "avgfill" || key === "tif";
+  const numeric =
+    key === "placed" ||
+    key === "limit" ||
+    key === "avgfill" ||
+    key === "age" ||
+    key === "tif";
   return { key, dir: numeric ? "desc" : "asc" };
 }
 
@@ -99,6 +109,9 @@ function compareBy(a: OpenRow, b: OpenRow, key: SortKey): number {
       if (a.avgPriceNanos == null) return -1;
       if (b.avgPriceNanos == null) return 1;
       return cmpBig(a.avgPriceNanos, b.avgPriceNanos);
+    case "age":
+      // Older (smaller ms) sorts first ascending; unknown (0) sorts oldest.
+      return a.placedAtMs - b.placedAtMs;
     case "tif":
       return a.expiresAtBlock - b.expiresAtBlock;
   }
@@ -162,6 +175,7 @@ export function EventOpenOrders({
         avgPriceNanos,
         fillCount: agg?.count ?? 0,
         expiresAtBlock: o.expires_at_block,
+        placedAtMs: o.created_at_ms && o.created_at_ms > 0 ? o.created_at_ms : 0,
       } satisfies OpenRow;
     });
     if (!sort) return decorated;
@@ -171,6 +185,9 @@ export function EventOpenOrders({
 
   const paged = usePaged(rows);
   const qc = useQueryClient();
+  // "Now" for the age column = latest committed block time (same reference the
+  // chart uses), so the render stays deterministic — no Date.now() per row.
+  const nowMs = useStore(selectLatestBlock)?.timestamp_ms ?? null;
 
   // Cancellation refresh: the resting-orders feed (useAccountOrders) self-
   // refetches per block, but invalidate immediately so the row drops as soon as
@@ -205,6 +222,7 @@ export function EventOpenOrders({
         <OrderRow
           key={r.order.order_id}
           row={r}
+          nowMs={nowMs}
           accountId={accountId}
           publicKeyHex={publicKeyHex}
           onCancelled={onCancelled}
@@ -217,17 +235,29 @@ export function EventOpenOrders({
 
 function OrderRow({
   row,
+  nowMs,
   accountId,
   publicKeyHex,
   onCancelled,
 }: {
   row: OpenRow;
+  nowMs: number | null;
   accountId: number;
   publicKeyHex: string;
   onCancelled: () => void;
 }) {
-  const { order, label, action, outcome, placed, filled, limitNanos, avgPriceNanos, fillCount } =
-    row;
+  const {
+    order,
+    label,
+    action,
+    outcome,
+    placed,
+    filled,
+    limitNanos,
+    avgPriceNanos,
+    fillCount,
+    placedAtMs,
+  } = row;
   const isBuy = action === "BUY";
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
@@ -294,6 +324,9 @@ function OrderRow({
       <Right mono>
         <AvgFillCell priceNanos={avgPriceNanos} count={fillCount} />
       </Right>
+      <Right mono>
+        <AgeCell placedAtMs={placedAtMs} nowMs={nowMs} />
+      </Right>
       <Right>
         <TifCell expiresAtBlock={order.expires_at_block} />
       </Right>
@@ -321,6 +354,19 @@ function OrderRow({
         </button>
       </Right>
     </Row>
+  );
+}
+
+/** How long ago the order was placed — "5m", "2h" — vs the latest block time.
+ *  Unknown (pre-B8 orders without created_at_ms) or no block yet → "—". */
+function AgeCell({ placedAtMs, nowMs }: { placedAtMs: number; nowMs: number | null }) {
+  if (placedAtMs <= 0 || nowMs == null) {
+    return <span style={{ color: "var(--fg-4)" }}>—</span>;
+  }
+  return (
+    <span title={new Date(placedAtMs).toLocaleString()}>
+      {formatAge(nowMs - placedAtMs)} ago
+    </span>
   );
 }
 
@@ -403,7 +449,7 @@ function Row({
       style={{
         display: "grid",
         gridTemplateColumns:
-          "minmax(0, 1fr) 44px 44px 100px 52px 66px 76px 64px",
+          "minmax(0, 1fr) 44px 44px 100px 52px 66px 60px 76px 64px",
         gap: 10,
         alignItems: "center",
         padding: "9px 0",

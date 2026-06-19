@@ -102,6 +102,10 @@ export function DegenRail({
     // selected is narrowed to non-undefined by the early return above, but
     // TypeScript can't see across the function boundary — guard here too.
     if (!selected || !built.ok || latestHeight == null) return;
+    // Anchor the fill countdown to now (aligned with submitHeight below) and
+    // carry it in DegenActive so it survives a Degen↔Pro toggle — see
+    // DegenActive.submitPerfMs.
+    const submitPerfMs = performance.now();
     setSigning(true);
     setSubmitError(null);
     try {
@@ -123,6 +127,7 @@ export function DegenRail({
         betUsd: amountNum,
         limitPriceNanos: built.order.limitPriceNanos,
         submitHeight: latestHeight,
+        submitPerfMs,
         // DegenActive.expiresAtBlock is number; built.order.expiresAtBlock is bigint.
         expiresAtBlock: Number(built.order.expiresAtBlock),
       });
@@ -131,7 +136,9 @@ export function DegenRail({
       qc.invalidateQueries({ queryKey: ["account", session.accountId, "portfolio"] });
       qc.invalidateQueries({ queryKey: ["orders", "pending"] });
     } catch (e) {
-      console.error("degen bet submit failed:", e);
+      // warn (not error): the rejection is handled and shown humanized below;
+      // console.error would trip the Next dev overlay with the raw Rust string.
+      console.warn("degen bet submit failed:", e);
       setSubmitError(humanizeOrderError(e, "bet"));
     } finally {
       setSigning(false);

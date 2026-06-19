@@ -32,6 +32,7 @@ export function OutcomeLegend({
   onChange,
   maxSelected = 8,
   highlightId,
+  onRowHeight,
 }: {
   /** Full favourite-first group. */
   outcomes: EventOutcome[];
@@ -42,10 +43,15 @@ export function OutcomeLegend({
   /** The chosen outcome (the market in the URL). Its chip is floated first,
    *  accent-ringed, and pinned (non-removable) so it stays on the chart. */
   highlightId?: number | undefined;
+  /** Reports the rendered height (px) of one chip row, so the parent can
+   *  reserve two rows above the chart and keep it from jumping when the legend
+   *  wraps onto a second row. */
+  onRowHeight?: (px: number) => void;
 }) {
   const selectOutcome = useSelectOutcome();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+  const firstChipRef = useRef<HTMLSpanElement | null>(null);
 
   useEffect(() => {
     function close(e: MouseEvent) {
@@ -63,6 +69,15 @@ export function OutcomeLegend({
   const hidden = outcomes.filter((o) => !sel.has(o.marketId));
   const atCap = shown.length >= maxSelected;
   const interactive = outcomes.length > 1;
+
+  // Report one chip row's rendered height so the parent can reserve two rows
+  // above the chart. Re-measures when the shown set changes (and so survives
+  // font loads); the value is stable, so the parent's setState bails out.
+  useEffect(() => {
+    if (!interactive) return;
+    const h = firstChipRef.current?.offsetHeight ?? 0;
+    if (h > 0) onRowHeight?.(h);
+  }, [shown.length, interactive, onRowHeight]);
 
   const remove = (id: number) => {
     // The pinned (chosen) outcome can't be removed.
@@ -86,7 +101,7 @@ export function OutcomeLegend({
         minWidth: 0,
       }}
     >
-      {shown.map((o) => {
+      {shown.map((o, i) => {
         const color = colorOf(o);
         const isHighlight = o.marketId === highlightId;
         const isClosed = o.closed;
@@ -100,6 +115,7 @@ export function OutcomeLegend({
           //   · ✕     → remove this line from the chart
           <span
             key={o.marketId}
+            ref={i === 0 ? firstChipRef : null}
             style={{
               display: "inline-flex",
               alignItems: "center",
