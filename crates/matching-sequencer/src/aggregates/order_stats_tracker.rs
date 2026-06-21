@@ -38,6 +38,12 @@ pub struct OrderStats {
     pub matched: u64,
     #[serde(default)]
     pub unmatched: u64,
+    /// Distinct orders admitted — counted once per order at intake, NOT per
+    /// batch (unlike `placed`). Must stay the LAST field: snapshots use
+    /// positional rmp_serde arrays, so appending keeps old 3-element blobs
+    /// decodable via `#[serde(default)]` (same pattern as `created_at_ms`).
+    #[serde(default)]
+    pub placed_distinct: u64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -83,6 +89,16 @@ impl OrderStatsTracker {
         }
         self.platform.placed += 1;
         self.hourly_entry_mut(ts_ms).placed += 1;
+    }
+
+    /// Record a distinct order admission — once per order at intake, NOT per
+    /// batch (unlike `record_placed`). Platform total + hourly bucket only;
+    /// per-market distinct is never surfaced on the wire, so we don't grow
+    /// per-market state to track it. MM flash orders are admitted once per
+    /// block and never rest, so counting them here matches their `placed`.
+    pub fn record_admitted(&mut self, ts_ms: u64) {
+        self.platform.placed_distinct += 1;
+        self.hourly_entry_mut(ts_ms).placed_distinct += 1;
     }
 
     /// Record an order exit (removed from the book by `expire`,
@@ -148,6 +164,7 @@ impl OrderStatsTracker {
                 out.placed += stats.placed;
                 out.matched += stats.matched;
                 out.unmatched += stats.unmatched;
+                out.placed_distinct += stats.placed_distinct;
             }
         }
         out
@@ -277,11 +294,53 @@ mod tests {
         let m = mid(1);
         t.record_placed([m], 0);
         t.record_exit(&matched_resting(1, m), 0);
+        t.record_admitted(0);
 
         let snap = t.snapshot();
         let restored = OrderStatsTracker::restore(snap);
         assert_eq!(restored.platform(), t.platform());
         assert_eq!(restored.per_market(m), t.per_market(m));
         assert_eq!(restored.platform_24h(0), t.platform_24h(0));
+    }
+
+    #[test]
+    fn record_admitted_is_platform_and_hourly_only() {
+        let mut t = OrderStatsTracker::new();
+        let m = mid(1);
+        t.record_admitted(0);
+        t.record_admitted(0);
+        t.record_admitted(0);
+        assert_eq!(t.platform().placed_distinct, 3);
+        assert_eq!(t.platform_24h(0).placed_distinct, 3);
+        // per-market distinct is intentionally not tracked
+        assert_eq!(t.per_market(m).placed_distinct, 0);
+        // and it must not touch the participation `placed` counter
+        assert_eq!(t.platform().placed, 0);
+    }
+
+    #[test]
+    fn order_stats_decodes_old_blob_without_placed_distinct() {
+        // An old snapshot encoded a 3-field OrderStats (positional rmp array).
+        // The new 4-field struct must decode it with placed_distinct => 0.
+        #[derive(Serialize)]
+        struct OldOrderStats {
+            placed: u64,
+            matched: u64,
+            unmatched: u64,
+        }
+        let old = OldOrderStats {
+            placed: 7,
+            matched: 3,
+            unmatched: 2,
+        };
+        let bytes = rmp_serde::to_vec(&old).expect("encode old blob");
+        let decoded: OrderStats = rmp_serde::from_slice(&bytes).expect("decode into new struct");
+        assert_eq!(decoded.placed, 7);
+        assert_eq!(decoded.matched, 3);
+        assert_eq!(decoded.unmatched, 2);
+        assert_eq!(
+            decoded.placed_distinct, 0,
+            "missing trailing field defaults to 0"
+        );
     }
 }

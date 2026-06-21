@@ -53,6 +53,7 @@ pub async fn get_activity_overview(
                 placed: all_time_orders.placed,
                 matched: all_time_orders.matched,
                 unmatched: all_time_orders.unmatched,
+                placed_distinct: all_time_orders.placed_distinct,
             },
         },
         last_24h: OverviewBucketResponse {
@@ -62,6 +63,7 @@ pub async fn get_activity_overview(
                 placed: orders_24h.placed,
                 matched: orders_24h.matched,
                 unmatched: orders_24h.unmatched,
+                placed_distinct: orders_24h.placed_distinct,
             },
         },
     }))

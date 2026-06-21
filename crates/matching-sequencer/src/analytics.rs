@@ -308,6 +308,12 @@ impl AnalyticsState {
             .record_placed(markets, timestamp_ms);
     }
 
+    /// Record one distinct order admission (platform-level). Call once per
+    /// order at intake; see `OrderStatsTracker::record_admitted`.
+    pub fn record_order_admitted(&mut self, timestamp_ms: u64) {
+        self.order_stats_tracker.record_admitted(timestamp_ms);
+    }
+
     pub fn record_order_exit(&mut self, resting_order: &RestingOrder, timestamp_ms: u64) {
         self.order_stats_tracker
             .record_exit(resting_order, timestamp_ms);

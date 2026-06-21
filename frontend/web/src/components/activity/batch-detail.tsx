@@ -189,7 +189,7 @@ export function BatchDetail({ row }: { row: BatchRow }) {
           <SidebarPanel title="Batch composition">
             <KvRow label="Markets" value={row.marketsTouched} />
             <KvRow label="Unique traders" value={row.uniqueTraders} />
-            <KvRow label="Placed orders" value={row.ordersPlaced} />
+            <KvRow label="Orders processed" value={row.ordersPlaced} />
             <KvRow
               label="Matched orders"
               value={row.ordersMatched}
@@ -239,7 +239,7 @@ function MarketTableHeader({
       <SortTh label="Matched vol" col="volume" sort={sort} onSort={onSort} />
       <SortTh label="Welfare" col="welfare" sort={sort} onSort={onSort} />
       <SortTh
-        label="Placed / Matched"
+        label="Processed / Matched"
         col="orders"
         sort={sort}
         onSort={onSort}
