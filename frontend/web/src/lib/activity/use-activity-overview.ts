@@ -76,7 +76,7 @@ function bucketStats(bucket: OverviewBucket | undefined): Last24hStats {
       matchedVolume: "—",
       welfare: "—",
       traders: null,
-      ordersPlaced: null,
+      ordersPlacedDistinct: null,
       ordersMatched: null,
       ordersUnmatched: null,
     };
@@ -87,7 +87,7 @@ function bucketStats(bucket: OverviewBucket | undefined): Last24hStats {
     ),
     welfare: formatCompactDollars(parseNanos(bucket.total_welfare_nanos ?? 0)),
     traders: bucket.unique_traders ?? 0,
-    ordersPlaced: bucket.orders?.placed ?? 0,
+    ordersPlacedDistinct: bucket.orders?.placed_distinct ?? 0,
     ordersMatched: bucket.orders?.matched ?? 0,
     ordersUnmatched: bucket.orders?.unmatched ?? 0,
   };

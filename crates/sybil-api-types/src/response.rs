@@ -692,6 +692,11 @@ pub struct OverviewOrderStatsResponse {
     pub matched: u64,
     #[serde(default)]
     pub unmatched: u64,
+    /// Distinct orders admitted (counted once per order at intake), all-time
+    /// or rolling 24h. `placed` above stays per-batch participation for
+    /// back-compat: a resting order counts once here but once per batch there.
+    #[serde(default)]
+    pub placed_distinct: u64,
 }
 
 /// Response shape for `GET /v1/activity/overview`. All-time + 24h slices.

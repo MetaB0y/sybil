@@ -8,9 +8,9 @@
  * traders, placed / matched / unmatched orders. Also real: `totalBatches`
  * (latestBlock.height) and `liveMarkets` (/v1/markets/summary).
  *
- * Caveat: backend `placed` counts per-batch participations, not distinct
- * orders — a real number, but it reads high next to matched/unmatched until
- * the backend counter is fixed.
+ * "Placed orders" = distinct orders admitted (counted once per order at
+ * intake), from `orders.placed_distinct` — consistent with matched/unmatched,
+ * which are also counted once per order lifetime.
  */
 
 import { formatCompactInt, formatInt } from "@/lib/format/nanos";
@@ -93,13 +93,13 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
             sub="addresses placed ≥1 order"
           />
           <BigKv
-            label="Orders processed"
+            label="Placed orders"
             value={
-              allTime.ordersPlaced == null
+              allTime.ordersPlacedDistinct == null
                 ? "—"
-                : formatCompactInt(allTime.ordersPlaced)
+                : formatCompactInt(allTime.ordersPlacedDistinct)
             }
-            sub="across all batches"
+            sub="distinct, all-time"
           />
           <BigKv
             label="Matched orders"

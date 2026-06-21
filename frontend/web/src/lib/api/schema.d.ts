@@ -1431,6 +1431,8 @@ export interface components {
             /** Format: int64 */
             placed?: number;
             /** Format: int64 */
+            placed_distinct?: number;
+            /** Format: int64 */
             unmatched?: number;
         };
         PendingOrderResponse: {

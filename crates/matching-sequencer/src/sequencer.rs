@@ -2403,6 +2403,9 @@ impl BlockSequencer {
                         is_mm: true,
                     });
                     accepted_orders.push(order);
+                    // Count this MM flash order as one distinct admission
+                    // (once per order at intake).
+                    self.analytics.record_order_admitted(timestamp_ms);
                     // Trader counts exclude MM but calling through the same
                     // hook keeps the admission paths symmetric.
                     self.analytics.record_trader_placement(
@@ -2491,6 +2494,10 @@ impl BlockSequencer {
                                 self.analytics.record_history(e);
                             }
                             accepted_orders.push(accepted.order);
+                            // Count this order as one distinct admission — once,
+                            // at intake. Carried resting orders never re-enter
+                            // this loop, so they are not recounted next batch.
+                            self.analytics.record_order_admitted(timestamp_ms);
                             self.analytics.record_trader_placement(
                                 account_id,
                                 tracker_markets.clone(),
@@ -3099,6 +3106,13 @@ mod tests {
             seq.platform_order_stats(2_000).0.placed,
             2,
             "placed is order-batch participation, not one-time admission"
+        );
+        // The distinct counter, by contrast, stays at 1: the order was
+        // admitted once (block 1) and merely participated again in block 2.
+        assert_eq!(
+            seq.platform_order_stats(2_000).0.placed_distinct,
+            1,
+            "distinct counts admission once, not per-batch participation"
         );
     }
 
