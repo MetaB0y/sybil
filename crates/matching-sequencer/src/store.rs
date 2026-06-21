@@ -61,7 +61,7 @@ use crate::account_storage::{
 };
 use crate::aggregates::{
     CostBasisTrackerSnapshot, LiquidityTrackerSnapshot, OrderStatsTrackerSnapshot,
-    TraderTrackerSnapshot,
+    TraderTrackerSnapshot, WelfareTrackerSnapshot,
 };
 use crate::block::{state_sidecar_snapshot_from_resting_orders, BlockHeader};
 use crate::bridge::{BridgeState, BridgeWithdrawalRequest, L1Deposit};
@@ -195,6 +195,12 @@ const ORDER_STATS_TRACKER: TableDefinition<&str, &[u8]> =
     TableDefinition::new("order_stats_tracker");
 const KEY_ORDER_STATS_TRACKER_SNAPSHOT: &str = "snapshot";
 
+/// Off-block welfare tracker: cumulative platform welfare running total +
+/// rolling hourly buckets for the 24h window. Single-blob shape; missing
+/// table on load yields `WelfareTrackerSnapshot::default()`.
+const WELFARE_TRACKER: TableDefinition<&str, &[u8]> = TableDefinition::new("welfare_tracker");
+const KEY_WELFARE_TRACKER_SNAPSHOT: &str = "snapshot";
+
 /// First-deposit timestamps per account (B8). Single blob keyed
 /// "snapshot"; missing-row yields an empty map.
 const FIRST_DEPOSIT_MS: TableDefinition<&str, &[u8]> = TableDefinition::new("first_deposit_ms");
@@ -320,6 +326,7 @@ pub struct AnalyticsRestoredState {
     pub price_tracker_clearing_history: PriceTrackerClearingHistorySnapshot,
     pub liquidity_tracker: LiquidityTrackerSnapshot,
     pub order_stats_tracker: OrderStatsTrackerSnapshot,
+    pub welfare_tracker: WelfareTrackerSnapshot,
     pub first_deposit_ms: HashMap<AccountId, u64>,
     pub fill_total_counts: HashMap<AccountId, u64>,
     pub cost_basis_tracker: CostBasisTrackerSnapshot,
@@ -369,6 +376,7 @@ pub struct AnalyticsSnapshot<'a> {
     pub price_tracker_clearing_history: PriceTrackerClearingHistorySnapshot,
     pub liquidity_tracker: LiquidityTrackerSnapshot,
     pub order_stats_tracker: OrderStatsTrackerSnapshot,
+    pub welfare_tracker: WelfareTrackerSnapshot,
     pub first_deposit_ms: HashMap<AccountId, u64>,
     pub fill_total_counts: HashMap<AccountId, u64>,
     pub cost_basis_tracker: CostBasisTrackerSnapshot,
@@ -430,6 +438,7 @@ impl Store {
         txn.open_table(PRICE_TRACKER_CLEARING_HISTORY)?;
         txn.open_table(LIQUIDITY_TRACKER)?;
         txn.open_table(ORDER_STATS_TRACKER)?;
+        txn.open_table(WELFARE_TRACKER)?;
         txn.open_table(FIRST_DEPOSIT_MS)?;
         txn.open_table(FILL_TOTAL_COUNTS)?;
         txn.open_table(COST_BASIS_TRACKER)?;
@@ -727,6 +736,13 @@ impl Store {
             let mut table = txn.open_table(ORDER_STATS_TRACKER)?;
             let bytes = rmp_serde::to_vec(&snapshot.analytics.order_stats_tracker)?;
             table.insert(KEY_ORDER_STATS_TRACKER_SNAPSHOT, bytes.as_slice())?;
+        }
+
+        // WelfareTracker snapshot — single blob keyed "snapshot".
+        {
+            let mut table = txn.open_table(WELFARE_TRACKER)?;
+            let bytes = rmp_serde::to_vec(&snapshot.analytics.welfare_tracker)?;
+            table.insert(KEY_WELFARE_TRACKER_SNAPSHOT, bytes.as_slice())?;
         }
 
         // First-deposit timestamps (B8) — single blob, missing → empty map.
@@ -1140,6 +1156,15 @@ impl Store {
             }
         };
 
+        // WelfareTracker snapshot. Missing-row → default.
+        let welfare_tracker: WelfareTrackerSnapshot = {
+            let table = txn.open_table(WELFARE_TRACKER)?;
+            match table.get(KEY_WELFARE_TRACKER_SNAPSHOT)? {
+                Some(value) => rmp_serde::from_slice(value.value())?,
+                None => WelfareTrackerSnapshot::default(),
+            }
+        };
+
         // First-deposit timestamps (B8). Missing-row → empty.
         let first_deposit_ms: HashMap<AccountId, u64> = {
             let table = txn.open_table(FIRST_DEPOSIT_MS)?;
@@ -1236,6 +1261,7 @@ impl Store {
                 price_tracker_clearing_history,
                 liquidity_tracker,
                 order_stats_tracker,
+                welfare_tracker,
                 first_deposit_ms,
                 fill_total_counts,
                 cost_basis_tracker,
@@ -1834,6 +1860,7 @@ mod tests {
                     price_tracker_clearing_history: Default::default(),
                     liquidity_tracker: Default::default(),
                     order_stats_tracker: Default::default(),
+                    welfare_tracker: Default::default(),
                     first_deposit_ms: HashMap::new(),
                     fill_total_counts: HashMap::new(),
                     cost_basis_tracker: Default::default(),
@@ -1871,6 +1898,7 @@ mod tests {
                     price_tracker_clearing_history: Default::default(),
                     liquidity_tracker: Default::default(),
                     order_stats_tracker: Default::default(),
+                    welfare_tracker: Default::default(),
                     first_deposit_ms: HashMap::new(),
                     fill_total_counts: HashMap::new(),
                     cost_basis_tracker: Default::default(),
@@ -1909,6 +1937,7 @@ mod tests {
                     price_tracker_clearing_history: Default::default(),
                     liquidity_tracker: Default::default(),
                     order_stats_tracker: Default::default(),
+                    welfare_tracker: Default::default(),
                     first_deposit_ms: HashMap::new(),
                     fill_total_counts: HashMap::new(),
                     cost_basis_tracker: Default::default(),

@@ -139,6 +139,9 @@ pub enum SequencerMsg {
     /// Platform-wide volume: `(all_time, last_24h)`. Caller supplies
     /// `now_ms` so 24h-bucket cutoff is testable.
     GetPlatformVolumes(u64, RpcReplyPort<(u64, u64)>),
+    /// Platform-wide welfare: `(all_time, last_24h)` in nanos (signed).
+    /// Caller supplies `now_ms` so the 24h cutoff is testable.
+    GetPlatformWelfare(u64, RpcReplyPort<(i64, i64)>),
     /// All-market 24h volumes — used by `list_markets` to populate
     /// `MarketResponse.volume_24h_nanos` in one round-trip.
     GetAllMarketVolumes24h(u64, RpcReplyPort<HashMap<MarketId, u64>>),
@@ -1583,6 +1586,9 @@ impl Actor for SequencerActor {
             SequencerMsg::GetPlatformVolumes(now_ms, reply) => {
                 let _ = reply.send(state.sequencer.platform_volumes(now_ms));
             }
+            SequencerMsg::GetPlatformWelfare(now_ms, reply) => {
+                let _ = reply.send(state.sequencer.platform_welfare(now_ms));
+            }
             SequencerMsg::GetAllMarketVolumes24h(now_ms, reply) => {
                 let _ = reply.send(state.sequencer.all_market_volumes_24h(now_ms));
             }
@@ -2289,6 +2295,13 @@ impl SequencerHandle {
     ) -> Result<(crate::aggregates::OrderStats, crate::aggregates::OrderStats), SequencerError>
     {
         self.rpc(|reply| SequencerMsg::GetPlatformOrderStats(now_ms, reply))
+            .await
+    }
+
+    /// Platform welfare `(all_time, last_24h)` in nanos for the activity hero.
+    #[tracing::instrument(skip_all)]
+    pub async fn get_platform_welfare(&self, now_ms: u64) -> Result<(i64, i64), SequencerError> {
+        self.rpc(|reply| SequencerMsg::GetPlatformWelfare(now_ms, reply))
             .await
     }
 

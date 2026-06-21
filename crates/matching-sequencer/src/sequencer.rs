@@ -889,6 +889,13 @@ impl BlockSequencer {
         self.analytics.platform_volumes(now_ms)
     }
 
+    /// Platform-wide welfare `(all_time, last_24h)` — cumulative running sum
+    /// plus the rolling 24h window. Caller supplies `now_ms` for a
+    /// deterministic 24h cutoff.
+    pub fn platform_welfare(&self, now_ms: u64) -> (i64, i64) {
+        self.analytics.platform_welfare(now_ms)
+    }
+
     /// Per-market clearing prices N hours ago. None when the market is too
     /// young to have a bucket bracketing `now_ms - n * 3_600_000`.
     pub fn price_n_hours_ago(
@@ -2593,6 +2600,12 @@ impl BlockSequencer {
             mark_prices,
         } = self.finalize_block_state_phase(&fills, &problem, &clearing_prices, timestamp_ms);
 
+        // Off-block cumulative + 24h platform welfare — accumulate this block's
+        // authoritative `total_welfare` scalar (counts each fill once, unlike the
+        // per-market `welfare_by_market` attribution). Runs once per finalized
+        // block, alongside the volume accumulated inside `record_finalized_block`.
+        self.analytics.record_welfare(total_welfare, timestamp_ms);
+
         // Update order book: release filled orders' reservations, adjust partial fills
         let post_solve_removed = self
             .order_book
@@ -3394,6 +3407,7 @@ mod tests {
                 price_tracker_clearing_history: Default::default(),
                 liquidity_tracker: Default::default(),
                 order_stats_tracker: Default::default(),
+                welfare_tracker: Default::default(),
                 first_deposit_ms: HashMap::new(),
                 fill_total_counts: HashMap::new(),
                 cost_basis_tracker: Default::default(),
@@ -3613,6 +3627,74 @@ mod tests {
             seq.accounts.get(untouched_id).unwrap().events_digest,
             [0u8; 32]
         );
+    }
+
+    /// Wiring + accumulation: the live block path feeds each block's
+    /// authoritative `total_welfare` into the platform welfare tracker, and the
+    /// all-time + 24h figures accumulate across blocks. Guards the
+    /// `produce_block_in_place` injection point — if `record_welfare` were not
+    /// called, platform welfare would stay `(0, 0)`.
+    #[test]
+    fn platform_welfare_accumulates_across_blocks() {
+        let (markets, m0) = setup();
+
+        let mut accounts = AccountStore::new();
+        let buyer_id = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let seller_id = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+        accounts
+            .get_mut(seller_id)
+            .unwrap()
+            .positions
+            .insert((m0, 0), 50);
+
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            Arc::new(AdminOracle::new()),
+            SequencerConfig::default(),
+        );
+
+        // No trades yet → zero platform welfare.
+        assert_eq!(seq.platform_welfare(0), (0, 0));
+
+        // Block 1: a crossing trade (bid 0.60 ≥ ask 0.40) → positive welfare.
+        let buy1 = OrderSubmission {
+            account_id: buyer_id,
+            orders: vec![outcome_buy(&markets, 0, m0, 0, 600_000_000, 10)],
+            mm_constraint: None,
+        };
+        let sell1 = OrderSubmission {
+            account_id: seller_id,
+            orders: vec![outcome_sell(&markets, 0, m0, 0, 400_000_000, 10)],
+            mm_constraint: None,
+        };
+        let w1 = seq
+            .produce_block(vec![buy1, sell1], 1_000)
+            .analytics
+            .total_welfare;
+        assert!(w1 > 0, "crossing trade should produce positive welfare");
+        // Live wiring: after one block, platform welfare == that block's scalar.
+        assert_eq!(seq.platform_welfare(1_000), (w1, w1));
+
+        // Block 2: another crossing trade — both sides still have capacity.
+        let buy2 = OrderSubmission {
+            account_id: buyer_id,
+            orders: vec![outcome_buy(&markets, 0, m0, 0, 600_000_000, 10)],
+            mm_constraint: None,
+        };
+        let sell2 = OrderSubmission {
+            account_id: seller_id,
+            orders: vec![outcome_sell(&markets, 0, m0, 0, 400_000_000, 10)],
+            mm_constraint: None,
+        };
+        let w2 = seq
+            .produce_block(vec![buy2, sell2], 2_000)
+            .analytics
+            .total_welfare;
+        assert!(w2 > 0, "second crossing trade should also produce welfare");
+        // All-time + 24h both accumulate the two blocks' welfare.
+        assert_eq!(seq.platform_welfare(2_000), (w1 + w2, w1 + w2));
     }
 
     // --- Block height counter ---
