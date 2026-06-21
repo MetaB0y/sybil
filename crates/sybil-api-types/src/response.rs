@@ -674,6 +674,11 @@ pub struct OverviewBucketResponse {
     pub unique_traders: u64,
     #[serde(default)]
     pub total_volume_nanos: u64,
+    /// Cumulative platform welfare in nanos for this bucket — sum of per-block
+    /// `total_welfare` (each fill counted once). Signed: solver rounding can
+    /// yield small negatives.
+    #[serde(default)]
+    pub total_welfare_nanos: i64,
     #[serde(default)]
     pub orders: OverviewOrderStatsResponse,
 }

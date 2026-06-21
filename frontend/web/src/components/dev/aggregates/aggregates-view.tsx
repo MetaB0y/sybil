@@ -95,7 +95,7 @@ export function AggregatesView() {
   return (
     <div>
       {/* (a) Top StatGrid */}
-      <StatGrid columns={4}>
+      <StatGrid columns={5}>
         <Stat
           label="Unique Traders (all-time)"
           value={fmtInt(allTime?.unique_traders) || "—"}
@@ -112,6 +112,12 @@ export function AggregatesView() {
           value={"$" + dollars(allTime?.total_volume_nanos)}
           tone="accent"
           sub={"24h: $" + dollars(last24h?.total_volume_nanos)}
+        />
+        <Stat
+          label="Platform Welfare (all-time)"
+          value={moneySigned((Number(allTime?.total_welfare_nanos) || 0) / 1e9)}
+          tone="accent"
+          sub={"24h: " + moneySigned((Number(last24h?.total_welfare_nanos) || 0) / 1e9)}
         />
         <Stat
           label="Orders Matched (all-time)"

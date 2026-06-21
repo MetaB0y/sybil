@@ -46,6 +46,7 @@ export type BatchMarketRow = {
  */
 export type Last24hStats = {
   matchedVolume: string; // formatted; "—" until loaded
+  welfare: string; // formatted signed dollars; "—" until loaded
   traders: number | null; // null until loaded
   ordersPlaced: number | null; // null until loaded
   ordersMatched: number | null; // null until loaded

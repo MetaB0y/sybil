@@ -95,6 +95,7 @@ export interface DevBlock {
 export interface DevOverviewBucket {
   unique_traders?: number;
   total_volume_nanos?: number | string | null;
+  total_welfare_nanos?: number | string | null;
   orders?: { placed?: number; matched?: number; unmatched?: number };
 }
 

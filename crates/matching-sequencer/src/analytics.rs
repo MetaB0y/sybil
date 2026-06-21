@@ -12,7 +12,8 @@ use crate::account::{AccountId, AccountStore};
 use crate::aggregates::{
     AccountEventLog, CostBasisTracker, CostBasisTrackerSnapshot, EquityTracker, HistoryEvent,
     LiquidityTracker, LiquidityTrackerSnapshot, OrderStats, OrderStatsTracker,
-    OrderStatsTrackerSnapshot, TraderTracker, TraderTrackerSnapshot,
+    OrderStatsTrackerSnapshot, TraderTracker, TraderTrackerSnapshot, WelfareTracker,
+    WelfareTrackerSnapshot,
 };
 use crate::fill_recorder::FillRecorder;
 use crate::market_info::{AccountFillRecord, PricePoint};
@@ -30,6 +31,7 @@ pub struct AnalyticsState {
     trader_tracker: TraderTracker,
     liquidity_tracker: LiquidityTracker,
     order_stats_tracker: OrderStatsTracker,
+    welfare_tracker: WelfareTracker,
     cost_basis_tracker: CostBasisTracker,
     first_deposit_ms: HashMap<AccountId, u64>,
     equity_tracker: EquityTracker,
@@ -44,6 +46,7 @@ impl AnalyticsState {
             trader_tracker: TraderTracker::new(),
             liquidity_tracker: LiquidityTracker::new(),
             order_stats_tracker: OrderStatsTracker::new(),
+            welfare_tracker: WelfareTracker::new(),
             cost_basis_tracker: CostBasisTracker::new(),
             first_deposit_ms: HashMap::new(),
             equity_tracker: EquityTracker::with_retention(config.max_equity_points_per_account),
@@ -72,6 +75,7 @@ impl AnalyticsState {
             trader_tracker: TraderTracker::restore(input.trader_tracker),
             liquidity_tracker: LiquidityTracker::restore(input.liquidity_tracker),
             order_stats_tracker: OrderStatsTracker::restore(input.order_stats_tracker),
+            welfare_tracker: WelfareTracker::restore(input.welfare_tracker),
             cost_basis_tracker: CostBasisTracker::restore(input.cost_basis_tracker),
             first_deposit_ms: input.first_deposit_ms,
             equity_tracker: EquityTracker::with_retention(config.max_equity_points_per_account),
@@ -92,6 +96,7 @@ impl AnalyticsState {
             price_tracker_clearing_history: self.price_clearing_history_snapshot(),
             liquidity_tracker: self.liquidity_snapshot(),
             order_stats_tracker: self.order_stats_snapshot(),
+            welfare_tracker: self.welfare_snapshot(),
             first_deposit_ms: self.first_deposit_snapshot(),
             fill_total_counts: self.total_fill_counts(),
             cost_basis_tracker: self.cost_basis_snapshot(),
@@ -225,6 +230,15 @@ impl AnalyticsState {
         )
     }
 
+    /// Platform welfare `(all_time, last_24h)` — cumulative running sum plus
+    /// the rolling 24h window. Mirrors `platform_volumes` / `platform_order_stats`.
+    pub fn platform_welfare(&self, now_ms: u64) -> (i64, i64) {
+        (
+            self.welfare_tracker.platform_total(),
+            self.welfare_tracker.platform_24h(now_ms),
+        )
+    }
+
     pub fn cost_basis_tracker(&self) -> &CostBasisTracker {
         &self.cost_basis_tracker
     }
@@ -286,6 +300,13 @@ impl AnalyticsState {
             &mut self.account_event_log,
         );
         (volume_by_market, mark_prices)
+    }
+
+    /// Accumulate one finalized block's authoritative `total_welfare` scalar
+    /// into the cumulative + 24h platform-welfare tracker. Called once per
+    /// committed block, alongside `record_finalized_block`.
+    pub fn record_welfare(&mut self, total_welfare: i64, timestamp_ms: u64) {
+        self.welfare_tracker.record(total_welfare, timestamp_ms);
     }
 
     pub fn record_trader_placement(
@@ -383,6 +404,10 @@ impl AnalyticsState {
 
     pub fn order_stats_snapshot(&self) -> OrderStatsTrackerSnapshot {
         self.order_stats_tracker.snapshot()
+    }
+
+    pub fn welfare_snapshot(&self) -> WelfareTrackerSnapshot {
+        self.welfare_tracker.snapshot()
     }
 
     pub fn cost_basis_snapshot(&self) -> CostBasisTrackerSnapshot {

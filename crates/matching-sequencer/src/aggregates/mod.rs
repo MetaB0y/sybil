@@ -11,6 +11,7 @@
 //! - `liquidity_tracker` (B4) — last-10-batch ±band depth average
 //! - `order_stats_tracker` (B6) — placed / matched / unmatched
 //! - `cost_basis_tracker` (C1) — WAC + realized PnL
+//! - `welfare_tracker` — cumulative + 24h platform welfare (signed)
 //! - `equity_tracker` — per-account equity series (volatile; resets on restart,
 //!   no snapshot round-trip)
 //!
@@ -22,6 +23,7 @@ pub mod equity_tracker;
 pub mod liquidity_tracker;
 pub mod order_stats_tracker;
 pub mod trader_tracker;
+pub mod welfare_tracker;
 
 pub use account_event_log::{
     fill_facets, side_outcome_from_order, AccountEventLog, HistoryEvent, HistoryKind,
@@ -32,3 +34,4 @@ pub use equity_tracker::{EquityPoint, EquityTracker, MAX_EQUITY_POINTS};
 pub use liquidity_tracker::{LiquidityTracker, LiquidityTrackerSnapshot, LIQUIDITY_RING_CAP};
 pub use order_stats_tracker::{OrderStats, OrderStatsTracker, OrderStatsTrackerSnapshot};
 pub use trader_tracker::{TraderTracker, TraderTrackerSnapshot};
+pub use welfare_tracker::{WelfareTracker, WelfareTrackerSnapshot};
