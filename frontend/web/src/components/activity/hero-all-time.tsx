@@ -33,24 +33,22 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
           alignItems: "start",
         }}
       >
-        {/* Left: hero number */}
+        {/* Left: two hero numbers — matched volume + welfare, same size */}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span className="eyebrow">All-time matched volume</span>
-          </div>
-          <span
+          <div
             style={{
-              fontFamily: "var(--font-sans)",
-              fontWeight: 600,
-              fontSize: "clamp(48px, 5.4vw, 80px)",
-              lineHeight: 0.95,
-              letterSpacing: "-0.02em",
-              color: "var(--fg-1)",
-              fontVariantNumeric: "tabular-nums",
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 44,
+              alignItems: "flex-start",
             }}
           >
-            {allTime.matchedVolume}
-          </span>
+            <HeroNumber
+              label="All-time matched volume"
+              value={allTime.matchedVolume}
+            />
+            <HeroNumber label="All-time welfare" value={allTime.welfare} />
+          </div>
           <div
             style={{
               display: "flex",
@@ -126,6 +124,29 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
         </div>
       </div>
     </section>
+  );
+}
+
+function HeroNumber({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}
+    >
+      <span className="eyebrow">{label}</span>
+      <span
+        style={{
+          fontFamily: "var(--font-sans)",
+          fontWeight: 600,
+          fontSize: "clamp(48px, 5.4vw, 80px)",
+          lineHeight: 0.95,
+          letterSpacing: "-0.02em",
+          color: "var(--fg-1)",
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {value}
+      </span>
+    </div>
   );
 }
 

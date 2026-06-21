@@ -74,6 +74,7 @@ function bucketStats(bucket: OverviewBucket | undefined): Last24hStats {
   if (!bucket) {
     return {
       matchedVolume: "—",
+      welfare: "—",
       traders: null,
       ordersPlaced: null,
       ordersMatched: null,
@@ -84,6 +85,7 @@ function bucketStats(bucket: OverviewBucket | undefined): Last24hStats {
     matchedVolume: formatCompactDollars(
       parseNanos(bucket.total_volume_nanos ?? 0)
     ),
+    welfare: formatCompactDollars(parseNanos(bucket.total_welfare_nanos ?? 0)),
     traders: bucket.unique_traders ?? 0,
     ordersPlaced: bucket.orders?.placed ?? 0,
     ordersMatched: bucket.orders?.matched ?? 0,

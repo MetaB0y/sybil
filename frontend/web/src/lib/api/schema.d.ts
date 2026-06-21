@@ -1416,6 +1416,8 @@ export interface components {
             /** Format: int64 */
             total_volume_nanos?: string;
             /** Format: int64 */
+            total_welfare_nanos?: string;
+            /** Format: int64 */
             unique_traders?: number;
         };
         OverviewOrderStatsResponse: {
