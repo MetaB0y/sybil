@@ -2233,7 +2233,7 @@ impl BlockSequencer {
         // ── Order Book: expire stale, remove orders for resolved markets ──
         let expired = self.order_book.expire(self.height);
         let revalidated = self.order_book.revalidate(&self.accounts, &active_markets);
-        for ro in expired.iter().chain(revalidated.iter()) {
+        for ro in expired.iter().chain(revalidated.iter().map(|(ro, _)| ro)) {
             self.analytics.record_order_exit(ro, timestamp_ms);
             for m in ro.order.active_markets() {
                 let slot = block_orders_by_market.entry(m).or_default();
@@ -2258,6 +2258,31 @@ impl BlockSequencer {
             let (side, outcome) = crate::aggregates::side_outcome_from_order(&ro.order);
             e.side = side;
             e.outcome = outcome;
+            self.analytics.record_history(e);
+        }
+        // Resting orders evicted by revalidation for a genuine per-order reason
+        // (insufficient balance/position) surface as Rejected history events.
+        // Market-inactive / account-gone / insolvent removals carry `None`.
+        for (ro, reason) in &revalidated {
+            let Some(reason) = reason else { continue };
+            use crate::aggregates::{HistoryEvent, HistoryKind};
+            let mut e = HistoryEvent::new(
+                ro.account_id,
+                HistoryKind::Rejected,
+                self.height,
+                timestamp_ms,
+            );
+            e.order_id = Some(ro.order.id);
+            e.market_id = ro.order.active_markets().next();
+            e.qty = Some(ro.order.max_fill);
+            e.price_nanos = Some(ro.order.limit_price);
+            let (side, outcome) = crate::aggregates::side_outcome_from_order(&ro.order);
+            e.side = side;
+            e.outcome = outcome;
+            e.reason = Some(reason.code());
+            let (req, avail) = reason.amounts();
+            e.required_nanos = req;
+            e.available_nanos = avail;
             self.analytics.record_history(e);
         }
 
@@ -2404,6 +2429,26 @@ impl BlockSequencer {
                                     account_id: account_id.0,
                                     reason: sybil_verifier::RejectionReason::CompleteSetFormation,
                                 });
+                                {
+                                    use crate::aggregates::{HistoryEvent, HistoryKind};
+                                    let o = &accepted.order;
+                                    let mut e = HistoryEvent::new(
+                                        account_id,
+                                        HistoryKind::Rejected,
+                                        self.height,
+                                        timestamp_ms,
+                                    );
+                                    e.order_id = Some(o.id);
+                                    e.market_id = o.active_markets().next();
+                                    e.qty = Some(o.max_fill);
+                                    e.price_nanos = Some(o.limit_price);
+                                    let (side, outcome) =
+                                        crate::aggregates::side_outcome_from_order(o);
+                                    e.side = side;
+                                    e.outcome = outcome;
+                                    e.reason = Some("complete_set");
+                                    self.analytics.record_history(e);
+                                }
                                 rejections.push(Rejection {
                                     order_id: accepted.order.id,
                                     account_id,
@@ -2452,6 +2497,28 @@ impl BlockSequencer {
                                 account_id: account_id.0,
                                 reason: convert_rejection_reason(&reason),
                             });
+                            {
+                                use crate::aggregates::{HistoryEvent, HistoryKind};
+                                let mut e = HistoryEvent::new(
+                                    account_id,
+                                    HistoryKind::Rejected,
+                                    self.height,
+                                    timestamp_ms,
+                                );
+                                e.order_id = Some(order_id);
+                                e.market_id = order.active_markets().next();
+                                e.qty = Some(order.max_fill);
+                                e.price_nanos = Some(order.limit_price);
+                                let (side, outcome) =
+                                    crate::aggregates::side_outcome_from_order(&order);
+                                e.side = side;
+                                e.outcome = outcome;
+                                e.reason = Some(reason.code());
+                                let (req, avail) = reason.amounts();
+                                e.required_nanos = req;
+                                e.available_nanos = avail;
+                                self.analytics.record_history(e);
+                            }
                             rejections.push(Rejection {
                                 order_id,
                                 account_id,
@@ -2597,7 +2664,7 @@ impl BlockSequencer {
         let post_solve_removed = self
             .order_book
             .settle(&fills, &mm_order_ids_set, self.height);
-        for ro in &post_solve_removed {
+        for (ro, exit) in &post_solve_removed {
             self.analytics.record_order_exit(ro, timestamp_ms);
             for m in ro.order.active_markets() {
                 let slot = block_orders_by_market.entry(m).or_default();
@@ -2606,6 +2673,26 @@ impl BlockSequencer {
                 } else {
                     slot.unmatched += 1;
                 }
+            }
+            // Orders swept for time-in-force during settle (`current >= expires`)
+            // surface as Expired history events. settle removes them one block
+            // before expire()'s `>` check would, so this is the path that fires
+            // for every normally-resting order that reaches expiry.
+            if *exit == crate::order_book::RestingExit::Expired {
+                use crate::aggregates::{HistoryEvent, HistoryKind};
+                let mut e = HistoryEvent::new(
+                    ro.account_id,
+                    HistoryKind::Expired,
+                    self.height,
+                    timestamp_ms,
+                );
+                e.order_id = Some(ro.order.id);
+                e.market_id = ro.order.active_markets().next();
+                e.qty = Some(ro.order.max_fill);
+                let (side, outcome) = crate::aggregates::side_outcome_from_order(&ro.order);
+                e.side = side;
+                e.outcome = outcome;
+                self.analytics.record_history(e);
             }
         }
         let pending_orders_after = self.order_book.len();

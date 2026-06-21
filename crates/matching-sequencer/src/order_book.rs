@@ -32,6 +32,17 @@ fn default_resting_expires_at_block() -> u64 {
 /// the book. Invariants (`reserved_balance >= 0`, all reservation qtys `>= 0`,
 /// aggregates equal to the sum of per-order reservations) are only enforced by
 /// the construction paths in this module.
+/// Why a resting order left the book during [`OrderBook::settle`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestingExit {
+    /// Fully filled, or the MM-bypass defensive path — no expiry semantics.
+    /// (Fully-filled orders get their `filled` event from the fill recorder.)
+    Settled,
+    /// Time-in-force reached (`current_height >= expires_at_block`) before fully
+    /// filling. The sequencer emits a `HistoryKind::Expired` event for these.
+    Expired,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RestingOrder {
     pub(crate) order: Order,
@@ -286,14 +297,19 @@ impl OrderBook {
         &mut self,
         accounts: &AccountStore,
         active_markets: &HashSet<MarketId>,
-    ) -> Vec<RestingOrder> {
+    ) -> Vec<(RestingOrder, Option<RejectionReason>)> {
         // We must re-validate carefully: removing one order releases its reservations,
         // which may make subsequent orders valid again. But for simplicity and safety,
         // we validate conservatively: remove anything that's invalid given current
         // reservations. This may over-reject (an order might become valid after a
         // prior order's reservation is released), but that's safe — the trader can
         // resubmit.
-        let mut to_remove = Vec::new();
+        //
+        // Each removal carries an optional reason: `Some(reason)` is a genuine
+        // per-order validation failure we surface to the account as a Rejected
+        // history event; `None` (market inactive / account gone / insolvent) is
+        // not a per-order rejection and is left unsurfaced.
+        let mut to_remove: Vec<(usize, Option<RejectionReason>)> = Vec::new();
 
         for (i, ro) in self.orders.iter().enumerate() {
             // Market still active?
@@ -302,17 +318,17 @@ impl OrderBook {
                 .active_markets()
                 .all(|m| active_markets.contains(&m));
             if !markets_active {
-                to_remove.push(i);
+                to_remove.push((i, None));
                 continue;
             }
 
             // Account still exists and solvent?
             let Some(account) = accounts.get(ro.account_id) else {
-                to_remove.push(i);
+                to_remove.push((i, None));
                 continue;
             };
             if account.balance <= 0 {
-                to_remove.push(i);
+                to_remove.push((i, None));
                 continue;
             }
 
@@ -330,28 +346,26 @@ impl OrderBook {
                     *v -= qty;
                 }
             }
-            if validate_order_with_reservation(
+            if let Err(reason) = validate_order_with_reservation(
                 &ro.order,
                 account,
                 reserved_without_self,
                 &positions_without_self,
-            )
-            .is_err()
-            {
-                to_remove.push(i);
+            ) {
+                to_remove.push((i, Some(reason)));
             }
         }
 
         // Remove in reverse order to preserve indices
         let mut removed = Vec::with_capacity(to_remove.len());
-        for &i in to_remove.iter().rev() {
+        for (i, reason) in to_remove.into_iter().rev() {
             let ro = self.orders.remove(i);
             Self::release_reservations(
                 &mut self.balance_reservations,
                 &mut self.position_reservations,
                 &ro,
             );
-            removed.push(ro);
+            removed.push((ro, reason));
         }
         removed
     }
@@ -441,12 +455,16 @@ impl OrderBook {
     /// re-inserted as remainders and are NOT included in the return value.
     /// `has_been_matched` is set to true on any order (or remainder) that
     /// received a positive fill in this batch.
+    ///
+    /// Each removed order is tagged with why it left: [`RestingExit::Expired`]
+    /// for the time-in-force sweep (so the caller can emit an `Expired` history
+    /// event), [`RestingExit::Settled`] for fully-filled / MM-defensive removals.
     pub fn settle(
         &mut self,
         fills: &[Fill],
         mm_order_ids: &HashSet<u64>,
         current_height: u64,
-    ) -> Vec<RestingOrder> {
+    ) -> Vec<(RestingOrder, RestingExit)> {
         // Build fill-qty map
         let mut filled_qty: HashMap<u64, u64> = HashMap::new();
         for f in fills {
@@ -466,7 +484,7 @@ impl OrderBook {
                     &mut self.position_reservations,
                     &ro,
                 );
-                removed.push(ro);
+                removed.push((ro, RestingExit::Settled));
                 continue;
             }
 
@@ -482,7 +500,7 @@ impl OrderBook {
                     &mut self.position_reservations,
                     &ro,
                 );
-                removed.push(ro);
+                removed.push((ro, RestingExit::Settled));
                 continue;
             }
 
@@ -492,7 +510,7 @@ impl OrderBook {
                     &mut self.position_reservations,
                     &ro,
                 );
-                removed.push(ro);
+                removed.push((ro, RestingExit::Expired));
                 continue;
             }
 
@@ -923,8 +941,33 @@ mod tests {
         }];
         let removed = book.settle(&fills, &HashSet::new(), 1);
         assert_eq!(removed.len(), 1);
-        assert!(removed[0].has_been_matched);
-        assert_eq!(removed[0].original_max_fill, 5);
+        assert!(removed[0].0.has_been_matched);
+        assert_eq!(removed[0].0.original_max_fill, 5);
+        assert_eq!(removed[0].1, RestingExit::Settled);
+    }
+
+    #[test]
+    fn settle_tags_expired_orders() {
+        let (mut accounts, markets, m0) = setup();
+        let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+        let mut book = OrderBook::new(1_000);
+        let account = accounts.get(aid).unwrap();
+
+        let mut order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
+        order.expires_at_block = Some(7);
+        book.accept(order, aid, account, 1, 0).unwrap();
+
+        // One block before expiry: nothing removed.
+        let removed = book.settle(&[], &HashSet::new(), 6);
+        assert!(removed.is_empty());
+        assert_eq!(book.len(), 1);
+
+        // At expiry (current_height >= expires_at_block): removed and tagged Expired
+        // so the sequencer can emit the HistoryKind::Expired event.
+        let removed = book.settle(&[], &HashSet::new(), 7);
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].1, RestingExit::Expired);
+        assert!(book.is_empty());
     }
 
     #[test]

@@ -22,6 +22,9 @@ pub enum HistoryKind {
     Deposit,
     Withdrawal,
     Resolved,
+    /// Order rejected at batch admission, or evicted by resting-order
+    /// revalidation. Appended LAST to keep existing rmp variant indices stable.
+    Rejected,
 }
 
 impl HistoryKind {
@@ -36,6 +39,7 @@ impl HistoryKind {
             HistoryKind::Deposit => "deposit",
             HistoryKind::Withdrawal => "withdrawal",
             HistoryKind::Resolved => "resolved",
+            HistoryKind::Rejected => "rejected",
         }
     }
     /// Filter-chip bucket.
@@ -64,6 +68,9 @@ pub struct HistoryEvent {
     pub amount_nanos: Option<i64>, // signed cash impact (+in / -out)
     pub realized_pnl_nanos: Option<i64>, // filled / resolved
     pub payout_outcome: Option<&'static str>, // resolved
+    pub reason: Option<&'static str>, // rejected: reason code
+    pub required_nanos: Option<i64>,  // rejected: balance/position only
+    pub available_nanos: Option<i64>, // rejected: balance/position only
 }
 
 impl HistoryEvent {
@@ -89,6 +96,9 @@ impl HistoryEvent {
             amount_nanos: None,
             realized_pnl_nanos: None,
             payout_outcome: None,
+            reason: None,
+            required_nanos: None,
+            available_nanos: None,
         }
     }
     pub fn id(&self) -> String {
@@ -116,6 +126,14 @@ pub struct StoredHistoryEvent {
     pub amount_nanos: Option<i64>,
     pub realized_pnl_nanos: Option<i64>,
     pub payout_outcome: Option<String>,
+    // Appended LAST with `#[serde(default)]`: this DTO is rmp-encoded positionally,
+    // so rows written before these fields existed must default the missing tail.
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub required_nanos: Option<i64>,
+    #[serde(default)]
+    pub available_nanos: Option<i64>,
 }
 
 /// Map a stored side/outcome string back to its 'static literal. Returns `None`
@@ -126,6 +144,18 @@ fn static_label(s: &str) -> Option<&'static str> {
         "SELL" => Some("SELL"),
         "YES" => Some("YES"),
         "NO" => Some("NO"),
+        _ => None,
+    }
+}
+
+/// Map a stored rejection reason code back to its 'static literal.
+fn static_reason(s: &str) -> Option<&'static str> {
+    match s {
+        "insufficient_balance" => Some("insufficient_balance"),
+        "insufficient_position" => Some("insufficient_position"),
+        "complete_set" => Some("complete_set"),
+        "account_not_found" => Some("account_not_found"),
+        "expired" => Some("expired"),
         _ => None,
     }
 }
@@ -147,6 +177,9 @@ impl StoredHistoryEvent {
             amount_nanos: e.amount_nanos,
             realized_pnl_nanos: e.realized_pnl_nanos,
             payout_outcome: e.payout_outcome.map(|s| s.to_owned()),
+            reason: e.reason.map(|s| s.to_owned()),
+            required_nanos: e.required_nanos,
+            available_nanos: e.available_nanos,
         }
     }
 
@@ -166,6 +199,9 @@ impl StoredHistoryEvent {
             amount_nanos: self.amount_nanos,
             realized_pnl_nanos: self.realized_pnl_nanos,
             payout_outcome: self.payout_outcome.as_deref().and_then(static_label),
+            reason: self.reason.as_deref().and_then(static_reason),
+            required_nanos: self.required_nanos,
+            available_nanos: self.available_nanos,
         }
     }
 }
@@ -374,6 +410,9 @@ mod tests {
         e.amount_nanos = Some(-375_000_000);
         e.realized_pnl_nanos = Some(12_500_000);
         e.payout_outcome = Some("NO");
+        e.reason = Some("insufficient_balance");
+        e.required_nanos = Some(20_000_000_000);
+        e.available_nanos = Some(12_000_000_000);
 
         let stored = StoredHistoryEvent::from_event(&e);
         let bytes = rmp_serde::to_vec(&stored).unwrap();
@@ -394,6 +433,40 @@ mod tests {
         assert_eq!(back.amount_nanos, e.amount_nanos);
         assert_eq!(back.realized_pnl_nanos, e.realized_pnl_nanos);
         assert_eq!(back.payout_outcome, e.payout_outcome);
+        assert_eq!(back.reason, e.reason);
+        assert_eq!(back.required_nanos, e.required_nanos);
+        assert_eq!(back.available_nanos, e.available_nanos);
+    }
+
+    /// A pre-`reason` stored row (the 14-field tail missing) still decodes:
+    /// the new `#[serde(default)]` fields fill in as `None`.
+    #[test]
+    fn stored_history_event_backward_compat_missing_reason_fields() {
+        // Encode a struct that lacks the three trailing fields by using a
+        // 14-element msgpack array (the historical layout), then decode into
+        // the current 17-field struct.
+        let legacy = (
+            42u64,                       // account_id
+            7u64,                        // seq
+            100u64,                      // block_height
+            999_000u64,                  // timestamp_ms
+            HistoryKind::Filled,         // kind
+            Some(5u32),                  // market_id
+            Some(1234u64),               // order_id
+            Some("BUY".to_string()),     // side
+            Some("YES".to_string()),     // outcome
+            Some(500u64),                // qty
+            Some(750_000_000u64),        // price_nanos
+            Some(-375_000_000i64),       // amount_nanos
+            Some(12_500_000i64),         // realized_pnl_nanos
+            Some("NO".to_string()),      // payout_outcome
+        );
+        let bytes = rmp_serde::to_vec(&legacy).unwrap();
+        let decoded: StoredHistoryEvent = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(decoded.order_id, Some(1234));
+        assert_eq!(decoded.reason, None);
+        assert_eq!(decoded.required_nanos, None);
+        assert_eq!(decoded.available_nanos, None);
     }
 
     /// Round-trip a minimal `HistoryEvent` (all optional fields `None`) to

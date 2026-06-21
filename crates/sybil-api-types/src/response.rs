@@ -748,6 +748,14 @@ pub struct HistoryEventResponse {
     pub realized_pnl_nanos: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payout_outcome: Option<String>,
+    /// Rejected only: reason code (`insufficient_balance` | `insufficient_position`
+    /// | `complete_set` | …).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_nanos: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available_nanos: Option<i64>,
 }
 
 #[cfg(test)]

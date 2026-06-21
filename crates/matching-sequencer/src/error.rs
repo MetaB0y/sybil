@@ -25,6 +25,30 @@ pub enum RejectionReason {
     },
 }
 
+impl RejectionReason {
+    /// Stable wire code for the per-account history feed (`HistoryKind::Rejected`).
+    pub fn code(&self) -> &'static str {
+        match self {
+            RejectionReason::InsufficientBalance { .. } => "insufficient_balance",
+            RejectionReason::InsufficientPosition { .. } => "insufficient_position",
+            RejectionReason::AccountNotFound => "account_not_found",
+            RejectionReason::CompleteSetFormation => "complete_set",
+            RejectionReason::Expired { .. } => "expired",
+        }
+    }
+
+    /// `(required, available)` nanos, when the reason carries them.
+    pub fn amounts(&self) -> (Option<i64>, Option<i64>) {
+        match self {
+            RejectionReason::InsufficientBalance { required, available }
+            | RejectionReason::InsufficientPosition {
+                required, available, ..
+            } => (Some(*required), Some(*available)),
+            _ => (None, None),
+        }
+    }
+}
+
 /// A rejected order.
 #[derive(Debug, Clone)]
 pub struct Rejection {
