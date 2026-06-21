@@ -69,7 +69,7 @@ pub struct HistoryEvent {
     pub realized_pnl_nanos: Option<i64>, // filled / resolved
     pub payout_outcome: Option<&'static str>, // resolved
     pub reason: Option<&'static str>, // rejected: reason code
-    pub required_nanos: Option<i64>,  // rejected: balance/position only
+    pub required_nanos: Option<i64>, // rejected: balance/position only
     pub available_nanos: Option<i64>, // rejected: balance/position only
 }
 
@@ -446,20 +446,20 @@ mod tests {
         // 14-element msgpack array (the historical layout), then decode into
         // the current 17-field struct.
         let legacy = (
-            42u64,                       // account_id
-            7u64,                        // seq
-            100u64,                      // block_height
-            999_000u64,                  // timestamp_ms
-            HistoryKind::Filled,         // kind
-            Some(5u32),                  // market_id
-            Some(1234u64),               // order_id
-            Some("BUY".to_string()),     // side
-            Some("YES".to_string()),     // outcome
-            Some(500u64),                // qty
-            Some(750_000_000u64),        // price_nanos
-            Some(-375_000_000i64),       // amount_nanos
-            Some(12_500_000i64),         // realized_pnl_nanos
-            Some("NO".to_string()),      // payout_outcome
+            42u64,                   // account_id
+            7u64,                    // seq
+            100u64,                  // block_height
+            999_000u64,              // timestamp_ms
+            HistoryKind::Filled,     // kind
+            Some(5u32),              // market_id
+            Some(1234u64),           // order_id
+            Some("BUY".to_string()), // side
+            Some("YES".to_string()), // outcome
+            Some(500u64),            // qty
+            Some(750_000_000u64),    // price_nanos
+            Some(-375_000_000i64),   // amount_nanos
+            Some(12_500_000i64),     // realized_pnl_nanos
+            Some("NO".to_string()),  // payout_outcome
         );
         let bytes = rmp_serde::to_vec(&legacy).unwrap();
         let decoded: StoredHistoryEvent = rmp_serde::from_slice(&bytes).unwrap();

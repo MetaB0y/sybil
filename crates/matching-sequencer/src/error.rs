@@ -40,9 +40,14 @@ impl RejectionReason {
     /// `(required, available)` nanos, when the reason carries them.
     pub fn amounts(&self) -> (Option<i64>, Option<i64>) {
         match self {
-            RejectionReason::InsufficientBalance { required, available }
+            RejectionReason::InsufficientBalance {
+                required,
+                available,
+            }
             | RejectionReason::InsufficientPosition {
-                required, available, ..
+                required,
+                available,
+                ..
             } => (Some(*required), Some(*available)),
             _ => (None, None),
         }
