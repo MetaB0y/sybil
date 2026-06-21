@@ -1508,11 +1508,24 @@ impl Actor for SequencerActor {
                 let _ = reply.send(state.sequencer.price_history(market_id, from_ms, to_ms));
             }
             SequencerMsg::GetAccountFills(account_id, market_id, limit, offset, reply) => {
-                let _ = reply.send(
-                    state
+                // Serve from the durable store (full persisted history); the
+                // in-memory recorder is a bounded window that's empty under prod
+                // retention caps. Fall back to memory on read error or when no
+                // store is configured. Mirrors GetEquitySeries / GetAccountEvents.
+                let result = match &state.store {
+                    Some(store) => store
+                        .account_fills(account_id, market_id, limit, offset)
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(error = %e, account_id = account_id.0, "account_fills read failed; falling back to memory");
+                            state
+                                .sequencer
+                                .account_fills(account_id, market_id, limit, offset)
+                        }),
+                    None => state
                         .sequencer
                         .account_fills(account_id, market_id, limit, offset),
-                );
+                };
+                let _ = reply.send(result);
             }
             SequencerMsg::GetEquitySeries(account_id, reply) => {
                 // NOTE: in prod the in-memory caps are 0, so this fallback returns

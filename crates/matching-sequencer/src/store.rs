@@ -232,6 +232,17 @@ fn fill_history_key(account_id: AccountId, record: &AccountFillRecord) -> [u8; 2
     key
 }
 
+/// Inclusive `[lo, hi]` bounds covering every fill-history key for one account
+/// (keys are `account_id || block_height || order_id`, big-endian, so a single
+/// account is a contiguous range).
+fn fill_history_account_bounds(account_id: AccountId) -> ([u8; 24], [u8; 24]) {
+    let mut lo = [0u8; 24];
+    lo[0..8].copy_from_slice(&account_id.0.to_be_bytes());
+    let mut hi = [0xffu8; 24];
+    hi[0..8].copy_from_slice(&account_id.0.to_be_bytes());
+    (lo, hi)
+}
+
 fn equity_key(account_id: AccountId, height: u64) -> [u8; 16] {
     let mut k = [0u8; 16];
     k[..8].copy_from_slice(&account_id.0.to_be_bytes());
@@ -1478,6 +1489,49 @@ impl Store {
         }
         Ok(out)
     }
+
+    /// Newest-first page of an account's fills from the durable store,
+    /// replicating [`crate::fill_recorder::FillRecorder::account_fills`]: a fill
+    /// matches `market_id_filter` if any of its `position_deltas` touches that
+    /// market, then `offset`/`limit` page over the filtered, newest-first
+    /// sequence.
+    ///
+    /// Reads the full persisted history, which outlives the bounded in-memory
+    /// recorder — so `/v1/accounts/{id}/fills` stays populated even when the hot
+    /// serving window is empty (e.g. prod retention caps). Stored keys sort
+    /// ascending by `(block_height, order_id)`; we iterate in reverse to serve
+    /// newest-first.
+    pub fn account_fills(
+        &self,
+        account_id: AccountId,
+        market_id_filter: Option<MarketId>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<AccountFillRecord>, StoreError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(FILL_HISTORY)?;
+        let (lo, hi) = fill_history_account_bounds(account_id);
+        let mut out = Vec::new();
+        let mut skipped = 0usize;
+        for entry in table.range::<&[u8]>(lo.as_slice()..=hi.as_slice())?.rev() {
+            let (_k, v) = entry?;
+            let record: AccountFillRecord = rmp_serde::from_slice(v.value())?;
+            let matches = market_id_filter
+                .is_none_or(|mid| record.position_deltas.iter().any(|(m, _, _)| *m == mid));
+            if !matches {
+                continue;
+            }
+            if skipped < offset {
+                skipped += 1;
+                continue;
+            }
+            out.push(record);
+            if out.len() >= limit {
+                break;
+            }
+        }
+        Ok(out)
+    }
 }
 
 fn append_msgpack_row<T: serde::Serialize>(
@@ -2503,6 +2557,87 @@ mod tests {
         assert_eq!(fills.len(), 1);
         assert_eq!(fills[0].fill_qty, 5);
         assert_eq!(fills[0].block_height, 1);
+    }
+
+    #[tokio::test]
+    async fn test_store_account_fills_reads_full_persisted_history() {
+        use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
+        use matching_engine::{outcome_buy, outcome_sell, NANOS_PER_DOLLAR};
+
+        let path = temp_db_path("store-account-fills-read");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+
+        let mut markets = MarketSet::new();
+        let market_id = markets.add_binary("Test");
+        let mut accounts = AccountStore::new();
+        let buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let seller = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        accounts
+            .get_mut(seller)
+            .unwrap()
+            .positions
+            .insert((market_id, 0), 10);
+
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            oracle.clone(),
+            SequencerConfig::default(),
+        );
+        // Two blocks, each crossing one unit, so two distinct buyer fills persist.
+        for height in 1..=2u64 {
+            seq.produce_block(
+                vec![
+                    OrderSubmission {
+                        account_id: buyer,
+                        orders: vec![outcome_buy(&markets, 0, market_id, 0, 700_000_000, 1)],
+                        mm_constraint: None,
+                    },
+                    OrderSubmission {
+                        account_id: seller,
+                        orders: vec![outcome_sell(&markets, 0, market_id, 0, 300_000_000, 1)],
+                        mm_constraint: None,
+                    },
+                ],
+                height * 1_000,
+            );
+            store.save_block(seq.snapshot()).await.unwrap();
+        }
+
+        // Reads straight from the durable store, independent of any in-memory recorder.
+        let fills = store.account_fills(buyer, None, 10, 0).unwrap();
+        assert_eq!(fills.len(), 2, "both persisted fills should be served");
+        // Newest-first: block 2 ahead of block 1.
+        assert_eq!(fills[0].block_height, 2);
+        assert_eq!(fills[1].block_height, 1);
+
+        // Market filter keeps fills that touch the traded market...
+        assert_eq!(
+            store
+                .account_fills(buyer, Some(market_id), 10, 0)
+                .unwrap()
+                .len(),
+            2
+        );
+        // ...and drops everything for a market the account never traded.
+        let untraded = markets.add_binary("Untraded");
+        assert!(store
+            .account_fills(buyer, Some(untraded), 10, 0)
+            .unwrap()
+            .is_empty());
+
+        // offset/limit page over the newest-first sequence.
+        let page = store.account_fills(buyer, None, 1, 1).unwrap();
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].block_height, 1);
+
+        // Unknown account => empty, no error.
+        assert!(store
+            .account_fills(AccountId(99), None, 10, 0)
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
