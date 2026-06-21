@@ -46,6 +46,7 @@ const TYPE_OPTIONS: { value: HistoryEventType | "all"; label: string }[] = [
   { value: "filled", label: "Filled" },
   { value: "cancelled", label: "Cancelled" },
   { value: "expired", label: "Expired" },
+  { value: "rejected", label: "Rejected" },
   { value: "deposit", label: "Deposit" },
   { value: "withdrawal", label: "Withdrawal" },
   { value: "resolved", label: "Resolved" },
@@ -451,6 +452,8 @@ function badgeMeta(
       return { label: "CANCELLED", tone: "muted" };
     case "expired":
       return { label: "EXPIRED", tone: "muted" };
+    case "rejected":
+      return { label: "REJECTED", tone: "no" };
     case "deposit":
       return { label: "DEPOSIT", tone: "yes" };
     case "withdrawal":

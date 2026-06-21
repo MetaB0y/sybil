@@ -127,7 +127,10 @@ function Connected({
     for (const e of history.events) {
       if (
         e.orderId != null &&
-        (e.type === "filled" || e.type === "cancelled" || e.type === "expired")
+        (e.type === "filled" ||
+          e.type === "cancelled" ||
+          e.type === "expired" ||
+          e.type === "rejected")
       ) {
         ids.add(e.orderId);
       }

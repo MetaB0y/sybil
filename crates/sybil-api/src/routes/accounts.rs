@@ -280,6 +280,9 @@ pub async fn get_account_history(
             amount_nanos: e.amount_nanos,
             realized_pnl_nanos: e.realized_pnl_nanos,
             payout_outcome: e.payout_outcome.map(|p| p.to_string()),
+            reason: e.reason.map(|r| r.to_string()),
+            required_nanos: e.required_nanos,
+            available_nanos: e.available_nanos,
         })
         .collect();
     Ok(Json(out))
