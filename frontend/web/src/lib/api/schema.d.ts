@@ -1056,6 +1056,8 @@ export interface components {
             /** Format: int64 */
             amount_nanos?: string | null;
             /** Format: int64 */
+            available_nanos?: string | null;
+            /** Format: int64 */
             block_height: number;
             category: string;
             id: string;
@@ -1071,6 +1073,9 @@ export interface components {
             qty?: number | null;
             /** Format: int64 */
             realized_pnl_nanos?: string | null;
+            reason?: string | null;
+            /** Format: int64 */
+            required_nanos?: string | null;
             side?: string | null;
             /** Format: int64 */
             timestamp_ms: number;

@@ -53,7 +53,7 @@ const VIEW_TABS: { id: View; label: string }[] = [
 ];
 
 /** History event types that terminally close an order. */
-const CLOSED_TYPES = new Set(["filled", "cancelled", "expired"]);
+const CLOSED_TYPES = new Set(["filled", "cancelled", "expired", "rejected"]);
 
 type Position = Portfolio["positions"][number];
 

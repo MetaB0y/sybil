@@ -37,13 +37,22 @@ import type { components } from "@/lib/api/schema";
 import { SidePill } from "./side-pill";
 
 type Market = components["schemas"]["MarketResponse"];
-type Status = "FILLED" | "CANCELLED" | "EXPIRED";
+type Status = "FILLED" | "CANCELLED" | "EXPIRED" | "REJECTED";
 
-const TERMINAL = new Set<HistoryEvent["type"]>(["filled", "cancelled", "expired"]);
-const STATUS_OF: Record<"filled" | "cancelled" | "expired", Status> = {
+const TERMINAL = new Set<HistoryEvent["type"]>([
+  "filled",
+  "cancelled",
+  "expired",
+  "rejected",
+]);
+const STATUS_OF: Record<
+  "filled" | "cancelled" | "expired" | "rejected",
+  Status
+> = {
   filled: "FILLED",
   cancelled: "CANCELLED",
   expired: "EXPIRED",
+  rejected: "REJECTED",
 };
 
 /** Per-order accumulator used while folding the history feed. */
@@ -242,7 +251,7 @@ export function ClosedOrdersList({ events, marketsById }: Props) {
         marketId: slot.marketId,
         market: marketsById.get(slot.marketId),
         label: marketsById.get(slot.marketId)?.name ?? `#${slot.marketId}`,
-        status: STATUS_OF[t.type as "filled" | "cancelled" | "expired"],
+        status: STATUS_OF[t.type as "filled" | "cancelled" | "expired" | "rejected"],
         closedAtMs: t.timestampMs,
         qty,
         priceNanos,
@@ -477,7 +486,9 @@ function StatusBadge({ status }: { status: Status }) {
   const tone =
     status === "FILLED"
       ? { fg: "var(--yes)", bg: "color-mix(in srgb, var(--yes) 14%, transparent)" }
-      : { fg: "var(--fg-3)", bg: "var(--fill-subtle)" };
+      : status === "REJECTED"
+        ? { fg: "var(--no)", bg: "color-mix(in srgb, var(--no) 14%, transparent)" }
+        : { fg: "var(--fg-3)", bg: "var(--fill-subtle)" };
   return (
     <span
       style={{

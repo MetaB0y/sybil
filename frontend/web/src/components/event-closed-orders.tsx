@@ -28,8 +28,9 @@
  * Default order is newest-first by the terminal event's `timestamp_ms`; every
  * column is click-to-sort.
  *
- * Failed/rejected orders never reach the history log (product decision — not
- * persisted), so they're naturally excluded.
+ * Rejected orders (insufficient balance/position, complete-set self-trade)
+ * surface as a REJECTED terminal status via `HistoryKind::Rejected`. The
+ * expired-at-entry path is separate and still tracked with the degen work.
  */
 
 import { useMemo, useState } from "react";
@@ -39,15 +40,24 @@ import { Pager, usePaged } from "@/components/event-list-pager";
 import { SidePill } from "@/components/portfolio/side-pill";
 import { Glossary } from "@/components/glossary";
 
-type Status = "FILLED" | "CANCELLED" | "EXPIRED";
+type Status = "FILLED" | "CANCELLED" | "EXPIRED" | "REJECTED";
 
 /** The terminal history event types that close an order. */
-const TERMINAL = new Set<HistoryEvent["type"]>(["filled", "cancelled", "expired"]);
+const TERMINAL = new Set<HistoryEvent["type"]>([
+  "filled",
+  "cancelled",
+  "expired",
+  "rejected",
+]);
 
-const STATUS_OF: Record<"filled" | "cancelled" | "expired", Status> = {
+const STATUS_OF: Record<
+  "filled" | "cancelled" | "expired" | "rejected",
+  Status
+> = {
   filled: "FILLED",
   cancelled: "CANCELLED",
   expired: "EXPIRED",
+  rejected: "REJECTED",
 };
 
 interface ClosedOrder {
@@ -288,7 +298,7 @@ export function EventClosedOrders({
         orderId,
         marketId: slot.marketId,
         label: labelByMarket.get(slot.marketId) ?? `#${slot.marketId}`,
-        status: STATUS_OF[t.type as "filled" | "cancelled" | "expired"],
+        status: STATUS_OF[t.type as "filled" | "cancelled" | "expired" | "rejected"],
         closedAtMs: t.timestampMs,
         qty,
         priceNanos,
@@ -507,7 +517,9 @@ function StatusBadge({ status }: { status: Status }) {
   const tone =
     status === "FILLED"
       ? { fg: "var(--yes)", bg: "color-mix(in srgb, var(--yes) 14%, transparent)" }
-      : { fg: "var(--fg-3)", bg: "var(--fill-subtle)" };
+      : status === "REJECTED"
+        ? { fg: "var(--no)", bg: "color-mix(in srgb, var(--no) 14%, transparent)" }
+        : { fg: "var(--fg-3)", bg: "var(--fill-subtle)" };
   return (
     <span
       style={{

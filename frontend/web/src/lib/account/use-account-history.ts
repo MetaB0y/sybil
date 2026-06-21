@@ -36,7 +36,8 @@ export type HistoryEventType =
   | "expired"
   | "deposit"
   | "withdrawal"
-  | "resolved";
+  | "resolved"
+  | "rejected";
 
 export type HistoryCategory = "all" | "trades" | "funding" | "settlement";
 
@@ -54,6 +55,9 @@ export interface HistoryEvent {
   amountNanos?: bigint; // signed cash impact, nanos-dollars (+in / -out)
   realizedPnlNanos?: bigint; // filled / resolved
   payoutOutcome?: "YES" | "NO"; // resolved only
+  reason?: string; // rejected only: reason code
+  requiredNanos?: bigint; // rejected: balance/position
+  availableNanos?: bigint; // rejected: balance/position
 }
 
 /** Which filter chip an event type falls under. */
@@ -70,6 +74,7 @@ export const CATEGORY_OF: Record<
   deposit: "funding",
   withdrawal: "funding",
   resolved: "settlement",
+  rejected: "trades",
 };
 
 export interface AccountHistory {
@@ -132,5 +137,8 @@ function mapEvent(r: HistoryEventResponse): HistoryEvent {
   if (r.realized_pnl_nanos != null)
     e.realizedPnlNanos = parseNanos(r.realized_pnl_nanos);
   if (r.payout_outcome != null) e.payoutOutcome = r.payout_outcome as "YES" | "NO";
+  if (r.reason != null) e.reason = r.reason;
+  if (r.required_nanos != null) e.requiredNanos = parseNanos(r.required_nanos);
+  if (r.available_nanos != null) e.availableNanos = parseNanos(r.available_nanos);
   return e;
 }
