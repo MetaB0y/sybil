@@ -26,6 +26,8 @@ export const GLOSSARY: Record<string, string> = {
   FBA: "Frequent Batch Auction. The market mechanism Sybil uses instead of a continuous limit order book.",
   Welfare:
     "Your surplus on the fills: how much better than your limit price you traded, times quantity filled. A buy that filled below your limit — or a sell that filled above it — earns positive welfare.",
+  "All-time welfare":
+    "Total trader surplus across every fill since launch — for each trade, how much better than its limit price it cleared, times quantity. The cumulative value Sybil's uniform-price batches have created for traders.",
   "Portfolio value":
     "Your cash balance plus the current value of every open position, marked at the latest batch clearing price.",
   "Net deposits":

@@ -15,6 +15,7 @@
 
 import { formatCompactInt, formatInt } from "@/lib/format/nanos";
 import type { AllTimeStats } from "@/lib/activity/types";
+import { Glossary } from "@/components/glossary";
 
 export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
   return (
@@ -39,7 +40,7 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
             style={{
               display: "flex",
               flexWrap: "wrap",
-              gap: 44,
+              gap: 80,
               alignItems: "flex-start",
             }}
           >
@@ -47,7 +48,11 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
               label="All-time matched volume"
               value={allTime.matchedVolume}
             />
-            <HeroNumber label="All-time welfare" value={allTime.welfare} />
+            <HeroNumber
+              label="All-time welfare"
+              value={allTime.welfare}
+              glossaryTerm="All-time welfare"
+            />
           </div>
           <div
             style={{
@@ -127,12 +132,27 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
   );
 }
 
-function HeroNumber({ label, value }: { label: string; value: string }) {
+function HeroNumber({
+  label,
+  value,
+  glossaryTerm,
+}: {
+  label: string;
+  value: string;
+  /** When set, the eyebrow gets a "?" badge with the glossary definition. */
+  glossaryTerm?: string;
+}) {
   return (
     <div
       style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}
     >
-      <span className="eyebrow">{label}</span>
+      {glossaryTerm ? (
+        <Glossary term={glossaryTerm}>
+          <span className="eyebrow">{label}</span>
+        </Glossary>
+      ) : (
+        <span className="eyebrow">{label}</span>
+      )}
       <span
         style={{
           fontFamily: "var(--font-sans)",
