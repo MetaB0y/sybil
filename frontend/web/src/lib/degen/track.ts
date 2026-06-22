@@ -2,7 +2,7 @@ import type { DegenSide } from "./degen";
 
 /** A degen-relevant row from the account events feed, normalized to bigint. */
 export interface DegenEvent {
-  type: string; // "placed" | "partial_fill" | "filled" | "expired" | ...
+  type: string; // "placed" | "partial_fill" | "filled" | "expired" | "cancelled" | ...
   blockHeight: number;
   marketId: number | null;
   orderId: number | null;
@@ -45,7 +45,7 @@ export function findDegenOrderId(
   return best?.orderId ?? null;
 }
 
-export type DegenPhase = "tracking" | "filled" | "partial" | "none";
+export type DegenPhase = "tracking" | "filled" | "partial" | "none" | "cancelled";
 
 export interface DegenBetState {
   phase: DegenPhase;
@@ -58,20 +58,31 @@ export interface DegenSnapshot {
   targetQty: bigint;
   currentHeight: number;
   expiresAtBlock: number;
-  /** The bound order's partial_fill/filled/expired rows (empty if unbound). */
+  /** The bound order's partial_fill/filled/expired/cancelled rows (empty if unbound). */
   events: DegenEvent[];
+  /**
+   * True when this bet's order was cancelled out-of-band — e.g. the user hit
+   * Cancel in the open-orders table or in the progress card. The backend
+   * doesn't emit an `OrderCancelled` event ([[use-cancelled-orders]]), so this
+   * is sourced from the local cancel store rather than `events`. A `cancelled`
+   * row in `events` (should the backend ever emit one) is honoured too.
+   */
+  cancelled?: boolean;
 }
 
 /**
- * Resolve the bet's phase. Terminal rows (filled/expired) win; the height
- * backstop (`>= expiresAtBlock + 1`) covers a missed terminal row or a
- * correlation miss so the spinner can never hang.
+ * Resolve the bet's phase. Terminal states (filled/cancelled/expired) win; the
+ * height backstop (`>= expiresAtBlock + 1`) covers a missed terminal row or a
+ * correlation miss so the spinner can never hang. A cancel that lands after some
+ * fills reads as `partial` (the filled portion stands) — the same way an expiry
+ * after partial fills does.
  */
 export function resolveDegenBet(s: DegenSnapshot): DegenBetState {
   let filledQty = 0n;
   let weighted = 0n;
   let hasFilled = false;
   let hasExpired = false;
+  let hasCancelled = s.cancelled === true;
   for (const e of s.events) {
     if (e.type === "partial_fill" || e.type === "filled") {
       filledQty += e.qty;
@@ -79,12 +90,17 @@ export function resolveDegenBet(s: DegenSnapshot): DegenBetState {
       if (e.type === "filled") hasFilled = true;
     } else if (e.type === "expired") {
       hasExpired = true;
+    } else if (e.type === "cancelled") {
+      hasCancelled = true;
     }
   }
   const avgPriceNanos = filledQty > 0n ? weighted / filledQty : null;
   const base = { filledQty, targetQty: s.targetQty, avgPriceNanos };
 
   if (hasFilled || filledQty >= s.targetQty) return { phase: "filled", ...base };
+  if (hasCancelled) {
+    return { phase: filledQty > 0n ? "partial" : "cancelled", ...base };
+  }
   if (hasExpired) {
     return { phase: filledQty > 0n ? "partial" : "none", ...base };
   }

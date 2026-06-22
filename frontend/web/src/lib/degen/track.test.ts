@@ -107,6 +107,36 @@ describe("resolveDegenBet", () => {
     expect(s.avgPriceNanos).toBeNull();
   });
 
+  it("is cancelled when the cancel flag is set and nothing filled", () => {
+    const s = resolveDegenBet({ ...base, events: [], cancelled: true });
+    expect(s.phase).toBe("cancelled");
+    expect(s.filledQty).toBe(0n);
+  });
+
+  it("is partial when cancelled after some fills (filled portion stands)", () => {
+    const s = resolveDegenBet({
+      ...base,
+      cancelled: true,
+      events: [ev({ type: "partial_fill", qty: 7n, priceNanos: 500_000_000n })],
+    });
+    expect(s.phase).toBe("partial");
+    expect(s.filledQty).toBe(7n);
+  });
+
+  it("honours a cancelled row from the events feed", () => {
+    const s = resolveDegenBet({ ...base, events: [ev({ type: "cancelled" })] });
+    expect(s.phase).toBe("cancelled");
+  });
+
+  it("prefers filled over a cancel that lands the same block", () => {
+    const s = resolveDegenBet({
+      ...base,
+      cancelled: true,
+      events: [ev({ type: "filled", qty: 20n, priceNanos: 500_000_000n })],
+    });
+    expect(s.phase).toBe("filled");
+  });
+
   it("falls back to height when the terminal row is missed", () => {
     const partial = resolveDegenBet({
       ...base,

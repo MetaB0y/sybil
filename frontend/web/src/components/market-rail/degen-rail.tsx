@@ -8,7 +8,7 @@
 
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { submitSignedOrder } from "@/lib/account/orders";
+import { cancelSignedOrder, submitSignedOrder } from "@/lib/account/orders";
 import { humanizeOrderError } from "@/lib/account/order-errors";
 import { useAccountSession, useSetConnectModalOpen } from "@/lib/account/use-account";
 import { useAvailableBalance } from "@/lib/account/use-available-balance";
@@ -43,6 +43,7 @@ export function DegenRail({
   const [side, setSide] = useState<Side>("YES");
   const [amount, setAmount] = useState<string>("10");
   const [signing, setSigning] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const session = useAccountSession();
@@ -145,6 +146,43 @@ export function DegenRail({
     }
   }
 
+  // Cancel the in-flight bet from the progress card. The order id is bound by
+  // the tracker off the events feed (null until the `placed` row lands). On a
+  // confirmed cancel, cancelSignedOrder records into the local cancel log, which
+  // the tracker observes and flips the card to its terminal state — the same
+  // path a cancel from the open-orders table takes. Passing `context` is what
+  // triggers that record, so it's required for the bridge, not just cosmetic.
+  async function onCancelBet() {
+    const orderId = tracking?.orderId ?? null;
+    if (!session || !active || orderId === null) return;
+    setCancelling(true);
+    try {
+      const remaining = active.targetQty - (tracking?.filledQty ?? 0n);
+      await cancelSignedOrder({
+        accountId: session.accountId,
+        publicKeyHex: session.publicKeyHex,
+        orderId,
+        context: {
+          marketId: active.marketId,
+          side: active.outcome === "YES" ? "BuyYes" : "BuyNo",
+          qty: Number(remaining > 0n ? remaining : 0n),
+          limitPriceNanos: String(active.limitPriceNanos),
+        },
+      });
+      qc.invalidateQueries({ queryKey: ["account", session.accountId, "events"] });
+      qc.invalidateQueries({ queryKey: ["account", session.accountId, "orders"] });
+      qc.invalidateQueries({ queryKey: ["account", session.accountId, "portfolio"] });
+      qc.invalidateQueries({ queryKey: ["orders", "pending"] });
+    } catch (e) {
+      // The likely failures are "already filled" / "already expired" — the
+      // tracker resolves those to filled/none on the next block anyway, so a
+      // warn (not error, which trips the dev overlay) is enough.
+      console.warn("degen cancel failed:", e);
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   const connected = session !== null;
   // Cash the engine would reserve for this bet (limit × shares). Block the CTA
   // when it exceeds what's available so we never trip a server-side
@@ -190,6 +228,9 @@ export function DegenRail({
           targetQty={active.targetQty}
           betUsd={active.betUsd}
           onBetAgain={() => setActive(null)}
+          onCancel={onCancelBet}
+          canCancel={(tracking?.orderId ?? null) !== null}
+          cancelling={cancelling}
         />
       ) : (
         <>

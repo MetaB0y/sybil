@@ -14,6 +14,12 @@ export interface DegenProgressProps {
   /** The dollar amount the user bet (the full intended stake). */
   betUsd: number;
   onBetAgain: () => void;
+  /** Cancel the in-flight bet (tracking phase only). Omit to hide the control. */
+  onCancel?: () => void;
+  /** False while the order id isn't bound yet — keeps Cancel disabled. */
+  canCancel?: boolean;
+  /** A cancel request is in flight. */
+  cancelling?: boolean;
 }
 
 /** "$10" for whole amounts, "$12.50" otherwise. */
@@ -43,6 +49,26 @@ export function DegenProgress(props: DegenProgressProps) {
           {props.filledQty.toString()} / {props.targetQty.toString()} shares
           bought
         </div>
+        {props.onCancel && (
+          <button
+            type="button"
+            onClick={props.onCancel}
+            disabled={!props.canCancel || props.cancelling}
+            title={
+              props.canCancel
+                ? "Cancel this bet"
+                : "Waiting for the order to be placed…"
+            }
+            style={{
+              ...cancelStyle,
+              cursor:
+                !props.canCancel || props.cancelling ? "not-allowed" : "pointer",
+              opacity: !props.canCancel || props.cancelling ? 0.55 : 1,
+            }}
+          >
+            {props.cancelling ? "Cancelling…" : "Cancel bet"}
+          </button>
+        )}
       </div>
     );
   }
@@ -58,15 +84,23 @@ export function DegenProgress(props: DegenProgressProps) {
       : 0;
   // Success (full or partial fill) always reads green; a miss always reads red
   // — independent of whether the user bet YES or NO, so the colour signals
-  // outcome, not side.
+  // outcome, not side. A user-initiated cancel is neither win nor loss, so it
+  // reads neutral rather than red.
   const success = props.phase === "filled" || props.phase === "partial";
-  const resultColor = success ? "var(--yes)" : "var(--no)";
+  const cancelled = props.phase === "cancelled";
+  const resultColor = cancelled
+    ? "var(--fg-2)"
+    : success
+      ? "var(--yes)"
+      : "var(--no)";
   const result =
     props.phase === "filled"
       ? `Successfully bet ${money(props.betUsd)} on ${props.side}!`
       : props.phase === "partial"
         ? `◐ Half in! Successfully bet ${money(filledUsd)} out of ${money(props.betUsd)} on ${props.side}!`
-        : `Oops, your order failed. Try again!`;
+        : cancelled
+          ? `Bet cancelled.`
+          : `Oops, your order failed. Try again!`;
 
   return (
     <div style={cardStyle}>
@@ -112,6 +146,21 @@ const barTrackStyle: React.CSSProperties = {
   borderRadius: 2,
   background: "var(--border-1)",
   overflow: "hidden",
+};
+// Quiet outline (matching the open-orders Cancel) so it sits under the live
+// meter without competing with it.
+const cancelStyle: React.CSSProperties = {
+  marginTop: 2,
+  padding: "9px 0",
+  borderRadius: 6,
+  border: "1px solid color-mix(in srgb, var(--no) 32%, transparent)",
+  background: "transparent",
+  color: "var(--no)",
+  fontFamily: "var(--font-mono)",
+  fontSize: 11,
+  fontWeight: 600,
+  textTransform: "uppercase",
+  letterSpacing: "var(--track-wide)",
 };
 // Filled accent button so "Bet again" reads as the obvious next tap, not a
 // faint outline.

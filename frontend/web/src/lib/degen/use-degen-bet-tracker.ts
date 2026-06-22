@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useAccountEvents } from "@/lib/account/use-account-events";
+import { useTrackedCancels } from "@/lib/account/use-cancelled-orders";
 import { BLOCK_INTERVAL_MS } from "@/lib/constants";
 import { parseNanos } from "@/lib/format/nanos";
 import { selectLatestHeight, useStore } from "@/lib/store";
@@ -35,6 +36,12 @@ export interface DegenActive {
 export interface DegenTracking extends DegenBetState {
   secondsLeft: number;
   timeProgress01: number;
+  /**
+   * The bet's bound order id (from the events feed), or null until the order's
+   * `placed`/fill row appears. The progress card's Cancel button needs this to
+   * call `cancelSignedOrder`; it stays disabled while null.
+   */
+  orderId: number | null;
 }
 
 /**
@@ -46,6 +53,10 @@ export function useDegenBetTracker(
   active: DegenActive | null,
 ): DegenTracking | null {
   const { data: rawEvents } = useAccountEvents(active?.accountId ?? null);
+  // Local cancel log — the bridge that lets a cancel from anywhere (the
+  // open-orders table or this card) flip the bet to its terminal state, since
+  // the backend emits no OrderCancelled event ([[use-cancelled-orders]]).
+  const trackedCancels = useTrackedCancels(active?.accountId ?? null);
   const latestHeight = useStore(selectLatestHeight);
 
   const submitHeight = active?.submitHeight ?? null;
@@ -102,11 +113,18 @@ export function useDegenBetTracker(
   });
   const ours = boundId === null ? [] : events.filter((e) => e.orderId === boundId);
 
+  // The bet is cancelled once we've bound an order id and the local cancel log
+  // has a record for it. Pre-binding (boundId null) we can't correlate a cancel,
+  // but a still-unacked order has nothing resting to cancel anyway.
+  const cancelled =
+    boundId !== null && trackedCancels.some((c) => c.orderId === boundId);
+
   const state = resolveDegenBet({
     targetQty: active.targetQty,
     currentHeight: latestHeight ?? active.submitHeight,
     expiresAtBlock: active.expiresAtBlock,
     events: ours,
+    cancelled,
   });
 
   const totalMs = Math.max(
@@ -118,5 +136,5 @@ export function useDegenBetTracker(
     Math.ceil((totalMs * (1 - timeProgress01)) / 1000),
   );
 
-  return { ...state, secondsLeft, timeProgress01 };
+  return { ...state, secondsLeft, timeProgress01, orderId: boundId };
 }

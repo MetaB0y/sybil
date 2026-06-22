@@ -66,4 +66,53 @@ describe("DegenProgress", () => {
     expect(html).toMatch(/failed/i);
     expect(html).toMatch(/Bet again/i);
   });
+
+  it("shows a neutral cancelled result (not a red miss)", () => {
+    const html = renderToStaticMarkup(
+      <DegenProgress {...common} phase="cancelled" filledQty={0n} />,
+    );
+    expect(html).toMatch(/cancelled/i);
+    expect(html).not.toMatch(/failed/i);
+    expect(html).not.toContain("color:var(--no)");
+    expect(html).toMatch(/Bet again/i);
+  });
+
+  it("renders a Cancel button while tracking when onCancel is given", () => {
+    const html = renderToStaticMarkup(
+      <DegenProgress
+        {...common}
+        phase="tracking"
+        onCancel={() => {}}
+        canCancel
+      />,
+    );
+    expect(html).toMatch(/Cancel bet/i);
+    expect(html).not.toMatch(/disabled/i);
+  });
+
+  it("disables Cancel until the order id is bound", () => {
+    const html = renderToStaticMarkup(
+      <DegenProgress
+        {...common}
+        phase="tracking"
+        onCancel={() => {}}
+        canCancel={false}
+      />,
+    );
+    expect(html).toMatch(/Cancel bet/i);
+    expect(html).toMatch(/disabled/i);
+  });
+
+  it("omits the Cancel control on a resolved bet", () => {
+    const html = renderToStaticMarkup(
+      <DegenProgress
+        {...common}
+        phase="filled"
+        filledQty={20n}
+        onCancel={() => {}}
+        canCancel
+      />,
+    );
+    expect(html).not.toMatch(/Cancel bet/i);
+  });
 });
