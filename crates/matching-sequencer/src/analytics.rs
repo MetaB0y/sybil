@@ -340,6 +340,20 @@ impl AnalyticsState {
             .record_exit(resting_order, timestamp_ms);
     }
 
+    /// Record an MM flash order's one-block outcome: `matched` if it received
+    /// a fill this block, else unmatched. MM orders never rest in the book, so
+    /// they don't reach `record_order_exit`; this is their matched/unmatched
+    /// hook. See `OrderStatsTracker::record_outcome`.
+    pub fn record_order_outcome(
+        &mut self,
+        markets: impl IntoIterator<Item = MarketId>,
+        matched: bool,
+        timestamp_ms: u64,
+    ) {
+        self.order_stats_tracker
+            .record_outcome(markets, matched, timestamp_ms);
+    }
+
     pub fn record_liquidity(
         &mut self,
         order_book: &OrderBook,

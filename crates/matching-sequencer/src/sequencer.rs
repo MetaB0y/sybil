@@ -2732,6 +2732,35 @@ impl BlockSequencer {
             self.config.liquidity_band_nanos,
         );
 
+        // MM flash orders live exactly one block and never enter the book, so
+        // the matched/unmatched exit hooks above never see them. Classify each
+        // here from this block's fills — any fill (qty > 0) → matched, else →
+        // unmatched — so an MM quote is counted like any one-shot
+        // (immediate-or-cancel) limit order. Their `placed` / `placed_distinct`
+        // were already counted at admission. MM orders are not in the book, so
+        // this cannot double-count with the exit hooks.
+        let mm_filled_qty: HashMap<u64, u64> =
+            fills
+                .iter()
+                .filter(|f| f.fill_qty > 0)
+                .fold(HashMap::new(), |mut acc, f| {
+                    *acc.entry(f.order_id).or_insert(0) += f.fill_qty;
+                    acc
+                });
+        for o in &mm_orders {
+            let matched = mm_filled_qty.get(&o.id).copied().unwrap_or(0) > 0;
+            self.analytics
+                .record_order_outcome(o.active_markets(), matched, timestamp_ms);
+            for m in o.active_markets() {
+                let slot = block_orders_by_market.entry(m).or_default();
+                if matched {
+                    slot.matched += 1;
+                } else {
+                    slot.unmatched += 1;
+                }
+            }
+        }
+
         // Off-block per-account equity series — sample accounts that traded
         // this block (the tracker also periodically sweeps all known accounts).
         let touched: std::collections::HashSet<AccountId> = fills
@@ -3139,19 +3168,28 @@ mod tests {
         };
 
         let production = seq.produce_block(vec![sub], 1_000);
-        assert_eq!(
-            production
-                .analytics
-                .orders_by_market
-                .get(&m0)
-                .unwrap()
-                .placed,
-            1
-        );
+        let m0_stats = production.analytics.orders_by_market.get(&m0).unwrap();
+        assert_eq!(m0_stats.placed, 1);
         assert_eq!(seq.platform_order_stats(1_000).0.placed, 1);
         assert_eq!(
             production.analytics.unique_placers, 0,
             "MM orders count as orders but not as unique traders"
+        );
+        // MM flash orders are counted in matched/unmatched too — they live one
+        // block and resolve in-place, so exactly one of the two ticks. This is
+        // the property that lets distinct-placed reconcile with matched +
+        // unmatched once carried orders have cycled out.
+        let stats = seq.platform_order_stats(1_000).0;
+        assert_eq!(stats.placed_distinct, 1, "MM flash order admitted once");
+        assert_eq!(
+            stats.matched + stats.unmatched,
+            1,
+            "MM flash order resolves to exactly one of matched/unmatched"
+        );
+        assert_eq!(
+            m0_stats.matched + m0_stats.unmatched,
+            1,
+            "per-market MM outcome counted in its block"
         );
     }
 

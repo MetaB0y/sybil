@@ -105,14 +105,28 @@ impl OrderStatsTracker {
     /// `revalidate`, or `settle`). Routes to matched if
     /// `has_been_matched`, else unmatched. Per-market over-counts.
     pub fn record_exit(&mut self, order: &RestingOrder, ts_ms: u64) {
-        if order.has_been_matched {
-            for m in order.order.active_markets() {
+        self.record_outcome(order.order.active_markets(), order.has_been_matched, ts_ms);
+    }
+
+    /// Record a resolved order outcome — `matched` (received ≥1 fill) or
+    /// unmatched (left without a fill). Shared by `record_exit` (resting
+    /// orders leaving the book) and by MM flash orders, which live a single
+    /// block and resolve in-place against that block's fills. Per-market +1
+    /// each active market; platform +1; hourly bucket +1.
+    pub fn record_outcome(
+        &mut self,
+        markets: impl IntoIterator<Item = MarketId>,
+        matched: bool,
+        ts_ms: u64,
+    ) {
+        if matched {
+            for m in markets {
                 self.per_market.entry(m).or_default().matched += 1;
             }
             self.platform.matched += 1;
             self.hourly_entry_mut(ts_ms).matched += 1;
         } else {
-            for m in order.order.active_markets() {
+            for m in markets {
                 self.per_market.entry(m).or_default().unmatched += 1;
             }
             self.platform.unmatched += 1;
@@ -316,6 +330,22 @@ mod tests {
         assert_eq!(t.per_market(m).placed_distinct, 0);
         // and it must not touch the participation `placed` counter
         assert_eq!(t.platform().placed, 0);
+    }
+
+    #[test]
+    fn record_outcome_routes_matched_and_unmatched() {
+        let mut t = OrderStatsTracker::new();
+        let m = mid(1);
+        t.record_outcome([m], true, 0);
+        t.record_outcome([m], false, 0);
+        t.record_outcome([m], false, 0);
+        let p = t.platform();
+        assert_eq!(p.matched, 1);
+        assert_eq!(p.unmatched, 2);
+        assert_eq!(t.per_market(m).matched, 1);
+        assert_eq!(t.per_market(m).unmatched, 2);
+        assert_eq!(t.platform_24h(0).matched, 1);
+        assert_eq!(t.platform_24h(0).unmatched, 2);
     }
 
     #[test]
