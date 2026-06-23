@@ -2,7 +2,8 @@
 
 /**
  * Nav chip showing the current account. Disconnected → "connect" button
- * (opens modal). Connected → "#13 ▾" with a small dropdown for disconnect /
+ * (opens modal). Connected → the live portfolio "total / cash ▾" with a small
+ * dropdown that recaps portfolio / cash / account id and offers disconnect /
  * copy account id / copy JWK.
  */
 
@@ -14,6 +15,8 @@ import {
   useAccountSession,
   useSetConnectModalOpen,
 } from "@/lib/account/use-account";
+import { usePortfolio } from "@/lib/account/use-portfolio";
+import { formatDollars, parseNanos } from "@/lib/format/nanos";
 
 export function AccountChip() {
   const session = useAccountSession();
@@ -45,6 +48,16 @@ export function AccountChip() {
 function ConnectedMenu({ accountId }: { accountId: number }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const portfolio = usePortfolio(accountId).data ?? null;
+
+  const total =
+    portfolio != null
+      ? formatDollars(parseNanos(portfolio.portfolio_value_nanos), { decimals: 2 })
+      : "—";
+  const cash =
+    portfolio != null
+      ? formatDollars(parseNanos(portfolio.balance_nanos), { decimals: 2 })
+      : "—";
 
   useEffect(() => {
     if (!open) return;
@@ -71,10 +84,16 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
         aria-haspopup="menu"
         aria-expanded={open}
         style={chipButtonStyle(true)}
-        title={`Account #${accountId}`}
+        title={`Portfolio ${total} · Cash ${cash} · Account #${accountId}`}
       >
-        #{accountId}{" "}
-        <span aria-hidden style={{ marginLeft: 4, color: "var(--fg-4)" }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+          <span style={{ color: "var(--fg-1)" }}>{total}</span>
+          <span aria-hidden style={{ color: "var(--fg-4)" }}>
+            /
+          </span>
+          <span style={{ color: "var(--fg-3)" }}>{cash}</span>
+        </span>
+        <span aria-hidden style={{ marginLeft: 6, color: "var(--fg-4)" }}>
           ▾
         </span>
       </button>
@@ -85,7 +104,7 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
             position: "absolute",
             top: "calc(100% + 6px)",
             right: 0,
-            minWidth: 180,
+            minWidth: 200,
             background: "var(--surface-1)",
             border: "1px solid var(--border-1)",
             borderRadius: 8,
@@ -94,6 +113,12 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
             zIndex: 60,
           }}
         >
+          <div style={{ padding: "6px 10px 8px" }}>
+            <InfoRow label="Portfolio" value={total} strong />
+            <InfoRow label="Cash" value={cash} />
+            <InfoRow label="Account" value={`#${accountId}`} />
+          </div>
+          <div style={{ height: 1, background: "var(--border-1)", margin: "4px 0" }} />
           <MenuItem
             onClick={() => {
               void navigator.clipboard?.writeText(String(accountId));
@@ -125,6 +150,51 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
           </MenuItem>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Labeled value row in the dropdown header (Portfolio / Cash / Account). */
+function InfoRow({
+  label,
+  value,
+  strong,
+}: {
+  label: string;
+  value: string;
+  strong?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "baseline",
+        justifyContent: "space-between",
+        gap: 16,
+        padding: "2px 0",
+      }}
+    >
+      <span
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          letterSpacing: "var(--track-wide)",
+          textTransform: "uppercase",
+          color: "var(--fg-4)",
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 12,
+          color: strong ? "var(--fg-1)" : "var(--fg-2)",
+          fontWeight: strong ? 600 : 400,
+        }}
+      >
+        {value}
+      </span>
     </div>
   );
 }
