@@ -11,6 +11,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { colorForOutcome } from "@/components/outcome-legend";
+import { formatCentsPrecise } from "@/lib/format/nanos";
 import { useSelectOutcome } from "@/lib/market-detail/active-outcome";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
 
@@ -123,7 +124,7 @@ export function DegenOutcomePicker({
           flexShrink: 0,
         }}
       >
-        {selected.yesCents != null ? `${selected.yesCents}¢` : "—"}
+        {selected.yesPriceNanos != null ? formatCentsPrecise(selected.yesPriceNanos) : "—"}
       </span>
       {interactive && (
         <svg

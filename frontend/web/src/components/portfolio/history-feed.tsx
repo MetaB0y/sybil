@@ -20,7 +20,7 @@ import {
   type HistoryEvent,
   type HistoryEventType,
 } from "@/lib/account/use-account-history";
-import { formatCents, formatDollars } from "@/lib/format/nanos";
+import { formatCentsPrecise, formatDollars } from "@/lib/format/nanos";
 import type { components } from "@/lib/api/schema";
 import { PortfolioToolbar } from "./portfolio-toolbar";
 import { SearchField } from "./search-field";
@@ -374,7 +374,7 @@ function priceLabel(event: HistoryEvent): React.ReactNode {
     event.priceNanos != null &&
     ["placed", "partial_fill", "filled"].includes(event.type)
   ) {
-    return formatCents(event.priceNanos);
+    return formatCentsPrecise(event.priceNanos);
   }
   return "—";
 }

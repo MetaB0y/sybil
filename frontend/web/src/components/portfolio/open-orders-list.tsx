@@ -24,7 +24,7 @@ import type { AccountFill } from "@/lib/account/use-account-fills";
 import type { AccountOrder } from "@/lib/account/use-account-orders";
 import {
   formatAge,
-  formatCents,
+  formatCentsPrecise,
   formatDollars,
   parseNanos,
 } from "@/lib/format/nanos";
@@ -351,7 +351,7 @@ function OrderRow({
       <RightCell mono>
         <FilledCell placed={placed} filled={filled} remaining={remaining} />
       </RightCell>
-      <RightCell mono>{formatCents(row.limitNanos)}</RightCell>
+      <RightCell mono>{formatCentsPrecise(row.limitNanos)}</RightCell>
       <RightCell mono>
         <AvgFillCell
           agg={{ count: row.fillCount, avgPriceNanos: row.avgPriceNanos }}
@@ -487,7 +487,7 @@ function AvgFillCell({ agg }: { agg: OrderFillAgg }) {
       }}
     >
       <span style={{ fontSize: 12, color: count > 0 ? "var(--fg-1)" : "var(--fg-3)" }}>
-        {agg.avgPriceNanos != null ? formatCents(agg.avgPriceNanos) : "—"}
+        {agg.avgPriceNanos != null ? formatCentsPrecise(agg.avgPriceNanos) : "—"}
       </span>
       <span
         style={{

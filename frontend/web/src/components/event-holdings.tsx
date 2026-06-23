@@ -32,7 +32,7 @@ import { useAccountHistory } from "@/lib/account/use-account-history";
 import { useAccountOrders } from "@/lib/account/use-account-orders";
 import { avgEntryPriceNanos } from "@/lib/account/positions";
 import { usePortfolio, type Portfolio } from "@/lib/account/use-portfolio";
-import { formatCents, formatDollars, parseNanos } from "@/lib/format/nanos";
+import { formatCentsPrecise, formatDollars, parseNanos } from "@/lib/format/nanos";
 import {
   useEventGroup,
   type EventOutcome,
@@ -695,8 +695,8 @@ function HoldingRow({ holding }: { holding: Holding }) {
       <Right mono>{quantity}</Right>
       <Right mono>
         {avgNanos == null
-          ? formatCents(markNanos)
-          : `${formatCents(avgNanos)} → ${formatCents(markNanos)}`}
+          ? formatCentsPrecise(markNanos)
+          : `${formatCentsPrecise(avgNanos)} → ${formatCentsPrecise(markNanos)}`}
       </Right>
       <Right mono>{formatDollars(valueNanos, { decimals: 2 })}</Right>
       <Right>

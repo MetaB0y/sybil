@@ -17,7 +17,7 @@ import { SidePill } from "./side-pill";
 import { avgEntryPriceNanos } from "@/lib/account/positions";
 import type { AccountFill } from "@/lib/account/use-account-fills";
 import type { Portfolio } from "@/lib/account/use-portfolio";
-import { formatCents, formatDollars, parseNanos } from "@/lib/format/nanos";
+import { formatCentsPrecise, formatDollars, parseNanos } from "@/lib/format/nanos";
 import type { components } from "@/lib/api/schema";
 
 type Market = components["schemas"]["MarketResponse"];
@@ -231,8 +231,8 @@ function PositionRow({ row }: { row: PositionRowData }) {
       </span>
       <SidePill outcome={position.outcome} />
       <RightCell mono>{position.quantity}</RightCell>
-      <RightCell mono>{avgNanos == null ? "—" : formatCents(avgNanos)}</RightCell>
-      <RightCell mono>{formatCents(markNanos)}</RightCell>
+      <RightCell mono>{avgNanos == null ? "—" : formatCentsPrecise(avgNanos)}</RightCell>
+      <RightCell mono>{formatCentsPrecise(markNanos)}</RightCell>
       <span style={{ display: "flex", justifyContent: "center" }}>
         <PositionSparkline marketId={position.market_id} outcome={position.outcome} />
       </span>

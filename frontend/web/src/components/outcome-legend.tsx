@@ -14,6 +14,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { getCategoryColor } from "@/lib/categorize";
+import { formatCentsPrecise } from "@/lib/format/nanos";
 import { useSelectOutcome } from "@/lib/market-detail/active-outcome";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
 
@@ -184,9 +185,9 @@ export function OutcomeLegend({
               >
                 {isClosed
                   ? "closed"
-                  : o.yesCents == null
+                  : o.yesPriceNanos == null
                     ? "—"
-                    : `${o.yesCents}¢`}
+                    : formatCentsPrecise(o.yesPriceNanos)}
               </span>
             </button>
             {removable && (

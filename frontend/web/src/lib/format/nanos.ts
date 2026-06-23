@@ -72,6 +72,39 @@ export const formatPercent = (v: NanosInput): string => {
 };
 
 /**
+ * Shared core for the "precise" price/odds formatters: render a 0..100
+ * magnitude (cents or percent) with up to one decimal, trimming a trailing
+ * ".0" so whole values stay clean ("12", not "12.0"). A tiny positive value
+ * that would round to "0" renders "<0.1" so a real sub-tenth price never reads
+ * as a flat zero. No >99 / <1 clamp — the actual number always shows.
+ */
+const formatTenth = (x: number): string => {
+  if (x > 0 && x < 0.05) return "<0.1";
+  const s = x.toFixed(1);
+  return s.endsWith(".0") ? s.slice(0, -2) : s;
+};
+
+/**
+ * Like `formatCents` but keeps sub-cent precision: "5.5¢", "0.3¢", "99.7¢";
+ * whole cents stay clean ("5¢"). No <1¢/>99¢ clamp. Use this for the user's
+ * own order / holding / trade price columns (and the per-outcome odds on the
+ * market page), where a fill or weighted-average entry is routinely fractional
+ * and rounding to whole cents misleads — two different prices collapse to one,
+ * and edge prices vanish into "<1¢"/">99¢". The surrounding dollar P&L is
+ * computed on raw nanos regardless; this only fixes the displayed price label.
+ */
+export const formatCentsPrecise = (v: NanosInput): string =>
+  `${formatTenth(Number(parseNanos(v)) / 1e7)}¢`;
+
+/**
+ * Percent counterpart to `formatCentsPrecise` — the same underlying number with
+ * a `%` suffix, for the browse-card odds. Edge markets read "0.3%" instead of
+ * collapsing to "<1%".
+ */
+export const formatPercentPrecise = (v: NanosInput): string =>
+  `${formatTenth(Number(parseNanos(v)) / 1e7)}%`;
+
+/**
  * Format an odds change as a signed percent (e.g. +5%, −3%, +0%) — the delta
  * counterpart to `formatPercent`. The flat case (no change, or caller passes 0
  * because there's no 24h history yet) renders "+0%" so the slot reads as "flat"

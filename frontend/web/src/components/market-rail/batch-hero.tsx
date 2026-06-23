@@ -19,7 +19,7 @@ import { Glossary } from "@/components/glossary";
 import {
   formatAge,
   formatBatchSeconds,
-  formatCents,
+  formatCentsPrecise,
   formatCompactDollars,
   formatInt,
   parseNanos,
@@ -151,7 +151,7 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
           }
           secondary={`for ${outcome.shortLabel}`}
           value={
-            indicativeYesNanos == null ? "—" : formatCents(indicativeYesNanos)
+            indicativeYesNanos == null ? "—" : formatCentsPrecise(indicativeYesNanos)
           }
           valueColor="var(--yes)"
         />

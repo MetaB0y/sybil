@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useInViewport } from "@/lib/hooks/use-in-viewport";
 import {
-  formatPercent,
+  formatPercentPrecise,
   formatPercentDelta,
   formatCompactDollars,
 } from "@/lib/format/nanos";
@@ -41,9 +41,9 @@ export function BinaryCard({ market, price }: Props) {
     inView
   );
 
-  // Prices are odds → render as % (number is unchanged; see formatPercent).
-  const yesCents = price ? formatPercent(price.yes) : "—";
-  const noCents = price ? formatPercent(price.no) : "—";
+  // Prices are odds → render as % (number is unchanged; see formatPercentPrecise).
+  const yesCents = price ? formatPercentPrecise(price.yes) : "—";
+  const noCents = price ? formatPercentPrecise(price.no) : "—";
 
   return (
     <Link

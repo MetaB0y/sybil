@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import Link from "next/link";
 import { useInViewport } from "@/lib/hooks/use-in-viewport";
 import {
-  formatPercent,
+  formatPercentPrecise,
   formatPercentDelta,
   formatCompactDollars,
 } from "@/lib/format/nanos";
@@ -307,7 +307,7 @@ function FeaturedOutcome({
       </div>
     );
   }
-  const cents = price ? formatPercent(price.yes) : "—";
+  const cents = price ? formatPercentPrecise(price.yes) : "—";
   const label = getLabel(leader);
   const leaderVolNanos = leader.volume_nanos ? BigInt(leader.volume_nanos) : 0n;
   const leaderVol =
@@ -462,7 +462,7 @@ function SecondaryRow({
   // whole card is closed the <article> already dims at 0.5 — self-dimming here
   // would compound to 0.25.
   const rowClosed = market.closed === true && !cardClosed;
-  const cents = price ? formatPercent(price.yes) : "—";
+  const cents = price ? formatPercentPrecise(price.yes) : "—";
   // Same logic as the leader: real 24h delta from price history, lazy-loaded
   // when the card scrolls into view.
   const { delta24Cents } = useCardHistory(market.market_id, inView);

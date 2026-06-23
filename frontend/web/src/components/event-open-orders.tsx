@@ -21,7 +21,7 @@ import { useMemo, useState } from "react";
 import { cancelSignedOrder } from "@/lib/account/orders";
 import type { AccountFill } from "@/lib/account/use-account-fills";
 import type { AccountOrder } from "@/lib/account/use-account-orders";
-import { formatAge, formatCents, formatDollars, parseNanos } from "@/lib/format/nanos";
+import { formatAge, formatCentsPrecise, formatDollars, parseNanos } from "@/lib/format/nanos";
 import { selectLatestBlock, useStore } from "@/lib/store";
 import { Pager, usePaged } from "@/components/event-list-pager";
 import { SidePill } from "@/components/portfolio/side-pill";
@@ -331,7 +331,7 @@ function OrderRow({
           <span title={`${filled} filled of ${placed} placed`}>{`${placed} / ${filled}`}</span>
         )}
       </Right>
-      <Right mono>{formatCents(limitNanos)}</Right>
+      <Right mono>{formatCentsPrecise(limitNanos)}</Right>
       <Right mono>
         <AvgFillCell priceNanos={avgPriceNanos} count={fillCount} />
       </Right>
@@ -396,7 +396,7 @@ function AvgFillCell({ priceNanos, count }: { priceNanos: bigint | null; count: 
       }}
     >
       <span style={{ fontSize: 12, color: count > 0 ? "var(--fg-1)" : "var(--fg-3)" }}>
-        {priceNanos != null ? formatCents(priceNanos) : "—"}
+        {priceNanos != null ? formatCentsPrecise(priceNanos) : "—"}
       </span>
       <span
         style={{

@@ -72,10 +72,9 @@ export function DegenRail({
     const last = pricePoints?.[pricePoints.length - 1];
     const histYes = last ? parseNanos(last.yes_price_nanos) : null;
     const histNo = last ? parseNanos(last.no_price_nanos) : null;
-    const clearYes =
-      selected.yesCents == null
-        ? null
-        : BigInt(Math.round(selected.yesCents * 1e7));
+    // Precise YES price in nanos (not the rounded `yesCents`) so the fallback
+    // mark matches the real clearing price to sub-cent precision.
+    const clearYes = selected.yesPriceNanos;
     const clearNo = clearYes == null ? null : ONE_DOLLAR_NANOS - clearYes;
     return side === "YES"
       ? resolveMarkNanos(histYes, clearYes)

@@ -35,7 +35,7 @@
 
 import { useMemo, useState } from "react";
 import type { HistoryEvent } from "@/lib/account/use-account-history";
-import { formatCents, formatDollars } from "@/lib/format/nanos";
+import { formatCentsPrecise, formatDollars } from "@/lib/format/nanos";
 import { Pager, usePaged } from "@/components/event-list-pager";
 import { SidePill } from "@/components/portfolio/side-pill";
 import { Glossary } from "@/components/glossary";
@@ -418,8 +418,8 @@ function PriceCell({
   requestedNanos: bigint | null;
 }) {
   if (settledNanos == null) return <>—</>;
-  const settled = formatCents(settledNanos);
-  const requested = requestedNanos != null ? formatCents(requestedNanos) : null;
+  const settled = formatCentsPrecise(settledNanos);
+  const requested = requestedNanos != null ? formatCentsPrecise(requestedNanos) : null;
   if (requested == null || requested === settled) return <>{settled}</>;
   return (
     <span style={{ display: "inline-flex", gap: 4, justifyContent: "flex-end" }}>

@@ -29,7 +29,7 @@ import { MarketThumb } from "@/components/market-thumb";
 import { Pager, usePaged, PORTFOLIO_PAGE_SIZE } from "@/components/event-list-pager";
 import { Glossary } from "@/components/glossary";
 import type { HistoryEvent } from "@/lib/account/use-account-history";
-import { formatCents, formatDollars } from "@/lib/format/nanos";
+import { formatCentsPrecise, formatDollars } from "@/lib/format/nanos";
 import type { components } from "@/lib/api/schema";
 import { PortfolioToolbar } from "./portfolio-toolbar";
 import { SearchField } from "./search-field";
@@ -349,8 +349,8 @@ function PriceCell({
   requestedNanos: bigint | null;
 }) {
   if (settledNanos == null) return <>—</>;
-  const settled = formatCents(settledNanos);
-  const requested = requestedNanos != null ? formatCents(requestedNanos) : null;
+  const settled = formatCentsPrecise(settledNanos);
+  const requested = requestedNanos != null ? formatCentsPrecise(requestedNanos) : null;
   if (requested == null || requested === settled) return <>{settled}</>;
   return (
     <span style={{ display: "inline-flex", gap: 4, justifyContent: "flex-end" }}>
