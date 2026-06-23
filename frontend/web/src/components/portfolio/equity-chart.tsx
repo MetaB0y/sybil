@@ -142,18 +142,6 @@ export function EquityChart({ curve, headerRight }: Props) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10, height: "100%", minHeight: 0 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 10,
-            color: "var(--fg-3)",
-            letterSpacing: "var(--track-wide)",
-            textTransform: "uppercase",
-            whiteSpace: "nowrap",
-          }}
-        >
-          Equity curve
-        </span>
         {headerRight}
       </div>
       <div

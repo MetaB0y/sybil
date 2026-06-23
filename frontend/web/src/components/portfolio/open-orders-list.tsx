@@ -32,6 +32,8 @@ import { selectLatestBlock, useStore } from "@/lib/store";
 import type { components } from "@/lib/api/schema";
 import { MarketThumb } from "@/components/market-thumb";
 import { Pager, usePaged, PORTFOLIO_PAGE_SIZE } from "@/components/event-list-pager";
+import { PortfolioToolbar } from "./portfolio-toolbar";
+import { SearchField } from "./search-field";
 import { SidePill } from "./side-pill";
 import { TifCell } from "./tif-cell";
 
@@ -127,6 +129,7 @@ function compareBy(a: OpenRow, b: OpenRow, key: SortKey): number {
 }
 
 interface Props {
+  tabs: React.ReactNode;
   accountId: number;
   publicKeyHex: string;
   orders: AccountOrder[];
@@ -135,6 +138,7 @@ interface Props {
 }
 
 export function OpenOrdersList({
+  tabs,
   accountId,
   publicKeyHex,
   orders,
@@ -142,6 +146,7 @@ export function OpenOrdersList({
   marketsById,
 }: Props) {
   const [sort, setSort] = useState<Sort | null>(null);
+  const [query, setQuery] = useState("");
   const nowMs = useStore(selectLatestBlock)?.timestamp_ms ?? null;
 
   // Aggregate the account's visible fills by order_id → count + WAC fill price.
@@ -199,44 +204,65 @@ export function OpenOrdersList({
     return [...decorated].sort((a, b) => compareBy(a, b, sort.key) * factor);
   }, [orders, fillsByOrder, marketsById, sort]);
 
-  const paged = usePaged(rows, PORTFOLIO_PAGE_SIZE);
+  const visibleRows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) => r.label.toLowerCase().includes(q));
+  }, [rows, query]);
+
+  const paged = usePaged(visibleRows, PORTFOLIO_PAGE_SIZE);
 
   const onSort = (key: SortKey) => {
     setSort((s) => nextSort(s, key));
     paged.setPage(0);
   };
 
-  if (orders.length === 0) {
-    return <Empty>No open orders.</Empty>;
-  }
+  const onSearch = (v: string) => {
+    setQuery(v);
+    paged.setPage(0);
+  };
+
+  const isEmpty = orders.length === 0;
   return (
-    <div
-      style={{
-        background: "var(--surface-1)",
-        border: "1px solid var(--border-1)",
-        borderRadius: 6,
-        overflow: "hidden",
-      }}
-    >
-      <div style={rowGrid("var(--fg-4)")}>
-        <span />
-        {COLUMNS.map((col) => (
-          <SortHeader key={col.key} col={col} sort={sort} onSort={onSort} />
-        ))}
-        <span />
-      </div>
-      {paged.visible.map((r) => (
-        <OrderRow
-          key={r.order.order_id}
-          row={r}
-          nowMs={nowMs}
-          accountId={accountId}
-          publicKeyHex={publicKeyHex}
-        />
-      ))}
-      <div style={{ padding: "0 14px" }}>
-        <Pager paged={paged} />
-      </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+      <PortfolioToolbar
+        tabs={tabs}
+        search={!isEmpty && <SearchField value={query} onChange={onSearch} />}
+      />
+      {isEmpty ? (
+        <Empty>No open orders.</Empty>
+      ) : visibleRows.length === 0 ? (
+        <Empty>No open orders match “{query}”.</Empty>
+      ) : (
+        <div
+          style={{
+            background: "var(--surface-1)",
+            border: "1px solid var(--border-1)",
+            borderRadius: 6,
+            overflow: "hidden",
+          }}
+        >
+          <div style={rowGrid("var(--fg-4)")}>
+            <span />
+            {COLUMNS.map((col) => (
+              <SortHeader key={col.key} col={col} sort={sort} onSort={onSort} />
+            ))}
+            <span />
+          </div>
+          {paged.visible.map((r) => (
+            <OrderRow
+              key={r.order.order_id}
+              row={r}
+              nowMs={nowMs}
+              accountId={accountId}
+              publicKeyHex={publicKeyHex}
+            />
+          ))}
+          <div style={{ padding: "0 14px" }}>
+            <Pager paged={paged} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

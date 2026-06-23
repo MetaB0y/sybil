@@ -11,7 +11,7 @@
  */
 
 import { useMemo, useState } from "react";
-import { ClosedOrdersList } from "@/components/portfolio/closed-orders-list";
+import { TradesList } from "@/components/portfolio/trades-list";
 import { EquityChart } from "@/components/portfolio/equity-chart";
 import { HistoryFeed } from "@/components/portfolio/history-feed";
 import { IdentityHeader } from "@/components/portfolio/identity-header";
@@ -119,31 +119,28 @@ function Connected({
   const tradeCount = fillsData.length;
   const tradeCountCapped = tradeCount >= FILLS_PAGE;
 
-  // Closed orders are reconstructed from the history feed inside
-  // ClosedOrdersList (one row per order_id with a terminal event). The count
-  // below mirrors its "distinct closed order" notion for the tab badge.
-  const closedCount = useMemo(() => {
-    const ids = new Set<number>();
+  // Trades are reconstructed from the history feed inside TradesList (one row
+  // per fill / partial fill). The count below mirrors that for the tab badge.
+  const tradesCount = useMemo(() => {
+    let n = 0;
     for (const e of history.events) {
-      if (
-        e.orderId != null &&
-        (e.type === "filled" ||
-          e.type === "cancelled" ||
-          e.type === "expired" ||
-          e.type === "rejected")
-      ) {
-        ids.add(e.orderId);
-      }
+      if (e.type === "filled" || e.type === "partial_fill") n += 1;
     }
-    return ids.size;
+    return n;
   }, [history.events]);
 
   const counts: Record<PortfolioTab, number> = {
     positions: portfolioData?.positions.length ?? 0,
     orders: ordersData.length,
-    closed: closedCount,
+    trades: tradesCount,
     history: history.events.length,
   };
+
+  // The tab strip is rendered inside the active list's toolbar so tabs +
+  // search + filters share one row (see PortfolioToolbar).
+  const tabsStrip = (
+    <PortfolioTabs value={tab} onChange={setTab} counts={counts} />
+  );
 
   return (
     <>
@@ -177,10 +174,9 @@ function Connected({
         />
       </section>
 
-      <PortfolioTabs value={tab} onChange={setTab} counts={counts} />
-
       {tab === "positions" && (
         <PositionsList
+          tabs={tabsStrip}
           positions={portfolioData?.positions ?? []}
           fills={fillsData}
           marketsById={marketsById}
@@ -188,6 +184,7 @@ function Connected({
       )}
       {tab === "orders" && (
         <OpenOrdersList
+          tabs={tabsStrip}
           accountId={accountId}
           publicKeyHex={publicKeyHex}
           orders={ordersData}
@@ -195,11 +192,16 @@ function Connected({
           marketsById={marketsById}
         />
       )}
-      {tab === "closed" && (
-        <ClosedOrdersList events={history.events} marketsById={marketsById} />
+      {tab === "trades" && (
+        <TradesList
+          tabs={tabsStrip}
+          events={history.events}
+          marketsById={marketsById}
+        />
       )}
       {tab === "history" && (
         <HistoryFeed
+          tabs={tabsStrip}
           events={history.events}
           marketsById={marketsById}
           isMock={history.isMock}

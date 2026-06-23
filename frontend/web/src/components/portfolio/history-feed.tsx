@@ -22,11 +22,14 @@ import {
 } from "@/lib/account/use-account-history";
 import { formatCents, formatDollars } from "@/lib/format/nanos";
 import type { components } from "@/lib/api/schema";
+import { PortfolioToolbar } from "./portfolio-toolbar";
+import { SearchField } from "./search-field";
 import { SidePill } from "./side-pill";
 
 type Market = components["schemas"]["MarketResponse"];
 
 interface Props {
+  tabs: React.ReactNode;
   events: HistoryEvent[];
   marketsById: Map<number, Market>;
   isMock?: boolean;
@@ -57,6 +60,7 @@ type SortKey =
   | "time"
   | "type"
   | "market"
+  | "action"
   | "side"
   | "qty"
   | "price"
@@ -69,6 +73,7 @@ const COLUMNS: { key: SortKey; label: string; align: "left" | "right" }[] = [
   { key: "time", label: "Time", align: "left" },
   { key: "type", label: "Type", align: "left" },
   { key: "market", label: "Market", align: "left" },
+  { key: "action", label: "Action", align: "left" },
   { key: "side", label: "Side", align: "left" },
   { key: "qty", label: "Qty", align: "right" },
   { key: "price", label: "Price", align: "right" },
@@ -104,6 +109,8 @@ function compareBy(a: HistoryRow, b: HistoryRow, key: SortKey): number {
       return ea.type.localeCompare(eb.type);
     case "market":
       return a.marketName.localeCompare(b.marketName);
+    case "action":
+      return (ea.side ?? "").localeCompare(eb.side ?? "");
     case "side":
       return (ea.outcome ?? "").localeCompare(eb.outcome ?? "");
     case "qty":
@@ -123,11 +130,12 @@ function compareBy(a: HistoryRow, b: HistoryRow, key: SortKey): number {
   }
 }
 
-export function HistoryFeed({ events, marketsById, isMock }: Props) {
+export function HistoryFeed({ tabs, events, marketsById, isMock }: Props) {
   const [category, setCategory] = useState<HistoryCategory>("all");
   const [type, setType] = useState<HistoryEventType | "all">("all");
   const [marketId, setMarketId] = useState<number | "all">("all");
   const [side, setSide] = useState<"BUY" | "SELL" | "all">("all");
+  const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort | null>(null);
 
   // Markets present in the feed, for the market dropdown.
@@ -144,6 +152,7 @@ export function HistoryFeed({ events, marketsById, isMock }: Props) {
   }, [events, marketsById]);
 
   const rows = useMemo<HistoryRow[]>(() => {
+    const q = query.trim().toLowerCase();
     const filtered = events.filter((e) => {
       if (category !== "all" && CATEGORY_OF[e.type] !== category) return false;
       if (type !== "all" && e.type !== type) return false;
@@ -151,19 +160,22 @@ export function HistoryFeed({ events, marketsById, isMock }: Props) {
       if (side !== "all" && e.side !== side) return false;
       return true;
     });
-    const decorated = filtered.map((e) => ({
+    let decorated = filtered.map((e) => ({
       event: e,
       marketName:
         e.marketId != null
           ? marketsById.get(e.marketId)?.name ?? `#${e.marketId}`
           : "",
     }));
+    if (q) {
+      decorated = decorated.filter((r) => r.marketName.toLowerCase().includes(q));
+    }
     if (!sort) {
       return decorated.sort((a, b) => b.event.timestampMs - a.event.timestampMs);
     }
     const factor = sort.dir === "asc" ? 1 : -1;
     return decorated.sort((a, b) => compareBy(a, b, sort.key) * factor);
-  }, [events, marketsById, category, type, marketId, side, sort]);
+  }, [events, marketsById, category, type, marketId, side, query, sort]);
 
   const paged = usePaged(rows, PORTFOLIO_PAGE_SIZE);
 
@@ -172,21 +184,27 @@ export function HistoryFeed({ events, marketsById, isMock }: Props) {
     paged.setPage(0);
   };
 
+  const noData = events.length === 0;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-      {/* Filters — right-aligned: category chips + type / market / side
-          dropdowns. The mock pill (when present) pins to the far left. */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: 10,
-          justifyContent: "flex-end",
-        }}
+      {/* Tabs + controls share one row. Controls (search + category chips +
+          type / market / side dropdowns) only show once there's history. */}
+      <PortfolioToolbar
+        tabs={tabs}
+        search={
+          !noData && (
+            <SearchField
+              value={query}
+              onChange={(v) => {
+                setQuery(v);
+                paged.setPage(0);
+              }}
+            />
+          )
+        }
       >
         {isMock && (
-          <span style={{ marginRight: "auto" }}>
+          <span>
             <MockValue
               hint="history feed is mocked; pending backend /events endpoint (per-account event log)"
               variant="pill"
@@ -195,62 +213,64 @@ export function HistoryFeed({ events, marketsById, isMock }: Props) {
             </MockValue>
           </span>
         )}
-        <div style={{ display: "flex", gap: 6 }}>
-          {CHIPS.map((c) => (
-            <Chip
-              key={c.id}
-              label={c.label}
-              active={category === c.id}
-              onClick={() => {
-                setCategory(c.id);
+        {!noData && (
+          <div style={{ display: "flex", gap: 6 }}>
+            {CHIPS.map((c) => (
+              <Chip
+                key={c.id}
+                label={c.label}
+                active={category === c.id}
+                onClick={() => {
+                  setCategory(c.id);
+                  paged.setPage(0);
+                }}
+              />
+            ))}
+          </div>
+        )}
+        {!noData && (
+          <div style={{ display: "flex", gap: 8 }}>
+            <FilterDropdown
+              ariaLabel="Filter by event type"
+              value={String(type)}
+              onChange={(v) => {
+                setType(v as HistoryEventType | "all");
                 paged.setPage(0);
               }}
+              options={TYPE_OPTIONS.map((o) => ({ value: String(o.value), label: o.label }))}
             />
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <FilterDropdown
-            ariaLabel="Filter by event type"
-            value={String(type)}
-            onChange={(v) => {
-              setType(v as HistoryEventType | "all");
-              paged.setPage(0);
-            }}
-            options={TYPE_OPTIONS.map((o) => ({ value: String(o.value), label: o.label }))}
-          />
-          <FilterDropdown
-            ariaLabel="Filter by market"
-            value={String(marketId)}
-            onChange={(v) => {
-              setMarketId(v === "all" ? "all" : Number(v));
-              paged.setPage(0);
-            }}
-            options={[
-              { value: "all", label: "All markets" },
-              ...marketOptions.map((m) => ({ value: String(m.id), label: m.name })),
-            ]}
-          />
-          <FilterDropdown
-            ariaLabel="Filter by side"
-            value={side}
-            onChange={(v) => {
-              setSide(v as "BUY" | "SELL" | "all");
-              paged.setPage(0);
-            }}
-            options={[
-              { value: "all", label: "All sides" },
-              { value: "BUY", label: "Buy" },
-              { value: "SELL", label: "Sell" },
-            ]}
-          />
-        </div>
-      </div>
+            <FilterDropdown
+              ariaLabel="Filter by market"
+              value={String(marketId)}
+              onChange={(v) => {
+                setMarketId(v === "all" ? "all" : Number(v));
+                paged.setPage(0);
+              }}
+              options={[
+                { value: "all", label: "All markets" },
+                ...marketOptions.map((m) => ({ value: String(m.id), label: m.name })),
+              ]}
+            />
+            <FilterDropdown
+              ariaLabel="Filter by side"
+              value={side}
+              onChange={(v) => {
+                setSide(v as "BUY" | "SELL" | "all");
+                paged.setPage(0);
+              }}
+              options={[
+                { value: "all", label: "All sides" },
+                { value: "BUY", label: "Buy" },
+                { value: "SELL", label: "Sell" },
+              ]}
+            />
+          </div>
+        )}
+      </PortfolioToolbar>
 
       {rows.length === 0 ? (
         <Empty>
-          {events.length === 0
-            ? "No history yet."
-            : "No events match these filters."}
+          {noData ? "No history yet." : "No events match these filters."}
         </Empty>
       ) : (
         <div
@@ -299,6 +319,7 @@ function EventRow({ row }: { row: HistoryRow }) {
       >
         {marketName || "—"}
       </span>
+      <ActionCell side={event.side} />
       <span>{event.outcome ? <SidePill outcome={event.outcome} /> : <Muted>—</Muted>}</span>
       <RightCell mono>{event.qty ?? "—"}</RightCell>
       <RightCell mono>{priceLabel(event)}</RightCell>
@@ -327,6 +348,25 @@ function EventRow({ row }: { row: HistoryRow }) {
     );
   }
   return <div style={style}>{body}</div>;
+}
+
+/** Buy/sell action — accent for BUY, red for SELL, "—" for non-order events. */
+function ActionCell({ side }: { side?: "BUY" | "SELL" | undefined }) {
+  const isBuy = side === "BUY";
+  const isSell = side === "SELL";
+  return (
+    <span
+      style={{
+        fontFamily: "var(--font-mono)",
+        fontSize: 11,
+        fontWeight: 600,
+        letterSpacing: "var(--track-wide)",
+        color: isBuy ? "var(--accent)" : isSell ? "var(--no)" : "var(--fg-4)",
+      }}
+    >
+      {isBuy ? "BUY" : isSell ? "SELL" : "—"}
+    </span>
+  );
 }
 
 function priceLabel(event: HistoryEvent): React.ReactNode {
@@ -710,7 +750,7 @@ function rowGrid(color: string): React.CSSProperties {
   return {
     display: "grid",
     gridTemplateColumns:
-      "64px 84px minmax(0, 1fr) 44px 50px 56px 92px 84px",
+      "64px 84px minmax(0, 1fr) 52px 44px 50px 56px 92px 84px",
     gap: 10,
     alignItems: "center",
     padding: "9px 14px",

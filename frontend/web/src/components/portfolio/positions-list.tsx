@@ -10,7 +10,9 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { MarketThumb } from "@/components/market-thumb";
 import { Pager, usePaged, PORTFOLIO_PAGE_SIZE } from "@/components/event-list-pager";
+import { PortfolioToolbar } from "./portfolio-toolbar";
 import { PositionSparkline } from "./position-sparkline";
+import { SearchField } from "./search-field";
 import { SidePill } from "./side-pill";
 import { avgEntryPriceNanos } from "@/lib/account/positions";
 import type { AccountFill } from "@/lib/account/use-account-fills";
@@ -22,6 +24,7 @@ type Market = components["schemas"]["MarketResponse"];
 type Position = Portfolio["positions"][number];
 
 interface Props {
+  tabs: React.ReactNode;
   positions: Position[];
   fills: AccountFill[];
   marketsById: Map<number, Market>;
@@ -95,8 +98,9 @@ function compareBy(a: PositionRowData, b: PositionRowData, key: SortKey): number
   }
 }
 
-export function PositionsList({ positions, fills, marketsById }: Props) {
+export function PositionsList({ tabs, positions, fills, marketsById }: Props) {
   const [sort, setSort] = useState<Sort | null>(null);
+  const [query, setQuery] = useState("");
 
   const rows = useMemo<PositionRowData[]>(() => {
     const decorated = positions.map((p) => {
@@ -129,43 +133,64 @@ export function PositionsList({ positions, fills, marketsById }: Props) {
     return [...decorated].sort((a, b) => compareBy(a, b, sort.key) * factor);
   }, [positions, fills, marketsById, sort]);
 
-  const paged = usePaged(rows, PORTFOLIO_PAGE_SIZE);
+  const visibleRows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) => r.label.toLowerCase().includes(q));
+  }, [rows, query]);
+
+  const paged = usePaged(visibleRows, PORTFOLIO_PAGE_SIZE);
 
   const onSort = (key: SortKey) => {
     setSort((s) => nextSort(s, key));
     paged.setPage(0);
   };
 
-  if (positions.length === 0) {
-    return <Empty>No open positions.</Empty>;
-  }
+  const onSearch = (v: string) => {
+    setQuery(v);
+    paged.setPage(0);
+  };
+
+  const isEmpty = positions.length === 0;
   return (
-    <div
-      style={{
-        background: "var(--surface-1)",
-        border: "1px solid var(--border-1)",
-        borderRadius: 6,
-        overflow: "hidden",
-      }}
-    >
-      <div style={rowGrid("var(--fg-4)")}>
-        <span />
-        <SortHeader col="market" label="Market" align="left" sort={sort} onSort={onSort} />
-        <SortHeader col="side" label="Side" align="left" sort={sort} onSort={onSort} />
-        <SortHeader col="shares" label="Shares" align="right" sort={sort} onSort={onSort} />
-        <SortHeader col="entry" label="Entry" align="right" sort={sort} onSort={onSort} />
-        <SortHeader col="mark" label="Mark" align="right" sort={sort} onSort={onSort} />
-        <span style={{ textAlign: "center" }}>7d</span>
-        <SortHeader col="value" label="Value" align="right" sort={sort} onSort={onSort} />
-        <SortHeader col="pnl" label="P&amp;L" align="right" sort={sort} onSort={onSort} />
-        <SortHeader col="resolves" label="Resolves" align="right" sort={sort} onSort={onSort} />
-      </div>
-      {paged.visible.map((r) => (
-        <PositionRow key={`${r.position.market_id}:${r.position.outcome}`} row={r} />
-      ))}
-      <div style={{ padding: "0 14px" }}>
-        <Pager paged={paged} />
-      </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+      <PortfolioToolbar
+        tabs={tabs}
+        search={!isEmpty && <SearchField value={query} onChange={onSearch} />}
+      />
+      {isEmpty ? (
+        <Empty>No open positions.</Empty>
+      ) : visibleRows.length === 0 ? (
+        <Empty>No positions match “{query}”.</Empty>
+      ) : (
+        <div
+          style={{
+            background: "var(--surface-1)",
+            border: "1px solid var(--border-1)",
+            borderRadius: 6,
+            overflow: "hidden",
+          }}
+        >
+          <div style={rowGrid("var(--fg-4)")}>
+            <span />
+            <SortHeader col="market" label="Market" align="left" sort={sort} onSort={onSort} />
+            <SortHeader col="side" label="Side" align="left" sort={sort} onSort={onSort} />
+            <SortHeader col="shares" label="Shares" align="right" sort={sort} onSort={onSort} />
+            <SortHeader col="entry" label="Entry" align="right" sort={sort} onSort={onSort} />
+            <SortHeader col="mark" label="Mark" align="right" sort={sort} onSort={onSort} />
+            <span style={{ textAlign: "center" }}>7d</span>
+            <SortHeader col="value" label="Value" align="right" sort={sort} onSort={onSort} />
+            <SortHeader col="pnl" label="P&amp;L" align="right" sort={sort} onSort={onSort} />
+            <SortHeader col="resolves" label="Resolves" align="right" sort={sort} onSort={onSort} />
+          </div>
+          {paged.visible.map((r) => (
+            <PositionRow key={`${r.position.market_id}:${r.position.outcome}`} row={r} />
+          ))}
+          <div style={{ padding: "0 14px" }}>
+            <Pager paged={paged} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
