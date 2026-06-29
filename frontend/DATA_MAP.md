@@ -193,6 +193,37 @@ the redb table is commented out), the **block-stream ring** (🟣 — only the l
 ~100 blocks are queryable, lost on restart though chain height survives), and
 **raw Polymarket event JSON** (🔴 — the snapshot dir is wiped on every boot).
 
+### List 1 — Data that must be persisted (action list)
+
+Datapoints we've **decided must survive restart and not be lost**, but currently
+aren't. Two backend fixes cover the whole list:
+
+1. **Price history** — re-enable the `PRICE_HISTORY` redb table: write the
+   per-block `PricePoint` delta in `save_block`, load it on restore (or serve
+   store-first like equity/fills).
+2. **Block history** — persist sealed batches to a new redb `BLOCKS` table and
+   serve `/v1/blocks*` from it (full per-batch detail + a retention knob).
+   *Product decision: users should be able to browse all past batches, so the
+   Activity page becomes a real block explorer and every batch-derived panel
+   survives restart.*
+
+| Page | Data | Current issue | Backend location |
+|---|---|---|---|
+| Market detail (`/m/[id]`) | Price chart (incl. "ALL" range) | Lost on restart + trimmed to 2000 pts/market | `PriceTracker.price_history` (in-RAM); redb `PRICE_HISTORY` commented out — `store.rs:316` |
+| Home (`/`) | Card price sparkline + 24h delta | Lost on restart + trimmed to 2000 pts/market | same (`PriceTracker.price_history`) |
+| Portfolio (`/portfolio`) | Position 7d sparkline | Lost on restart + trimmed to 2000 pts/market | same (`PriceTracker.price_history`) |
+| Activity (`/activity`) | Batches table + per-batch detail | Lost on restart + can't browse older than ~100 batches | in-RAM `block_history` ring; redb keeps latest header only |
+| Market detail dev (`/m-dev/[id]`) | Recent batches panel | Lost on restart + only last ~100 batches | same (`block_history` ring) |
+| Dev › Blocks | Chain blocks list + block detail | Lost on restart + only last ~100 batches | same (`block_history` ring) |
+| Dev › Overview | Recent volume/fills/orders window + bar chart | Lost on restart + only last ~100 batches | same (`block_history` ring) |
+| Dev › Aggregates | Latest-block sidecar + recent cancellations | Lost on restart + only last ~100 batches | same (`block_history` ring) |
+| Home (`/`) | Clearing ticker strip | Lost on restart (quiet ~16 min until refill) | same (`block_history` ring) |
+
+> **List 2 (intended short-lived, no change needed):** raw Polymarket event JSON
+> (re-fetched by the mirror in ~2 min), the open-batch indicative snapshot (live
+> in-flight batch), and the rolling 24h volume / liquidity windows (trimmed by
+> design, and they already persist across restart). _Full List 2 table TBD._
+
 ### Account-scoped (your portfolio data)
 
 | Datapoint | Endpoint(s) | Status | What survives / what's lost (exact caps) |
