@@ -11,7 +11,7 @@
  */
 
 import { useMemo, useState } from "react";
-import { TradesList } from "@/components/portfolio/trades-list";
+import { TradesList, tradeOrderCount } from "@/components/portfolio/trades-list";
 import { EquityChart } from "@/components/portfolio/equity-chart";
 import { HistoryFeed } from "@/components/portfolio/history-feed";
 import { IdentityHeader } from "@/components/portfolio/identity-header";
@@ -120,14 +120,12 @@ function Connected({
   const tradeCountCapped = tradeCount >= FILLS_PAGE;
 
   // Trades are reconstructed from the history feed inside TradesList (one row
-  // per fill / partial fill). The count below mirrors that for the tab badge.
-  const tradesCount = useMemo(() => {
-    let n = 0;
-    for (const e of history.events) {
-      if (e.type === "filled" || e.type === "partial_fill") n += 1;
-    }
-    return n;
-  }, [history.events]);
+  // per executed order — fills grouped by order_id). The badge mirrors that via
+  // the shared counter so it can't drift from the list.
+  const tradesCount = useMemo(
+    () => tradeOrderCount(history.events),
+    [history.events],
+  );
 
   const counts: Record<PortfolioTab, number> = {
     positions: portfolioData?.positions.length ?? 0,

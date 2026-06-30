@@ -1,26 +1,33 @@
 "use client";
 
 /**
- * Trades tab — every execution the account took, one row per fill. Built from
- * the account history feed: we keep `filled` and `partial_fill` events (each is
- * a discrete on-block execution with its own qty/price increment) and drop the
- * order-lifecycle noise (placed / cancelled / expired / rejected). So a user
- * sees exactly the trades that happened, partial fills included.
+ * Trades tab — one row per ORDER that executed (not per fill). Built from the
+ * account history feed: we group `filled` + `partial_fill` events by `order_id`
+ * and aggregate them, dropping the order-lifecycle noise (placed / cancelled /
+ * expired / rejected). A single order can fill across hundreds of batches (the
+ * matching engine nibbles a resting limit order a few shares per block), so one
+ * bet is one row here — users think in orders, not partial executions.
  *
  * Shares the design language of `OpenOrdersList` / the history feed (card,
  * thumbnail, click-to-sort headers, `Link` rows, paginated footer). Grid rows:
  *   thumb · market · action · side · qty · price · welfare · value · P&L · time
  *
- * Per-row derivations:
- *   - qty     = the fill event's qty (this execution's size).
- *   - price   = the fill price; the order's limit (requested) price shows
- *               struck-through before it when they differ.
- *   - welfare = (limit − fill) × qty, signed by side (buyer below limit /
+ * Per-row (per-order) derivations, summed over the order's fills:
+ *   - qty     = total filled shares across all fills.
+ *   - price   = volume-weighted avg execution price (notional ÷ total qty); the
+ *               order's limit (requested) price shows struck-through before it
+ *               when they differ. The limit comes from the `placed` event.
+ *   - welfare = Σ (limit − fill) × qty, signed by side (buyer below limit /
  *               seller above = positive surplus). Null without a known limit.
- *               The limit is joined from the order's `placed` event.
- *   - value   = qty × price (notional $).
- *   - P&L     = the fill event's realized PnL — SELL fills only.
- * Default order is newest-first by fill time; every column is click-to-sort.
+ *   - value   = Σ qty × price (total notional $).
+ *   - P&L     = Σ realized PnL across the order's SELL fills (buys show "—").
+ *   - time    = the order's most recent fill.
+ * Default order is newest-first by last fill; every column is click-to-sort.
+ *
+ * Toolbar: a market filter (shared `FilterDropdown`, same as History). Every row
+ * links to its market; orders with more than one fill also get a "show partial
+ * fills" button that expands their individual partial fills inline, paginated
+ * (`FILLS_SUBPAGE`) since one order can fill across hundreds of batches.
  */
 
 import Link from "next/link";
@@ -31,11 +38,15 @@ import { Glossary } from "@/components/glossary";
 import type { HistoryEvent } from "@/lib/account/use-account-history";
 import { formatCentsPrecise, formatDollars } from "@/lib/format/nanos";
 import type { components } from "@/lib/api/schema";
+import { FilterDropdown } from "./filter-dropdown";
 import { PortfolioToolbar } from "./portfolio-toolbar";
 import { SearchField } from "./search-field";
 import { SidePill } from "./side-pill";
 
 type Market = components["schemas"]["MarketResponse"];
+
+/** Page size for an expanded order's partial-fills sub-list. */
+const FILLS_SUBPAGE = 12;
 
 /** A single fill with every sortable value derived once. */
 interface TradeRowData {
@@ -52,6 +63,46 @@ interface TradeRowData {
   valueNanos: bigint | null;
   realizedPnlNanos: bigint | null;
   welfareNanos: bigint | null;
+  /** This order's individual partial/full fills, newest-first (for expansion). */
+  fills: HistoryEvent[];
+}
+
+/** Mutable accumulator while folding an order's fills into one row. */
+interface TradeAgg {
+  orderId: number | null;
+  marketId: number;
+  side?: "BUY" | "SELL";
+  outcome?: "YES" | "NO";
+  totalQty: number;
+  hasQty: boolean;
+  valueNanos: bigint; // Σ qty × price (notional) + VWAP numerator
+  hasValue: boolean;
+  welfareNanos: bigint;
+  hasWelfare: boolean;
+  realizedPnlNanos: bigint;
+  hasPnl: boolean;
+  lastAtMs: number;
+  fills: HistoryEvent[];
+}
+
+/**
+ * Group key for collapsing fills into one trade row: by order when known, else
+ * the fill's own event id (so an order-less fill still shows as its own row).
+ */
+function tradeGroupKey(e: HistoryEvent): string {
+  return e.orderId != null ? `o${e.orderId}` : `e${e.id}`;
+}
+
+/**
+ * Count of distinct executed orders (= number of Trades-tab rows). Exported so
+ * the tab badge in `portfolio/page.tsx` matches the list exactly.
+ */
+export function tradeOrderCount(events: HistoryEvent[]): number {
+  const keys = new Set<string>();
+  for (const e of events) {
+    if (e.type === "filled" || e.type === "partial_fill") keys.add(tradeGroupKey(e));
+  }
+  return keys.size;
 }
 
 type SortKey =
@@ -148,10 +199,11 @@ interface Props {
 export function TradesList({ tabs, events, marketsById }: Props) {
   const [sort, setSort] = useState<Sort | null>(null);
   const [query, setQuery] = useState("");
+  const [marketId, setMarketId] = useState<number | "all">("all");
 
   const rows = useMemo<TradeRowData[]>(() => {
     // First pass: the limit (requested) price per order, from `placed` events,
-    // so each fill can show its welfare vs the order's limit.
+    // so each row can show its welfare vs the order's limit.
     const limitByOrder = new Map<number, bigint>();
     for (const e of events) {
       if (
@@ -164,44 +216,83 @@ export function TradesList({ tabs, events, marketsById }: Props) {
       }
     }
 
-    // Second pass: one row per fill / partial fill.
-    const decorated: TradeRowData[] = [];
+    // Second pass: fold every fill / partial fill into its order's accumulator.
+    const byOrder = new Map<string, TradeAgg>();
     for (const e of events) {
       if (e.type !== "filled" && e.type !== "partial_fill") continue;
       if (e.marketId == null) continue;
 
-      const qty = e.qty ?? null;
-      const priceNanos = e.priceNanos ?? null;
-      const requestedPriceNanos =
-        e.orderId != null ? limitByOrder.get(e.orderId) ?? null : null;
-
-      let welfareNanos: bigint | null = null;
-      if (
-        requestedPriceNanos != null &&
-        e.side != null &&
-        priceNanos != null &&
-        qty != null
-      ) {
-        const edge = (requestedPriceNanos - priceNanos) * BigInt(qty);
-        welfareNanos = e.side === "BUY" ? edge : -edge;
+      const key = tradeGroupKey(e);
+      let agg = byOrder.get(key);
+      if (!agg) {
+        agg = {
+          orderId: e.orderId ?? null,
+          marketId: e.marketId,
+          totalQty: 0,
+          hasQty: false,
+          valueNanos: 0n,
+          hasValue: false,
+          welfareNanos: 0n,
+          hasWelfare: false,
+          realizedPnlNanos: 0n,
+          hasPnl: false,
+          lastAtMs: e.timestampMs,
+          fills: [],
+        };
+        if (e.side) agg.side = e.side;
+        if (e.outcome) agg.outcome = e.outcome;
+        byOrder.set(key, agg);
       }
 
+      agg.fills.push(e); // events arrive newest-first, so fills stay newest-first
+      if (e.qty != null) {
+        agg.totalQty += e.qty;
+        agg.hasQty = true;
+      }
+      if (e.qty != null && e.priceNanos != null) {
+        agg.valueNanos += BigInt(e.qty) * e.priceNanos;
+        agg.hasValue = true;
+      }
+      const limit = e.orderId != null ? limitByOrder.get(e.orderId) : undefined;
+      if (limit != null && e.side != null && e.priceNanos != null && e.qty != null) {
+        const edge = (limit - e.priceNanos) * BigInt(e.qty);
+        agg.welfareNanos += e.side === "BUY" ? edge : -edge;
+        agg.hasWelfare = true;
+      }
+      if (e.side === "SELL" && e.realizedPnlNanos != null) {
+        agg.realizedPnlNanos += e.realizedPnlNanos;
+        agg.hasPnl = true;
+      }
+      if (e.timestampMs > agg.lastAtMs) agg.lastAtMs = e.timestampMs;
+    }
+
+    // Third pass: materialize one row per order with the aggregates resolved.
+    const decorated: TradeRowData[] = [];
+    for (const [key, agg] of byOrder) {
+      const totalQty = agg.hasQty ? agg.totalQty : null;
+      const valueNanos = agg.hasValue ? agg.valueNanos : null;
+      // Execution price = volume-weighted average = notional ÷ total qty.
+      const priceNanos =
+        agg.hasValue && agg.totalQty > 0
+          ? agg.valueNanos / BigInt(agg.totalQty)
+          : null;
       const row: TradeRowData = {
-        id: e.id,
-        marketId: e.marketId,
-        market: marketsById.get(e.marketId),
-        label: marketsById.get(e.marketId)?.name ?? `#${e.marketId}`,
-        filledAtMs: e.timestampMs,
-        qty,
+        id: key,
+        marketId: agg.marketId,
+        market: marketsById.get(agg.marketId),
+        label: marketsById.get(agg.marketId)?.name ?? `#${agg.marketId}`,
+        filledAtMs: agg.lastAtMs,
+        qty: totalQty,
         priceNanos,
-        requestedPriceNanos,
-        valueNanos:
-          qty != null && priceNanos != null ? BigInt(qty) * priceNanos : null,
-        realizedPnlNanos: e.side === "SELL" ? e.realizedPnlNanos ?? null : null,
-        welfareNanos,
+        requestedPriceNanos:
+          agg.orderId != null ? limitByOrder.get(agg.orderId) ?? null : null,
+        valueNanos,
+        realizedPnlNanos: agg.hasPnl ? agg.realizedPnlNanos : null,
+        welfareNanos: agg.hasWelfare ? agg.welfareNanos : null,
+        fills: agg.fills,
       };
-      if (e.side) row.side = e.side;
-      if (e.outcome) row.outcome = e.outcome;
+      if (agg.side) row.side = agg.side;
+      if (agg.outcome) row.outcome = agg.outcome;
       decorated.push(row);
     }
 
@@ -212,11 +303,25 @@ export function TradesList({ tabs, events, marketsById }: Props) {
     return decorated.sort((a, b) => compareBy(a, b, sort.key) * factor);
   }, [events, marketsById, sort]);
 
+  // Markets present in the trades, for the market filter dropdown.
+  const marketOptions = useMemo(() => {
+    const ids = new Map<number, string>();
+    for (const r of rows) {
+      if (!ids.has(r.marketId)) ids.set(r.marketId, r.label);
+    }
+    return [...ids.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [rows]);
+
   const visibleRows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) => r.label.toLowerCase().includes(q));
-  }, [rows, query]);
+    return rows.filter((r) => {
+      if (marketId !== "all" && r.marketId !== marketId) return false;
+      if (q && !r.label.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [rows, query, marketId]);
 
   const paged = usePaged(visibleRows, PORTFOLIO_PAGE_SIZE);
 
@@ -236,11 +341,26 @@ export function TradesList({ tabs, events, marketsById }: Props) {
       <PortfolioToolbar
         tabs={tabs}
         search={!isEmpty && <SearchField value={query} onChange={onSearch} />}
-      />
+      >
+        {!isEmpty && (
+          <FilterDropdown
+            ariaLabel="Filter by market"
+            value={String(marketId)}
+            onChange={(v) => {
+              setMarketId(v === "all" ? "all" : Number(v));
+              paged.setPage(0);
+            }}
+            options={[
+              { value: "all", label: "All markets" },
+              ...marketOptions.map((m) => ({ value: String(m.id), label: m.name })),
+            ]}
+          />
+        )}
+      </PortfolioToolbar>
       {isEmpty ? (
         <Empty>No trades yet.</Empty>
       ) : visibleRows.length === 0 ? (
-        <Empty>No trades match “{query}”.</Empty>
+        <Empty>No trades match these filters.</Empty>
       ) : (
         <div
           style={{
@@ -259,7 +379,7 @@ export function TradesList({ tabs, events, marketsById }: Props) {
           {paged.visible.map((r) => (
             <TradeRow key={r.id} row={r} />
           ))}
-          <div style={{ padding: "0 14px" }}>
+          <div style={{ padding: "0 14px 12px" }}>
             <Pager paged={paged} />
           </div>
         </div>
@@ -269,72 +389,209 @@ export function TradesList({ tabs, events, marketsById }: Props) {
 }
 
 function TradeRow({ row }: { row: TradeRowData }) {
+  const [expanded, setExpanded] = useState(false);
   const { market, label, marketId } = row;
   const isBuy = row.side === "BUY";
   const isSell = row.side === "SELL";
+  // Only orders with more than one fill are worth expanding into partials.
+  const canExpand = row.fills.length > 1;
+
+  // The toggle lives inside the row's <Link>, so stop the click from both
+  // navigating to the market and scrolling the focused control into view.
+  const toggle = (e: React.SyntheticEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setExpanded((x) => !x);
+  };
+
   return (
-    <Link
-      href={`/m/${marketId}`}
-      style={{
-        ...rowGrid("var(--fg-2)"),
-        textDecoration: "none",
-        color: "inherit",
-        borderTop: "1px solid var(--border-1)",
-      }}
-    >
-      <MarketThumb
-        marketId={marketId}
-        name={label}
-        imageUrl={market?.market_image_url ?? market?.event_image_url ?? null}
-        fallbackIconUrl={market?.market_icon_url ?? market?.event_icon_url ?? null}
-        size={28}
-      />
-      <span
+    <div style={{ borderTop: "1px solid var(--border-1)" }}>
+      <Link
+        href={`/m/${marketId}`}
         style={{
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          color: "var(--fg-1)",
-          fontFamily: "var(--font-sans)",
-          fontSize: 13,
+          ...rowGrid("var(--fg-2)"),
+          textDecoration: "none",
+          color: "inherit",
+          background: expanded ? "var(--surface-2)" : undefined,
         }}
-        title={label}
       >
-        {label}
-      </span>
+        <MarketThumb
+          marketId={marketId}
+          name={label}
+          imageUrl={market?.market_image_url ?? market?.event_image_url ?? null}
+          fallbackIconUrl={market?.market_icon_url ?? market?.event_icon_url ?? null}
+          size={28}
+        />
+        <span
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            overflow: "hidden",
+            color: "var(--fg-1)",
+            fontFamily: "var(--font-sans)",
+            fontSize: 13,
+          }}
+        >
+          <span
+            style={{
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              minWidth: 0,
+            }}
+            title={label}
+          >
+            {label}
+          </span>
+          {canExpand && (
+            <span
+              role="button"
+              tabIndex={0}
+              aria-expanded={expanded}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={toggle}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") toggle(e);
+              }}
+              style={{
+                flexShrink: 0,
+                cursor: "pointer",
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                letterSpacing: "var(--track-wide)",
+                color: "var(--accent)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {expanded ? "hide partial fills" : "show partial fills"}
+            </span>
+          )}
+        </span>
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            color: isBuy ? "var(--accent)" : isSell ? "var(--no)" : "var(--fg-4)",
+            fontWeight: 600,
+            letterSpacing: "var(--track-wide)",
+          }}
+        >
+          {isBuy ? "BUY" : isSell ? "SELL" : "—"}
+        </span>
+        {row.outcome ? <SidePill outcome={row.outcome} /> : <Muted>—</Muted>}
+        <RightCell mono>{row.qty ?? "—"}</RightCell>
+        <RightCell mono>
+          <PriceCell
+            settledNanos={row.priceNanos}
+            requestedNanos={row.requestedPriceNanos}
+          />
+        </RightCell>
+        <RightCell>
+          <WelfareCell welfareNanos={row.welfareNanos} />
+        </RightCell>
+        <RightCell mono>
+          {row.valueNanos != null ? formatDollars(row.valueNanos, { decimals: 2 }) : "—"}
+        </RightCell>
+        <RightCell>
+          <PnlCell pnlNanos={row.realizedPnlNanos} />
+        </RightCell>
+        <RightCell>
+          <FilledTime ms={row.filledAtMs} />
+        </RightCell>
+      </Link>
+      {canExpand && expanded && (
+        <ExpandedFills
+          fills={row.fills}
+          requestedPriceNanos={row.requestedPriceNanos}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The expanded order's individual partial/full fills, paginated (an order can
+ * have hundreds). Renders on the same grey panel as the summary row and reuses
+ * the main `rowGrid`, so each fill's qty / price / welfare / value / time line
+ * up directly under the table's columns (the left identity columns and the P&L
+ * column are blank for a fill). Newest-first, matching the summary's grouping.
+ */
+function ExpandedFills({
+  fills,
+  requestedPriceNanos,
+}: {
+  fills: HistoryEvent[];
+  requestedPriceNanos: bigint | null;
+}) {
+  const paged = usePaged(fills, FILLS_SUBPAGE);
+  return (
+    <div style={{ background: "var(--surface-2)" }}>
+      {paged.visible.map((f) => (
+        <FillSubRow key={f.id} fill={f} requestedPriceNanos={requestedPriceNanos} />
+      ))}
+      <div style={{ padding: "0 14px 12px" }}>
+        <Pager paged={paged} />
+      </div>
+    </div>
+  );
+}
+
+function FillSubRow({
+  fill,
+  requestedPriceNanos,
+}: {
+  fill: HistoryEvent;
+  requestedPriceNanos: bigint | null;
+}) {
+  const qty = fill.qty ?? null;
+  const price = fill.priceNanos ?? null;
+  const valueNanos = qty != null && price != null ? BigInt(qty) * price : null;
+  let welfareNanos: bigint | null = null;
+  if (requestedPriceNanos != null && fill.side != null && price != null && qty != null) {
+    const edge = (requestedPriceNanos - price) * BigInt(qty);
+    welfareNanos = fill.side === "BUY" ? edge : -edge;
+  }
+  // Same 10-column grid as a trade row → columns align. Identity columns
+  // (thumb/market/action/side) and the P&L column stay blank for a fill.
+  return (
+    <div style={{ ...rowGrid("var(--fg-2)"), borderTop: "1px solid var(--border-1)" }}>
+      <span />
+      <span />
+      <span />
+      <span />
+      <RightCell mono>{qty ?? "—"}</RightCell>
+      <RightCell mono>
+        <PriceCell settledNanos={price} requestedNanos={requestedPriceNanos} />
+      </RightCell>
+      <RightCell>
+        <WelfareCell welfareNanos={welfareNanos} />
+      </RightCell>
+      <RightCell mono>
+        {valueNanos != null ? formatDollars(valueNanos, { decimals: 2 }) : "—"}
+      </RightCell>
+      {/* Time on one line, spanning the main table's P&L + Time columns. */}
       <span
         style={{
+          gridColumn: "span 2",
+          textAlign: "right",
           fontFamily: "var(--font-mono)",
           fontSize: 11,
-          color: isBuy ? "var(--accent)" : isSell ? "var(--no)" : "var(--fg-4)",
-          fontWeight: 600,
-          letterSpacing: "var(--track-wide)",
+          color: "var(--fg-3)",
+          whiteSpace: "nowrap",
         }}
       >
-        {isBuy ? "BUY" : isSell ? "SELL" : "—"}
+        {fmtFillTime(fill.timestampMs)}
       </span>
-      {row.outcome ? <SidePill outcome={row.outcome} /> : <Muted>—</Muted>}
-      <RightCell mono>{row.qty ?? "—"}</RightCell>
-      <RightCell mono>
-        <PriceCell
-          settledNanos={row.priceNanos}
-          requestedNanos={row.requestedPriceNanos}
-        />
-      </RightCell>
-      <RightCell>
-        <WelfareCell welfareNanos={row.welfareNanos} />
-      </RightCell>
-      <RightCell mono>
-        {row.valueNanos != null ? formatDollars(row.valueNanos, { decimals: 2 }) : "—"}
-      </RightCell>
-      <RightCell>
-        <PnlCell pnlNanos={row.realizedPnlNanos} />
-      </RightCell>
-      <RightCell>
-        <FilledTime ms={row.filledAtMs} />
-      </RightCell>
-    </Link>
+    </div>
   );
+}
+
+function fmtFillTime(ms: number): string {
+  const d = new Date(ms);
+  const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return `${date} ${time}`;
 }
 
 /**

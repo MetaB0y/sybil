@@ -1,21 +1,30 @@
 "use client";
 
 /**
- * Unified portfolio history feed (event log).
+ * Unified portfolio history feed (event log) — the account's FULL history.
  *
  * Backed by `GET /v1/accounts/{id}/events` — a per-account, off-block event log
  * merging order lifecycle (placed / partial_fill / filled / cancelled /
- * expired), funding (created / deposit / withdrawal) and settlement (resolved),
- * newest-first. The log is in-memory and bounded (5k events/account); it resets
- * on backend restart, same as the equity curve and price chart.
+ * expired / rejected), funding (created / deposit / withdrawal) and settlement
+ * (resolved), newest-first. In prod this is served from the DURABLE, append-only
+ * redb `history_events` table — uncapped and restart-safe; the in-memory ring is
+ * 0 there and only a read-error fallback. See `frontend/DATA_MAP.md`.
  *
- * We fetch a single page (`HISTORY_PAGE`) and invalidate per block so fresh
- * events appear as batches clear. The endpoint also supports a `before` cursor
- * (`"<block>.<seq>"`, i.e. an event's `id`) for pagination, which a future
- * load-more can use; `hasMore` reports whether the page came back full.
+ * We walk the `before` cursor (`"<block>.<seq>"`, an event's `id`) to load the
+ * account's ENTIRE history — not just the newest page. Fetching a single page
+ * made the History count saturate at the page size and the Trades count (fills
+ * within that page) *shrink* as `placed`/`rejected` events evicted older fills
+ * from the window — even though no data was lost. `MAX_PAGES` bounds the walk;
+ * `hasMore` reports when it tripped and `loadMore` extends it.
+ *
+ * Invalidated per block so fresh events appear as batches clear. The walk starts
+ * from the newest end each block and returns a consistent snapshot (events that
+ * arrive mid-walk are simply picked up next block). NOTE: this re-walks every
+ * loaded page each block; if an account ever accumulates many pages, split this
+ * into a live newest-page query plus a cached immutable backfill.
  */
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
 import type { components } from "@/lib/api/schema";
@@ -24,8 +33,13 @@ import { selectLatestBlock, useStore } from "@/lib/store";
 
 type HistoryEventResponse = components["schemas"]["HistoryEventResponse"];
 
-/** Default page size — the endpoint caps at 500. */
-const HISTORY_PAGE = 200;
+/** Per-page size for the cursor walk — the endpoint caps at 500. */
+const HISTORY_PAGE = 500;
+/**
+ * Safety bound on the cursor walk: at most `HISTORY_PAGE * MAX_PAGES` events are
+ * loaded per pass. `hasMore` is true when this trips; `loadMore` raises it.
+ */
+const MAX_PAGES = 25;
 
 export type HistoryEventType =
   | "created"
@@ -80,8 +94,8 @@ export const CATEGORY_OF: Record<
 export interface AccountHistory {
   events: HistoryEvent[];
   isMock: boolean;
-  // Pagination stubs for the future load-more (the endpoint takes a `before`
-  // cursor). `hasMore` is true when the first page came back full.
+  // `hasMore` is true only when the cursor walk hit the `MAX_PAGES` safety cap
+  // (i.e. older events exist beyond what we loaded); `loadMore` raises the cap.
   hasMore: boolean;
   loadMore: () => void;
 }
@@ -89,6 +103,7 @@ export interface AccountHistory {
 export function useAccountHistory(accountId: number | null): AccountHistory {
   const qc = useQueryClient();
   const latest = useStore(selectLatestBlock);
+  const [maxPages, setMaxPages] = useState(MAX_PAGES);
 
   useEffect(() => {
     if (accountId === null) return;
@@ -97,25 +112,45 @@ export function useAccountHistory(accountId: number | null): AccountHistory {
 
   const q = useQuery({
     enabled: accountId !== null,
-    queryKey: ["account", accountId, "history", { limit: HISTORY_PAGE }],
-    queryFn: async (): Promise<HistoryEvent[]> => {
+    queryKey: ["account", accountId, "history", { page: HISTORY_PAGE, maxPages }],
+    queryFn: async (): Promise<{ events: HistoryEvent[]; truncated: boolean }> => {
       if (accountId === null) throw new Error("no account");
-      const { data, error } = await api.GET("/v1/accounts/{id}/events", {
-        params: { path: { id: accountId }, query: { limit: HISTORY_PAGE } },
-      });
-      if (error || !data) throw new Error("fetch account history failed");
-      return data.map(mapEvent);
+      // Walk the `before` cursor from the newest event to the oldest, paging in
+      // 500s, so counts/lists reflect the account's whole history — not a window.
+      const all: HistoryEvent[] = [];
+      let before: string | undefined;
+      let truncated = false;
+      for (let page = 0; ; page += 1) {
+        const { data, error } = await api.GET("/v1/accounts/{id}/events", {
+          params: {
+            path: { id: accountId },
+            query: { limit: HISTORY_PAGE, ...(before ? { before } : {}) },
+          },
+        });
+        if (error || !data) throw new Error("fetch account history failed");
+        for (const r of data) all.push(mapEvent(r));
+        if (data.length < HISTORY_PAGE) break; // reached the oldest event
+        if (page + 1 >= maxPages) {
+          truncated = true; // hit the safety cap; older events not loaded
+          break;
+        }
+        // The oldest event of this page is the exclusive cursor for the next.
+        const oldest = data[data.length - 1];
+        if (!oldest) break;
+        before = oldest.id;
+      }
+      return { events: all, truncated };
     },
     staleTime: 0,
     refetchOnWindowFocus: false,
   });
 
-  const events = q.data ?? [];
+  const events = q.data?.events ?? [];
   return {
     events,
     isMock: false,
-    hasMore: events.length >= HISTORY_PAGE,
-    loadMore: () => {},
+    hasMore: q.data?.truncated ?? false,
+    loadMore: () => setMaxPages((p) => p + MAX_PAGES),
   };
 }
 
