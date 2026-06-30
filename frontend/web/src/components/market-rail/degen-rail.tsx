@@ -20,6 +20,7 @@ import {
   type DegenActive,
 } from "@/lib/degen/use-degen-bet-tracker";
 import type { PendingOrder } from "@/lib/markets/use-pending-orders";
+import { ResearchNudge } from "./research-nudge";
 import { parseNanos } from "@/lib/format/nanos";
 import type { EventGroup } from "@/lib/market-detail/use-event-group";
 import { usePriceHistory } from "@/lib/markets/use-price-history";
@@ -346,6 +347,8 @@ export function DegenRail({
               {submitError}
             </div>
           )}
+
+          <ResearchNudge />
         </>
       )}
 
