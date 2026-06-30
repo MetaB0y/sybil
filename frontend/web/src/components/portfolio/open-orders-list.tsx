@@ -8,9 +8,10 @@
  * - Placed/filled uses B8's `original_quantity` (placed) and `original −
  *   remaining` (filled). Orders persisted before B8 report `original_quantity:
  *   0`; we fall back to the bare remaining count for them.
- * - Fill count + avg fill price are derived from the account's `/fills` feed by
- *   `order_id`. Bounded by the fills window, so very old / heavily-filled orders
- *   may undercount — fine for typical recent open orders.
+ * - Fill count + avg fill price come from the account's durable history log
+ *   (`partial_fill`/`filled` events aggregated by `order_id` in `fillAggByOrder`),
+ *   NOT the `/fills` endpoint — which returns `[]` in prod, so this column used
+ *   to read "— / 0 fills" even for orders that had clearly filled.
  * - Created time is the exact `created_at_ms` from `PendingOrderResponse`
  *   (falls back to the block height for orders admitted before that field).
  * - Every column is click-to-sort; default order is newest-first by created
@@ -20,8 +21,8 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { cancelSignedOrder } from "@/lib/account/orders";
-import type { AccountFill } from "@/lib/account/use-account-fills";
 import type { AccountOrder } from "@/lib/account/use-account-orders";
+import type { OrderFillAgg } from "@/lib/account/use-account-history";
 import {
   formatAge,
   formatCentsPrecise,
@@ -38,11 +39,6 @@ import { SidePill } from "./side-pill";
 import { TifCell } from "./tif-cell";
 
 type Market = components["schemas"]["MarketResponse"];
-
-interface OrderFillAgg {
-  count: number;
-  avgPriceNanos: bigint | null;
-}
 
 /** An order with every sortable value derived once. */
 interface OpenRow {
@@ -133,7 +129,9 @@ interface Props {
   accountId: number;
   publicKeyHex: string;
   orders: AccountOrder[];
-  fills: AccountFill[];
+  /** Per-order fill count + avg price, aggregated from the durable history log
+   *  (see `fillAggByOrder`) — the `/fills` endpoint is empty in prod. */
+  fillsByOrder: Map<number, OrderFillAgg>;
   marketsById: Map<number, Market>;
 }
 
@@ -142,34 +140,12 @@ export function OpenOrdersList({
   accountId,
   publicKeyHex,
   orders,
-  fills,
+  fillsByOrder,
   marketsById,
 }: Props) {
   const [sort, setSort] = useState<Sort | null>(null);
   const [query, setQuery] = useState("");
   const nowMs = useStore(selectLatestBlock)?.timestamp_ms ?? null;
-
-  // Aggregate the account's visible fills by order_id → count + WAC fill price.
-  const fillsByOrder = useMemo(() => {
-    const acc = new Map<number, { count: number; qty: bigint; cost: bigint }>();
-    for (const f of fills) {
-      const e = acc.get(f.order_id) ?? { count: 0, qty: 0n, cost: 0n };
-      const qty = BigInt(f.fill_qty);
-      const price = parseNanos(f.fill_price_nanos);
-      e.count += 1;
-      e.qty += qty;
-      e.cost += qty * price;
-      acc.set(f.order_id, e);
-    }
-    const out = new Map<number, OrderFillAgg>();
-    for (const [id, e] of acc) {
-      out.set(id, {
-        count: e.count,
-        avgPriceNanos: e.qty > 0n ? e.cost / e.qty : null,
-      });
-    }
-    return out;
-  }, [fills]);
 
   const rows = useMemo<OpenRow[]>(() => {
     const decorated = orders.map((o) => {

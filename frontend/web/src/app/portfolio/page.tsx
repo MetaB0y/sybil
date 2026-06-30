@@ -29,7 +29,10 @@ import {
   useSetConnectModalOpen,
 } from "@/lib/account/use-account";
 import { useAccountFills } from "@/lib/account/use-account-fills";
-import { useAccountHistory } from "@/lib/account/use-account-history";
+import {
+  useAccountHistory,
+  fillAggByOrder,
+} from "@/lib/account/use-account-history";
 import { useAccountOrders } from "@/lib/account/use-account-orders";
 import {
   useEquityCurve,
@@ -116,14 +119,19 @@ function Connected({
     baselineDepositsDollars: baselineDeposits,
   });
 
-  const tradeCount = fillsData.length;
-  const tradeCountCapped = tradeCount >= FILLS_PAGE;
-
   // Trades are reconstructed from the history feed inside TradesList (one row
   // per executed order — fills grouped by order_id). The badge mirrors that via
   // the shared counter so it can't drift from the list.
   const tradesCount = useMemo(
     () => tradeOrderCount(history.events),
+    [history.events],
+  );
+
+  // Per-order fill count + avg price for the Open Orders "Avg fill" column,
+  // derived from the durable history log (the `/fills` endpoint is empty in
+  // prod, which is why this used to read "— / 0 fills").
+  const fillsByOrder = useMemo(
+    () => fillAggByOrder(history.events),
     [history.events],
   );
 
@@ -159,8 +167,8 @@ function Connected({
           portfolio={portfolioData}
           pnlSplit={pnlSplit}
           curve={curve}
-          tradeCount={tradeCount}
-          tradeCountCapped={tradeCountCapped}
+          tradeCount={tradesCount}
+          tradeCountCapped={history.hasMore}
           rangeLabel={RANGE_COPY[range]}
         />
 
@@ -186,7 +194,7 @@ function Connected({
           accountId={accountId}
           publicKeyHex={publicKeyHex}
           orders={ordersData}
-          fills={fillsData}
+          fillsByOrder={fillsByOrder}
           marketsById={marketsById}
         />
       )}

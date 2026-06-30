@@ -154,6 +154,44 @@ export function useAccountHistory(accountId: number | null): AccountHistory {
   };
 }
 
+/** Per-order fill aggregate: execution count + volume-weighted avg fill price. */
+export interface OrderFillAgg {
+  count: number;
+  avgPriceNanos: bigint | null;
+}
+
+/**
+ * Aggregate an account's `partial_fill` + `filled` history events by `order_id`
+ * into a per-order fill count and volume-weighted average fill price. This is
+ * the authoritative fill source for the UI: the `/v1/accounts/{id}/fills`
+ * endpoint returns `[]` in prod (it reads an in-memory recorder), but these fill
+ * events live in the durable, full history log loaded by `useAccountHistory`.
+ * Used by Open Orders' "Avg fill" column and the hero trade count.
+ */
+export function fillAggByOrder(events: HistoryEvent[]): Map<number, OrderFillAgg> {
+  const acc = new Map<number, { count: number; qty: bigint; cost: bigint }>();
+  for (const e of events) {
+    if (e.type !== "filled" && e.type !== "partial_fill") continue;
+    if (e.orderId == null) continue;
+    const cur = acc.get(e.orderId) ?? { count: 0, qty: 0n, cost: 0n };
+    cur.count += 1;
+    if (e.qty != null) {
+      const q = BigInt(e.qty);
+      cur.qty += q;
+      if (e.priceNanos != null) cur.cost += q * e.priceNanos;
+    }
+    acc.set(e.orderId, cur);
+  }
+  const out = new Map<number, OrderFillAgg>();
+  for (const [id, e] of acc) {
+    out.set(id, {
+      count: e.count,
+      avgPriceNanos: e.qty > 0n ? e.cost / e.qty : null,
+    });
+  }
+  return out;
+}
+
 /** Normalize a wire `HistoryEventResponse` into the FE `HistoryEvent` model. */
 function mapEvent(r: HistoryEventResponse): HistoryEvent {
   const e: HistoryEvent = {
