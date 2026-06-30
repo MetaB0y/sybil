@@ -166,7 +166,13 @@ export function EquityChart({ curve, headerRight }: Props) {
               width="100%"
               height="100%"
               preserveAspectRatio="none"
-              style={{ display: "block", touchAction: "none" }}
+              // Absolutely positioned so the SVG contributes ZERO intrinsic
+              // height: an in-flow SVG with a viewBox collapses to its aspect
+              // ratio during the grid's intrinsic-sizing pass, which—fed by the
+              // ResizeObserver below—creates a feedback loop that ratchets the
+              // box taller on every window resize. Out of flow, the box height
+              // is driven solely by the grid row (matching the hero).
+              style={{ position: "absolute", inset: 0, display: "block", touchAction: "none" }}
               onPointerMove={onMove}
               onPointerLeave={() => setHoverIdx(null)}
             >
