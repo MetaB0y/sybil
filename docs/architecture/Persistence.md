@@ -2,7 +2,7 @@
 tags: [infrastructure, storage]
 layer: sequencer
 status: current
-last_verified: 2026-05-27
+last_verified: 2026-06-30
 ---
 
 # Persistence
@@ -66,6 +66,7 @@ Authoritative state needed to resume the exchange after a crash:
 | `redb` | `market_meta` | market metadata |
 | `redb` | `market_statuses` | market status driven by oracle/system logic |
 | `redb` | `market_groups` | market groups |
+| `redb` | `resolution_templates` | installed resolution templates referenced by market metadata |
 | `redb` | `block_headers` | canonical block header by height |
 | `redb` | `pubkey_registry` | compressed pubkey to account id |
 | `redb` | `clearing_prices` | last clearing price vector per market |
@@ -89,6 +90,36 @@ Still not persisted:
 
 The order state tables protect the API's 200 OK contract: anything acknowledged before a crash is either already in the committed order-book snapshot or replayed from an incremental log.
 
+## Acknowledged Control-Plane Mutations
+
+The same 200 OK contract must apply to control-plane mutations, not only orders. Account creation, funding, pubkey registration, market creation, metadata updates, cancellation, and resolution are all user-visible state transitions. If one is acknowledged after the last committed block and the process restarts before the next block snapshot, it needs an incremental durability path.
+
+This is implemented with a small redb write-ahead table for acknowledged control-plane commands:
+
+1. Serialize the validated command with a monotonic sequence number.
+2. Commit the command before mutating in-memory sequencer state or before returning success.
+3. Replay unapplied commands after loading the last committed block snapshot.
+4. Clear commands atomically when `save_block()` commits a block that includes their effects.
+
+This mirrors `admit_log` and `pending_bundles`: the block snapshot stays the primary checkpoint, while the log protects acknowledged writes between checkpoints. Commands must be deterministic under replay. Market and feed IDs are reallocated from the committed `next_*` counters in the same WAL order; timestamp-bearing commands carry the acknowledged timestamp so sidecar history does not depend on restart time.
+
+Implemented today:
+
+- Account creation
+- Account funding
+- Pubkey registration
+- Market creation and metadata updates
+- Market-group creation
+- Market resolution / attested resolution
+- Signed order cancellation
+- Oracle feed registration
+- Resolution template installation
+
+Resolution templates are also persisted in the committed snapshot. A WAL alone
+would protect template installation only until the next block; once
+`save_block()` clears the control-plane log, templates must be snapshot state
+like feeds and market metadata.
+
 ## Tier 3: Derived Views
 
 Persisted today:
@@ -102,6 +133,8 @@ Still not persisted:
 - **Price history**
 - **Block ring buffer for SSE catch-up**
 - **Derived aggregates such as welfare summaries**
+
+The planned durable boundary for these views is [[Historical Data Serving]]. The in-memory caches should remain hot caches only; they should not be the source of truth for replay, charts, or restart behavior.
 
 These are reconstructable or refreshable, but expensive or inconvenient to rebuild.
 
@@ -158,11 +191,13 @@ This is the whole reason the commit fence lives in redb.
 
 - All account balances and positions
 - All markets, groups, metadata, and statuses
+- Installed resolution templates and data feeds
 - Block headers
 - Pubkey registry
 - Counter state and next IDs
 - Resting orders and reservations
 - Direct-admit recovery log and deferred submissions admitted after the last committed block
+- Control-plane recovery log for acknowledged account, market, resolution, cancellation, feed, and template mutations admitted after the last committed block
 - Fill history
 
 **Lost on crash:**
@@ -170,6 +205,21 @@ This is the whole reason the commit fence lives in redb.
 - Price history cache
 - SSE ring buffer contents
 - Transient external feed state such as recently pushed reference prices
+
+## Restart Stress Testing
+
+Persistence needs failure-injection tests at acknowledgement boundaries, not only clean `save_block()` round trips:
+
+- Acknowledge account creation, restart before the next block, and verify the account exists.
+- Acknowledge funding, restart before the next block, and verify balance and deposit history.
+- Acknowledge pubkey registration, restart before the next block, and verify signed orders can use it.
+- Acknowledge market creation and metadata, restart before the next block, and verify both survive.
+- Acknowledge cancellation, restart before the next block, and verify reservations are released exactly once.
+- Acknowledge feed/template installation, restart before the next block, and verify attested resolution can still resolve through that template.
+- Acknowledge market resolution, restart before the next block, and verify balances, status, group membership, and the next block's system event are consistent.
+- Crash after qMDB slot write but before redb fence commit and verify recovery uses the previous fence.
+- Crash after redb fence commit and verify recovery uses the new fence.
+- Restart repeatedly while direct-admit orders and deferred bundles are queued and verify no accepted order disappears or double-reserves funds.
 
 ## How to Add New Persisted State
 

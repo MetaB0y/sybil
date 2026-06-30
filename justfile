@@ -326,6 +326,7 @@ smoke:
 # ── Docker ─────────────────────────────────────────────────────────────────
 
 LOCAL_COMPOSE := "docker-compose"
+DEPLOY_PLATFORM := "linux/amd64"
 
 # Build Docker image
 docker-build:
@@ -370,7 +371,7 @@ deploy-sync:
 
 # Build and deploy sybil-api, polymarket mirror, and prover status API
 deploy-api: deploy-sync
-    {{LOCAL_COMPOSE}} build sybil-api
+    DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-api
     docker save sybil-api:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-api sybil-polymarket sybil-prover sybil-prover-worker sybil-prover-mock'
 
@@ -385,7 +386,7 @@ deploy-reset-state confirm:
 
 # Build and deploy arena bots + dashboard (pass OpenRouter key)
 deploy-arena key: deploy-sync
-    {{LOCAL_COMPOSE}} build sybil-arena
+    DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-arena
     docker save sybil-arena:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && OPENROUTER_API_KEY={{key}} {{COMPOSE_PROD}} up -d sybil-arena sybil-arena-dashboard caddy'
 
@@ -403,7 +404,7 @@ deploy-caddy: deploy-sync
 
 # Deploy everything
 deploy-all key: deploy-sync
-    {{LOCAL_COMPOSE}} build
+    DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build
     docker save sybil-api:latest sybil-arena:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then OPENROUTER_API_KEY={{key}} {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else OPENROUTER_API_KEY={{key}} {{COMPOSE_PROD}} up -d --remove-orphans; fi'
 

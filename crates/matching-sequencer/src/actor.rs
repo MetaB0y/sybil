@@ -18,18 +18,26 @@ use crate::bridge::{BridgeState, BridgeWithdrawalRequest, L1Deposit, WithdrawalL
 use crate::crypto::{
     verify_signed_cancel, verify_signed_order, PublicKey, SignedCancel, SignedOrder,
 };
-use crate::error::SequencerError;
+use crate::error::{Rejection, RejectionReason, SequencerError};
 use crate::market_info::{AccountFillRecord, MarketMetadata, MarketSearchQuery, PricePoint};
 use crate::portfolio::PortfolioSummary;
 use crate::sequencer::{
     BlockSequencer, OrderSubmission, PendingOrderInfo, PreparedBlock, SequencerConfig,
 };
+use crate::store::ControlPlaneCommand;
 use crate::{
     AccountSnapshotSlot, QmdbStateExclusionProofParts, QmdbStateKeyValueProofParts,
     QMDB_STATE_MAX_KEY_BYTES,
 };
 
 const SEQUENCER_ACTOR_METRIC_NAME: &str = "sequencer";
+
+fn current_timestamp_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
 
 /// Messages sent from handles to the sequencer actor.
 pub enum SequencerMsg {
@@ -46,7 +54,7 @@ pub enum SequencerMsg {
         RpcReplyPort<Result<SequencerStateProof, SequencerError>>,
     ),
     ProduceBlock(RpcReplyPort<Result<SealedBlock, SequencerError>>),
-    CreateAccount(i64, RpcReplyPort<Account>),
+    CreateAccount(i64, RpcReplyPort<Result<Account, SequencerError>>),
     FundAccount(
         AccountId,
         i64,
@@ -67,8 +75,12 @@ pub enum SequencerMsg {
         RpcReplyPort<Result<(), SequencerError>>,
     ),
     ListMarkets(RpcReplyPort<MarketSet>),
-    CreateMarket(String, RpcReplyPort<MarketId>),
-    CreateMarketGroup(String, Vec<MarketId>, RpcReplyPort<MarketGroup>),
+    CreateMarket(String, RpcReplyPort<Result<MarketId, SequencerError>>),
+    CreateMarketGroup(
+        String,
+        Vec<MarketId>,
+        RpcReplyPort<Result<MarketGroup, SequencerError>>,
+    ),
     ListMarketGroups(RpcReplyPort<Vec<MarketGroup>>),
     ResolveMarket(
         MarketId,
@@ -80,11 +92,18 @@ pub enum SequencerMsg {
         SignedAttestation,
         RpcReplyPort<Result<ResolutionRecord, SequencerError>>,
     ),
-    RegisterFeed(FeedPubkey, String, RpcReplyPort<FeedId>),
+    RegisterFeed(
+        FeedPubkey,
+        String,
+        RpcReplyPort<Result<FeedId, SequencerError>>,
+    ),
     GetFeed(FeedId, RpcReplyPort<Option<DataFeed>>),
     GetFeedByPubkey(FeedPubkey, RpcReplyPort<Option<DataFeed>>),
     ListFeeds(RpcReplyPort<Vec<DataFeed>>),
-    InstallTemplate(sybil_oracle::ResolutionTemplate, RpcReplyPort<()>),
+    InstallTemplate(
+        sybil_oracle::ResolutionTemplate,
+        RpcReplyPort<Result<(), SequencerError>>,
+    ),
     TemplateExists(String, RpcReplyPort<bool>),
     GetMarketStatus(MarketId, RpcReplyPort<MarketStatus>),
     GetAllMarketStatuses(RpcReplyPort<HashMap<MarketId, MarketStatus>>),
@@ -97,7 +116,11 @@ pub enum SequencerMsg {
         AccountId,
         RpcReplyPort<Result<PortfolioSummary, SequencerError>>,
     ),
-    CreateMarketWithMetadata(String, MarketMetadata, RpcReplyPort<MarketId>),
+    CreateMarketWithMetadata(
+        String,
+        MarketMetadata,
+        RpcReplyPort<Result<MarketId, SequencerError>>,
+    ),
     GetMarketMetadata(MarketId, RpcReplyPort<Option<MarketMetadata>>),
     GetPriceHistory(
         MarketId,
@@ -764,7 +787,7 @@ impl SequencerActorState {
         self.admit_or_defer(submission).await
     }
 
-    fn handle_signed_cancel(&mut self, signed: SignedCancel) -> Result<(), SequencerError> {
+    async fn handle_signed_cancel(&mut self, signed: SignedCancel) -> Result<(), SequencerError> {
         verify_signed_cancel(&signed)?;
 
         let account_id = self
@@ -776,8 +799,17 @@ impl SequencerActorState {
             return Err(SequencerError::SignerAccountMismatch);
         }
 
+        let timestamp_ms = current_timestamp_ms();
+        let mut validation = self.sequencer.clone();
+        validation.cancel_pending_order_at(signed.account_id, signed.order_id, timestamp_ms)?;
+        self.persist_control_plane(&ControlPlaneCommand::CancelPendingOrder {
+            account_id: signed.account_id,
+            order_id: signed.order_id,
+            timestamp_ms,
+        })
+        .await?;
         self.sequencer
-            .cancel_pending_order(signed.account_id, signed.order_id)
+            .cancel_pending_order_at(signed.account_id, signed.order_id, timestamp_ms)
     }
 
     fn handle_search_markets(&self, query: MarketSearchQuery) -> Vec<MarketSearchResult> {
@@ -1092,12 +1124,182 @@ impl SequencerActorState {
         Ok(())
     }
 
-    fn handle_register_pubkey(
+    async fn persist_control_plane(
+        &self,
+        command: &crate::store::ControlPlaneCommand,
+    ) -> Result<(), SequencerError> {
+        if let Some(store) = &self.store {
+            store
+                .append_control_plane_command(command)
+                .await
+                .map_err(|err| SequencerError::Persistence(err.to_string()))?;
+        }
+        Ok(())
+    }
+
+    async fn handle_create_account(
+        &mut self,
+        initial_balance: i64,
+    ) -> Result<Account, SequencerError> {
+        self.persist_control_plane(&ControlPlaneCommand::CreateAccount { initial_balance })
+            .await?;
+        let account_id = self.sequencer.create_account(initial_balance);
+        Ok(self
+            .sequencer
+            .accounts
+            .get(account_id)
+            .cloned()
+            .expect("created account should exist"))
+    }
+
+    async fn handle_fund_account(
+        &mut self,
+        account_id: AccountId,
+        amount: i64,
+    ) -> Result<Account, SequencerError> {
+        if self.sequencer.accounts.get(account_id).is_none() {
+            return self.sequencer.fund_account(account_id, amount);
+        }
+        let timestamp_ms = current_timestamp_ms();
+        self.persist_control_plane(&ControlPlaneCommand::FundAccount {
+            account_id,
+            amount,
+            timestamp_ms,
+        })
+        .await?;
+        self.sequencer
+            .fund_account_at(account_id, amount, timestamp_ms)
+    }
+
+    async fn handle_register_pubkey(
         &mut self,
         account_id: AccountId,
         pubkey: PublicKey,
     ) -> Result<(), SequencerError> {
+        if self.sequencer.accounts.get(account_id).is_none() {
+            return Err(SequencerError::Rejected(Rejection {
+                order_id: 0,
+                account_id,
+                reason: RejectionReason::AccountNotFound,
+            }));
+        }
+        if self.sequencer.lookup_pubkey(&pubkey).is_some() {
+            return Err(SequencerError::AccountAlreadyRegistered);
+        }
+        self.persist_control_plane(&ControlPlaneCommand::RegisterPubkey {
+            account_id,
+            compressed_pubkey: pubkey.compressed_bytes(),
+        })
+        .await?;
         self.sequencer.register_pubkey(account_id, pubkey)
+    }
+
+    async fn handle_create_market(&mut self, name: String) -> Result<MarketId, SequencerError> {
+        self.persist_control_plane(&ControlPlaneCommand::CreateMarket { name: name.clone() })
+            .await?;
+        Ok(self.sequencer.create_market(name))
+    }
+
+    async fn handle_create_market_with_metadata(
+        &mut self,
+        name: String,
+        metadata: MarketMetadata,
+    ) -> Result<MarketId, SequencerError> {
+        self.persist_control_plane(&ControlPlaneCommand::CreateMarketWithMetadata {
+            name: name.clone(),
+            metadata: metadata.clone(),
+        })
+        .await?;
+        Ok(self.sequencer.create_market_with_metadata(name, metadata))
+    }
+
+    async fn handle_create_market_group(
+        &mut self,
+        name: String,
+        market_ids: Vec<MarketId>,
+    ) -> Result<MarketGroup, SequencerError> {
+        self.persist_control_plane(&ControlPlaneCommand::CreateMarketGroup {
+            name: name.clone(),
+            market_ids: market_ids.clone(),
+        })
+        .await?;
+        Ok(self.sequencer.create_market_group(name, market_ids))
+    }
+
+    async fn handle_resolve_market(
+        &mut self,
+        market_id: MarketId,
+        payout_nanos: Nanos,
+    ) -> Result<ResolutionRecord, SequencerError> {
+        let timestamp_ms = current_timestamp_ms();
+        let mut validation = self.sequencer.clone();
+        validation.resolve_market(market_id, payout_nanos, timestamp_ms)?;
+        self.persist_control_plane(&ControlPlaneCommand::ResolveMarket {
+            market_id,
+            payout_nanos,
+            timestamp_ms,
+        })
+        .await?;
+        self.sequencer
+            .resolve_market(market_id, payout_nanos, timestamp_ms)
+    }
+
+    async fn handle_resolve_market_attested(
+        &mut self,
+        market_id: MarketId,
+        signed: SignedAttestation,
+    ) -> Result<ResolutionRecord, SequencerError> {
+        crate::crypto::verify_signed_attestation(&signed)?;
+        let timestamp_ms = current_timestamp_ms();
+        let mut validation = self.sequencer.clone();
+        validation.resolve_market_attested(market_id, &signed, timestamp_ms)?;
+        self.persist_control_plane(&ControlPlaneCommand::ResolveMarketAttested {
+            market_id,
+            signed: signed.clone(),
+            timestamp_ms,
+        })
+        .await?;
+        self.sequencer
+            .resolve_market_attested(market_id, &signed, timestamp_ms)
+    }
+
+    async fn handle_register_feed(
+        &mut self,
+        pubkey: FeedPubkey,
+        name: String,
+    ) -> Result<FeedId, SequencerError> {
+        if let Some(feed) = self.sequencer.feed_by_pubkey(&pubkey) {
+            return Ok(feed.id);
+        }
+        let timestamp_ms = current_timestamp_ms();
+        self.persist_control_plane(&ControlPlaneCommand::RegisterFeed {
+            pubkey: pubkey.clone(),
+            name: name.clone(),
+            timestamp_ms,
+        })
+        .await?;
+        Ok(self.sequencer.register_feed(pubkey, name, timestamp_ms))
+    }
+
+    async fn handle_install_template(
+        &mut self,
+        template: sybil_oracle::ResolutionTemplate,
+    ) -> Result<(), SequencerError> {
+        if self
+            .sequencer
+            .market_lifecycle()
+            .templates()
+            .get(&template.id)
+            .is_some_and(|existing| existing == &template)
+        {
+            return Ok(());
+        }
+        self.persist_control_plane(&ControlPlaneCommand::InstallTemplate {
+            template: template.clone(),
+        })
+        .await?;
+        self.sequencer.install_template(template);
+        Ok(())
     }
 
     async fn handle_l1_deposit(&mut self, deposit: L1Deposit) -> Result<Account, SequencerError> {
@@ -1318,9 +1520,10 @@ impl Actor for SequencerActor {
                 let _ = reply.send(result);
             }
             SequencerMsg::CancelSignedOrder(signed, reply) => {
-                let result = state
-                    .check_global_submission_rate()
-                    .and_then(|_| state.handle_signed_cancel(signed));
+                let result = match state.check_global_submission_rate() {
+                    Ok(()) => state.handle_signed_cancel(signed).await,
+                    Err(err) => Err(err),
+                };
                 state.record_cancel_metrics("signed", &result);
                 let _ = reply.send(result);
             }
@@ -1353,17 +1556,10 @@ impl Actor for SequencerActor {
                 let _ = reply.send(result);
             }
             SequencerMsg::CreateAccount(initial_balance, reply) => {
-                let account_id = state.sequencer.create_account(initial_balance);
-                let account = state
-                    .sequencer
-                    .accounts
-                    .get(account_id)
-                    .cloned()
-                    .expect("created account should exist");
-                let _ = reply.send(account);
+                let _ = reply.send(state.handle_create_account(initial_balance).await);
             }
             SequencerMsg::FundAccount(account_id, amount, reply) => {
-                let _ = reply.send(state.sequencer.fund_account(account_id, amount));
+                let _ = reply.send(state.handle_fund_account(account_id, amount).await);
             }
             SequencerMsg::SubmitL1Deposit(deposit, reply) => {
                 let _ = reply.send(state.handle_l1_deposit(deposit).await);
@@ -1384,58 +1580,32 @@ impl Actor for SequencerActor {
                 let _ = reply.send(state.sequencer.default_bridge_withdrawal_expiry_height());
             }
             SequencerMsg::RegisterPubkey(account_id, pubkey, reply) => {
-                let _ = reply.send(state.handle_register_pubkey(account_id, pubkey));
+                let _ = reply.send(state.handle_register_pubkey(account_id, pubkey).await);
             }
             SequencerMsg::ListMarkets(reply) => {
                 let _ = reply.send(state.sequencer.markets().clone());
             }
             SequencerMsg::CreateMarket(name, reply) => {
-                let _ = reply.send(state.sequencer.markets_mut().add_binary(name));
+                let _ = reply.send(state.handle_create_market(name).await);
             }
             SequencerMsg::CreateMarketGroup(name, market_ids, reply) => {
-                let mut group = MarketGroup::new(&name);
-                for mid in &market_ids {
-                    group.add_market(*mid);
-                }
-                state.sequencer.market_groups_mut().push(group.clone());
-                let _ = reply.send(group);
+                let _ = reply.send(state.handle_create_market_group(name, market_ids).await);
             }
             SequencerMsg::ListMarketGroups(reply) => {
                 let _ = reply.send(state.sequencer.market_groups().to_vec());
             }
             SequencerMsg::ResolveMarket(market_id, payout_nanos, reply) => {
-                let timestamp_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
-                let _ = reply.send(state.sequencer.resolve_market(
-                    market_id,
-                    payout_nanos,
-                    timestamp_ms,
-                ));
+                let _ = reply.send(state.handle_resolve_market(market_id, payout_nanos).await);
             }
             SequencerMsg::ResolveMarketAttested(market_id, signed, reply) => {
-                let timestamp_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
-                let result = match crate::crypto::verify_signed_attestation(&signed) {
-                    Ok(_pubkey) => {
-                        state
-                            .sequencer
-                            .resolve_market_attested(market_id, &signed, timestamp_ms)
-                    }
-                    Err(e) => Err(e),
-                };
-                let _ = reply.send(result);
+                let _ = reply.send(
+                    state
+                        .handle_resolve_market_attested(market_id, signed)
+                        .await,
+                );
             }
             SequencerMsg::RegisterFeed(pubkey, name, reply) => {
-                let now_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
-                let id = state.sequencer.register_feed(pubkey, name, now_ms);
-                let _ = reply.send(id);
+                let _ = reply.send(state.handle_register_feed(pubkey, name).await);
             }
             SequencerMsg::GetFeed(id, reply) => {
                 let feed = state.sequencer.feed_by_id(id).cloned();
@@ -1451,8 +1621,7 @@ impl Actor for SequencerActor {
                 let _ = reply.send(feeds);
             }
             SequencerMsg::InstallTemplate(template, reply) => {
-                state.sequencer.install_template(template);
-                let _ = reply.send(());
+                let _ = reply.send(state.handle_install_template(template).await);
             }
             SequencerMsg::TemplateExists(id, reply) => {
                 let _ = reply.send(state.sequencer.template_exists(&id));
@@ -1500,9 +1669,11 @@ impl Actor for SequencerActor {
                 let _ = reply.send(result);
             }
             SequencerMsg::CreateMarketWithMetadata(name, metadata, reply) => {
-                let market_id = state.sequencer.markets_mut().add_binary(name);
-                state.sequencer.set_market_metadata(market_id, metadata);
-                let _ = reply.send(market_id);
+                let _ = reply.send(
+                    state
+                        .handle_create_market_with_metadata(name, metadata)
+                        .await,
+                );
             }
             SequencerMsg::GetMarketMetadata(market_id, reply) => {
                 let _ = reply.send(state.sequencer.market_metadata(market_id).cloned());
@@ -1840,9 +2011,15 @@ impl SequencerHandle {
     /// [`BlockSequencer::restore`] before invoking this function — see
     /// `crates/sybil-api/src/main.rs` for the canonical hydration + spawn pattern.
     pub fn spawn_with_store(sequencer: BlockSequencer, store: Option<crate::store::Store>) -> Self {
+        Self::spawn_with_store_arc(sequencer, store.map(Arc::new))
+    }
+
+    fn spawn_with_store_arc(
+        sequencer: BlockSequencer,
+        store: Option<Arc<crate::store::Store>>,
+    ) -> Self {
         let oracle = sequencer.oracle();
         let config = sequencer.config.clone();
-        let store = store.map(Arc::new);
         let (block_broadcast, _) = broadcast::channel(64);
         let mailbox_monitor = MailboxMonitor::new(
             SEQUENCER_ACTOR_METRIC_NAME,
@@ -1931,7 +2108,7 @@ impl SequencerHandle {
 
     pub async fn create_account(&self, initial_balance: i64) -> Result<Account, SequencerError> {
         self.rpc(|reply| SequencerMsg::CreateAccount(initial_balance, reply))
-            .await
+            .await?
     }
 
     pub async fn fund_account(
@@ -1997,7 +2174,7 @@ impl SequencerHandle {
 
     pub async fn create_market(&self, name: String) -> Result<MarketId, SequencerError> {
         self.rpc(|reply| SequencerMsg::CreateMarket(name, reply))
-            .await
+            .await?
     }
 
     pub async fn create_market_group(
@@ -2006,7 +2183,7 @@ impl SequencerHandle {
         market_ids: Vec<MarketId>,
     ) -> Result<MarketGroup, SequencerError> {
         self.rpc(|reply| SequencerMsg::CreateMarketGroup(name, market_ids, reply))
-            .await
+            .await?
     }
 
     pub async fn list_market_groups(&self) -> Result<Vec<MarketGroup>, SequencerError> {
@@ -2037,7 +2214,7 @@ impl SequencerHandle {
         name: String,
     ) -> Result<FeedId, SequencerError> {
         self.rpc(|reply| SequencerMsg::RegisterFeed(pubkey, name, reply))
-            .await
+            .await?
     }
 
     pub async fn get_feed(&self, id: FeedId) -> Result<Option<DataFeed>, SequencerError> {
@@ -2061,7 +2238,7 @@ impl SequencerHandle {
         template: sybil_oracle::ResolutionTemplate,
     ) -> Result<(), SequencerError> {
         self.rpc(|reply| SequencerMsg::InstallTemplate(template, reply))
-            .await
+            .await?
     }
 
     pub async fn template_exists(&self, id: String) -> Result<bool, SequencerError> {
@@ -2119,7 +2296,7 @@ impl SequencerHandle {
         metadata: MarketMetadata,
     ) -> Result<MarketId, SequencerError> {
         self.rpc(|reply| SequencerMsg::CreateMarketWithMetadata(name, metadata, reply))
-            .await
+            .await?
     }
 
     pub async fn get_market_metadata(
@@ -2336,12 +2513,26 @@ impl SequencerHandle {
 mod tests {
     use super::*;
     use crate::account::AccountStore;
+    use crate::crypto::sign_cancel;
+    use crate::market_info::ResolutionConfig;
     use crate::sequencer::SequencerConfig;
     use crate::system_event::SystemEvent;
     use matching_engine::{outcome_buy, MarketSet, NANOS_PER_DOLLAR};
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
     use std::time::Duration;
-    use sybil_oracle::AdminOracle;
+    use sybil_oracle::{AdminOracle, FeedPubkey, ResolutionPolicy, ResolutionTemplate, TemplateId};
+
+    static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_store_path(prefix: &str) -> PathBuf {
+        let unique = NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "sybil-actor-{prefix}-{}-{unique}.redb",
+            std::process::id()
+        ))
+    }
 
     fn make_test_sequencer() -> (BlockSequencer, AccountId) {
         make_test_sequencer_with_config(SequencerConfig::default())
@@ -2731,6 +2922,264 @@ mod tests {
                 assert_eq!(*amount, 25 * NANOS_PER_DOLLAR as i64);
             }
             other => panic!("expected Deposit event, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn acknowledged_control_plane_writes_survive_restart_before_next_block() {
+        let path = temp_store_path("control-plane-wal");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        };
+        let (mut baseline, aid) = make_test_sequencer_with_config(config.clone());
+        baseline.produce_block(Vec::new(), 1);
+        store.save_block(baseline.snapshot()).await.unwrap();
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        let seq = BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+        let handle = SequencerHandle::spawn_with_store_arc(seq, Some(store.clone()));
+
+        let created = handle
+            .create_account(50 * NANOS_PER_DOLLAR as i64)
+            .await
+            .unwrap();
+        handle
+            .fund_account(aid, 25 * NANOS_PER_DOLLAR as i64)
+            .await
+            .unwrap();
+
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        let pubkey = PublicKey(*signing_key.verifying_key());
+        handle.register_pubkey(aid, pubkey.clone()).await.unwrap();
+
+        let plain_market = handle
+            .create_market("plain wal market".to_string())
+            .await
+            .unwrap();
+        let metadata = MarketMetadata {
+            description: "metadata survives WAL replay".to_string(),
+            category: "regression".to_string(),
+            tags: vec!["wal".to_string()],
+            resolution_criteria: "resolve by admin".to_string(),
+            expiry_timestamp_ms: 9_999_999,
+            created_at_ms: 123_456,
+            resolution_config: Some(ResolutionConfig {
+                template: "wal_template".to_string(),
+            }),
+        };
+        let metadata_market = handle
+            .create_market_with_metadata("metadata wal market".to_string(), metadata.clone())
+            .await
+            .unwrap();
+        let group_market = handle
+            .create_market("group wal market".to_string())
+            .await
+            .unwrap();
+        let group = handle
+            .create_market_group("wal group".to_string(), vec![group_market])
+            .await
+            .unwrap();
+        assert_eq!(group.markets, vec![group_market]);
+
+        let feed_pubkey = FeedPubkey(vec![2u8; 33]);
+        let feed_id = handle
+            .register_feed(feed_pubkey.clone(), "wal_feed".to_string())
+            .await
+            .unwrap();
+        let template = ResolutionTemplate {
+            id: TemplateId("wal_template".to_string()),
+            policy: ResolutionPolicy::Immediate { feed_id },
+        };
+        handle.install_template(template.clone()).await.unwrap();
+
+        let resolved_market = handle
+            .create_market("resolved wal market".to_string())
+            .await
+            .unwrap();
+        handle
+            .resolve_market(resolved_market, NANOS_PER_DOLLAR)
+            .await
+            .unwrap();
+
+        let markets = handle.list_markets().await.unwrap();
+        let sub = OrderSubmission {
+            account_id: aid,
+            orders: vec![outcome_buy(
+                &markets,
+                0,
+                MarketId::new(0),
+                0,
+                500_000_000,
+                1,
+            )],
+            mm_constraint: None,
+        };
+        handle.submit_order(sub).await.unwrap();
+        let pending = handle.get_pending_orders(Some(aid)).await.unwrap();
+        assert_eq!(pending.len(), 1);
+        let signed_cancel = sign_cancel(aid, pending[0].order_id, &signing_key);
+        handle.cancel_signed_order(signed_cancel).await.unwrap();
+
+        let assert_replayed = |restored_seq: &BlockSequencer| {
+            assert!(
+                restored_seq.accounts.get(created.id).is_some(),
+                "created account was acknowledged but vanished after restore"
+            );
+            assert_eq!(
+                restored_seq.accounts.get(aid).unwrap().balance,
+                125 * NANOS_PER_DOLLAR as i64,
+                "funding was acknowledged but not replayed after restore"
+            );
+            assert_eq!(
+                restored_seq.lookup_pubkey(&pubkey),
+                Some(aid),
+                "pubkey registration was acknowledged but not replayed after restore"
+            );
+            assert!(
+                restored_seq.markets().get(plain_market).is_some(),
+                "created market was acknowledged but not replayed after restore"
+            );
+            assert_eq!(
+                restored_seq.market_metadata(metadata_market),
+                Some(&metadata),
+                "market metadata was acknowledged but not replayed after restore"
+            );
+            assert!(
+                restored_seq
+                    .market_groups()
+                    .iter()
+                    .any(|group| group.name == "wal group" && group.markets == vec![group_market]),
+                "market group was acknowledged but not replayed after restore"
+            );
+            assert!(
+                matches!(
+                    restored_seq.market_status(resolved_market),
+                    MarketStatus::Resolved { .. }
+                ),
+                "market resolution was acknowledged but not replayed after restore"
+            );
+            assert_eq!(
+                restored_seq
+                    .feed_by_pubkey(&feed_pubkey)
+                    .map(|feed| feed.id),
+                Some(feed_id),
+                "feed registration was acknowledged but not replayed after restore"
+            );
+            assert!(
+                restored_seq.template_exists("wal_template"),
+                "template installation was acknowledged but not replayed after restore"
+            );
+            assert!(
+                restored_seq.pending_orders_info(Some(aid)).is_empty(),
+                "signed cancel was acknowledged but the order reappeared after restore"
+            );
+        };
+
+        const EXPECTED_CONTROL_PLANE_COMMANDS: usize = 12;
+        for restart_round in 0..3 {
+            let restored = store.load_state().await.unwrap().unwrap();
+            assert_eq!(
+                restored.control_plane_log.len(),
+                EXPECTED_CONTROL_PLANE_COMMANDS,
+                "restart round {restart_round} should see every acknowledged control-plane command before commit"
+            );
+            assert_eq!(
+                restored.admit_log.len(),
+                1,
+                "restart round {restart_round} should replay the direct admit before the cancel command"
+            );
+            let restored_seq =
+                BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+            assert_replayed(&restored_seq);
+
+            let mut probe = restored_seq.clone();
+            let probe_block = probe
+                .produce_block(Vec::new(), 10_000 + restart_round)
+                .block;
+            assert!(
+                probe_block
+                    .system_events
+                    .iter()
+                    .any(|event| matches!(event, SystemEvent::CreateAccount { account_id, .. } if *account_id == created.id)),
+                "restart round {restart_round} should stage the uncommitted account creation event"
+            );
+            assert!(
+                probe_block
+                    .system_events
+                    .iter()
+                    .any(|event| matches!(event, SystemEvent::Deposit { account_id, .. } if *account_id == aid)),
+                "restart round {restart_round} should stage the uncommitted funding event"
+            );
+            assert!(
+                probe_block.system_events.iter().any(|event| matches!(
+                    event,
+                    SystemEvent::MarketResolved { market_id, .. } if *market_id == resolved_market
+                )),
+                "restart round {restart_round} should stage the uncommitted resolution event"
+            );
+            assert!(
+                probe_block.system_events.iter().any(|event| matches!(
+                    event,
+                    SystemEvent::OrderCancelled { account_id, .. } if *account_id == aid
+                )),
+                "restart round {restart_round} should stage the uncommitted cancellation event"
+            );
+        }
+
+        let committed = handle.produce_block().await.unwrap();
+        assert!(
+            committed
+                .canonical
+                .system_events
+                .iter()
+                .any(|event| matches!(
+                    event,
+                    SystemEvent::MarketResolved { market_id, .. } if *market_id == resolved_market
+                )),
+            "committed block should include the WAL-replayed market resolution"
+        );
+        assert!(
+            committed
+                .canonical
+                .system_events
+                .iter()
+                .any(|event| matches!(
+                    event,
+                    SystemEvent::OrderCancelled { account_id, .. } if *account_id == aid
+                )),
+            "committed block should include the WAL-replayed cancellation"
+        );
+
+        for restart_round in 0..3 {
+            let restored_after_commit = store.load_state().await.unwrap().unwrap();
+            assert!(
+                restored_after_commit.control_plane_log.is_empty(),
+                "control-plane WAL should clear once a block commits the writes"
+            );
+            assert!(
+                restored_after_commit.admit_log.is_empty(),
+                "admit WAL should clear once a block commits the direct admit and cancel"
+            );
+            let restored_seq = BlockSequencer::restore(
+                restored_after_commit,
+                Arc::new(AdminOracle::new()),
+                config.clone(),
+            );
+            assert_replayed(&restored_seq);
+
+            let mut probe = restored_seq.clone();
+            let probe_block = probe
+                .produce_block(Vec::new(), 20_000 + restart_round)
+                .block;
+            assert!(
+                probe_block.system_events.is_empty(),
+                "restart round {restart_round} after commit must not duplicate control-plane system events"
+            );
         }
     }
 

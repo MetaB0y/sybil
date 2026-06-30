@@ -32,8 +32,9 @@
 //!
 //! # Persistence Tiers
 //!
-//! **Tier 1 (implemented)**: Core state — accounts, markets, groups, block headers,
-//! counters, pubkeys, clearing prices, market volumes. Sufficient for crash recovery.
+//! **Tier 1 (implemented)**: Core state — accounts, markets, groups, resolution
+//! templates, block headers, counters, pubkeys, clearing prices, market volumes.
+//! Sufficient for crash recovery.
 //!
 //! **Tier 2 (partial)**: Order state.
 //! - Resting order book: implemented (see `RESTING_ORDERS` table).
@@ -50,7 +51,9 @@ use std::sync::Arc;
 
 use matching_engine::{MarketGroup, MarketId, MarketSet, Nanos};
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
-use sybil_oracle::{AdminOracle, DataFeed, MarketStatus};
+use sybil_oracle::{
+    AdminOracle, DataFeed, FeedPubkey, MarketStatus, ResolutionTemplate, SignedAttestation,
+};
 use sybil_verifier::BlockWitness;
 use tracing::{debug, info, warn};
 
@@ -84,6 +87,13 @@ const MARKET_META: TableDefinition<u32, &[u8]> = TableDefinition::new("market_me
 /// off-chain signer identity allowed to produce resolution attestations.
 /// The redb layout is additive (rmp-serde); no layout version bump needed.
 const DATA_FEEDS: TableDefinition<u64, &[u8]> = TableDefinition::new("data_feeds");
+
+/// Resolution templates: template_id -> msgpack(ResolutionTemplate).
+/// Built-in templates are reinstalled by the API on startup, but persisting
+/// the registry keeps the sequencer snapshot self-contained and protects
+/// operator-installed templates after the control-plane WAL is cleared.
+const RESOLUTION_TEMPLATES: TableDefinition<&str, &[u8]> =
+    TableDefinition::new("resolution_templates");
 
 /// Market statuses: market_id (u32) → msgpack(MarketStatus)
 const MARKET_STATUSES: TableDefinition<u32, &[u8]> = TableDefinition::new("market_statuses");
@@ -134,6 +144,12 @@ const PENDING_BUNDLES: TableDefinition<u64, &[u8]> = TableDefinition::new("pendi
 /// `RESTING_ORDERS` snapshot; restart loads the snapshot and then replays
 /// this table on top.
 const ADMIT_LOG: TableDefinition<u64, &[u8]> = TableDefinition::new("admit_log");
+
+/// Control-plane command WAL: monotonic seq (u64) -> msgpack(ControlPlaneCommand).
+/// Protects acknowledged account, market, resolution, cancellation, feed, and
+/// template mutations accepted after the last committed block. Cleared
+/// atomically inside `save_block`.
+const CONTROL_PLANE_LOG: TableDefinition<u64, &[u8]> = TableDefinition::new("control_plane_log");
 
 /// Per-account fill history: account_id || block_height || order_id →
 /// msgpack(AccountFillRecord). The byte key keeps records clustered by
@@ -326,6 +342,56 @@ pub struct Store {
     account_state_store: Box<dyn AccountStateStore>,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum ControlPlaneCommand {
+    CreateAccount {
+        initial_balance: i64,
+    },
+    FundAccount {
+        account_id: AccountId,
+        amount: i64,
+        timestamp_ms: u64,
+    },
+    RegisterPubkey {
+        account_id: AccountId,
+        compressed_pubkey: Vec<u8>,
+    },
+    CreateMarket {
+        name: String,
+    },
+    CreateMarketWithMetadata {
+        name: String,
+        metadata: MarketMetadata,
+    },
+    CreateMarketGroup {
+        name: String,
+        market_ids: Vec<MarketId>,
+    },
+    CancelPendingOrder {
+        account_id: AccountId,
+        order_id: u64,
+        timestamp_ms: u64,
+    },
+    ResolveMarket {
+        market_id: MarketId,
+        payout_nanos: Nanos,
+        timestamp_ms: u64,
+    },
+    ResolveMarketAttested {
+        market_id: MarketId,
+        signed: SignedAttestation,
+        timestamp_ms: u64,
+    },
+    RegisterFeed {
+        pubkey: FeedPubkey,
+        name: String,
+        timestamp_ms: u64,
+    },
+    InstallTemplate {
+        template: ResolutionTemplate,
+    },
+}
+
 /// Store-restored analytics projections. These are grouped separately from
 /// core sequencer state, but still loaded from the existing redb tables.
 pub struct AnalyticsRestoredState {
@@ -358,6 +424,8 @@ pub struct RestoredState {
     pub resting_orders: Vec<RestingOrder>,
     /// All registered data feeds.
     pub data_feeds: Vec<DataFeed>,
+    /// All installed resolution templates.
+    pub resolution_templates: Vec<ResolutionTemplate>,
     /// Bundle / MM / multi-market submissions that were admitted after the
     /// last committed block. The actor replays these into its in-memory
     /// pending queue so nothing acknowledged with a 200 OK is dropped by a
@@ -367,6 +435,9 @@ pub struct RestoredState {
     /// after the last committed block. On restart these are re-inserted
     /// on top of `resting_orders` before the sequencer starts processing.
     pub admit_log: Vec<RestingOrder>,
+    /// Acknowledged control-plane mutations accepted after the last committed
+    /// block. Replayed after snapshot restore so those writes are not lost.
+    pub control_plane_log: Vec<ControlPlaneCommand>,
     /// Derived analytics projections restored from redb.
     pub analytics: AnalyticsRestoredState,
     /// L1 bridge sidecar state restored from the last committed block.
@@ -437,10 +508,12 @@ impl Store {
         txn.open_table(RESTING_ORDERS)?;
         txn.open_table(PENDING_BUNDLES)?;
         txn.open_table(ADMIT_LOG)?;
+        txn.open_table(CONTROL_PLANE_LOG)?;
         txn.open_table(FILL_HISTORY)?;
         txn.open_table(EQUITY_POINTS)?;
         txn.open_table(HISTORY_EVENTS)?;
         txn.open_table(DATA_FEEDS)?;
+        txn.open_table(RESOLUTION_TEMPLATES)?;
         txn.open_table(BRIDGE_STATE)?;
         txn.open_table(PENDING_L1_DEPOSITS)?;
         txn.open_table(PENDING_BRIDGE_WITHDRAWALS)?;
@@ -675,6 +748,16 @@ impl Store {
             }
         }
 
+        // Resolution templates
+        {
+            let mut table = txn.open_table(RESOLUTION_TEMPLATES)?;
+            table.retain(|_, _| false)?;
+            for (template_id, template) in snapshot.lifecycle.templates().iter() {
+                let bytes = rmp_serde::to_vec(template)?;
+                table.insert(template_id.0.as_str(), bytes.as_slice())?;
+            }
+        }
+
         // L1 bridge sidecar state.
         {
             let mut table = txn.open_table(BRIDGE_STATE)?;
@@ -696,6 +779,13 @@ impl Store {
         // the incremental log atomically in this txn.
         {
             let mut table = txn.open_table(ADMIT_LOG)?;
+            table.retain(|_, _| false)?;
+        }
+
+        // Control-plane commands are now represented by the committed
+        // account/pubkey snapshot, so clear the replay log atomically.
+        {
+            let mut table = txn.open_table(CONTROL_PLANE_LOG)?;
             table.retain(|_, _| false)?;
         }
 
@@ -1036,6 +1126,16 @@ impl Store {
             out
         };
 
+        let resolution_templates: Vec<ResolutionTemplate> = {
+            let table = txn.open_table(RESOLUTION_TEMPLATES)?;
+            let mut out = Vec::new();
+            for entry in table.iter()? {
+                let (_, value) = entry?;
+                out.push(rmp_serde::from_slice(value.value())?);
+            }
+            out
+        };
+
         let pending_bundles: Vec<crate::sequencer::OrderSubmission> = {
             let table = txn.open_table(PENDING_BUNDLES)?;
             let mut out = Vec::new();
@@ -1048,6 +1148,16 @@ impl Store {
 
         let admit_log: Vec<RestingOrder> = {
             let table = txn.open_table(ADMIT_LOG)?;
+            let mut out = Vec::new();
+            for entry in table.iter()? {
+                let (_, value) = entry?;
+                out.push(rmp_serde::from_slice(value.value())?);
+            }
+            out
+        };
+
+        let control_plane_log: Vec<ControlPlaneCommand> = {
+            let table = txn.open_table(CONTROL_PLANE_LOG)?;
             let mut out = Vec::new();
             for entry in table.iter()? {
                 let (_, value) = entry?;
@@ -1241,8 +1351,10 @@ impl Store {
             resting_orders = resting_orders.len(),
             pending_bundles = pending_bundles.len(),
             admit_log = admit_log.len(),
+            control_plane_log = control_plane_log.len(),
             account_fills = account_fills.len(),
             data_feeds = data_feeds.len(),
+            resolution_templates = resolution_templates.len(),
             bridge_deposit_cursor = bridge_state.deposit_cursor,
             pending_l1_deposits = pending_l1_deposits.len(),
             pending_bridge_withdrawals = pending_bridge_withdrawals.len(),
@@ -1261,8 +1373,10 @@ impl Store {
             pubkey_registry,
             resting_orders,
             data_feeds,
+            resolution_templates,
             pending_bundles,
             admit_log,
+            control_plane_log,
             analytics: AnalyticsRestoredState {
                 last_clearing_prices,
                 market_volumes,
@@ -1423,6 +1537,13 @@ impl Store {
         }
         txn.commit()?;
         Ok(())
+    }
+
+    pub async fn append_control_plane_command(
+        &self,
+        command: &ControlPlaneCommand,
+    ) -> Result<(), StoreError> {
+        append_msgpack_row(&self.db, CONTROL_PLANE_LOG, command)
     }
 
     pub async fn append_pending_l1_deposit(&self, deposit: &L1Deposit) -> Result<(), StoreError> {
@@ -2876,7 +2997,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_store_roundtrips_data_feeds() {
-        use sybil_oracle::FeedPubkey;
+        use sybil_oracle::{FeedId, FeedPubkey, ResolutionPolicy, ResolutionTemplate, TemplateId};
 
         let path = temp_db_path("store-data-feeds");
         let store = Store::open(&path).unwrap();
@@ -2885,6 +3006,10 @@ mod tests {
         let mut lifecycle = MarketLifecycle::new(oracle);
         lifecycle.register_feed(FeedPubkey(vec![1u8; 33]), "admin".into(), 100);
         lifecycle.register_feed(FeedPubkey(vec![2u8; 33]), "polymarket_mirror".into(), 200);
+        lifecycle.install_template(ResolutionTemplate {
+            id: TemplateId("polymarket_mirror".to_string()),
+            policy: ResolutionPolicy::Immediate { feed_id: FeedId(1) },
+        });
 
         let markets = MarketSet::new();
         let accounts = AccountStore::new();
@@ -2908,6 +3033,11 @@ mod tests {
         let names: Vec<_> = restored.data_feeds.iter().map(|f| f.name.clone()).collect();
         assert!(names.contains(&"admin".to_string()));
         assert!(names.contains(&"polymarket_mirror".to_string()));
+        assert_eq!(restored.resolution_templates.len(), 1);
+        assert_eq!(
+            restored.resolution_templates[0].id,
+            TemplateId("polymarket_mirror".to_string())
+        );
     }
 
     #[tokio::test]

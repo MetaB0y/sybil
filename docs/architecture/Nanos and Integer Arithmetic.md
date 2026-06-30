@@ -3,7 +3,7 @@ tags: [concept, infrastructure]
 layer: core
 crate: matching-engine
 status: current
-last_verified: 2026-03-15
+last_verified: 2026-06-30
 ---
 
 Sybil uses no floating-point arithmetic anywhere in the system. All prices and quantities are represented as unsigned 64-bit integers in "nanos" — nanodollars, where 1 dollar equals 1,000,000,000 (10^9) nanos. This gives sub-cent precision (9 decimal places) while keeping all computation deterministic and ZK-friendly.
@@ -14,7 +14,8 @@ A u64 in nanos can represent values up to about $18.4 billion, which is ample fo
 
 ## Key Properties
 - `Nanos` = u64, 1 dollar = 1,000,000,000 nanos
-- `Qty` = u64, share quantities
+- `Qty` = u64, currently whole-share quantities
+- [[Fractional Quantities]] plans to reinterpret `Qty` as fixed-point share units with `SHARE_SCALE = 1000`
 - i128 intermediates in [[Settlement]] for overflow safety
 - Maximum representable value: ~$18.4B (u64::MAX / 10^9)
 - Deterministic across all platforms — critical for [[Four-Layer Verification|verification]]

@@ -429,7 +429,7 @@ fn now_secs() -> u64 {
 
 async fn http_metrics(req: Request<axum::body::Body>, next: Next) -> Response {
     let method = req.method().clone();
-    let path = req.uri().path().to_string();
+    let path = metric_path_label(req.uri().path());
     let start = Instant::now();
 
     let response = next.run(req).await;
@@ -437,10 +437,75 @@ async fn http_metrics(req: Request<axum::body::Body>, next: Next) -> Response {
     let duration_secs = start.elapsed().as_secs_f64();
     let status = response.status().as_u16();
 
-    metrics::counter!("sybil_http_requests_total", "method" => method.to_string(), "path" => path.clone(), "status" => status.to_string()).increment(1);
-    metrics::histogram!("sybil_http_request_duration_seconds", "method" => method.to_string(), "path" => path.clone()).record(duration_secs);
+    metrics::counter!("sybil_http_requests_total", "method" => method.to_string(), "path" => path, "status" => status.to_string()).increment(1);
+    metrics::histogram!("sybil_http_request_duration_seconds", "method" => method.to_string(), "path" => path)
+        .record(duration_secs);
 
     response
+}
+
+fn metric_path_label(path: &str) -> &'static str {
+    let trimmed = path.trim_matches('/');
+    let segments: Vec<&str> = if trimmed.is_empty() {
+        Vec::new()
+    } else {
+        trimmed.split('/').collect()
+    };
+
+    match segments.as_slice() {
+        [] => "/",
+        ["trade"] => "/trade",
+        ["openapi.json"] => "/openapi.json",
+        ["metrics"] => "/metrics",
+        ["v1", "activity", "overview"] => "/v1/activity/overview",
+        ["v1", "blocks"] => "/v1/blocks",
+        ["v1", "blocks", "latest"] => "/v1/blocks/latest",
+        ["v1", "blocks", "stream"] => "/v1/blocks/stream",
+        ["v1", "blocks", "ws"] => "/v1/blocks/ws",
+        ["v1", "blocks", _] => "/v1/blocks/{height}",
+        ["v1", "bots", "decisions"] => "/v1/bots/decisions",
+        ["v1", "bridge", "deposits"] => "/v1/bridge/deposits",
+        ["v1", "bridge", "status"] => "/v1/bridge/status",
+        ["v1", "bridge", "withdrawals"] => "/v1/bridge/withdrawals",
+        ["v1", "bridge", "withdrawals", _] => "/v1/bridge/withdrawals/{id}",
+        ["v1", "events", _, "raw"] => "/v1/events/{event_id}/raw",
+        ["v1", "events", _, "traders"] => "/v1/events/{event_id}/traders",
+        ["v1", "feeds"] => "/v1/feeds",
+        ["v1", "health"] => "/v1/health",
+        ["v1", "orders"] => "/v1/orders",
+        ["v1", "orders", "cancel", "signed"] => "/v1/orders/cancel/signed",
+        ["v1", "orders", "pending"] => "/v1/orders/pending",
+        ["v1", "orders", "signed"] => "/v1/orders/signed",
+        ["v1", "proofs", "state", _] => "/v1/proofs/state/{leaf_key_hex}",
+        ["v1", "simulation", "pause"] => "/v1/simulation/pause",
+        ["v1", "simulation", "resume"] => "/v1/simulation/resume",
+        ["v1", "state-root"] => "/v1/state-root",
+        ["v1", "accounts"] => "/v1/accounts",
+        ["v1", "accounts", _] => "/v1/accounts/{id}",
+        ["v1", "accounts", _, "bridge-key"] => "/v1/accounts/{id}/bridge-key",
+        ["v1", "accounts", _, "equity"] => "/v1/accounts/{id}/equity",
+        ["v1", "accounts", _, "events"] => "/v1/accounts/{id}/events",
+        ["v1", "accounts", _, "fills"] => "/v1/accounts/{id}/fills",
+        ["v1", "accounts", _, "fund"] => "/v1/accounts/{id}/fund",
+        ["v1", "accounts", _, "keys"] => "/v1/accounts/{id}/keys",
+        ["v1", "accounts", _, "orders"] => "/v1/accounts/{id}/orders",
+        ["v1", "accounts", _, "portfolio"] => "/v1/accounts/{id}/portfolio",
+        ["v1", "markets"] => "/v1/markets",
+        ["v1", "markets", "groups"] => "/v1/markets/groups",
+        ["v1", "markets", "prices"] => "/v1/markets/prices",
+        ["v1", "markets", "prices", "reference"] => "/v1/markets/prices/reference",
+        ["v1", "markets", "search"] => "/v1/markets/search",
+        ["v1", "markets", "summary"] => "/v1/markets/summary",
+        ["v1", "markets", _] => "/v1/markets/{id}",
+        ["v1", "markets", _, "metadata"] => "/v1/markets/{id}/metadata",
+        ["v1", "markets", _, "open-batch"] => "/v1/markets/{id}/open-batch",
+        ["v1", "markets", _, "orderbook"] => "/v1/markets/{id}/orderbook",
+        ["v1", "markets", _, "prices", "history"] => "/v1/markets/{id}/prices/history",
+        ["v1", "markets", _, "resolution"] => "/v1/markets/{id}/resolution",
+        ["v1", "markets", _, "resolve"] => "/v1/markets/{id}/resolve",
+        ["v1", ..] => "/v1/{unmatched}",
+        _ => "/{unmatched}",
+    }
 }
 
 fn order_rate_limit_client_key(req: &Request<axum::body::Body>) -> String {
@@ -706,4 +771,43 @@ pub fn create_router(state: AppState) -> Router {
         )
         .layer(CorsLayer::permissive())
         .with_state(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::metric_path_label;
+
+    #[test]
+    fn metric_path_label_normalizes_dynamic_routes() {
+        assert_eq!(
+            metric_path_label("/v1/accounts/112/fills"),
+            "/v1/accounts/{id}/fills"
+        );
+        assert_eq!(
+            metric_path_label("/v1/accounts/112/orders"),
+            "/v1/accounts/{id}/orders"
+        );
+        assert_eq!(
+            metric_path_label("/v1/markets/42/prices/history"),
+            "/v1/markets/{id}/prices/history"
+        );
+        assert_eq!(
+            metric_path_label("/v1/events/polymarket-abc/raw"),
+            "/v1/events/{event_id}/raw"
+        );
+        assert_eq!(
+            metric_path_label("/v1/proofs/state/abcdef"),
+            "/v1/proofs/state/{leaf_key_hex}"
+        );
+        assert_eq!(metric_path_label("/v1/blocks/123"), "/v1/blocks/{height}");
+    }
+
+    #[test]
+    fn metric_path_label_buckets_unmatched_routes() {
+        assert_eq!(
+            metric_path_label("/v1/accounts/1/fills/extra"),
+            "/v1/{unmatched}"
+        );
+        assert_eq!(metric_path_label("/wp-login.php"), "/{unmatched}");
+    }
 }

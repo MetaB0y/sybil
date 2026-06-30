@@ -3,7 +3,7 @@ tags: [infrastructure]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-04-30
+last_verified: 2026-06-30
 ---
 
 The WebSocket block stream is the production transport for the block feed — a persistent, bidirectional channel at `GET /v1/blocks/ws` that pushes every committed block to subscribers. It complements the simpler [[SSE Block Stream]] (`/v1/blocks/stream`) with stronger guarantees: versioned message envelope, explicit lag signalling with close codes, server-initiated pings, and gap-free reconnect via `?from_block=N`. These are the properties long-lived clients (frontends, agents, proof consumers) need; SSE stays around for scripted tooling and `curl` debugging.
@@ -30,7 +30,9 @@ Clients should read the `v` field first and ignore messages whose version they d
 
 On disconnect (either a clean `lagged` close or a transport error), a client that has seen block `H` reconnects with `?from_block=H+1`. The server replays every block in `[H+1, current_head]` from its in-memory history, emits `replay_complete`, then switches to the live feed. There is no gap and no duplicate.
 
-If `H+1` is older than the in-memory history (default 100 blocks), the server closes with "replay failed at height N: block not found". The client should fall back to `/v1/blocks/latest` for the current state and resume without `from_block`.
+Current behavior: if `H+1` is older than the in-memory history (default 100 blocks), the server closes with "replay failed at height N: block not found". The client should fall back to `/v1/blocks/latest` for the current state and resume without `from_block`.
+
+Target behavior: [[Historical Data Serving]] makes replay durable. If `H+1` is outside the hot ring but inside configured block-history retention, the handler should replay from the store and then switch to the live feed. Only requests older than retention should fail.
 
 ## Keepalive
 
@@ -53,3 +55,4 @@ The server sends a WebSocket Ping frame every 30 seconds. Any message from the c
 - [[SSE Block Stream]] — simpler alternative at `/v1/blocks/stream`
 - [[REST API]] — `GET /v1/blocks/{height}` for one-shot block fetches
 - [[Block Lifecycle]] — what's in each `BlockResponse` payload
+- [[Historical Data Serving]] — planned durable replay source

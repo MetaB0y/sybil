@@ -248,12 +248,17 @@ impl AnalyticsState {
     }
 
     pub fn note_first_deposit(&mut self, account_id: AccountId) {
-        self.first_deposit_ms.entry(account_id).or_insert_with(|| {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64
-        });
+        let timestamp_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        self.note_first_deposit_at(account_id, timestamp_ms);
+    }
+
+    pub fn note_first_deposit_at(&mut self, account_id: AccountId, timestamp_ms: u64) {
+        self.first_deposit_ms
+            .entry(account_id)
+            .or_insert(timestamp_ms);
     }
 
     pub fn merge_prices(

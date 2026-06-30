@@ -30,8 +30,15 @@ use crate::market_info::{AccountFillRecord, MarketMetadata, PricePoint};
 use crate::market_lifecycle::MarketLifecycle;
 use crate::order_book::OrderBook;
 use crate::settlement;
-use crate::store::{RestoredState, SequencerSnapshot};
+use crate::store::{ControlPlaneCommand, RestoredState, SequencerSnapshot};
 use crate::system_event::SystemEvent;
+
+fn current_timestamp_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
 
 /// Default order TTL in blocks. At the 10s cadence this is ~20 years —
 /// i.e. effectively never expires (GTC).
@@ -682,6 +689,7 @@ impl BlockSequencer {
     /// Restore from persisted state.
     pub fn restore(state: RestoredState, oracle: Arc<dyn Oracle>, config: SequencerConfig) -> Self {
         let solver: Arc<dyn Solver> = Arc::new(matching_solver::LpSolver::new());
+        let control_plane_log = state.control_plane_log.clone();
         let mut lifecycle = MarketLifecycle::new(oracle);
         for (market_id, status) in state.market_statuses {
             lifecycle.set_market_status(market_id, status);
@@ -691,6 +699,9 @@ impl BlockSequencer {
         }
         for feed in state.data_feeds {
             lifecycle.restore_feed(feed);
+        }
+        for template in state.resolution_templates {
+            lifecycle.install_template(template);
         }
         let mut order_book = OrderBook::restore(state.resting_orders, config.order_ttl_blocks);
         // Replay the admit-log WAL on top of the snapshot: every non-MM
@@ -729,9 +740,88 @@ impl BlockSequencer {
                 .request_bridge_withdrawal(request)
                 .expect("pending bridge withdrawal replay should be valid");
         }
+        for command in control_plane_log {
+            restored
+                .replay_control_plane_command(command)
+                .expect("control-plane WAL replay should be valid");
+        }
         let account_ids: Vec<AccountId> = restored.accounts.iter().map(|(id, _)| *id).collect();
         restored.analytics.seed_equity_known(account_ids);
         restored
+    }
+
+    fn replay_control_plane_command(
+        &mut self,
+        command: ControlPlaneCommand,
+    ) -> Result<(), SequencerError> {
+        match command {
+            ControlPlaneCommand::CreateAccount { initial_balance } => {
+                self.create_account(initial_balance);
+                Ok(())
+            }
+            ControlPlaneCommand::FundAccount {
+                account_id,
+                amount,
+                timestamp_ms,
+            } => self
+                .fund_account_at(account_id, amount, timestamp_ms)
+                .map(|_| ()),
+            ControlPlaneCommand::RegisterPubkey {
+                account_id,
+                compressed_pubkey,
+            } => {
+                let pubkey = crate::crypto::PublicKey::from_compressed_bytes(&compressed_pubkey)
+                    .ok_or_else(|| {
+                        SequencerError::Persistence(
+                            "invalid pubkey in control-plane WAL".to_string(),
+                        )
+                    })?;
+                self.register_pubkey(account_id, pubkey)
+            }
+            ControlPlaneCommand::CreateMarket { name } => {
+                self.create_market(name);
+                Ok(())
+            }
+            ControlPlaneCommand::CreateMarketWithMetadata { name, metadata } => {
+                self.create_market_with_metadata(name, metadata);
+                Ok(())
+            }
+            ControlPlaneCommand::CreateMarketGroup { name, market_ids } => {
+                self.create_market_group(name, market_ids);
+                Ok(())
+            }
+            ControlPlaneCommand::CancelPendingOrder {
+                account_id,
+                order_id,
+                timestamp_ms,
+            } => self.cancel_pending_order_at(account_id, order_id, timestamp_ms),
+            ControlPlaneCommand::ResolveMarket {
+                market_id,
+                payout_nanos,
+                timestamp_ms,
+            } => self
+                .resolve_market(market_id, payout_nanos, timestamp_ms)
+                .map(|_| ()),
+            ControlPlaneCommand::ResolveMarketAttested {
+                market_id,
+                signed,
+                timestamp_ms,
+            } => self
+                .resolve_market_attested(market_id, &signed, timestamp_ms)
+                .map(|_| ()),
+            ControlPlaneCommand::RegisterFeed {
+                pubkey,
+                name,
+                timestamp_ms,
+            } => {
+                self.register_feed(pubkey, name, timestamp_ms);
+                Ok(())
+            }
+            ControlPlaneCommand::InstallTemplate { template } => {
+                self.install_template(template);
+                Ok(())
+            }
+        }
     }
 
     pub fn height(&self) -> u64 {
@@ -809,6 +899,29 @@ impl BlockSequencer {
 
     pub fn market_groups_mut(&mut self) -> &mut Vec<MarketGroup> {
         &mut self.market_groups
+    }
+
+    pub fn create_market(&mut self, name: String) -> MarketId {
+        self.markets.add_binary(name)
+    }
+
+    pub fn create_market_with_metadata(
+        &mut self,
+        name: String,
+        metadata: MarketMetadata,
+    ) -> MarketId {
+        let market_id = self.create_market(name);
+        self.set_market_metadata(market_id, metadata);
+        market_id
+    }
+
+    pub fn create_market_group(&mut self, name: String, market_ids: Vec<MarketId>) -> MarketGroup {
+        let mut group = MarketGroup::new(&name);
+        for market_id in market_ids {
+            group.add_market(market_id);
+        }
+        self.market_groups.push(group.clone());
+        group
     }
 
     pub fn last_header(&self) -> Option<&BlockHeader> {
@@ -1100,6 +1213,15 @@ impl BlockSequencer {
         account_id: AccountId,
         amount: i64,
     ) -> Result<Account, SequencerError> {
+        self.fund_account_at(account_id, amount, current_timestamp_ms())
+    }
+
+    pub fn fund_account_at(
+        &mut self,
+        account_id: AccountId,
+        amount: i64,
+        timestamp_ms: u64,
+    ) -> Result<Account, SequencerError> {
         self.capture_system_account_baseline(account_id);
         let account = self.accounts.get_mut(account_id).ok_or({
             SequencerError::Rejected(Rejection {
@@ -1113,7 +1235,7 @@ impl BlockSequencer {
         account.total_deposited += amount;
         let updated = account.clone();
         self.record_system_event(SystemEvent::Deposit { account_id, amount });
-        self.note_first_deposit(account_id);
+        self.note_first_deposit_at(account_id, timestamp_ms);
         Ok(updated)
     }
 
@@ -1121,6 +1243,11 @@ impl BlockSequencer {
     /// deposits are ignored. Off-block sidecar; never enters `state_root`.
     fn note_first_deposit(&mut self, account_id: AccountId) {
         self.analytics.note_first_deposit(account_id);
+    }
+
+    fn note_first_deposit_at(&mut self, account_id: AccountId, timestamp_ms: u64) {
+        self.analytics
+            .note_first_deposit_at(account_id, timestamp_ms);
     }
 
     /// First-deposit timestamp for an account, in ms since UNIX epoch.
@@ -1494,6 +1621,15 @@ impl BlockSequencer {
         account_id: AccountId,
         order_id: u64,
     ) -> Result<(), SequencerError> {
+        self.cancel_pending_order_at(account_id, order_id, current_timestamp_ms())
+    }
+
+    pub fn cancel_pending_order_at(
+        &mut self,
+        account_id: AccountId,
+        order_id: u64,
+        timestamp_ms: u64,
+    ) -> Result<(), SequencerError> {
         match self.order_book.cancel(account_id, order_id) {
             Ok(ro) => {
                 let market_ids: Vec<MarketId> = ro.order.active_markets().collect();
@@ -1509,12 +1645,12 @@ impl BlockSequencer {
                     });
                 {
                     use crate::aggregates::{HistoryEvent, HistoryKind};
-                    let now_ms = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64;
-                    let mut e =
-                        HistoryEvent::new(account_id, HistoryKind::Cancelled, self.height, now_ms);
+                    let mut e = HistoryEvent::new(
+                        account_id,
+                        HistoryKind::Cancelled,
+                        self.height,
+                        timestamp_ms,
+                    );
                     e.order_id = Some(order_id);
                     e.market_id = ro.order.active_markets().next();
                     e.qty = Some(ro.order.max_fill);
@@ -3532,7 +3668,9 @@ mod tests {
             pubkey_registry: seq_a.pubkey_registry().clone(),
             resting_orders: seq_a.order_book.snapshot(),
             data_feeds: Vec::new(),
+            resolution_templates: Vec::new(),
             pending_bundles: Vec::new(),
+            control_plane_log: Vec::new(),
             pending_l1_deposits: Vec::new(),
             pending_bridge_withdrawals: Vec::new(),
             bridge_state: BridgeState::default(),

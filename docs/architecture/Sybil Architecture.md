@@ -2,7 +2,7 @@
 tags: [moc]
 layer: core
 status: current
-last_verified: 2026-03-15
+last_verified: 2026-06-30
 ---
 
 Sybil is a prediction market matching engine built on Frequent Batch Auctions. Traders place orders on binary-outcome markets — "Will X happen? YES or NO" — and every second, all pending orders are batched together and cleared simultaneously by a welfare-maximizing solver. This is fundamentally different from continuous limit order books: instead of a race to be first, every participant in a batch gets the same price. The architecture is designed from the ground up for verifiability, with a ZK proof pipeline that can attest to the correctness of every batch on-chain.
@@ -61,6 +61,7 @@ The matching problem itself has an elegant mathematical structure: without marke
 - [[Nanos and Integer Arithmetic]] — the numeric foundation
 - [[Binary Markets and Market Groups]] — binary outcomes grouped for multi-outcome events
 - [[Minting]] — share creation mechanics
+- [[Fractional Quantities]] — planned fixed-point share units
 
 ## The Matching Problem
 - [[The LP Core]] — the polynomial-time base problem
@@ -82,6 +83,8 @@ The matching problem itself has an elegant mathematical structure: without marke
 - [[Actor Mailbox Monitoring]] — queue-depth observability for hot actors
 - [[Settlement]] — balance and position updates
 - [[Pending Orders and TTL]] — cross-batch order persistence
+- [[Persistence]] — crash recovery and acknowledged-write durability
+- [[Historical Data Serving]] — durable block and price history design
 - [[State Root and Parent Hash]] — cryptographic chaining
 - [[Block Witness]] — the ZK audit trail
 - [[Four-Layer Verification]] — 37 independent correctness checks across 4 layers
