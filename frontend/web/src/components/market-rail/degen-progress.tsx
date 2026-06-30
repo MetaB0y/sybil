@@ -50,24 +50,34 @@ export function DegenProgress(props: DegenProgressProps) {
           bought
         </div>
         {props.onCancel && (
-          <button
-            type="button"
-            onClick={props.onCancel}
-            disabled={!props.canCancel || props.cancelling}
-            title={
-              props.canCancel
-                ? "Cancel this bet"
-                : "Waiting for the order to be placed…"
-            }
-            style={{
-              ...cancelStyle,
-              cursor:
-                !props.canCancel || props.cancelling ? "not-allowed" : "pointer",
-              opacity: !props.canCancel || props.cancelling ? 0.55 : 1,
-            }}
-          >
-            {props.cancelling ? "Cancelling…" : "Cancel bet"}
-          </button>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <button
+              type="button"
+              onClick={props.onCancel}
+              disabled={!props.canCancel || props.cancelling}
+              title={
+                props.canCancel
+                  ? "Cancel this bet"
+                  : "Cancel unlocks the moment your order registers (about a second)."
+              }
+              style={{
+                ...cancelStyle,
+                cursor:
+                  !props.canCancel || props.cancelling
+                    ? "not-allowed"
+                    : "pointer",
+                opacity: !props.canCancel || props.cancelling ? 0.55 : 1,
+              }}
+            >
+              {props.cancelling ? "Cancelling…" : "Cancel bet"}
+            </button>
+            {/* Cancel can't fire until the order's id registers (~1s after
+                submit). Brief, but say so the greyed button doesn't read as
+                broken. */}
+            {!props.canCancel && !props.cancelling && (
+              <span style={cancelHintStyle}>unlocking cancel…</span>
+            )}
+          </div>
         )}
       </div>
     );
@@ -161,6 +171,14 @@ const cancelStyle: React.CSSProperties = {
   fontWeight: 600,
   textTransform: "uppercase",
   letterSpacing: "var(--track-wide)",
+};
+// Muted caption under a greyed Cancel — explains why it's not yet tappable.
+const cancelHintStyle: React.CSSProperties = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 10,
+  color: "var(--fg-4)",
+  textAlign: "center",
+  letterSpacing: "0.02em",
 };
 // Filled accent button so "Bet again" reads as the obvious next tap, not a
 // faint outline.

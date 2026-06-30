@@ -16,6 +16,39 @@ export interface DegenCriteria {
   marketId: number;
   outcome: DegenSide;
   submitHeight: number;
+  /**
+   * Highest order id that already existed for this market *before* this bet was
+   * submitted (see `priorMaxOrderId`). Order ids are monotonic within a market,
+   * so the new bet's order is always strictly greater — matching only ids above
+   * this floor isolates this bet from the account's earlier orders on the same
+   * market+side (otherwise a fresh bet re-binds a prior, already-resolved order
+   * whose `filled`/`placed` row sits at a height ≥ this submit height). Null on
+   * the first-ever bet (nothing to exclude).
+   */
+  minOrderIdExclusive?: number | null;
+}
+
+/**
+ * Highest order id already present for `marketId` across the events + pending
+ * feeds — the floor that isolates a fresh degen bet from this account's earlier
+ * orders on the same market. Snapshot at submit and carried in `DegenActive`.
+ * Returns null when the feeds hold nothing for this market (first bet).
+ */
+export function priorMaxOrderId(
+  marketId: number,
+  events: { market_id?: number | null; order_id?: number | null }[],
+  pending: { market_id: number; order_id: number }[],
+): number | null {
+  let max: number | null = null;
+  for (const e of events) {
+    if (e.market_id !== marketId || e.order_id == null) continue;
+    if (max === null || e.order_id > max) max = e.order_id;
+  }
+  for (const o of pending) {
+    if (o.market_id !== marketId) continue;
+    if (max === null || o.order_id > max) max = o.order_id;
+  }
+  return max;
 }
 
 /**
@@ -35,6 +68,9 @@ export function findDegenOrderId(
     if (e.side !== "BUY") continue;
     if (e.outcome !== c.outcome) continue;
     if (e.blockHeight < c.submitHeight) continue;
+    if (c.minOrderIdExclusive != null && e.orderId <= c.minOrderIdExclusive) {
+      continue;
+    }
     if (e.type !== "placed" && e.type !== "partial_fill" && e.type !== "filled") {
       continue;
     }
@@ -43,6 +79,41 @@ export function findDegenOrderId(
     }
   }
   return best?.orderId ?? null;
+}
+
+/** Minimal subset of `PendingOrderResponse` needed to bind a degen bet's id. */
+export interface DegenPendingOrder {
+  order_id: number;
+  market_id: number;
+  side: string; // "BuyYes" | "BuyNo" | "SellYes" | "SellNo" | …
+  created_at_block: number;
+}
+
+/**
+ * Bind our degen bet's order id from the *pending-orders* feed
+ * (`/v1/accounts/{id}/orders`). The backend assigns the id at submit and exposes
+ * the resting order here within ~1s — during the open batch, before the `placed`
+ * event commits at the next clear — so Cancel can unlock immediately instead of
+ * waiting a full batch. Matches our market + buy side, ignores any order created
+ * before this bet, and takes the newest (ids are monotonic) to isolate this bet
+ * from an earlier resting order on the same side.
+ */
+export function findDegenPendingOrderId(
+  pending: DegenPendingOrder[],
+  c: DegenCriteria,
+): number | null {
+  const wantSide = c.outcome === "YES" ? "BuyYes" : "BuyNo";
+  let bestId: number | null = null;
+  for (const o of pending) {
+    if (o.market_id !== c.marketId) continue;
+    if (o.side !== wantSide) continue;
+    if (o.created_at_block < c.submitHeight) continue;
+    if (c.minOrderIdExclusive != null && o.order_id <= c.minOrderIdExclusive) {
+      continue;
+    }
+    if (bestId === null || o.order_id > bestId) bestId = o.order_id;
+  }
+  return bestId;
 }
 
 export type DegenPhase = "tracking" | "filled" | "partial" | "none" | "cancelled";

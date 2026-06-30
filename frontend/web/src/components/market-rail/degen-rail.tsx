@@ -6,21 +6,28 @@
  * fill-progress card and then a result (DegenProgress). One bet at a time.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { cancelSignedOrder, submitSignedOrder } from "@/lib/account/orders";
 import { humanizeOrderError } from "@/lib/account/order-errors";
 import { useAccountSession, useSetConnectModalOpen } from "@/lib/account/use-account";
+import type { AccountEvent } from "@/lib/account/use-account-events";
 import { useAvailableBalance } from "@/lib/account/use-available-balance";
 import { ONE_DOLLAR_NANOS, buildDegenOrder, resolveMarkNanos } from "@/lib/degen";
+import { priorMaxOrderId } from "@/lib/degen/track";
 import {
   useDegenBetTracker,
   type DegenActive,
 } from "@/lib/degen/use-degen-bet-tracker";
+import type { PendingOrder } from "@/lib/markets/use-pending-orders";
 import { parseNanos } from "@/lib/format/nanos";
 import type { EventGroup } from "@/lib/market-detail/use-event-group";
 import { usePriceHistory } from "@/lib/markets/use-price-history";
-import { selectLatestHeight, useStore } from "@/lib/store";
+import {
+  selectLatestBlockAnchor,
+  selectLatestHeight,
+  useStore,
+} from "@/lib/store";
 import { DegenAmount } from "./degen-amount";
 import { DegenOutcomePicker } from "./degen-outcome-picker";
 import { DegenProgress } from "./degen-progress";
@@ -45,6 +52,13 @@ export function DegenRail({
   const [signing, setSigning] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Optimistic cancel: hitting Cancel is a local intent, so we reflect it
+  // immediately instead of waiting for the order to drop out of the live feeds
+  // and the cancel to round-trip a block. Reset whenever the active bet changes.
+  const [cancelledLocal, setCancelledLocal] = useState(false);
+  useEffect(() => {
+    setCancelledLocal(false);
+  }, [active]);
 
   const session = useAccountSession();
   const openConnectModal = useSetConnectModalOpen();
@@ -102,10 +116,34 @@ export function DegenRail({
     // selected is narrowed to non-undefined by the early return above, but
     // TypeScript can't see across the function boundary — guard here too.
     if (!selected || !built.ok || latestHeight == null) return;
-    // Anchor the fill countdown to now (aligned with submitHeight below) and
-    // carry it in DegenActive so it survives a Degen↔Pro toggle — see
-    // DegenActive.submitPerfMs.
+    // Freeze the open batch's block-clock anchor so the progress card shows ONE
+    // countdown to the next batch clear (the live current-batch timeline).
+    // Carried in DegenActive so it survives a Degen↔Pro toggle.
+    const batchAnchorPerfMs =
+      selectLatestBlockAnchor(useStore.getState()) ?? performance.now();
+    // The actual submit instant — start of the bet's lifetime. `batchAnchorPerfMs`
+    // is the batch *start* (up to ~10s earlier); the bar spans submit→expiry, so a
+    // late-in-batch bet shows its true shorter remaining time from an empty bar.
     const submitPerfMs = performance.now();
+    // Floor that isolates this bet from the account's earlier orders on this
+    // market: the highest order id already in the cached events/pending feeds.
+    // The new order's id is strictly greater (ids are monotonic per market), so
+    // the tracker binds *this* bet and never re-reads a prior, already-resolved
+    // order. Without it, a repeat bet on the same market+side instantly read the
+    // previous order's "Successfully bet…"/"failed" state.
+    const floorOrderId = priorMaxOrderId(
+      selected.marketId,
+      qc.getQueryData<AccountEvent[]>([
+        "account",
+        session.accountId,
+        "events",
+      ]) ?? [],
+      qc.getQueryData<PendingOrder[]>([
+        "account",
+        session.accountId,
+        "orders",
+      ]) ?? [],
+    );
     setSigning(true);
     setSubmitError(null);
     try {
@@ -127,7 +165,9 @@ export function DegenRail({
         betUsd: amountNum,
         limitPriceNanos: built.order.limitPriceNanos,
         submitHeight: latestHeight,
+        batchAnchorPerfMs,
         submitPerfMs,
+        priorMaxOrderId: floorOrderId,
         // DegenActive.expiresAtBlock is number; built.order.expiresAtBlock is bigint.
         expiresAtBlock: Number(built.order.expiresAtBlock),
       });
@@ -155,6 +195,9 @@ export function DegenRail({
     const orderId = tracking?.orderId ?? null;
     if (!session || !active || orderId === null) return;
     setCancelling(true);
+    // Flip the card to its cancelled state now; revert only if the backend
+    // rejects (e.g. the order already filled/expired in the meantime).
+    setCancelledLocal(true);
     try {
       const remaining = active.targetQty - (tracking?.filledQty ?? 0n);
       await cancelSignedOrder({
@@ -173,10 +216,11 @@ export function DegenRail({
       qc.invalidateQueries({ queryKey: ["account", session.accountId, "portfolio"] });
       qc.invalidateQueries({ queryKey: ["orders", "pending"] });
     } catch (e) {
-      // The likely failures are "already filled" / "already expired" — the
-      // tracker resolves those to filled/none on the next block anyway, so a
-      // warn (not error, which trips the dev overlay) is enough.
+      // The likely failures are "already filled" / "already expired" — undo the
+      // optimistic flip and let the tracker resolve to filled/none on the next
+      // block. warn (not error, which trips the dev overlay) is enough.
       console.warn("degen cancel failed:", e);
+      setCancelledLocal(false);
     } finally {
       setCancelling(false);
     }
@@ -211,7 +255,15 @@ export function DegenRail({
   //  - after a missed bet ("none"): the short "why failed?" explainer;
   //  - pre-bet (null) and once a bet lands ("filled"/"partial"): nothing (the
   //    result card already explains itself).
-  const resultPhase = active ? tracking?.phase ?? "tracking" : null;
+  // The optimistic cancel wins over the tracker's phase; if shares already
+  // partially filled before the cancel, that portion stands (read "partial").
+  const trackedPhase = tracking?.phase ?? "tracking";
+  const effectivePhase = cancelledLocal
+    ? (tracking?.filledQty ?? 0n) > 0n
+      ? "partial"
+      : "cancelled"
+    : trackedPhase;
+  const resultPhase = active ? effectivePhase : null;
   const showWaiting = resultPhase === "tracking";
   const showFailed = resultPhase === "none";
 
@@ -219,7 +271,7 @@ export function DegenRail({
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {active ? (
         <DegenProgress
-          phase={tracking?.phase ?? "tracking"}
+          phase={effectivePhase}
           side={active.outcome}
           secondsLeft={tracking?.secondsLeft ?? 0}
           timeProgress01={tracking?.timeProgress01 ?? 0}

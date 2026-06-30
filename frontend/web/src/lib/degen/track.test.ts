@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   findDegenOrderId,
+  findDegenPendingOrderId,
+  priorMaxOrderId,
   resolveDegenBet,
   type DegenEvent,
+  type DegenPendingOrder,
 } from "./track";
 
 function ev(p: Partial<DegenEvent>): DegenEvent {
@@ -50,8 +53,93 @@ describe("findDegenOrderId", () => {
     expect(findDegenOrderId(events, crit)).toBe(8);
   });
 
+  it("skips a prior order at/below the id floor (repeat-bet isolation)", () => {
+    // A previous bet's filled row sits at a height >= this submit; without the
+    // floor it would re-bind and read as instantly filled. The floor (=42)
+    // excludes it, and the fresh order (43) hasn't surfaced yet → null.
+    const events = [ev({ type: "filled", orderId: 42, blockHeight: 101 })];
+    expect(findDegenOrderId(events, { ...crit, minOrderIdExclusive: 42 })).toBeNull();
+  });
+
+  it("binds the new order above the id floor", () => {
+    const events = [
+      ev({ type: "filled", orderId: 42, blockHeight: 101 }),
+      ev({ type: "placed", orderId: 43, blockHeight: 101 }),
+    ];
+    expect(findDegenOrderId(events, { ...crit, minOrderIdExclusive: 42 })).toBe(43);
+  });
+
   it("returns null when nothing matches", () => {
     expect(findDegenOrderId([], crit)).toBeNull();
+  });
+});
+
+function po(p: Partial<DegenPendingOrder>): DegenPendingOrder {
+  return { order_id: 1, market_id: 7, side: "BuyYes", created_at_block: 100, ...p };
+}
+
+describe("findDegenPendingOrderId", () => {
+  it("binds the matching buy-side pending order", () => {
+    expect(findDegenPendingOrderId([po({ order_id: 55 })], crit)).toBe(55);
+  });
+
+  it("matches NO bets to the BuyNo side", () => {
+    const noCrit = { marketId: 7, outcome: "NO" as const, submitHeight: 100 };
+    const pending = [po({ order_id: 9, side: "BuyYes" }), po({ order_id: 10, side: "BuyNo" })];
+    expect(findDegenPendingOrderId(pending, noCrit)).toBe(10);
+  });
+
+  it("ignores wrong market, side, and orders created before this bet", () => {
+    const pending = [
+      po({ order_id: 1, market_id: 8 }),
+      po({ order_id: 2, side: "BuyNo" }),
+      po({ order_id: 3, created_at_block: 99 }),
+    ];
+    expect(findDegenPendingOrderId(pending, crit)).toBeNull();
+  });
+
+  it("takes the newest (highest) id to isolate this bet from an earlier rest", () => {
+    const pending = [
+      po({ order_id: 70, created_at_block: 100 }),
+      po({ order_id: 91, created_at_block: 101 }),
+    ];
+    expect(findDegenPendingOrderId(pending, crit)).toBe(91);
+  });
+
+  it("skips a still-resting prior order at/below the id floor", () => {
+    const pending = [po({ order_id: 70, created_at_block: 100 })];
+    expect(
+      findDegenPendingOrderId(pending, { ...crit, minOrderIdExclusive: 70 }),
+    ).toBeNull();
+  });
+
+  it("returns null for an empty pending list", () => {
+    expect(findDegenPendingOrderId([], crit)).toBeNull();
+  });
+});
+
+describe("priorMaxOrderId", () => {
+  it("returns the highest id for the market across both feeds", () => {
+    const events = [
+      { market_id: 7, order_id: 10 },
+      { market_id: 7, order_id: 42 },
+      { market_id: 8, order_id: 99 }, // other market — ignored
+    ];
+    const pending = [{ market_id: 7, order_id: 41 }];
+    expect(priorMaxOrderId(7, events, pending)).toBe(42);
+  });
+
+  it("ignores rows missing an order id", () => {
+    const events = [
+      { market_id: 7, order_id: null },
+      { market_id: 7, order_id: 5 },
+    ];
+    expect(priorMaxOrderId(7, events, [])).toBe(5);
+  });
+
+  it("is null when neither feed has the market (first bet)", () => {
+    expect(priorMaxOrderId(7, [{ market_id: 8, order_id: 3 }], [])).toBeNull();
+    expect(priorMaxOrderId(7, [], [])).toBeNull();
   });
 });
 

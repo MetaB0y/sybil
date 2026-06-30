@@ -4,7 +4,7 @@ import { DegenProgress } from "./degen-progress";
 
 const common = {
   side: "YES" as const,
-  secondsLeft: 24,
+  secondsLeft: 22,
   timeProgress01: 0.4,
   filledQty: 12n,
   targetQty: 20n,
@@ -18,7 +18,7 @@ describe("DegenProgress", () => {
       <DegenProgress {...common} phase="tracking" />,
     );
     expect(html).toMatch(/Placing your bet/i);
-    expect(html).toContain("24s");
+    expect(html).toContain("22s");
     expect(html).toContain("12");
     expect(html).toContain("20");
     expect(html).not.toMatch(/Bet again/i);
