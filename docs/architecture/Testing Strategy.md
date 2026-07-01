@@ -49,7 +49,9 @@ Good properties:
 - serialization round trips preserve canonical bytes and hashes
 - pruning only removes rows below the configured retention floor
 
-These tests should not start an HTTP server or Docker.
+These tests should not start an HTTP server or Docker. The first core property
+slice lives in `matching-engine`: simple binary settlement deltas, minting
+balance restoration, zero-fill no-ops, and order welfare/satisfaction semantics.
 
 ### 2. In-Process API Integration
 
@@ -108,13 +110,13 @@ starting containers.
 
 ## Next Implementation Slice
 
-1. Rename and organize the current restart tests around public contracts:
+1. Add store-backed latest/list/WS replay restart tests when the historical
+   block-serving adapter is implemented.
+2. Add reservation-rounding properties around `notional_nanos_ceil` and
+   order-book acceptance so tiny fractional orders cannot overspend.
+3. Rename and organize the current restart tests around public contracts:
    acknowledged writes, committed block history, price history/candles, and
    retention.
-2. Add a narrow proptest module for settlement/order invariants before adding
-   more HTTP scenarios.
-3. Add store-backed latest/list/WS replay restart tests when the historical
-   block-serving adapter is implemented.
 4. Move helpers into a separate test-support crate only if multiple crates begin
    sharing the same public fixtures.
 

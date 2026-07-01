@@ -344,7 +344,8 @@ impl Fill {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shares_to_qty;
+    use crate::{shares_to_qty, signed_price_delta_notional, NANOS_PER_DOLLAR};
+    use proptest::prelude::*;
 
     #[test]
     fn test_order_creation() {
@@ -436,5 +437,50 @@ mod tests {
         assert_eq!(OrderDirection::SellYes.to_byte(), 1);
         assert_eq!(OrderDirection::BuyNo.to_byte(), 2);
         assert_eq!(OrderDirection::SellNo.to_byte(), 3);
+    }
+
+    proptest! {
+        #[test]
+        fn welfare_and_satisfaction_match_order_side(
+            payoff_kind in 0u8..4,
+            limit_price in 0u64..=NANOS_PER_DOLLAR,
+            fill_price in 0u64..=NANOS_PER_DOLLAR,
+            fill_qty in 0u64..=shares_to_qty(1_000_000),
+        ) {
+            let (yes_payoff, no_payoff) = match payoff_kind {
+                0 => (1, 0),
+                1 => (-1, 0),
+                2 => (0, 1),
+                _ => (0, -1),
+            };
+            let mut order = binary_order(yes_payoff, no_payoff);
+            order.limit_price = limit_price;
+            order.max_fill = fill_qty;
+
+            let seller = order.is_seller();
+            let surplus_per_unit = if seller {
+                fill_price as i64 - limit_price as i64
+            } else {
+                limit_price as i64 - fill_price as i64
+            };
+            let expected_welfare = signed_price_delta_notional(surplus_per_unit, fill_qty);
+
+            prop_assert_eq!(order.welfare_contribution(fill_price, fill_qty), expected_welfare);
+            prop_assert_eq!(
+                order.is_satisfied_at_price(fill_price),
+                if seller {
+                    fill_price >= limit_price
+                } else {
+                    fill_price <= limit_price
+                }
+            );
+            if fill_qty > 0 {
+                if order.is_satisfied_at_price(fill_price) {
+                    prop_assert!(expected_welfare >= 0);
+                } else {
+                    prop_assert!(expected_welfare <= 0);
+                }
+            }
+        }
     }
 }

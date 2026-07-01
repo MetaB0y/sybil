@@ -240,7 +240,10 @@ pub fn derive_minting(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{outcome_buy, outcome_sell, shares_to_qty, MarketSet, NANOS_PER_DOLLAR};
+    use crate::{
+        notional_nanos, outcome_buy, outcome_sell, shares_to_qty, MarketSet, NANOS_PER_DOLLAR,
+    };
+    use proptest::prelude::*;
 
     #[test]
     fn test_zero_qty_returns_none() {
@@ -445,5 +448,102 @@ mod tests {
         assert_eq!(adj.len(), 1);
         assert_eq!(adj[0].position_delta, -50);
         assert_eq!(adj[0].balance_delta, 0); // no price → zero revenue
+    }
+
+    proptest! {
+        #[test]
+        fn simple_binary_settlement_matches_notional_and_position(
+            outcome in 0u8..=1,
+            is_sell in any::<bool>(),
+            price in 0u64..=NANOS_PER_DOLLAR,
+            qty in 1u64..=shares_to_qty(1_000_000),
+        ) {
+            let mut markets = MarketSet::new();
+            let market = markets.add_binary("prop");
+            let order = if is_sell {
+                outcome_sell(&markets, 9, market, outcome, price, qty)
+            } else {
+                outcome_buy(&markets, 9, market, outcome, price, qty)
+            };
+            let fill = Fill::new(order.id, qty, price);
+
+            let delta = compute_fill_settlement(&order, &fill).expect("nonzero fill settles");
+            let notional = notional_nanos(price, qty) as i64;
+            let signed_qty = if is_sell { -(qty as i64) } else { qty as i64 };
+
+            prop_assert_eq!(
+                delta.balance_delta,
+                if is_sell { notional } else { -notional }
+            );
+            prop_assert_eq!(delta.position_deltas, vec![(market, outcome, signed_qty)]);
+        }
+
+        #[test]
+        fn zero_quantity_fill_is_always_noop(
+            outcome in 0u8..=1,
+            is_sell in any::<bool>(),
+            price in 0u64..=NANOS_PER_DOLLAR,
+            order_qty in 0u64..=shares_to_qty(1_000_000),
+        ) {
+            let mut markets = MarketSet::new();
+            let market = markets.add_binary("zero");
+            let order = if is_sell {
+                outcome_sell(&markets, 4, market, outcome, price, order_qty)
+            } else {
+                outcome_buy(&markets, 4, market, outcome, price, order_qty)
+            };
+            let fill = Fill::new(order.id, 0, price);
+
+            prop_assert!(compute_fill_settlement(&order, &fill).is_none());
+        }
+
+        #[test]
+        fn minting_adjustment_restores_yes_no_balance(
+            market_id in 0u32..1000,
+            total_yes in -1_000_000i64..=1_000_000,
+            total_no in -1_000_000i64..=1_000_000,
+            yes_price in 0u64..=NANOS_PER_DOLLAR,
+            no_price in 0u64..=NANOS_PER_DOLLAR,
+        ) {
+            let market = MarketId::new(market_id);
+            let totals = vec![(market, total_yes, total_no)];
+            let mut prices = HashMap::new();
+            prices.insert(market, vec![yes_price, no_price]);
+
+            let adjustments = derive_minting(&totals, &prices);
+            if total_yes == total_no {
+                prop_assert!(adjustments.is_empty());
+                return Ok(());
+            }
+
+            prop_assert_eq!(adjustments.len(), 1);
+            let adjustment = &adjustments[0];
+            prop_assert_eq!(adjustment.market_id, market);
+
+            let mut adjusted_yes = total_yes;
+            let mut adjusted_no = total_no;
+            if total_yes > total_no {
+                let diff = total_yes - total_no;
+                prop_assert_eq!(adjustment.outcome, 0);
+                prop_assert_eq!(adjustment.position_delta, -diff);
+                prop_assert_eq!(
+                    adjustment.balance_delta,
+                    notional_nanos(yes_price, diff as u64) as i64
+                );
+                adjusted_yes += adjustment.position_delta;
+            } else {
+                let diff = total_yes - total_no;
+                let abs_diff = diff.unsigned_abs();
+                prop_assert_eq!(adjustment.outcome, 1);
+                prop_assert_eq!(adjustment.position_delta, diff);
+                prop_assert_eq!(
+                    adjustment.balance_delta,
+                    notional_nanos(no_price, abs_diff) as i64
+                );
+                adjusted_no += adjustment.position_delta;
+            }
+
+            prop_assert_eq!(adjusted_yes, adjusted_no);
+        }
     }
 }
