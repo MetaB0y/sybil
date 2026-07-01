@@ -50,6 +50,21 @@ transaction that commits the block also commits its history rows.
 Phase 1 does not require a separate process, async export pipeline, object
 storage, or OLAP database.
 
+Implemented so far:
+
+- `blocks_full` persists full `SealedBlock` replay payloads by height from the
+  actor commit path.
+- `GetBlock(height)` checks the hot in-memory ring first, then falls back to
+  `blocks_full`.
+- A regression test covers ring eviction plus cold restart with an empty hot
+  ring.
+
+Still planned in this phase:
+
+- `block_summaries` and paginated `GET /v1/blocks`.
+- Durable WebSocket replay from blocks older than the hot ring.
+- Durable `price_points` range scans and retention metadata.
+
 ## Schema Sketch
 
 Suggested redb tables for Phase 1:

@@ -66,7 +66,7 @@ use crate::aggregates::{
     CostBasisTrackerSnapshot, LiquidityTrackerSnapshot, OrderStatsTrackerSnapshot,
     TraderTrackerSnapshot, WelfareTrackerSnapshot,
 };
-use crate::block::{state_sidecar_snapshot_from_resting_orders, BlockHeader};
+use crate::block::{state_sidecar_snapshot_from_resting_orders, BlockHeader, SealedBlock};
 use crate::bridge::{BridgeState, BridgeWithdrawalRequest, L1Deposit};
 use crate::market_info::{AccountFillRecord, MarketMetadata};
 use crate::market_lifecycle::MarketLifecycle;
@@ -328,9 +328,12 @@ fn prune_historical_block_rows(db: &Database) -> Result<bool, StoreError> {
 // TODO: Tier 2 tables (remaining)
 // const MM_STATE: TableDefinition<u32, &[u8]> = TableDefinition::new("mm_state");
 
+/// Full API replay block by height. Unlike `BLOCK_HEADERS`/`BLOCK_WITNESSES`,
+/// this is historical serving data and is not pruned to latest-only.
+const BLOCKS_FULL: TableDefinition<u64, &[u8]> = TableDefinition::new("blocks_full");
+
 // TODO: Tier 3 tables (remaining)
 // const PRICE_HISTORY: TableDefinition<u64, &[u8]> = TableDefinition::new("price_history");
-// const BLOCKS_FULL: TableDefinition<u64, &[u8]> = TableDefinition::new("blocks_full");
 
 // ---------------------------------------------------------------------------
 // Store
@@ -504,6 +507,7 @@ impl Store {
         txn.open_table(MARKET_STATUSES)?;
         txn.open_table(MARKET_GROUPS)?;
         txn.open_table(BLOCK_HEADERS)?;
+        txn.open_table(BLOCKS_FULL)?;
         txn.open_table(BLOCK_WITNESSES)?;
         txn.open_table(PUBKEY_REGISTRY)?;
         txn.open_table(COUNTERS)?;
@@ -550,7 +554,7 @@ impl Store {
 
     /// Save the sequencer state after a block. Single ACID transaction.
     pub async fn save_block(&self, snapshot: SequencerSnapshot<'_>) -> Result<(), StoreError> {
-        self.save_block_inner(snapshot, None).await
+        self.save_block_inner(snapshot, None, None).await
     }
 
     /// Save the sequencer state and its witness after a block.
@@ -563,13 +567,27 @@ impl Store {
         snapshot: SequencerSnapshot<'_>,
         witness: &BlockWitness,
     ) -> Result<(), StoreError> {
-        self.save_block_inner(snapshot, Some(witness)).await
+        self.save_block_inner(snapshot, Some(witness), None).await
+    }
+
+    /// Save sequencer state, witness, and the API replay block payload after
+    /// a block. Actor commits use this path so historical reads have the same
+    /// durability boundary as recovery state.
+    pub async fn save_block_with_witness_and_history(
+        &self,
+        snapshot: SequencerSnapshot<'_>,
+        witness: &BlockWitness,
+        block: &SealedBlock,
+    ) -> Result<(), StoreError> {
+        self.save_block_inner(snapshot, Some(witness), Some(block))
+            .await
     }
 
     async fn save_block_inner(
         &self,
         snapshot: SequencerSnapshot<'_>,
         witness: Option<&BlockWitness>,
+        history_block: Option<&SealedBlock>,
     ) -> Result<(), StoreError> {
         if let Some(witness) = witness {
             validate_witness_header(snapshot.header, witness)?;
@@ -654,6 +672,14 @@ impl Store {
             let mut table = txn.open_table(BLOCK_HEADERS)?;
             table.retain(|height, _| height == snapshot.header.height)?;
             let bytes = rmp_serde::to_vec(snapshot.header)?;
+            table.insert(snapshot.header.height, bytes.as_slice())?;
+        }
+
+        // Full historical block replay payload. This is append-only history
+        // data, so unlike headers/witnesses it is not retained latest-only.
+        if let Some(block) = history_block {
+            let mut table = txn.open_table(BLOCKS_FULL)?;
+            let bytes = rmp_serde::to_vec(block)?;
             table.insert(snapshot.header.height, bytes.as_slice())?;
         }
 
@@ -975,6 +1001,17 @@ impl Store {
     pub fn block_witness(&self, height: u64) -> Result<Option<BlockWitness>, StoreError> {
         let txn = self.db.begin_read()?;
         let table = txn.open_table(BLOCK_WITNESSES)?;
+        table
+            .get(height)?
+            .map(|value| rmp_serde::from_slice(value.value()))
+            .transpose()
+            .map_err(StoreError::from)
+    }
+
+    /// Load a historical API replay block by exact height.
+    pub async fn load_block(&self, height: u64) -> Result<Option<SealedBlock>, StoreError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(BLOCKS_FULL)?;
         table
             .get(height)?
             .map(|value| rmp_serde::from_slice(value.value()))

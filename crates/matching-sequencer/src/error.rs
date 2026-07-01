@@ -3,7 +3,7 @@ use matching_engine::MarketId;
 use crate::account::AccountId;
 
 /// Reason an order was rejected.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum RejectionReason {
     InsufficientBalance {
         required: i64,
@@ -55,7 +55,7 @@ impl RejectionReason {
 }
 
 /// A rejected order.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Rejection {
     pub order_id: u64,
     pub account_id: AccountId,

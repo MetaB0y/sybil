@@ -629,10 +629,12 @@ impl SequencerActorState {
 
     async fn persist_block(&self, prepared: &PreparedBlock) -> Result<(), SequencerError> {
         if let Some(ref store) = self.store {
+            let sealed = prepared.production().sealed_block();
             store
-                .save_block_with_witness(
+                .save_block_with_witness_and_history(
                     prepared.next_sequencer().snapshot(),
                     &prepared.production().witness,
+                    &sealed,
                 )
                 .await
                 .map_err(|error| SequencerError::Persistence(error.to_string()))?;
@@ -1649,7 +1651,18 @@ impl Actor for SequencerActor {
                     .iter()
                     .find(|b| b.canonical.header.height == height)
                     .cloned();
-                let _ = reply.send(block.ok_or(SequencerError::BlockNotFound));
+                let result = match block {
+                    Some(block) => Ok(block),
+                    None => match &state.store {
+                        Some(store) => store
+                            .load_block(height)
+                            .await
+                            .map_err(|error| SequencerError::Persistence(error.to_string()))
+                            .and_then(|block| block.ok_or(SequencerError::BlockNotFound)),
+                        None => Err(SequencerError::BlockNotFound),
+                    },
+                };
+                let _ = reply.send(result);
             }
             SequencerMsg::GetRecentBlocks(n, reply) => {
                 let cap = state.sequencer.config.block_history_capacity;
@@ -3557,6 +3570,56 @@ mod tests {
 
         let result = handle.get_block(99).await;
         assert!(matches!(result, Err(SequencerError::BlockNotFound)));
+    }
+
+    #[tokio::test]
+    async fn store_backed_get_block_survives_ring_eviction_and_restart() {
+        let path = temp_store_path("block-history");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let config = SequencerConfig {
+            block_history_capacity: 1,
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        };
+        let (seq, _) = make_test_sequencer_with_config(config.clone());
+        let handle = SequencerHandle::spawn_with_store_arc(seq, Some(store.clone()));
+
+        let block1 = handle.produce_block().await.unwrap();
+        let block2 = handle.produce_block().await.unwrap();
+        assert_eq!(block1.canonical.header.height, 1);
+        assert_eq!(block2.canonical.header.height, 2);
+
+        let recent = handle.get_recent_blocks(10).await.unwrap();
+        assert_eq!(recent.len(), 1, "hot ring should evict block 1");
+        assert_eq!(recent[0].canonical.header.height, 2);
+
+        let evicted = handle.get_block(1).await.unwrap();
+        assert_eq!(evicted.canonical.header.height, 1);
+        assert_eq!(
+            evicted.canonical.header.state_root,
+            block1.canonical.header.state_root
+        );
+
+        drop(handle);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        let restored_seq =
+            BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+        let reader = SequencerHandle::spawn_with_store_arc(restored_seq, Some(store.clone()));
+
+        let stored_block1 = reader.get_block(1).await.unwrap();
+        assert_eq!(stored_block1.canonical.header.height, 1);
+        assert_eq!(
+            stored_block1.canonical.header.state_root,
+            block1.canonical.header.state_root
+        );
+        let stored_block2 = reader.get_block(2).await.unwrap();
+        assert_eq!(stored_block2.canonical.header.height, 2);
+        assert_eq!(
+            stored_block2.canonical.header.state_root,
+            block2.canonical.header.state_root
+        );
     }
 
     #[tokio::test]

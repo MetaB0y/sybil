@@ -160,11 +160,14 @@ Persisted today:
 - **Fill history**: per-account fill records in `fill_history`, keyed by `(account_id, block_height, order_id)`. See [[Fill History Persistence]].
 - **Account event history**: per-account portfolio history rows in `history_events`, keyed by `(account_id, block_height, seq)`. The sequencer persists the global `history_event_next_seq` cursor so restart cannot overwrite rows at the same height.
 - **Account equity series**: per-account equity points in `equity_points`, keyed by `(account_id, height)`.
+- **Full block replay payloads**: `SealedBlock` rows in `blocks_full`, keyed by
+  height, used as the exact-height fallback for `GET /v1/blocks/{height}` when
+  the hot block ring has evicted the block or after restart.
 
 Still not persisted:
 
 - **Price history**
-- **Block ring buffer for SSE catch-up**
+- **Block summaries and block ring fallback for SSE catch-up**
 - **Derived aggregates such as welfare summaries**
 
 The planned durable boundary for these views is [[Historical Data Serving]]. The in-memory caches should remain hot caches only; they should not be the source of truth for replay, charts, or restart behavior.

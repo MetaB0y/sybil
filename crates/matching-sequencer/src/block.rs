@@ -74,14 +74,14 @@ impl BlockHeader {
 }
 
 /// A canonical block plus derived, API-facing analytics.
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct SealedBlock {
     pub canonical: Block,
     pub analytics: BlockAnalytics,
 }
 
 /// A sequencer block produced each tick.
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Block {
     pub header: BlockHeader,
     pub order_ids: Vec<u64>,
@@ -97,7 +97,7 @@ pub struct Block {
 /// This is not canonical protocol data: it is not part of the block hash,
 /// state root, events root, or witness. API/SSE consumers receive it next to
 /// the block so product views do not have to reconstruct common summaries.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct BlockAnalytics {
     pub total_welfare: i64,
     pub total_volume: u64,
