@@ -45,7 +45,10 @@ This avoids two failure modes:
 This keeps the block commit boundary simple: when a block is saved, its replay
 payload and derived history rows are saved in the same redb transaction as the
 other block metadata and qMDB fence flip. A block is historical only if the same
-transaction that commits the block also commits its history rows.
+transaction that commits the block also commits its history rows. Retention
+pruning is separate bounded maintenance: it may lag behind the retention target,
+but it must never advertise a row as pruned before the delete transaction
+commits.
 
 Phase 1 does not require a separate process, async export pipeline, object
 storage, or OLAP database.
@@ -81,7 +84,8 @@ Suggested redb tables for Phase 1:
 | `blocks_full` | `height: u64` | versioned `SealedBlock` replay payload |
 | `block_summaries` | `height: u64` | compact block row for list pages |
 | `price_points` | `(market_id: u32, height: u64)` | `PricePoint` mark row |
-| `history_meta` | string key | min/max retained height, prune/export cursors |
+| `price_candles` | `(market_id: u32, resolution_secs: u32, bucket_start_ms: u64)` | `PriceCandle` OHLCV row |
+| `history_meta` | string key | retained floors, prune cursors, export cursors |
 
 `blocks_full` should store the versioned API-neutral replay payload needed by
 REST and WebSocket catch-up. It can start as `SealedBlock` if that is the
@@ -100,10 +104,16 @@ today: clearing price when a market trades, book midpoint when it does not trade
 but the book moves, and carry-over otherwise. Persisting only solver clearing
 prices would not preserve quiet-market charts or 24h deltas.
 
+`price_candles` are derived product rows for long-window charting. They are not
+canonical exchange state. They should be written from the same block-local
+price-point delta as `price_points`, so a committed block cannot have raw rows
+without matching candle updates for configured resolutions.
+
 Keys should be big-endian fixed-width bytes when compound ordering matters:
 
 ```text
 price_points key = be_u32(market_id) || be_u64(height)
+price_candles key = be_u32(market_id) || be_u32(resolution_secs) || be_u64(bucket_start_ms)
 ```
 
 The store may retain serialized structures initially. If query CPU becomes a
@@ -115,11 +125,11 @@ copies to avoid serialization work.
 Block commit should remain the only history commit point:
 
 1. `prepare_block` builds the next sequencer and `BlockProduction`.
-2. `persist_block` calls `Store::save_block_with_witness(...)` with the prepared
-   snapshot, witness, sealed block payload, compact summary, and price-point
-   delta.
+2. `persist_block` calls `Store::save_block_with_witness_and_history(...)` with
+   the prepared snapshot, witness, sealed block payload, compact summary, and
+   price-point delta.
 3. `save_block` writes qMDB inactive slots, redb state, full block, summary,
-   price rows, and retention metadata in one redb transaction.
+   raw price rows, and candle rows in one redb transaction.
 4. Only after the transaction succeeds does the actor swap in the prepared
    sequencer and broadcast the sealed block.
 
@@ -131,6 +141,12 @@ that cannot be loaded by `GET /v1/blocks/{height}`.
 Price rows should be append-only deltas emitted by `PriceTracker::record_block`.
 The in-memory `price_history` cache remains bounded; the durable table is the
 source of truth for historical ranges.
+
+Retention should not run as unbounded work inside this transaction. After a
+successful block commit, the actor or a maintenance task may call
+`Store::prune_history(policy, budget)` in a separate bounded redb write
+transaction. If pruning is interrupted, extra rows remain available; correctness
+does not depend on pruning catching up immediately.
 
 ## Read Path
 
@@ -155,7 +171,8 @@ Historical APIs should be explicit and bounded:
 
 - `GET /v1/blocks?before_height=&after_height=&limit=`
 - `GET /v1/blocks/{height}`
-- `GET /v1/markets/{id}/prices/history?from_ms=&to_ms=&after_height=&before_height=&limit=&resolution=`
+- `GET /v1/markets/{id}/prices/history?from_ms=&to_ms=&before_height=&limit=`
+- `GET /v1/markets/{id}/prices/candles?resolution=&from_ms=&to_ms=&before_ms=&limit=`
 
 Defaults should be small. Maximum limits should be enforced server-side.
 Responses should include pagination cursors so clients do not ask for "all
@@ -168,7 +185,7 @@ Suggested caps:
 | `GET /v1/blocks` | 60 | 500 |
 | `GET /v1/blocks/ws?from_block=` durable replay page | 64 internal | 64 internal |
 | `GET /v1/markets/{id}/prices/history` raw points | 500 | 5000 |
-| Downsampled/candled price history | 500 | 2000 |
+| `GET /v1/markets/{id}/prices/candles` | 500 | 2000 |
 
 WebSocket reconnect with `?from_block=N` should first use the hot ring. If `N`
 is older than the ring, it should stream from durable block history up to the
@@ -176,30 +193,146 @@ current head and then switch to live broadcast. If `N` is older than durable
 retention, it should fail clearly with a retention/gap envelope rather than
 silently skipping blocks.
 
-## Retention and Downsampling
+## Retention and Pruning
 
-Unbounded retention is a product decision, not an accident. The default policy should be:
+Unbounded retention is a product decision, not an accident. The first production
+policy should be simple and explicit:
 
-- Keep canonical blocks for a configured number of heights or days.
-- Keep raw price points for a shorter window.
-- Keep downsampled price candles for longer windows.
-- Expose the effective retention window through health or metadata.
+- Keep full replay blocks for a configured height window.
+- Keep raw mark-price points for a configured height or time window.
+- Keep price candles for a longer configured time window.
+- Expose retained floors in API responses and health/metadata so clients can
+  distinguish "outside retention" from "no data".
 
-If blocks are needed for verification or legal/audit reasons, canonical block retention should be longer than UI chart retention.
+Initial devnet defaults should be conservative and operator-tunable. A useful
+starting point is:
 
-Initial devnet defaults can be conservative:
+| Data | Default | Rationale |
+|------|---------|-----------|
+| `blocks_full` | 100,000 blocks | Enough for reconnect/replay debugging without retaining every historical payload forever. |
+| `price_points` raw rows | 7 days or 1,000,000 blocks, whichever is lower | Raw charts stay useful for recent investigation; old chart windows should use candles. |
+| 1 minute candles | 30 days | UI-friendly medium horizon. |
+| 5 minute candles | 180 days | Long horizon without a row explosion. |
+| 1 hour candles | unbounded on devnet until size proves otherwise | Cheap enough for coarse historical charts and backtests. |
 
-- Canonical blocks: 7 days or 100,000 blocks, whichever is lower.
-- Raw mark price points: 7 days.
-- Candles: planned but not required for first correctness pass.
+These are not consensus constants. They belong in runtime configuration, for
+example:
 
-Pruning must be explicit and metadata-driven. A prune should advance
-`history_meta.min_block_height` and `history_meta.min_price_height` only after
-the relevant rows are deleted. API responses should expose the retained range so
-clients can tell "outside retention" apart from "no data".
+- `SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS`
+- `SYBIL_RAW_PRICE_RETENTION_BLOCKS`
+- `SYBIL_PRICE_CANDLE_RETENTION_BLOCKS`
+- `SYBIL_HISTORY_PRUNE_INTERVAL_BLOCKS`
+- `SYBIL_HISTORY_PRUNE_MAX_ROWS`
 
-Do not prune account event history, fills, or equity as part of this work; those
+Use block-height windows for `blocks_full` and raw `price_points` first. They
+are deterministic, cheap to compare, and match current keys. Time-based raw
+retention can be layered later if product requirements need wall-clock windows
+across variable block cadence.
+
+### Metadata
+
+Add a small `history_meta` table rather than overloading generic counters.
+Values can start as `u64`; use MessagePack only when a field needs structure.
+
+Suggested keys:
+
+| Key | Meaning |
+|-----|---------|
+| `blocks_full_min_height` | Lowest full block height still expected to serve. |
+| `price_points_min_height` | Lowest raw price-point height still expected to serve. |
+| `price_candles_min_bucket_ms:{resolution_secs}` | Lowest retained candle bucket per resolution. |
+| `last_history_prune_height` | Last committed block height that attempted pruning. |
+
+Metadata must trail reality, never lead it. A prune transaction should:
+
+1. Delete rows below the configured floor, up to the per-run budget.
+2. Inspect or compute the lowest remaining retained row for that stream.
+3. Advance the corresponding `history_meta` floor in the same transaction.
+4. Commit.
+
+If a crash happens before commit, neither deletes nor metadata changes are
+visible. If a crash happens after commit, both are visible. If the budget is
+exhausted, the floor advances only as far as rows were actually deleted.
+
+redb may not shrink its file immediately after row deletes. Retention controls
+logical history growth and future page reuse; physical compaction should be a
+separate low-frequency maintenance action, not a per-block operation.
+
+### API Gap Semantics
+
+APIs should report retention explicitly:
+
+- `GET /v1/blocks/{height}` should return a distinct retention/gone error when
+  `height < blocks_full_min_height`, not a generic not-found response.
+- `GET /v1/blocks/ws?from_block=N` should send a versioned retention-gap
+  envelope and close cleanly when `N < blocks_full_min_height`.
+- Raw price-history responses should include `retention_min_height` once
+  retention is active.
+- Candle responses should include `retention_min_bucket_ms` for the selected
+  resolution.
+
+"No rows matched inside retention" and "the requested range is older than
+retention" are different product states. The frontend should be able to show
+them differently.
+
+Do not prune account event history, fills, or equity as part of this work. Those
 have their own pagination and retention decisions.
+
+## Price Candles
+
+Candles are the first downsampled history product. They should be boring:
+deterministic OHLCV rows derived from committed raw mark points.
+
+Suggested value:
+
+```text
+PriceCandle {
+  bucket_start_ms,
+  bucket_end_ms,
+  first_height,
+  last_height,
+  open_yes_price,
+  high_yes_price,
+  low_yes_price,
+  close_yes_price,
+  open_no_price,
+  high_no_price,
+  low_no_price,
+  close_no_price,
+  volume_nanos,
+  point_count,
+}
+```
+
+The write path should update candle rows from `price_points_delta` in the same
+store transaction that appends raw rows. For each configured resolution, compute
+`bucket_start_ms = timestamp_ms - (timestamp_ms % resolution_ms)` and merge the
+point into the row:
+
+- `open_*` and `first_height` come from the earliest point in the bucket.
+- `close_*` and `last_height` come from the latest point in the bucket.
+- `high_*` and `low_*` are max/min over points in the bucket.
+- `volume_nanos` sums block-local raw-point volumes.
+- `point_count` increments by one per raw point merged.
+
+Do not store synthetic empty candles. Sparse markets should have sparse candle
+rows; chart clients can carry the last close visually when they need step-line
+continuity. Storing empty rows for every market and bucket would recreate the
+unbounded growth problem in a quieter form.
+
+Expose candles through a distinct endpoint rather than overloading the raw
+price-point schema:
+
+```text
+GET /v1/markets/{id}/prices/candles?resolution=1m&from_ms=&to_ms=&before_ms=&limit=
+```
+
+This keeps existing raw chart clients stable and gives candle responses their
+own cursor, retention metadata, and OHLC fields.
+
+Backfill is optional. After deployment, candle rows can start from the first
+new committed block. A later maintenance command can backfill candles from
+existing raw rows, but startup should not run a large backfill synchronously.
 
 ## When To Split A History Service
 
@@ -242,6 +375,8 @@ be the first durable store.
   traded clearing prices.
 - Retention tests proving old rows are pruned only according to configured
   policy.
+- Candle tests proving OHLCV rows are updated from committed raw price deltas,
+  sparse buckets are omitted, and candle history survives restart.
 - Load tests proving large history ranges are paginated and do not allocate
   unbounded vectors.
 
@@ -251,6 +386,8 @@ be the first durable store.
 - SYB-147: replay WebSocket block stream from durable history.
 - SYB-148: persist paginated market price history with retention policy.
 - SYB-156: keep `frontend/DATA_MAP.md` aligned as these contracts change.
+- SYB-160: add history retention metadata and bounded pruning.
+- SYB-161: add price candle storage and API for long-window charts.
 
 ## Related Notes
 

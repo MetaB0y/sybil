@@ -186,6 +186,11 @@ Persisted fill-history, event-history, and equity rows are not pruned yet;
 long-lived deployments should add store retention policies or paginated indexed
 scans before exposing unbounded historical query windows.
 
+Raw price-history rows and full block replay rows are now durable, but they do
+not yet have retention metadata or pruning. See [[Historical Data Serving]] for
+the planned policy: append history at block commit, run pruning as bounded
+maintenance, and advance advertised retained floors only after deletes commit.
+
 ## Recovery Order
 
 Startup recovery is intentionally fence-driven:
@@ -242,7 +247,8 @@ This is the whole reason the commit fence lives in redb.
 
 **Lost on crash:**
 
-- Price history cache
+- In-memory price-history cache contents. Store-backed raw price rows already
+  committed before the crash are preserved.
 - SSE ring buffer contents
 - Transient external feed state such as recently pushed reference prices
 
