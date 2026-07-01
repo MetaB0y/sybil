@@ -1,14 +1,13 @@
 # Build stage
 FROM rust:1.94-bookworm AS builder
 
-# Constrain the Rust build for the prod Linode (1 vCPU / 2 GB RAM /
-# 495 MB swap). Single-job stops parallel rustc invocations from racing
-# for memory; codegen-units=1 produces smaller intermediate artifacts so
-# the linker peak stays under our swap budget. On a 1-core host this
-# is no slower wall-clock; on a multi-core dev box, builds are slower
-# but trivially predictable.
-ENV CARGO_BUILD_JOBS=1
-ENV CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+# Default to server-safe Rust build settings for the prod Linode
+# (1 vCPU / 2 GB RAM / 495 MB swap). Local compose builds can override these
+# through Docker build args without making remote builds more memory-hungry.
+ARG CARGO_BUILD_JOBS=1
+ARG CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
+ENV CARGO_PROFILE_RELEASE_CODEGEN_UNITS=${CARGO_PROFILE_RELEASE_CODEGEN_UNITS}
 
 RUN apt-get update && apt-get install -y --no-install-recommends cmake libclang-dev && rm -rf /var/lib/apt/lists/*
 

@@ -1,11 +1,19 @@
 # Local dev: adds build contexts so `docker compose build` works.
 # Auto-loaded by `docker compose up` — not shipped to server.
+x-rust-build-args: &rust-build-args
+  CARGO_BUILD_JOBS: ${SYBIL_DOCKER_BUILD_JOBS:-4}
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${SYBIL_DOCKER_RELEASE_CODEGEN_UNITS:-16}
+
 services:
   sybil-api:
-    build: .
+    build:
+      context: .
+      args: *rust-build-args
 
   sybil-polymarket:
-    build: .
+    build:
+      context: .
+      args: *rust-build-args
 
   sybil-arena:
     build: ./arena

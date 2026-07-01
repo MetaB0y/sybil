@@ -42,6 +42,30 @@ Main services:
 - `caddy` - HTTPS for app and arena dashboard
 - `node-exporter`, `victoriametrics`, `vmalert`, `grafana` - observability stack
 
+## Local Image Builds
+
+`just deploy-api` builds a `linux/amd64` image locally, transfers it with
+`docker save | ssh docker load`, and restarts the production containers. The
+Linode should not run the Rust release build directly.
+
+The Dockerfile defaults to server-safe Rust settings:
+
+- `CARGO_BUILD_JOBS=1`
+- `CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1`
+
+Local compose builds override those defaults through `docker-compose.override.yml`
+so emergency deploys can use more of the developer machine:
+
+```bash
+SYBIL_DOCKER_BUILD_JOBS=4 \
+SYBIL_DOCKER_RELEASE_CODEGEN_UNITS=16 \
+just deploy-api
+```
+
+Lower `SYBIL_DOCKER_BUILD_JOBS` if the local Docker VM starts swapping. These
+knobs are only for local image construction; the server receives the finished
+image and the override file is not copied to `/opt/sybil`.
+
 ## Persistence
 
 The public devnet runs `sybil-api` with `SYBIL_DATA_DIR=/data`, backed by the
