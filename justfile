@@ -325,6 +325,10 @@ smoke:
 
 # ── Docker ─────────────────────────────────────────────────────────────────
 
+# Smoke-test compose profile boundaries without starting containers
+compose-smoke:
+    ./scripts/compose-profile-smoke.sh
+
 LOCAL_COMPOSE := "docker-compose"
 DEPLOY_PLATFORM := "linux/amd64"
 

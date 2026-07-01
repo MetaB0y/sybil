@@ -102,18 +102,20 @@ Docker tests are for packaging and service wiring only:
 - Prometheus scrape target for `sybil-api` is up
 
 Do not put deep exchange semantics here. They are slower and harder to diagnose
-than the in-process and process-restart layers.
+than the in-process and process-restart layers. The current profile/config smoke
+is `just compose-smoke`; it checks the prover-worker profile boundary without
+starting containers.
 
 ## Next Implementation Slice
 
 1. Rename and organize the current restart tests around public contracts:
    acknowledged writes, committed block history, price history/candles, and
    retention.
-2. Extract only the repeated process helpers into a small module inside
-   `crates/sybil-api/tests/common`.
-3. Add a narrow proptest module for settlement/order invariants before adding
+2. Add a narrow proptest module for settlement/order invariants before adding
    more HTTP scenarios.
-4. Add one Docker smoke check that validates the compose profile decision made
-   for the prover worker.
+3. Add store-backed latest/list/WS replay restart tests when the historical
+   block-serving adapter is implemented.
+4. Move helpers into a separate test-support crate only if multiple crates begin
+   sharing the same public fixtures.
 
 This gives us better coverage without creating a new testing platform.
