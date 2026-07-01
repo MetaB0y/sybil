@@ -40,6 +40,7 @@ RUN for crate in matching-engine matching-solver matching-scenarios matching-sim
     mkdir -p crates/sybil-witgen-cli/src && echo "fn main() {}" > crates/sybil-witgen-cli/src/main.rs && \
     mkdir -p crates/matching-sim/src && echo "fn main() {}" > crates/matching-sim/src/main.rs && \
     mkdir -p crates/matching-sequencer/src/bin && echo "fn main() {}" > crates/matching-sequencer/src/bin/sybil_sim.rs && \
+    mkdir -p crates/matching-solver/benches && echo "fn main() {}" > crates/matching-solver/benches/solver_bench.rs && \
     mkdir -p crates/sybil-polymarket/src && echo "fn main() {}" > crates/sybil-polymarket/src/main.rs
 
 # Build dependencies only (cached layer)
