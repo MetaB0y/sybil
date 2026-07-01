@@ -225,6 +225,33 @@ async fn get_json(client: &reqwest::Client, base_url: &str, path: &str) -> Value
     serde_json::from_str(&text).expect("GET response is JSON")
 }
 
+async fn wait_for_block(client: &reqwest::Client, base_url: &str, height: u64) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let last_error = match client
+            .get(format!("{base_url}/v1/blocks/{height}"))
+            .send()
+            .await
+        {
+            Ok(resp) => {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                if status == StatusCode::OK {
+                    return serde_json::from_str(&body).expect("block response is JSON");
+                }
+                format!("status {status}: {body}")
+            }
+            Err(err) => err.to_string(),
+        };
+
+        assert!(
+            Instant::now() < deadline,
+            "sybil-api did not serve block {height}: {last_error}"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
 fn assert_funding_history_once(history: &Value) {
     let events = history
         .as_array()
@@ -489,6 +516,153 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     )
     .await;
     assert_funding_history_once(&committed_funding_history);
+
+    committer.kill().await;
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn deferred_bundle_revalidates_against_replayed_admit_after_process_restart() {
+    let root = temp_root("process-restart-deferred");
+    let data_dir = root.join("data");
+    let admin_key_path = root.join("admin-feed.key");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+
+    let writer = spawn_api(&data_dir, &admin_key_path, 50).await;
+    wait_for_height_at_least(&client, &writer.base_url, 1).await;
+    pause_blocks(&client, &writer.base_url).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let pre_write_health = wait_for_health(&client, &writer.base_url).await;
+    let pre_write_height = pre_write_health["height"]
+        .as_u64()
+        .expect("baseline height exists before deferred writes");
+
+    let created = post_json(
+        &client,
+        &writer.base_url,
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 1_000_000_000u64 }),
+    )
+    .await;
+    let account_id = created["account_id"].as_u64().unwrap();
+
+    let market = post_json(
+        &client,
+        &writer.base_url,
+        "/v1/markets",
+        json!({ "name": "process restart deferred market" }),
+    )
+    .await;
+    let market_id = market["market_id"].as_u64().unwrap();
+
+    post_json(
+        &client,
+        &writer.base_url,
+        "/v1/orders",
+        json!({
+            "account_id": account_id,
+            "orders": [{
+                "type": "BuyYes",
+                "market_id": market_id,
+                "limit_price_nanos": 800_000_000u64,
+                "quantity": 1u64
+            }]
+        }),
+    )
+    .await;
+    let pending_after_direct = get_json(
+        &client,
+        &writer.base_url,
+        &format!("/v1/accounts/{account_id}/orders"),
+    )
+    .await;
+    let direct_orders = pending_after_direct
+        .as_array()
+        .expect("pending orders response is an array");
+    assert_eq!(direct_orders.len(), 1);
+    let direct_order_id = direct_orders[0]["order_id"].as_u64().unwrap();
+
+    post_json(
+        &client,
+        &writer.base_url,
+        "/v1/orders",
+        json!({
+            "account_id": account_id,
+            "orders": [
+                {
+                    "type": "BuyYes",
+                    "market_id": market_id,
+                    "limit_price_nanos": 600_000_000u64,
+                    "quantity": 1u64
+                },
+                {
+                    "type": "BuyYes",
+                    "market_id": market_id,
+                    "limit_price_nanos": 600_000_000u64,
+                    "quantity": 1u64
+                }
+            ]
+        }),
+    )
+    .await;
+    let pending_after_deferred = get_json(
+        &client,
+        &writer.base_url,
+        &format!("/v1/accounts/{account_id}/orders"),
+    )
+    .await;
+    assert_eq!(
+        pending_after_deferred.as_array().unwrap().len(),
+        1,
+        "deferred bundle must not appear as directly admitted resting orders"
+    );
+
+    writer.kill().await;
+
+    let committer = spawn_api(&data_dir, &admin_key_path, 50).await;
+    let target_height = pre_write_height + 1;
+    wait_for_height_at_least(&client, &committer.base_url, target_height).await;
+    pause_blocks(&client, &committer.base_url).await;
+    let restored_block = wait_for_block(&client, &committer.base_url, target_height).await;
+
+    assert_eq!(
+        restored_block["order_count"].as_u64(),
+        Some(3),
+        "restarted block should contain the replayed direct order plus two rejected deferred orders"
+    );
+    let rejections = restored_block["rejections"]
+        .as_array()
+        .expect("block rejections response is an array");
+    assert_eq!(rejections.len(), 2, "restored block={restored_block}");
+    let mut rejection_ids: Vec<u64> = rejections
+        .iter()
+        .map(|rejection| rejection["order_id"].as_u64().unwrap())
+        .collect();
+    rejection_ids.sort_unstable();
+    assert_eq!(
+        rejection_ids,
+        vec![direct_order_id + 1, direct_order_id + 2],
+        "restored deferred bundle must allocate fresh IDs after the replayed direct admit"
+    );
+    assert!(rejections.iter().all(|rejection| {
+        rejection["account_id"].as_u64() == Some(account_id)
+            && rejection["reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("InsufficientBalance"))
+    }));
+
+    let post_restart_pending = get_json(
+        &client,
+        &committer.base_url,
+        &format!("/v1/accounts/{account_id}/orders"),
+    )
+    .await;
+    let pending = post_restart_pending.as_array().unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0]["order_id"].as_u64(), Some(direct_order_id));
 
     committer.kill().await;
     let _ = std::fs::remove_dir_all(root);
