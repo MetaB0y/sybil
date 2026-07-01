@@ -50,7 +50,27 @@ RUN cargo build --release -p sybil-api -p sybil-polymarket -p sybil-prover
 # Copy actual source code
 COPY crates/ crates/
 
-# Build service binaries
+# Remove artifacts produced from dummy workspace sources while preserving the
+# third-party dependency cache built above. Cargo fingerprints can otherwise
+# treat the dummy package binaries as fresh after COPY, yielding no-op services.
+RUN cargo clean \
+        -p matching-engine \
+        -p matching-solver \
+        -p matching-scenarios \
+        -p matching-sim \
+        -p matching-sequencer \
+        -p sybil-api \
+        -p sybil-api-types \
+        -p sybil-oracle \
+        -p sybil-verifier \
+        -p sybil-zk \
+        -p sybil-witgen \
+        -p sybil-witgen-cli \
+        -p sybil-prover \
+        -p sybil-canonical \
+        -p sybil-polymarket
+
+# Build service binaries from real workspace sources.
 RUN cargo build --release -p sybil-api -p sybil-polymarket -p sybil-prover
 
 # Runtime stage
