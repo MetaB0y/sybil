@@ -9,6 +9,11 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use matching_engine::{MarketId, Order};
+use matching_sequencer::crypto::{canonical_cancel_bytes, canonical_order_bytes};
+use matching_sequencer::AccountId;
+use p256::ecdsa::signature::Signer;
+use p256::ecdsa::{Signature, SigningKey};
 use reqwest::StatusCode;
 use serde_json::{json, Value};
 use tokio::process::{Child, Command};
@@ -57,6 +62,52 @@ fn sybil_api_binary() -> PathBuf {
     }
     path.push(format!("sybil-api{}", std::env::consts::EXE_SUFFIX));
     path
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    hex::encode(bytes)
+}
+
+fn new_signing_key() -> SigningKey {
+    SigningKey::from_bytes((&[9u8; 32]).into()).expect("fixed signing key")
+}
+
+fn signed_buy_yes_payload(
+    market_id: u32,
+    limit_price_nanos: u64,
+    quantity: u64,
+    key: &SigningKey,
+) -> Value {
+    let mut order = Order::new(0);
+    order.markets[0] = MarketId::new(market_id);
+    order.num_markets = 1;
+    order.num_states = 2;
+    order.limit_price = limit_price_nanos;
+    order.max_fill = quantity;
+    order.payoffs[0] = 1;
+    order.payoffs[1] = 0;
+
+    let signature: Signature = key.sign(&canonical_order_bytes(&order));
+    json!({
+        "signer_pubkey_hex": to_hex(key.verifying_key().to_sec1_point(true).as_bytes()),
+        "order": {
+            "market_ids": [market_id],
+            "payoffs": [1, 0],
+            "limit_price_nanos": limit_price_nanos,
+            "max_fill": quantity
+        },
+        "signature_hex": to_hex(signature.to_bytes().as_slice())
+    })
+}
+
+fn signed_cancel_payload(account_id: u64, order_id: u64, key: &SigningKey) -> Value {
+    let signature: Signature = key.sign(&canonical_cancel_bytes(AccountId(account_id), order_id));
+    json!({
+        "account_id": account_id,
+        "order_id": order_id,
+        "signer_pubkey_hex": to_hex(key.verifying_key().to_sec1_point(true).as_bytes()),
+        "signature_hex": to_hex(signature.to_bytes().as_slice())
+    })
 }
 
 async fn spawn_api(data_dir: &Path, admin_key_path: &Path, block_interval_ms: u64) -> ApiProcess {
@@ -220,6 +271,50 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     )
     .await;
     let market_id = market["market_id"].as_u64().unwrap();
+
+    let signing_key = new_signing_key();
+    let public_key_hex = to_hex(signing_key.verifying_key().to_sec1_point(true).as_bytes());
+    post_json(
+        &client,
+        &writer.base_url,
+        &format!("/v1/accounts/{account_id}/keys"),
+        json!({ "public_key_hex": public_key_hex }),
+    )
+    .await;
+
+    post_json(
+        &client,
+        &writer.base_url,
+        "/v1/orders/signed",
+        signed_buy_yes_payload(market_id as u32, 400, 3, &signing_key),
+    )
+    .await;
+    let pending = get_json(
+        &client,
+        &writer.base_url,
+        &format!("/v1/accounts/{account_id}/orders"),
+    )
+    .await;
+    let pending = pending
+        .as_array()
+        .expect("pending orders response is an array");
+    assert_eq!(pending.len(), 1);
+    let order_id = pending[0]["order_id"].as_u64().unwrap();
+
+    post_json(
+        &client,
+        &writer.base_url,
+        "/v1/orders/cancel/signed",
+        signed_cancel_payload(account_id, order_id, &signing_key),
+    )
+    .await;
+    let pending_after_cancel = get_json(
+        &client,
+        &writer.base_url,
+        &format!("/v1/accounts/{account_id}/orders"),
+    )
+    .await;
+    assert!(pending_after_cancel.as_array().unwrap().is_empty());
     writer.kill().await;
 
     let reader = spawn_api(&data_dir, &admin_key_path, 60_000).await;
@@ -244,6 +339,31 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
         restored_market["name"].as_str(),
         Some("process restart WAL market")
     );
+    let restored_pending = get_json(
+        &client,
+        &reader.base_url,
+        &format!("/v1/accounts/{account_id}/orders"),
+    )
+    .await;
+    assert!(
+        restored_pending.as_array().unwrap().is_empty(),
+        "signed cancel should survive restart without resurrecting the resting order"
+    );
+
+    post_json(
+        &client,
+        &reader.base_url,
+        "/v1/orders/signed",
+        signed_buy_yes_payload(market_id as u32, 450, 2, &signing_key),
+    )
+    .await;
+    let post_restart_pending = get_json(
+        &client,
+        &reader.base_url,
+        &format!("/v1/accounts/{account_id}/orders"),
+    )
+    .await;
+    assert_eq!(post_restart_pending.as_array().unwrap().len(), 1);
 
     reader.kill().await;
     let _ = std::fs::remove_dir_all(root);
