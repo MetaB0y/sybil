@@ -734,6 +734,17 @@ impl BlockSequencer {
             pending_bundles: state.pending_bundles,
             config,
         };
+        // Control-plane replay can create/fund accounts and cancel resting
+        // orders. Bridge WAL validation depends on those effects, so it must
+        // run before deposits/withdrawals are replayed. The separate WAL
+        // tables still do not encode exact cross-subsystem event ordering; if
+        // system-event interleaving becomes consensus-sensitive, collapse these
+        // into one sequenced acknowledged-write log.
+        for command in control_plane_log {
+            restored
+                .replay_control_plane_command(command)
+                .expect("control-plane WAL replay should be valid");
+        }
         for deposit in state.pending_l1_deposits {
             restored
                 .ingest_l1_deposit(deposit)
@@ -743,11 +754,6 @@ impl BlockSequencer {
             restored
                 .request_bridge_withdrawal(request)
                 .expect("pending bridge withdrawal replay should be valid");
-        }
-        for command in control_plane_log {
-            restored
-                .replay_control_plane_command(command)
-                .expect("control-plane WAL replay should be valid");
         }
         let account_ids: Vec<AccountId> = restored.accounts.iter().map(|(id, _)| *id).collect();
         restored.analytics.seed_equity_known(account_ids);

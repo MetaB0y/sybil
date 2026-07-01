@@ -3229,6 +3229,110 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn bridge_withdrawal_replays_after_control_plane_cancel_wal() {
+        let path = temp_store_path("bridge-after-cancel-wal");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        };
+        let (mut baseline, aid) = make_test_sequencer_with_config(config.clone());
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        let pubkey = PublicKey(*signing_key.verifying_key());
+        baseline.register_pubkey(aid, pubkey).unwrap();
+        baseline.produce_block(Vec::new(), 1);
+        store.save_block(baseline.snapshot()).await.unwrap();
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        let seq = BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+        let handle = SequencerHandle::spawn_with_store_arc(seq, Some(store.clone()));
+        let markets = handle.list_markets().await.unwrap();
+
+        handle
+            .submit_order(OrderSubmission {
+                account_id: aid,
+                orders: vec![outcome_buy(
+                    &markets,
+                    1,
+                    MarketId::new(0),
+                    0,
+                    500_000_000,
+                    100,
+                )],
+                mm_constraint: None,
+            })
+            .await
+            .unwrap();
+        let pending = handle.get_pending_orders(Some(aid)).await.unwrap();
+        assert_eq!(pending.len(), 1);
+
+        let signed_cancel = sign_cancel(aid, pending[0].order_id, &signing_key);
+        handle.cancel_signed_order(signed_cancel).await.unwrap();
+
+        let withdrawal = handle
+            .create_bridge_withdrawal(BridgeWithdrawalRequest {
+                account_id: aid,
+                chain_id: 1,
+                vault_address: [0x10; 20],
+                recipient: [0x40; 20],
+                token_address: [0x20; 20],
+                amount_token_units: 80_000_000,
+                expiry_height: 10,
+            })
+            .await
+            .unwrap();
+        assert_eq!(withdrawal.amount_nanos, 80 * NANOS_PER_DOLLAR);
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        assert_eq!(restored.admit_log.len(), 1);
+        assert_eq!(restored.control_plane_log.len(), 1);
+        assert_eq!(restored.pending_bridge_withdrawals.len(), 1);
+        let restored_seq =
+            BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+
+        assert!(
+            restored_seq.pending_orders_info(Some(aid)).is_empty(),
+            "cancel must replay before the bridge withdrawal validates"
+        );
+        assert_eq!(
+            restored_seq.bridge_withdrawal(withdrawal.withdrawal_id),
+            Some(&withdrawal)
+        );
+        assert_eq!(
+            restored_seq.accounts.get(aid).unwrap().balance,
+            20 * NANOS_PER_DOLLAR as i64
+        );
+
+        let committed = handle.produce_block().await.unwrap();
+        assert!(
+            committed
+                .canonical
+                .system_events
+                .iter()
+                .any(|event| matches!(
+                    event,
+                    SystemEvent::OrderCancelled { account_id, .. } if *account_id == aid
+                )),
+            "committed block should include the WAL-replayed cancellation"
+        );
+        assert!(
+            committed
+                .canonical
+                .system_events
+                .iter()
+                .any(|event| matches!(
+                    event,
+                    SystemEvent::WithdrawalCreated { account_id, withdrawal: leaf, .. }
+                        if *account_id == aid && leaf.withdrawal_id == withdrawal.withdrawal_id
+                )),
+            "committed block should include the WAL-replayed bridge withdrawal"
+        );
+    }
+
+    #[tokio::test]
     async fn test_fund_nonexistent_account() {
         let (seq, _) = make_test_sequencer();
         let handle = SequencerHandle::spawn(seq);

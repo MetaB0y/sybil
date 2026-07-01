@@ -135,6 +135,19 @@ Implemented today:
 - Oracle feed registration
 - Resolution template installation
 
+Bridge deposits and withdrawals use dedicated WAL tables because they are
+bridge-sidecar inputs rather than generic control-plane commands. Recovery
+replays the admitted resting-order log into the order book, then replays the
+control-plane WAL, then replays bridge deposit/withdrawal WALs. That order is an
+invariant: bridge withdrawals validate against account balances and resting-book
+reservations, so an acknowledged cancellation or funding command must be visible
+before pending bridge withdrawals are replayed.
+
+The separate WAL tables preserve state correctness but do not preserve exact
+cross-subsystem system-event ordering. If event interleaving becomes
+consensus-sensitive, migrate these acknowledged-write paths into one globally
+sequenced WAL rather than adding more pairwise replay rules.
+
 Resolution templates are also persisted in the committed snapshot. A WAL alone
 would protect template installation only until the next block; once
 `save_block()` clears the control-plane log, templates must be snapshot state
