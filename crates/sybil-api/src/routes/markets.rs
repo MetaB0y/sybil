@@ -591,6 +591,7 @@ pub async fn resolve_market(
         ("id" = u32, Path, description = "Market ID"),
         ("from_ms" = Option<u64>, Query, description = "Start timestamp filter"),
         ("to_ms" = Option<u64>, Query, description = "End timestamp filter"),
+        ("before_height" = Option<u64>, Query, description = "Return points with height strictly below this cursor"),
         ("limit" = Option<usize>, Query, description = "Maximum returned points, newest matching points first by cap, clamped server-side"),
     ),
     responses(
@@ -607,14 +608,22 @@ pub async fn get_price_history(
         .limit
         .unwrap_or(DEFAULT_PRICE_HISTORY_QUERY_POINTS)
         .min(MAX_PRICE_HISTORY_QUERY_POINTS);
-    let points = state
+    let page = state
         .sequencer
-        .get_price_history(mid, params.from_ms, params.to_ms, limit)
+        .get_price_history(
+            mid,
+            params.from_ms,
+            params.to_ms,
+            params.before_height,
+            limit,
+        )
         .await?;
 
     let response = PriceHistoryResponse {
         market_id: id,
-        points: points
+        next_before_height: page.next_before_height,
+        points: page
+            .points
             .into_iter()
             .map(|p| PricePointResponse {
                 height: p.height,
@@ -633,6 +642,7 @@ pub async fn get_price_history(
 pub struct PriceHistoryParams {
     pub from_ms: Option<u64>,
     pub to_ms: Option<u64>,
+    pub before_height: Option<u64>,
     pub limit: Option<usize>,
 }
 

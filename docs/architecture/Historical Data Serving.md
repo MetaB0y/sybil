@@ -60,16 +60,16 @@ Implemented so far:
   replay starts before the hot ring.
 - `price_points` persists raw mark-price rows by `(market_id, height)` from the
   same block commit transaction.
-- `GetPriceHistory(market_id, from_ms, to_ms, limit)` uses the durable price
-  table when a store is configured. The public endpoint defaults to 500 points
-  and clamps requests at 5,000 points.
+- `GetPriceHistory(market_id, from_ms, to_ms, before_height, limit)` uses the
+  durable price table when a store is configured. The public endpoint defaults
+  to 500 points and clamps requests at 5,000 points. `before_height` /
+  `next_before_height` provide older-page cursoring.
 - Regression tests cover ring eviction plus cold restart for exact block reads,
   WebSocket replay, and raw price-history reads.
 
 Still planned in this phase:
 
 - `block_summaries` and paginated `GET /v1/blocks`.
-- Cursor metadata for price-history pagination.
 - Retention metadata, pruning, and downsampled candles.
 
 ## Schema Sketch
@@ -140,8 +140,7 @@ Historical reads must be bounded before they allocate:
 - `GetRecentBlocks(limit)` should become a store-backed page, not a full
   in-memory ring dump.
 - `GetPriceHistory(market_id, range, limit)` is a range scan over
-  `price_points` with a hard cap. Today the endpoint supports a bounded `limit`;
-  it still needs cursor metadata before clients can page long ranges precisely.
+  `price_points` with a hard cap and `before_height` cursoring.
 - WebSocket replay should page durable blocks in small chunks before switching
   to live broadcast.
 

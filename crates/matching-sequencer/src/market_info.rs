@@ -49,6 +49,12 @@ pub struct PricePoint {
     pub volume_nanos: u64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PriceHistoryPage {
+    pub points: Vec<PricePoint>,
+    pub next_before_height: Option<u64>,
+}
+
 /// Record of a fill attributed to an account.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AccountFillRecord {

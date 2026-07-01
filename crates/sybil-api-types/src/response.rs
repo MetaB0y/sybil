@@ -588,6 +588,8 @@ pub struct PositionValueResponse {
 pub struct PriceHistoryResponse {
     pub market_id: u32,
     pub points: Vec<PricePointResponse>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_before_height: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

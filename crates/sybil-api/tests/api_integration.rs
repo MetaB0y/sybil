@@ -820,6 +820,10 @@ async fn market_price_history_persists_to_store_beyond_hot_cache() {
         2,
         "store-backed route should return points older than the one-point hot cache: {response}"
     );
+    assert!(
+        response.get("next_before_height").is_none(),
+        "full page should not advertise another page: {response}"
+    );
     assert_eq!(points[0]["height"].as_u64().unwrap(), 1);
     assert_eq!(points[1]["height"].as_u64().unwrap(), 2);
     assert!(points
@@ -827,7 +831,7 @@ async fn market_price_history_persists_to_store_beyond_hot_cache() {
         .all(|point| point["volume_nanos"].as_u64().unwrap() > 0));
 
     let (status, body) = get(
-        app,
+        app.clone(),
         &format!("/v1/markets/{market_id}/prices/history?limit=1"),
     )
     .await;
@@ -836,6 +840,22 @@ async fn market_price_history_persists_to_store_beyond_hot_cache() {
     let limited_points = limited["points"].as_array().unwrap();
     assert_eq!(limited_points.len(), 1);
     assert_eq!(limited_points[0]["height"].as_u64().unwrap(), 2);
+    assert_eq!(limited["next_before_height"].as_u64().unwrap(), 2);
+
+    let (status, body) = get(
+        app,
+        &format!("/v1/markets/{market_id}/prices/history?limit=1&before_height=2"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let older = parse_json(&body);
+    let older_points = older["points"].as_array().unwrap();
+    assert_eq!(older_points.len(), 1);
+    assert_eq!(older_points[0]["height"].as_u64().unwrap(), 1);
+    assert!(
+        older.get("next_before_height").is_none(),
+        "oldest page should not advertise another page: {older}"
+    );
 }
 
 // ---------------------------------------------------------------------------

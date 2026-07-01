@@ -1052,16 +1052,21 @@ impl Store {
 
     /// Load raw mark-price points for one market. The scan is bounded in
     /// memory: if more than `limit` points match, the newest `limit` points
-    /// are returned in chronological order.
+    /// are returned in chronological order with a `before_height` cursor for
+    /// the next older page.
     pub async fn load_price_history(
         &self,
         market_id: MarketId,
         from_ms: Option<u64>,
         to_ms: Option<u64>,
+        before_height: Option<u64>,
         limit: usize,
-    ) -> Result<Vec<crate::market_info::PricePoint>, StoreError> {
+    ) -> Result<crate::market_info::PriceHistoryPage, StoreError> {
         if limit == 0 {
-            return Ok(Vec::new());
+            return Ok(crate::market_info::PriceHistoryPage {
+                points: Vec::new(),
+                next_before_height: None,
+            });
         }
         let txn = self.db.begin_read()?;
         let table = txn.open_table(PRICE_POINTS)?;
@@ -1072,15 +1077,26 @@ impl Store {
             let point: crate::market_info::PricePoint = rmp_serde::from_slice(value.value())?;
             if from_ms.is_some_and(|from| point.timestamp_ms < from)
                 || to_ms.is_some_and(|to| point.timestamp_ms > to)
+                || before_height.is_some_and(|before| point.height >= before)
             {
                 continue;
             }
-            if points.len() == limit {
+            if points.len() == limit.saturating_add(1) {
                 points.pop_front();
             }
             points.push_back(point);
         }
-        Ok(points.into_iter().collect())
+        let mut points: Vec<_> = points.into_iter().collect();
+        let next_before_height = if points.len() > limit {
+            points.remove(0);
+            points.first().map(|point| point.height)
+        } else {
+            None
+        };
+        Ok(crate::market_info::PriceHistoryPage {
+            points,
+            next_before_height,
+        })
     }
 
     /// Load the latest committed block witness, if the store has one.

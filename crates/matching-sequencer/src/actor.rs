@@ -19,7 +19,9 @@ use crate::crypto::{
     verify_signed_cancel, verify_signed_order, PublicKey, SignedCancel, SignedOrder,
 };
 use crate::error::{Rejection, RejectionReason, SequencerError};
-use crate::market_info::{AccountFillRecord, MarketMetadata, MarketSearchQuery, PricePoint};
+use crate::market_info::{
+    AccountFillRecord, MarketMetadata, MarketSearchQuery, PriceHistoryPage, PricePoint,
+};
 use crate::portfolio::PortfolioSummary;
 use crate::sequencer::{
     BlockSequencer, OrderSubmission, PendingOrderInfo, PreparedBlock, SequencerConfig,
@@ -41,11 +43,32 @@ fn current_timestamp_ms() -> u64 {
         .as_millis() as u64
 }
 
-fn limit_price_points(points: Vec<PricePoint>, limit: usize) -> Vec<PricePoint> {
+fn limit_price_point_page(
+    mut points: Vec<PricePoint>,
+    before_height: Option<u64>,
+    limit: usize,
+) -> PriceHistoryPage {
+    if let Some(before_height) = before_height {
+        points.retain(|point| point.height < before_height);
+    }
+    if limit == 0 {
+        return PriceHistoryPage {
+            points: Vec::new(),
+            next_before_height: None,
+        };
+    }
+
     if points.len() > limit {
-        points[points.len() - limit..].to_vec()
+        let page = points.split_off(points.len() - limit);
+        PriceHistoryPage {
+            next_before_height: page.first().map(|point| point.height),
+            points: page,
+        }
     } else {
-        points
+        PriceHistoryPage {
+            points,
+            next_before_height: None,
+        }
     }
 }
 
@@ -137,8 +160,9 @@ pub enum SequencerMsg {
         MarketId,
         Option<u64>,
         Option<u64>,
+        Option<u64>,
         usize,
-        RpcReplyPort<Result<Vec<PricePoint>, SequencerError>>,
+        RpcReplyPort<Result<PriceHistoryPage, SequencerError>>,
     ),
     GetAccountFills(
         AccountId,
@@ -1713,15 +1737,23 @@ impl Actor for SequencerActor {
             SequencerMsg::GetMarketMetadata(market_id, reply) => {
                 let _ = reply.send(state.sequencer.market_metadata(market_id).cloned());
             }
-            SequencerMsg::GetPriceHistory(market_id, from_ms, to_ms, limit, reply) => {
+            SequencerMsg::GetPriceHistory(
+                market_id,
+                from_ms,
+                to_ms,
+                before_height,
+                limit,
+                reply,
+            ) => {
                 let limit = limit.min(MAX_PRICE_HISTORY_QUERY_POINTS);
                 let result = match &state.store {
                     Some(store) => store
-                        .load_price_history(market_id, from_ms, to_ms, limit)
+                        .load_price_history(market_id, from_ms, to_ms, before_height, limit)
                         .await
                         .map_err(|error| SequencerError::Persistence(error.to_string())),
-                    None => Ok(limit_price_points(
+                    None => Ok(limit_price_point_page(
                         state.sequencer.price_history(market_id, from_ms, to_ms),
+                        before_height,
                         limit,
                     )),
                 };
@@ -2377,10 +2409,13 @@ impl SequencerHandle {
         market_id: MarketId,
         from_ms: Option<u64>,
         to_ms: Option<u64>,
+        before_height: Option<u64>,
         limit: usize,
-    ) -> Result<Vec<PricePoint>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetPriceHistory(market_id, from_ms, to_ms, limit, reply))
-            .await?
+    ) -> Result<PriceHistoryPage, SequencerError> {
+        self.rpc(|reply| {
+            SequencerMsg::GetPriceHistory(market_id, from_ms, to_ms, before_height, limit, reply)
+        })
+        .await?
     }
 
     pub async fn get_account_fills(
@@ -3725,11 +3760,12 @@ mod tests {
             .unwrap();
         let block2 = handle.produce_block().await.unwrap();
 
-        let points = handle
-            .get_price_history(market_id, None, None, 2)
+        let page = handle
+            .get_price_history(market_id, None, None, None, 2)
             .await
             .unwrap();
-        let heights: Vec<_> = points.iter().map(|point| point.height).collect();
+        assert_eq!(page.next_before_height, None);
+        let heights: Vec<_> = page.points.iter().map(|point| point.height).collect();
         assert_eq!(
             heights,
             vec![
@@ -3738,7 +3774,22 @@ mod tests {
             ],
             "store-backed reads should include points older than the hot price cache"
         );
-        assert!(points.iter().all(|point| point.volume_nanos > 0));
+        assert!(page.points.iter().all(|point| point.volume_nanos > 0));
+
+        let newest_page = handle
+            .get_price_history(market_id, None, None, None, 1)
+            .await
+            .unwrap();
+        assert_eq!(newest_page.next_before_height, Some(2));
+        assert_eq!(newest_page.points.len(), 1);
+        assert_eq!(newest_page.points[0].height, 2);
+        let older_page = handle
+            .get_price_history(market_id, None, None, newest_page.next_before_height, 1)
+            .await
+            .unwrap();
+        assert_eq!(older_page.next_before_height, None);
+        assert_eq!(older_page.points.len(), 1);
+        assert_eq!(older_page.points[0].height, 1);
 
         drop(handle);
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -3747,11 +3798,15 @@ mod tests {
         let restored_seq =
             BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
         let reader = SequencerHandle::spawn_with_store_arc(restored_seq, Some(store.clone()));
-        let restored_points = reader
-            .get_price_history(market_id, None, None, 2)
+        let restored_page = reader
+            .get_price_history(market_id, None, None, None, 2)
             .await
             .unwrap();
-        let restored_heights: Vec<_> = restored_points.iter().map(|point| point.height).collect();
+        let restored_heights: Vec<_> = restored_page
+            .points
+            .iter()
+            .map(|point| point.height)
+            .collect();
         assert_eq!(restored_heights, heights);
     }
 
