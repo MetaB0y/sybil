@@ -1,5 +1,6 @@
 use matching_engine::{
-    compute_fill_settlement, Fill, MarketId, MintAdjustment, Nanos, Order, NANOS_PER_DOLLAR,
+    compute_fill_settlement, notional_nanos, Fill, MarketId, MintAdjustment, Nanos, Order,
+    NANOS_PER_DOLLAR,
 };
 
 use crate::account::{Account, AccountId, AccountStore};
@@ -99,10 +100,12 @@ pub fn resolve_market(
         }
 
         if yes_pos != 0 {
-            account.balance += (yes_pos as i128 * yes_payout_nanos as i128) as i64;
+            account.balance +=
+                notional_nanos(yes_payout_nanos, yes_pos.unsigned_abs()) as i64 * yes_pos.signum();
         }
         if no_pos != 0 {
-            account.balance += (no_pos as i128 * no_payout_nanos as i128) as i64;
+            account.balance +=
+                notional_nanos(no_payout_nanos, no_pos.unsigned_abs()) as i64 * no_pos.signum();
         }
     }
 
@@ -114,7 +117,7 @@ mod tests {
     use super::*;
     use crate::account::AccountStore;
     use crate::canonical_state::CanonicalState;
-    use matching_engine::{outcome_buy, outcome_sell, MarketSet, NANOS_PER_DOLLAR};
+    use matching_engine::{outcome_buy, outcome_sell, shares_to_qty, MarketSet, NANOS_PER_DOLLAR};
     use proptest::prelude::*;
     use std::collections::HashMap;
     use sybil_verifier::{BlockWitness, WitnessBlockHeader, WitnessOrder};
@@ -143,25 +146,30 @@ mod tests {
         }
     }
 
+    fn q(shares: u64) -> u64 {
+        shares_to_qty(shares)
+    }
+
     #[test]
     fn test_settle_yes_buy() {
         let (markets, mut accounts) = setup();
         let m0 = MarketId::new(0);
         let aid = AccountId(0);
 
-        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10); // Buy YES at 0.50, qty 10
-        let fill = Fill::new(1, 10, 500_000_000); // Filled at 0.50
+        let qty = q(10);
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, qty); // Buy YES at 0.50, qty 10
+        let fill = Fill::new(1, qty, 500_000_000); // Filled at 0.50
 
         let account = accounts.get_mut(aid).unwrap();
         settle_fill(account, &order, &fill);
 
         // Should have paid 0.50 * 10 = 5 nanos * 10
-        let expected_cost = 500_000_000i64 * 10;
+        let expected_cost = notional_nanos(500_000_000, qty) as i64;
         assert_eq!(
             account.balance,
             100 * NANOS_PER_DOLLAR as i64 - expected_cost
         );
-        assert_eq!(account.position(m0, 0), 10); // 10 YES shares
+        assert_eq!(account.position(m0, 0), qty as i64); // 10 YES shares
     }
 
     #[test]
@@ -172,20 +180,21 @@ mod tests {
 
         // First give the account some position
         let account = accounts.get_mut(aid).unwrap();
-        account.positions.insert((m0, 0), 10);
+        account.positions.insert((m0, 0), q(10) as i64);
 
-        let order = outcome_sell(&markets, 2, m0, 0, 500_000_000, 5); // Sell YES at 0.50, qty 5
-        let fill = Fill::new(2, 5, 500_000_000);
+        let qty = q(5);
+        let order = outcome_sell(&markets, 2, m0, 0, 500_000_000, qty); // Sell YES at 0.50, qty 5
+        let fill = Fill::new(2, qty, 500_000_000);
 
         settle_fill(account, &order, &fill);
 
         // Should have received 0.50 * 5
-        let expected_revenue = 500_000_000i64 * 5;
+        let expected_revenue = notional_nanos(500_000_000, qty) as i64;
         assert_eq!(
             account.balance,
             100 * NANOS_PER_DOLLAR as i64 + expected_revenue
         );
-        assert_eq!(account.position(m0, 0), 5); // 10 - 5 = 5 YES shares left
+        assert_eq!(account.position(m0, 0), q(5) as i64); // 10 - 5 = 5 YES shares left
     }
 
     #[test]
@@ -195,8 +204,8 @@ mod tests {
         let aid = AccountId(0);
 
         let account = accounts.get_mut(aid).unwrap();
-        account.positions.insert((m0, 0), 10); // 10 YES shares
-        account.positions.insert((m0, 1), 5); // 5 NO shares
+        account.positions.insert((m0, 0), q(10) as i64); // 10 YES shares
+        account.positions.insert((m0, 1), q(5) as i64); // 5 NO shares
         let initial_balance = account.balance;
 
         resolve_market(&mut accounts, m0, NANOS_PER_DOLLAR); // YES wins ($1 per YES share)
@@ -206,7 +215,7 @@ mod tests {
         // NO pays $0: 5 * $0 = $0 added
         assert_eq!(
             account.balance,
-            initial_balance + 10 * NANOS_PER_DOLLAR as i64
+            initial_balance + notional_nanos(NANOS_PER_DOLLAR, q(10)) as i64
         );
         // All positions for this market should be gone
         assert_eq!(account.position(m0, 0), 0);
@@ -220,8 +229,8 @@ mod tests {
         let aid = AccountId(0);
 
         let account = accounts.get_mut(aid).unwrap();
-        account.positions.insert((m0, 0), 10); // 10 YES shares
-        account.positions.insert((m0, 1), 5); // 5 NO shares
+        account.positions.insert((m0, 0), q(10) as i64); // 10 YES shares
+        account.positions.insert((m0, 1), q(5) as i64); // 5 NO shares
         let initial_balance = account.balance;
 
         resolve_market(&mut accounts, m0, 0); // NO wins ($0 per YES share)
@@ -231,7 +240,7 @@ mod tests {
         // NO pays $1: 5 * $1 = $5
         assert_eq!(
             account.balance,
-            initial_balance + 5 * NANOS_PER_DOLLAR as i64
+            initial_balance + notional_nanos(NANOS_PER_DOLLAR, q(5)) as i64
         );
         assert_eq!(account.position(m0, 0), 0);
         assert_eq!(account.position(m0, 1), 0);
@@ -244,8 +253,8 @@ mod tests {
         let aid = AccountId(0);
 
         let account = accounts.get_mut(aid).unwrap();
-        account.positions.insert((m0, 0), 10); // 10 YES shares
-        account.positions.insert((m0, 1), 5); // 5 NO shares
+        account.positions.insert((m0, 0), q(10) as i64); // 10 YES shares
+        account.positions.insert((m0, 1), q(5) as i64); // 5 NO shares
         let initial_balance = account.balance;
 
         // Resolve at 70% — YES pays $0.70, NO pays $0.30
@@ -254,7 +263,9 @@ mod tests {
         let account = accounts.get(aid).unwrap();
         // YES: 10 * $0.70 = $7.00
         // NO: 5 * $0.30 = $1.50
-        let expected = initial_balance + 10 * 700_000_000i64 + 5 * 300_000_000i64;
+        let expected = initial_balance
+            + notional_nanos(700_000_000, q(10)) as i64
+            + notional_nanos(300_000_000, q(5)) as i64;
         assert_eq!(account.balance, expected);
         assert_eq!(account.position(m0, 0), 0);
         assert_eq!(account.position(m0, 1), 0);
@@ -287,12 +298,13 @@ mod tests {
         fn prop_settle_batch_matches_verifier_for_simple_buys(
             balance in 1_000_000_000i64..=20_000_000_000,
             limit_price in prop_oneof![Just(100_000_000u64), Just(300_000_000u64), Just(500_000_000u64), Just(700_000_000u64)],
-            fill_qty in 1u64..=5,
+            fill_shares in 1u64..=5,
         ) {
             let mut markets = MarketSet::new();
             let m0 = markets.add_binary("M0");
             let mut accounts = AccountStore::new();
-            let required_balance = (limit_price as i64 * fill_qty as i64) + 1_000_000_000;
+            let fill_qty = q(fill_shares);
+            let required_balance = notional_nanos(limit_price, fill_qty) as i64 + 1_000_000_000;
             let aid = accounts.create_account(balance.max(required_balance));
 
             let order = outcome_buy(&markets, 1, m0, 0, limit_price, fill_qty);

@@ -25,6 +25,8 @@ from .types import (
     SellNo,
     SellYes,
     TimeInForce,
+    quantity_units_to_shares,
+    shares_to_quantity_units,
 )
 
 
@@ -103,7 +105,7 @@ class SybilClient:
             PositionValue(
                 market_id=p["market_id"],
                 outcome=p["outcome"],
-                quantity=p["quantity"],
+                quantity=quantity_units_to_shares(p["quantity"]),
                 current_price_nanos=p["current_price_nanos"],
                 value_nanos=p["value_nanos"],
             )
@@ -136,7 +138,7 @@ class SybilClient:
         return [
             AccountFill(
                 order_id=f["order_id"],
-                fill_qty=f["fill_qty"],
+                fill_qty=quantity_units_to_shares(f["fill_qty"]),
                 fill_price_nanos=f["fill_price_nanos"],
                 block_height=f["block_height"],
                 timestamp_ms=f["timestamp_ms"],
@@ -144,7 +146,7 @@ class SybilClient:
                     PositionDelta(
                         market_id=d["market_id"],
                         outcome=d["outcome"],
-                        delta=d["delta"],
+                        delta=quantity_units_to_shares(d["delta"]),
                     )
                     for d in f.get("position_deltas", [])
                 ],
@@ -162,17 +164,20 @@ class SybilClient:
                 market_id=o["market_id"],
                 side=o["side"],
                 limit_price_nanos=o["limit_price_nanos"],
-                remaining_quantity=o["remaining_quantity"],
+                remaining_quantity=quantity_units_to_shares(o["remaining_quantity"]),
                 created_at_block=o["created_at_block"],
                 expires_at_block=o.get("expires_at_block"),
-                original_quantity=o.get("original_quantity", o["remaining_quantity"]),
+                original_quantity=quantity_units_to_shares(
+                    o.get("original_quantity", o["remaining_quantity"])
+                ),
             )
             for o in data
         ]
 
     def _parse_account(self, data: dict[str, Any]) -> Account:
         positions = [
-            Position(p["market_id"], p["outcome"], p["quantity"]) for p in data.get("positions", [])
+            Position(p["market_id"], p["outcome"], quantity_units_to_shares(p["quantity"]))
+            for p in data.get("positions", [])
         ]
         return Account(data["account_id"], data["balance_nanos"], positions)
 
@@ -340,7 +345,7 @@ class SybilClient:
         return data.get("accepted", False)
 
     async def buy_yes(
-        self, account_id: int, market_id: int, price: float, quantity: int
+        self, account_id: int, market_id: int, price: float, quantity: int | float
     ) -> bool:
         """Submit a buy YES order."""
         return await self.submit_orders(
@@ -348,7 +353,7 @@ class SybilClient:
         )
 
     async def buy_no(
-        self, account_id: int, market_id: int, price: float, quantity: int
+        self, account_id: int, market_id: int, price: float, quantity: int | float
     ) -> bool:
         """Submit a buy NO order."""
         return await self.submit_orders(
@@ -356,7 +361,7 @@ class SybilClient:
         )
 
     async def sell_yes(
-        self, account_id: int, market_id: int, price: float, quantity: int
+        self, account_id: int, market_id: int, price: float, quantity: int | float
     ) -> bool:
         """Submit a sell YES order."""
         return await self.submit_orders(
@@ -364,7 +369,7 @@ class SybilClient:
         )
 
     async def sell_no(
-        self, account_id: int, market_id: int, price: float, quantity: int
+        self, account_id: int, market_id: int, price: float, quantity: int | float
     ) -> bool:
         """Submit a sell NO order."""
         return await self.submit_orders(
@@ -377,28 +382,28 @@ class SybilClient:
                 "type": "BuyYes",
                 "market_id": order.market_id,
                 "limit_price_nanos": order.limit_price_nanos,
-                "quantity": order.quantity,
+                "quantity": shares_to_quantity_units(order.quantity),
             }
         elif isinstance(order, BuyNo):
             return {
                 "type": "BuyNo",
                 "market_id": order.market_id,
                 "limit_price_nanos": order.limit_price_nanos,
-                "quantity": order.quantity,
+                "quantity": shares_to_quantity_units(order.quantity),
             }
         elif isinstance(order, SellYes):
             return {
                 "type": "SellYes",
                 "market_id": order.market_id,
                 "limit_price_nanos": order.limit_price_nanos,
-                "quantity": order.quantity,
+                "quantity": shares_to_quantity_units(order.quantity),
             }
         elif isinstance(order, SellNo):
             return {
                 "type": "SellNo",
                 "market_id": order.market_id,
                 "limit_price_nanos": order.limit_price_nanos,
-                "quantity": order.quantity,
+                "quantity": shares_to_quantity_units(order.quantity),
             }
         else:
             raise ValueError(f"Unknown order type: {type(order)}")
@@ -435,7 +440,11 @@ class SybilClient:
 
     def _parse_block(self, data: dict[str, Any]) -> Block:
         fills = [
-            Fill(f["order_id"], f["fill_qty"], f["fill_price_nanos"])
+            Fill(
+                f["order_id"],
+                quantity_units_to_shares(f["fill_qty"]),
+                f["fill_price_nanos"],
+            )
             for f in data.get("fills", [])
         ]
         # clearing_prices_nanos format: {"market_id": [yes_nanos, no_nanos]}

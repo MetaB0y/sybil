@@ -1,4 +1,5 @@
 import type { OrderSide } from "@/lib/account/orders";
+import { SHARE_SCALE } from "@/lib/account/quantity";
 import { DEGEN_BATCHES, DEGEN_EXPONENT, DEGEN_PEAK_NANOS, ONE_DOLLAR_NANOS } from "./constants";
 
 /**
@@ -26,10 +27,10 @@ export function degenLimitPrice(sideMarkNanos: bigint): bigint {
   return raw;
 }
 
-/** Shares affordable for `budgetNanos` at limit `limitNanos` (integer floor). */
+/** Share-units affordable for `budgetNanos` at limit `limitNanos` (integer floor). */
 export function degenQuantity(budgetNanos: bigint, limitNanos: bigint): bigint {
   if (budgetNanos <= 0n || limitNanos <= 0n) return 0n;
-  return budgetNanos / limitNanos;
+  return (budgetNanos * SHARE_SCALE) / limitNanos;
 }
 
 /** Last eligible block height: the next `DEGEN_BATCHES` batches. */
@@ -69,7 +70,7 @@ export type DegenOrderResult =
 /**
  * Compose the degen math into an order spec. `markNanos` is the already-resolved
  * mark for the chosen side (see `resolveMarkNanos`). Returns `below-minimum`
- * when the budget can't afford a single share at the degen limit price.
+ * when the budget can't afford the minimum 0.001 share at the degen limit price.
  */
 export function buildDegenOrder(params: {
   side: DegenSide;

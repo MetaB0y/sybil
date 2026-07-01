@@ -12,6 +12,7 @@ Before modifying this crate, read these vault notes (`docs/architecture/`):
 - [[Block Lifecycle]] — batch collection, solving, settlement, sealed block
 - [[Mempool]] — order buffering, segregation, and drain limits
 - [[Settlement]] — fill settlement logic (simple and generic)
+- [[Fractional Quantities]] — `Qty` is fixed-point share-units
 - [[Pending Orders and TTL]] — cross-batch order persistence and expiry
 - [[State Root and Parent Hash]] — block chaining and state commitment
 
@@ -58,8 +59,8 @@ BlockSequencer::produce_block(submissions, timestamp_ms) → (Block, PipelineRes
 ## Settlement Logic
 
 **Simple (single binary market):**
-- Buy: `balance -= price * qty; position(market, outcome) += qty`
-- Sell: `balance += price * qty; position(market, outcome) -= qty`
+- Buy: `balance -= price * qty / SHARE_SCALE; position(market, outcome) += qty`
+- Sell: `balance += price * qty / SHARE_SCALE; position(market, outcome) -= qty`
 
 **Generic (bundles, spreads):**
 - Debit balance by cost

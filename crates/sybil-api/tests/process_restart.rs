@@ -111,9 +111,19 @@ fn signed_cancel_payload(account_id: u64, order_id: u64, key: &SigningKey) -> Va
 }
 
 async fn spawn_api(data_dir: &Path, admin_key_path: &Path, block_interval_ms: u64) -> ApiProcess {
+    spawn_api_with_env(data_dir, admin_key_path, block_interval_ms, &[]).await
+}
+
+async fn spawn_api_with_env(
+    data_dir: &Path,
+    admin_key_path: &Path,
+    block_interval_ms: u64,
+    extra_env: &[(&str, &str)],
+) -> ApiProcess {
     let port = free_port();
     let base_url = format!("http://127.0.0.1:{port}");
-    let child = Command::new(sybil_api_binary())
+    let mut command = Command::new(sybil_api_binary());
+    command
         .arg("--dev-mode")
         .arg("--port")
         .arg(port.to_string())
@@ -127,9 +137,11 @@ async fn spawn_api(data_dir: &Path, admin_key_path: &Path, block_interval_ms: u6
         .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("sybil-api binary spawns");
+        .stderr(Stdio::null());
+    for (key, value) in extra_env {
+        command.env(key, value);
+    }
+    let child = command.spawn().expect("sybil-api binary spawns");
 
     ApiProcess { child, base_url }
 }
@@ -194,6 +206,20 @@ async fn pause_blocks(client: &reqwest::Client, base_url: &str) {
     );
 }
 
+async fn resume_blocks(client: &reqwest::Client, base_url: &str) {
+    let resp = client
+        .post(format!("{base_url}/v1/simulation/resume"))
+        .send()
+        .await
+        .expect("resume request succeeds");
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "resume failed: {}",
+        resp.text().await.unwrap_or_default()
+    );
+}
+
 async fn post_json(client: &reqwest::Client, base_url: &str, path: &str, body: Value) -> Value {
     let resp = client
         .post(format!("{base_url}{path}"))
@@ -225,6 +251,22 @@ async fn get_json(client: &reqwest::Client, base_url: &str, path: &str) -> Value
     serde_json::from_str(&text).expect("GET response is JSON")
 }
 
+async fn get_status_and_body(
+    client: &reqwest::Client,
+    base_url: &str,
+    path: &str,
+) -> (StatusCode, Value) {
+    let resp = client
+        .get(format!("{base_url}{path}"))
+        .send()
+        .await
+        .expect("GET request succeeds");
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    let body = serde_json::from_str(&text).unwrap_or_else(|_| json!({ "raw": text }));
+    (status, body)
+}
+
 async fn wait_for_block(client: &reqwest::Client, base_url: &str, height: u64) -> Value {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
@@ -250,6 +292,48 @@ async fn wait_for_block(client: &reqwest::Client, base_url: &str, height: u64) -
         );
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
+}
+
+async fn submit_crossing_trade(
+    client: &reqwest::Client,
+    base_url: &str,
+    buyer: u64,
+    seller: u64,
+    market_id: u64,
+    yes_price_nanos: u64,
+    no_price_nanos: u64,
+    quantity: u64,
+) {
+    post_json(
+        client,
+        base_url,
+        "/v1/orders",
+        json!({
+            "account_id": buyer,
+            "orders": [{
+                "type": "BuyYes",
+                "market_id": market_id,
+                "limit_price_nanos": yes_price_nanos,
+                "quantity": quantity
+            }]
+        }),
+    )
+    .await;
+    post_json(
+        client,
+        base_url,
+        "/v1/orders",
+        json!({
+            "account_id": seller,
+            "orders": [{
+                "type": "BuyNo",
+                "market_id": market_id,
+                "limit_price_nanos": no_price_nanos,
+                "quantity": quantity
+            }]
+        }),
+    )
+    .await;
 }
 
 fn assert_funding_history_once(history: &Value) {
@@ -518,6 +602,139 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     assert_funding_history_once(&committed_funding_history);
 
     committer.kill().await;
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn history_retention_and_candles_survive_process_restart() {
+    let root = temp_root("process-restart-history");
+    let data_dir = root.join("data");
+    let admin_key_path = root.join("admin-feed.key");
+    let retention_env = [
+        ("SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS", "2"),
+        ("SYBIL_RAW_PRICE_RETENTION_BLOCKS", "100"),
+        ("SYBIL_HISTORY_PRUNE_INTERVAL_BLOCKS", "1"),
+        ("SYBIL_HISTORY_PRUNE_MAX_ROWS", "100"),
+        ("SYBIL_PRICE_CANDLE_RESOLUTIONS_SECS", "60"),
+    ];
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+
+    let writer = spawn_api_with_env(&data_dir, &admin_key_path, 50, &retention_env).await;
+    wait_for_height_at_least(&client, &writer.base_url, 1).await;
+    pause_blocks(&client, &writer.base_url).await;
+
+    let buyer = post_json(
+        &client,
+        &writer.base_url,
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 100_000_000_000u64 }),
+    )
+    .await["account_id"]
+        .as_u64()
+        .unwrap();
+    let seller = post_json(
+        &client,
+        &writer.base_url,
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 100_000_000_000u64 }),
+    )
+    .await["account_id"]
+        .as_u64()
+        .unwrap();
+    let market_id = post_json(
+        &client,
+        &writer.base_url,
+        "/v1/markets",
+        json!({ "name": "process restart history market" }),
+    )
+    .await["market_id"]
+        .as_u64()
+        .unwrap();
+
+    let mut first_trade_height = None;
+    let mut last_trade_height = 0;
+    for (yes, no) in [
+        (600_000_000u64, 500_000_000u64),
+        (650_000_000u64, 450_000_000u64),
+        (700_000_000u64, 400_000_000u64),
+    ] {
+        let before = wait_for_health(&client, &writer.base_url).await["height"]
+            .as_u64()
+            .expect("height while paused");
+        submit_crossing_trade(
+            &client,
+            &writer.base_url,
+            buyer,
+            seller,
+            market_id,
+            yes,
+            no,
+            5,
+        )
+        .await;
+        resume_blocks(&client, &writer.base_url).await;
+        let committed = wait_for_height_at_least(&client, &writer.base_url, before + 1).await;
+        pause_blocks(&client, &writer.base_url).await;
+        first_trade_height.get_or_insert(before + 1);
+        last_trade_height = committed;
+    }
+    let first_trade_height = first_trade_height.expect("at least one trade committed");
+
+    writer.kill().await;
+
+    let reader = spawn_api_with_env(&data_dir, &admin_key_path, 60_000, &retention_env).await;
+    let restored_height = wait_for_health(&client, &reader.base_url).await["height"]
+        .as_u64()
+        .expect("restored height");
+    assert!(
+        restored_height >= last_trade_height,
+        "restart should restore at least the last committed trade block"
+    );
+    pause_blocks(&client, &reader.base_url).await;
+
+    let history = get_json(
+        &client,
+        &reader.base_url,
+        &format!("/v1/markets/{market_id}/prices/history?limit=10"),
+    )
+    .await;
+    let points = history["points"].as_array().unwrap();
+    assert_eq!(
+        points.len(),
+        3,
+        "raw price history after restart: {history}"
+    );
+    assert!(points
+        .iter()
+        .all(|point| point["volume_nanos"].as_u64().unwrap() > 0));
+
+    let candles = get_json(
+        &client,
+        &reader.base_url,
+        &format!("/v1/markets/{market_id}/prices/candles?resolution=1m&limit=10"),
+    )
+    .await;
+    let point_count: u64 = candles["candles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|candle| candle["point_count"].as_u64().unwrap())
+        .sum();
+    assert_eq!(point_count, 3, "candle history after restart: {candles}");
+
+    let (status, body) = get_status_and_body(
+        &client,
+        &reader.base_url,
+        &format!("/v1/blocks/{first_trade_height}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::GONE, "body={body}");
+    assert_eq!(body["code"].as_str(), Some("RETENTION_GONE"));
+
+    reader.kill().await;
     let _ = std::fs::remove_dir_all(root);
 }
 

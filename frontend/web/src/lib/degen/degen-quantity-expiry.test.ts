@@ -6,16 +6,16 @@ const usd = (d: number): bigint => BigInt(Math.round(d * 1e9)); // $1 = 1e9 nano
 const cents = (c: number): bigint => BigInt(Math.round(c * 1e7));
 
 describe("degenQuantity", () => {
-  it("returns budget / limit as a floored share count", () => {
-    expect(degenQuantity(usd(10), cents(50))).toBe(20n); // $10 / 50¢ = 20
+  it("returns budget / limit as floored share-units", () => {
+    expect(degenQuantity(usd(10), cents(50))).toBe(20_000n); // $10 / 50¢ = 20 shares
   });
 
-  it("floors fractional shares (does not overspend)", () => {
-    expect(degenQuantity(usd(10), cents(30))).toBe(33n); // 33.33 -> 33
+  it("keeps fractional shares down to 0.001 without overspending", () => {
+    expect(degenQuantity(usd(10), cents(30))).toBe(33_333n); // 33.333 shares
   });
 
-  it("returns 0 when the budget cannot afford one share", () => {
-    expect(degenQuantity(usd(0.1), cents(50))).toBe(0n);
+  it("allows sub-share bets when the budget can afford one share-unit", () => {
+    expect(degenQuantity(usd(0.1), cents(50))).toBe(200n); // 0.2 shares
   });
 
   it("guards against non-positive inputs (incl. negatives, which would otherwise floor toward -∞)", () => {

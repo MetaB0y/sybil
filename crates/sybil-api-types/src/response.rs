@@ -18,6 +18,7 @@ pub struct AccountResponse {
 pub struct PositionResponse {
     pub market_id: u32,
     pub outcome: String,
+    /// Signed position quantity in fixed-point share-units (`1000` = 1 share).
     pub quantity: i64,
 }
 
@@ -219,6 +220,7 @@ pub struct CancelOrderResponse {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct FillResponse {
     pub order_id: u64,
+    /// Fill quantity in fixed-point share-units (`1000` = 1 share).
     pub fill_qty: u64,
     pub fill_price_nanos: u64,
     #[serde(default)]
@@ -258,7 +260,8 @@ pub enum SystemEventResponse {
     /// On-chain cancellation event (D1). `side` is the categorical
     /// `OrderDirection` ("BuyYes"/"SellYes"/"BuyNo"/"SellNo") and
     /// `remaining_quantity` is the unfilled portion of `max_fill` at
-    /// cancel time. Forward-additive: old clients ignore unknown
+    /// cancel time, in fixed-point share-units. Forward-additive: old clients
+    /// ignore unknown
     /// variants via serde's `#[serde(tag = "type")]` shape.
     OrderCancelled {
         account_id: u64,
@@ -561,7 +564,7 @@ pub struct PortfolioResponse {
     #[serde(default)]
     pub realized_pnl_nanos: i64,
     /// Mark-to-market PnL on currently open positions (C1). Computed as
-    /// `Σ (current_price - avg_entry) * quantity` across positions.
+    /// `Σ (current_price - avg_entry) * quantity / SHARE_SCALE` across positions.
     #[serde(default)]
     pub unrealized_pnl_nanos: i64,
 }
@@ -571,6 +574,7 @@ pub struct PortfolioResponse {
 pub struct PositionValueResponse {
     pub market_id: u32,
     pub outcome: String,
+    /// Signed position quantity in fixed-point share-units (`1000` = 1 share).
     pub quantity: i64,
     pub current_price_nanos: u64,
     pub value_nanos: i64,
@@ -604,6 +608,37 @@ pub struct PricePointResponse {
     pub volume_nanos: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PriceCandlesResponse {
+    pub market_id: u32,
+    pub resolution_secs: u32,
+    pub candles: Vec<PriceCandleResponse>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_before_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retention_min_bucket_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PriceCandleResponse {
+    pub bucket_start_ms: u64,
+    pub bucket_end_ms: u64,
+    pub first_height: u64,
+    pub last_height: u64,
+    pub open_yes_price_nanos: u64,
+    pub high_yes_price_nanos: u64,
+    pub low_yes_price_nanos: u64,
+    pub close_yes_price_nanos: u64,
+    pub open_no_price_nanos: u64,
+    pub high_no_price_nanos: u64,
+    pub low_no_price_nanos: u64,
+    pub close_no_price_nanos: u64,
+    pub volume_nanos: u64,
+    pub point_count: u64,
+}
+
 // --- Equity Series ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -628,6 +663,7 @@ pub struct EquitySeriesResponse {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AccountFillResponse {
     pub order_id: u64,
+    /// Fill quantity in fixed-point share-units (`1000` = 1 share).
     pub fill_qty: u64,
     pub fill_price_nanos: u64,
     pub block_height: u64,
@@ -651,10 +687,11 @@ pub struct PendingOrderResponse {
     pub market_id: u32,
     pub side: String,
     pub limit_price_nanos: u64,
+    /// Remaining fill quantity in fixed-point share-units (`1000` = 1 share).
     pub remaining_quantity: u64,
     pub created_at_block: u64,
     pub expires_at_block: u64,
-    /// Original `max_fill` at admit time (B8). Lets the FE render a
+    /// Original `max_fill` at admit time, in fixed-point share-units (B8). Lets the FE render a
     /// partial-fill progress bar as `(original - remaining) / original`.
     /// `0` for orders persisted before B5/B8 (#[serde(default)] forward
     /// compat).

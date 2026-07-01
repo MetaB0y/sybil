@@ -130,6 +130,16 @@ pub struct ApiConfig {
     #[arg(long, default_value = "10000", env = "SYBIL_HISTORY_PRUNE_MAX_ROWS")]
     pub history_prune_max_rows: usize,
 
+    /// Comma-separated candle resolutions, in seconds, maintained from
+    /// committed raw price points.
+    #[arg(
+        long,
+        env = "SYBIL_PRICE_CANDLE_RESOLUTIONS_SECS",
+        value_delimiter = ',',
+        default_value = "60,300,3600"
+    )]
+    pub price_candle_resolutions_secs: Vec<u32>,
+
     /// In-memory fill-history records retained per account for API queries.
     #[arg(
         long,
@@ -228,6 +238,7 @@ impl Default for ApiConfig {
             raw_price_retention_blocks: 0,
             history_prune_interval_blocks: 1_000,
             history_prune_max_rows: 10_000,
+            price_candle_resolutions_secs: vec![60, 300, 3_600],
             max_fill_history_per_account: 5_000,
             max_equity_points_per_account: 0,
             max_history_events_per_account: 0,

@@ -51,7 +51,7 @@
 
 use std::collections::HashMap;
 
-use matching_engine::{MarketId, NANOS_PER_DOLLAR};
+use matching_engine::{signed_price_delta_notional, MarketId, NANOS_PER_DOLLAR};
 use serde::{Deserialize, Serialize};
 
 use crate::account::{Account, AccountId};
@@ -151,9 +151,9 @@ impl CostBasisTracker {
         // Opposite sign — reducing or flipping.
         let close_qty = delta.unsigned_abs().min(prior_qty.unsigned_abs()) as i128;
         let pnl = if prior_qty > 0 {
-            (entry_price as i128 - prior_basis as i128) * close_qty
+            signed_price_delta_notional(entry_price - prior_basis, close_qty as u64) as i128
         } else {
-            (prior_basis as i128 - entry_price as i128) * close_qty
+            signed_price_delta_notional(prior_basis - entry_price, close_qty as u64) as i128
         };
         *self.realized.entry(account_id).or_insert(0) += pnl as i64;
 
@@ -181,9 +181,9 @@ impl CostBasisTracker {
             let key = (account_id, market_id, outcome);
             let basis = self.basis.get(&key).copied().unwrap_or(0);
             let pnl = if qty > 0 {
-                (close_price as i128 - basis as i128) * qty as i128
+                signed_price_delta_notional(close_price - basis, qty.unsigned_abs()) as i128
             } else {
-                (basis as i128 - close_price as i128) * qty.unsigned_abs() as i128
+                signed_price_delta_notional(basis - close_price, qty.unsigned_abs()) as i128
             };
             *self.realized.entry(account_id).or_insert(0) += pnl as i64;
             self.basis.remove(&key);
@@ -223,7 +223,7 @@ pub struct CostBasisTrackerSnapshot {
 mod tests {
     use super::*;
     use crate::account::Account;
-    use matching_engine::NANOS_PER_DOLLAR;
+    use matching_engine::{shares_to_qty, signed_price_delta_notional, NANOS_PER_DOLLAR};
 
     fn aid(n: u64) -> AccountId {
         AccountId(n)
@@ -240,6 +240,10 @@ mod tests {
         account
     }
 
+    fn q(shares: u64) -> i64 {
+        shares_to_qty(shares) as i64
+    }
+
     #[test]
     fn apply_fill_basic() {
         // Open YES at 0.40, then add at 0.60: WAC should be 0.50 for 2 lots.
@@ -249,15 +253,15 @@ mod tests {
 
         let mut account = Account::new(a, 0);
         // First fill: buy 5 YES at 0.40
-        account.positions.insert((m, 0), 5);
+        account.positions.insert((m, 0), q(5));
         let p1 = (NANOS_PER_DOLLAR as i64) * 4 / 10;
-        t.apply_fill(a, &[(m, 0, 5)], p1, &account);
+        t.apply_fill(a, &[(m, 0, q(5))], p1, &account);
         assert_eq!(t.cost_basis(a, m, 0), p1);
 
         // Second fill: buy 5 more YES at 0.60 → WAC = 0.50
-        account.positions.insert((m, 0), 10);
+        account.positions.insert((m, 0), q(10));
         let p2 = (NANOS_PER_DOLLAR as i64) * 6 / 10;
-        t.apply_fill(a, &[(m, 0, 5)], p2, &account);
+        t.apply_fill(a, &[(m, 0, q(5))], p2, &account);
         assert_eq!(t.cost_basis(a, m, 0), (p1 + p2) / 2);
 
         // Realized still zero (no closes).
@@ -268,9 +272,9 @@ mod tests {
     fn apply_fill_excludes_mint() {
         let mut t = CostBasisTracker::new();
         let m = mid(1);
-        let account = account_with(m, 0, 5);
+        let account = account_with(m, 0, q(5));
         let p = NANOS_PER_DOLLAR as i64 / 2;
-        t.apply_fill(AccountId::MINT, &[(m, 0, 5)], p, &account);
+        t.apply_fill(AccountId::MINT, &[(m, 0, q(5))], p, &account);
 
         // No basis, no realized — MINT short-circuits.
         assert_eq!(t.cost_basis(AccountId::MINT, m, 0), 0);
@@ -286,15 +290,15 @@ mod tests {
         let a = aid(7);
 
         let mut account = Account::new(a, 0);
-        account.positions.insert((m, 0), 10);
+        account.positions.insert((m, 0), q(10));
         let p = (NANOS_PER_DOLLAR as i64) * 4 / 10;
-        t.apply_fill(a, &[(m, 0, 10)], p, &account);
+        t.apply_fill(a, &[(m, 0, q(10))], p, &account);
         assert_eq!(t.cost_basis(a, m, 0), p);
 
         let payout = NANOS_PER_DOLLAR as i64;
-        t.apply_resolution(m, payout, [(a, 0u8, 10i64)]);
+        t.apply_resolution(m, payout, [(a, 0u8, q(10))]);
 
-        let expected = ((NANOS_PER_DOLLAR as i64) - p) * 10;
+        let expected = signed_price_delta_notional((NANOS_PER_DOLLAR as i64) - p, q(10) as u64);
         assert_eq!(t.realized_pnl(a), expected);
         // Basis cleared after resolution.
         assert_eq!(t.cost_basis(a, m, 0), 0);
@@ -307,14 +311,14 @@ mod tests {
         let a = aid(7);
 
         let mut account = Account::new(a, 0);
-        account.positions.insert((m, 0), 4);
-        t.apply_fill(a, &[(m, 0, 4)], NANOS_PER_DOLLAR as i64 / 2, &account);
+        account.positions.insert((m, 0), q(4));
+        t.apply_fill(a, &[(m, 0, q(4))], NANOS_PER_DOLLAR as i64 / 2, &account);
 
         // Close 2 at higher price: should produce some realized.
-        account.positions.insert((m, 0), 2);
+        account.positions.insert((m, 0), q(2));
         t.apply_fill(
             a,
-            &[(m, 0, -2)],
+            &[(m, 0, -q(2))],
             (NANOS_PER_DOLLAR as i64) * 6 / 10,
             &account,
         );
@@ -334,17 +338,17 @@ mod tests {
         let a = aid(7);
 
         let mut account = Account::new(a, 0);
-        account.positions.insert((m, 0), 5);
+        account.positions.insert((m, 0), q(5));
         t.apply_fill(
             a,
-            &[(m, 0, 5)],
+            &[(m, 0, q(5))],
             (NANOS_PER_DOLLAR as i64) * 3 / 10,
             &account,
         );
-        account.positions.insert((m, 0), 10);
+        account.positions.insert((m, 0), q(10));
         t.apply_fill(
             a,
-            &[(m, 0, 5)],
+            &[(m, 0, q(5))],
             (NANOS_PER_DOLLAR as i64) * 5 / 10,
             &account,
         );
@@ -352,8 +356,11 @@ mod tests {
         // 0.30 and 0.50 average to 0.40 exactly with equal-quantity legs.
         assert_eq!(basis, (NANOS_PER_DOLLAR as i64) * 4 / 10);
 
-        t.apply_resolution(m, 0, [(a, 0u8, 10i64)]);
-        assert_eq!(t.realized_pnl(a), -basis * 10);
+        t.apply_resolution(m, 0, [(a, 0u8, q(10))]);
+        assert_eq!(
+            t.realized_pnl(a),
+            signed_price_delta_notional(-basis, q(10) as u64)
+        );
     }
 
     // --- NO-side regression tests (the side-price fix) ---
@@ -367,9 +374,9 @@ mod tests {
         let a = aid(7);
 
         let mut account = Account::new(a, 0);
-        account.positions.insert((m, 1), 10);
+        account.positions.insert((m, 1), q(10));
         let no_price = (NANOS_PER_DOLLAR as i64) * 9 / 100; // 0.09
-        t.apply_fill(a, &[(m, 1, 10)], no_price, &account);
+        t.apply_fill(a, &[(m, 1, q(10))], no_price, &account);
 
         assert_eq!(t.cost_basis(a, m, 1), no_price);
         assert_eq!(t.realized_pnl(a), 0);
@@ -383,12 +390,12 @@ mod tests {
         let a = aid(7);
 
         let mut account = Account::new(a, 0);
-        account.positions.insert((m, 1), 5);
+        account.positions.insert((m, 1), q(5));
         let p1 = (NANOS_PER_DOLLAR as i64) * 2 / 10;
-        t.apply_fill(a, &[(m, 1, 5)], p1, &account);
-        account.positions.insert((m, 1), 10);
+        t.apply_fill(a, &[(m, 1, q(5))], p1, &account);
+        account.positions.insert((m, 1), q(10));
         let p2 = (NANOS_PER_DOLLAR as i64) * 4 / 10;
-        t.apply_fill(a, &[(m, 1, 5)], p2, &account);
+        t.apply_fill(a, &[(m, 1, q(5))], p2, &account);
 
         assert_eq!(t.cost_basis(a, m, 1), (p1 + p2) / 2);
     }
@@ -402,12 +409,13 @@ mod tests {
         let a = aid(7);
 
         let mut account = Account::new(a, 0);
-        account.positions.insert((m, 1), 10);
+        account.positions.insert((m, 1), q(10));
         let no_price = (NANOS_PER_DOLLAR as i64) * 9 / 100;
-        t.apply_fill(a, &[(m, 1, 10)], no_price, &account);
+        t.apply_fill(a, &[(m, 1, q(10))], no_price, &account);
 
-        t.apply_resolution(m, 0, [(a, 1u8, 10i64)]);
-        let expected = ((NANOS_PER_DOLLAR as i64) - no_price) * 10;
+        t.apply_resolution(m, 0, [(a, 1u8, q(10))]);
+        let expected =
+            signed_price_delta_notional((NANOS_PER_DOLLAR as i64) - no_price, q(10) as u64);
         assert_eq!(t.realized_pnl(a), expected);
         assert_eq!(t.cost_basis(a, m, 1), 0); // dropped after resolution
     }
@@ -421,12 +429,15 @@ mod tests {
         let a = aid(7);
 
         let mut account = Account::new(a, 0);
-        account.positions.insert((m, 1), 10);
+        account.positions.insert((m, 1), q(10));
         let no_price = (NANOS_PER_DOLLAR as i64) * 9 / 100;
-        t.apply_fill(a, &[(m, 1, 10)], no_price, &account);
+        t.apply_fill(a, &[(m, 1, q(10))], no_price, &account);
 
-        t.apply_resolution(m, NANOS_PER_DOLLAR as i64, [(a, 1u8, 10i64)]);
-        assert_eq!(t.realized_pnl(a), -no_price * 10);
+        t.apply_resolution(m, NANOS_PER_DOLLAR as i64, [(a, 1u8, q(10))]);
+        assert_eq!(
+            t.realized_pnl(a),
+            signed_price_delta_notional(-no_price, q(10) as u64)
+        );
     }
 
     #[test]
@@ -438,16 +449,19 @@ mod tests {
         let a = aid(7);
 
         let mut account = Account::new(a, 0);
-        account.positions.insert((m, 1), 10);
+        account.positions.insert((m, 1), q(10));
         let buy = (NANOS_PER_DOLLAR as i64) / 10; // 0.10
-        t.apply_fill(a, &[(m, 1, 10)], buy, &account);
+        t.apply_fill(a, &[(m, 1, q(10))], buy, &account);
 
         // Sell 4 (delta -4) at 0.25 → post qty 6.
-        account.positions.insert((m, 1), 6);
+        account.positions.insert((m, 1), q(6));
         let sell = (NANOS_PER_DOLLAR as i64) * 25 / 100; // 0.25
-        t.apply_fill(a, &[(m, 1, -4)], sell, &account);
+        t.apply_fill(a, &[(m, 1, -q(4))], sell, &account);
 
-        assert_eq!(t.realized_pnl(a), (sell - buy) * 4);
+        assert_eq!(
+            t.realized_pnl(a),
+            signed_price_delta_notional(sell - buy, q(4) as u64)
+        );
         assert_eq!(t.cost_basis(a, m, 1), buy);
     }
 }

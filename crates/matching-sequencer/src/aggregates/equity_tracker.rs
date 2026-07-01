@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use matching_engine::{MarketId, Nanos};
+use matching_engine::{signed_notional_nanos, MarketId, Nanos};
 
 use crate::account::{AccountId, AccountStore};
 
@@ -55,7 +55,7 @@ fn portfolio_value_nanos(
             .get(&market_id)
             .and_then(|p| p.get(outcome as usize).copied())
             .unwrap_or(matching_engine::NANOS_PER_DOLLAR / 2);
-        total += qty as i128 * price as i128;
+        total += signed_notional_nanos(price, qty) as i128;
     }
     total as i64
 }

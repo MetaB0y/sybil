@@ -1,10 +1,23 @@
 """Data types for Sybil client."""
 
 from dataclasses import dataclass, field
+from decimal import Decimal, ROUND_FLOOR
 from typing import Literal
 
 NANOS_PER_DOLLAR = 1_000_000_000
+SHARE_SCALE = 1_000
 TimeInForce = Literal["GTC", "IOC", "GTD"]
+
+
+def shares_to_quantity_units(shares: int | float | Decimal) -> int:
+    """Convert user-facing shares to protocol share-units."""
+    units = (Decimal(str(shares)) * SHARE_SCALE).to_integral_value(rounding=ROUND_FLOOR)
+    return max(0, int(units))
+
+
+def quantity_units_to_shares(quantity_units: int) -> float:
+    """Convert protocol share-units to user-facing shares."""
+    return quantity_units / SHARE_SCALE
 
 
 @dataclass
@@ -13,7 +26,7 @@ class Position:
 
     market_id: int
     outcome: Literal["YES", "NO"]
-    quantity: int
+    quantity: float
 
 
 @dataclass
@@ -28,7 +41,7 @@ class Account:
     def balance_dollars(self) -> float:
         return self.balance_nanos / NANOS_PER_DOLLAR
 
-    def position(self, market_id: int, outcome: str) -> int:
+    def position(self, market_id: int, outcome: str) -> float:
         """Get position quantity for a market outcome."""
         for pos in self.positions:
             if pos.market_id == market_id and pos.outcome == outcome:
@@ -78,7 +91,7 @@ class Fill:
     """A fill from the matching engine."""
 
     order_id: int
-    fill_qty: int
+    fill_qty: float
     fill_price_nanos: int
 
     @property
@@ -132,7 +145,7 @@ class PositionDelta:
 
     market_id: int
     outcome: str
-    delta: int
+    delta: float
 
 
 @dataclass
@@ -140,7 +153,7 @@ class AccountFill:
     """Record of a fill attributed to an account."""
 
     order_id: int
-    fill_qty: int
+    fill_qty: float
     fill_price_nanos: int
     block_height: int
     timestamp_ms: int
@@ -160,10 +173,10 @@ class PendingOrder:
     market_id: int
     side: str
     limit_price_nanos: int
-    remaining_quantity: int
+    remaining_quantity: float
     created_at_block: int
     expires_at_block: int | None
-    original_quantity: int
+    original_quantity: float
 
     @property
     def limit_price(self) -> float:
@@ -176,7 +189,7 @@ class PositionValue:
 
     market_id: int
     outcome: str
-    quantity: int
+    quantity: float
     current_price_nanos: int
     value_nanos: int
 
@@ -222,10 +235,10 @@ class OrderSpec:
 class BuyYes(OrderSpec):
     market_id: int
     limit_price_nanos: int
-    quantity: int
+    quantity: float
 
     @classmethod
-    def at_price(cls, market_id: int, price: float, quantity: int) -> "BuyYes":
+    def at_price(cls, market_id: int, price: float, quantity: int | float) -> "BuyYes":
         return cls(market_id, int(price * NANOS_PER_DOLLAR), quantity)
 
 
@@ -233,10 +246,10 @@ class BuyYes(OrderSpec):
 class BuyNo(OrderSpec):
     market_id: int
     limit_price_nanos: int
-    quantity: int
+    quantity: float
 
     @classmethod
-    def at_price(cls, market_id: int, price: float, quantity: int) -> "BuyNo":
+    def at_price(cls, market_id: int, price: float, quantity: int | float) -> "BuyNo":
         return cls(market_id, int(price * NANOS_PER_DOLLAR), quantity)
 
 
@@ -244,10 +257,10 @@ class BuyNo(OrderSpec):
 class SellYes(OrderSpec):
     market_id: int
     limit_price_nanos: int
-    quantity: int
+    quantity: float
 
     @classmethod
-    def at_price(cls, market_id: int, price: float, quantity: int) -> "SellYes":
+    def at_price(cls, market_id: int, price: float, quantity: int | float) -> "SellYes":
         return cls(market_id, int(price * NANOS_PER_DOLLAR), quantity)
 
 
@@ -255,8 +268,8 @@ class SellYes(OrderSpec):
 class SellNo(OrderSpec):
     market_id: int
     limit_price_nanos: int
-    quantity: int
+    quantity: float
 
     @classmethod
-    def at_price(cls, market_id: int, price: float, quantity: int) -> "SellNo":
+    def at_price(cls, market_id: int, price: float, quantity: int | float) -> "SellNo":
         return cls(market_id, int(price * NANOS_PER_DOLLAR), quantity)

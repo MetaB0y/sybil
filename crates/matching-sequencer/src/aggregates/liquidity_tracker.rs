@@ -1,7 +1,7 @@
 //! Off-block per-market liquidity scoring (B4).
 //!
 //! For each block, scores the *near-the-money* resting-book depth on every
-//! market that has a clearing price: sum of `limit_price * max_fill` over
+//! market that has a clearing price: sum of `limit_price * max_fill / SHARE_SCALE` over
 //! single-market resting orders whose `limit_price` falls within ±band of
 //! the market's midprice (YES clearing price in binary markets). The
 //! per-market score lands in a ring of the last `LIQUIDITY_RING_CAP` blocks
@@ -15,7 +15,7 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use matching_engine::{MarketId, Nanos, Order};
+use matching_engine::{notional_nanos, MarketId, Nanos, Order};
 use serde::{Deserialize, Serialize};
 
 use crate::order_book::OrderBook;
@@ -88,7 +88,7 @@ impl LiquidityTracker {
             let band_lo = mid.saturating_sub(band_nanos);
             let band_hi = mid.saturating_add(band_nanos);
             if order.limit_price >= band_lo && order.limit_price <= band_hi {
-                let value = order.limit_price.saturating_mul(order.max_fill);
+                let value = notional_nanos(order.limit_price, order.max_fill);
                 let entry = depth_by_market.entry(market).or_insert(0);
                 *entry = entry.saturating_add(value);
             }
@@ -112,7 +112,7 @@ impl LiquidityTracker {
             let band_lo = mid.saturating_sub(band_nanos);
             let band_hi = mid.saturating_add(band_nanos);
             if order.limit_price >= band_lo && order.limit_price <= band_hi {
-                let value = order.limit_price.saturating_mul(order.max_fill);
+                let value = notional_nanos(order.limit_price, order.max_fill);
                 let entry = depth_by_market.entry(market).or_insert(0);
                 *entry = entry.saturating_add(value);
             }
@@ -199,7 +199,9 @@ impl LiquidityTracker {
 mod tests {
     use super::*;
     use crate::account::AccountStore;
-    use matching_engine::{outcome_buy, spread, MarketId, MarketSet, NANOS_PER_DOLLAR};
+    use matching_engine::{
+        outcome_buy, shares_to_qty, spread, MarketId, MarketSet, NANOS_PER_DOLLAR,
+    };
 
     fn two_market_setup() -> (
         MarketSet,
@@ -226,6 +228,10 @@ mod tests {
         book.accept(order, trader, account, 1, 0).expect("admit");
     }
 
+    fn q(shares: u64) -> u64 {
+        shares_to_qty(shares)
+    }
+
     /// Multi-market resting orders (spreads/bundles) are excluded from the
     /// per-market score; single-market orders inside the band contribute.
     #[test]
@@ -237,13 +243,13 @@ mod tests {
         admit(
             &mut book,
             &accounts,
-            outcome_buy(&markets, 1, m0, 0, mid_yes, 4),
+            outcome_buy(&markets, 1, m0, 0, mid_yes, q(4)),
             trader,
         );
         admit(
             &mut book,
             &accounts,
-            spread(&markets, 2, m0, m1, mid_yes, 4),
+            spread(&markets, 2, m0, m1, mid_yes, q(4)),
             trader,
         );
 
@@ -269,7 +275,7 @@ mod tests {
         admit(
             &mut book,
             &accounts,
-            outcome_buy(&markets, 1, m0, 0, mid_yes, 1),
+            outcome_buy(&markets, 1, m0, 0, mid_yes, q(1)),
             trader,
         );
 
@@ -297,7 +303,7 @@ mod tests {
         admit(
             &mut book,
             &accounts,
-            outcome_buy(&markets, 1, m0, 0, mid_yes - 100_000_000, 4),
+            outcome_buy(&markets, 1, m0, 0, mid_yes - 100_000_000, q(4)),
             trader,
         );
 
@@ -318,7 +324,7 @@ mod tests {
         admit(
             &mut book,
             &accounts,
-            outcome_buy(&markets, 1, m0, 0, mid_yes, 3),
+            outcome_buy(&markets, 1, m0, 0, mid_yes, q(3)),
             trader,
         );
 
@@ -349,12 +355,12 @@ mod tests {
         admit(
             &mut book,
             &accounts,
-            outcome_buy(&markets, 1, m0, 0, mid_yes, 4),
+            outcome_buy(&markets, 1, m0, 0, mid_yes, q(4)),
             trader,
         );
 
         // Flash MM order — built but NOT accepted into the book.
-        let mm = outcome_buy(&markets, 99, m0, 0, mid_yes, 6);
+        let mm = outcome_buy(&markets, 99, m0, 0, mid_yes, q(6));
         let mm_slice: Vec<&matching_engine::Order> = vec![&mm];
 
         let mut tracker = LiquidityTracker::new();
@@ -372,7 +378,7 @@ mod tests {
         let (markets, _accounts, _trader, m0, _m1) = two_market_setup();
         let book = OrderBook::new(1_000);
         let mid_yes = NANOS_PER_DOLLAR / 2;
-        let mm = outcome_buy(&markets, 99, m0, 0, mid_yes - 100_000_000, 6);
+        let mm = outcome_buy(&markets, 99, m0, 0, mid_yes - 100_000_000, q(6));
         let mm_slice: Vec<&matching_engine::Order> = vec![&mm];
 
         let mut tracker = LiquidityTracker::new();
@@ -392,7 +398,7 @@ mod tests {
         admit(
             &mut book,
             &accounts,
-            outcome_buy(&markets, 1, m0, 0, mid_yes, 2),
+            outcome_buy(&markets, 1, m0, 0, mid_yes, q(2)),
             trader,
         );
 
@@ -441,7 +447,7 @@ mod tests {
         admit(
             &mut book,
             &accounts,
-            outcome_buy(&markets, 1, m0, 0, mid_yes, 2),
+            outcome_buy(&markets, 1, m0, 0, mid_yes, q(2)),
             trader,
         );
         let mut tracker = LiquidityTracker::new();

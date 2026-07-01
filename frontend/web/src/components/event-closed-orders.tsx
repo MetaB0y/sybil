@@ -34,6 +34,7 @@
  */
 
 import { useMemo, useState } from "react";
+import { notionalNanos } from "@/lib/account/quantity";
 import type { HistoryEvent } from "@/lib/account/use-account-history";
 import { formatCentsPrecise, formatDollars } from "@/lib/format/nanos";
 import { Pager, usePaged } from "@/components/event-list-pager";
@@ -269,7 +270,7 @@ export function EventClosedOrders({
         e.qty != null
       ) {
         slot.filledQty += BigInt(e.qty);
-        slot.filledNotional += e.priceNanos * BigInt(e.qty);
+        slot.filledNotional += notionalNanos(e.priceNanos, e.qty);
       }
       if (
         TERMINAL.has(e.type) &&
@@ -291,7 +292,7 @@ export function EventClosedOrders({
       // and at least one fill; else null ("—").
       let welfareNanos: bigint | null = null;
       if (slot.requestedPrice != null && slot.side != null && slot.filledQty > 0n) {
-        const edge = slot.requestedPrice * slot.filledQty - slot.filledNotional;
+        const edge = notionalNanos(slot.requestedPrice, slot.filledQty) - slot.filledNotional;
         welfareNanos = slot.side === "BUY" ? edge : -edge;
       }
       const row: ClosedOrder = {
@@ -303,7 +304,7 @@ export function EventClosedOrders({
         qty,
         priceNanos,
         requestedPriceNanos: slot.requestedPrice,
-        valueNanos: qty != null && priceNanos != null ? BigInt(qty) * priceNanos : null,
+        valueNanos: qty != null && priceNanos != null ? notionalNanos(priceNanos, qty) : null,
         // PnL is realized on the closing trade — show it for sells only.
         realizedPnlNanos: slot.side === "SELL" ? slot.realizedPnl : null,
         welfareNanos,

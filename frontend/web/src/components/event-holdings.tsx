@@ -31,6 +31,11 @@ import { useAccountFills } from "@/lib/account/use-account-fills";
 import { useAccountHistory } from "@/lib/account/use-account-history";
 import { useAccountOrders } from "@/lib/account/use-account-orders";
 import { avgEntryPriceNanos } from "@/lib/account/positions";
+import {
+  formatShareUnits,
+  notionalNanos,
+  unitsToShares,
+} from "@/lib/account/quantity";
 import { usePortfolio, type Portfolio } from "@/lib/account/use-portfolio";
 import { formatCentsPrecise, formatDollars, parseNanos } from "@/lib/format/nanos";
 import {
@@ -102,7 +107,7 @@ function compareBy(a: Holding, b: Holding, key: SortKey): number {
     case "side":
       return a.outcome.localeCompare(b.outcome);
     case "shares":
-      return a.quantity - b.quantity;
+      return unitsToShares(a.quantity) - unitsToShares(b.quantity);
     case "price":
       return cmpBig(a.markNanos, b.markNanos);
     case "value":
@@ -169,10 +174,10 @@ export function EventHoldings({ marketId }: { marketId: number }) {
       const markNanos = liveMark ?? parseNanos(p.current_price_nanos);
       const valueNanos =
         liveMark != null
-          ? BigInt(p.quantity) * markNanos
+          ? notionalNanos(markNanos, p.quantity)
           : parseNanos(p.value_nanos);
       const avgNanos = avgEntryPriceNanos(fills, p.market_id, p.outcome, p);
-      const costNanos = avgNanos == null ? null : BigInt(p.quantity) * avgNanos;
+      const costNanos = avgNanos == null ? null : notionalNanos(avgNanos, p.quantity);
       const pnlNanos = costNanos == null ? null : valueNanos - costNanos;
       return {
         position: p,
@@ -692,7 +697,7 @@ function HoldingRow({ holding }: { holding: Holding }) {
       <span>
         <SidePill outcome={outcome} />
       </span>
-      <Right mono>{quantity}</Right>
+      <Right mono>{formatShareUnits(quantity)}</Right>
       <Right mono>
         {avgNanos == null
           ? formatCentsPrecise(markNanos)

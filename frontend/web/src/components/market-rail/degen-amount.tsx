@@ -7,9 +7,11 @@
  * Payout is computed from the *actual* degen order the rail will submit
  * (`maxFill` shares at the degen-taxed limit price), not the indicative
  * clearing price — each share pays $1 if the bet wins, so the max payout is
- * `maxFill × $1` and the multiplier is `payout / bet`. `maxFill` is `null`
- * when the bet is below the one-share minimum.
+ * `maxFill / 1000 × $1` and the multiplier is `payout / bet`. `maxFill` is
+ * `null` when the bet is below the minimum 0.001 share.
  */
+
+import { unitsToShares } from "@/lib/account/quantity";
 
 const CHIPS = [10, 25, 100, 500] as const;
 
@@ -22,7 +24,7 @@ export function DegenAmount({
 }: {
   amount: string;
   setAmount: (a: string) => void;
-  /** Shares the built degen order will buy, or null when below minimum. */
+  /** Share-units the built degen order will buy, or null when below minimum. */
   maxFill: bigint | null;
   /** Cash available to bet (balance − cash reserved by open orders), or null
    *  if unknown. This is what the engine checks, so MAX/headroom use it. */
@@ -31,7 +33,7 @@ export function DegenAmount({
   reservedDollars?: number;
 }) {
   const bet = parseFloat(amount) || 0;
-  const win = maxFill == null ? null : Number(maxFill);
+  const win = maxFill == null ? null : unitsToShares(maxFill);
   const mult = win != null && bet > 0 ? win / bet : null;
   const add = (delta: number) =>
     setAmount(String(Math.round(((parseFloat(amount) || 0) + delta) * 100) / 100));

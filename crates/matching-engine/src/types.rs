@@ -10,11 +10,54 @@ use serde::{Deserialize, Serialize};
 /// 1 unit = 1 nanodollar = 1e-9 USD
 pub const NANOS_PER_DOLLAR: u64 = 1_000_000_000;
 
+/// 1 share = 1000 quantity units. The smallest tradable quantity is 0.001
+/// share, represented as `Qty = 1`.
+pub const SHARE_SCALE: u64 = 1_000;
+
 /// Amount in nanodollars (max ~18 billion dollars with u64)
 pub type Nanos = u64;
 
-/// Quantity in shares/lots
+/// Quantity in fixed-point share units (`SHARE_SCALE` units = 1 share).
 pub type Qty = u64;
+
+/// Convert whole shares into the internal fixed-point quantity unit.
+pub const fn shares_to_qty(shares: u64) -> Qty {
+    shares.saturating_mul(SHARE_SCALE)
+}
+
+/// Floor of `price_nanos * qty / SHARE_SCALE`, returned as `u64`.
+pub fn notional_nanos(price: Nanos, qty: Qty) -> Nanos {
+    ((price as u128 * qty as u128) / SHARE_SCALE as u128) as Nanos
+}
+
+/// Ceiling of `price_nanos * qty / SHARE_SCALE`, returned as `u64`.
+///
+/// Use this for reservations and budget checks, where under-reserving by even
+/// one nano is worse than releasing a tiny surplus later.
+pub fn notional_nanos_ceil(price: Nanos, qty: Qty) -> Nanos {
+    let numerator = price as u128 * qty as u128;
+    numerator.div_ceil(SHARE_SCALE as u128) as Nanos
+}
+
+/// Signed floor of `price_nanos * qty / SHARE_SCALE`.
+pub fn signed_notional_nanos(price: Nanos, qty: i64) -> i64 {
+    let abs = notional_nanos(price, qty.unsigned_abs()) as i64;
+    if qty < 0 {
+        -abs
+    } else {
+        abs
+    }
+}
+
+/// Signed floor of `price_delta_nanos * qty / SHARE_SCALE`.
+pub fn signed_price_delta_notional(price_delta: i64, qty: Qty) -> i64 {
+    let abs = ((price_delta.unsigned_abs() as u128 * qty as u128) / SHARE_SCALE as u128) as i64;
+    if price_delta < 0 {
+        -abs
+    } else {
+        abs
+    }
+}
 
 /// Market identifier
 #[derive(

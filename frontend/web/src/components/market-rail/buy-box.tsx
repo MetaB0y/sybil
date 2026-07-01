@@ -25,6 +25,12 @@ import {
 } from "@/lib/account/orders";
 import { humanizeOrderError } from "@/lib/account/order-errors";
 import {
+  formatShareUnits,
+  notionalNanosCeil,
+  sharesToUnits,
+  unitsToShares,
+} from "@/lib/account/quantity";
+import {
   useAccountSession,
   useSetConnectModalOpen,
 } from "@/lib/account/use-account";
@@ -33,7 +39,6 @@ import { usePortfolio } from "@/lib/account/use-portfolio";
 import {
   formatBatchSeconds,
   formatDollars,
-  formatInt,
 } from "@/lib/format/nanos";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
 import { useBatchCountdown } from "./use-batch-countdown";
@@ -103,18 +108,15 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
   const usd = parseFloat(amount) || 0;
   const sh = parseFloat(shares) || 0;
   const sharesIfUsd = limitDec > 0 ? usd / limitDec : 0;
-  const maxCostIfShares = sh * limitDec;
+  const limitCentsPreview = Math.max(1, Math.min(99, Math.round(limit)));
+  const limitPriceNanosPreview = BigInt(limitCentsPreview) * 10_000_000n;
 
-  // Unified receipt quantities. `qtyShares` is the order size the engine will
-  // see (`max_fill`), floored to whole shares exactly like onCtaClick — so the
-  // receipt matches what's actually submitted in all four modes (buy/sell ×
-  // $/shares). `grossAtLimit` is the cash value of that order at the limit
-  // price; `payoutIfWin` is what those shares return ($1 each) if in-the-money.
-  const qtyShares = Math.max(
-    0,
-    Math.floor(unit === "usd" ? sharesIfUsd : sh),
-  );
-  const grossAtLimit = qtyShares * limitDec;
+  // Unified receipt quantities. `qtyUnits` is the order size the engine will see
+  // (`max_fill`), floored to the protocol's 0.001-share increment.
+  const qtyUnits = sharesToUnits(unit === "usd" ? sharesIfUsd : sh);
+  const qtyShares = unitsToShares(qtyUnits);
+  const grossAtLimit =
+    Number(notionalNanosCeil(limitPriceNanosPreview, qtyUnits)) / 1e9;
   const payoutIfWin = qtyShares; // qty × $1
 
   // Cash available to BUY = balance − cash reserved by resting buy orders.
@@ -126,10 +128,11 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
   // Shares of THIS outcome+side the user currently holds — what they can sell.
   // Positions carry the outcome as "YES"/"NO" (accounts route), matching
   // `outcomeSide`.
-  const heldShares =
+  const heldUnits =
     portfolio.data?.positions?.find(
       (p) => p.market_id === outcome.marketId && p.outcome === outcomeSide,
     )?.quantity ?? 0;
+  const heldShares = unitsToShares(heldUnits);
 
   // Quick-amount chips on the order input. `+N` is additive; `MAX` fills the
   // available balance (needs a known balance). Mirrors the handoff BuyBox.
@@ -162,14 +165,16 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
             ? {
                 label: "MAX",
                 disabled: heldShares <= 0,
-                apply: () => setShares(String(heldShares)),
+                apply: () => setShares(formatShareUnits(heldUnits)),
               }
             : {
                 label: "MAX",
                 disabled: availableDollars == null,
                 apply: () => {
                   if (availableDollars != null)
-                    setShares(String(Math.floor(availableDollars / limitDec)));
+                    setShares(
+                      formatShareUnits(sharesToUnits(availableDollars / limitDec)),
+                    );
                 },
               },
         ];
@@ -185,19 +190,19 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
 
   // Block a BUY whose cost exceeds available cash, so we never trip a
   // server-side InsufficientBalance. Sells are gated by held shares instead.
-  const buyCostDollars = unit === "usd" ? usd : maxCostIfShares;
+  const buyCostNanos = notionalNanosCeil(limitPriceNanosPreview, qtyUnits);
   const insufficientBuy =
     connected &&
     dir === "buy" &&
-    availableDollars != null &&
-    buyCostDollars > availableDollars;
+    availableNanos != null &&
+    buyCostNanos > availableNanos;
   // Block a SELL of more shares than held — the mirror of insufficientBuy — so
   // we never trip a server-side InsufficientPosition. Only enforced once the
   // portfolio has loaded (heldShares defaults to 0 while that query is pending,
   // which would otherwise reject every sell).
   const positionsLoaded = portfolio.data != null;
   const insufficientSell =
-    connected && dir === "sell" && positionsLoaded && qtyShares > heldShares;
+    connected && dir === "sell" && positionsLoaded && qtyUnits > BigInt(heldUnits);
   const ctaOff = submitting || insufficientBuy || insufficientSell;
 
   const ctaLabel = (() => {
@@ -221,12 +226,9 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
     setSubmitOk(null);
 
     // Resolve qty (max_fill) and basic validation.
-    const maxFill =
-      unit === "usd"
-        ? Math.max(0, Math.floor(sharesIfUsd))
-        : Math.max(0, Math.floor(sh));
-    if (maxFill < 1) {
-      setSubmitError("max_fill must be at least 1 share");
+    const maxFill = sharesToUnits(unit === "usd" ? sharesIfUsd : sh);
+    if (maxFill < 1n) {
+      setSubmitError("max_fill must be at least 0.001 share");
       return;
     }
     const limitCents = Math.max(1, Math.min(99, Math.round(limit)));
@@ -250,14 +252,14 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
         marketId: outcome.marketId,
         side: orderSideFor(dir, outcomeSide),
         limitPriceNanos,
-        maxFill: BigInt(maxFill),
+        maxFill,
         ...(expiresAtBlock !== undefined ? { expiresAtBlock } : {}),
       });
       if (!res.accepted) {
         setSubmitError("server returned accepted=false");
       } else {
         setSubmitOk(
-          `queued · ${maxFill} sh @ ${limitCents}¢ (${ttl})`,
+          `queued · ${formatShareUnits(maxFill)} sh @ ${limitCents}¢ (${ttl})`,
         );
         // Refresh both per-account caches and the chain-wide pending list
         // (consumed by market-rail's pending feed).
@@ -452,7 +454,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
             }}
           >
             {dir === "sell"
-              ? `balance ${formatInt(heldShares)} sh`
+              ? `balance ${formatShareUnits(heldUnits)} sh`
               : availableDollars == null
                 ? ""
                 : unit === "usd"
@@ -710,7 +712,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
             {/* Buy: pay AT MOST limit×qty (uniform clearing may be cheaper),
                 receive qty shares, each worth $1 if the outcome resolves in. */}
             <ReceiptRow label="max cost" value={`≤ $${grossAtLimit.toFixed(2)}`} />
-            <ReceiptRow label="shares (if filled)" value={`${qtyShares}`} />
+            <ReceiptRow label="shares (if filled)" value={formatShareUnits(qtyUnits)} />
             <ReceiptRow
               label="payout if it wins"
               value={`$${payoutIfWin.toFixed(2)}`}
@@ -724,7 +726,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
               label="min receive"
               value={`≥ $${grossAtLimit.toFixed(2)}`}
             />
-            <ReceiptRow label="shares to sell" value={`${qtyShares}`} />
+            <ReceiptRow label="shares to sell" value={formatShareUnits(qtyUnits)} />
           </>
         )}
         <div

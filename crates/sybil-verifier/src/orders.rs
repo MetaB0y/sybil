@@ -6,6 +6,8 @@
 
 use std::collections::HashMap;
 
+use matching_engine::notional_nanos_ceil;
+
 use crate::types::{AccountSnapshot, BlockWitness, RejectionReason};
 use crate::violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
 
@@ -62,7 +64,7 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
 
         if has_positive && !has_negative {
             // Pure buy: check balance covers worst-case cost
-            let max_cost = order.limit_price as i64 * order.max_fill as i64;
+            let max_cost = notional_nanos_ceil(order.limit_price, order.max_fill) as i64;
             let reserved = *reserved_balance.get(&wo.account_id).unwrap_or(&0);
             let available = snap.balance - reserved;
 
@@ -142,7 +144,7 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
                 let has_negative = order.payoffs[..num_states].iter().any(|&p| p < 0);
 
                 if has_positive && !has_negative {
-                    let max_cost = order.limit_price as i64 * order.max_fill as i64;
+                    let max_cost = notional_nanos_ceil(order.limit_price, order.max_fill) as i64;
                     if max_cost != *required {
                         violations.push(Violation {
                             kind: ViolationKind::IncorrectRejectionReason,
@@ -220,7 +222,7 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
 mod tests {
     use super::*;
     use crate::types::{WitnessBlockHeader, WitnessOrder, WitnessRejection};
-    use matching_engine::{outcome_buy, outcome_sell, MarketSet, NANOS_PER_DOLLAR};
+    use matching_engine::{outcome_buy, outcome_sell, shares_to_qty, MarketSet, NANOS_PER_DOLLAR};
     use proptest::prelude::*;
     use std::collections::HashMap;
 
@@ -268,7 +270,7 @@ mod tests {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
 
-        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, shares_to_qty(10));
         let pre_state = vec![AccountSnapshot {
             id: 0,
             balance: 10 * NANOS_PER_DOLLAR as i64,
@@ -376,7 +378,7 @@ mod tests {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
 
-        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, shares_to_qty(10));
         // max_cost = 0.50 * 10 = $5, but only $3 available
         let pre_state = vec![AccountSnapshot {
             id: 0,
@@ -411,8 +413,8 @@ mod tests {
         let m0 = markets.add_binary("M0");
 
         // Two buy orders from the same account, $5 each = $10 total
-        let order1 = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        let order2 = outcome_buy(&markets, 2, m0, 0, 500_000_000, 10);
+        let order1 = outcome_buy(&markets, 1, m0, 0, 500_000_000, shares_to_qty(10));
+        let order2 = outcome_buy(&markets, 2, m0, 0, 500_000_000, shares_to_qty(10));
 
         // Account has $8 — enough for one but not both
         let pre_state = vec![AccountSnapshot {
@@ -697,8 +699,8 @@ mod tests {
             let order1 = outcome_buy(&markets, 1, m0, 0, limit_price_1, max_fill_1);
             let order2 = outcome_buy(&markets, 2, m0, 0, limit_price_2, max_fill_2);
 
-            let cost1 = limit_price_1 as i64 * max_fill_1 as i64;
-            let cost2 = limit_price_2 as i64 * max_fill_2 as i64;
+            let cost1 = notional_nanos_ceil(limit_price_1, max_fill_1) as i64;
+            let cost2 = notional_nanos_ceil(limit_price_2, max_fill_2) as i64;
             let state = vec![AccountSnapshot {
                 id: 0,
                 balance: cost1 + cost2 - 1,

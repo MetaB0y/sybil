@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
@@ -20,7 +20,8 @@ use crate::crypto::{
 };
 use crate::error::{Rejection, RejectionReason, SequencerError};
 use crate::market_info::{
-    AccountFillRecord, MarketMetadata, MarketSearchQuery, PriceHistoryPage, PricePoint,
+    AccountFillRecord, MarketMetadata, MarketSearchQuery, PriceCandle, PriceCandlePage,
+    PriceHistoryPage, PricePoint,
 };
 use crate::portfolio::PortfolioSummary;
 use crate::sequencer::{
@@ -72,6 +73,62 @@ fn limit_price_point_page(
             next_before_height: None,
             retention_min_height: None,
         }
+    }
+}
+
+fn price_candle_page_from_points(
+    points: Vec<PricePoint>,
+    resolution_secs: u32,
+    from_ms: Option<u64>,
+    to_ms: Option<u64>,
+    before_ms: Option<u64>,
+    limit: usize,
+) -> PriceCandlePage {
+    if resolution_secs == 0 || limit == 0 {
+        return PriceCandlePage {
+            resolution_secs,
+            candles: Vec::new(),
+            next_before_ms: None,
+            retention_min_bucket_ms: None,
+        };
+    }
+
+    let mut by_bucket = BTreeMap::<u64, PriceCandle>::new();
+    for point in points {
+        if from_ms.is_some_and(|from| point.timestamp_ms < from)
+            || to_ms.is_some_and(|to| point.timestamp_ms > to)
+        {
+            continue;
+        }
+        let candle = PriceCandle::from_point(resolution_secs, &point);
+        if before_ms.is_some_and(|before| candle.bucket_start_ms >= before) {
+            continue;
+        }
+        by_bucket
+            .entry(candle.bucket_start_ms)
+            .and_modify(|existing| existing.merge_point(&point))
+            .or_insert(candle);
+    }
+
+    let mut candles = VecDeque::new();
+    for candle in by_bucket.into_values() {
+        if candles.len() == limit.saturating_add(1) {
+            candles.pop_front();
+        }
+        candles.push_back(candle);
+    }
+    let mut candles: Vec<_> = candles.into_iter().collect();
+    let next_before_ms = if candles.len() > limit {
+        candles.remove(0);
+        candles.first().map(|candle| candle.bucket_start_ms)
+    } else {
+        None
+    };
+    PriceCandlePage {
+        resolution_secs,
+        candles,
+        next_before_ms,
+        retention_min_bucket_ms: None,
     }
 }
 
@@ -166,6 +223,15 @@ pub enum SequencerMsg {
         Option<u64>,
         usize,
         RpcReplyPort<Result<PriceHistoryPage, SequencerError>>,
+    ),
+    GetPriceCandles(
+        MarketId,
+        u32,
+        Option<u64>,
+        Option<u64>,
+        Option<u64>,
+        usize,
+        RpcReplyPort<Result<PriceCandlePage, SequencerError>>,
     ),
     GetAccountFills(
         AccountId,
@@ -299,7 +365,7 @@ fn build_indicative_snapshots(
         let Some(order) = order_map.get(&fill.order_id) else {
             continue;
         };
-        let notional = fill.fill_price.saturating_mul(fill.fill_qty);
+        let notional = matching_engine::notional_nanos(fill.fill_price, fill.fill_qty);
         for m in order.active_markets() {
             let entry = volume_by_market.entry(m).or_insert(0);
             *entry = entry.saturating_add(notional);
@@ -1824,6 +1890,39 @@ impl Actor for SequencerActor {
                 };
                 let _ = reply.send(result);
             }
+            SequencerMsg::GetPriceCandles(
+                market_id,
+                resolution_secs,
+                from_ms,
+                to_ms,
+                before_ms,
+                limit,
+                reply,
+            ) => {
+                let limit = limit.min(MAX_PRICE_HISTORY_QUERY_POINTS);
+                let result = match &state.store {
+                    Some(store) => store
+                        .load_price_candles(
+                            market_id,
+                            resolution_secs,
+                            from_ms,
+                            to_ms,
+                            before_ms,
+                            limit,
+                        )
+                        .await
+                        .map_err(|error| SequencerError::Persistence(error.to_string())),
+                    None => Ok(price_candle_page_from_points(
+                        state.sequencer.price_history(market_id, from_ms, to_ms),
+                        resolution_secs,
+                        from_ms,
+                        to_ms,
+                        before_ms,
+                        limit,
+                    )),
+                };
+                let _ = reply.send(result);
+            }
             SequencerMsg::GetAccountFills(account_id, market_id, limit, offset, reply) => {
                 // Serve from the durable store (full persisted history); the
                 // in-memory recorder is a bounded window that's empty under prod
@@ -2479,6 +2578,29 @@ impl SequencerHandle {
     ) -> Result<PriceHistoryPage, SequencerError> {
         self.rpc(|reply| {
             SequencerMsg::GetPriceHistory(market_id, from_ms, to_ms, before_height, limit, reply)
+        })
+        .await?
+    }
+
+    pub async fn get_price_candles(
+        &self,
+        market_id: MarketId,
+        resolution_secs: u32,
+        from_ms: Option<u64>,
+        to_ms: Option<u64>,
+        before_ms: Option<u64>,
+        limit: usize,
+    ) -> Result<PriceCandlePage, SequencerError> {
+        self.rpc(|reply| {
+            SequencerMsg::GetPriceCandles(
+                market_id,
+                resolution_secs,
+                from_ms,
+                to_ms,
+                before_ms,
+                limit,
+                reply,
+            )
         })
         .await?
     }
@@ -3912,6 +4034,20 @@ mod tests {
         assert_eq!(older_page.next_before_height, None);
         assert_eq!(older_page.points.len(), 1);
         assert_eq!(older_page.points[0].height, 1);
+        let candle_page = handle
+            .get_price_candles(market_id, 60, None, None, None, 10)
+            .await
+            .unwrap();
+        assert!(!candle_page.candles.is_empty());
+        assert_eq!(
+            candle_page
+                .candles
+                .iter()
+                .map(|candle| candle.point_count)
+                .sum::<u64>(),
+            2,
+            "candles should aggregate the two committed raw price points"
+        );
 
         drop(handle);
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -3930,6 +4066,11 @@ mod tests {
             .map(|point| point.height)
             .collect();
         assert_eq!(restored_heights, heights);
+        let restored_candles = reader
+            .get_price_candles(market_id, 60, None, None, None, 10)
+            .await
+            .unwrap();
+        assert_eq!(restored_candles.candles, candle_page.candles);
     }
 
     #[tokio::test]
@@ -3990,12 +4131,20 @@ mod tests {
         // surface the price_discovery price and a non-zero volume.
         let mut markets = MarketSet::new();
         let m = markets.add_binary("m");
-        let order = outcome_buy(&markets, 1, m, 0, NANOS_PER_DOLLAR / 2, 5);
+        let order = outcome_buy(
+            &markets,
+            1,
+            m,
+            0,
+            NANOS_PER_DOLLAR / 2,
+            matching_engine::shares_to_qty(5),
+        );
         let order_id = order.id;
         let problem = mk_problem(vec![order], markets);
 
         let mut result = matching_solver::PipelineResult::empty();
-        let mut fill = matching_engine::Fill::new(order_id, 3, 400_000_000);
+        let mut fill =
+            matching_engine::Fill::new(order_id, matching_engine::shares_to_qty(3), 400_000_000);
         fill.account_id = 7;
         result.result.fills.push(fill);
         let mut pd = matching_solver::PriceDiscoveryResult::empty();

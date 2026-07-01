@@ -206,8 +206,10 @@ runtime policy is simple and explicit:
 - Expose retained floors in API responses so clients can distinguish "outside
   retention" from "no data".
 
-Price candles remain planned separately and should have their own retention
-window once implemented.
+Price candles are implemented as durable post-seal aggregate rows. They are
+cheap enough for long-window charting, but their own retention windows are
+still a follow-up so raw point pruning and candle pruning can be tuned
+independently.
 
 Initial devnet defaults should be conservative and operator-tunable. A useful
 starting point is:
@@ -224,6 +226,7 @@ These are not consensus constants. Runtime configuration currently includes:
 
 - `SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS`
 - `SYBIL_RAW_PRICE_RETENTION_BLOCKS`
+- `SYBIL_PRICE_CANDLE_RESOLUTIONS_SECS`
 - `SYBIL_HISTORY_PRUNE_INTERVAL_BLOCKS`
 - `SYBIL_HISTORY_PRUNE_MAX_ROWS`
 

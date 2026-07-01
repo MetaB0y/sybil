@@ -21,6 +21,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { cancelSignedOrder } from "@/lib/account/orders";
+import { formatShareUnits, notionalNanosCeil } from "@/lib/account/quantity";
 import type { AccountOrder } from "@/lib/account/use-account-orders";
 import type { OrderFillAgg } from "@/lib/account/use-account-history";
 import {
@@ -163,7 +164,7 @@ export function OpenOrdersList({
         filled: placed > 0 ? Math.max(0, placed - o.remaining_quantity) : 0,
         remaining: o.remaining_quantity,
         limitNanos,
-        valueNanos: limitNanos * BigInt(o.remaining_quantity),
+        valueNanos: notionalNanosCeil(limitNanos, o.remaining_quantity),
         avgPriceNanos: agg?.avgPriceNanos ?? null,
         fillCount: agg?.count ?? 0,
         createdMs:
@@ -413,9 +414,11 @@ function FilledCell({
 }) {
   // Pre-B8 orders have no authoritative placed count — show bare remaining.
   if (placed === 0) {
-    return <>{remaining}</>;
+    return <>{formatShareUnits(remaining)}</>;
   }
   const pct = Math.min(1, Math.max(0, filled / placed));
+  const placedLabel = formatShareUnits(placed);
+  const filledLabel = formatShareUnits(filled);
   return (
     <span
       style={{
@@ -424,9 +427,9 @@ function FilledCell({
         alignItems: "flex-end",
         gap: 2,
       }}
-      title={`${filled} filled of ${placed} placed`}
+      title={`${filledLabel} filled of ${placedLabel} placed`}
     >
-      <span>{`${placed} / ${filled}`}</span>
+      <span>{`${placedLabel} / ${filledLabel}`}</span>
       <span
         style={{
           height: 2,

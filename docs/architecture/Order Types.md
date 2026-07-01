@@ -3,10 +3,10 @@ tags: [concept]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-03-15
+last_verified: 2026-07-01
 ---
 
-Users submit orders through the [[REST API]] using the `OrderSpec` enum — a user-friendly representation that gets converted to [[Payoff Vectors]] internally. The conversion happens at the API boundary: the user thinks in terms of "buy YES on market 3 at 55 cents for 10 shares," and the system converts this to a payoff vector over atomic states with a limit price in [[Nanos and Integer Arithmetic|nanos]].
+Users submit orders through the [[REST API]] using the `OrderSpec` enum — a user-friendly representation that gets converted to [[Payoff Vectors]] internally. The conversion happens at the API boundary: the user thinks in terms of "buy YES on market 3 at 55 cents for 10 shares," and the system converts this to a payoff vector over atomic states with a limit price in [[Nanos and Integer Arithmetic|nanos]] and a quantity in fixed-point share-units (`10 shares = 10_000` units).
 
 The order types span from simple to fully custom. **BuyYes/BuyNo/SellYes/SellNo** are single-market limit orders — the bread and butter of prediction market trading. **Spread** orders simultaneously buy YES on one market and sell YES on another, expressing a relative-value view ("A is more likely than B"). **BundleYes/BundleSell** bet on conjunctions — "both A and B will happen" — across multiple markets. **Custom** is the escape hatch: the user specifies raw `market_ids`, `payoffs` arrays, and a limit price, constructing an arbitrary [[Payoff Vectors|payoff vector]] directly.
 
@@ -16,6 +16,7 @@ The conversion to payoff vectors is the key architectural insight. The solver ne
 
 ## Key Properties
 - `OrderSpec` enum: BuyYes, BuyNo, SellYes, SellNo, Spread, BundleYes, BundleSell, Custom
+- Quantity fields are protocol share-units; `1000` units = 1 share
 - API time-in-force: GTC, IOC, GTD; core model: optional `expires_at_block`
 - Converted to [[Payoff Vectors]] at the API boundary
 - Solver is agnostic to order type — only sees payoff vectors + limit prices

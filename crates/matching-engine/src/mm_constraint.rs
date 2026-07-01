@@ -15,7 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::{Nanos, Qty};
+use crate::types::{notional_nanos_ceil, Nanos, Qty};
 
 /// Unique identifier for a market maker.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -30,44 +30,36 @@ impl MmId {
 /// Side of an MM order for capital calculation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MmSide {
-    /// Selling YES tokens (capital = (1 - price) * qty)
+    /// Selling YES tokens (capital = (1 - price) * qty / SHARE_SCALE)
     SellYes,
-    /// Buying YES tokens (capital = price * qty)
+    /// Buying YES tokens (capital = price * qty / SHARE_SCALE)
     BuyYes,
-    /// Selling NO tokens (capital = price * qty)
+    /// Selling NO tokens (capital = price * qty / SHARE_SCALE)
     SellNo,
-    /// Buying NO tokens (capital = (1 - price) * qty)
+    /// Buying NO tokens (capital = (1 - price) * qty / SHARE_SCALE)
     BuyNo,
 }
 
 impl MmSide {
     /// Calculate capital needed for this side at given price and quantity.
     ///
-    /// Prices are in nanos (1e9 = $1). Quantity is in shares.
-    /// Returns capital needed in nanos.
+    /// Prices are in nanos (1e9 = $1). Quantity is in fixed-point share units.
+    /// Returns capital needed in nanos, rounded up for conservative budget checks.
     pub fn capital_needed(&self, price: Nanos, quantity: Qty) -> Nanos {
         use crate::types::NANOS_PER_DOLLAR;
 
-        // Use u128 intermediate to avoid overflow when price is low and qty is large
-        // (e.g., 900M * 20B = 18e18, near u64::MAX)
-        let p = price as u128;
-        let q = quantity as u128;
-        let npd = NANOS_PER_DOLLAR as u128;
-
-        let result = match self {
+        let price_per_share = match self {
             MmSide::SellYes | MmSide::BuyNo => {
                 // Net cost: (1 - price) per unit
-                (npd - p) * q
+                NANOS_PER_DOLLAR.saturating_sub(price)
             }
             MmSide::BuyYes | MmSide::SellNo => {
                 // Net cost: price per unit
-                p * q
+                price
             }
         };
 
-        result
-            .try_into()
-            .expect("capital overflow: result exceeds u64")
+        notional_nanos_ceil(price_per_share, quantity)
     }
 }
 
@@ -146,18 +138,19 @@ impl MmConstraint {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shares_to_qty;
 
     #[test]
     fn test_mm_side_capital_sell_yes() {
         // Selling YES at $0.60 = capital cost of $0.40 per unit
-        let capital = MmSide::SellYes.capital_needed(600_000_000, 100);
+        let capital = MmSide::SellYes.capital_needed(600_000_000, shares_to_qty(100));
         assert_eq!(capital, 40_000_000_000); // $40
     }
 
     #[test]
     fn test_mm_side_capital_buy_yes() {
         // Buying YES at $0.60 = capital cost of $0.60 per unit
-        let capital = MmSide::BuyYes.capital_needed(600_000_000, 100);
+        let capital = MmSide::BuyYes.capital_needed(600_000_000, shares_to_qty(100));
         assert_eq!(capital, 60_000_000_000); // $60
     }
 
@@ -181,9 +174,9 @@ mod tests {
 
         let mut fills = std::collections::HashMap::new();
         // Order 100: Sell YES at $0.60, qty 50 → capital = $20
-        fills.insert(100, (600_000_000, 50));
+        fills.insert(100, (600_000_000, shares_to_qty(50)));
         // Order 101: Buy YES at $0.40, qty 100 → capital = $40
-        fills.insert(101, (400_000_000, 100));
+        fills.insert(101, (400_000_000, shares_to_qty(100)));
 
         let capital = constraint.capital_used(&fills);
         assert_eq!(capital, 60_000_000_000); // $60 total
@@ -197,7 +190,7 @@ mod tests {
         // (NANOS_PER_DOLLAR - price) * qty = (1e9 - 100_000_000) * 20_000_000_000
         // = 900_000_000 * 20_000_000_000 = 18_000_000_000_000_000_000 (~18e18)
         // u64::MAX = 18_446_744_073_709_551_615 (~18.4e18), so this just barely fits
-        let capital = MmSide::SellYes.capital_needed(100_000_000, 20_000_000_000);
+        let capital = MmSide::SellYes.capital_needed(100_000_000, shares_to_qty(20_000_000_000));
         assert_eq!(capital, 18_000_000_000_000_000_000);
     }
 
@@ -208,8 +201,8 @@ mod tests {
             .with_order(101, MmSide::BuyYes);
 
         let mut fills = std::collections::HashMap::new();
-        fills.insert(100, (600_000_000, 50)); // $20
-        fills.insert(101, (400_000_000, 100)); // $40
+        fills.insert(100, (600_000_000, shares_to_qty(50))); // $20
+        fills.insert(101, (400_000_000, shares_to_qty(100))); // $40
 
         let capital = constraint.capital_used(&fills);
         assert_eq!(capital, 60_000_000_000); // $60 total

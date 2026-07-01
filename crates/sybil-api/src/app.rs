@@ -117,6 +117,8 @@ use crate::types::response::*;
         ResolveMarketResponse,
         PortfolioResponse,
         PositionValueResponse,
+        PriceCandleResponse,
+        PriceCandlesResponse,
         PriceHistoryResponse,
         PricePointResponse,
         AccountFillResponse,
@@ -500,6 +502,7 @@ fn metric_path_label(path: &str) -> &'static str {
         ["v1", "markets", _, "metadata"] => "/v1/markets/{id}/metadata",
         ["v1", "markets", _, "open-batch"] => "/v1/markets/{id}/open-batch",
         ["v1", "markets", _, "orderbook"] => "/v1/markets/{id}/orderbook",
+        ["v1", "markets", _, "prices", "candles"] => "/v1/markets/{id}/prices/candles",
         ["v1", "markets", _, "prices", "history"] => "/v1/markets/{id}/prices/history",
         ["v1", "markets", _, "resolution"] => "/v1/markets/{id}/resolution",
         ["v1", "markets", _, "resolve"] => "/v1/markets/{id}/resolve",
@@ -683,6 +686,10 @@ pub fn create_router(state: AppState) -> Router {
             axum::routing::get(routes::markets::get_price_history),
         )
         .route(
+            "/v1/markets/{id}/prices/candles",
+            axum::routing::get(routes::markets::get_price_candles),
+        )
+        .route(
             "/v1/markets/{id}/open-batch",
             axum::routing::get(routes::aggregates::get_open_batch),
         )
@@ -790,6 +797,10 @@ mod tests {
         assert_eq!(
             metric_path_label("/v1/markets/42/prices/history"),
             "/v1/markets/{id}/prices/history"
+        );
+        assert_eq!(
+            metric_path_label("/v1/markets/42/prices/candles"),
+            "/v1/markets/{id}/prices/candles"
         );
         assert_eq!(
             metric_path_label("/v1/events/polymarket-abc/raw"),

@@ -35,6 +35,7 @@ import { useMemo, useState } from "react";
 import { MarketThumb } from "@/components/market-thumb";
 import { Pager, usePaged, PORTFOLIO_PAGE_SIZE } from "@/components/event-list-pager";
 import { Glossary } from "@/components/glossary";
+import { notionalNanos, priceNanosFromNotional } from "@/lib/account/quantity";
 import type { HistoryEvent } from "@/lib/account/use-account-history";
 import { formatCentsPrecise, formatDollars } from "@/lib/format/nanos";
 import type { components } from "@/lib/api/schema";
@@ -250,12 +251,12 @@ export function TradesList({ tabs, events, marketsById }: Props) {
         agg.hasQty = true;
       }
       if (e.qty != null && e.priceNanos != null) {
-        agg.valueNanos += BigInt(e.qty) * e.priceNanos;
+        agg.valueNanos += notionalNanos(e.priceNanos, e.qty);
         agg.hasValue = true;
       }
       const limit = e.orderId != null ? limitByOrder.get(e.orderId) : undefined;
       if (limit != null && e.side != null && e.priceNanos != null && e.qty != null) {
-        const edge = (limit - e.priceNanos) * BigInt(e.qty);
+        const edge = notionalNanos(limit - e.priceNanos, e.qty);
         agg.welfareNanos += e.side === "BUY" ? edge : -edge;
         agg.hasWelfare = true;
       }
@@ -274,7 +275,7 @@ export function TradesList({ tabs, events, marketsById }: Props) {
       // Execution price = volume-weighted average = notional ÷ total qty.
       const priceNanos =
         agg.hasValue && agg.totalQty > 0
-          ? agg.valueNanos / BigInt(agg.totalQty)
+          ? priceNanosFromNotional(agg.valueNanos, agg.totalQty)
           : null;
       const row: TradeRowData = {
         id: key,
@@ -546,10 +547,10 @@ function FillSubRow({
 }) {
   const qty = fill.qty ?? null;
   const price = fill.priceNanos ?? null;
-  const valueNanos = qty != null && price != null ? BigInt(qty) * price : null;
+  const valueNanos = qty != null && price != null ? notionalNanos(price, qty) : null;
   let welfareNanos: bigint | null = null;
   if (requestedPriceNanos != null && fill.side != null && price != null && qty != null) {
-    const edge = (requestedPriceNanos - price) * BigInt(qty);
+    const edge = notionalNanos(requestedPriceNanos - price, qty);
     welfareNanos = fill.side === "BUY" ? edge : -edge;
   }
   // Same 10-column grid as a trade row → columns align. Identity columns

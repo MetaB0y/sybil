@@ -61,7 +61,7 @@ The matching problem itself has an elegant mathematical structure: without marke
 - [[Nanos and Integer Arithmetic]] — the numeric foundation
 - [[Binary Markets and Market Groups]] — binary outcomes grouped for multi-outcome events
 - [[Minting]] — share creation mechanics
-- [[Fractional Quantities]] — planned fixed-point share units
+- [[Fractional Quantities]] — fixed-point share units
 
 ## The Matching Problem
 - [[The LP Core]] — the polynomial-time base problem

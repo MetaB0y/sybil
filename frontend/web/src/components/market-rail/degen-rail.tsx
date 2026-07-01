@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { cancelSignedOrder, submitSignedOrder } from "@/lib/account/orders";
 import { humanizeOrderError } from "@/lib/account/order-errors";
+import { notionalNanosCeil } from "@/lib/account/quantity";
 import { useAccountSession, useSetConnectModalOpen } from "@/lib/account/use-account";
 import type { AccountEvent } from "@/lib/account/use-account-events";
 import { useAvailableBalance } from "@/lib/account/use-available-balance";
@@ -228,11 +229,10 @@ export function DegenRail({
   }
 
   const connected = session !== null;
-  // Cash the engine would reserve for this bet (limit × shares). Block the CTA
-  // when it exceeds what's available so we never trip a server-side
-  // InsufficientBalance rejection.
+  // Cash the engine would reserve for this bet. Block the CTA when it exceeds
+  // what's available so we never trip a server-side InsufficientBalance rejection.
   const requiredNanos = built.ok
-    ? built.order.limitPriceNanos * built.order.maxFill
+    ? notionalNanosCeil(built.order.limitPriceNanos, built.order.maxFill)
     : 0n;
   const insufficient =
     connected &&

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEGEN_BATCHES, ONE_DOLLAR_NANOS } from "./constants";
 import { buildDegenOrder, degenLimitPrice } from "./degen";
+import { SHARE_SCALE } from "@/lib/account/quantity";
 
 const usd = (d: number): bigint => BigInt(Math.round(d * 1e9));
 
@@ -18,7 +19,7 @@ describe("buildDegenOrder", () => {
     const limit = degenLimitPrice(mark); // 5.4e8
     expect(res.order.side).toBe("BuyYes");
     expect(res.order.limitPriceNanos).toBe(limit);
-    expect(res.order.maxFill).toBe(usd(10) / limit); // 18n
+    expect(res.order.maxFill).toBe((usd(10) * SHARE_SCALE) / limit); // 18.518 shares
     expect(res.order.expiresAtBlock).toBe(1003n);
   });
 
@@ -35,10 +36,10 @@ describe("buildDegenOrder", () => {
     expect(res.order.expiresAtBlock).toBe(1n + DEGEN_BATCHES);
   });
 
-  it("reports below-minimum when the budget can't afford one share", () => {
+  it("reports below-minimum when the budget can't afford one share-unit", () => {
     const res = buildDegenOrder({
       side: "YES",
-      betUsdNanos: usd(0.01),
+      betUsdNanos: 1n,
       markNanos: ONE_DOLLAR_NANOS / 2n,
       latestHeight: 1n,
     });

@@ -179,29 +179,33 @@ pub enum TimeInForce {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(tag = "type")]
 pub enum OrderSpec {
-    /// Buy YES shares on a single market.
+    /// Buy YES share-units on a single market (`1000` units = 1 share).
     BuyYes {
         market_id: u32,
         /// Limit price in nanos (0 to 1_000_000_000).
         limit_price_nanos: u64,
+        /// Quantity in fixed-point share-units.
         quantity: u64,
     },
-    /// Buy NO shares on a single market.
+    /// Buy NO share-units on a single market (`1000` units = 1 share).
     BuyNo {
         market_id: u32,
         limit_price_nanos: u64,
+        /// Quantity in fixed-point share-units.
         quantity: u64,
     },
-    /// Sell YES shares on a single market.
+    /// Sell YES share-units on a single market (`1000` units = 1 share).
     SellYes {
         market_id: u32,
         limit_price_nanos: u64,
+        /// Quantity in fixed-point share-units.
         quantity: u64,
     },
-    /// Sell NO shares on a single market.
+    /// Sell NO share-units on a single market (`1000` units = 1 share).
     SellNo {
         market_id: u32,
         limit_price_nanos: u64,
+        /// Quantity in fixed-point share-units.
         quantity: u64,
     },
     /// Spread: buy A YES, sell B YES.
@@ -209,18 +213,21 @@ pub enum OrderSpec {
         market_a: u32,
         market_b: u32,
         limit_price_nanos: u64,
+        /// Quantity in fixed-point share-units.
         quantity: u64,
     },
     /// Bundle YES: all markets must be YES to win.
     BundleYes {
         market_ids: Vec<u32>,
         limit_price_nanos: u64,
+        /// Quantity in fixed-point share-units.
         quantity: u64,
     },
     /// Bundle Sell: sell the all-YES bundle.
     BundleSell {
         market_ids: Vec<u32>,
         limit_price_nanos: u64,
+        /// Quantity in fixed-point share-units.
         quantity: u64,
     },
     /// Custom payoff vector.
@@ -228,6 +235,7 @@ pub enum OrderSpec {
         market_ids: Vec<u32>,
         payoffs: Vec<i8>,
         limit_price_nanos: u64,
+        /// Maximum fill in fixed-point share-units.
         max_fill: u64,
     },
 }
@@ -305,7 +313,7 @@ pub struct SignedOrderData {
     pub payoffs: Vec<i8>,
     /// Limit price in nanos (0 to 1_000_000_000).
     pub limit_price_nanos: u64,
-    /// Maximum fill quantity.
+    /// Maximum fill quantity in fixed-point share-units.
     pub max_fill: u64,
 }
 

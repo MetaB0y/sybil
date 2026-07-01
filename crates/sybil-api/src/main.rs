@@ -197,6 +197,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         raw_price_retention_blocks: config.raw_price_retention_blocks,
         history_prune_interval_blocks: config.history_prune_interval_blocks,
         history_prune_max_rows: config.history_prune_max_rows,
+        price_candle_resolutions_secs: config.price_candle_resolutions_secs.clone(),
         max_fill_history_per_account: config.max_fill_history_per_account,
         max_equity_points_per_account: config.max_equity_points_per_account,
         max_history_events_per_account: config.max_history_events_per_account,

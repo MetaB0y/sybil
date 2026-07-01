@@ -293,7 +293,9 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
 mod tests {
     use super::*;
     use crate::types::{WitnessBlockHeader, WitnessOrder};
-    use matching_engine::{outcome_buy, outcome_sell, Fill, MarketSet, NANOS_PER_DOLLAR};
+    use matching_engine::{
+        notional_nanos, outcome_buy, outcome_sell, shares_to_qty, Fill, MarketSet, NANOS_PER_DOLLAR,
+    };
     use proptest::prelude::*;
 
     fn empty_header() -> WitnessBlockHeader {
@@ -329,16 +331,21 @@ mod tests {
             .collect()
     }
 
+    fn q(shares: u64) -> u64 {
+        shares_to_qty(shares)
+    }
+
     #[test]
     fn test_settlement_buy_yes() {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
 
-        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        let fill = Fill::new(1, 10, 500_000_000);
+        let qty = q(10);
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, qty);
+        let fill = Fill::new(1, qty, 500_000_000);
 
         let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
-        let expected_cost = 500_000_000i64 * 10;
+        let expected_cost = notional_nanos(500_000_000, qty) as i64;
         let mint_id = u64::MAX;
         let mut clearing_prices = HashMap::new();
         clearing_prices.insert(m0, vec![500_000_000, 500_000_000]);
@@ -356,14 +363,14 @@ mod tests {
                 id: 0,
                 balance: initial_balance - expected_cost,
                 total_deposited: 0,
-                positions: vec![(m0, 0, 10)],
+                positions: vec![(m0, 0, qty as i64)],
                 events_digest: [0u8; 32],
             },
             AccountSnapshot {
                 id: mint_id,
                 balance: expected_cost,
                 total_deposited: 0,
-                positions: vec![(m0, 0, -10)],
+                positions: vec![(m0, 0, -(qty as i64))],
                 events_digest: [0u8; 32],
             },
         ];
@@ -401,8 +408,9 @@ mod tests {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
 
-        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        let fill = Fill::new(1, 10, 500_000_000);
+        let qty = q(10);
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, qty);
+        let fill = Fill::new(1, qty, 500_000_000);
 
         let mint_id = u64::MAX;
         let mut clearing_prices = HashMap::new();
@@ -421,14 +429,14 @@ mod tests {
                 id: 0,
                 balance: 95 * NANOS_PER_DOLLAR as i64,
                 total_deposited: 0,
-                positions: vec![(m0, 0, 10)],
+                positions: vec![(m0, 0, qty as i64)],
                 events_digest: [0u8; 32],
             },
             AccountSnapshot {
                 id: mint_id,
                 balance: 5 * NANOS_PER_DOLLAR as i64,
                 total_deposited: 0,
-                positions: vec![(m0, 0, -10)],
+                positions: vec![(m0, 0, -(qty as i64))],
                 events_digest: [0u8; 32],
             },
         ];
@@ -466,11 +474,12 @@ mod tests {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
 
-        let order = outcome_sell(&markets, 2, m0, 0, 500_000_000, 5);
-        let fill = Fill::new(2, 5, 500_000_000);
+        let qty = q(5);
+        let order = outcome_sell(&markets, 2, m0, 0, 500_000_000, qty);
+        let fill = Fill::new(2, qty, 500_000_000);
 
         let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
-        let expected_revenue = 500_000_000i64 * 5;
+        let expected_revenue = notional_nanos(500_000_000, qty) as i64;
         let mint_id = u64::MAX;
         let mut clearing_prices = HashMap::new();
         clearing_prices.insert(m0, vec![500_000_000, 500_000_000]);
@@ -479,7 +488,7 @@ mod tests {
             id: 0,
             balance: initial_balance,
             total_deposited: 0,
-            positions: vec![(m0, 0, 10)],
+            positions: vec![(m0, 0, q(10) as i64)],
             events_digest: [0u8; 32],
         }];
 
@@ -488,14 +497,14 @@ mod tests {
                 id: 0,
                 balance: initial_balance + expected_revenue,
                 total_deposited: 0,
-                positions: vec![(m0, 0, 5)],
+                positions: vec![(m0, 0, q(5) as i64)],
                 events_digest: [0u8; 32],
             },
             AccountSnapshot {
                 id: mint_id,
                 balance: expected_revenue,
                 total_deposited: 0,
-                positions: vec![(m0, 0, -5)],
+                positions: vec![(m0, 0, -(q(5) as i64))],
                 events_digest: [0u8; 32],
             },
         ];
@@ -533,8 +542,9 @@ mod tests {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
 
-        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        let fill = Fill::new(1, 10, 500_000_000);
+        let qty = q(10);
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, qty);
+        let fill = Fill::new(1, qty, 500_000_000);
 
         let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
 
@@ -551,7 +561,7 @@ mod tests {
             id: 0,
             balance: initial_balance, // Should be initial_balance - cost
             total_deposited: 0,
-            positions: vec![(m0, 0, 10)],
+            positions: vec![(m0, 0, qty as i64)],
             events_digest: [0u8; 32],
         }];
 
@@ -628,11 +638,12 @@ mod tests {
         let m0 = markets.add_binary("M0");
 
         // Account starts with $1, buys 10 YES @ $0.50 → cost = $5 → balance = -$4
-        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        let fill = Fill::new(1, 10, 500_000_000);
+        let qty = q(10);
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, qty);
+        let fill = Fill::new(1, qty, 500_000_000);
 
         let initial_balance = 1_000_000_000; // $1
-        let expected_balance = initial_balance - 500_000_000i64 * 10; // -$4
+        let expected_balance = initial_balance - notional_nanos(500_000_000, qty) as i64; // -$4
 
         let pre_state = vec![AccountSnapshot {
             id: 0,
@@ -646,7 +657,7 @@ mod tests {
             id: 0,
             balance: expected_balance,
             total_deposited: 0,
-            positions: vec![(m0, 0, 10)],
+            positions: vec![(m0, 0, qty as i64)],
             events_digest: [0u8; 32],
         }];
 
@@ -688,11 +699,12 @@ mod tests {
         let m0 = markets.add_binary("M0");
 
         // Account sells 5 YES without holding any → position = -5
-        let order = outcome_sell(&markets, 1, m0, 0, 500_000_000, 5);
-        let fill = Fill::new(1, 5, 500_000_000);
+        let qty = q(5);
+        let order = outcome_sell(&markets, 1, m0, 0, 500_000_000, qty);
+        let fill = Fill::new(1, qty, 500_000_000);
 
         let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
-        let expected_revenue = 500_000_000i64 * 5;
+        let expected_revenue = notional_nanos(500_000_000, qty) as i64;
 
         let pre_state = vec![AccountSnapshot {
             id: 0,
@@ -706,7 +718,7 @@ mod tests {
             id: 0,
             balance: initial_balance + expected_revenue,
             total_deposited: 0,
-            positions: vec![(m0, 0, -5)],
+            positions: vec![(m0, 0, -(qty as i64))],
             events_digest: [0u8; 32],
         }];
 
@@ -748,11 +760,12 @@ mod tests {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
 
-        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        let fill = Fill::new(1, 10, 500_000_000);
+        let qty = q(10);
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, qty);
+        let fill = Fill::new(1, qty, 500_000_000);
 
         let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
-        let fill_cost = 500_000_000i64 * 10; // $5
+        let fill_cost = notional_nanos(500_000_000, qty) as i64; // $5
         let mint_revenue = fill_cost; // MINT receives yes_price * diff
 
         let mut clearing_prices = HashMap::new();
@@ -781,14 +794,14 @@ mod tests {
                 id: 0,
                 balance: initial_balance - fill_cost,
                 total_deposited: 0,
-                positions: vec![(m0, 0, 10)],
+                positions: vec![(m0, 0, qty as i64)],
                 events_digest: [0u8; 32],
             },
             AccountSnapshot {
                 id: mint_id,
                 balance: mint_revenue,
                 total_deposited: 0,
-                positions: vec![(m0, 0, -10)],
+                positions: vec![(m0, 0, -(qty as i64))],
                 events_digest: [0u8; 32],
             },
         ];
@@ -826,11 +839,12 @@ mod tests {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
 
-        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        let fill = Fill::new(1, 10, 500_000_000);
+        let qty = q(10);
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, qty);
+        let fill = Fill::new(1, qty, 500_000_000);
 
         let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
-        let fill_cost = 500_000_000i64 * 10;
+        let fill_cost = notional_nanos(500_000_000, qty) as i64;
         let mint_id = u64::MAX;
 
         let mut clearing_prices = HashMap::new();
@@ -849,14 +863,14 @@ mod tests {
                 id: 0,
                 balance: initial_balance - fill_cost,
                 total_deposited: 0,
-                positions: vec![(m0, 0, 10)],
+                positions: vec![(m0, 0, qty as i64)],
                 events_digest: [0u8; 32],
             },
             AccountSnapshot {
                 id: mint_id,
                 balance: fill_cost,
                 total_deposited: 0,
-                positions: vec![(m0, 0, -10)],
+                positions: vec![(m0, 0, -(qty as i64))],
                 events_digest: [0u8; 32],
             },
         ];
@@ -895,11 +909,12 @@ mod tests {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
 
-        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        let fill = Fill::new(1, 10, 500_000_000);
+        let qty = q(10);
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, qty);
+        let fill = Fill::new(1, qty, 500_000_000);
 
         let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
-        let fill_cost = 500_000_000i64 * 10;
+        let fill_cost = notional_nanos(500_000_000, qty) as i64;
 
         let mut clearing_prices = HashMap::new();
         clearing_prices.insert(m0, vec![500_000_000, 500_000_000]);
@@ -927,14 +942,14 @@ mod tests {
                 id: 0,
                 balance: initial_balance - fill_cost,
                 total_deposited: 0,
-                positions: vec![(m0, 0, 10)],
+                positions: vec![(m0, 0, qty as i64)],
                 events_digest: [0u8; 32],
             },
             AccountSnapshot {
                 id: mint_id,
                 balance: 999, // WRONG — should be fill_cost
                 total_deposited: 0,
-                positions: vec![(m0, 0, -10)],
+                positions: vec![(m0, 0, -(qty as i64))],
                 events_digest: [0u8; 32],
             },
         ];
@@ -977,11 +992,12 @@ mod tests {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
 
-        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        let fill = Fill::new(1, 10, 500_000_000);
+        let qty = q(10);
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, qty);
+        let fill = Fill::new(1, qty, 500_000_000);
 
         let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
-        let fill_cost = 500_000_000i64 * 10;
+        let fill_cost = notional_nanos(500_000_000, qty) as i64;
         let mint_id = u64::MAX;
 
         let pre_state = vec![
@@ -1007,14 +1023,14 @@ mod tests {
                 id: 0,
                 balance: initial_balance - fill_cost,
                 total_deposited: 0,
-                positions: vec![(m0, 0, 10)],
+                positions: vec![(m0, 0, qty as i64)],
                 events_digest: [0u8; 32],
             },
             AccountSnapshot {
                 id: mint_id,
                 balance: 0,
                 total_deposited: 0,
-                positions: vec![(m0, 0, -10)],
+                positions: vec![(m0, 0, -(qty as i64))],
                 events_digest: [0u8; 32],
             },
         ];

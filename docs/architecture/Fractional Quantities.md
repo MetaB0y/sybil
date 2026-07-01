@@ -1,13 +1,13 @@
 ---
 tags: [concept, economics]
 layer: core
-status: planned
-last_verified: 2026-06-30
+status: current
+last_verified: 2026-07-01
 ---
 
 # Fractional Quantities
 
-Sybil should support fractional shares without introducing floating-point arithmetic. The canonical representation is fixed-point share units:
+Sybil supports fractional shares without introducing floating-point arithmetic. The canonical representation is fixed-point share units:
 
 - `SHARE_SCALE = 1000`
 - `Qty = u64` counts share units, not whole shares
@@ -30,12 +30,12 @@ Rounding is a protocol decision, not a UI decision. The default rule should be c
 
 - Buyers reserve `ceil(price * qty / SHARE_SCALE)` nanos.
 - Sellers reserve `ceil(max_payoff * qty / SHARE_SCALE)` nanos where sell-side collateral is needed.
-- Settlement credits and debits use the same deterministic rounding helper for both parties.
-- Residual rounding dust is explicitly accounted for in the block or fee/dust accumulator, never hidden in an account balance.
+- Settlement credits and debits use deterministic floor/truncation via the shared notional helpers.
+- Reservation and MM-budget checks use the conservative ceil helper so tiny fractional orders cannot overspend through rounding.
 
 ## Impact Surface
 
-Changing `Qty` semantics is intentionally a cross-cutting migration:
+`Qty` semantics are intentionally cross-cutting:
 
 - Order validation and reservation math
 - Solver inputs and outputs
@@ -46,17 +46,17 @@ Changing `Qty` semantics is intentionally a cross-cutting migration:
 - API request/response schemas and generated clients
 - Python SDK convenience helpers and frontend display formatting
 
-The important invariant is that every protocol boundary agrees on the unit. The early-dev preference is to rename external fields or add explicit aliases if needed rather than rely on ambiguous `quantity` semantics.
+The important invariant is that every protocol boundary agrees on the unit. Current Rust API DTOs still use the legacy field names `quantity`, `max_fill`, `fill_qty`, and `remaining_quantity`, but their values are share-units. User-facing clients such as the Python SDK and frontend convert between display shares and protocol units at their boundary.
 
 ## API Shape
 
-The clean long-term API is explicit:
+The cleaner long-term API would be explicit:
 
 - Request field: `quantity_units`
 - Response field: `fill_qty_units`
 - Optional convenience display fields may expose decimal shares, but they are non-authoritative.
 
-If compatibility with existing clients matters during rollout, the server can accept old `quantity` as whole shares only behind an explicit version gate. Otherwise, the migration should fail fast on ambiguous payloads.
+If compatibility with external clients becomes important, add explicit `*_units` aliases or versioned DTOs rather than silently treating `quantity` as whole shares.
 
 ## Test Requirements
 

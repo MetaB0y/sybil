@@ -691,7 +691,9 @@ fn reservation_snapshots_from_aggregates(
 mod tests {
     use super::*;
     use crate::account::AccountStore;
-    use matching_engine::{outcome_buy, MarketId, MarketSet, NANOS_PER_DOLLAR};
+    use matching_engine::{
+        notional_nanos_ceil, outcome_buy, shares_to_qty, MarketId, MarketSet, NANOS_PER_DOLLAR,
+    };
 
     fn setup() -> (AccountStore, MarketSet, MarketId) {
         let accounts = AccountStore::new();
@@ -704,19 +706,26 @@ mod tests {
         outcome_buy(markets, id, market, 0, price, qty)
     }
 
+    fn q(shares: u64) -> u64 {
+        shares_to_qty(shares)
+    }
+
     #[test]
     fn accept_tracks_balance_reservation() {
         let (mut accounts, markets, m0) = setup();
         let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
         let mut book = OrderBook::new(3);
 
-        let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
+        let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, q(5));
         let account = accounts.get(aid).unwrap();
         book.accept(order, aid, account, 1, 0).unwrap();
 
         // Should have reserved 5 * 0.5 = 2.5 dollars
         let reserved = book.reserved_balance(aid);
-        assert_eq!(reserved, (NANOS_PER_DOLLAR / 2 * 5) as i64);
+        assert_eq!(
+            reserved,
+            notional_nanos_ceil(NANOS_PER_DOLLAR / 2, q(5)) as i64
+        );
     }
 
     #[test]
@@ -728,11 +737,11 @@ mod tests {
         let account = accounts.get(aid).unwrap();
 
         // First order: costs $2
-        let o1 = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 4);
+        let o1 = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, q(4));
         book.accept(o1, aid, account, 1, 0).unwrap();
 
         // Second order: costs $2 — would exceed $3 balance
-        let o2 = buy_yes(&markets, 2, m0, NANOS_PER_DOLLAR / 2, 4);
+        let o2 = buy_yes(&markets, 2, m0, NANOS_PER_DOLLAR / 2, q(4));
         let result = book.accept(o2, aid, account, 1, 0);
         assert!(result.is_err());
     }
@@ -744,7 +753,7 @@ mod tests {
         let mut book = OrderBook::new(3);
         let account = accounts.get(aid).unwrap();
 
-        let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
+        let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, q(5));
         book.accept(order, aid, account, 1, 0).unwrap();
         assert!(book.reserved_balance(aid) > 0);
 
@@ -761,7 +770,7 @@ mod tests {
         let mut book = OrderBook::new(3);
         let account = accounts.get(aid).unwrap();
 
-        let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
+        let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, q(5));
         let accepted = book.accept(order, aid, account, 1, 0).unwrap();
         let order_id = accepted.order.id;
         assert!(book.reserved_balance(aid) > 0);
@@ -769,7 +778,7 @@ mod tests {
         // Fully fill
         let fills = vec![Fill {
             order_id,
-            fill_qty: 5,
+            fill_qty: q(5),
             fill_price: NANOS_PER_DOLLAR / 2,
             account_id: 0,
         }];
@@ -786,7 +795,7 @@ mod tests {
         let mut book = OrderBook::new(3);
         let account = accounts.get(aid).unwrap();
 
-        let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 10);
+        let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, q(10));
         let accepted = book.accept(order, aid, account, 1, 0).unwrap();
         let order_id = accepted.order.id;
 
@@ -795,7 +804,7 @@ mod tests {
         // Partially fill 4 of 10
         let fills = vec![Fill {
             order_id,
-            fill_qty: 4,
+            fill_qty: q(4),
             fill_price: NANOS_PER_DOLLAR / 2,
             account_id: 0,
         }];
@@ -809,7 +818,7 @@ mod tests {
 
         // Check remaining order has max_fill = 6
         let (remaining_order, _) = book.resting_orders().next().unwrap();
-        assert_eq!(remaining_order.max_fill, 6);
+        assert_eq!(remaining_order.max_fill, q(6));
     }
 
     #[test]
@@ -819,7 +828,7 @@ mod tests {
         let mut book = OrderBook::new(3);
         let account = accounts.get(aid).unwrap();
 
-        let mut order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
+        let mut order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, q(5));
         order.expires_at_block = Some(1);
         book.accept(order, aid, account, 0, 0).unwrap();
 
@@ -836,7 +845,7 @@ mod tests {
         let mut book = OrderBook::new(10);
         let account = accounts.get(aid).unwrap();
 
-        let mut order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
+        let mut order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, q(5));
         order.expires_at_block = Some(2);
         book.accept(order, aid, account, 1, 0).unwrap();
 
@@ -891,7 +900,7 @@ mod tests {
         let mut book = OrderBook::new(3);
         let account = accounts.get(aid).unwrap();
 
-        let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
+        let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, q(5));
         let accepted = book.accept(order, aid, account, 1, 0).unwrap();
         assert!(book.reserved_balance(aid) > 0);
 
@@ -909,7 +918,7 @@ mod tests {
         let account = accounts.get(aid).unwrap();
 
         for id in 1..=3 {
-            let mut order = buy_yes(&markets, id, m0, NANOS_PER_DOLLAR / 2, 2);
+            let mut order = buy_yes(&markets, id, m0, NANOS_PER_DOLLAR / 2, q(2));
             order.expires_at_block = Some(1);
             book.accept(order, aid, account, 0, 0).unwrap();
         }
@@ -919,7 +928,7 @@ mod tests {
         assert_eq!(book.len(), 0);
         assert!(removed.iter().all(|ro| !ro.has_been_matched));
         // original_max_fill survives the removal
-        assert!(removed.iter().all(|ro| ro.original_max_fill == 2));
+        assert!(removed.iter().all(|ro| ro.original_max_fill == q(2)));
     }
 
     #[test]
@@ -929,20 +938,20 @@ mod tests {
         let mut book = OrderBook::new(10);
         let account = accounts.get(aid).unwrap();
 
-        let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
+        let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, q(5));
         let accepted = book.accept(order, aid, account, 1, 0).unwrap();
         let order_id = accepted.order.id;
 
         let fills = vec![Fill {
             order_id,
-            fill_qty: 5,
+            fill_qty: q(5),
             fill_price: NANOS_PER_DOLLAR / 2,
             account_id: 0,
         }];
         let removed = book.settle(&fills, &HashSet::new(), 1);
         assert_eq!(removed.len(), 1);
         assert!(removed[0].0.has_been_matched);
-        assert_eq!(removed[0].0.original_max_fill, 5);
+        assert_eq!(removed[0].0.original_max_fill, q(5));
         assert_eq!(removed[0].1, RestingExit::Settled);
     }
 
@@ -953,7 +962,7 @@ mod tests {
         let mut book = OrderBook::new(1_000);
         let account = accounts.get(aid).unwrap();
 
-        let mut order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 5);
+        let mut order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, q(5));
         order.expires_at_block = Some(7);
         book.accept(order, aid, account, 1, 0).unwrap();
 
@@ -977,12 +986,12 @@ mod tests {
         let mut book = OrderBook::new(10);
         let account = accounts.get(aid).unwrap();
 
-        let order = buy_yes(&markets, 7, m0, NANOS_PER_DOLLAR / 2, 5);
+        let order = buy_yes(&markets, 7, m0, NANOS_PER_DOLLAR / 2, q(5));
         let accepted = book.accept(order, aid, account, 1, 0).unwrap();
 
         let ro = book.cancel(aid, accepted.order.id).unwrap();
         assert_eq!(ro.order.id, accepted.order.id);
-        assert_eq!(ro.original_max_fill, 5);
+        assert_eq!(ro.original_max_fill, q(5));
         assert!(!ro.has_been_matched);
     }
 
@@ -1021,13 +1030,13 @@ mod tests {
         let mut book = OrderBook::new(10);
         let account = accounts.get(aid).unwrap();
 
-        let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, 10);
+        let order = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, q(10));
         let accepted = book.accept(order, aid, account, 1, 0).unwrap();
         let order_id = accepted.order.id;
 
         let fills = vec![Fill {
             order_id,
-            fill_qty: 3,
+            fill_qty: q(3),
             fill_price: NANOS_PER_DOLLAR / 2,
             account_id: 0,
         }];
@@ -1038,6 +1047,6 @@ mod tests {
         assert_eq!(book.len(), 1);
         let remainder = book.orders.first().unwrap();
         assert!(remainder.has_been_matched);
-        assert_eq!(remainder.original_max_fill, 10);
+        assert_eq!(remainder.original_max_fill, q(10));
     }
 }

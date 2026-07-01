@@ -19,6 +19,12 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { cancelSignedOrder } from "@/lib/account/orders";
+import {
+  formatShareUnits,
+  notionalNanos,
+  notionalNanosCeil,
+  priceNanosFromNotional,
+} from "@/lib/account/quantity";
 import type { AccountFill } from "@/lib/account/use-account-fills";
 import type { AccountOrder } from "@/lib/account/use-account-orders";
 import { formatAge, formatCentsPrecise, formatDollars, parseNanos } from "@/lib/format/nanos";
@@ -153,12 +159,12 @@ export function EventOpenOrders({
       const price = parseNanos(f.fill_price_nanos);
       e.count += 1;
       e.qty += qty;
-      e.cost += qty * price;
+      e.cost += notionalNanos(price, qty);
       acc.set(f.order_id, e);
     }
     const out = new Map<number, OrderFillAgg>();
     for (const [id, e] of acc) {
-      out.set(id, { count: e.count, avgPriceNanos: e.qty > 0n ? e.cost / e.qty : null });
+      out.set(id, { count: e.count, avgPriceNanos: priceNanosFromNotional(e.cost, e.qty) });
     }
     return out;
   }, [fills]);
@@ -180,8 +186,7 @@ export function EventOpenOrders({
         placed,
         filled: placed > 0 ? Math.max(0, placed - o.remaining_quantity) : 0,
         limitNanos,
-        // Notional still resting = limit × remaining (nanos × shares = $-nanos).
-        valueNanos: limitNanos * BigInt(o.remaining_quantity),
+        valueNanos: notionalNanosCeil(limitNanos, o.remaining_quantity),
         avgPriceNanos,
         fillCount: agg?.count ?? 0,
         expiresAtBlock: o.expires_at_block,
@@ -326,9 +331,13 @@ function OrderRow({
       </span>
       <Right mono>
         {placed === 0 ? (
-          <>{order.remaining_quantity}</>
+          <>{formatShareUnits(order.remaining_quantity)}</>
         ) : (
-          <span title={`${filled} filled of ${placed} placed`}>{`${placed} / ${filled}`}</span>
+          <span
+            title={`${formatShareUnits(filled)} filled of ${formatShareUnits(placed)} placed`}
+          >
+            {`${formatShareUnits(placed)} / ${formatShareUnits(filled)}`}
+          </span>
         )}
       </Right>
       <Right mono>{formatCentsPrecise(limitNanos)}</Right>

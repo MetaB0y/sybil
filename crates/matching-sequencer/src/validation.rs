@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use matching_engine::{MarketId, Order};
+use matching_engine::{notional_nanos_ceil, MarketId, Order};
 
 use crate::account::Account;
 use crate::error::RejectionReason;
@@ -36,7 +36,7 @@ pub fn validate_order_with_reservation(
 
     if has_positive && !has_negative {
         // Pure buy: check balance covers worst-case cost (minus already reserved)
-        let max_cost = order.limit_price as i64 * order.max_fill as i64;
+        let max_cost = notional_nanos_ceil(order.limit_price, order.max_fill) as i64;
         let available = account.balance - reserved_balance;
         if max_cost > available {
             return Err(RejectionReason::InsufficientBalance {

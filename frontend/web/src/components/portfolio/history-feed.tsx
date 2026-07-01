@@ -21,6 +21,7 @@ import {
   type HistoryEventType,
 } from "@/lib/account/use-account-history";
 import { formatCentsPrecise, formatDollars } from "@/lib/format/nanos";
+import { notionalNanosCeil } from "@/lib/account/quantity";
 import type { components } from "@/lib/api/schema";
 import { FilterDropdown } from "./filter-dropdown";
 import { PortfolioToolbar } from "./portfolio-toolbar";
@@ -394,7 +395,7 @@ function AmountCell({ event }: { event: HistoryEvent }) {
   }
   // placed (reserved margin) / cancelled / expired / created → muted reserve or —
   if (event.type === "placed" && event.priceNanos != null && event.qty != null) {
-    const reserved = event.priceNanos * BigInt(event.qty);
+    const reserved = notionalNanosCeil(event.priceNanos, event.qty);
     return (
       <RightCell mono>
         <span style={{ color: "var(--fg-4)" }} title="reserved margin">

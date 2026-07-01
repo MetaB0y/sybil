@@ -17,6 +17,11 @@ import { SidePill } from "./side-pill";
 import { avgEntryPriceNanos } from "@/lib/account/positions";
 import type { AccountFill } from "@/lib/account/use-account-fills";
 import type { Portfolio } from "@/lib/account/use-portfolio";
+import {
+  formatShareUnits,
+  notionalNanos,
+  unitsToShares,
+} from "@/lib/account/quantity";
 import { formatCentsPrecise, formatDollars, parseNanos } from "@/lib/format/nanos";
 import type { components } from "@/lib/api/schema";
 
@@ -108,7 +113,7 @@ export function PositionsList({ tabs, positions, fills, marketsById }: Props) {
       const avgNanos = avgEntryPriceNanos(fills, p.market_id, p.outcome, p);
       const valueNanos = parseNanos(p.value_nanos);
       const markNanos = parseNanos(p.current_price_nanos);
-      const costNanos = avgNanos == null ? null : BigInt(p.quantity) * avgNanos;
+      const costNanos = avgNanos == null ? null : notionalNanos(avgNanos, p.quantity);
       const pnlNanos = costNanos == null ? null : valueNanos - costNanos;
       const pnlPct =
         costNanos == null || costNanos === 0n
@@ -119,7 +124,7 @@ export function PositionsList({ tabs, positions, fills, marketsById }: Props) {
         market,
         label: market?.name ?? `#${p.market_id}`,
         outcome: p.outcome,
-        shares: p.quantity,
+        shares: unitsToShares(p.quantity),
         avgNanos,
         markNanos,
         valueNanos,
@@ -230,7 +235,7 @@ function PositionRow({ row }: { row: PositionRowData }) {
         {market?.name ?? `#${position.market_id}`}
       </span>
       <SidePill outcome={position.outcome} />
-      <RightCell mono>{position.quantity}</RightCell>
+      <RightCell mono>{formatShareUnits(position.quantity)}</RightCell>
       <RightCell mono>{avgNanos == null ? "—" : formatCentsPrecise(avgNanos)}</RightCell>
       <RightCell mono>{formatCentsPrecise(markNanos)}</RightCell>
       <span style={{ display: "flex", justifyContent: "center" }}>

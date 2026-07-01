@@ -354,9 +354,8 @@ pub fn fill_facets(
         }
         // `fill_price` is already this side's own price (NO orders fill at the
         // NO price), matching on-block settlement — use it directly, no flip.
-        let entry = fill_price as i64;
         // buying (delta>0) spends cash; selling (delta<0) receives cash
-        cash -= delta as i128 * entry as i128;
+        cash -= matching_engine::signed_notional_nanos(fill_price, delta) as i128;
         if primary.is_none_or(|(_, _, d)| delta.unsigned_abs() > d.unsigned_abs()) {
             primary = Some((m, outcome, delta));
         }
@@ -522,7 +521,8 @@ mod tests {
     fn fill_facets_no_buy_cash_is_side_price() {
         // Buy 10 NO at 0.09 → spend 0.90 (the NO price), NOT 0.91-flipped 9.10.
         let m = MarketId::new(1);
-        let (mid, side, outcome, cash) = fill_facets(&[(m, 1, 10)], 90_000_000);
+        let qty = matching_engine::shares_to_qty(10) as i64;
+        let (mid, side, outcome, cash) = fill_facets(&[(m, 1, qty)], 90_000_000);
         assert_eq!(mid, Some(m));
         assert_eq!(side, Some("BUY"));
         assert_eq!(outcome, Some("NO"));
@@ -533,7 +533,8 @@ mod tests {
     fn fill_facets_no_sell_cash_is_side_price() {
         // Sell 10 NO at 0.30 → receive 3.00.
         let m = MarketId::new(1);
-        let (_, side, outcome, cash) = fill_facets(&[(m, 1, -10)], 300_000_000);
+        let qty = matching_engine::shares_to_qty(10) as i64;
+        let (_, side, outcome, cash) = fill_facets(&[(m, 1, -qty)], 300_000_000);
         assert_eq!(side, Some("SELL"));
         assert_eq!(outcome, Some("NO"));
         assert_eq!(cash, 3_000_000_000);
@@ -543,12 +544,13 @@ mod tests {
     fn fill_facets_yes_unaffected() {
         let m = MarketId::new(1);
         // Buy 10 YES at 0.60 → spend 6.00.
-        let (_, side, outcome, cash) = fill_facets(&[(m, 0, 10)], 600_000_000);
+        let qty = matching_engine::shares_to_qty(10) as i64;
+        let (_, side, outcome, cash) = fill_facets(&[(m, 0, qty)], 600_000_000);
         assert_eq!(side, Some("BUY"));
         assert_eq!(outcome, Some("YES"));
         assert_eq!(cash, -6_000_000_000);
         // Sell 10 YES at 0.60 → receive 6.00.
-        let (_, _, _, cash_sell) = fill_facets(&[(m, 0, -10)], 600_000_000);
+        let (_, _, _, cash_sell) = fill_facets(&[(m, 0, -qty)], 600_000_000);
         assert_eq!(cash_sell, 6_000_000_000);
     }
 }

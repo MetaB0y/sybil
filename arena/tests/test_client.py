@@ -1,7 +1,16 @@
 """Tests for sybil_client."""
 
 from sybil_client import BuyNo, BuyYes, SellNo, SellYes
-from sybil_client.types import NANOS_PER_DOLLAR, Account, Block, Fill, Market, Position
+from sybil_client.types import (
+    NANOS_PER_DOLLAR,
+    SHARE_SCALE,
+    Account,
+    Block,
+    Fill,
+    Market,
+    Position,
+    shares_to_quantity_units,
+)
 
 
 class TestTypes:
@@ -108,6 +117,11 @@ class TestNanosConversion:
     def test_nanos_per_dollar(self):
         assert NANOS_PER_DOLLAR == 1_000_000_000
 
+    def test_share_scale(self):
+        assert SHARE_SCALE == 1_000
+        assert shares_to_quantity_units(1) == 1_000
+        assert shares_to_quantity_units(0.001) == 1
+
     def test_account_balance_conversion(self):
         # $100
         account = Account(id=1, balance_nanos=100 * NANOS_PER_DOLLAR, positions=[])
@@ -153,6 +167,6 @@ def test_submit_orders_can_set_ioc_time_in_force(monkeypatch):
             "type": "BuyYes",
             "market_id": 7,
             "limit_price_nanos": 550_000_000,
-            "quantity": 3,
+            "quantity": 3_000,
         }
     ]

@@ -47,7 +47,11 @@ pub use problem::{MarketGroup, Problem, ProblemSummary};
 pub use settlement::{compute_fill_settlement, derive_minting, MintAdjustment, SettlementDelta};
 pub use state::{state_index, state_to_outcomes, StateSpace};
 pub use types::conversions::{dollars_to_nanos, nanos_to_dollars, nanos_to_price, price_to_nanos};
-pub use types::{MarketId, Nanos, OrderDirection, Qty, Side, NANOS_PER_DOLLAR};
+pub use types::{
+    notional_nanos, notional_nanos_ceil, shares_to_qty, signed_notional_nanos,
+    signed_price_delta_notional, MarketId, Nanos, OrderDirection, Qty, Side, NANOS_PER_DOLLAR,
+    SHARE_SCALE,
+};
 
 // Re-export order_builder convenience functions
 pub use order_builder::{

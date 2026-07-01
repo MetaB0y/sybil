@@ -106,6 +106,8 @@ pub struct SequencerConfig {
     pub history_prune_interval_blocks: u64,
     /// Maximum durable history rows deleted in one maintenance pass.
     pub history_prune_max_rows: usize,
+    /// Candle resolutions maintained from committed raw price points.
+    pub price_candle_resolutions_secs: Vec<u32>,
     /// Maximum in-memory fill records retained per account for API queries.
     /// Persistent storage may retain more rows.
     pub max_fill_history_per_account: usize,
@@ -148,6 +150,7 @@ impl Default for SequencerConfig {
             raw_price_retention_blocks: 0,
             history_prune_interval_blocks: 1_000,
             history_prune_max_rows: 10_000,
+            price_candle_resolutions_secs: vec![60, 300, 3_600],
             max_fill_history_per_account:
                 crate::fill_recorder::DEFAULT_MAX_FILL_HISTORY_PER_ACCOUNT,
             max_equity_points_per_account: crate::aggregates::MAX_EQUITY_POINTS,
@@ -882,6 +885,7 @@ impl BlockSequencer {
             next_order_id: self.next_order_id,
             pubkey_registry: &self.pubkey_registry,
             analytics: self.analytics.snapshot(),
+            price_candle_resolutions_secs: &self.config.price_candle_resolutions_secs,
             resting_orders: self.order_book.snapshot(),
             bridge_state: &self.bridge,
         }
@@ -2025,7 +2029,7 @@ impl BlockSequencer {
         let total_welfare = pipeline_result.result.total_welfare;
         let total_volume = fills
             .iter()
-            .map(|f| f.fill_price.saturating_mul(f.fill_qty))
+            .map(|f| matching_engine::notional_nanos(f.fill_price, f.fill_qty))
             .fold(0u64, |acc, v| acc.saturating_add(v));
         let orders_filled = pipeline_result.result.orders_filled;
 
@@ -3070,7 +3074,10 @@ mod tests {
     use crate::account::AccountStore;
     use crate::error::RejectionReason;
     use crate::validation::{validate_order, validate_order_with_reservation};
-    use matching_engine::{outcome_buy, outcome_sell, MarketId, MarketSet, MmId, NANOS_PER_DOLLAR};
+    use matching_engine::{
+        notional_nanos, outcome_buy, outcome_sell, shares_to_qty, MarketId, MarketSet, MmId,
+        NANOS_PER_DOLLAR,
+    };
     use proptest::prelude::*;
     use sybil_oracle::AdminOracle;
 
@@ -3095,6 +3102,14 @@ mod tests {
             ),
             aid,
         )
+    }
+
+    fn q(shares: u64) -> u64 {
+        shares_to_qty(shares)
+    }
+
+    fn qi(shares: u64) -> i64 {
+        q(shares) as i64
     }
 
     fn eth_address(byte: u8) -> [u8; 20] {
@@ -3186,30 +3201,33 @@ mod tests {
     #[test]
     fn test_expected_balance_delta_from_fills_respects_order_side() {
         let (markets, m0) = setup();
-        let buy = outcome_buy(&markets, 1, m0, 0, 300_000_000, 4);
-        let sell = outcome_sell(&markets, 2, m0, 0, 700_000_000, 2);
+        let buy = outcome_buy(&markets, 1, m0, 0, 300_000_000, q(4));
+        let sell = outcome_sell(&markets, 2, m0, 0, 700_000_000, q(2));
         let order_map = HashMap::from([(buy.id, &buy), (sell.id, &sell)]);
 
         let fills = vec![
-            Fill::new(buy.id, 4, 300_000_000),
-            Fill::new(sell.id, 2, 700_000_000),
+            Fill::new(buy.id, q(4), 300_000_000),
+            Fill::new(sell.id, q(2), 700_000_000),
         ];
 
         let expected_delta = expected_balance_delta_from_fills(&fills, &order_map, &[]);
-        assert_eq!(expected_delta, -(300_000_000i64 * 4) + (700_000_000i64 * 2));
+        assert_eq!(
+            expected_delta,
+            -(notional_nanos(300_000_000, q(4)) as i64) + notional_nanos(700_000_000, q(2)) as i64
+        );
     }
 
     #[test]
     fn test_expected_balance_delta_includes_mint_adjustments() {
         let (markets, m0) = setup();
-        let buy = outcome_buy(&markets, 1, m0, 0, 300_000_000, 4);
+        let buy = outcome_buy(&markets, 1, m0, 0, 300_000_000, q(4));
         let order_map = HashMap::from([(buy.id, &buy)]);
-        let fills = vec![Fill::new(buy.id, 4, 300_000_000)];
+        let fills = vec![Fill::new(buy.id, q(4), 300_000_000)];
         let mint_adjustments = vec![matching_engine::MintAdjustment {
             market_id: m0,
             outcome: 0,
-            position_delta: -4,
-            balance_delta: 300_000_000i64 * 4,
+            position_delta: -qi(4),
+            balance_delta: notional_nanos(300_000_000, q(4)) as i64,
         }];
 
         let expected_delta =
@@ -3408,7 +3426,7 @@ mod tests {
         let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
         let account = accounts.get(aid).unwrap();
 
-        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, q(10));
         assert!(validate_order(&order, account, &HashMap::new()).is_ok());
     }
 
@@ -3419,7 +3437,7 @@ mod tests {
         let aid = accounts.create_account(3 * NANOS_PER_DOLLAR as i64);
         let account = accounts.get(aid).unwrap();
 
-        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, q(10));
         let result = validate_order(&order, account, &HashMap::new());
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -3440,9 +3458,9 @@ mod tests {
         let mut accounts = AccountStore::new();
         let aid = accounts.create_account(NANOS_PER_DOLLAR as i64);
         let account = accounts.get_mut(aid).unwrap();
-        account.positions.insert((m0, 0), 10);
+        account.positions.insert((m0, 0), qi(10));
 
-        let order = outcome_sell(&markets, 1, m0, 0, 500_000_000, 5);
+        let order = outcome_sell(&markets, 1, m0, 0, 500_000_000, q(5));
         assert!(validate_order(&order, account, &HashMap::new()).is_ok());
     }
 
@@ -3452,9 +3470,9 @@ mod tests {
         let mut accounts = AccountStore::new();
         let aid = accounts.create_account(NANOS_PER_DOLLAR as i64);
         let account = accounts.get_mut(aid).unwrap();
-        account.positions.insert((m0, 0), 3);
+        account.positions.insert((m0, 0), qi(3));
 
-        let order = outcome_sell(&markets, 1, m0, 0, 500_000_000, 5);
+        let order = outcome_sell(&markets, 1, m0, 0, 500_000_000, q(5));
         let result = validate_order(&order, account, &HashMap::new());
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -3466,8 +3484,8 @@ mod tests {
             } => {
                 assert_eq!(market, m0);
                 assert_eq!(outcome, 0);
-                assert_eq!(required, 5);
-                assert_eq!(available, 3);
+                assert_eq!(required, qi(5));
+                assert_eq!(available, qi(3));
             }
             other => panic!("Expected InsufficientPosition, got {:?}", other),
         }
@@ -3482,9 +3500,9 @@ mod tests {
         let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
         let account = accounts.get(aid).unwrap();
 
-        let order = outcome_buy(&markets, 1, m0, 0, 600_000_000, 5);
+        let order = outcome_buy(&markets, 1, m0, 0, 600_000_000, q(5));
         let cost = validate_order_with_reservation(&order, account, 0, &HashMap::new()).unwrap();
-        assert_eq!(cost, 600_000_000i64 * 5);
+        assert_eq!(cost, notional_nanos(600_000_000, q(5)) as i64);
     }
 
     #[test]
@@ -3494,11 +3512,11 @@ mod tests {
         let aid = accounts.create_account(8 * NANOS_PER_DOLLAR as i64);
         let account = accounts.get(aid).unwrap();
 
-        let order1 = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
+        let order1 = outcome_buy(&markets, 1, m0, 0, 500_000_000, q(10));
         let cost1 = validate_order_with_reservation(&order1, account, 0, &HashMap::new()).unwrap();
         assert_eq!(cost1, 5_000_000_000);
 
-        let order2 = outcome_buy(&markets, 2, m0, 0, 500_000_000, 10);
+        let order2 = outcome_buy(&markets, 2, m0, 0, 500_000_000, q(10));
         let result = validate_order_with_reservation(&order2, account, cost1, &HashMap::new());
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -3518,8 +3536,8 @@ mod tests {
         let (markets, m0) = setup();
         let (mut seq, aid) = make_sequencer(8 * NANOS_PER_DOLLAR as i64);
 
-        let order1 = outcome_buy(&markets, 0, m0, 0, 500_000_000, 10);
-        let order2 = outcome_buy(&markets, 0, m0, 0, 500_000_000, 10);
+        let order1 = outcome_buy(&markets, 0, m0, 0, 500_000_000, q(10));
+        let order2 = outcome_buy(&markets, 0, m0, 0, 500_000_000, q(10));
 
         let sub = OrderSubmission {
             account_id: aid,
@@ -3542,9 +3560,9 @@ mod tests {
         let mut accounts = AccountStore::new();
         let aid = accounts.create_account(5 * NANOS_PER_DOLLAR as i64);
         let account = accounts.get_mut(aid).unwrap();
-        account.positions.insert((m0, 0), 100);
+        account.positions.insert((m0, 0), qi(100));
 
-        let sell = outcome_sell(&markets, 1, m0, 0, 500_000_000, 10);
+        let sell = outcome_sell(&markets, 1, m0, 0, 500_000_000, q(10));
         let cost = validate_order_with_reservation(&sell, account, 0, &HashMap::new()).unwrap();
         assert_eq!(cost, 0);
     }
@@ -3901,7 +3919,7 @@ mod tests {
         let replayed_admit = match live.try_admit_direct(
             OrderSubmission {
                 account_id: aid,
-                orders: vec![outcome_buy(&markets, 0, m0, 0, 800_000_000, 1)],
+                orders: vec![outcome_buy(&markets, 0, m0, 0, 800_000_000, q(1))],
                 mm_constraint: None,
             },
             1_001,
@@ -3914,8 +3932,8 @@ mod tests {
             OrderSubmission {
                 account_id: aid,
                 orders: vec![
-                    outcome_buy(&markets, 0, m0, 0, 600_000_000, 1),
-                    outcome_buy(&markets, 0, m0, 0, 600_000_000, 1),
+                    outcome_buy(&markets, 0, m0, 0, 600_000_000, q(1)),
+                    outcome_buy(&markets, 0, m0, 0, 600_000_000, q(1)),
                 ],
                 mm_constraint: None,
             },

@@ -6,7 +6,7 @@
  *
  * Mirrors the matching engine's reservation model (`validation.rs` +
  * `order_book.rs`, one global book keyed by account):
- *   - A BUY reserves `limit_price_nanos × remaining_quantity` cash.
+ *   - A BUY reserves `ceil(limit_price_nanos × remaining_quantity / 1000)` cash.
  *   - A SELL reserves position (shares), NOT cash.
  * The engine rejects a buy when `limit_price × max_fill > balance − reserved`,
  * surfacing `InsufficientBalance { required, available }`. The frontend only
@@ -19,6 +19,7 @@
 
 import { useMemo } from "react";
 import { parseNanos } from "@/lib/format/nanos";
+import { notionalNanosCeil } from "./quantity";
 import { useAccountOrders } from "./use-account-orders";
 import { usePortfolio } from "./use-portfolio";
 
@@ -45,7 +46,10 @@ export function useAvailableBalance(accountId: number | null): AvailableBalance 
     let reservedNanos = 0n;
     for (const o of orders.data ?? []) {
       if (!o.side?.toLowerCase().includes("buy")) continue;
-      reservedNanos += parseNanos(o.limit_price_nanos) * BigInt(o.remaining_quantity);
+      reservedNanos += notionalNanosCeil(
+        parseNanos(o.limit_price_nanos),
+        o.remaining_quantity,
+      );
     }
 
     const availableNanos =

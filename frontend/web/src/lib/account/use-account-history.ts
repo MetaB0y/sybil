@@ -30,6 +30,7 @@ import { api } from "@/lib/api/client";
 import type { components } from "@/lib/api/schema";
 import { parseNanos } from "@/lib/format/nanos";
 import { selectLatestBlock, useStore } from "@/lib/store";
+import { notionalNanos, priceNanosFromNotional } from "./quantity";
 
 type HistoryEventResponse = components["schemas"]["HistoryEventResponse"];
 
@@ -178,7 +179,7 @@ export function fillAggByOrder(events: HistoryEvent[]): Map<number, OrderFillAgg
     if (e.qty != null) {
       const q = BigInt(e.qty);
       cur.qty += q;
-      if (e.priceNanos != null) cur.cost += q * e.priceNanos;
+      if (e.priceNanos != null) cur.cost += notionalNanos(e.priceNanos, q);
     }
     acc.set(e.orderId, cur);
   }
@@ -186,7 +187,7 @@ export function fillAggByOrder(events: HistoryEvent[]): Map<number, OrderFillAgg
   for (const [id, e] of acc) {
     out.set(id, {
       count: e.count,
-      avgPriceNanos: e.qty > 0n ? e.cost / e.qty : null,
+      avgPriceNanos: priceNanosFromNotional(e.cost, e.qty),
     });
   }
   return out;

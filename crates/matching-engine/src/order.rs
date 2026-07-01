@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::{MarketId, Nanos, OrderDirection, Qty};
+use crate::types::{signed_price_delta_notional, MarketId, Nanos, OrderDirection, Qty};
 
 /// A (MarketId, value) pair from marginal payoff computation.
 pub type MarginalPayoff<T> = (MarketId, T);
@@ -59,8 +59,9 @@ pub struct Order {
     pub num_markets: u8,
 
     /// Payoff coefficient per atomic state.
-    /// +N = long N shares, -N = short N shares, 0 = no exposure.
-    /// i8 sufficient: range -128 to +127 shares per state.
+    /// +N = long N units of the payoff per filled quantity unit, -N = short,
+    /// 0 = no exposure. Fill quantities are fixed-point share units.
+    /// i8 sufficient: range -128 to +127 payoff units per state.
     pub payoffs: [i8; MAX_STATES],
 
     /// Number of atomic states (= product of outcomes per market)
@@ -124,8 +125,10 @@ impl Order {
     }
 
     /// Calculate welfare contribution if this order fills at the given price.
-    /// Welfare = (limit_price - fill_price) * quantity for buyers (happy when fill < limit)
-    /// Welfare = (fill_price - limit_price) * quantity for sellers (happy when fill > limit)
+    /// Welfare = (limit_price - fill_price) * quantity for buyers
+    /// (happy when fill < limit), scaled by `SHARE_SCALE`.
+    /// Welfare = (fill_price - limit_price) * quantity for sellers
+    /// (happy when fill > limit), scaled by `SHARE_SCALE`.
     pub fn welfare_contribution(&self, fill_price: Nanos, fill_qty: Qty) -> i64 {
         if fill_qty == 0 {
             return 0;
@@ -135,7 +138,7 @@ impl Order {
         } else {
             self.limit_price as i64 - fill_price as i64
         };
-        surplus_per_unit * fill_qty as i64
+        signed_price_delta_notional(surplus_per_unit, fill_qty)
     }
 
     /// Check if this order would be satisfied at a given price.
@@ -341,6 +344,7 @@ impl Fill {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shares_to_qty;
 
     #[test]
     fn test_order_creation() {
@@ -357,7 +361,7 @@ mod tests {
         order.limit_price = 600_000_000; // 0.60 in nanos
 
         // Fill at 0.50
-        let welfare = order.welfare_contribution(500_000_000, 100);
+        let welfare = order.welfare_contribution(500_000_000, shares_to_qty(100));
         // (0.60 - 0.50) * 100 = 10 in nano-equivalent
         assert_eq!(welfare, 100_000_000 * 100);
     }

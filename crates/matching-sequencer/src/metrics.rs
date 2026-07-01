@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use matching_engine::{MarketId, Nanos, NANOS_PER_DOLLAR};
+use matching_engine::{signed_notional_nanos, MarketId, Nanos, NANOS_PER_DOLLAR};
 
 use crate::account::{AccountId, AccountStore};
 
@@ -63,7 +63,7 @@ pub fn compute_agent_pnl(
                     .get(outcome as usize)
                     .copied()
                     .unwrap_or(NANOS_PER_DOLLAR / 2);
-                position_value += qty * price as i64;
+                position_value += signed_notional_nanos(price, qty);
             }
 
             let total_pnl = (final_balance - initial_balance) + position_value;

@@ -69,7 +69,7 @@ use crate::aggregates::{
 };
 use crate::block::{state_sidecar_snapshot_from_resting_orders, BlockHeader, SealedBlock};
 use crate::bridge::{BridgeState, BridgeWithdrawalRequest, L1Deposit};
-use crate::market_info::{AccountFillRecord, MarketMetadata};
+use crate::market_info::{AccountFillRecord, MarketMetadata, PriceCandle, PriceCandlePage};
 use crate::market_lifecycle::MarketLifecycle;
 use crate::order_book::RestingOrder;
 use crate::price_tracker::{PriceTrackerClearingHistorySnapshot, PriceTrackerVolumeSnapshot};
@@ -210,6 +210,10 @@ const KEY_PRICE_TRACKER_CLEARING_HISTORY_SNAPSHOT: &str = "snapshot";
 /// market_id(4B BE) ++ block_height(8B BE).
 const PRICE_POINTS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("price_points");
 
+/// Downsampled committed-batch price candles. Key =
+/// market_id(4B BE) ++ resolution_secs(4B BE) ++ bucket_start_ms(8B BE).
+const PRICE_CANDLES: TableDefinition<&[u8], &[u8]> = TableDefinition::new("price_candles");
+
 /// Off-block liquidity tracker: per-market ±band depth rings used by the
 /// `liquidity_avg10` surface. Same single-blob shape as `TRADER_TRACKER`.
 const LIQUIDITY_TRACKER: TableDefinition<&str, &[u8]> = TableDefinition::new("liquidity_tracker");
@@ -310,6 +314,24 @@ fn price_point_market_bounds(market_id: MarketId) -> ([u8; 12], [u8; 12]) {
     (
         price_point_key(market_id, 0),
         price_point_key(market_id, u64::MAX),
+    )
+}
+
+fn price_candle_key(market_id: MarketId, resolution_secs: u32, bucket_start_ms: u64) -> [u8; 16] {
+    let mut key = [0u8; 16];
+    key[..4].copy_from_slice(&market_id.0.to_be_bytes());
+    key[4..8].copy_from_slice(&resolution_secs.to_be_bytes());
+    key[8..].copy_from_slice(&bucket_start_ms.to_be_bytes());
+    key
+}
+
+fn price_candle_market_resolution_bounds(
+    market_id: MarketId,
+    resolution_secs: u32,
+) -> ([u8; 16], [u8; 16]) {
+    (
+        price_candle_key(market_id, resolution_secs, 0),
+        price_candle_key(market_id, resolution_secs, u64::MAX),
     )
 }
 
@@ -575,6 +597,7 @@ pub struct SequencerSnapshot<'a> {
     pub next_order_id: u64,
     pub pubkey_registry: &'a HashMap<crate::crypto::PublicKey, AccountId>,
     pub analytics: AnalyticsSnapshot<'a>,
+    pub price_candle_resolutions_secs: &'a [u32],
     /// Owned because the snapshot clones the live book — cheap for bounded sizes.
     pub resting_orders: Vec<RestingOrder>,
     pub bridge_state: &'a BridgeState,
@@ -620,6 +643,7 @@ impl Store {
         txn.open_table(PRICE_TRACKER_VOLUME)?;
         txn.open_table(PRICE_TRACKER_CLEARING_HISTORY)?;
         txn.open_table(PRICE_POINTS)?;
+        txn.open_table(PRICE_CANDLES)?;
         txn.open_table(LIQUIDITY_TRACKER)?;
         txn.open_table(ORDER_STATS_TRACKER)?;
         txn.open_table(WELFARE_TRACKER)?;
@@ -868,6 +892,35 @@ impl Store {
                 let key = price_point_key(*market_id, point.height);
                 let bytes = rmp_serde::to_vec(point)?;
                 price_points.insert(key.as_slice(), bytes.as_slice())?;
+            }
+        }
+
+        // Price candles — downsample committed raw mark-price rows in the
+        // same transaction so new raw rows and their candle aggregates share
+        // one durability boundary.
+        if !snapshot.analytics.price_points_delta.is_empty()
+            && !snapshot.price_candle_resolutions_secs.is_empty()
+        {
+            let mut candles = txn.open_table(PRICE_CANDLES)?;
+            for (market_id, point) in &snapshot.analytics.price_points_delta {
+                for &resolution_secs in snapshot.price_candle_resolutions_secs {
+                    if resolution_secs == 0 {
+                        continue;
+                    }
+                    let mut candle = PriceCandle::from_point(resolution_secs, point);
+                    let key = price_candle_key(*market_id, resolution_secs, candle.bucket_start_ms);
+                    if let Some(existing) = {
+                        candles
+                            .get(key.as_slice())?
+                            .map(|value| rmp_serde::from_slice(value.value()))
+                            .transpose()?
+                    } {
+                        candle = existing;
+                        candle.merge_point(point);
+                    }
+                    let bytes = rmp_serde::to_vec(&candle)?;
+                    candles.insert(key.as_slice(), bytes.as_slice())?;
+                }
             }
         }
 
@@ -1328,6 +1381,59 @@ impl Store {
             points,
             next_before_height,
             retention_min_height,
+        })
+    }
+
+    /// Load downsampled price candles for one market/resolution. The newest
+    /// matching candles are returned in chronological order, with
+    /// `before_ms` cursoring to the next older page.
+    pub async fn load_price_candles(
+        &self,
+        market_id: MarketId,
+        resolution_secs: u32,
+        from_ms: Option<u64>,
+        to_ms: Option<u64>,
+        before_ms: Option<u64>,
+        limit: usize,
+    ) -> Result<PriceCandlePage, StoreError> {
+        if resolution_secs == 0 || limit == 0 {
+            return Ok(PriceCandlePage {
+                resolution_secs,
+                candles: Vec::new(),
+                next_before_ms: None,
+                retention_min_bucket_ms: None,
+            });
+        }
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(PRICE_CANDLES)?;
+        let (lo, hi) = price_candle_market_resolution_bounds(market_id, resolution_secs);
+        let mut candles = VecDeque::new();
+        for entry in table.range(lo.as_slice()..=hi.as_slice())? {
+            let (_, value) = entry?;
+            let candle: PriceCandle = rmp_serde::from_slice(value.value())?;
+            if from_ms.is_some_and(|from| candle.bucket_start_ms < from)
+                || to_ms.is_some_and(|to| candle.bucket_start_ms > to)
+                || before_ms.is_some_and(|before| candle.bucket_start_ms >= before)
+            {
+                continue;
+            }
+            if candles.len() == limit.saturating_add(1) {
+                candles.pop_front();
+            }
+            candles.push_back(candle);
+        }
+        let mut candles: Vec<_> = candles.into_iter().collect();
+        let next_before_ms = if candles.len() > limit {
+            candles.remove(0);
+            candles.first().map(|candle| candle.bucket_start_ms)
+        } else {
+            None
+        };
+        Ok(PriceCandlePage {
+            resolution_secs,
+            candles,
+            next_before_ms,
+            retention_min_bucket_ms: None,
         })
     }
 
@@ -2412,6 +2518,7 @@ mod tests {
                     price_points_delta: Vec::new(),
                     history_events_delta: Vec::new(),
                 },
+                price_candle_resolutions_secs: &[],
                 bridge_state: &self.bridge_state,
                 resting_orders,
             }
@@ -2451,6 +2558,7 @@ mod tests {
                     price_points_delta: Vec::new(),
                     history_events_delta: Vec::new(),
                 },
+                price_candle_resolutions_secs: &[],
                 bridge_state: &self.bridge_state,
                 resting_orders: Vec::new(),
             }
@@ -2490,6 +2598,7 @@ mod tests {
                     price_points_delta,
                     history_events_delta: Vec::new(),
                 },
+                price_candle_resolutions_secs: &[60, 300, 3_600],
                 bridge_state: &self.bridge_state,
                 resting_orders: Vec::new(),
             }
@@ -2530,6 +2639,7 @@ mod tests {
                     price_points_delta: Vec::new(),
                     history_events_delta,
                 },
+                price_candle_resolutions_secs: &[],
                 bridge_state: &self.bridge_state,
                 resting_orders: Vec::new(),
             }
@@ -2748,6 +2858,95 @@ mod tests {
         let heights: Vec<_> = page.points.iter().map(|point| point.height).collect();
         assert_eq!(heights, vec![1, 2, 3, 4, 5]);
         assert_eq!(page.retention_min_height, Some(1));
+    }
+
+    #[tokio::test]
+    async fn price_candles_merge_committed_points_without_empty_buckets() {
+        let path = temp_db_path("store-price-candles");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+        let lifecycle = MarketLifecycle::new(oracle);
+        let mut markets = MarketSet::new();
+        let market_id = markets.add_binary("candles");
+        let accounts = AccountStore::new();
+        let env = TestEnv::new();
+
+        let samples = [
+            (1, 1_000, 500_000_000, 500_000_000, 10),
+            (2, 20_000, 700_000_000, 300_000_000, 20),
+            (3, 65_000, 600_000_000, 400_000_000, 30),
+        ];
+        for (height, timestamp_ms, yes_price, no_price, volume_nanos) in samples {
+            let mut header = sample_header(height);
+            header.timestamp_ms = timestamp_ms;
+            let point = crate::market_info::PricePoint {
+                height,
+                timestamp_ms,
+                yes_price,
+                no_price,
+                volume_nanos,
+            };
+            store
+                .save_block(env.snapshot_with_price_points(
+                    &accounts,
+                    &markets,
+                    &lifecycle,
+                    &header,
+                    vec![(market_id, point)],
+                ))
+                .await
+                .unwrap();
+        }
+
+        let page = store
+            .load_price_candles(market_id, 60, Some(0), Some(180_000), None, 10)
+            .await
+            .unwrap();
+        assert_eq!(page.resolution_secs, 60);
+        assert_eq!(
+            page.candles.len(),
+            2,
+            "no synthetic empty bucket should be stored"
+        );
+
+        let first = &page.candles[0];
+        assert_eq!(first.bucket_start_ms, 0);
+        assert_eq!(first.bucket_end_ms, 60_000);
+        assert_eq!(first.first_height, 1);
+        assert_eq!(first.last_height, 2);
+        assert_eq!(first.open_yes_price, 500_000_000);
+        assert_eq!(first.high_yes_price, 700_000_000);
+        assert_eq!(first.low_yes_price, 500_000_000);
+        assert_eq!(first.close_yes_price, 700_000_000);
+        assert_eq!(first.open_no_price, 500_000_000);
+        assert_eq!(first.high_no_price, 500_000_000);
+        assert_eq!(first.low_no_price, 300_000_000);
+        assert_eq!(first.close_no_price, 300_000_000);
+        assert_eq!(first.volume_nanos, 30);
+        assert_eq!(first.point_count, 2);
+
+        let second = &page.candles[1];
+        assert_eq!(second.bucket_start_ms, 60_000);
+        assert_eq!(second.first_height, 3);
+        assert_eq!(second.last_height, 3);
+        assert_eq!(second.open_yes_price, 600_000_000);
+        assert_eq!(second.close_yes_price, 600_000_000);
+        assert_eq!(second.volume_nanos, 30);
+        assert_eq!(second.point_count, 1);
+
+        let newest = store
+            .load_price_candles(market_id, 60, None, None, None, 1)
+            .await
+            .unwrap();
+        assert_eq!(newest.next_before_ms, Some(60_000));
+        assert_eq!(newest.candles[0].bucket_start_ms, 60_000);
+
+        let older = store
+            .load_price_candles(market_id, 60, None, None, newest.next_before_ms, 1)
+            .await
+            .unwrap();
+        assert_eq!(older.next_before_ms, None);
+        assert_eq!(older.candles[0].bucket_start_ms, 0);
     }
 
     #[tokio::test]

@@ -832,6 +832,29 @@ async fn market_price_history_persists_to_store_beyond_hot_cache() {
 
     let (status, body) = get(
         app.clone(),
+        &format!("/v1/markets/{market_id}/prices/candles?resolution=1m"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let candles_response = parse_json(&body);
+    assert_eq!(candles_response["market_id"].as_u64().unwrap(), market_id);
+    assert_eq!(candles_response["resolution_secs"].as_u64().unwrap(), 60);
+    let candles = candles_response["candles"].as_array().unwrap();
+    assert!(
+        !candles.is_empty(),
+        "expected candle rows: {candles_response}"
+    );
+    let point_count: u64 = candles
+        .iter()
+        .map(|candle| candle["point_count"].as_u64().unwrap())
+        .sum();
+    assert_eq!(point_count, 2);
+    assert!(candles
+        .iter()
+        .all(|candle| candle["volume_nanos"].as_u64().unwrap() > 0));
+
+    let (status, body) = get(
+        app.clone(),
         &format!("/v1/markets/{market_id}/prices/history?limit=1"),
     )
     .await;

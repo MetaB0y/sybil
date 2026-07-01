@@ -448,7 +448,8 @@ mod tests {
     use super::*;
     use crate::types::{WitnessBlockHeader, WitnessOrder};
     use matching_engine::{
-        outcome_sell, simple_no_buy, simple_yes_buy, MarketSet, MmConstraint, MmId, MmSide,
+        outcome_sell, shares_to_qty, simple_no_buy, simple_yes_buy, MarketSet, MmConstraint, MmId,
+        MmSide,
     };
 
     fn empty_header() -> WitnessBlockHeader {
@@ -501,7 +502,7 @@ mod tests {
 
     fn buy_order(markets: &MarketSet, id: u64, market: MarketId) -> WitnessOrder {
         WitnessOrder {
-            order: simple_yes_buy(markets, id, market, 600_000_000, 100),
+            order: simple_yes_buy(markets, id, market, 600_000_000, shares_to_qty(100)),
             account_id: 0,
             is_mm: false,
         }
@@ -509,7 +510,7 @@ mod tests {
 
     fn sell_order(markets: &MarketSet, id: u64, market: MarketId) -> WitnessOrder {
         WitnessOrder {
-            order: outcome_sell(markets, id, market, 0, 400_000_000, 100),
+            order: outcome_sell(markets, id, market, 0, 400_000_000, shares_to_qty(100)),
             account_id: 1,
             is_mm: false,
         }
@@ -522,7 +523,10 @@ mod tests {
 
         // Balanced: buyer buys 50 YES, seller sells 50 YES at same price
         let orders = vec![buy_order(&markets, 1, m0), sell_order(&markets, 2, m0)];
-        let fills = vec![Fill::new(1, 50, 500_000_000), Fill::new(2, 50, 500_000_000)];
+        let fills = vec![
+            Fill::new(1, shares_to_qty(50), 500_000_000),
+            Fill::new(2, shares_to_qty(50), 500_000_000),
+        ];
 
         let mut witness = make_witness(orders, fills);
         witness
@@ -535,7 +539,7 @@ mod tests {
 
     #[test]
     fn test_order_not_found() {
-        let witness = make_witness(vec![], vec![Fill::new(999, 50, 500_000_000)]);
+        let witness = make_witness(vec![], vec![Fill::new(999, shares_to_qty(50), 500_000_000)]);
         // Fix welfare since no orders exist
         let mut witness = witness;
         witness.total_welfare = 0;
@@ -554,7 +558,7 @@ mod tests {
         let m0 = markets.add_binary("M0");
 
         let orders = vec![buy_order(&markets, 1, m0)];
-        let fills = vec![Fill::new(1, 200, 500_000_000)]; // max_fill=100
+        let fills = vec![Fill::new(1, shares_to_qty(200), 500_000_000)]; // max_fill=100 shares
 
         let mut witness = make_witness(orders, fills);
         witness.total_welfare = 0; // welfare will be wrong due to overfill
@@ -573,7 +577,10 @@ mod tests {
         let m0 = markets.add_binary("M0");
 
         let orders = vec![buy_order(&markets, 1, m0)];
-        let fills = vec![Fill::new(1, 50, 500_000_000), Fill::new(1, 30, 500_000_000)];
+        let fills = vec![
+            Fill::new(1, shares_to_qty(50), 500_000_000),
+            Fill::new(1, shares_to_qty(30), 500_000_000),
+        ];
 
         let mut witness = make_witness(orders, fills);
         witness.total_welfare = 0;
@@ -592,7 +599,7 @@ mod tests {
         let m0 = markets.add_binary("M0");
 
         let orders = vec![buy_order(&markets, 1, m0)]; // limit=600_000_000
-        let fills = vec![Fill::new(1, 50, 700_000_000)]; // above limit
+        let fills = vec![Fill::new(1, shares_to_qty(50), 700_000_000)]; // above limit
 
         let mut witness = make_witness(orders, fills);
         witness.total_welfare = 0;
@@ -612,8 +619,8 @@ mod tests {
 
         let orders = vec![buy_order(&markets, 1, m0), buy_order(&markets, 2, m0)];
         let fills = vec![
-            Fill::new(1, 100, 500_000_000),
-            Fill::new(2, 100, 500_000_000),
+            Fill::new(1, shares_to_qty(100), 500_000_000),
+            Fill::new(2, shares_to_qty(100), 500_000_000),
         ];
 
         let mm = MmConstraint::new(MmId(1), 10_000_000_000) // $10 budget
@@ -711,7 +718,10 @@ mod tests {
 
         // Balanced: 50 YES bought + 50 YES sold = net 0
         let orders = vec![buy_order(&markets, 1, m0), sell_order(&markets, 2, m0)];
-        let fills = vec![Fill::new(1, 50, 500_000_000), Fill::new(2, 50, 500_000_000)];
+        let fills = vec![
+            Fill::new(1, shares_to_qty(50), 500_000_000),
+            Fill::new(2, shares_to_qty(50), 500_000_000),
+        ];
 
         let mut witness = make_witness(orders, fills);
         witness
@@ -730,7 +740,7 @@ mod tests {
         // A one-sided buy creates position imbalance at the fill layer, but
         // this is valid when settlement derives the MINT counterparty.
         let orders = vec![buy_order(&markets, 1, m0)];
-        let fills = vec![Fill::new(1, 50, 500_000_000)];
+        let fills = vec![Fill::new(1, shares_to_qty(50), 500_000_000)];
 
         let mut witness = make_witness(orders, fills);
         witness
@@ -748,18 +758,21 @@ mod tests {
 
         // Minting: buyer buys YES, another buyer buys NO → balanced (creates a complete set)
         let wo_yes = WitnessOrder {
-            order: simple_yes_buy(&markets, 1, m0, 600_000_000, 50),
+            order: simple_yes_buy(&markets, 1, m0, 600_000_000, shares_to_qty(50)),
             account_id: 0,
             is_mm: false,
         };
         let wo_no = WitnessOrder {
-            order: simple_no_buy(&markets, 2, m0, 600_000_000, 50),
+            order: simple_no_buy(&markets, 2, m0, 600_000_000, shares_to_qty(50)),
             account_id: 1,
             is_mm: false,
         };
 
         let orders = vec![wo_yes, wo_no];
-        let fills = vec![Fill::new(1, 50, 500_000_000), Fill::new(2, 50, 500_000_000)];
+        let fills = vec![
+            Fill::new(1, shares_to_qty(50), 500_000_000),
+            Fill::new(2, shares_to_qty(50), 500_000_000),
+        ];
 
         let mut witness = make_witness(orders, fills);
         witness

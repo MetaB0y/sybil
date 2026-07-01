@@ -3,22 +3,32 @@ tags: [infrastructure, crate]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-05-17
+last_verified: 2026-07-01
 ---
 
 The REST API is the external interface to the exchange. Built with Axum (a Rust async web framework), it exposes endpoints for account management, market operations, order submission, and block retrieval. An OpenAPI schema is auto-generated for client code generation. The API communicates with the sequencer via message passing through a `SequencerHandle` — no shared mutable state.
 
 The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Proofs** (`/v1/proofs/state/{leaf_key_hex}`), **Accounts** (create, query balance/positions, fund, register keys), **Markets** (list, create, query details/prices/groups, resolve), **Orders** (submit unsigned or [[P256 Authentication|signed]]), and **Blocks** (latest, by height, [[SSE Block Stream|SSE stream]]). Many endpoints are dev-mode only: account creation/funding, market creation/resolution, and group creation. In production, these administrative operations would be restricted to governance or oracle processes.
 
+Order quantity fields (`quantity`, `max_fill`, `fill_qty`,
+`remaining_quantity`, `original_quantity`, and position `quantity`) are protocol
+[[Fractional Quantities|share-units]], not display shares. `1000` units equals
+1 full YES/NO share; the minimum increment is `1` unit = 0.001 share. Client
+layers may expose ordinary decimal shares, but signed/canonical API payloads
+use integer units.
+
 Market raw price history is served through
 `GET /v1/markets/{id}/prices/history`, backed by durable `price_points` when a
 store is configured. The endpoint is bounded by `limit` and pages older raw
 points with `before_height` / `next_before_height`. When raw price retention is
 active, responses include `retention_min_height` so clients can distinguish an
-empty in-retention range from data older than retained history. Long-window
-charting should use a separate planned candle endpoint,
-`GET /v1/markets/{id}/prices/candles`, rather than overloading the raw point
-schema with OHLC fields.
+empty in-retention range from data older than retained history.
+
+Long-window charting uses `GET /v1/markets/{id}/prices/candles`, backed by
+durable post-seal price candles. Candles are built only from committed batch
+price points: open/high/low/close are over sealed YES/NO prices, volume is
+post-seal traded notional, and empty buckets are omitted. This preserves the
+private-batch boundary because no in-flight order-book information is exposed.
 
 Block history reads distinguish missing data from retained-history gaps:
 `GET /v1/blocks/{height}` returns `410 Gone` with code `RETENTION_GONE` when

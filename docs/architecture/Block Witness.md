@@ -3,7 +3,7 @@ tags: [zk, spec]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-05-02
+last_verified: 2026-07-01
 ---
 
 # Block Witness
@@ -38,7 +38,7 @@ that job. Everything else in this doc follows from two invariants:
 | `system_events` | state changes applied between blocks (create account, dev deposit, L1 deposit, withdrawal creation, resolution) |
 | `fills` | real accepted-order fills produced by the solver; synthetic minting fills are not allowed |
 | `clearing_prices` | per-market clearing prices produced by the solver |
-| `total_welfare` | sum of `(limit_price - clearing_price) * fill_qty` |
+| `total_welfare` | sum of `(limit_price - clearing_price) * fill_qty / SHARE_SCALE` |
 | `minting_cost` | solver-reported welfare adjustment; live sequencer blocks set this to zero because minting is represented by MINT account settlement |
 | `mm_constraints` | MM budget constraints active this batch |
 | `market_groups` | market group definitions (for complete-set logic) |

@@ -1,6 +1,7 @@
 "use client";
 
 import type React from "react";
+import { formatShareUnits } from "@/lib/account/quantity";
 import type { DegenSide } from "@/lib/degen";
 import type { DegenPhase } from "@/lib/degen/track";
 
@@ -46,8 +47,7 @@ export function DegenProgress(props: DegenProgressProps) {
           />
         </div>
         <div style={monoStyle}>
-          {props.filledQty.toString()} / {props.targetQty.toString()} shares
-          bought
+          {formatShareUnits(props.filledQty)} / {formatShareUnits(props.targetQty)} shares bought
         </div>
         {props.onCancel && (
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>

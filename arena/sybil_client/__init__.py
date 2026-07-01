@@ -9,6 +9,7 @@ from .types import (
     BuyYes,
     Fill,
     Market,
+    SHARE_SCALE,
     OrderSpec,
     PendingOrder,
     Portfolio,
@@ -19,6 +20,8 @@ from .types import (
     SellNo,
     SellYes,
     TimeInForce,
+    quantity_units_to_shares,
+    shares_to_quantity_units,
 )
 
 __all__ = [
@@ -30,6 +33,7 @@ __all__ = [
     "BuyYes",
     "Fill",
     "Market",
+    "SHARE_SCALE",
     "OrderSpec",
     "PendingOrder",
     "Portfolio",
@@ -40,4 +44,6 @@ __all__ = [
     "SellNo",
     "SellYes",
     "TimeInForce",
+    "quantity_units_to_shares",
+    "shares_to_quantity_units",
 ]

@@ -11,6 +11,23 @@ use sybil_api_types::*;
 
 /// Default variance prior for markets with insufficient price history.
 const DEFAULT_VARIANCE: f64 = 0.0005;
+const SHARE_SCALE: f64 = 1_000.0;
+const SHARE_SCALE_I64: i64 = 1_000;
+
+fn shares_to_qty_units(shares: f64) -> u64 {
+    if !shares.is_finite() || shares <= 0.0 {
+        return 0;
+    }
+    (shares * SHARE_SCALE).floor().max(1.0) as u64
+}
+
+fn whole_shares_to_qty_units(shares: i64) -> i64 {
+    shares.saturating_mul(SHARE_SCALE_I64)
+}
+
+fn qty_units_to_shares(qty_units: i64) -> f64 {
+    qty_units as f64 / SHARE_SCALE
+}
 
 // --------------------------------------------------------------------------- //
 // Messages
@@ -73,9 +90,9 @@ impl MarketState {
         }
     }
 
-    /// Net inventory: positive = long YES, negative = long NO.
+    /// Net inventory in full-share units: positive = long YES, negative = long NO.
     fn net_inventory(&self) -> f64 {
-        (self.yes_position - self.no_position) as f64
+        qty_units_to_shares(self.yes_position - self.no_position)
     }
 
     fn push_price(&mut self, mid: f64) {
@@ -103,8 +120,8 @@ impl MarketState {
 
     /// Dollar exposure for this market given a reference mid price.
     fn exposure(&self, mid: f64) -> f64 {
-        let yes_val = self.yes_position as f64 * mid;
-        let no_val = self.no_position as f64 * (1.0 - mid);
+        let yes_val = qty_units_to_shares(self.yes_position) * mid;
+        let no_val = qty_units_to_shares(self.no_position) * (1.0 - mid);
         yes_val.abs() + no_val.abs()
     }
 }
@@ -152,6 +169,7 @@ pub struct QuoteConfig {
     pub gamma: f64,
     pub base_spread: f64,
     pub min_spread: f64,
+    /// Position cap in full shares, not protocol share-units.
     pub max_position: i64,
     pub quote_size_dollars: f64,
 }
@@ -170,8 +188,9 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
         vol_spread.clamp(config.min_spread, (edge_room - 0.01).max(config.min_spread));
 
     // Position limits
-    let at_yes_limit = input.yes_position >= config.max_position;
-    let at_no_limit = input.no_position >= config.max_position;
+    let max_position_units = whole_shares_to_qty_units(config.max_position);
+    let at_yes_limit = input.yes_position >= max_position_units;
+    let at_no_limit = input.no_position >= max_position_units;
 
     // Inventory-adjusted sizing
     let inv_ratio = (input.net_inventory.abs() / config.max_position as f64).min(1.0);
@@ -186,13 +205,13 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
         orders.push(OrderSpec::BuyYes {
             market_id: input.market_id,
             limit_price_nanos: (yes_bid * NANOS_PER_DOLLAR as f64) as u64,
-            quantity: (buy_size / yes_bid).max(1.0) as u64,
+            quantity: shares_to_qty_units(buy_size / yes_bid),
         });
     }
 
     if input.yes_position > 0 && yes_ask > 0.01 && yes_ask < 0.99 {
         let max_sell = input.yes_position as u64;
-        let desired = (sell_size / yes_ask).max(1.0) as u64;
+        let desired = shares_to_qty_units(sell_size / yes_ask);
         orders.push(OrderSpec::SellYes {
             market_id: input.market_id,
             limit_price_nanos: (yes_ask * NANOS_PER_DOLLAR as f64) as u64,
@@ -213,13 +232,13 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
         orders.push(OrderSpec::BuyNo {
             market_id: input.market_id,
             limit_price_nanos: (no_bid * NANOS_PER_DOLLAR as f64) as u64,
-            quantity: (buy_size / no_bid).max(1.0) as u64,
+            quantity: shares_to_qty_units(buy_size / no_bid),
         });
     }
 
     if input.no_position > 0 && no_ask > 0.01 && no_ask < 0.99 {
         let max_sell = input.no_position as u64;
-        let desired = (sell_size / no_ask).max(1.0) as u64;
+        let desired = shares_to_qty_units(sell_size / no_ask);
         orders.push(OrderSpec::SellNo {
             market_id: input.market_id,
             limit_price_nanos: (no_ask * NANOS_PER_DOLLAR as f64) as u64,
@@ -702,6 +721,10 @@ mod tests {
         }
     }
 
+    fn q(shares: i64) -> i64 {
+        whole_shares_to_qty_units(shares)
+    }
+
     #[test]
     fn symmetric_quotes_at_midpoint() {
         let orders = generate_quotes(&default_input(0.5), &default_config());
@@ -732,7 +755,7 @@ mod tests {
         // Long YES → reservation price below mid → tighter YES bid, wider YES ask
         let mut long_yes = default_input(0.5);
         long_yes.net_inventory = 1000.0;
-        long_yes.yes_position = 1000;
+        long_yes.yes_position = q(1000);
         let orders = generate_quotes(&long_yes, &config);
 
         let yes_bid = orders.iter().find_map(|o| match o {
@@ -750,7 +773,7 @@ mod tests {
     fn at_position_limit_no_buy() {
         let config = default_config();
         let mut input = default_input(0.5);
-        input.yes_position = 5000; // at max_position
+        input.yes_position = q(5000); // at max_position
         let orders = generate_quotes(&input, &config);
         // At YES limit → no BuyYes
         assert!(!orders.iter().any(|o| matches!(o, OrderSpec::BuyYes { .. })));
@@ -769,8 +792,8 @@ mod tests {
     fn sell_only_when_holding_position() {
         let config = default_config();
         let mut input = default_input(0.5);
-        input.yes_position = 100;
-        input.no_position = 50;
+        input.yes_position = q(100);
+        input.no_position = q(50);
         let orders = generate_quotes(&input, &config);
         // Should have SellYes (holding YES) and SellNo (holding NO, standalone)
         assert!(orders
@@ -783,14 +806,14 @@ mod tests {
     fn sell_quantity_capped_to_position() {
         let config = default_config();
         let mut input = default_input(0.5);
-        input.yes_position = 3; // very small position
+        input.yes_position = q(3); // very small position
         let orders = generate_quotes(&input, &config);
         let sell_qty = orders.iter().find_map(|o| match o {
             OrderSpec::SellYes { quantity, .. } => Some(*quantity),
             _ => None,
         });
         assert!(sell_qty.is_some());
-        assert!(sell_qty.unwrap() <= 3);
+        assert!(sell_qty.unwrap() <= q(3) as u64);
     }
 
     #[test]

@@ -56,6 +56,75 @@ pub struct PriceHistoryPage {
     pub retention_min_height: Option<u64>,
 }
 
+/// Downsampled committed-batch price history for one market and resolution.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PriceCandle {
+    pub bucket_start_ms: u64,
+    pub bucket_end_ms: u64,
+    pub first_height: u64,
+    pub last_height: u64,
+    pub open_yes_price: Nanos,
+    pub high_yes_price: Nanos,
+    pub low_yes_price: Nanos,
+    pub close_yes_price: Nanos,
+    pub open_no_price: Nanos,
+    pub high_no_price: Nanos,
+    pub low_no_price: Nanos,
+    pub close_no_price: Nanos,
+    pub volume_nanos: u64,
+    pub point_count: u64,
+}
+
+impl PriceCandle {
+    pub fn from_point(resolution_secs: u32, point: &PricePoint) -> Self {
+        let resolution_ms = u64::from(resolution_secs.max(1)).saturating_mul(1000);
+        let bucket_start_ms = point.timestamp_ms - (point.timestamp_ms % resolution_ms);
+        Self {
+            bucket_start_ms,
+            bucket_end_ms: bucket_start_ms.saturating_add(resolution_ms),
+            first_height: point.height,
+            last_height: point.height,
+            open_yes_price: point.yes_price,
+            high_yes_price: point.yes_price,
+            low_yes_price: point.yes_price,
+            close_yes_price: point.yes_price,
+            open_no_price: point.no_price,
+            high_no_price: point.no_price,
+            low_no_price: point.no_price,
+            close_no_price: point.no_price,
+            volume_nanos: point.volume_nanos,
+            point_count: 1,
+        }
+    }
+
+    pub fn merge_point(&mut self, point: &PricePoint) {
+        if point.height < self.first_height {
+            self.first_height = point.height;
+            self.open_yes_price = point.yes_price;
+            self.open_no_price = point.no_price;
+        }
+        if point.height >= self.last_height {
+            self.last_height = point.height;
+            self.close_yes_price = point.yes_price;
+            self.close_no_price = point.no_price;
+        }
+        self.high_yes_price = self.high_yes_price.max(point.yes_price);
+        self.low_yes_price = self.low_yes_price.min(point.yes_price);
+        self.high_no_price = self.high_no_price.max(point.no_price);
+        self.low_no_price = self.low_no_price.min(point.no_price);
+        self.volume_nanos = self.volume_nanos.saturating_add(point.volume_nanos);
+        self.point_count = self.point_count.saturating_add(1);
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PriceCandlePage {
+    pub resolution_secs: u32,
+    pub candles: Vec<PriceCandle>,
+    pub next_before_ms: Option<u64>,
+    pub retention_min_bucket_ms: Option<u64>,
+}
+
 /// Record of a fill attributed to an account.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AccountFillRecord {

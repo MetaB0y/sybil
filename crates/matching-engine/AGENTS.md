@@ -27,7 +27,7 @@ Before modifying this crate, read these vault notes (`docs/architecture/`):
 | Type | Purpose |
 |------|---------|
 | `Nanos` (u64) | Monetary unit = 1 nanodollar. Max ~$18B with u64. |
-| `Qty` (u64) | Quantity in shares |
+| `Qty` (u64) | Fixed-point share-units (`SHARE_SCALE = 1000`) |
 | `MarketId` | Market identifier with sentinel `MarketId::NONE` |
 | `Order` | Unified payoff vector representation with limit price and quantity constraints |
 | `Fill` | Result of matching: order_id, fill_qty, fill_price |
@@ -55,8 +55,8 @@ Example: Spread "Buy A YES, Sell B YES" → payoffs `[0, -1, +1, 0]` over 4 stat
 ## MM Capital Calculation
 
 `MmSide` determines capital usage at clearing prices:
-- `BuyYes`/`SellNo`: capital = `price × qty`
-- `SellYes`/`BuyNo`: capital = `(NANOS - price) × qty`
+- `BuyYes`/`SellNo`: capital = `price × qty / SHARE_SCALE`
+- `SellYes`/`BuyNo`: capital = `(NANOS - price) × qty / SHARE_SCALE`
 
 ## Module Map
 

@@ -7,6 +7,8 @@
  * math. Fields that may arrive as strings on the wire are coerced via `n()`.
  */
 
+const SHARE_SCALE = 1_000;
+
 import type {
   DevMarket,
   DevMarketGroup,
@@ -319,7 +321,7 @@ export function positionRefValue(
         ? n(p.current_price_nanos) / 1e9
         : 0.5;
   const price = p.outcome === "YES" ? yes : 1 - yes;
-  return n(p.quantity) * price;
+  return (n(p.quantity) / SHARE_SCALE) * price;
 }
 
 interface OrderLike {

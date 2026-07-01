@@ -2,7 +2,9 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use matching_engine::{mark_yes_no, Fill, MarketId, Nanos, Order, NANOS_PER_DOLLAR};
+use matching_engine::{
+    mark_yes_no, notional_nanos, Fill, MarketId, Nanos, Order, NANOS_PER_DOLLAR,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::market_info::PricePoint;
@@ -235,7 +237,7 @@ impl PriceTracker {
             if fill.fill_qty == 0 {
                 continue;
             }
-            let vol = fill.fill_price.saturating_mul(fill.fill_qty);
+            let vol = notional_nanos(fill.fill_price, fill.fill_qty);
             platform_block_volume = platform_block_volume.saturating_add(vol);
             if let Some(order) = orders.get(&fill.order_id) {
                 for mid in order.active_markets() {
@@ -489,7 +491,13 @@ impl PriceTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matching_engine::{outcome_buy, Fill, MarketSet, NANOS_PER_DOLLAR};
+    use matching_engine::{
+        notional_nanos, outcome_buy, shares_to_qty, Fill, MarketSet, NANOS_PER_DOLLAR,
+    };
+
+    fn q(shares: u64) -> u64 {
+        shares_to_qty(shares)
+    }
 
     #[test]
     fn price_history_is_bounded_per_market() {
@@ -523,7 +531,7 @@ mod tests {
     fn single_market_setup() -> (MarketSet, MarketId, Order, HashMap<MarketId, Vec<Nanos>>) {
         let mut markets = MarketSet::new();
         let market = markets.add_binary("vol");
-        let order = outcome_buy(&markets, 1, market, 0, NANOS_PER_DOLLAR / 2, 4);
+        let order = outcome_buy(&markets, 1, market, 0, NANOS_PER_DOLLAR / 2, q(4));
         let mut clearing_prices = HashMap::new();
         clearing_prices.insert(market, vec![NANOS_PER_DOLLAR / 2, NANOS_PER_DOLLAR / 2]);
         (markets, market, order, clearing_prices)
@@ -539,8 +547,8 @@ mod tests {
 
         let mut tracker = PriceTracker::new();
         let price = NANOS_PER_DOLLAR / 2;
-        let qty = 4u64;
-        let per_block = price.saturating_mul(qty);
+        let qty = q(4);
+        let per_block = notional_nanos(price, qty);
 
         tracker.record_block(
             &[Fill::new(order.id, qty, price)],
@@ -580,8 +588,8 @@ mod tests {
 
         let mut tracker = PriceTracker::new();
         let price = NANOS_PER_DOLLAR / 2;
-        let qty = 4u64;
-        let per_block = price.saturating_mul(qty);
+        let qty = q(4);
+        let per_block = notional_nanos(price, qty);
 
         // Three blocks, one per hour.
         for h in 0..3u64 {
@@ -625,7 +633,7 @@ mod tests {
 
         let mut tracker = PriceTracker::new();
         let price = NANOS_PER_DOLLAR / 2;
-        let qty = 4u64;
+        let qty = q(4);
 
         // 30 blocks in 30 distinct hours.
         for h in 0..30u64 {
@@ -647,7 +655,7 @@ mod tests {
         // Platform running total covers ALL 30 blocks (cap doesn't affect it).
         assert_eq!(
             tracker.platform_volume_total(),
-            price.saturating_mul(qty).saturating_mul(30)
+            notional_nanos(price, qty).saturating_mul(30)
         );
     }
 
@@ -821,8 +829,8 @@ mod tests {
 
         let mut tracker = PriceTracker::new();
         let price = NANOS_PER_DOLLAR / 2;
-        let qty = 4u64;
-        let per_block = price.saturating_mul(qty);
+        let qty = q(4);
+        let per_block = notional_nanos(price, qty);
 
         for h in 0..3u64 {
             tracker.record_block(

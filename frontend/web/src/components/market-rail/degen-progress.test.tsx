@@ -6,8 +6,8 @@ const common = {
   side: "YES" as const,
   secondsLeft: 22,
   timeProgress01: 0.4,
-  filledQty: 12n,
-  targetQty: 20n,
+  filledQty: 12_000n,
+  targetQty: 20_000n,
   betUsd: 10,
   onBetAgain: () => {},
 };
@@ -26,7 +26,7 @@ describe("DegenProgress", () => {
 
   it("shows a filled result with the bet amount + side and a reset", () => {
     const html = renderToStaticMarkup(
-      <DegenProgress {...common} phase="filled" filledQty={20n} />,
+      <DegenProgress {...common} phase="filled" filledQty={20_000n} />,
     );
     expect(html).toMatch(/Successfully bet/i);
     expect(html).not.toMatch(/Congratulations/i);
@@ -37,7 +37,7 @@ describe("DegenProgress", () => {
 
   it("colours success green even on a NO bet, and a miss red", () => {
     const filledNo = renderToStaticMarkup(
-      <DegenProgress {...common} side="NO" phase="filled" filledQty={20n} />,
+      <DegenProgress {...common} side="NO" phase="filled" filledQty={20_000n} />,
     );
     expect(filledNo).toContain("var(--yes)");
     expect(filledNo).not.toContain("color:var(--no)");
@@ -108,7 +108,7 @@ describe("DegenProgress", () => {
       <DegenProgress
         {...common}
         phase="filled"
-        filledQty={20n}
+        filledQty={20_000n}
         onCancel={() => {}}
         canCancel
       />,

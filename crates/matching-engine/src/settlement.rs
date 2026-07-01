@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use crate::order::{Fill, Order};
-use crate::types::{MarketId, Nanos};
+use crate::types::{notional_nanos, signed_notional_nanos, MarketId, Nanos};
 
 /// Balance and position changes resulting from settling one fill.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,9 +28,9 @@ pub struct SettlementDelta {
 ///
 /// For a single binary market (the common case):
 /// - Positive payoff at outcome = BUY that outcome:
-///   `balance -= price * qty`, `position(outcome) += qty`
+///   `balance -= price * qty / SHARE_SCALE`, `position(outcome) += qty`
 /// - Negative payoff at outcome = SELL that outcome:
-///   `balance += price * qty`, `position(outcome) -= qty`
+///   `balance += price * qty / SHARE_SCALE`, `position(outcome) -= qty`
 ///
 /// For multi-market orders (bundles, spreads):
 /// - Debit balance by `price * qty`
@@ -52,28 +52,28 @@ pub fn compute_fill_settlement(order: &Order, fill: &Fill) -> Option<SettlementD
 
         if yes_payoff > 0 && no_payoff == 0 {
             // Buying YES
-            let cost = (fill.fill_price as i128 * fill.fill_qty as i128) as i64;
+            let cost = notional_nanos(fill.fill_price, fill.fill_qty) as i64;
             return Some(SettlementDelta {
                 balance_delta: -cost,
                 position_deltas: vec![(market, 0, fill.fill_qty as i64)],
             });
         } else if yes_payoff == 0 && no_payoff > 0 {
             // Buying NO
-            let cost = (fill.fill_price as i128 * fill.fill_qty as i128) as i64;
+            let cost = notional_nanos(fill.fill_price, fill.fill_qty) as i64;
             return Some(SettlementDelta {
                 balance_delta: -cost,
                 position_deltas: vec![(market, 1, fill.fill_qty as i64)],
             });
         } else if yes_payoff < 0 && no_payoff == 0 {
             // Selling YES
-            let revenue = (fill.fill_price as i128 * fill.fill_qty as i128) as i64;
+            let revenue = notional_nanos(fill.fill_price, fill.fill_qty) as i64;
             return Some(SettlementDelta {
                 balance_delta: revenue,
                 position_deltas: vec![(market, 0, -(fill.fill_qty as i64))],
             });
         } else if yes_payoff == 0 && no_payoff < 0 {
             // Selling NO
-            let revenue = (fill.fill_price as i128 * fill.fill_qty as i128) as i64;
+            let revenue = notional_nanos(fill.fill_price, fill.fill_qty) as i64;
             return Some(SettlementDelta {
                 balance_delta: revenue,
                 position_deltas: vec![(market, 1, -(fill.fill_qty as i64))],
@@ -94,7 +94,7 @@ fn compute_generic_settlement(
     num_states: usize,
 ) -> Option<SettlementDelta> {
     // Debit the cost
-    let cost = (fill.fill_price as i128 * fill.fill_qty as i128) as i64;
+    let cost = notional_nanos(fill.fill_price, fill.fill_qty) as i64;
     let mut position_deltas = Vec::new();
 
     if num_markets == 1 {
@@ -217,7 +217,7 @@ pub fn derive_minting(
                 market_id,
                 outcome: 0,
                 position_delta: -diff,
-                balance_delta: (yes_price as i128 * diff as i128) as i64,
+                balance_delta: signed_notional_nanos(yes_price, diff),
             });
         } else {
             // More NO than YES → MINT shorts NO, receives no_price revenue
@@ -229,7 +229,7 @@ pub fn derive_minting(
                 market_id,
                 outcome: 1,
                 position_delta: diff, // negative: MINT shorts NO
-                balance_delta: (no_price as i128 * diff.unsigned_abs() as i128) as i64,
+                balance_delta: notional_nanos(no_price, diff.unsigned_abs()) as i64,
             });
         }
     }
@@ -240,7 +240,7 @@ pub fn derive_minting(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{outcome_buy, outcome_sell, MarketSet, NANOS_PER_DOLLAR};
+    use crate::{outcome_buy, outcome_sell, shares_to_qty, MarketSet, NANOS_PER_DOLLAR};
 
     #[test]
     fn test_zero_qty_returns_none() {
@@ -255,48 +255,52 @@ mod tests {
     fn test_buy_yes() {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
-        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        let fill = Fill::new(1, 10, 500_000_000);
+        let qty = shares_to_qty(10);
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, qty);
+        let fill = Fill::new(1, qty, 500_000_000);
 
         let delta = compute_fill_settlement(&order, &fill).unwrap();
         assert_eq!(delta.balance_delta, -(500_000_000i64 * 10));
-        assert_eq!(delta.position_deltas, vec![(m0, 0, 10)]);
+        assert_eq!(delta.position_deltas, vec![(m0, 0, qty as i64)]);
     }
 
     #[test]
     fn test_buy_no() {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
-        let order = outcome_buy(&markets, 1, m0, 1, 300_000_000, 5);
-        let fill = Fill::new(1, 5, 300_000_000);
+        let qty = shares_to_qty(5);
+        let order = outcome_buy(&markets, 1, m0, 1, 300_000_000, qty);
+        let fill = Fill::new(1, qty, 300_000_000);
 
         let delta = compute_fill_settlement(&order, &fill).unwrap();
         assert_eq!(delta.balance_delta, -(300_000_000i64 * 5));
-        assert_eq!(delta.position_deltas, vec![(m0, 1, 5)]);
+        assert_eq!(delta.position_deltas, vec![(m0, 1, qty as i64)]);
     }
 
     #[test]
     fn test_sell_yes() {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
-        let order = outcome_sell(&markets, 2, m0, 0, 500_000_000, 5);
-        let fill = Fill::new(2, 5, 500_000_000);
+        let qty = shares_to_qty(5);
+        let order = outcome_sell(&markets, 2, m0, 0, 500_000_000, qty);
+        let fill = Fill::new(2, qty, 500_000_000);
 
         let delta = compute_fill_settlement(&order, &fill).unwrap();
         assert_eq!(delta.balance_delta, 500_000_000i64 * 5);
-        assert_eq!(delta.position_deltas, vec![(m0, 0, -5)]);
+        assert_eq!(delta.position_deltas, vec![(m0, 0, -(qty as i64))]);
     }
 
     #[test]
     fn test_sell_no() {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
-        let order = outcome_sell(&markets, 3, m0, 1, 400_000_000, 3);
-        let fill = Fill::new(3, 3, 400_000_000);
+        let qty = shares_to_qty(3);
+        let order = outcome_sell(&markets, 3, m0, 1, 400_000_000, qty);
+        let fill = Fill::new(3, qty, 400_000_000);
 
         let delta = compute_fill_settlement(&order, &fill).unwrap();
         assert_eq!(delta.balance_delta, 400_000_000i64 * 3);
-        assert_eq!(delta.position_deltas, vec![(m0, 1, -3)]);
+        assert_eq!(delta.position_deltas, vec![(m0, 1, -(qty as i64))]);
     }
 
     #[test]
@@ -304,24 +308,25 @@ mod tests {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("A");
         let m1 = markets.add_binary("B");
-        let order = crate::bundle_yes(&markets, 10, &[m0, m1], 250_000_000, 4);
-        let fill = Fill::new(10, 4, 250_000_000);
+        let qty = shares_to_qty(4);
+        let order = crate::bundle_yes(&markets, 10, &[m0, m1], 250_000_000, qty);
+        let fill = Fill::new(10, qty, 250_000_000);
 
         let delta = compute_fill_settlement(&order, &fill).unwrap();
         // Cost: 0.25 * 4 = 1.0
         assert_eq!(delta.balance_delta, -(250_000_000i64 * 4));
         // Bundle YES: payoffs[0]=1 (both YES), payoffs[1..3]=0
         // Each market gets +1 YES position per fill unit
-        // m0: yes_sum=1, yes_count=2, delta = 1*4/2 = 2
-        // m1: yes_sum=1, yes_count=2, delta = 1*4/2 = 2
+        // m0: yes_sum=1, yes_count=2, delta = 1*4000/2 = 2000 units
+        // m1: yes_sum=1, yes_count=2, delta = 1*4000/2 = 2000 units
         assert!(delta
             .position_deltas
             .iter()
-            .any(|&(m, o, q)| m == m0 && o == 0 && q == 2));
+            .any(|&(m, o, q)| m == m0 && o == 0 && q == shares_to_qty(2) as i64));
         assert!(delta
             .position_deltas
             .iter()
-            .any(|&(m, o, q)| m == m1 && o == 0 && q == 2));
+            .any(|&(m, o, q)| m == m1 && o == 0 && q == shares_to_qty(2) as i64));
     }
 
     #[test]
@@ -351,8 +356,8 @@ mod tests {
             .position_deltas
             .iter()
             .any(|&(m, o, q)| m == m1 && o == 0 && q == 1));
-        // Cost is still exact (no truncation in balance)
-        assert_eq!(delta.balance_delta, -(250_000_000i64 * 3));
+        // Cost is scaled by SHARE_SCALE: 0.003 shares at $0.25 = 750,000 nanos.
+        assert_eq!(delta.balance_delta, -750_000);
     }
 
     #[test]
@@ -380,7 +385,7 @@ mod tests {
     #[test]
     fn test_minting_no_imbalance() {
         let m0 = MarketId(0);
-        let totals = vec![(m0, 100, 100)];
+        let totals = vec![(m0, shares_to_qty(100) as i64, shares_to_qty(100) as i64)];
         let prices = HashMap::new();
         assert!(derive_minting(&totals, &prices).is_empty());
     }
@@ -388,7 +393,7 @@ mod tests {
     #[test]
     fn test_minting_yes_surplus() {
         let m0 = MarketId(0);
-        let totals = vec![(m0, 150, 100)]; // 50 more YES than NO
+        let totals = vec![(m0, shares_to_qty(150) as i64, shares_to_qty(100) as i64)]; // 50 more YES than NO
         let mut prices = HashMap::new();
         prices.insert(m0, vec![400_000_000, 600_000_000]); // 0.40 / 0.60
 
@@ -396,21 +401,21 @@ mod tests {
         assert_eq!(adj.len(), 1);
         assert_eq!(adj[0].market_id, m0);
         assert_eq!(adj[0].outcome, 0); // shorts YES
-        assert_eq!(adj[0].position_delta, -50);
+        assert_eq!(adj[0].position_delta, -(shares_to_qty(50) as i64));
         assert_eq!(adj[0].balance_delta, 400_000_000i64 * 50); // yes_price * qty
     }
 
     #[test]
     fn test_minting_no_surplus() {
         let m0 = MarketId(0);
-        let totals = vec![(m0, 100, 180)]; // 80 more NO than YES
+        let totals = vec![(m0, shares_to_qty(100) as i64, shares_to_qty(180) as i64)]; // 80 more NO than YES
         let mut prices = HashMap::new();
         prices.insert(m0, vec![700_000_000, 300_000_000]);
 
         let adj = derive_minting(&totals, &prices);
         assert_eq!(adj.len(), 1);
         assert_eq!(adj[0].outcome, 1); // shorts NO
-        assert_eq!(adj[0].position_delta, -80); // total_yes - total_no = -80
+        assert_eq!(adj[0].position_delta, -(shares_to_qty(80) as i64)); // total_yes - total_no = -80
         assert_eq!(adj[0].balance_delta, 300_000_000i64 * 80); // no_price * |diff|
     }
 

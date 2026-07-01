@@ -639,12 +639,118 @@ pub async fn get_price_history(
     Ok(Json(response))
 }
 
+/// GET /v1/markets/{id}/prices/candles
+#[utoipa::path(
+    get,
+    path = "/v1/markets/{id}/prices/candles",
+    params(
+        ("id" = u32, Path, description = "Market ID"),
+        ("resolution" = String, Query, description = "Candle resolution: seconds or one of 1m, 5m, 1h"),
+        ("from_ms" = Option<u64>, Query, description = "Start bucket timestamp filter"),
+        ("to_ms" = Option<u64>, Query, description = "End bucket timestamp filter"),
+        ("before_ms" = Option<u64>, Query, description = "Return candles with bucket_start_ms strictly below this cursor"),
+        ("limit" = Option<usize>, Query, description = "Maximum returned candles, clamped server-side"),
+    ),
+    responses(
+        (status = 200, description = "Price candles", body = PriceCandlesResponse)
+    )
+)]
+pub async fn get_price_candles(
+    State(state): State<AppState>,
+    Path(id): Path<u32>,
+    Query(params): Query<PriceCandlesParams>,
+) -> Result<Json<PriceCandlesResponse>, AppError> {
+    let mid = MarketId::new(id);
+    let resolution_secs = parse_candle_resolution(&params.resolution)?;
+    let limit = params
+        .limit
+        .unwrap_or(DEFAULT_PRICE_HISTORY_QUERY_POINTS)
+        .min(MAX_PRICE_HISTORY_QUERY_POINTS);
+    let page = state
+        .sequencer
+        .get_price_candles(
+            mid,
+            resolution_secs,
+            params.from_ms,
+            params.to_ms,
+            params.before_ms,
+            limit,
+        )
+        .await?;
+
+    Ok(Json(PriceCandlesResponse {
+        market_id: id,
+        resolution_secs: page.resolution_secs,
+        next_before_ms: page.next_before_ms,
+        retention_min_bucket_ms: page.retention_min_bucket_ms,
+        candles: page
+            .candles
+            .into_iter()
+            .map(|c| PriceCandleResponse {
+                bucket_start_ms: c.bucket_start_ms,
+                bucket_end_ms: c.bucket_end_ms,
+                first_height: c.first_height,
+                last_height: c.last_height,
+                open_yes_price_nanos: c.open_yes_price,
+                high_yes_price_nanos: c.high_yes_price,
+                low_yes_price_nanos: c.low_yes_price,
+                close_yes_price_nanos: c.close_yes_price,
+                open_no_price_nanos: c.open_no_price,
+                high_no_price_nanos: c.high_no_price,
+                low_no_price_nanos: c.low_no_price,
+                close_no_price_nanos: c.close_no_price,
+                volume_nanos: c.volume_nanos,
+                point_count: c.point_count,
+            })
+            .collect(),
+    }))
+}
+
 #[derive(Debug, serde::Deserialize)]
 pub struct PriceHistoryParams {
     pub from_ms: Option<u64>,
     pub to_ms: Option<u64>,
     pub before_height: Option<u64>,
     pub limit: Option<usize>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct PriceCandlesParams {
+    pub resolution: String,
+    pub from_ms: Option<u64>,
+    pub to_ms: Option<u64>,
+    pub before_ms: Option<u64>,
+    pub limit: Option<usize>,
+}
+
+fn parse_candle_resolution(input: &str) -> Result<u32, AppError> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::bad_request("resolution is required"));
+    }
+    if let Some(minutes) = trimmed.strip_suffix('m') {
+        let value = minutes
+            .parse::<u32>()
+            .map_err(|_| AppError::bad_request("invalid candle resolution"))?;
+        return value
+            .checked_mul(60)
+            .filter(|seconds| *seconds > 0)
+            .ok_or_else(|| AppError::bad_request("invalid candle resolution"));
+    }
+    if let Some(hours) = trimmed.strip_suffix('h') {
+        let value = hours
+            .parse::<u32>()
+            .map_err(|_| AppError::bad_request("invalid candle resolution"))?;
+        return value
+            .checked_mul(3_600)
+            .filter(|seconds| *seconds > 0)
+            .ok_or_else(|| AppError::bad_request("invalid candle resolution"));
+    }
+    trimmed
+        .parse::<u32>()
+        .ok()
+        .filter(|seconds| *seconds > 0)
+        .ok_or_else(|| AppError::bad_request("invalid candle resolution"))
 }
 
 /// GET /v1/markets/search
