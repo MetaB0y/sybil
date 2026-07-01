@@ -36,6 +36,7 @@ RUN for crate in matching-engine matching-solver matching-scenarios matching-sim
         mkdir -p crates/$crate/src && echo "" > crates/$crate/src/lib.rs; \
     done && \
     mkdir -p crates/sybil-api/src && echo "fn main() {}" > crates/sybil-api/src/main.rs && \
+    mkdir -p crates/sybil-api/src/bin && echo "fn main() {}" > crates/sybil-api/src/bin/sybil_admin.rs && \
     mkdir -p crates/sybil-prover/src && echo "fn main() {}" > crates/sybil-prover/src/main.rs && \
     mkdir -p crates/sybil-witgen-cli/src && echo "fn main() {}" > crates/sybil-witgen-cli/src/main.rs && \
     mkdir -p crates/matching-sim/src && echo "fn main() {}" > crates/matching-sim/src/main.rs && \
