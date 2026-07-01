@@ -26,6 +26,7 @@ COPY crates/sybil-oracle/Cargo.toml crates/sybil-oracle/
 COPY crates/sybil-verifier/Cargo.toml crates/sybil-verifier/
 COPY crates/sybil-zk/Cargo.toml crates/sybil-zk/
 COPY crates/sybil-witgen/Cargo.toml crates/sybil-witgen/
+COPY crates/sybil-witgen-cli/Cargo.toml crates/sybil-witgen-cli/
 COPY crates/sybil-prover/Cargo.toml crates/sybil-prover/
 COPY crates/sybil-canonical/Cargo.toml crates/sybil-canonical/
 COPY crates/sybil-polymarket/Cargo.toml crates/sybil-polymarket/
@@ -36,12 +37,13 @@ RUN for crate in matching-engine matching-solver matching-scenarios matching-sim
     done && \
     mkdir -p crates/sybil-api/src && echo "fn main() {}" > crates/sybil-api/src/main.rs && \
     mkdir -p crates/sybil-prover/src && echo "fn main() {}" > crates/sybil-prover/src/main.rs && \
+    mkdir -p crates/sybil-witgen-cli/src && echo "fn main() {}" > crates/sybil-witgen-cli/src/main.rs && \
     mkdir -p crates/matching-sim/src && echo "fn main() {}" > crates/matching-sim/src/main.rs && \
     mkdir -p crates/matching-sequencer/src/bin && echo "fn main() {}" > crates/matching-sequencer/src/bin/sybil_sim.rs && \
     mkdir -p crates/sybil-polymarket/src && echo "fn main() {}" > crates/sybil-polymarket/src/main.rs
 
 # Build dependencies only (cached layer)
-RUN cargo build --release -p sybil-api -p sybil-polymarket -p sybil-prover 2>/dev/null || true
+RUN cargo build --release -p sybil-api -p sybil-polymarket -p sybil-prover
 
 # Copy actual source code
 COPY crates/ crates/
