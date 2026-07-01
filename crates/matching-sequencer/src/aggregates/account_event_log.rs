@@ -247,6 +247,25 @@ impl AccountEventLog {
         &self.pending
     }
 
+    pub fn query_pending(
+        &self,
+        account_id: AccountId,
+        before: Option<(u64, u64)>,
+        category: Option<&str>,
+    ) -> Vec<HistoryEvent> {
+        self.pending
+            .iter()
+            .rev()
+            .filter(|e| e.account_id == account_id)
+            .filter(|e| match before {
+                Some((b, s)) => (e.block_height, e.seq) < (b, s),
+                None => true,
+            })
+            .filter(|e| category.is_none_or(|c| e.kind.category() == c))
+            .cloned()
+            .collect()
+    }
+
     pub fn clear_pending(&mut self) {
         self.pending.clear();
     }

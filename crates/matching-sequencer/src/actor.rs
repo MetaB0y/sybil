@@ -1142,9 +1142,15 @@ impl SequencerActorState {
         &mut self,
         initial_balance: i64,
     ) -> Result<Account, SequencerError> {
-        self.persist_control_plane(&ControlPlaneCommand::CreateAccount { initial_balance })
-            .await?;
-        let account_id = self.sequencer.create_account(initial_balance);
+        let timestamp_ms = current_timestamp_ms();
+        self.persist_control_plane(&ControlPlaneCommand::CreateAccountAt {
+            initial_balance,
+            timestamp_ms,
+        })
+        .await?;
+        let account_id = self
+            .sequencer
+            .create_account_at(initial_balance, timestamp_ms);
         Ok(self
             .sequencer
             .accounts
@@ -1721,17 +1727,32 @@ impl Actor for SequencerActor {
             }
             SequencerMsg::GetAccountEvents(account_id, limit, before, category, reply) => {
                 let result = match &state.store {
-                    Some(store) => store
-                        .account_events(account_id, limit, before, category.clone())
-                        .unwrap_or_else(|e| {
-                            tracing::warn!(error = %e, account_id = account_id.0, "account_events read failed; falling back to memory");
-                            state.sequencer.account_history(
-                                account_id,
-                                limit,
-                                before,
-                                category.as_deref(),
-                            )
-                        }),
+                    Some(store) => {
+                        match store.account_events(account_id, limit, before, category.clone()) {
+                            Ok(mut events) => {
+                                events.extend(state.sequencer.pending_account_history(
+                                    account_id,
+                                    before,
+                                    category.as_deref(),
+                                ));
+                                events.sort_by(|a, b| {
+                                    (b.block_height, b.seq).cmp(&(a.block_height, a.seq))
+                                });
+                                events.dedup_by_key(|e| (e.account_id.0, e.block_height, e.seq));
+                                events.truncate(limit);
+                                events
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, account_id = account_id.0, "account_events read failed; falling back to memory");
+                                state.sequencer.account_history(
+                                    account_id,
+                                    limit,
+                                    before,
+                                    category.as_deref(),
+                                )
+                            }
+                        }
+                    }
                     None => state.sequencer.account_history(
                         account_id,
                         limit,
@@ -3105,6 +3126,21 @@ mod tests {
             let restored_seq =
                 BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
             assert_replayed(&restored_seq);
+            let created_history =
+                restored_seq.pending_account_history(created.id, None, Some("funding"));
+            assert!(
+                created_history
+                    .iter()
+                    .any(|event| matches!(event.kind, crate::aggregates::HistoryKind::Created)),
+                "restart round {restart_round} should expose pending account creation history"
+            );
+            let funding_history = restored_seq.pending_account_history(aid, None, Some("funding"));
+            assert!(
+                funding_history
+                    .iter()
+                    .any(|event| matches!(event.kind, crate::aggregates::HistoryKind::Deposit)),
+                "restart round {restart_round} should expose pending deposit history"
+            );
 
             let mut probe = restored_seq.clone();
             let probe_block = probe

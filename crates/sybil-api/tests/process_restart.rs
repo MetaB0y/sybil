@@ -225,6 +225,33 @@ async fn get_json(client: &reqwest::Client, base_url: &str, path: &str) -> Value
     serde_json::from_str(&text).expect("GET response is JSON")
 }
 
+fn assert_funding_history_once(history: &Value) {
+    let events = history
+        .as_array()
+        .expect("funding history response is an array");
+    let created: Vec<_> = events
+        .iter()
+        .filter(|event| event["type"].as_str() == Some("created"))
+        .collect();
+    assert_eq!(
+        created.len(),
+        1,
+        "account creation history must appear once; history={history}"
+    );
+    assert_eq!(created[0]["amount_nanos"].as_i64(), Some(1_000));
+
+    let deposits: Vec<_> = events
+        .iter()
+        .filter(|event| event["type"].as_str() == Some("deposit"))
+        .collect();
+    assert_eq!(
+        deposits.len(),
+        1,
+        "deposit history must appear once; history={history}"
+    );
+    assert_eq!(deposits[0]["amount_nanos"].as_i64(), Some(250));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_next_block() {
     let root = temp_root("process-restart");
@@ -365,6 +392,13 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     )
     .await;
     assert_eq!(restored_account["balance_nanos"].as_i64(), Some(1_250));
+    let restored_funding_history = get_json(
+        &client,
+        &reader.base_url,
+        &format!("/v1/accounts/{account_id}/events?category=funding&limit=10"),
+    )
+    .await;
+    assert_funding_history_once(&restored_funding_history);
 
     let restored_market = get_json(
         &client,
@@ -445,5 +479,17 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     assert_eq!(post_restart_pending.as_array().unwrap().len(), 1);
 
     reader.kill().await;
+    let committer = spawn_api(&data_dir, &admin_key_path, 50).await;
+    wait_for_height_at_least(&client, &committer.base_url, pre_write_height + 1).await;
+    pause_blocks(&client, &committer.base_url).await;
+    let committed_funding_history = get_json(
+        &client,
+        &committer.base_url,
+        &format!("/v1/accounts/{account_id}/events?category=funding&limit=10"),
+    )
+    .await;
+    assert_funding_history_once(&committed_funding_history);
+
+    committer.kill().await;
     let _ = std::fs::remove_dir_all(root);
 }

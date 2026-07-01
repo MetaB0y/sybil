@@ -347,6 +347,10 @@ pub enum ControlPlaneCommand {
     CreateAccount {
         initial_balance: i64,
     },
+    CreateAccountAt {
+        initial_balance: i64,
+        timestamp_ms: u64,
+    },
     FundAccount {
         account_id: AccountId,
         amount: i64,

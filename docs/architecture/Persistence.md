@@ -2,7 +2,7 @@
 tags: [infrastructure, storage]
 layer: sequencer
 status: current
-last_verified: 2026-06-30
+last_verified: 2026-07-01
 ---
 
 # Persistence
@@ -103,6 +103,13 @@ This is implemented with a small redb write-ahead table for acknowledged control
 
 This mirrors `admit_log` and `pending_bundles`: the block snapshot stays the primary checkpoint, while the log protects acknowledged writes between checkpoints. Commands must be deterministic under replay. Market and feed IDs are reallocated from the committed `next_*` counters in the same WAL order; timestamp-bearing commands carry the acknowledged timestamp so sidecar history does not depend on restart time.
 
+For account creation and dev-mode funding, the sequencer stages account-history
+rows at the same time as the pending system event, using the next block height
+that will commit the event. Account-history reads merge durable `history_events`
+rows with the in-memory pending rows, so an acknowledged create/fund remains
+visible immediately after a pre-block restart and is still persisted exactly
+once when the next block commits.
+
 Implemented today:
 
 - Account creation
@@ -199,6 +206,7 @@ This is the whole reason the commit fence lives in redb.
 - Direct-admit recovery log and deferred submissions admitted after the last committed block
 - Control-plane recovery log for acknowledged account, market, resolution, cancellation, feed, and template mutations admitted after the last committed block
 - Fill history
+- Account event history, including pending acknowledged account creation and funding replayed before the next block
 
 **Lost on crash:**
 

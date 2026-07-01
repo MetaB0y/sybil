@@ -759,6 +759,13 @@ impl BlockSequencer {
                 self.create_account(initial_balance);
                 Ok(())
             }
+            ControlPlaneCommand::CreateAccountAt {
+                initial_balance,
+                timestamp_ms,
+            } => {
+                self.create_account_at(initial_balance, timestamp_ms);
+                Ok(())
+            }
             ControlPlaneCommand::FundAccount {
                 account_id,
                 amount,
@@ -1130,6 +1137,16 @@ impl BlockSequencer {
         self.analytics.record_history(event);
     }
 
+    pub fn pending_account_history(
+        &self,
+        account_id: AccountId,
+        before: Option<(u64, u64)>,
+        category: Option<&str>,
+    ) -> Vec<crate::aggregates::HistoryEvent> {
+        self.analytics
+            .pending_account_history(account_id, before, category)
+    }
+
     pub fn account_history(
         &self,
         account_id: AccountId,
@@ -1199,12 +1216,27 @@ impl BlockSequencer {
     }
 
     pub fn create_account(&mut self, initial_balance: i64) -> AccountId {
+        self.create_account_at(initial_balance, current_timestamp_ms())
+    }
+
+    pub fn create_account_at(&mut self, initial_balance: i64, timestamp_ms: u64) -> AccountId {
         let account_id = self.accounts.create_account(initial_balance);
         self.capture_missing_system_account(account_id);
         self.record_system_event(SystemEvent::CreateAccount {
             account_id,
             initial_balance,
         });
+        {
+            use crate::aggregates::{HistoryEvent, HistoryKind};
+            let mut e = HistoryEvent::new(
+                account_id,
+                HistoryKind::Created,
+                self.height.saturating_add(1),
+                timestamp_ms,
+            );
+            e.amount_nanos = Some(initial_balance);
+            self.analytics.record_history(e);
+        }
         account_id
     }
 
@@ -1235,6 +1267,17 @@ impl BlockSequencer {
         account.total_deposited += amount;
         let updated = account.clone();
         self.record_system_event(SystemEvent::Deposit { account_id, amount });
+        {
+            use crate::aggregates::{HistoryEvent, HistoryKind};
+            let mut e = HistoryEvent::new(
+                account_id,
+                HistoryKind::Deposit,
+                self.height.saturating_add(1),
+                timestamp_ms,
+            );
+            e.amount_nanos = Some(amount);
+            self.analytics.record_history(e);
+        }
         self.note_first_deposit_at(account_id, timestamp_ms);
         Ok(updated)
     }
@@ -2260,29 +2303,7 @@ impl BlockSequencer {
         for event in &system_events {
             use crate::aggregates::{HistoryEvent, HistoryKind};
             match event {
-                SystemEvent::CreateAccount {
-                    account_id,
-                    initial_balance,
-                } => {
-                    let mut e = HistoryEvent::new(
-                        *account_id,
-                        HistoryKind::Created,
-                        self.height,
-                        timestamp_ms,
-                    );
-                    e.amount_nanos = Some(*initial_balance);
-                    self.analytics.record_history(e);
-                }
-                SystemEvent::Deposit { account_id, amount } => {
-                    let mut e = HistoryEvent::new(
-                        *account_id,
-                        HistoryKind::Deposit,
-                        self.height,
-                        timestamp_ms,
-                    );
-                    e.amount_nanos = Some(*amount);
-                    self.analytics.record_history(e);
-                }
+                SystemEvent::CreateAccount { .. } | SystemEvent::Deposit { .. } => {}
                 SystemEvent::L1Deposit {
                     account_id, amount, ..
                 } => {

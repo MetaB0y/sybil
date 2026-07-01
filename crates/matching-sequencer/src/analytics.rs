@@ -401,6 +401,16 @@ impl AnalyticsState {
             .query(account_id, limit, before, category)
     }
 
+    pub fn pending_account_history(
+        &self,
+        account_id: AccountId,
+        before: Option<(u64, u64)>,
+        category: Option<&str>,
+    ) -> Vec<HistoryEvent> {
+        self.account_event_log
+            .query_pending(account_id, before, category)
+    }
+
     pub fn apply_resolution(
         &mut self,
         market_id: MarketId,
