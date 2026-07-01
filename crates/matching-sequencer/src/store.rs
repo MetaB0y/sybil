@@ -2222,6 +2222,114 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_store_recovery_treats_redb_fence_as_commit_point() {
+        let path = temp_db_path("store-redb-fence-commit-point");
+        let oracle = Arc::new(AdminOracle::new());
+        let lifecycle = MarketLifecycle::new(oracle);
+        let markets = MarketSet::new();
+        let env = TestEnv::new();
+
+        let mut accounts = AccountStore::new();
+        let account_id = accounts.create_account(100);
+        let (header_1, witness_1) =
+            coherent_header_and_witness(1, &accounts, &markets, &lifecycle, &env.bridge_state);
+
+        let mut accounts_after_uncommitted_qmdb = accounts.clone();
+        accounts_after_uncommitted_qmdb
+            .get_mut(account_id)
+            .unwrap()
+            .balance = 200;
+        let (header_2, witness_2) = coherent_header_and_witness(
+            2,
+            &accounts_after_uncommitted_qmdb,
+            &markets,
+            &lifecycle,
+            &env.bridge_state,
+        );
+
+        {
+            let store = Store::open(&path).unwrap();
+            store
+                .save_block_with_witness(
+                    env.snapshot(&accounts, &markets, &lifecycle, &header_1, 1, None, vec![]),
+                    &witness_1,
+                )
+                .await
+                .unwrap();
+
+            let committed_root = store.current_state_qmdb_root().await.unwrap().unwrap();
+            assert_eq!(committed_root.slot, AccountSnapshotSlot::A);
+            assert_eq!(committed_root.root, header_1.state_root);
+
+            // Simulate a crash after the inactive qMDB slot was written but
+            // before redb committed the fence flip for height 2.
+            store
+                .account_state_store
+                .persist(CommittedAccountState {
+                    accounts: &accounts_after_uncommitted_qmdb,
+                    state_sidecar: &witness_2.state_sidecar,
+                    height: header_2.height,
+                    next_account_id: accounts_after_uncommitted_qmdb.next_id(),
+                    slot: AccountSnapshotSlot::B,
+                })
+                .await
+                .unwrap();
+
+            let uncommitted_root = store.state_qmdb_root(AccountSnapshotSlot::B).await.unwrap();
+            assert_eq!(uncommitted_root.root, header_2.state_root);
+            let still_committed_root = store.current_state_qmdb_root().await.unwrap().unwrap();
+            assert_eq!(still_committed_root.slot, AccountSnapshotSlot::A);
+            assert_eq!(still_committed_root.root, header_1.state_root);
+        }
+
+        let reopened = Store::open(&path).unwrap();
+        let restored = reopened.load_state().await.unwrap().unwrap();
+        assert_eq!(restored.height, 1);
+        assert_eq!(restored.accounts.get(account_id).unwrap().balance, 100);
+        let restored_root = reopened.current_state_qmdb_root().await.unwrap().unwrap();
+        assert_eq!(restored_root.slot, AccountSnapshotSlot::A);
+        assert_eq!(restored_root.root, header_1.state_root);
+
+        // Once save_block completes its redb transaction, the same qMDB slot is
+        // authoritative after restart.
+        reopened
+            .save_block_with_witness(
+                env.snapshot(
+                    &accounts_after_uncommitted_qmdb,
+                    &markets,
+                    &lifecycle,
+                    &header_2,
+                    1,
+                    None,
+                    vec![],
+                ),
+                &witness_2,
+            )
+            .await
+            .unwrap();
+        drop(reopened);
+
+        let reopened_after_commit = Store::open(&path).unwrap();
+        let restored_after_commit = reopened_after_commit.load_state().await.unwrap().unwrap();
+        assert_eq!(restored_after_commit.height, 2);
+        assert_eq!(
+            restored_after_commit
+                .accounts
+                .get(account_id)
+                .unwrap()
+                .balance,
+            200
+        );
+        let committed_after_flip = reopened_after_commit
+            .current_state_qmdb_root()
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(committed_after_flip.slot, AccountSnapshotSlot::B);
+        assert_eq!(committed_after_flip.root, header_2.state_root);
+    }
+
+    #[tokio::test]
     async fn test_store_restores_history_event_next_seq() {
         use crate::aggregates::{HistoryEvent, HistoryKind, StoredHistoryEvent};
 
