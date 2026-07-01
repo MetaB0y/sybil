@@ -166,11 +166,14 @@ Persisted today:
 - **Raw price history**: per-market mark-price rows in `price_points`, keyed by
   `(market_id, height)`, used by `GET /v1/markets/{id}/prices/history` when a
   durable store is configured.
+- **Downsampled price candles**: per-market OHLCV rows in `price_candles`,
+  keyed by `(market_id, resolution_secs, bucket_start_ms)`, derived only from
+  committed post-seal price points.
 
-Still not persisted:
+Still not durable-served / retention-complete:
 
-- **Block summaries and paginated block-list history**
-- **Price-history retention metadata and downsampled candles**
+- **Paginated block-list, latest-block, and WS replay reads from `blocks_full`**
+- **Per-resolution candle retention metadata/pruning**
 - **Derived aggregates such as welfare summaries**
 
 The planned durable boundary for these views is [[Historical Data Serving]]. The in-memory caches should remain hot caches only; they should not be the source of truth for replay, charts, or restart behavior.
@@ -269,6 +272,8 @@ Persistence needs failure-injection tests at acknowledgement boundaries, not onl
 - Crash after qMDB slot write but before redb fence commit and verify recovery uses the previous fence.
 - Crash after redb fence commit and verify recovery uses the new fence.
 - Restart repeatedly while direct-admit orders and deferred bundles are queued and verify no accepted order disappears or double-reserves funds.
+
+The broader fixture ladder and restart-harness conventions live in [[Testing Strategy]].
 
 ## How to Add New Persisted State
 

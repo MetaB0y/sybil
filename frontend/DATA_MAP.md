@@ -187,32 +187,36 @@ out by design, or (c) one durable half + one volatile half.
 
 **Headline:** most of the data is safe in prod. Balances, positions, cost basis,
 **open _and_ closed/cancelled/expired/rejected orders**, fills, the equity curve,
-and the full account history all persist forever (durable redb tables, never
-trimmed). The genuine restart-loss is: **per-market price-history charts** (🔴 —
-the redb table is commented out), the **block-stream ring** (🟣 — only the last
-~100 blocks are queryable, lost on restart though chain height survives), and
-**raw Polymarket event JSON** (🔴 — the snapshot dir is wiped on every boot).
+the full account history, and per-market price history all persist across
+restart. The genuine restart-loss is now the **block-stream/list ring** (🟣 —
+only the last ~100 blocks are queryable/list-replayable after a restart, though
+chain height survives) and **raw Polymarket event JSON** (🔴 — the snapshot dir
+is wiped on every boot). Historical chart serving still needs retention/pruning
+policy so raw/candle tables do not grow forever.
 
 ### List 1 — Data that must be persisted (action list)
 
-Datapoints we've **decided must survive restart and not be lost**, but currently
-aren't. Two backend fixes cover the whole list:
+Datapoints we've **decided must survive restart and remain browseable**, but
+that still need backend work:
 
-1. **Price history** — re-enable the `PRICE_HISTORY` redb table: write the
-   per-block `PricePoint` delta in `save_block`, load it on restore (or serve
-   store-first like equity/fills).
-2. **Block history** — persist sealed batches to a new redb `BLOCKS` table and
-   serve `/v1/blocks*` from it (full per-batch detail + a retention knob).
+1. **Block history serving** — exact-height blocks are durable in `blocks_full`;
+   serve `/v1/blocks`, `/v1/blocks/latest`, and WS replay from that store instead
+   of only from the hot ring (with the existing retention knob).
    *Product decision: users should be able to browse all past batches, so the
    Activity page becomes a real block explorer and every batch-derived panel
    survives restart.*
+2. **Raw Polymarket event JSON** — stop wiping `event_snapshots` on boot, or
+   move snapshots into a durable table with explicit retention.
+3. **Price-history retention/pruning** — raw rows and candles are durable now;
+   add per-resolution retention so long-running prod does not retain every
+   price point forever.
 
 | Page | Data | Current issue | Backend location |
 |---|---|---|---|
-| Market detail (`/m/[id]`) | Price chart (incl. "ALL" range) | Lost on restart + trimmed to 2000 pts/market | `PriceTracker.price_history` (in-RAM); redb `PRICE_HISTORY` commented out — `store.rs:316` |
-| Home (`/`) | Card price sparkline + 24h delta | Lost on restart + trimmed to 2000 pts/market | same (`PriceTracker.price_history`) |
-| Portfolio (`/portfolio`) | Position 7d sparkline | Lost on restart + trimmed to 2000 pts/market | same (`PriceTracker.price_history`) |
-| Activity (`/activity`) | Batches table + per-batch detail | Lost on restart + can't browse older than ~100 batches | in-RAM `block_history` ring; redb keeps latest header only |
+| Market detail (`/m/[id]`) | Price chart (incl. "ALL" range) | Durable raw history + candles; retention/pruning still TODO | redb `price_points` + `price_candles`; bounded `PriceTracker.price_history` hot cache |
+| Home (`/`) | Card price sparkline + 24h delta | Durable raw history + candles; retention/pruning still TODO | same (`price_points` / `price_candles`) |
+| Portfolio (`/portfolio`) | Position 7d sparkline | Durable raw history + candles; retention/pruning still TODO | same (`price_points` / `price_candles`) |
+| Activity (`/activity`) | Batches table + per-batch detail | Recent list/WS replay is still ring-limited; exact-height fallback is durable | in-RAM `block_history` ring + redb `blocks_full`; list/replay store adapter still TODO |
 | Market detail dev (`/m-dev/[id]`) | Recent batches panel | Lost on restart + only last ~100 batches | same (`block_history` ring) |
 | Dev › Blocks | Chain blocks list + block detail | Lost on restart + only last ~100 batches | same (`block_history` ring) |
 | Dev › Overview | Recent volume/fills/orders window + bar chart | Lost on restart + only last ~100 batches | same (`block_history` ring) |
@@ -245,7 +249,7 @@ aren't. Two backend fixes cover the whole list:
 | Markets list: existence, `volume_nanos`, `trader_count` | `GET /v1/markets`, `/v1/markets/summary` | 🟢 Persistent | All cumulative/forever, snapshotted to redb every block + restored. `trader_count` = all-time **unbounded** HashSet (memory-growth vector, not a cap). The FE `RestartCaveatBadge` comments (markets.rs:31-48) are **stale**. |
 | Market groups | `GET /v1/markets/groups` (dev) | 🟢 Persistent | redb `MARKET_GROUPS`, written in the block sidecar + folded into `state_root`, restored at startup. (Distinct from the off-block `event_id` grouping the FE uses for cards.) |
 | Markets list: `volume_24h_nanos`, `liquidity_avg10_nanos` | `GET /v1/markets`, `/v1/markets/summary` | 🟣 Mixed | **Persistent across restart**, but inherently **rolling**: `volume_24h` = ≤25 hourly buckets; `liquidity_avg10` = last-10-block ring (and is actually a *sum*, not an avg). Ages out by design while running, not restart loss. |
-| Per-market price history (charts / sparklines) | `GET /v1/markets/{id}/prices/history` | 🟣 Mixed | **In-RAM only** (redb `PRICE_HISTORY` table is commented out, `store.rs:316`) → **restart-lost**: returns `[]` after restart and rebuilds one point per price-moving block. While-running cap = **2000 points/market**. `SYBIL_DATA_DIR` does NOT save this series. |
+| Per-market price history (charts / sparklines) | `GET /v1/markets/{id}/prices/history` · `GET /v1/markets/{id}/prices/candles` | 🟣 Mixed | **Persistent across restart**: raw price points are served store-first from redb `price_points`; downsampled OHLCV candles are stored in `price_candles`. The in-RAM `PriceTracker.price_history` cap (**2000 points/market**) is now only a hot cache / no-store fallback. Remaining issue: no per-resolution retention/pruning yet, so disk growth policy is still TODO. |
 
 ### Platform / activity-scoped
 
@@ -255,7 +259,7 @@ aren't. Two backend fixes cover the whole list:
 | Activity overview — last-24h | `GET /v1/activity/overview` (`last_24h.*`) | 🟣 Mixed | **Persistent across restart**, inherently **rolling** ≤25 hourly buckets/tracker (cap 25 each), summed over `[now-24h, now]`. Reads its own persisted buckets, not the block ring. |
 | Event trader count | `GET /v1/events/{id}/traders` | 🟢 Persistent | All-time **unbounded** union of per-market placer sets (the 25-bucket cap is only the 24h platform count); redb-backed + restored. Correct immediately after restart. |
 | Raw Polymarket event JSON | `GET /v1/events/{id}/raw` | 🔴 Restart-lost | Files on the persistent volume, but the `event_snapshots` dir is `remove_dir_all`'d + recreated on **every startup** (`main.rs:127-142`) → 404 for up to ~2 min until the mirror re-syncs (120s). No cap, ~zero cross-restart retention. |
-| Block stream / batches / heights | `GET /v1/blocks*`, `/v1/blocks/ws` | 🟣 Mixed | In-RAM ring, **cap 100** (~16.7 min @ 10s blocks), FIFO. **Restart-lost**: after restart `/v1/blocks=[]`, `/latest`+`/{height}` 404, WS replay fails until ~100 new blocks accrue. redb keeps only the latest header (hash-chaining, never served). Chain **height** IS preserved → the "Total batches" count resumes, does not zero out. (Project-memory "10 deep" note is stale; it's 100.) |
+| Block stream / batches / heights | `GET /v1/blocks*`, `/v1/blocks/ws` | 🟣 Mixed | Exact-height `GET /v1/blocks/{height}` falls back to durable redb `blocks_full` after ring eviction/restart. Still ring-only: `/v1/blocks` recent list, `/latest`, and WS replay. Ring cap = **100** (~16.7 min @ 10s blocks), FIFO. Chain **height** is persisted → "Total batches" resumes, does not zero out. |
 | Open-batch indicative snapshot | `GET /v1/markets/{id}/open-batch` (dev) | 🔴 Restart-lost | In-memory intra-block placer state; resets to the fresh open batch on restart. Loss is inherent (the in-flight, not-yet-sealed batch) — acceptable. |
 
 ### External
@@ -266,21 +270,19 @@ aren't. Two backend fixes cover the whole list:
 
 ### Backend fixes (prioritized to-improve list)
 
-1. **🔴 high — Persist the price-history chart series.** It's in-RAM only (the
-   `PRICE_HISTORY` redb table is commented out at `store.rs:316`), so charts
-   rebuild from zero on every restart — your explicit worry. Re-enable the table:
-   write the per-block `PricePoint` delta (insert-only, `market_id||height`) in
-   `save_block` and load it on restore (or serve store-first like equity/fills).
-   Converts 🟣 → 🟢.
-2. **🟣 high — Persist the block stream.** Only a 100-deep RAM ring exists; after
-   restart `/v1/blocks` is empty and WS replay fails for ~16.7 min. Add a redb
-   `BLOCKS` table keyed by height + a store fallback in
-   `GetBlock`/`GetRecentBlocks`/`GetLatestBlock` and the WS replay path. (Chain
-   height already survives and the ring self-heals in minutes, so below charts.)
-3. **🔴 medium — Stop wiping `event_snapshots` on startup.** `main.rs:127-142`
+1. **🟣 high — Serve block lists/replay from durable blocks.** Exact-height block
+   lookup already falls back to redb `blocks_full`, but `/v1/blocks`, `/latest`,
+   and WS replay still read only the 100-deep RAM ring. Add store-backed
+   `GetRecentBlocks`/`GetLatestBlock` and replay paths using the existing
+   retention metadata.
+2. **🔴 medium — Stop wiping `event_snapshots` on startup.** `main.rs:127-142`
    `remove_dir_all`s raw event JSON on every boot, causing ~2 min of 404s. Drop
    the wipe (keep ensure-exists) so files on the persistent volume survive, or
    shorten the mirror sync interval. Makes the raw-JSON half 🟢.
+3. **🟣 medium — Add price-history retention/pruning.** Raw price points and
+   candles now survive restart, but there is no policy for pruning raw rows or
+   keeping progressively coarser candle resolutions. Add a retention table/knob
+   before long-running prod history becomes unbounded.
 4. **🟢 medium — Verify the deployed fills binary.** `/fills` persistence assumes
    the prod binary has the store-first read (`actor.rs:1513-1531`); stale memory
    recorded `[]` in prod. Curl prod `/v1/accounts/{id}/fills` for an account with

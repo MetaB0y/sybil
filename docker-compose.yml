@@ -78,6 +78,7 @@ services:
 
   sybil-prover-worker:
     image: sybil-api:latest
+    profiles: ["prover-worker"]
     mem_limit: "256m"
     memswap_limit: "256m"
     entrypoint: ["sybil-prover"]

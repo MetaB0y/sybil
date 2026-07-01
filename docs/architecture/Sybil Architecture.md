@@ -85,6 +85,7 @@ The matching problem itself has an elegant mathematical structure: without marke
 - [[Pending Orders and TTL]] — cross-batch order persistence
 - [[Persistence]] — crash recovery and acknowledged-write durability
 - [[Historical Data Serving]] — durable block and price history design
+- [[Testing Strategy]] — layered fixtures, restart tests, and property tests
 - [[State Root and Parent Hash]] — cryptographic chaining
 - [[Block Witness]] — the ZK audit trail
 - [[Four-Layer Verification]] — 37 independent correctness checks across 4 layers

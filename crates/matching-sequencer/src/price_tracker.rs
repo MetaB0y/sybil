@@ -11,9 +11,10 @@ use crate::market_info::PricePoint;
 
 /// Bounded in-memory price history retained per market.
 ///
-/// This is a serving cache for live charts, not canonical state. The durable
-/// price-history table is still a future store concern; keeping this bounded
-/// prevents long-running live deployments from retaining every fill forever.
+/// This is a hot cache for no-store/dev runs and recent in-process reads. When
+/// a durable store is configured, `price_points` is the serving source of truth
+/// for historical ranges; keeping this bounded prevents long-running live
+/// deployments from retaining every fill forever in RAM.
 pub const DEFAULT_MAX_PRICE_HISTORY_POINTS_PER_MARKET: usize = 2_000;
 
 /// Milliseconds in one hour — bucket granularity for the 24h volume window.

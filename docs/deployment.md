@@ -36,7 +36,9 @@ Main services:
 - `sybil-api` - Rust API/sequencer on port `3000`
 - `sybil-polymarket` - Polymarket mirror and flash MM
 - `sybil-prover` - proof artifact status API and Prometheus metrics on port `3002`
-- `sybil-prover-worker` - filesystem proof-job worker
+- `sybil-prover-mock` - devnet mock proof artifact producer
+- `sybil-prover-worker` - optional filesystem proof-job worker, profile-gated
+  until proof-job export is live
 - `sybil-arena` - live Python LLM/noise traders
 - `sybil-arena-dashboard` - Streamlit dashboard on port `8501`
 - `caddy` - HTTPS for app and arena dashboard
@@ -84,7 +86,8 @@ Preserved across API/container restarts:
 Still treated as bounded live serving caches:
 
 - recent block ring buffer
-- price-history chart points
+- price-history hot cache (durable reads come from `price_points` /
+  `price_candles` when `SYBIL_DATA_DIR=/data`)
 - in-memory per-account fill-history window
 
 The in-memory cache limits are configured with:
@@ -217,10 +220,21 @@ PY'
 ## Prover Devnet Path
 
 The deployed `sybil-prover` service exposes `/healthz`, `/proofs/{height}`,
-and `/metrics`. The worker watches `/jobs/*.msgpack` and writes durable
-per-block artifacts under `/artifacts`. Production proof-job export is still
-being wired, so an empty prover artifact store is normal until jobs are fed
-into that inbox.
+and `/metrics`. The default devnet stack runs `sybil-prover-mock`, which follows
+the live API and writes bounded mock artifacts under `/artifacts` so Grafana and
+vmalert can exercise the proof-status surface without pretending real OpenVM
+proof generation is active.
+
+The real filesystem worker is intentionally not part of `just deploy-api`.
+Start it only when proof-job export is active:
+
+```bash
+just deploy-prover-worker
+```
+
+That worker watches `/jobs/*.msgpack` and writes prepared per-block artifacts
+under `/artifacts`. Until jobs are fed into that inbox, running it adds another
+process without proving anything.
 
 For local Anvil bridge plumbing, use the explicit unsafe verifier smoke:
 

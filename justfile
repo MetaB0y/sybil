@@ -369,11 +369,16 @@ deploy-sync:
     scp docker-compose.yml docker-compose.prod.yml docker-compose.telegram.yml {{SERVER}}:/opt/sybil/
     scp -r deploy {{SERVER}}:/opt/sybil/
 
-# Build and deploy sybil-api, polymarket mirror, and prover status API
+# Build and deploy sybil-api, polymarket mirror, and prover status/mock API.
+# The real filesystem prover worker is profile-gated until proof-job export is live.
 deploy-api: deploy-sync
     DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-api
     docker save sybil-api:latest | ssh {{SERVER}} docker load
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-api sybil-polymarket sybil-prover sybil-prover-worker sybil-prover-mock'
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-api sybil-polymarket sybil-prover sybil-prover-mock'
+
+# Start the real filesystem prover worker when proof-job export is enabled.
+deploy-prover-worker: deploy-sync
+    ssh {{SERVER}} 'cd /opt/sybil && COMPOSE_PROFILES=prover-worker {{COMPOSE_PROD}} up -d sybil-prover-worker'
 
 # Destructively reset production app state, then restart services.
 # This removes old markets, mirror mappings, arena bot DB, prover artifacts,
