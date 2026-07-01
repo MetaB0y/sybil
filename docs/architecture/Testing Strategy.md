@@ -52,6 +52,9 @@ Good properties:
 These tests should not start an HTTP server or Docker. The first core property
 slice lives in `matching-engine`: simple binary settlement deltas, minting
 balance restoration, zero-fill no-ops, and order welfare/satisfaction semantics.
+The first reservation property slice lives in `matching-sequencer`: buy-order
+acceptance reserves ceiled fractional notional and rejects when existing
+reservations consume the balance.
 
 ### 2. In-Process API Integration
 
@@ -112,11 +115,11 @@ starting containers.
 
 1. Add store-backed latest/list/WS replay restart tests when the historical
    block-serving adapter is implemented.
-2. Add reservation-rounding properties around `notional_nanos_ceil` and
-   order-book acceptance so tiny fractional orders cannot overspend.
-3. Rename and organize the current restart tests around public contracts:
+2. Rename and organize the current restart tests around public contracts:
    acknowledged writes, committed block history, price history/candles, and
    retention.
+3. Add focused properties for sell-side position reservations and cancellation /
+   expiry release invariants.
 4. Move helpers into a separate test-support crate only if multiple crates begin
    sharing the same public fixtures.
 

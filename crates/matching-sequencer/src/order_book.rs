@@ -692,8 +692,10 @@ mod tests {
     use super::*;
     use crate::account::AccountStore;
     use matching_engine::{
-        notional_nanos_ceil, outcome_buy, shares_to_qty, MarketId, MarketSet, NANOS_PER_DOLLAR,
+        notional_nanos, notional_nanos_ceil, outcome_buy, shares_to_qty, MarketId, MarketSet,
+        NANOS_PER_DOLLAR,
     };
+    use proptest::prelude::*;
 
     fn setup() -> (AccountStore, MarketSet, MarketId) {
         let accounts = AccountStore::new();
@@ -1048,5 +1050,110 @@ mod tests {
         let remainder = book.orders.first().unwrap();
         assert!(remainder.has_been_matched);
         assert_eq!(remainder.original_max_fill, q(10));
+    }
+
+    proptest! {
+        #[test]
+        fn accept_buy_reserves_ceiled_fractional_notional(
+            price in 0u64..=NANOS_PER_DOLLAR,
+            qty in 1u64..=shares_to_qty(1_000),
+        ) {
+            let (mut accounts, markets, m0) = setup();
+            let expected = notional_nanos_ceil(price, qty);
+            let aid = accounts.create_account(expected as i64);
+            let mut book = OrderBook::new(10);
+            let account = accounts.get(aid).unwrap();
+            let order = buy_yes(&markets, 1, m0, price, qty);
+
+            let accepted = book.accept(order, aid, account, 1, 0).unwrap();
+
+            prop_assert_eq!(accepted.resting_order.reserved_balance, expected as i64);
+            prop_assert_eq!(book.reserved_balance(aid), expected as i64);
+            prop_assert_eq!(book.len(), 1);
+        }
+
+        #[test]
+        fn accept_buy_rejects_when_only_floor_notional_is_available(
+            price in 1u64..=NANOS_PER_DOLLAR,
+            qty in 1u64..=shares_to_qty(1_000),
+        ) {
+            let floor = notional_nanos(price, qty);
+            let ceil = notional_nanos_ceil(price, qty);
+            if floor == ceil {
+                return Ok(());
+            }
+
+            let (mut accounts, markets, m0) = setup();
+            let aid = accounts.create_account(floor as i64);
+            let mut book = OrderBook::new(10);
+            let account = accounts.get(aid).unwrap();
+            let order = buy_yes(&markets, 1, m0, price, qty);
+
+            let result = book.accept(order, aid, account, 1, 0);
+            prop_assert!(
+                result.is_err(),
+                "order should reject when available balance only covers floor notional"
+            );
+            let err = match result {
+                Err(err) => err,
+                Ok(_) => unreachable!("checked is_err above"),
+            };
+            match err {
+                RejectionReason::InsufficientBalance { required, available } => {
+                    prop_assert_eq!(required, ceil as i64);
+                    prop_assert_eq!(available, floor as i64);
+                }
+                other => prop_assert!(false, "unexpected rejection: {other:?}"),
+            }
+            prop_assert_eq!(book.reserved_balance(aid), 0);
+            prop_assert!(book.is_empty());
+        }
+
+        #[test]
+        fn accept_buy_accounts_for_existing_fractional_reservations(
+            price in 1u64..=NANOS_PER_DOLLAR,
+            qty in 1u64..=shares_to_qty(1_000),
+            accepted_count in 1usize..=20,
+        ) {
+            let per_order = notional_nanos_ceil(price, qty);
+            prop_assume!(per_order > 0);
+
+            let (mut accounts, markets, m0) = setup();
+            let balance = per_order
+                .checked_mul(accepted_count as u64)
+                .expect("bounded generator keeps balance in range");
+            let aid = accounts.create_account(balance as i64);
+            let mut book = OrderBook::new(10);
+            let account = accounts.get(aid).unwrap();
+
+            for order_index in 0..accepted_count {
+                let order = buy_yes(&markets, order_index as u64 + 1, m0, price, qty);
+                book.accept(order, aid, account, 1, 0).unwrap();
+                prop_assert_eq!(
+                    book.reserved_balance(aid),
+                    per_order as i64 * (order_index as i64 + 1)
+                );
+            }
+
+            let rejected = buy_yes(&markets, accepted_count as u64 + 1, m0, price, qty);
+            let result = book.accept(rejected, aid, account, 1, 0);
+            prop_assert!(
+                result.is_err(),
+                "order should reject after existing reservations consume the balance"
+            );
+            let err = match result {
+                Err(err) => err,
+                Ok(_) => unreachable!("checked is_err above"),
+            };
+            match err {
+                RejectionReason::InsufficientBalance { required, available } => {
+                    prop_assert_eq!(required, per_order as i64);
+                    prop_assert_eq!(available, 0);
+                }
+                other => prop_assert!(false, "unexpected rejection: {other:?}"),
+            }
+            prop_assert_eq!(book.len(), accepted_count);
+            prop_assert_eq!(book.reserved_balance(aid), balance as i64);
+        }
     }
 }
