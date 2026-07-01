@@ -272,6 +272,39 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     .await;
     let market_id = market["market_id"].as_u64().unwrap();
 
+    let metadata_market = post_json(
+        &client,
+        &writer.base_url,
+        "/v1/markets",
+        json!({
+            "name": "process restart metadata market",
+            "description": "metadata should replay after process restart",
+            "category": "restart-tests",
+            "tags": ["persistence", "process"],
+            "resolution_criteria": "resolved by the restart test",
+            "expiry_timestamp_ms": 1_800_000_000_000u64,
+            "resolution_template": "admin_immediate"
+        }),
+    )
+    .await;
+    let metadata_market_id = metadata_market["market_id"].as_u64().unwrap();
+
+    let resolved_market = post_json(
+        &client,
+        &writer.base_url,
+        "/v1/markets",
+        json!({ "name": "process restart resolved market" }),
+    )
+    .await;
+    let resolved_market_id = resolved_market["market_id"].as_u64().unwrap();
+    post_json(
+        &client,
+        &writer.base_url,
+        &format!("/v1/markets/{resolved_market_id}/resolve"),
+        json!({ "payout_nanos": 1_000_000_000u64 }),
+    )
+    .await;
+
     let signing_key = new_signing_key();
     let public_key_hex = to_hex(signing_key.verifying_key().to_sec1_point(true).as_bytes());
     post_json(
@@ -339,6 +372,48 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
         restored_market["name"].as_str(),
         Some("process restart WAL market")
     );
+    let restored_metadata_market = get_json(
+        &client,
+        &reader.base_url,
+        &format!("/v1/markets/{metadata_market_id}"),
+    )
+    .await;
+    assert_eq!(
+        restored_metadata_market["description"].as_str(),
+        Some("metadata should replay after process restart")
+    );
+    assert_eq!(
+        restored_metadata_market["category"].as_str(),
+        Some("restart-tests")
+    );
+    assert_eq!(
+        restored_metadata_market["tags"].as_array().unwrap()[0].as_str(),
+        Some("persistence")
+    );
+    assert_eq!(
+        restored_metadata_market["resolution_criteria"].as_str(),
+        Some("resolved by the restart test")
+    );
+    assert_eq!(
+        restored_metadata_market["expiry_timestamp_ms"].as_u64(),
+        Some(1_800_000_000_000)
+    );
+
+    let restored_resolved_market = get_json(
+        &client,
+        &reader.base_url,
+        &format!("/v1/markets/{resolved_market_id}"),
+    )
+    .await;
+    assert_eq!(
+        restored_resolved_market["status"].as_str(),
+        Some("resolved")
+    );
+    assert_eq!(
+        restored_resolved_market["payout_nanos"].as_u64(),
+        Some(1_000_000_000)
+    );
+
     let restored_pending = get_json(
         &client,
         &reader.base_url,
