@@ -21,12 +21,12 @@ use crate::types::response::{HealthResponse, StateRootResponse};
     )
 )]
 pub async fn health(State(state): State<AppState>) -> (StatusCode, Json<HealthResponse>) {
-    match state.sequencer.get_latest_block().await {
-        Ok(block) => (
+    match state.sequencer.get_committed_height().await {
+        Ok(height) => (
             StatusCode::OK,
             Json(HealthResponse {
                 status: "ok".to_string(),
-                height: block.map(|b| b.canonical.header.height),
+                height,
             }),
         ),
         Err(err) => {

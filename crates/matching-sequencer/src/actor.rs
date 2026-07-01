@@ -46,6 +46,7 @@ pub enum SequencerMsg {
     SubmitSignedOrder(SignedOrder, RpcReplyPort<Result<(), SequencerError>>),
     CancelSignedOrder(SignedCancel, RpcReplyPort<Result<(), SequencerError>>),
     GetLatestBlock(RpcReplyPort<Option<SealedBlock>>),
+    GetCommittedHeight(RpcReplyPort<Option<u64>>),
     GetRecentBlocks(usize, RpcReplyPort<Vec<SealedBlock>>),
     GetAccount(AccountId, RpcReplyPort<Option<Account>>),
     GetStateRoot(RpcReplyPort<[u8; 32]>),
@@ -1530,6 +1531,10 @@ impl Actor for SequencerActor {
             SequencerMsg::GetLatestBlock(reply) => {
                 let _ = reply.send(state.latest_block.clone());
             }
+            SequencerMsg::GetCommittedHeight(reply) => {
+                let height = state.sequencer.height();
+                let _ = reply.send((height > 0).then_some(height));
+            }
             SequencerMsg::GetAccount(account_id, reply) => {
                 let _ = reply.send(state.sequencer.accounts.get(account_id).cloned());
             }
@@ -2080,6 +2085,10 @@ impl SequencerHandle {
 
     pub async fn get_latest_block(&self) -> Result<Option<SealedBlock>, SequencerError> {
         self.rpc(SequencerMsg::GetLatestBlock).await
+    }
+
+    pub async fn get_committed_height(&self) -> Result<Option<u64>, SequencerError> {
+        self.rpc(SequencerMsg::GetCommittedHeight).await
     }
 
     pub async fn get_account(

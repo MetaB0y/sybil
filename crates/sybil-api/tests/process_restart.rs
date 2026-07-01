@@ -240,10 +240,9 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     pause_blocks(&client, &writer.base_url).await;
     tokio::time::sleep(Duration::from_millis(100)).await;
     let pre_write_health = wait_for_health(&client, &writer.base_url).await;
-    assert!(
-        pre_write_health["height"].as_u64().is_some(),
-        "baseline height exists before WAL writes"
-    );
+    let pre_write_height = pre_write_health["height"]
+        .as_u64()
+        .expect("baseline height exists before WAL writes");
 
     let created = post_json(
         &client,
@@ -351,7 +350,12 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     writer.kill().await;
 
     let reader = spawn_api(&data_dir, &admin_key_path, 60_000).await;
-    wait_for_health(&client, &reader.base_url).await;
+    let post_restart_health = wait_for_health(&client, &reader.base_url).await;
+    assert_eq!(
+        post_restart_health["height"].as_u64(),
+        Some(pre_write_height),
+        "health should report restored committed height before a new block is produced"
+    );
     pause_blocks(&client, &reader.base_url).await;
 
     let restored_account = get_json(
