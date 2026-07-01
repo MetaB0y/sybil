@@ -90,6 +90,13 @@ Still not persisted:
 
 The order state tables protect the API's 200 OK contract: anything acknowledged before a crash is either already in the committed order-book snapshot or replayed from an incremental log.
 
+On restore, the sequencer rebuilds the resting book from the committed
+snapshot plus the admit log before it drains deferred pending bundles. It must
+advance `next_order_id` past every replayed resting-order id before assigning
+fresh ids to pending-bundle orders. Otherwise a restart with both `admit_log`
+and `pending_bundles` can reuse an order id in the first replay block and trip
+the verifier's duplicate-order check.
+
 ## Acknowledged Control-Plane Mutations
 
 The same 200 OK contract must apply to control-plane mutations, not only orders. Account creation, funding, pubkey registration, market creation, metadata updates, cancellation, and resolution are all user-visible state transitions. If one is acknowledged after the last committed block and the process restarts before the next block snapshot, it needs an incremental durability path.

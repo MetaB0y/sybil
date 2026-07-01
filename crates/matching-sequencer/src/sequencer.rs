@@ -712,10 +712,14 @@ impl BlockSequencer {
         for resting in state.admit_log {
             order_book.reinsert_for_replay(resting);
         }
+        let next_order_id = order_book
+            .resting_orders()
+            .map(|(order, _)| order.id.saturating_add(1))
+            .fold(state.next_order_id, u64::max);
         let mut restored = Self {
             accounts: state.accounts,
             solver,
-            next_order_id: state.next_order_id,
+            next_order_id,
             order_book,
             height: state.height,
             markets: state.markets,
@@ -3744,6 +3748,117 @@ mod tests {
             seq_b.order_book.reserved_balance(aid_a),
             0,
             "A's reservation should be released after the fill"
+        );
+    }
+
+    #[test]
+    fn restore_advances_next_order_id_past_replayed_admit_log_before_pending_bundles() {
+        let (markets, m0) = setup();
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let oracle: Arc<dyn Oracle> = Arc::new(AdminOracle::new());
+        let mut committed = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            oracle.clone(),
+            SequencerConfig::default(),
+        );
+        committed.produce_block(Vec::new(), 1_000);
+        assert_eq!(committed.next_order_id(), 1);
+
+        let mut live = committed.clone();
+        let direct = OrderSubmission {
+            account_id: aid,
+            orders: vec![outcome_buy(&markets, 0, m0, 0, 100_000_000, 1)],
+            mm_constraint: None,
+        };
+        let replayed_admit = match live.try_admit_direct(direct, 1_001) {
+            AdmitOutcome::Admitted {
+                order_id,
+                resting_order,
+            } => {
+                assert_eq!(order_id, 1);
+                resting_order
+            }
+            other => panic!("expected direct admit, got {:?}", other),
+        };
+
+        let deferred = match live.try_admit_direct(
+            OrderSubmission {
+                account_id: aid,
+                orders: vec![
+                    outcome_buy(&markets, 0, m0, 0, 100_000_000, 1),
+                    outcome_buy(&markets, 0, m0, 0, 100_000_000, 1),
+                ],
+                mm_constraint: None,
+            },
+            1_002,
+        ) {
+            AdmitOutcome::Deferred(submission) => submission,
+            other => panic!("expected pending bundle deferral, got {:?}", other),
+        };
+
+        let state = RestoredState {
+            accounts: committed.accounts.clone(),
+            markets: markets.clone(),
+            market_groups: vec![],
+            market_statuses: HashMap::new(),
+            market_metadata: HashMap::new(),
+            height: committed.height(),
+            last_header: committed.last_header().cloned(),
+            next_order_id: committed.next_order_id(),
+            pubkey_registry: committed.pubkey_registry().clone(),
+            resting_orders: committed.order_book.snapshot(),
+            data_feeds: Vec::new(),
+            resolution_templates: Vec::new(),
+            pending_bundles: vec![deferred],
+            control_plane_log: Vec::new(),
+            pending_l1_deposits: Vec::new(),
+            pending_bridge_withdrawals: Vec::new(),
+            bridge_state: BridgeState::default(),
+            admit_log: vec![replayed_admit],
+            analytics: crate::store::AnalyticsRestoredState {
+                last_clearing_prices: committed.last_clearing_prices().clone(),
+                market_volumes: committed.market_volumes().clone(),
+                account_fills: Vec::new(),
+                trader_tracker: Default::default(),
+                price_tracker_volume: Default::default(),
+                price_tracker_clearing_history: Default::default(),
+                liquidity_tracker: Default::default(),
+                order_stats_tracker: Default::default(),
+                welfare_tracker: Default::default(),
+                first_deposit_ms: HashMap::new(),
+                fill_total_counts: HashMap::new(),
+                cost_basis_tracker: Default::default(),
+                history_event_next_seq: 0,
+            },
+        };
+
+        let mut restored = BlockSequencer::restore(state, oracle, SequencerConfig::default());
+        assert_eq!(
+            restored.next_order_id(),
+            2,
+            "restore must not reuse IDs consumed by admit-log replay"
+        );
+        let bp = restored.produce_block(Vec::new(), 2_000);
+        let ids: Vec<u64> = bp
+            .witness
+            .orders
+            .iter()
+            .map(|witness_order| witness_order.order.id)
+            .collect();
+        let unique: std::collections::HashSet<u64> = ids.iter().copied().collect();
+        assert_eq!(ids.len(), unique.len(), "duplicate order IDs: {ids:?}");
+        assert!(
+            ids.contains(&1) && ids.contains(&2) && ids.contains(&3),
+            "expected replayed direct admit plus two restored bundle orders, got {ids:?}"
+        );
+        let verification = sybil_verifier::verify_full(&bp.witness, false);
+        assert!(
+            verification.valid,
+            "restored mixed admit/bundle block should verify: {:?}",
+            verification.violations
         );
     }
 
