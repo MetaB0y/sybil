@@ -24,6 +24,9 @@ use sybil_api::state::AppState;
 use sybil_oracle::{FeedId, FeedPubkey, ResolutionPolicy, ResolutionTemplate, TemplateId};
 use tower::ServiceExt;
 
+#[allow(dead_code)]
+pub mod process;
+
 static NEXT_STORE_ID: AtomicU64 = AtomicU64::new(0);
 
 fn temp_store_path() -> PathBuf {

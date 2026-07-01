@@ -4,65 +4,23 @@
 //! router, so they exercise CLI config, persistent-store hydration, actor
 //! startup, and HTTP request/response boundaries together.
 
-use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use matching_engine::{MarketId, Order};
+use matching_engine::{shares_to_qty, MarketId, Order};
 use matching_sequencer::crypto::{canonical_cancel_bytes, canonical_order_bytes};
 use matching_sequencer::AccountId;
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
 use reqwest::StatusCode;
 use serde_json::{json, Value};
-use tokio::process::{Child, Command};
 
-static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+mod common;
 
-struct ApiProcess {
-    child: Child,
-    base_url: String,
-}
-
-impl ApiProcess {
-    async fn kill(mut self) {
-        let _ = self.child.start_kill();
-        let _ = tokio::time::timeout(Duration::from_secs(5), self.child.wait()).await;
-    }
-}
-
-impl Drop for ApiProcess {
-    fn drop(&mut self) {
-        let _ = self.child.start_kill();
-    }
-}
-
-fn temp_root(prefix: &str) -> PathBuf {
-    let id = NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!("sybil-api-{prefix}-{}-{id}", std::process::id()));
-    std::fs::create_dir_all(&path).expect("test temp dir can be created");
-    path
-}
-
-fn free_port() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("ephemeral port binds");
-    listener.local_addr().expect("local addr exists").port()
-}
-
-fn sybil_api_binary() -> PathBuf {
-    if let Some(path) = option_env!("CARGO_BIN_EXE_sybil-api") {
-        return PathBuf::from(path);
-    }
-
-    let mut path = std::env::current_exe().expect("test executable path is available");
-    path.pop();
-    if path.ends_with("deps") {
-        path.pop();
-    }
-    path.push(format!("sybil-api{}", std::env::consts::EXE_SUFFIX));
-    path
-}
+use common::process::{
+    get_json, get_status_and_body, pause_blocks, post_json, restart_api, restart_api_with_env,
+    resume_blocks, spawn_api, spawn_api_with_env, wait_for_block, wait_for_health,
+    wait_for_height_at_least, ProcessTestRoot,
+};
 
 fn to_hex(bytes: &[u8]) -> String {
     hex::encode(bytes)
@@ -108,190 +66,6 @@ fn signed_cancel_payload(account_id: u64, order_id: u64, key: &SigningKey) -> Va
         "signer_pubkey_hex": to_hex(key.verifying_key().to_sec1_point(true).as_bytes()),
         "signature_hex": to_hex(signature.to_bytes().as_slice())
     })
-}
-
-async fn spawn_api(data_dir: &Path, admin_key_path: &Path, block_interval_ms: u64) -> ApiProcess {
-    spawn_api_with_env(data_dir, admin_key_path, block_interval_ms, &[]).await
-}
-
-async fn spawn_api_with_env(
-    data_dir: &Path,
-    admin_key_path: &Path,
-    block_interval_ms: u64,
-    extra_env: &[(&str, &str)],
-) -> ApiProcess {
-    let port = free_port();
-    let base_url = format!("http://127.0.0.1:{port}");
-    let mut command = Command::new(sybil_api_binary());
-    command
-        .arg("--dev-mode")
-        .arg("--port")
-        .arg(port.to_string())
-        .arg("--data-dir")
-        .arg(data_dir)
-        .arg("--admin-feed-key-path")
-        .arg(admin_key_path)
-        .arg("--block-interval-ms")
-        .arg(block_interval_ms.to_string())
-        .env("RUST_LOG", "warn")
-        .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    for (key, value) in extra_env {
-        command.env(key, value);
-    }
-    let child = command.spawn().expect("sybil-api binary spawns");
-
-    ApiProcess { child, base_url }
-}
-
-async fn wait_for_health(client: &reqwest::Client, base_url: &str) -> Value {
-    let deadline = Instant::now() + Duration::from_secs(10);
-
-    loop {
-        let last_error = match client.get(format!("{base_url}/v1/health")).send().await {
-            Ok(resp) => {
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                if status == StatusCode::OK {
-                    return serde_json::from_str(&body).expect("health response is JSON");
-                }
-                format!("status {status}: {body}")
-            }
-            Err(err) => err.to_string(),
-        };
-
-        assert!(
-            Instant::now() < deadline,
-            "sybil-api did not become healthy: {last_error}"
-        );
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-}
-
-async fn wait_for_height_at_least(
-    client: &reqwest::Client,
-    base_url: &str,
-    min_height: u64,
-) -> u64 {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        let health = wait_for_health(client, base_url).await;
-        if let Some(height) = health["height"].as_u64() {
-            if height >= min_height {
-                return height;
-            }
-        }
-
-        assert!(
-            Instant::now() < deadline,
-            "sybil-api did not produce block height {min_height}; last health={health}"
-        );
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-}
-
-async fn pause_blocks(client: &reqwest::Client, base_url: &str) {
-    let resp = client
-        .post(format!("{base_url}/v1/simulation/pause"))
-        .send()
-        .await
-        .expect("pause request succeeds");
-    assert_eq!(
-        resp.status(),
-        StatusCode::OK,
-        "pause failed: {}",
-        resp.text().await.unwrap_or_default()
-    );
-}
-
-async fn resume_blocks(client: &reqwest::Client, base_url: &str) {
-    let resp = client
-        .post(format!("{base_url}/v1/simulation/resume"))
-        .send()
-        .await
-        .expect("resume request succeeds");
-    assert_eq!(
-        resp.status(),
-        StatusCode::OK,
-        "resume failed: {}",
-        resp.text().await.unwrap_or_default()
-    );
-}
-
-async fn post_json(client: &reqwest::Client, base_url: &str, path: &str, body: Value) -> Value {
-    let resp = client
-        .post(format!("{base_url}{path}"))
-        .json(&body)
-        .send()
-        .await
-        .expect("POST request succeeds");
-    let status = resp.status();
-    let text = resp.text().await.unwrap_or_default();
-    assert!(
-        status.is_success(),
-        "POST {path} failed with {status}: {text}"
-    );
-    serde_json::from_str(&text).expect("POST response is JSON")
-}
-
-async fn get_json(client: &reqwest::Client, base_url: &str, path: &str) -> Value {
-    let resp = client
-        .get(format!("{base_url}{path}"))
-        .send()
-        .await
-        .expect("GET request succeeds");
-    let status = resp.status();
-    let text = resp.text().await.unwrap_or_default();
-    assert!(
-        status.is_success(),
-        "GET {path} failed with {status}: {text}"
-    );
-    serde_json::from_str(&text).expect("GET response is JSON")
-}
-
-async fn get_status_and_body(
-    client: &reqwest::Client,
-    base_url: &str,
-    path: &str,
-) -> (StatusCode, Value) {
-    let resp = client
-        .get(format!("{base_url}{path}"))
-        .send()
-        .await
-        .expect("GET request succeeds");
-    let status = resp.status();
-    let text = resp.text().await.unwrap_or_default();
-    let body = serde_json::from_str(&text).unwrap_or_else(|_| json!({ "raw": text }));
-    (status, body)
-}
-
-async fn wait_for_block(client: &reqwest::Client, base_url: &str, height: u64) -> Value {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        let last_error = match client
-            .get(format!("{base_url}/v1/blocks/{height}"))
-            .send()
-            .await
-        {
-            Ok(resp) => {
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                if status == StatusCode::OK {
-                    return serde_json::from_str(&body).expect("block response is JSON");
-                }
-                format!("status {status}: {body}")
-            }
-            Err(err) => err.to_string(),
-        };
-
-        assert!(
-            Instant::now() < deadline,
-            "sybil-api did not serve block {height}: {last_error}"
-        );
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
 }
 
 async fn submit_crossing_trade(
@@ -365,15 +139,13 @@ fn assert_funding_history_once(history: &Value) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_next_block() {
-    let root = temp_root("process-restart");
-    let data_dir = root.join("data");
-    let admin_key_path = root.join("admin-feed.key");
+    let root = ProcessTestRoot::new("process-restart");
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
         .build()
         .unwrap();
 
-    let writer = spawn_api(&data_dir, &admin_key_path, 50).await;
+    let writer = spawn_api(root.data_dir(), root.admin_key_path(), 50).await;
     wait_for_height_at_least(&client, &writer.base_url, 1).await;
     pause_blocks(&client, &writer.base_url).await;
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -485,9 +257,7 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     )
     .await;
     assert!(pending_after_cancel.as_array().unwrap().is_empty());
-    writer.kill().await;
-
-    let reader = spawn_api(&data_dir, &admin_key_path, 60_000).await;
+    let reader = restart_api(writer, &root, 60_000).await;
     let post_restart_health = wait_for_health(&client, &reader.base_url).await;
     assert_eq!(
         post_restart_health["height"].as_u64(),
@@ -589,8 +359,7 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     .await;
     assert_eq!(post_restart_pending.as_array().unwrap().len(), 1);
 
-    reader.kill().await;
-    let committer = spawn_api(&data_dir, &admin_key_path, 50).await;
+    let committer = restart_api(reader, &root, 50).await;
     wait_for_height_at_least(&client, &committer.base_url, pre_write_height + 1).await;
     pause_blocks(&client, &committer.base_url).await;
     let committed_funding_history = get_json(
@@ -602,14 +371,11 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     assert_funding_history_once(&committed_funding_history);
 
     committer.kill().await;
-    let _ = std::fs::remove_dir_all(root);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn history_retention_and_candles_survive_process_restart() {
-    let root = temp_root("process-restart-history");
-    let data_dir = root.join("data");
-    let admin_key_path = root.join("admin-feed.key");
+    let root = ProcessTestRoot::new("process-restart-history");
     let retention_env = [
         ("SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS", "2"),
         ("SYBIL_RAW_PRICE_RETENTION_BLOCKS", "100"),
@@ -622,7 +388,8 @@ async fn history_retention_and_candles_survive_process_restart() {
         .build()
         .unwrap();
 
-    let writer = spawn_api_with_env(&data_dir, &admin_key_path, 50, &retention_env).await;
+    let writer =
+        spawn_api_with_env(root.data_dir(), root.admin_key_path(), 50, &retention_env).await;
     wait_for_height_at_least(&client, &writer.base_url, 1).await;
     pause_blocks(&client, &writer.base_url).await;
 
@@ -683,9 +450,7 @@ async fn history_retention_and_candles_survive_process_restart() {
     }
     let first_trade_height = first_trade_height.expect("at least one trade committed");
 
-    writer.kill().await;
-
-    let reader = spawn_api_with_env(&data_dir, &admin_key_path, 60_000, &retention_env).await;
+    let reader = restart_api_with_env(writer, &root, 60_000, &retention_env).await;
     let restored_height = wait_for_health(&client, &reader.base_url).await["height"]
         .as_u64()
         .expect("restored height");
@@ -735,20 +500,17 @@ async fn history_retention_and_candles_survive_process_restart() {
     assert_eq!(body["code"].as_str(), Some("RETENTION_GONE"));
 
     reader.kill().await;
-    let _ = std::fs::remove_dir_all(root);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn deferred_bundle_revalidates_against_replayed_admit_after_process_restart() {
-    let root = temp_root("process-restart-deferred");
-    let data_dir = root.join("data");
-    let admin_key_path = root.join("admin-feed.key");
+    let root = ProcessTestRoot::new("process-restart-deferred");
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
         .build()
         .unwrap();
 
-    let writer = spawn_api(&data_dir, &admin_key_path, 50).await;
+    let writer = spawn_api(root.data_dir(), root.admin_key_path(), 50).await;
     wait_for_height_at_least(&client, &writer.base_url, 1).await;
     pause_blocks(&client, &writer.base_url).await;
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -774,6 +536,7 @@ async fn deferred_bundle_revalidates_against_replayed_admit_after_process_restar
     )
     .await;
     let market_id = market["market_id"].as_u64().unwrap();
+    let one_share = shares_to_qty(1);
 
     post_json(
         &client,
@@ -785,7 +548,7 @@ async fn deferred_bundle_revalidates_against_replayed_admit_after_process_restar
                 "type": "BuyYes",
                 "market_id": market_id,
                 "limit_price_nanos": 800_000_000u64,
-                "quantity": 1u64
+                "quantity": one_share
             }]
         }),
     )
@@ -813,13 +576,13 @@ async fn deferred_bundle_revalidates_against_replayed_admit_after_process_restar
                     "type": "BuyYes",
                     "market_id": market_id,
                     "limit_price_nanos": 600_000_000u64,
-                    "quantity": 1u64
+                    "quantity": one_share
                 },
                 {
                     "type": "BuyYes",
                     "market_id": market_id,
                     "limit_price_nanos": 600_000_000u64,
-                    "quantity": 1u64
+                    "quantity": one_share
                 }
             ]
         }),
@@ -837,9 +600,7 @@ async fn deferred_bundle_revalidates_against_replayed_admit_after_process_restar
         "deferred bundle must not appear as directly admitted resting orders"
     );
 
-    writer.kill().await;
-
-    let committer = spawn_api(&data_dir, &admin_key_path, 50).await;
+    let committer = restart_api(writer, &root, 50).await;
     let target_height = pre_write_height + 1;
     wait_for_height_at_least(&client, &committer.base_url, target_height).await;
     pause_blocks(&client, &committer.base_url).await;
@@ -882,5 +643,4 @@ async fn deferred_bundle_revalidates_against_replayed_admit_after_process_restar
     assert_eq!(pending[0]["order_id"].as_u64(), Some(direct_order_id));
 
     committer.kill().await;
-    let _ = std::fs::remove_dir_all(root);
 }
