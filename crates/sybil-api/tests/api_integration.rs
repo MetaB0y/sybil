@@ -806,7 +806,11 @@ async fn market_price_history_persists_to_store_beyond_hot_cache() {
         );
     }
 
-    let (status, body) = get(app, &format!("/v1/markets/{market_id}/prices/history")).await;
+    let (status, body) = get(
+        app.clone(),
+        &format!("/v1/markets/{market_id}/prices/history"),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     let response = parse_json(&body);
     assert_eq!(response["market_id"].as_u64().unwrap(), market_id);
@@ -821,6 +825,17 @@ async fn market_price_history_persists_to_store_beyond_hot_cache() {
     assert!(points
         .iter()
         .all(|point| point["volume_nanos"].as_u64().unwrap() > 0));
+
+    let (status, body) = get(
+        app,
+        &format!("/v1/markets/{market_id}/prices/history?limit=1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let limited = parse_json(&body);
+    let limited_points = limited["points"].as_array().unwrap();
+    assert_eq!(limited_points.len(), 1);
+    assert_eq!(limited_points[0]["height"].as_u64().unwrap(), 2);
 }
 
 // ---------------------------------------------------------------------------

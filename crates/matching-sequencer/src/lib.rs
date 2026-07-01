@@ -35,6 +35,7 @@ pub use account_storage::{
 };
 pub use actor::{
     MarketSearchResult, SequencerHandle, SequencerStateProof, SequencerStateProofKind,
+    DEFAULT_PRICE_HISTORY_QUERY_POINTS, MAX_PRICE_HISTORY_QUERY_POINTS,
 };
 pub use block::{Block, BlockAnalytics, BlockProduction, SealedBlock};
 pub use bridge::{

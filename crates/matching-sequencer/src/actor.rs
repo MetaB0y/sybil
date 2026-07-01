@@ -31,13 +31,22 @@ use crate::{
 };
 
 const SEQUENCER_ACTOR_METRIC_NAME: &str = "sequencer";
-const MAX_PRICE_HISTORY_QUERY_POINTS: usize = 5_000;
+pub const DEFAULT_PRICE_HISTORY_QUERY_POINTS: usize = 500;
+pub const MAX_PRICE_HISTORY_QUERY_POINTS: usize = 5_000;
 
 fn current_timestamp_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+fn limit_price_points(points: Vec<PricePoint>, limit: usize) -> Vec<PricePoint> {
+    if points.len() > limit {
+        points[points.len() - limit..].to_vec()
+    } else {
+        points
+    }
 }
 
 /// Messages sent from handles to the sequencer actor.
@@ -128,6 +137,7 @@ pub enum SequencerMsg {
         MarketId,
         Option<u64>,
         Option<u64>,
+        usize,
         RpcReplyPort<Result<Vec<PricePoint>, SequencerError>>,
     ),
     GetAccountFills(
@@ -1703,18 +1713,17 @@ impl Actor for SequencerActor {
             SequencerMsg::GetMarketMetadata(market_id, reply) => {
                 let _ = reply.send(state.sequencer.market_metadata(market_id).cloned());
             }
-            SequencerMsg::GetPriceHistory(market_id, from_ms, to_ms, reply) => {
+            SequencerMsg::GetPriceHistory(market_id, from_ms, to_ms, limit, reply) => {
+                let limit = limit.min(MAX_PRICE_HISTORY_QUERY_POINTS);
                 let result = match &state.store {
                     Some(store) => store
-                        .load_price_history(
-                            market_id,
-                            from_ms,
-                            to_ms,
-                            MAX_PRICE_HISTORY_QUERY_POINTS,
-                        )
+                        .load_price_history(market_id, from_ms, to_ms, limit)
                         .await
                         .map_err(|error| SequencerError::Persistence(error.to_string())),
-                    None => Ok(state.sequencer.price_history(market_id, from_ms, to_ms)),
+                    None => Ok(limit_price_points(
+                        state.sequencer.price_history(market_id, from_ms, to_ms),
+                        limit,
+                    )),
                 };
                 let _ = reply.send(result);
             }
@@ -2368,8 +2377,9 @@ impl SequencerHandle {
         market_id: MarketId,
         from_ms: Option<u64>,
         to_ms: Option<u64>,
+        limit: usize,
     ) -> Result<Vec<PricePoint>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetPriceHistory(market_id, from_ms, to_ms, reply))
+        self.rpc(|reply| SequencerMsg::GetPriceHistory(market_id, from_ms, to_ms, limit, reply))
             .await?
     }
 
@@ -3716,7 +3726,7 @@ mod tests {
         let block2 = handle.produce_block().await.unwrap();
 
         let points = handle
-            .get_price_history(market_id, None, None)
+            .get_price_history(market_id, None, None, 2)
             .await
             .unwrap();
         let heights: Vec<_> = points.iter().map(|point| point.height).collect();
@@ -3738,7 +3748,7 @@ mod tests {
             BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
         let reader = SequencerHandle::spawn_with_store_arc(restored_seq, Some(store.clone()));
         let restored_points = reader
-            .get_price_history(market_id, None, None)
+            .get_price_history(market_id, None, None, 2)
             .await
             .unwrap();
         let restored_heights: Vec<_> = restored_points.iter().map(|point| point.height).collect();

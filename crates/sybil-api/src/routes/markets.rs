@@ -2,7 +2,10 @@ use axum::extract::{Path, Query, State};
 use axum::Json;
 
 use matching_engine::{MarketId, NANOS_PER_DOLLAR};
-use matching_sequencer::{MarketMetadata, ResolutionConfig};
+use matching_sequencer::{
+    MarketMetadata, ResolutionConfig, DEFAULT_PRICE_HISTORY_QUERY_POINTS,
+    MAX_PRICE_HISTORY_QUERY_POINTS,
+};
 use sybil_oracle::{FeedPubkey, ResolutionAttestation, SignedAttestation};
 
 use crate::convert::prices_to_response;
@@ -588,6 +591,7 @@ pub async fn resolve_market(
         ("id" = u32, Path, description = "Market ID"),
         ("from_ms" = Option<u64>, Query, description = "Start timestamp filter"),
         ("to_ms" = Option<u64>, Query, description = "End timestamp filter"),
+        ("limit" = Option<usize>, Query, description = "Maximum returned points, newest matching points first by cap, clamped server-side"),
     ),
     responses(
         (status = 200, description = "Price history", body = PriceHistoryResponse)
@@ -599,9 +603,13 @@ pub async fn get_price_history(
     Query(params): Query<PriceHistoryParams>,
 ) -> Result<Json<PriceHistoryResponse>, AppError> {
     let mid = MarketId::new(id);
+    let limit = params
+        .limit
+        .unwrap_or(DEFAULT_PRICE_HISTORY_QUERY_POINTS)
+        .min(MAX_PRICE_HISTORY_QUERY_POINTS);
     let points = state
         .sequencer
-        .get_price_history(mid, params.from_ms, params.to_ms)
+        .get_price_history(mid, params.from_ms, params.to_ms, limit)
         .await?;
 
     let response = PriceHistoryResponse {
@@ -625,6 +633,7 @@ pub async fn get_price_history(
 pub struct PriceHistoryParams {
     pub from_ms: Option<u64>,
     pub to_ms: Option<u64>,
+    pub limit: Option<usize>,
 }
 
 /// GET /v1/markets/search
