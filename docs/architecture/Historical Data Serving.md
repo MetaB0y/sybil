@@ -144,9 +144,11 @@ source of truth for historical ranges.
 
 Retention should not run as unbounded work inside this transaction. After a
 successful block commit, the actor or a maintenance task may call
-`Store::prune_history(policy, budget)` in a separate bounded redb write
-transaction. If pruning is interrupted, extra rows remain available; correctness
-does not depend on pruning catching up immediately.
+`Store::prune_history(head_height, policy)` in a separate bounded redb write
+transaction. This is implemented for `blocks_full` and raw `price_points`.
+Pruning failure is logged/metriced but does not fail block production after the
+block has already been saved. If pruning is interrupted, extra rows remain
+available; correctness does not depend on pruning catching up immediately.
 
 ## Read Path
 
@@ -195,14 +197,17 @@ silently skipping blocks.
 
 ## Retention and Pruning
 
-Unbounded retention is a product decision, not an accident. The first production
-policy should be simple and explicit:
+Unbounded retention is a product decision, not an accident. The implemented
+runtime policy is simple and explicit:
 
 - Keep full replay blocks for a configured height window.
-- Keep raw mark-price points for a configured height or time window.
-- Keep price candles for a longer configured time window.
-- Expose retained floors in API responses and health/metadata so clients can
-  distinguish "outside retention" from "no data".
+- Keep raw mark-price points for a configured height window.
+- Prune at a configured block interval with a configured maximum rows per run.
+- Expose retained floors in API responses so clients can distinguish "outside
+  retention" from "no data".
+
+Price candles remain planned separately and should have their own retention
+window once implemented.
 
 Initial devnet defaults should be conservative and operator-tunable. A useful
 starting point is:
@@ -215,24 +220,29 @@ starting point is:
 | 5 minute candles | 180 days | Long horizon without a row explosion. |
 | 1 hour candles | unbounded on devnet until size proves otherwise | Cheap enough for coarse historical charts and backtests. |
 
-These are not consensus constants. They belong in runtime configuration, for
-example:
+These are not consensus constants. Runtime configuration currently includes:
 
 - `SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS`
 - `SYBIL_RAW_PRICE_RETENTION_BLOCKS`
-- `SYBIL_PRICE_CANDLE_RETENTION_BLOCKS`
 - `SYBIL_HISTORY_PRUNE_INTERVAL_BLOCKS`
 - `SYBIL_HISTORY_PRUNE_MAX_ROWS`
 
 Use block-height windows for `blocks_full` and raw `price_points` first. They
 are deterministic, cheap to compare, and match current keys. Time-based raw
-retention can be layered later if product requirements need wall-clock windows
-across variable block cadence.
+retention and `SYBIL_PRICE_CANDLE_RETENTION_BLOCKS` can be layered later if
+product requirements need wall-clock windows across variable block cadence.
+
+Implementation caveat: `price_points` is keyed by `(market_id, height)`, which
+is ideal for per-market chart reads but not for global height pruning. The first
+implementation scans keys without allocating more than the configured row
+budget. If pruning CPU becomes visible in block latency, add a secondary
+height-ordered index before increasing prune budgets.
 
 ### Metadata
 
-Add a small `history_meta` table rather than overloading generic counters.
-Values can start as `u64`; use MessagePack only when a field needs structure.
+The store uses a small `history_meta` table rather than overloading generic
+counters. Values start as `u64`; use MessagePack only when a field needs
+structure.
 
 Suggested keys:
 
@@ -260,14 +270,14 @@ separate low-frequency maintenance action, not a per-block operation.
 
 ### API Gap Semantics
 
-APIs should report retention explicitly:
+APIs report retention explicitly for the implemented streams:
 
-- `GET /v1/blocks/{height}` should return a distinct retention/gone error when
+- `GET /v1/blocks/{height}` returns `410 Gone` with code `RETENTION_GONE` when
   `height < blocks_full_min_height`, not a generic not-found response.
-- `GET /v1/blocks/ws?from_block=N` should send a versioned retention-gap
-  envelope and close cleanly when `N < blocks_full_min_height`.
-- Raw price-history responses should include `retention_min_height` once
-  retention is active.
+- `GET /v1/blocks/ws?from_block=N` sends a versioned `retention_gap` envelope
+  and closes cleanly when replay asks for a pruned height.
+- Raw price-history responses include `retention_min_height` once retention is
+  active.
 - Candle responses should include `retention_min_bucket_ms` for the selected
   resolution.
 

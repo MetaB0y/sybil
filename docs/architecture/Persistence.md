@@ -186,10 +186,13 @@ Persisted fill-history, event-history, and equity rows are not pruned yet;
 long-lived deployments should add store retention policies or paginated indexed
 scans before exposing unbounded historical query windows.
 
-Raw price-history rows and full block replay rows are now durable, but they do
-not yet have retention metadata or pruning. See [[Historical Data Serving]] for
-the planned policy: append history at block commit, run pruning as bounded
-maintenance, and advance advertised retained floors only after deletes commit.
+Raw price-history rows and full block replay rows are durable and have
+opt-in bounded retention. `history_meta` records the lowest retained
+`blocks_full` and `price_points` heights plus the last prune attempt height.
+Pruning runs after a successful block save, deletes rows under a per-run row
+budget, and advances metadata only in the same committed redb transaction as
+the deletes. See [[Historical Data Serving]] for the longer candle/history
+roadmap.
 
 ## Recovery Order
 

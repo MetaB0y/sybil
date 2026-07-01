@@ -622,6 +622,7 @@ pub async fn get_price_history(
     let response = PriceHistoryResponse {
         market_id: id,
         next_before_height: page.next_before_height,
+        retention_min_height: page.retention_min_height,
         points: page
             .points
             .into_iter()

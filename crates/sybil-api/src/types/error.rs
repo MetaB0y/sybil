@@ -42,6 +42,18 @@ impl AppError {
         }
     }
 
+    pub fn gone(error: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::GONE,
+            body: ErrorBody {
+                error: error.into(),
+                code: "RETENTION_GONE".to_string(),
+                details: None,
+            },
+            retry_after_secs: None,
+        }
+    }
+
     pub fn forbidden(error: impl Into<String>) -> Self {
         Self {
             status: StatusCode::FORBIDDEN,
@@ -168,6 +180,12 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::BlockNotFound => {
                 AppError::not_found("Block not found")
             }
+            matching_sequencer::SequencerError::BlockPruned {
+                requested_height,
+                retention_min_height,
+            } => AppError::gone(format!(
+                "Block {requested_height} is older than retained history min {retention_min_height}"
+            )),
             matching_sequencer::SequencerError::OrderNotFound => {
                 AppError::not_found("Pending order not found")
             }

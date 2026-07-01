@@ -7,7 +7,7 @@ use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::time::{interval, Instant, MissedTickBehavior};
 
-use matching_sequencer::SequencerHandle;
+use matching_sequencer::{SequencerError, SequencerHandle};
 use sybil_api_types::ws::{BlockStreamMessage, BlockStreamPayload, BLOCK_STREAM_VERSION};
 
 use crate::convert::block_to_response;
@@ -140,6 +140,26 @@ async fn replay(socket: &mut WebSocket, handle: &SequencerHandle, from: u64) -> 
     while h <= head {
         let block = match handle.get_block(h).await {
             Ok(b) => b,
+            Err(SequencerError::BlockPruned {
+                requested_height,
+                retention_min_height,
+            }) => {
+                if !send_envelope(
+                    socket,
+                    BlockStreamPayload::RetentionGap {
+                        requested_height,
+                        retention_min_height,
+                        head_height: head,
+                    },
+                )
+                .await
+                {
+                    return ReplayOutcome::ClientGone;
+                }
+                return ReplayOutcome::Error(format!(
+                    "replay requested height {requested_height} older than retention min {retention_min_height}"
+                ));
+            }
             Err(e) => return ReplayOutcome::Error(format!("replay failed at height {h}: {e}")),
         };
         if !send_block(socket, &block).await {

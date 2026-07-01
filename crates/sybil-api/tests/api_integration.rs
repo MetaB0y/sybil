@@ -1399,6 +1399,40 @@ async fn recent_blocks_returns_newest_first() {
 }
 
 #[tokio::test]
+async fn pruned_block_returns_410_retention_gone() {
+    let (app, handle) = test_app_with_store_config(
+        true,
+        SequencerConfig {
+            block_history_capacity: 1,
+            block_history_retention_blocks: 1,
+            history_prune_interval_blocks: 1,
+            history_prune_max_rows: 10,
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        },
+    )
+    .await;
+
+    let first = handle.produce_block().await.unwrap();
+    handle.produce_block().await.unwrap();
+    handle.produce_block().await.unwrap();
+
+    let (status, body) = get(
+        app,
+        &format!("/v1/blocks/{}", first.canonical.header.height),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::GONE,
+        "body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    let resp = parse_json(&body);
+    assert_eq!(resp["code"].as_str().unwrap(), "RETENTION_GONE");
+}
+
+#[tokio::test]
 async fn account_orders_include_created_at_ms() {
     let (app, _) = test_app(true).await;
 

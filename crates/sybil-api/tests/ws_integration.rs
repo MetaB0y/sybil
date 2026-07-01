@@ -177,6 +177,44 @@ async fn ws_from_block_replays_store_history_beyond_hot_ring() {
 }
 
 #[tokio::test]
+async fn ws_from_block_older_than_retention_sends_gap_envelope() {
+    let (addr, handle) = spawn_store_server(SequencerConfig {
+        block_history_capacity: 1,
+        block_history_retention_blocks: 1,
+        history_prune_interval_blocks: 1,
+        history_prune_max_rows: 10,
+        block_interval: Duration::from_secs(60),
+        ..SequencerConfig::default()
+    })
+    .await;
+
+    let b0 = handle.produce_block().await.unwrap();
+    handle.produce_block().await.unwrap();
+    let b2 = handle.produce_block().await.unwrap();
+
+    let url = format!(
+        "ws://{}/v1/blocks/ws?from_block={}",
+        addr, b0.canonical.header.height
+    );
+    let (ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    let (_sink, mut stream) = ws.split();
+
+    let msg = recv_envelope(&mut stream).await;
+    match msg.payload {
+        BlockStreamPayload::RetentionGap {
+            requested_height,
+            retention_min_height,
+            head_height,
+        } => {
+            assert_eq!(requested_height, b0.canonical.header.height);
+            assert_eq!(retention_min_height, b2.canonical.header.height);
+            assert_eq!(head_height, b2.canonical.header.height);
+        }
+        other => panic!("expected retention_gap, got {:?}", other),
+    }
+}
+
+#[tokio::test]
 async fn ws_from_block_ahead_of_head_announces_complete() {
     let (addr, _handle) = spawn_server().await;
 

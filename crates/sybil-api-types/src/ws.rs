@@ -38,6 +38,14 @@ pub enum BlockStreamPayload {
         skipped: u64,
         last_sent_height: Option<u64>,
     },
+    /// Requested replay starts before durable retention. This is the last
+    /// message on the stream; the server closes the connection immediately
+    /// after.
+    RetentionGap {
+        requested_height: u64,
+        retention_min_height: u64,
+        head_height: u64,
+    },
 }
 
 #[cfg(test)]
@@ -109,6 +117,23 @@ mod tests {
         assert_eq!(
             json,
             r#"{"v":1,"type":"lagged","skipped":7,"last_sent_height":42}"#
+        );
+    }
+
+    #[test]
+    fn envelope_retention_gap_shape() {
+        let json = serde_json::to_string(&BlockStreamMessage {
+            v: BLOCK_STREAM_VERSION,
+            payload: BlockStreamPayload::RetentionGap {
+                requested_height: 10,
+                retention_min_height: 25,
+                head_height: 80,
+            },
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"v":1,"type":"retention_gap","requested_height":10,"retention_min_height":25,"head_height":80}"#
         );
     }
 }

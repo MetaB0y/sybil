@@ -26,7 +26,7 @@ use crate::portfolio::PortfolioSummary;
 use crate::sequencer::{
     BlockSequencer, OrderSubmission, PendingOrderInfo, PreparedBlock, SequencerConfig,
 };
-use crate::store::ControlPlaneCommand;
+use crate::store::{ControlPlaneCommand, HistoryRetentionPolicy};
 use crate::{
     AccountSnapshotSlot, QmdbStateExclusionProofParts, QmdbStateKeyValueProofParts,
     QMDB_STATE_MAX_KEY_BYTES,
@@ -55,6 +55,7 @@ fn limit_price_point_page(
         return PriceHistoryPage {
             points: Vec::new(),
             next_before_height: None,
+            retention_min_height: None,
         };
     }
 
@@ -63,11 +64,13 @@ fn limit_price_point_page(
         PriceHistoryPage {
             next_before_height: page.first().map(|point| point.height),
             points: page,
+            retention_min_height: None,
         }
     } else {
         PriceHistoryPage {
             points,
             next_before_height: None,
+            retention_min_height: None,
         }
     }
 }
@@ -665,6 +668,7 @@ impl SequencerActorState {
     async fn persist_block(&self, prepared: &PreparedBlock) -> Result<(), SequencerError> {
         if let Some(ref store) = self.store {
             let sealed = prepared.production().sealed_block();
+            let height = sealed.canonical.header.height;
             store
                 .save_block_with_witness_and_history(
                     prepared.next_sequencer().snapshot(),
@@ -673,6 +677,50 @@ impl SequencerActorState {
                 )
                 .await
                 .map_err(|error| SequencerError::Persistence(error.to_string()))?;
+
+            let policy = HistoryRetentionPolicy {
+                block_history_retention_blocks: self
+                    .sequencer
+                    .config
+                    .block_history_retention_blocks,
+                raw_price_retention_blocks: self.sequencer.config.raw_price_retention_blocks,
+                prune_interval_blocks: self.sequencer.config.history_prune_interval_blocks,
+                prune_max_rows: self.sequencer.config.history_prune_max_rows,
+            };
+            if policy.should_prune_at(height) {
+                match store.prune_history(height, policy) {
+                    Ok(report) => {
+                        metrics::counter!(
+                            "sybil_history_pruned_rows_total",
+                            "stream" => "blocks_full"
+                        )
+                        .increment(report.blocks_full_pruned as u64);
+                        metrics::counter!(
+                            "sybil_history_pruned_rows_total",
+                            "stream" => "price_points"
+                        )
+                        .increment(report.price_points_pruned as u64);
+                        if let Some(min_height) = report.meta.blocks_full_min_height {
+                            metrics::gauge!(
+                                "sybil_history_retention_min_height",
+                                "stream" => "blocks_full"
+                            )
+                            .set(min_height as f64);
+                        }
+                        if let Some(min_height) = report.meta.price_points_min_height {
+                            metrics::gauge!(
+                                "sybil_history_retention_min_height",
+                                "stream" => "price_points"
+                            )
+                            .set(min_height as f64);
+                        }
+                    }
+                    Err(error) => {
+                        metrics::counter!("sybil_history_prune_failures_total").increment(1);
+                        tracing::warn!(height, %error, "history pruning failed after block save");
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -1689,11 +1737,28 @@ impl Actor for SequencerActor {
                 let result = match block {
                     Some(block) => Ok(block),
                     None => match &state.store {
-                        Some(store) => store
-                            .load_block(height)
-                            .await
-                            .map_err(|error| SequencerError::Persistence(error.to_string()))
-                            .and_then(|block| block.ok_or(SequencerError::BlockNotFound)),
+                        Some(store) => match store.load_block(height).await {
+                            Ok(Some(block)) => Ok(block),
+                            Ok(None) => match store.history_retention_meta() {
+                                Ok(meta) => {
+                                    if let Some(retention_min_height) = meta.blocks_full_min_height
+                                    {
+                                        if height < retention_min_height {
+                                            Err(SequencerError::BlockPruned {
+                                                requested_height: height,
+                                                retention_min_height,
+                                            })
+                                        } else {
+                                            Err(SequencerError::BlockNotFound)
+                                        }
+                                    } else {
+                                        Err(SequencerError::BlockNotFound)
+                                    }
+                                }
+                                Err(error) => Err(SequencerError::Persistence(error.to_string())),
+                            },
+                            Err(error) => Err(SequencerError::Persistence(error.to_string())),
+                        },
                         None => Err(SequencerError::BlockNotFound),
                     },
                 };
@@ -3677,6 +3742,63 @@ mod tests {
         assert_eq!(
             stored_block2.canonical.header.state_root,
             block2.canonical.header.state_root
+        );
+    }
+
+    #[tokio::test]
+    async fn store_backed_history_pruning_runs_after_block_commit() {
+        let path = temp_store_path("block-history-retention");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let config = SequencerConfig {
+            block_history_capacity: 1,
+            block_history_retention_blocks: 1,
+            history_prune_interval_blocks: 1,
+            history_prune_max_rows: 10,
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        };
+        let (seq, _) = make_test_sequencer_with_config(config);
+        let handle = SequencerHandle::spawn_with_store_arc(seq, Some(store.clone()));
+
+        handle.produce_block().await.unwrap();
+        handle.produce_block().await.unwrap();
+        let block3 = handle.produce_block().await.unwrap();
+        assert_eq!(block3.canonical.header.height, 3);
+
+        let meta = store.history_retention_meta().unwrap();
+        assert_eq!(meta.blocks_full_min_height, Some(3));
+        assert_eq!(meta.last_history_prune_height, Some(3));
+        assert!(store.load_block(1).await.unwrap().is_none());
+        assert!(store.load_block(2).await.unwrap().is_none());
+        assert_eq!(
+            store
+                .load_block(3)
+                .await
+                .unwrap()
+                .unwrap()
+                .canonical
+                .header
+                .height,
+            3
+        );
+
+        let pruned = match handle.get_block(1).await {
+            Ok(block) => panic!(
+                "expected block 1 to be pruned, got height {}",
+                block.canonical.header.height
+            ),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            pruned,
+            SequencerError::BlockPruned {
+                requested_height: 1,
+                retention_min_height: 3,
+            }
+        ));
+        assert_eq!(
+            handle.get_block(3).await.unwrap().canonical.header.height,
+            3
         );
     }
 

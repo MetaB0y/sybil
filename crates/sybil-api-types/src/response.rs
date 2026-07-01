@@ -590,6 +590,8 @@ pub struct PriceHistoryResponse {
     pub points: Vec<PricePointResponse>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_before_height: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retention_min_height: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

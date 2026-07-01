@@ -104,6 +104,32 @@ pub struct ApiConfig {
     )]
     pub max_price_history_points_per_market: usize,
 
+    /// Durable full-block history rows retained by bounded pruning. 0 disables
+    /// pruning for full block history.
+    #[arg(
+        long,
+        default_value = "0",
+        env = "SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS"
+    )]
+    pub block_history_retention_blocks: u64,
+
+    /// Durable raw price-point rows retained by bounded pruning. 0 disables
+    /// pruning for raw price history.
+    #[arg(long, default_value = "0", env = "SYBIL_RAW_PRICE_RETENTION_BLOCKS")]
+    pub raw_price_retention_blocks: u64,
+
+    /// Block cadence for retention maintenance. 0 disables scheduled pruning.
+    #[arg(
+        long,
+        default_value = "1000",
+        env = "SYBIL_HISTORY_PRUNE_INTERVAL_BLOCKS"
+    )]
+    pub history_prune_interval_blocks: u64,
+
+    /// Maximum durable history rows deleted in one maintenance pass.
+    #[arg(long, default_value = "10000", env = "SYBIL_HISTORY_PRUNE_MAX_ROWS")]
+    pub history_prune_max_rows: usize,
+
     /// In-memory fill-history records retained per account for API queries.
     #[arg(
         long,
@@ -198,6 +224,10 @@ impl Default for ApiConfig {
             http_order_client_burst: 1_000,
             block_history_capacity: 100,
             max_price_history_points_per_market: 2_000,
+            block_history_retention_blocks: 0,
+            raw_price_retention_blocks: 0,
+            history_prune_interval_blocks: 1_000,
+            history_prune_max_rows: 10_000,
             max_fill_history_per_account: 5_000,
             max_equity_points_per_account: 0,
             max_history_events_per_account: 0,

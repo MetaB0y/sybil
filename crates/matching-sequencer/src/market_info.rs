@@ -53,6 +53,7 @@ pub struct PricePoint {
 pub struct PriceHistoryPage {
     pub points: Vec<PricePoint>,
     pub next_before_height: Option<u64>,
+    pub retention_min_height: Option<u64>,
 }
 
 /// Record of a fill attributed to an account.

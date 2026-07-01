@@ -122,6 +122,12 @@ const MARKET_VOLUMES: TableDefinition<u32, u64> = TableDefinition::new("market_v
 /// Scalar counters: name → value
 const COUNTERS: TableDefinition<&str, u64> = TableDefinition::new("counters");
 
+/// Historical-serving metadata: retained floors and maintenance cursors.
+///
+/// These rows describe durable history that is actually still present. They
+/// are advanced only in the same transaction that deletes old rows.
+const HISTORY_META: TableDefinition<&str, u64> = TableDefinition::new("history_meta");
+
 /// Resting order book snapshot: single row keyed "snapshot" → msgpack(Vec<RestingOrder>).
 /// Rewritten atomically each block.
 const RESTING_ORDERS: TableDefinition<&str, &[u8]> = TableDefinition::new("resting_orders");
@@ -248,6 +254,9 @@ const KEY_NEXT_ORDER_ID: &str = "next_order_id";
 const KEY_ACCOUNT_STATE_HEIGHT: &str = "account_state_height";
 const KEY_ACCOUNT_STATE_SLOT: &str = "account_state_slot";
 const KEY_HISTORY_EVENT_NEXT_SEQ: &str = "history_event_next_seq";
+const KEY_BLOCKS_FULL_MIN_HEIGHT: &str = "blocks_full_min_height";
+const KEY_PRICE_POINTS_MIN_HEIGHT: &str = "price_points_min_height";
+const KEY_LAST_HISTORY_PRUNE_HEIGHT: &str = "last_history_prune_height";
 
 const STORE_LAYOUT_VERSION: u64 = 1;
 
@@ -290,6 +299,11 @@ fn price_point_key(market_id: MarketId, height: u64) -> [u8; 12] {
     key[..4].copy_from_slice(&market_id.0.to_be_bytes());
     key[4..].copy_from_slice(&height.to_be_bytes());
     key
+}
+
+fn price_point_height_from_key(key: &[u8]) -> Option<u64> {
+    let height_bytes: [u8; 8] = key.get(4..12)?.try_into().ok()?;
+    Some(u64::from_be_bytes(height_bytes))
 }
 
 fn price_point_market_bounds(market_id: MarketId) -> ([u8; 12], [u8; 12]) {
@@ -362,6 +376,62 @@ const BLOCKS_FULL: TableDefinition<u64, &[u8]> = TableDefinition::new("blocks_fu
 pub struct Store {
     db: Database,
     account_state_store: Box<dyn AccountStateStore>,
+}
+
+/// Retention settings for durable history tables.
+///
+/// A value of 0 disables pruning for that stream. `prune_max_rows` bounds the
+/// memory and write work of one maintenance pass; when it is exhausted,
+/// metadata remains at the oldest row still present.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HistoryRetentionPolicy {
+    pub block_history_retention_blocks: u64,
+    pub raw_price_retention_blocks: u64,
+    pub prune_interval_blocks: u64,
+    pub prune_max_rows: usize,
+}
+
+impl HistoryRetentionPolicy {
+    pub fn should_prune_at(&self, height: u64) -> bool {
+        height > 0
+            && self.prune_interval_blocks > 0
+            && self.prune_max_rows > 0
+            && (self.block_history_retention_blocks > 0 || self.raw_price_retention_blocks > 0)
+            && height % self.prune_interval_blocks == 0
+    }
+
+    fn blocks_full_floor(&self, head_height: u64) -> Option<u64> {
+        retention_floor(head_height, self.block_history_retention_blocks)
+    }
+
+    fn price_points_floor(&self, head_height: u64) -> Option<u64> {
+        retention_floor(head_height, self.raw_price_retention_blocks)
+    }
+}
+
+fn retention_floor(head_height: u64, retention_blocks: u64) -> Option<u64> {
+    if head_height == 0 || retention_blocks == 0 {
+        return None;
+    }
+    Some(
+        head_height
+            .saturating_sub(retention_blocks.saturating_sub(1))
+            .max(1),
+    )
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HistoryRetentionMeta {
+    pub blocks_full_min_height: Option<u64>,
+    pub price_points_min_height: Option<u64>,
+    pub last_history_prune_height: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HistoryPruneReport {
+    pub blocks_full_pruned: usize,
+    pub price_points_pruned: usize,
+    pub meta: HistoryRetentionMeta,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -531,6 +601,7 @@ impl Store {
         txn.open_table(BLOCK_WITNESSES)?;
         txn.open_table(PUBKEY_REGISTRY)?;
         txn.open_table(COUNTERS)?;
+        txn.open_table(HISTORY_META)?;
         txn.open_table(CLEARING_PRICES)?;
         txn.open_table(MARKET_VOLUMES)?;
         txn.open_table(RESTING_ORDERS)?;
@@ -1050,6 +1121,160 @@ impl Store {
             .map_err(StoreError::from)
     }
 
+    pub fn history_retention_meta(&self) -> Result<HistoryRetentionMeta, StoreError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(HISTORY_META)?;
+        Ok(HistoryRetentionMeta {
+            blocks_full_min_height: table
+                .get(KEY_BLOCKS_FULL_MIN_HEIGHT)?
+                .map(|value| value.value()),
+            price_points_min_height: table
+                .get(KEY_PRICE_POINTS_MIN_HEIGHT)?
+                .map(|value| value.value()),
+            last_history_prune_height: table
+                .get(KEY_LAST_HISTORY_PRUNE_HEIGHT)?
+                .map(|value| value.value()),
+        })
+    }
+
+    /// Delete old durable history rows under a bounded row budget.
+    ///
+    /// This is deliberately separate from block commit. If the budget is too
+    /// small to reach the target floor, rows remain and the metadata floor
+    /// stays at the oldest row still present.
+    pub fn prune_history(
+        &self,
+        head_height: u64,
+        policy: HistoryRetentionPolicy,
+    ) -> Result<HistoryPruneReport, StoreError> {
+        let block_floor = policy.blocks_full_floor(head_height);
+        let price_floor = policy.price_points_floor(head_height);
+        if policy.prune_max_rows == 0 || (block_floor.is_none() && price_floor.is_none()) {
+            return Ok(HistoryPruneReport {
+                meta: self.history_retention_meta()?,
+                ..HistoryPruneReport::default()
+            });
+        }
+
+        let txn = self.db.begin_write()?;
+        let mut remaining = policy.prune_max_rows;
+        let mut blocks_full_pruned = 0usize;
+        let mut price_points_pruned = 0usize;
+
+        if let Some(floor) = block_floor {
+            let keys: Vec<u64> = {
+                let table = txn.open_table(BLOCKS_FULL)?;
+                let mut keys = Vec::new();
+                for entry in table.range(0..floor)? {
+                    let (key, _) = entry?;
+                    keys.push(key.value());
+                    if keys.len() >= remaining {
+                        break;
+                    }
+                }
+                keys
+            };
+
+            if !keys.is_empty() {
+                let mut table = txn.open_table(BLOCKS_FULL)?;
+                for key in keys {
+                    if table.remove(key)?.is_some() {
+                        blocks_full_pruned += 1;
+                    }
+                }
+                remaining = remaining.saturating_sub(blocks_full_pruned);
+            }
+        }
+
+        if remaining > 0 {
+            if let Some(floor) = price_floor {
+                let keys: Vec<[u8; 12]> = {
+                    let table = txn.open_table(PRICE_POINTS)?;
+                    let mut keys = Vec::new();
+                    for entry in table.iter()? {
+                        let (key, _) = entry?;
+                        let key_bytes = key.value();
+                        if price_point_height_from_key(key_bytes).is_some_and(|h| h < floor) {
+                            let mut owned = [0u8; 12];
+                            owned.copy_from_slice(key_bytes);
+                            keys.push(owned);
+                            if keys.len() >= remaining {
+                                break;
+                            }
+                        }
+                    }
+                    keys
+                };
+
+                if !keys.is_empty() {
+                    let mut table = txn.open_table(PRICE_POINTS)?;
+                    for key in keys {
+                        if table.remove(key.as_slice())?.is_some() {
+                            price_points_pruned += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        let blocks_full_min_height = if block_floor.is_some() {
+            let table = txn.open_table(BLOCKS_FULL)?;
+            let min_height = table
+                .iter()?
+                .next()
+                .transpose()?
+                .map(|(key, _)| key.value());
+            min_height
+        } else {
+            None
+        };
+        let price_points_min_height = if price_floor.is_some() {
+            let table = txn.open_table(PRICE_POINTS)?;
+            let mut min_height: Option<u64> = None;
+            for entry in table.iter()? {
+                let (key, _) = entry?;
+                if let Some(height) = price_point_height_from_key(key.value()) {
+                    min_height = Some(min_height.map_or(height, |min| min.min(height)));
+                }
+            }
+            min_height
+        } else {
+            None
+        };
+
+        {
+            let mut meta = txn.open_table(HISTORY_META)?;
+            if block_floor.is_some() {
+                match blocks_full_min_height {
+                    Some(height) => {
+                        meta.insert(KEY_BLOCKS_FULL_MIN_HEIGHT, height)?;
+                    }
+                    None => {
+                        meta.remove(KEY_BLOCKS_FULL_MIN_HEIGHT)?;
+                    }
+                }
+            }
+            if price_floor.is_some() {
+                match price_points_min_height {
+                    Some(height) => {
+                        meta.insert(KEY_PRICE_POINTS_MIN_HEIGHT, height)?;
+                    }
+                    None => {
+                        meta.remove(KEY_PRICE_POINTS_MIN_HEIGHT)?;
+                    }
+                }
+            }
+            meta.insert(KEY_LAST_HISTORY_PRUNE_HEIGHT, head_height)?;
+        }
+
+        txn.commit()?;
+        Ok(HistoryPruneReport {
+            blocks_full_pruned,
+            price_points_pruned,
+            meta: self.history_retention_meta()?,
+        })
+    }
+
     /// Load raw mark-price points for one market. The scan is bounded in
     /// memory: if more than `limit` points match, the newest `limit` points
     /// are returned in chronological order with a `before_height` cursor for
@@ -1062,13 +1287,19 @@ impl Store {
         before_height: Option<u64>,
         limit: usize,
     ) -> Result<crate::market_info::PriceHistoryPage, StoreError> {
+        let txn = self.db.begin_read()?;
+        let retention_min_height = {
+            let meta = txn.open_table(HISTORY_META)?;
+            meta.get(KEY_PRICE_POINTS_MIN_HEIGHT)?
+                .map(|value| value.value())
+        };
         if limit == 0 {
             return Ok(crate::market_info::PriceHistoryPage {
                 points: Vec::new(),
                 next_before_height: None,
+                retention_min_height,
             });
         }
-        let txn = self.db.begin_read()?;
         let table = txn.open_table(PRICE_POINTS)?;
         let (lo, hi) = price_point_market_bounds(market_id);
         let mut points = VecDeque::new();
@@ -1096,6 +1327,7 @@ impl Store {
         Ok(crate::market_info::PriceHistoryPage {
             points,
             next_before_height,
+            retention_min_height,
         })
     }
 
@@ -2080,6 +2312,21 @@ mod tests {
         }
     }
 
+    fn sample_sealed_block(header: &BlockHeader) -> SealedBlock {
+        SealedBlock {
+            canonical: crate::block::Block {
+                header: header.clone(),
+                order_ids: Vec::new(),
+                system_events: Vec::new(),
+                bridge: crate::bridge::BridgeBlockData::default(),
+                fills: Vec::new(),
+                clearing_prices: HashMap::new(),
+                rejections: Vec::new(),
+            },
+            analytics: crate::block::BlockAnalytics::default(),
+        }
+    }
+
     fn coherent_header_and_witness(
         height: u64,
         accounts: &AccountStore,
@@ -2209,6 +2456,45 @@ mod tests {
             }
         }
 
+        fn snapshot_with_price_points<'a>(
+            &'a self,
+            accounts: &'a AccountStore,
+            markets: &'a MarketSet,
+            lifecycle: &'a MarketLifecycle,
+            header: &'a BlockHeader,
+            price_points_delta: Vec<(MarketId, crate::market_info::PricePoint)>,
+        ) -> SequencerSnapshot<'a> {
+            SequencerSnapshot {
+                accounts,
+                markets,
+                market_groups: &[],
+                lifecycle,
+                header,
+                next_order_id: 1,
+                pubkey_registry: &self.empty_pk,
+                analytics: AnalyticsSnapshot {
+                    last_clearing_prices: &self.empty_prices,
+                    market_volumes: &self.empty_volumes,
+                    account_fills: Vec::new(),
+                    trader_tracker: Default::default(),
+                    price_tracker_volume: Default::default(),
+                    price_tracker_clearing_history: Default::default(),
+                    liquidity_tracker: Default::default(),
+                    order_stats_tracker: Default::default(),
+                    welfare_tracker: Default::default(),
+                    first_deposit_ms: HashMap::new(),
+                    fill_total_counts: HashMap::new(),
+                    cost_basis_tracker: Default::default(),
+                    history_event_next_seq: 0,
+                    equity_points_delta: Vec::new(),
+                    price_points_delta,
+                    history_events_delta: Vec::new(),
+                },
+                bridge_state: &self.bridge_state,
+                resting_orders: Vec::new(),
+            }
+        }
+
         fn snapshot_with_history_events<'a>(
             &'a self,
             accounts: &'a AccountStore,
@@ -2300,6 +2586,168 @@ mod tests {
                 "persisted typed-state qMDB root diverged from the committed block header at height {height}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn history_pruning_deletes_blocks_and_price_points_with_metadata() {
+        let path = temp_db_path("store-history-retention");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+        let lifecycle = MarketLifecycle::new(oracle);
+        let mut markets = MarketSet::new();
+        let market_id = markets.add_binary("retention");
+        let accounts = AccountStore::new();
+        let env = TestEnv::new();
+
+        for height in 1..=5 {
+            let (header, witness) = coherent_header_and_witness(
+                height,
+                &accounts,
+                &markets,
+                &lifecycle,
+                &env.bridge_state,
+            );
+            let point = crate::market_info::PricePoint {
+                height,
+                timestamp_ms: header.timestamp_ms,
+                yes_price: 500_000_000 + height,
+                no_price: 500_000_000 - height,
+                volume_nanos: height * 10,
+            };
+            let block = sample_sealed_block(&header);
+            store
+                .save_block_with_witness_and_history(
+                    env.snapshot_with_price_points(
+                        &accounts,
+                        &markets,
+                        &lifecycle,
+                        &header,
+                        vec![(market_id, point)],
+                    ),
+                    &witness,
+                    &block,
+                )
+                .await
+                .unwrap();
+        }
+
+        let report = store
+            .prune_history(
+                5,
+                HistoryRetentionPolicy {
+                    block_history_retention_blocks: 3,
+                    raw_price_retention_blocks: 3,
+                    prune_interval_blocks: 1,
+                    prune_max_rows: 10,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(report.blocks_full_pruned, 2);
+        assert_eq!(report.price_points_pruned, 2);
+        assert_eq!(report.meta.blocks_full_min_height, Some(3));
+        assert_eq!(report.meta.price_points_min_height, Some(3));
+        assert_eq!(report.meta.last_history_prune_height, Some(5));
+        assert!(store.load_block(1).await.unwrap().is_none());
+        assert!(store.load_block(2).await.unwrap().is_none());
+        assert_eq!(
+            store
+                .load_block(3)
+                .await
+                .unwrap()
+                .unwrap()
+                .canonical
+                .header
+                .height,
+            3
+        );
+
+        let page = store
+            .load_price_history(market_id, None, None, None, 10)
+            .await
+            .unwrap();
+        assert_eq!(page.retention_min_height, Some(3));
+        let heights: Vec<_> = page.points.iter().map(|point| point.height).collect();
+        assert_eq!(heights, vec![3, 4, 5]);
+    }
+
+    #[tokio::test]
+    async fn history_pruning_partial_budget_keeps_metadata_at_oldest_remaining_row() {
+        let path = temp_db_path("store-history-retention-budget");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+        let lifecycle = MarketLifecycle::new(oracle);
+        let mut markets = MarketSet::new();
+        let market_id = markets.add_binary("retention budget");
+        let accounts = AccountStore::new();
+        let env = TestEnv::new();
+
+        for height in 1..=5 {
+            let (header, witness) = coherent_header_and_witness(
+                height,
+                &accounts,
+                &markets,
+                &lifecycle,
+                &env.bridge_state,
+            );
+            let point = crate::market_info::PricePoint {
+                height,
+                timestamp_ms: header.timestamp_ms,
+                yes_price: 500_000_000,
+                no_price: 500_000_000,
+                volume_nanos: 1,
+            };
+            let block = sample_sealed_block(&header);
+            store
+                .save_block_with_witness_and_history(
+                    env.snapshot_with_price_points(
+                        &accounts,
+                        &markets,
+                        &lifecycle,
+                        &header,
+                        vec![(market_id, point)],
+                    ),
+                    &witness,
+                    &block,
+                )
+                .await
+                .unwrap();
+        }
+
+        let report = store
+            .prune_history(
+                5,
+                HistoryRetentionPolicy {
+                    block_history_retention_blocks: 2,
+                    raw_price_retention_blocks: 2,
+                    prune_interval_blocks: 1,
+                    prune_max_rows: 2,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(report.blocks_full_pruned, 2);
+        assert_eq!(report.price_points_pruned, 0);
+        assert_eq!(
+            report.meta.blocks_full_min_height,
+            Some(3),
+            "block floor must not jump to target 4 while block 3 remains"
+        );
+        assert_eq!(
+            report.meta.price_points_min_height,
+            Some(1),
+            "price metadata must not advance when budget is exhausted first"
+        );
+        assert_eq!(report.meta.last_history_prune_height, Some(5));
+        assert!(store.load_block(3).await.unwrap().is_some());
+
+        let page = store
+            .load_price_history(market_id, None, None, None, 10)
+            .await
+            .unwrap();
+        let heights: Vec<_> = page.points.iter().map(|point| point.height).collect();
+        assert_eq!(heights, vec![1, 2, 3, 4, 5]);
+        assert_eq!(page.retention_min_height, Some(1));
     }
 
     #[tokio::test]

@@ -96,6 +96,16 @@ pub struct SequencerConfig {
     /// Maximum in-memory chart points retained per market. This is a serving
     /// cache, not canonical state.
     pub max_price_history_points_per_market: usize,
+    /// Durable full-block history rows retained by bounded pruning. 0 means
+    /// do not prune this stream.
+    pub block_history_retention_blocks: u64,
+    /// Durable raw price-point rows retained by bounded pruning. 0 means do
+    /// not prune this stream.
+    pub raw_price_retention_blocks: u64,
+    /// Block cadence for retention maintenance. 0 disables scheduled pruning.
+    pub history_prune_interval_blocks: u64,
+    /// Maximum durable history rows deleted in one maintenance pass.
+    pub history_prune_max_rows: usize,
     /// Maximum in-memory fill records retained per account for API queries.
     /// Persistent storage may retain more rows.
     pub max_fill_history_per_account: usize,
@@ -134,6 +144,10 @@ impl Default for SequencerConfig {
             block_history_capacity: 100,
             max_price_history_points_per_market:
                 crate::price_tracker::DEFAULT_MAX_PRICE_HISTORY_POINTS_PER_MARKET,
+            block_history_retention_blocks: 0,
+            raw_price_retention_blocks: 0,
+            history_prune_interval_blocks: 1_000,
+            history_prune_max_rows: 10_000,
             max_fill_history_per_account:
                 crate::fill_recorder::DEFAULT_MAX_FILL_HISTORY_PER_ACCOUNT,
             max_equity_points_per_account: crate::aggregates::MAX_EQUITY_POINTS,
