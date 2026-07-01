@@ -56,14 +56,20 @@ Implemented so far:
   actor commit path.
 - `GetBlock(height)` checks the hot in-memory ring first, then falls back to
   `blocks_full`.
-- A regression test covers ring eviction plus cold restart with an empty hot
-  ring.
+- WebSocket replay with `from_block` uses durable block rows when the requested
+  replay starts before the hot ring.
+- `price_points` persists raw mark-price rows by `(market_id, height)` from the
+  same block commit transaction.
+- `GetPriceHistory(market_id, from_ms, to_ms)` uses the durable price table when
+  a store is configured, with a hard internal cap of 5,000 returned points.
+- Regression tests cover ring eviction plus cold restart for exact block reads,
+  WebSocket replay, and raw price-history reads.
 
 Still planned in this phase:
 
 - `block_summaries` and paginated `GET /v1/blocks`.
-- Durable WebSocket replay from blocks older than the hot ring.
-- Durable `price_points` range scans and retention metadata.
+- Explicit public price-history pagination parameters and cursor metadata.
+- Retention metadata, pruning, and downsampled candles.
 
 ## Schema Sketch
 
@@ -132,8 +138,9 @@ Historical reads must be bounded before they allocate:
 - `GetBlock(height)` can check the hot ring first, then read `blocks_full`.
 - `GetRecentBlocks(limit)` should become a store-backed page, not a full
   in-memory ring dump.
-- `GetPriceHistory(market_id, range, limit)` should be a range scan over
-  `price_points` with a hard cap.
+- `GetPriceHistory(market_id, range, limit)` is a range scan over
+  `price_points` with a hard cap. Today the actor uses a fixed 5,000 point cap;
+  the public endpoint still needs explicit pagination/cursor parameters.
 - WebSocket replay should page durable blocks in small chunks before switching
   to live broadcast.
 

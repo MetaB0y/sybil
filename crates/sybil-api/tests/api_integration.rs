@@ -12,10 +12,12 @@ use serde_json::{json, Value};
 
 use common::{
     get, post_json, post_json_with_headers, put_json, test_app, test_app_with_config,
-    test_app_with_store, test_app_with_store_zero_caps,
+    test_app_with_store, test_app_with_store_config, test_app_with_store_zero_caps,
 };
 use matching_engine::MarketSet;
 use matching_sequencer::crypto::{canonical_cancel_bytes, canonical_order_bytes};
+use matching_sequencer::SequencerConfig;
+use std::time::Duration;
 use sybil_api::config::ApiConfig;
 
 // ---------------------------------------------------------------------------
@@ -725,6 +727,100 @@ async fn list_markets_reports_traded_volume() {
         market["volume_nanos"].as_u64().unwrap() > 0,
         "detail endpoint should expose traded volume"
     );
+}
+
+#[tokio::test]
+async fn market_price_history_persists_to_store_beyond_hot_cache() {
+    let (app, handle) = test_app_with_store_config(
+        true,
+        SequencerConfig {
+            max_price_history_points_per_market: 1,
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        },
+    )
+    .await;
+
+    let balance = 100_000_000_000u64;
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": balance }),
+    )
+    .await;
+    let acct_a = parse_json(&body)["account_id"].as_u64().unwrap();
+
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": balance }),
+    )
+    .await;
+    let acct_b = parse_json(&body)["account_id"].as_u64().unwrap();
+
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/markets",
+        json!({ "name": "Price history" }),
+    )
+    .await;
+    let market_id = parse_json(&body)["market_id"].as_u64().unwrap();
+
+    for (yes_price, no_price) in [(600_000_000u64, 500_000_000u64), (700_000_000, 400_000_000)] {
+        let (status, _) = post_json(
+            app.clone(),
+            "/v1/orders",
+            json!({
+                "account_id": acct_a,
+                "orders": [{
+                    "type": "BuyYes",
+                    "market_id": market_id,
+                    "limit_price_nanos": yes_price,
+                    "quantity": 10
+                }]
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (status, _) = post_json(
+            app.clone(),
+            "/v1/orders",
+            json!({
+                "account_id": acct_b,
+                "orders": [{
+                    "type": "BuyNo",
+                    "market_id": market_id,
+                    "limit_price_nanos": no_price,
+                    "quantity": 10
+                }]
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let block = handle.produce_block().await.unwrap();
+        assert!(
+            !block.canonical.fills.is_empty(),
+            "expected fills from crossing orders"
+        );
+    }
+
+    let (status, body) = get(app, &format!("/v1/markets/{market_id}/prices/history")).await;
+    assert_eq!(status, StatusCode::OK);
+    let response = parse_json(&body);
+    assert_eq!(response["market_id"].as_u64().unwrap(), market_id);
+    let points = response["points"].as_array().unwrap();
+    assert_eq!(
+        points.len(),
+        2,
+        "store-backed route should return points older than the one-point hot cache: {response}"
+    );
+    assert_eq!(points[0]["height"].as_u64().unwrap(), 1);
+    assert_eq!(points[1]["height"].as_u64().unwrap(), 2);
+    assert!(points
+        .iter()
+        .all(|point| point["volume_nanos"].as_u64().unwrap() > 0));
 }
 
 // ---------------------------------------------------------------------------

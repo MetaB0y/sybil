@@ -39,7 +39,7 @@ impl MarketMetadata {
 }
 
 /// A single price observation for a market at a given block.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PricePoint {
     pub height: u64,
     pub timestamp_ms: u64,

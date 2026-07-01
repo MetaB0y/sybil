@@ -43,9 +43,10 @@
 //!
 //! **Tier 3 (partial)**: Derived views.
 //! - Fill history: implemented (see `FILL_HISTORY` table).
-//! - Price history and block ring buffer: TODO.
+//! - Price history: implemented for raw mark points (see `PRICE_POINTS` table).
+//! - Block ring buffer: exact-height fallback implemented, list/replay policy TODO.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -199,6 +200,10 @@ const PRICE_TRACKER_CLEARING_HISTORY: TableDefinition<&str, &[u8]> =
     TableDefinition::new("price_tracker_clearing_history");
 const KEY_PRICE_TRACKER_CLEARING_HISTORY_SNAPSHOT: &str = "snapshot";
 
+/// Durable raw mark-price points. Key =
+/// market_id(4B BE) ++ block_height(8B BE).
+const PRICE_POINTS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("price_points");
+
 /// Off-block liquidity tracker: per-market ±band depth rings used by the
 /// `liquidity_avg10` surface. Same single-blob shape as `TRADER_TRACKER`.
 const LIQUIDITY_TRACKER: TableDefinition<&str, &[u8]> = TableDefinition::new("liquidity_tracker");
@@ -278,6 +283,20 @@ fn history_event_key(account_id: AccountId, block_height: u64, seq: u64) -> [u8;
     k[8..16].copy_from_slice(&block_height.to_be_bytes());
     k[16..].copy_from_slice(&seq.to_be_bytes());
     k
+}
+
+fn price_point_key(market_id: MarketId, height: u64) -> [u8; 12] {
+    let mut key = [0u8; 12];
+    key[..4].copy_from_slice(&market_id.0.to_be_bytes());
+    key[4..].copy_from_slice(&height.to_be_bytes());
+    key
+}
+
+fn price_point_market_bounds(market_id: MarketId) -> ([u8; 12], [u8; 12]) {
+    (
+        price_point_key(market_id, 0),
+        price_point_key(market_id, u64::MAX),
+    )
 }
 
 fn seq_from_history_event_key(key: &[u8]) -> Option<u64> {
@@ -470,6 +489,7 @@ pub struct AnalyticsSnapshot<'a> {
     pub fill_total_counts: HashMap<AccountId, u64>,
     pub cost_basis_tracker: CostBasisTrackerSnapshot,
     pub history_event_next_seq: u64,
+    pub price_points_delta: Vec<(MarketId, crate::market_info::PricePoint)>,
     pub equity_points_delta: Vec<(AccountId, crate::aggregates::EquityPoint)>,
     pub history_events_delta: Vec<crate::aggregates::StoredHistoryEvent>,
 }
@@ -528,6 +548,7 @@ impl Store {
         txn.open_table(TRADER_TRACKER)?;
         txn.open_table(PRICE_TRACKER_VOLUME)?;
         txn.open_table(PRICE_TRACKER_CLEARING_HISTORY)?;
+        txn.open_table(PRICE_POINTS)?;
         txn.open_table(LIQUIDITY_TRACKER)?;
         txn.open_table(ORDER_STATS_TRACKER)?;
         txn.open_table(WELFARE_TRACKER)?;
@@ -767,6 +788,16 @@ impl Store {
                 KEY_HISTORY_EVENT_NEXT_SEQ,
                 snapshot.analytics.history_event_next_seq,
             )?;
+        }
+
+        // Price points delta — append raw mark-price rows emitted this block.
+        {
+            let mut price_points = txn.open_table(PRICE_POINTS)?;
+            for (market_id, point) in &snapshot.analytics.price_points_delta {
+                let key = price_point_key(*market_id, point.height);
+                let bytes = rmp_serde::to_vec(point)?;
+                price_points.insert(key.as_slice(), bytes.as_slice())?;
+            }
         }
 
         // Data feeds
@@ -1017,6 +1048,39 @@ impl Store {
             .map(|value| rmp_serde::from_slice(value.value()))
             .transpose()
             .map_err(StoreError::from)
+    }
+
+    /// Load raw mark-price points for one market. The scan is bounded in
+    /// memory: if more than `limit` points match, the newest `limit` points
+    /// are returned in chronological order.
+    pub async fn load_price_history(
+        &self,
+        market_id: MarketId,
+        from_ms: Option<u64>,
+        to_ms: Option<u64>,
+        limit: usize,
+    ) -> Result<Vec<crate::market_info::PricePoint>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(PRICE_POINTS)?;
+        let (lo, hi) = price_point_market_bounds(market_id);
+        let mut points = VecDeque::new();
+        for entry in table.range(lo.as_slice()..=hi.as_slice())? {
+            let (_, value) = entry?;
+            let point: crate::market_info::PricePoint = rmp_serde::from_slice(value.value())?;
+            if from_ms.is_some_and(|from| point.timestamp_ms < from)
+                || to_ms.is_some_and(|to| point.timestamp_ms > to)
+            {
+                continue;
+            }
+            if points.len() == limit {
+                points.pop_front();
+            }
+            points.push_back(point);
+        }
+        Ok(points.into_iter().collect())
     }
 
     /// Load the latest committed block witness, if the store has one.
@@ -2082,6 +2146,7 @@ mod tests {
                     cost_basis_tracker: Default::default(),
                     history_event_next_seq: 0,
                     equity_points_delta: Vec::new(),
+                    price_points_delta: Vec::new(),
                     history_events_delta: Vec::new(),
                 },
                 bridge_state: &self.bridge_state,
@@ -2120,6 +2185,7 @@ mod tests {
                     cost_basis_tracker: Default::default(),
                     history_event_next_seq: 0,
                     equity_points_delta: Vec::new(),
+                    price_points_delta: Vec::new(),
                     history_events_delta: Vec::new(),
                 },
                 bridge_state: &self.bridge_state,
@@ -2159,6 +2225,7 @@ mod tests {
                     cost_basis_tracker: Default::default(),
                     history_event_next_seq,
                     equity_points_delta: Vec::new(),
+                    price_points_delta: Vec::new(),
                     history_events_delta,
                 },
                 bridge_state: &self.bridge_state,

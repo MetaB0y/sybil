@@ -60,6 +60,9 @@ pub struct PriceTracker {
     last_mark_prices: HashMap<MarketId, Vec<Nanos>>,
     /// Price history per market.
     price_history: HashMap<MarketId, Vec<PricePoint>>,
+    /// Price points appended since the last committed snapshot. Store-backed
+    /// history persists these rows, then the actor clears them after commit.
+    pending_price_points: Vec<(MarketId, PricePoint)>,
     /// Cumulative per-market volume in nanos.
     market_volumes: HashMap<MarketId, u64>,
     /// Maximum retained price points per market in the in-memory serving cache.
@@ -96,6 +99,7 @@ impl PriceTracker {
             last_clearing_prices: HashMap::new(),
             last_mark_prices: HashMap::new(),
             price_history: HashMap::new(),
+            pending_price_points: Vec::new(),
             market_volumes: HashMap::new(),
             max_history_points_per_market,
             platform_volume: 0,
@@ -128,6 +132,7 @@ impl PriceTracker {
             last_clearing_prices,
             last_mark_prices: last_clearing_prices_seed,
             price_history: HashMap::new(),
+            pending_price_points: Vec::new(),
             market_volumes,
             max_history_points_per_market,
             platform_volume: 0,
@@ -271,20 +276,24 @@ impl PriceTracker {
                     .map(|p| p.yes_price == yes_price && p.no_price == no_price)
                     .unwrap_or(false);
             if !unchanged {
-                let history = self.price_history.entry(mid).or_default();
-                history.push(PricePoint {
+                let point = PricePoint {
                     height,
                     timestamp_ms,
                     yes_price,
                     no_price,
                     volume_nanos: vol,
-                });
-                let overflow = history
-                    .len()
-                    .saturating_sub(self.max_history_points_per_market);
-                if overflow > 0 {
-                    history.drain(0..overflow);
+                };
+                {
+                    let history = self.price_history.entry(mid).or_default();
+                    history.push(point.clone());
+                    let overflow = history
+                        .len()
+                        .saturating_sub(self.max_history_points_per_market);
+                    if overflow > 0 {
+                        history.drain(0..overflow);
+                    }
                 }
+                self.pending_price_points.push((mid, point));
             }
 
             if vol > 0 {
@@ -363,6 +372,14 @@ impl PriceTracker {
             .filter(|p| to_ms.is_none_or(|t| p.timestamp_ms <= t))
             .cloned()
             .collect()
+    }
+
+    pub fn pending_price_points(&self) -> &[(MarketId, PricePoint)] {
+        &self.pending_price_points
+    }
+
+    pub fn clear_pending(&mut self) {
+        self.pending_price_points.clear();
     }
 
     /// Get cumulative volume for a market.

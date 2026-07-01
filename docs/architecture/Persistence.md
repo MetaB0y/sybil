@@ -163,11 +163,14 @@ Persisted today:
 - **Full block replay payloads**: `SealedBlock` rows in `blocks_full`, keyed by
   height, used as the exact-height fallback for `GET /v1/blocks/{height}` when
   the hot block ring has evicted the block or after restart.
+- **Raw price history**: per-market mark-price rows in `price_points`, keyed by
+  `(market_id, height)`, used by `GET /v1/markets/{id}/prices/history` when a
+  durable store is configured.
 
 Still not persisted:
 
-- **Price history**
-- **Block summaries and block ring fallback for SSE catch-up**
+- **Block summaries and paginated block-list history**
+- **Price-history retention metadata and downsampled candles**
 - **Derived aggregates such as welfare summaries**
 
 The planned durable boundary for these views is [[Historical Data Serving]]. The in-memory caches should remain hot caches only; they should not be the source of truth for replay, charts, or restart behavior.

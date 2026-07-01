@@ -101,6 +101,7 @@ impl AnalyticsState {
             fill_total_counts: self.total_fill_counts(),
             cost_basis_tracker: self.cost_basis_snapshot(),
             history_event_next_seq: self.account_event_log.next_seq(),
+            price_points_delta: self.price_tracker.pending_price_points().to_vec(),
             equity_points_delta: self.equity_tracker.pending().to_vec(),
             history_events_delta: self
                 .account_event_log
@@ -459,6 +460,7 @@ impl AnalyticsState {
     }
 
     pub fn clear_offblock_pending(&mut self) {
+        self.price_tracker.clear_pending();
         self.equity_tracker.clear_pending();
         self.account_event_log.clear_pending();
     }

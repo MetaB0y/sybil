@@ -31,6 +31,7 @@ use crate::{
 };
 
 const SEQUENCER_ACTOR_METRIC_NAME: &str = "sequencer";
+const MAX_PRICE_HISTORY_QUERY_POINTS: usize = 5_000;
 
 fn current_timestamp_ms() -> u64 {
     std::time::SystemTime::now()
@@ -127,7 +128,7 @@ pub enum SequencerMsg {
         MarketId,
         Option<u64>,
         Option<u64>,
-        RpcReplyPort<Vec<PricePoint>>,
+        RpcReplyPort<Result<Vec<PricePoint>, SequencerError>>,
     ),
     GetAccountFills(
         AccountId,
@@ -1703,7 +1704,19 @@ impl Actor for SequencerActor {
                 let _ = reply.send(state.sequencer.market_metadata(market_id).cloned());
             }
             SequencerMsg::GetPriceHistory(market_id, from_ms, to_ms, reply) => {
-                let _ = reply.send(state.sequencer.price_history(market_id, from_ms, to_ms));
+                let result = match &state.store {
+                    Some(store) => store
+                        .load_price_history(
+                            market_id,
+                            from_ms,
+                            to_ms,
+                            MAX_PRICE_HISTORY_QUERY_POINTS,
+                        )
+                        .await
+                        .map_err(|error| SequencerError::Persistence(error.to_string())),
+                    None => Ok(state.sequencer.price_history(market_id, from_ms, to_ms)),
+                };
+                let _ = reply.send(result);
             }
             SequencerMsg::GetAccountFills(account_id, market_id, limit, offset, reply) => {
                 // Serve from the durable store (full persisted history); the
@@ -2357,7 +2370,7 @@ impl SequencerHandle {
         to_ms: Option<u64>,
     ) -> Result<Vec<PricePoint>, SequencerError> {
         self.rpc(|reply| SequencerMsg::GetPriceHistory(market_id, from_ms, to_ms, reply))
-            .await
+            .await?
     }
 
     pub async fn get_account_fills(
@@ -3620,6 +3633,116 @@ mod tests {
             stored_block2.canonical.header.state_root,
             block2.canonical.header.state_root
         );
+    }
+
+    #[tokio::test]
+    async fn store_backed_price_history_survives_cache_eviction_and_restart() {
+        let path = temp_store_path("price-history");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let config = SequencerConfig {
+            max_price_history_points_per_market: 1,
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        };
+
+        let mut accounts = AccountStore::new();
+        let buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let seller = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let mut markets = MarketSet::new();
+        let market_id = markets.add_binary("Price history");
+        accounts
+            .get_mut(seller)
+            .unwrap()
+            .positions
+            .insert((market_id, 0), 10);
+
+        let seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            Arc::new(AdminOracle::new()),
+            config.clone(),
+        );
+        let handle = SequencerHandle::spawn_with_store_arc(seq, Some(store.clone()));
+
+        handle
+            .submit_order(OrderSubmission {
+                account_id: buyer,
+                orders: vec![outcome_buy(&markets, 1, market_id, 0, 600_000_000, 1)],
+                mm_constraint: None,
+            })
+            .await
+            .unwrap();
+        handle
+            .submit_order(OrderSubmission {
+                account_id: seller,
+                orders: vec![matching_engine::outcome_sell(
+                    &markets,
+                    2,
+                    market_id,
+                    0,
+                    400_000_000,
+                    1,
+                )],
+                mm_constraint: None,
+            })
+            .await
+            .unwrap();
+        let block1 = handle.produce_block().await.unwrap();
+
+        handle
+            .submit_order(OrderSubmission {
+                account_id: buyer,
+                orders: vec![outcome_buy(&markets, 3, market_id, 0, 700_000_000, 1)],
+                mm_constraint: None,
+            })
+            .await
+            .unwrap();
+        handle
+            .submit_order(OrderSubmission {
+                account_id: seller,
+                orders: vec![matching_engine::outcome_sell(
+                    &markets,
+                    4,
+                    market_id,
+                    0,
+                    300_000_000,
+                    1,
+                )],
+                mm_constraint: None,
+            })
+            .await
+            .unwrap();
+        let block2 = handle.produce_block().await.unwrap();
+
+        let points = handle
+            .get_price_history(market_id, None, None)
+            .await
+            .unwrap();
+        let heights: Vec<_> = points.iter().map(|point| point.height).collect();
+        assert_eq!(
+            heights,
+            vec![
+                block1.canonical.header.height,
+                block2.canonical.header.height
+            ],
+            "store-backed reads should include points older than the hot price cache"
+        );
+        assert!(points.iter().all(|point| point.volume_nanos > 0));
+
+        drop(handle);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        let restored_seq =
+            BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+        let reader = SequencerHandle::spawn_with_store_arc(restored_seq, Some(store.clone()));
+        let restored_points = reader
+            .get_price_history(market_id, None, None)
+            .await
+            .unwrap();
+        let restored_heights: Vec<_> = restored_points.iter().map(|point| point.height).collect();
+        assert_eq!(restored_heights, heights);
     }
 
     #[tokio::test]
