@@ -115,16 +115,20 @@ pub async fn test_app_with_config(config: ApiConfig) -> (Router, SequencerHandle
 /// for endpoints that depend on qMDB state roots or proofs.
 #[allow(dead_code)]
 pub async fn test_app_with_store(dev_mode: bool) -> (Router, SequencerHandle) {
+    test_app_with_store_config(dev_mode, SequencerConfig::default()).await
+}
+
+/// Create a store-backed test app with an explicit sequencer config.
+#[allow(dead_code)]
+pub async fn test_app_with_store_config(
+    dev_mode: bool,
+    sequencer_config: SequencerConfig,
+) -> (Router, SequencerHandle) {
     let accounts = AccountStore::new();
     let markets = MarketSet::new();
     let oracle = Arc::new(AdminOracle::new());
-    let sequencer = BlockSequencer::with_default_solver(
-        accounts,
-        markets,
-        vec![],
-        oracle,
-        SequencerConfig::default(),
-    );
+    let sequencer =
+        BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, sequencer_config);
     let store = Store::open(&temp_store_path()).expect("test store opens");
     let handle = SequencerHandle::spawn_with_store(sequencer, Some(store));
     let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()

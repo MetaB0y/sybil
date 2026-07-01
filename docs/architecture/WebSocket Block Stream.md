@@ -8,7 +8,7 @@ last_verified: 2026-06-30
 
 The WebSocket block stream is the production transport for the block feed — a persistent, bidirectional channel at `GET /v1/blocks/ws` that pushes every committed block to subscribers. It complements the simpler [[SSE Block Stream]] (`/v1/blocks/stream`) with stronger guarantees: versioned message envelope, explicit lag signalling with close codes, server-initiated pings, and gap-free reconnect via `?from_block=N`. These are the properties long-lived clients (frontends, agents, proof consumers) need; SSE stays around for scripted tooling and `curl` debugging.
 
-The stream sits on top of a `tokio::sync::broadcast` channel fed by the sequencer actor. Each subscriber gets its own 64-block buffer. If a client falls behind that window, the server sends a final `lagged` envelope and closes the connection with code 1008 — the client reconnects with `?from_block=<last_sent_height + 1>` and the handler replays from the in-memory block history (last 100 blocks) before switching back to live. This is a deliberate "crash fast, recover cleanly" design: no silent block loss, no unbounded buffering.
+The stream sits on top of a `tokio::sync::broadcast` channel fed by the sequencer actor. Each subscriber gets its own 64-block buffer. If a client falls behind that window, the server sends a final `lagged` envelope and closes the connection with code 1008 — the client reconnects with `?from_block=<last_sent_height + 1>` and the handler replays from block history before switching back to live. The hot in-memory ring is checked first; if the requested height has already been evicted, replay falls back to the durable `blocks_full` store. This is a deliberate "crash fast, recover cleanly" design: no silent block loss, no unbounded buffering.
 
 ## Message Envelope
 
@@ -28,11 +28,9 @@ Clients should read the `v` field first and ignore messages whose version they d
 
 ## Reconnect Flow
 
-On disconnect (either a clean `lagged` close or a transport error), a client that has seen block `H` reconnects with `?from_block=H+1`. The server replays every block in `[H+1, current_head]` from its in-memory history, emits `replay_complete`, then switches to the live feed. There is no gap and no duplicate.
+On disconnect (either a clean `lagged` close or a transport error), a client that has seen block `H` reconnects with `?from_block=H+1`. The server replays every block in `[H+1, current_head]` from hot or durable history, emits `replay_complete`, then switches to the live feed. There is no gap and no duplicate.
 
-Current behavior: if `H+1` is older than the in-memory history (default 100 blocks), the server closes with "replay failed at height N: block not found". The client should fall back to `/v1/blocks/latest` for the current state and resume without `from_block`.
-
-Target behavior: [[Historical Data Serving]] makes replay durable. If `H+1` is outside the hot ring but inside configured block-history retention, the handler should replay from the store and then switch to the live feed. Only requests older than retention should fail.
+Current behavior: replay can read committed `blocks_full` rows after the hot ring has evicted a block. If a requested height is missing from durable history, the server closes with "replay failed at height N: block not found". Retention/gap envelopes are still future work under [[Historical Data Serving]].
 
 ## Keepalive
 

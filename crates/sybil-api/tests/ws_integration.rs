@@ -9,16 +9,26 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use matching_sequencer::SequencerHandle;
+use matching_sequencer::{SequencerConfig, SequencerHandle};
 use sybil_api_types::ws::{BlockStreamMessage, BlockStreamPayload};
 use tokio::net::TcpListener;
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::protocol::Message;
 
-use common::test_app;
+use common::{test_app, test_app_with_store_config};
 
 async fn spawn_server() -> (SocketAddr, SequencerHandle) {
     let (app, handle) = test_app(true).await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (addr, handle)
+}
+
+async fn spawn_store_server(config: SequencerConfig) -> (SocketAddr, SequencerHandle) {
+    let (app, handle) = test_app_with_store_config(true, config).await;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -111,6 +121,58 @@ async fn ws_from_block_replays_history_then_goes_live() {
     match msg.payload {
         BlockStreamPayload::Block { data } => assert_eq!(data.height, live.canonical.header.height),
         other => panic!("expected live block after replay, got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn ws_from_block_replays_store_history_beyond_hot_ring() {
+    let (addr, handle) = spawn_store_server(SequencerConfig {
+        block_history_capacity: 1,
+        block_interval: Duration::from_secs(60),
+        ..SequencerConfig::default()
+    })
+    .await;
+
+    let b0 = handle.produce_block().await.unwrap();
+    let b1 = handle.produce_block().await.unwrap();
+    let b2 = handle.produce_block().await.unwrap();
+    let recent = handle.get_recent_blocks(10).await.unwrap();
+    assert_eq!(recent.len(), 1, "hot ring should retain only block 3");
+    assert_eq!(
+        recent[0].canonical.header.height,
+        b2.canonical.header.height
+    );
+
+    let url = format!(
+        "ws://{}/v1/blocks/ws?from_block={}",
+        addr, b0.canonical.header.height
+    );
+    let (ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    let (_sink, mut stream) = ws.split();
+
+    let mut seen_heights = vec![];
+    for _ in 0..3 {
+        let msg = recv_envelope(&mut stream).await;
+        match msg.payload {
+            BlockStreamPayload::Block { data } => seen_heights.push(data.height),
+            other => panic!("expected durable replay block, got {:?}", other),
+        }
+    }
+    assert_eq!(
+        seen_heights,
+        vec![
+            b0.canonical.header.height,
+            b1.canonical.header.height,
+            b2.canonical.header.height
+        ]
+    );
+
+    let complete = recv_envelope(&mut stream).await;
+    match complete.payload {
+        BlockStreamPayload::ReplayComplete { up_to_height } => {
+            assert_eq!(up_to_height, b2.canonical.header.height);
+        }
+        other => panic!("expected replay_complete, got {:?}", other),
     }
 }
 
