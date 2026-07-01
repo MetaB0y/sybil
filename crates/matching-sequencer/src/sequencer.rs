@@ -3863,6 +3863,107 @@ mod tests {
     }
 
     #[test]
+    fn restored_pending_bundle_revalidates_against_replayed_admit_reservations() {
+        let (markets, m0) = setup();
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(NANOS_PER_DOLLAR as i64);
+        let oracle: Arc<dyn Oracle> = Arc::new(AdminOracle::new());
+        let mut committed = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            oracle.clone(),
+            SequencerConfig::default(),
+        );
+        committed.produce_block(Vec::new(), 1_000);
+
+        let mut live = committed.clone();
+        let replayed_admit = match live.try_admit_direct(
+            OrderSubmission {
+                account_id: aid,
+                orders: vec![outcome_buy(&markets, 0, m0, 0, 800_000_000, 1)],
+                mm_constraint: None,
+            },
+            1_001,
+        ) {
+            AdmitOutcome::Admitted { resting_order, .. } => resting_order,
+            other => panic!("expected direct admit, got {:?}", other),
+        };
+
+        let deferred = match live.try_admit_direct(
+            OrderSubmission {
+                account_id: aid,
+                orders: vec![
+                    outcome_buy(&markets, 0, m0, 0, 600_000_000, 1),
+                    outcome_buy(&markets, 0, m0, 0, 600_000_000, 1),
+                ],
+                mm_constraint: None,
+            },
+            1_002,
+        ) {
+            AdmitOutcome::Deferred(submission) => submission,
+            other => panic!("expected pending bundle deferral, got {:?}", other),
+        };
+
+        let state = RestoredState {
+            accounts: committed.accounts.clone(),
+            markets: markets.clone(),
+            market_groups: vec![],
+            market_statuses: HashMap::new(),
+            market_metadata: HashMap::new(),
+            height: committed.height(),
+            last_header: committed.last_header().cloned(),
+            next_order_id: committed.next_order_id(),
+            pubkey_registry: committed.pubkey_registry().clone(),
+            resting_orders: committed.order_book.snapshot(),
+            data_feeds: Vec::new(),
+            resolution_templates: Vec::new(),
+            pending_bundles: vec![deferred],
+            control_plane_log: Vec::new(),
+            pending_l1_deposits: Vec::new(),
+            pending_bridge_withdrawals: Vec::new(),
+            bridge_state: BridgeState::default(),
+            admit_log: vec![replayed_admit],
+            analytics: crate::store::AnalyticsRestoredState {
+                last_clearing_prices: committed.last_clearing_prices().clone(),
+                market_volumes: committed.market_volumes().clone(),
+                account_fills: Vec::new(),
+                trader_tracker: Default::default(),
+                price_tracker_volume: Default::default(),
+                price_tracker_clearing_history: Default::default(),
+                liquidity_tracker: Default::default(),
+                order_stats_tracker: Default::default(),
+                welfare_tracker: Default::default(),
+                first_deposit_ms: HashMap::new(),
+                fill_total_counts: HashMap::new(),
+                cost_basis_tracker: Default::default(),
+                history_event_next_seq: 0,
+            },
+        };
+
+        let mut restored = BlockSequencer::restore(state, oracle, SequencerConfig::default());
+        assert_eq!(restored.order_book.reserved_balance(aid), 800_000_000);
+
+        let bp = restored.produce_block(Vec::new(), 2_000);
+        assert_eq!(
+            bp.witness.orders.len(),
+            1,
+            "over-reserved pending bundle orders must not enter accepted witness orders"
+        );
+        assert_eq!(bp.witness.rejections.len(), 2);
+        assert!(bp.witness.rejections.iter().all(|rejection| matches!(
+            rejection.reason,
+            sybil_verifier::RejectionReason::InsufficientBalance { .. }
+        )));
+        let verification = sybil_verifier::verify_full(&bp.witness, false);
+        assert!(
+            verification.valid,
+            "rejected restored pending bundle should still produce a valid witness: {:?}",
+            verification.violations
+        );
+    }
+
+    #[test]
     fn test_expired_orders_removed() {
         let (markets, m0) = setup();
         let (mut seq, aid) = make_sequencer(100 * NANOS_PER_DOLLAR as i64);

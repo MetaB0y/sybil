@@ -97,6 +97,12 @@ fresh ids to pending-bundle orders. Otherwise a restart with both `admit_log`
 and `pending_bundles` can reuse an order id in the first replay block and trip
 the verifier's duplicate-order check.
 
+Deferred pending bundles are not trusted as already validated after restore.
+They are drained through normal block-time validation against the restored
+resting-book reservations. If replayed state makes a bundle stale or
+over-reserved, its orders become block rejections instead of accepted witness
+orders.
+
 ## Acknowledged Control-Plane Mutations
 
 The same 200 OK contract must apply to control-plane mutations, not only orders. Account creation, funding, pubkey registration, market creation, metadata updates, cancellation, and resolution are all user-visible state transitions. If one is acknowledged after the last committed block and the process restarts before the next block snapshot, it needs an incremental durability path.
