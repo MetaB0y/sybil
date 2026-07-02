@@ -1,0 +1,87 @@
+# Snapshot the Polymarket rewards universe every 30 min and deploy the
+# dashboard to GitHub Pages.
+#
+# Fail-safe by construction: any failing step (fetch errors, coverage < 99%,
+# compute sanity floors) aborts the run BEFORE deploy — Pages keeps serving
+# the last good snapshot and the page header shows a STALE badge. GitHub
+# emails the repo owner on workflow failure.
+#
+# The per-run history commit doubles as repo activity, which keeps GitHub
+# from auto-disabling this schedule after 60 idle days.
+name: update
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'   # keep PERIOD_MIN below in sync with this cadence
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'history/**'         # bot commits must not re-trigger (belt & suspenders;
+                              # GITHUB_TOKEN pushes don't trigger workflows anyway)
+
+permissions:
+  contents: write   # push history commits + the gh-pages branch
+
+concurrency:
+  group: update             # a delayed cron run must not overlap the next one
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Fetch snapshot
+        run: python fetch_snapshot.py
+
+      - name: Compute page data + history line
+        env:
+          PERIOD_MIN: '30'
+        run: python compute.py --history history
+
+      - name: Upload fetch manifest (debug aid)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: data/*/manifest.json
+          retention-days: 3
+          if-no-files-found: ignore
+
+      - name: Commit history
+        run: |
+          git config user.name  'rewards-bot'
+          git config user.email 'rewards-bot@users.noreply.github.com'
+          git add history
+          if ! git diff --cached --quiet; then
+            git commit -m "history: $(date -u +'%Y-%m-%dT%H:%MZ')"
+            # --autostash: compute rewrites the tracked page/data.js seed, which
+            # otherwise blocks the rebase with "You have unstaged changes"
+            git pull --rebase --autostash origin main
+            git push
+          fi
+
+      # Branch-based Pages deploy: force-push page/ as a single orphan commit,
+      # so gh-pages never accumulates history. (The Actions deploy path —
+      # deploy-pages@v4 — hung indefinitely in GitHub's queue on this account;
+      # legacy branch builds are what its other Pages sites use and they work.)
+      - name: Deploy page/ to gh-pages
+        run: |
+          cd page
+          touch .nojekyll
+          git init -b gh-pages -q
+          git config user.name  'rewards-bot'
+          git config user.email 'rewards-bot@users.noreply.github.com'
+          git add -A
+          git commit -q -m "deploy: $(date -u +'%Y-%m-%dT%H:%MZ')"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" gh-pages

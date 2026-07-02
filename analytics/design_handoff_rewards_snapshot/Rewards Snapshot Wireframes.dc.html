@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<meta name="design_doc_mode" content="canvas">
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#1c1c1e; --muted:#8a8a8e; --faint:#b8b8bc;
+  --line:rgba(0,0,0,.10); --hair:rgba(0,0,0,.055);
+  --fillbg:rgba(0,0,0,.06);
+  --accent:#3b5bdb; --accent-tint:rgba(59,91,219,.10); --accent-line:rgba(59,91,219,.30);
+  --panel:#fbfbfa;
+}
+*{box-sizing:border-box}
+body{margin:0;background:#eceae5;font-family:system-ui,-apple-system,sans-serif;color:var(--ink)}
+/* ---- options scaffold ---- */
+.dv-turn{padding:44px 48px 40px;border-bottom:1px solid rgba(0,0,0,.08);scroll-margin-top:16px}
+.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 6px}
+.dv-tid{font:600 10px 'IBM Plex Mono',monospace;padding:3px 7px;background:#1a1a1a;color:#fff;border-radius:4px;text-decoration:none}
+.dv-tname{font:600 13px/1.2 system-ui;color:#1a1a1a}
+.dv-intro{font:400 12.5px/1.5 system-ui;color:rgba(0,0,0,.5);max-width:720px;margin:0 0 26px}
+.dv-opts{display:flex;flex-wrap:wrap;gap:40px;align-items:flex-start}
+.dv-opt{flex:none;display:flex;flex-direction:column;gap:11px;scroll-margin-top:16px}
+.dv-oid{font:600 10.5px 'IBM Plex Mono',monospace;padding:3px 7px;background:rgba(0,0,0,.08);color:#1a1a1a;border-radius:5px;text-decoration:none}
+.dv-olabel{display:flex;align-items:baseline;gap:9px;font:600 13px/1.3 system-ui;color:var(--ink)}
+.dv-olabel .tag{font:400 11px/1.3 system-ui;color:var(--muted)}
+.dv-tradeoff{font:500 15px/1.3 'Caveat',cursive;color:#b45309;max-width:520px;margin-top:-2px}
+.dv-opt:target .dv-oid{background:var(--accent);color:#fff}
+.dv-next{margin:30px 0 0;font:12px/1.6 system-ui;color:rgba(0,0,0,.5)}
+.dv-next a{color:var(--accent);text-decoration:none}
+/* ---- app frame ---- */
+.frame{background:#fff;border:1px solid var(--line);border-radius:11px;overflow:hidden;box-shadow:0 6px 22px rgba(0,0,0,.07)}
+.topbar{display:flex;align-items:center;gap:7px;padding:9px 14px;border-bottom:1px solid var(--line);background:var(--panel)}
+.dot{width:9px;height:9px;border-radius:50%;background:rgba(0,0,0,.11)}
+.appttl{margin-left:9px;font:600 11px system-ui;color:var(--muted);letter-spacing:.01em}
+.body{padding:20px 22px 22px}
+/* headline */
+.head{display:flex;align-items:flex-end;gap:30px;padding-bottom:15px;border-bottom:1px solid var(--line)}
+.kpi .big{font:700 29px/1 system-ui;letter-spacing:-.025em}
+.kpi .big .u{font-size:14px;color:var(--muted);font-weight:600}
+.kpi .cap{font:11px system-ui;color:var(--muted);margin-top:6px}
+.snap{margin-left:auto;text-align:right}
+.snap .t{font:500 11px 'IBM Plex Mono',monospace;color:var(--muted)}
+.btn{display:inline-flex;align-items:center;gap:6px;font:600 11px system-ui;padding:7px 12px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink);margin-top:8px;cursor:pointer}
+.btn.acc{background:var(--accent);color:#fff;border-color:var(--accent)}
+/* chips */
+.chips{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.chips .lbl{font:11px system-ui;color:var(--muted)}
+.chip{display:inline-flex;align-items:center;gap:7px;font:500 11px 'IBM Plex Mono',monospace;padding:4px 6px 4px 10px;background:var(--accent-tint);color:var(--accent);border:1px solid var(--accent-line);border-radius:14px}
+.chip .x{display:inline-flex;width:14px;height:14px;align-items:center;justify-content:center;border-radius:50%;background:rgba(59,91,219,.16);font-size:10px}
+/* breakdown card */
+.bd{border:1px solid var(--line);border-radius:9px;padding:13px 14px;background:#fff}
+.bd h4{margin:0 0 2px;font:600 10.5px system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--ink)}
+.bd .cardsub{font:10px system-ui;color:var(--faint);margin-bottom:11px}
+/* bars */
+.bars{display:flex;flex-direction:column;gap:7px}
+.bar{display:grid;grid-template-columns:64px 1fr 30px;gap:9px;align-items:center;font:11px/1 system-ui}
+.bar.wide{grid-template-columns:112px 1fr 58px}
+.bar .lab{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar .trk{height:11px;background:var(--fillbg);border-radius:3px;overflow:hidden}
+.bar .fil{height:100%;background:var(--accent);border-radius:3px}
+.bar .fil.m{background:rgba(0,0,0,.28)}
+.bar .val{text-align:right;font:500 10.5px 'IBM Plex Mono',monospace;color:var(--ink)}
+/* table */
+.tbl{width:100%;border-collapse:collapse;font-size:11px}
+.tbl th{text-align:left;color:var(--muted);font:600 9.5px system-ui;text-transform:uppercase;letter-spacing:.05em;padding:8px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
+.tbl th .ar{color:var(--accent)}
+.tbl td{padding:8px 9px;border-bottom:1px solid var(--hair);color:var(--ink);white-space:nowrap}
+.tbl td.q{white-space:normal;max-width:230px;color:var(--ink)}
+.tbl .num{text-align:right;font:500 10.5px 'IBM Plex Mono',monospace}
+.pill{display:inline-block;font:500 9.5px system-ui;padding:2px 7px;border-radius:10px;background:var(--fillbg);color:var(--muted)}
+.pill.a{background:var(--accent-tint);color:var(--accent)}
+.pill.warn{background:rgba(180,83,9,.12);color:#b45309}
+.secttl{font:600 10.5px system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0 0 10px}
+.tip{position:absolute;background:#1c1c1e;color:#fff;font:500 10px 'IBM Plex Mono',monospace;padding:6px 8px;border-radius:6px;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.2);z-index:3}
+.tip:after{content:'';position:absolute;left:18px;bottom:-4px;width:8px;height:8px;background:#1c1c1e;transform:rotate(45deg)}
+.hint{font:500 13px 'Caveat',cursive;color:#b45309}
+/* segmented */
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
+.seg span{font:600 11px system-ui;padding:7px 13px;color:var(--muted);border-right:1px solid var(--line)}
+.seg span:last-child{border-right:0}
+.seg span.on{background:var(--accent);color:#fff}
+/* terminal */
+.term{background:#161616;color:#d6d6d0;font-family:'IBM Plex Mono',monospace}
+.term .topbar{background:#0f0f0f;border-color:rgba(255,255,255,.09)}
+.term .appttl{color:#7d7d78}
+.term .dot{background:rgba(255,255,255,.16)}
+.term .tcol h4{color:#8f8f88;font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.06em;margin:0 0 8px}
+.term .trow{display:grid;grid-template-columns:88px 1fr 40px;gap:8px;font-size:11px;line-height:1.7;color:#c9c9c2}
+.term .trow .bar{font-family:'IBM Plex Mono',monospace;color:#5b7cf0;letter-spacing:-1px}
+.term .trow .n{text-align:right;color:#e8e8e2}
+.term .thead{color:#5b7cf0}
+.term .divln{border-top:1px solid rgba(255,255,255,.10);margin:14px 0}
+.term .ttbl{width:100%;border-collapse:collapse;font-size:11px;color:#c9c9c2}
+.term .ttbl td,.term .ttbl th{padding:3px 10px 3px 0;text-align:left;white-space:nowrap}
+.term .ttbl th{color:#7d7d78;font-weight:600;border-bottom:1px solid rgba(255,255,255,.12)}
+.term .ttbl .n{text-align:right;color:#e8e8e2}
+.term .kacc{color:#5b7cf0}
+.term .kwarn{color:#e0a458}
+</style>
+</helmet>
+
+<section class="dv-turn" id="t1">
+  <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">Rewards snapshot — 6 layout directions</span></div>
+  <p class="dv-intro">Same dataset, same six breakdowns, six ways to arrange them. All low/mid-fidelity — focus on structure, hierarchy, and where the filtering lives. Accent, spacing and interaction cues are indicative. Pick a direction (e.g. "build out <a class="dv-oid" href="#1d">1d</a>") and I'll take it to high fidelity.</p>
+
+  <div class="dv-opts">
+
+    <!-- ============ 1a GRID OF SMALL MULTIPLES ============ -->
+    <div class="dv-opt" id="1a">
+      <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Grid of small multiples <span class="tag">· everything visible at once</span></div>
+      <div class="dv-tradeoff">See all six distributions in one glance — but each chart is small; no single hero.</div>
+      <div class="frame" style="width:1120px">
+        <div class="topbar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="appttl">Liquidity Rewards — Market Snapshot</span></div>
+        <div class="body">
+          <div class="head" style="margin-bottom:14px">
+            <div class="kpi"><div class="big">$48,250<span class="u">/day</span></div><div class="cap">Total daily reward pool</div></div>
+            <div class="kpi"><div class="big">2,184</div><div class="cap">Rewarded markets</div></div>
+            <div class="snap"><div class="t">snapshot · 2 Jul 14:32 UTC</div><button class="btn acc">↻ Refresh</button></div>
+          </div>
+          <div class="chips" style="margin-bottom:15px"><span class="lbl">Filters:</span><span class="chip">Sports<span class="x">×</span></span><span class="chip">spread 0–5¢<span class="x">×</span></span><span class="lbl" style="color:var(--faint)">— 312 markets · $9,940/day</span></div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:13px">
+            <div class="bd"><h4>Category</h4><div class="cardsub">click to filter · % of pool</div><div class="bars">
+              <div class="bar"><span class="lab">Sports</span><span class="trk"><span class="fil" style="width:100%"></span></span><span class="val">34%</span></div>
+              <div class="bar"><span class="lab">Crypto</span><span class="trk"><span class="fil" style="width:79%"></span></span><span class="val">27%</span></div>
+              <div class="bar"><span class="lab">Politics</span><span class="trk"><span class="fil m" style="width:56%"></span></span><span class="val">19%</span></div>
+              <div class="bar"><span class="lab">Pop-cult.</span><span class="trk"><span class="fil m" style="width:26%"></span></span><span class="val">9%</span></div>
+              <div class="bar"><span class="lab">Economy</span><span class="trk"><span class="fil m" style="width:21%"></span></span><span class="val">7%</span></div>
+              <div class="bar"><span class="lab">Other</span><span class="trk"><span class="fil m" style="width:12%"></span></span><span class="val">4%</span></div>
+            </div></div>
+            <div class="bd" style="position:relative"><h4>Current spread</h4><div class="cardsub">hover → exact $ + %</div>
+              <div class="tip" style="top:40px;left:96px">$19,782 · 41% of pool<br>0–5¢ · 894 mkts</div>
+              <div class="bars">
+              <div class="bar"><span class="lab">0–5¢</span><span class="trk"><span class="fil" style="width:100%"></span></span><span class="val">41%</span></div>
+              <div class="bar"><span class="lab">5–10¢</span><span class="trk"><span class="fil" style="width:59%"></span></span><span class="val">24%</span></div>
+              <div class="bar"><span class="lab">10–20¢</span><span class="trk"><span class="fil m" style="width:39%"></span></span><span class="val">16%</span></div>
+              <div class="bar"><span class="lab">20–30¢</span><span class="trk"><span class="fil m" style="width:22%"></span></span><span class="val">9%</span></div>
+              <div class="bar"><span class="lab">30–50¢</span><span class="trk"><span class="fil m" style="width:15%"></span></span><span class="val">6%</span></div>
+              <div class="bar"><span class="lab">&gt;50¢</span><span class="trk"><span class="fil m" style="width:10%"></span></span><span class="val">4%</span></div>
+            </div></div>
+            <div class="bd"><h4>24h volume</h4><div class="cardsub">click to filter</div><div class="bars">
+              <div class="bar"><span class="lab">$0</span><span class="trk"><span class="fil m" style="width:8%"></span></span><span class="val">3%</span></div>
+              <div class="bar"><span class="lab">&lt;1k</span><span class="trk"><span class="fil m" style="width:31%"></span></span><span class="val">12%</span></div>
+              <div class="bar"><span class="lab">1–10k</span><span class="trk"><span class="fil" style="width:72%"></span></span><span class="val">28%</span></div>
+              <div class="bar"><span class="lab">10–100k</span><span class="trk"><span class="fil" style="width:100%"></span></span><span class="val">39%</span></div>
+              <div class="bar"><span class="lab">&gt;100k</span><span class="trk"><span class="fil m" style="width:46%"></span></span><span class="val">18%</span></div>
+            </div></div>
+            <div class="bd"><h4>Market age</h4><div class="cardsub">click to filter</div><div class="bars">
+              <div class="bar"><span class="lab">&lt;1d</span><span class="trk"><span class="fil m" style="width:37%"></span></span><span class="val">14%</span></div>
+              <div class="bar"><span class="lab">1–7d</span><span class="trk"><span class="fil" style="width:87%"></span></span><span class="val">33%</span></div>
+              <div class="bar"><span class="lab">7–30d</span><span class="trk"><span class="fil" style="width:100%"></span></span><span class="val">38%</span></div>
+              <div class="bar"><span class="lab">&gt;30d</span><span class="trk"><span class="fil m" style="width:39%"></span></span><span class="val">15%</span></div>
+            </div></div>
+            <div class="bd"><h4>Time to resolution</h4><div class="cardsub">click to filter</div><div class="bars">
+              <div class="bar"><span class="lab">&lt;1d</span><span class="trk"><span class="fil m" style="width:38%"></span></span><span class="val">11%</span></div>
+              <div class="bar"><span class="lab">1–7d</span><span class="trk"><span class="fil" style="width:100%"></span></span><span class="val">29%</span></div>
+              <div class="bar"><span class="lab">7–30d</span><span class="trk"><span class="fil" style="width:93%"></span></span><span class="val">27%</span></div>
+              <div class="bar"><span class="lab">&gt;30d</span><span class="trk"><span class="fil m" style="width:76%"></span></span><span class="val">22%</span></div>
+              <div class="bar"><span class="lab">no end</span><span class="trk"><span class="fil m" style="width:38%"></span></span><span class="val">11%</span></div>
+            </div></div>
+            <div class="bd"><h4>Competitiveness</h4><div class="cardsub">farmers per market</div><div class="bars">
+              <div class="bar"><span class="lab">no farmers</span><span class="trk"><span class="fil m" style="width:48%"></span></span><span class="val">22%</span></div>
+              <div class="bar"><span class="lab">thin</span><span class="trk"><span class="fil" style="width:100%"></span></span><span class="val">46%</span></div>
+              <div class="bar"><span class="lab">contested</span><span class="trk"><span class="fil" style="width:70%"></span></span><span class="val">32%</span></div>
+            </div></div>
+          </div>
+          <div style="margin-top:16px">
+            <div class="secttl">Markets — 2,184 · sortable</div>
+            <table class="tbl">
+              <thead><tr><th>Question</th><th>Cat</th><th>Spread</th><th class="num">24h vol</th><th class="num">Reward/day <span class="ar">↓</span></th><th>Comp.</th></tr></thead>
+              <tbody>
+                <tr><td class="q">Will BTC close above $120k this week?</td><td>Crypto</td><td>0–5¢</td><td class="num">$84.2k</td><td class="num">$412</td><td><span class="pill warn">thin</span></td></tr>
+                <tr><td class="q">NBA Finals — Game 6 winner</td><td>Sports</td><td>5–10¢</td><td class="num">$41.0k</td><td class="num">$388</td><td><span class="pill a">contested</span></td></tr>
+                <tr><td class="q">US CPI MoM above 0.3% in June?</td><td>Economy</td><td>0–5¢</td><td class="num">$12.4k</td><td class="num">$301</td><td><span class="pill warn">thin</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1b SINGLE LARGE CHART + SWITCHER ============ -->
+    <div class="dv-opt" id="1b">
+      <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>One big chart + dimension switcher <span class="tag">· focus on one cut at a time</span></div>
+      <div class="dv-tradeoff">Big, legible, comparable bars — but you only see one breakdown at a time; cross-pattern reading needs clicks.</div>
+      <div class="frame" style="width:1120px">
+        <div class="topbar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="appttl">Liquidity Rewards — Market Snapshot</span></div>
+        <div class="body">
+          <div class="head" style="margin-bottom:16px">
+            <div class="kpi"><div class="big">$48,250<span class="u">/day</span></div><div class="cap">Total daily reward pool · 2,184 markets</div></div>
+            <div class="snap"><div class="t">snapshot · 2 Jul 14:32 UTC</div><button class="btn">↻ Refresh</button></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
+            <span style="font:11px system-ui;color:var(--muted)">Break down by</span>
+            <div class="seg"><span class="on">Category</span><span>Spread</span><span>24h vol</span><span>Age</span><span>Resolution</span><span>Competitiveness</span></div>
+          </div>
+          <div class="chips" style="margin-bottom:14px"><span class="lbl">Active:</span><span class="chip">Crypto<span class="x">×</span></span></div>
+          <div style="display:grid;grid-template-columns:1.35fr 1fr;gap:20px;align-items:start">
+            <div class="bd" style="position:relative;padding:18px 18px 16px">
+              <h4 style="font-size:11px">Reward $/day by Category</h4><div class="cardsub">bars sized to $ · hover for exact figures</div>
+              <div class="tip" style="top:58px;left:180px">$13,027 · 27% · 590 mkts</div>
+              <div class="bars" style="gap:12px;margin-top:4px">
+                <div class="bar wide" style="grid-template-columns:96px 1fr 66px"><span class="lab">Sports</span><span class="trk" style="height:20px"><span class="fil" style="width:100%"></span></span><span class="val">$16,405</span></div>
+                <div class="bar wide" style="grid-template-columns:96px 1fr 66px"><span class="lab">Crypto</span><span class="trk" style="height:20px"><span class="fil" style="width:79%"></span></span><span class="val">$13,027</span></div>
+                <div class="bar wide" style="grid-template-columns:96px 1fr 66px"><span class="lab">Politics</span><span class="trk" style="height:20px"><span class="fil m" style="width:56%"></span></span><span class="val">$9,167</span></div>
+                <div class="bar wide" style="grid-template-columns:96px 1fr 66px"><span class="lab">Pop-culture</span><span class="trk" style="height:20px"><span class="fil m" style="width:26%"></span></span><span class="val">$4,342</span></div>
+                <div class="bar wide" style="grid-template-columns:96px 1fr 66px"><span class="lab">Economy</span><span class="trk" style="height:20px"><span class="fil m" style="width:21%"></span></span><span class="val">$3,377</span></div>
+                <div class="bar wide" style="grid-template-columns:96px 1fr 66px"><span class="lab">Other</span><span class="trk" style="height:20px"><span class="fil m" style="width:12%"></span></span><span class="val">$1,930</span></div>
+              </div>
+            </div>
+            <div>
+              <div class="secttl">Markets in view — 590</div>
+              <table class="tbl">
+                <thead><tr><th>Question</th><th class="num">Vol</th><th class="num">$/day ↓</th></tr></thead>
+                <tbody>
+                  <tr><td class="q">BTC above $120k this week?</td><td class="num">$84k</td><td class="num">$412</td></tr>
+                  <tr><td class="q">ETH flips $6k in July?</td><td class="num">$52k</td><td class="num">$355</td></tr>
+                  <tr><td class="q">SOL new ATH before Aug?</td><td class="num">$31k</td><td class="num">$288</td></tr>
+                  <tr><td class="q">Fed cut odds — crypto proxy</td><td class="num">$19k</td><td class="num">$240</td></tr>
+                  <tr><td class="q">Doge above $0.30?</td><td class="num">$11k</td><td class="num">$196</td></tr>
+                </tbody>
+              </table>
+              <div class="hint" style="margin-top:10px">↳ table + all totals re-animate when you switch the dimension or click a bar</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1c VERTICAL SCROLL STORY ============ -->
+    <div class="dv-opt" id="1c">
+      <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>Vertical scroll story <span class="tag">· narrative, one breakdown per band</span></div>
+      <div class="dv-tradeoff">Reads like a report, great for sharing findings — but lots of scrolling and weak for side-by-side comparison.</div>
+      <div class="frame" style="width:720px">
+        <div class="topbar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="appttl">Liquidity Rewards — Market Snapshot</span></div>
+        <div class="body" style="padding:0">
+          <div style="position:sticky;top:0;background:#fff;padding:16px 22px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:24px;z-index:2">
+            <div class="kpi"><div class="big" style="font-size:23px">$48,250<span class="u">/day</span></div></div>
+            <div style="font:11px system-ui;color:var(--muted)">2,184 markets · snapshot 14:32 UTC</div>
+            <button class="btn" style="margin-left:auto;margin-top:0">↻ Refresh</button>
+          </div>
+          <div style="padding:22px">
+            <div style="margin-bottom:22px">
+              <div style="font:600 12px system-ui;margin-bottom:3px">Where the pool goes — by category</div>
+              <div style="font:12px/1.4 system-ui;color:var(--muted);margin-bottom:12px">Sports and Crypto absorb <b style="color:var(--ink)">61%</b> of daily rewards.</div>
+              <div class="bars" style="gap:9px">
+                <div class="bar wide"><span class="lab">Sports</span><span class="trk" style="height:16px"><span class="fil" style="width:100%"></span></span><span class="val">$16,405</span></div>
+                <div class="bar wide"><span class="lab">Crypto</span><span class="trk" style="height:16px"><span class="fil" style="width:79%"></span></span><span class="val">$13,027</span></div>
+                <div class="bar wide"><span class="lab">Politics</span><span class="trk" style="height:16px"><span class="fil m" style="width:56%"></span></span><span class="val">$9,167</span></div>
+                <div class="bar wide"><span class="lab">Other 3</span><span class="trk" style="height:16px"><span class="fil m" style="width:36%"></span></span><span class="val">$9,651</span></div>
+              </div>
+            </div>
+            <div style="border-top:1px solid var(--hair);padding-top:20px;margin-bottom:22px">
+              <div style="font:600 12px system-ui;margin-bottom:3px">Concentrated in tight spreads</div>
+              <div style="font:12px/1.4 system-ui;color:var(--muted);margin-bottom:12px"><b style="color:var(--ink)">65%</b> of rewards sit at spreads under 10¢.</div>
+              <div class="bars" style="gap:9px">
+                <div class="bar wide"><span class="lab">0–5¢</span><span class="trk" style="height:16px"><span class="fil" style="width:100%"></span></span><span class="val">$19,782</span></div>
+                <div class="bar wide"><span class="lab">5–10¢</span><span class="trk" style="height:16px"><span class="fil" style="width:59%"></span></span><span class="val">$11,580</span></div>
+                <div class="bar wide"><span class="lab">10–20¢</span><span class="trk" style="height:16px"><span class="fil m" style="width:39%"></span></span><span class="val">$7,720</span></div>
+                <div class="bar wide"><span class="lab">&gt;20¢</span><span class="trk" style="height:16px"><span class="fil m" style="width:24%"></span></span><span class="val">$9,168</span></div>
+              </div>
+            </div>
+            <div style="border-top:1px solid var(--hair);padding-top:16px;display:flex;align-items:center;gap:10px;color:var(--faint);font:11px system-ui">
+              <span>▾ 24h volume</span><span>·</span><span>Age</span><span>·</span><span>Resolution</span><span>·</span><span>Competitiveness</span><span>·</span><span>Market table</span>
+            </div>
+            <div class="hint" style="margin-top:14px">each section scrolls into view + animates in ↓</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1d SIDEBAR FILTER + CANVAS ============ -->
+    <div class="dv-opt" id="1d">
+      <div class="dv-olabel"><a class="dv-oid" href="#1d">1d</a>Sidebar filter + canvas <span class="tag">· explicit controls, familiar</span></div>
+      <div class="dv-tradeoff">Powerful, discoverable filtering with every dimension in reach — but the rail costs width and feels a touch heavier.</div>
+      <div class="frame" style="width:1120px">
+        <div class="topbar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="appttl">Liquidity Rewards — Market Snapshot</span></div>
+        <div style="display:grid;grid-template-columns:214px 1fr">
+          <div style="border-right:1px solid var(--line);background:var(--panel);padding:16px 15px">
+            <div style="font:600 10px system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:12px">Filters</div>
+            <div style="font:600 11px system-ui;margin-bottom:7px">Category</div>
+            <div style="display:flex;flex-direction:column;gap:6px;font:11px system-ui;color:var(--ink);margin-bottom:15px">
+              <label style="display:flex;gap:7px;align-items:center;color:var(--accent);font-weight:600"><span style="width:12px;height:12px;border-radius:3px;background:var(--accent);display:inline-block"></span>Sports · $16.4k</label>
+              <label style="display:flex;gap:7px;align-items:center"><span style="width:12px;height:12px;border-radius:3px;border:1px solid var(--line);display:inline-block"></span>Crypto · $13.0k</label>
+              <label style="display:flex;gap:7px;align-items:center"><span style="width:12px;height:12px;border-radius:3px;border:1px solid var(--line);display:inline-block"></span>Politics · $9.2k</label>
+              <label style="display:flex;gap:7px;align-items:center;color:var(--faint)">+ 3 more</label>
+            </div>
+            <div style="font:600 11px system-ui;margin-bottom:7px">Spread</div>
+            <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:15px">
+              <span class="pill a">0–5¢</span><span class="pill">5–10¢</span><span class="pill">10–20¢</span><span class="pill">20–30¢</span><span class="pill">30–50¢</span><span class="pill">&gt;50¢</span>
+            </div>
+            <div style="font:600 11px system-ui;margin-bottom:7px">24h volume</div>
+            <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:15px">
+              <span class="pill">$0</span><span class="pill">&lt;1k</span><span class="pill">1–10k</span><span class="pill">10–100k</span><span class="pill">&gt;100k</span>
+            </div>
+            <div style="font:11px system-ui;color:var(--faint);line-height:1.9">Age ▸<br>Resolution ▸<br>Competitiveness ▸</div>
+          </div>
+          <div class="body">
+            <div class="head" style="margin-bottom:13px">
+              <div class="kpi"><div class="big">$9,940<span class="u">/day</span></div><div class="cap">filtered · of $48,250 total</div></div>
+              <div class="kpi"><div class="big" style="font-size:20px">312</div><div class="cap">of 2,184 markets</div></div>
+              <div class="snap"><div class="t">14:32 UTC</div><button class="btn acc">↻ Refresh</button></div>
+            </div>
+            <div class="chips" style="margin-bottom:14px"><span class="chip">Sports<span class="x">×</span></span><span class="chip">0–5¢<span class="x">×</span></span><span class="lbl" style="color:var(--accent);cursor:pointer">clear all</span></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-bottom:14px">
+              <div class="bd"><h4>Spread (filtered)</h4><div class="bars" style="margin-top:8px">
+                <div class="bar"><span class="lab">0–5¢</span><span class="trk"><span class="fil" style="width:100%"></span></span><span class="val">100%</span></div>
+                <div class="bar"><span class="lab">5–10¢</span><span class="trk"><span class="fil m" style="width:0%"></span></span><span class="val">—</span></div>
+              </div></div>
+              <div class="bd"><h4>Competitiveness</h4><div class="bars" style="margin-top:8px">
+                <div class="bar"><span class="lab">thin</span><span class="trk"><span class="fil" style="width:100%"></span></span><span class="val">58%</span></div>
+                <div class="bar"><span class="lab">contested</span><span class="trk"><span class="fil" style="width:52%"></span></span><span class="val">30%</span></div>
+                <div class="bar"><span class="lab">none</span><span class="trk"><span class="fil m" style="width:21%"></span></span><span class="val">12%</span></div>
+              </div></div>
+            </div>
+            <div class="secttl">Markets — 312</div>
+            <table class="tbl">
+              <thead><tr><th>Question</th><th>Spread</th><th class="num">24h vol</th><th class="num">$/day ↓</th><th>Comp.</th></tr></thead>
+              <tbody>
+                <tr><td class="q">NBA Finals — Game 6 winner</td><td>0–5¢</td><td class="num">$41k</td><td class="num">$388</td><td><span class="pill a">contested</span></td></tr>
+                <tr><td class="q">Any goal in first half — UCL final</td><td>0–5¢</td><td class="num">$22k</td><td class="num">$264</td><td><span class="pill warn">thin</span></td></tr>
+                <tr><td class="q">Djokovic to reach QF</td><td>0–5¢</td><td class="num">$9k</td><td class="num">$150</td><td><span class="pill warn">thin</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1e DENSE TERMINAL ============ -->
+    <div class="dv-opt" id="1e">
+      <div class="dv-olabel"><a class="dv-oid" href="#1e">1e</a>Dense terminal <span class="tag">· max density, power-user</span></div>
+      <div class="dv-tradeoff">Enormous info density, keyboard-fast for researchers — but intimidating and less inviting for casual viewing.</div>
+      <div class="frame term" style="width:1120px">
+        <div class="topbar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="appttl">rewards@polymarket ~ snapshot</span></div>
+        <div class="body" style="padding:16px 18px">
+          <div style="display:flex;align-items:baseline;gap:18px;font-size:12px;margin-bottom:6px">
+            <span style="color:#e8e8e2;font-weight:600;font-size:16px">$48,250/day</span>
+            <span style="color:#7d7d78">markets=<span class="kacc">2184</span></span>
+            <span style="color:#7d7d78">snap=<span class="kacc">2025-07-02T14:32Z</span></span>
+            <span style="margin-left:auto;color:#7d7d78">[<span class="kacc">r</span>]efresh · [<span class="kacc">/</span>]filter</span>
+          </div>
+          <div style="font-size:11px;color:#7d7d78;margin-bottom:12px">filter: <span class="kacc">category=sports</span> <span class="kacc">spread=0-5c</span> → 312 mkts · $9,940/day <span class="kwarn">[×clear]</span></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:22px">
+            <div class="tcol"><h4>CATEGORY</h4><div class="trow thead"><span>bucket</span><span>dist</span><span class="n">%</span></div>
+              <div class="trow"><span>sports</span><span class="bar">████████████</span><span class="n">34</span></div>
+              <div class="trow"><span>crypto</span><span class="bar">█████████▍</span><span class="n">27</span></div>
+              <div class="trow"><span>politics</span><span class="bar">██████▋</span><span class="n">19</span></div>
+              <div class="trow"><span>pop-cult</span><span class="bar">███▏</span><span class="n">9</span></div>
+              <div class="trow"><span>economy</span><span class="bar">██▍</span><span class="n">7</span></div>
+              <div class="trow"><span>other</span><span class="bar">█▍</span><span class="n">4</span></div>
+            </div>
+            <div class="tcol"><h4>SPREAD</h4><div class="trow thead"><span>bucket</span><span>dist</span><span class="n">%</span></div>
+              <div class="trow"><span>0-5c</span><span class="bar">██████████████</span><span class="n">41</span></div>
+              <div class="trow"><span>5-10c</span><span class="bar">████████▍</span><span class="n">24</span></div>
+              <div class="trow"><span>10-20c</span><span class="bar">█████▋</span><span class="n">16</span></div>
+              <div class="trow"><span>20-30c</span><span class="bar">███▏</span><span class="n">9</span></div>
+              <div class="trow"><span>30-50c</span><span class="bar">██▏</span><span class="n">6</span></div>
+              <div class="trow"><span>&gt;50c</span><span class="bar">█▍</span><span class="n">4</span></div>
+            </div>
+            <div class="tcol"><h4>24H VOLUME</h4><div class="trow thead"><span>bucket</span><span>dist</span><span class="n">%</span></div>
+              <div class="trow"><span>$0</span><span class="bar">█</span><span class="n">3</span></div>
+              <div class="trow"><span>&lt;1k</span><span class="bar">████▏</span><span class="n">12</span></div>
+              <div class="trow"><span>1-10k</span><span class="bar">█████████▋</span><span class="n">28</span></div>
+              <div class="trow"><span>10-100k</span><span class="bar">█████████████▍</span><span class="n">39</span></div>
+              <div class="trow"><span>&gt;100k</span><span class="bar">██████▏</span><span class="n">18</span></div>
+            </div>
+            <div class="tcol"><h4>AGE</h4><div class="trow thead"><span>bucket</span><span>dist</span><span class="n">%</span></div>
+              <div class="trow"><span>&lt;1d</span><span class="bar">████▊</span><span class="n">14</span></div>
+              <div class="trow"><span>1-7d</span><span class="bar">███████████▍</span><span class="n">33</span></div>
+              <div class="trow"><span>7-30d</span><span class="bar">█████████████</span><span class="n">38</span></div>
+              <div class="trow"><span>&gt;30d</span><span class="bar">█████▏</span><span class="n">15</span></div>
+            </div>
+            <div class="tcol"><h4>RESOLUTION</h4><div class="trow thead"><span>bucket</span><span>dist</span><span class="n">%</span></div>
+              <div class="trow"><span>&lt;1d</span><span class="bar">███▊</span><span class="n">11</span></div>
+              <div class="trow"><span>1-7d</span><span class="bar">██████████</span><span class="n">29</span></div>
+              <div class="trow"><span>7-30d</span><span class="bar">█████████▍</span><span class="n">27</span></div>
+              <div class="trow"><span>&gt;30d</span><span class="bar">███████▋</span><span class="n">22</span></div>
+              <div class="trow"><span>no-end</span><span class="bar">███▊</span><span class="n">11</span></div>
+            </div>
+            <div class="tcol"><h4>COMPETITIVENESS</h4><div class="trow thead"><span>bucket</span><span>dist</span><span class="n">%</span></div>
+              <div class="trow"><span>no-farmer</span><span class="bar">███████▌</span><span class="n">22</span></div>
+              <div class="trow"><span>thin</span><span class="bar">████████████████</span><span class="n">46</span></div>
+              <div class="trow"><span>contested</span><span class="bar">███████████</span><span class="n">32</span></div>
+            </div>
+          </div>
+          <div class="divln"></div>
+          <table class="ttbl"><thead><tr><th>question</th><th>cat</th><th>spr</th><th class="n">24h_vol</th><th class="n">$/day▼</th><th>comp</th></tr></thead>
+            <tbody>
+              <tr><td>Will BTC close above $120k this week?</td><td>crypto</td><td>0-5c</td><td class="n">84.2k</td><td class="n">412</td><td class="kwarn">thin</td></tr>
+              <tr><td>NBA Finals — Game 6 winner</td><td>sports</td><td>5-10c</td><td class="n">41.0k</td><td class="n">388</td><td class="kacc">contested</td></tr>
+              <tr><td>US CPI MoM above 0.3% in June?</td><td>economy</td><td>0-5c</td><td class="n">12.4k</td><td class="n">301</td><td class="kwarn">thin</td></tr>
+              <tr><td>Trump approval above 45% end-July?</td><td>politics</td><td>10-20c</td><td class="n">8.1k</td><td class="n">247</td><td class="kacc">contested</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1f BENTO FOCUS + TILES ============ -->
+    <div class="dv-opt" id="1f">
+      <div class="dv-olabel"><a class="dv-oid" href="#1f">1f</a>Bento — hero + supporting tiles <span class="tag">· one primary cut, context around it</span></div>
+      <div class="dv-tradeoff">Strong visual hierarchy with a clear focus and peripheral context — but presumes one dimension matters most.</div>
+      <div class="frame" style="width:1120px">
+        <div class="topbar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="appttl">Liquidity Rewards — Market Snapshot</span></div>
+        <div class="body">
+          <div class="head" style="margin-bottom:14px">
+            <div class="kpi"><div class="big">$48,250<span class="u">/day</span></div><div class="cap">Total pool · 2,184 markets</div></div>
+            <div class="snap"><div class="t">snapshot · 2 Jul 14:32 UTC</div><button class="btn acc">↻ Refresh</button></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1.5fr 1fr 1fr;grid-auto-rows:auto;gap:12px">
+            <div class="bd" style="grid-row:span 2;padding:16px 17px">
+              <h4 style="font-size:11px">Category — primary</h4><div class="cardsub">click a bar to cross-filter everything</div>
+              <div class="bars" style="gap:11px;margin-top:6px">
+                <div class="bar wide"><span class="lab">Sports</span><span class="trk" style="height:18px"><span class="fil" style="width:100%"></span></span><span class="val">$16,405</span></div>
+                <div class="bar wide"><span class="lab">Crypto</span><span class="trk" style="height:18px"><span class="fil" style="width:79%"></span></span><span class="val">$13,027</span></div>
+                <div class="bar wide"><span class="lab">Politics</span><span class="trk" style="height:18px"><span class="fil m" style="width:56%"></span></span><span class="val">$9,167</span></div>
+                <div class="bar wide"><span class="lab">Pop-cult.</span><span class="trk" style="height:18px"><span class="fil m" style="width:26%"></span></span><span class="val">$4,342</span></div>
+                <div class="bar wide"><span class="lab">Economy</span><span class="trk" style="height:18px"><span class="fil m" style="width:21%"></span></span><span class="val">$3,377</span></div>
+                <div class="bar wide"><span class="lab">Other</span><span class="trk" style="height:18px"><span class="fil m" style="width:12%"></span></span><span class="val">$1,930</span></div>
+              </div>
+            </div>
+            <div class="bd"><h4>Spread</h4><div class="bars" style="margin-top:8px">
+              <div class="bar"><span class="lab">0–5¢</span><span class="trk"><span class="fil" style="width:100%"></span></span><span class="val">41%</span></div>
+              <div class="bar"><span class="lab">5–10¢</span><span class="trk"><span class="fil" style="width:59%"></span></span><span class="val">24%</span></div>
+              <div class="bar"><span class="lab">&gt;10¢</span><span class="trk"><span class="fil m" style="width:52%"></span></span><span class="val">35%</span></div>
+            </div></div>
+            <div class="bd"><h4>Competitiveness</h4><div class="bars" style="margin-top:8px">
+              <div class="bar"><span class="lab">thin</span><span class="trk"><span class="fil" style="width:100%"></span></span><span class="val">46%</span></div>
+              <div class="bar"><span class="lab">contested</span><span class="trk"><span class="fil" style="width:70%"></span></span><span class="val">32%</span></div>
+              <div class="bar"><span class="lab">none</span><span class="trk"><span class="fil m" style="width:48%"></span></span><span class="val">22%</span></div>
+            </div></div>
+            <div class="bd"><h4>24h volume</h4><div class="bars" style="margin-top:8px">
+              <div class="bar"><span class="lab">10–100k</span><span class="trk"><span class="fil" style="width:100%"></span></span><span class="val">39%</span></div>
+              <div class="bar"><span class="lab">1–10k</span><span class="trk"><span class="fil" style="width:72%"></span></span><span class="val">28%</span></div>
+              <div class="bar"><span class="lab">&gt;100k</span><span class="trk"><span class="fil m" style="width:46%"></span></span><span class="val">18%</span></div>
+            </div></div>
+            <div class="bd"><h4>Time to resolution</h4><div class="bars" style="margin-top:8px">
+              <div class="bar"><span class="lab">1–7d</span><span class="trk"><span class="fil" style="width:100%"></span></span><span class="val">29%</span></div>
+              <div class="bar"><span class="lab">7–30d</span><span class="trk"><span class="fil" style="width:93%"></span></span><span class="val">27%</span></div>
+              <div class="bar"><span class="lab">&gt;30d</span><span class="trk"><span class="fil m" style="width:76%"></span></span><span class="val">22%</span></div>
+            </div></div>
+          </div>
+          <div style="margin-top:14px">
+            <div class="secttl">Markets — 2,184 · sortable</div>
+            <table class="tbl">
+              <thead><tr><th>Question</th><th>Cat</th><th>Spread</th><th class="num">24h vol</th><th class="num">Reward/day ↓</th><th>Comp.</th></tr></thead>
+              <tbody>
+                <tr><td class="q">Will BTC close above $120k this week?</td><td>Crypto</td><td>0–5¢</td><td class="num">$84.2k</td><td class="num">$412</td><td><span class="pill warn">thin</span></td></tr>
+                <tr><td class="q">NBA Finals — Game 6 winner</td><td>Sports</td><td>5–10¢</td><td class="num">$41.0k</td><td class="num">$388</td><td><span class="pill a">contested</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <p class="dv-next">Try next: "take <a class="dv-oid" href="#1d">1d</a> to high fidelity with working cross-filter" · "merge <a class="dv-oid" href="#1b">1b</a>'s switcher into <a class="dv-oid" href="#1a">1a</a>" · "make <a class="dv-oid" href="#1e">1e</a> a light theme" · "new directions"</p>
+</section>
+</x-dc>
+</body>
+</html>

@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#1c1c1e; --muted:#8a8a8e; --faint:#b8b8bc;
+  --line:rgba(0,0,0,.10); --hair:rgba(0,0,0,.055);
+  --fillbg:rgba(0,0,0,.055); --panel:#fbfbfa;
+  --accent:#3b5bdb; --accent-tint:rgba(59,91,219,.10); --accent-line:rgba(59,91,219,.30);
+}
+*{box-sizing:border-box}
+body{margin:0;background:#f4f3f0;font-family:system-ui,-apple-system,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+.wrap{min-height:100vh;display:flex;justify-content:center;padding:34px 24px 60px}
+.frame{width:1180px;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.07)}
+.topbar{display:flex;align-items:center;gap:7px;padding:10px 15px;border-bottom:1px solid var(--line);background:var(--panel)}
+.dot{width:9px;height:9px;border-radius:50%;background:rgba(0,0,0,.11)}
+.appttl{margin-left:9px;font:600 11px system-ui;color:var(--muted);letter-spacing:.01em}
+.body{padding:22px 24px 24px}
+/* headline */
+.head{display:flex;align-items:flex-end;gap:34px;padding-bottom:16px;border-bottom:1px solid var(--line)}
+.kpi .big{font:700 30px/1 system-ui;letter-spacing:-.025em;font-variant-numeric:tabular-nums}
+.kpi .big.small{font-size:22px;color:var(--ink)}
+.kpi .big .u{font-size:14px;color:var(--muted);font-weight:600}
+.kpi .cap{font:11px system-ui;color:var(--muted);margin-top:6px}
+.snap{margin-left:auto;text-align:right}
+.snap .t{font:500 11px 'IBM Plex Mono',monospace;color:var(--muted)}
+.btn{display:inline-flex;align-items:center;gap:6px;font:600 11px system-ui;padding:8px 13px;border:1px solid var(--accent);border-radius:8px;background:var(--accent);color:#fff;margin-top:9px;cursor:pointer;transition:filter .15s}
+.btn:hover{filter:brightness(1.06)}
+.btn:active{transform:translateY(1px)}
+/* chips */
+.chips{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:15px 0 3px;min-height:24px}
+.chips .lbl{font:11px system-ui;color:var(--muted)}
+.chip{display:inline-flex;align-items:center;gap:7px;font:500 11px 'IBM Plex Mono',monospace;padding:4px 6px 4px 10px;background:var(--accent-tint);color:var(--accent);border:1px solid var(--accent-line);border-radius:14px;animation:pop .18s ease}
+.chip .x{display:inline-flex;width:15px;height:15px;align-items:center;justify-content:center;border-radius:50%;background:rgba(59,91,219,.16);font-size:11px;cursor:pointer}
+.chip .x:hover{background:rgba(59,91,219,.3)}
+.clr{font:11px system-ui;color:var(--accent);cursor:pointer}
+.clr:hover{text-decoration:underline}
+.subtle{margin-left:auto;font:11px 'IBM Plex Mono',monospace;color:var(--faint)}
+@keyframes pop{from{opacity:0;transform:scale(.9)}to{opacity:1;transform:scale(1)}}
+/* grid */
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:13px;margin:16px 0}
+.bd{border:1px solid var(--line);border-radius:10px;padding:14px 15px;background:#fff}
+.bdhd{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:12px}
+.bd h4{margin:0;font:600 10.5px system-ui;text-transform:uppercase;letter-spacing:.055em;color:var(--ink)}
+.cardsub{font:10px system-ui;color:var(--faint);white-space:nowrap}
+/* bars */
+.bars{display:flex;flex-direction:column;gap:8px}
+.bar{display:grid;grid-template-columns:70px 1fr 34px;gap:9px;align-items:center;font:11px/1 system-ui;cursor:pointer}
+.bar .lab{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar .trk{height:12px;background:var(--fillbg);border-radius:3px;overflow:hidden}
+.bar .fil{display:block}
+.bar:hover .fil{filter:brightness(.9)}
+.bar:hover .lab{color:var(--ink)}
+.bar .val{text-align:right;font:500 10.5px 'IBM Plex Mono',monospace;color:var(--ink)}
+/* table */
+.secttl{font:600 10.5px system-ui;text-transform:uppercase;letter-spacing:.055em;color:var(--muted);margin:2px 0 10px}
+.tblwrap{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.tbl{width:100%;border-collapse:collapse;font-size:11px}
+.tbl th{text-align:left;color:var(--muted);font:600 9.5px system-ui;text-transform:uppercase;letter-spacing:.05em;padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap;cursor:pointer;user-select:none;background:var(--panel)}
+.tbl th:hover{color:var(--ink)}
+.tbl th.on{color:var(--accent)}
+.tbl th.num{text-align:right}
+.tbl td{padding:8px 10px;border-bottom:1px solid var(--hair);color:var(--ink);white-space:nowrap}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover{background:rgba(59,91,219,.04)}
+.tbl td.q{white-space:normal;max-width:340px}
+.tbl .num{text-align:right;font:500 10.5px 'IBM Plex Mono',monospace}
+.pill{display:inline-block;font:500 9.5px system-ui;padding:2px 8px;border-radius:10px;background:var(--fillbg);color:var(--muted)}
+.pill.a{background:var(--accent-tint);color:var(--accent)}
+.pill.warn{background:rgba(180,83,9,.12);color:#b45309}
+/* pager */
+.pager{display:flex;align-items:center;gap:6px;margin-top:12px}
+.pginfo{font:11px 'IBM Plex Mono',monospace;color:var(--muted);margin-right:auto}
+.pgbtn{font:600 11px system-ui;min-width:30px;height:28px;padding:0 9px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink);cursor:pointer;transition:background .12s,border-color .12s}
+.pgbtn:hover{background:var(--panel);border-color:var(--muted)}
+.pgbtn.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.pgbtn.dis{opacity:.4;pointer-events:none}
+.pggap{font:600 11px system-ui;color:var(--faint);padding:0 2px;align-self:flex-end}
+/* tooltip */
+.livetip{position:fixed;pointer-events:none;z-index:60;background:#1c1c1e;color:#fff;padding:7px 9px;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.25);transform:translateY(-115%);font:600 12px 'IBM Plex Mono',monospace;white-space:nowrap}
+.livetip .l2{font-weight:400;color:#c7c7cc;font-size:10.5px;margin-top:2px}
+</style>
+</helmet>
+<div class="wrap">
+  <div class="frame" data-screen-label="Rewards Grid">
+    <div class="topbar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="appttl">Liquidity Rewards — Market Snapshot</span></div>
+    <div class="body">
+      <div class="head">
+        <div class="kpi"><div class="big">{{ totalLabel }}<span class="u">/day</span></div><div class="cap">{{ totalCap }}</div></div>
+        <div class="kpi"><div class="big small">{{ marketsLabel }}</div><div class="cap">{{ marketsCap }}</div></div>
+        <div class="snap"><div class="t">snapshot · {{ snapLabel }}</div><button class="btn" onClick="{{ refresh }}">↻ Refresh snapshot</button></div>
+      </div>
+
+      <div class="chips">
+        <sc-if value="{{ hasFilters }}" hint-placeholder-val="{{ false }}">
+          <span class="lbl">Filtering:</span>
+          <sc-for list="{{ chips }}" as="chip" hint-placeholder-count="2">
+            <span class="chip">{{ chip.label }}<span class="x" onClick="{{ chip.onRemove }}">×</span></span>
+          </sc-for>
+          <span class="clr" onClick="{{ clearAll }}">clear all</span>
+        </sc-if>
+        <span class="subtle">{{ summary }}</span>
+      </div>
+
+      <div class="grid">
+        <sc-for list="{{ breakdowns }}" as="bd" hint-placeholder-count="6">
+          <div class="bd">
+            <div class="bdhd"><h4>{{ bd.title }}</h4><span class="cardsub">{{ bd.sub }}</span></div>
+            <div class="bars">
+              <sc-for list="{{ bd.bars }}" as="bar" hint-placeholder-count="5">
+                <div class="bar" onClick="{{ bar.onClick }}" onMouseMove="{{ bar.onMove }}" onMouseLeave="{{ bar.onLeave }}">
+                  <span class="lab">{{ bar.label }}</span>
+                  <span class="trk"><span class="fil" style="{{ bar.fillStyle }}"></span></span>
+                  <span class="val">{{ bar.valLabel }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+
+      <div class="secttl">{{ tableTitle }}</div>
+      <div class="tblwrap">
+        <table class="tbl">
+          <thead><tr>
+            <sc-for list="{{ headers }}" as="h" hint-placeholder-count="6">
+              <th class="{{ h.thClass }}" onClick="{{ h.onClick }}">{{ h.label }}{{ h.arrow }}</th>
+            </sc-for>
+          </tr></thead>
+          <tbody>
+            <sc-for list="{{ rows }}" as="r" hint-placeholder-count="10">
+              <tr>
+                <td class="q">{{ r.q }}</td>
+                <td>{{ r.cat }}</td>
+                <td>{{ r.spread }}</td>
+                <td class="num">{{ r.vol }}</td>
+                <td class="num">{{ r.reward }}</td>
+                <td><span class="{{ r.compClass }}">{{ r.comp }}</span></td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <span class="pginfo">{{ pager.info }}</span>
+        <button class="{{ pager.prevClass }}" onClick="{{ pager.onPrev }}">‹ Prev</button>
+        <sc-for list="{{ pager.pages }}" as="p" hint-placeholder-count="5">
+          <sc-if value="{{ p.gap }}" hint-placeholder-val="{{ false }}"><span class="pggap">…</span></sc-if>
+          <sc-if value="{{ p.page }}" hint-placeholder-val="{{ true }}"><button class="pgbtn {{ p.activeClass }}" onClick="{{ p.onClick }}">{{ p.label }}</button></sc-if>
+        </sc-for>
+        <button class="{{ pager.nextClass }}" onClick="{{ pager.onNext }}">Next ›</button>
+      </div>
+    </div>
+  </div>
+  <sc-if value="{{ tip.show }}" hint-placeholder-val="{{ false }}">
+    <div class="livetip" style="{{ tip.style }}">
+      <div>{{ tip.l1 }}</div>
+      <div class="l2">{{ tip.l2 }}</div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.baseSeed = 20250702;
+    this.DIMS = [
+      { key: 'cat',    title: 'Category',           sub: 'click to filter',      chip: '',       buckets: ['Sports','Crypto','Politics','Pop-culture','Economy','Other'],   w: [34,27,19,9,7,4] },
+      { key: 'spread', title: 'Current spread',     sub: 'hover for $ + %',      chip: 'spread', buckets: ['0–5¢','5–10¢','10–20¢','20–30¢','30–50¢','>50¢'],               w: [41,24,16,9,6,4] },
+      { key: 'vol',    title: '24h volume',         sub: 'click to filter',      chip: 'vol',    buckets: ['$0','<1k','1–10k','10–100k','>100k'],                          w: [3,12,28,39,18] },
+      { key: 'age',    title: 'Market age',         sub: 'click to filter',      chip: 'age',    buckets: ['<1d','1–7d','7–30d','>30d'],                                    w: [14,33,38,15] },
+      { key: 'res',    title: 'Time to resolution', sub: 'click to filter',      chip: 'ends',   buckets: ['<1d','1–7d','7–30d','>30d','no end'],                           w: [11,29,27,22,11] },
+      { key: 'comp',   title: 'Competitiveness',    sub: 'farmers per market',   chip: '',       buckets: ['no farmers','thin','contested'],                               w: [22,46,32] },
+    ];
+    const g = this.gen(this.baseSeed);
+    this.state = Object.assign({ filters: {}, sort: { key: 'reward', dir: 'desc' }, tip: { show: false }, page: 1 }, g);
+  }
+
+  rng(seed) { let s = seed >>> 0; return () => { s |= 0; s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+
+  pickW(items, w, rnd) { let tot = 0; for (const x of w) tot += x; let r = rnd() * tot; for (let i = 0; i < items.length; i++) { r -= w[i]; if (r <= 0) return items[i]; } return items[items.length - 1]; }
+
+  volNum(bucket, rnd) {
+    switch (bucket) {
+      case '$0': return 0;
+      case '<1k': return Math.floor(50 + rnd() * 949);
+      case '1–10k': return Math.floor(1000 + rnd() * 9000);
+      case '10–100k': return Math.floor(10000 + rnd() * 90000);
+      default: return Math.floor(100000 + rnd() * 320000);
+    }
+  }
+  volFactor(b) { return { '$0': 0.5, '<1k': 0.7, '1–10k': 0.95, '10–100k': 1.3, '>100k': 1.7 }[b]; }
+  fmtVol(n) { if (n === 0) return '$0'; if (n < 1000) return '$' + n; if (n < 1e6) return '$' + (n / 1000).toFixed(n < 10000 ? 1 : 0) + 'k'; return '$' + (n / 1e6).toFixed(1) + 'M'; }
+
+  makeQ(cat, rnd) {
+    const P = (a) => a[Math.floor(rnd() * a.length)];
+    if (cat === 'Sports') return P(['NBA Finals','UEFA Champions League','NFL Week 1','Wimbledon','World Series','Premier League']) + ' — ' + P(['series winner?','both teams to score?','total points over 44.5?','to reach the final?','first goal before 20\'?','clean sheet?']);
+    if (cat === 'Crypto') { const c = P(['BTC','ETH','SOL','DOGE','XRP','BNB','AVAX']); const pr = [P(['$120k','$8k','$300','$0.40','$3.20','$900']),0]; return c + ' ' + P(['above ' + pr[0] + ' this week?','to a new ATH before Sept?','up on the day?','above ' + pr[0] + ' by Friday?']); }
+    if (cat === 'Politics') return P(['Trump','The incumbent','The challenger','The Fed chair','Congress']) + ' — ' + P(['approval above 45% end-July?','to win the nomination?','shutdown before October?','rate decision: hold?','bill passes this session?']);
+    if (cat === 'Pop-culture') return P(['Album of the Year','Best Picture','The season finale','Box-office #1','The reunion special','The next single']) + ' — ' + P(['to break records?','winner announced this week?','over 10M viewers?','debuts at #1?']);
+    if (cat === 'Economy') return P(['US CPI MoM','Nonfarm payrolls','GDP q/q','Unemployment rate','Fed funds']) + ' — ' + P(['above 0.3%?','beats consensus?','above 4%?','a cut in July?','revised higher?']);
+    return P(['SpaceX Starship launch','New iPhone reveal','The merger','The referendum','A named storm']) + ' — ' + P(['on schedule?','approved this quarter?','before year-end?','completes this month?']);
+  }
+
+  gen(seed) {
+    const rnd = this.rng(seed);
+    const count = 2060 + Math.floor(rnd() * 220);
+    const markets = [];
+    let grandTotal = 0;
+    for (let i = 0; i < count; i++) {
+      const cat = this.pickW(this.DIMS[0].buckets, this.DIMS[0].w, rnd);
+      const spread = this.pickW(this.DIMS[1].buckets, this.DIMS[1].w, rnd);
+      const vol = this.pickW(this.DIMS[2].buckets, this.DIMS[2].w, rnd);
+      const age = this.pickW(this.DIMS[3].buckets, this.DIMS[3].w, rnd);
+      const res = this.pickW(this.DIMS[4].buckets, this.DIMS[4].w, rnd);
+      const comp = this.pickW(this.DIMS[5].buckets, this.DIMS[5].w, rnd);
+      const volNum = this.volNum(vol, rnd);
+      const base = 4 + (-16 * Math.log(1 - rnd()));
+      const reward = Math.max(2, Math.round(base * this.volFactor(vol)));
+      grandTotal += reward;
+      markets.push({ cat, spread, vol, age, res, comp, volNum, volLabel: this.fmtVol(volNum), reward, q: this.makeQ(cat, rnd) });
+    }
+    const offMin = (seed - this.baseSeed) * 7 + Math.floor(rnd() * 4);
+    const d = new Date(Date.UTC(2025, 6, 2, 14, 32) + offMin * 60000);
+    const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getUTCMonth()];
+    const pad = (n) => (n < 10 ? '0' + n : '' + n);
+    const snapLabel = d.getUTCDate() + ' ' + mo + ' ' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ' UTC';
+    return { seed, markets, grandTotal, grandCount: count, snapLabel };
+  }
+
+  toggle(k, b) { const f = Object.assign({}, this.state.filters); if (f[k] === b) delete f[k]; else f[k] = b; this.setState({ filters: f, tip: { show: false }, page: 1 }); }
+  clearAll() { this.setState({ filters: {}, tip: { show: false }, page: 1 }); }
+  sortBy(k, num) { const s = this.state.sort; if (s.key === k) this.setState({ sort: { key: k, dir: s.dir === 'desc' ? 'asc' : 'desc' }, page: 1 }); else this.setState({ sort: { key: k, dir: num ? 'desc' : 'asc' }, page: 1 }); }
+  refresh() { this.setState(Object.assign({}, this.gen(this.state.seed + 1), { tip: { show: false }, page: 1 })); }
+  goto(p) { this.setState({ page: p, tip: { show: false } }); }
+  idx(dimKey, val) { return this.DIMS.find((d) => d.key === dimKey).buckets.indexOf(val); }
+  compClass(c) { return c === 'thin' ? 'pill warn' : c === 'contested' ? 'pill a' : 'pill'; }
+
+  renderVals() {
+    const { markets, filters, sort, grandTotal, grandCount, snapLabel, tip } = this.state;
+    const active = Object.keys(filters);
+    const money = (n) => '$' + Math.round(n).toLocaleString();
+    const passExcept = (m, ex) => { for (const k of active) { if (k === ex) continue; if (m[k] !== filters[k]) return false; } return true; };
+    const passAll = (m) => { for (const k of active) { if (m[k] !== filters[k]) return false; } return true; };
+
+    const breakdowns = this.DIMS.map((dim) => {
+      const sums = {}, cnts = {};
+      dim.buckets.forEach((b) => { sums[b] = 0; cnts[b] = 0; });
+      let tot = 0;
+      for (const m of markets) { if (passExcept(m, dim.key)) { sums[m[dim.key]] += m.reward; cnts[m[dim.key]]++; tot += m.reward; } }
+      const max = Math.max(1, ...dim.buckets.map((b) => sums[b]));
+      const sel = filters[dim.key];
+      const bars = dim.buckets.map((b) => {
+        const v = sums[b], c = cnts[b];
+        const pct = tot > 0 ? (v / tot * 100) : 0;
+        const isSel = sel === b, dimmed = sel && !isSel, empty = v <= 0;
+        const fillStyle = { height: '100%', borderRadius: '3px', width: (v / max * 100).toFixed(1) + '%', background: 'var(--accent)', opacity: dimmed ? 0.24 : (sel ? 1 : 0.9), transition: 'width .55s cubic-bezier(.22,.61,.36,1), opacity .3s' };
+        const pctStr = pct < 1 && pct > 0 ? '<1' : Math.round(pct);
+        return {
+          key: b, label: b, valLabel: empty ? '—' : pctStr + '%', fillStyle,
+          onClick: () => this.toggle(dim.key, b),
+          onMove: (e) => this.setState({ tip: { show: true, x: e.clientX, y: e.clientY, l1: money(v), l2: b + ' · ' + pctStr + '% of pool · ' + c.toLocaleString() + ' mkts' } }),
+          onLeave: () => this.setState({ tip: { show: false } }),
+        };
+      });
+      return { key: dim.key, title: dim.title, sub: dim.sub, bars };
+    });
+
+    let ftot = 0, fcount = 0;
+    for (const m of markets) { if (passAll(m)) { ftot += m.reward; fcount++; } }
+    const hasFilters = active.length > 0;
+
+    const chips = active.map((k) => {
+      const dim = this.DIMS.find((d) => d.key === k);
+      return { label: (dim.chip ? dim.chip + ' ' : '') + filters[k], onRemove: () => this.toggle(k, filters[k]) };
+    });
+    const summary = hasFilters
+      ? active.map((k) => filters[k]).join(' ∩ ') + '  ·  ' + fcount.toLocaleString() + ' of ' + grandCount.toLocaleString() + ' markets'
+      : grandCount.toLocaleString() + ' rewarded markets · ' + money(grandTotal) + '/day';
+
+    const cols = [['q', 'Question', false], ['cat', 'Category', false], ['spread', 'Spread', false], ['vol', '24h vol', true], ['reward', 'Reward/day', true], ['comp', 'Competitiveness', false]];
+    const headers = cols.map((col) => {
+      const k = col[0], on = sort.key === k;
+      return { label: col[1], thClass: (col[2] ? 'num' : '') + (on ? ' on' : ''), arrow: on ? (sort.dir === 'desc' ? ' ↓' : ' ↑') : '', onClick: () => this.sortBy(k, col[2]) };
+    });
+
+    const keyOf = (m) => { switch (sort.key) { case 'reward': return m.reward; case 'vol': return m.volNum; case 'spread': return this.idx('spread', m.spread); case 'comp': return this.idx('comp', m.comp); case 'cat': return m.cat; default: return m.q; } };
+    const fmk = markets.filter(passAll);
+    fmk.sort((a, b) => { const x = keyOf(a), y = keyOf(b); const c = typeof x === 'number' ? x - y : String(x).localeCompare(String(y)); return sort.dir === 'desc' ? -c : c; });
+    const pageSize = 20;
+    const totalPages = Math.max(1, Math.ceil(fmk.length / pageSize));
+    const page = Math.min(Math.max(1, this.state.page), totalPages);
+    const start = (page - 1) * pageSize;
+    const rows = fmk.slice(start, start + pageSize).map((m) => ({ q: m.q, cat: m.cat, spread: m.spread, vol: m.volLabel, reward: money(m.reward), comp: m.comp, compClass: this.compClass(m.comp) }));
+    const tableTitle = 'Markets — ' + fmk.length.toLocaleString() + ' · click a header to sort';
+
+    // windowed page buttons: first, current±1, last, with gaps
+    const nums = new Set([1, totalPages, page, page - 1, page + 1]);
+    if (page <= 2) { nums.add(2); nums.add(3); }
+    if (page >= totalPages - 1) { nums.add(totalPages - 1); nums.add(totalPages - 2); }
+    const sorted = [...nums].filter((n) => n >= 1 && n <= totalPages).sort((a, b) => a - b);
+    const pages = [];
+    let prev = 0;
+    for (const n of sorted) { if (n - prev > 1) pages.push({ gap: true, label: '…' }); pages.push({ label: '' + n, page: n, activeClass: n === page ? 'on' : '', onClick: () => this.goto(n) }); prev = n; }
+    const pager = {
+      info: fmk.length ? ((start + 1) + '–' + Math.min(start + pageSize, fmk.length) + ' of ' + fmk.length.toLocaleString()) : '0 of 0',
+      pages, prevDisabled: page <= 1, nextDisabled: page >= totalPages,
+      prevClass: 'pgbtn' + (page <= 1 ? ' dis' : ''), nextClass: 'pgbtn' + (page >= totalPages ? ' dis' : ''),
+      onPrev: () => this.goto(Math.max(1, page - 1)), onNext: () => this.goto(Math.min(totalPages, page + 1)),
+    };
+
+    return {
+      totalLabel: money(ftot), totalCap: hasFilters ? 'filtered · of ' + money(grandTotal) + ' total' : 'Total daily reward pool',
+      marketsLabel: fcount.toLocaleString(), marketsCap: hasFilters ? 'of ' + grandCount.toLocaleString() + ' in snapshot' : 'Rewarded markets',
+      snapLabel, refresh: () => this.refresh(),
+      hasFilters, chips, clearAll: () => this.clearAll(), summary,
+      breakdowns, headers, rows, tableTitle, pager,
+      tip: tip.show ? { show: true, style: { left: (tip.x + 14) + 'px', top: (tip.y - 12) + 'px' }, l1: tip.l1, l2: tip.l2 } : { show: false, style: {}, l1: '', l2: '' },
+    };
+  }
+}
+</script>
+</body>
+</html>
