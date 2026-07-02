@@ -14,6 +14,8 @@ Start at the top and stop when you have what you need.
 | [01-critical-bugs.md](01-critical-bugs.md) | Severity-ranked register of correctness/safety bugs, verified against code | To know what to fix first |
 | [02-cross-cutting-themes.md](02-cross-cutting-themes.md) | The ten patterns that recur across subsystems | To understand *why* the repo feels the way it does |
 | [30-roadmap.md](30-roadmap.md) | A sequenced, ambitious plan (delete / merge / build) | To plan the work |
+| [40-do-not-break.md](40-do-not-break.md) | The load-bearing spine — invariants to protect during the deletion/refactor phases | Before you delete or refactor anything |
+| [41-meta-recommendations.md](41-meta-recommendations.md) | Process, scope, and sequencing advice around the review | Before you act on any of it |
 
 Per-subsystem deep reviews:
 
