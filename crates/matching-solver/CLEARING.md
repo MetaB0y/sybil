@@ -1,5 +1,14 @@
 # Market Clearing and Price Consistency
 
+> **⚠️ OBSOLETE (verified 2026-07-02).** This document describes a removed
+> architecture: `pipeline.rs`, `local_solver.rs`, `negrisk.rs`,
+> `dual_master.rs`, `mm_allocator.rs`, and the Mechanism 1–4 combiner no longer
+> exist. The current solvers are `lp_solver` / `eg_solver` /
+> `iterative_lp_solver` / `conic_solver` / `milp` / `decomposed`. For current
+> documentation see `docs/SPEC.md` §4–5 and the vault notes ([[Solver
+> Landscape]], [[The LP Core]]). Kept only as historical background; scheduled
+> for deletion per `design/architecture-review-2026-07.md` (P9).
+
 How the solver turns a batch of orders into fills with prices that make economic
 sense.
 

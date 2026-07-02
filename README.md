@@ -42,8 +42,9 @@ sybil/
 
 ## Documentation
 
-- [Architecture](design/architecture.md) - Solver design and key abstractions
-- [Architecture Diagrams](design/architecture-diagrams.md) - System overview, solver flow, block lifecycle
+- [System Specification](docs/SPEC.md) - **Start here.** One linear document covering the whole system: domain model, matching problem, solvers, sequencer, verification, ZK pipeline, contracts, API, arena, deployment, and invariants
+- [Architecture vault](docs/architecture/Sybil%20Architecture.md) - Obsidian vault of ~48 per-concept canonical notes
+- [Architecture Review 2026-07](design/architecture-review-2026-07.md) - Simplification proposals and known doc drift
 - [Solver Benchmarks](design/solver-benchmarks.md) - Comparative evaluation of all solvers
 - [Welfare vs Volume](design/welfare-vs-volume.md) - Optimization objective tradeoffs
 
@@ -61,8 +62,9 @@ All solvers take a `Problem` and return a `PipelineResult` (fills, clearing pric
 
 | Solver | Backend | Description |
 |--------|---------|-------------|
-| **LpSolver** | HiGHS | LP with entropy smoothing + iterative MM budget shading. Production default. |
-| **EgSolver** | HiGHS | Eisenberg-Gale / Fisher market formulation. |
+| **LpSolver** | HiGHS | LP + single-pass SLP MM budget shading. Production default. |
+| **IterLpSolver** | HiGHS | Damped fixed-point on the Eisenberg-Gale budget multiplier; better under tight MM budgets. |
+| **EgSolver** | HiGHS | Eisenberg-Gale / Fisher market formulation (Frank-Wolfe). |
 | **ConicSolver** | Clarabel | Interior-point solver with configurable objective (Linear, Fisher, QuasiFisher). |
 | **MilpSolver** | SCIP | Mixed-integer exact optimal with timeout. Feature-gated (`milp`). |
 | **DecomposedSolver** | (wraps any) | Per-market-group decomposition with mirror descent budget coordination. |

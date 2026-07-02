@@ -1,5 +1,14 @@
 # Deployment Runbook
 
+> **⚠️ STALE (verified 2026-07-02).** This runbook describes a Kamal + GHCR +
+> Traefik + Tempo topology that was never landed — there is no
+> `config/deploy.yml`, no image push to GHCR, and no Tempo/Traefik service in
+> any compose file. The **actual** deploy path is the `deploy-*` recipes in the
+> `justfile`: build locally → `docker save | ssh docker load` → `docker
+> compose` on the server, fronted by Caddy. See `docs/SPEC.md` §16 and
+> `AGENTS.md` § Deployment. This file needs a rewrite
+> (`design/architecture-review-2026-07.md`, P9).
+
 ## Architecture
 
 ```
