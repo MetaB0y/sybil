@@ -3,12 +3,17 @@
 //! These tests hard-assert the economic invariants that the sequencer currently
 //! only checks with `eprintln` warnings (sequencer.rs:650-715).
 
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use matching_engine::{outcome_buy, MarketId, MarketSet, NANOS_PER_DOLLAR};
+use matching_engine::{
+    compute_fill_settlement, derive_minting, outcome_buy, signed_notional_nanos, MarketId,
+    MarketSet, NANOS_PER_DOLLAR,
+};
 use matching_sequencer::{AccountId, AccountStore, AdminOracle, BlockSequencer, OrderSubmission};
 use proptest::prelude::*;
+use sybil_verifier::BlockWitness;
 
 // ---------------------------------------------------------------------------
 // Strategies
@@ -140,6 +145,133 @@ fn assert_position_balance(seq: &BlockSequencer, markets: &MarketSet) {
     }
 }
 
+fn expected_resolution_delta(seq: &BlockSequencer, market: MarketId, yes_payout_nanos: u64) -> i64 {
+    let no_payout_nanos = NANOS_PER_DOLLAR - yes_payout_nanos;
+    seq.accounts
+        .iter()
+        .map(|(_, account)| {
+            signed_notional_nanos(yes_payout_nanos, account.position(market, 0))
+                + signed_notional_nanos(no_payout_nanos, account.position(market, 1))
+        })
+        .sum()
+}
+
+fn recompute_total_welfare(witness: &BlockWitness) -> i64 {
+    let order_map: HashMap<u64, _> = witness
+        .orders
+        .iter()
+        .map(|witness_order| (witness_order.order.id, &witness_order.order))
+        .collect();
+
+    witness
+        .fills
+        .iter()
+        .filter_map(|fill| {
+            order_map
+                .get(&fill.order_id)
+                .map(|order| order.welfare_contribution(fill.fill_price, fill.fill_qty))
+        })
+        .sum()
+}
+
+fn raw_welfare_numerator(witness: &BlockWitness) -> i128 {
+    let order_map: HashMap<u64, _> = witness
+        .orders
+        .iter()
+        .map(|witness_order| (witness_order.order.id, &witness_order.order))
+        .collect();
+
+    witness
+        .fills
+        .iter()
+        .filter_map(|fill| {
+            order_map.get(&fill.order_id).map(|order| {
+                let surplus_per_unit = if order.is_seller() {
+                    fill.fill_price as i128 - order.limit_price as i128
+                } else {
+                    order.limit_price as i128 - fill.fill_price as i128
+                };
+                surplus_per_unit * fill.fill_qty as i128
+            })
+        })
+        .sum()
+}
+
+fn expected_block_balance_delta(witness: &BlockWitness) -> i64 {
+    let order_map: HashMap<u64, _> = witness
+        .orders
+        .iter()
+        .map(|witness_order| (witness_order.order.id, &witness_order.order))
+        .collect();
+    let order_account: HashMap<u64, u64> = witness
+        .orders
+        .iter()
+        .map(|witness_order| (witness_order.order.id, witness_order.account_id))
+        .collect();
+    let mut positions_by_account: HashMap<u64, HashMap<(MarketId, u8), i64>> = witness
+        .post_system_state
+        .iter()
+        .map(|account| {
+            (
+                account.id,
+                account
+                    .positions
+                    .iter()
+                    .map(|&(market, outcome, qty)| ((market, outcome), qty))
+                    .collect(),
+            )
+        })
+        .collect();
+
+    let mut balance_delta = 0;
+    for fill in &witness.fills {
+        let Some(order) = order_map.get(&fill.order_id) else {
+            continue;
+        };
+        let account_id = if fill.account_id != 0 {
+            fill.account_id
+        } else {
+            *order_account
+                .get(&fill.order_id)
+                .expect("witness fill must reference a witness order")
+        };
+        let Some(delta) = compute_fill_settlement(order, fill) else {
+            continue;
+        };
+
+        balance_delta += delta.balance_delta;
+        let positions = positions_by_account.entry(account_id).or_default();
+        for (market, outcome, qty_delta) in delta.position_deltas {
+            *positions.entry((market, outcome)).or_insert(0) += qty_delta;
+        }
+    }
+
+    let markets: HashSet<MarketId> = positions_by_account
+        .values()
+        .flat_map(|positions| positions.keys().map(|(market, _)| *market))
+        .collect();
+    let market_totals: Vec<(MarketId, i64, i64)> = markets
+        .into_iter()
+        .map(|market| {
+            let total_yes = positions_by_account
+                .values()
+                .map(|positions| positions.get(&(market, 0)).copied().unwrap_or(0))
+                .sum();
+            let total_no = positions_by_account
+                .values()
+                .map(|positions| positions.get(&(market, 1)).copied().unwrap_or(0))
+                .sum();
+            (market, total_yes, total_no)
+        })
+        .collect();
+
+    let mint_delta: i64 = derive_minting(&market_totals, &witness.clearing_prices)
+        .iter()
+        .map(|adjustment| adjustment.balance_delta)
+        .sum();
+    balance_delta + mint_delta
+}
+
 // Counters to verify tests are actually exercising trades
 static TRADES_SEEN: AtomicU64 = AtomicU64::new(0);
 static CASES_WITH_TRADES: AtomicU64 = AtomicU64::new(0);
@@ -231,9 +363,11 @@ proptest! {
     }
 
     /// Batch commutativity (FBA property): shuffling submissions within a batch
-    /// must produce identical welfare. Clearing prices may differ when the LP
-    /// has degenerate duals (multiple optimal price vectors with equal welfare),
-    /// which is expected for markets with sparse order flow.
+    /// must preserve unscaled welfare. Reported nanos may differ by deterministic
+    /// floor-rounding dust because fractional share-units are floored per fill.
+    /// Clearing prices may differ when the LP has degenerate duals (multiple
+    /// optimal price vectors with equal welfare), which is expected for markets
+    /// with sparse order flow.
     #[test]
     fn batch_commutativity(
         submissions in arb_trading_batch(N_ACCOUNTS, N_MARKETS, make_markets()),
@@ -254,9 +388,22 @@ proptest! {
         let (mut seq2, _) = make_sequencer();
         let bp2 = seq2.produce_block(shuffled, 1000);
 
+        assert_eq!(bp1.analytics.total_welfare, recompute_total_welfare(&bp1.witness));
+        assert_eq!(bp2.analytics.total_welfare, recompute_total_welfare(&bp2.witness));
         assert_eq!(
-            bp1.analytics.total_welfare, bp2.analytics.total_welfare,
-            "Shuffled submissions produced different welfare"
+            raw_welfare_numerator(&bp1.witness),
+            raw_welfare_numerator(&bp2.witness),
+            "Shuffled submissions changed unscaled welfare"
+        );
+        let welfare_delta = (bp1.analytics.total_welfare - bp2.analytics.total_welfare).abs();
+        let max_rounding_delta = bp1.witness.fills.len().max(bp2.witness.fills.len()) as i64;
+        assert!(
+            welfare_delta <= max_rounding_delta,
+            "Shuffled submissions produced welfare outside rounding envelope: left={} right={} delta={} max_delta={}",
+            bp1.analytics.total_welfare,
+            bp2.analytics.total_welfare,
+            welfare_delta,
+            max_rounding_delta
         );
     }
 
@@ -281,6 +428,7 @@ proptest! {
             pre_yes += account.position(m0, 0);
             pre_no += account.position(m0, 1);
         }
+        let expected_delta = expected_resolution_delta(&seq, m0, payout);
 
         // Resolve
         let _ = seq.resolve_market(m0, payout, 2000);
@@ -288,11 +436,6 @@ proptest! {
         // Post-resolution checks
         let post_balance: i64 = seq.accounts.iter().map(|(_, a)| a.balance).sum();
         let balance_delta = post_balance - pre_balance;
-
-        // Expected payout: YES * yes_payout + NO * no_payout
-        let no_payout = NANOS_PER_DOLLAR - payout;
-        let expected_delta =
-            (pre_yes as i128 * payout as i128 + pre_no as i128 * no_payout as i128) as i64;
 
         assert_eq!(
             balance_delta, expected_delta,
@@ -315,8 +458,9 @@ proptest! {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
 
-    /// Doubling all quantities should double welfare and not change clearing prices.
-    /// (Catches overflow/rounding bugs.)
+    /// Doubling all quantities should preserve clearing prices, double fill quantities,
+    /// and produce the exact welfare obtained by recomputing with doubled share-units.
+    /// Integer floor division may add at most one nano of rounding delta per fill.
     #[test]
     fn quantity_scaling(
         base_submissions in arb_trading_batch(N_ACCOUNTS, N_MARKETS, make_markets()),
@@ -345,24 +489,94 @@ proptest! {
         let (mut seq2, _) = make_sequencer();
         let bp2 = seq2.produce_block(doubled, 1000);
 
+        assert_eq!(bp1.analytics.total_welfare, recompute_total_welfare(&bp1.witness));
+        assert_eq!(bp2.analytics.total_welfare, recompute_total_welfare(&bp2.witness));
+
         // Clearing prices should be the same
         assert_eq!(
             bp1.block.clearing_prices, bp2.block.clearing_prices,
             "Doubled quantities changed clearing prices"
         );
 
-        // Welfare MUST double — no silent pass when welfare is 0.
-        // With crossing pairs, we should always get trades.
+        // No silent pass when welfare is 0. With crossing pairs, we should
+        // always get trades.
         assert!(
             bp1.analytics.total_welfare > 0,
             "Base batch produced zero welfare — strategy isn't generating crossing orders"
         );
+        let base_fills: HashMap<u64, _> = bp1
+            .witness
+            .fills
+            .iter()
+            .map(|fill| (fill.order_id, fill))
+            .collect();
+        assert_eq!(
+            base_fills.len(),
+            bp1.witness.fills.len(),
+            "Base batch produced multiple fills for the same order"
+        );
+        assert_eq!(
+            base_fills.len(),
+            bp2.witness.fills.len(),
+            "Doubled quantities changed the filled order set"
+        );
+
+        for doubled_fill in &bp2.witness.fills {
+            let base_fill = base_fills
+                .get(&doubled_fill.order_id)
+                .expect("Doubled batch filled an order not filled in the base batch");
+            assert_eq!(
+                doubled_fill.fill_price, base_fill.fill_price,
+                "Doubled quantities changed fill price for order {}",
+                doubled_fill.order_id
+            );
+            assert_eq!(
+                doubled_fill.fill_qty,
+                base_fill
+                    .fill_qty
+                    .checked_mul(2)
+                    .expect("test quantities should double without overflow"),
+                "Doubled quantities did not double fill quantity for order {}",
+                doubled_fill.order_id
+            );
+        }
+
+        let base_orders: HashMap<u64, _> = bp1
+            .witness
+            .orders
+            .iter()
+            .map(|witness_order| (witness_order.order.id, &witness_order.order))
+            .collect();
+        let expected_doubled_welfare: i64 = bp1
+            .witness
+            .fills
+            .iter()
+            .map(|fill| {
+                let order = base_orders
+                    .get(&fill.order_id)
+                    .expect("base fill must reference a witness order");
+                let doubled_qty = fill
+                    .fill_qty
+                    .checked_mul(2)
+                    .expect("test quantities should double without overflow");
+                order.welfare_contribution(fill.fill_price, doubled_qty)
+            })
+            .sum();
         assert_eq!(
             bp2.analytics.total_welfare,
-            bp1.analytics.total_welfare * 2,
-            "Doubled quantities didn't double welfare: base={} doubled={}",
-            bp1.analytics.total_welfare,
+            expected_doubled_welfare,
+            "Doubled quantities did not match exact floor-recomputed welfare: expected={} doubled={}",
+            expected_doubled_welfare,
             bp2.analytics.total_welfare
+        );
+        let rounding_delta = bp2.analytics.total_welfare - bp1.analytics.total_welfare * 2;
+        assert!(
+            (0..=bp1.witness.fills.len() as i64).contains(&rounding_delta),
+            "Doubled welfare has impossible truncation delta: base={} doubled={} delta={} fills={}",
+            bp1.analytics.total_welfare,
+            bp2.analytics.total_welfare,
+            rounding_delta,
+            bp1.witness.fills.len()
         );
     }
 }
@@ -405,25 +619,20 @@ proptest! {
             matching_sequencer::block::hash_header(&bp2.block.header)
         );
 
-        // Total balance can only change by the value locked in positions.
-        // Each minted YES+NO pair costs $1.  Global YES == Global NO (position balance),
-        // so total locked capital = global_yes * NANOS_PER_DOLLAR summed over markets.
         let post_balance: i64 = seq.accounts.iter().map(|(_, a)| a.balance).sum();
-        let mut total_position_value: i64 = 0;
-        for market in markets.iter() {
-            let mut global_yes: i64 = 0;
-            for (_, account) in seq.accounts.iter() {
-                global_yes += account.position(market.id, 0);
-            }
-            // global_yes == global_no already asserted by assert_position_balance
-            total_position_value += global_yes * NANOS_PER_DOLLAR as i64;
-        }
-        // Money out of balances = money locked in positions
+        let expected_balance_delta: i64 = [&bp1, &bp2, &bp3]
+            .iter()
+            .map(|bp| expected_block_balance_delta(&bp.witness))
+            .sum();
+
+        // Balance movement must match the exact settlement deltas applied by
+        // fills and MINT adjustments. Fractional quantities intentionally floor
+        // each price*quantity conversion, so aggregate face value is not exact.
         assert_eq!(
-            pre_balance - post_balance,
-            total_position_value,
-            "Balance leak across 3 blocks: pre={} post={} positions={}",
-            pre_balance, post_balance, total_position_value
+            post_balance - pre_balance,
+            expected_balance_delta,
+            "Balance leak across 3 blocks: pre={} post={} expected_delta={}",
+            pre_balance, post_balance, expected_balance_delta
         );
     }
 }
