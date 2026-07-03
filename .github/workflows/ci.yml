@@ -123,3 +123,43 @@ jobs:
       - name: Test contracts
         working-directory: contracts
         run: forge test -vvv
+
+  zk:
+    name: ZK Guest & Tools
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.1"
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Separate, out-of-workspace crates pinned to the OpenVM v2.0.0-beta.2
+          # git dependency graph; cache their target dirs independently.
+          workspaces: |
+            zk/openvm-tools
+            zk/openvm-guest
+
+      # Consensus-surface staleness gate: fail if the OpenVM guest source
+      # changed without regenerating the pinned commitment. Compares only;
+      # never rebuilds or updates the pin. See scripts/zk-guest-fingerprint.sh.
+      - name: Guest commitment staleness gate
+        run: scripts/zk-guest-fingerprint.sh --check
+
+      # Host-side encoder (not consensus surface). Full check + clippy.
+      - name: Check openvm-tools
+        working-directory: zk/openvm-tools
+        run: cargo clippy --tests --all-features
+
+      # Guest crate checked with the normal host compiler (the same check as
+      # `just openvm-guest-check`). This validates the guest source compiles;
+      # it does NOT rebuild the zkVM artifact / commitment, which requires the
+      # pinned `cargo-openvm` CLI + risc0 target toolchain and stays a local /
+      # release step. The guest is consensus surface: this job must never
+      # regenerate its artifact, only host-check the source unchanged.
+      - name: Host-check openvm-guest
+        working-directory: zk/openvm-guest
+        run: cargo clippy --tests
