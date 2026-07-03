@@ -5,9 +5,8 @@
  * `__tests__/canonical.test.ts` pin every field to the Rust insta snapshots —
  * any schema drift fails the tests before a signature ever hits the wire.
  *
- * NOTE: `expires_at_block: Option<u64>` is on the Rust struct but is missing
- * from the older `static/trade.html` schema. Test vectors here come from
- * `crates/sybil-canonical/src/snapshots/*.snap`, not from trade.html.
+ * NOTE: `expires_at_block: Option<u64>` is part of the Rust struct. Test
+ * vectors here come from `crates/sybil-canonical/src/snapshots/*.snap`.
  */
 
 import { serialize } from "borsh";

@@ -329,7 +329,7 @@ Surface (~50 endpoints; the OpenAPI spec currently under-reports a few — candl
 | Bridge | `GET /v1/bridge/status`, `POST deposits|withdrawals` (dev), `GET /withdrawals/{id}` |
 | Proofs | `GET /v1/proofs/state/{leaf_key_hex}` — qMDB inclusion/exclusion against the committed root |
 | Feeds | `GET|POST /v1/feeds` (POST dev) |
-| Misc | `/v1/activity/overview`, `/v1/events/{id}/traders`, `/v1/events/{id}/raw`, `/v1/bots/decisions`, `/metrics`, `/openapi.json`, static dashboards `/`, `/trade` |
+| Misc | `/v1/activity/overview`, `/v1/events/{id}/traders`, `/v1/events/{id}/raw`, `/v1/bots/decisions`, `/metrics`, `/openapi.json`, static dashboard `/` |
 
 **Authentication model.** No sessions. Two mechanisms: P256 ECDSA signatures over canonical bytes (orders, cancels, attestations; keys registered per account), and the `dev_mode` flag gating all admin-ish mutation. Order writes additionally pass token-bucket rate limits keyed by client IP.
 
@@ -368,7 +368,7 @@ This is the system's liquidity and reality anchor on the devnet: real markets, r
 ## 15. Frontends and dashboards
 
 - **`frontend/web`** — the product UI: Next.js 16 / React 19 / Tailwind 4, TanStack Query + Zustand, typed REST via `openapi-fetch` against generated `schema.d.ts` (with `*_nanos` fields patched to strings), realtime via the **WebSocket** stream with height-based resume. Routes: markets, market detail, activity, portfolio, plus a `/dev/*` zone (a port of the Rust console). `handoff/` holds design mockups (only the token CSS is consumed); `archive/` holds completed plan documents.
-- **`crates/sybil-api/static/`** — the original Alpine.js dev console served at `/` and `/trade`.
+- **`crates/sybil-api/static/`** — the original Alpine.js dev console served at `/`.
 - **`viz/`** — Streamlit analyzer of solver pipeline snapshots (offline, JSON in).
 - **`arena/viz/`** — Streamlit news-dataset explorer for LLM sims (unrelated to the above despite the shared framework).
 

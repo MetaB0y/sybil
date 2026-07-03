@@ -188,6 +188,13 @@ async fn resolve_market_forbidden_without_dev_mode() {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
+#[tokio::test]
+async fn stale_trade_page_is_not_mounted() {
+    let (app, _) = test_app(true).await;
+    let (status, _) = get(app, "/trade").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
 // ---------------------------------------------------------------------------
 // B. 404 handling
 // ---------------------------------------------------------------------------

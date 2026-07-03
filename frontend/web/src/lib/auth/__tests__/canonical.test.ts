@@ -10,8 +10,7 @@ import {
  * Vectors copied VERBATIM from `crates/sybil-canonical/src/snapshots/*.snap`.
  *
  * To refresh: read the .snap files in that directory; the bottom line is the
- * authoritative hex. Do NOT copy from `static/trade.html` — its hardcoded
- * vectors are stale (missing the `expires_at_block` trailing Option byte).
+ * authoritative hex.
  */
 interface OrderVector {
   name: string;

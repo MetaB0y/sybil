@@ -38,7 +38,7 @@ Scaffolding is done when all 12 boxes are checked. After that: resolve **Pending
 | Forms | **React Hook Form** + **Zod** — when order form ships |
 | Animation | **Framer Motion**. ⚠ At 2s batch cadence, the batch-theater clock must use linear easing keyed to `block.height`, not wall-clock spring physics — Framer springs jank at this cadence. |
 | Money math | All `*_nanos` fields as **`bigint`** via `parseNanos()`. NOT raw `number` — corrupts above 2^53. See [KNOWN_ISSUES.md #1](./KNOWN_ISSUES.md) for the workaround in place and the pending backend fix. |
-| Signed orders | **borsh@2.0.0** — NOT installed in scaffolding. Add when wallet/auth ships. Lift schemas from `crates/sybil-api/static/trade.html`. ⚠ JS borsh and `borsh-rs` are NOT automatically wire-compatible — first integration must include a round-trip test against `/v1/orders/signed` with a Rust-generated fixture. |
+| Signed orders | **borsh@2.0.0** — NOT installed in scaffolding. Add when wallet/auth ships. Lift schemas from `frontend/web/src/lib/auth/canonical.ts` and verify against `crates/sybil-canonical/src/snapshots/*.snap`. JS borsh and `borsh-rs` are NOT automatically wire-compatible — first integration must include a round-trip test against `/v1/orders/signed` with a Rust-generated fixture. |
 | Package manager | **pnpm 9.x** (pinned via `packageManager` field in `package.json`) |
 | Node | **20 LTS** (pinned via `.nvmrc` + `engines`) |
 | TypeScript | strict mode + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes` |

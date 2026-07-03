@@ -8,7 +8,7 @@
  *    `crates/sybil-api/src/routes/orders.rs:42-47` (Signature::from_slice).
  *    WebCrypto ECDSA outputs raw r||s natively; DO NOT DER-encode.
  *
- * The matching browser-side reference is `static/trade.html:879-911`.
+ * The matching browser-side implementation lives in this package.
  */
 
 import { toHex } from "./canonical";

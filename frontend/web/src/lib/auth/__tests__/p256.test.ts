@@ -33,8 +33,7 @@ describe("p256 sign + verify roundtrip", () => {
 
     const sigHex = await signBytes(kp.privateKey, bytes);
     // `lowS: false` — WebCrypto emits high-S signatures ~50% of the time;
-    // the Rust `p256` crate accepts both (trade.html ships unmodified
-    // WebCrypto sigs and they verify), so noble must too for parity.
+    // the Rust `p256` crate accepts both, so noble must too for parity.
     const ok = p256.verify(fromHex(sigHex), bytes, fromHex(pubHex), {
       lowS: false,
     });
@@ -51,8 +50,7 @@ describe("p256 sign + verify roundtrip", () => {
 
     const pubHex = await exportPublicKeyCompressedHex(kp.publicKey);
     // `lowS: false` — WebCrypto emits high-S signatures ~50% of the time;
-    // the Rust `p256` crate accepts both (trade.html ships unmodified
-    // WebCrypto sigs and they verify), so noble must too for parity.
+    // the Rust `p256` crate accepts both, so noble must too for parity.
     const ok = p256.verify(fromHex(sigHex), bytes, fromHex(pubHex), {
       lowS: false,
     });

@@ -236,14 +236,6 @@
     color: var(--muted);
     font-size: 11px;
   }
-  .iframe-wrap {
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    overflow: hidden;
-    background: var(--surface);
-  }
-  iframe { width: 100%; border: 0; display: block; background: white; }
-  .trade-frame { height: calc(100vh - 150px); min-height: 820px; }
   .empty { padding: 26px 12px; color: var(--dim); text-align: center; }
   .clickable { cursor: pointer; }
   .account-strip {
@@ -1046,17 +1038,6 @@
       </div>
     </section>
 
-    <section x-show="selectedTab === 'trade'">
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Trade</h2>
-          <a href="/trade" target="_blank" rel="noreferrer">Open direct trade view</a>
-        </div>
-        <div class="iframe-wrap">
-          <iframe class="trade-frame" src="/trade" title="Sybil Trading"></iframe>
-        </div>
-      </div>
-    </section>
   </main>
 </div>
 
@@ -1070,7 +1051,6 @@ function consoleApp() {
       { id: 'aggregates', label: 'Aggregates' },
       { id: 'participants', label: 'MM & Accounts' },
       { id: 'bots', label: 'Bot Decisions' },
-      { id: 'trade', label: 'Trade' },
     ],
     selectedTab: 'overview',
     health: {},

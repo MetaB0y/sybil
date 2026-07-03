@@ -153,13 +153,6 @@ async fn dashboard() -> impl IntoResponse {
     )
 }
 
-async fn trade() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        include_str!("../static/trade.html"),
-    )
-}
-
 async fn prometheus_metrics(State(state): State<AppState>) -> impl IntoResponse {
     record_live_market_metrics(&state).await;
     record_bot_metrics(&state).await;
@@ -456,7 +449,6 @@ fn metric_path_label(path: &str) -> &'static str {
 
     match segments.as_slice() {
         [] => "/",
-        ["trade"] => "/trade",
         ["openapi.json"] => "/openapi.json",
         ["metrics"] => "/metrics",
         ["v1", "activity", "overview"] => "/v1/activity/overview",
@@ -560,7 +552,6 @@ pub fn create_router(state: AppState) -> Router {
     Router::new()
         // Dashboard
         .route("/", axum::routing::get(dashboard))
-        .route("/trade", axum::routing::get(trade))
         // OpenAPI spec
         .route("/openapi.json", axum::routing::get(openapi_json))
         // Metrics (outside http_metrics middleware to avoid self-scraping noise)
@@ -815,6 +806,7 @@ mod tests {
 
     #[test]
     fn metric_path_label_buckets_unmatched_routes() {
+        assert_eq!(metric_path_label("/trade"), "/{unmatched}");
         assert_eq!(
             metric_path_label("/v1/accounts/1/fills/extra"),
             "/v1/{unmatched}"
