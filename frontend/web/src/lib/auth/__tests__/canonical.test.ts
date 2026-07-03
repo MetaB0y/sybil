@@ -7,7 +7,7 @@ import {
 } from "../canonical";
 
 /**
- * Vectors copied VERBATIM from `crates/sybil-canonical/src/snapshots/*.snap`.
+ * Vectors copied VERBATIM from `crates/sybil-signing/src/snapshots/*.snap`.
  *
  * To refresh: read the .snap files in that directory; the bottom line is the
  * authoritative hex.

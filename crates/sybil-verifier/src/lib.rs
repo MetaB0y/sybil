@@ -26,19 +26,34 @@ mod canonical;
 #[cfg(feature = "qmdb")]
 pub mod event_commitment;
 pub mod event_schema;
+#[cfg(feature = "qmdb")]
+mod header_hash {
+    use crate::WitnessBlockHeader;
+
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../sybil-zk/src/header_hash_impl.rs"
+    ));
+}
 pub mod match_verifier;
 pub mod orders;
 pub mod settlement;
+mod snapshot_schema;
 pub mod state_schema;
 pub mod types;
 pub mod violations;
 pub mod witness_schema;
+
+#[cfg(all(test, feature = "qmdb"))]
+mod byte_identity;
 
 /// Canonical byte schemas used as inputs to state, event, and witness commitments.
 ///
 /// The verifier crate owns these schemas so native verification, witness
 /// generation, and guest verification all serialize committed data the same way.
 pub mod commitments {
+    #[cfg(feature = "qmdb")]
+    pub use crate::header_hash::hash_header;
     pub use crate::{event_schema, state_schema, witness_schema};
 }
 

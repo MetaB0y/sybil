@@ -24,9 +24,11 @@ encoding — across Rust crates, across languages, and across implementations.
 Without a normative spec, drift is silent and catastrophic: two honest
 implementations can compute different state roots from the same logical state.
 
-Today the rules are scattered across six files:
+The executable rules are concentrated in the verifier commitments modules and
+the guest-safe header hash source:
 
-- `crates/matching-sequencer/src/block.rs::hash_header`
+- `crates/sybil-zk/src/header_hash_impl.rs::hash_header`
+- `crates/sybil-verifier/src/snapshot_schema.rs`
 - `crates/matching-sequencer/src/canonical_state.rs::CanonicalState`
 - `crates/matching-sequencer/src/digest.rs` (5 event encoders)
 - `crates/sybil-verifier/src/block.rs::compute_state_root`
@@ -121,7 +123,8 @@ by `id` and concatenated.
 
 ### `BlockHeader`
 
-Source: `matching-sequencer::block::hash_header`.
+Source: `sybil-zk/src/header_hash_impl.rs`, re-exported through
+`sybil_zk::hash_header` and `sybil_verifier::commitments::hash_header`.
 
 ```
 header_bytes =
@@ -164,7 +167,7 @@ event leaves. Full witness bytes encode `MmConstraint` entries sorted by
 `mm_id`, with `order_ids` and `order_sides` sorted by `order_id`.
 `MarketGroup` entries are sorted by first contained market id, then name, and
 their market lists are sorted by `market_id`. The Rust signing path continues
-to use `sybil-canonical::Order`, including `expires_at_block`, so P256 signed
+to use `sybil-signing::Order`, including `expires_at_block`, so P256 signed
 orders cover resolved IOC/GTD expiry semantics.
 
 ### State leaves for `state_root`

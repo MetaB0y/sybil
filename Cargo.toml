@@ -7,7 +7,7 @@ members = [
     "crates/matching-sim",
     "crates/matching-sequencer",
     "crates/sequencer-sim",
-    "crates/sybil-canonical",
+    "crates/sybil-signing",
     "crates/sybil-oracle",
     "crates/sybil-api",
     "crates/sybil-api-types",

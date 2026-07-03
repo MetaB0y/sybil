@@ -231,7 +231,7 @@ The 200-OK contract: anything acknowledged (orders, account creation, funding, m
 
 **`BlockWitness`** (`sybil-verifier/src/types.rs`, 16 fields) is self-contained and reproducible: header + parent header, accepted orders, rejections with reasons, system events, fills, clearing prices, welfare + minting cost, MM constraints, market groups, three account-state snapshots (`pre_state`, `post_system_state`, `post_state`), the non-account `state_sidecar`, and resolved markets. Two invariants define validity: *(a)* replaying `pre_state + system_events + fills` yields `post_state`; *(b)* recomputing the roots from the witness matches the header.
 
-**Canonical serialization** (`sybil-verifier::commitments` — `state_schema.rs`, `event_schema.rs`, `witness_schema.rs`): hand-specified little-endian byte layouts with domain-separation strings, version bytes, and golden test vectors. This is *the* byte truth consumed by native verification, witness generation, and the zkVM guest. (A separate, unrelated system — `sybil-canonical`, borsh-based — defines the bytes that *clients sign*: orders, cancels, attestations. Signing bytes and commitment bytes are deliberately different systems.)
+**Canonical serialization** (`sybil-verifier::commitments` — `state_schema.rs`, `event_schema.rs`, `witness_schema.rs`): hand-specified little-endian byte layouts with domain-separation strings, version bytes, and golden test vectors. This is *the* byte truth consumed by native verification, witness generation, and the zkVM guest. (A separate, unrelated system — `sybil-signing`, borsh-based — defines the bytes that *clients sign*: orders, cancels, attestations. Signing bytes and commitment bytes are deliberately different systems.)
 
 **Public/private split** for ZK: prices, welfare, counts, and roots are public; individual orders, fills, balances, and MM constraints are private, provable selectively via `events_root`/`state_root` membership proofs.
 
@@ -305,7 +305,7 @@ Roles: multisig admin, granular pausers (deposits / roots / withdrawal-requests 
 `crates/sybil-oracle` makes **resolution decisions only**; the sequencer executes them, and all external I/O lives in untrusted signers. The design (full roadmap: `Oracle System` vault note):
 
 - A **`DataFeed`** is a registered P256 identity (33-byte compressed pubkey + name).
-- A **`ResolutionAttestation`** `{market_id, payout_nanos, nonce}` is signed over `sybil-canonical` borsh bytes.
+- A **`ResolutionAttestation`** `{market_id, payout_nanos, nonce}` is signed over `sybil-signing` borsh bytes.
 - A market's **`ResolutionTemplate`** names a **`ResolutionPolicy`**. Shipped today: `Immediate { feed_id }` — one attestation from the named feed settles the market. Templates shipped: `admin_immediate` (default), `polymarket_mirror`. The state machine today is `Active → Resolved`; `Proposed/Challenged/Voided` are reserved for future optimistic/quorum policies.
 - Signature verification happens in the sequencer (`crypto.rs`); the API's `POST /v1/markets/{id}/resolve` accepts either a signed attestation (any mode) or an unsigned admin call (dev-mode only).
 

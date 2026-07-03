@@ -1,7 +1,4 @@
 use matching_sequencer::store::Store;
-use matching_sequencer::{
-    QmdbStateKeyValueProofParts, QmdbStateOperationProofParts, QmdbStateRangeProofParts,
-};
 use sybil_verifier::{commitments::state_schema, BlockWitness};
 
 use crate::{
@@ -69,7 +66,7 @@ pub async fn collect_state_transition_proof_job(
         state_leaf_proofs.push(StateTransitionStateLeafProof {
             key: key.clone(),
             value: value.clone(),
-            proof: convert_key_value_proof(proof.proof_parts()),
+            proof: proof.proof_parts(),
         });
     }
 
@@ -82,34 +79,6 @@ pub async fn build_state_transition_guest_input_from_store(
 ) -> Result<sybil_zk::StateTransitionGuestInput, SequencerStoreWitgenError> {
     let job = collect_state_transition_proof_job(store, witness).await?;
     Ok(build_state_transition_guest_input(job)?)
-}
-
-fn convert_key_value_proof(proof: QmdbStateKeyValueProofParts) -> sybil_zk::QmdbStateKeyValueProof {
-    sybil_zk::QmdbStateKeyValueProof {
-        operation: convert_operation_proof(proof.operation),
-        next_key: proof.next_key,
-    }
-}
-
-fn convert_operation_proof(
-    proof: QmdbStateOperationProofParts,
-) -> sybil_zk::QmdbStateOperationProof {
-    sybil_zk::QmdbStateOperationProof {
-        location: proof.location,
-        activity_chunk: proof.activity_chunk,
-        range: convert_range_proof(proof.range),
-    }
-}
-
-fn convert_range_proof(proof: QmdbStateRangeProofParts) -> sybil_zk::QmdbStateRangeProof {
-    sybil_zk::QmdbStateRangeProof {
-        leaves: proof.leaves,
-        digests: proof.digests,
-        pre_prefix_acc: proof.pre_prefix_acc,
-        unfolded_prefix_peaks: proof.unfolded_prefix_peaks,
-        partial_chunk_digest: proof.partial_chunk_digest,
-        ops_root: proof.ops_root,
-    }
 }
 
 #[cfg(test)]

@@ -92,9 +92,9 @@ These either lose money at runtime or let a proof attest to invalid state. They 
 
 ### H11 — Deployed `/trade` page signs stale canonical bytes; every signed order is rejected **[VERIFIED shape]**
 
-- **Where:** `crates/sybil-api/static/trade.html:549-558` (`ORDER_SCHEMA` omits `expires_at_block: Option<u64>`); `crates/sybil-canonical/src/lib.rs:40` (Rust `CanonicalOrder` includes it — at minimum a trailing `0x00` byte); `crypto.rs`/`actor.rs:756` (verification reconstructs bytes with the field).
+- **Where:** `crates/sybil-api/static/trade.html:549-558` (`ORDER_SCHEMA` omits `expires_at_block: Option<u64>`); `crates/sybil-signing/src/lib.rs:40` (Rust `CanonicalOrder` includes it — at minimum a trailing `0x00` byte); `crypto.rs`/`actor.rs:756` (verification reconstructs bytes with the field).
 - **Failure:** The browser signs a message missing the trailing option byte; the server verifies a different message → `InvalidSignature` for every order. The page's embedded self-check vectors are equally stale, so its startup check passes while producing unverifiable signatures. This page is live (routed at `/trade`, iframed by the deployed console).
-- **Fix:** Delete `static/trade.html` (superseded by the Next.js signing path) and the console's Trade tab; if a binary-embedded trade page must stay, regenerate its schema/vectors from the `sybil-canonical` snapshots and add a CI check that greps embedded vectors against the `.snap` files.
+- **Fix:** Delete `static/trade.html` (superseded by the Next.js signing path) and the console's Trade tab; if a binary-embedded trade page must stay, regenerate its schema/vectors from the `sybil-signing` snapshots and add a CI check that greps embedded vectors against the `.snap` files.
 
 ### H12 — L1 indexer applies unconfirmed tip logs as irreversible credits **[REPORTED]**
 

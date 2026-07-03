@@ -1,6 +1,6 @@
 # HTTP API Layer
 
-**Crates:** `sybil-api`, `sybil-api-types`, `sybil-canonical`
+**Crates:** `sybil-api`, `sybil-api-types`, `sybil-signing`
 
 ## Verdict
 
@@ -14,11 +14,11 @@ A clean Axum layer with a genuinely excellent router trust-boundary design, unde
 
 **Streaming:** both SSE (`sse.rs`, 26 LOC) and WebSocket (`ws.rs`, 216 LOC) sit on the same broadcast channel; WS has a versioned envelope, replay, lag signalling, ping/idle-timeout — SSE has none of these.
 
-**Auth:** P256 ECDSA. Signed writes parse hex pubkey+sig in the route, build a `SignedOrder`/`SignedCancel`/`SignedBridgeWithdrawal`, and the actor verifies against the registered key via `sybil-canonical` borsh bytes. The signature covers order content including `expires_at_block` but **no nonce/sequence**.
+**Auth:** P256 ECDSA. Signed writes parse hex pubkey+sig in the route, build a `SignedOrder`/`SignedCancel`/`SignedBridgeWithdrawal`, and the actor verifies against the registered key via `sybil-signing` borsh bytes. The signature covers order content including `expires_at_block` but **no nonce/sequence**.
 
 **Off-block state:** `AppState` also holds `reference_prices`, `market_ref_data` (with JSON-on-disk persistence), an event-snapshot directory, an arena SQLite path, and the HTTP rate limiter — a parallel state store outside the sequencer, mutated by dev/internal routes. This contradicts `REST API.md`'s "the API is stateless — all exchange state lives in the SequencerActor."
 
-**`sybil-canonical` (194 LOC)** holds a *third* copy of `Order`/`MarketId`/`PriceCondition`/etc. for stable borsh signable bytes, deliberately mirroring the sequencer/oracle structs "without importing" them.
+**`sybil-signing` (194 LOC)** holds a *third* copy of `Order`/`MarketId`/`PriceCondition`/etc. for stable borsh signable bytes, deliberately mirroring the sequencer/oracle structs "without importing" them.
 
 ## Strengths
 
@@ -51,7 +51,7 @@ A clean Axum layer with a genuinely excellent router trust-boundary design, unde
 ## Ambitious ideas
 
 1. **Finish the hot/cold read-model split** — the single highest-leverage move for "crispy clear." A typed `ReadModelStore` covering markets, blocks-by-height, price history, and platform aggregates, with all cold reads routed there via `spawn_blocking`. The actor then serves only writes + latest-state, and `list_markets` stops issuing 10 RPCs per poll.
-2. **Collapse the three `Order` representations.** Make `sybil-canonical` the one canonical signable form and have `matching_engine::Order` implement `To/FromCanonical` (feature-gated) so signed bytes are *derived*, not hand-mapped, with a field-exhaustiveness test so a new field cannot escape the signature.
+2. **Collapse the three `Order` representations.** Make `sybil-signing` the one canonical signable form and have `matching_engine::Order` implement `To/FromCanonical` (feature-gated) so signed bytes are *derived*, not hand-mapped, with a field-exhaustiveness test so a new field cannot escape the signature.
 3. **Extract off-block display state** (reference prices, market ref data, event snapshots) into a dedicated `RefDataService` (its own actor or store). `AppState` shrinks to `{sequencer, read_store, config, rate_limiter}`, restoring the "all protocol state in the sequencer" invariant behind one clearly-labelled display sidecar.
 4. **Add signed-write replay protection** as a first-class concept: a nonce/expiry in the canonical payload plus a bounded per-account replay set in the sequencer, shared by orders, cancels, and withdrawals — a prerequisite before any signed endpoint goes public.
 5. **Unify the block feed on WebSocket** (arena and polymarket already consume it) and delete SSE, or make SSE a thin re-encoding of the same `BlockStreamPayload`. One feed, one guarantee set.

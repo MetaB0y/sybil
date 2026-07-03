@@ -32,7 +32,7 @@ Some code reads as dead weight but is load-bearing or intended-load-bearing. Han
 
 - **`sybil-verifier/src/arithmetic.rs`** — currently has zero callers, so it scans as dead. It is the *intended* overflow-safe arithmetic layer. **Wire it up** (per [SYB-187](https://linear.app/sybilmarket/issue/SYB-187) / H3), don't delete it — unless you inline equivalent checked-i128 helpers at every call site instead.
 - **`lean/FisherClearing`** — decorative-seeming (proves the ℝ-valued paper, disconnected from the Rust). It is the *correctness argument* for the mechanism. Keep it, add `lake build` to CI, and ideally bridge one integer-level theorem — do not drop it as "unused."
-- **`sybil-canonical`'s "mirror without importing"** — ugly and duplicative, but it is currently the guest-safety / dependency boundary. Consolidate it carefully into `sybil-commitments` (P5); do not simply delete the mirror and import the runtime types into guest-safe code.
+- **`sybil-signing`'s "mirror without importing"** — ugly and duplicative, but it is currently the guest-safety / dependency boundary. Consolidate it carefully into `sybil-commitments` (P5); do not simply delete the mirror and import the runtime types into guest-safe code.
 - **The MINT (`u64::MAX`) system account** — looks like a magic sentinel; it is the counterparty that absorbs per-market YES/NO imbalance and makes conservation hold. Don't "clean it up" into a normal account.
 
 ## Safe to delete (both reviews agree)

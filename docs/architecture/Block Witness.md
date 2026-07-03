@@ -270,11 +270,12 @@ current executable vectors live in `sybil-zk`'s public-input golden test and
 ## Where this lives
 
 > `crates/sybil-verifier/src/types.rs` — `BlockWitness`, `WitnessBlockHeader`, `AccountSnapshot`
-> `crates/matching-sequencer/src/block.rs` — `produce_block` builds the witness; `hash_header` is the current header hash
+> `crates/matching-sequencer/src/block.rs` — `produce_block` builds the witness and imports the shared header hash
 > `crates/sybil-verifier/src/block.rs` — `verify_block` runs Layer 3 checks against the witness
 > `crates/sybil-verifier/src/event_schema.rs` — canonical event leaves
 > `crates/sybil-verifier/src/event_commitment.rs` — native keyless-qMDB `events_root`
 > `crates/sybil-verifier/src/witness_schema.rs` — canonical full witness bytes
+> `crates/sybil-zk/src/header_hash_impl.rs` — shared header hash source
 > `crates/sybil-zk/src/lib.rs` — `witness_root` computation and public input binding
 
 ## See also

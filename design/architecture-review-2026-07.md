@@ -90,9 +90,9 @@ Concretely: (a) move tracker updates out of `produce_block_in_place` into an `An
 
 ### P5 — One home for canonical bytes and hashes
 
-**Problem.** Byte-truth is scattered: `hash_header` exists three times (sequencer, `sybil-verifier/block.rs:298` — with a comment saying "must match" — and `sybil-zk/lib.rs:229`); `state_schema.rs` and `witness_schema.rs` contain ~200 lines of parallel `append_*` encoders over the same snapshot types; qMDB proof types are declared twice (`sybil-zk` and `matching-sequencer::qmdb_state`) with three `convert_*` bridge functions; and the crate *named* `sybil-canonical` is a different, unrelated serialization system (client signing bytes). In a ZK system, hand-synchronized encoders are the highest-consequence duplication there is: a silent divergence is a soundness bug.
+**Problem.** Byte-truth is scattered: `hash_header` exists three times (sequencer, `sybil-verifier/block.rs:298` — with a comment saying "must match" — and `sybil-zk/lib.rs:229`); `state_schema.rs` and `witness_schema.rs` contain ~200 lines of parallel `append_*` encoders over the same snapshot types; qMDB proof types are declared twice (`sybil-zk` and `matching-sequencer::qmdb_state`) with three `convert_*` bridge functions; and the old signing-crate name described a different, unrelated serialization system (client signing bytes). In a ZK system, hand-synchronized encoders are the highest-consequence duplication there is: a silent divergence is a soundness bug.
 
-**Proposal.** `sybil-verifier::commitments` is already the de-facto owner — finish the job: move `hash_header` there (sequencer and zk import it); merge the two snapshot encoders into one visitor with two entry points; let `sybil-zk` own the qMDB proof types and have the sequencer produce them directly. Rename for honesty: `sybil-canonical` → `sybil-signing` (or fold it into `sybil-api-types`), so "canonical" means exactly one thing in this codebase.
+**Proposal.** `sybil-verifier::commitments` is already the de-facto owner — finish the job: move `hash_header` there (sequencer and zk import it); merge the two snapshot encoders into one visitor with two entry points; let `sybil-zk` own the qMDB proof types and have the sequencer produce them directly. Rename the client-signing crate to `sybil-signing` (or fold it into `sybil-api-types`), so "canonical" means exactly one thing in this codebase.
 
 **Payoff.** The set of code that must be byte-identical for soundness becomes one module with golden tests, not five files with comments pointing at each other.
 
@@ -156,7 +156,7 @@ Total: roughly **10–12k lines** removable with zero behavior change, plus the 
 ## 4. What *not* to do
 
 - **Don't merge `sybil-api-types` into `matching-engine`.** The wire/domain split is intentional; the cost (a `convert.rs`) buys the freedom to evolve the wire format without touching consensus types.
-- **Don't unify `sybil-canonical`'s signing bytes with commitment bytes.** Clients sign a stable, minimal payload; commitments encode full state. Rename it (P5), don't merge it.
+- **Don't unify `sybil-signing`'s signing bytes with commitment bytes.** Clients sign a stable, minimal payload; commitments encode full state. Rename it (P5), don't merge it.
 - **Don't collapse the native/guest commitment implementations.** The hand-rolled guest verifier exists so the guest doesn't link commonware; the golden tests pinning them equal are the right mechanism. (Do add fuzzing, per P10.)
 - **Don't chase crate-count for its own sake elsewhere.** engine/solver/scenarios/sequencer/api are real boundaries with distinct change cadences; the ZK host tools (P7) are the only place the crate graph outruns the concept graph.
 - **Don't formalize the Rust↔Lean gap yet.** The Lean development proves the continuous theory; bridging to integer code is research, not cleanup. Keep citing theorems from comments.

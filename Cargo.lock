@@ -2463,9 +2463,10 @@ dependencies = [
  "rmp-serde",
  "serde",
  "sha3",
- "sybil-canonical",
  "sybil-oracle",
+ "sybil-signing",
  "sybil-verifier",
+ "sybil-zk",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -4223,16 +4224,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sybil-canonical"
-version = "0.1.0"
-dependencies = [
- "borsh",
- "hex",
- "insta",
- "serde",
-]
-
-[[package]]
 name = "sybil-client"
 version = "0.1.0"
 dependencies = [
@@ -4268,8 +4259,8 @@ dependencies = [
  "serde",
  "serde_json",
  "sybil-api-types",
- "sybil-canonical",
  "sybil-client",
+ "sybil-signing",
  "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite 0.29.0",
@@ -4299,6 +4290,16 @@ dependencies = [
  "sybil-zk",
  "thiserror 2.0.18",
  "tokio",
+]
+
+[[package]]
+name = "sybil-signing"
+version = "0.1.0"
+dependencies = [
+ "borsh",
+ "hex",
+ "insta",
+ "serde",
 ]
 
 [[package]]

@@ -10,7 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 sybil-api-types = { path = "../sybil-api-types" }
-sybil-canonical = { path = "../sybil-canonical" }
+sybil-signing = { path = "../sybil-signing" }
 sybil-client = { path = "../sybil-client" }
 p256 = { version = "0.14.0-rc.7", features = ["ecdsa"] }
 hex = "0.4"

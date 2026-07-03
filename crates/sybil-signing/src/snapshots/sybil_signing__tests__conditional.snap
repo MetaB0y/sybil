@@ -1,5 +1,5 @@
 ---
-source: crates/sybil-canonical/src/lib.rs
+source: crates/sybil-signing/src/lib.rs
 expression: "hex::encode(canonical_order_bytes(&order))"
 ---
 05000000ffffffffffffffffffffffffffffffff0101000000000000000000000000000000000000000000000000000000000000000280dc5b24000000000900000000000000010b00000080ce341d000000000000

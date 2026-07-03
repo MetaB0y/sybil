@@ -101,6 +101,20 @@ pub struct QmdbStateKeyValueProof {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum QmdbStateExclusionProof {
+    KeyValue {
+        operation: QmdbStateOperationProof,
+        span_key: Vec<u8>,
+        span_value: Vec<u8>,
+        span_next_key: Vec<u8>,
+    },
+    Commit {
+        operation: QmdbStateOperationProof,
+        metadata: Option<Vec<u8>>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QmdbStateOperationProof {
     pub location: u64,
     pub activity_chunk: [u8; QMDB_STATE_CHUNK_SIZE],

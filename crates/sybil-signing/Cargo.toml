@@ -1,8 +1,8 @@
 [package]
-name = "sybil-canonical"
+name = "sybil-signing"
 version = "0.1.0"
 edition = "2021"
-description = "Canonical signable payloads shared across Sybil clients"
+description = "Stable signable payloads shared across Sybil clients"
 
 [dependencies]
 borsh = { version = "1.6.1", features = ["derive"] }

@@ -23,7 +23,7 @@ Per-subsystem deep reviews:
 |-----|-----------|
 | [10-core-math-and-solvers.md](10-core-math-and-solvers.md) | `matching-engine`, `matching-solver`, scenarios, sim, fuzz |
 | [11-sequencer.md](11-sequencer.md) | `matching-sequencer` (block lifecycle + state + settlement) |
-| [12-api.md](12-api.md) | `sybil-api`, `sybil-api-types`, `sybil-canonical`, streaming, auth |
+| [12-api.md](12-api.md) | `sybil-api`, `sybil-api-types`, `sybil-signing`, streaming, auth |
 | [13-polymarket-mirror.md](13-polymarket-mirror.md) | `sybil-polymarket` |
 | [14-oracle-l1-contracts.md](14-oracle-l1-contracts.md) | `sybil-oracle`, `sybil-l1-protocol`, `sybil-l1-indexer`, `contracts/` |
 | [15-verification-zk.md](15-verification-zk.md) | `sybil-verifier`, `sybil-zk`, `sybil-witgen`, `sybil-prover`, `zk/`, `lean/` |

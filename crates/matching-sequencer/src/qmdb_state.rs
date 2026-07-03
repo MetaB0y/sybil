@@ -59,42 +59,12 @@ pub type QmdbStateExclusionProof = ExclusionProof<
     QMDB_STATE_CHUNK_SIZE,
 >;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct QmdbStateRangeProofParts {
-    pub leaves: u64,
-    pub digests: Vec<[u8; 32]>,
-    pub pre_prefix_acc: Option<[u8; 32]>,
-    pub unfolded_prefix_peaks: Vec<[u8; 32]>,
-    pub partial_chunk_digest: Option<[u8; 32]>,
-    pub ops_root: [u8; 32],
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct QmdbStateOperationProofParts {
-    pub location: u64,
-    pub activity_chunk: [u8; QMDB_STATE_CHUNK_SIZE],
-    pub range: QmdbStateRangeProofParts,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct QmdbStateKeyValueProofParts {
-    pub operation: QmdbStateOperationProofParts,
-    pub next_key: Vec<u8>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum QmdbStateExclusionProofParts {
-    KeyValue {
-        operation: QmdbStateOperationProofParts,
-        span_key: Vec<u8>,
-        span_value: Vec<u8>,
-        span_next_key: Vec<u8>,
-    },
-    Commit {
-        operation: QmdbStateOperationProofParts,
-        metadata: Option<Vec<u8>>,
-    },
-}
+pub use sybil_zk::{
+    QmdbStateExclusionProof as QmdbStateExclusionProofParts,
+    QmdbStateKeyValueProof as QmdbStateKeyValueProofParts,
+    QmdbStateOperationProof as QmdbStateOperationProofParts,
+    QmdbStateRangeProof as QmdbStateRangeProofParts,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct QmdbStateRoot {

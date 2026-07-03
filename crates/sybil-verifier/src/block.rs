@@ -17,14 +17,13 @@ use commonware_storage::qmdb::current::ordered::variable::Db as OrderedVariableD
 use commonware_storage::qmdb::current::VariableConfig;
 use commonware_storage::translator::OneCap;
 
+pub use crate::commitments::hash_header;
 use crate::event_commitment::compute_events_root;
 pub use crate::state_schema::{
     account_leaf_key, account_reservation_leaf_key, market_group_leaf_key, market_leaf_key,
     market_metadata_digest, resting_order_leaf_key, state_root_leaves, withdrawal_leaf_key,
 };
-use crate::types::{
-    AccountSnapshot, BlockWitness, BridgeStateSnapshot, StateSidecarSnapshot, WitnessBlockHeader,
-};
+use crate::types::{AccountSnapshot, BlockWitness, BridgeStateSnapshot, StateSidecarSnapshot};
 use crate::violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
 
 const QMDB_CHUNK_SIZE: usize = 32;
@@ -290,21 +289,6 @@ async fn open_state_root_db(context: deterministic::Context) -> Result<StateRoot
     StateRootDb::init(context, config)
         .await
         .map_err(|error| format!("failed to initialize state root qmdb: {error}"))
-}
-
-/// Compute blake3 hash of a block header for chaining.
-///
-/// Must match `matching-sequencer`'s `hash_header`.
-pub fn hash_header(header: &WitnessBlockHeader) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(&header.height.to_le_bytes());
-    hasher.update(&header.parent_hash);
-    hasher.update(&header.state_root);
-    hasher.update(&header.events_root);
-    hasher.update(&header.order_count.to_le_bytes());
-    hasher.update(&header.fill_count.to_le_bytes());
-    hasher.update(&header.timestamp_ms.to_le_bytes());
-    *hasher.finalize().as_bytes()
 }
 
 /// Format a hash as hex (first 8 bytes).

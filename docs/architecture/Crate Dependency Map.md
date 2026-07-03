@@ -16,11 +16,12 @@ proof job type, job-to-guest-input conversion, worker/API artifact surface,
 DA publication, and L1 calldata encoding. Its default build depends on
 `sybil-verifier` and `sybil-zk` but not on `matching-sequencer`; the optional
 `sequencer-store` feature adds the `witgen` subcommands that read persisted
-block/proof material from the sequencer store. The sequencer does not depend on
-`sybil-zk`; it produces and persists blocks, witnesses, and qMDB proof
-material.
+block/proof material from the sequencer store. The sequencer depends on
+`sybil-zk` only for the shared serializable qMDB proof structs; it still
+produces and persists blocks, witnesses, and qMDB proof material without
+assembling prover inputs.
 
-The client tier sits below the DTO crate. `sybil-api-types` is the shared source of truth for request/response shapes; `sybil-client` is THE Rust HTTP client for `sybil-api` (SYB-171), typed against those DTOs. Both in-tree Rust consumers use it: `sybil-polymarket` (the mirror + market maker) and the `sybil-admin` CLI (a binary inside `sybil-api`). It replaced two hand-written clients that had drifted independently — there is now exactly one, so no third should be added. It owns base-url + optional service-token (`SYBIL_SERVICE_TOKEN`) auth, response decoding, and the SSE block-stream consumption; each consumer keeps its own concerns (the mirror's reconnect loop and poisoned-market parsing, the admin's audit log) around it.
+The client tier sits below the DTO crate. `sybil-api-types` is the shared source of truth for request/response shapes; `sybil-client` is THE Rust HTTP client for `sybil-api` (SYB-171), typed against those DTOs. Both in-tree Rust consumers use it: `sybil-polymarket` (the mirror + market maker) and the `sybil-admin` CLI (a binary inside `sybil-api`). It replaced two hand-written clients that had drifted independently — there is now exactly one, so no third should be added. It owns base-url + optional service-token (`SYBIL_SERVICE_TOKEN`) auth, response decoding, and the SSE block-stream consumption; each consumer keeps its own concerns (the mirror's reconnect loop and poisoned-market parsing, the admin's audit log) around it. `sybil-signing` is separate from the commitment schemas: it owns stable Borsh signable payload bytes for client signatures, and is used by the sequencer's signed-write verification and by signing clients.
 
 The Python `arena/` sits outside the Rust workspace entirely, connected only via HTTP to `sybil-api`. This clean boundary means the Python bots can be developed, tested, and deployed independently of the Rust code — they only need a running server. The separation also means the arena doesn't need to compile any Rust code, which is important for Python-first developers who want to build bots without a Rust toolchain.
 
@@ -36,6 +37,7 @@ graph TB
     SOLVER --> SEQ["matching-sequencer"]
     ORACLE --> SEQ
     VERIFIER --> SEQ
+    ZK --> SEQ
 
     SEQ --> API["sybil-api"]
     SEQ --> SEQSIM["sequencer-sim<br/>dev-only · sybil-sim bin"]
@@ -48,6 +50,8 @@ graph TB
     SEQ -.->|"sequencer-store feature"| PROVER
     ZK --> OPENVM["zk/openvm-guest"]
 
+    SIGNING["sybil-signing<br/>client signable bytes"] --> SEQ
+    SIGNING --> POLY
     TYPES["sybil-api-types<br/>shared request/response DTOs"] --> CLIENT["sybil-client<br/>THE Rust API client · SYB-171"]
     CLIENT --> POLY["sybil-polymarket<br/>mirror + market maker"]
     CLIENT --> API
@@ -63,7 +67,8 @@ graph TB
 - `sybil-zk` is guest-safe verification; `sybil-prover` owns portable proof jobs and host-side prover input construction
 - `sybil-prover witgen ...` is sequencer-side tooling for exporting latest-block proof jobs from the store, gated behind `sequencer-store`
 - Default `sybil-prover` builds are the proof-job CLI/service boundary and settlement calldata encoder; they do not depend on the sequencer
-- Sequencer owns block production and persistence, not prover input assembly
+- Sequencer owns block production and persistence, not prover input assembly; its `sybil-zk` edge is limited to shared qMDB proof structs
+- `sybil-signing` is client-signature serialization, not consensus commitment serialization
 - `sybil-client` is THE Rust HTTP client (SYB-171): `sybil-polymarket` and the `sybil-admin` CLI both depend on it; no hand-written duplicate should be reintroduced
 - Arena connects via HTTP only — no Rust compilation required
 - `matching-sim` is a dev tool that cross-cuts multiple crates for benchmarking

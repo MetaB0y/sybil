@@ -2,17 +2,21 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use sha3::{Digest as _, Keccak256};
-use sybil_verifier::{
-    commitments::witness_schema, BlockWitness, VerificationResult, WitnessBlockHeader,
-};
+use sybil_verifier::{commitments::witness_schema, BlockWitness, VerificationResult};
 
 mod guest_commitments;
+mod header_hash {
+    use sybil_verifier::WitnessBlockHeader;
+
+    include!("header_hash_impl.rs");
+}
 
 pub use guest_commitments::{
     compute_events_root, events_root_from_event_bytes, verify_qmdb_key_value_proof,
-    verify_qmdb_state_root, QmdbStateKeyValueProof, QmdbStateOperationProof, QmdbStateRangeProof,
-    QmdbStateRootProof, QMDB_STATE_CHUNK_SIZE,
+    verify_qmdb_state_root, QmdbStateExclusionProof, QmdbStateKeyValueProof,
+    QmdbStateOperationProof, QmdbStateRangeProof, QmdbStateRootProof, QMDB_STATE_CHUNK_SIZE,
 };
+pub use header_hash::hash_header;
 
 pub const STATE_TRANSITION_DOMAIN: &[u8] = b"sybil/openvm/state-transition/v1";
 pub const WITNESS_ROOT_DOMAIN: &[u8] = b"sybil/witness";
@@ -224,18 +228,6 @@ pub fn state_transition_public_input_hash(inputs: &StateTransitionPublicInputs) 
             AbiWord::Uint(inputs.deposit_count),
         ],
     ))
-}
-
-pub fn hash_header(header: &WitnessBlockHeader) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(&header.height.to_le_bytes());
-    hasher.update(&header.parent_hash);
-    hasher.update(&header.state_root);
-    hasher.update(&header.events_root);
-    hasher.update(&header.order_count.to_le_bytes());
-    hasher.update(&header.fill_count.to_le_bytes());
-    hasher.update(&header.timestamp_ms.to_le_bytes());
-    *hasher.finalize().as_bytes()
 }
 
 pub fn witness_root(witness: &BlockWitness) -> [u8; 32] {
@@ -575,6 +567,27 @@ mod tests {
         QMDB_STATE_CHUNK_SIZE,
     >;
     type NativeKeyValueProof = KeyValueProof<MmrFamily, Vec<u8>, QmdbDigest, QMDB_STATE_CHUNK_SIZE>;
+
+    #[test]
+    fn hash_header_golden_vector() {
+        let header = WitnessBlockHeader {
+            height: 11,
+            parent_hash: [4u8; 32],
+            state_root: [5u8; 32],
+            events_root: [6u8; 32],
+            order_count: 2,
+            fill_count: 1,
+            timestamp_ms: 1_700_000_001_234,
+        };
+
+        assert_eq!(
+            hash_header(&header),
+            [
+                237, 2, 52, 82, 23, 11, 241, 36, 196, 211, 229, 155, 159, 99, 198, 162, 76, 210,
+                68, 96, 104, 0, 3, 235, 39, 53, 0, 15, 146, 163, 93, 242,
+            ],
+        );
+    }
 
     fn empty_guest_input() -> StateTransitionGuestInput {
         let state_sidecar = StateSidecarSnapshot::default();

@@ -10,11 +10,11 @@ use crate::error::SequencerError;
 use matching_engine::Order;
 use p256::ecdsa::signature::{Signer, Verifier};
 use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
-use sybil_canonical::{
+use sybil_oracle::{ResolutionAttestation, SignedAttestation};
+use sybil_signing::{
     ConditionDir as CanonicalConditionDir, MarketId as CanonicalMarketId, Order as CanonicalOrder,
     PriceCondition as CanonicalPriceCondition, ResolutionAttestation as CanonicalAttestation,
 };
-use sybil_oracle::{ResolutionAttestation, SignedAttestation};
 
 /// A P256 public key (secp256r1 / passkey-compatible).
 #[derive(Clone, Debug)]
@@ -62,7 +62,7 @@ pub struct SignedCancel {
 }
 
 fn to_canonical_order(order: &Order) -> CanonicalOrder {
-    let mut markets = [CanonicalMarketId::NONE; sybil_canonical::MAX_MARKETS_PER_ORDER];
+    let mut markets = [CanonicalMarketId::NONE; sybil_signing::MAX_MARKETS_PER_ORDER];
     for (dst, src) in markets.iter_mut().zip(order.markets.iter()) {
         *dst = CanonicalMarketId(src.0);
     }
@@ -95,7 +95,7 @@ fn to_canonical_order(order: &Order) -> CanonicalOrder {
 ///
 /// NOTE: `id` is excluded because the sequencer assigns IDs after submission.
 pub fn canonical_order_bytes(order: &Order) -> Vec<u8> {
-    sybil_canonical::canonical_order_bytes(&to_canonical_order(order))
+    sybil_signing::canonical_order_bytes(&to_canonical_order(order))
 }
 
 /// Deterministic canonical byte encoding of a cancel request for signing.
@@ -104,7 +104,7 @@ pub fn canonical_order_bytes(order: &Order) -> Vec<u8> {
 /// - account_id: u64
 /// - order_id: u64
 pub fn canonical_cancel_bytes(account_id: crate::account::AccountId, order_id: u64) -> Vec<u8> {
-    sybil_canonical::canonical_cancel_bytes(account_id.0, order_id)
+    sybil_signing::canonical_cancel_bytes(account_id.0, order_id)
 }
 
 /// Verify a signed order's P256 ECDSA signature.
@@ -148,7 +148,7 @@ fn to_canonical_attestation(att: &ResolutionAttestation) -> CanonicalAttestation
 
 /// Deterministic canonical byte encoding of a `ResolutionAttestation` for signing.
 pub fn canonical_attestation_bytes(att: &ResolutionAttestation) -> Vec<u8> {
-    sybil_canonical::canonical_attestation_bytes(&to_canonical_attestation(att))
+    sybil_signing::canonical_attestation_bytes(&to_canonical_attestation(att))
 }
 
 /// Verify the signature on a [`SignedAttestation`]. Does NOT check that the

@@ -7,9 +7,10 @@ description = "Multi-batch block sequencer for prediction market matching"
 [dependencies]
 matching-engine = { path = "../matching-engine" }
 matching-solver = { path = "../matching-solver", features = ["lp"] }
-sybil-canonical = { path = "../sybil-canonical" }
+sybil-signing = { path = "../sybil-signing" }
 sybil-oracle = { path = "../sybil-oracle" }
 sybil-verifier = { path = "../sybil-verifier" }
+sybil-zk = { path = "../sybil-zk" }
 blake3 = "1"
 sha3 = "0.10"
 serde = { version = "1.0", features = ["derive"] }

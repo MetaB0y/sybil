@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::feed::FeedPubkey;
 
 /// Payload signed by an off-chain resolver. Kept canonical in
-/// `sybil-canonical::canonical_attestation_bytes`.
+/// `sybil-signing::canonical_attestation_bytes`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolutionAttestation {
     pub market_id: MarketId,

@@ -11,7 +11,7 @@ use std::path::Path;
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
 use sybil_api_types::SignedAttestationDto;
-use sybil_canonical::{
+use sybil_signing::{
     canonical_attestation_bytes, MarketId as CanonicalMarketId,
     ResolutionAttestation as CanonicalAttestation,
 };
