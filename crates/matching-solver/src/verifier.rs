@@ -325,11 +325,14 @@ pub fn verify_strict(problem: &Problem, result: &MatchingResult) -> Verification
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matching_engine::{simple_no_buy, simple_yes_buy, MmConstraint, MmId, MmSide};
+    use matching_engine::{
+        simple_no_buy, simple_yes_buy, MmConstraint, MmId, MmSide, NANOS_PER_DOLLAR, SHARE_SCALE,
+    };
 
     fn create_test_problem() -> Problem {
         let mut problem = Problem::new("test");
         let market = problem.markets.add_binary("m");
+        let full_fill = SHARE_SCALE / 10;
 
         // Add BuyYes orders (ids 1-5)
         for i in 1..=5 {
@@ -338,7 +341,7 @@ mod tests {
                 i,
                 market,
                 600_000_000, // $0.60 limit
-                100,
+                full_fill,
             ));
         }
 
@@ -349,7 +352,7 @@ mod tests {
                 i,
                 market,
                 500_000_000, // $0.50 limit
-                100,
+                full_fill,
             ));
         }
 
@@ -370,14 +373,16 @@ mod tests {
     #[test]
     fn test_valid_result() {
         let problem = create_test_problem();
+        let full_fill = SHARE_SCALE / 10;
+        let half_fill = full_fill / 2;
 
         // BuyYes + BuyNo at same qty → positions balance
         let result = build_result(
             vec![
-                Fill::new(1, 50, 500_000_000),   // BuyYes 50
-                Fill::new(2, 100, 550_000_000),  // BuyYes 100
-                Fill::new(11, 50, 500_000_000),  // BuyNo 50
-                Fill::new(12, 100, 500_000_000), // BuyNo 100
+                Fill::new(1, half_fill, 500_000_000),
+                Fill::new(2, full_fill, 550_000_000),
+                Fill::new(11, half_fill, 500_000_000),
+                Fill::new(12, full_fill, 500_000_000),
             ],
             &problem,
         );
@@ -393,9 +398,10 @@ mod tests {
     #[test]
     fn test_quantity_exceeds_max() {
         let problem = create_test_problem();
+        let full_fill = SHARE_SCALE / 10;
 
         let mut result = MatchingResult::new();
-        result.fills.push(Fill::new(1, 200, 500_000_000)); // max_fill is 100
+        result.fills.push(Fill::new(1, full_fill * 2, 500_000_000));
         result.total_welfare = 0;
 
         let verification = verify(&problem, &result);
@@ -409,9 +415,10 @@ mod tests {
     #[test]
     fn test_price_exceeds_limit() {
         let problem = create_test_problem();
+        let half_fill = SHARE_SCALE / 20;
 
         let mut result = MatchingResult::new();
-        result.fills.push(Fill::new(1, 50, 700_000_000)); // limit is 600_000_000
+        result.fills.push(Fill::new(1, half_fill, 700_000_000)); // limit is 600_000_000
         result.total_welfare = 0;
 
         let verification = verify(&problem, &result);
@@ -425,10 +432,11 @@ mod tests {
     #[test]
     fn test_duplicate_fill() {
         let problem = create_test_problem();
+        let half_fill = SHARE_SCALE / 20;
 
         let mut result = MatchingResult::new();
-        result.fills.push(Fill::new(1, 50, 500_000_000));
-        result.fills.push(Fill::new(1, 30, 500_000_000)); // Duplicate
+        result.fills.push(Fill::new(1, half_fill, 500_000_000));
+        result.fills.push(Fill::new(1, half_fill / 2, 500_000_000)); // Duplicate
         result.total_welfare = 0;
 
         let verification = verify(&problem, &result);
@@ -442,9 +450,10 @@ mod tests {
     #[test]
     fn test_order_not_found() {
         let problem = create_test_problem();
+        let half_fill = SHARE_SCALE / 20;
 
         let mut result = MatchingResult::new();
-        result.fills.push(Fill::new(999, 50, 500_000_000)); // Order doesn't exist
+        result.fills.push(Fill::new(999, half_fill, 500_000_000)); // Order doesn't exist
         result.total_welfare = 0;
 
         let verification = verify(&problem, &result);
@@ -458,18 +467,23 @@ mod tests {
     #[test]
     fn test_mm_budget_exceeded() {
         let mut problem = create_test_problem();
+        let fill_qty = SHARE_SCALE / 10;
+        let fill_price = NANOS_PER_DOLLAR / 2;
+        let per_fill_capital = MmSide::SellYes.capital_needed(fill_price, fill_qty);
+        let budget = per_fill_capital;
 
-        // Add MM constraint with a small budget. Each 100-unit fill is 0.1
-        // share, so a $0.50 fill price consumes $0.05 of capital.
-        let mm = MmConstraint::new(MmId(1), 10_000_000) // $0.01 budget
+        // Each fill is 0.1 share at a 50c price, so one fill fits but two do not.
+        let mm = MmConstraint::new(MmId(1), budget)
             .with_order(1, MmSide::SellYes)
             .with_order(2, MmSide::SellYes);
         problem.mm_constraints.push(mm);
 
         let mut result = MatchingResult::new();
-        // Fill both orders - each costs ~$0.05 capital (0.1 shares * $0.50)
-        result.fills.push(Fill::new(1, 100, 500_000_000));
-        result.fills.push(Fill::new(2, 100, 500_000_000));
+        result.fills.push(Fill::new(1, fill_qty, fill_price));
+        result.fills.push(Fill::new(2, fill_qty, fill_price));
+
+        assert_eq!(per_fill_capital, NANOS_PER_DOLLAR / 20);
+        assert!(2 * per_fill_capital > budget);
 
         let order1 = problem.orders.iter().find(|o| o.id == 1).unwrap();
         let order2 = problem.orders.iter().find(|o| o.id == 2).unwrap();
@@ -486,9 +500,10 @@ mod tests {
     #[test]
     fn test_welfare_mismatch() {
         let problem = create_test_problem();
+        let half_fill = SHARE_SCALE / 20;
 
         let mut result = MatchingResult::new();
-        result.fills.push(Fill::new(1, 50, 500_000_000));
+        result.fills.push(Fill::new(1, half_fill, 500_000_000));
         result.total_welfare = 999_999_999_999; // Wrong welfare
 
         let verification = verify(&problem, &result);
@@ -504,11 +519,12 @@ mod tests {
     #[test]
     fn test_volume_mismatch() {
         let problem = create_test_problem();
+        let full_fill = SHARE_SCALE / 10;
 
         let mut result = build_result(
             vec![
-                Fill::new(1, 100, 500_000_000),
-                Fill::new(11, 100, 500_000_000),
+                Fill::new(1, full_fill, 500_000_000),
+                Fill::new(11, full_fill, 500_000_000),
             ],
             &problem,
         );
@@ -530,11 +546,12 @@ mod tests {
     #[test]
     fn test_orders_filled_mismatch() {
         let problem = create_test_problem();
+        let full_fill = SHARE_SCALE / 10;
 
         let mut result = build_result(
             vec![
-                Fill::new(1, 100, 500_000_000),
-                Fill::new(11, 100, 500_000_000),
+                Fill::new(1, full_fill, 500_000_000),
+                Fill::new(11, full_fill, 500_000_000),
             ],
             &problem,
         );

@@ -261,6 +261,10 @@ mod tests {
         MmId, NANOS_PER_DOLLAR,
     };
 
+    fn dollars(nanos: i64) -> f64 {
+        nanos as f64 / NANOS_PER_DOLLAR as f64
+    }
+
     #[test]
     fn test_aug_lp_single_market() {
         let mut problem = Problem::new("aug_lp_single");
@@ -631,12 +635,12 @@ mod tests {
         eprintln!("Tight budget price-shift scenario:");
         eprintln!(
             "  LP:    welfare=${:.2}, fills={}",
-            lp_w as f64 / 1e9,
+            dollars(lp_w),
             lp_result.result.orders_filled,
         );
         eprintln!(
             "  AugLP: welfare=${:.2}, fills={}",
-            aug_w as f64 / 1e9,
+            dollars(aug_w),
             aug_result.result.orders_filled,
         );
         eprintln!(
@@ -655,8 +659,8 @@ mod tests {
         assert!(
             aug_w > lp_w * 10,
             "AugLP (${:.2}) should far exceed LP (${:.2}) with tight budget + price shift",
-            aug_w as f64 / 1e9,
-            lp_w as f64 / 1e9,
+            dollars(aug_w),
+            dollars(lp_w),
         );
     }
 
@@ -724,12 +728,12 @@ mod tests {
         eprintln!("Competing MMs scenario:");
         eprintln!(
             "  LP:    welfare=${:.2}, fills={}",
-            lp_w as f64 / 1e9,
+            dollars(lp_w),
             lp_result.result.orders_filled,
         );
         eprintln!(
             "  AugLP: welfare=${:.2}, fills={}",
-            aug_w as f64 / 1e9,
+            dollars(aug_w),
             aug_result.result.orders_filled,
         );
         eprintln!(
@@ -822,12 +826,12 @@ mod tests {
         eprintln!("Multi-market MM scenario:");
         eprintln!(
             "  LP:    welfare=${:.2}, fills={}",
-            lp_w as f64 / 1e9,
+            dollars(lp_w),
             lp_result.result.orders_filled,
         );
         eprintln!(
             "  AugLP: welfare=${:.2}, fills={}",
-            aug_w as f64 / 1e9,
+            dollars(aug_w),
             aug_result.result.orders_filled,
         );
         eprintln!(
@@ -907,8 +911,8 @@ mod tests {
             eprintln!(
                 "${:>9} ${:>10.2} ${:>10.2} {:>+7.1}% {:>8}",
                 budget,
-                lp_w as f64 / 1e9,
-                aug_w as f64 / 1e9,
+                dollars(lp_w),
+                dollars(aug_w),
                 gap,
                 winner,
             );
