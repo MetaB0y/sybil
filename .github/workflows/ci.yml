@@ -87,8 +87,8 @@ jobs:
       - name: sybil-api-types features
         run: cargo hack check -p sybil-api-types --each-feature --no-dev-deps
 
-      - name: sybil-witgen features
-        run: cargo hack check -p sybil-witgen --each-feature --no-dev-deps
+      - name: sybil-prover features
+        run: cargo hack check -p sybil-prover --each-feature --no-dev-deps
 
       - name: sybil-verifier features
         run: cargo hack check -p sybil-verifier --each-feature --no-dev-deps
