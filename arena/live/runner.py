@@ -18,6 +18,7 @@ from sybil_client import SybilClient
 from sybil_client.types import NANOS_PER_DOLLAR, TimeInForce
 
 from .db import DecisionDB
+from .market_selection import MarketProfile, select_markets
 from .news_feed import NewsFeed
 from .personas import PERSONAS
 from .strategy import FlatStrategy, KellyStrategy
@@ -33,6 +34,7 @@ class LiveConfig:
     model_name: str = "deepseek/deepseek-v4-flash"
     initial_balance: float = 500.0
     max_markets: int = 0
+    market_profile: MarketProfile = "all"
     order_time_in_force: TimeInForce = "IOC"
     news_poll_interval: int = 300
     min_llm_interval: float = 60.0
@@ -44,48 +46,60 @@ class LiveConfig:
     mapping_path: str | None = None  # Path to polymarket_mapping.json
 
 
-def select_markets(markets, max_n: int = 0):
-    """Pick diverse Polymarket-mirrored markets for trading.
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    return int(raw)
 
-    With max_n <= 0, returns every suitable mirrored market. For bounded
-    selections, avoids picking many markets from the same group (e.g. 18 NBA MVP
-    candidates) by preferring standalone markets and picking at most 2 per group
-    prefix.
-    """
-    all_suitable = max_n <= 0
+
+def _env_market_profile(name: str, default: MarketProfile = "all") -> MarketProfile:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    if raw in ("all", "important-news"):
+        return raw
+    raise ValueError(f"{name} must be one of: all, important-news")
+
+
+def _fallback_unfiltered_markets(markets, max_n: int = 0):
+    """Return active mirrored markets without profile scoring or grouping."""
+    def is_active_mirrored(market) -> bool:
+        tags = {
+            str(tag).strip().lower().replace("-", " ")
+            for tag in getattr(market, "tags", [])
+        }
+        return (
+            "polymarket" in tags
+            and str(getattr(market, "status", "")).lower() == "active"
+        )
+
     active = [
-        m for m in markets
-        if "polymarket" in m.tags
-        and m.status.lower() == "active"
+        m
+        for m in markets
+        if is_active_mirrored(m)
     ]
+    active.sort(key=lambda m: (-getattr(m, "volume_nanos", 0), getattr(m, "id", 0)))
+    if max_n <= 0:
+        return active
+    return active[:max_n]
 
-    # Separate standalone markets from group sub-markets (name contains ":")
-    standalone = [m for m in active if ":" not in m.name]
-    grouped = [m for m in active if ":" in m.name]
 
-    selected = []
-
-    # Add standalone markets first (these are typically more interesting)
-    standalone.sort(key=lambda m: (-m.volume_nanos, m.id))
-    selected.extend(standalone)
-
-    # From grouped markets, pick at most 2 per group prefix unless the caller
-    # explicitly requested every suitable mirrored market.
-    from collections import defaultdict
-    groups = defaultdict(list)
-    for m in grouped:
-        prefix = m.name.split(":")[0].strip()
-        groups[prefix].append(m)
-
-    for prefix in sorted(groups, key=lambda p: -len(groups[p])):
-        # Sort within group by yes_price closeness to 0.5 (most uncertain = most interesting)
-        members = groups[prefix]
-        members.sort(key=lambda m: abs(m.yes_price - 0.5))
-        selected.extend(members if all_suitable else members[:2])
-
-    if all_suitable:
-        return selected
-    return selected[:max_n]
+def _select_markets_resilient(
+    markets,
+    max_n: int = 0,
+    profile: MarketProfile = "all",
+):
+    try:
+        return select_markets(markets, max_n, profile)
+    except Exception as e:
+        log.warning(
+            "Market selection failed for profile=%s: %s; falling back to unfiltered markets",
+            profile,
+            e,
+            exc_info=True,
+        )
+        return _fallback_unfiltered_markets(markets, max_n)
 
 
 async def snapshot_portfolios(traders, db: DecisionDB, interval_s: float = 300):
@@ -171,13 +185,21 @@ async def run_live(config: LiveConfig):
                     log.warning("Market ID %d not found on server, skipping", mid)
             log.info("Manual market selection: %d markets", len(active))
         else:
-            active = select_markets(all_markets, config.max_markets)
+            active = _select_markets_resilient(
+                all_markets,
+                config.max_markets,
+                config.market_profile,
+            )
 
         if not active:
             log.error("No suitable markets found!")
             return
 
-        log.info("Selected %d markets for trading:", len(active))
+        log.info(
+            "Selected %d markets for trading with profile=%s:",
+            len(active),
+            config.market_profile,
+        )
         for m in active:
             log.info(
                 "  [%d] %s (YES=%.2f, vol=$%.0f)",
@@ -331,8 +353,21 @@ def main():
     parser.add_argument(
         "--max-markets",
         type=int,
-        default=0,
-        help="Maximum markets for bots to trade; 0 means all suitable mirrored markets",
+        default=None,
+        help=(
+            "Maximum markets for bots to trade. Defaults to ARENA_MAX_MARKETS or 0. "
+            "For --market-profile=all, 0 means all suitable mirrored markets; focused "
+            "profiles use their profile default."
+        ),
+    )
+    parser.add_argument(
+        "--market-profile",
+        choices=["all", "important-news"],
+        default=None,
+        help=(
+            "Market selection profile for automatic market discovery. Defaults to "
+            "ARENA_MARKET_PROFILE or all."
+        ),
     )
     parser.add_argument(
         "--order-time-in-force",
@@ -360,6 +395,14 @@ def main():
                         help="Path to polymarket_mapping.json for reference prices")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
+    try:
+        max_markets = args.max_markets if args.max_markets is not None else _env_int(
+            "ARENA_MAX_MARKETS", 0
+        )
+        market_profile = args.market_profile or _env_market_profile("ARENA_MARKET_PROFILE")
+    except ValueError as e:
+        parser.error(str(e))
+
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
     if not api_key:
         parser.error(
@@ -377,7 +420,8 @@ def main():
         api_key=api_key,
         model_name=args.model,
         initial_balance=args.balance,
-        max_markets=args.max_markets,
+        max_markets=max_markets,
+        market_profile=market_profile,
         order_time_in_force=args.order_time_in_force,
         noise_count=args.noise_count,
         news_poll_interval=args.news_interval,

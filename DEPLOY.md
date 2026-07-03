@@ -56,6 +56,10 @@ Create `/opt/sybil/arena.env` for the arena container:
 
 ```bash
 OPENROUTER_API_KEY=sk-or-v1-...
+# Optional: focus live arena bots on broad news markets.
+# Defaults are ARENA_MARKET_PROFILE=all and ARENA_MAX_MARKETS=0.
+# ARENA_MARKET_PROFILE=important-news
+# ARENA_MAX_MARKETS=64
 ```
 
 The OpenRouter key is supplied to `sybil-arena` via `env_file: ./arena.env`.

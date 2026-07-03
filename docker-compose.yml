@@ -114,7 +114,6 @@ services:
     memswap_limit: "512m"
     command:
       - "--sybil-url=http://sybil-api:3000"
-      - "--max-markets=0"
       - "--model=deepseek/deepseek-v4-flash"
       - "--db-path=/data/decisions.db"
     environment:

@@ -21,6 +21,8 @@ services:
     build: ./arena
     environment:
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      ARENA_MARKET_PROFILE: "${ARENA_MARKET_PROFILE:-}"
+      ARENA_MAX_MARKETS: "${ARENA_MAX_MARKETS:-}"
 
   sybil-arena-dashboard:
     build: ./arena
