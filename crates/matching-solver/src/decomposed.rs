@@ -138,7 +138,13 @@ impl<S: crate::Solver> DecomposedSolver<S> {
 
         let order_map_full: HashMap<u64, &Order> =
             problem.orders.iter().map(|o| (o.id, o)).collect();
-        crate::lp_solver::recompute_welfare(&mut result.result, &order_map_full);
+        let empty_prices = HashMap::new();
+        let clearing_prices = result
+            .price_discovery
+            .as_ref()
+            .map(|price_discovery| &price_discovery.prices)
+            .unwrap_or(&empty_prices);
+        crate::lp_solver::recompute_welfare(&mut result.result, &order_map_full, clearing_prices);
 
         result.total_time_secs = start.elapsed().as_secs_f64();
         result
@@ -312,7 +318,7 @@ impl<S: crate::Solver> DecomposedSolver<S> {
             let converged = check_convergence(&utilities, spanning_mms, self.convergence_eps);
 
             // Track best welfare seen across all iterations
-            let iter_welfare: i64 = results.iter().map(|r| r.result.total_welfare).sum();
+            let iter_welfare: i64 = results.iter().map(|r| r.result.total_welfare()).sum();
             if iter_welfare > best_welfare {
                 best_welfare = iter_welfare;
                 best_results = results;
@@ -804,7 +810,7 @@ fn aggregate_results(component_results: Vec<PipelineResult>) -> PipelineResult {
         for fill in &result.result.fills {
             merged.fills.push(fill.clone());
         }
-        merged.total_welfare += result.result.total_welfare;
+        merged.gross_welfare += result.result.gross_welfare;
         merged.minting_cost += result.result.minting_cost;
         merged.orders_filled += result.result.orders_filled;
         merged.orders_unfilled_liquidity += result.result.orders_unfilled_liquidity;
@@ -823,7 +829,7 @@ fn aggregate_results(component_results: Vec<PipelineResult>) -> PipelineResult {
     let mut pipeline_result = PipelineResult::empty();
     pipeline_result.result = merged;
     pipeline_result.price_discovery = Some(PriceDiscoveryResult {
-        total_welfare: pipeline_result.result.total_welfare,
+        total_welfare: pipeline_result.result.total_welfare(),
         total_fills: pipeline_result.result.fills.len(),
         prices,
     });
@@ -904,12 +910,12 @@ mod tests {
         let decomp = decomposed.solve(&problem);
 
         // Welfare should match (within rounding)
-        let diff = (mono.result.total_welfare - decomp.result.total_welfare).abs();
+        let diff = (mono.result.total_welfare() - decomp.result.total_welfare()).abs();
         assert!(
             diff <= NANOS_PER_DOLLAR as i64,
             "welfare should match: mono={}, decomp={}, diff={}",
-            mono.result.total_welfare,
-            decomp.result.total_welfare,
+            mono.result.total_welfare(),
+            decomp.result.total_welfare(),
             diff
         );
     }
@@ -939,9 +945,9 @@ mod tests {
 
         // Should produce fills (single component = direct delegation)
         assert!(
-            result.result.total_welfare >= 0,
+            result.result.total_welfare() >= 0,
             "single component should work, welfare={}",
-            result.result.total_welfare
+            result.result.total_welfare()
         );
     }
 
@@ -1022,7 +1028,7 @@ mod tests {
 
         assert!(result.result.orders_filled > 0, "should fill some orders");
         assert!(
-            result.result.total_welfare > 0,
+            result.result.total_welfare() > 0,
             "should produce positive welfare"
         );
     }
@@ -1067,7 +1073,7 @@ mod tests {
 
         assert!(result.result.orders_filled > 0, "should produce fills");
         assert!(
-            result.result.total_welfare > 0,
+            result.result.total_welfare() > 0,
             "should produce positive welfare"
         );
     }

@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use matching_engine::{Fill, MarketId, Order, NANOS_PER_DOLLAR};
+use matching_engine::{net_welfare, Fill, MarketId, Order, NANOS_PER_DOLLAR};
 
 use crate::types::BlockWitness;
 use crate::violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
@@ -101,7 +101,7 @@ fn verify_fills(
     stats: &mut VerificationStats,
 ) {
     let mut filled_orders: HashSet<u64> = HashSet::new();
-    let mut computed_welfare: i64 = 0;
+    let mut computed_gross_welfare: i64 = 0;
 
     for fill in fills {
         stats.fills_checked += 1;
@@ -175,11 +175,11 @@ fn verify_fills(
                 ),
             });
         }
-        computed_welfare += fill_welfare;
+        computed_gross_welfare += order.gross_welfare_contribution(fill.fill_qty);
     }
 
     stats.orders_checked = order_map.len();
-    stats.computed_welfare = computed_welfare - minting_cost;
+    stats.computed_welfare = net_welfare(computed_gross_welfare, minting_cost);
 
     // 7a. Minting cost must be non-negative (can only reduce welfare, never inflate it)
     if minting_cost < 0 {
@@ -192,15 +192,19 @@ fn verify_fills(
         });
     }
 
-    // 7b. Welfare consistency: total_welfare = fill_welfare - minting_cost
-    let expected_welfare = computed_welfare - minting_cost;
+    // 7b. Welfare consistency: total_welfare = gross_order_value - minting_cost
+    let expected_welfare = net_welfare(computed_gross_welfare, minting_cost);
     let welfare_diff = (expected_welfare - reported_welfare).abs();
     if welfare_diff > 0 {
         violations.push(Violation {
             kind: ViolationKind::WelfareMismatch,
             details: format!(
-                "Computed fill welfare {} - minting_cost {} = {} != reported welfare {} (diff={})",
-                computed_welfare, minting_cost, expected_welfare, reported_welfare, welfare_diff
+                "Computed gross welfare {} - minting_cost {} = {} != reported welfare {} (diff={})",
+                computed_gross_welfare,
+                minting_cost,
+                expected_welfare,
+                reported_welfare,
+                welfare_diff
             ),
         });
     }
@@ -448,8 +452,8 @@ mod tests {
     use super::*;
     use crate::types::{WitnessBlockHeader, WitnessOrder};
     use matching_engine::{
-        outcome_sell, shares_to_qty, simple_no_buy, simple_yes_buy, MarketSet, MmConstraint, MmId,
-        MmSide,
+        gross_welfare_from_fills, minting_cost_from_fills, net_welfare, outcome_sell,
+        shares_to_qty, simple_no_buy, simple_yes_buy, MarketSet, MmConstraint, MmId, MmSide,
     };
 
     fn empty_header() -> WitnessBlockHeader {
@@ -466,17 +470,8 @@ mod tests {
 
     fn make_witness(orders: Vec<WitnessOrder>, fills: Vec<Fill>) -> BlockWitness {
         let total_welfare = {
-            let order_map: HashMap<u64, &Order> =
-                orders.iter().map(|wo| (wo.order.id, &wo.order)).collect();
-            fills
-                .iter()
-                .map(|f| {
-                    order_map
-                        .get(&f.order_id)
-                        .map(|o| f.welfare(o))
-                        .unwrap_or(0)
-                })
-                .sum()
+            let orders = orders.iter().map(|wo| &wo.order);
+            gross_welfare_from_fills(orders, &fills)
         };
 
         BlockWitness {
@@ -498,6 +493,18 @@ mod tests {
 
             resolved_markets: vec![],
         }
+    }
+
+    fn refresh_welfare(witness: &mut BlockWitness) {
+        let orders: Vec<&Order> = witness.orders.iter().map(|wo| &wo.order).collect();
+        let gross_welfare = gross_welfare_from_fills(orders.iter().copied(), &witness.fills);
+        let minting_cost = minting_cost_from_fills(
+            orders.iter().copied(),
+            &witness.fills,
+            &witness.clearing_prices,
+        );
+        witness.minting_cost = minting_cost;
+        witness.total_welfare = net_welfare(gross_welfare, minting_cost);
     }
 
     fn buy_order(markets: &MarketSet, id: u64, market: MarketId) -> WitnessOrder {
@@ -532,6 +539,7 @@ mod tests {
         witness
             .clearing_prices
             .insert(m0, vec![500_000_000, 500_000_000]);
+        refresh_welfare(&mut witness);
 
         let result = verify_match(&witness, false);
         assert!(result.valid, "Violations: {:?}", result.violations);
@@ -727,6 +735,7 @@ mod tests {
         witness
             .clearing_prices
             .insert(m0, vec![500_000_000, 500_000_000]);
+        refresh_welfare(&mut witness);
 
         let result = verify_match(&witness, false);
         assert!(result.valid, "Violations: {:?}", result.violations);

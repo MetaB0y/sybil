@@ -18,7 +18,9 @@ use std::time::Instant;
 
 use highs::{HighsModelStatus, RowProblem, Sense};
 
-use matching_engine::{Fill, MarketId, MmSide, Nanos, Order, Problem, Qty, NANOS_PER_DOLLAR};
+use matching_engine::{
+    minting_cost_from_fills, Fill, MarketId, MmSide, Nanos, Order, Problem, Qty, NANOS_PER_DOLLAR,
+};
 
 use crate::result::{PipelineResult, PipelineTimings, PriceDiscoveryResult};
 use crate::solver::order_sign;
@@ -633,14 +635,14 @@ pub(crate) fn finalize_result(
     let (mut result, prices) = extract_result(solution, orders, &ctx.markets);
 
     trim_mm_budget_overflows(&mut result, &problem.mm_constraints, &ctx.mm_order_info);
-    recompute_welfare(&mut result, &order_map);
+    recompute_welfare(&mut result, &order_map, &prices);
 
     let mut pipeline_result = PipelineResult::empty();
     pipeline_result.result = result;
     pipeline_result.price_discovery = Some(PriceDiscoveryResult {
         prices,
         total_fills: pipeline_result.result.fills.len(),
-        total_welfare: pipeline_result.result.total_welfare,
+        total_welfare: pipeline_result.result.total_welfare(),
     });
     pipeline_result.total_time_secs = start.elapsed().as_secs_f64();
     pipeline_result.phase_times = PipelineTimings {
@@ -648,26 +650,27 @@ pub(crate) fn finalize_result(
         ..Default::default()
     };
 
-    if pipeline_result.result.total_welfare < 0 {
-        pipeline_result.result = MatchingResult::new();
-    }
-
     pipeline_result
 }
 
 /// Recompute welfare, volume, and fill count from scratch.
-pub(crate) fn recompute_welfare(result: &mut MatchingResult, order_map: &HashMap<u64, &Order>) {
-    result.total_welfare = 0;
+pub(crate) fn recompute_welfare(
+    result: &mut MatchingResult,
+    order_map: &HashMap<u64, &Order>,
+    clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
+) {
+    result.gross_welfare = 0;
     result.total_quantity_filled = 0;
     result.orders_filled = 0;
-    result.minting_cost = 0;
     for fill in &result.fills {
         if let Some(&order) = order_map.get(&fill.order_id) {
-            result.total_welfare += order.welfare_contribution(fill.fill_price, fill.fill_qty);
+            result.gross_welfare += order.gross_welfare_contribution(fill.fill_qty);
         }
         result.total_quantity_filled += fill.fill_qty;
         result.orders_filled += 1;
     }
+    result.minting_cost =
+        minting_cost_from_fills(order_map.values().copied(), &result.fills, clearing_prices);
 }
 
 #[cfg(test)]
@@ -711,9 +714,9 @@ mod tests {
         let result = solver.solve(&problem);
 
         assert!(
-            result.result.total_welfare > 0,
+            result.result.total_welfare() > 0,
             "should produce positive welfare, got {}",
-            result.result.total_welfare
+            result.result.total_welfare()
         );
         assert!(result.result.orders_filled > 0, "should fill some orders");
     }
@@ -745,7 +748,7 @@ mod tests {
             result.result.orders_filled
         );
         assert!(
-            result.result.total_welfare > 0,
+            result.result.total_welfare() > 0,
             "minting should produce positive welfare"
         );
     }
@@ -791,9 +794,9 @@ mod tests {
             "LP finalizer must not leak synthetic minting/arb fills into block output"
         );
         assert!(
-            result.result.total_welfare > 0,
+            result.result.total_welfare() > 0,
             "group minting should produce positive welfare, got {}",
-            result.result.total_welfare
+            result.result.total_welfare()
         );
     }
 

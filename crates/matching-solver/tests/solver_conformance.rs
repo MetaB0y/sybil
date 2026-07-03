@@ -756,7 +756,7 @@ mod conformance {
             system_events: vec![],
             fills: pipeline.result.fills.clone(),
             clearing_prices,
-            total_welfare: pipeline.result.total_welfare,
+            total_welfare: pipeline.result.total_welfare(),
             minting_cost: pipeline.result.minting_cost,
             mm_constraints: case.problem.mm_constraints.clone(),
             market_groups: case.problem.market_groups.clone(),
@@ -819,7 +819,6 @@ mod conformance {
 
     #[cfg(feature = "milp")]
     #[test]
-    #[ignore = "SYB-197 finding: MILP fails strict verify_match with WelfareMismatch (negative minting cost - the SYB-167 gross-vs-net welfare discrepancy); minimal case: single-market MM batch"]
     fn milp_solver_conformance() {
         let solver = matching_solver::MilpSolver::with_config(matching_solver::MilpConfig {
             timeout_secs: Some(3.0),

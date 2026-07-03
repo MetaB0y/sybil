@@ -8,9 +8,10 @@
 //! - `q_i ∈ [0, max_fill_i]`: fill quantity for order i
 //! - `p_m ∈ [0, NANOS_PER_DOLLAR]`: YES clearing price for market m
 //! - `mint_m ∈ ℝ`: net minting for market m (positive = mint, negative = burn)
+//! - `mint_cost_m ≥ max(mint_m, 0)`: nonnegative reporting cost
 //!
 //! **Objective (maximize):**
-//! `Σ sign_i × L_i × q_i - Σ_m NANOS_PER_DOLLAR × mint_m`
+//! `Σ sign_i × L_i × q_i - Σ_m NANOS_PER_DOLLAR × mint_cost_m`
 //!
 //! **Constraints:**
 //! - z/q linking: AON, min/max fill
@@ -19,7 +20,9 @@
 //! - MM budget (quadratic): exact bilinear `price × quantity` via SCIP MIQCQP
 //! - Market groups: `Σ p_m ≤ NANOS_PER_DOLLAR` per group
 
-use matching_engine::{Fill, MarketId, Nanos, Order, Problem, NANOS_PER_DOLLAR};
+use matching_engine::{
+    minting_cost_from_fills, Fill, MarketId, MmSide, Nanos, Order, Problem, NANOS_PER_DOLLAR,
+};
 
 use crate::MatchingResult;
 
@@ -125,8 +128,7 @@ pub struct MilpResult {
     pub solve_time_secs: f64,
     /// Clearing prices derived by the MILP (YES price per market)
     pub clearing_prices: HashMap<MarketId, Vec<Nanos>>,
-    /// True SCIP objective value (welfare with minting costs deducted).
-    /// This equals real-fill welfare minus minting costs.
+    /// Settlement-derived net welfare reported through the common solver API.
     pub objective_welfare: i64,
 }
 
@@ -189,7 +191,7 @@ impl MilpSolver {
         let solve_result = self.solve_with_scip(&active_orders, problem);
 
         match solve_result {
-            Ok((solution, status, solve_time, scip_objective)) => {
+            Ok((solution, status, solve_time, _scip_objective)) => {
                 let mut clearing_prices: HashMap<MarketId, Vec<Nanos>> = HashMap::new();
 
                 // Build clearing prices from price variables
@@ -229,15 +231,10 @@ impl MilpSolver {
                     }
                 }
 
-                let objective_welfare = scip_objective.round() as i64;
-
-                // The MILP objective correctly deducts minting cost
-                // (per-market: $1/pair, group: $1/set). The fill-level welfare
-                // records only real orders, while minting is represented by
-                // solver variables and by the sequencer/verifier MINT account.
-                let fill_welfare = result.total_welfare;
-                result.minting_cost = fill_welfare - objective_welfare;
-                result.total_welfare = objective_welfare;
+                let mm_order_info = build_mm_order_info(problem);
+                trim_mm_budget_overflows(&mut result, &problem.mm_constraints, &mm_order_info);
+                recompute_result_from_fills(&mut result, &active_orders, &clearing_prices);
+                let objective_welfare = result.total_welfare();
 
                 MilpResult {
                     result,
@@ -368,15 +365,32 @@ impl MilpSolver {
             })
             .collect();
 
-        // mint_m (continuous, free): net minting for market m
-        // Objective: -NANOS_PER_DOLLAR per unit (minting cost)
+        // mint_m (continuous, free): net minting for market m.
+        // mint_cost_m charges only positive minting; burn never inflates welfare.
         let mint_vars: HashMap<MarketId, Variable> = markets
             .iter()
             .map(|&m| {
-                let v = model.add(var().cont(-1e15..=1e15).obj(-nanos_f));
+                let v = model.add(var().cont(-1e15..=1e15).obj(0.0));
                 (m, v)
             })
             .collect();
+        let mint_cost_vars: HashMap<MarketId, Variable> = markets
+            .iter()
+            .map(|&m| {
+                let v = model.add(var().cont(0.0..=1e15).obj(-nanos_f));
+                (m, v)
+            })
+            .collect();
+
+        for &market in &markets {
+            let Some(mint_var) = mint_vars.get(&market) else {
+                continue;
+            };
+            let Some(cost_var) = mint_cost_vars.get(&market) else {
+                continue;
+            };
+            model.add(cons().coef(cost_var, 1.0).coef(mint_var, -1.0).ge(0.0));
+        }
 
         // group_mint_g (continuous, free): group-level minting per market group.
         //
@@ -387,7 +401,7 @@ impl MilpSolver {
         // Positive group_mint = arbitrage (buy YES in all markets)
         // Negative group_mint = reverse arbitrage (sell YES in all markets)
         //
-        // Objective: -NANOS_PER_DOLLAR per unit (same $1 cost as a single mint)
+        // group_mint_cost_g charges only positive group minting.
         let market_to_group: HashMap<MarketId, usize> = problem
             .market_groups
             .iter()
@@ -396,8 +410,15 @@ impl MilpSolver {
             .collect();
 
         let group_mint_vars: Vec<Variable> = (0..problem.market_groups.len())
-            .map(|_| model.add(var().cont(-1e15..=1e15).obj(-nanos_f)))
+            .map(|_| model.add(var().cont(-1e15..=1e15).obj(0.0)))
             .collect();
+        let group_mint_cost_vars: Vec<Variable> = (0..problem.market_groups.len())
+            .map(|_| model.add(var().cont(0.0..=1e15).obj(-nanos_f)))
+            .collect();
+
+        for (group_mint, group_cost) in group_mint_vars.iter().zip(&group_mint_cost_vars) {
+            model.add(cons().coef(group_cost, 1.0).coef(group_mint, -1.0).ge(0.0));
+        }
 
         // ================================================================
         // Per-order constraints: z/q linking
@@ -783,6 +804,100 @@ impl MilpSolver {
     }
 }
 
+fn build_mm_order_info(problem: &Problem) -> HashMap<u64, (usize, MmSide)> {
+    problem
+        .mm_constraints
+        .iter()
+        .enumerate()
+        .flat_map(|(mm_idx, mm)| {
+            mm.order_ids
+                .iter()
+                .filter_map(move |&oid| mm.order_sides.get(&oid).map(|&side| (oid, (mm_idx, side))))
+        })
+        .collect()
+}
+
+fn trim_mm_budget_overflows(
+    result: &mut MatchingResult,
+    mm_constraints: &[matching_engine::MmConstraint],
+    mm_order_info: &HashMap<u64, (usize, MmSide)>,
+) {
+    for (mm_idx, mm) in mm_constraints.iter().enumerate() {
+        let mut mm_fills: Vec<(usize, u64)> = Vec::new();
+
+        for (fill_idx, fill) in result.fills.iter().enumerate() {
+            let Some(&(fill_mm_idx, side)) = mm_order_info.get(&fill.order_id) else {
+                continue;
+            };
+            if fill_mm_idx != mm_idx || fill.fill_qty == 0 {
+                continue;
+            }
+            mm_fills.push((
+                fill_idx,
+                side.capital_needed(fill.fill_price, fill.fill_qty),
+            ));
+        }
+
+        let total_capital: u128 = mm_fills.iter().map(|&(_, capital)| capital as u128).sum();
+        if total_capital <= mm.max_capital as u128 {
+            continue;
+        }
+
+        mm_fills.sort_by_key(|&(_, capital)| capital);
+
+        let mut remaining = total_capital;
+        for &(fill_idx, _) in &mm_fills {
+            if remaining <= mm.max_capital as u128 {
+                break;
+            }
+            let fill = &result.fills[fill_idx];
+            let Some(&(_, side)) = mm_order_info.get(&fill.order_id) else {
+                continue;
+            };
+            let capital_per_unit = side.capital_needed(fill.fill_price, 1) as u128;
+            if capital_per_unit == 0 {
+                continue;
+            }
+            let overflow = remaining - mm.max_capital as u128;
+            let trim_qty = overflow
+                .div_ceil(capital_per_unit)
+                .min(result.fills[fill_idx].fill_qty as u128) as u64;
+            remaining -= side.capital_needed(fill.fill_price, trim_qty) as u128;
+            result.fills[fill_idx].fill_qty -= trim_qty;
+        }
+    }
+
+    result.fills.retain(|fill| fill.fill_qty > 0);
+}
+
+fn recompute_result_from_fills(
+    result: &mut MatchingResult,
+    active_orders: &[&Order],
+    clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
+) {
+    let order_map: HashMap<u64, &Order> = active_orders
+        .iter()
+        .copied()
+        .map(|order| (order.id, order))
+        .collect();
+
+    result.gross_welfare = 0;
+    result.orders_filled = 0;
+    result.total_quantity_filled = 0;
+    for fill in &result.fills {
+        if let Some(order) = order_map.get(&fill.order_id) {
+            result.gross_welfare += order.gross_welfare_contribution(fill.fill_qty);
+        }
+        result.orders_filled += 1;
+        result.total_quantity_filled += fill.fill_qty;
+    }
+    result.minting_cost = minting_cost_from_fills(
+        active_orders.iter().copied(),
+        &result.fills,
+        clearing_prices,
+    );
+}
+
 /// Internal solution representation
 struct ScipSolution {
     z_values: Vec<f64>,
@@ -808,11 +923,11 @@ impl crate::Solver for MilpSolver {
         pr.price_discovery = Some(crate::PriceDiscoveryResult {
             prices: milp_result.clearing_prices,
             total_fills: pr.result.fills.len(),
-            total_welfare: pr.result.total_welfare,
+            total_welfare: pr.result.total_welfare(),
         });
         pr.total_time_secs = milp_result.solve_time_secs;
 
-        if pr.result.total_welfare < 0 {
+        if pr.result.total_welfare() < 0 {
             pr.result = crate::MatchingResult::new();
         }
 
@@ -878,9 +993,9 @@ mod tests {
         let result = solver.solve_with_status(&problem).result;
         assert!(result.orders_filled > 0);
         assert!(
-            result.total_welfare > 0,
+            result.total_welfare() > 0,
             "welfare should be positive, got {}",
-            result.total_welfare
+            result.total_welfare()
         );
     }
 
@@ -960,7 +1075,7 @@ mod tests {
             "both orders should fill via minting"
         );
         assert!(
-            result.result.total_welfare > 0,
+            result.result.total_welfare() > 0,
             "minting should produce positive welfare"
         );
     }
@@ -1033,9 +1148,9 @@ mod tests {
         // Welfare = sum(limit * qty) - group_mint_cost
         // = (0.40 + 0.35 + 0.30) * 100 - 1.00 * 100 = $5 = 5_000_000_000 nanos
         assert!(
-            result.result.total_welfare > 0,
+            result.result.total_welfare() > 0,
             "group minting should produce positive welfare, got {}",
-            result.result.total_welfare
+            result.result.total_welfare()
         );
     }
 }

@@ -7,8 +7,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::types::{
-    signed_price_delta_notional, MarketId, Nanos, OrderDirection, Qty, MAX_ORDER_QTY,
-    NANOS_PER_DOLLAR,
+    notional_nanos, signed_price_delta_notional, MarketId, Nanos, OrderDirection, Qty,
+    MAX_ORDER_QTY, NANOS_PER_DOLLAR,
 };
 
 /// A (MarketId, value) pair from marginal payoff computation.
@@ -142,6 +142,20 @@ impl Order {
             self.limit_price as i64 - fill_price as i64
         };
         signed_price_delta_notional(surplus_per_unit, fill_qty)
+    }
+
+    /// Gross objective contribution before protocol minting cost.
+    ///
+    /// Buyers contribute `+limit_price * qty`; sellers contribute
+    /// `-limit_price * qty`. Subtracting the settlement-derived minting cost
+    /// from the sum of these terms gives the protocol welfare scalar.
+    pub fn gross_welfare_contribution(&self, fill_qty: Qty) -> i64 {
+        let value = notional_nanos(self.limit_price, fill_qty) as i64;
+        if self.is_seller() {
+            -value
+        } else {
+            value
+        }
     }
 
     /// Check if this order would be satisfied at a given price.

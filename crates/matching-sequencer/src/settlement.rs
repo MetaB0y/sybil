@@ -338,7 +338,7 @@ mod tests {
                 fills: vec![fill],
                 clearing_prices,
                 total_welfare: 0,
-                minting_cost: 0,
+                minting_cost: notional_nanos(limit_price, fill_qty) as i64,
                 mm_constraints: vec![],
                 market_groups: vec![],
                 pre_state: post_system_state.clone(),

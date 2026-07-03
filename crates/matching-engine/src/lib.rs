@@ -39,7 +39,12 @@ pub use order::{
 };
 pub use order_builder::OrderBuilder;
 pub use problem::{MarketGroup, Problem, ProblemSummary};
-pub use settlement::{compute_fill_settlement, derive_minting, MintAdjustment, SettlementDelta};
+pub use settlement::{
+    compute_fill_settlement, derive_minting, derive_minting_cost, fill_balance_delta_from_fills,
+    gross_welfare_from_fills, market_totals_from_fills, minting_cost_from_adjustments,
+    minting_cost_from_balance_deltas, minting_cost_from_fills,
+    minting_cost_from_incremental_adjustments, net_welfare, MintAdjustment, SettlementDelta,
+};
 pub use state::{state_index, state_to_outcomes, StateSpace};
 pub use types::conversions::{dollars_to_nanos, nanos_to_dollars, nanos_to_price, price_to_nanos};
 pub use types::{

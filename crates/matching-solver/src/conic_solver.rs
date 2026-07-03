@@ -541,9 +541,9 @@ mod tests {
         let result = solver.solve(&problem);
 
         assert!(
-            result.result.total_welfare > 0,
+            result.result.total_welfare() > 0,
             "should produce positive welfare, got {}",
-            result.result.total_welfare
+            result.result.total_welfare()
         );
         assert!(result.result.orders_filled > 0, "should fill some orders");
     }
@@ -571,7 +571,7 @@ mod tests {
             result.result.orders_filled, 2,
             "both orders should fill via minting"
         );
-        assert!(result.result.total_welfare > 0);
+        assert!(result.result.total_welfare() > 0);
     }
 
     #[test]
@@ -605,7 +605,7 @@ mod tests {
             "should fill all 3 via group minting, filled {}",
             result.result.orders_filled
         );
-        assert!(result.result.total_welfare > 0);
+        assert!(result.result.total_welfare() > 0);
     }
 
     #[test]
@@ -720,7 +720,7 @@ mod tests {
         let result = solver.solve(&problem);
 
         assert!(result.result.orders_filled > 0);
-        assert!(result.result.total_welfare > 0);
+        assert!(result.result.total_welfare() > 0);
     }
 
     #[test]
@@ -804,12 +804,12 @@ mod tests {
 
         // Welfare should match (within rounding tolerance)
         let welfare_diff =
-            (lp_result.result.total_welfare - conic_result.result.total_welfare).abs();
+            (lp_result.result.total_welfare() - conic_result.result.total_welfare()).abs();
         assert!(
             welfare_diff <= 2 * NANOS_PER_DOLLAR as i64,
             "welfare should match: LP={}, Conic={}, diff={}",
-            lp_result.result.total_welfare,
-            conic_result.result.total_welfare,
+            lp_result.result.total_welfare(),
+            conic_result.result.total_welfare(),
             welfare_diff
         );
 
@@ -853,7 +853,7 @@ mod tests {
             "Fisher mode should fill orders"
         );
         assert!(
-            result.result.total_welfare > 0,
+            result.result.total_welfare() > 0,
             "Fisher mode should have positive welfare"
         );
     }
@@ -901,11 +901,11 @@ mod tests {
         // QuasiFisher has strictly more degrees of freedom (s_k ≥ 0),
         // so its welfare should be >= Fisher welfare (within tolerance)
         assert!(
-            quasi_result.result.total_welfare
-                >= fisher_result.result.total_welfare - NANOS_PER_DOLLAR as i64,
+            quasi_result.result.total_welfare()
+                >= fisher_result.result.total_welfare() - NANOS_PER_DOLLAR as i64,
             "QuasiFisher welfare ({}) should be >= Fisher welfare ({})",
-            quasi_result.result.total_welfare,
-            fisher_result.result.total_welfare,
+            quasi_result.result.total_welfare(),
+            fisher_result.result.total_welfare(),
         );
     }
 
@@ -953,7 +953,8 @@ mod tests {
 
         // Linear mode delegates to LP, so results should be identical
         assert_eq!(
-            lp_result.result.total_welfare, linear_result.result.total_welfare,
+            lp_result.result.total_welfare(),
+            linear_result.result.total_welfare(),
             "Linear mode should produce identical welfare to LP"
         );
         assert_eq!(

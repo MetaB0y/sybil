@@ -440,9 +440,9 @@ mod tests {
         let result = solver.solve(&problem);
 
         assert!(
-            result.result.total_welfare > 0,
+            result.result.total_welfare() > 0,
             "should produce positive welfare, got {}",
-            result.result.total_welfare
+            result.result.total_welfare()
         );
         assert!(result.result.orders_filled > 0, "should fill some orders");
     }
@@ -470,7 +470,7 @@ mod tests {
             result.result.orders_filled, 2,
             "both orders should fill via minting"
         );
-        assert!(result.result.total_welfare > 0);
+        assert!(result.result.total_welfare() > 0);
     }
 
     #[test]
@@ -504,7 +504,7 @@ mod tests {
             "should fill all 3 via group minting, filled {}",
             result.result.orders_filled
         );
-        assert!(result.result.total_welfare > 0);
+        assert!(result.result.total_welfare() > 0);
     }
 
     #[test]
@@ -665,6 +665,6 @@ mod tests {
         let result = solver.solve(&problem);
 
         assert!(result.result.orders_filled > 0);
-        assert!(result.result.total_welfare > 0);
+        assert!(result.result.total_welfare() > 0);
     }
 }

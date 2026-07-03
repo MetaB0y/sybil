@@ -5,7 +5,10 @@
 
 use std::collections::HashMap;
 
-use matching_engine::{compute_fill_settlement, derive_minting, Fill, MarketId, Order};
+use matching_engine::{
+    compute_fill_settlement, derive_minting, minting_cost_from_incremental_adjustments, Fill,
+    MarketId, Order,
+};
 
 use crate::types::{AccountSnapshot, BlockWitness, WitnessOrder};
 use crate::violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
@@ -21,6 +24,8 @@ struct DerivedSettlement {
     accounts: HashMap<u64, DerivedAccountState>,
     violations: Vec<Violation>,
     accounts_checked: usize,
+    minting_cost: i64,
+    fill_balance_delta: i64,
 }
 
 fn derive_post_state(
@@ -57,6 +62,9 @@ fn derive_post_state(
         result.accounts_checked += 1;
     }
 
+    let pre_market_totals = market_totals_from_accounts(&result.accounts);
+    let pre_adjustments = derive_minting(&pre_market_totals, clearing_prices);
+
     // Apply each fill using the shared settlement function
     for fill in fills {
         if fill.fill_qty == 0 {
@@ -80,6 +88,7 @@ fn derive_post_state(
         let account = result.accounts.entry(account_id).or_default();
 
         if let Some(delta) = compute_fill_settlement(order, fill) {
+            result.fill_balance_delta += delta.balance_delta;
             account.balance += delta.balance_delta;
             let pos = &mut account.positions;
             for (market, outcome, qty_delta) in delta.position_deltas {
@@ -119,6 +128,11 @@ fn derive_post_state(
             .collect();
 
         let adjustments = derive_minting(&market_totals, clearing_prices);
+        result.minting_cost = minting_cost_from_incremental_adjustments(
+            result.fill_balance_delta,
+            &pre_adjustments,
+            &adjustments,
+        );
 
         if !adjustments.is_empty() {
             let mint = result.accounts.entry(MINT_ID).or_default();
@@ -152,6 +166,30 @@ fn derive_post_state(
     result
 }
 
+fn market_totals_from_accounts(
+    accounts: &HashMap<u64, DerivedAccountState>,
+) -> Vec<(MarketId, i64, i64)> {
+    let all_markets: std::collections::HashSet<MarketId> = accounts
+        .values()
+        .flat_map(|account| account.positions.keys().map(|(m, _)| *m))
+        .collect();
+
+    all_markets
+        .iter()
+        .map(|&market_id| {
+            let total_yes: i64 = accounts
+                .values()
+                .map(|account| account.positions.get(&(market_id, 0)).copied().unwrap_or(0))
+                .sum();
+            let total_no: i64 = accounts
+                .values()
+                .map(|account| account.positions.get(&(market_id, 1)).copied().unwrap_or(0))
+                .sum();
+            (market_id, total_yes, total_no)
+        })
+        .collect()
+}
+
 /// Verify that `post_system_state + fills → post_state`.
 pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
     let mut violations = Vec::new();
@@ -164,6 +202,16 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
     );
     stats.accounts_checked = derived.accounts_checked;
     violations.extend(derived.violations.clone());
+
+    if derived.minting_cost != witness.minting_cost {
+        violations.push(Violation {
+            kind: ViolationKind::WelfareMismatch,
+            details: format!(
+                "Reported minting_cost {} != settlement-derived minting_cost {}",
+                witness.minting_cost, derived.minting_cost
+            ),
+        });
+    }
 
     // Non-negative balance/position assertions (ZK invariants).
     // MINT (u64::MAX) is exempt — it holds short positions by design.
@@ -388,7 +436,7 @@ mod tests {
             fills: vec![fill],
             clearing_prices,
             total_welfare: 0,
-            minting_cost: 0,
+            minting_cost: expected_cost,
             mm_constraints: vec![],
             market_groups: vec![],
             pre_state: pre_state.clone(),
@@ -454,7 +502,7 @@ mod tests {
             fills: vec![fill],
             clearing_prices,
             total_welfare: 0,
-            minting_cost: 0,
+            minting_cost: 5 * NANOS_PER_DOLLAR as i64,
             mm_constraints: vec![],
             market_groups: vec![],
             pre_state: vec![],
@@ -819,7 +867,7 @@ mod tests {
             fills: vec![fill],
             clearing_prices,
             total_welfare: 0,
-            minting_cost: 0,
+            minting_cost: fill_cost,
             mm_constraints: vec![],
             market_groups: vec![],
             pre_state: pre_state.clone(),
@@ -888,7 +936,7 @@ mod tests {
             fills: vec![fill],
             clearing_prices,
             total_welfare: 0,
-            minting_cost: 0,
+            minting_cost: fill_cost,
             mm_constraints: vec![],
             market_groups: vec![],
             pre_state: vec![],
@@ -967,7 +1015,7 @@ mod tests {
             fills: vec![fill],
             clearing_prices,
             total_welfare: 0,
-            minting_cost: 0,
+            minting_cost: fill_cost,
             mm_constraints: vec![],
             market_groups: vec![],
             pre_state: pre_state.clone(),

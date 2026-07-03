@@ -570,7 +570,7 @@ fn run_detailed_pipeline(
                 println!("  Fills:          {}", result.result.fills.len());
                 println!(
                     "  Welfare:        {}",
-                    format_welfare(result.result.total_welfare)
+                    format_welfare(result.result.total_welfare())
                 );
                 println!(
                     "  Volume:         {}",
@@ -627,10 +627,6 @@ fn run_detailed_pipeline(
             let witness = witness_from_problem(&problem, &result);
             let verification = verify_match(&witness, false);
             print_verification_result(&verification);
-
-            // Also run matching-solver's fill/order/MM verifier.
-            let solver_verification = matching_solver::verify(&problem, &result.result);
-            print_solver_verification(&solver_verification);
         }
 
         // Export JSON if requested
@@ -736,7 +732,7 @@ fn witness_from_problem(problem: &Problem, result: &PipelineResult) -> BlockWitn
         system_events: vec![],
         fills: result.result.fills.clone(),
         clearing_prices,
-        total_welfare: result.result.total_welfare,
+        total_welfare: result.result.total_welfare(),
         minting_cost: result.result.minting_cost,
         mm_constraints: problem.mm_constraints.clone(),
         market_groups: problem.market_groups.clone(),
@@ -784,21 +780,6 @@ fn print_verification_result(result: &VerificationResult) {
         }
         if result.violations.len() > 10 {
             println!("    ... and {} more", result.violations.len() - 10);
-        }
-    }
-}
-
-#[cfg(any(feature = "lp", feature = "conic"))]
-fn print_solver_verification(result: &matching_solver::VerificationResult) {
-    if result.valid {
-        println!("  Solver result: \u{2713} VALID");
-    } else {
-        println!(
-            "  Solver result: \u{2717} {} violations",
-            result.violations.len()
-        );
-        for v in result.violations.iter().take(5) {
-            println!("    {:?}: {}", v.kind, v.details);
         }
     }
 }
@@ -1361,7 +1342,7 @@ fn witness_from_milp(problem: &Problem, result: &matching_solver::MilpResult) ->
         system_events: vec![],
         fills: result.result.fills.clone(),
         clearing_prices: result.clearing_prices.clone(),
-        total_welfare: result.result.total_welfare,
+        total_welfare: result.result.total_welfare(),
         minting_cost: result.result.minting_cost,
         mm_constraints: problem.mm_constraints.clone(),
         market_groups: problem.market_groups.clone(),
@@ -1663,7 +1644,7 @@ fn print_gap_analysis(data: &GapAnalysisData) {
         .iter()
         .enumerate()
         .filter(|(_, d)| d.is_valid)
-        .max_by_key(|(_, d)| d.result.total_welfare)
+        .max_by_key(|(_, d)| d.result.total_welfare())
         .map(|(i, _)| i);
 
     let Some(best_idx) = best_idx else {
@@ -1702,8 +1683,8 @@ fn print_solver_diff(problem: &Problem, best: &SolverDetail, other: &SolverDetai
         .collect();
 
     // Use total_welfare which accounts for minting cost
-    let best_welfare = best_result.total_welfare;
-    let other_welfare = other_result.total_welfare;
+    let best_welfare = best_result.total_welfare();
+    let other_welfare = other_result.total_welfare();
     let gap = best_welfare - other_welfare;
     let gap_pct = if best_welfare > 0 {
         gap as f64 / best_welfare as f64 * 100.0
@@ -2179,8 +2160,8 @@ fn build_comparison_json(
                 .sum();
             serde_json::json!({
                 "solver": name,
-                "total_welfare": result.total_welfare,
-                "total_welfare_dollars": result.total_welfare as f64 / 1e9,
+                "total_welfare": result.total_welfare(),
+                "total_welfare_dollars": result.total_welfare() as f64 / 1e9,
                 "orders_filled": result.orders_filled,
                 "orders_unfilled_liquidity": result.orders_unfilled_liquidity,
                 "total_quantity_filled": result.total_quantity_filled,

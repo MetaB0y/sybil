@@ -127,8 +127,8 @@ impl VizSnapshot {
         let orders_unfilled = problem.orders.len().saturating_sub(orders_filled);
 
         let final_result = FinalSnapshot {
-            total_welfare: result.result.total_welfare,
-            total_welfare_dollars: result.result.total_welfare as f64 / NANOS_PER_DOLLAR as f64,
+            total_welfare: result.result.total_welfare(),
+            total_welfare_dollars: result.result.total_welfare() as f64 / NANOS_PER_DOLLAR as f64,
             total_volume,
             total_fills: result.result.fills.len(),
             orders_filled,

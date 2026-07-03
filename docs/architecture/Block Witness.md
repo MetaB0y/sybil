@@ -3,7 +3,7 @@ tags: [zk, spec]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-07-01
+last_verified: 2026-07-03
 ---
 
 # Block Witness
@@ -38,8 +38,8 @@ that job. Everything else in this doc follows from two invariants:
 | `system_events` | state changes applied between blocks (create account, dev deposit, L1 deposit, withdrawal creation, resolution) |
 | `fills` | real accepted-order fills produced by the solver; synthetic minting fills are not allowed |
 | `clearing_prices` | per-market clearing prices produced by the solver |
-| `total_welfare` | sum of `(limit_price - clearing_price) * fill_qty / SHARE_SCALE` |
-| `minting_cost` | solver-reported welfare adjustment; live sequencer blocks set this to zero because minting is represented by MINT account settlement |
+| `total_welfare` | net welfare: gross order-value objective minus settlement-derived `minting_cost` |
+| `minting_cost` | settlement-derived reporting cost from real-fill cash flow and `derive_minting` adjustments |
 | `mm_constraints` | MM budget constraints active this batch |
 | `market_groups` | market group definitions (for complete-set logic) |
 | `pre_state` | account snapshots at block start |
@@ -49,7 +49,8 @@ that job. Everything else in this doc follows from two invariants:
 | `resolved_markets` | markets resolved/voided; orders/fills must not reference |
 
 The sequencer builds this in `matching-sequencer::sequencer` at the end of
-each block. Tests and `matching-sim` run the 4-layer verifier over it.
+each block. Sequencer tests run the 4-layer verifier over it; `matching-sim`
+builds a witness and runs the match layer.
 `sybil-prover` is the prover-input boundary; its `sequencer-store` feature
 consumes a committed witness plus qMDB proofs from storage and emits
 `StateTransitionProofJob`, while the default builder consumes only that
@@ -59,8 +60,10 @@ Minting/burning is not encoded as synthetic orders or synthetic fills. The
 solver may use minting variables internally to discover welfare-maximizing
 fills and clearing prices, but the witness records only real participant
 orders/fills. Settlement verification independently replays those fills, derives
-the required protocol counterparty adjustment, and checks the reserved MINT
-account in `post_state`.
+the required protocol counterparty adjustment, checks the reserved MINT account
+in `post_state`, and checks that `minting_cost` equals the shared
+settlement-derived reporting cost. Layer 1 welfare verification then checks
+`total_welfare = gross_order_value - minting_cost`.
 
 ## ZK public/private partition
 

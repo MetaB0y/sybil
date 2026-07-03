@@ -299,9 +299,9 @@ mod tests {
         let result = solver.solve(&problem);
 
         assert!(
-            result.result.total_welfare > 0,
+            result.result.total_welfare() > 0,
             "should produce positive welfare, got {}",
-            result.result.total_welfare
+            result.result.total_welfare()
         );
         assert!(result.result.orders_filled > 0, "should fill some orders");
     }
@@ -329,7 +329,7 @@ mod tests {
             result.result.orders_filled, 2,
             "both orders should fill via minting"
         );
-        assert!(result.result.total_welfare > 0);
+        assert!(result.result.total_welfare() > 0);
     }
 
     #[test]
@@ -363,7 +363,7 @@ mod tests {
             "should fill all 3 via group minting, filled {}",
             result.result.orders_filled
         );
-        assert!(result.result.total_welfare > 0);
+        assert!(result.result.total_welfare() > 0);
     }
 
     #[test]
@@ -518,7 +518,7 @@ mod tests {
         let result = solver.solve(&problem);
 
         assert!(result.result.orders_filled > 0);
-        assert!(result.result.total_welfare > 0);
+        assert!(result.result.total_welfare() > 0);
     }
 
     #[test]
@@ -561,7 +561,8 @@ mod tests {
 
         // Welfare should match exactly (delegates to LP)
         assert_eq!(
-            lp_result.result.total_welfare, aug_result.result.total_welfare,
+            lp_result.result.total_welfare(),
+            aug_result.result.total_welfare(),
             "AugLP should produce identical welfare to LP when no MMs"
         );
         assert_eq!(
@@ -630,8 +631,8 @@ mod tests {
         let lp_result = LpSolver::new().solve(&problem);
         let aug_result = IterLpSolver::new().solve(&problem);
 
-        let lp_w = lp_result.result.total_welfare;
-        let aug_w = aug_result.result.total_welfare;
+        let lp_w = lp_result.result.total_welfare();
+        let aug_w = aug_result.result.total_welfare();
 
         eprintln!("Tight budget price-shift scenario:");
         eprintln!(
@@ -723,8 +724,8 @@ mod tests {
         let lp_result = LpSolver::new().solve(&problem);
         let aug_result = IterLpSolver::new().solve(&problem);
 
-        let lp_w = lp_result.result.total_welfare;
-        let aug_w = aug_result.result.total_welfare;
+        let lp_w = lp_result.result.total_welfare();
+        let aug_w = aug_result.result.total_welfare();
 
         eprintln!("Competing MMs scenario:");
         eprintln!(
@@ -821,8 +822,8 @@ mod tests {
         let lp_result = LpSolver::new().solve(&problem);
         let aug_result = IterLpSolver::new().solve(&problem);
 
-        let lp_w = lp_result.result.total_welfare;
-        let aug_w = aug_result.result.total_welfare;
+        let lp_w = lp_result.result.total_welfare();
+        let aug_w = aug_result.result.total_welfare();
 
         eprintln!("Multi-market MM scenario:");
         eprintln!(
@@ -892,8 +893,8 @@ mod tests {
                 ));
             }
 
-            let lp_w = LpSolver::new().solve(&problem).result.total_welfare;
-            let aug_w = IterLpSolver::new().solve(&problem).result.total_welfare;
+            let lp_w = LpSolver::new().solve(&problem).result.total_welfare();
+            let aug_w = IterLpSolver::new().solve(&problem).result.total_welfare();
             let gap = if lp_w > 0 {
                 (aug_w - lp_w) as f64 / lp_w as f64 * 100.0
             } else if aug_w > 0 {

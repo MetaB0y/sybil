@@ -237,6 +237,150 @@ pub fn derive_minting(
     adjustments
 }
 
+/// Sum the welfare adjustment implied by MINT account settlement.
+///
+/// This is a reporting helper only. The authoritative settlement semantics
+/// remain [`derive_minting`]; the cost is the MINT balance delta produced by
+/// those same adjustments.
+pub fn minting_cost_from_adjustments(adjustments: &[MintAdjustment]) -> i64 {
+    adjustments
+        .iter()
+        .map(|adjustment| adjustment.balance_delta)
+        .sum()
+}
+
+/// Derive the reporting minting cost from real-fill cash flow and MINT
+/// adjustments.
+///
+/// Complete-set creation is visible as cash leaving real accounts with no
+/// MINT balance delta. One-sided protocol inventory can be visible as both
+/// real-account cash outflow and a MINT balance delta; in that case the two
+/// views describe the same cost, so the cash outflow is authoritative. MINT
+/// adjustment cost is the fallback for cases with no real-account outflow.
+pub fn minting_cost_from_balance_deltas(
+    fill_balance_delta: i64,
+    adjustments: &[MintAdjustment],
+) -> i64 {
+    minting_cost_from_incremental_adjustments(fill_balance_delta, &[], adjustments)
+}
+
+/// Derive reporting minting cost from the incremental MINT adjustment across
+/// a block boundary.
+pub fn minting_cost_from_incremental_adjustments(
+    fill_balance_delta: i64,
+    pre_adjustments: &[MintAdjustment],
+    post_adjustments: &[MintAdjustment],
+) -> i64 {
+    let fill_cash_outflow = (-fill_balance_delta).max(0);
+    if fill_cash_outflow > 0 {
+        fill_cash_outflow
+    } else {
+        let pre_cost = minting_cost_from_adjustments(pre_adjustments);
+        let post_cost = minting_cost_from_adjustments(post_adjustments);
+        (post_cost - pre_cost).max(0)
+    }
+}
+
+/// Derive the settlement-consistent minting cost for a set of market totals.
+pub fn derive_minting_cost(
+    market_totals: &[(MarketId, i64, i64)],
+    clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
+) -> i64 {
+    minting_cost_from_adjustments(&derive_minting(market_totals, clearing_prices))
+}
+
+/// Protocol welfare convention: gross order value net of minting cost.
+pub fn net_welfare(gross_welfare: i64, minting_cost: i64) -> i64 {
+    gross_welfare - minting_cost
+}
+
+/// Compute gross order-value objective from real participant fills.
+pub fn gross_welfare_from_fills<'a>(
+    orders: impl IntoIterator<Item = &'a Order>,
+    fills: &[Fill],
+) -> i64 {
+    let order_map: HashMap<u64, &Order> =
+        orders.into_iter().map(|order| (order.id, order)).collect();
+    fills
+        .iter()
+        .filter_map(|fill| {
+            order_map
+                .get(&fill.order_id)
+                .map(|order| order.gross_welfare_contribution(fill.fill_qty))
+        })
+        .sum()
+}
+
+/// Compute real-account cash delta implied by fills.
+pub fn fill_balance_delta_from_fills<'a>(
+    orders: impl IntoIterator<Item = &'a Order>,
+    fills: &[Fill],
+) -> i64 {
+    let order_map: HashMap<u64, &Order> =
+        orders.into_iter().map(|order| (order.id, order)).collect();
+    fills
+        .iter()
+        .filter_map(|fill| {
+            order_map
+                .get(&fill.order_id)
+                .and_then(|order| compute_fill_settlement(order, fill))
+                .map(|delta| delta.balance_delta)
+        })
+        .sum()
+}
+
+/// Compute the settlement-derived minting cost implied by fills.
+pub fn minting_cost_from_fills<'a>(
+    orders: impl IntoIterator<Item = &'a Order>,
+    fills: &[Fill],
+    clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
+) -> i64 {
+    let orders: Vec<&Order> = orders.into_iter().collect();
+    let market_totals = market_totals_from_fills(orders.iter().copied(), fills);
+    let adjustments = derive_minting(&market_totals, clearing_prices);
+    let fill_balance_delta = fill_balance_delta_from_fills(orders.iter().copied(), fills);
+    minting_cost_from_balance_deltas(fill_balance_delta, &adjustments)
+}
+
+/// Compute per-market position totals implied by fills alone.
+///
+/// Callers with live account state should prefer deriving totals from that
+/// state after applying fills. Solver and simulation paths do not have account
+/// state, and a balanced pre-state means the fill deltas determine the same
+/// incremental minting adjustment.
+pub fn market_totals_from_fills<'a>(
+    orders: impl IntoIterator<Item = &'a Order>,
+    fills: &[Fill],
+) -> Vec<(MarketId, i64, i64)> {
+    let order_map: HashMap<u64, &Order> =
+        orders.into_iter().map(|order| (order.id, order)).collect();
+    let mut totals: HashMap<MarketId, (i64, i64)> = HashMap::new();
+
+    for fill in fills {
+        let Some(order) = order_map.get(&fill.order_id) else {
+            continue;
+        };
+        let Some(delta) = compute_fill_settlement(order, fill) else {
+            continue;
+        };
+        for (market, outcome, qty_delta) in delta.position_deltas {
+            let entry = totals.entry(market).or_insert((0, 0));
+            match outcome {
+                0 => entry.0 += qty_delta,
+                1 => entry.1 += qty_delta,
+                _ => {}
+            }
+        }
+    }
+
+    let mut totals: Vec<_> = totals
+        .into_iter()
+        .map(|(market, (total_yes, total_no))| (market, total_yes, total_no))
+        .collect();
+    totals.sort_by_key(|(market, _, _)| *market);
+    totals
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

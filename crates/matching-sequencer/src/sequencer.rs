@@ -259,6 +259,7 @@ struct FinalizedBlockState {
     /// consumers see `BlockMarketStats.volume_nanos`.
     volume_by_market: HashMap<MarketId, u64>,
     mark_prices: HashMap<MarketId, Vec<Nanos>>,
+    minting_cost: i64,
     invariant_failures: Vec<BlockInvariantFailure>,
 }
 
@@ -278,6 +279,7 @@ struct WitnessAssemblyInput<'a> {
     fills: &'a [Fill],
     clearing_prices: &'a HashMap<MarketId, Vec<Nanos>>,
     total_welfare: i64,
+    minting_cost: i64,
     problem: &'a Problem,
     pre_state: Vec<AccountSnapshot>,
     post_system_state: Vec<AccountSnapshot>,
@@ -2224,7 +2226,7 @@ impl BlockSequencer {
             }
         }
 
-        let total_welfare = pipeline_result.result.total_welfare;
+        let total_welfare = pipeline_result.result.total_welfare();
         let total_volume = fills
             .iter()
             .map(|f| matching_engine::notional_nanos(f.fill_price, f.fill_qty))
@@ -2276,6 +2278,11 @@ impl BlockSequencer {
         timestamp_ms: u64,
     ) -> FinalizedBlockState {
         let pre_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
+        let pre_market_totals = CanonicalState::from_accounts(&self.accounts)
+            .market_position_totals()
+            .minting_inputs();
+        let pre_mint_adjustments =
+            matching_engine::derive_minting(&pre_market_totals, clearing_prices);
 
         settlement::settle_batch(&mut self.accounts, fills, &problem.orders, self.height);
 
@@ -2283,6 +2290,13 @@ impl BlockSequencer {
             .market_position_totals()
             .minting_inputs();
         let mint_adjustments = matching_engine::derive_minting(&market_totals, clearing_prices);
+        let fill_balance_delta =
+            matching_engine::fill_balance_delta_from_fills(problem.orders.iter(), fills);
+        let minting_cost = matching_engine::minting_cost_from_incremental_adjustments(
+            fill_balance_delta,
+            &pre_mint_adjustments,
+            &mint_adjustments,
+        );
         if !mint_adjustments.is_empty() {
             let mint = self
                 .accounts
@@ -2334,6 +2348,7 @@ impl BlockSequencer {
             post_state,
             volume_by_market,
             mark_prices,
+            minting_cost,
             invariant_failures,
         }
     }
@@ -2350,6 +2365,7 @@ impl BlockSequencer {
             fills,
             clearing_prices,
             total_welfare,
+            minting_cost,
             problem,
             pre_state,
             post_system_state,
@@ -2399,7 +2415,7 @@ impl BlockSequencer {
             fills: fills.to_vec(),
             clearing_prices: clearing_prices.clone(),
             total_welfare,
-            minting_cost: 0,
+            minting_cost,
             mm_constraints: problem.mm_constraints.clone(),
             market_groups: problem.market_groups.clone(),
             pre_state,
@@ -3046,7 +3062,7 @@ impl BlockSequencer {
             pipeline_result,
             fills,
             clearing_prices,
-            total_welfare,
+            total_welfare: _solver_total_welfare,
             total_volume,
             orders_filled,
             welfare_by_market,
@@ -3060,8 +3076,12 @@ impl BlockSequencer {
             post_state,
             volume_by_market,
             mark_prices,
+            minting_cost,
             mut invariant_failures,
         } = self.finalize_block_state_phase(&fills, &problem, &clearing_prices, timestamp_ms);
+
+        let total_welfare =
+            matching_engine::net_welfare(pipeline_result.result.gross_welfare, minting_cost);
 
         // Off-block cumulative + 24h platform welfare — accumulate this block's
         // authoritative `total_welfare` scalar (counts each fill once, unlike the
@@ -3181,6 +3201,7 @@ impl BlockSequencer {
                 fills: &fills,
                 clearing_prices: &clearing_prices,
                 total_welfare,
+                minting_cost,
                 problem: &problem,
                 pre_state,
                 post_system_state,

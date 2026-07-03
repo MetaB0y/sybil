@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use matching_engine::{
-    compute_fill_settlement, derive_minting, outcome_buy, signed_notional_nanos, MarketId,
-    MarketSet, NANOS_PER_DOLLAR,
+    compute_fill_settlement, derive_minting, net_welfare, outcome_buy, signed_notional_nanos,
+    MarketId, MarketSet, NANOS_PER_DOLLAR,
 };
 use matching_sequencer::{AccountId, AccountStore, AdminOracle, BlockSequencer, OrderSubmission};
 use proptest::prelude::*;
@@ -163,15 +163,16 @@ fn recompute_total_welfare(witness: &BlockWitness) -> i64 {
         .map(|witness_order| (witness_order.order.id, &witness_order.order))
         .collect();
 
-    witness
+    let gross_welfare = witness
         .fills
         .iter()
         .filter_map(|fill| {
             order_map
                 .get(&fill.order_id)
-                .map(|order| order.welfare_contribution(fill.fill_price, fill.fill_qty))
+                .map(|order| order.gross_welfare_contribution(fill.fill_qty))
         })
-        .sum()
+        .sum();
+    net_welfare(gross_welfare, witness.minting_cost)
 }
 
 fn raw_welfare_numerator(witness: &BlockWitness) -> i128 {
@@ -541,37 +542,18 @@ proptest! {
             );
         }
 
-        let base_orders: HashMap<u64, _> = bp1
-            .witness
-            .orders
-            .iter()
-            .map(|witness_order| (witness_order.order.id, &witness_order.order))
-            .collect();
-        let expected_doubled_welfare: i64 = bp1
-            .witness
-            .fills
-            .iter()
-            .map(|fill| {
-                let order = base_orders
-                    .get(&fill.order_id)
-                    .expect("base fill must reference a witness order");
-                let doubled_qty = fill
-                    .fill_qty
-                    .checked_mul(2)
-                    .expect("test quantities should double without overflow");
-                order.welfare_contribution(fill.fill_price, doubled_qty)
-            })
-            .sum();
+        let expected_doubled_welfare = recompute_total_welfare(&bp2.witness);
         assert_eq!(
             bp2.analytics.total_welfare,
             expected_doubled_welfare,
-            "Doubled quantities did not match exact floor-recomputed welfare: expected={} doubled={}",
+            "Doubled quantities did not match shared net welfare recomputation: expected={} doubled={}",
             expected_doubled_welfare,
             bp2.analytics.total_welfare
         );
         let rounding_delta = bp2.analytics.total_welfare - bp1.analytics.total_welfare * 2;
+        let max_rounding_delta = (bp1.witness.fills.len() as i64).saturating_mul(2);
         assert!(
-            (0..=bp1.witness.fills.len() as i64).contains(&rounding_delta),
+            rounding_delta.abs() <= max_rounding_delta,
             "Doubled welfare has impossible truncation delta: base={} doubled={} delta={} fills={}",
             bp1.analytics.total_welfare,
             bp2.analytics.total_welfare,

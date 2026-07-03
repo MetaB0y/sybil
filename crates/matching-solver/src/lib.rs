@@ -9,7 +9,6 @@
 // Internal modules
 pub mod result;
 pub mod solver;
-pub mod verifier;
 pub mod viz;
 
 #[cfg(feature = "milp")]
@@ -41,9 +40,6 @@ pub use solver::Solver;
 // Visualization
 pub use viz::VizSnapshot;
 
-// Result verification (for ZK proof integration)
-pub use verifier::{verify, verify_strict, VerificationResult, Verifier, Violation, ViolationKind};
-
 #[cfg(feature = "milp")]
 pub use milp::{MilpConfig, MilpResult, MilpSolver, MmBudgetMode, SolveStatus};
 
@@ -62,17 +58,18 @@ pub use conic_solver::{ConicConfig, ConicSolver, ObjectiveMode};
 #[cfg(feature = "lp")]
 pub use decomposed::DecomposedSolver;
 
-use serde::Serialize;
+use serde::ser::SerializeStruct;
+use serde::{Serialize, Serializer};
 
-use matching_engine::{Fill, Order};
+use matching_engine::{net_welfare, Fill, Order};
 
 /// Result of solving a matching problem.
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default)]
 pub struct MatchingResult {
     /// Orders that were filled
     pub fills: Vec<Fill>,
-    /// Total welfare achieved (fill-level surplus minus minting cost).
-    pub total_welfare: i64,
+    /// Gross order-value objective before protocol minting cost.
+    pub gross_welfare: i64,
     /// Cost of share creation (minting) not captured in fill-level welfare.
     pub minting_cost: i64,
     /// Number of orders filled (at least partially)
@@ -87,7 +84,7 @@ impl MatchingResult {
     pub fn new() -> Self {
         Self {
             fills: Vec::new(),
-            total_welfare: 0,
+            gross_welfare: 0,
             minting_cost: 0,
             orders_filled: 0,
             orders_unfilled_liquidity: 0,
@@ -95,12 +92,35 @@ impl MatchingResult {
         }
     }
 
+    /// Total welfare under the protocol convention: gross order value net of
+    /// settlement-derived minting cost.
+    pub fn total_welfare(&self) -> i64 {
+        net_welfare(self.gross_welfare, self.minting_cost)
+    }
+
     pub fn add_fill(&mut self, fill: Fill, order: &Order) {
-        self.total_welfare += fill.welfare(order);
+        self.gross_welfare += order.gross_welfare_contribution(fill.fill_qty);
         self.total_quantity_filled += fill.fill_qty;
         if fill.fill_qty > 0 {
             self.orders_filled += 1;
         }
         self.fills.push(fill);
+    }
+}
+
+impl Serialize for MatchingResult {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("MatchingResult", 7)?;
+        state.serialize_field("fills", &self.fills)?;
+        state.serialize_field("gross_welfare", &self.gross_welfare)?;
+        state.serialize_field("minting_cost", &self.minting_cost)?;
+        state.serialize_field("total_welfare", &self.total_welfare())?;
+        state.serialize_field("orders_filled", &self.orders_filled)?;
+        state.serialize_field("orders_unfilled_liquidity", &self.orders_unfilled_liquidity)?;
+        state.serialize_field("total_quantity_filled", &self.total_quantity_filled)?;
+        state.end()
     }
 }
