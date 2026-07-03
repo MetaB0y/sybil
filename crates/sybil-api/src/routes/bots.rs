@@ -8,6 +8,7 @@ use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::arena::{count_rows, table_exists};
 use crate::state::AppState;
 use crate::types::error::AppError;
 
@@ -202,25 +203,6 @@ fn unavailable(path: Option<String>, error: impl Into<String>) -> BotDecisionFee
         decisions: Vec::new(),
         token_usage: Vec::new(),
     }
-}
-
-fn table_exists(conn: &Connection, table: &str) -> bool {
-    conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
-        [table],
-        |row| row.get::<_, i64>(0),
-    )
-    .map(|v| v == 1)
-    .unwrap_or(false)
-}
-
-fn count_rows(conn: &Connection, table: &str) -> i64 {
-    if !table_exists(conn, table) {
-        return 0;
-    }
-    let sql = format!("SELECT COUNT(*) FROM {table}");
-    conn.query_row(&sql, [], |row| row.get::<_, i64>(0))
-        .unwrap_or(0)
 }
 
 fn latest_decision_timestamp(conn: &Connection) -> Option<String> {

@@ -242,7 +242,11 @@ pub enum SequencerMsg {
         usize,
         RpcReplyPort<Vec<AccountFillRecord>>,
     ),
-    GetEquitySeries(AccountId, RpcReplyPort<Vec<crate::aggregates::EquityPoint>>),
+    GetEquitySeries(
+        AccountId,
+        u64,
+        RpcReplyPort<Vec<crate::aggregates::EquityPoint>>,
+    ),
     GetAccountEvents(
         AccountId,
         usize,
@@ -2047,16 +2051,28 @@ impl Actor for SequencerActor {
                 };
                 let _ = reply.send(result);
             }
-            SequencerMsg::GetEquitySeries(account_id, reply) => {
+            SequencerMsg::GetEquitySeries(account_id, since_ms, reply) => {
                 // NOTE: in prod the in-memory caps are 0, so this fallback returns
                 // an empty series. A persistent store read error therefore surfaces
                 // as an empty (200 OK) response plus the warn! below — not an error.
+                // The `since_ms` range is pushed into the store scan; the in-memory
+                // fallback re-applies it so both paths return the same window.
                 let result = match &state.store {
-                    Some(store) => store.equity_series(account_id).unwrap_or_else(|e| {
+                    Some(store) => store.equity_series(account_id, since_ms).unwrap_or_else(|e| {
                         tracing::warn!(error = %e, account_id = account_id.0, "equity_series read failed; falling back to memory");
-                        state.sequencer.equity_series(account_id)
+                        state
+                            .sequencer
+                            .equity_series(account_id)
+                            .into_iter()
+                            .filter(|point| point.timestamp_ms >= since_ms)
+                            .collect()
                     }),
-                    None => state.sequencer.equity_series(account_id),
+                    None => state
+                        .sequencer
+                        .equity_series(account_id)
+                        .into_iter()
+                        .filter(|point| point.timestamp_ms >= since_ms)
+                        .collect(),
                 };
                 let _ = reply.send(result);
             }
@@ -2785,11 +2801,15 @@ impl SequencerHandle {
             .await
     }
 
+    /// Equity series for an account, restricted to points with
+    /// `timestamp_ms >= since_ms` (pass `0` for the full series). The range is
+    /// applied in the durable store scan rather than by the caller.
     pub async fn get_equity_series(
         &self,
         account_id: AccountId,
+        since_ms: u64,
     ) -> Result<Vec<crate::aggregates::EquityPoint>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetEquitySeries(account_id, reply))
+        self.rpc(|reply| SequencerMsg::GetEquitySeries(account_id, since_ms, reply))
             .await
     }
 
@@ -4295,7 +4315,7 @@ mod tests {
             "direct-admit Placed history must be durable exactly once even with no in-memory fallback"
         );
 
-        let equity = store.equity_series(aid).unwrap();
+        let equity = store.equity_series(aid, 0).unwrap();
         assert!(
             equity
                 .iter()

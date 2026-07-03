@@ -1,22 +1,22 @@
-use std::path::Path;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
-use axum::extract::State;
+use axum::extract::{MatchedPath, State};
 use axum::http::{header, Method, Request};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
-use rusqlite::{Connection, OpenFlags};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tracing::Level;
 use utoipa::OpenApi;
 
+use crate::arena;
 use crate::routes;
 use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::request::*;
 use crate::types::response::*;
+use crate::util::now_ms;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -240,14 +240,14 @@ async fn record_live_market_metrics(state: &AppState) {
 
 async fn record_bot_metrics(state: &AppState) {
     let path = state.arena_db_path.clone();
-    let snapshot = match tokio::task::spawn_blocking(move || load_bot_metrics_snapshot(&path)).await
-    {
-        Ok(snapshot) => snapshot,
-        Err(error) => {
-            tracing::warn!(error = %error, "bot metrics task failed");
-            BotMetricsSnapshot::unavailable()
-        }
-    };
+    let snapshot =
+        match tokio::task::spawn_blocking(move || arena::load_bot_metrics_snapshot(&path)).await {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                tracing::warn!(error = %error, "bot metrics task failed");
+                arena::BotMetricsSnapshot::unavailable()
+            }
+        };
 
     metrics::gauge!("sybil_bot_db_available").set(if snapshot.db_available { 1.0 } else { 0.0 });
     metrics::gauge!("sybil_bot_decisions_total").set(snapshot.decisions as f64);
@@ -267,164 +267,9 @@ async fn record_bot_metrics(state: &AppState) {
     }
 }
 
-#[derive(Debug, Default)]
-struct BotMetricsSnapshot {
-    db_available: bool,
-    decisions: i64,
-    latest_decision_age_seconds: Option<u64>,
-    traders: Vec<TraderMetricsSnapshot>,
-}
-
-impl BotMetricsSnapshot {
-    fn unavailable() -> Self {
-        Self::default()
-    }
-}
-
-#[derive(Debug, Default)]
-struct TraderMetricsSnapshot {
-    name: String,
-    decisions: i64,
-    latest_decision_age_seconds: Option<u64>,
-    total_fills: Option<i64>,
-    total_orders: Option<i64>,
-}
-
-fn load_bot_metrics_snapshot(path: &str) -> BotMetricsSnapshot {
-    if path.trim().is_empty() || !Path::new(path).exists() {
-        return BotMetricsSnapshot::unavailable();
-    }
-    let conn = match Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
-        Ok(conn) => conn,
-        Err(error) => {
-            tracing::warn!(path, error = %error, "failed to open arena bot db for metrics");
-            return BotMetricsSnapshot::unavailable();
-        }
-    };
-    if !sqlite_table_exists(&conn, "decisions") {
-        return BotMetricsSnapshot::unavailable();
-    }
-
-    let now = now_secs();
-    let decisions = sqlite_count_rows(&conn, "decisions");
-    let latest_decision_age_seconds = latest_timestamp_seconds(
-        &conn,
-        "SELECT MAX(strftime('%s', timestamp)) FROM decisions",
-    )
-    .map(|ts| now.saturating_sub(ts));
-    let mut traders = load_trader_decision_metrics(&conn, now);
-    load_trader_snapshot_metrics(&conn, &mut traders);
-
-    BotMetricsSnapshot {
-        db_available: true,
-        decisions,
-        latest_decision_age_seconds,
-        traders,
-    }
-}
-
-fn sqlite_table_exists(conn: &Connection, table: &str) -> bool {
-    conn.query_row(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
-        [table],
-        |row| row.get::<_, i64>(0),
-    )
-    .map(|count| count > 0)
-    .unwrap_or(false)
-}
-
-fn sqlite_count_rows(conn: &Connection, table: &str) -> i64 {
-    let sql = format!("SELECT COUNT(*) FROM {table}");
-    conn.query_row(&sql, [], |row| row.get(0)).unwrap_or(0)
-}
-
-fn latest_timestamp_seconds(conn: &Connection, sql: &str) -> Option<u64> {
-    conn.query_row(sql, [], |row| row.get::<_, Option<String>>(0))
-        .ok()
-        .flatten()
-        .and_then(|value| value.parse::<u64>().ok())
-}
-
-fn load_trader_decision_metrics(conn: &Connection, now: u64) -> Vec<TraderMetricsSnapshot> {
-    let mut stmt = match conn.prepare(
-        "SELECT trader_name, COUNT(*), MAX(strftime('%s', timestamp))
-         FROM decisions GROUP BY trader_name",
-    ) {
-        Ok(stmt) => stmt,
-        Err(error) => {
-            tracing::warn!(error = %error, "failed to prepare trader decision metrics query");
-            return Vec::new();
-        }
-    };
-    let Ok(rows) = stmt.query_map([], |row| {
-        let latest: Option<String> = row.get(2)?;
-        Ok(TraderMetricsSnapshot {
-            name: row.get(0)?,
-            decisions: row.get(1)?,
-            latest_decision_age_seconds: latest
-                .and_then(|value| value.parse::<u64>().ok())
-                .map(|ts| now.saturating_sub(ts)),
-            total_fills: None,
-            total_orders: None,
-        })
-    }) else {
-        return Vec::new();
-    };
-    rows.filter_map(Result::ok).collect()
-}
-
-fn load_trader_snapshot_metrics(conn: &Connection, traders: &mut [TraderMetricsSnapshot]) {
-    if !sqlite_table_exists(conn, "portfolio_snapshots") {
-        return;
-    }
-    let mut stmt = match conn.prepare(
-        "SELECT p.trader_name, p.total_fills, p.total_orders
-         FROM portfolio_snapshots p
-         JOIN (
-           SELECT trader_name, MAX(id) AS id FROM portfolio_snapshots GROUP BY trader_name
-         ) latest ON p.trader_name = latest.trader_name AND p.id = latest.id",
-    ) {
-        Ok(stmt) => stmt,
-        Err(error) => {
-            tracing::warn!(error = %error, "failed to prepare trader snapshot metrics query");
-            return;
-        }
-    };
-    let Ok(rows) = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, Option<i64>>(1)?,
-            row.get::<_, Option<i64>>(2)?,
-        ))
-    }) else {
-        return;
-    };
-    let snapshots: std::collections::HashMap<_, _> = rows
-        .filter_map(Result::ok)
-        .map(|(name, fills, orders)| (name, (fills, orders)))
-        .collect();
-    for trader in traders {
-        if let Some((fills, orders)) = snapshots.get(&trader.name) {
-            trader.total_fills = *fills;
-            trader.total_orders = *orders;
-        }
-    }
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
-
-fn now_secs() -> u64 {
-    now_ms() / 1000
-}
-
 async fn http_metrics(req: Request<axum::body::Body>, next: Next) -> Response {
     let method = req.method().clone();
-    let path = metric_path_label(req.uri().path());
+    let path = metric_path_label(&req);
     let start = Instant::now();
 
     let response = next.run(req).await;
@@ -432,74 +277,33 @@ async fn http_metrics(req: Request<axum::body::Body>, next: Next) -> Response {
     let duration_secs = start.elapsed().as_secs_f64();
     let status = response.status().as_u16();
 
-    metrics::counter!("sybil_http_requests_total", "method" => method.to_string(), "path" => path, "status" => status.to_string()).increment(1);
+    metrics::counter!("sybil_http_requests_total", "method" => method.to_string(), "path" => path.clone(), "status" => status.to_string()).increment(1);
     metrics::histogram!("sybil_http_request_duration_seconds", "method" => method.to_string(), "path" => path)
         .record(duration_secs);
 
     response
 }
 
-fn metric_path_label(path: &str) -> &'static str {
-    let trimmed = path.trim_matches('/');
-    let segments: Vec<&str> = if trimmed.is_empty() {
-        Vec::new()
-    } else {
-        trimmed.split('/').collect()
-    };
+/// Prometheus `path` label for a request. Matched routes reuse axum's
+/// [`MatchedPath`] extension — the registered route template (e.g.
+/// `/v1/markets/{id}`) is exactly the label we want, so there is no
+/// hand-maintained route table to keep in sync. Unmatched requests (no
+/// `MatchedPath`, i.e. 404s) bucket by their first path segment.
+fn metric_path_label(req: &Request<axum::body::Body>) -> String {
+    match req.extensions().get::<MatchedPath>() {
+        Some(matched) => matched.as_str().to_string(),
+        None => unmatched_metric_label(req.uri().path()).to_string(),
+    }
+}
 
-    match segments.as_slice() {
-        [] => "/",
-        ["openapi.json"] => "/openapi.json",
-        ["metrics"] => "/metrics",
-        ["v1", "activity", "overview"] => "/v1/activity/overview",
-        ["v1", "blocks"] => "/v1/blocks",
-        ["v1", "blocks", "latest"] => "/v1/blocks/latest",
-        ["v1", "blocks", "stream"] => "/v1/blocks/stream",
-        ["v1", "blocks", "ws"] => "/v1/blocks/ws",
-        ["v1", "blocks", _] => "/v1/blocks/{height}",
-        ["v1", "bots", "decisions"] => "/v1/bots/decisions",
-        ["v1", "bridge", "deposits"] => "/v1/bridge/deposits",
-        ["v1", "bridge", "status"] => "/v1/bridge/status",
-        ["v1", "bridge", "withdrawals"] => "/v1/bridge/withdrawals",
-        ["v1", "bridge", "withdrawals", _] => "/v1/bridge/withdrawals/{id}",
-        ["v1", "events", _, "raw"] => "/v1/events/{event_id}/raw",
-        ["v1", "events", _, "traders"] => "/v1/events/{event_id}/traders",
-        ["v1", "feeds"] => "/v1/feeds",
-        ["v1", "health"] => "/v1/health",
-        ["v1", "orders"] => "/v1/orders",
-        ["v1", "orders", "cancel", "signed"] => "/v1/orders/cancel/signed",
-        ["v1", "orders", "pending"] => "/v1/orders/pending",
-        ["v1", "orders", "signed"] => "/v1/orders/signed",
-        ["v1", "proofs", "state", _] => "/v1/proofs/state/{leaf_key_hex}",
-        ["v1", "simulation", "pause"] => "/v1/simulation/pause",
-        ["v1", "simulation", "resume"] => "/v1/simulation/resume",
-        ["v1", "state-root"] => "/v1/state-root",
-        ["v1", "accounts"] => "/v1/accounts",
-        ["v1", "accounts", _] => "/v1/accounts/{id}",
-        ["v1", "accounts", _, "bridge-key"] => "/v1/accounts/{id}/bridge-key",
-        ["v1", "accounts", _, "equity"] => "/v1/accounts/{id}/equity",
-        ["v1", "accounts", _, "events"] => "/v1/accounts/{id}/events",
-        ["v1", "accounts", _, "fills"] => "/v1/accounts/{id}/fills",
-        ["v1", "accounts", _, "fund"] => "/v1/accounts/{id}/fund",
-        ["v1", "accounts", _, "keys"] => "/v1/accounts/{id}/keys",
-        ["v1", "accounts", _, "orders"] => "/v1/accounts/{id}/orders",
-        ["v1", "accounts", _, "portfolio"] => "/v1/accounts/{id}/portfolio",
-        ["v1", "markets"] => "/v1/markets",
-        ["v1", "markets", "groups"] => "/v1/markets/groups",
-        ["v1", "markets", "prices"] => "/v1/markets/prices",
-        ["v1", "markets", "prices", "reference"] => "/v1/markets/prices/reference",
-        ["v1", "markets", "search"] => "/v1/markets/search",
-        ["v1", "markets", "summary"] => "/v1/markets/summary",
-        ["v1", "markets", _] => "/v1/markets/{id}",
-        ["v1", "markets", _, "metadata"] => "/v1/markets/{id}/metadata",
-        ["v1", "markets", _, "open-batch"] => "/v1/markets/{id}/open-batch",
-        ["v1", "markets", _, "orderbook"] => "/v1/markets/{id}/orderbook",
-        ["v1", "markets", _, "prices", "candles"] => "/v1/markets/{id}/prices/candles",
-        ["v1", "markets", _, "prices", "history"] => "/v1/markets/{id}/prices/history",
-        ["v1", "markets", _, "resolution"] => "/v1/markets/{id}/resolution",
-        ["v1", "markets", _, "resolve"] => "/v1/markets/{id}/resolve",
-        ["v1", ..] => "/v1/{unmatched}",
-        _ => "/{unmatched}",
+/// Bucket label for a request that matched no route. Keeps `/v1`-prefixed
+/// probes separate from everything else, mirroring the previous hand-match.
+fn unmatched_metric_label(path: &str) -> &'static str {
+    let first = path.trim_matches('/').split('/').next().unwrap_or("");
+    if first == "v1" {
+        "/v1/{unmatched}"
+    } else {
+        "/{unmatched}"
     }
 }
 
@@ -1088,44 +892,103 @@ pub fn create_router(state: AppState) -> Router {
 
 #[cfg(test)]
 mod tests {
-    use super::metric_path_label;
+    use std::collections::BTreeSet;
 
-    #[test]
-    fn metric_path_label_normalizes_dynamic_routes() {
-        assert_eq!(
-            metric_path_label("/v1/accounts/112/fills"),
-            "/v1/accounts/{id}/fills"
-        );
-        assert_eq!(
-            metric_path_label("/v1/accounts/112/orders"),
-            "/v1/accounts/{id}/orders"
-        );
-        assert_eq!(
-            metric_path_label("/v1/markets/42/prices/history"),
-            "/v1/markets/{id}/prices/history"
-        );
-        assert_eq!(
-            metric_path_label("/v1/markets/42/prices/candles"),
-            "/v1/markets/{id}/prices/candles"
-        );
-        assert_eq!(
-            metric_path_label("/v1/events/polymarket-abc/raw"),
-            "/v1/events/{event_id}/raw"
-        );
-        assert_eq!(
-            metric_path_label("/v1/proofs/state/abcdef"),
-            "/v1/proofs/state/{leaf_key_hex}"
-        );
-        assert_eq!(metric_path_label("/v1/blocks/123"), "/v1/blocks/{height}");
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use axum::middleware::{self, Next};
+    use axum::response::Response;
+    use axum::routing::get;
+    use axum::Router;
+    use tower::ServiceExt;
+
+    use super::{
+        metric_path_label, unmatched_metric_label, DEV_ROUTE_TABLE, PUBLIC_ROUTE_TABLE,
+        SERVICE_ROUTE_TABLE,
+    };
+
+    /// Middleware that stamps the derived metric label onto the response so a
+    /// test can observe what `http_metrics` would record.
+    async fn label_probe(req: Request<Body>, next: Next) -> Response {
+        let label = metric_path_label(&req);
+        let mut resp = next.run(req).await;
+        resp.headers_mut()
+            .insert("x-metric-label", label.parse().unwrap());
+        resp
+    }
+
+    /// Turn a route template into a concrete request path (`{id}` -> `1`).
+    fn concretize(template: &str) -> String {
+        template
+            .split('/')
+            .map(|seg| if seg.starts_with('{') { "1" } else { seg })
+            .collect::<Vec<_>>()
+            .join("/")
+    }
+
+    async fn label_for(router: &Router, uri: &str) -> String {
+        let resp = router
+            .clone()
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        resp.headers()
+            .get("x-metric-label")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string()
+    }
+
+    /// Every mounted route's `MatchedPath`-derived label must equal its template
+    /// string — the parity that lets the derivation replace the old hand-match.
+    #[tokio::test]
+    async fn matched_path_labels_equal_route_templates() {
+        let paths: BTreeSet<&str> = PUBLIC_ROUTE_TABLE
+            .iter()
+            .chain(SERVICE_ROUTE_TABLE)
+            .chain(DEV_ROUTE_TABLE)
+            .map(|mount| mount.path)
+            .collect();
+
+        // `MatchedPath` keys on the path template, not the method, so registering
+        // each template once under a GET handler is enough to exercise the label.
+        let mut router = Router::new();
+        for path in &paths {
+            router = router.route(path, get(|| async { StatusCode::OK }));
+        }
+        let router = router.layer(middleware::from_fn(label_probe));
+
+        for path in &paths {
+            let uri = concretize(path);
+            assert_eq!(label_for(&router, &uri).await, *path, "uri {uri}");
+        }
     }
 
     #[test]
-    fn metric_path_label_buckets_unmatched_routes() {
-        assert_eq!(metric_path_label("/trade"), "/{unmatched}");
+    fn unmatched_routes_bucket_by_prefix() {
+        assert_eq!(unmatched_metric_label("/trade"), "/{unmatched}");
         assert_eq!(
-            metric_path_label("/v1/accounts/1/fills/extra"),
+            unmatched_metric_label("/v1/accounts/1/fills/extra"),
             "/v1/{unmatched}"
         );
-        assert_eq!(metric_path_label("/wp-login.php"), "/{unmatched}");
+        assert_eq!(unmatched_metric_label("/wp-login.php"), "/{unmatched}");
+    }
+
+    /// Requests that match no route carry no `MatchedPath`, so the middleware
+    /// falls back to the prefix buckets.
+    #[tokio::test]
+    async fn unmatched_requests_use_bucket_labels() {
+        let router = Router::new()
+            .route("/v1/health", get(|| async { StatusCode::OK }))
+            .layer(middleware::from_fn(label_probe));
+
+        for (uri, expected) in [
+            ("/trade", "/{unmatched}"),
+            ("/v1/accounts/1/fills/extra", "/v1/{unmatched}"),
+            ("/wp-login.php", "/{unmatched}"),
+        ] {
+            assert_eq!(label_for(&router, uri).await, expected, "uri {uri}");
+        }
     }
 }

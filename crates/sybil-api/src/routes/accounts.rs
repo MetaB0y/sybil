@@ -11,6 +11,7 @@ use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::request::{CreateAccountRequest, FundAccountRequest, RegisterKeyRequest};
 use crate::types::response::*;
+use crate::util::now_ms;
 
 /// POST /v1/accounts
 #[utoipa::path(
@@ -310,20 +311,19 @@ pub async fn get_equity(
     Path(id): Path<u64>,
     Query(params): Query<EquityRangeParams>,
 ) -> Result<Json<EquitySeriesResponse>, AppError> {
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
+    let now_ms = now_ms();
     let since_ms = match params.range.as_deref() {
         Some("24h") => now_ms.saturating_sub(24 * 3_600_000),
         Some("7d") => now_ms.saturating_sub(7 * 24 * 3_600_000),
         Some("30d") => now_ms.saturating_sub(30 * 24 * 3_600_000),
         _ => 0,
     };
-    let points = state.sequencer.get_equity_series(AccountId(id)).await?;
+    let points = state
+        .sequencer
+        .get_equity_series(AccountId(id), since_ms)
+        .await?;
     let points: Vec<EquityPointResponse> = points
         .into_iter()
-        .filter(|p| p.timestamp_ms >= since_ms)
         .map(|p| EquityPointResponse {
             timestamp_ms: p.timestamp_ms,
             height: p.height,

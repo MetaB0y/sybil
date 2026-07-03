@@ -2098,10 +2098,14 @@ impl Store {
         Ok(())
     }
 
-    /// All equity points for an account, oldest-first (matches `EquityTracker::series`).
+    /// Equity points for an account, oldest-first (matches `EquityTracker::series`),
+    /// keeping only points with `timestamp_ms >= since_ms`. Pass `since_ms == 0`
+    /// for the full series. Points are keyed by height, so the timestamp range is
+    /// applied while scanning rather than as a key bound.
     pub fn equity_series(
         &self,
         account_id: AccountId,
+        since_ms: u64,
     ) -> Result<Vec<crate::aggregates::EquityPoint>, StoreError> {
         let txn = self.db.begin_read()?;
         let table = txn.open_table(EQUITY_POINTS)?;
@@ -2110,7 +2114,10 @@ impl Store {
         let mut out = Vec::new();
         for entry in table.range::<&[u8]>(lo.as_slice()..=hi.as_slice())? {
             let (_k, v) = entry?;
-            out.push(rmp_serde::from_slice(v.value())?);
+            let point: crate::aggregates::EquityPoint = rmp_serde::from_slice(v.value())?;
+            if point.timestamp_ms >= since_ms {
+                out.push(point);
+            }
         }
         Ok(out)
     }
@@ -4082,7 +4089,7 @@ mod tests {
             .unwrap();
 
         // Equity: oldest-first, all points.
-        let got = store.equity_series(aid).unwrap();
+        let got = store.equity_series(aid, 0).unwrap();
         assert_eq!(got, pts);
 
         // History: newest-first, filtered + paged like AccountEventLog::query.
@@ -4100,7 +4107,7 @@ mod tests {
         assert!(page.iter().all(|e| !(e.block_height == 2 && e.seq == 1)));
 
         // Unknown account → empty.
-        assert!(store.equity_series(AccountId(99)).unwrap().is_empty());
+        assert!(store.equity_series(AccountId(99), 0).unwrap().is_empty());
         assert!(store
             .account_events(AccountId(99), 10, None, None)
             .unwrap()

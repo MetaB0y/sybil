@@ -14,13 +14,7 @@ use matching_engine::MarketId;
 use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::response::*;
-
-fn now_unix_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
+use crate::util::now_ms;
 
 /// GET /v1/activity/overview
 #[utoipa::path(
@@ -34,7 +28,7 @@ fn now_unix_ms() -> u64 {
 pub async fn get_activity_overview(
     State(state): State<AppState>,
 ) -> Result<Json<ActivityOverviewResponse>, AppError> {
-    let now_ms = now_unix_ms();
+    let now_ms = now_ms();
     let (
         (all_time_traders, traders_24h),
         (all_time_volume, volume_24h),

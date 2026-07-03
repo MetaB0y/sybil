@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use sybil_api::util::now_ms;
 
 use clap::{Args, Parser, Subcommand};
 use matching_engine::NANOS_PER_DOLLAR;
@@ -394,11 +394,4 @@ fn tail_audit_log(path: &Path, limit: usize) -> Result<(), CliError> {
 fn print_json<T: Serialize>(value: &T) -> Result<(), CliError> {
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
 }
