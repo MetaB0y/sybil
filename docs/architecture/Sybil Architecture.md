@@ -104,6 +104,7 @@ The matching problem itself has an elegant mathematical structure: without marke
 
 ## Operations and Deployment
 - [[Deployment Profiles]] — local/devnet/prod knob matrix, durability guardrails, and history-serving policy
+- [[Acknowledged-Write WAL Replay]] — WAL table inventory, replay-order dependency matrix, and the single-sequenced-WAL decision record
 
 ## Arena and Development
 - [[Python SDK]] — async client library
