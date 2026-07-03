@@ -9,14 +9,14 @@
 //! Note: this is NOT the "Augmented LP" from `eg-conic.typ` (which is a
 //! custom interior-point solver with Woodbury rank-K correction).
 
-use std::collections::HashMap;
 use std::time::Instant;
 
-use matching_engine::{MmSide, Order, Problem};
+use matching_engine::Problem;
 
-use crate::lp_solver::{build_and_solve_lp, build_solver_context, finalize_result};
+use crate::lp_solver::{
+    build_and_solve_lp, build_solver_context, project_and_finalize, welfare_weights,
+};
 use crate::result::PipelineResult;
-use crate::solver::order_sign;
 
 /// Configuration for the iterative LP solver.
 #[derive(Clone, Debug)]
@@ -81,17 +81,10 @@ impl IterLpSolver {
         let ctx = build_solver_context(problem);
 
         // Per-order MM info: order_index -> (mm_constraint_index, MmSide)
-        let mm_order_map: HashMap<usize, (usize, MmSide)> = orders
-            .iter()
-            .enumerate()
-            .filter_map(|(i, o)| ctx.mm_order_info.get(&o.id).map(|&info| (i, info)))
-            .collect();
+        let mm_order_map = ctx.mm_order_index_map(orders);
 
         // Per-order welfare weight: sign × limit_price
-        let welfare_weights: Vec<f64> = orders
-            .iter()
-            .map(|o| order_sign(o) * o.limit_price as f64)
-            .collect();
+        let welfare_weights = welfare_weights(orders);
 
         let num_mm = problem.mm_constraints.len();
 
@@ -215,26 +208,7 @@ impl IterLpSolver {
         // Projection LP: cap max_fill at converged allocation, solve
         // standard welfare LP for exact prices
         // ================================================================
-
-        let mut projected_orders: Vec<Order> = orders.to_vec();
-        for i in 0..n {
-            let aug_fill = converged_q[i].round().max(0.0) as u64;
-            projected_orders[i].max_fill = aug_fill.min(orders[i].max_fill);
-        }
-
-        let projection_obj: Vec<f64> = welfare_weights.clone();
-        let Some(final_sol) = build_and_solve_lp(
-            &projected_orders,
-            &ctx.markets,
-            &ctx.market_to_group,
-            ctx.num_groups,
-            &projection_obj,
-            &[],
-        ) else {
-            return PipelineResult::empty();
-        };
-
-        finalize_result(&final_sol, problem, &ctx, start)
+        project_and_finalize(&converged_q, problem, &ctx, start)
     }
 }
 
@@ -257,9 +231,14 @@ impl crate::Solver for IterLpSolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_fixtures::{
+        assert_buy_no_within_budget, assert_mm_not_filled, group_minting_problem, minting_problem,
+        mm_budget_problem, multiple_mms_problem, no_profitable_trades_problem,
+        single_market_problem, zero_budget_mm_problem,
+    };
     use matching_engine::{
         outcome_sell, shares_to_qty, simple_no_buy, simple_yes_buy, MarketGroup, MmConstraint,
-        MmId, NANOS_PER_DOLLAR,
+        MmId, MmSide, NANOS_PER_DOLLAR,
     };
 
     fn dollars(nanos: i64) -> f64 {
@@ -268,35 +247,7 @@ mod tests {
 
     #[test]
     fn test_aug_lp_single_market() {
-        let mut problem = Problem::new("aug_lp_single");
-        let market = problem.markets.add_binary("market");
-
-        problem.orders.push(outcome_sell(
-            &problem.markets,
-            100,
-            market,
-            0,
-            500_000_000,
-            1000,
-        ));
-        problem.orders.push(outcome_sell(
-            &problem.markets,
-            101,
-            market,
-            1,
-            500_000_000,
-            1000,
-        ));
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            1,
-            market,
-            600_000_000,
-            100,
-        ));
-
-        let solver = IterLpSolver::new();
-        let result = solver.solve(&problem);
+        let result = IterLpSolver::new().solve(&single_market_problem());
 
         assert!(
             result.result.total_welfare() > 0,
@@ -308,22 +259,7 @@ mod tests {
 
     #[test]
     fn test_aug_lp_minting() {
-        let mut problem = Problem::new("aug_lp_minting");
-        let market = problem.markets.add_binary("market");
-
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            1,
-            market,
-            600_000_000,
-            100,
-        ));
-        problem
-            .orders
-            .push(simple_no_buy(&problem.markets, 2, market, 500_000_000, 100));
-
-        let solver = IterLpSolver::new();
-        let result = solver.solve(&problem);
+        let result = IterLpSolver::new().solve(&minting_problem());
 
         assert_eq!(
             result.result.orders_filled, 2,
@@ -334,29 +270,7 @@ mod tests {
 
     #[test]
     fn test_aug_lp_group_minting() {
-        let mut problem = Problem::new("aug_lp_group_mint");
-        let m0 = problem.markets.add_binary("A");
-        let m1 = problem.markets.add_binary("B");
-        let m2 = problem.markets.add_binary("C");
-
-        let mut group = MarketGroup::new("Election");
-        group.add_market(m0);
-        group.add_market(m1);
-        group.add_market(m2);
-        problem.add_market_group(group);
-
-        problem
-            .orders
-            .push(simple_yes_buy(&problem.markets, 1, m0, 400_000_000, 100));
-        problem
-            .orders
-            .push(simple_yes_buy(&problem.markets, 2, m1, 350_000_000, 100));
-        problem
-            .orders
-            .push(simple_yes_buy(&problem.markets, 3, m2, 300_000_000, 100));
-
-        let solver = IterLpSolver::new();
-        let result = solver.solve(&problem);
+        let result = IterLpSolver::new().solve(&group_minting_problem());
 
         assert!(
             result.result.orders_filled >= 3,
@@ -376,22 +290,7 @@ mod tests {
 
     #[test]
     fn test_aug_lp_no_profitable_trades() {
-        let mut problem = Problem::new("no_profit");
-        let market = problem.markets.add_binary("market");
-
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            1,
-            market,
-            300_000_000,
-            100,
-        ));
-        problem
-            .orders
-            .push(simple_no_buy(&problem.markets, 2, market, 300_000_000, 100));
-
-        let solver = IterLpSolver::new();
-        let result = solver.solve(&problem);
+        let result = IterLpSolver::new().solve(&no_profitable_trades_problem());
 
         assert_eq!(
             result.result.orders_filled, 0,
@@ -401,121 +300,22 @@ mod tests {
 
     #[test]
     fn test_aug_lp_mm_budget() {
-        let mut problem = Problem::new("aug_lp_mm_budget");
-        let market = problem.markets.add_binary("market");
-
-        // YES buyer at 60c, 500 shares
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            1,
-            market,
-            600_000_000,
-            500,
-        ));
-
-        // MM buying NO at 50c, 1000 shares, budget $50
-        let mm_order = simple_no_buy(&problem.markets, 200, market, 500_000_000, 1000);
-        problem.orders.push(mm_order);
-
-        let mut mm = MmConstraint::new(MmId(1), 50 * NANOS_PER_DOLLAR);
-        mm.add_order(200, MmSide::BuyNo);
-        problem.mm_constraints.push(mm);
-
-        let solver = IterLpSolver::new();
-        let result = solver.solve(&problem);
+        let result = IterLpSolver::new().solve(&mm_budget_problem());
 
         assert!(result.result.orders_filled > 0, "should fill some orders");
-
-        // Check MM budget not exceeded
-        let mm_fill = result.result.fills.iter().find(|f| f.order_id == 200);
-        if let Some(fill) = mm_fill {
-            let capital = MmSide::BuyNo.capital_needed(fill.fill_price, fill.fill_qty);
-            assert!(
-                capital <= 50 * NANOS_PER_DOLLAR + NANOS_PER_DOLLAR / 100,
-                "MM capital {} should not exceed budget {}",
-                capital,
-                50 * NANOS_PER_DOLLAR
-            );
-        }
+        assert_buy_no_within_budget(&result, 200, 50);
     }
 
     #[test]
     fn test_aug_lp_zero_budget_mm() {
-        let mut problem = Problem::new("aug_lp_zero_budget");
-        let market = problem.markets.add_binary("market");
+        let result = IterLpSolver::new().solve(&zero_budget_mm_problem());
 
-        // YES buyer + NO buyer pair via minting
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            1,
-            market,
-            600_000_000,
-            100,
-        ));
-        problem.orders.push(simple_no_buy(
-            &problem.markets,
-            100,
-            market,
-            500_000_000,
-            100,
-        ));
-
-        // MM with zero budget
-        let mm_order = simple_no_buy(&problem.markets, 200, market, 500_000_000, 1000);
-        problem.orders.push(mm_order);
-
-        let mut mm = MmConstraint::new(MmId(1), 0);
-        mm.add_order(200, MmSide::BuyNo);
-        problem.mm_constraints.push(mm);
-
-        let solver = IterLpSolver::new();
-        let result = solver.solve(&problem);
-
-        // Zero-budget MM should get zero fills
-        let mm_fill = result.result.fills.iter().find(|f| f.order_id == 200);
-        assert!(
-            mm_fill.is_none() || mm_fill.unwrap().fill_qty == 0,
-            "zero-budget MM should not be filled"
-        );
+        assert_mm_not_filled(&result, 200);
     }
 
     #[test]
     fn test_aug_lp_multiple_mms() {
-        let mut problem = Problem::new("aug_lp_multi_mm");
-        let market = problem.markets.add_binary("market");
-
-        // YES buyers
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            1,
-            market,
-            600_000_000,
-            1000,
-        ));
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            2,
-            market,
-            550_000_000,
-            1000,
-        ));
-
-        // MM1: buys NO at 45c, budget $100
-        let mm1_order = simple_no_buy(&problem.markets, 200, market, 450_000_000, 2000);
-        problem.orders.push(mm1_order);
-        let mut mm1 = MmConstraint::new(MmId(1), 100 * NANOS_PER_DOLLAR);
-        mm1.add_order(200, MmSide::BuyNo);
-        problem.mm_constraints.push(mm1);
-
-        // MM2: buys NO at 50c, budget $50
-        let mm2_order = simple_no_buy(&problem.markets, 300, market, 500_000_000, 2000);
-        problem.orders.push(mm2_order);
-        let mut mm2 = MmConstraint::new(MmId(2), 50 * NANOS_PER_DOLLAR);
-        mm2.add_order(300, MmSide::BuyNo);
-        problem.mm_constraints.push(mm2);
-
-        let solver = IterLpSolver::new();
-        let result = solver.solve(&problem);
+        let result = IterLpSolver::new().solve(&multiple_mms_problem());
 
         assert!(result.result.orders_filled > 0);
         assert!(result.result.total_welfare() > 0);

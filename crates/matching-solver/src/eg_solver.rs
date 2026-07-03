@@ -15,14 +15,14 @@
 //! `dφ/dγ = 0` finds the optimal step in ~15 iterations. This typically halves
 //! the number of LP oracle calls vs fixed `γ = 2/(t+2)`.
 
-use std::collections::HashMap;
 use std::time::Instant;
 
-use matching_engine::{MmSide, Order, Problem};
+use matching_engine::{Order, Problem};
 
-use crate::lp_solver::{build_and_solve_lp, build_solver_context, finalize_result};
+use crate::lp_solver::{
+    build_and_solve_lp, build_solver_context, project_and_finalize, welfare_weights,
+};
 use crate::result::PipelineResult;
-use crate::solver::order_sign;
 
 /// Configuration for the Eisenberg-Gale solver.
 #[derive(Clone, Debug)]
@@ -88,11 +88,7 @@ impl EgSolver {
         let ctx = build_solver_context(problem);
 
         // Per-order MM info: order_index -> (mm_constraint_index, MmSide)
-        let mm_order_map: HashMap<usize, (usize, MmSide)> = orders
-            .iter()
-            .enumerate()
-            .filter_map(|(i, o)| ctx.mm_order_info.get(&o.id).map(|&info| (i, info)))
-            .collect();
+        let mm_order_map = ctx.mm_order_index_map(orders);
 
         // Group MM orders by constraint index
         let num_mm = problem.mm_constraints.len();
@@ -102,10 +98,7 @@ impl EgSolver {
         }
 
         // Precompute per-order welfare weight: sign * limit_price
-        let welfare_weights: Vec<f64> = orders
-            .iter()
-            .map(|o| order_sign(o) * o.limit_price as f64)
-            .collect();
+        let welfare_weights = welfare_weights(orders);
 
         // MM budgets
         let mm_budgets: Vec<f64> = problem
@@ -328,30 +321,10 @@ impl EgSolver {
         //
         // FW produces q values that are convex combinations of LP vertices.
         // The last LP's duals don't correspond to this allocation (different
-        // objective). Solve one final LP with standard welfare objective but
-        // with upper bounds capped at the FW allocation. This gives proper
-        // duals where complementary slackness guarantees UCP.
-
-        let projection_obj: Vec<f64> = welfare_weights.clone();
-
-        let mut projected_orders: Vec<Order> = orders.to_vec();
-        for i in 0..n {
-            let fw_fill = q[i].round().max(0.0) as u64;
-            projected_orders[i].max_fill = fw_fill.min(orders[i].max_fill);
-        }
-
-        let Some(final_sol) = build_and_solve_lp(
-            &projected_orders,
-            &ctx.markets,
-            &ctx.market_to_group,
-            ctx.num_groups,
-            &projection_obj,
-            &[],
-        ) else {
-            return PipelineResult::empty();
-        };
-
-        finalize_result(&final_sol, problem, &ctx, start)
+        // objective). The shared epilogue caps upper bounds at the FW
+        // allocation and re-solves the standard welfare LP for proper duals
+        // where complementary slackness guarantees UCP.
+        project_and_finalize(&q, problem, &ctx, start)
     }
 
     /// Fast path: no MM orders → single LP solve (identical to LpSolver).
@@ -362,10 +335,7 @@ impl EgSolver {
         ctx: &crate::lp_solver::SolverContext,
         start: Instant,
     ) -> PipelineResult {
-        let objective_coeffs: Vec<f64> = orders
-            .iter()
-            .map(|o| order_sign(o) * o.limit_price as f64)
-            .collect();
+        let objective_coeffs = welfare_weights(orders);
 
         let Some(sol) = build_and_solve_lp(
             orders,
@@ -378,7 +348,7 @@ impl EgSolver {
             return PipelineResult::empty();
         };
 
-        finalize_result(&sol, problem, ctx, start)
+        crate::lp_solver::finalize_result(&sol, problem, ctx, start)
     }
 }
 
@@ -401,43 +371,16 @@ impl crate::Solver for EgSolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matching_engine::{
-        outcome_sell, simple_no_buy, simple_yes_buy, MarketGroup, MmConstraint, MmId,
-        NANOS_PER_DOLLAR,
+    use crate::test_fixtures::{
+        assert_buy_no_within_budget, assert_mm_not_filled, group_minting_problem, minting_problem,
+        mm_budget_problem, multiple_mms_problem, no_profitable_trades_problem,
+        single_market_problem, zero_budget_mm_problem,
     };
 
     #[test]
     fn test_eg_single_market_matches_lp() {
-        // No MMs → EG should produce identical results to LP
-        let mut problem = Problem::new("eg_single");
-        let market = problem.markets.add_binary("market");
-
-        problem.orders.push(outcome_sell(
-            &problem.markets,
-            100,
-            market,
-            0,
-            500_000_000,
-            1000,
-        ));
-        problem.orders.push(outcome_sell(
-            &problem.markets,
-            101,
-            market,
-            1,
-            500_000_000,
-            1000,
-        ));
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            1,
-            market,
-            600_000_000,
-            100,
-        ));
-
-        let solver = EgSolver::new();
-        let result = solver.solve(&problem);
+        // No MMs -> EG should produce identical results to LP
+        let result = EgSolver::new().solve(&single_market_problem());
 
         assert!(
             result.result.total_welfare() > 0,
@@ -449,22 +392,7 @@ mod tests {
 
     #[test]
     fn test_eg_minting() {
-        let mut problem = Problem::new("eg_minting");
-        let market = problem.markets.add_binary("market");
-
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            1,
-            market,
-            600_000_000,
-            100,
-        ));
-        problem
-            .orders
-            .push(simple_no_buy(&problem.markets, 2, market, 500_000_000, 100));
-
-        let solver = EgSolver::new();
-        let result = solver.solve(&problem);
+        let result = EgSolver::new().solve(&minting_problem());
 
         assert_eq!(
             result.result.orders_filled, 2,
@@ -475,29 +403,7 @@ mod tests {
 
     #[test]
     fn test_eg_group_minting() {
-        let mut problem = Problem::new("eg_group_mint");
-        let m0 = problem.markets.add_binary("A");
-        let m1 = problem.markets.add_binary("B");
-        let m2 = problem.markets.add_binary("C");
-
-        let mut group = MarketGroup::new("Election");
-        group.add_market(m0);
-        group.add_market(m1);
-        group.add_market(m2);
-        problem.add_market_group(group);
-
-        problem
-            .orders
-            .push(simple_yes_buy(&problem.markets, 1, m0, 400_000_000, 100));
-        problem
-            .orders
-            .push(simple_yes_buy(&problem.markets, 2, m1, 350_000_000, 100));
-        problem
-            .orders
-            .push(simple_yes_buy(&problem.markets, 3, m2, 300_000_000, 100));
-
-        let solver = EgSolver::new();
-        let result = solver.solve(&problem);
+        let result = EgSolver::new().solve(&group_minting_problem());
 
         assert!(
             result.result.orders_filled >= 3,
@@ -517,22 +423,7 @@ mod tests {
 
     #[test]
     fn test_eg_no_profitable_trades() {
-        let mut problem = Problem::new("no_profit");
-        let market = problem.markets.add_binary("market");
-
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            1,
-            market,
-            300_000_000,
-            100,
-        ));
-        problem
-            .orders
-            .push(simple_no_buy(&problem.markets, 2, market, 300_000_000, 100));
-
-        let solver = EgSolver::new();
-        let result = solver.solve(&problem);
+        let result = EgSolver::new().solve(&no_profitable_trades_problem());
 
         assert_eq!(
             result.result.orders_filled, 0,
@@ -542,127 +433,26 @@ mod tests {
 
     #[test]
     fn test_eg_mm_budget_absorption() {
-        // MM with limited budget — EG should respect budget.
+        // MM with limited budget -> EG should respect budget.
         // YES buyer + NO buyer (MM) pair via minting: mint costs $1,
-        // recovers 60c + 50c = $1.10 → profitable.
-        let mut problem = Problem::new("eg_mm_budget");
-        let market = problem.markets.add_binary("market");
+        // recovers 60c + 50c = $1.10 -> profitable.
+        let result = EgSolver::new().solve(&mm_budget_problem());
 
-        // YES buyer at 60c, 500 shares
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            1,
-            market,
-            600_000_000,
-            500,
-        ));
-
-        // MM buying NO at 50c, 1000 shares, budget $50
-        // BuyNo capital = (1 - p_yes) * qty
-        let mm_order = simple_no_buy(&problem.markets, 200, market, 500_000_000, 1000);
-        problem.orders.push(mm_order);
-
-        let mut mm = MmConstraint::new(MmId(1), 50 * NANOS_PER_DOLLAR); // $50 budget
-        mm.add_order(200, MmSide::BuyNo);
-        problem.mm_constraints.push(mm);
-
-        let solver = EgSolver::new();
-        let result = solver.solve(&problem);
-
-        // Should fill something
         assert!(result.result.orders_filled > 0, "should fill some orders");
-
-        // Check MM budget not exceeded
-        let mm_fill = result.result.fills.iter().find(|f| f.order_id == 200);
-        if let Some(fill) = mm_fill {
-            let capital = MmSide::BuyNo.capital_needed(fill.fill_price, fill.fill_qty);
-            assert!(
-                capital <= 50 * NANOS_PER_DOLLAR + NANOS_PER_DOLLAR / 100, // 1% tolerance for rounding
-                "MM capital {} should not exceed budget {}",
-                capital,
-                50 * NANOS_PER_DOLLAR
-            );
-        }
+        assert_buy_no_within_budget(&result, 200, 50);
     }
 
     #[test]
     fn test_eg_zero_mm_budget() {
-        let mut problem = Problem::new("eg_zero_budget");
-        let market = problem.markets.add_binary("market");
+        let result = EgSolver::new().solve(&zero_budget_mm_problem());
 
-        // YES buyer + NO buyer pair via minting
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            1,
-            market,
-            600_000_000,
-            100,
-        ));
-        problem.orders.push(simple_no_buy(
-            &problem.markets,
-            100,
-            market,
-            500_000_000,
-            100,
-        ));
-
-        // MM with zero budget (also wants NO)
-        let mm_order = simple_no_buy(&problem.markets, 200, market, 500_000_000, 1000);
-        problem.orders.push(mm_order);
-
-        let mut mm = MmConstraint::new(MmId(1), 0);
-        mm.add_order(200, MmSide::BuyNo);
-        problem.mm_constraints.push(mm);
-
-        let solver = EgSolver::new();
-        let result = solver.solve(&problem);
-
-        // Zero-budget MM should get zero fills
-        let mm_fill = result.result.fills.iter().find(|f| f.order_id == 200);
-        assert!(
-            mm_fill.is_none() || mm_fill.unwrap().fill_qty == 0,
-            "zero-budget MM should not be filled"
-        );
+        assert_mm_not_filled(&result, 200);
     }
 
     #[test]
     fn test_eg_multiple_mms() {
         // Two MMs with different budgets, both buying NO to pair with YES buyers via minting
-        let mut problem = Problem::new("eg_multi_mm");
-        let market = problem.markets.add_binary("market");
-
-        // YES buyers
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            1,
-            market,
-            600_000_000,
-            1000,
-        ));
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            2,
-            market,
-            550_000_000,
-            1000,
-        ));
-
-        // MM1: buys NO at 45c, budget $100
-        let mm1_order = simple_no_buy(&problem.markets, 200, market, 450_000_000, 2000);
-        problem.orders.push(mm1_order);
-        let mut mm1 = MmConstraint::new(MmId(1), 100 * NANOS_PER_DOLLAR);
-        mm1.add_order(200, MmSide::BuyNo);
-        problem.mm_constraints.push(mm1);
-
-        // MM2: buys NO at 50c, budget $50
-        let mm2_order = simple_no_buy(&problem.markets, 300, market, 500_000_000, 2000);
-        problem.orders.push(mm2_order);
-        let mut mm2 = MmConstraint::new(MmId(2), 50 * NANOS_PER_DOLLAR);
-        mm2.add_order(300, MmSide::BuyNo);
-        problem.mm_constraints.push(mm2);
-
-        let solver = EgSolver::new();
-        let result = solver.solve(&problem);
+        let result = EgSolver::new().solve(&multiple_mms_problem());
 
         assert!(result.result.orders_filled > 0);
         assert!(result.result.total_welfare() > 0);

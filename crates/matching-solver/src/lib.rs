@@ -29,6 +29,9 @@ pub mod iterative_lp_solver;
 #[cfg(feature = "lp")]
 pub mod decomposed;
 
+#[cfg(all(test, feature = "lp"))]
+pub(crate) mod test_fixtures;
+
 // === Public API ===
 
 // Result types

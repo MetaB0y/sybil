@@ -14,7 +14,7 @@ use std::time::Instant;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-use matching_engine::{MarketGroup, MarketId, MarketSet, MmConstraint, MmSide, Order, Problem};
+use matching_engine::{MarketGroup, MarketId, MarketSet, MmConstraint, Order, Problem};
 
 use crate::result::{PipelineResult, PipelineTimings, PriceDiscoveryResult};
 use crate::MatchingResult;
@@ -117,16 +117,7 @@ impl<S: crate::Solver> DecomposedSolver<S> {
         // Post-aggregation: enforce global MM budgets + restore position balance.
         // Per-component LP budget enforcement is imperfect (linearized + rounded),
         // so small overruns compound across components.
-        let mm_order_info: HashMap<u64, (usize, MmSide)> = problem
-            .mm_constraints
-            .iter()
-            .enumerate()
-            .flat_map(|(mm_idx, mm)| {
-                mm.order_ids.iter().filter_map(move |&oid| {
-                    mm.order_sides.get(&oid).map(|&side| (oid, (mm_idx, side)))
-                })
-            })
-            .collect();
+        let mm_order_info = crate::lp_solver::build_mm_order_info(problem);
 
         if !problem.mm_constraints.is_empty() {
             crate::lp_solver::trim_mm_budget_overflows(
@@ -701,7 +692,7 @@ fn compute_mm_utilities(
                     }
                     let order = &problem.orders[order_idx];
                     // L_i = sign_i × limit_price_i (welfare weight)
-                    let w_i = if order.is_seller() { -1.0 } else { 1.0 } * order.limit_price as f64;
+                    let w_i = crate::lp_solver::welfare_weight(order);
                     // Only positive-weight orders contribute to U_k
                     if w_i <= 0.0 {
                         continue;

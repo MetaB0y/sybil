@@ -157,10 +157,7 @@ impl LpSolver {
         budget_rows: &[(Vec<(usize, f64)>, f64)],
     ) -> Option<LpSolution> {
         // Default welfare objective: sign_i * limit_price_i
-        let objective_coeffs: Vec<f64> = orders
-            .iter()
-            .map(|o| order_sign(o) * o.limit_price as f64)
-            .collect();
+        let objective_coeffs = welfare_weights(orders);
         build_and_solve_lp(
             orders,
             markets,
@@ -582,6 +579,36 @@ pub(crate) fn trim_mm_budget_overflows(
     result.fills.retain(|f| f.fill_qty > 0);
 }
 
+/// Per-order welfare weight in the objective: sign × limit price.
+///
+/// Buyers contribute `+limit_price`, sellers `-limit_price`. This is the
+/// linear welfare coefficient shared by every LP-family objective.
+pub(crate) fn welfare_weight(order: &Order) -> f64 {
+    order_sign(order) * order.limit_price as f64
+}
+
+/// Per-order welfare weights (`sign × limit price`) for all orders, in order.
+pub(crate) fn welfare_weights(orders: &[Order]) -> Vec<f64> {
+    orders.iter().map(welfare_weight).collect()
+}
+
+/// Build the MM order map `order_id → (mm_constraint_index, MmSide)`.
+///
+/// Shared by [`build_solver_context`] and the decomposed solver's global
+/// budget-trimming pass.
+pub(crate) fn build_mm_order_info(problem: &Problem) -> HashMap<u64, (usize, MmSide)> {
+    problem
+        .mm_constraints
+        .iter()
+        .enumerate()
+        .flat_map(|(mm_idx, mm)| {
+            mm.order_ids
+                .iter()
+                .filter_map(move |&oid| mm.order_sides.get(&oid).map(|&side| (oid, (mm_idx, side))))
+        })
+        .collect()
+}
+
 /// Common setup shared across all LP-family solvers: collect markets,
 /// build market-to-group mapping, build MM order info.
 pub(crate) struct SolverContext {
@@ -589,6 +616,20 @@ pub(crate) struct SolverContext {
     pub market_to_group: HashMap<MarketId, usize>,
     pub num_groups: usize,
     pub mm_order_info: HashMap<u64, (usize, MmSide)>,
+}
+
+impl SolverContext {
+    /// Per-order MM info keyed by order *index*: `order_index → (mm_idx, side)`.
+    ///
+    /// Convenience view over [`Self::mm_order_info`] for solvers that iterate
+    /// orders positionally (EG, IterLP, Conic).
+    pub(crate) fn mm_order_index_map(&self, orders: &[Order]) -> HashMap<usize, (usize, MmSide)> {
+        orders
+            .iter()
+            .enumerate()
+            .filter_map(|(i, o)| self.mm_order_info.get(&o.id).map(|&info| (i, info)))
+            .collect()
+    }
 }
 
 /// Build the common context from a Problem.
@@ -600,21 +641,11 @@ pub(crate) fn build_solver_context(problem: &Problem) -> SolverContext {
         .enumerate()
         .flat_map(|(g_idx, group)| group.markets.iter().map(move |&m| (m, g_idx)))
         .collect();
-    let mm_order_info: HashMap<u64, (usize, MmSide)> = problem
-        .mm_constraints
-        .iter()
-        .enumerate()
-        .flat_map(|(mm_idx, mm)| {
-            mm.order_ids
-                .iter()
-                .filter_map(move |&oid| mm.order_sides.get(&oid).map(|&side| (oid, (mm_idx, side))))
-        })
-        .collect();
     SolverContext {
         markets,
         market_to_group,
         num_groups: problem.market_groups.len(),
-        mm_order_info,
+        mm_order_info: build_mm_order_info(problem),
     }
 }
 
@@ -653,6 +684,45 @@ pub(crate) fn finalize_result(
     pipeline_result
 }
 
+/// Shared projection-LP epilogue for the EG, IterLP, and Conic solvers.
+///
+/// Their core phase (Frank-Wolfe, μ-iteration, or conic interior point)
+/// produces a continuous allocation whose duals don't yield valid clearing
+/// prices. This caps each order's `max_fill` at the rounded core allocation,
+/// re-solves the standard welfare LP for exact prices, and finalizes — so the
+/// LP's complementary slackness guarantees a uniform clearing price.
+///
+/// `allocation[i]` is the core-phase fill for order `i` (in the same order as
+/// `problem.orders`); it is rounded and clamped to `[0, max_fill]`.
+pub(crate) fn project_and_finalize(
+    allocation: &[f64],
+    problem: &Problem,
+    ctx: &SolverContext,
+    start: Instant,
+) -> PipelineResult {
+    let orders = &problem.orders;
+
+    let mut projected_orders: Vec<Order> = orders.to_vec();
+    for (i, order) in projected_orders.iter_mut().enumerate() {
+        let core_fill = allocation[i].round().max(0.0) as u64;
+        order.max_fill = core_fill.min(orders[i].max_fill);
+    }
+
+    let projection_obj = welfare_weights(orders);
+    let Some(final_sol) = build_and_solve_lp(
+        &projected_orders,
+        &ctx.markets,
+        &ctx.market_to_group,
+        ctx.num_groups,
+        &projection_obj,
+        &[],
+    ) else {
+        return PipelineResult::empty();
+    };
+
+    finalize_result(&final_sol, problem, ctx, start)
+}
+
 /// Recompute welfare, volume, and fill count from scratch.
 pub(crate) fn recompute_welfare(
     result: &mut MatchingResult,
@@ -676,42 +746,13 @@ pub(crate) fn recompute_welfare(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matching_engine::{outcome_sell, simple_no_buy, simple_yes_buy, MarketGroup};
+    use crate::test_fixtures::{
+        group_minting_problem, minting_problem, no_profitable_trades_problem, single_market_problem,
+    };
 
     #[test]
     fn test_lp_single_market() {
-        let mut problem = Problem::new("lp_single");
-        let market = problem.markets.add_binary("market");
-
-        // YES seller at 50c, 1000 shares
-        problem.orders.push(outcome_sell(
-            &problem.markets,
-            100,
-            market,
-            0,
-            500_000_000,
-            1000,
-        ));
-        // NO seller at 50c, 1000 shares
-        problem.orders.push(outcome_sell(
-            &problem.markets,
-            101,
-            market,
-            1,
-            500_000_000,
-            1000,
-        ));
-        // YES buyer at 60c, 100 shares
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            1,
-            market,
-            600_000_000,
-            100,
-        ));
-
-        let solver = LpSolver::new();
-        let result = solver.solve(&problem);
+        let result = LpSolver::new().solve(&single_market_problem());
 
         assert!(
             result.result.total_welfare() > 0,
@@ -723,24 +764,7 @@ mod tests {
 
     #[test]
     fn test_lp_minting() {
-        let mut problem = Problem::new("lp_minting");
-        let market = problem.markets.add_binary("market");
-
-        // YES buyer at 60c
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            1,
-            market,
-            600_000_000,
-            100,
-        ));
-        // NO buyer at 50c
-        problem
-            .orders
-            .push(simple_no_buy(&problem.markets, 2, market, 500_000_000, 100));
-
-        let solver = LpSolver::new();
-        let result = solver.solve(&problem);
+        let result = LpSolver::new().solve(&minting_problem());
 
         assert!(
             result.result.orders_filled == 2,
@@ -755,30 +779,8 @@ mod tests {
 
     #[test]
     fn test_lp_group_minting() {
-        let mut problem = Problem::new("lp_group_mint");
-        let m0 = problem.markets.add_binary("A");
-        let m1 = problem.markets.add_binary("B");
-        let m2 = problem.markets.add_binary("C");
-
-        let mut group = MarketGroup::new("Election");
-        group.add_market(m0);
-        group.add_market(m1);
-        group.add_market(m2);
-        problem.add_market_group(group);
-
-        // YES buyers at prices that sum to > $1 (profitable negrisk)
-        problem
-            .orders
-            .push(simple_yes_buy(&problem.markets, 1, m0, 400_000_000, 100));
-        problem
-            .orders
-            .push(simple_yes_buy(&problem.markets, 2, m1, 350_000_000, 100));
-        problem
-            .orders
-            .push(simple_yes_buy(&problem.markets, 3, m2, 300_000_000, 100));
-
-        let solver = LpSolver::new();
-        let result = solver.solve(&problem);
+        let problem = group_minting_problem();
+        let result = LpSolver::new().solve(&problem);
 
         assert!(
             result.result.orders_filled >= 3,
@@ -810,27 +812,9 @@ mod tests {
 
     #[test]
     fn test_lp_no_profitable_trades() {
-        let mut problem = Problem::new("no_profit");
-        let market = problem.markets.add_binary("market");
+        // Should not fill because minting costs $1 but only recovers $0.60.
+        let result = LpSolver::new().solve(&no_profitable_trades_problem());
 
-        // YES buyer at 30c
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            1,
-            market,
-            300_000_000,
-            100,
-        ));
-        // NO buyer at 30c → sum = 60c < $1, not profitable to mint
-        problem
-            .orders
-            .push(simple_no_buy(&problem.markets, 2, market, 300_000_000, 100));
-        // No sellers → only minting possible, but it costs $1 and only returns 60c
-
-        let solver = LpSolver::new();
-        let result = solver.solve(&problem);
-
-        // Should not fill because minting costs $1 but only recovers $0.60
         assert_eq!(
             result.result.orders_filled, 0,
             "should not fill unprofitable minting"
