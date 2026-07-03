@@ -17,7 +17,9 @@ from bots.random_trader import RandomTrader
 from sybil_client import SybilClient
 from sybil_client.types import NANOS_PER_DOLLAR, TimeInForce
 
+from .analyst import PersonaAnalyst
 from .db import DecisionDB
+from .fair_value_bus import FairValueBus
 from .market_selection import MarketProfile, select_markets
 from .metrics import ArenaMetrics, start_metrics_server
 from .news_feed import NewsFeed
@@ -300,12 +302,36 @@ async def run_live(config: LiveConfig):
             ("Flat", FlatStrategy()),
         ]
 
+        # SYB-210: split analysis from sizing. Each persona gets ONE analyst
+        # (the sole LLM caller) publishing onto a per-persona FairValueBus, and
+        # TWO sizers (Kelly + Flat) subscribing to that same bus. Both sizing
+        # arms therefore consume identical fair-value updates, and the analysis
+        # LLM is called N times per batch instead of 2N.
+        analysts = []
         traders = []
         for persona_key in config.personas:
             if persona_key not in PERSONAS:
                 log.warning("Unknown persona: %s, skipping", persona_key)
                 continue
             persona = PERSONAS[persona_key]
+
+            bus = FairValueBus(persona_key=persona_key)
+            analyst = PersonaAnalyst(
+                client=client,
+                news_feed=None,  # attached below after feed creation
+                bus=bus,
+                api_key=config.api_key,
+                persona=persona["persona"],
+                persona_key=persona_key,
+                model_name=config.model_name,
+                market_ids=market_ids,
+                markets_info=markets_info,
+                db=db,
+                min_llm_interval_s=config.min_llm_interval,
+                name=f"{persona['name']} (Analyst)",
+                metrics=metrics,
+            )
+            analysts.append(analyst)
 
             for strat_label, strategy in strategies:
                 bot_name = f"{persona['name']} ({strat_label})"
@@ -319,16 +345,12 @@ async def run_live(config: LiveConfig):
                     client=client,
                     account_id=account_id,
                     news_feed=None,  # set below after feed creation
-                    api_key=config.api_key,
-                    persona=persona["persona"],
                     strategy=strategy,
-                    model_name=config.model_name,
                     market_ids=market_ids,
                     markets_info=markets_info,
                     db=db,
-                    min_llm_interval_s=config.min_llm_interval,
                     name=bot_name,
-                    metrics=metrics,
+                    fair_value_bus=bus,
                 )
                 trader.time_in_force = config.order_time_in_force
                 traders.append(trader)
@@ -352,14 +374,21 @@ async def run_live(config: LiveConfig):
         feed = NewsFeed(active, api_key=config.api_key, poll_interval_s=config.news_poll_interval,
                         mapping_path=config.mapping_path, metrics=metrics)
 
-        # Wire feed into traders. Each trader registers its own subscriber view
-        # so the Kelly and Flat arms both receive every article (SYB-192).
+        # Wire feed into analysts (news subscription) and sizers (price cache
+        # only). Each analyst registers its own subscriber view of the feed so
+        # every persona sees every article (SYB-192); the two sizers of a
+        # persona no longer subscribe to news — they consume the analyst's
+        # FairValueBus instead (SYB-210).
+        for analyst in analysts:
+            analyst.attach_feed_and_bus(feed, analyst.bus)
         for trader in traders:
             trader.attach_news_feed(feed)
 
         # 5. Run everything
-        log.info("Starting live trading with %d LLM traders + %d noise traders on %d markets",
-                 len(traders), len(noise_traders), len(active))
+        log.info(
+            "Starting live trading with %d analysts + %d sizers + %d noise traders on %d markets",
+            len(analysts), len(traders), len(noise_traders), len(active),
+        )
 
         stop_event = asyncio.Event()
         tasks = [
@@ -367,6 +396,8 @@ async def run_live(config: LiveConfig):
             asyncio.create_task(snapshot_portfolios(traders, db), name="snapshots"),
             asyncio.create_task(log_articles_loop(feed, db), name="article_logger"),
         ]
+        for a in analysts:
+            tasks.append(asyncio.create_task(supervise_bot(a, stop_event), name=f"analyst:{a.name}"))
         for t in traders:
             tasks.append(asyncio.create_task(supervise_bot(t, stop_event), name=f"trader:{t.name}"))
         for n in noise_traders:
@@ -376,6 +407,8 @@ async def run_live(config: LiveConfig):
         def _signal_handler():
             log.info("Shutdown requested")
             stop_event.set()
+            for a in analysts:
+                a.stop()
             for t in traders:
                 t.stop()
             for n in noise_traders:
@@ -407,6 +440,8 @@ async def run_live(config: LiveConfig):
                     log.error("Task %s exited unexpectedly", task.get_name())
                     failure = RuntimeError(f"Task {task.get_name()} exited unexpectedly")
             log.info("Stopping all tasks after worker failure...")
+            for a in analysts:
+                a.stop()
             for t in traders:
                 t.stop()
             for n in noise_traders:

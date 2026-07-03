@@ -1,7 +1,12 @@
-"""Tests for live trader bookkeeping."""
+"""Tests for the live sizer (LiveLlmTrader) bookkeeping and price resolution.
+
+Post SYB-210 the trader is an LLM-free sizer: it drains FairValueUpdates from a
+persona bus and rebalances mechanically. The analysis-LLM tests moved to
+test_analyst.py; the sizer/bus integration tests live in test_analyst.py too.
+"""
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 from live.trader import LiveLlmTrader, _order_to_log_dict
 from sybil_client import BuyYes
@@ -18,9 +23,6 @@ def _make_trader(db=None):
         client=MagicMock(),
         account_id=1,
         news_feed=news_feed,
-        api_key="test",
-        persona="Test persona",
-        model_name="test-model",
         market_ids=[7],
         markets_info={7: market},
         db=db,
@@ -131,115 +133,6 @@ def test_observed_market_prices_do_not_invent_default_prices():
     )
 
     assert trader._observed_market_prices(block) == {}
-
-
-def test_parse_fair_value_tolerates_trailing_dot():
-    trader = _make_trader()
-
-    parsed = trader._parse_fair_value(
-        "FAIR_VALUE: 0.85.\n"
-        "MOTIVATION: Strong new evidence.\n"
-        "ANALYSIS: The article directly updates the market."
-    )
-
-    assert parsed == (
-        0.85,
-        "Strong new evidence.",
-        "The article directly updates the market.",
-    )
-
-
-def test_parse_fair_value_invalid_number_returns_none():
-    trader = _make_trader()
-
-    assert trader._parse_fair_value("FAIR_VALUE: 0.8.5\nMOTIVATION: bad") is None
-
-
-def _make_multi_market_trader(market_ids):
-    from live.news_feed import LiveArticle
-
-    news_feed = MagicMock()
-    news_feed.polymarket_prices.get_price.return_value = 0.55
-    article = LiveArticle(
-        url="http://x/a",
-        title="Something happened",
-        source="src",
-        published=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        full_text="Body text.",
-    )
-    # The trader drains its own subscription, not the feed directly (SYB-192).
-    news_feed.subscribe.return_value.drain = AsyncMock(return_value=[article])
-
-    markets_info = {}
-    for mid in market_ids:
-        m = MagicMock()
-        m.id = mid
-        m.name = f"Market {mid}"
-        m.description = ""
-        m.resolution_criteria = ""
-        m.reference_price_nanos = None
-        markets_info[mid] = m
-
-    return LiveLlmTrader(
-        client=MagicMock(),
-        account_id=1,
-        news_feed=news_feed,
-        api_key="test",
-        persona="Test persona",
-        model_name="test-model",
-        market_ids=list(market_ids),
-        markets_info=markets_info,
-        min_llm_interval_s=1000.0,
-        name="Burst Trader",
-    )
-
-
-def _block():
-    from sybil_client.types import Block
-
-    return Block(
-        height=2,
-        parent_hash="",
-        state_root="",
-        fills=[],
-        clearing_prices={},
-        total_welfare=0,
-        total_volume=0,
-        orders_filled=0,
-    )
-
-
-async def test_llm_interval_gates_per_call_not_per_block():
-    # AR-6: several markets have fresh articles in a single block, but the
-    # min interval must cap the trader to one LLM call — not a burst.
-    trader = _make_multi_market_trader([7, 8, 9])
-    trader.balance_history = [500.0]
-    trader._observed_first_block = True
-    trader._call_llm = AsyncMock(
-        return_value=("FAIR_VALUE: 0.60\nMOTIVATION: m\nANALYSIS: a", 0.1)
-    )
-
-    await trader.on_block(_block())
-
-    assert trader._call_llm.call_count == 1
-
-
-async def test_llm_interval_allows_one_call_per_elapsed_interval():
-    # AR-6: after the interval elapses (simulated by resetting the timestamp),
-    # the next block is allowed exactly one more call.
-    trader = _make_multi_market_trader([7, 8])
-    trader.balance_history = [500.0]
-    trader._observed_first_block = True
-    trader._call_llm = AsyncMock(
-        return_value=("FAIR_VALUE: 0.60\nMOTIVATION: m\nANALYSIS: a", 0.1)
-    )
-
-    await trader.on_block(_block())
-    assert trader._call_llm.call_count == 1
-
-    trader._last_llm_call = 0.0  # interval elapsed
-    await trader.on_block(_block())
-    assert trader._call_llm.call_count == 2
 
 
 def test_db_persists_and_reattaches_bot_account(tmp_path):

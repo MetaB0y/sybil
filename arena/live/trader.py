@@ -1,30 +1,30 @@
-"""Live LLM-driven trader with pluggable sizing strategy.
+"""Live sizing trader — the LLM-free consumer half of the arena (SYB-210).
 
-Architecture:
-- LLM provides FAIR_VALUE estimates (probability analysis)
-- Sizing strategy computes target positions (Kelly, Flat, etc.)
-- Position management runs periodically (active selling when edge shrinks)
-- LLM is only called when new articles arrive; sizing is continuous
+Architecture (post analysis/sizing split):
+- A per-persona ``PersonaAnalyst`` (live/analyst.py) runs the analysis LLM and
+  publishes ``FairValueUpdate``s onto a ``FairValueBus``.
+- This trader is now a pure *sizer*: it drains fair-value updates, records the
+  decision, and runs mechanical sizing/rebalance (``_rebalance_all``, position
+  orders). Both the Kelly and Flat arms of one persona subscribe to the same
+  persona stream, so their fair-value inputs are provably identical.
+
+The class name ``LiveLlmTrader`` is retained (it is the DB ``trader_name`` and
+the sybil-api reader / runner wiring depend on it); it no longer calls an LLM.
 """
 
 import logging
-import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
-
-import openai
 
 from bots.base import BaseAgent
 from sybil_client import Block, OrderSpec
 from sybil_client.types import NANOS_PER_DOLLAR, Market
 
 from .db import DecisionDB
-from .news_feed import LiveArticle, NewsFeed, NewsSubscription
-
-if TYPE_CHECKING:
-    from .metrics import ArenaMetrics
+from .fair_value_bus import FairValueBus, FairValueSubscription
+from .news_feed import LiveArticle, NewsFeed
+from .pricing import market_price, observed_market_prices
 from .strategy import RESOLVED_HIGH, RESOLVED_LOW, KellyStrategy, SizingStrategy, position_orders
 
 log = logging.getLogger(__name__)
@@ -99,80 +99,41 @@ def _order_to_log_dict(order: OrderSpec) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# System prompt
-# --------------------------------------------------------------------------- #
-SYSTEM_PROMPT = """\
-You are analyzing news articles for a prediction market. Your job is to estimate the probability
-of the event occurring, given the evidence.
-
-You will be given:
-- A market question
-- Current market price (from Polymarket)
-- Your previous fair value estimate (if any)
-- Your current portfolio
-- One or more news articles
-
-Respond with your probability estimate and brief reasoning. Be concise.
-
-Key principles:
-- Base your estimate on the article evidence + prior fair value, not just the market price
-- If the article contains no NEW information, keep your estimate near your prior fair value
-- Only revise significantly for DIRECT evidence — tangential news warrants at most 1-2 cent
-  adjustment
-- Official actions > direct quotes > analysis > speculation > rumors
-- Most events have genuine uncertainty — avoid extreme probabilities unless evidence is
-  extraordinary
-
-Always respond in English regardless of article language."""
-
-
-# --------------------------------------------------------------------------- #
-# LiveLlmTrader
+# LiveLlmTrader (sizer)
 # --------------------------------------------------------------------------- #
 class LiveLlmTrader(BaseAgent):
-    """LLM-driven analysis + pluggable sizing strategy.
+    """Mechanical sizer driven by a persona's FairValueBus.
 
-    The LLM provides fair value estimates. The strategy computes target
-    positions. Position management runs periodically based on strategy's
-    rebalance_interval_s.
+    Consumes ``FairValueUpdate``s (no LLM), maintains target positions via the
+    sizing strategy, and rebalances on the strategy's cadence.
     """
 
     def __init__(
         self,
         client,
         account_id: int,
-        news_feed: NewsFeed,
-        api_key: str,
-        persona: str,
+        news_feed: NewsFeed | None,
         strategy: SizingStrategy | None = None,
-        model_name: str = "deepseek/deepseek-v4-flash",
         market_ids: list[int] | None = None,
         markets_info: dict[int, Market] | None = None,
         db: DecisionDB | None = None,
-        min_llm_interval_s: float = 60.0,
         name: str | None = None,
-        metrics: "ArenaMetrics | None" = None,
+        fair_value_bus: FairValueBus | None = None,
     ):
         super().__init__(client, account_id, name or "LiveLlmTrader", market_ids)
+        # The feed is kept only for its Polymarket price cache; the sizer no
+        # longer subscribes to news (analysis moved to PersonaAnalyst, SYB-210).
         self.news_feed = news_feed
-        # SYB-192: each trader drains its OWN subscriber view so the Kelly and
-        # Flat arms both see every article. When the feed is wired after
-        # construction (the runner passes news_feed=None), attach_news_feed
-        # registers the subscription then.
-        self.news_sub: NewsSubscription | None = (
-            news_feed.subscribe(name=name) if news_feed is not None else None
-        )
-        self.api_key = api_key
-        self.model_name = model_name
-        self.persona = persona
         self.strategy = strategy or KellyStrategy()
         self.markets_info = markets_info or {}
         self.db = db
-        self.metrics = metrics
-        self.min_llm_interval_s = min_llm_interval_s
 
-        self._llm_client: openai.AsyncOpenAI | None = None
-        self._last_llm_call: float = 0.0
+        # SYB-210: both sizing arms of a persona subscribe to the SAME bus, so
+        # they drain identical FairValueUpdate objects (provably equal A/B inputs).
+        self.fv_sub: FairValueSubscription | None = (
+            fair_value_bus.subscribe(name=name) if fair_value_bus is not None else None
+        )
+
         self._last_rebalance: float = 0.0
         self._observed_first_block = False
 
@@ -183,12 +144,15 @@ class LiveLlmTrader(BaseAgent):
         self._pending_order_logs: list[dict] = []
 
     def attach_news_feed(self, feed: NewsFeed) -> None:
-        """Wire in the shared feed and register this trader's own subscription.
-
-        Used by the runner, which constructs traders before the feed exists.
-        """
+        """Wire in the shared feed (price cache only; no news subscription)."""
         self.news_feed = feed
-        self.news_sub = feed.subscribe(name=self.name)
+
+    def subscribe_fair_values(self, bus: FairValueBus) -> None:
+        """Register this sizer's own view of its persona's fair-value bus.
+
+        Used by the runner, which constructs sizers before the bus exists.
+        """
+        self.fv_sub = bus.subscribe(name=self.name)
 
     def _record_trade(
         self,
@@ -249,74 +213,16 @@ class LiveLlmTrader(BaseAgent):
                 article_urls=article_urls,
             )
 
-    # -- LLM --
-
-    def _get_llm_client(self) -> openai.AsyncOpenAI:
-        if self._llm_client is None:
-            self._llm_client = openai.AsyncOpenAI(
-                base_url="https://openrouter.ai/api/v1",
-                api_key=self.api_key,
-                timeout=openai.Timeout(60.0, connect=10.0),
-                max_retries=0,
-            )
-        return self._llm_client
-
-    async def _call_llm(self, prompt: str) -> tuple[str, float]:
-        llm = self._get_llm_client()
-        t0 = time.monotonic()
-        resp = await llm.chat.completions.create(
-            model=self.model_name,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=2048,
-            extra_body={"reasoning": {"max_tokens": 1024}},
-        )
-        text = resp.choices[0].message.content or ""
-        duration = time.monotonic() - t0
-        if resp.usage:
-            log.info(
-                "[%s] tokens: prompt=%d completion=%d (%.1fs)",
-                self.name, resp.usage.prompt_tokens,
-                resp.usage.completion_tokens, duration,
-            )
-            if self.db:
-                self.db.log_token_usage(
-                    self.name, resp.usage.prompt_tokens,
-                    resp.usage.completion_tokens, self.model_name, duration,
-                )
-        return text, duration
-
     # -- Price helpers --
 
     def _get_market_price(self, market_id: int, block: Block) -> float:
-        # AR-1: prefer the freshly polled Polymarket mid so the sizing engine
-        # sees the same price the LLM prompt is shown. The startup
-        # reference_price_nanos snapshot is only a fallback — it used to win
-        # here and froze sizing prices at process start.
-        poly_price = self.news_feed.polymarket_prices.get_price(market_id)
-        if poly_price and poly_price > 0:
-            return poly_price
-
-        market = self.markets_info.get(market_id)
-        if market and market.reference_price_nanos is not None and market.reference_price_nanos > 0:
-            return market.reference_price_nanos / NANOS_PER_DOLLAR
-
-        if market_id in block.clearing_prices:
-            yes_nanos, _ = block.clearing_prices[market_id]
-            return yes_nanos / NANOS_PER_DOLLAR
-
-        return 0.0
+        return market_price(self.news_feed, self.markets_info, market_id, block)
 
     def _observed_market_prices(self, block: Block) -> dict[int, tuple[int, int]]:
         """Prices worth recording for live trading, without synthetic 50/50s."""
-        market_ids = self.market_ids or set(block.clearing_prices.keys())
-        prices: dict[int, tuple[int, int]] = {}
-        for market_id in market_ids:
-            ref = self._get_market_price(market_id, block)
-            if ref > 0:
-                yes_nanos = int(ref * NANOS_PER_DOLLAR)
-                prices[market_id] = (yes_nanos, NANOS_PER_DOLLAR - yes_nanos)
-        return prices
+        return observed_market_prices(
+            self.news_feed, self.markets_info, self.market_ids, block
+        )
 
     def _portfolio_value(self, block: Block) -> float:
         pv = self.current_balance
@@ -331,117 +237,6 @@ class LiveLlmTrader(BaseAgent):
             else:
                 pv += qty * (1 - price)
         return max(pv, 0.01)
-
-    # -- Prompt building --
-
-    def _format_recent_trades(self, market_id: int) -> str:
-        records = self.trade_log.get(market_id, [])
-        if not records:
-            return "No trades yet."
-        lines = []
-        for rec in records[-5:]:
-            t = rec.timestamp.strftime("%H:%M")
-            if not rec.orders:
-                lines.append(f"- [{t}] FV={rec.fair_value:.2f} | {rec.motivation}")
-            else:
-                order_desc = ", ".join(_describe_order(o) for o in rec.orders)
-                lines.append(f"- [{t}] FV={rec.fair_value:.2f} -> {order_desc} | {rec.motivation}")
-        return "\n".join(lines).rstrip()
-
-    def _build_prompt(
-        self, articles: list[LiveArticle], market: Market, block: Block
-    ) -> str:
-        market_id = market.id
-        yes_price = self._get_market_price(market_id, block)
-        if yes_price <= 0:
-            return ""
-
-        poly_price = self.news_feed.polymarket_prices.get_price(market_id)
-        if poly_price and poly_price > 0:
-            price_line = f"- Polymarket consensus: YES=${poly_price:.4f} | NO=${1 - poly_price:.4f}"
-        else:
-            price_line = f"- YES price: ${yes_price:.4f} | NO price: ${1 - yes_price:.4f}"
-
-        history = self.price_history.get(market_id, [])
-        recent_prices = [s.yes_price for s in history[-5:]]
-        if recent_prices:
-            price_line += f"\n- Recent prices: {', '.join(f'{p:.4f}' for p in recent_prices)}"
-
-        balance = self.current_balance
-        yes_shares = self.get_position(market_id, "YES")
-        no_shares = self.get_position(market_id, "NO")
-        pv = self._portfolio_value(block)
-
-        last_fv = self.fair_values.get(market_id)
-        last_fv_line = f"\n- Your last fair value estimate: {last_fv:.2f}" if last_fv else ""
-        portfolio_line = (
-            f"- Your portfolio: ${balance:.2f} cash, {yes_shares} YES shares, "
-            f"{no_shares} NO shares (~${pv:.0f} total){last_fv_line}"
-        )
-
-        context = ""
-        if market.description:
-            context += f"\n{market.description[:500]}"
-        if market.resolution_criteria:
-            context += f"\nResolution: {market.resolution_criteria[:200]}"
-
-        if len(articles) == 1:
-            art = articles[0]
-            text = art.full_text[:3000] if art.full_text else "(text unavailable)"
-            article_section = f'New article from {art.source}:\n"{art.title}"\n\n{text}'
-        else:
-            budget_per = max(500, 6000 // len(articles))
-            parts = ["New articles this batch:\n"]
-            for idx, art in enumerate(articles, 1):
-                text = art.full_text[:budget_per] if art.full_text else "(text unavailable)"
-                parts.append(f'[{idx}] From {art.source}: "{art.title}"\n{text}\n')
-            article_section = "\n".join(parts)
-
-        return f"""{SYSTEM_PROMPT}
-
-{self.persona}
-
-Market: "{market.name}"{context}
-
-Current state:
-{price_line}
-{portfolio_line}
-
-Recent trades:
-{self._format_recent_trades(market_id)}
-
-{article_section}
-
-Analyze and respond in this EXACT format:
-
-FAIR_VALUE: [Your probability estimate, 0.01-0.99]
-MOTIVATION: [1 sentence — why this fair value]
-ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
-
-    # -- LLM output parsing --
-
-    def _parse_fair_value(self, text: str) -> tuple[float, str, str] | None:
-        fv_match = re.search(r"FAIR_VALUE:\s*([\d.]+)", text)
-        if not fv_match:
-            log.warning("Failed to parse FAIR_VALUE from LLM output")
-            return None
-        raw_fair_value = fv_match.group(1)
-        try:
-            fair_value = float(raw_fair_value.rstrip("."))
-        except ValueError:
-            log.warning("Invalid FAIR_VALUE: %s", raw_fair_value)
-            return None
-        if not 0.01 <= fair_value <= 0.99:
-            log.warning("FAIR_VALUE out of range: %s", fair_value)
-            return None
-
-        KEYWORDS = r"\nANALYSIS:|\nFAIR_VALUE:|\nEDGE:|\nORDERS:|\nMOTIVATION:|\Z"
-        motiv_match = re.search(rf"MOTIVATION:\s*(.*?)(?={KEYWORDS})", text, re.DOTALL)
-        motivation = motiv_match.group(1).strip() if motiv_match else ""
-        analysis_match = re.search(rf"ANALYSIS:\s*(.*?)(?={KEYWORDS})", text, re.DOTALL)
-        analysis = analysis_match.group(1).strip() if analysis_match else ""
-
-        return (fair_value, motivation, analysis)
 
     # -- Position management --
 
@@ -497,6 +292,24 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
 
         return all_orders
 
+    def _clear_resolved_markets(self, block: Block) -> None:
+        """Drop fair values for resolved markets so the sizer exits them.
+
+        Pre-split, the trader cleared a resolved market's FV inside its own LLM
+        loop (only when a fresh article arrived). Post-split the analyst clears
+        its copy and stops publishing, so the sizer must notice resolution on
+        its own. This is LLM-free and runs every block, which is strictly more
+        robust; sizing math (_rebalance_all) is unchanged.
+        """
+        for market_id in list(self.fair_values.keys()):
+            ref_price = self._get_market_price(market_id, block)
+            if ref_price > 0 and (ref_price >= RESOLVED_HIGH or ref_price <= RESOLVED_LOW):
+                market = self.markets_info.get(market_id)
+                name = market.name[:30] if market else str(market_id)
+                log.info("[%s] %s resolved (price=%.2f), clearing FV",
+                         self.name, name, ref_price)
+                del self.fair_values[market_id]
+
     # -- Main loop --
 
     async def on_block(self, block: Block) -> list[OrderSpec]:
@@ -517,84 +330,41 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
             self._observed_first_block = True
             return []
 
-        # LLM analysis on new articles.
-        #
-        # AR-6: the min interval is enforced per LLM *call*, not per block. A
-        # single block can surface articles for many markets; the old loop-entry
-        # gate let one block fire an unbounded burst of sequential LLM calls.
-        # Here we stop draining once the per-trader budget is spent and leave the
-        # remaining markets' articles pending for a later block.
+        # Drain fair-value updates published by this persona's analyst. Each
+        # update is recorded per-sizer (matching the pre-split per-trader
+        # decision row) so sybil-api's per-trader_name reader is unchanged.
         for market_id in list(self.market_ids or []):
-            elapsed_llm = time.monotonic() - self._last_llm_call
-            if self._last_llm_call != 0 and elapsed_llm < self.min_llm_interval_s:
-                break
-
-            articles = await self.news_sub.drain(market_id) if self.news_sub else []
-            if not articles:
+            updates = await self.fv_sub.drain(market_id) if self.fv_sub else []
+            if not updates:
                 continue
 
             market = self.markets_info.get(market_id)
-            if not market:
-                continue
-
+            market_name = market.name if market else str(market_id)
             ref_price = self._get_market_price(market_id, block)
-            if ref_price <= 0:
-                continue
 
-            # Skip resolved markets — don't waste LLM calls
-            if ref_price >= RESOLVED_HIGH or ref_price <= RESOLVED_LOW:
-                if market_id in self.fair_values:
-                    log.info("[%s] %s resolved (price=%.2f), clearing FV",
-                             self.name, market.name[:30], ref_price)
-                    del self.fair_values[market_id]
-                continue
+            for update in updates:
+                old_fv = self.fair_values.get(market_id)
+                self.fair_values[market_id] = update.fair_value
+                log.info("[%s] %s: FV %.2f->%.2f (market=%.2f) | %s",
+                         self.name, market_name[:30], old_fv or 0,
+                         update.fair_value, ref_price, update.motivation)
+                self._record_trade(
+                    market_id=market_id,
+                    market_name=market_name,
+                    fair_value=update.fair_value,
+                    orders=[],
+                    motivation=update.motivation,
+                    analysis=update.analysis,
+                    raw_llm_response="",
+                    llm_duration_s=0.0,
+                    market_price=ref_price,
+                    block_height=update.block_height,
+                    timestamp=now,
+                    articles=update.articles,
+                )
 
-            titles = "; ".join(f'"{a.title[:40]}"' for a in articles)
-            log.info("[%s] %d article(s) for %s (price=%.2f): %s",
-                     self.name, len(articles), market.name[:30], ref_price, titles)
-
-            prompt = self._build_prompt(articles, market, block)
-            if not prompt:
-                continue
-
-            try:
-                raw_text, llm_duration_s = await self._call_llm(prompt)
-                self._last_llm_call = time.monotonic()
-                if self.metrics is not None:
-                    self.metrics.record_llm_call(self.name)
-                log.info("[%s] LLM response (%.1fs):\n%s", self.name, llm_duration_s, raw_text)
-            except Exception as e:
-                log.warning("[%s] LLM call failed: %s", self.name, e)
-                continue
-
-            parsed = self._parse_fair_value(raw_text)
-            if parsed is None:
-                log.warning("[%s] Failed to parse LLM output", self.name)
-                continue
-
-            fair_value, motivation, analysis = parsed
-            old_fv = self.fair_values.get(market_id)
-            self.fair_values[market_id] = fair_value
-
-            log.info("[%s] %s: FV %.2f->%.2f (market=%.2f, edge=%.2f) | %s",
-                     self.name, market.name[:30],
-                     old_fv or 0, fair_value, ref_price,
-                     fair_value - ref_price, motivation)
-
-            self._record_trade(
-                market_id=market_id,
-                market_name=market.name,
-                fair_value=fair_value,
-                orders=[],
-                motivation=motivation,
-                analysis=analysis,
-                raw_llm_response=raw_text,
-                llm_duration_s=llm_duration_s,
-                market_price=ref_price,
-                block_height=block.height,
-                timestamp=now,
-                articles=articles,
-            )
+        # Exit any markets that have since resolved (LLM-free).
+        self._clear_resolved_markets(block)
 
         # Position management via strategy
         elapsed_rebal = time.monotonic() - self._last_rebalance
