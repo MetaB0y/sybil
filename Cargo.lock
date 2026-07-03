@@ -2502,6 +2502,7 @@ dependencies = [
  "russcip",
  "serde",
  "serde_json",
+ "sybil-verifier",
  "tracing",
 ]
 

@@ -33,6 +33,7 @@ optional = true
 proptest = "1.9"
 divan = "0.1"
 matching-scenarios = { path = "../matching-scenarios" }
+sybil-verifier = { path = "../sybil-verifier", default-features = false }
 
 [[bench]]
 name = "solver_bench"
