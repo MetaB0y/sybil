@@ -5,9 +5,24 @@ use std::borrow::Cow;
 #[cfg(any(feature = "lp", feature = "conic", feature = "milp"))]
 use std::collections::HashSet;
 
+#[cfg(any(feature = "lp", feature = "conic", feature = "milp"))]
+use matching_engine::Order;
 use matching_engine::Problem;
 
 use crate::PipelineResult;
+
+/// Determine the sign for an order in the welfare objective.
+///
+/// - Buyer (no negative payoffs) -> +1.0
+/// - Seller (any negative payoff) -> -1.0
+#[cfg(any(feature = "lp", feature = "conic", feature = "milp"))]
+pub(crate) fn order_sign(order: &Order) -> f64 {
+    if order.is_seller() {
+        -1.0
+    } else {
+        1.0
+    }
+}
 
 #[cfg(any(feature = "lp", feature = "conic", feature = "milp"))]
 pub(crate) struct SupportedProblem<'a> {

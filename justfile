@@ -10,7 +10,7 @@ test:
 
 # Run clippy lints
 lint:
-    cargo clippy --workspace --all-features
+    RUSTFLAGS="-Dwarnings" cargo clippy --workspace --all-features
 
 # Format code
 fmt:
@@ -214,8 +214,8 @@ doc:
 doc-open:
     cargo doc --workspace --no-deps --open
 
-# Check all (compile, test, lint, fmt)
-check-all: fmt-check lint test contracts-fmt-check contracts-build contracts-test
+# Check all (compile, test, lint, fmt, docs)
+check-all: fmt-check lint test docs-check contracts-fmt-check contracts-build contracts-test
     @echo "All checks passed!"
 
 # Run benchmarks if any

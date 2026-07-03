@@ -14,8 +14,9 @@ use std::time::Instant;
 
 use matching_engine::{MmSide, Order, Problem};
 
-use crate::lp_solver::{build_and_solve_lp, build_solver_context, finalize_result, order_sign};
+use crate::lp_solver::{build_and_solve_lp, build_solver_context, finalize_result};
 use crate::result::PipelineResult;
+use crate::solver::order_sign;
 
 /// Configuration for the iterative LP solver.
 #[derive(Clone, Debug)]

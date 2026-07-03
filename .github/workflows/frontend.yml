@@ -12,7 +12,7 @@ on:
 
 jobs:
   build:
-    name: Typecheck, Lint, Build
+    name: Typecheck, Lint, Test, Build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -38,6 +38,9 @@ jobs:
 
       - name: Lint
         run: pnpm lint
+
+      - name: Test
+        run: pnpm test
 
       - name: Build
         run: pnpm build

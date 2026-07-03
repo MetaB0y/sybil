@@ -23,7 +23,9 @@ use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Cell, Color
 
 use matching_engine::{Fill, MarketId, Order, Problem};
 use matching_scenarios::{generate_scenario, ScenarioConfig};
-use matching_solver::{MilpConfig, MilpSolver, MmBudgetMode, PipelineResult, VizSnapshot};
+use matching_solver::{MilpConfig, MilpSolver, MmBudgetMode};
+#[cfg(any(feature = "lp", feature = "conic"))]
+use matching_solver::{PipelineResult, VizSnapshot};
 use sybil_verifier::{
     verify_match, BlockWitness, VerificationResult, WitnessBlockHeader, WitnessOrder,
 };
@@ -78,17 +80,8 @@ fn main() {
 
     let start = Instant::now();
 
-    if matches!(
-        solver_choice,
-        SolverChoice::Lp
-            | SolverChoice::Eg
-            | SolverChoice::Conic
-            | SolverChoice::DecomposedLp
-            | SolverChoice::DecomposedEg
-            | SolverChoice::DecomposedConic
-            | SolverChoice::IterLp
-            | SolverChoice::DecomposedIterLp
-    ) && (verbose || export_json.is_some() || show_charts)
+    if supports_detailed_pipeline(&solver_choice)
+        && (verbose || export_json.is_some() || show_charts)
     {
         // Detailed pipeline run with step-by-step output
         run_detailed_pipeline(
@@ -180,6 +173,7 @@ fn print_help() {
 // ============================================================================
 
 /// Compute statistics about orders in the problem
+#[cfg(any(feature = "lp", feature = "conic"))]
 struct OrderStats {
     total_orders: usize,
     single_market_orders: usize,
@@ -188,6 +182,7 @@ struct OrderStats {
     mm_order_count: usize,
 }
 
+#[cfg(any(feature = "lp", feature = "conic"))]
 impl OrderStats {
     fn compute(problem: &Problem) -> Self {
         let mm_order_ids: HashSet<u64> = problem
@@ -217,6 +212,7 @@ impl OrderStats {
 }
 
 /// Compute fill statistics from a result
+#[cfg(any(feature = "lp", feature = "conic"))]
 struct FillStats {
     // By fill status
     fully_filled: usize,
@@ -235,6 +231,7 @@ struct FillStats {
     markets_with_volume: usize,
 }
 
+#[cfg(any(feature = "lp", feature = "conic"))]
 impl FillStats {
     fn compute(problem: &Problem, result: &PipelineResult, order_stats: &OrderStats) -> Self {
         let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
@@ -314,6 +311,7 @@ impl FillStats {
 
 /// Select a representative subset of markets for detailed output.
 /// Picks markets from different groups + some standalone markets.
+#[cfg(any(feature = "lp", feature = "conic"))]
 fn select_sample_markets(problem: &Problem, max_markets: usize) -> Vec<MarketId> {
     let mut selected = Vec::new();
 
@@ -358,6 +356,7 @@ fn select_sample_markets(problem: &Problem, max_markets: usize) -> Vec<MarketId>
 }
 
 /// Print detailed market stats table
+#[cfg(any(feature = "lp", feature = "conic"))]
 fn print_market_details(problem: &Problem, result: &PipelineResult, sample_markets: &[MarketId]) {
     if sample_markets.is_empty() {
         return;
@@ -452,6 +451,7 @@ fn print_market_details(problem: &Problem, result: &PipelineResult, sample_marke
 }
 
 #[allow(unused_variables, clippy::too_many_arguments)]
+#[cfg(any(feature = "lp", feature = "conic"))]
 fn run_detailed_pipeline(
     base_config: &ScenarioConfig,
     num_batches: usize,
@@ -692,10 +692,26 @@ fn run_detailed_pipeline(
     }
 }
 
+#[allow(unused_variables, clippy::too_many_arguments)]
+#[cfg(not(any(feature = "lp", feature = "conic")))]
+fn run_detailed_pipeline(
+    base_config: &ScenarioConfig,
+    num_batches: usize,
+    export_json: Option<&str>,
+    show_charts: bool,
+    verbose: bool,
+    solver_choice: &SolverChoice,
+    mm_budget_scale: Option<f64>,
+    args: &[String],
+) {
+    unreachable!("detailed pipeline requires the lp or conic feature")
+}
+
 /// Build a BlockWitness from a Problem + PipelineResult for standalone verification.
 ///
 /// The sim doesn't have accounts or settlement, so only Layer 1 (match verification)
 /// is meaningful. Layers 2–4 (settlement, block, orders) require a full sequencer.
+#[cfg(any(feature = "lp", feature = "conic"))]
 fn witness_from_problem(problem: &Problem, result: &PipelineResult) -> BlockWitness {
     let clearing_prices = result
         .price_discovery
@@ -746,6 +762,7 @@ fn witness_from_problem(problem: &Problem, result: &PipelineResult) -> BlockWitn
     witness
 }
 
+#[cfg(any(feature = "lp", feature = "conic"))]
 fn print_verification_result(result: &VerificationResult) {
     println!();
     println!("Result Verification (ZK-ready):");
@@ -783,6 +800,7 @@ fn print_verification_result(result: &VerificationResult) {
     }
 }
 
+#[cfg(any(feature = "lp", feature = "conic"))]
 fn print_solver_verification(result: &matching_solver::VerificationResult) {
     if result.valid {
         println!("  Solver result: \u{2713} VALID");
@@ -797,6 +815,7 @@ fn print_solver_verification(result: &matching_solver::VerificationResult) {
     }
 }
 
+#[cfg(any(feature = "lp", feature = "conic"))]
 fn print_problem_summary(problem: &Problem, stats: &OrderStats) {
     println!("Problem Summary:");
     println!("  Markets: {}", problem.markets.len());
@@ -816,6 +835,7 @@ fn print_problem_summary(problem: &Problem, stats: &OrderStats) {
     println!();
 }
 
+#[cfg(any(feature = "lp", feature = "conic"))]
 fn print_fill_stats(stats: &FillStats, order_stats: &OrderStats, num_markets: usize) {
     println!("Fill Statistics:");
     println!("─────────────────────────────────────────");
@@ -884,6 +904,7 @@ fn print_fill_stats(stats: &FillStats, order_stats: &OrderStats, num_markets: us
     );
 }
 
+#[cfg(any(feature = "lp", feature = "conic"))]
 fn pct(num: usize, denom: usize) -> f64 {
     if denom > 0 {
         num as f64 / denom as f64 * 100.0
@@ -1017,6 +1038,21 @@ enum SolverChoice {
     All,
 }
 
+fn supports_detailed_pipeline(choice: &SolverChoice) -> bool {
+    match choice {
+        #[cfg(feature = "lp")]
+        SolverChoice::Lp
+        | SolverChoice::Eg
+        | SolverChoice::DecomposedLp
+        | SolverChoice::DecomposedEg
+        | SolverChoice::IterLp
+        | SolverChoice::DecomposedIterLp => true,
+        #[cfg(feature = "conic")]
+        SolverChoice::Conic | SolverChoice::DecomposedConic => true,
+        SolverChoice::Milp | SolverChoice::All => false,
+    }
+}
+
 fn parse_solver_choice(args: &[String]) -> SolverChoice {
     match get_arg_value(args, "--solver").as_deref() {
         Some("milp") => SolverChoice::Milp,
@@ -1038,7 +1074,10 @@ fn parse_solver_choice(args: &[String]) -> SolverChoice {
         #[cfg(feature = "lp")]
         Some("decomposed-iter-lp") => SolverChoice::DecomposedIterLp,
         Some("all") => SolverChoice::All,
-        _ => SolverChoice::Lp, // Default to LP solver
+        #[cfg(feature = "lp")]
+        _ => SolverChoice::Lp, // Default to LP solver when available.
+        #[cfg(not(feature = "lp"))]
+        _ => SolverChoice::Milp, // No-feature builds only have the always-enabled MILP backend.
     }
 }
 
@@ -1156,10 +1195,14 @@ struct GapAnalysisData {
 }
 
 /// Expand a solver choice into individual choices for comparison.
+// The `All` arm builds its vec with cfg-gated pushes per solver feature,
+// which vec![] cannot express.
+#[allow(clippy::vec_init_then_push)]
 fn expand_solver_choices(choice: &SolverChoice) -> Vec<SolverChoice> {
     match choice {
         SolverChoice::All => {
-            let mut choices = vec![SolverChoice::Milp];
+            let mut choices = Vec::new();
+            choices.push(SolverChoice::Milp);
             #[cfg(feature = "lp")]
             choices.push(SolverChoice::Lp);
             #[cfg(feature = "lp")]
@@ -1294,6 +1337,7 @@ fn run_solver_with_witness(
 }
 
 /// Build a BlockWitness from a PipelineResult using real orders and real fills.
+#[cfg(any(feature = "lp", feature = "conic"))]
 fn witness_from_pipeline(problem: &Problem, result: &PipelineResult) -> BlockWitness {
     witness_from_problem(problem, result)
 }

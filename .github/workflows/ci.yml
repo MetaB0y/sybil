@@ -32,6 +32,47 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+  docs:
+    name: Docs Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate architecture vault
+        run: ./scripts/check-vault.sh
+
+  feature-lattice:
+    name: Feature Lattice
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.1"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@cargo-hack
+
+      - name: Workspace without default features
+        run: cargo hack check --workspace --no-default-features --no-dev-deps
+
+      - name: matching-solver features
+        run: cargo hack check -p matching-solver --each-feature --no-dev-deps
+
+      - name: matching-sim features
+        run: cargo hack check -p matching-sim --each-feature --no-dev-deps
+
+      - name: sybil-api-types features
+        run: cargo hack check -p sybil-api-types --each-feature --no-dev-deps
+
+      - name: sybil-witgen features
+        run: cargo hack check -p sybil-witgen --each-feature --no-dev-deps
+
+      - name: sybil-verifier features
+        run: cargo hack check -p sybil-verifier --each-feature --no-dev-deps
+
   docker:
     name: Docker Build
     runs-on: ubuntu-latest

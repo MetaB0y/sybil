@@ -175,7 +175,7 @@ impl DualAnalysis {
     }
 }
 
-use crate::lp_solver::order_sign;
+use crate::solver::order_sign;
 
 // ============================================================================
 // MILP Solver

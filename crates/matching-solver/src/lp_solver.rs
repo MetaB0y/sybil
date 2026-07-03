@@ -21,19 +21,8 @@ use highs::{HighsModelStatus, RowProblem, Sense};
 use matching_engine::{Fill, MarketId, MmSide, Nanos, Order, Problem, Qty, NANOS_PER_DOLLAR};
 
 use crate::result::{PipelineResult, PipelineTimings, PriceDiscoveryResult};
+use crate::solver::order_sign;
 use crate::MatchingResult;
-
-/// Determine the sign for an order in the welfare objective.
-///
-/// - Buyer (no negative payoffs) -> +1.0
-/// - Seller (any negative payoff) -> -1.0
-pub(crate) fn order_sign(order: &Order) -> f64 {
-    if order.is_seller() {
-        -1.0
-    } else {
-        1.0
-    }
-}
 
 /// Configuration for the LP solver.
 #[derive(Clone, Debug)]

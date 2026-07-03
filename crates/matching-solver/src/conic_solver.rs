@@ -19,8 +19,9 @@ use clarabel::solver::*;
 
 use matching_engine::{MmSide, Order, Problem, NANOS_PER_DOLLAR};
 
-use crate::lp_solver::{build_and_solve_lp, build_solver_context, finalize_result, order_sign};
+use crate::lp_solver::{build_and_solve_lp, build_solver_context, finalize_result};
 use crate::result::PipelineResult;
+use crate::solver::order_sign;
 
 /// Objective mode for the conic solver.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
