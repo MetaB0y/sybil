@@ -22,6 +22,26 @@ warn()  { echo "  WARN:  $1"; WARNINGS=$((WARNINGS + 1)); }
 VALID_LAYERS="core solver sequencer api oracle verification arena"
 VALID_STATUSES="current planned deprecated"
 
+# Existing top-level source directories, used to recognise backticked repo-path
+# references. Excludes hidden dirs and build output (target/), which need not
+# exist at check time (e.g. a fresh CI checkout).
+TOP_DIRS=()
+for d in "$REPO_ROOT"/*/; do
+    base="$(basename "$d")"
+    case "$base" in
+        target) continue ;;
+    esac
+    TOP_DIRS+=("$base")
+done
+
+is_top_dir() {
+    local needle="$1" d
+    for d in "${TOP_DIRS[@]}"; do
+        [ "$d" = "$needle" ] && return 0
+    done
+    return 1
+}
+
 # Collect all note names (without .md extension). Use indexed arrays instead
 # of associative arrays so the script runs on macOS' bundled Bash 3.
 NOTE_NAMES=()
@@ -191,6 +211,46 @@ for f in "$VAULT_PATH"/*.md; do
             }
         }
     ' "$f")
+
+    # ── 7. Backticked repo-path references ───────────────────────────────────
+    # Every `inline code` token that looks like a repo path — has a slash and a
+    # first segment that is an existing top-level source directory — must point
+    # at a real file/dir. Strips path:line and path::symbol suffixes. Skips
+    # URLs, globs (*), and placeholder paths (<...>, {...}) plus any token with
+    # whitespace (prose/expressions like "GET /v1/...") to keep false positives
+    # near zero; the top-level-dir gate is the primary filter.
+    while IFS= read -r tok; do
+        [ -z "$tok" ] && continue
+        case "$tok" in
+            *[[:space:]]*) continue ;;   # expressions, "GET /v1/..." etc.
+            *"*"*)         continue ;;   # globs
+            *"<"*)         continue ;;   # placeholders
+            *"{"*)         continue ;;   # placeholders
+            *"://"*)       continue ;;   # URLs
+            */*) ;;                       # must contain a slash
+            *)             continue ;;
+        esac
+        # Strip a trailing :line or ::symbol suffix (paths carry no colons).
+        p="${tok%%:*}"
+        [ -z "$p" ] && continue
+        first="${p%%/*}"
+        if is_top_dir "$first" && [ ! -e "$REPO_ROOT/$p" ]; then
+            error "Dead repo path \`$tok\` → '$p' not found"
+        fi
+    done < <(grep -oE '`[^`]+`' "$f" | sed 's/`//g')
+
+    # ── 8. crate: frontmatter names a real crate ─────────────────────────────
+    # Convention (surveyed 2026-07-03): singular `crate:` key with a single
+    # crate name, present on the notes scoped to one crate. It must name a
+    # directory under crates/, or the two out-of-workspace OpenVM crates.
+    crate="$(printf '%s\n' "$frontmatter" | frontmatter_field crate | sed 's/[[:space:]]*$//')"
+    if [ -n "$crate" ]; then
+        if [ ! -d "$REPO_ROOT/crates/$crate" ] \
+            && [ "$crate" != "zk/openvm-guest" ] \
+            && [ "$crate" != "zk/openvm-tools" ]; then
+            error "Frontmatter crate '$crate' has no directory under crates/ (nor zk/openvm-guest|zk/openvm-tools)"
+        fi
+    fi
 
 done
 

@@ -23,13 +23,17 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Check formatting
+      # These three steps mirror `just fmt-check`, `just lint`, and `just test`
+      # (the Rust portion of `just check-all`). Keep them in sync so local and
+      # CI can't drift. RUSTFLAGS=-Dwarnings is set in the workflow `env:` above,
+      # matching the inline RUSTFLAGS in the `lint` recipe.
+      - name: Check formatting # just fmt-check
         run: cargo fmt --all -- --check
 
-      - name: Clippy
+      - name: Clippy # just lint
         run: cargo clippy --workspace --all-features
 
-      - name: Test
+      - name: Test # just test
         run: cargo test --workspace
 
   docs:

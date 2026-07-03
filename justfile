@@ -223,8 +223,26 @@ arena-check:
     cd arena && uv run ruff check .
     cd arena && uv run pytest -q
 
-# Check all (compile, test, lint, fmt, docs)
-check-all: fmt-check lint test docs-check arena-check contracts-fmt-check contracts-build contracts-test
+# Run frontend typecheck, lint, vitest, and build (mirrors .github/workflows/frontend.yml).
+# Degrades gracefully with a clear skip message when pnpm is not installed locally.
+frontend-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v pnpm >/dev/null 2>&1; then
+        echo "SKIP frontend-check: pnpm not found (install pnpm@10 to run frontend/web checks)"
+        exit 0
+    fi
+    cd frontend/web
+    pnpm install --frozen-lockfile
+    pnpm tsc --noEmit
+    pnpm lint
+    pnpm test
+    pnpm build
+
+# Check all — mirrors every CI check so local runs catch what CI would.
+# Rust portion (fmt-check/lint/test) matches the ci.yml "Check, Lint, Test" job;
+# the remaining recipes mirror the docs/arena/frontend/contracts CI jobs.
+check-all: fmt-check lint test docs-check arena-check frontend-check contracts-fmt-check contracts-build contracts-test
     @echo "All checks passed!"
 
 # Run benchmarks if any

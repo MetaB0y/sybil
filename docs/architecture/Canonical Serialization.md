@@ -495,9 +495,10 @@ header_bytes length = 120 bytes, as defined above.
 header_hash = BLAKE3(header_bytes)
 ```
 
-A follow-up issue will land a `canonical_bytes_vectors.rs` test in
-`crates/sybil-verifier/tests/` that asserts these exact bytes and hashes
-against the implementation. This RFC is pure spec.
+A follow-up issue will land a `#[cfg(test)]` canonical-bytes vector module in
+`crates/sybil-verifier/` (alongside the existing inline tests in
+`crates/sybil-verifier/src/witness_schema.rs`) that asserts these exact bytes
+and hashes against the implementation. This RFC is pure spec.
 
 ## Adding a field without breaking hashes
 
