@@ -21,6 +21,7 @@ class FakeMarket:
     category: str = ""
     status: str = "active"
     expiry_timestamp_ms: int = 0
+    reference_price_nanos: int | None = None
     volume_nanos: int = field(init=False)
 
     def __post_init__(self):
@@ -209,3 +210,40 @@ def test_runner_selection_failure_falls_back_to_unfiltered_set(monkeypatch, capl
 
     assert [m.id for m in selected] == [3, 1]
     assert "falling back to unfiltered markets" in caplog.text
+
+
+def test_selection_can_require_reference_prices():
+    without_ref = market("Will the US and Iran sign a peace deal before 2027?", "Geopolitics")
+    with_ref = market(
+        "Will the US and Iran sign a diplomatic deal before 2027?",
+        "Geopolitics",
+        id=2,
+    )
+    with_ref.reference_price_nanos = 410_000_000
+
+    selected = select_markets(
+        [without_ref, with_ref],
+        max_n=10,
+        profile="important-news",
+        require_reference_price=True,
+    )
+
+    assert [m.id for m in selected] == [2]
+
+
+def test_selection_scores_reference_price_before_first_clear():
+    far = market("Important Election: Candidate far", "Elections", id=1)
+    far.yes_price_value = 0.0
+    far.reference_price_nanos = 50_000_000
+    near = market("Important Election: Candidate near", "Elections", id=2)
+    near.yes_price_value = 0.0
+    near.reference_price_nanos = 490_000_000
+
+    selected = select_markets(
+        [far, near],
+        max_n=1,
+        profile="important-news",
+        require_reference_price=True,
+    )
+
+    assert [m.id for m in selected] == [2]

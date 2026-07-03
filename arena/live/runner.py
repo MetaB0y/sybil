@@ -26,6 +26,11 @@ from .trader import LiveLlmTrader
 
 log = logging.getLogger(__name__)
 
+# When --require-reference-prices is set, arena may start before the Polymarket
+# mirror has published any reference prices. Rather than exit, poll for a
+# reference-backed market set on this cadence until one appears.
+MARKET_DISCOVERY_RETRY_SECONDS = 30
+
 
 @dataclass
 class LiveConfig:
@@ -35,6 +40,7 @@ class LiveConfig:
     initial_balance: float = 500.0
     max_markets: int = 0
     market_profile: MarketProfile = "all"
+    require_reference_prices: bool = False
     order_time_in_force: TimeInForce = "IOC"
     news_poll_interval: int = 300
     min_llm_interval: float = 60.0
@@ -62,17 +68,22 @@ def _env_market_profile(name: str, default: MarketProfile = "all") -> MarketProf
     raise ValueError(f"{name} must be one of: all, important-news")
 
 
-def _fallback_unfiltered_markets(markets, max_n: int = 0):
+def _fallback_unfiltered_markets(markets, max_n: int = 0, require_reference_price: bool = False):
     """Return active mirrored markets without profile scoring or grouping."""
     def is_active_mirrored(market) -> bool:
         tags = {
             str(tag).strip().lower().replace("-", " ")
             for tag in getattr(market, "tags", [])
         }
-        return (
-            "polymarket" in tags
-            and str(getattr(market, "status", "")).lower() == "active"
-        )
+        if "polymarket" not in tags:
+            return False
+        if str(getattr(market, "status", "")).lower() != "active":
+            return False
+        if require_reference_price:
+            ref = getattr(market, "reference_price_nanos", None)
+            if ref is None or ref <= 0:
+                return False
+        return True
 
     active = [
         m
@@ -89,9 +100,12 @@ def _select_markets_resilient(
     markets,
     max_n: int = 0,
     profile: MarketProfile = "all",
+    require_reference_price: bool = False,
 ):
     try:
-        return select_markets(markets, max_n, profile)
+        return select_markets(
+            markets, max_n, profile, require_reference_price=require_reference_price
+        )
     except Exception as e:
         log.warning(
             "Market selection failed for profile=%s: %s; falling back to unfiltered markets",
@@ -99,7 +113,9 @@ def _select_markets_resilient(
             e,
             exc_info=True,
         )
-        return _fallback_unfiltered_markets(markets, max_n)
+        return _fallback_unfiltered_markets(
+            markets, max_n, require_reference_price=require_reference_price
+        )
 
 
 async def snapshot_portfolios(traders, db: DecisionDB, interval_s: float = 300):
@@ -206,30 +222,45 @@ async def run_live(config: LiveConfig):
     log.info("Decision DB: %s", db_path)
 
     async with SybilClient(config.sybil_url) as client:
-        # 1. Discover markets
-        all_markets = await client.list_markets()
-        log.info("Total markets on server: %d", len(all_markets))
+        # 1. Discover markets. When reference prices are required, arena may
+        # start before the Polymarket mirror has published any; retry instead of
+        # exiting so a cold start self-heals once the mirror catches up.
+        active = []
+        while not active:
+            all_markets = await client.list_markets()
+            log.info("Total markets on server: %d", len(all_markets))
 
-        if config.market_ids:
-            # Manual market selection by ID
-            market_by_id = {m.id: m for m in all_markets}
-            active = []
-            for mid in config.market_ids:
-                if mid in market_by_id:
-                    active.append(market_by_id[mid])
-                else:
-                    log.warning("Market ID %d not found on server, skipping", mid)
-            log.info("Manual market selection: %d markets", len(active))
-        else:
-            active = _select_markets_resilient(
-                all_markets,
-                config.max_markets,
+            if config.market_ids:
+                # Manual market selection by ID
+                market_by_id = {m.id: m for m in all_markets}
+                active = []
+                for mid in config.market_ids:
+                    if mid in market_by_id:
+                        active.append(market_by_id[mid])
+                    else:
+                        log.warning("Market ID %d not found on server, skipping", mid)
+                log.info("Manual market selection: %d markets", len(active))
+            else:
+                active = _select_markets_resilient(
+                    all_markets,
+                    config.max_markets,
+                    config.market_profile,
+                    require_reference_price=config.require_reference_prices,
+                )
+
+            if active:
+                break
+
+            if not config.require_reference_prices:
+                log.error("No suitable markets found!")
+                return
+
+            log.warning(
+                "No reference-backed markets found for profile=%s; retrying in %ss",
                 config.market_profile,
+                MARKET_DISCOVERY_RETRY_SECONDS,
             )
-
-        if not active:
-            log.error("No suitable markets found!")
-            return
+            await asyncio.sleep(MARKET_DISCOVERY_RETRY_SECONDS)
 
         log.info(
             "Selected %d markets for trading with profile=%s:",
@@ -403,6 +434,11 @@ def main():
         ),
     )
     parser.add_argument(
+        "--require-reference-prices",
+        action="store_true",
+        help="Only auto-select markets with live external reference prices.",
+    )
+    parser.add_argument(
         "--order-time-in-force",
         choices=["GTC", "IOC", "GTD"],
         default="IOC",
@@ -447,6 +483,7 @@ def main():
         format="%(asctime)s %(name)-20s %(levelname)-5s %(message)s",
         datefmt="%H:%M:%S",
     )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
     config = LiveConfig(
         sybil_url=args.sybil_url,
@@ -455,6 +492,7 @@ def main():
         initial_balance=args.balance,
         max_markets=max_markets,
         market_profile=market_profile,
+        require_reference_prices=args.require_reference_prices,
         order_time_in_force=args.order_time_in_force,
         noise_count=args.noise_count,
         news_poll_interval=args.news_interval,

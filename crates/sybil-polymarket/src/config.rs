@@ -101,7 +101,11 @@ pub struct Config {
     pub mm_min_spread: f64,
 
     /// Blocks between position syncs via GET /v1/accounts/{id}.
-    #[arg(long, default_value = "5", env = "MM_SYNC_INTERVAL_BLOCKS")]
+    ///
+    /// Keep this at one block for live IOC quoting: inventory-aware sell
+    /// quotes must observe fills from the immediately previous block before
+    /// the next quote batch is generated.
+    #[arg(long, default_value = "1", env = "MM_SYNC_INTERVAL_BLOCKS")]
     pub mm_sync_interval_blocks: u64,
 
     /// Per-token price staleness threshold in milliseconds (PM-4/PM-6). A token

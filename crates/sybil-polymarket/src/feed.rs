@@ -93,12 +93,7 @@ impl FeedActor {
         loop {
             // Check for new token subscriptions (non-blocking drain)
             while let Ok(msg) = self.feed_rx.try_recv() {
-                let FeedMessage::SubscribeTokens(ids) = msg;
-                for id in ids {
-                    if !self.token_ids.contains(&id) {
-                        self.token_ids.push(id);
-                    }
-                }
+                self.handle_message(msg);
             }
 
             if self.token_ids.is_empty() {
@@ -111,8 +106,7 @@ impl FeedActor {
                     msg = self.feed_rx.recv() => {
                         match msg {
                             Some(msg) => {
-                                let FeedMessage::SubscribeTokens(ids) = msg;
-                                self.token_ids.extend(ids);
+                                self.handle_message(msg);
                             }
                             None => return, // Channel closed
                         }
@@ -127,12 +121,34 @@ impl FeedActor {
                 "attempting WebSocket connection"
             );
             self.poll_rest_once().await;
+            // Clone the connection inputs so the `feed_rx.recv()` branch below
+            // can take `&mut self` to fold in a new subscription and reconnect
+            // immediately, instead of waiting for the current WebSocket to drop.
+            let ws_url = self.config.ws_url.clone();
+            let token_ids = self.token_ids.clone();
             let ws_result = tokio::select! {
                 _ = cancel.cancelled() => {
                     info!("FeedActor shutting down");
                     return;
                 }
-                result = ws::run_ws_feed(&self.config.ws_url, &self.token_ids, &self.price_tx) => result,
+                msg = self.feed_rx.recv() => {
+                    match msg {
+                        Some(msg) => {
+                            let added = self.handle_message(msg);
+                            if added > 0 {
+                                info!(
+                                    added,
+                                    tokens = self.token_ids.len(),
+                                    "token subscription changed; reconnecting WebSocket"
+                                );
+                            }
+                            backoff_secs = 1;
+                            continue;
+                        }
+                        None => return,
+                    }
+                }
+                result = ws::run_ws_feed(&ws_url, &token_ids, &self.price_tx) => result,
             };
 
             match ws_result {
@@ -153,12 +169,7 @@ impl FeedActor {
 
             // Drain any new subscriptions before reconnecting
             while let Ok(msg) = self.feed_rx.try_recv() {
-                let FeedMessage::SubscribeTokens(ids) = msg;
-                for id in ids {
-                    if !self.token_ids.contains(&id) {
-                        self.token_ids.push(id);
-                    }
-                }
+                self.handle_message(msg);
             }
 
             // Backoff before reconnect
@@ -188,6 +199,20 @@ impl FeedActor {
                 warn!(error = %e, "REST midpoints fallback failed");
             }
         }
+    }
+
+    /// Fold a subscription message into `token_ids`, returning how many token
+    /// IDs were newly added (0 when every id was already subscribed).
+    fn handle_message(&mut self, msg: FeedMessage) -> usize {
+        let FeedMessage::SubscribeTokens(ids) = msg;
+        let mut added = 0;
+        for id in ids {
+            if !self.token_ids.contains(&id) {
+                self.token_ids.push(id);
+                added += 1;
+            }
+        }
+        added
     }
 }
 

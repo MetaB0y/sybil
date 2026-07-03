@@ -15,6 +15,7 @@ from typing import Literal, Protocol
 MarketProfile = Literal["all", "important-news"]
 
 DEFAULT_IMPORTANT_NEWS_MARKETS = 64
+NANOS_PER_DOLLAR = 1_000_000_000
 
 
 class MarketLike(Protocol):
@@ -24,6 +25,7 @@ class MarketLike(Protocol):
     category: str
     tags: list[str]
     yes_price: float
+    reference_price_nanos: int | None
     volume_nanos: int
     volume_dollars: float
     expiry_timestamp_ms: int
@@ -175,6 +177,7 @@ def select_markets(
     markets: list[MarketLike],
     max_n: int = 0,
     profile: MarketProfile = "all",
+    require_reference_price: bool = False,
 ) -> list[MarketLike]:
     """Pick Polymarket-mirrored markets for live trading."""
     if profile == "important-news":
@@ -184,11 +187,16 @@ def select_markets(
             if "polymarket" in {_normalize_tag(t) for t in m.tags}
             and m.status.lower() == "active"
             and not _is_expired(m)
+            and (not require_reference_price or _has_reference_price(m))
         ]
         return _select_important_news(active, max_n)
 
     active = [
-        m for m in markets if "polymarket" in m.tags and m.status.lower() == "active"
+        m
+        for m in markets
+        if "polymarket" in m.tags
+        and m.status.lower() == "active"
+        and (not require_reference_price or _has_reference_price(m))
     ]
     return _select_diverse(
         active,
@@ -260,9 +268,9 @@ def _select_diverse(
     for prefix in sorted(groups, key=group_sort_value):
         members = groups[prefix]
         if prefer_uncertain_group_members:
-            members.sort(key=lambda m: (abs(m.yes_price - 0.5), -ranking_value(m), m.id))
+            members.sort(key=lambda m: (abs(_market_probability(m) - 0.5), -ranking_value(m), m.id))
         else:
-            members.sort(key=lambda m: (-ranking_value(m), abs(m.yes_price - 0.5), m.id))
+            members.sort(key=lambda m: (-ranking_value(m), abs(_market_probability(m) - 0.5), m.id))
         selected.extend(members if all_suitable else members[:per_group_limit])
 
     if all_suitable:
@@ -273,9 +281,10 @@ def _select_diverse(
 def _important_news_score(market: MarketLike) -> float:
     title = market.name.lower()
     tags = _market_tags(market)
+    price = _market_probability(market)
 
     score = math.log10(max(1.0, market.volume_dollars) + 1.0) * 8.0
-    score += (1.0 - min(1.0, abs(market.yes_price - 0.5) * 2.0)) * 4.0
+    score += (1.0 - min(1.0, abs(price - 0.5) * 2.0)) * 4.0
     score += len(tags & INCLUDE_TAGS) * 2.0
 
     score += 2.5 * len(_important_news_terms_in(title))
@@ -296,6 +305,25 @@ def _normalize_tag(tag: str) -> str:
 
 def _ranking_volume(market: MarketLike) -> float:
     return market.volume_dollars if hasattr(market, "volume_dollars") else market.volume_nanos
+
+
+def _has_reference_price(market: MarketLike) -> bool:
+    ref_price = getattr(market, "reference_price_nanos", None)
+    return ref_price is not None and ref_price > 0
+
+
+def _market_probability(market: MarketLike) -> float:
+    # Prefer the external Polymarket reference price when present: a freshly
+    # created mirror market has no local clearing price yet, so ``yes_price``
+    # sits at a degenerate 0.0/1.0 that would otherwise read as maximally
+    # certain and distort uncertainty-based scoring/grouping.
+    ref_price = getattr(market, "reference_price_nanos", None)
+    if ref_price is not None and ref_price > 0:
+        return ref_price / NANOS_PER_DOLLAR
+    price = getattr(market, "yes_price", 0.5)
+    if price <= 0.0 or price >= 1.0:
+        return 0.5
+    return price
 
 
 def _is_expired(market: MarketLike) -> bool:
