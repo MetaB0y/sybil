@@ -968,7 +968,7 @@ mod tests {
         );
 
         // YES + NO should sum to $1
-        for (_market, prices) in &milp_result.clearing_prices {
+        for prices in milp_result.clearing_prices.values() {
             assert_eq!(prices.len(), 2);
             let sum = prices[0] + prices[1];
             assert!(

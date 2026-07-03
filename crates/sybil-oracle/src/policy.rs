@@ -73,6 +73,35 @@ pub fn evaluate_immediate(
     Ok(PolicyOutcome::Settle { record })
 }
 
+/// Convenience wrapper used by the admin facade: reuses the `Immediate` logic
+/// but records the resolution as `OracleSource::Admin` so legacy tests keep
+/// asserting the same enum variant.
+pub(crate) fn evaluate_admin_immediate(
+    market_id: MarketId,
+    payout_nanos: Nanos,
+    current_status: &MarketStatus,
+    timestamp_ms: u64,
+) -> Result<PolicyOutcome, OracleError> {
+    if payout_nanos > NANOS_PER_DOLLAR {
+        return Err(OracleError::InvalidPayout(payout_nanos));
+    }
+    match current_status {
+        MarketStatus::Resolved { .. } => return Err(OracleError::AlreadyResolved),
+        MarketStatus::Voided => return Err(OracleError::InvalidState),
+        _ => {}
+    }
+    Ok(PolicyOutcome::Settle {
+        record: ResolutionRecord {
+            market_id,
+            payout_nanos,
+            resolved_by: OracleSource::Admin,
+            resolved_at_ms: timestamp_ms,
+            proposal: None,
+            challenge: None,
+        },
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,33 +186,4 @@ mod tests {
         .unwrap_err();
         assert!(matches!(err, OracleError::AlreadyResolved));
     }
-}
-
-/// Convenience wrapper used by the admin facade: reuses the `Immediate` logic
-/// but records the resolution as `OracleSource::Admin` so legacy tests keep
-/// asserting the same enum variant.
-pub(crate) fn evaluate_admin_immediate(
-    market_id: MarketId,
-    payout_nanos: Nanos,
-    current_status: &MarketStatus,
-    timestamp_ms: u64,
-) -> Result<PolicyOutcome, OracleError> {
-    if payout_nanos > NANOS_PER_DOLLAR {
-        return Err(OracleError::InvalidPayout(payout_nanos));
-    }
-    match current_status {
-        MarketStatus::Resolved { .. } => return Err(OracleError::AlreadyResolved),
-        MarketStatus::Voided => return Err(OracleError::InvalidState),
-        _ => {}
-    }
-    Ok(PolicyOutcome::Settle {
-        record: ResolutionRecord {
-            market_id,
-            payout_nanos,
-            resolved_by: OracleSource::Admin,
-            resolved_at_ms: timestamp_ms,
-            proposal: None,
-            challenge: None,
-        },
-    })
 }

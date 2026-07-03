@@ -68,16 +68,25 @@ fn signed_cancel_payload(account_id: u64, order_id: u64, key: &SigningKey) -> Va
     })
 }
 
-async fn submit_crossing_trade(
-    client: &reqwest::Client,
-    base_url: &str,
+struct CrossingTrade {
     buyer: u64,
     seller: u64,
     market_id: u64,
     yes_price_nanos: u64,
     no_price_nanos: u64,
     quantity: u64,
-) {
+}
+
+async fn submit_crossing_trade(client: &reqwest::Client, base_url: &str, trade: CrossingTrade) {
+    let CrossingTrade {
+        buyer,
+        seller,
+        market_id,
+        yes_price_nanos,
+        no_price_nanos,
+        quantity,
+    } = trade;
+
     post_json(
         client,
         base_url,
@@ -434,12 +443,14 @@ async fn history_retention_and_candles_survive_process_restart() {
         submit_crossing_trade(
             &client,
             &writer.base_url,
-            buyer,
-            seller,
-            market_id,
-            yes,
-            no,
-            5,
+            CrossingTrade {
+                buyer,
+                seller,
+                market_id,
+                yes_price_nanos: yes,
+                no_price_nanos: no,
+                quantity: 5,
+            },
         )
         .await;
         resume_blocks(&client, &writer.base_url).await;

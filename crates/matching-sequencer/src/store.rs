@@ -419,7 +419,7 @@ impl HistoryRetentionPolicy {
             && self.prune_interval_blocks > 0
             && self.prune_max_rows > 0
             && (self.block_history_retention_blocks > 0 || self.raw_price_retention_blocks > 0)
-            && height % self.prune_interval_blocks == 0
+            && height.is_multiple_of(self.prune_interval_blocks)
     }
 
     fn blocks_full_floor(&self, head_height: u64) -> Option<u64> {

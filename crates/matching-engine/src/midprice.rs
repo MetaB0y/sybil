@@ -118,7 +118,7 @@ mod tests {
         let (ms, m0, _) = markets();
         let bid = outcome_buy(&ms, 1, m0, 0, 400_000_000, 5);
         let ask = outcome_sell(&ms, 2, m0, 0, 600_000_000, 5);
-        let orders = vec![bid, ask];
+        let orders = [bid, ask];
         let mids = book_midprices(orders.iter());
         assert_eq!(mids.get(&m0).copied(), Some(500_000_000));
     }
@@ -130,7 +130,7 @@ mod tests {
         let (ms, m0, _) = markets();
         let yes_ask_via_no = outcome_buy(&ms, 1, m0, 1, 300_000_000, 5); // BuyNo @30c -> ask 70c
         let yes_bid_via_no = outcome_sell(&ms, 2, m0, 1, 800_000_000, 5); // SellNo @80c -> bid 20c
-        let orders = vec![yes_ask_via_no, yes_bid_via_no];
+        let orders = [yes_ask_via_no, yes_bid_via_no];
         let mids = book_midprices(orders.iter());
         assert_eq!(mids.get(&m0).copied(), Some(450_000_000));
     }
@@ -140,9 +140,9 @@ mod tests {
     fn one_sided_book_has_no_midpoint() {
         let (ms, m0, _) = markets();
         let bid = outcome_buy(&ms, 1, m0, 0, 400_000_000, 5);
-        let orders = vec![bid];
+        let orders = [bid];
         let mids = book_midprices(orders.iter());
-        assert!(mids.get(&m0).is_none());
+        assert!(!mids.contains_key(&m0));
     }
 
     // Multi-market spread orders are ignored entirely.
@@ -150,7 +150,7 @@ mod tests {
     fn multi_market_orders_excluded() {
         let (ms, m0, m1) = markets();
         let sp = spread(&ms, 1, m0, m1, 500_000_000, 5);
-        let orders = vec![sp];
+        let orders = [sp];
         let mids = book_midprices(orders.iter());
         assert!(mids.is_empty());
     }
@@ -161,9 +161,9 @@ mod tests {
         let (ms, m0, _) = markets();
         let bid = outcome_buy(&ms, 1, m0, 0, 700_000_000, 5);
         let ask = outcome_sell(&ms, 2, m0, 0, 300_000_000, 5);
-        let orders = vec![bid, ask];
+        let orders = [bid, ask];
         let mids = book_midprices(orders.iter());
-        assert!(mids.get(&m0).is_none());
+        assert!(!mids.contains_key(&m0));
     }
 
     #[test]
