@@ -6,6 +6,11 @@ services:
       - sybil-data:/data
       - arena-data:/arena-data
     environment:
+      # Selects the prod durability posture and arms the startup preflight
+      # guardrail (SYB-133): sybil-api refuses to boot if any dev-only knob is
+      # wired in. Override deliberately with SYBIL_ALLOW_DEV_KNOBS=1.
+      # See docs/architecture/Deployment Profiles.md.
+      SYBIL_DEPLOYMENT_PROFILE: "prod"
       SYBIL_DEV_MODE: "false"
       SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:?Set SYBIL_SERVICE_TOKEN in /opt/sybil/.env}"
       SYBIL_CORS_ORIGINS: "${SYBIL_CORS_ORIGINS:-}"

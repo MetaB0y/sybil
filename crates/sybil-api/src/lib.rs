@@ -2,6 +2,7 @@ pub mod app;
 pub(crate) mod arena;
 pub mod config;
 pub mod convert;
+pub mod preflight;
 pub mod routes;
 pub mod sse;
 pub mod state;

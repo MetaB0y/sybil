@@ -12,6 +12,19 @@ pub struct ApiConfig {
     #[arg(long, default_value = "false", env = "SYBIL_DEV_MODE")]
     pub dev_mode: bool,
 
+    /// Deployment profile: `local`, `devnet`, or `prod`. Selects the intended
+    /// durability/cache posture and drives the startup preflight guardrail. On
+    /// `prod`, the server refuses to start when dev-only knobs are wired in
+    /// (see [`crate::preflight`]) unless `SYBIL_ALLOW_DEV_KNOBS=1` is set.
+    #[arg(long, default_value = "local", env = "SYBIL_DEPLOYMENT_PROFILE")]
+    pub deployment_profile: String,
+
+    /// Escape hatch: allow a `prod` profile to start despite dev-only knobs.
+    /// Fail-open override, mirroring the fail-closed service-token posture.
+    /// Intended for deliberate one-off operations, never steady state.
+    #[arg(long, default_value = "false", env = "SYBIL_ALLOW_DEV_KNOBS")]
+    pub allow_dev_knobs: bool,
+
     /// Bearer token required for service/operator routes when dev mode is off.
     /// Empty/unset means service routes fail closed in production.
     #[arg(long, default_value = "", env = "SYBIL_SERVICE_TOKEN")]
@@ -228,6 +241,8 @@ impl Default for ApiConfig {
         Self {
             port: 3000,
             dev_mode: false,
+            deployment_profile: "local".to_string(),
+            allow_dev_knobs: false,
             service_token: String::new(),
             cors_origins: Vec::new(),
             block_interval_ms: 500,

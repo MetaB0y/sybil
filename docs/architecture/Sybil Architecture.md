@@ -102,6 +102,9 @@ The matching problem itself has an elegant mathematical structure: without marke
 - [[Oracle Lifecycle]] — market resolution process
 - [[Market Resolution]] — outcome determination and payout
 
+## Operations and Deployment
+- [[Deployment Profiles]] — local/devnet/prod knob matrix, durability guardrails, and history-serving policy
+
 ## Arena and Development
 - [[Python SDK]] — async client library
 - [[Bot Framework]] — building trading agents

@@ -67,6 +67,20 @@ It is not passed as a CLI argument and is not interpolated into SSH command
 strings by the deploy recipes. The arena process reads `OPENROUTER_API_KEY` from
 its environment and exits with a clear error if it is missing.
 
+## Deployment Profile Guardrail
+
+`sybil-api` reads `SYBIL_DEPLOYMENT_PROFILE` (`local` | `devnet` | `prod`,
+default `local`). `docker-compose.prod.yml` sets it to `prod`, which arms a
+startup preflight: the server refuses to boot if a dev-only knob is wired in
+(`SYBIL_DEV_MODE=true`, unset `SYBIL_SERVICE_TOKEN`, unset `SYBIL_DATA_DIR`, or
+`SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT=0`). Every profile logs a `deployment
+profile preflight` block naming knobs that diverge from the prod baseline.
+
+Override deliberately (never steady state) with `SYBIL_ALLOW_DEV_KNOBS=1`. On
+the shared devnet box, export `SYBIL_DEPLOYMENT_PROFILE=devnet` so its logs
+self-label. Full knob matrix and history-serving policy:
+`docs/architecture/Deployment Profiles.md`.
+
 ## Deploy Commands
 
 ```bash

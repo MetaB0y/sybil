@@ -124,6 +124,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = ApiConfig::parse();
 
+    // Deployment-profile preflight (SYB-133): log the active profile + every
+    // knob diverging from the prod-intended baseline, and fail closed when a
+    // `prod` start has dev-only knobs wired in. Runs before any store/socket
+    // setup so a misconfigured prod box never comes up serving.
+    if let Err(msg) = sybil_api::preflight::run_preflight(&config) {
+        tracing::error!("{msg}");
+        return Err(std::io::Error::other(msg).into());
+    }
+
     if !config.event_snapshot_dir.is_empty() {
         let dir = std::path::Path::new(&config.event_snapshot_dir);
         if dir.exists() {
