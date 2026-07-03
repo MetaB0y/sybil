@@ -381,7 +381,7 @@ export interface paths {
         /** GET /v1/feeds — list registered data feeds. */
         get: operations["list_feeds"];
         put?: never;
-        /** POST /v1/feeds — register a data feed (dev mode only). */
+        /** POST /v1/feeds — register a data feed. */
         post: operations["register_feed"];
         delete?: never;
         options?: never;
@@ -473,7 +473,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** POST /v1/markets/prices/reference — set reference prices from external system (dev mode) */
+        /** POST /v1/markets/prices/reference — set reference prices from external system. */
         post: operations["set_reference_prices"];
         delete?: never;
         options?: never;
@@ -546,7 +546,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** POST /v1/markets/{id}/metadata — set external metadata for a market (dev mode) */
+        /** POST /v1/markets/{id}/metadata — set external metadata for a market. */
         post: operations["set_market_metadata"];
         delete?: never;
         options?: never;
@@ -750,7 +750,10 @@ export interface components {
             block_height: number;
             /** Format: int64 */
             fill_price_nanos: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Fill quantity in fixed-point share-units (`1000` = 1 share).
+             */
             fill_qty: number;
             /** Format: int64 */
             order_id: number;
@@ -1033,7 +1036,10 @@ export interface components {
             account_id?: number;
             /** Format: int64 */
             fill_price_nanos: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Fill quantity in fixed-point share-units (`1000` = 1 share).
+             */
             fill_qty: number;
             /** Format: int64 */
             order_id: number;
@@ -1073,6 +1079,10 @@ export interface components {
             qty?: number | null;
             /** Format: int64 */
             realized_pnl_nanos?: string | null;
+            /**
+             * @description Rejected only: reason code (`insufficient_balance` | `insufficient_position`
+             *     | `complete_set` | …).
+             */
             reason?: string | null;
             /** Format: int64 */
             required_nanos?: string | null;
@@ -1107,7 +1117,10 @@ export interface components {
             category?: string | null;
             /** Format: int64 */
             challenge_deadline_ms?: number | null;
-            /** @description Whether Polymarket has closed this market. Off-block; the frontend filters closed markets out of the listing. */
+            /**
+             * @description Whether Polymarket has closed this market. Off-block; the frontend
+             *     filters closed markets out of the listing.
+             */
             closed?: boolean | null;
             /** Format: int64 */
             created_at_ms?: number | null;
@@ -1134,7 +1147,11 @@ export interface components {
             expiry_timestamp_ms?: number | null;
             /** @description External URL (e.g., Polymarket link). */
             external_url?: string | null;
-            /** @description Polymarket short outcome label (`groupItemTitle`, e.g. "May 15"). Off-block; the frontend uses it as the per-outcome name so it needn't fetch the raw event JSON just for labels. */
+            /**
+             * @description Polymarket short outcome label (`groupItemTitle`, e.g. "May 15"). Off-
+             *     block; the frontend uses it as the per-outcome name so it needn't fetch
+             *     the raw event JSON just for labels.
+             */
             group_item_title?: string | null;
             /**
              * Format: int64
@@ -1334,7 +1351,13 @@ export interface components {
         OrderAcceptedResponse: {
             accepted: boolean;
         };
-        /** @description Tagged enum representing different order types. */
+        /**
+         * @description Tagged enum representing public order types.
+         *
+         *     Public submission is intentionally limited to single-market binary orders.
+         *     Compound payoff-vector orders remain available inside `matching-engine` for
+         *     research and tests, but are not accepted at the HTTP API edge.
+         */
         OrderSpec: {
             /**
              * Format: int64
@@ -1343,7 +1366,10 @@ export interface components {
             limit_price_nanos: string;
             /** Format: int32 */
             market_id: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Quantity in fixed-point share-units.
+             */
             quantity: number;
             /** @enum {string} */
             type: "BuyYes";
@@ -1352,7 +1378,10 @@ export interface components {
             limit_price_nanos: string;
             /** Format: int32 */
             market_id: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Quantity in fixed-point share-units.
+             */
             quantity: number;
             /** @enum {string} */
             type: "BuyNo";
@@ -1361,7 +1390,10 @@ export interface components {
             limit_price_nanos: string;
             /** Format: int32 */
             market_id: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Quantity in fixed-point share-units.
+             */
             quantity: number;
             /** @enum {string} */
             type: "SellYes";
@@ -1370,46 +1402,13 @@ export interface components {
             limit_price_nanos: string;
             /** Format: int32 */
             market_id: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Quantity in fixed-point share-units.
+             */
             quantity: number;
             /** @enum {string} */
             type: "SellNo";
-        } | {
-            /** Format: int64 */
-            limit_price_nanos: string;
-            /** Format: int32 */
-            market_a: number;
-            /** Format: int32 */
-            market_b: number;
-            /** Format: int64 */
-            quantity: number;
-            /** @enum {string} */
-            type: "Spread";
-        } | {
-            /** Format: int64 */
-            limit_price_nanos: string;
-            market_ids: number[];
-            /** Format: int64 */
-            quantity: number;
-            /** @enum {string} */
-            type: "BundleYes";
-        } | {
-            /** Format: int64 */
-            limit_price_nanos: string;
-            market_ids: number[];
-            /** Format: int64 */
-            quantity: number;
-            /** @enum {string} */
-            type: "BundleSell";
-        } | {
-            /** Format: int64 */
-            limit_price_nanos: string;
-            market_ids: number[];
-            /** Format: int64 */
-            max_fill: number;
-            payoffs: number[];
-            /** @enum {string} */
-            type: "Custom";
         };
         /**
          * @description Per-bucket platform totals returned by `/v1/activity/overview`. B1
@@ -1420,7 +1419,12 @@ export interface components {
             orders?: components["schemas"]["OverviewOrderStatsResponse"];
             /** Format: int64 */
             total_volume_nanos?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Cumulative platform welfare in nanos for this bucket — sum of per-block
+             *     `total_welfare` (each fill counted once). Signed: solver rounding can
+             *     yield small negatives.
+             */
             total_welfare_nanos?: string;
             /** Format: int64 */
             unique_traders?: number;
@@ -1430,7 +1434,12 @@ export interface components {
             matched?: number;
             /** Format: int64 */
             placed?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Distinct orders admitted (counted once per order at intake), all-time
+             *     or rolling 24h. `placed` above stays per-batch participation for
+             *     back-compat: a resting order counts once here but once per batch there.
+             */
             placed_distinct?: number;
             /** Format: int64 */
             unmatched?: number;
@@ -1456,13 +1465,16 @@ export interface components {
             order_id: number;
             /**
              * Format: int64
-             * @description Original `max_fill` at admit time (B8). Lets the FE render a
+             * @description Original `max_fill` at admit time, in fixed-point share-units (B8). Lets the FE render a
              *     partial-fill progress bar as `(original - remaining) / original`.
              *     `0` for orders persisted before B5/B8 (#[serde(default)] forward
              *     compat).
              */
             original_quantity?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Remaining fill quantity in fixed-point share-units (`1000` = 1 share).
+             */
             remaining_quantity: number;
             side: string;
         };
@@ -1505,7 +1517,7 @@ export interface components {
             /**
              * Format: int64
              * @description Mark-to-market PnL on currently open positions (C1). Computed as
-             *     `Σ (current_price - avg_entry) * quantity` across positions.
+             *     `Σ (current_price - avg_entry) * quantity / SHARE_SCALE` across positions.
              */
             unrealized_pnl_nanos?: string;
         };
@@ -1520,7 +1532,10 @@ export interface components {
             /** Format: int32 */
             market_id: number;
             outcome: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Signed position quantity in fixed-point share-units (`1000` = 1 share).
+             */
             quantity: number;
         };
         PositionValueResponse: {
@@ -1536,15 +1551,63 @@ export interface components {
             /** Format: int32 */
             market_id: number;
             outcome: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Signed position quantity in fixed-point share-units (`1000` = 1 share).
+             */
             quantity: number;
             /** Format: int64 */
             value_nanos: string;
         };
+        PriceCandleResponse: {
+            /** Format: int64 */
+            bucket_end_ms: number;
+            /** Format: int64 */
+            bucket_start_ms: number;
+            /** Format: int64 */
+            close_no_price_nanos: string;
+            /** Format: int64 */
+            close_yes_price_nanos: string;
+            /** Format: int64 */
+            first_height: number;
+            /** Format: int64 */
+            high_no_price_nanos: string;
+            /** Format: int64 */
+            high_yes_price_nanos: string;
+            /** Format: int64 */
+            last_height: number;
+            /** Format: int64 */
+            low_no_price_nanos: string;
+            /** Format: int64 */
+            low_yes_price_nanos: string;
+            /** Format: int64 */
+            open_no_price_nanos: string;
+            /** Format: int64 */
+            open_yes_price_nanos: string;
+            /** Format: int64 */
+            point_count: number;
+            /** Format: int64 */
+            volume_nanos: string;
+        };
+        PriceCandlesResponse: {
+            candles: components["schemas"]["PriceCandleResponse"][];
+            /** Format: int32 */
+            market_id: number;
+            /** Format: int64 */
+            next_before_ms?: number | null;
+            /** Format: int32 */
+            resolution_secs: number;
+            /** Format: int64 */
+            retention_min_bucket_ms?: number | null;
+        };
         PriceHistoryResponse: {
             /** Format: int32 */
             market_id: number;
+            /** Format: int64 */
+            next_before_height?: number | null;
             points: components["schemas"]["PricePointResponse"][];
+            /** Format: int64 */
+            retention_min_height?: number | null;
         };
         PricePointResponse: {
             /** Format: int64 */
@@ -1667,6 +1730,11 @@ export interface components {
              */
             category?: string | null;
             /**
+             * @description Whether Polymarket has closed this market. The frontend hides closed
+             *     markets from the listing.
+             */
+            closed?: boolean | null;
+            /**
              * Format: int64
              * @description Event-level expected end date (epoch ms). Display only.
              */
@@ -1690,6 +1758,11 @@ export interface components {
             event_title?: string | null;
             /** @description External URL (e.g., Polymarket link). */
             external_url?: string | null;
+            /**
+             * @description Polymarket short outcome label (`groupItemTitle`, e.g. "May 15"). The
+             *     frontend renders this as the per-outcome name on multi-cards.
+             */
+            group_item_title?: string | null;
             /**
              * Format: int64
              * @description Per-market expected end date (epoch ms). Display only; matching engine
@@ -1739,7 +1812,7 @@ export interface components {
             market_ids: number[];
             /**
              * Format: int64
-             * @description Maximum fill quantity.
+             * @description Maximum fill quantity in fixed-point share-units.
              */
             max_fill: number;
             /** @description Payoff vector. */
@@ -2872,6 +2945,10 @@ export interface operations {
                 from_ms?: number;
                 /** @description End timestamp filter */
                 to_ms?: number;
+                /** @description Return points with height strictly below this cursor */
+                before_height?: number;
+                /** @description Maximum returned points, newest matching points first by cap, clamped server-side */
+                limit?: number;
             };
             header?: never;
             path: {
