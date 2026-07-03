@@ -127,23 +127,28 @@ export function useDegenBetTracker(
       ? 1
       : Math.max(1, active.batchAnchorPerfMs + gtdWindowMs - active.submitPerfMs);
 
-  // Start at 0 and let the first RAF tick fill in the real value within ~one
-  // frame (a Degen↔Pro remount resumes at the true elapsed point, not 0).
-  const [timeProgress01, setTimeProgress01] = useState(0);
+  const [progressSnapshot, setProgressSnapshot] =
+    useState<ProgressSnapshot | null>(null);
   const rafRef = useRef<number>(0);
+  const timeProgress01 =
+    submitPerf === null
+      ? 0
+      : progressSnapshot?.submitPerf === submitPerf &&
+          progressSnapshot.lifetimeMs === lifetimeMs
+        ? progressSnapshot.value
+        : computeProgress01(submitPerf, lifetimeMs);
 
   useEffect(() => {
     if (submitPerf === null) return;
-    const compute = () =>
-      Math.min(1, Math.max(0, (performance.now() - submitPerf) / lifetimeMs));
-    // Seed synchronously so a new bet snaps to its true elapsed point immediately,
-    // instead of briefly showing the prior bet's bar.
-    setTimeProgress01(compute());
     let last = 0;
     const step = (t: number) => {
       if (t - last >= 100) {
         last = t;
-        setTimeProgress01(compute());
+        setProgressSnapshot({
+          submitPerf,
+          lifetimeMs,
+          value: computeProgress01(submitPerf, lifetimeMs),
+        });
       }
       rafRef.current = requestAnimationFrame(step);
     };
@@ -217,4 +222,15 @@ function usePendingOrderId(
     submitHeight: active.submitHeight,
     minOrderIdExclusive: active.priorMaxOrderId,
   });
+}
+
+interface ProgressSnapshot {
+  submitPerf: number;
+  lifetimeMs: number;
+  value: number;
+}
+
+function computeProgress01(submitPerf: number, lifetimeMs: number) {
+  const now = typeof performance === "undefined" ? submitPerf : performance.now();
+  return Math.min(1, Math.max(0, (now - submitPerf) / lifetimeMs));
 }

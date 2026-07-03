@@ -6,7 +6,7 @@
  * fill-progress card and then a result (DegenProgress). One bet at a time.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { cancelSignedOrder, submitSignedOrder } from "@/lib/account/orders";
 import { humanizeOrderError } from "@/lib/account/order-errors";
@@ -56,11 +56,13 @@ export function DegenRail({
   const [submitError, setSubmitError] = useState<string | null>(null);
   // Optimistic cancel: hitting Cancel is a local intent, so we reflect it
   // immediately instead of waiting for the order to drop out of the live feeds
-  // and the cancel to round-trip a block. Reset whenever the active bet changes.
-  const [cancelledLocal, setCancelledLocal] = useState(false);
-  useEffect(() => {
-    setCancelledLocal(false);
-  }, [active]);
+  // and the cancel to round-trip a block. Scope it to the active bet so a new
+  // bet naturally starts uncancelled without a reset effect.
+  const [optimisticallyCancelledBetKey, setOptimisticallyCancelledBetKey] =
+    useState<string | null>(null);
+  const activeBetKey = active ? degenActiveKey(active) : null;
+  const cancelledLocal =
+    activeBetKey !== null && optimisticallyCancelledBetKey === activeBetKey;
 
   const session = useAccountSession();
   const openConnectModal = useSetConnectModalOpen();
@@ -199,7 +201,7 @@ export function DegenRail({
     setCancelling(true);
     // Flip the card to its cancelled state now; revert only if the backend
     // rejects (e.g. the order already filled/expired in the meantime).
-    setCancelledLocal(true);
+    setOptimisticallyCancelledBetKey(activeBetKey);
     try {
       const remaining = active.targetQty - (tracking?.filledQty ?? 0n);
       await cancelSignedOrder({
@@ -222,7 +224,7 @@ export function DegenRail({
       // optimistic flip and let the tracker resolve to filled/none on the next
       // block. warn (not error, which trips the dev overlay) is enough.
       console.warn("degen cancel failed:", e);
-      setCancelledLocal(false);
+      setOptimisticallyCancelledBetKey(null);
     } finally {
       setCancelling(false);
     }
@@ -373,4 +375,16 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   );
+}
+
+function degenActiveKey(active: DegenActive) {
+  return [
+    active.accountId,
+    active.marketId,
+    active.outcome,
+    active.submitHeight,
+    active.submitPerfMs,
+    active.expiresAtBlock,
+    active.priorMaxOrderId ?? "none",
+  ].join(":");
 }
