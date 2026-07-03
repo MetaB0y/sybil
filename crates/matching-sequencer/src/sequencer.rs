@@ -392,9 +392,7 @@ fn expected_balance_delta_from_fills(
     fill_delta + mint_delta
 }
 
-fn verifier_failures(
-    verification: &sybil_verifier::VerificationResult,
-) -> Vec<VerifierFailure> {
+fn verifier_failures(verification: &sybil_verifier::VerificationResult) -> Vec<VerifierFailure> {
     verification
         .violations
         .iter()
@@ -828,19 +826,70 @@ impl BlockSequencer {
         // system-event interleaving becomes consensus-sensitive, collapse these
         // into one sequenced acknowledged-write log.
         for command in control_plane_log {
-            restored
-                .replay_control_plane_command(command)
-                .expect("control-plane WAL replay should be valid");
+            if let Err(error) = restored.replay_control_plane_command(command) {
+                metrics::counter!(
+                    "sybil_restore_wal_rows_dropped_total",
+                    "kind" => "control_plane"
+                )
+                .increment(1);
+                tracing::warn!(
+                    height = restored.height,
+                    %error,
+                    "dropping invalid control-plane WAL row during restore"
+                );
+            }
         }
+
+        let expired_on_restore = restored
+            .order_book
+            .expire_committed_through(restored.height);
+        if !expired_on_restore.is_empty() {
+            metrics::counter!("sybil_restore_expired_resting_orders_total")
+                .increment(expired_on_restore.len() as u64);
+            debug!(
+                height = restored.height,
+                expired_orders = expired_on_restore.len(),
+                "expired stale resting orders during restore"
+            );
+        }
+
         for deposit in state.pending_l1_deposits {
-            restored
-                .ingest_l1_deposit(deposit)
-                .expect("pending l1 deposit replay should be valid");
+            let account_id = deposit.account_id;
+            let deposit_id = deposit.deposit_id;
+            if let Err(error) = restored.ingest_l1_deposit(deposit) {
+                metrics::counter!(
+                    "sybil_restore_wal_rows_dropped_total",
+                    "kind" => "l1_deposit"
+                )
+                .increment(1);
+                tracing::warn!(
+                    height = restored.height,
+                    deposit_id,
+                    account_id = ?account_id,
+                    %error,
+                    "dropping invalid pending l1 deposit WAL row during restore"
+                );
+            }
         }
         for request in state.pending_bridge_withdrawals {
-            restored
-                .request_bridge_withdrawal(request)
-                .expect("pending bridge withdrawal replay should be valid");
+            let account_id = request.account_id;
+            let amount_token_units = request.amount_token_units;
+            let expiry_height = request.expiry_height;
+            if let Err(error) = restored.request_bridge_withdrawal(request) {
+                metrics::counter!(
+                    "sybil_restore_wal_rows_dropped_total",
+                    "kind" => "bridge_withdrawal"
+                )
+                .increment(1);
+                tracing::warn!(
+                    height = restored.height,
+                    account_id = ?account_id,
+                    amount_token_units,
+                    expiry_height,
+                    %error,
+                    "dropping invalid pending bridge withdrawal WAL row during restore"
+                );
+            }
         }
         let account_ids: Vec<AccountId> = restored.accounts.iter().map(|(id, _)| *id).collect();
         restored.analytics.seed_equity_known(account_ids);
@@ -3238,6 +3287,7 @@ mod tests {
     use super::*;
     use crate::account::AccountStore;
     use crate::error::RejectionReason;
+    use crate::order_book::RestingOrder;
     use crate::validation::{validate_order, validate_order_with_reservation};
     use matching_engine::{
         notional_nanos, outcome_buy, outcome_sell, shares_to_qty, MarketId, MarketSet, MmId,
@@ -3275,6 +3325,52 @@ mod tests {
 
     fn qi(shares: u64) -> i64 {
         q(shares) as i64
+    }
+
+    fn restored_analytics_from(seq: &BlockSequencer) -> crate::store::AnalyticsRestoredState {
+        crate::store::AnalyticsRestoredState {
+            last_clearing_prices: seq.last_clearing_prices().clone(),
+            market_volumes: seq.market_volumes().clone(),
+            account_fills: Vec::new(),
+            trader_tracker: Default::default(),
+            price_tracker_volume: Default::default(),
+            price_tracker_clearing_history: Default::default(),
+            liquidity_tracker: Default::default(),
+            order_stats_tracker: Default::default(),
+            welfare_tracker: Default::default(),
+            first_deposit_ms: HashMap::new(),
+            fill_total_counts: HashMap::new(),
+            cost_basis_tracker: Default::default(),
+            history_event_next_seq: 0,
+        }
+    }
+
+    fn restored_state_with_resting_orders(
+        seq: &BlockSequencer,
+        markets: MarketSet,
+        resting_orders: Vec<RestingOrder>,
+    ) -> RestoredState {
+        RestoredState {
+            accounts: seq.accounts.clone(),
+            markets,
+            market_groups: seq.market_groups().to_vec(),
+            market_statuses: HashMap::new(),
+            market_metadata: HashMap::new(),
+            height: seq.height(),
+            last_header: seq.last_header().cloned(),
+            next_order_id: seq.next_order_id(),
+            pubkey_registry: seq.pubkey_registry().clone(),
+            resting_orders,
+            data_feeds: Vec::new(),
+            resolution_templates: Vec::new(),
+            pending_bundles: Vec::new(),
+            control_plane_log: Vec::new(),
+            pending_l1_deposits: Vec::new(),
+            pending_bridge_withdrawals: Vec::new(),
+            bridge_state: seq.bridge_state().clone(),
+            admit_log: Vec::new(),
+            analytics: restored_analytics_from(seq),
+        }
     }
 
     fn total_balance(seq: &BlockSequencer) -> i64 {
@@ -3322,9 +3418,7 @@ mod tests {
         )
     }
 
-    fn expect_invariant_failure(
-        result: Result<BlockProduction, SequencerError>,
-    ) -> SequencerError {
+    fn expect_invariant_failure(result: Result<BlockProduction, SequencerError>) -> SequencerError {
         match result {
             Err(err @ SequencerError::BlockInvariantFailure { .. }) => err,
             Err(other) => panic!("expected block invariant failure, got {other}"),
@@ -4411,6 +4505,135 @@ mod tests {
             "rejected restored pending bundle should still produce a valid witness: {:?}",
             verification.violations
         );
+    }
+
+    #[test]
+    fn restore_expires_stale_resting_orders_before_bridge_wal_replay() {
+        let (markets, m0) = setup();
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let oracle: Arc<dyn Oracle> = Arc::new(AdminOracle::new());
+        let config = SequencerConfig {
+            order_ttl_blocks: 10,
+            ..SequencerConfig::default()
+        };
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            oracle.clone(),
+            config.clone(),
+        );
+
+        let mut expiring_order = outcome_buy(&markets, 0, m0, 0, 800_000_000, q(100));
+        expiring_order.expires_at_block = Some(2);
+        seq.produce_block(
+            vec![OrderSubmission {
+                account_id: aid,
+                orders: vec![expiring_order],
+                mm_constraint: None,
+            }],
+            1_000,
+        );
+        assert_eq!(seq.height(), 1);
+        assert_eq!(seq.order_book.len(), 1);
+        assert_eq!(
+            seq.order_book.reserved_balance(aid),
+            80 * NANOS_PER_DOLLAR as i64
+        );
+
+        let stale_checkpoint_resting_orders = seq.order_book.snapshot();
+
+        seq.produce_block(Vec::new(), 2_000);
+        assert_eq!(seq.height(), 2);
+        assert!(seq.order_book.is_empty());
+        assert_eq!(seq.order_book.reserved_balance(aid), 0);
+
+        let committed_after_expiry = seq.clone();
+        let withdrawal_request = BridgeWithdrawalRequest {
+            account_id: aid,
+            chain_id: 1,
+            vault_address: [0x10; 20],
+            recipient: [0x40; 20],
+            token_address: [0x20; 20],
+            amount_token_units: 90_000_000,
+            expiry_height: 10,
+        };
+        let acknowledged_withdrawal = seq
+            .request_bridge_withdrawal(withdrawal_request.clone())
+            .unwrap();
+
+        let mut state = restored_state_with_resting_orders(
+            &committed_after_expiry,
+            markets.clone(),
+            stale_checkpoint_resting_orders,
+        );
+        state.pending_bridge_withdrawals = vec![withdrawal_request];
+
+        let restored = BlockSequencer::restore(state, oracle, config);
+
+        assert!(restored.order_book.is_empty());
+        assert_eq!(restored.order_book.reserved_balance(aid), 0);
+        assert_eq!(
+            restored.bridge_withdrawal(acknowledged_withdrawal.withdrawal_id),
+            Some(&acknowledged_withdrawal)
+        );
+        assert_eq!(
+            restored.accounts.get(aid).unwrap().balance,
+            10 * NANOS_PER_DOLLAR as i64
+        );
+    }
+
+    #[test]
+    fn restore_drops_invalid_bridge_and_deposit_wal_rows() {
+        let (markets, _) = setup();
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let oracle: Arc<dyn Oracle> = Arc::new(AdminOracle::new());
+        let config = SequencerConfig::default();
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            oracle.clone(),
+            config.clone(),
+        );
+        seq.produce_block(Vec::new(), 1_000);
+
+        let invalid_deposit = L1Deposit {
+            deposit_id: 2,
+            account_id: aid,
+            chain_id: 1,
+            vault_address: [0x10; 20],
+            token_address: [0x20; 20],
+            sender: [0x30; 20],
+            sybil_account_key: account_key(aid),
+            amount_token_units: 10_000_000,
+            deposit_root: [0x02; 32],
+        };
+        let invalid_withdrawal = BridgeWithdrawalRequest {
+            account_id: aid,
+            chain_id: 1,
+            vault_address: [0x10; 20],
+            recipient: [0x40; 20],
+            token_address: [0x20; 20],
+            amount_token_units: 150_000_000,
+            expiry_height: 10,
+        };
+
+        let mut state =
+            restored_state_with_resting_orders(&seq, markets.clone(), seq.order_book.snapshot());
+        state.pending_l1_deposits = vec![invalid_deposit];
+        state.pending_bridge_withdrawals = vec![invalid_withdrawal];
+
+        let restored = BlockSequencer::restore(state, oracle, config);
+
+        assert_eq!(
+            restored.accounts.get(aid).unwrap().balance,
+            100 * NANOS_PER_DOLLAR as i64
+        );
+        assert_eq!(restored.bridge_state().deposit_cursor, 0);
+        assert!(restored.bridge_state().withdrawals.is_empty());
     }
 
     #[test]

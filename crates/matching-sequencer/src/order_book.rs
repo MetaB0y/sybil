@@ -265,13 +265,14 @@ impl OrderBook {
         })
     }
 
-    /// Remove expired orders and release their reservations.
-    /// Returns the orders that were removed (empty when nothing expired).
-    pub fn expire(&mut self, current_height: u64) -> Vec<RestingOrder> {
+    fn expire_where(
+        &mut self,
+        mut should_expire: impl FnMut(&RestingOrder) -> bool,
+    ) -> Vec<RestingOrder> {
         let mut removed = Vec::new();
         let mut kept = Vec::with_capacity(self.orders.len());
         for ro in self.orders.drain(..) {
-            if current_height > ro.expires_at_block {
+            if should_expire(&ro) {
                 Self::release_reservations(
                     &mut self.balance_reservations,
                     &mut self.position_reservations,
@@ -284,6 +285,21 @@ impl OrderBook {
         }
         self.orders = kept;
         removed
+    }
+
+    /// Remove orders that are expired at block-start and release reservations.
+    /// Returns the orders that were removed (empty when nothing expired).
+    pub fn expire(&mut self, current_height: u64) -> Vec<RestingOrder> {
+        self.expire_where(|ro| current_height > ro.expires_at_block)
+    }
+
+    /// Advance a restored stale snapshot to a committed block height.
+    ///
+    /// Live block commit sweeps orders whose expiry block was just processed
+    /// (`current_height >= expires_at_block`) in `settle()`. Restore uses the
+    /// same committed-height semantics before replaying WAL rows.
+    pub fn expire_committed_through(&mut self, current_height: u64) -> Vec<RestingOrder> {
+        self.expire_where(|ro| current_height >= ro.expires_at_block)
     }
 
     /// Re-validate all resting orders against current account state.
