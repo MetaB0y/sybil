@@ -1,0 +1,7 @@
+# Config for regenerating the vendored Sybil OpenAPI Python client.
+# See `just arena-sdk-regen` / scripts/regen-sdk.sh.
+#
+# Disable post-generation hooks (autoflake / ruff) so the vendored tree is
+# byte-reproducible regardless of which formatter versions happen to be on
+# PATH. The generated package is excluded from our ruff config anyway.
+post_hooks: []

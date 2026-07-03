@@ -9,6 +9,13 @@ from typing import Any
 
 import httpx
 
+from ._generated.models import (
+    AccountFillResponse,
+    AccountResponse,
+    PortfolioResponse,
+    PriceHistoryResponse,
+)
+from ._generated.types import Unset
 from .types import (
     NANOS_PER_DOLLAR,
     Account,
@@ -33,6 +40,17 @@ from .types import (
 )
 
 log = logging.getLogger(__name__)
+
+
+def _opt(value: Any) -> Any:
+    """Unwrap a generated-model optional attribute: the ``UNSET`` sentinel -> ``None``.
+
+    The vendored ``sybil_client._generated`` package (regenerated from the API's
+    OpenAPI spec via ``just arena-sdk-regen``) represents absent optional fields
+    with an ``Unset`` sentinel rather than ``None``. This collapses that back to
+    ``None`` so callers can apply their own defaults.
+    """
+    return None if isinstance(value, Unset) else value
 
 
 class SybilClientError(Exception):
@@ -114,24 +132,25 @@ class SybilClient:
     async def get_portfolio(self, account_id: int) -> Portfolio:
         """Get portfolio summary with valued positions and PnL."""
         data = await self._request("GET", f"/v1/accounts/{account_id}/portfolio")
+        model = PortfolioResponse.from_dict(data)
         positions = [
             PositionValue(
-                market_id=p["market_id"],
-                outcome=p["outcome"],
-                quantity=quantity_units_to_shares(p["quantity"]),
-                current_price_nanos=p["current_price_nanos"],
-                value_nanos=p["value_nanos"],
+                market_id=p.market_id,
+                outcome=p.outcome,
+                quantity=quantity_units_to_shares(p.quantity),
+                current_price_nanos=p.current_price_nanos,
+                value_nanos=p.value_nanos,
             )
-            for p in data.get("positions", [])
+            for p in model.positions
         ]
         return Portfolio(
-            account_id=data["account_id"],
-            balance_nanos=data["balance_nanos"],
-            total_deposited_nanos=data["total_deposited_nanos"],
+            account_id=model.account_id,
+            balance_nanos=model.balance_nanos,
+            total_deposited_nanos=model.total_deposited_nanos,
             positions=positions,
-            total_position_value_nanos=data["total_position_value_nanos"],
-            portfolio_value_nanos=data["portfolio_value_nanos"],
-            pnl_nanos=data["pnl_nanos"],
+            total_position_value_nanos=model.total_position_value_nanos,
+            portfolio_value_nanos=model.portfolio_value_nanos,
+            pnl_nanos=model.pnl_nanos,
         )
 
     async def get_account_fills(
@@ -150,25 +169,28 @@ class SybilClient:
         )
         return [
             AccountFill(
-                order_id=f["order_id"],
-                fill_qty=quantity_units_to_shares(f["fill_qty"]),
-                fill_price_nanos=f["fill_price_nanos"],
-                block_height=f["block_height"],
-                timestamp_ms=f["timestamp_ms"],
+                order_id=f.order_id,
+                fill_qty=quantity_units_to_shares(f.fill_qty),
+                fill_price_nanos=f.fill_price_nanos,
+                block_height=f.block_height,
+                timestamp_ms=f.timestamp_ms,
                 position_deltas=[
                     PositionDelta(
-                        market_id=d["market_id"],
-                        outcome=d["outcome"],
-                        delta=quantity_units_to_shares(d["delta"]),
+                        market_id=d.market_id,
+                        outcome=d.outcome,
+                        delta=quantity_units_to_shares(d.delta),
                     )
-                    for d in f.get("position_deltas", [])
+                    for d in f.position_deltas
                 ],
             )
-            for f in data
+            for f in (AccountFillResponse.from_dict(item) for item in data)
         ]
 
     async def get_pending_orders(self, account_id: int) -> list[PendingOrder]:
         """Get pending orders for an account."""
+        # Hand-written: the generated ``PendingOrderResponse`` marks
+        # ``expires_at_block`` as required, but the server omits it for
+        # non-GTD orders. Keep the lenient ``.get`` so GTC/IOC orders parse.
         data = await self._request("GET", f"/v1/accounts/{account_id}/orders")
         return [
             PendingOrder(
@@ -188,11 +210,12 @@ class SybilClient:
         ]
 
     def _parse_account(self, data: dict[str, Any]) -> Account:
+        model = AccountResponse.from_dict(data)
         positions = [
-            Position(p["market_id"], p["outcome"], quantity_units_to_shares(p["quantity"]))
-            for p in data.get("positions", [])
+            Position(p.market_id, p.outcome, quantity_units_to_shares(p.quantity))
+            for p in (_opt(model.positions) or [])
         ]
-        return Account(data["account_id"], data["balance_nanos"], positions)
+        return Account(model.account_id, model.balance_nanos, positions)
 
     # === Markets ===
 
@@ -256,15 +279,16 @@ class SybilClient:
         data = await self._request(
             "GET", f"/v1/markets/{market_id}/prices/history", params=params
         )
+        model = PriceHistoryResponse.from_dict(data)
         return [
             PricePoint(
-                height=p["height"],
-                timestamp_ms=p["timestamp_ms"],
-                yes_price_nanos=p["yes_price_nanos"],
-                no_price_nanos=p["no_price_nanos"],
-                volume_nanos=p["volume_nanos"],
+                height=p.height,
+                timestamp_ms=p.timestamp_ms,
+                yes_price_nanos=p.yes_price_nanos,
+                no_price_nanos=p.no_price_nanos,
+                volume_nanos=p.volume_nanos,
             )
-            for p in data.get("points", [])
+            for p in model.points
         ]
 
     async def search_markets(
@@ -307,6 +331,11 @@ class SybilClient:
         )
 
     def _parse_market(self, data: dict[str, Any]) -> Market:
+        # Hand-written: this parser is shared between the full ``MarketResponse``
+        # (list/get/search) and the partial ``CreateMarketResponse`` (create,
+        # which carries only market_id + name). Delegating to
+        # ``MarketResponse.from_dict`` would reject the create-market shape on its
+        # required ``status`` field, so we keep the lenient ``.get`` defaults.
         return Market(
             id=data["market_id"],
             name=data["name"],

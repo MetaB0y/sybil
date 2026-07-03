@@ -223,6 +223,12 @@ arena-check:
     cd arena && uv run ruff check .
     cd arena && uv run pytest -q
 
+# Regenerate the vendored Sybil OpenAPI Python client (arena/sybil_client/_generated)
+# from the live spec. Mirrors the frontend's `types:generate`; boots sybil-api on a
+# free port, fetches /openapi.json, and regenerates only the _generated/ package.
+arena-sdk-regen:
+    ./arena/scripts/regen-sdk.sh
+
 # Run frontend typecheck, lint, vitest, and build (mirrors .github/workflows/frontend.yml).
 # Degrades gracefully with a clear skip message when pnpm is not installed locally.
 frontend-check:
