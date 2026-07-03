@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use reqwest::Client;
 use tracing::{debug, warn};
 
-use super::types::{GammaEvent, MidpointResponse};
+use super::types::{GammaEvent, GammaMarket, MidpointResponse};
 use crate::error::Error;
 
 #[derive(Debug, serde::Deserialize)]
@@ -215,6 +215,42 @@ impl GammaClient {
         }
 
         Ok(all_events)
+    }
+
+    /// Fetch Gamma markets by Polymarket condition id. Gamma accepts repeated
+    /// `condition_ids` query parameters; keep chunks at 50 ids to bound URL
+    /// length, matching the analytics snapshot tooling.
+    pub async fn fetch_markets_by_condition_ids(
+        &self,
+        condition_ids: &[String],
+    ) -> Result<Vec<GammaMarket>, Error> {
+        if condition_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut all_markets = Vec::with_capacity(condition_ids.len());
+        for chunk in condition_ids.chunks(50) {
+            let url = format!("{}/markets", self.gamma_url);
+            let mut query = Vec::with_capacity(chunk.len() + 1);
+            query.push(("limit", chunk.len().to_string()));
+            query.extend(chunk.iter().map(|id| ("condition_ids", id.clone())));
+
+            let resp = self.http.get(&url).query(&query).send().await?;
+
+            if !resp.status().is_success() {
+                let status = resp.status().as_u16();
+                let body = resp.text().await.unwrap_or_default();
+                return Err(Error::PolymarketApi(format!(
+                    "GET /markets?condition_ids returned {}: {}",
+                    status, body
+                )));
+            }
+
+            let markets: Vec<GammaMarket> = resp.json().await?;
+            all_markets.extend(markets);
+        }
+
+        Ok(all_markets)
     }
 
     /// Fetch midpoint price for a single token via CLOB REST.

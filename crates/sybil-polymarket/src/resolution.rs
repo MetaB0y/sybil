@@ -28,6 +28,9 @@ use crate::signer::ResolutionSigner;
 use sybil_api_types::SetMarketMetadataRequest;
 use sybil_client::SybilClient;
 
+const CONDITION_IDS_PER_REQUEST: usize = 50;
+const CONDITION_CHUNKS_PER_TICK: usize = 4;
+
 /// Periodic resolver. Polls closed Polymarket events, attests to clean
 /// binary resolutions, and sends them to sybil-api.
 pub struct ResolutionActor {
@@ -41,6 +44,10 @@ pub struct ResolutionActor {
     /// only — a restart re-flags each once via this path (and the sync actor's
     /// first-sync backfill), which is harmless and idempotent on the API side.
     flagged_closed: Mutex<HashSet<String>>,
+    /// Round-robin cursor through locally mirrored condition ids. This keeps
+    /// exhaustive reconciliation bounded per tick while guaranteeing markets
+    /// outside Gamma's top closed-events window are still revisited.
+    condition_poll_cursor: Mutex<usize>,
 }
 
 impl ResolutionActor {
@@ -58,6 +65,7 @@ impl ResolutionActor {
             mapping,
             signer,
             flagged_closed: Mutex::new(HashSet::new()),
+            condition_poll_cursor: Mutex::new(0),
         }
     }
 
@@ -101,7 +109,20 @@ impl ResolutionActor {
         let events = self
             .gamma
             .fetch_closed_events(self.config.max_events)
+            .await
+            .unwrap_or_else(|e| {
+                warn!(error = %e, "closed-events fast path failed; continuing with mirrored condition poll");
+                Vec::new()
+            });
+
+        let mut condition_ids: Vec<String> = mirrors.keys().cloned().collect();
+        condition_ids.sort();
+        let polled_condition_ids = self.next_condition_poll_ids(&condition_ids);
+        let condition_markets = self
+            .gamma
+            .fetch_markets_by_condition_ids(&polled_condition_ids)
             .await?;
+        let markets = mapped_resolution_markets(&events, condition_markets, &mirrors);
 
         // Mark-once: push `closed: true` off-block for any mapped market
         // Polymarket reports closed, so the frontend hides/greys it. Independent
@@ -110,7 +131,7 @@ impl ResolutionActor {
         // this lifetime so we don't re-POST every tick.
         let to_flag = {
             let flagged = self.flagged_closed.lock().expect("flagged_closed poisoned");
-            pending_close_flags(&events, &mirrors, &flagged)
+            pending_close_flags_for_markets(&markets, &mirrors, &flagged)
         };
         if !to_flag.is_empty() {
             let req = SetMarketMetadataRequest {
@@ -133,22 +154,39 @@ impl ResolutionActor {
         }
 
         let mut resolved = 0usize;
-        for event in events {
-            for market in event.markets {
-                let Some(&sybil_id) = mirrors.get(&market.condition_id) else {
-                    continue;
-                };
-                match self.maybe_resolve(sybil_id, &market).await {
-                    Ok(true) => resolved += 1,
-                    Ok(false) => {}
-                    Err(e) => warn!(sybil_id, error = %e, "failed to resolve market"),
-                }
+        for market in markets {
+            let Some(&sybil_id) = mirrors.get(&market.condition_id) else {
+                continue;
+            };
+            match self.maybe_resolve(sybil_id, &market).await {
+                Ok(true) => resolved += 1,
+                Ok(false) => {}
+                Err(e) => warn!(sybil_id, error = %e, "failed to resolve market"),
             }
         }
         if resolved > 0 {
             info!(resolved, "settled markets via polymarket_mirror");
         }
         Ok(())
+    }
+
+    fn next_condition_poll_ids(&self, condition_ids: &[String]) -> Vec<String> {
+        if condition_ids.is_empty() {
+            return Vec::new();
+        }
+
+        let max_ids = CONDITION_IDS_PER_REQUEST * CONDITION_CHUNKS_PER_TICK;
+        let count = condition_ids.len().min(max_ids);
+        let mut cursor = self
+            .condition_poll_cursor
+            .lock()
+            .expect("condition_poll_cursor poisoned");
+        let start = *cursor % condition_ids.len();
+        let ids = (0..count)
+            .map(|offset| condition_ids[(start + offset) % condition_ids.len()].clone())
+            .collect();
+        *cursor = (start + count) % condition_ids.len();
+        ids
     }
 
     /// Returns `Ok(true)` if we successfully posted a resolution; `Ok(false)`
@@ -201,34 +239,67 @@ impl ResolutionActor {
 /// `closed`, it is in the `mirrors` map (condition_id -> sybil_market_id), and
 /// it has not already been flagged this process lifetime. Returns
 /// `(sybil_market_id, condition_id)` pairs. No I/O — unit-tested in isolation.
+#[cfg(test)]
 fn pending_close_flags(
     events: &[GammaEvent],
     mirrors: &HashMap<String, u32>,
     already_flagged: &HashSet<String>,
 ) -> Vec<(u32, String)> {
+    let markets: Vec<_> = events
+        .iter()
+        .flat_map(|event| event.markets.iter().cloned())
+        .collect();
+    pending_close_flags_for_markets(&markets, mirrors, already_flagged)
+}
+
+fn pending_close_flags_for_markets(
+    markets: &[GammaMarket],
+    mirrors: &HashMap<String, u32>,
+    already_flagged: &HashSet<String>,
+) -> Vec<(u32, String)> {
     let mut out = Vec::new();
-    for event in events {
-        for market in &event.markets {
-            if !market.closed {
-                continue;
-            }
-            let Some(&sybil_id) = mirrors.get(&market.condition_id) else {
-                continue;
-            };
-            if already_flagged.contains(&market.condition_id) {
-                continue;
-            }
-            out.push((sybil_id, market.condition_id.clone()));
+    for market in markets {
+        if !market.closed {
+            continue;
         }
+        let Some(&sybil_id) = mirrors.get(&market.condition_id) else {
+            continue;
+        };
+        if already_flagged.contains(&market.condition_id) {
+            continue;
+        }
+        out.push((sybil_id, market.condition_id.clone()));
     }
     out
 }
 
+fn mapped_resolution_markets(
+    closed_events: &[GammaEvent],
+    condition_markets: Vec<GammaMarket>,
+    mirrors: &HashMap<String, u32>,
+) -> Vec<GammaMarket> {
+    let mut by_condition = HashMap::new();
+    for event in closed_events {
+        for market in &event.markets {
+            if mirrors.contains_key(&market.condition_id) {
+                by_condition.insert(market.condition_id.clone(), market.clone());
+            }
+        }
+    }
+    for market in condition_markets {
+        if mirrors.contains_key(&market.condition_id) {
+            by_condition.insert(market.condition_id.clone(), market);
+        }
+    }
+    by_condition.into_values().collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::pending_close_flags;
+    use super::{mapped_resolution_markets, pending_close_flags, pending_close_flags_for_markets};
     use crate::polymarket::types::{GammaEvent, GammaMarket};
     use std::collections::{HashMap, HashSet};
+    use sybil_api_types::NANOS_PER_DOLLAR;
 
     fn market(condition_id: &str, closed: bool) -> GammaMarket {
         GammaMarket {
@@ -257,6 +328,16 @@ mod tests {
             resolved_by: None,
             extra: Default::default(),
         }
+    }
+
+    fn resolved_market(condition_id: &str, yes_wins: bool) -> GammaMarket {
+        let mut market = market(condition_id, true);
+        market.outcome_prices = if yes_wins {
+            serde_json::to_string(&["1", "0"]).unwrap()
+        } else {
+            serde_json::to_string(&["0", "1"]).unwrap()
+        };
+        market
     }
 
     fn event(markets: Vec<GammaMarket>) -> GammaEvent {
@@ -301,5 +382,28 @@ mod tests {
         let already: HashSet<String> = ["0xaaa".to_string()].into_iter().collect();
         let out = pending_close_flags(&events, &mirrors, &already);
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn reconciles_mirrored_condition_outside_closed_events_window() {
+        let closed_events = vec![event(vec![resolved_market("0xtop", true)])];
+        let condition_markets = vec![resolved_market("0xoff", true)];
+        let mirrors = HashMap::from([("0xoff".to_string(), 42u32)]);
+
+        let markets = mapped_resolution_markets(&closed_events, condition_markets, &mirrors);
+        assert_eq!(
+            markets
+                .iter()
+                .map(|m| m.condition_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["0xoff"]
+        );
+        assert_eq!(markets[0].resolved_payout(), Some(NANOS_PER_DOLLAR));
+
+        let already = HashSet::new();
+        assert_eq!(
+            pending_close_flags_for_markets(&markets, &mirrors, &already),
+            vec![(42u32, "0xoff".to_string())]
+        );
     }
 }

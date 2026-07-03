@@ -35,6 +35,69 @@ pub struct SyncActor {
     first_sync: bool,
 }
 
+struct PendingMmNotification {
+    sybil_market_id: u32,
+    condition_id: String,
+    yes_token_id: String,
+    initial_mid: f64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum NegRiskGroupAction {
+    Create(Vec<u32>),
+    ExistingCannotExtend {
+        missing_market_ids: Vec<u32>,
+        existing_group_market_ids: Vec<u32>,
+    },
+    None,
+}
+
+fn plan_negrisk_group_action(
+    event: &GammaEvent,
+    active_mapped_ids: &[u32],
+    existing_group: Option<&GroupInfo>,
+) -> NegRiskGroupAction {
+    if !event.is_neg_risk() || active_mapped_ids.len() <= 1 {
+        return NegRiskGroupAction::None;
+    }
+
+    if let Some(group) = existing_group {
+        let missing_market_ids: Vec<u32> = active_mapped_ids
+            .iter()
+            .copied()
+            .filter(|id| !group.sybil_market_ids.contains(id))
+            .collect();
+        if missing_market_ids.is_empty() {
+            NegRiskGroupAction::None
+        } else {
+            NegRiskGroupAction::ExistingCannotExtend {
+                missing_market_ids,
+                existing_group_market_ids: group.sybil_market_ids.clone(),
+            }
+        }
+    } else {
+        NegRiskGroupAction::Create(active_mapped_ids.to_vec())
+    }
+}
+
+fn mm_group_membership(
+    event_id: &str,
+    sybil_market_id: u32,
+    group: Option<&GroupInfo>,
+) -> (Option<String>, usize) {
+    let in_group = group
+        .as_ref()
+        .is_some_and(|group| group.neg_risk && group.sybil_market_ids.contains(&sybil_market_id));
+    if in_group {
+        (
+            Some(event_id.to_string()),
+            group.map(|group| group.sybil_market_ids.len()).unwrap_or(0),
+        )
+    } else {
+        (None, 0)
+    }
+}
+
 impl SyncActor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -179,10 +242,6 @@ impl SyncActor {
         let mut new_token_ids = Vec::new();
 
         for event in &events {
-            if self.mapping.read().await.is_event_synced(&event.id) {
-                continue;
-            }
-
             let active_markets: Vec<_> = event
                 .markets
                 .iter()
@@ -193,17 +252,48 @@ impl SyncActor {
                 continue;
             }
 
+            let (event_synced, existing_group, mapped_count, unmapped_count) = {
+                let map = self.mapping.read().await;
+                let mapped_count = active_markets
+                    .iter()
+                    .filter(|m| map.sybil_market_id(&m.condition_id).is_some())
+                    .count();
+                (
+                    map.is_event_synced(&event.id),
+                    map.event_group(&event.id),
+                    mapped_count,
+                    active_markets.len().saturating_sub(mapped_count),
+                )
+            };
+            let needs_group_retry =
+                event.is_neg_risk() && existing_group.is_none() && mapped_count > 1;
+            if event_synced && unmapped_count == 0 && !needs_group_retry {
+                continue;
+            }
+
             info!(
                 event_id = &event.id,
                 title = &event.title,
                 markets = active_markets.len(),
+                unmapped = unmapped_count,
                 neg_risk = event.is_neg_risk(),
-                "syncing new event"
+                already_synced = event_synced,
+                "syncing polymarket event"
             );
 
-            let mut sybil_market_ids = Vec::new();
+            let mut pending_mm = Vec::new();
 
             for poly_market in &active_markets {
+                if self
+                    .mapping
+                    .read()
+                    .await
+                    .sybil_market_id(&poly_market.condition_id)
+                    .is_some()
+                {
+                    continue;
+                }
+
                 let token_ids = match poly_market.parsed_token_ids() {
                     Ok(ids) if ids.len() >= 2 => ids,
                     Ok(_) => {
@@ -272,7 +362,6 @@ impl SyncActor {
                             token_ids.clone(),
                             sybil_id,
                         );
-                        sybil_market_ids.push(sybil_id);
 
                         // Push off-block metadata (event id/title, images, end
                         // dates, category) so the frontend can render real
@@ -295,35 +384,12 @@ impl SyncActor {
                             );
                         }
 
-                        if self.config.mm_max_markets == 0 || mm_live < self.config.mm_max_markets {
-                            // Notify MM about the new market
-                            let initial_mid = poly_market.yes_price().unwrap_or(0.5);
-                            let _ = self
-                                .mm_tx
-                                .send(MmMessage::MarketMirrored {
-                                    sybil_market_id: sybil_id,
-                                    yes_token_id: token_ids[0].clone(),
-                                    initial_mid,
-                                    group_key: event.is_neg_risk().then(|| event.id.clone()),
-                                    group_size: if event.is_neg_risk() {
-                                        active_markets.len()
-                                    } else {
-                                        0
-                                    },
-                                })
-                                .await;
-                            mm_live += 1;
-
-                            // Collect token IDs for Feed subscription
-                            new_token_ids.extend(token_ids);
-                        } else {
-                            info!(
-                                sybil_id,
-                                limit = self.config.mm_max_markets,
-                                live = mm_live,
-                                "created market but skipped live MM tracking (cap reached)"
-                            );
-                        }
+                        pending_mm.push(PendingMmNotification {
+                            sybil_market_id: sybil_id,
+                            condition_id: poly_market.condition_id.clone(),
+                            yes_token_id: token_ids[0].clone(),
+                            initial_mid: poly_market.yes_price().unwrap_or(0.5),
+                        });
                     }
                     Err(e) => {
                         warn!(
@@ -335,48 +401,150 @@ impl SyncActor {
                 }
             }
 
-            // Create market group for NegRisk events with multiple markets
-            if event.is_neg_risk() && sybil_market_ids.len() > 1 {
-                let group_req = CreateMarketGroupRequest {
-                    name: event.title.clone(),
-                    market_ids: sybil_market_ids.clone(),
-                };
-                match self.sybil_client.create_market_group(&group_req).await {
-                    Ok(_) => {
-                        info!(
-                            event_id = &event.id,
-                            markets = sybil_market_ids.len(),
-                            "created market group"
-                        );
-                        self.mapping.write().await.register_event(
-                            event.id.clone(),
-                            GroupInfo {
-                                group_name: event.title.clone(),
-                                sybil_market_ids: sybil_market_ids.clone(),
-                                neg_risk: true,
-                            },
-                        );
-                    }
-                    Err(e) => {
-                        warn!(event_id = &event.id, error = %e, "failed to create market group");
-                    }
-                }
-            } else if !sybil_market_ids.is_empty() {
-                self.mapping.write().await.mark_event_synced(&event.id);
-            } else {
+            let (active_mapped_ids, unmapped_after) = {
+                let map = self.mapping.read().await;
+                let mapped: Vec<u32> = active_markets
+                    .iter()
+                    .filter_map(|m| map.sybil_market_id(&m.condition_id))
+                    .collect();
+                let unmapped_after = active_markets.len().saturating_sub(mapped.len());
+                (mapped, unmapped_after)
+            };
+
+            let existing_group = self.mapping.read().await.event_group(&event.id);
+            let group_action = if event.is_neg_risk()
+                && existing_group.is_none()
+                && active_mapped_ids.len() > 1
+                && unmapped_after > 0
+            {
                 warn!(
                     event_id = &event.id,
-                    "no Sybil markets created; leaving event unsynced for retry"
+                    mapped = active_mapped_ids.len(),
+                    unmapped = unmapped_after,
+                    "not creating partial NegRisk MarketGroup until all active child markets are mapped"
                 );
+                NegRiskGroupAction::None
+            } else {
+                plan_negrisk_group_action(event, &active_mapped_ids, existing_group.as_ref())
+            };
+            match group_action {
+                NegRiskGroupAction::Create(market_ids) => {
+                    let group_req = CreateMarketGroupRequest {
+                        name: event.title.clone(),
+                        market_ids: market_ids.clone(),
+                    };
+                    match self.sybil_client.create_market_group(&group_req).await {
+                        Ok(_) => {
+                            info!(
+                                event_id = &event.id,
+                                markets = market_ids.len(),
+                                "created market group"
+                            );
+                            self.mapping.write().await.register_event(
+                                event.id.clone(),
+                                GroupInfo {
+                                    group_name: event.title.clone(),
+                                    sybil_market_ids: market_ids,
+                                    neg_risk: true,
+                                },
+                            );
+                        }
+                        Err(e) => {
+                            warn!(
+                                event_id = &event.id,
+                                error = %e,
+                                "failed to create market group"
+                            );
+                        }
+                    }
+                }
+                NegRiskGroupAction::ExistingCannotExtend {
+                    missing_market_ids,
+                    existing_group_market_ids,
+                } => {
+                    warn!(
+                        event_id = &event.id,
+                        missing_market_ids = ?missing_market_ids,
+                        existing_group_market_ids = ?existing_group_market_ids,
+                        "NegRisk event has active child markets outside an existing Sybil MarketGroup; Sybil exposes create/list only, no group-extension endpoint, so the mirror will not submit a duplicate overlapping group"
+                    );
+                }
+                NegRiskGroupAction::None => {}
+            }
+
+            if (!event.is_neg_risk() || active_mapped_ids.len() <= 1)
+                && !active_mapped_ids.is_empty()
+                && unmapped_after == 0
+            {
+                self.mapping.write().await.mark_event_synced(&event.id);
+            } else if active_mapped_ids.is_empty() {
+                warn!(
+                    event_id = &event.id,
+                    "no Sybil markets mapped; leaving event unsynced for retry"
+                );
+            }
+
+            let group_after_sync = self.mapping.read().await.event_group(&event.id);
+            for pending in pending_mm {
+                let (group_key, group_size) = mm_group_membership(
+                    &event.id,
+                    pending.sybil_market_id,
+                    group_after_sync.as_ref(),
+                );
+
+                if event.is_neg_risk() && group_key.is_none() && group_after_sync.is_some() {
+                    warn!(
+                        event_id = &event.id,
+                        sybil_id = pending.sybil_market_id,
+                        condition_id = &pending.condition_id,
+                        "tracking late NegRisk child as standalone because existing Sybil MarketGroup cannot be extended"
+                    );
+                }
+
+                if self.config.mm_max_markets == 0 || mm_live < self.config.mm_max_markets {
+                    match self
+                        .mm_tx
+                        .send(MmMessage::MarketMirrored {
+                            sybil_market_id: pending.sybil_market_id,
+                            yes_token_id: pending.yes_token_id.clone(),
+                            initial_mid: pending.initial_mid,
+                            group_key,
+                            group_size,
+                        })
+                        .await
+                    {
+                        Ok(()) => {
+                            mm_live += 1;
+                            new_token_ids.push(pending.yes_token_id);
+                        }
+                        Err(e) => {
+                            warn!(
+                                sybil_id = pending.sybil_market_id,
+                                error = %e,
+                                "failed to notify MM about mirrored market"
+                            );
+                        }
+                    }
+                } else {
+                    info!(
+                        sybil_id = pending.sybil_market_id,
+                        limit = self.config.mm_max_markets,
+                        live = mm_live,
+                        "created market but skipped live MM tracking (cap reached)"
+                    );
+                }
             }
         }
 
         // Notify Feed about new tokens to subscribe
         if !new_token_ids.is_empty() {
-            let _ = self
+            if let Err(e) = self
                 .feed_tx
                 .send(FeedMessage::SubscribeTokens(new_token_ids))
-                .await;
+                .await
+            {
+                warn!(error = %e, "failed to notify feed about new token subscriptions");
+            }
         }
 
         Ok(())
@@ -452,5 +620,132 @@ fn build_metadata_request(event: &GammaEvent, market: &GammaMarket) -> SetMarket
         market_start_date_ms,
         group_item_title: market.group_item_title.clone(),
         closed: Some(market.closed),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn market(condition_id: &str, yes_token: &str, no_token: &str, title: &str) -> GammaMarket {
+        GammaMarket {
+            condition_id: condition_id.to_string(),
+            question: format!("{title}?"),
+            outcomes: serde_json::to_string(&["Yes", "No"]).unwrap(),
+            outcome_prices: serde_json::to_string(&["0.50", "0.50"]).unwrap(),
+            clob_token_ids: serde_json::to_string(&[yes_token, no_token]).unwrap(),
+            active: true,
+            closed: false,
+            neg_risk: true,
+            group_item_title: Some(title.to_string()),
+            best_bid: None,
+            best_ask: None,
+            last_trade_price: None,
+            volume: None,
+            liquidity: None,
+            slug: None,
+            description: None,
+            start_date: None,
+            end_date: None,
+            resolution_source: None,
+            image: None,
+            icon: None,
+            umared: None,
+            resolved_by: None,
+            extra: Default::default(),
+        }
+    }
+
+    fn negrisk_event(markets: Vec<GammaMarket>) -> GammaEvent {
+        GammaEvent {
+            id: "event-1".to_string(),
+            title: "Election".to_string(),
+            description: String::new(),
+            slug: "election".to_string(),
+            active: true,
+            closed: false,
+            enable_neg_risk: true,
+            neg_risk: true,
+            markets,
+            tags: Vec::new(),
+            volume: None,
+            liquidity: None,
+            start_date: None,
+            end_date: None,
+            created_at: None,
+            image: None,
+            icon: None,
+            extra: Default::default(),
+        }
+    }
+
+    #[test]
+    fn resync_synced_negrisk_child_does_not_plan_duplicate_group() {
+        let event = negrisk_event(vec![
+            market("cond-1", "yes-1", "no-1", "A"),
+            market("cond-2", "yes-2", "no-2", "B"),
+            market("cond-3", "yes-3", "no-3", "C"),
+        ]);
+        let existing_group = GroupInfo {
+            group_name: "Election".to_string(),
+            sybil_market_ids: vec![0, 1],
+            neg_risk: true,
+        };
+
+        let action = plan_negrisk_group_action(&event, &[0, 1, 2], Some(&existing_group));
+        assert_eq!(
+            action,
+            NegRiskGroupAction::ExistingCannotExtend {
+                missing_market_ids: vec![2],
+                existing_group_market_ids: vec![0, 1],
+            }
+        );
+    }
+
+    #[test]
+    fn late_negrisk_child_uses_standalone_mm_membership_when_group_cannot_extend() {
+        let existing_group = GroupInfo {
+            group_name: "Election".to_string(),
+            sybil_market_ids: vec![0, 1],
+            neg_risk: true,
+        };
+
+        assert_eq!(
+            mm_group_membership("event-1", 0, Some(&existing_group)),
+            (Some("event-1".to_string()), 2)
+        );
+        assert_eq!(
+            mm_group_membership("event-1", 2, Some(&existing_group)),
+            (None, 0)
+        );
+    }
+
+    #[test]
+    fn synced_event_with_new_unmapped_child_is_detected_for_resync() {
+        let event = negrisk_event(vec![
+            market("cond-1", "yes-1", "no-1", "A"),
+            market("cond-2", "yes-2", "no-2", "B"),
+            market("cond-3", "yes-3", "no-3", "C"),
+        ]);
+        let mut mapping = MappingStore::new(None);
+        mapping.register_market("cond-1".to_string(), vec!["yes-1".into(), "no-1".into()], 0);
+        mapping.register_market("cond-2".to_string(), vec!["yes-2".into(), "no-2".into()], 1);
+        mapping.register_event(
+            "event-1".to_string(),
+            GroupInfo {
+                group_name: "Election".to_string(),
+                sybil_market_ids: vec![0, 1],
+                neg_risk: true,
+            },
+        );
+
+        let unmapped: Vec<_> = event
+            .markets
+            .iter()
+            .filter(|market| mapping.sybil_market_id(&market.condition_id).is_none())
+            .map(|market| market.condition_id.as_str())
+            .collect();
+
+        assert_eq!(unmapped, vec!["cond-3"]);
     }
 }

@@ -93,6 +93,11 @@ impl MappingStore {
         self.event_to_group.insert(event_id, group_info);
     }
 
+    /// Look up the Sybil market group registered for a Polymarket event.
+    pub fn event_group(&self, event_id: &str) -> Option<GroupInfo> {
+        self.event_to_group.get(event_id).cloned()
+    }
+
     /// Mark a simple (non-NegRisk) event as synced.
     pub fn mark_event_synced(&mut self, event_id: &str) {
         self.synced_events.insert(event_id.to_string());
