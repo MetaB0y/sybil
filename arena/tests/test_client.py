@@ -170,3 +170,61 @@ def test_submit_orders_can_set_ioc_time_in_force(monkeypatch):
             "quantity": 3_000,
         }
     ]
+
+
+class _FakeStreamCM:
+    """Async context manager mimicking httpx's client.stream(...)."""
+
+    def __init__(self, lines, raise_exc=None):
+        self._lines = lines
+        self._raise_exc = raise_exc
+
+    async def __aenter__(self):
+        if self._raise_exc is not None:
+            raise self._raise_exc
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            yield line
+
+
+class _FakeStreamingHttp:
+    def __init__(self):
+        self.calls = 0
+
+    def stream(self, method, path):
+        import httpx
+
+        self.calls += 1
+        if self.calls == 1:
+            # First connection drops before yielding anything.
+            return _FakeStreamCM([], raise_exc=httpx.ConnectError("boom"))
+        return _FakeStreamCM(['data: {"height": 5}', 'data: {"height": 6}'])
+
+
+async def test_stream_blocks_reconnects_after_drop():
+    # AR-3: a dropped SSE connection must be retried with backoff instead of
+    # ending the stream (which would tear down the consuming bot).
+    from sybil_client import SybilClient
+
+    client = SybilClient("http://example.invalid")
+    client._client = _FakeStreamingHttp()
+    client._stream_reconnect_base_s = 0.0
+    client._stream_reconnect_max_s = 0.0
+
+    heights = []
+    gen = client.stream_blocks()
+    try:
+        async for block in gen:
+            heights.append(block.height)
+            if len(heights) >= 2:
+                break
+    finally:
+        await gen.aclose()
+
+    assert heights == [5, 6]
+    assert client._client.calls == 2  # reconnected once after the drop

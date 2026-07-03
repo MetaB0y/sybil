@@ -276,6 +276,8 @@ class NewsFeed:
         # Dedup
         self._seen_urls: deque[str] = deque()
         self._seen_set: set[str] = set()
+        # url -> set of market ids that matched it in the latest poll (AR-7)
+        self._url_market_ids: dict[str, set[int]] = {}
 
         # Pending articles per market
         self._pending: dict[int, list[LiveArticle]] = defaultdict(list)
@@ -389,16 +391,34 @@ class NewsFeed:
             log.warning("Feed fetch errors across %d markets: %s",
                         sum(feed_errors.values()), summary)
 
-        # Group candidates by market (dedup first)
-        per_market: dict[int, list[dict]] = {}
+        # Group candidates by market. AR-7: an article can surface in several
+        # markets' feeds. We first collect every (url -> matching market ids)
+        # association, then apply cross-poll dedup once per url. This keeps a
+        # multi-market article associated with ALL of its markets instead of
+        # silently assigning it to whichever feed happened to be polled first.
         market_by_id: dict[int, Market] = {m.id: m for m in self.markets}
+        url_to_market_ids: dict[str, set[int]] = defaultdict(set)
+        url_to_entry: dict[str, dict] = {}
         for (market, _), result in zip(self._market_feeds, feed_results):
             if isinstance(result, Exception) or not isinstance(result, list):
                 continue
             for entry in result:
                 url = entry["url"]
-                if url and self._mark_seen(url):
-                    per_market.setdefault(market.id, []).append(entry)
+                if not url:
+                    continue
+                url_to_market_ids[url].add(market.id)
+                url_to_entry.setdefault(url, entry)
+
+        # Record the full match set per url (for fan-out below), then dedup
+        # across polls so each url is processed/fetched at most once.
+        self._url_market_ids: dict[str, set[int]] = url_to_market_ids
+        per_market: dict[int, list[dict]] = {}
+        for url, market_ids in url_to_market_ids.items():
+            if not self._mark_seen(url):
+                continue
+            entry = url_to_entry[url]
+            for mid in market_ids:
+                per_market.setdefault(mid, []).append(entry)
 
         total_candidates = sum(len(v) for v in per_market.values())
         if total_candidates == 0:
@@ -417,7 +437,11 @@ class NewsFeed:
         log.info("Poll: %d new candidates across %d markets",
                  total_candidates, len(per_market))
 
-        # Batch LLM gate per market (1 LLM call per market, not per article)
+        # Batch LLM gate per market (1 LLM call per market, not per article).
+        # Relevance is judged per market, but full text is fetched at most once
+        # per url and shared across every market the article is delivered to.
+        text_cache: dict[str, str | None] = {}
+        logged_urls: set[str] = set()
         for market_id, entries in per_market.items():
             market = market_by_id[market_id]
             entries = sorted(
@@ -440,20 +464,27 @@ class NewsFeed:
 
             # Fetch full text only for articles that passed the gate
             for entry, _ in passed:
-                full_text = await fetch_article_text(http, entry["url"])
+                url = entry["url"]
+                if url not in text_cache:
+                    text_cache[url] = await fetch_article_text(http, url)
 
+                matched_ids = sorted(self._url_market_ids.get(url, {market_id}))
                 article = LiveArticle(
-                    url=entry["url"],
+                    url=url,
                     title=entry["title"],
                     source=entry["source"],
                     published=entry["published"],
-                    full_text=full_text,
-                    matched_market_ids=[market_id],
+                    full_text=text_cache[url],
+                    matched_market_ids=matched_ids,
                 )
 
                 async with self._lock:
                     self._pending[market_id].append(article)
-                    self._all_articles.append(article)
+                    # De-dup the all-articles log (one row per url), while still
+                    # fanning the article out to every market's pending queue.
+                    if url not in logged_urls:
+                        self._all_articles.append(article)
+                        logged_urls.add(url)
 
                 log.info(
                     "✓ [%d] %s → \"%s\" [%s]",

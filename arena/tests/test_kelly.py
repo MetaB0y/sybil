@@ -98,18 +98,39 @@ class TestFlatStrategy:
         yes, no = self.s.target(0.40, 0.50, 500.0, 40, 0)
         assert yes == 0 and no == 0
 
-    def test_hard_exit_rule(self):
-        """Market moves strongly against → sell at least half."""
-        # Long YES but market at 25% (below 30% threshold)
-        yes, no = self.s.target(0.60, 0.25, 500.0, 100, 0)
-        assert yes == 50  # half of 100
-        assert no == 0
+    def test_hard_exit_on_adverse_move_from_entry(self):
+        """AR-4: long YES exits fully once it falls far below its entry price."""
+        # First sighting records entry ~0.50.
+        self.s.target(0.60, 0.50, 500.0, 100, 0, market_id=1)
+        # Price falls to 0.30 → down 40% vs entry (>= 30%) → exit fully.
+        yes, no = self.s.target(0.55, 0.30, 500.0, 100, 0, market_id=1)
+        assert (yes, no) == (0, 0)
 
-    def test_hard_exit_rule_no(self):
-        """Long NO but market at 75% → sell at least half."""
-        yes, no = self.s.target(0.40, 0.75, 500.0, 0, 100)
-        assert yes == 0
-        assert no == 50  # half of 100
+    def test_hard_exit_on_adverse_move_from_entry_no(self):
+        """AR-4: long NO exits fully once its mark falls far below entry."""
+        self.s.target(0.40, 0.50, 500.0, 0, 100, market_id=3)  # entry ~0.50
+        # Price rises to 0.70 → NO mark 0.30, down 40% vs entry → exit fully.
+        yes, no = self.s.target(0.45, 0.70, 500.0, 0, 100, market_id=3)
+        assert (yes, no) == (0, 0)
+
+    def test_no_churn_when_held_near_entry(self):
+        """AR-4: a cheap market held near its entry is NOT force-sold.
+
+        The old absolute-price rule sold half of any YES position on a market
+        priced < 0.30 every rebalance, causing perpetual buy/sell churn.
+        """
+        self.s.target(0.28, 0.25, 500.0, 100, 0, market_id=2)  # entry ~0.25
+        yes, no = self.s.target(0.27, 0.25, 500.0, 100, 0, market_id=2)
+        assert (yes, no) == (100, 0)  # holds, no halving
+
+    def test_reentry_rearms_stop_at_new_basis(self):
+        """AR-4: after an exit, a re-entry resets the entry price."""
+        self.s.target(0.60, 0.50, 500.0, 100, 0, market_id=5)  # entry ~0.50
+        assert self.s.target(0.55, 0.30, 500.0, 100, 0, market_id=5) == (0, 0)
+        # Flat now; a fresh YES position records entry at 0.30 and holds there.
+        self.s.target(0.60, 0.30, 500.0, 66, 0, market_id=5)  # entry ~0.30
+        yes, no = self.s.target(0.58, 0.30, 500.0, 66, 0, market_id=5)
+        assert (yes, no) == (66, 0)
 
     def test_resolved_high_exits(self):
         """Market at 0.99 → resolved, exit everything."""

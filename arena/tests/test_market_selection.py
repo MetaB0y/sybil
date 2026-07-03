@@ -138,6 +138,55 @@ def test_selection_skips_title_dates_that_have_passed_without_api_expiry():
     assert [m.id for m in selected] == [2]
 
 
+def test_api_expiry_is_authoritative_over_title_heuristic():
+    # Title says a past date, but the API expiry is in the future → keep it.
+    live_despite_title = market(
+        "Will the US and Iran sign a peace deal by January 1, 2000?",
+        "Geopolitics",
+        id=1,
+    )
+    live_despite_title.expiry_timestamp_ms = int(time.time() * 1000) + 86_400_000
+    # Title says a future date, but the API expiry has passed → drop it.
+    expired_despite_title = market(
+        "Will the US and Iran sign a peace deal by December 31, 2099?",
+        "Geopolitics",
+        id=2,
+    )
+    expired_despite_title.expiry_timestamp_ms = int(time.time() * 1000) - 1
+
+    selected = select_markets(
+        [live_despite_title, expired_despite_title], max_n=10, profile="important-news"
+    )
+
+    assert [m.id for m in selected] == [1]
+
+
+def test_title_dates_without_year_roll_forward():
+    from datetime import UTC, datetime
+
+    from live.market_selection import _title_due_date
+
+    today = datetime.now(UTC).date()
+    # A year-less title date must never resolve into the past.
+    due = _title_due_date("Will the ceasefire hold by January 1?")
+    assert due is not None and due >= today
+
+    # And such a market (no API expiry) is not treated as expired.
+    m = market("Will the ceasefire hold by January 1?", "Geopolitics", id=1)
+    selected = select_markets([m], max_n=10, profile="important-news")
+    assert [x.id for x in selected] == [1]
+
+
+def test_important_news_terms_match_on_word_boundaries():
+    # AR-8: substring matching used to fire "war" on "warriors" and "ban" on
+    # "urban"/"Taliban". Word-boundary matching must not.
+    assert not is_important_news_market(market("Will the Warriors make the finals?"))
+    assert not is_important_news_market(market("Will urban density rise?"))
+    # Genuine terms still match on a word boundary.
+    assert is_important_news_market(market("Will a ceasefire end the war?"))
+    assert is_important_news_market(market("Will the ban take effect?"))
+
+
 def test_runner_selection_failure_falls_back_to_unfiltered_set(monkeypatch, caplog):
     def broken_selector(*_args, **_kwargs):
         raise RuntimeError("selector unavailable")

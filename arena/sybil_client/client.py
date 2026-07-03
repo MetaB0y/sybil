@@ -1,6 +1,8 @@
 """Sybil API client."""
 
+import asyncio
 import json
+import logging
 import os
 from collections.abc import AsyncIterator
 from typing import Any
@@ -30,6 +32,8 @@ from .types import (
     shares_to_quantity_units,
 )
 
+log = logging.getLogger(__name__)
+
 
 class SybilClientError(Exception):
     """Error from Sybil API."""
@@ -47,6 +51,9 @@ class SybilClient:
         self.base_url = base_url.rstrip("/")
         self.service_token = service_token or os.environ.get("SYBIL_SERVICE_TOKEN", "")
         self._client: httpx.AsyncClient | None = None
+        # Reconnect backoff bounds for stream_blocks (AR-3). Tests override.
+        self._stream_reconnect_base_s: float = 1.0
+        self._stream_reconnect_max_s: float = 30.0
 
     async def __aenter__(self) -> "SybilClient":
         self._client = httpx.AsyncClient(base_url=self.base_url, timeout=30.0)
@@ -437,12 +444,32 @@ class SybilClient:
         return self._parse_block(data)
 
     async def stream_blocks(self) -> AsyncIterator[Block]:
-        """Stream new blocks via SSE."""
-        async with self.client.stream("GET", "/v1/blocks/stream") as response:
-            async for line in response.aiter_lines():
-                if line.startswith("data:"):
-                    data = json.loads(line[5:].strip())
-                    yield self._parse_block(data)
+        """Stream new blocks via SSE, reconnecting with backoff on drops.
+
+        AR-3: a transient SSE disconnect (or a clean server-side close) used to
+        end the iterator, which tore down the consuming bot. Instead we
+        transparently reconnect with exponential backoff so callers see one
+        uninterrupted block stream; the backoff resets after any block is
+        delivered. ``CancelledError`` (shutdown) still propagates immediately.
+        """
+        backoff = self._stream_reconnect_base_s
+        while True:
+            try:
+                async with self.client.stream("GET", "/v1/blocks/stream") as response:
+                    async for line in response.aiter_lines():
+                        if line.startswith("data:"):
+                            data = json.loads(line[5:].strip())
+                            yield self._parse_block(data)
+                            backoff = self._stream_reconnect_base_s
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.warning("Block stream error (%s); reconnecting in %.1fs", e, backoff)
+            else:
+                log.info("Block stream closed by server; reconnecting in %.1fs", backoff)
+
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, self._stream_reconnect_max_s)
 
     def _parse_block(self, data: dict[str, Any]) -> Block:
         fills = [

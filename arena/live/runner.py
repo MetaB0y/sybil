@@ -162,6 +162,42 @@ async def supervise_bot(agent, stop_event: asyncio.Event, restart_delay_s: float
                 pass
 
 
+async def _resolve_bot_account(
+    client: SybilClient,
+    db: DecisionDB,
+    persona_key: str,
+    strat_label: str,
+    initial_balance_nanos: int,
+    bot_name: str,
+) -> int:
+    """Reattach a (persona, strategy) bot to its persisted account, or mint one.
+
+    AR-3: restarts must not abandon portfolios. We look up the persisted
+    account id for this (persona, strategy) pair and reuse it when the account
+    still exists on the server; otherwise we create a fresh account and persist
+    the mapping so the next restart reattaches.
+    """
+    existing = db.get_bot_account_id(persona_key, strat_label)
+    if existing is not None:
+        try:
+            await client.get_account(existing)
+            log.info("Reattached %s to existing account %d", bot_name, existing)
+            return existing
+        except Exception as e:
+            log.warning(
+                "Persisted account %d for %s is unusable (%s); creating a new one",
+                existing, bot_name, e,
+            )
+
+    account = await client.create_account(initial_balance_nanos)
+    db.save_bot_account_id(persona_key, strat_label, account.id)
+    log.info(
+        "Created account %d for %s ($%.2f)",
+        account.id, bot_name, initial_balance_nanos / NANOS_PER_DOLLAR,
+    )
+    return account.id
+
+
 async def run_live(config: LiveConfig):
     """Main entry point for live trading."""
     # Resolve DB path
@@ -226,20 +262,16 @@ async def run_live(config: LiveConfig):
             persona = PERSONAS[persona_key]
 
             for strat_label, strategy in strategies:
-                account = await client.create_account(
-                    int(config.initial_balance * NANOS_PER_DOLLAR)
-                )
                 bot_name = f"{persona['name']} ({strat_label})"
-                log.info(
-                    "Created account %d for %s ($%.0f)",
-                    account.id,
+                account_id = await _resolve_bot_account(
+                    client, db, persona_key, strat_label,
+                    int(config.initial_balance * NANOS_PER_DOLLAR),
                     bot_name,
-                    config.initial_balance,
                 )
 
                 trader = LiveLlmTrader(
                     client=client,
-                    account_id=account.id,
+                    account_id=account_id,
                     news_feed=None,  # set below after feed creation
                     api_key=config.api_key,
                     persona=persona["persona"],

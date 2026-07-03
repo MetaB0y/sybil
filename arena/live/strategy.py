@@ -35,8 +35,13 @@ class SizingStrategy(ABC):
         portfolio_value: float,
         current_yes: int,
         current_no: int,
+        market_id: int | None = None,
     ) -> tuple[int, int]:
-        """Return (target_yes, target_no). Exactly one should be > 0, or both 0."""
+        """Return (target_yes, target_no). Exactly one should be > 0, or both 0.
+
+        ``market_id`` lets stateful strategies key per-position bookkeeping
+        (e.g. entry prices). Stateless strategies ignore it.
+        """
         ...
 
     @property
@@ -82,6 +87,7 @@ class KellyStrategy(SizingStrategy):
         portfolio_value: float,
         current_yes: int,
         current_no: int,
+        market_id: int | None = None,
     ) -> tuple[int, int]:
         # Resolved market → exit everything
         if market_price >= RESOLVED_HIGH or market_price <= RESOLVED_LOW:
@@ -116,13 +122,29 @@ class KellyStrategy(SizingStrategy):
 # Flat strategy — fixed bet size, hard exit rules (terminator2-inspired)
 # --------------------------------------------------------------------------- #
 class FlatStrategy(SizingStrategy):
-    """Fixed $ per bet with hard mechanical exit rules.
+    """Fixed $ per bet with a cost-basis-relative hard exit.
 
     Inspired by terminator2 (profitable on Manifold):
     - Flat $20 bets regardless of edge magnitude
-    - Hard exit: if market moves 70% against position, sell at least half
-    - Don't add to existing positions
-    - Diversify across many markets
+    - Don't add to existing positions; diversify across many markets
+
+    Exit rule (AR-4)
+    ----------------
+    The hard exit keys on adverse movement **relative to the entry price**, not
+    on the absolute price level. The strategy records the price at which each
+    position was first observed and exits fully when the position's mark has
+    lost ``exit_adverse_frac`` of its value versus that entry:
+
+    - long YES bought at ``entry`` → exit when ``market_price`` has fallen so
+      that ``(entry - market_price) / entry >= exit_adverse_frac``;
+    - long NO (mark ``1 - market_price``) → exit when it has fallen so that
+      ``(market_price - entry) / (1 - entry) >= exit_adverse_frac``.
+
+    Keying on the absolute level (the old ``price < 0.30`` / ``> 0.70`` rule)
+    meant any position on a legitimately cheap/expensive market was force-sold
+    every rebalance and immediately re-bought, an endless buy/sell churn. Tying
+    the exit to entry makes it a one-shot stop-loss and re-entry re-arms it at
+    the new basis.
 
     Pros: simple, robust to FV errors, prevents conviction loops.
     Cons: doesn't scale with confidence, leaves edge on the table.
@@ -132,14 +154,14 @@ class FlatStrategy(SizingStrategy):
         self,
         bet_dollars: float = 20.0,
         min_edge: float = 0.03,
-        exit_against_pct: float = 0.70,
-        exit_fraction: float = 0.5,
+        exit_adverse_frac: float = 0.30,
     ):
         self.bet_dollars = bet_dollars
         self.min_edge = min_edge
-        # If price has moved this far against our direction, exit
-        self.exit_against_pct = exit_against_pct
-        self.exit_fraction = exit_fraction
+        # Exit once a position has lost this fraction of its value vs entry.
+        self.exit_adverse_frac = exit_adverse_frac
+        # market_id -> entry price (Polymarket-style YES price at first sighting)
+        self._entry_prices: dict[int | None, float] = {}
 
     @property
     def name(self) -> str:
@@ -150,6 +172,9 @@ class FlatStrategy(SizingStrategy):
         # Flat strategy doesn't need frequent rebalancing
         return 60.0
 
+    def _forget_entry(self, market_id: int | None) -> None:
+        self._entry_prices.pop(market_id, None)
+
     def target(
         self,
         fair_value: float,
@@ -157,28 +182,39 @@ class FlatStrategy(SizingStrategy):
         portfolio_value: float,
         current_yes: int,
         current_no: int,
+        market_id: int | None = None,
     ) -> tuple[int, int]:
         # Resolved market → exit everything
         if market_price >= RESOLVED_HIGH or market_price <= RESOLVED_LOW:
+            self._forget_entry(market_id)
             return (0, 0)
 
         edge = fair_value - market_price
 
-        # Hard exit rule: market has moved strongly against our position
-        if current_yes > 0 and market_price < (1 - self.exit_against_pct):
-            # We're long YES but market says <30% → exit at least half
-            keep = int(current_yes * (1 - self.exit_fraction))
-            return (keep, 0)
+        # Track the entry price: record it the first block we observe a holding,
+        # and forget it once we are flat so a fresh position re-arms the stop.
+        if current_yes > 0 or current_no > 0:
+            entry = self._entry_prices.setdefault(market_id, market_price)
+        else:
+            self._forget_entry(market_id)
+            entry = None
 
-        if current_no > 0 and market_price > self.exit_against_pct:
-            # We're long NO but market says >70% → exit at least half
-            keep = int(current_no * (1 - self.exit_fraction))
-            return (0, keep)
+        # Hard exit: the position has moved adversely vs its entry price.
+        if current_yes > 0 and entry is not None and entry > 0:
+            if (entry - market_price) / entry >= self.exit_adverse_frac:
+                self._forget_entry(market_id)
+                return (0, 0)
+        if current_no > 0 and entry is not None and entry < 1:
+            if (market_price - entry) / (1 - entry) >= self.exit_adverse_frac:
+                self._forget_entry(market_id)
+                return (0, 0)
 
         # If edge flipped against our position, exit completely
         if current_yes > 0 and edge < -self.min_edge:
+            self._forget_entry(market_id)
             return (0, 0)
         if current_no > 0 and edge > self.min_edge:
+            self._forget_entry(market_id)
             return (0, 0)
 
         # Not enough edge → hold what we have

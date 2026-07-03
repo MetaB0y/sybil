@@ -102,6 +102,18 @@ IMPORTANT_NEWS_TERMS = (
     "war",
 )
 
+# AR-8: match important-news terms on word boundaries, case-insensitively, so
+# "war" no longer fires on "warriors" and "ban" no longer fires on "Taliban".
+IMPORTANT_NEWS_TERM_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(term) for term in IMPORTANT_NEWS_TERMS) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def _important_news_terms_in(title: str) -> set[str]:
+    """Distinct important-news terms present in ``title`` (word-boundary match)."""
+    return {match.group(0).lower() for match in IMPORTANT_NEWS_TERM_RE.finditer(title)}
+
 EXCLUDED_TITLE_PATTERNS = [
     # Single-speaker and social-media markets are usually about an utterance,
     # not a broad event whose probability changes through messy news.
@@ -200,7 +212,7 @@ def is_important_news_market(market: MarketLike) -> bool:
         return False
 
     has_included_tag = bool(tags & INCLUDE_TAGS)
-    has_important_term = any(term in title for term in IMPORTANT_NEWS_TERMS)
+    has_important_term = bool(IMPORTANT_NEWS_TERM_RE.search(title))
     return has_included_tag or has_important_term
 
 
@@ -266,9 +278,7 @@ def _important_news_score(market: MarketLike) -> float:
     score += (1.0 - min(1.0, abs(market.yes_price - 0.5) * 2.0)) * 4.0
     score += len(tags & INCLUDE_TAGS) * 2.0
 
-    for term in IMPORTANT_NEWS_TERMS:
-        if term in title:
-            score += 2.5
+    score += 2.5 * len(_important_news_terms_in(title))
 
     if ":" in market.name:
         score -= 1.0
@@ -289,9 +299,13 @@ def _ranking_volume(market: MarketLike) -> float:
 
 
 def _is_expired(market: MarketLike) -> bool:
+    # AR-2: the API's expiry_timestamp_ms is authoritative when present. The
+    # title-date heuristic is a best-effort fallback used only when the API
+    # gives no expiry, so a fuzzy title parse can never override real metadata
+    # and exclude a live market.
     expiry_ms = getattr(market, "expiry_timestamp_ms", 0)
-    if expiry_ms > 0 and expiry_ms <= int(time.time() * 1000):
-        return True
+    if expiry_ms > 0:
+        return expiry_ms <= int(time.time() * 1000)
     due_date = _title_due_date(market.name)
     return due_date is not None and due_date < datetime.now(UTC).date()
 
@@ -310,22 +324,40 @@ def _important_news_group_key(market: MarketLike) -> str | None:
     return _colon_group_key(market)
 
 
+def _month_date(month: int, day: int, year: int) -> date:
+    _, max_day = monthrange(year, month)
+    return date(year, month, min(day, max_day))
+
+
+def _roll_forward_if_yearless(due: date, explicit_year: str | None, today: date) -> date:
+    # AR-2: a title like "by May 31" carries no year. Assuming the current
+    # year makes such markets look expired for the back half of the year, so a
+    # year-less date that has already passed rolls forward to next year.
+    if explicit_year is not None or due >= today:
+        return due
+    return _month_date(due.month, due.day, due.year + 1)
+
+
 def _title_due_date(title: str) -> date | None:
-    current_year = datetime.now(UTC).year
+    today = datetime.now(UTC).date()
+    current_year = today.year
 
     month_day = TITLE_DATE_PATTERNS[0].search(title)
     if month_day is not None:
         month = MONTHS[month_day.group(1).lower()]
         day = int(month_day.group(2))
-        year = int(month_day.group(3) or current_year)
-        _, max_day = monthrange(year, month)
-        return date(year, month, min(day, max_day))
+        explicit_year = month_day.group(3)
+        year = int(explicit_year or current_year)
+        due = _month_date(month, day, year)
+        return _roll_forward_if_yearless(due, explicit_year, today)
 
     end_of_month = TITLE_DATE_PATTERNS[1].search(title)
     if end_of_month is not None:
         month = MONTHS[end_of_month.group(1).lower()]
-        year = int(end_of_month.group(2) or current_year)
+        explicit_year = end_of_month.group(2)
+        year = int(explicit_year or current_year)
         _, max_day = monthrange(year, month)
-        return date(year, month, max_day)
+        due = date(year, month, max_day)
+        return _roll_forward_if_yearless(due, explicit_year, today)
 
     return None

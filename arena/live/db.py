@@ -78,6 +78,14 @@ class DecisionDB:
                     total_orders INTEGER DEFAULT 0
                 );
 
+                CREATE TABLE IF NOT EXISTS bot_accounts (
+                    persona TEXT NOT NULL,
+                    strategy TEXT NOT NULL,
+                    account_id INTEGER NOT NULL,
+                    created_at TEXT,
+                    PRIMARY KEY (persona, strategy)
+                );
+
                 CREATE TABLE IF NOT EXISTS token_usage (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     trader_name TEXT,
@@ -218,6 +226,37 @@ class DecisionDB:
                     completion_tokens,
                     model,
                     duration_s,
+                ),
+            )
+            self.conn.commit()
+
+    def get_bot_account_id(self, persona: str, strategy: str) -> int | None:
+        """Return the persisted account id for a (persona, strategy) bot, if any.
+
+        Lets the runner reattach a restarting bot to its existing portfolio
+        instead of minting a fresh account and abandoning the old one (AR-3).
+        """
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT account_id FROM bot_accounts WHERE persona = ? AND strategy = ?",
+                (persona, strategy),
+            ).fetchone()
+        return int(row["account_id"]) if row is not None else None
+
+    def save_bot_account_id(self, persona: str, strategy: str, account_id: int) -> None:
+        """Persist the account id owning a (persona, strategy) bot's portfolio."""
+        with self._lock:
+            self.conn.execute(
+                """INSERT INTO bot_accounts (persona, strategy, account_id, created_at)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(persona, strategy)
+                   DO UPDATE SET account_id = excluded.account_id,
+                                 created_at = excluded.created_at""",
+                (
+                    persona,
+                    strategy,
+                    account_id,
+                    datetime.now(timezone.utc).isoformat(),
                 ),
             )
             self.conn.commit()

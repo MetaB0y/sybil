@@ -268,13 +268,17 @@ class LiveLlmTrader(BaseAgent):
     # -- Price helpers --
 
     def _get_market_price(self, market_id: int, block: Block) -> float:
-        market = self.markets_info.get(market_id)
-        if market and market.reference_price_nanos is not None and market.reference_price_nanos > 0:
-            return market.reference_price_nanos / NANOS_PER_DOLLAR
-
+        # AR-1: prefer the freshly polled Polymarket mid so the sizing engine
+        # sees the same price the LLM prompt is shown. The startup
+        # reference_price_nanos snapshot is only a fallback — it used to win
+        # here and froze sizing prices at process start.
         poly_price = self.news_feed.polymarket_prices.get_price(market_id)
         if poly_price and poly_price > 0:
             return poly_price
+
+        market = self.markets_info.get(market_id)
+        if market and market.reference_price_nanos is not None and market.reference_price_nanos > 0:
+            return market.reference_price_nanos / NANOS_PER_DOLLAR
 
         if market_id in block.clearing_prices:
             yes_nanos, _ = block.clearing_prices[market_id]
@@ -452,7 +456,7 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
                 continue
 
             target_yes, target_no = self.strategy.target(
-                fv, market_price, pv, current_yes, current_no,
+                fv, market_price, pv, current_yes, current_no, market_id=market_id,
             )
 
             available_cash = max(0, cash - min_cash)
@@ -492,74 +496,82 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
             self._observed_first_block = True
             return []
 
-        # LLM analysis on new articles
-        elapsed_llm = time.monotonic() - self._last_llm_call
-        if elapsed_llm >= self.min_llm_interval_s or self._last_llm_call == 0:
-            for market_id in list(self.market_ids or []):
-                articles = await self.news_feed.drain(market_id)
-                if not articles:
-                    continue
+        # LLM analysis on new articles.
+        #
+        # AR-6: the min interval is enforced per LLM *call*, not per block. A
+        # single block can surface articles for many markets; the old loop-entry
+        # gate let one block fire an unbounded burst of sequential LLM calls.
+        # Here we stop draining once the per-trader budget is spent and leave the
+        # remaining markets' articles pending for a later block.
+        for market_id in list(self.market_ids or []):
+            elapsed_llm = time.monotonic() - self._last_llm_call
+            if self._last_llm_call != 0 and elapsed_llm < self.min_llm_interval_s:
+                break
 
-                market = self.markets_info.get(market_id)
-                if not market:
-                    continue
+            articles = await self.news_feed.drain(market_id)
+            if not articles:
+                continue
 
-                ref_price = self._get_market_price(market_id, block)
-                if ref_price <= 0:
-                    continue
+            market = self.markets_info.get(market_id)
+            if not market:
+                continue
 
-                # Skip resolved markets — don't waste LLM calls
-                if ref_price >= RESOLVED_HIGH or ref_price <= RESOLVED_LOW:
-                    if market_id in self.fair_values:
-                        log.info("[%s] %s resolved (price=%.2f), clearing FV",
-                                 self.name, market.name[:30], ref_price)
-                        del self.fair_values[market_id]
-                    continue
+            ref_price = self._get_market_price(market_id, block)
+            if ref_price <= 0:
+                continue
 
-                titles = "; ".join(f'"{a.title[:40]}"' for a in articles)
-                log.info("[%s] %d article(s) for %s (price=%.2f): %s",
-                         self.name, len(articles), market.name[:30], ref_price, titles)
+            # Skip resolved markets — don't waste LLM calls
+            if ref_price >= RESOLVED_HIGH or ref_price <= RESOLVED_LOW:
+                if market_id in self.fair_values:
+                    log.info("[%s] %s resolved (price=%.2f), clearing FV",
+                             self.name, market.name[:30], ref_price)
+                    del self.fair_values[market_id]
+                continue
 
-                prompt = self._build_prompt(articles, market, block)
-                if not prompt:
-                    continue
+            titles = "; ".join(f'"{a.title[:40]}"' for a in articles)
+            log.info("[%s] %d article(s) for %s (price=%.2f): %s",
+                     self.name, len(articles), market.name[:30], ref_price, titles)
 
-                try:
-                    raw_text, llm_duration_s = await self._call_llm(prompt)
-                    self._last_llm_call = time.monotonic()
-                    log.info("[%s] LLM response (%.1fs):\n%s", self.name, llm_duration_s, raw_text)
-                except Exception as e:
-                    log.warning("[%s] LLM call failed: %s", self.name, e)
-                    continue
+            prompt = self._build_prompt(articles, market, block)
+            if not prompt:
+                continue
 
-                parsed = self._parse_fair_value(raw_text)
-                if parsed is None:
-                    log.warning("[%s] Failed to parse LLM output", self.name)
-                    continue
+            try:
+                raw_text, llm_duration_s = await self._call_llm(prompt)
+                self._last_llm_call = time.monotonic()
+                log.info("[%s] LLM response (%.1fs):\n%s", self.name, llm_duration_s, raw_text)
+            except Exception as e:
+                log.warning("[%s] LLM call failed: %s", self.name, e)
+                continue
 
-                fair_value, motivation, analysis = parsed
-                old_fv = self.fair_values.get(market_id)
-                self.fair_values[market_id] = fair_value
+            parsed = self._parse_fair_value(raw_text)
+            if parsed is None:
+                log.warning("[%s] Failed to parse LLM output", self.name)
+                continue
 
-                log.info("[%s] %s: FV %.2f->%.2f (market=%.2f, edge=%.2f) | %s",
-                         self.name, market.name[:30],
-                         old_fv or 0, fair_value, ref_price,
-                         fair_value - ref_price, motivation)
+            fair_value, motivation, analysis = parsed
+            old_fv = self.fair_values.get(market_id)
+            self.fair_values[market_id] = fair_value
 
-                self._record_trade(
-                    market_id=market_id,
-                    market_name=market.name,
-                    fair_value=fair_value,
-                    orders=[],
-                    motivation=motivation,
-                    analysis=analysis,
-                    raw_llm_response=raw_text,
-                    llm_duration_s=llm_duration_s,
-                    market_price=ref_price,
-                    block_height=block.height,
-                    timestamp=now,
-                    articles=articles,
-                )
+            log.info("[%s] %s: FV %.2f->%.2f (market=%.2f, edge=%.2f) | %s",
+                     self.name, market.name[:30],
+                     old_fv or 0, fair_value, ref_price,
+                     fair_value - ref_price, motivation)
+
+            self._record_trade(
+                market_id=market_id,
+                market_name=market.name,
+                fair_value=fair_value,
+                orders=[],
+                motivation=motivation,
+                analysis=analysis,
+                raw_llm_response=raw_text,
+                llm_duration_s=llm_duration_s,
+                market_price=ref_price,
+                block_height=block.height,
+                timestamp=now,
+                articles=articles,
+            )
 
         # Position management via strategy
         elapsed_rebal = time.monotonic() - self._last_rebalance
