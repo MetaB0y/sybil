@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Purpose
 
-The **matching-sequencer** crate is an agent-based, multi-batch sequential simulation engine. It orchestrates block production, manages account state, validates orders, and settles fills. Provides both synchronous (simulation) and async actor-based (API) interfaces.
+The **matching-sequencer** crate is the multi-batch block sequencer. It orchestrates block production, manages account state, validates orders, and settles fills. Provides both synchronous (`BlockSequencer`) and async actor-based (`SequencerHandle`) interfaces. This is a **production library** — `sybil-api` links it, so it must stay free of dev/simulation tooling.
+
+> The agent-based simulation harness (`SimulationRunner`, the agent framework, and the `sybil-sim` binary) lives in the separate dev-only **`sequencer-sim`** crate, which depends on this one through its public API. Keep it that way: do not re-add `simulation.rs`/`scenario.rs`/`agent/`/sim-`metrics.rs` here.
 
 ## Architecture Notes
 
@@ -19,7 +21,7 @@ Before modifying this crate, read these vault notes (`docs/architecture/`):
 ## Core Architecture
 
 ```
-SimulationRunner / SequencerHandle (async)
+SequencerHandle (async) / BlockSequencer (sync)
         ↓
   SequencerActor (tokio task, 1-second timer)
         ↓
@@ -38,7 +40,6 @@ SimulationRunner / SequencerHandle (async)
 | `Account` / `AccountStore` | Balance + positions per account |
 | `OrderBook` | Resting orders with tracked balance/position reservations |
 | `OrderSubmission` | Request to include orders in next batch |
-| `SimulationRunner` | Multi-batch orchestration with agents |
 
 ## Block Production Flow
 
@@ -74,13 +75,7 @@ BlockSequencer::produce_block(submissions, timestamp_ms) → (Block, PipelineRes
 
 ## Agent Framework
 
-| Agent | Behavior |
-|-------|----------|
-| `InformedTrader` | Knows true probs, trades on edge > threshold |
-| `NoiseTrader` | Random order flow with configurable activity |
-| `MarketMakerAgent` | Quotes both sides, respects budget constraint |
-
-Agents implement: `submit_orders(view: &MarketView, account: &Account) → AgentSubmission`
+The synthetic agents (`InformedTrader`, `NoiseTrader`, `MarketMakerAgent`) and the multi-batch `SimulationRunner` that drives them now live in the **`sequencer-sim`** crate. See `crates/sequencer-sim/` and run `just sim-agent` (or `cargo run -p sequencer-sim --bin sybil-sim`).
 
 ## Order Book
 
@@ -110,13 +105,13 @@ Agents implement: `submit_orders(view: &MarketView, account: &Account) → Agent
 |--------|---------|
 | `sequencer.rs` | BlockSequencer core |
 | `actor.rs` | SequencerActor async wrapper |
-| `simulation.rs` | SimulationRunner multi-batch |
 | `settlement.rs` | Fill and market resolution |
 | `account.rs` | Account, AccountStore |
 | `block.rs` | Block, BlockHeader |
 | `order_book.rs` | OrderBook: resting orders + reservations |
-| `agent/*.rs` | Informed, Noise, MM agents |
 | `validation.rs` | Order validation rules |
+
+(`SimulationRunner`, agents, and scenarios now live in the `sequencer-sim` crate.)
 
 ## Testing
 

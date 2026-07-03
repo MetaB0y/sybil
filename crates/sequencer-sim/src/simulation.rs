@@ -7,15 +7,17 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use sybil_oracle::AdminOracle;
 
-use crate::account::{AccountId, AccountStore};
 use crate::agent::informed::InformedTrader;
 use crate::agent::market_maker::MarketMakerAgent;
 use crate::agent::noise::NoiseTrader;
 use crate::agent::{Agent, MarketView};
 use crate::metrics::{self, AgentPnL, BatchMetrics};
 use crate::scenario::{EventMarketMap, NewsItem, NewsVisibility, PublicBeliefs, Scenario};
-use crate::sequencer::{batch_result_from_block, BlockSequencer, OrderSubmission, SequencerConfig};
-use crate::settlement;
+use matching_sequencer::account::{AccountId, AccountStore};
+use matching_sequencer::sequencer::{
+    batch_result_from_block, BlockSequencer, OrderSubmission, SequencerConfig,
+};
+use matching_sequencer::settlement;
 
 pub struct SimulationRunner {
     sequencer: BlockSequencer,

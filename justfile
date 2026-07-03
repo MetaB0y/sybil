@@ -52,6 +52,10 @@ milp-killer:
 sim preset="medium" solver="lp" verbose="-v":
     cargo run --bin matching-sim --release -- --preset {{preset}} --solver {{solver}} {{verbose}}
 
+# Agent-based multi-batch sequencer simulation (sequencer-sim crate)
+sim-agent scenario="standard":
+    cargo run --bin sybil-sim --release -- --scenario {{scenario}} -v
+
 # Build release
 build:
     cargo build --release

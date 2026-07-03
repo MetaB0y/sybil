@@ -2,8 +2,8 @@ use matching_engine::{
     outcome_buy, outcome_sell, MarketSet, MmConstraint, MmId, MmSide, Nanos, NANOS_PER_DOLLAR,
 };
 
-use crate::account::{Account, AccountId};
 use crate::agent::{Agent, AgentSubmission, MarketView};
+use matching_sequencer::account::{Account, AccountId};
 
 pub struct MarketMakerAgent {
     name: String,

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use matching_engine::{signed_notional_nanos, MarketId, Nanos, NANOS_PER_DOLLAR};
 
-use crate::account::{AccountId, AccountStore};
+use matching_sequencer::account::{AccountId, AccountStore};
 
 /// Per-batch metrics.
 #[derive(Clone, Debug)]

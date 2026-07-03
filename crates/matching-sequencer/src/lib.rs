@@ -1,7 +1,6 @@
 pub mod account;
 mod account_storage;
 pub mod actor;
-pub mod agent;
 pub mod aggregates;
 mod analytics;
 pub mod block;
@@ -13,16 +12,13 @@ pub mod error;
 pub mod fill_recorder;
 pub mod market_info;
 pub mod market_lifecycle;
-pub mod metrics;
 pub mod order_book;
 pub mod portfolio;
 pub mod price_tracker;
 mod qmdb_accounts;
 mod qmdb_state;
-pub mod scenario;
 pub mod sequencer;
 pub mod settlement;
-pub mod simulation;
 pub mod store;
 pub mod system_event;
 pub mod validation;
@@ -51,12 +47,10 @@ pub use market_info::{
     PriceCandlePage, PriceHistoryPage, PricePoint, ResolutionConfig,
 };
 pub use portfolio::{PortfolioSummary, PositionValue};
-pub use scenario::Scenario;
 pub use sequencer::{
     AnalyticsMemoryStats, BatchResult, BatchSequencer, BlockSequencer, OrderSubmission,
     PendingOrderInfo, SequencerConfig, DEFAULT_ORDER_TTL_BLOCKS,
 };
-pub use simulation::{SimulationResult, SimulationRunner};
 pub use system_event::SystemEvent;
 
 // Re-export oracle types needed by consumers (e.g. sybil-api)

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use matching_engine::{MarketGroup, MarketId, MmConstraint, Nanos, Order};
 
-use crate::account::{Account, AccountId};
+use matching_sequencer::account::{Account, AccountId};
 
 /// View of the current market state, provided to agents each batch.
 pub struct MarketView {

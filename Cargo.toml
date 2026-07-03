@@ -6,6 +6,7 @@ members = [
     "crates/matching-scenarios",
     "crates/matching-sim",
     "crates/matching-sequencer",
+    "crates/sequencer-sim",
     "crates/sybil-canonical",
     "crates/sybil-oracle",
     "crates/sybil-api",

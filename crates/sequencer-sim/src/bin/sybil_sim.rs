@@ -2,8 +2,8 @@ use clap::Parser;
 use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Cell, Color, Table};
 
 use matching_engine::NANOS_PER_DOLLAR;
-use matching_sequencer::scenario::Scenario;
-use matching_sequencer::simulation::SimulationRunner;
+use sequencer_sim::scenario::Scenario;
+use sequencer_sim::simulation::SimulationRunner;
 
 #[derive(Parser)]
 #[command(name = "sybil-sim", about = "Agent-based prediction market simulation")]
@@ -111,7 +111,7 @@ fn main() {
     print_summary(&result);
 }
 
-fn print_batch_table(result: &matching_sequencer::SimulationResult) {
+fn print_batch_table(result: &sequencer_sim::SimulationResult) {
     let mut table = Table::new();
     table.load_preset(UTF8_FULL);
     table.apply_modifier(UTF8_ROUND_CORNERS);
@@ -128,7 +128,7 @@ fn print_batch_table(result: &matching_sequencer::SimulationResult) {
 
     for bm in &result.batch_metrics {
         let price_err =
-            matching_sequencer::metrics::price_convergence(&bm.clearing_prices, &result.true_probs);
+            sequencer_sim::metrics::price_convergence(&bm.clearing_prices, &result.true_probs);
         table.add_row(vec![
             Cell::new(bm.batch),
             Cell::new(format_nanos_dollars(bm.total_welfare)),
@@ -146,7 +146,7 @@ fn print_batch_table(result: &matching_sequencer::SimulationResult) {
     println!();
 }
 
-fn print_agent_pnl(result: &matching_sequencer::SimulationResult) {
+fn print_agent_pnl(result: &sequencer_sim::SimulationResult) {
     let mut table = Table::new();
     table.load_preset(UTF8_FULL);
     table.apply_modifier(UTF8_ROUND_CORNERS);
@@ -178,7 +178,7 @@ fn print_agent_pnl(result: &matching_sequencer::SimulationResult) {
     println!();
 }
 
-fn print_resolved_pnl(result: &matching_sequencer::SimulationResult) {
+fn print_resolved_pnl(result: &sequencer_sim::SimulationResult) {
     let mut table = Table::new();
     table.load_preset(UTF8_FULL);
     table.apply_modifier(UTF8_ROUND_CORNERS);
@@ -204,9 +204,9 @@ fn print_resolved_pnl(result: &matching_sequencer::SimulationResult) {
 }
 
 fn print_event_price_discovery(
-    result: &matching_sequencer::SimulationResult,
+    result: &sequencer_sim::SimulationResult,
     scenario: &Scenario,
-    event_map: &matching_sequencer::scenario::EventMarketMap,
+    event_map: &sequencer_sim::scenario::EventMarketMap,
 ) {
     let mut table = Table::new();
     table.load_preset(UTF8_FULL);
@@ -307,7 +307,7 @@ fn format_market_price(
     }
 }
 
-fn print_summary(result: &matching_sequencer::SimulationResult) {
+fn print_summary(result: &sequencer_sim::SimulationResult) {
     let total_welfare: i64 = result.batch_metrics.iter().map(|b| b.total_welfare).sum();
     let total_volume: u64 = result.batch_metrics.iter().map(|b| b.total_volume).sum();
     let total_orders: usize = result

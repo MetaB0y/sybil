@@ -1,0 +1,18 @@
+[package]
+name = "sequencer-sim"
+version = "0.1.0"
+edition = "2021"
+description = "Agent-based multi-batch simulation harness for the prediction market sequencer (dev-only; not linked by sybil-api)"
+
+[[bin]]
+name = "sybil-sim"
+path = "src/bin/sybil_sim.rs"
+
+[dependencies]
+matching-engine = { path = "../matching-engine" }
+matching-sequencer = { path = "../matching-sequencer" }
+sybil-oracle = { path = "../sybil-oracle" }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+clap = { version = "4.5", features = ["derive"] }
+comfy-table = "7"

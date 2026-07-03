@@ -21,7 +21,8 @@ sybil/
 │   ├── matching-solver/           # Solver implementations (LP, EG, Conic, MILP, Decomposed)
 │   ├── matching-scenarios/        # Test scenario generators (order mixes, spreads)
 │   ├── matching-sim/              # CLI simulation tool with presets and solver comparison
-│   ├── matching-sequencer/        # Agent-based multi-batch sequential simulation
+│   ├── matching-sequencer/        # Multi-batch block sequencer (production lib; linked by sybil-api)
+│   ├── sequencer-sim/             # Dev-only agent-based simulation driving the sequencer (bin: sybil-sim)
 │   ├── sybil-api/                 # HTTP API server for agent trading
 │   ├── sybil-oracle/              # Oracle/resolution service
 │   └── sybil-verifier/            # ZK-ready block verification

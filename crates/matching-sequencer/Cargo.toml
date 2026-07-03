@@ -2,11 +2,7 @@
 name = "matching-sequencer"
 version = "0.1.0"
 edition = "2021"
-description = "Agent-based multi-batch simulation for prediction market matching"
-
-[[bin]]
-name = "sybil-sim"
-path = "src/bin/sybil_sim.rs"
+description = "Multi-batch block sequencer for prediction market matching"
 
 [dependencies]
 matching-engine = { path = "../matching-engine" }
@@ -14,10 +10,6 @@ matching-solver = { path = "../matching-solver", features = ["lp"] }
 sybil-canonical = { path = "../sybil-canonical" }
 sybil-oracle = { path = "../sybil-oracle" }
 sybil-verifier = { path = "../sybil-verifier" }
-rand = { workspace = true }
-rand_chacha = { workspace = true }
-clap = { version = "4.5", features = ["derive"] }
-comfy-table = "7"
 blake3 = "1"
 sha3 = "0.10"
 serde = { version = "1.0", features = ["derive"] }
@@ -38,3 +30,5 @@ metrics = "0.24"
 
 [dev-dependencies]
 proptest = "1.6"
+rand = { workspace = true }
+rand_chacha = { workspace = true }
