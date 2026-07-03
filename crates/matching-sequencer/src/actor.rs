@@ -770,6 +770,9 @@ impl SequencerActorState {
         if let Some(ref store) = self.store {
             let sealed = prepared.production().sealed_block();
             let height = sealed.canonical.header.height;
+            // Commit clears pending off-block read-model rows after this returns.
+            // Persist every prepared block so empty-fill batches can still durably
+            // carry direct-admit history and equity deltas.
             store
                 .save_block_with_witness_and_history(
                     prepared.next_sequencer().snapshot(),
@@ -4109,6 +4112,76 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(restored_candles.candles, candle_page.candles);
+    }
+
+    #[tokio::test]
+    async fn store_backed_direct_admit_read_model_rows_survive_empty_block() {
+        let path = temp_store_path("direct-admit-read-model");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(60),
+            max_equity_points_per_account: 0,
+            max_history_events_per_account: 0,
+            ..SequencerConfig::default()
+        };
+
+        let (mut baseline, aid) = make_test_sequencer_with_config(config.clone());
+        baseline.produce_block(Vec::new(), 1_000);
+        store.save_block(baseline.snapshot()).await.unwrap();
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        let seq = BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+        let handle = SequencerHandle::spawn_with_store_arc(seq, Some(store.clone()));
+        let markets = handle.list_markets().await.unwrap();
+        let market_id = MarketId::new(0);
+
+        handle
+            .submit_order(OrderSubmission {
+                account_id: aid,
+                orders: vec![outcome_buy(&markets, 0, market_id, 0, 600_000_000, 1)],
+                mm_constraint: None,
+            })
+            .await
+            .unwrap();
+
+        let block = handle.produce_block().await.unwrap();
+        assert_eq!(block.canonical.header.height, 2);
+        assert_eq!(
+            block.canonical.header.fill_count, 0,
+            "the read-model rows must persist even when the admitted order does not cross"
+        );
+        assert!(
+            block.canonical.system_events.is_empty(),
+            "the regression targets empty non-system blocks"
+        );
+
+        let events = store.account_events(aid, 10, None, Some("trades".into())).unwrap();
+        let placed_count = events
+            .iter()
+            .filter(|event| matches!(event.kind, crate::aggregates::HistoryKind::Placed))
+            .count();
+        assert_eq!(
+            placed_count, 1,
+            "direct-admit Placed history must be durable exactly once even with no in-memory fallback"
+        );
+
+        let equity = store.equity_series(aid).unwrap();
+        assert!(
+            equity.iter().any(|point| point.height == block.canonical.header.height),
+            "equity point from the empty-fill block must be durable"
+        );
+
+        handle.produce_block().await.unwrap();
+        let events_after_next_block =
+            store.account_events(aid, 10, None, Some("trades".into())).unwrap();
+        let placed_count_after_next_block = events_after_next_block
+            .iter()
+            .filter(|event| matches!(event.kind, crate::aggregates::HistoryKind::Placed))
+            .count();
+        assert_eq!(
+            placed_count_after_next_block, 1,
+            "later persisted blocks must not re-flush already-cleared Placed history"
+        );
     }
 
     #[tokio::test]
