@@ -12,6 +12,7 @@ use p256::ecdsa::signature::{Signer, Verifier};
 use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
 use sybil_oracle::{ResolutionAttestation, SignedAttestation};
 use sybil_signing::{
+    BridgeWithdrawalRequest as CanonicalBridgeWithdrawalRequest,
     ConditionDir as CanonicalConditionDir, MarketId as CanonicalMarketId, Order as CanonicalOrder,
     PriceCondition as CanonicalPriceCondition, ResolutionAttestation as CanonicalAttestation,
 };
@@ -57,6 +58,13 @@ pub struct SignedOrder {
 pub struct SignedCancel {
     pub account_id: crate::account::AccountId,
     pub order_id: u64,
+    pub signer: PublicKey,
+    pub signature: Signature,
+}
+
+/// A bridge withdrawal request authenticated by a P256 signature.
+pub struct SignedBridgeWithdrawal {
+    pub request: crate::bridge::BridgeWithdrawalRequest,
     pub signer: PublicKey,
     pub signature: Signature,
 }
@@ -107,6 +115,27 @@ pub fn canonical_cancel_bytes(account_id: crate::account::AccountId, order_id: u
     sybil_signing::canonical_cancel_bytes(account_id.0, order_id)
 }
 
+fn to_canonical_bridge_withdrawal(
+    request: &crate::bridge::BridgeWithdrawalRequest,
+) -> CanonicalBridgeWithdrawalRequest {
+    CanonicalBridgeWithdrawalRequest {
+        account_id: request.account_id.0,
+        chain_id: request.chain_id,
+        vault_address: request.vault_address,
+        recipient: request.recipient,
+        token_address: request.token_address,
+        amount_token_units: request.amount_token_units,
+        expiry_height: request.expiry_height,
+    }
+}
+
+/// Deterministic canonical byte encoding of a bridge withdrawal request for signing.
+pub fn canonical_bridge_withdrawal_bytes(
+    request: &crate::bridge::BridgeWithdrawalRequest,
+) -> Vec<u8> {
+    sybil_signing::canonical_bridge_withdrawal_bytes(&to_canonical_bridge_withdrawal(request))
+}
+
 /// Verify a signed order's P256 ECDSA signature.
 pub fn verify_signed_order(signed: &SignedOrder) -> Result<(), SequencerError> {
     let msg = canonical_order_bytes(&signed.order);
@@ -120,6 +149,18 @@ pub fn verify_signed_order(signed: &SignedOrder) -> Result<(), SequencerError> {
 /// Verify a signed cancel request's P256 ECDSA signature.
 pub fn verify_signed_cancel(signed: &SignedCancel) -> Result<(), SequencerError> {
     let msg = canonical_cancel_bytes(signed.account_id, signed.order_id);
+    signed
+        .signer
+        .0
+        .verify(&msg, &signed.signature)
+        .map_err(|_| SequencerError::InvalidSignature)
+}
+
+/// Verify a signed bridge withdrawal request's P256 ECDSA signature.
+pub fn verify_signed_bridge_withdrawal(
+    signed: &SignedBridgeWithdrawal,
+) -> Result<(), SequencerError> {
+    let msg = canonical_bridge_withdrawal_bytes(&signed.request);
     signed
         .signer
         .0
@@ -189,6 +230,20 @@ pub fn sign_cancel(
     SignedCancel {
         account_id,
         order_id,
+        signer: PublicKey(*key.verifying_key()),
+        signature,
+    }
+}
+
+/// Sign a bridge withdrawal request with a P256 signing key (testing / client use).
+pub fn sign_bridge_withdrawal(
+    request: crate::bridge::BridgeWithdrawalRequest,
+    key: &SigningKey,
+) -> SignedBridgeWithdrawal {
+    let msg = canonical_bridge_withdrawal_bytes(&request);
+    let signature: Signature = key.sign(&msg);
+    SignedBridgeWithdrawal {
+        request,
         signer: PublicKey(*key.verifying_key()),
         signature,
     }
@@ -305,6 +360,46 @@ mod tests {
     }
 
     #[test]
+    fn test_sign_verify_bridge_withdrawal_roundtrip() {
+        let key =
+            <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(&mut crypto_rng());
+        let request = crate::bridge::BridgeWithdrawalRequest {
+            account_id: crate::account::AccountId(7),
+            chain_id: 31_337,
+            vault_address: [0x11; 20],
+            recipient: [0x22; 20],
+            token_address: [0x33; 20],
+            amount_token_units: 42_000_000,
+            expiry_height: 123_456,
+        };
+        let signed = sign_bridge_withdrawal(request, &key);
+
+        assert!(verify_signed_bridge_withdrawal(&signed).is_ok());
+    }
+
+    #[test]
+    fn test_tampered_bridge_withdrawal_rejected() {
+        let key =
+            <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(&mut crypto_rng());
+        let request = crate::bridge::BridgeWithdrawalRequest {
+            account_id: crate::account::AccountId(7),
+            chain_id: 31_337,
+            vault_address: [0x11; 20],
+            recipient: [0x22; 20],
+            token_address: [0x33; 20],
+            amount_token_units: 42_000_000,
+            expiry_height: 123_456,
+        };
+        let mut signed = sign_bridge_withdrawal(request, &key);
+        signed.request.amount_token_units = 43_000_000;
+
+        assert!(matches!(
+            verify_signed_bridge_withdrawal(&signed),
+            Err(SequencerError::InvalidSignature)
+        ));
+    }
+
+    #[test]
     fn test_canonical_encoding_deterministic() {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("Test");
@@ -351,6 +446,23 @@ mod tests {
     fn test_canonical_cancel_encoding_deterministic() {
         let bytes1 = canonical_cancel_bytes(crate::account::AccountId(3), 17);
         let bytes2 = canonical_cancel_bytes(crate::account::AccountId(3), 17);
+
+        assert_eq!(bytes1, bytes2);
+    }
+
+    #[test]
+    fn test_canonical_bridge_withdrawal_encoding_deterministic() {
+        let request = crate::bridge::BridgeWithdrawalRequest {
+            account_id: crate::account::AccountId(7),
+            chain_id: 31_337,
+            vault_address: [0x11; 20],
+            recipient: [0x22; 20],
+            token_address: [0x33; 20],
+            amount_token_units: 42_000_000,
+            expiry_height: 123_456,
+        };
+        let bytes1 = canonical_bridge_withdrawal_bytes(&request);
+        let bytes2 = canonical_bridge_withdrawal_bytes(&request);
 
         assert_eq!(bytes1, bytes2);
     }

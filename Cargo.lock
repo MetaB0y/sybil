@@ -4237,6 +4237,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "sybil-l1-indexer"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "hex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sybil-api-types",
+ "sybil-client",
+ "sybil-l1-protocol",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "sybil-l1-protocol"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "serde",
+ "sha3",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "sybil-oracle"
 version = "0.1.0"
 dependencies = [

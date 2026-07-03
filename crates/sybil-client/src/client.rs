@@ -121,6 +121,66 @@ impl SybilClient {
         self.decode(resp).await
     }
 
+    // === Bridge ===
+
+    pub async fn bridge_status(&self) -> Result<BridgeStatusResponse, Error> {
+        let resp = self
+            .with_service_auth(self.http.get(self.url("/v1/bridge/status")))
+            .send()
+            .await?;
+        self.decode(resp).await
+    }
+
+    pub async fn bridge_account_by_key(
+        &self,
+        sybil_account_key_hex: &str,
+    ) -> Result<BridgeAccountKeyResponse, Error> {
+        let resp = self
+            .with_service_auth(self.http.get(self.url(&format!(
+                "/v1/bridge/accounts/by-key/{}",
+                sybil_account_key_hex
+            ))))
+            .send()
+            .await?;
+        self.decode(resp).await
+    }
+
+    pub async fn submit_l1_deposit(
+        &self,
+        req: &SubmitL1DepositRequest,
+    ) -> Result<BridgeDepositResponse, Error> {
+        let resp = self
+            .with_service_auth(self.http.post(self.url("/v1/bridge/deposits")))
+            .json(req)
+            .send()
+            .await?;
+        self.decode(resp).await
+    }
+
+    pub async fn create_bridge_withdrawal(
+        &self,
+        req: &CreateBridgeWithdrawalRequest,
+    ) -> Result<BridgeWithdrawalResponse, Error> {
+        let resp = self
+            .with_service_auth(self.http.post(self.url("/v1/bridge/withdrawals")))
+            .json(req)
+            .send()
+            .await?;
+        self.decode(resp).await
+    }
+
+    pub async fn create_signed_bridge_withdrawal(
+        &self,
+        req: &CreateSignedBridgeWithdrawalRequest,
+    ) -> Result<BridgeWithdrawalResponse, Error> {
+        let resp = self
+            .with_service_auth(self.http.post(self.url("/v1/bridge/withdrawals/signed")))
+            .json(req)
+            .send()
+            .await?;
+        self.decode(resp).await
+    }
+
     // === Markets ===
 
     pub async fn create_market(

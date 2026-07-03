@@ -12,6 +12,8 @@ members = [
     "crates/sybil-api",
     "crates/sybil-api-types",
     "crates/sybil-client",
+    "crates/sybil-l1-indexer",
+    "crates/sybil-l1-protocol",
     "crates/sybil-verifier",
     "crates/sybil-zk",
     "crates/sybil-prover",

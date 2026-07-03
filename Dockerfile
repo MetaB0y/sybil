@@ -23,6 +23,8 @@ COPY crates/matching-sequencer/Cargo.toml crates/matching-sequencer/
 COPY crates/sybil-api/Cargo.toml crates/sybil-api/
 COPY crates/sybil-api-types/Cargo.toml crates/sybil-api-types/
 COPY crates/sybil-client/Cargo.toml crates/sybil-client/
+COPY crates/sybil-l1-indexer/Cargo.toml crates/sybil-l1-indexer/
+COPY crates/sybil-l1-protocol/Cargo.toml crates/sybil-l1-protocol/
 COPY crates/sybil-oracle/Cargo.toml crates/sybil-oracle/
 COPY crates/sybil-verifier/Cargo.toml crates/sybil-verifier/
 COPY crates/sybil-zk/Cargo.toml crates/sybil-zk/
@@ -32,13 +34,14 @@ COPY crates/sybil-polymarket/Cargo.toml crates/sybil-polymarket/
 COPY crates/sequencer-sim/Cargo.toml crates/sequencer-sim/
 
 # Create dummy source files to cache dependency compilation
-RUN for crate in matching-engine matching-solver matching-scenarios matching-sim matching-sequencer sybil-api sybil-api-types sybil-client sybil-oracle sybil-verifier sybil-zk sybil-signing sybil-polymarket sequencer-sim; do \
+RUN for crate in matching-engine matching-solver matching-scenarios matching-sim matching-sequencer sybil-api sybil-api-types sybil-client sybil-l1-protocol sybil-l1-indexer sybil-oracle sybil-verifier sybil-zk sybil-signing sybil-polymarket sequencer-sim; do \
         mkdir -p crates/$crate/src && echo "" > crates/$crate/src/lib.rs; \
     done && \
     mkdir -p crates/sybil-api/src && echo "fn main() {}" > crates/sybil-api/src/main.rs && \
     mkdir -p crates/sybil-api/src/bin && echo "fn main() {}" > crates/sybil-api/src/bin/sybil_admin.rs && \
     mkdir -p crates/sybil-prover/src && echo "" > crates/sybil-prover/src/lib.rs && echo "fn main() {}" > crates/sybil-prover/src/main.rs && \
     mkdir -p crates/sybil-prover/src/bin && echo "fn main() {}" > crates/sybil-prover/src/bin/sybil_prover_mock.rs && \
+    mkdir -p crates/sybil-l1-indexer/src && echo "fn main() {}" > crates/sybil-l1-indexer/src/main.rs && \
     mkdir -p crates/matching-sim/src && echo "fn main() {}" > crates/matching-sim/src/main.rs && \
     mkdir -p crates/sequencer-sim/src/bin && echo "fn main() {}" > crates/sequencer-sim/src/bin/sybil_sim.rs && \
     mkdir -p crates/matching-solver/benches && echo "fn main() {}" > crates/matching-solver/benches/solver_bench.rs && \

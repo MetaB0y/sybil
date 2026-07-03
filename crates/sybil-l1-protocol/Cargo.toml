@@ -1,0 +1,13 @@
+[package]
+name = "sybil-l1-protocol"
+version = "0.1.0"
+edition = "2021"
+description = "Ethereum L1 ABI, event parsing, and bridge hashing primitives for Sybil"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+sha3 = "0.10"
+thiserror = { workspace = true }
+
+[dev-dependencies]
+hex = "0.4"

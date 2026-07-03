@@ -8,7 +8,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use axum::body::Body;
 use axum::http::{header, HeaderMap, Method, Request, StatusCode};
 use http_body_util::BodyExt;
-use p256::ecdsa::SigningKey;
+use matching_sequencer::crypto::{canonical_bridge_withdrawal_bytes, PublicKey};
+use matching_sequencer::{AccountId, BridgeWithdrawalRequest};
+use p256::ecdsa::signature::Signer;
+use p256::ecdsa::{Signature, SigningKey};
 use serde_json::{json, Value};
 use sybil_api::app::{RouteMount, DEV_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, SERVICE_ROUTE_TABLE};
 use sybil_api::config::ApiConfig;
@@ -190,12 +193,20 @@ fn exact_service_routes() -> &'static [RouteMount] {
             path: "/v1/accounts/{id}/fund",
         },
         RouteMount {
+            method: "GET",
+            path: "/v1/bridge/accounts/by-key/{key_hex}",
+        },
+        RouteMount {
             method: "POST",
             path: "/v1/bridge/deposits",
         },
         RouteMount {
             method: "POST",
             path: "/v1/bridge/withdrawals",
+        },
+        RouteMount {
+            method: "POST",
+            path: "/v1/bridge/withdrawals/signed",
         },
         RouteMount {
             method: "POST",
@@ -345,6 +356,7 @@ fn service_probe_requests() -> Vec<(Method, &'static str, Value)> {
             "/v1/accounts/1/fund",
             json!({"amount_nanos": 1000}),
         ),
+        (Method::GET, "/v1/bridge/accounts/by-key/00", json!({})),
         (
             Method::POST,
             "/v1/bridge/deposits",
@@ -354,6 +366,11 @@ fn service_probe_requests() -> Vec<(Method, &'static str, Value)> {
             Method::POST,
             "/v1/bridge/withdrawals",
             json!({"account_id": 1}),
+        ),
+        (
+            Method::POST,
+            "/v1/bridge/withdrawals/signed",
+            json!({"withdrawal": {"account_id": 1}}),
         ),
         (
             Method::POST,
@@ -475,6 +492,17 @@ async fn service_routes_succeed_with_token_in_prod() {
 
     let (status, body) = request_json(
         app.clone(),
+        Method::GET,
+        &format!("/v1/bridge/accounts/by-key/{account_key}"),
+        Some(TOKEN),
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(parse_json(&body)["account_id"], json!(account_id));
+
+    let (status, body) = request_json(
+        app.clone(),
         Method::POST,
         "/v1/bridge/deposits",
         Some(TOKEN),
@@ -488,6 +516,52 @@ async fn service_routes_succeed_with_token_in_prod() {
             "sybil_account_key_hex": account_key,
             "amount_token_units": 10_000u64,
             "deposit_root_hex": hex_bytes(0x44, 32),
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+
+    let withdrawal_key = SigningKey::from_bytes((&[8u8; 32]).into()).expect("fixed signing key");
+    let withdrawal_pubkey = PublicKey(*withdrawal_key.verifying_key());
+    let withdrawal_pubkey_hex = hex::encode(withdrawal_pubkey.compressed_bytes());
+    let (status, body) = request_json(
+        app.clone(),
+        Method::POST,
+        &format!("/v1/accounts/{account_id}/keys"),
+        None,
+        json!({"public_key_hex": withdrawal_pubkey_hex}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+
+    let signed_withdrawal = BridgeWithdrawalRequest {
+        account_id: AccountId(account_id),
+        chain_id: 1,
+        vault_address: [0x10; 20],
+        recipient: [0x41; 20],
+        token_address: [0x20; 20],
+        amount_token_units: 1_000,
+        expiry_height: 10,
+    };
+    let msg = canonical_bridge_withdrawal_bytes(&signed_withdrawal);
+    let signature: Signature = withdrawal_key.sign(&msg);
+    let (status, body) = request_json(
+        app.clone(),
+        Method::POST,
+        "/v1/bridge/withdrawals/signed",
+        Some(TOKEN),
+        json!({
+            "withdrawal": {
+                "account_id": account_id,
+                "chain_id": 1,
+                "vault_address_hex": hex_bytes(0x10, 20),
+                "recipient_hex": hex_bytes(0x41, 20),
+                "token_address_hex": hex_bytes(0x20, 20),
+                "amount_token_units": 1_000u64,
+                "expiry_height": 10u64,
+            },
+            "signer_pubkey_hex": withdrawal_pubkey_hex,
+            "signature_hex": hex::encode(signature.to_bytes()),
         }),
     )
     .await;
@@ -543,8 +617,7 @@ async fn service_routes_succeed_with_token_in_prod() {
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
 
     let key = SigningKey::from_bytes((&[9u8; 32]).into()).expect("fixed signing key");
-    let pubkey_hex =
-        hex::encode(matching_sequencer::PublicKey(*key.verifying_key()).compressed_bytes());
+    let pubkey_hex = hex::encode(PublicKey(*key.verifying_key()).compressed_bytes());
     let (status, body) = request_json(
         app.clone(),
         Method::POST,

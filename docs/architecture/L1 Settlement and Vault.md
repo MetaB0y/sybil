@@ -298,6 +298,17 @@ prefix ending at `depositCount` and that typed state advances
 That keeps typed state to a single cursor rather than an unbounded consumed-id
 set.
 
+Current Rust scaffolding is intentionally weaker than this production model.
+`crates/sybil-l1-protocol` defines the `DepositReceived` ABI parser and the
+deposit hash/tree domains. `crates/sybil-l1-indexer` polls a dev/anvil-style
+JSON-RPC endpoint for those logs and submits them to `sybil-api` through the
+shared `sybil-client`; the API then uses the sequencer's existing
+`pending_l1_deposits` WAL entrypoint. This path is service-gated and ordered
+by deposit id, but it does not yet prove L1 receipt inclusion, finality, or
+that the submitted post-deposit root is a vault checkpoint. Those are explicit
+SYB-178/SYB-188 trust-boundary TODOs and must be closed before production
+deposit soundness.
+
 ### Normal withdrawals
 
 Normal withdrawals are sequencer-cooperative:
@@ -361,6 +372,13 @@ withdrawal leaf should remain in off-chain state until the sequencer observes
 the L1 request/finalization and retires it in a later block. That keeps
 normal withdrawals replay-safe without letting users withdraw from stale raw
 balances while continuing to trade.
+
+The current API exposes two scaffolding paths into the same sequencer
+withdrawal WAL: a service-only unsigned operator path and a service-only signed
+path that verifies a P256 signature over the canonical withdrawal payload
+against the account key registry. The signed path proves Sybil-account intent
+and fail-closes when `expiry_height` is omitted, but L1 release still depends on
+future SYB-178/SYB-188 withdrawal-proof and vault-authorization work.
 
 ### Withdrawal queue
 

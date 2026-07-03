@@ -36,8 +36,10 @@ use crate::util::now_ms;
         routes::accounts::get_account_history,
         routes::bridge::status,
         routes::bridge::account_key,
+        routes::bridge::account_by_key,
         routes::bridge::submit_l1_deposit,
         routes::bridge::create_withdrawal,
+        routes::bridge::create_signed_withdrawal,
         routes::bridge::get_withdrawal,
         routes::markets::list_markets,
         routes::markets::list_markets_summary,
@@ -78,6 +80,7 @@ use crate::util::now_ms;
         FundAccountRequest,
         SubmitL1DepositRequest,
         CreateBridgeWithdrawalRequest,
+        CreateSignedBridgeWithdrawalRequest,
         RegisterKeyRequest,
         CreateMarketRequest,
         CreateMarketGroupRequest,
@@ -547,12 +550,20 @@ pub const SERVICE_ROUTE_TABLE: &[RouteMount] = &[
         path: "/v1/accounts/{id}/fund",
     },
     RouteMount {
+        method: "GET",
+        path: "/v1/bridge/accounts/by-key/{key_hex}",
+    },
+    RouteMount {
         method: "POST",
         path: "/v1/bridge/deposits",
     },
     RouteMount {
         method: "POST",
         path: "/v1/bridge/withdrawals",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/bridge/withdrawals/signed",
     },
     RouteMount {
         method: "POST",
@@ -770,12 +781,20 @@ fn service_routes() -> Router<AppState> {
             axum::routing::post(routes::accounts::fund_account),
         )
         .route(
+            "/v1/bridge/accounts/by-key/{key_hex}",
+            axum::routing::get(routes::bridge::account_by_key),
+        )
+        .route(
             "/v1/bridge/deposits",
             axum::routing::post(routes::bridge::submit_l1_deposit),
         )
         .route(
             "/v1/bridge/withdrawals",
             axum::routing::post(routes::bridge::create_withdrawal),
+        )
+        .route(
+            "/v1/bridge/withdrawals/signed",
+            axum::routing::post(routes::bridge::create_signed_withdrawal),
         )
         .route(
             "/v1/markets",

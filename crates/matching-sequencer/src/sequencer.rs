@@ -1519,6 +1519,16 @@ impl BlockSequencer {
             .map(|_| account_key(account_id))
     }
 
+    pub fn bridge_account_id_by_key(&self, key: [u8; 32]) -> Option<AccountId> {
+        self.accounts.iter().find_map(|(&account_id, _)| {
+            if account_key(account_id) == key {
+                Some(account_id)
+            } else {
+                None
+            }
+        })
+    }
+
     pub fn default_bridge_withdrawal_expiry_height(&self) -> u64 {
         self.height
             .saturating_add(1)

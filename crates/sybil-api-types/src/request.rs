@@ -64,6 +64,17 @@ pub struct CreateBridgeWithdrawalRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CreateSignedBridgeWithdrawalRequest {
+    /// Withdrawal payload covered by the P256 signature.
+    pub withdrawal: CreateBridgeWithdrawalRequest,
+    /// Hex-encoded compressed P256 public key of the signer.
+    pub signer_pubkey_hex: String,
+    /// Hex-encoded P256 ECDSA signature over the canonical withdrawal payload.
+    pub signature_hex: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RegisterKeyRequest {
     /// Hex-encoded compressed P256 public key (33 bytes).
     #[cfg_attr(feature = "openapi", schema(example = "02a1b2c3..."))]

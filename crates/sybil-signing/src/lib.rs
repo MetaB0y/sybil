@@ -46,6 +46,19 @@ struct CancelRequest {
     order_id: u64,
 }
 
+/// Canonical, stable byte layout of a bridge withdrawal request. This mirrors
+/// `matching_sequencer::bridge::BridgeWithdrawalRequest` without importing it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct BridgeWithdrawalRequest {
+    pub account_id: u64,
+    pub chain_id: u64,
+    pub vault_address: [u8; 20],
+    pub recipient: [u8; 20],
+    pub token_address: [u8; 20],
+    pub amount_token_units: u64,
+    pub expiry_height: u64,
+}
+
 /// Canonical, stable byte layout of a resolution attestation. Mirrors
 /// `sybil_oracle::ResolutionAttestation` without importing it (keeps this
 /// crate dependency-light).
@@ -70,6 +83,10 @@ pub fn canonical_cancel_bytes(account_id: u64, order_id: u64) -> Vec<u8> {
 
 pub fn canonical_attestation_bytes(att: &ResolutionAttestation) -> Vec<u8> {
     borsh::to_vec(att).expect("canonical attestation serialization should not fail")
+}
+
+pub fn canonical_bridge_withdrawal_bytes(request: &BridgeWithdrawalRequest) -> Vec<u8> {
+    borsh::to_vec(request).expect("canonical bridge withdrawal serialization should not fail")
 }
 
 #[cfg(test)]
@@ -139,6 +156,23 @@ mod tests {
         insta::assert_snapshot!(
             "attestation",
             hex::encode(canonical_attestation_bytes(&att))
+        );
+    }
+
+    #[test]
+    fn bridge_withdrawal_snapshot() {
+        let request = BridgeWithdrawalRequest {
+            account_id: 9,
+            chain_id: 31_337,
+            vault_address: [0x11; 20],
+            recipient: [0x22; 20],
+            token_address: [0x33; 20],
+            amount_token_units: 42_000_000,
+            expiry_height: 123_456,
+        };
+        insta::assert_snapshot!(
+            "bridge_withdrawal",
+            hex::encode(canonical_bridge_withdrawal_bytes(&request))
         );
     }
 

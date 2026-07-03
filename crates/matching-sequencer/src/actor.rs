@@ -15,7 +15,8 @@ use crate::account::{Account, AccountId};
 use crate::block::{BlockProduction, SealedBlock};
 use crate::bridge::{BridgeState, BridgeWithdrawalRequest, L1Deposit, WithdrawalLeaf};
 use crate::crypto::{
-    verify_signed_cancel, verify_signed_order, PublicKey, SignedCancel, SignedOrder,
+    verify_signed_bridge_withdrawal, verify_signed_cancel, verify_signed_order, PublicKey,
+    SignedBridgeWithdrawal, SignedCancel, SignedOrder,
 };
 use crate::error::{Rejection, RejectionReason, SequencerError};
 use crate::market_info::{
@@ -160,8 +161,13 @@ pub enum SequencerMsg {
         BridgeWithdrawalRequest,
         RpcReplyPort<Result<WithdrawalLeaf, SequencerError>>,
     ),
+    CreateSignedBridgeWithdrawal(
+        SignedBridgeWithdrawal,
+        RpcReplyPort<Result<WithdrawalLeaf, SequencerError>>,
+    ),
     GetBridgeState(RpcReplyPort<BridgeState>),
     GetBridgeAccountKey(AccountId, RpcReplyPort<Option<[u8; 32]>>),
+    GetBridgeAccountIdByKey([u8; 32], RpcReplyPort<Option<AccountId>>),
     GetBridgeWithdrawal(u64, RpcReplyPort<Option<WithdrawalLeaf>>),
     GetDefaultBridgeWithdrawalExpiry(RpcReplyPort<u64>),
     RegisterPubkey(
@@ -1630,6 +1636,21 @@ impl SequencerActorState {
         self.sequencer.request_bridge_withdrawal(request)
     }
 
+    async fn handle_signed_bridge_withdrawal(
+        &mut self,
+        signed: SignedBridgeWithdrawal,
+    ) -> Result<WithdrawalLeaf, SequencerError> {
+        verify_signed_bridge_withdrawal(&signed)?;
+        let account_id = self
+            .sequencer
+            .lookup_pubkey(&signed.signer)
+            .ok_or(SequencerError::UnknownSigner)?;
+        if account_id != signed.request.account_id {
+            return Err(SequencerError::SignerAccountMismatch);
+        }
+        self.handle_bridge_withdrawal(signed.request).await
+    }
+
     async fn handle_state_proof(
         &self,
         leaf_key: Vec<u8>,
@@ -1895,11 +1916,17 @@ impl Actor for SequencerActor {
             SequencerMsg::CreateBridgeWithdrawal(request, reply) => {
                 let _ = reply.send(state.handle_bridge_withdrawal(request).await);
             }
+            SequencerMsg::CreateSignedBridgeWithdrawal(signed, reply) => {
+                let _ = reply.send(state.handle_signed_bridge_withdrawal(signed).await);
+            }
             SequencerMsg::GetBridgeState(reply) => {
                 let _ = reply.send(state.sequencer.bridge_state().clone());
             }
             SequencerMsg::GetBridgeAccountKey(account_id, reply) => {
                 let _ = reply.send(state.sequencer.bridge_account_key(account_id));
+            }
+            SequencerMsg::GetBridgeAccountIdByKey(key, reply) => {
+                let _ = reply.send(state.sequencer.bridge_account_id_by_key(key));
             }
             SequencerMsg::GetBridgeWithdrawal(withdrawal_id, reply) => {
                 let _ = reply.send(state.sequencer.bridge_withdrawal(withdrawal_id).cloned());
@@ -2653,6 +2680,14 @@ impl SequencerHandle {
             .await?
     }
 
+    pub async fn create_signed_bridge_withdrawal(
+        &self,
+        signed: SignedBridgeWithdrawal,
+    ) -> Result<WithdrawalLeaf, SequencerError> {
+        self.rpc(|reply| SequencerMsg::CreateSignedBridgeWithdrawal(signed, reply))
+            .await?
+    }
+
     pub async fn get_bridge_state(&self) -> Result<BridgeState, SequencerError> {
         self.rpc(SequencerMsg::GetBridgeState).await
     }
@@ -2662,6 +2697,14 @@ impl SequencerHandle {
         account_id: AccountId,
     ) -> Result<Option<[u8; 32]>, SequencerError> {
         self.rpc(|reply| SequencerMsg::GetBridgeAccountKey(account_id, reply))
+            .await
+    }
+
+    pub async fn get_bridge_account_id_by_key(
+        &self,
+        key: [u8; 32],
+    ) -> Result<Option<AccountId>, SequencerError> {
+        self.rpc(|reply| SequencerMsg::GetBridgeAccountIdByKey(key, reply))
             .await
     }
 
