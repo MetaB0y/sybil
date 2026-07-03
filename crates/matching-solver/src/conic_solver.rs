@@ -176,6 +176,10 @@ impl ConicSolver {
         let num_cash_vars = if has_cash { k } else { 0 };
         let d = n + num_cash_vars + k + m + g;
 
+        if k == 0 {
+            return crate::lp_solver::LpSolver::new().solve(problem);
+        }
+
         // Remap cone_mms index to get budgets/groups for exp-cone MMs only
         let cone_mm_budgets: Vec<f64> = cone_mms.iter().map(|&kk| mm_budgets[kk]).collect();
         let cone_mm_groups: Vec<&Vec<usize>> = cone_mms.iter().map(|&kk| &mm_groups[kk]).collect();
@@ -426,14 +430,14 @@ impl ConicSolver {
 
         let Ok(mut solver) = DefaultSolver::new(&p_mat, &obj, &a_mat, &b_vec, &cones, settings)
         else {
-            return PipelineResult::empty();
+            return crate::lp_solver::LpSolver::new().solve(problem);
         };
 
         solver.solve();
 
         match solver.solution.status {
             SolverStatus::Solved | SolverStatus::AlmostSolved => {}
-            _ => return PipelineResult::empty(),
+            _ => return crate::lp_solver::LpSolver::new().solve(problem),
         }
 
         // ================================================================

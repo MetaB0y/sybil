@@ -118,6 +118,14 @@ impl<S: crate::Solver> DecomposedSolver<S> {
         // Per-component LP budget enforcement is imperfect (linearized + rounded),
         // so small overruns compound across components.
         let mm_order_info = crate::lp_solver::build_mm_order_info(problem);
+        let order_map_full: HashMap<u64, &Order> =
+            problem.orders.iter().map(|o| (o.id, o)).collect();
+        let empty_prices = HashMap::new();
+        let clearing_prices = result
+            .price_discovery
+            .as_ref()
+            .map(|price_discovery| &price_discovery.prices)
+            .unwrap_or(&empty_prices);
 
         if !problem.mm_constraints.is_empty() {
             crate::lp_solver::trim_mm_budget_overflows(
@@ -127,15 +135,16 @@ impl<S: crate::Solver> DecomposedSolver<S> {
             );
         }
 
-        let order_map_full: HashMap<u64, &Order> =
-            problem.orders.iter().map(|o| (o.id, o)).collect();
-        let empty_prices = HashMap::new();
-        let clearing_prices = result
-            .price_discovery
-            .as_ref()
-            .map(|price_discovery| &price_discovery.prices)
-            .unwrap_or(&empty_prices);
+        crate::lp_solver::trim_zero_price_minting(
+            &mut result.result,
+            &order_map_full,
+            clearing_prices,
+        );
         crate::lp_solver::recompute_welfare(&mut result.result, &order_map_full, clearing_prices);
+        if let Some(price_discovery) = result.price_discovery.as_mut() {
+            price_discovery.total_fills = result.result.fills.len();
+            price_discovery.total_welfare = result.result.total_welfare();
+        }
 
         result.total_time_secs = start.elapsed().as_secs_f64();
         result

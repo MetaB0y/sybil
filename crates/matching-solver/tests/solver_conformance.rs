@@ -785,23 +785,18 @@ mod conformance {
 
     #[cfg(feature = "lp")]
     #[test]
-    #[ignore = "SYB-197 finding: EG can return no fills on a crossing MM case; see proptest regression seed f76d7bb8408f0a6335e0fe4bee7efc8aba362ac49bef219f716a35052d1c08df"]
     fn eg_solver_conformance() {
-        // Minimized finding: one binary market with the base crossing
-        // BuyYes/BuyNo/SellYes/SellNo orders at qty=1, plus a tight MM
-        // constraint over sell-side orders. EG returns an empty fill set even
-        // though the generated scenario has guaranteed positive-surplus crosses.
+        // Covers the SYB-203 regression where MM sell-side orders inside EG
+        // log utility collapsed the projected allocation to no fills.
         let solver = matching_solver::EgSolver::new();
         run_solver_conformance(&solver);
     }
 
     #[cfg(feature = "lp")]
     #[test]
-    #[ignore = "SYB-197 finding: IterLP can exceed an MM budget after integer rounding; see proptest regression seed 005286340a146b8c787d144df98ea580774bd8d476e8b6ec62fb93fd0369c8af"]
     fn iter_lp_solver_conformance() {
-        // Minimized finding: one binary market with an MM constraint budget of
-        // 500000001000000 nanos. Strict match verification computes MM capital
-        // used as 500000001500000 nanos, an overflow of 500000 nanos.
+        // Covers the SYB-202 regression where post-rounding MM capital
+        // trimming under-trimmed by one fixed-point unit.
         let solver = matching_solver::IterLpSolver::new();
         run_solver_conformance(&solver);
     }
@@ -830,13 +825,9 @@ mod conformance {
 
     #[cfg(feature = "conic")]
     #[test]
-    #[ignore = "SYB-197 finding: Conic can return no fills on a crossing case; see inline minimized case"]
     fn conic_solver_conformance() {
-        // Minimized finding from `cargo test -p matching-solver --features conic`:
-        // one binary market, base crossing orders at qty=41000, no MM
-        // constraints, plus aggressive same-market YES sell/buy liquidity. Conic
-        // returns an empty fill set despite the guaranteed positive-surplus
-        // crosses.
+        // Covers the SYB-204 regressions where degenerate/no-progress conic
+        // solves returned an empty result despite guaranteed crossing orders.
         let solver = matching_solver::ConicSolver::with_config(matching_solver::ConicConfig {
             max_iter: 100,
             time_limit: 5.0,

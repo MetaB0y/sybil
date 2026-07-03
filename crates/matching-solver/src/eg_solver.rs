@@ -90,15 +90,19 @@ impl EgSolver {
         // Per-order MM info: order_index -> (mm_constraint_index, MmSide)
         let mm_order_map = ctx.mm_order_index_map(orders);
 
-        // Group MM orders by constraint index
-        let num_mm = problem.mm_constraints.len();
-        let mut mm_groups: Vec<Vec<usize>> = vec![Vec::new(); num_mm];
-        for (&order_idx, &(mm_idx, _)) in &mm_order_map {
-            mm_groups[mm_idx].push(order_idx);
-        }
-
         // Precompute per-order welfare weight: sign * limit_price
         let welfare_weights = welfare_weights(orders);
+
+        // Group positive-welfare MM orders by constraint index. Nonpositive
+        // MM orders stay in the linear welfare objective; putting them inside
+        // log utility can drive U_k negative and collapse the FW allocation.
+        let num_mm = problem.mm_constraints.len();
+        let mut mm_pos_groups: Vec<Vec<usize>> = vec![Vec::new(); num_mm];
+        for (&order_idx, &(mm_idx, _)) in &mm_order_map {
+            if welfare_weights[order_idx] > 0.0 {
+                mm_pos_groups[mm_idx].push(order_idx);
+            }
+        }
 
         // MM budgets
         let mm_budgets: Vec<f64> = problem
@@ -113,6 +117,15 @@ impl EgSolver {
         if !has_mm {
             return self.solve_lp_only(problem, orders, &ctx, start);
         }
+
+        let active_mm: Vec<bool> = (0..num_mm)
+            .map(|k| mm_budgets[k] > 0.0 && !mm_pos_groups[k].is_empty())
+            .collect();
+
+        let is_log_mm_order = |i: usize| -> Option<usize> {
+            let (mm_idx, _) = *mm_order_map.get(&i)?;
+            (welfare_weights[i] > 0.0 && active_mm[mm_idx]).then_some(mm_idx)
+        };
 
         // ================================================================
         // Step 1: Warm start — solve LP with linear welfare
@@ -137,8 +150,8 @@ impl EgSolver {
 
         // Seed MM fills: ensure each MM group has nonzero surplus
         // to avoid gradient explosion (B_k / 0) on first iteration.
-        for (mm_idx, group_orders) in mm_groups.iter().enumerate() {
-            if mm_budgets[mm_idx] == 0.0 {
+        for (mm_idx, group_orders) in mm_pos_groups.iter().enumerate() {
+            if !active_mm[mm_idx] {
                 continue;
             }
             let surplus: f64 = group_orders
@@ -161,7 +174,7 @@ impl EgSolver {
         // ================================================================
         for _t in 0..self.config.max_fw_iterations {
             // Compute U_k = Σ_{i ∈ MM_k} w_i * q_i for each MM group
-            let u_k: Vec<f64> = mm_groups
+            let u_k: Vec<f64> = mm_pos_groups
                 .iter()
                 .map(|group_orders| {
                     let u: f64 = group_orders
@@ -175,7 +188,7 @@ impl EgSolver {
             // Build gradient (objective coefficients for LP oracle)
             let grad: Vec<f64> = (0..n)
                 .map(|i| {
-                    if let Some(&(mm_idx, _)) = mm_order_map.get(&i) {
+                    if let Some(mm_idx) = is_log_mm_order(i) {
                         mm_budgets[mm_idx] * welfare_weights[i] / u_k[mm_idx]
                     } else {
                         welfare_weights[i]
@@ -207,7 +220,7 @@ impl EgSolver {
             // Concave in γ → bisection on φ'(γ) = 0.
 
             // Precompute U_k(s) for each MM group
-            let u_k_s: Vec<f64> = mm_groups
+            let u_k_s: Vec<f64> = mm_pos_groups
                 .iter()
                 .map(|group_orders| {
                     let u: f64 = group_orders
@@ -221,13 +234,13 @@ impl EgSolver {
             // ΔU_k = U_k(s) - U_k(q)
             let delta_u: Vec<f64> = (0..num_mm).map(|k| u_k_s[k] - u_k[k]).collect();
 
-            // R(q) = Σ_{j∉MM} w_j * q_j, R(s) = Σ_{j∉MM} w_j * s_j
+            // R(q) = linear-welfare orders, R(s) = same at the oracle vertex.
             let r_q: f64 = (0..n)
-                .filter(|i| !mm_order_map.contains_key(i))
+                .filter(|&i| is_log_mm_order(i).is_none())
                 .map(|i| welfare_weights[i] * q[i])
                 .sum();
             let r_s: f64 = (0..n)
-                .filter(|i| !mm_order_map.contains_key(i))
+                .filter(|&i| is_log_mm_order(i).is_none())
                 .map(|i| welfare_weights[i] * sol.q_values[i])
                 .sum();
             let delta_r = r_s - r_q;
@@ -236,7 +249,7 @@ impl EgSolver {
             let phi_prime = |gamma: f64| -> f64 {
                 let mut deriv = delta_r;
                 for k in 0..num_mm {
-                    if mm_budgets[k] == 0.0 {
+                    if !active_mm[k] {
                         continue;
                     }
                     let denom = (1.0 - gamma) * u_k[k] + gamma * u_k_s[k];
@@ -280,8 +293,8 @@ impl EgSolver {
 
             // Compute EG objective: Σ_k B_k * ln(U_k) + Σ_{j ∉ MM} w_j * q_j
             let mut eg_obj = 0.0;
-            for (mm_idx, group_orders) in mm_groups.iter().enumerate() {
-                if mm_budgets[mm_idx] == 0.0 {
+            for (mm_idx, group_orders) in mm_pos_groups.iter().enumerate() {
+                if !active_mm[mm_idx] {
                     continue;
                 }
                 let surplus: f64 = group_orders
@@ -293,7 +306,7 @@ impl EgSolver {
                 }
             }
             for i in 0..n {
-                if !mm_order_map.contains_key(&i) {
+                if is_log_mm_order(i).is_none() {
                     eg_obj += welfare_weights[i] * q[i];
                 }
             }
@@ -324,7 +337,12 @@ impl EgSolver {
         // objective). The shared epilogue caps upper bounds at the FW
         // allocation and re-solves the standard welfare LP for proper duals
         // where complementary slackness guarantees UCP.
-        project_and_finalize(&q, problem, &ctx, start)
+        let result = project_and_finalize(&q, problem, &ctx, start);
+        if result.result.fills.is_empty() {
+            crate::lp_solver::LpSolver::new().solve(problem)
+        } else {
+            result
+        }
     }
 
     /// Fast path: no MM orders → single LP solve (identical to LpSolver).

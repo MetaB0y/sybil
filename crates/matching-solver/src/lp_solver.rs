@@ -563,20 +563,150 @@ pub(crate) fn trim_mm_budget_overflows(
             let Some(&(_, side)) = mm_order_info.get(&fill.order_id) else {
                 continue;
             };
-            let cpu = side.capital_needed(fill.fill_price, 1) as u128;
-            if cpu == 0 {
+            let trim = trim_qty_to_fit_budget(
+                side,
+                fill.fill_price,
+                fill.fill_qty,
+                remaining,
+                mm.max_capital as u128,
+            );
+            if trim == 0 {
                 continue;
             }
-            let overflow = remaining - mm.max_capital as u128;
-            let trim = overflow
-                .div_ceil(cpu)
-                .min(result.fills[fi].fill_qty as u128) as u64;
-            remaining -= side.capital_needed(fill.fill_price, trim) as u128;
+
+            let fill_price = fill.fill_price;
+            let old_qty = result.fills[fi].fill_qty;
+            let old_capital = side.capital_needed(fill_price, old_qty) as u128;
             result.fills[fi].fill_qty -= trim;
+            let new_capital = side.capital_needed(fill_price, result.fills[fi].fill_qty) as u128;
+            remaining = remaining - old_capital + new_capital;
         }
     }
 
     result.fills.retain(|f| f.fill_qty > 0);
+}
+
+fn trim_qty_to_fit_budget(
+    side: MmSide,
+    fill_price: Nanos,
+    fill_qty: Qty,
+    remaining_capital: u128,
+    budget: u128,
+) -> Qty {
+    if remaining_capital <= budget || fill_qty == 0 {
+        return 0;
+    }
+
+    let old_capital = side.capital_needed(fill_price, fill_qty) as u128;
+    if old_capital == 0 {
+        return 0;
+    }
+
+    if remaining_capital - old_capital > budget {
+        return fill_qty;
+    }
+
+    let mut lo = 1;
+    let mut hi = fill_qty;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let new_qty = fill_qty - mid;
+        let new_capital = side.capital_needed(fill_price, new_qty) as u128;
+        let after_trim = remaining_capital - old_capital + new_capital;
+        if after_trim <= budget {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+
+    lo
+}
+
+pub(crate) fn trim_zero_price_minting(
+    result: &mut MatchingResult,
+    order_map: &HashMap<u64, &Order>,
+    clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
+) {
+    let mut diff_by_market: HashMap<MarketId, i128> = HashMap::new();
+    for fill in &result.fills {
+        let Some(&order) = order_map.get(&fill.order_id) else {
+            continue;
+        };
+        let diff_coeff = outcome_diff_coeff(order);
+        if diff_coeff == 0 {
+            continue;
+        }
+        *diff_by_market.entry(order.markets[0]).or_insert(0) +=
+            diff_coeff as i128 * fill.fill_qty as i128;
+    }
+
+    for (market, diff) in diff_by_market {
+        let Some(trim_direction) = zero_price_mint_direction(market, diff, clearing_prices) else {
+            continue;
+        };
+
+        let mut remaining = diff.unsigned_abs();
+        let mut candidates: Vec<(usize, u64)> = result
+            .fills
+            .iter()
+            .enumerate()
+            .filter_map(|(fill_idx, fill)| {
+                let &order = order_map.get(&fill.order_id)?;
+                if order.markets[0] != market || outcome_diff_coeff(order) != trim_direction {
+                    return None;
+                }
+                Some((fill_idx, fill.fill_qty))
+            })
+            .collect();
+        candidates.sort_by_key(|&(_, qty)| qty);
+
+        for (fill_idx, qty) in candidates {
+            if remaining == 0 {
+                break;
+            }
+            let trim = if remaining > qty as u128 {
+                qty
+            } else {
+                remaining as u64
+            };
+            result.fills[fill_idx].fill_qty -= trim;
+            remaining -= trim as u128;
+        }
+    }
+
+    result.fills.retain(|fill| fill.fill_qty > 0);
+}
+
+fn zero_price_mint_direction(
+    market: MarketId,
+    diff: i128,
+    clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
+) -> Option<i8> {
+    if diff == 0 {
+        return None;
+    }
+
+    let prices = clearing_prices.get(&market);
+    let missing_or_zero = |outcome: usize| {
+        prices
+            .and_then(|market_prices| market_prices.get(outcome))
+            .copied()
+            .unwrap_or(0)
+            == 0
+    };
+
+    if diff > 0 && missing_or_zero(0) {
+        Some(1)
+    } else if diff < 0 && missing_or_zero(1) {
+        Some(-1)
+    } else {
+        None
+    }
+}
+
+fn outcome_diff_coeff(order: &Order) -> i8 {
+    order.payoffs[0].saturating_sub(order.payoffs[1])
 }
 
 /// Per-order welfare weight in the objective: sign × limit price.
@@ -666,6 +796,7 @@ pub(crate) fn finalize_result(
     let (mut result, prices) = extract_result(solution, orders, &ctx.markets);
 
     trim_mm_budget_overflows(&mut result, &problem.mm_constraints, &ctx.mm_order_info);
+    trim_zero_price_minting(&mut result, &order_map, &prices);
     recompute_welfare(&mut result, &order_map, &prices);
 
     let mut pipeline_result = PipelineResult::empty();
@@ -688,12 +819,13 @@ pub(crate) fn finalize_result(
 ///
 /// Their core phase (Frank-Wolfe, μ-iteration, or conic interior point)
 /// produces a continuous allocation whose duals don't yield valid clearing
-/// prices. This caps each order's `max_fill` at the rounded core allocation,
+/// prices. This caps each order's `max_fill` at the ceiled core allocation,
 /// re-solves the standard welfare LP for exact prices, and finalizes — so the
 /// LP's complementary slackness guarantees a uniform clearing price.
 ///
 /// `allocation[i]` is the core-phase fill for order `i` (in the same order as
-/// `problem.orders`); it is rounded and clamped to `[0, max_fill]`.
+/// `problem.orders`); it is ceiled as an integer upper bound and clamped to
+/// `[0, max_fill]`.
 pub(crate) fn project_and_finalize(
     allocation: &[f64],
     problem: &Problem,
@@ -704,7 +836,11 @@ pub(crate) fn project_and_finalize(
 
     let mut projected_orders: Vec<Order> = orders.to_vec();
     for (i, order) in projected_orders.iter_mut().enumerate() {
-        let core_fill = allocation[i].round().max(0.0) as u64;
+        let core_fill = if allocation[i] <= 1e-9 {
+            0
+        } else {
+            allocation[i].ceil() as u64
+        };
         order.max_fill = core_fill.min(orders[i].max_fill);
     }
 
