@@ -452,6 +452,7 @@ struct SequencerActorState {
     block_history: VecDeque<SealedBlock>,
     block_broadcast: broadcast::Sender<SealedBlock>,
     pause_count: u32,
+    halted_error: Option<SequencerError>,
     store: Option<Arc<crate::store::Store>>,
     global_submission_bucket: TokenBucket,
     account_submission_buckets: HashMap<AccountId, TokenBucket>,
@@ -640,6 +641,13 @@ impl SequencerActorState {
         fields(height = tracing::field::Empty, pending_bundles = tracing::field::Empty)
     )]
     async fn on_tick(&mut self) {
+        if let Some(error) = &self.halted_error {
+            tracing::error!(
+                error = %error,
+                "block production halted after invariant failure"
+            );
+            return;
+        }
         if self.pause_count > 0 {
             return;
         }
@@ -651,7 +659,13 @@ impl SequencerActorState {
         let pending_bundles = self.sequencer.pending_bundles_len();
         tracing::Span::current().record("pending_bundles", pending_bundles);
 
-        let prepared = self.sequencer.prepare_block(Vec::new(), timestamp_ms);
+        let prepared = match self.sequencer.prepare_block(Vec::new(), timestamp_ms) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.halt_after_invariant_failure(error);
+                return;
+            }
+        };
         tracing::Span::current().record("height", prepared.production().block.header.height);
 
         if let Err(error) = self.persist_block(&prepared).await {
@@ -664,12 +678,33 @@ impl SequencerActorState {
             return;
         }
 
-        let bp = self.sequencer.commit_prepared_block(prepared);
+        let bp = match self.sequencer.commit_prepared_block(prepared) {
+            Ok(bp) => bp,
+            Err(error) => {
+                self.halt_after_invariant_failure(error);
+                return;
+            }
+        };
         self.record_metrics(&bp, pending_bundles);
         let sealed = bp.sealed_block();
         self.push_to_history(sealed.clone());
         let _ = self.block_broadcast.send(sealed.clone());
         self.latest_block = Some(sealed);
+    }
+
+    fn halt_after_invariant_failure(&mut self, error: SequencerError) {
+        metrics::counter!("sybil_block_verification_failures").increment(1);
+        // Verification failures mean the prepared state transition itself is
+        // untrustworthy. Leave the live pre-block state intact and fail-stop
+        // future ticks until an operator fixes the solver/state bug and
+        // restarts from the last committed block. Persistence failures keep
+        // the existing retry path above because they do not invalidate the
+        // in-memory state transition.
+        tracing::error!(
+            error = %error,
+            "prepared block discarded before commit; block production halted"
+        );
+        self.halted_error = Some(error);
     }
 
     /// Indicative scheduler tick (C2). Builds a speculative `Problem` from
@@ -1581,6 +1616,7 @@ impl Actor for SequencerActor {
             block_history: VecDeque::new(),
             block_broadcast: args.block_broadcast,
             pause_count: 0,
+            halted_error: None,
             store: args.store,
             global_submission_bucket,
             account_submission_buckets: HashMap::new(),
@@ -1711,10 +1747,12 @@ impl Actor for SequencerActor {
             }
             SequencerMsg::ProduceBlock(reply) => {
                 state.on_tick().await;
-                let result = state
-                    .latest_block
-                    .clone()
-                    .ok_or_else(|| SequencerError::Persistence("no block committed".to_string()));
+                let result = match &state.halted_error {
+                    Some(error) => Err(error.clone()),
+                    None => state.latest_block.clone().ok_or_else(|| {
+                        SequencerError::Persistence("no block committed".to_string())
+                    }),
+                };
                 let _ = reply.send(result);
             }
             SequencerMsg::CreateAccount(initial_balance, reply) => {

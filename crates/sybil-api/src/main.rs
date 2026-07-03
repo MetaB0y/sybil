@@ -204,6 +204,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         actor_queue_warn_depth: config.actor_queue_warn_depth,
         actor_queue_error_depth: config.actor_queue_error_depth,
         liquidity_band_nanos: config.liquidity_band_nanos,
+        verification_fail_open: false,
     };
 
     let handle = if let Some(state) = restored {

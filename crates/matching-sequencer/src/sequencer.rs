@@ -25,7 +25,9 @@ use crate::bridge::{
     DEFAULT_WITHDRAWAL_EXPIRY_BLOCKS,
 };
 use crate::canonical_state::{snapshot_account, CanonicalState};
-use crate::error::{Rejection, RejectionReason, SequencerError};
+use crate::error::{
+    BlockInvariantFailure, Rejection, RejectionReason, SequencerError, VerifierFailure,
+};
 use crate::market_info::{AccountFillRecord, MarketMetadata, PricePoint};
 use crate::market_lifecycle::MarketLifecycle;
 use crate::order_book::OrderBook;
@@ -129,6 +131,9 @@ pub struct SequencerConfig {
     /// 50_000_000 nanos = $0.05. Ships on the wire alongside the average so
     /// FE labels can read "(±$0.05)".
     pub liquidity_band_nanos: u64,
+    /// Explicit devnet escape hatch for old log-and-commit behavior when
+    /// hard block verification fails. Production defaults to fail-closed.
+    pub verification_fail_open: bool,
 }
 
 impl Default for SequencerConfig {
@@ -159,6 +164,7 @@ impl Default for SequencerConfig {
             actor_queue_warn_depth: 1_000,
             actor_queue_error_depth: 5_000,
             liquidity_band_nanos: 50_000_000,
+            verification_fail_open: false,
         }
     }
 }
@@ -253,6 +259,7 @@ struct FinalizedBlockState {
     /// consumers see `BlockMarketStats.volume_nanos`.
     volume_by_market: HashMap<MarketId, u64>,
     mark_prices: HashMap<MarketId, Vec<Nanos>>,
+    invariant_failures: Vec<BlockInvariantFailure>,
 }
 
 struct WitnessArtifacts {
@@ -383,6 +390,65 @@ fn expected_balance_delta_from_fills(
     });
     let mint_delta: i64 = mint_adjustments.iter().map(|adj| adj.balance_delta).sum();
     fill_delta + mint_delta
+}
+
+fn verifier_failures(
+    verification: &sybil_verifier::VerificationResult,
+) -> Vec<VerifierFailure> {
+    verification
+        .violations
+        .iter()
+        .map(|violation| VerifierFailure {
+            kind: format!("{:?}", violation.kind),
+            details: violation.details.clone(),
+        })
+        .collect()
+}
+
+fn collect_account_invariant_failures(
+    accounts: &AccountStore,
+    markets: &MarketSet,
+) -> Vec<BlockInvariantFailure> {
+    let mut failures = Vec::new();
+    for (account_id, account) in accounts.iter() {
+        if *account_id != AccountId::MINT && account.balance < 0 {
+            failures.push(BlockInvariantFailure::NegativeBalance {
+                account_id: *account_id,
+                balance: account.balance,
+            });
+        }
+    }
+
+    let post_state = CanonicalState::from_accounts(accounts);
+    let post_position_totals = post_state.market_position_totals();
+    for market in markets.iter() {
+        let (total_yes, total_no) = post_position_totals.totals_for(market.id);
+        if total_yes != total_no {
+            failures.push(BlockInvariantFailure::PositionImbalance {
+                market_id: market.id,
+                total_yes,
+                total_no,
+            });
+        }
+    }
+
+    failures
+}
+
+fn log_block_invariant_failures(height: u64, failures: &[BlockInvariantFailure], fail_open: bool) {
+    error!(
+        height,
+        failures = failures.len(),
+        fail_open,
+        "prepared block failed hard invariant verification"
+    );
+    for failure in failures {
+        error!(height, failure = ?failure, "block invariant failure");
+    }
+}
+
+fn block_invariant_error(height: u64, failures: Vec<BlockInvariantFailure>) -> SequencerError {
+    SequencerError::BlockInvariantFailure { height, failures }
 }
 
 /// Build the witness state snapshots around the system-event boundary.
@@ -1937,15 +2003,17 @@ impl BlockSequencer {
         &self,
         submissions: Vec<OrderSubmission>,
         timestamp_ms: u64,
-    ) -> PreparedBlock {
+    ) -> Result<PreparedBlock, SequencerError> {
         let mut next_sequencer = self.clone();
         let mut all_submissions = std::mem::take(&mut next_sequencer.pending_bundles);
         all_submissions.extend(submissions);
-        let production = next_sequencer.produce_block_in_place(all_submissions, timestamp_ms);
-        PreparedBlock {
+        let production = next_sequencer.produce_block_in_place(all_submissions, timestamp_ms)?;
+        let prepared = PreparedBlock {
             next_sequencer,
             production,
-        }
+        };
+        self.validate_prepared_block_for_commit(&prepared)?;
+        Ok(prepared)
     }
 
     /// Buffer a submission that couldn't be admitted directly into the
@@ -1967,28 +2035,93 @@ impl BlockSequencer {
         skip_all,
         fields(height = prepared.production().block.header.height)
     )]
-    pub fn commit_prepared_block(&mut self, prepared: PreparedBlock) -> BlockProduction {
+    pub fn commit_prepared_block(
+        &mut self,
+        prepared: PreparedBlock,
+    ) -> Result<BlockProduction, SequencerError> {
+        self.validate_prepared_block_for_commit(&prepared)?;
         let PreparedBlock {
             next_sequencer,
             production,
         } = prepared;
         *self = next_sequencer;
         self.analytics.clear_offblock_pending();
-        production
+        Ok(production)
     }
 
     /// Core sync method: prepare + immediately commit a block in-memory.
+    pub fn try_produce_block(
+        &mut self,
+        submissions: Vec<OrderSubmission>,
+        timestamp_ms: u64,
+    ) -> Result<BlockProduction, SequencerError> {
+        let prepared = self.prepare_block(submissions, timestamp_ms)?;
+        self.commit_prepared_block(prepared)
+    }
+
+    /// Legacy convenience wrapper for simulation-style callers.
     ///
-    /// Direct callers such as simulations keep the previous semantics. The actor
-    /// can instead call [`Self::prepare_block`] and commit only after persistence succeeds.
+    /// Money-path integrations should prefer [`Self::try_produce_block`] or
+    /// the prepare/persist/commit split so invariant failures surface as
+    /// typed errors and discard the prepared clone.
     #[tracing::instrument(skip_all, fields(height))]
     pub fn produce_block(
         &mut self,
         submissions: Vec<OrderSubmission>,
         timestamp_ms: u64,
     ) -> BlockProduction {
-        let prepared = self.prepare_block(submissions, timestamp_ms);
-        self.commit_prepared_block(prepared)
+        self.try_produce_block(submissions, timestamp_ms)
+            .expect("block production failed hard invariant verification")
+    }
+
+    fn validate_prepared_block_for_commit(
+        &self,
+        prepared: &PreparedBlock,
+    ) -> Result<(), SequencerError> {
+        let height = prepared.production.block.header.height;
+        let mut failures = collect_account_invariant_failures(
+            &prepared.next_sequencer.accounts,
+            &prepared.next_sequencer.markets,
+        );
+
+        let prepared_state_root = crate::block::compute_complete_state_root(
+            &prepared.next_sequencer.accounts,
+            prepared.next_sequencer.bridge_state(),
+            prepared.next_sequencer.order_book(),
+            prepared.next_sequencer.markets(),
+            prepared.next_sequencer.market_groups(),
+            prepared.next_sequencer.market_lifecycle(),
+        );
+        let block_state_root = prepared.production.block.header.state_root;
+        if prepared_state_root != block_state_root {
+            failures.push(BlockInvariantFailure::PreparedStateRootMismatch {
+                block_state_root,
+                prepared_state_root,
+            });
+        }
+
+        let verification =
+            sybil_verifier::verify_full(&prepared.production.witness, /* diagnostics */ false);
+        if !verification.valid {
+            failures.push(BlockInvariantFailure::FullVerificationFailed {
+                violations: verifier_failures(&verification),
+            });
+        }
+
+        if failures.is_empty() {
+            return Ok(());
+        }
+
+        log_block_invariant_failures(height, &failures, self.config.verification_fail_open);
+        if self.config.verification_fail_open {
+            error!(
+                height,
+                "verification_fail_open enabled; committing prepared block despite hard invariant failures"
+            );
+            Ok(())
+        } else {
+            Err(block_invariant_error(height, failures))
+        }
     }
 
     #[tracing::instrument(
@@ -2124,40 +2257,30 @@ impl BlockSequencer {
 
         let post_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
         let balance_delta = post_total_balance - pre_total_balance;
+        let mut invariant_failures = Vec::new();
         if balance_delta != 0 {
             let expected_balance_delta =
                 expected_balance_delta_from_fills(fills, &order_map, &mint_adjustments);
             if balance_delta != expected_balance_delta {
-                error!(
-                    height = self.height,
+                invariant_failures.push(BlockInvariantFailure::BalanceDeltaMismatch {
                     balance_delta,
                     expected_balance_delta,
-                    diff = balance_delta - expected_balance_delta,
-                    "post-settlement balance delta mismatch"
-                );
+                });
             }
         }
 
+        invariant_failures.extend(collect_account_invariant_failures(
+            &self.accounts,
+            &self.markets,
+        ));
+
         let post_state = CanonicalState::from_accounts(&self.accounts);
-        let post_position_totals = post_state.market_position_totals();
-        for market in self.markets.iter() {
-            let (total_yes, total_no) = post_position_totals.totals_for(market.id);
-            if total_yes != total_no {
-                error!(
-                    height = self.height,
-                    market = ?market.id,
-                    total_yes,
-                    total_no,
-                    diff = total_yes - total_no,
-                    "post-settlement position imbalance"
-                );
-            }
-        }
 
         FinalizedBlockState {
             post_state,
             volume_by_market,
             mark_prices,
+            invariant_failures,
         }
     }
 
@@ -2239,7 +2362,7 @@ impl BlockSequencer {
         &mut self,
         submissions: Vec<OrderSubmission>,
         timestamp_ms: u64,
-    ) -> BlockProduction {
+    ) -> Result<BlockProduction, SequencerError> {
         self.height += 1;
         tracing::Span::current().record("height", self.height);
         let system_events = std::mem::take(&mut self.pending_system_events);
@@ -2883,6 +3006,7 @@ impl BlockSequencer {
             post_state,
             volume_by_market,
             mark_prices,
+            mut invariant_failures,
         } = self.finalize_block_state_phase(&fills, &problem, &clearing_prices, timestamp_ms);
 
         // Off-block cumulative + 24h platform welfare — accumulate this block's
@@ -3042,21 +3166,36 @@ impl BlockSequencer {
             welfare_by_market,
         };
 
-        // Verify the block using all 4 verification layers.
-        // TODO: This runs inline for now. Eventually a separate prover node
-        // will consume the BlockWitness and generate ZK proofs asynchronously.
+        // Verify the block using all 4 verification layers before this
+        // prepared clone is allowed to cross the commit boundary. A violation
+        // means the solver or state transition is untrustworthy, so the
+        // default semantics are fail-stop rather than retrying as if this were
+        // a transient persistence failure.
+        // TODO: Eventually a separate prover node will consume the
+        // BlockWitness and generate ZK proofs asynchronously.
         let verification = sybil_verifier::verify_full(&witness, /* diagnostics */ false);
         if !verification.valid {
-            error!(
-                violations = verification.violations.len(),
-                "block #{} FAILED verification", self.height
-            );
-            for v in &verification.violations {
-                error!(kind = ?v.kind, details = %v.details, "verification violation");
-            }
+            invariant_failures.push(BlockInvariantFailure::FullVerificationFailed {
+                violations: verifier_failures(&verification),
+            });
         }
 
-        BlockProduction {
+        if !invariant_failures.is_empty() {
+            log_block_invariant_failures(
+                self.height,
+                &invariant_failures,
+                self.config.verification_fail_open,
+            );
+            if !self.config.verification_fail_open {
+                return Err(block_invariant_error(self.height, invariant_failures));
+            }
+            error!(
+                height = self.height,
+                "verification_fail_open enabled; prepared block will be allowed despite hard invariant failures"
+            );
+        }
+
+        Ok(BlockProduction {
             block,
             analytics,
             pipeline: pipeline_result,
@@ -3069,7 +3208,7 @@ impl BlockSequencer {
                 rejected_orders,
                 pending_orders_after,
             },
-        }
+        })
     }
 }
 
@@ -3145,6 +3284,54 @@ mod tests {
             .sum()
     }
 
+    type PositionState = (MarketId, u8, i64);
+    type AccountState = (u64, i64, Vec<PositionState>);
+
+    fn account_state_for_assertions(accounts: &AccountStore) -> Vec<AccountState> {
+        let mut rows: Vec<_> = accounts
+            .iter()
+            .map(|(account_id, account)| {
+                let mut positions: Vec<_> = account
+                    .positions
+                    .iter()
+                    .map(|(&(market, outcome), &qty)| (market, outcome, qty))
+                    .collect();
+                positions.sort_by_key(|&(market, outcome, _)| (market.0, outcome));
+                (account_id.0, account.balance, positions)
+            })
+            .collect();
+        rows.sort_by_key(|(account_id, _, _)| *account_id);
+        rows
+    }
+
+    fn sequencer_with_single_market(balance: i64) -> (BlockSequencer, AccountId, MarketId) {
+        let (markets, market) = setup();
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(balance);
+        let oracle = Arc::new(AdminOracle::new());
+        (
+            BlockSequencer::with_default_solver(
+                accounts,
+                markets,
+                vec![],
+                oracle,
+                SequencerConfig::default(),
+            ),
+            aid,
+            market,
+        )
+    }
+
+    fn expect_invariant_failure(
+        result: Result<BlockProduction, SequencerError>,
+    ) -> SequencerError {
+        match result {
+            Err(err @ SequencerError::BlockInvariantFailure { .. }) => err,
+            Err(other) => panic!("expected block invariant failure, got {other}"),
+            Ok(_) => panic!("expected block invariant failure, got committed block"),
+        }
+    }
+
     fn raw_single_market_order(
         market: MarketId,
         payoffs: [i8; 2],
@@ -3160,6 +3347,94 @@ mod tests {
         order.limit_price = limit_price;
         order.max_fill = max_fill;
         order
+    }
+
+    #[test]
+    fn commit_rejects_prepared_block_when_verify_full_invalid_and_retains_pre_state() {
+        let (mut seq, _aid, _market) = sequencer_with_single_market(1_000);
+        let pre_height = seq.height();
+        let pre_accounts = account_state_for_assertions(&seq.accounts);
+        let pre_header = seq.last_header.clone();
+
+        let mut prepared = seq.prepare_block(vec![], 1_000).unwrap();
+        prepared.production.witness.header.state_root[0] ^= 0xff;
+
+        let err = expect_invariant_failure(seq.commit_prepared_block(prepared));
+        assert!(matches!(
+            err,
+            SequencerError::BlockInvariantFailure { failures, .. }
+                if failures
+                    .iter()
+                    .any(|failure| matches!(failure, BlockInvariantFailure::FullVerificationFailed { .. }))
+        ));
+        assert_eq!(seq.height(), pre_height);
+        assert_eq!(account_state_for_assertions(&seq.accounts), pre_accounts);
+        assert_eq!(seq.last_header, pre_header);
+    }
+
+    #[test]
+    fn commit_rejects_prepared_block_with_position_imbalance_and_retains_pre_state() {
+        let (mut seq, aid, market) = sequencer_with_single_market(1_000);
+        let pre_height = seq.height();
+        let pre_accounts = account_state_for_assertions(&seq.accounts);
+        let pre_header = seq.last_header.clone();
+
+        let mut prepared = seq.prepare_block(vec![], 1_000).unwrap();
+        prepared
+            .next_sequencer
+            .accounts
+            .get_mut(aid)
+            .unwrap()
+            .positions
+            .insert((market, 0), 1);
+
+        let err = expect_invariant_failure(seq.commit_prepared_block(prepared));
+        assert!(matches!(
+            err,
+            SequencerError::BlockInvariantFailure { failures, .. }
+                if failures.iter().any(|failure| {
+                    matches!(
+                        failure,
+                        BlockInvariantFailure::PositionImbalance { market_id, .. }
+                            if *market_id == market
+                    )
+                })
+        ));
+        assert_eq!(seq.height(), pre_height);
+        assert_eq!(account_state_for_assertions(&seq.accounts), pre_accounts);
+        assert_eq!(seq.last_header, pre_header);
+    }
+
+    #[test]
+    fn commit_rejects_prepared_block_with_negative_non_mint_balance_and_retains_pre_state() {
+        let (mut seq, aid, _market) = sequencer_with_single_market(1_000);
+        let pre_height = seq.height();
+        let pre_accounts = account_state_for_assertions(&seq.accounts);
+        let pre_header = seq.last_header.clone();
+
+        let mut prepared = seq.prepare_block(vec![], 1_000).unwrap();
+        prepared
+            .next_sequencer
+            .accounts
+            .get_mut(aid)
+            .unwrap()
+            .balance = -1;
+
+        let err = expect_invariant_failure(seq.commit_prepared_block(prepared));
+        assert!(matches!(
+            err,
+            SequencerError::BlockInvariantFailure { failures, .. }
+                if failures.iter().any(|failure| {
+                    matches!(
+                        failure,
+                        BlockInvariantFailure::NegativeBalance { account_id, balance }
+                            if *account_id == aid && *balance == -1
+                    )
+                })
+        ));
+        assert_eq!(seq.height(), pre_height);
+        assert_eq!(account_state_for_assertions(&seq.accounts), pre_accounts);
+        assert_eq!(seq.last_header, pre_header);
     }
 
     fn eth_address(byte: u8) -> [u8; 20] {
@@ -3826,6 +4101,11 @@ mod tests {
             .unwrap()
             .positions
             .insert((m0, 0), 10);
+        accounts
+            .get_mut(aid_b)
+            .unwrap()
+            .positions
+            .insert((m0, 1), 10);
 
         let oracle: Arc<dyn Oracle> = Arc::new(AdminOracle::new());
         let mut seq_a = BlockSequencer::with_default_solver(
@@ -5327,6 +5607,11 @@ mod tests {
             .unwrap()
             .positions
             .insert((m0, 0), 50);
+        seq.accounts
+            .get_mut(aid)
+            .unwrap()
+            .positions
+            .insert((m0, 1), 50);
 
         let sell_first = single_order_sub(aid, outcome_sell(&markets, 0, m0, 0, 400_000_000, 10));
         assert!(matches!(

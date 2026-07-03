@@ -44,7 +44,7 @@ pub struct BlockFlowMetrics {
 }
 
 /// Header of a sequencer block.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BlockHeader {
     pub height: u64,
     /// blake3(previous header bytes), zeros for genesis.

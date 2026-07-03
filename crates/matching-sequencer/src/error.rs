@@ -65,8 +65,40 @@ pub struct Rejection {
     pub reason: RejectionReason,
 }
 
+/// Verifier violation carried across the sequencer error boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifierFailure {
+    pub kind: String,
+    pub details: String,
+}
+
+/// Hard block-production invariant that must hold before a prepared block is committed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BlockInvariantFailure {
+    NegativeBalance {
+        account_id: AccountId,
+        balance: i64,
+    },
+    BalanceDeltaMismatch {
+        balance_delta: i64,
+        expected_balance_delta: i64,
+    },
+    PositionImbalance {
+        market_id: MarketId,
+        total_yes: i64,
+        total_no: i64,
+    },
+    PreparedStateRootMismatch {
+        block_state_root: [u8; 32],
+        prepared_state_root: [u8; 32],
+    },
+    FullVerificationFailed {
+        violations: Vec<VerifierFailure>,
+    },
+}
+
 /// Errors from the sequencer subsystem.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum SequencerError {
     /// Order validation failure.
     #[error("order {} rejected: {:?}", .0.order_id, .0.reason)]
@@ -134,4 +166,10 @@ pub enum SequencerError {
     /// Block persistence failed before the prepared block could be committed.
     #[error("block persistence failed: {0}")]
     Persistence(String),
+    /// A prepared block failed hard invariant or verifier checks before commit.
+    #[error("block {height} failed hard invariant verification: {failures:?}")]
+    BlockInvariantFailure {
+        height: u64,
+        failures: Vec<BlockInvariantFailure>,
+    },
 }

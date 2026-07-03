@@ -204,6 +204,14 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::ProofUnavailable(ref msg) => {
                 AppError::service_unavailable(format!("Proof unavailable: {msg}"))
             }
+            matching_sequencer::SequencerError::BlockInvariantFailure { height, failures } => {
+                tracing::error!(
+                    height = *height,
+                    failures = ?failures,
+                    "sequencer block invariant failure"
+                );
+                AppError::internal("Internal sequencer integrity failure")
+            }
             matching_sequencer::SequencerError::Persistence(ref msg) => {
                 AppError::internal(format!("Persistence error: {msg}"))
             }
