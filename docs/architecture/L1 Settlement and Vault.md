@@ -2,7 +2,7 @@
 tags: [contracts, bridge, validium, spec]
 layer: verification
 status: planned
-last_verified: 2026-05-06
+last_verified: 2026-07-03
 ---
 
 # L1 Settlement and Vault
@@ -417,14 +417,37 @@ verifier adapter, public-input encoding, or deployment configuration is wrong.
 Escape mode is entered when roots stop arriving:
 
 ```text
-block.timestamp > latestRoot.verifiedAt + escapeTimeout
+block.timestamp > livenessReference + escapeTimeout
 ```
 
-Anyone may activate escape mode after the timeout. Governance may also pause
-first during an incident, but pausing alone does not prove the operator is
-dead.
+`livenessReference` is `latestRoot.verifiedAt` once any root has been accepted.
+Before the first accepted root it falls back to the vault deployment time
+(`deployedAt`), so deposits made before the operator ever produced a root are
+not trapped if the operator disappears pre-genesis. Anyone may activate escape
+mode after the timeout. Governance may also pause first during an incident, but
+pausing alone does not prove the operator is dead.
 
-Escape claims are proof-backed cash withdrawals from the latest accepted root:
+> **Unimplemented mechanism (status: not shipped).** The proof-backed escape
+> *cash claim* described below does **not** exist in the deployed contracts.
+> Activating escape mode currently only sets the `escapeModeActive` flag and
+> emits `EscapeModeActivated`; there is no `escapeClaim`/`escapeWithdraw`
+> entrypoint. Implementing it soundly requires a **distinct ZK guest program**
+> — one proving `acct`/`acct_resv` membership against the latest accepted root
+> and computing conservative withdrawable cash — which has a different
+> public-input shape and app commitment than the single state-transition/
+> withdrawal guest the `OpenVmVerifierAdapter` is pinned to. That is a new
+> guest plus a `claimKind`-dispatched verifier, out of scope for the contract
+> layer alone. Tracked as SYB-32 / SYB-80 (H14).
+>
+> Until it ships the vault **fails closed**: `requestWithdrawal` rejects any
+> `claimKind != CLAIM_KIND_NORMAL` (`UnsupportedClaimKind`), and the
+> `CLAIM_KIND_ESCAPE` constant that previously advertised the absent mechanism
+> has been removed. `claimKind` remains bound into the withdrawal public-input
+> hash so a future escape entrypoint can be added without changing the proof
+> shape of normal withdrawals.
+
+When implemented, escape claims are intended to be proof-backed cash
+withdrawals from the latest accepted root:
 
 1. User obtains the latest accepted root and state data from DA or their own
    archive.
@@ -538,6 +561,7 @@ Minimum custom errors:
 
 ```solidity
 error InvalidProof();
+error UnsupportedClaimKind(bytes32 claimKind);
 error UnknownStateRoot(bytes32 stateRoot);
 error NonMonotonicHeight(uint64 expectedPrevious, uint64 providedPrevious);
 error DepositRootMismatch(bytes32 expectedRoot, bytes32 providedRoot);
@@ -596,7 +620,9 @@ struct WithdrawalPublicInputs {
 
 `claimKind` separates normal withdrawal leaves from emergency cash exits.
 Those are different ZK programs or different verifier keys even if they share
-the same vault entrypoint.
+the same vault entrypoint. Only `CLAIM_KIND_NORMAL` is implemented today;
+`requestWithdrawal` rejects every other kind (see the unimplemented-mechanism
+note under [Emergency escape](#emergency-escape)).
 
 ## Interaction with typed state
 

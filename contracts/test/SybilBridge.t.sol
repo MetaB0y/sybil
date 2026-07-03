@@ -264,6 +264,46 @@ contract SybilBridgeTest {
         require(vault.escapeModeActive(), "escape active");
     }
 
+    function testEscapeModeActivatesBeforeFirstRootAfterDeploymentTimeout() public {
+        // No root has ever been accepted, but a user deposited before the
+        // operator produced any root. Escape must still become activatable once
+        // escapeTimeout elapses from deployment, so those deposits are not
+        // trapped by the operator disappearing pre-genesis.
+        vault.deposit(1_000_000, ACCOUNT_KEY);
+        require(settlement.latestRootVerifiedAt() == 0, "no root yet");
+
+        (bool earlyOk,) =
+            address(vault).call(abi.encodeWithSelector(SybilVault.activateEscapeMode.selector));
+        require(!earlyOk, "early escape before first root");
+
+        vm.warp(vault.deployedAt() + ESCAPE_TIMEOUT + 1);
+        vault.activateEscapeMode();
+        require(vault.escapeModeActive(), "escape active pre-first-root");
+    }
+
+    function testRequestWithdrawalRejectsNonNormalClaimKind() public {
+        bytes32 stateRoot = _acceptRootWithDeposit();
+        SybilTypes.WithdrawalPublicInputs memory inputs = SybilTypes.WithdrawalPublicInputs({
+            stateRoot: stateRoot,
+            height: settlement.latestHeight(),
+            nullifier: keccak256("escape-claim-nullifier"),
+            recipient: address(this),
+            token: address(token),
+            amount: 100_000,
+            claimKind: keccak256("sybil/claim-kind/escape-cash/v1")
+        });
+
+        (bool ok,) = address(vault)
+            .call(
+                abi.encodeWithSelector(
+                    SybilVault.requestWithdrawal.selector, inputs, bytes("withdrawal-proof")
+                )
+            );
+        require(!ok, "non-normal claim kind accepted");
+        // Fail-closed must not burn the nullifier or queue anything.
+        require(!vault.nullifierUsed(inputs.nullifier), "nullifier burned on reject");
+    }
+
     function _acceptRootWithDeposit() internal returns (bytes32) {
         vault.deposit(1_000_000, ACCOUNT_KEY);
         bytes32 stateRoot = keccak256("state-1");

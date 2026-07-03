@@ -16,10 +16,20 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
     bytes32 public constant PARAMETER_ADMIN_ROLE = keccak256("SYBIL_PARAMETER_ADMIN_ROLE");
     bytes32 public constant GUARDIAN_ROLE = keccak256("SYBIL_GUARDIAN_ROLE");
     bytes32 public constant CLAIM_KIND_NORMAL = keccak256("sybil/claim-kind/normal-withdrawal/v1");
-    bytes32 public constant CLAIM_KIND_ESCAPE = keccak256("sybil/claim-kind/escape-cash/v1");
+    // NOTE: The emergency escape-cash claim is unimplemented. It requires a
+    // distinct ZK guest program (proving `acct`/`acct_resv` membership against
+    // the latest accepted root and computing conservative withdrawable cash),
+    // which is a different public-input shape and app commitment than the
+    // single guest this vault's verifier adapter is pinned to. Until that guest
+    // and a claimKind-dispatched verifier exist, `requestWithdrawal` fails
+    // closed on any non-normal claim kind (see UnsupportedClaimKind below). The
+    // former `CLAIM_KIND_ESCAPE` constant advertised a mechanism that does not
+    // exist and has been removed; see "Emergency escape" in the L1 Settlement
+    // and Vault design note for the unimplemented-mechanism record.
 
     IERC20Minimal public immutable token;
     ISybilSettlement public immutable settlement;
+    uint64 public immutable deployedAt;
     IOpenVmVerifierAdapter public verifier;
 
     uint64 public withdrawalDelay;
@@ -79,6 +89,7 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
     event WithdrawalFinalizationPaused(bool paused);
 
     error InvalidProof();
+    error UnsupportedClaimKind(bytes32 claimKind);
     error UnknownStateRoot(bytes32 stateRoot);
     error WithdrawalAlreadyUsed(bytes32 nullifier);
     error WithdrawalNotReady(bytes32 nullifier, uint64 executableAt);
@@ -109,6 +120,7 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
 
         token = collateralToken;
         settlement = settlementContract;
+        deployedAt = uint64(block.timestamp);
         verifier = verifierAdapter;
         withdrawalDelay = initialWithdrawalDelay;
         escapeTimeout = initialEscapeTimeout;
@@ -151,6 +163,11 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
         bytes calldata proof
     ) external returns (bytes32 nullifier) {
         if (withdrawalRequestsPaused) revert WithdrawalRequestsPausedError();
+        // OL-3: this entrypoint serves normal withdrawal-leaf claims only. The
+        // claimKind is bound into the proof public-input hash, so accepting a
+        // non-normal kind here would advertise the unimplemented escape-cash
+        // path. Fail closed until a dedicated escape entrypoint exists.
+        if (inputs.claimKind != CLAIM_KIND_NORMAL) revert UnsupportedClaimKind(inputs.claimKind);
         if (inputs.amount == 0) revert AmountZero();
         if (inputs.token != address(token)) revert TokenUnsupported(inputs.token);
         if (!settlement.isAcceptedRoot(inputs.stateRoot)) {
@@ -222,8 +239,16 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
 
     function activateEscapeMode() external {
         if (escapeModeActive) revert EscapeModeAlreadyActive();
+        // Escape mode signals operator disappearance. Liveness is measured from
+        // the last accepted root, but before any root is accepted there is no
+        // verifiedAt to measure from. Falling back to the vault deployment time
+        // means deposits made before the operator ever produced a first root
+        // are not trapped: if no root arrives within escapeTimeout of
+        // deployment, the mode still becomes activatable so governance and
+        // timeout-driven recovery paths can proceed.
         uint64 latestVerifiedAt = settlement.latestRootVerifiedAt();
-        if (latestVerifiedAt == 0 || block.timestamp <= latestVerifiedAt + escapeTimeout) {
+        uint64 livenessReference = latestVerifiedAt == 0 ? deployedAt : latestVerifiedAt;
+        if (block.timestamp <= livenessReference + escapeTimeout) {
             revert EscapeModeInactive();
         }
         escapeModeActive = true;
