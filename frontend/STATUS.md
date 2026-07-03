@@ -1,7 +1,7 @@
 # Sybil Frontend — Current Status
 
 > Always-current snapshot. Read this first if you're picking up cold.
-> Historical plans-of-record live in [`archive/`](./archive).
+> Historical plans-of-record were removed from the working tree; use repository history for old plans.
 
 ## TL;DR
 
@@ -48,7 +48,7 @@ End-to-end smoke for every Phase A–D wire field lives in [`scripts/smoke-test.
 
 ## Phase 2 status
 
-Polymarket mirror metadata (`event_id`, `event_title`, `event_image_url`, `event_icon_url`, `event_end_date_ms`, market-level image/icon/end-date, `categories`) is **shipped** — fields live on `MarketResponse`, populated by `sybil-polymarket` from `gamma-api.polymarket.com`. Archived plan: [`archive/PHASE_2_PLAN.md`](./archive/PHASE_2_PLAN.md).
+Polymarket mirror metadata (`event_id`, `event_title`, `event_image_url`, `event_icon_url`, `event_end_date_ms`, market-level image/icon/end-date, `categories`) is **shipped** — fields live on `MarketResponse`, populated by `sybil-polymarket` from `gamma-api.polymarket.com`.
 
 ## Local-only commits (ahead of origin)
 
@@ -72,7 +72,6 @@ Polymarket mirror metadata (`event_id`, `event_title`, `event_image_url`, `event
 - **[`BACKEND_DATA_PLAN.md`](./BACKEND_DATA_PLAN.md)** — backend changes catalogued surface-by-surface
 - **[`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md)** — active workarounds
 - **[`CLAUDE.md`](./CLAUDE.md)** — gitignored session notes (deploy story, prod box, Polymarket findings, branching rules)
-- **[`handoff/HANDOFF.md`](./handoff/HANDOFF.md)** — design source-of-truth
-- **[`archive/`](./archive)** — completed plans (Phase 2, Activity, Scaffolding) and the original Open Questions doc
+- **[`handoff/tokens/colors_and_type.css`](./handoff/tokens/colors_and_type.css)** — design token source for `pnpm tokens:sync`
 - **`docs/architecture/WebSocket Block Stream.md`** — wire format for the live block stream
 - **Live demo health check:** `https://172-104-31-54.nip.io/v1/health` → `{"status":"ok","height":...}` (if not, demo VM is down)

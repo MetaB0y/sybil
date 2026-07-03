@@ -7,10 +7,7 @@ const MODES: { id: RailMode; label: string; sub: string }[] = [
   { id: "pro", label: "Pro", sub: "full depth" },
 ];
 
-/**
- * Segmented control at the top of the market detail right rail. Matches
- * `ModeTabs` in `frontend/handoff/data/fed-right-rail-modes.jsx:13`.
- */
+/** Segmented control at the top of the market detail right rail. */
 export function ModeTabs({
   value,
   onChange,

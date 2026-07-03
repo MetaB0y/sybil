@@ -6,8 +6,7 @@
  * `BatchTheater` component in this slot.
  *
  * The rail is a plain column that scrolls with the rest of the page — it is
- * NOT a sticky/independently-scrolling panel. Matches `V2BatchTheater` in
- * `frontend/handoff/data/fed-variations.jsx:99`.
+ * NOT a sticky/independently-scrolling panel.
  */
 
 import { useState } from "react";

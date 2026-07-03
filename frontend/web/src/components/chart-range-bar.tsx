@@ -1,10 +1,7 @@
 "use client";
 
 /**
- * Time-window selector for the price chart. Matches `RangeBar` in
- * `frontend/handoff/data/fed-primitives.jsx:299`.
- *
- * The selected range is applied client-side by slicing `history` against
+ * Time-window selector for the price chart. The selected range is applied client-side by slicing `history` against
  * `Date.now() - rangeMs` before passing it to `PriceChart`.
  */
 

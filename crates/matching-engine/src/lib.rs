@@ -17,10 +17,8 @@
 //! - `market`: Binary market definitions
 //! - `order`: Unified order representation using payoff vectors
 //! - `order_builder`: Convenient constructors for common order types
-//! - `book`: Liquidity order books
 //! - `state`: State indexing and payoff evaluation
 
-pub mod book;
 pub mod market;
 pub mod midprice;
 pub mod mm_constraint;
@@ -32,9 +30,6 @@ pub mod state;
 pub mod types;
 
 // Re-exports for convenience
-pub use book::{
-    BookLevel, JointLiquidityBook, JointOutcome, LiquidityBook, LiquidityPool, Outcome, NO, YES,
-};
 pub use market::{Market, MarketSet};
 pub use midprice::{book_midprices, mark_yes_no};
 pub use mm_constraint::{MmConstraint, MmId, MmSide};

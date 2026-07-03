@@ -284,12 +284,6 @@ and `live.runner` defaults live LLM/noise orders to `IOC`. With persistent mode
 enabled, a normal restart does not clear the book; use the pending-order checks
 above and only reset `sybil-data` when intentionally starting a fresh devnet.
 
-## Known Observability Caveat
-
-The 2 GB Linode does not run Tempo by default. Metrics and alerts are the
-operational source of truth; tracing can be enabled later by running an OTLP
-collector/Tempo and setting `OTEL_EXPORTER_OTLP_ENDPOINT` for `sybil-api`.
-
 The API runs with a Docker memory cap. If it leaks or retains too much derived
 state, the desired failure mode is a `sybil-api` container restart plus alerts,
 not a host-level swap spiral. The live stack also exports:

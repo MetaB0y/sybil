@@ -363,18 +363,18 @@ This is the system's liquidity and reality anchor on the devnet: real markets, r
 - **`sim/`** — backtesting: time-compressed clock, news article pipeline (two-phase relevance filtering), `LlmTrader` (LLM makes full trading decisions from news via OpenRouter), results analysis. Entry: `python -m sim.runner --market iran ...`.
 - **`live/`** — the same idea against the real server: LLM trader personas, SQLite decision log (read by the API's `/v1/bots/decisions` and the dashboard), news feed.
 - **`markets/`** — per-market config packs (personas, sources, datasets).
-- **`nba/`** — legacy sports-trading framework, preserved for reference (~6.2k lines, cold).
+- Legacy sports-trading framework removed; jj history preserves it.
 
 ## 15. Frontends and dashboards
 
-- **`frontend/web`** — the product UI: Next.js 16 / React 19 / Tailwind 4, TanStack Query + Zustand, typed REST via `openapi-fetch` against generated `schema.d.ts` (with `*_nanos` fields patched to strings), realtime via the **WebSocket** stream with height-based resume. Routes: markets, market detail, activity, portfolio, plus a `/dev/*` zone (a port of the Rust console). `handoff/` holds design mockups (only the token CSS is consumed); `archive/` holds completed plan documents.
+- **`frontend/web`** — the product UI: Next.js 16 / React 19 / Tailwind 4, TanStack Query + Zustand, typed REST via `openapi-fetch` against generated `schema.d.ts` (with `*_nanos` fields patched to strings), realtime via the **WebSocket** stream with height-based resume. Routes: markets, market detail, activity, portfolio, plus a `/dev/*` zone (a port of the Rust console). `frontend/handoff/tokens/colors_and_type.css` is the token source consumed by `pnpm tokens:sync`.
 - **`crates/sybil-api/static/`** — the original Alpine.js dev console served at `/`.
 - **`viz/`** — Streamlit analyzer of solver pipeline snapshots (offline, JSON in).
 - **`arena/viz/`** — Streamlit news-dataset explorer for LLM sims (unrelated to the above despite the shared framework).
 
 ## 16. Deployment and operations
 
-Single Linode (2 GB), Debian, everything in Docker Compose (the real deploy path is `just deploy-*`: build locally → `docker save | ssh docker load` → compose up; `DEPLOY.md`'s Kamal description is stale). Services: sybil-api (dev-mode, 10 s blocks), polymarket mirror, prover (serve) + mock prover (+ optional worker profile), two arena containers, VictoriaMetrics + vmalert (~40 alert rules) + Grafana + node-exporter, Caddy (TLS, SSE/WS-aware proxying), optional Telegram alert bridge. Monitoring is unusually thorough for the stage: solve latency, mailbox depth, qMDB root mismatches, price divergence vs Polymarket, prover artifact staleness, host memory/swap.
+Single Linode (2 GB), Debian, everything in Docker Compose. The real deploy path is `just deploy-*`: build locally, `docker save | ssh docker load`, then compose up. Services: sybil-api (dev-mode, 10 s blocks), polymarket mirror, prover (serve) + mock prover (+ optional worker profile), two arena containers, VictoriaMetrics + vmalert (~40 alert rules) + Grafana + node-exporter, Caddy (TLS, SSE/WS-aware proxying), optional Telegram alert bridge. Monitoring is unusually thorough for the stage: solve latency, mailbox depth, qMDB root mismatches, price divergence vs Polymarket, prover artifact staleness, host memory/swap.
 
 ---
 
@@ -416,7 +416,7 @@ The things that must always hold, and who enforces them:
 | `zk/` | small | OpenVM guest + input encoder (separate workspaces) |
 | `contracts/` | 1.5k | vault, settlement, verifier adapter + tests |
 | `lean/` | 1.9k | Fisher-market theory, fully proved |
-| `arena/` | 22k | Python SDK, bots, sims, live trading (6.2k legacy) |
+| `arena/` | 16k | Python SDK, bots, sims, live trading |
 | `frontend/web` | 34k | product UI |
 | `viz/` | 2.2k | solver pipeline dashboard |
 
@@ -424,9 +424,4 @@ The things that must always hold, and who enforces them:
 
 Documentation that currently disagrees with the code — kept here so readers aren't misled; fixes proposed in `design/architecture-review-2026-07.md`:
 
-- `matching-solver/CLEARING.md` describes a removed architecture (pipeline/negrisk/dual-master modules that no longer exist). The "entropy smoothing" mentioned in several docs does not exist in `lp_solver.rs`.
-- `matching-sequencer/AGENTS.md` documents a `mempool.rs` module (gone — replaced by direct-admit + deferred bundles) and a TTL default of 3 blocks (actual: ~63M).
-- `sybil-api/AGENTS.md` lists ~15 endpoints of ~50, and claims prod disables dev-mode (it doesn't, currently).
-- `sybil-polymarket/AGENTS.md` lists 3 actors of 4 and references a deleted `sybil/types.rs`.
-- `DEPLOY.md` describes a Kamal/Traefik/Tempo topology that was never landed; the justfile SSH deploy is the real one.
 - Vault/AGENTS "five solvers" vs six in code; violation count "37" vs "38".

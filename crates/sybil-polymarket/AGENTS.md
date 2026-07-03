@@ -8,12 +8,13 @@ The **sybil-polymarket** crate mirrors Polymarket markets onto a Sybil instance 
 
 ## Architecture
 
-Three tokio actors communicate via channels:
+Four tokio actors communicate via channels:
 
 ```
 SyncActor ──→ FeedActor:  mpsc (new token subscriptions)
 SyncActor ──→ MmActor:    mpsc (new market notifications)
 FeedActor ──→ MmActor:    watch (real-time price snapshots)
+ResolutionActor polls Gamma and resolves Sybil markets via service API calls
 ```
 
 ### SyncActor (`sync.rs`)
@@ -25,6 +26,9 @@ WebSocket connection to Polymarket CLOB for real-time prices. Falls back to REST
 ### MmActor (`mm.rs`)
 Listens to Sybil SSE block stream. Each block: reads latest Polymarket reference price, submits BuyYes + BuyNo as flash liquidity (mm_budget_nanos).
 
+### ResolutionActor (`resolution.rs`)
+Polls mirrored Polymarket markets for resolution status and submits signed/authorized Sybil resolutions when outcomes settle.
+
 ## Module Map
 
 | Module | Purpose |
@@ -35,11 +39,11 @@ Listens to Sybil SSE block stream. Each block: reads latest Polymarket reference
 | `polymarket/types.rs` | Gamma event/market types, WS message types |
 | `polymarket/gamma.rs` | Gamma REST client, CLOB midpoint client |
 | `polymarket/ws.rs` | CLOB WebSocket price feed |
-| `sybil/types.rs` | Sybil API request/response DTOs |
-| `sybil/client.rs` | Sybil HTTP client + SSE streaming |
+| `sybil/client.rs` | Sybil HTTP client + SSE streaming using `sybil-api-types` DTOs |
 | `sync.rs` | SyncActor |
 | `feed.rs` | FeedActor |
 | `mm.rs` | MmActor |
+| `resolution.rs` | ResolutionActor |
 | `main.rs` | Orchestration + shutdown |
 
 ## Running

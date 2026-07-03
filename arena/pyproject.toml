@@ -31,7 +31,6 @@ crypto = [
     "websockets>=12.0",     # For Binance WS
 ]
 llm = [
-    "anthropic>=0.25",      # For Claude-powered bots
     "openai>=1.0",          # For GPT-powered bots
     "trafilatura>=2.0",     # Article text extraction
 ]

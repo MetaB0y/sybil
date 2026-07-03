@@ -21,7 +21,6 @@ The LLM Trader replaces the legacy `NewsTrader` which used a mechanical approach
 
 ## Where This Lives
 > `arena/sim/llm_trader.py` — `LlmTrader` implementation
-> `arena/sim/news_trader_legacy.py` — legacy `NewsTrader` for comparison
 > `arena/markets/` — per-market personas, sources, and prompt configuration
 
 ## See Also

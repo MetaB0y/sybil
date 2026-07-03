@@ -2,8 +2,7 @@
 
 /**
  * Inline glossary badge — a small "?" next to a term that reveals a short
- * definition on hover/focus (or tap). Ported from the handoff `Glossary`
- * (`frontend/handoff/data/fed-primitives.jsx:22-50`).
+ * definition on hover/focus (or tap).
  *
  * Used in the Pro rail to explain Sybil-specific FBA jargon (indicative
  * price, IEV, imbalance, batch) without cluttering the dense layout.
@@ -12,7 +11,7 @@
 import { useRef, useState } from "react";
 import { FloatingTooltip } from "./floating-tooltip";
 
-/** Term → definition. Keep copy in sync with the handoff GLOSSARY. */
+/** Term → definition. */
 export const GLOSSARY: Record<string, string> = {
   "Indicative price":
     "The price the current batch would clear at if it ran right now. Updates as new orders come in. Not final until the batch closes.",

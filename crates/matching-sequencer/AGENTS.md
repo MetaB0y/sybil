@@ -87,15 +87,16 @@ Agents implement: `submit_orders(view: &MarketView, account: &Account) → Agent
 - `OrderBook` is the single source of truth for committed capital
 - Unfilled non-MM orders become resting orders with tracked reservations
 - Balance reserved at acceptance time (buys), positions reserved (sells)
-- Expire after TTL blocks (default 3), reservations released
+- Expire after TTL blocks (default `63_072_000`, effectively GTC at the normal cadence), reservations released
 - Re-validated each block (market resolution, account solvency)
 - MM orders bypass the book entirely (flash liquidity, one-shot)
 
-## Mempool
+## Deferred Bundle Buffer
 
-- Segregates single-market vs multi-market/MM orders
-- Drain limits: per-market (100), bundles (50), total (10k)
-- FIFO within pools
+- Single-market non-MM orders can admit directly into `OrderBook`
+- MM, multi-market, and multi-order submissions are buffered as pending bundles
+- Defaults from `SequencerConfig`: `max_pending_bundles = 10_000`, `max_pending_bundles_per_account = 100`, `max_orders_per_submission = 64`
+- Rate limits: 50 submissions/account/second with burst 200; 1,000 global submissions/second with burst 3,000
 
 ## State Commitment
 
@@ -113,7 +114,6 @@ Agents implement: `submit_orders(view: &MarketView, account: &Account) → Agent
 | `settlement.rs` | Fill and market resolution |
 | `account.rs` | Account, AccountStore |
 | `block.rs` | Block, BlockHeader |
-| `mempool.rs` | Order buffering |
 | `order_book.rs` | OrderBook: resting orders + reservations |
 | `agent/*.rs` | Informed, Noise, MM agents |
 | `validation.rs` | Order validation rules |

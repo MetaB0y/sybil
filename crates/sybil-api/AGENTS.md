@@ -15,38 +15,11 @@ Before modifying this crate, read these vault notes (`docs/architecture/`):
 
 ## Endpoints
 
-### System
-- `GET /v1/health` — server health + latest block height
-- `GET /v1/state-root` — current state root hash
+Do not maintain a hand-written endpoint list here. The source of truth is:
 
-### Accounts
-- `POST /v1/accounts` — create account (service route; token skipped in dev mode)
-- `GET /v1/accounts/{id}` — balance + positions
-- `POST /v1/accounts/{id}/fund` — add funds (service route; token skipped in dev mode)
-- `POST /v1/accounts/{id}/keys` — register P256 public key
-
-### Markets
-- `GET /v1/markets` — list all with current prices
-- `POST /v1/markets` — create binary market (service route; token skipped in dev mode)
-- `GET /v1/markets/{id}` — market details + status
-- `GET /v1/markets/prices` — all clearing prices
-- `GET /v1/markets/groups` — list market groups
-- `POST /v1/markets/groups` — create group (service route; token skipped in dev mode)
-- `POST /v1/markets/{id}/resolve` — resolve with payout or signed attestation (service route; token skipped in dev mode)
-- `POST /v1/markets/prices/reference` — update external reference prices (service route)
-- `POST /v1/markets/{id}/metadata` — update off-block mirror metadata (service route)
-- `PUT /v1/events/{event_id}/raw` — update raw mirror event snapshot (service route)
-
-### Orders
-- `POST /v1/orders` — submit unsigned orders
-- `POST /v1/orders/signed` — submit P256-signed order
-- `GET /v1/orders/pending` — diagnostic pending-order listing (dev mode only; not mounted in prod)
-- `GET /v1/markets/{id}/orderbook` — diagnostic market orderbook listing (dev mode only; not mounted in prod)
-
-### Blocks
-- `GET /v1/blocks/latest` — latest block with fills, prices, rejections
-- `GET /v1/blocks/{height}` — block at specific height
-- `GET /v1/blocks/stream` — SSE stream of new blocks
+- Runtime schema: `GET /openapi.json`
+- Mounted route tables in `src/app.rs`: `PUBLIC_ROUTE_TABLE`, `SERVICE_ROUTE_TABLE`, and `DEV_ROUTE_TABLE`
+- Handler-level request/response docs in `src/routes/*.rs`
 
 ## Order Types (OrderSpec)
 
@@ -60,8 +33,8 @@ enum OrderSpec {
 ```
 
 Public API admission only accepts single-market binary one-hot orders. The core
-`matching-engine` payoff-vector helpers for spreads, bundles, and custom payoff
-vectors remain available for research and tests, but are not exposed through
+`matching-engine` payoff-vector helpers remain available for research and tests,
+but spreads, bundles, and custom payoff vectors are not exposed through
 `OrderSpec`.
 
 ## Service and Dev Mode

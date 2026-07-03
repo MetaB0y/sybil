@@ -1,10 +1,7 @@
 "use client";
 
 /**
- * Pro-mode order entry form. Matches `BuyBox` in
- * `frontend/handoff/data/fed-fba-panel.jsx:206`.
- *
- * Wires the form to the live `/v1/orders/signed` endpoint via
+ * Pro-mode order entry form. Wires the form to the live `/v1/orders/signed` endpoint via
  * `submitSignedOrder`. Side mapping:
  *   - buy + YES → BuyYes
  *   - buy + NO  → BuyNo

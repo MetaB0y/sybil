@@ -336,7 +336,7 @@ DEPLOY_PLATFORM := "linux/amd64"
 docker-build:
     {{LOCAL_COMPOSE}} build
 
-# Start all services (API + VictoriaMetrics + Tempo + Grafana)
+# Start all services (API + VictoriaMetrics + Grafana)
 docker-up:
     {{LOCAL_COMPOSE}} up -d
 

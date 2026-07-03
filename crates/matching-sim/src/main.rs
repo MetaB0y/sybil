@@ -641,15 +641,6 @@ fn run_detailed_pipeline(
                 base_config.seed + batch as u64
             );
 
-            #[cfg(feature = "viz")]
-            let snapshot = VizSnapshot::from_pipeline_result_with_phases(
-                &result,
-                &problem,
-                scenario_name,
-                result.phase_snapshots.clone(),
-            );
-
-            #[cfg(not(feature = "viz"))]
             let snapshot = VizSnapshot::from_pipeline_result(&result, &problem, scenario_name);
 
             let json = snapshot.to_json();
@@ -680,10 +671,7 @@ fn run_detailed_pipeline(
 
         // Show ASCII charts if requested
         if show_charts {
-            println!(
-                "{}",
-                matching_solver::viz::ascii::convergence_summary(&result.iteration_stats)
-            );
+            println!("No iteration data available.");
         }
 
         if verbose {

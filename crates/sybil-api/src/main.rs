@@ -65,7 +65,7 @@ fn init_telemetry() -> Telemetry {
         .expect("failed to install Prometheus metrics recorder");
 
     // OpenTelemetry trace export is intentionally opt-in. The public demo runs
-    // on a small 2 GB host where Tempo can starve the metrics/alerting path.
+    // on a small 2 GB host; metrics and alerts are the default observability path.
     let otel_enabled = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
         .ok()
         .is_some_and(|endpoint| !endpoint.trim().is_empty());

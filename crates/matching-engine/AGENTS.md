@@ -65,7 +65,6 @@ Example: Spread "Buy A YES, Sell B YES" → payoffs `[0, -1, +1, 0]` over 4 stat
 | `types.rs` | Nanos, Qty, MarketId, Side, conversions |
 | `order.rs` | Order, Fill, PriceCondition |
 | `order_builder.rs` | OrderBuilder + convenience factories |
-| `book.rs` | LiquidityBook, JointLiquidityBook, LiquidityPool |
 | `state.rs` | State indexing, StateSpace |
 | `mm_constraint.rs` | MmConstraint, MmSide, validation |
 | `problem.rs` | Problem, MarketGroup, ProblemSummary |

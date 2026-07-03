@@ -130,51 +130,6 @@ pub struct MilpResult {
     pub objective_welfare: i64,
 }
 
-/// Analysis of dual prices from MILP solution.
-///
-/// Dual prices (shadow prices) indicate the marginal value of relaxing constraints:
-/// - High liquidity dual -> Market is scarce, bundles sharing it create value
-/// - Binding constraint -> Opportunity for cross-market optimization
-#[derive(Clone, Debug, Default)]
-pub struct DualAnalysis {
-    /// Shadow prices for liquidity constraints per (market_id, outcome).
-    /// High values indicate scarce, valuable liquidity.
-    pub liquidity_duals: HashMap<(MarketId, u8), f64>,
-    /// Number of binding liquidity constraints (at capacity)
-    pub binding_liquidity_constraints: usize,
-    /// Total number of constraints in the model
-    pub total_constraints: usize,
-    /// Objective value (total welfare)
-    pub objective_value: f64,
-}
-
-impl DualAnalysis {
-    /// Get the most scarce markets (highest dual prices).
-    pub fn scarce_markets(&self, top_n: usize) -> Vec<((MarketId, u8), f64)> {
-        let mut pairs: Vec<_> = self.liquidity_duals.iter().map(|(&k, &v)| (k, v)).collect();
-        pairs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        pairs.truncate(top_n);
-        pairs
-    }
-
-    /// Summary of where cross-market value comes from.
-    pub fn value_summary(&self) -> String {
-        let scarce = self.scarce_markets(5);
-        let binding_pct = if self.total_constraints > 0 {
-            (self.binding_liquidity_constraints as f64 / self.total_constraints as f64) * 100.0
-        } else {
-            0.0
-        };
-
-        format!(
-            "Dual Analysis:\n  Binding liquidity: {} ({:.1}% of constraints)\n  Top scarce markets: {:?}",
-            self.binding_liquidity_constraints,
-            binding_pct,
-            scarce.iter().map(|((m, o), d)| format!("M{}O{}:{:.2}", m.0, o, d)).collect::<Vec<_>>()
-        )
-    }
-}
-
 use crate::solver::order_sign;
 
 // ============================================================================
@@ -202,20 +157,6 @@ impl MilpSolver {
     pub fn with_timeout(timeout_secs: f64) -> Self {
         Self {
             config: MilpConfig::with_timeout(timeout_secs),
-        }
-    }
-
-    /// Solve and extract dual prices to understand value sources.
-    pub fn solve_with_duals(&self, problem: &Problem) -> (MilpResult, DualAnalysis) {
-        let result = self.solve_with_status(problem);
-        let analysis = self.compute_dual_analysis(problem, &result);
-        (result, analysis)
-    }
-
-    fn compute_dual_analysis(&self, _problem: &Problem, result: &MilpResult) -> DualAnalysis {
-        DualAnalysis {
-            objective_value: result.result.total_welfare as f64,
-            ..Default::default()
         }
     }
 

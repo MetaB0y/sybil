@@ -22,7 +22,7 @@ Before modifying this crate, read these vault notes (`docs/architecture/`):
 
 | Solver | File | Feature | Purpose |
 |--------|------|---------|---------|
-| **LpSolver** | `lp_solver.rs` | `lp` | LP via HiGHS with entropy smoothing. Best welfare across all presets. |
+| **LpSolver** | `lp_solver.rs` | `lp` | LP via HiGHS with single-pass SLP MM budget shading. Production default. |
 | **EgSolver** | `eg_solver.rs` | `lp` | Eisenberg-Gale / Fisher market formulation. |
 | **ConicSolver** | `conic_solver.rs` | `conic` | Conic EG via Clarabel. |
 | **IterLpSolver** | `iterative_lp_solver.rs` | `lp` | Iterative LP with EG μ-boosted MM weights. |

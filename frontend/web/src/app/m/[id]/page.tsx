@@ -150,13 +150,6 @@ export default function MarketDetailPage({
 }
 
 /**
- * Page header. Mirrors `MarketHeader` in `frontend/handoff/data/fed-primitives.jsx:246`:
- *
- *   ┌──────┐ Markets / ● Category / resolves <date>
- *   │ thumb│ <market name>
- *   │      │ vol $X   24h $Y   traders N   liq $Z   batches ~M
- *   └──────┘
- *
  * Title, thumbnail and all five stats are scoped to the single market in the
  * URL — never its parent event. `vol / 24h / traders / liq` are real Phase-B
  * fields (see `derive-market-stats.ts`). `batches ~M` stays a cadence-based

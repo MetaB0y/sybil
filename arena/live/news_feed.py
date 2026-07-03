@@ -63,7 +63,7 @@ class PolymarketPrices:
             # Local Docker volume
             str(Path.home() / "polymarket_mapping.json"),
         ]
-        # Also check the Kamal/Docker volume paths
+        # Also check local Docker volume paths.
         for p in paths_to_try:
             if p and Path(p).exists():
                 try:

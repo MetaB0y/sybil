@@ -1,7 +1,7 @@
 //! Matching solver for prediction market FBA (Frequent Batch Auction).
 //!
 //! Solves the welfare-maximizing order matching problem via convex programs:
-//! - **LP** (`lp_solver`): Linear program via HiGHS with entropy smoothing
+//! - **LP** (`lp_solver`): Linear program via HiGHS with MM budget shading
 //! - **EG** (`eg_solver`): Eisenberg-Gale / Fisher market formulation
 //! - **Conic** (`conic_solver`): Conic EG via Clarabel
 //! - **MILP** (`milp`): Mixed-integer via SCIP (exact with timeout)
@@ -33,10 +33,7 @@ pub mod decomposed;
 // === Public API ===
 
 // Result types
-pub use result::{
-    CombineStats, IterationStats, PipelineResult, PipelineTimings, PriceDiscoveryResult,
-    SolverContribution, UcpStats,
-};
+pub use result::{PipelineResult, PipelineTimings, PriceDiscoveryResult};
 
 // Solver trait
 pub use solver::Solver;

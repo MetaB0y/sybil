@@ -16,7 +16,7 @@ use rayon::prelude::*;
 
 use matching_engine::{MarketGroup, MarketId, MarketSet, MmConstraint, MmSide, Order, Problem};
 
-use crate::result::{PipelineResult, PipelineTimings, PriceDiscoveryResult, SolverContribution};
+use crate::result::{PipelineResult, PipelineTimings, PriceDiscoveryResult};
 use crate::MatchingResult;
 
 // ============================================================================
@@ -112,7 +112,7 @@ impl<S: crate::Solver> DecomposedSolver<S> {
         };
 
         // Step 8: Aggregate results. Component fills are disjoint real order fills.
-        let mut result = aggregate_results(component_results, self.inner.name());
+        let mut result = aggregate_results(component_results);
 
         // Post-aggregation: enforce global MM budgets + restore position balance.
         // Per-component LP budget enforcement is imperfect (linearized + rounded),
@@ -794,7 +794,7 @@ fn check_convergence(
 // ============================================================================
 
 /// Merge results from all components into a unified PipelineResult.
-fn aggregate_results(component_results: Vec<PipelineResult>, solver_name: &str) -> PipelineResult {
+fn aggregate_results(component_results: Vec<PipelineResult>) -> PipelineResult {
     let mut merged = MatchingResult::new();
     let mut prices: HashMap<MarketId, Vec<u64>> = HashMap::new();
     let mut total_solve_time = 0.0f64;
@@ -827,11 +827,6 @@ fn aggregate_results(component_results: Vec<PipelineResult>, solver_name: &str) 
         total_fills: pipeline_result.result.fills.len(),
         prices,
     });
-    pipeline_result.contributions = vec![SolverContribution {
-        solver_name: format!("Decomposed({})", solver_name),
-        fills_contributed: pipeline_result.result.orders_filled,
-        welfare_contributed: pipeline_result.result.total_welfare,
-    }];
     pipeline_result.phase_times = PipelineTimings {
         price_discovery_secs: total_solve_time,
         ..Default::default()

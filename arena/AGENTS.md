@@ -34,7 +34,7 @@ Bots (Python)  →  sybil_client  →  HTTP/SSE  →  sybil-api (Rust)
 |-----------|---------|
 | `sybil_client/` | Async Python SDK for sybil-api |
 | `bots/` | Trading bot implementations (generic) |
-| `sim/` | Generic simulation framework (clock, news trader, runner, results) |
+| `sim/` | Generic simulation framework (clock, LLM trader, runner, results) |
 | `markets/` | Per-market configuration (personas, sources, prompts) |
 | `markets/iran/` | Iran strike market: config, personas, sources, fetch_data, merge_data, datasets/, phase1/, runs/ |
 | `markets/iran/docs/` | Market-specific docs (llm-trader-flow decision pipeline) |
@@ -43,7 +43,6 @@ Bots (Python)  →  sybil_client  →  HTTP/SSE  →  sybil-api (Rust)
 | `scripts/` | Competition orchestration |
 | `examples/` | Example competition scripts |
 | `tests/` | Pytest test suite |
-| `nba/` | Legacy NBA/sports code (preserved for reference) |
 
 ## Key Components
 
@@ -89,7 +88,6 @@ All bots accept `market_ids: list[int] | None` to restrict trading to specific m
 |--------|---------|
 | `sim/clock.py` | `SimulatedClock` — time-compressed clock with ref-counted pause |
 | `sim/llm_trader.py` | `LlmTrader` — LLM makes full trading decisions (analysis + orders) |
-| `sim/news_trader_legacy.py` | `NewsTrader` — legacy mechanical trader (Beta belief + Kelly sizing) |
 | `sim/headline_filter.py` | Phase 1 headline relevance filter |
 | `sim/runner.py` | `SimulationConfig` + `run_simulation()` orchestration |
 | `sim/results.py` | `build_block_records()` + `save_and_print_results()` |
@@ -135,7 +133,7 @@ cd arena && uv run streamlit run viz/news_explorer.py -- --market iran
 
 - **BuyYes + BuyNo** can match via minting (costs $1 total)
 - **SellYes/SellNo** requires owning the position first
-- Orders persist for 5 blocks if unfilled (TTL)
+- Orders rest until canceled or their explicit time-in-force expires
 - Prices are in nanos: 1 dollar = 1,000,000,000 nanos
 
 ## Testing
