@@ -850,6 +850,11 @@ export interface components {
         AccountFillResponse: {
             /** Format: int64 */
             block_height: number;
+            /**
+             * @description Stable cursor for forward pagination (`GET .../fills?after=<cursor>`).
+             *     Opaque to clients; current encoding is `<block_height>.<order_id>`.
+             */
+            cursor: string;
             /** Format: int64 */
             fill_price_nanos: string;
             /**
@@ -2314,9 +2319,14 @@ export interface operations {
             query?: {
                 /** @description Filter by market ID */
                 market_id?: number;
+                /** @description Stable cursor returned as `cursor` on each fill. When present, returns fills strictly after this cursor in ascending order. Use `0.0` to start from the beginning. */
+                after?: string;
                 /** @description Result limit */
                 limit?: number;
-                /** @description Result offset */
+                /**
+                 * @deprecated
+                 * @description Deprecated offset-from-newest pagination. Ignored when `after` is present.
+                 */
                 offset?: number;
             };
             header?: never;

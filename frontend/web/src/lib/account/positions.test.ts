@@ -15,6 +15,7 @@ function fill(
 ): Fill {
   return {
     block_height: 1,
+    cursor: "1.1",
     // fill_price_nanos is the filled side's OWN price (a NO fill carries the
     // NO price), NOT a YES-clearing price — used directly, no flip.
     fill_price_nanos: String(priceNanos),

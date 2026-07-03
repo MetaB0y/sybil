@@ -1,3 +1,5 @@
+use std::fmt;
+
 use matching_engine::{MarketId, Nanos};
 
 /// Per-market resolution configuration.
@@ -135,6 +137,49 @@ pub struct AccountFillRecord {
     pub timestamp_ms: u64,
     /// Position changes from this fill: (market_id, outcome, signed delta).
     pub position_deltas: Vec<(MarketId, u8, i64)>,
+}
+
+/// Stable per-account fill cursor.
+///
+/// The HTTP representation is `"<block_height>.<order_id>"`. `order_id` is
+/// sequencer-assigned and globally monotonic, so `(block_height, order_id)` is
+/// stable across restarts and already matches the durable fill-history key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct AccountFillCursor {
+    pub block_height: u64,
+    pub order_id: u64,
+}
+
+impl AccountFillCursor {
+    pub const MIN: Self = Self {
+        block_height: 0,
+        order_id: 0,
+    };
+
+    pub fn new(block_height: u64, order_id: u64) -> Self {
+        Self {
+            block_height,
+            order_id,
+        }
+    }
+
+    pub fn from_record(record: &AccountFillRecord) -> Self {
+        Self::new(record.block_height, record.order_id)
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        let (block_height, order_id) = value.split_once('.')?;
+        Some(Self {
+            block_height: block_height.parse().ok()?,
+            order_id: order_id.parse().ok()?,
+        })
+    }
+}
+
+impl fmt::Display for AccountFillCursor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}", self.block_height, self.order_id)
+    }
 }
 
 /// Query parameters for searching markets.

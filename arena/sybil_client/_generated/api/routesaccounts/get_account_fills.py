@@ -18,6 +18,7 @@ def _get_kwargs(
     id: int,
     *,
     market_id: int | Unset = UNSET,
+    after: str | Unset = UNSET,
     limit: int | Unset = UNSET,
     offset: int | Unset = UNSET,
 
@@ -29,6 +30,8 @@ def _get_kwargs(
     params: dict[str, Any] = {}
 
     params["market_id"] = market_id
+
+    params["after"] = after
 
     params["limit"] = limit
 
@@ -82,6 +85,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
     market_id: int | Unset = UNSET,
+    after: str | Unset = UNSET,
     limit: int | Unset = UNSET,
     offset: int | Unset = UNSET,
 
@@ -91,6 +95,7 @@ def sync_detailed(
     Args:
         id (int):
         market_id (int | Unset):
+        after (str | Unset):
         limit (int | Unset):
         offset (int | Unset):
 
@@ -106,6 +111,7 @@ def sync_detailed(
     kwargs = _get_kwargs(
         id=id,
 market_id=market_id,
+after=after,
 limit=limit,
 offset=offset,
 
@@ -122,6 +128,7 @@ def sync(
     *,
     client: AuthenticatedClient | Client,
     market_id: int | Unset = UNSET,
+    after: str | Unset = UNSET,
     limit: int | Unset = UNSET,
     offset: int | Unset = UNSET,
 
@@ -131,6 +138,7 @@ def sync(
     Args:
         id (int):
         market_id (int | Unset):
+        after (str | Unset):
         limit (int | Unset):
         offset (int | Unset):
 
@@ -147,6 +155,7 @@ def sync(
         id=id,
 client=client,
 market_id=market_id,
+after=after,
 limit=limit,
 offset=offset,
 
@@ -157,6 +166,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
     market_id: int | Unset = UNSET,
+    after: str | Unset = UNSET,
     limit: int | Unset = UNSET,
     offset: int | Unset = UNSET,
 
@@ -166,6 +176,7 @@ async def asyncio_detailed(
     Args:
         id (int):
         market_id (int | Unset):
+        after (str | Unset):
         limit (int | Unset):
         offset (int | Unset):
 
@@ -181,6 +192,7 @@ async def asyncio_detailed(
     kwargs = _get_kwargs(
         id=id,
 market_id=market_id,
+after=after,
 limit=limit,
 offset=offset,
 
@@ -197,6 +209,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient | Client,
     market_id: int | Unset = UNSET,
+    after: str | Unset = UNSET,
     limit: int | Unset = UNSET,
     offset: int | Unset = UNSET,
 
@@ -206,6 +219,7 @@ async def asyncio(
     Args:
         id (int):
         market_id (int | Unset):
+        after (str | Unset):
         limit (int | Unset):
         offset (int | Unset):
 
@@ -222,6 +236,7 @@ async def asyncio(
         id=id,
 client=client,
 market_id=market_id,
+after=after,
 limit=limit,
 offset=offset,
 

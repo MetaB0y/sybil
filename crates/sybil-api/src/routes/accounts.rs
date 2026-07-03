@@ -2,7 +2,7 @@ use axum::extract::{Path, Query, State};
 use axum::Json;
 
 use matching_engine::MarketId;
-use matching_sequencer::{AccountId, PublicKey};
+use matching_sequencer::{AccountFillCursor, AccountFillRecord, AccountId, PublicKey};
 use p256::ecdsa::VerifyingKey;
 use p256::Sec1Point;
 
@@ -169,8 +169,9 @@ pub async fn get_portfolio(
     params(
         ("id" = u64, Path, description = "Account ID"),
         ("market_id" = Option<u32>, Query, description = "Filter by market ID"),
+        ("after" = Option<String>, Query, description = "Stable cursor returned as `cursor` on each fill. When present, returns fills strictly after this cursor in ascending order. Use `0.0` to start from the beginning."),
         ("limit" = Option<usize>, Query, description = "Result limit"),
-        ("offset" = Option<usize>, Query, description = "Result offset"),
+        ("offset" = Option<usize>, Query, deprecated, description = "Deprecated offset-from-newest pagination. Ignored when `after` is present."),
     ),
     responses(
         (status = 200, description = "Account fill history", body = Vec<AccountFillResponse>)
@@ -183,38 +184,48 @@ pub async fn get_account_fills(
 ) -> Result<Json<Vec<AccountFillResponse>>, AppError> {
     let market_id = params.market_id.map(MarketId::new);
     let limit = params.limit.unwrap_or(100);
-    let offset = params.offset.unwrap_or(0);
+    let fills = if let Some(after) = params.after.as_deref() {
+        let cursor = AccountFillCursor::parse(after)
+            .ok_or_else(|| AppError::bad_request("Invalid fill cursor"))?;
+        state
+            .sequencer
+            .get_account_fills_after(AccountId(id), market_id, Some(cursor), limit)
+            .await?
+    } else {
+        let offset = params.offset.unwrap_or(0);
+        state
+            .sequencer
+            .get_account_fills(AccountId(id), market_id, limit, offset)
+            .await?
+    };
 
-    let fills = state
-        .sequencer
-        .get_account_fills(AccountId(id), market_id, limit, offset)
-        .await?;
-
-    let response: Vec<AccountFillResponse> = fills
-        .into_iter()
-        .map(|f| AccountFillResponse {
-            order_id: f.order_id,
-            fill_qty: f.fill_qty,
-            fill_price_nanos: f.fill_price,
-            block_height: f.block_height,
-            timestamp_ms: f.timestamp_ms,
-            position_deltas: f
-                .position_deltas
-                .into_iter()
-                .map(|(mid, outcome, delta)| PositionDeltaResponse {
-                    market_id: mid.0,
-                    outcome: if outcome == 0 {
-                        "YES".to_string()
-                    } else {
-                        "NO".to_string()
-                    },
-                    delta,
-                })
-                .collect(),
-        })
-        .collect();
+    let response: Vec<AccountFillResponse> = fills.into_iter().map(account_fill_response).collect();
 
     Ok(Json(response))
+}
+
+fn account_fill_response(f: AccountFillRecord) -> AccountFillResponse {
+    AccountFillResponse {
+        cursor: AccountFillCursor::from_record(&f).to_string(),
+        order_id: f.order_id,
+        fill_qty: f.fill_qty,
+        fill_price_nanos: f.fill_price,
+        block_height: f.block_height,
+        timestamp_ms: f.timestamp_ms,
+        position_deltas: f
+            .position_deltas
+            .into_iter()
+            .map(|(mid, outcome, delta)| PositionDeltaResponse {
+                market_id: mid.0,
+                outcome: if outcome == 0 {
+                    "YES".to_string()
+                } else {
+                    "NO".to_string()
+                },
+                delta,
+            })
+            .collect(),
+    }
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -284,6 +295,7 @@ pub async fn get_account_history(
 #[derive(Debug, serde::Deserialize)]
 pub struct AccountFillParams {
     pub market_id: Option<u32>,
+    pub after: Option<String>,
     pub limit: Option<usize>,
     pub offset: Option<usize>,
 }

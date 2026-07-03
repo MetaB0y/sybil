@@ -71,7 +71,9 @@ use crate::aggregates::{
 };
 use crate::block::{state_sidecar_snapshot_from_resting_orders, BlockHeader, SealedBlock};
 use crate::bridge::{BridgeState, BridgeWithdrawalRequest, L1Deposit};
-use crate::market_info::{AccountFillRecord, MarketMetadata, PriceCandle, PriceCandlePage};
+use crate::market_info::{
+    AccountFillCursor, AccountFillRecord, MarketMetadata, PriceCandle, PriceCandlePage,
+};
 use crate::market_lifecycle::MarketLifecycle;
 use crate::order_book::RestingOrder;
 use crate::price_tracker::{PriceTrackerClearingHistorySnapshot, PriceTrackerVolumeSnapshot};
@@ -600,6 +602,7 @@ pub struct AnalyticsSnapshot<'a> {
     pub fill_total_counts: HashMap<AccountId, u64>,
     pub cost_basis_tracker: CostBasisTrackerSnapshot,
     pub history_event_next_seq: u64,
+    pub fill_history_delta: Vec<(AccountId, AccountFillRecord)>,
     pub price_points_delta: Vec<(MarketId, crate::market_info::PricePoint)>,
     pub equity_points_delta: Vec<(AccountId, crate::aggregates::EquityPoint)>,
     pub history_events_delta: Vec<crate::aggregates::StoredHistoryEvent>,
@@ -898,11 +901,18 @@ impl Store {
             table.insert(KEY_RESTING_ORDERS_SNAPSHOT, bytes.as_slice())?;
         }
 
-        // Fill history. Records are cumulative; re-inserting the full
-        // snapshot is idempotent because the key is account/block/order.
+        // Fill history. The hot snapshot is bounded, but the per-block delta
+        // is captured before hot retention trim, so caps never suppress
+        // durable FILL_HISTORY rows. Re-inserting either path is idempotent
+        // because the key is account/block/order.
         {
             let mut table = txn.open_table(FILL_HISTORY)?;
             for (account_id, record) in &snapshot.analytics.account_fills {
+                let key = fill_history_key(*account_id, record);
+                let bytes = rmp_serde::to_vec(record)?;
+                table.insert(key.as_slice(), bytes.as_slice())?;
+            }
+            for (account_id, record) in &snapshot.analytics.fill_history_delta {
                 let key = fill_history_key(*account_id, record);
                 let bytes = rmp_serde::to_vec(record)?;
                 table.insert(key.as_slice(), bytes.as_slice())?;
@@ -2204,6 +2214,38 @@ impl Store {
         }
         Ok(out)
     }
+
+    /// Oldest-first durable page of fills strictly after `after`, ordered by
+    /// the stable `(block_height, order_id)` cursor.
+    pub fn account_fills_after(
+        &self,
+        account_id: AccountId,
+        market_id_filter: Option<MarketId>,
+        after: Option<AccountFillCursor>,
+        limit: usize,
+    ) -> Result<Vec<AccountFillRecord>, StoreError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(FILL_HISTORY)?;
+        let (lo, hi) = fill_history_account_bounds(account_id);
+        let mut out = Vec::new();
+        for entry in table.range::<&[u8]>(lo.as_slice()..=hi.as_slice())? {
+            let (_k, v) = entry?;
+            let record: AccountFillRecord = rmp_serde::from_slice(v.value())?;
+            if after.is_some_and(|cursor| AccountFillCursor::from_record(&record) <= cursor) {
+                continue;
+            }
+            let matches = market_id_filter
+                .is_none_or(|mid| record.position_deltas.iter().any(|(m, _, _)| *m == mid));
+            if !matches {
+                continue;
+            }
+            out.push(record);
+            if out.len() >= limit {
+                break;
+            }
+        }
+        Ok(out)
+    }
 }
 
 fn append_msgpack_row<T: serde::Serialize>(
@@ -2583,6 +2625,7 @@ mod tests {
                     fill_total_counts: HashMap::new(),
                     cost_basis_tracker: Default::default(),
                     history_event_next_seq: 0,
+                    fill_history_delta: Vec::new(),
                     equity_points_delta: Vec::new(),
                     price_points_delta: Vec::new(),
                     history_events_delta: Vec::new(),
@@ -2623,6 +2666,7 @@ mod tests {
                     fill_total_counts: HashMap::new(),
                     cost_basis_tracker: Default::default(),
                     history_event_next_seq: 0,
+                    fill_history_delta: Vec::new(),
                     equity_points_delta: Vec::new(),
                     price_points_delta: Vec::new(),
                     history_events_delta: Vec::new(),
@@ -2663,6 +2707,7 @@ mod tests {
                     fill_total_counts: HashMap::new(),
                     cost_basis_tracker: Default::default(),
                     history_event_next_seq: 0,
+                    fill_history_delta: Vec::new(),
                     equity_points_delta: Vec::new(),
                     price_points_delta,
                     history_events_delta: Vec::new(),
@@ -2704,6 +2749,7 @@ mod tests {
                     fill_total_counts: HashMap::new(),
                     cost_basis_tracker: Default::default(),
                     history_event_next_seq,
+                    fill_history_delta: Vec::new(),
                     equity_points_delta: Vec::new(),
                     price_points_delta: Vec::new(),
                     history_events_delta,
@@ -3711,6 +3757,19 @@ mod tests {
         assert_eq!(fills[0].block_height, 2);
         assert_eq!(fills[1].block_height, 1);
 
+        let forward = store
+            .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 10)
+            .unwrap();
+        assert_eq!(forward.len(), 2);
+        assert_eq!(forward[0].block_height, 1);
+        assert_eq!(forward[1].block_height, 2);
+        let cursor = AccountFillCursor::from_record(&forward[0]);
+        let after_first = store
+            .account_fills_after(buyer, None, Some(cursor), 10)
+            .unwrap();
+        assert_eq!(after_first.len(), 1);
+        assert_eq!(after_first[0].block_height, 2);
+
         // Market filter keeps fills that touch the traded market...
         assert_eq!(
             store
@@ -3736,6 +3795,141 @@ mod tests {
             .account_fills(AccountId(99), None, 10, 0)
             .unwrap()
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_store_fill_cursor_pagination_survives_reopen() {
+        use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
+        use matching_engine::{outcome_buy, outcome_sell, NANOS_PER_DOLLAR};
+
+        let path = temp_db_path("store-account-fills-cursor-reopen");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+
+        let mut markets = MarketSet::new();
+        let market_id = markets.add_binary("Test");
+        let mut accounts = AccountStore::new();
+        let buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let seller = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        accounts
+            .get_mut(seller)
+            .unwrap()
+            .positions
+            .insert((market_id, 0), 10);
+
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            oracle,
+            SequencerConfig::default(),
+        );
+        for height in 1..=2u64 {
+            let prepared = seq
+                .prepare_block(
+                    vec![
+                        OrderSubmission {
+                            account_id: buyer,
+                            orders: vec![outcome_buy(&markets, 0, market_id, 0, 700_000_000, 1)],
+                            mm_constraint: None,
+                        },
+                        OrderSubmission {
+                            account_id: seller,
+                            orders: vec![outcome_sell(&markets, 0, market_id, 0, 300_000_000, 1)],
+                            mm_constraint: None,
+                        },
+                    ],
+                    height * 1_000,
+                )
+                .unwrap();
+            store
+                .save_block(prepared.next_sequencer().snapshot())
+                .await
+                .unwrap();
+            seq.commit_prepared_block(prepared).unwrap();
+        }
+        drop(store);
+
+        let reopened = Store::open(&path).unwrap();
+        let fills = reopened
+            .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 10)
+            .unwrap();
+        let heights: Vec<u64> = fills.iter().map(|fill| fill.block_height).collect();
+        assert_eq!(heights, vec![1, 2]);
+    }
+
+    #[tokio::test]
+    async fn test_store_persists_fill_delta_when_hot_cap_is_zero() {
+        use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
+        use matching_engine::{outcome_buy, outcome_sell, NANOS_PER_DOLLAR};
+
+        let path = temp_db_path("store-fill-cap-zero");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+
+        let mut markets = MarketSet::new();
+        let market_id = markets.add_binary("Test");
+        let mut accounts = AccountStore::new();
+        let buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let seller = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        accounts
+            .get_mut(seller)
+            .unwrap()
+            .positions
+            .insert((market_id, 0), 10);
+
+        let config = SequencerConfig {
+            max_fill_history_per_account: 0,
+            ..SequencerConfig::default()
+        };
+        let mut seq =
+            BlockSequencer::with_default_solver(accounts, markets.clone(), vec![], oracle, config);
+
+        let prepared = seq
+            .prepare_block(
+                vec![
+                    OrderSubmission {
+                        account_id: buyer,
+                        orders: vec![outcome_buy(&markets, 0, market_id, 0, 700_000_000, 1)],
+                        mm_constraint: None,
+                    },
+                    OrderSubmission {
+                        account_id: seller,
+                        orders: vec![outcome_sell(&markets, 0, market_id, 0, 300_000_000, 1)],
+                        mm_constraint: None,
+                    },
+                ],
+                1_000,
+            )
+            .unwrap();
+
+        assert!(prepared
+            .next_sequencer()
+            .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 10)
+            .is_empty());
+
+        store
+            .save_block(prepared.next_sequencer().snapshot())
+            .await
+            .unwrap();
+        seq.commit_prepared_block(prepared).unwrap();
+        assert!(seq
+            .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 10)
+            .is_empty());
+
+        let durable = store
+            .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 10)
+            .unwrap();
+        assert_eq!(durable.len(), 1);
+        assert_eq!(durable[0].block_height, 1);
+        drop(store);
+
+        let reopened = Store::open(&path).unwrap();
+        let reopened_fills = reopened
+            .account_fills_after(buyer, Some(market_id), Some(AccountFillCursor::MIN), 10)
+            .unwrap();
+        assert_eq!(reopened_fills.len(), 1);
+        assert_eq!(reopened_fills[0].fill_qty, 1);
     }
 
     #[tokio::test]

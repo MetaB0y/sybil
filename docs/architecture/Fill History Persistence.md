@@ -3,7 +3,7 @@ tags: [infrastructure, storage]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-04-26
+last_verified: 2026-07-03
 ---
 
 # Fill History Persistence
@@ -30,15 +30,21 @@ value = msgpack(AccountFillRecord)
 
 All key components are big-endian `u64`, so lexicographic order groups records by account and then by block height. The table is additive: `save_block()` re-inserts the in-memory recorder snapshot and overwrites identical keys, making the operation idempotent across retry paths.
 
+The public cursor is the stable string `"<block_height>.<order_id>"`, returned
+on each fill as `cursor`. `GET /v1/accounts/{id}/fills?after=<cursor>&limit=N`
+returns matching fills strictly after that cursor in ascending cursor order.
+`0.0` is the start sentinel. The older `offset` query remains for compatibility
+but is offset-from-newest and should not be used for tailing.
+
 ## Recovery
 
-Startup reads all `fill_history` rows, decodes the account id from the key, and hydrates `FillRecorder` before the actor starts serving traffic. The public account-fill API continues to query `FillRecorder`; storage remains an implementation detail of startup and block commit.
+Startup reads all `fill_history` rows, decodes the account id from the key, and hydrates `FillRecorder` before the actor starts serving traffic. Store-backed deployments serve account-fill history directly from redb; the bounded `FillRecorder` window is the no-store fallback and hot in-process cache.
 
 Market filtering remains in memory for now by checking each record's `position_deltas`. That is acceptable at current scale and keeps the first implementation simple. If fill history grows enough to make scans expensive, add a second index keyed by `(account_id, market_id, block_height, order_id)` rather than changing the API.
 
 ## Transaction Boundary
 
-Fill history is committed inside the same redb transaction as the block header, market metadata, clearing prices, order-book snapshot, and account-state fence flip. That gives a simple guarantee:
+Fill history is committed inside the same redb transaction as the block header, market metadata, clearing prices, order-book snapshot, and account-state fence flip. The durable rows are sourced from an untrimmed per-block delta captured before the hot cache applies `SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT`, so a cap of `0` disables only the hot window and never suppresses durable rows. That gives a simple guarantee:
 
 - If a block is committed, its fill history is committed.
 - If a block is not committed, its fill history is ignored with the rest of the uncommitted block.

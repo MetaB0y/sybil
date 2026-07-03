@@ -28,7 +28,7 @@ use crate::canonical_state::{snapshot_account, CanonicalState};
 use crate::error::{
     BlockInvariantFailure, Rejection, RejectionReason, SequencerError, VerifierFailure,
 };
-use crate::market_info::{AccountFillRecord, MarketMetadata, PricePoint};
+use crate::market_info::{AccountFillCursor, AccountFillRecord, MarketMetadata, PricePoint};
 use crate::market_lifecycle::MarketLifecycle;
 use crate::order_book::OrderBook;
 use crate::settlement;
@@ -1301,6 +1301,17 @@ impl BlockSequencer {
     ) -> Vec<AccountFillRecord> {
         self.analytics
             .account_fills(account_id, market_id_filter, limit, offset)
+    }
+
+    pub fn account_fills_after(
+        &self,
+        account_id: AccountId,
+        market_id_filter: Option<MarketId>,
+        after: Option<AccountFillCursor>,
+        limit: usize,
+    ) -> Vec<AccountFillRecord> {
+        self.analytics
+            .account_fills_after(account_id, market_id_filter, after, limit)
     }
 
     pub fn equity_series(&self, account_id: AccountId) -> Vec<crate::aggregates::EquityPoint> {

@@ -19,8 +19,8 @@ use crate::crypto::{
 };
 use crate::error::{Rejection, RejectionReason, SequencerError};
 use crate::market_info::{
-    AccountFillRecord, MarketMetadata, MarketSearchQuery, PriceCandle, PriceCandlePage,
-    PriceHistoryPage, PricePoint,
+    AccountFillCursor, AccountFillRecord, MarketMetadata, MarketSearchQuery, PriceCandle,
+    PriceCandlePage, PriceHistoryPage, PricePoint,
 };
 use crate::portfolio::PortfolioSummary;
 use crate::sequencer::{
@@ -238,6 +238,13 @@ pub enum SequencerMsg {
         AccountId,
         Option<MarketId>,
         usize,
+        usize,
+        RpcReplyPort<Vec<AccountFillRecord>>,
+    ),
+    GetAccountFillsAfter(
+        AccountId,
+        Option<MarketId>,
+        Option<AccountFillCursor>,
         usize,
         RpcReplyPort<Vec<AccountFillRecord>>,
     ),
@@ -2102,6 +2109,22 @@ impl Actor for SequencerActor {
                 };
                 let _ = reply.send(result);
             }
+            SequencerMsg::GetAccountFillsAfter(account_id, market_id, after, limit, reply) => {
+                let result = match &state.store {
+                    Some(store) => store
+                        .account_fills_after(account_id, market_id, after, limit)
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(error = %e, account_id = account_id.0, "account_fills_after read failed; falling back to memory");
+                            state
+                                .sequencer
+                                .account_fills_after(account_id, market_id, after, limit)
+                        }),
+                    None => state
+                        .sequencer
+                        .account_fills_after(account_id, market_id, after, limit),
+                };
+                let _ = reply.send(result);
+            }
             SequencerMsg::GetEquitySeries(account_id, since_ms, reply) => {
                 // NOTE: in prod the in-memory caps are 0, so this fallback returns
                 // an empty series. A persistent store read error therefore surfaces
@@ -2850,6 +2873,19 @@ impl SequencerHandle {
     ) -> Result<Vec<AccountFillRecord>, SequencerError> {
         self.rpc(|reply| SequencerMsg::GetAccountFills(account_id, market_id, limit, offset, reply))
             .await
+    }
+
+    pub async fn get_account_fills_after(
+        &self,
+        account_id: AccountId,
+        market_id: Option<MarketId>,
+        after: Option<AccountFillCursor>,
+        limit: usize,
+    ) -> Result<Vec<AccountFillRecord>, SequencerError> {
+        self.rpc(|reply| {
+            SequencerMsg::GetAccountFillsAfter(account_id, market_id, after, limit, reply)
+        })
+        .await
     }
 
     /// Equity series for an account, restricted to points with

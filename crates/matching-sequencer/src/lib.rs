@@ -43,8 +43,8 @@ pub use bridge::{
 pub use crypto::{PublicKey, SignedCancel, SignedOrder};
 pub use error::{Rejection, RejectionReason, SequencerError};
 pub use market_info::{
-    AccountFillRecord, MarketMetadata, MarketSearchQuery, MarketSortField, PriceCandle,
-    PriceCandlePage, PriceHistoryPage, PricePoint, ResolutionConfig,
+    AccountFillCursor, AccountFillRecord, MarketMetadata, MarketSearchQuery, MarketSortField,
+    PriceCandle, PriceCandlePage, PriceHistoryPage, PricePoint, ResolutionConfig,
 };
 pub use portfolio::{PortfolioSummary, PositionValue};
 pub use sequencer::{

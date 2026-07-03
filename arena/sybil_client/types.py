@@ -158,6 +158,7 @@ class AccountFill:
     block_height: int
     timestamp_ms: int
     position_deltas: list[PositionDelta] = field(default_factory=list)
+    cursor: str = ""
 
     @property
     def fill_price(self) -> float:

@@ -6,7 +6,7 @@ use matching_engine::{compute_fill_settlement, Fill, MarketId, Order};
 
 use crate::account::{AccountId, AccountStore};
 use crate::aggregates::CostBasisTracker;
-use crate::market_info::AccountFillRecord;
+use crate::market_info::{AccountFillCursor, AccountFillRecord};
 
 /// Bounded in-memory fill history retained per account.
 ///
@@ -19,6 +19,10 @@ pub const DEFAULT_MAX_FILL_HISTORY_PER_ACCOUNT: usize = 5_000;
 pub struct FillRecorder {
     account_fills: HashMap<AccountId, Vec<AccountFillRecord>>,
     max_history_per_account: usize,
+    /// Records appended since the last committed block snapshot. This is the
+    /// durable write delta and is intentionally not bounded by
+    /// `max_history_per_account`; the cap only applies to the hot cache.
+    pending_delta: Vec<(AccountId, AccountFillRecord)>,
     /// All-time fill count per account, excluding `AccountId::MINT`. One
     /// fill record bumps the per-account counter once regardless of how
     /// many markets the underlying order touches (the fill IS the trade
@@ -43,6 +47,7 @@ impl FillRecorder {
         Self {
             account_fills: HashMap::new(),
             max_history_per_account,
+            pending_delta: Vec::new(),
             total_count: HashMap::new(),
         }
     }
@@ -66,6 +71,7 @@ impl FillRecorder {
         Self {
             account_fills,
             max_history_per_account,
+            pending_delta: Vec::new(),
             // Cold-start the total counter from the visible window. After
             // trim this under-reports, which is acceptable until snapshot
             // round-tripping for total_count lands alongside C1.
@@ -101,6 +107,15 @@ impl FillRecorder {
             (account_id.0, record.block_height, record.order_id)
         });
         records
+    }
+
+    /// Fills appended since the last committed off-block snapshot.
+    pub fn pending_delta(&self) -> &[(AccountId, AccountFillRecord)] {
+        &self.pending_delta
+    }
+
+    pub fn clear_pending(&mut self) {
+        self.pending_delta.clear();
     }
 
     /// All-time fill counts per account (MINT excluded by construction).
@@ -181,15 +196,18 @@ impl FillRecorder {
                 event_log.append(e);
             }
 
-            let records = self.account_fills.entry(account_id).or_default();
-            records.push(AccountFillRecord {
+            let record = AccountFillRecord {
                 order_id: fill.order_id,
                 fill_qty: fill.fill_qty,
                 fill_price: fill.fill_price,
                 block_height: height,
                 timestamp_ms,
                 position_deltas,
-            });
+            };
+            self.pending_delta.push((account_id, record.clone()));
+
+            let records = self.account_fills.entry(account_id).or_default();
+            records.push(record);
             trim_account_fills(records, self.max_history_per_account);
 
             // All-time counter: skip MINT (system account, not a user trade).
@@ -227,6 +245,36 @@ impl FillRecorder {
             .take(limit)
             .cloned()
             .collect()
+    }
+
+    /// Get fill records for an account strictly after `after`, served
+    /// oldest-to-newest in stable cursor order. This is the forward-tailing
+    /// API; unlike offset-from-newest pagination, inserts at the head cannot
+    /// shift the client's place.
+    pub fn account_fills_after(
+        &self,
+        account_id: AccountId,
+        market_id_filter: Option<MarketId>,
+        after: Option<AccountFillCursor>,
+        limit: usize,
+    ) -> Vec<AccountFillRecord> {
+        let Some(fills) = self.account_fills.get(&account_id) else {
+            return Vec::new();
+        };
+        let mut out: Vec<_> = fills
+            .iter()
+            .filter(|record| {
+                after.is_none_or(|cursor| AccountFillCursor::from_record(record) > cursor)
+            })
+            .filter(|record| {
+                market_id_filter
+                    .is_none_or(|mid| record.position_deltas.iter().any(|(m, _, _)| *m == mid))
+            })
+            .cloned()
+            .collect();
+        out.sort_by_key(AccountFillCursor::from_record);
+        out.truncate(limit);
+        out
     }
 }
 
@@ -300,6 +348,100 @@ mod tests {
         assert_eq!(fills.len(), max_fills);
         // Served newest-first after restore + trim: most recent retained leads.
         assert_eq!(fills.first().unwrap().block_height, max_fills as u64 + 5);
+    }
+
+    #[test]
+    fn cursor_pagination_is_forward_stable_across_new_fills() {
+        let mut markets = MarketSet::new();
+        let market = markets.add_binary("cursor");
+        let order = outcome_buy(&markets, 1, market, 0, NANOS_PER_DOLLAR / 2, 1);
+        let mut orders = HashMap::new();
+        orders.insert(order.id, &order);
+
+        let mut recorder = FillRecorder::with_retention(10);
+        let mut cb = CostBasisTracker::new();
+        let accounts = AccountStore::new();
+        let mut log = crate::aggregates::AccountEventLog::new();
+
+        for height in 1..=2 {
+            let mut fill = Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2);
+            fill.account_id = 42;
+            recorder.record_fills(
+                &[fill],
+                &orders,
+                height,
+                height * 1_000,
+                &mut cb,
+                &accounts,
+                &mut log,
+            );
+        }
+
+        let first_page =
+            recorder.account_fills_after(AccountId(42), None, Some(AccountFillCursor::MIN), 1);
+        assert_eq!(first_page.len(), 1);
+        assert_eq!(first_page[0].block_height, 1);
+        let cursor = AccountFillCursor::from_record(&first_page[0]);
+
+        let mut fill = Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2);
+        fill.account_id = 42;
+        recorder.record_fills(&[fill], &orders, 3, 3_000, &mut cb, &accounts, &mut log);
+
+        let next_page = recorder.account_fills_after(AccountId(42), None, Some(cursor), 10);
+        let heights: Vec<u64> = next_page.iter().map(|record| record.block_height).collect();
+        assert_eq!(heights, vec![2, 3]);
+    }
+
+    #[test]
+    fn cursor_pagination_survives_hot_retention_trim() {
+        let records = (1..=4)
+            .map(|height| {
+                (
+                    AccountId(7),
+                    AccountFillRecord {
+                        order_id: height,
+                        fill_qty: 1,
+                        fill_price: NANOS_PER_DOLLAR / 2,
+                        block_height: height,
+                        timestamp_ms: height * 1_000,
+                        position_deltas: Vec::new(),
+                    },
+                )
+            })
+            .collect();
+        let recorder = FillRecorder::restore_with_retention(records, 2);
+
+        let fills = recorder.account_fills_after(
+            AccountId(7),
+            None,
+            Some(AccountFillCursor::new(1, 1)),
+            10,
+        );
+        let heights: Vec<u64> = fills.iter().map(|record| record.block_height).collect();
+        assert_eq!(heights, vec![3, 4]);
+    }
+
+    #[test]
+    fn pending_delta_is_captured_before_hot_retention_trim() {
+        let mut markets = MarketSet::new();
+        let market = markets.add_binary("cap0");
+        let order = outcome_buy(&markets, 1, market, 0, NANOS_PER_DOLLAR / 2, 1);
+        let mut orders = HashMap::new();
+        orders.insert(order.id, &order);
+
+        let mut recorder = FillRecorder::with_retention(0);
+        let mut cb = CostBasisTracker::new();
+        let accounts = AccountStore::new();
+        let mut log = crate::aggregates::AccountEventLog::new();
+        let mut fill = Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2);
+        fill.account_id = 42;
+        recorder.record_fills(&[fill], &orders, 1, 1_000, &mut cb, &accounts, &mut log);
+
+        assert!(recorder
+            .account_fills_after(AccountId(42), None, Some(AccountFillCursor::MIN), 10)
+            .is_empty());
+        assert_eq!(recorder.pending_delta().len(), 1);
+        assert_eq!(recorder.pending_delta()[0].1.block_height, 1);
     }
 
     #[test]

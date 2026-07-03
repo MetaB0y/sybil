@@ -40,8 +40,8 @@ class BaseAgent(ABC):
         self.block_log: list[tuple[int, list[OrderSpec]]] = []
         # Per-block stats from the sequencer (welfare, volume, fills)
         self.block_stats: dict[int, tuple[int, int, int]] = {}  # height -> (welfare, volume, fills)
-        # Fill tracking via get_account_fills()
-        self._last_fill_count: int = 0
+        # Fill tracking via get_account_fills(after=cursor)
+        self._last_fill_cursor: str = "0.0"
         self._fill_history: list = []  # list[AccountFill], available to subclasses
 
     @abstractmethod
@@ -145,14 +145,14 @@ class BaseAgent(ABC):
             page_size = 100
             while True:
                 new_fills = await self.client.get_account_fills(
-                    self.account_id, limit=page_size, offset=self._last_fill_count
+                    self.account_id, limit=page_size, after=self._last_fill_cursor
                 )
                 if not new_fills:
                     break
                 self._fill_history.extend(new_fills)
                 for fill in new_fills:
                     await self.on_fill(fill.order_id, fill.fill_qty, fill.fill_price)
-                self._last_fill_count += len(new_fills)
+                self._last_fill_cursor = new_fills[-1].cursor
                 if len(new_fills) < page_size:
                     break
 

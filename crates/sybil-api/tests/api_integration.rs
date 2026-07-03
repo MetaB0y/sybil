@@ -1364,9 +1364,10 @@ async fn fills_paginated_correctly() {
     let (_, body) = get(app.clone(), "/v1/accounts/0/fills?limit=1").await;
     let page1 = parse_json(&body);
     assert_eq!(page1.as_array().unwrap().len(), 1);
+    assert!(page1.as_array().unwrap()[0]["cursor"].as_str().is_some());
 
     // Paginate: offset=1, limit=1
-    let (_, body) = get(app, "/v1/accounts/0/fills?offset=1&limit=1").await;
+    let (_, body) = get(app.clone(), "/v1/accounts/0/fills?offset=1&limit=1").await;
     let page2 = parse_json(&body);
     assert_eq!(page2.as_array().unwrap().len(), 1);
 
@@ -1375,6 +1376,33 @@ async fn fills_paginated_correctly() {
         page1.as_array().unwrap()[0]["order_id"],
         page2.as_array().unwrap()[0]["order_id"],
     );
+
+    // Cursor pagination: after=0.0 returns oldest-first, then strictly after
+    // the returned cursor advances without offset-from-newest shifting.
+    let (_, body) = get(app.clone(), "/v1/accounts/0/fills?after=0.0&limit=1").await;
+    let first_forward = parse_json(&body);
+    assert_eq!(first_forward.as_array().unwrap().len(), 1);
+    let cursor = first_forward.as_array().unwrap()[0]["cursor"]
+        .as_str()
+        .unwrap();
+    let (_, body) = get(
+        app.clone(),
+        &format!("/v1/accounts/0/fills?after={cursor}&limit=10"),
+    )
+    .await;
+    let rest_forward = parse_json(&body);
+    assert!(
+        !rest_forward.as_array().unwrap().is_empty(),
+        "expected at least one fill after first cursor"
+    );
+    assert!(rest_forward
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|fill| fill["cursor"].as_str().unwrap() != cursor));
+
+    let (status, _) = get(app, "/v1/accounts/0/fills?after=not-a-cursor").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 // ---------------------------------------------------------------------------
@@ -1680,6 +1708,67 @@ async fn account_equity_series_persists_to_store() {
         !v["points"].as_array().unwrap().is_empty(),
         "equity must come back from redb: {v}"
     );
+}
+
+#[tokio::test]
+async fn account_fills_persist_to_store_with_zero_hot_cap() {
+    let (app, handle) = test_app_with_store_zero_caps(true).await;
+
+    let (_, body) = post_json(app.clone(), "/v1/markets", json!({ "name": "FillDb?" })).await;
+    let market_id = parse_json(&body)["market_id"].as_u64().unwrap();
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 10_000_000_000u64 }),
+    )
+    .await;
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 10_000_000_000u64 }),
+    )
+    .await;
+    let account_b = parse_json(&body)["account_id"].as_u64().unwrap();
+
+    post_json(
+        app.clone(),
+        "/v1/orders",
+        json!({
+            "account_id": account_id,
+            "orders": [{ "type": "BuyYes", "market_id": market_id, "limit_price_nanos": 600_000_000u64, "quantity": 10 }]
+        }),
+    )
+    .await;
+    post_json(
+        app.clone(),
+        "/v1/orders",
+        json!({
+            "account_id": account_b,
+            "orders": [{ "type": "BuyNo", "market_id": market_id, "limit_price_nanos": 500_000_000u64, "quantity": 10 }]
+        }),
+    )
+    .await;
+
+    let block = handle.produce_block().await.unwrap();
+    assert!(
+        !block.canonical.fills.is_empty(),
+        "expected fills from crossing orders"
+    );
+
+    let (status, body) = get(
+        app,
+        &format!("/v1/accounts/{account_id}/fills?after=0.0&limit=10"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let fills = parse_json(&body);
+    let fills = fills.as_array().unwrap();
+    assert!(
+        !fills.is_empty(),
+        "fills must come back from redb at hot cap 0"
+    );
+    assert!(fills[0]["cursor"].as_str().is_some());
 }
 
 #[tokio::test]

@@ -158,33 +158,46 @@ class SybilClient:
         account_id: int,
         market_id: int | None = None,
         limit: int = 100,
-        offset: int = 0,
+        offset: int | None = None,
+        after: str | None = None,
     ) -> list[AccountFill]:
         """Get fill history for an account."""
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        params: dict[str, Any] = {"limit": limit}
+        if after is not None:
+            params["after"] = after
+        elif offset is not None:
+            params["offset"] = offset
         if market_id is not None:
             params["market_id"] = market_id
         data = await self._request(
             "GET", f"/v1/accounts/{account_id}/fills", params=params
         )
-        return [
-            AccountFill(
-                order_id=f.order_id,
-                fill_qty=quantity_units_to_shares(f.fill_qty),
-                fill_price_nanos=f.fill_price_nanos,
-                block_height=f.block_height,
-                timestamp_ms=f.timestamp_ms,
-                position_deltas=[
-                    PositionDelta(
-                        market_id=d.market_id,
-                        outcome=d.outcome,
-                        delta=quantity_units_to_shares(d.delta),
-                    )
-                    for d in f.position_deltas
-                ],
+        fills: list[AccountFill] = []
+        for item in data:
+            f = AccountFillResponse.from_dict(item)
+            cursor = f.additional_properties.get(
+                "cursor",
+                item.get("cursor", f"{f.block_height}.{f.order_id}"),
             )
-            for f in (AccountFillResponse.from_dict(item) for item in data)
-        ]
+            fills.append(
+                AccountFill(
+                    cursor=str(cursor),
+                    order_id=f.order_id,
+                    fill_qty=quantity_units_to_shares(f.fill_qty),
+                    fill_price_nanos=f.fill_price_nanos,
+                    block_height=f.block_height,
+                    timestamp_ms=f.timestamp_ms,
+                    position_deltas=[
+                        PositionDelta(
+                            market_id=d.market_id,
+                            outcome=d.outcome,
+                            delta=quantity_units_to_shares(d.delta),
+                        )
+                        for d in f.position_deltas
+                    ],
+                )
+            )
+        return fills
 
     async def get_pending_orders(self, account_id: int) -> list[PendingOrder]:
         """Get pending orders for an account."""

@@ -662,6 +662,9 @@ pub struct EquitySeriesResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AccountFillResponse {
+    /// Stable cursor for forward pagination (`GET .../fills?after=<cursor>`).
+    /// Opaque to clients; current encoding is `<block_height>.<order_id>`.
+    pub cursor: String,
     pub order_id: u64,
     /// Fill quantity in fixed-point share-units (`1000` = 1 share).
     pub fill_qty: u64,

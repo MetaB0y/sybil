@@ -30,6 +30,12 @@ price points: open/high/low/close are over sealed YES/NO prices, volume is
 post-seal traded notional, and empty buckets are omitted. This preserves the
 private-batch boundary because no in-flight order-book information is exposed.
 
+Account fill history is served by `GET /v1/accounts/{id}/fills`. New clients
+tail with `after=<cursor>&limit=N`, where each response row includes an opaque
+stable `cursor` string (`0.0` starts at the beginning) and results are returned
+oldest-to-newest. The older `offset` query remains compatibility-only and pages
+newest-first.
+
 Block history reads distinguish missing data from retained-history gaps:
 `GET /v1/blocks/{height}` returns `410 Gone` with code `RETENTION_GONE` when
 the requested height is below the retained `blocks_full` floor. WebSocket block

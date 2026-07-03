@@ -16,7 +16,7 @@ use crate::aggregates::{
     WelfareTrackerSnapshot,
 };
 use crate::fill_recorder::FillRecorder;
-use crate::market_info::{AccountFillRecord, PricePoint};
+use crate::market_info::{AccountFillCursor, AccountFillRecord, PricePoint};
 use crate::order_book::{OrderBook, RestingOrder};
 use crate::price_tracker::{
     PriceTracker, PriceTrackerClearingHistorySnapshot, PriceTrackerVolumeSnapshot,
@@ -101,6 +101,7 @@ impl AnalyticsState {
             fill_total_counts: self.total_fill_counts(),
             cost_basis_tracker: self.cost_basis_snapshot(),
             history_event_next_seq: self.account_event_log.next_seq(),
+            fill_history_delta: self.fill_recorder.pending_delta().to_vec(),
             price_points_delta: self.price_tracker.pending_price_points().to_vec(),
             equity_points_delta: self.equity_tracker.pending().to_vec(),
             history_events_delta: self
@@ -178,6 +179,17 @@ impl AnalyticsState {
     ) -> Vec<AccountFillRecord> {
         self.fill_recorder
             .account_fills(account_id, market_id_filter, limit, offset)
+    }
+
+    pub fn account_fills_after(
+        &self,
+        account_id: AccountId,
+        market_id_filter: Option<MarketId>,
+        after: Option<AccountFillCursor>,
+        limit: usize,
+    ) -> Vec<AccountFillRecord> {
+        self.fill_recorder
+            .account_fills_after(account_id, market_id_filter, after, limit)
     }
 
     pub fn fill_snapshot(&self) -> Vec<(AccountId, AccountFillRecord)> {
@@ -460,6 +472,7 @@ impl AnalyticsState {
     }
 
     pub fn clear_offblock_pending(&mut self) {
+        self.fill_recorder.clear_pending();
         self.price_tracker.clear_pending();
         self.equity_tracker.clear_pending();
         self.account_event_log.clear_pending();

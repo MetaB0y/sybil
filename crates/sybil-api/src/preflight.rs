@@ -107,13 +107,12 @@ fn is_set(value: &str) -> bool {
 ///   promoted to startup).
 /// - `SYBIL_DATA_DIR` unset — in-memory only; the whole store (state, equity,
 ///   history, price points) is lost on restart and never persisted.
-/// - `SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT=0` — the fills endpoint is served
-///   purely from the hot ring; there is no durable fills serving path today
-///   (see the criterion-5 gap in the doc), so 0 serves empty even with a store.
 ///
 /// Informational-only deviations (logged, never block): a durable store backs
 /// these when `SYBIL_DATA_DIR` is set, so the reduced RAM cache does not lose
 /// data on its own.
+/// - `SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT` — account fills are served
+///   store-first from durable `FILL_HISTORY`; the cap only bounds the hot ring.
 /// - `SYBIL_MAX_PRICE_HISTORY_POINTS_PER_MARKET` — raw price history is served
 ///   store-first from durable `price_points`.
 /// - `SYBIL_MAX_EQUITY_POINTS_PER_ACCOUNT` / `SYBIL_MAX_HISTORY_EVENTS_PER_ACCOUNT`
@@ -154,10 +153,8 @@ pub fn collect_deviations(config: &ApiConfig) -> Vec<Deviation> {
         out.push(Deviation {
             knob: "SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT",
             value: "0".to_string(),
-            prod_intended: "5000",
-            // No durable fills serving path today: 0 serves empty even with a
-            // store configured. See criterion-5 gap.
-            dev_only: true,
+            prod_intended: "5000 (hot cache only; durable FILL_HISTORY backs serving)",
+            dev_only: false,
         });
     }
 
@@ -388,17 +385,19 @@ mod tests {
     }
 
     #[test]
-    fn zero_fill_history_blocks_prod_start() {
+    fn zero_fill_history_is_informational_not_blocking() {
         let config = ApiConfig {
             max_fill_history_per_account: 0,
             ..prod_ready_config()
         };
         let report = build_report(&config).unwrap();
         assert!(report
-            .violations()
+            .deviations
             .iter()
-            .any(|d| d.knob == "SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT"));
-        assert!(run_preflight(&config).is_err());
+            .any(|d| d.knob == "SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT" && !d.dev_only));
+        assert!(report.violations().is_empty());
+        assert!(!report.blocks_prod_start(false));
+        assert!(run_preflight(&config).is_ok());
     }
 
     #[test]

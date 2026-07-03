@@ -60,7 +60,7 @@ reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.
 
 | Knob | default | current devnet | prod (intended) | Dev-only in prod? |
 | --- | --- | --- | --- | --- |
-| `SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT` | `5000` | `5000` | `5000` | **`0` blocks** (see gap) |
+| `SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT` | `5000` | `5000` | `5000` | no (durable-backed; `0` disables hot cache only) |
 | `SYBIL_MAX_PRICE_HISTORY_POINTS_PER_MARKET` | `2000` | `2000` | `2000` | no (durable-backed) |
 | `SYBIL_MAX_EQUITY_POINTS_PER_ACCOUNT` | `0` | `0` | `0` (redb-served) | no (durable-backed) |
 | `SYBIL_MAX_HISTORY_EVENTS_PER_ACCOUNT` | `0` | `0` | `0` (redb-served) | no (durable-backed) |
@@ -96,8 +96,8 @@ At boot, before opening the store or binding the socket,
    This runs on **every** profile, so a `local` or `devnet` box still surfaces
    its deltas.
 2. **Fail-closes a `prod` start** when any dev-only knob is set:
-   `SYBIL_DEV_MODE=true`, `SYBIL_SERVICE_TOKEN` unset, `SYBIL_DATA_DIR` unset,
-   or `SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT=0`. The process exits non-zero with a
+   `SYBIL_DEV_MODE=true`, `SYBIL_SERVICE_TOKEN` unset, or `SYBIL_DATA_DIR`
+   unset. The process exits non-zero with a
    message naming the offending knobs. This mirrors the existing fail-closed
    service-token posture in `service_auth`
    (`crates/sybil-api/src/app.rs`), promoted from request-time to startup.
@@ -127,17 +127,17 @@ At boot, before opening the store or binding the socket,
 
 All four history endpoints dispatch on store presence: with `SYBIL_DATA_DIR`
 set they read the full series from redb; with no store they read the bounded
-in-memory ring. The RAM cap therefore only bounds the fallback — **except for
-fills** (see gap). Verified by code trace, 2026-07-03:
+in-memory ring. The RAM cap therefore only bounds the fallback. Verified by
+code trace, 2026-07-03:
 
 | Series | Endpoint | Cap default | Durable write | `cap=0` with store |
 | --- | --- | --- | --- | --- |
 | Equity | `/v1/accounts/{id}/equity` | `0` | unconditional | serves full series ✅ |
 | History events | `/v1/accounts/{id}/events` | `0` | unconditional | serves full series ✅ |
 | Price history | `/v1/markets/{id}/prices/history` | `2000` | unconditional | serves full series ✅ |
-| Fills | `/v1/accounts/{id}/fills` | `5000` | **cap-gated** | serves **empty** ❌ |
+| Fills | `/v1/accounts/{id}/fills` | `5000` | unconditional per-block delta | serves full series ✅ |
 
-- Equity, history events, and price history are safe to set to `0` **only when
+- Equity, history events, price history, and fills are safe to set to `0` **only when
   `SYBIL_DATA_DIR` is set** — the durable delta is written every block
   regardless of the RAM cap, and reads fall through to redb. This is exactly
   why prod runs `SYBIL_MAX_EQUITY_POINTS_PER_ACCOUNT=0` and
@@ -147,25 +147,18 @@ fills** (see gap). Verified by code trace, 2026-07-03:
   durability is the only thing that makes `cap=0` viable. The preflight blocks a
   `prod` start with no `SYBIL_DATA_DIR` for exactly this reason.
 
-### Criterion-5 gap: fills is not durably backed at `cap=0`
+### Criterion-5 gap: fills durable at `cap=0` fixed
 
-`SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT=0` is a footgun. Unlike the other three,
-the durable fills delta is sourced from the **same** in-memory window the cap
-bounds: each block, `record_fills` pushes fills then trims the window to the
-cap, and the persisted snapshot is taken from that trimmed window. At `cap=0`
-the window is emptied *before* the snapshot, so **nothing is ever written to
-the `FILL_HISTORY` table** — both the memory read and the durable read return
-empty. At the default `5000`, every fill survives the block it occurred in, is
-snapshotted, and persists (redb inserts accumulate), so durable serving works
-even after the hot window later trims.
+`SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT=0` now matches equity/history/price:
+the cap bounds only the in-memory hot cache. `FillRecorder` captures an
+untrimmed per-block fill delta before applying retention, and `Store::save_block`
+persists that delta to `FILL_HISTORY` inside the same redb block-commit
+transaction as the account-state fence flip. Store-backed reads therefore serve
+the durable series even when the hot window is empty.
 
-**Status: known gap, not fixed in this ticket.** Prod deliberately keeps fills
-at `5000` (not `0`) precisely because there is no durable fills serving path at
-`0`. Building a durable-store-backed fills serving path that survives `cap=0`
-(matching the equity/history/price pattern of an unconditional per-block delta)
-is deferred to a follow-up ticket. Until then: keep
-`SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT` above peak fills-per-account-per-block, and
-the preflight refuses a `prod` boot at `0`.
+The preflight still logs `SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT=0` as an
+informational deviation from the intended hot-cache default, but it no longer
+blocks a `prod` boot. `SYBIL_DATA_DIR` unset remains prod-blocking.
 
 ### Secondary gaps flagged for follow-up
 

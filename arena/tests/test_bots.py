@@ -154,7 +154,13 @@ class _StreamingClient:
     async def get_account(self, account_id: int):
         return Account(id=account_id, balance_nanos=50_000_000_000, positions=[])
 
-    async def get_account_fills(self, account_id: int, limit: int, offset: int):
+    async def get_account_fills(
+        self,
+        account_id: int,
+        limit: int,
+        after: str | None = None,
+        offset: int | None = None,
+    ):
         return []
 
     async def get_pending_orders(self, account_id: int):
@@ -167,6 +173,7 @@ async def test_base_agent_update_state_fetches_all_fill_pages():
     client.get_account.return_value = Account(id=7, balance_nanos=50_000_000_000, positions=[])
     first_page = [
         AccountFill(
+            cursor=f"1.{i}",
             order_id=i,
             fill_qty=1,
             fill_price_nanos=500_000_000,
@@ -179,6 +186,7 @@ async def test_base_agent_update_state_fetches_all_fill_pages():
         first_page,
         [
             AccountFill(
+                cursor="2.101",
                 order_id=101,
                 fill_qty=1,
                 fill_price_nanos=520_000_000,
@@ -201,9 +209,102 @@ async def test_base_agent_update_state_fetches_all_fill_pages():
     )
     await agent._update_state(block)
 
-    assert agent._last_fill_count == 101
+    assert agent._last_fill_cursor == "2.101"
     assert len(agent._fill_history) == 101
     assert client.get_account_fills.await_count == 2
+    client.get_account_fills.assert_any_await(7, limit=100, after="0.0")
+    client.get_account_fills.assert_any_await(7, limit=100, after="1.100")
+
+
+@pytest.mark.anyio
+async def test_base_agent_cursor_tailing_handles_new_fills_between_polls():
+    client = AsyncMock()
+    client.get_account.return_value = Account(id=7, balance_nanos=50_000_000_000, positions=[])
+    client.get_account_fills.side_effect = [
+        [
+            AccountFill(
+                cursor="1.10",
+                order_id=10,
+                fill_qty=1,
+                fill_price_nanos=500_000_000,
+                block_height=1,
+                timestamp_ms=1,
+            )
+        ],
+        [
+            AccountFill(
+                cursor="2.11",
+                order_id=11,
+                fill_qty=1,
+                fill_price_nanos=510_000_000,
+                block_height=2,
+                timestamp_ms=2,
+            )
+        ],
+    ]
+    agent = _DummyAgent(client=client, account_id=7, name="Dummy")
+    block = Block(
+        height=1,
+        parent_hash="",
+        state_root="",
+        fills=[],
+        clearing_prices={},
+        total_welfare=0,
+        total_volume=0,
+        orders_filled=0,
+    )
+
+    await agent._update_state(block)
+    await agent._update_state(block)
+
+    assert [fill.order_id for fill in agent._fill_history] == [10, 11]
+    assert agent._last_fill_cursor == "2.11"
+    client.get_account_fills.assert_any_await(7, limit=100, after="0.0")
+    client.get_account_fills.assert_any_await(7, limit=100, after="1.10")
+
+
+@pytest.mark.anyio
+async def test_base_agent_cursor_tailing_continues_after_retention_trims_tail():
+    client = AsyncMock()
+    client.get_account.return_value = Account(id=7, balance_nanos=50_000_000_000, positions=[])
+    client.get_account_fills.side_effect = [
+        [
+            AccountFill(
+                cursor="5.50",
+                order_id=50,
+                fill_qty=1,
+                fill_price_nanos=500_000_000,
+                block_height=5,
+                timestamp_ms=5,
+            ),
+            AccountFill(
+                cursor="6.51",
+                order_id=51,
+                fill_qty=1,
+                fill_price_nanos=510_000_000,
+                block_height=6,
+                timestamp_ms=6,
+            ),
+        ],
+    ]
+    agent = _DummyAgent(client=client, account_id=7, name="Dummy")
+    agent._last_fill_cursor = "1.10"
+    block = Block(
+        height=6,
+        parent_hash="",
+        state_root="",
+        fills=[],
+        clearing_prices={},
+        total_welfare=0,
+        total_volume=0,
+        orders_filled=0,
+    )
+
+    await agent._update_state(block)
+
+    assert [fill.order_id for fill in agent._fill_history] == [50, 51]
+    assert agent._last_fill_cursor == "6.51"
+    client.get_account_fills.assert_any_await(7, limit=100, after="1.10")
 
 
 @pytest.mark.anyio

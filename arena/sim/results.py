@@ -14,13 +14,13 @@ log = logging.getLogger(__name__)
 async def _fetch_all_fills(client, account_id: int) -> list:
     """Fetch all fills for an account, paginating if needed."""
     all_fills = []
-    offset = 0
+    cursor = "0.0"
     while True:
-        batch = await client.get_account_fills(account_id, limit=100, offset=offset)
+        batch = await client.get_account_fills(account_id, limit=100, after=cursor)
         all_fills.extend(batch)
         if len(batch) < 100:
             break
-        offset += len(batch)
+        cursor = batch[-1].cursor
     return all_fills
 
 
