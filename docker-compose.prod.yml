@@ -35,13 +35,20 @@ services:
   sybil-arena:
     volumes:
       - polymarket-data:/polymarket-data:ro
+    env_file:
+      - ./arena.env
     command:
       - "--sybil-url=http://sybil-api:3000"
-      - "--api-key=${OPENROUTER_API_KEY}"
       - "--max-markets=0"
       - "--model=deepseek/deepseek-v4-flash"
       - "--db-path=/data/decisions.db"
       - "--mapping-path=/polymarket-data/polymarket_mapping.json"
+
+  grafana:
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: "${GF_SECURITY_ADMIN_PASSWORD:?Set GF_SECURITY_ADMIN_PASSWORD in /opt/sybil/.env}"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
 
   caddy:
     image: caddy:latest
@@ -50,6 +57,9 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      CADDY_OPS_AUTH_USER: "${CADDY_OPS_AUTH_USER:?Set CADDY_OPS_AUTH_USER in /opt/sybil/.env}"
+      CADDY_OPS_AUTH_HASH: "${CADDY_OPS_AUTH_HASH:?Set CADDY_OPS_AUTH_HASH in /opt/sybil/.env}"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

@@ -2,6 +2,12 @@
     email val@sybil.exchange
 }
 
+(ops_auth) {
+    basic_auth {
+        {$CADDY_OPS_AUTH_USER} {$CADDY_OPS_AUTH_HASH}
+    }
+}
+
 172-104-31-54.nip.io {
     encode zstd gzip
 
@@ -32,5 +38,20 @@
 arena.172-104-31-54.nip.io {
     encode zstd gzip
 
+    import ops_auth
     reverse_proxy sybil-arena-dashboard:8501
+}
+
+grafana.172-104-31-54.nip.io {
+    encode zstd gzip
+
+    import ops_auth
+    reverse_proxy grafana:3000
+}
+
+prover.172-104-31-54.nip.io {
+    encode zstd gzip
+
+    import ops_auth
+    reverse_proxy sybil-prover:3002
 }

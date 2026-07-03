@@ -10,11 +10,12 @@ Pipeline:
 
 Usage (standalone test):
     cd arena && uv run python -m live.news_feed --sybil-url http://172.104.31.54:3000 --duration 300
-    cd arena && uv run python -m live.news_feed --sybil-url http://172.104.31.54:3000 --duration 300 --api-key $OPENROUTER_API_KEY
+    cd arena && OPENROUTER_API_KEY=... uv run python -m live.news_feed --sybil-url http://172.104.31.54:3000 --duration 300
 """
 
 import asyncio
 import logging
+import os
 import re
 import urllib.parse
 from collections import Counter, defaultdict, deque
@@ -515,10 +516,10 @@ async def _main():
 
     parser = argparse.ArgumentParser(description="Test news feed")
     parser.add_argument("--sybil-url", default="http://172.104.31.54:3000")
-    parser.add_argument("--api-key", default=None, help="OpenRouter API key for LLM gate")
     parser.add_argument("--duration", type=int, default=300, help="Run for N seconds")
     parser.add_argument("--max-markets", type=int, default=10)
     args = parser.parse_args()
+    api_key = os.environ.get("OPENROUTER_API_KEY")
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 
@@ -539,7 +540,7 @@ async def _main():
             query = build_search_query(m)
             log.info("  [%d] %s → query: \"%s\"", m.id, m.name[:50], query)
 
-        feed = NewsFeed(active, api_key=args.api_key, poll_interval_s=60)
+        feed = NewsFeed(active, api_key=api_key, poll_interval_s=60)
 
         async def _run_timed():
             await asyncio.sleep(args.duration)

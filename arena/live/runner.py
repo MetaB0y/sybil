@@ -1,13 +1,14 @@
 """Live trading bot orchestrator.
 
 Usage:
-    cd arena && uv run python -m live.runner --api-key $OPENROUTER_API_KEY
-    cd arena && uv run python -m live.runner --api-key $KEY --max-markets 10
+    cd arena && OPENROUTER_API_KEY=... uv run python -m live.runner
+    cd arena && OPENROUTER_API_KEY=... uv run python -m live.runner --max-markets 10
 """
 
 import argparse
 import asyncio
 import logging
+import os
 import signal
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -326,7 +327,6 @@ async def run_live(config: LiveConfig):
 def main():
     parser = argparse.ArgumentParser(description="Live AI trading bots")
     parser.add_argument("--sybil-url", default="http://172.104.31.54:3000")
-    parser.add_argument("--api-key", required=True, help="OpenRouter API key")
     parser.add_argument("--model", default="deepseek/deepseek-v4-flash")
     parser.add_argument(
         "--max-markets",
@@ -360,6 +360,11 @@ def main():
                         help="Path to polymarket_mapping.json for reference prices")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
+    api_key = os.environ.get("OPENROUTER_API_KEY", "")
+    if not api_key:
+        parser.error(
+            "OPENROUTER_API_KEY is required in the environment; do not pass it as a CLI argument"
+        )
 
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper()),
@@ -369,7 +374,7 @@ def main():
 
     config = LiveConfig(
         sybil_url=args.sybil_url,
-        api_key=args.api_key,
+        api_key=api_key,
         model_name=args.model,
         initial_balance=args.balance,
         max_markets=args.max_markets,

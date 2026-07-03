@@ -9,6 +9,8 @@ services:
     build:
       context: .
       args: *rust-build-args
+    ports:
+      - "127.0.0.1:3000:3000"
 
   sybil-polymarket:
     build:
@@ -20,3 +22,21 @@ services:
 
   sybil-arena-dashboard:
     build: ./arena
+    ports:
+      - "127.0.0.1:8501:8501"
+
+  sybil-prover:
+    ports:
+      - "127.0.0.1:3002:3002"
+
+  victoriametrics:
+    ports:
+      - "127.0.0.1:8428:8428"
+
+  vmalert:
+    ports:
+      - "127.0.0.1:8880:8880"
+
+  grafana:
+    ports:
+      - "127.0.0.1:3001:3000"

@@ -1,185 +1,126 @@
 # Deployment Runbook
 
-> **⚠️ STALE (verified 2026-07-02).** This runbook describes a Kamal + GHCR +
-> Traefik + Tempo topology that was never landed — there is no
-> `config/deploy.yml`, no image push to GHCR, and no Tempo/Traefik service in
-> any compose file. The **actual** deploy path is the `deploy-*` recipes in the
-> `justfile`: build locally → `docker save | ssh docker load` → `docker
-> compose` on the server, fronted by Caddy. See `docs/SPEC.md` §16 and
-> `AGENTS.md` § Deployment. This file needs a rewrite
-> (`design/architecture-review-2026-07.md`, P9).
+Production is a single Linode host running Docker Compose from `/opt/sybil`.
+Images are built locally, transferred with `docker save | ssh docker load`, and
+started with the `deploy-*` recipes in the `justfile`.
 
-## Architecture
+## Public Surface
 
-```
-GitHub Actions ── build Docker image ──→ GHCR (ghcr.io/metab0y/sybil-api)
-                                              │
-Linode (g6-standard-1, 2GB) ←── docker pull ──┘
-  ├── sybil-api        (port 3000, Traefik proxy)
-  ├── sybil-polymarket  (sidecar, connects to sybil-api)
-  ├── VictoriaMetrics   (metrics, port 8428)
-  ├── Tempo             (traces, port 4317)
-  └── Grafana           (dashboards, port 3001)
-```
+Only Caddy publishes host ports in the production compose stack.
 
-Both `sybil-api` and `sybil-polymarket` binaries are in the same Docker image.
-Kamal deploys `sybil-api` as the main service; `sybil-polymarket` runs as an accessory.
+| Public port | Hostname | Service | Auth |
+| --- | --- | --- | --- |
+| 80, 443 | `172-104-31-54.nip.io` | `sybil-api` trading API and web UI | Public |
+| 80, 443 | `arena.172-104-31-54.nip.io` | Streamlit arena dashboard | Caddy basic auth |
+| 80, 443 | `grafana.172-104-31-54.nip.io` | Grafana | Caddy basic auth, then Grafana login |
+| 80, 443 | `prover.172-104-31-54.nip.io` | Prover status/API | Caddy basic auth |
 
-## Prerequisites
+These services are Docker-network-only in prod and must not publish host ports:
+`sybil-api`, `sybil-prover`, `sybil-arena-dashboard`, `victoriametrics`,
+`vmalert`, `grafana`, `node-exporter`, `sybil-polymarket`, and `sybil-arena`.
+VictoriaMetrics and vmalert are intentionally not routed through Caddy.
+Grafana anonymous access is disabled; there is no intended public read-only
+dashboard.
 
-- Linode account with a running instance
-- GitHub account with GHCR access
-- Kamal 2 installed: `gem install kamal`
-- SSH key added to the Linode
+Local development still gets localhost-only port mappings through
+`docker-compose.override.yml`, which is auto-loaded by plain `docker compose up`
+and is not copied to the server.
 
-## Server
+## Required Prod Secrets
 
-- **Provider**: Linode
-- **Type**: g6-standard-1 (1 vCPU, 2GB RAM, 50GB disk)
-- **OS**: Debian 13
-- **IP**: set in `config/deploy.yml`
-
-## Secrets
+Create `/opt/sybil/.env` on the deploy host before running prod compose commands:
 
 ```bash
-cp .kamal/secrets.example .kamal/secrets
+GF_SECURITY_ADMIN_PASSWORD=<strong grafana admin password>
+CADDY_OPS_AUTH_USER=ops
+CADDY_OPS_AUTH_HASH='<bcrypt hash from caddy hash-password>'
 ```
 
-Fill in:
-```
-KAMAL_REGISTRY_USERNAME=<github-username>
-KAMAL_REGISTRY_PASSWORD=<ghcr-pat-with-write:packages>
-SYBIL_SEED_MARKETS=
-```
-
-The server IP is hardcoded in `config/deploy.yml`. Secrets file is gitignored.
-
-## CI (GitHub Actions)
-
-On every push to `main`, `.github/workflows/docker.yml`:
-1. Builds the Docker image (both binaries)
-2. Pushes to `ghcr.io/metab0y/sybil-api:latest` and `:sha`
-3. Uses GHA cache for layer caching
-
-## Deploy
-
-### First time
+Generate the Caddy hash with:
 
 ```bash
-# 1. Ensure Docker image exists on GHCR (push to main or run workflow manually)
-# 2. Set up the server (installs Docker, starts proxy + accessories)
-kamal setup
-# 3. Boot the polymarket mirror
-kamal accessory boot polymarket
+caddy hash-password --plaintext '<ops password>'
 ```
 
-### Subsequent deploys
+Keep the bcrypt hash single-quoted in `.env` so `$` characters are not treated as
+Compose interpolation. Optional Telegram alerting also reads
+`TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` from the same file.
+
+Create `/opt/sybil/arena.env` for the arena container:
 
 ```bash
-# After pushing to main and CI builds the image:
-kamal deploy
+OPENROUTER_API_KEY=sk-or-v1-...
 ```
 
-### Accessory management
+The OpenRouter key is supplied to `sybil-arena` via `env_file: ./arena.env`.
+It is not passed as a CLI argument and is not interpolated into SSH command
+strings by the deploy recipes. The arena process reads `OPENROUTER_API_KEY` from
+its environment and exits with a clear error if it is missing.
+
+## Deploy Commands
 
 ```bash
-kamal accessory boot polymarket       # start
-kamal accessory stop polymarket       # stop
-kamal accessory restart polymarket    # restart
-kamal accessory logs polymarket       # view logs
-kamal accessory boot --all            # start all (metrics, grafana, etc.)
+just deploy-api
+just deploy-arena
+just deploy-monitoring
+just deploy-caddy
+just deploy-all
+```
+
+`deploy-arena` and `deploy-all` require `OPENROUTER_API_KEY` in
+`/opt/sybil/arena.env`. The recipes check only for the presence of required variable
+names; they do not print or pass secret values in command arguments.
+
+Optional Telegram alerting:
+
+```bash
+just deploy-telegram-alerts
+```
+
+## Smoke Checks
+
+Run this on the deploy host after changes:
+
+```bash
+cd /opt/sybil
+./scripts/ops-smoke.sh
+```
+
+The script fails if it finds non-loopback TCP listeners outside the Caddy port
+allowlist (`80 443` by default), or if OpenRouter-style key material appears in
+host process arguments or Docker command arrays.
+
+If host SSH is intentionally public and should be tolerated by the smoke check,
+run:
+
+```bash
+OPS_SMOKE_ALLOWED_PUBLIC_PORTS="22 80 443" ./scripts/ops-smoke.sh
 ```
 
 ## Operations
 
-### Alpha market curation
-
-The built-in alpha trading UI treats the market group named `featured` as the curated shelf.
-If that group exists, `/trade` defaults to showing only those markets. If it does not exist,
-the UI falls back to all active markets.
-
-Use the existing market-group API to manage this shelf. No separate admin subsystem is required
-for Milestone 1; operators curate the alpha surface by keeping `featured` aligned with the
-markets that are safe and useful to expose.
-
-### View logs
+View logs:
 
 ```bash
-kamal app logs -f                 # sybil-api logs
-kamal accessory logs polymarket   # polymarket mirror logs
+just deploy-logs sybil-api
+just deploy-logs sybil-arena
+just deploy-logs grafana
 ```
 
-### SSH into server
+SSH to the host:
 
 ```bash
-kamal app exec -i bash            # shell in sybil-api container
-ssh root@<server-ip>              # direct SSH
+just deploy-shell
 ```
 
-### Check health
+Check public API health:
 
 ```bash
-curl http://<server-ip>:3000/v1/health
-curl http://<server-ip>:3000/        # dashboard
+curl https://172-104-31-54.nip.io/v1/health
 ```
 
-### Restart
+Reset app state only when intentional:
 
 ```bash
-kamal app restart                 # restart sybil-api
-kamal accessory restart polymarket
+just deploy-reset-state CONFIRM
 ```
-
-## Services
-
-### sybil-api
-
-- **Port**: 3000
-- **Healthcheck**: `GET /v1/health`
-- **Dashboard**: `GET /`
-- **Config**: env vars in `config/deploy.yml`
-  - `SYBIL_DEV_MODE=true` (required for market creation)
-  - `SYBIL_BLOCK_INTERVAL_MS=2000`
-
-For the ad-hoc SSH `just deploy-api` path, `sybil-api` runs on Docker bridge networking
-while the OTEL collector is exposed on the host. Set
-`OTEL_EXPORTER_OTLP_ENDPOINT=http://172.17.0.1:4317` so traces reach the host-published
-collector instead of container-local `localhost`.
-
-### sybil-polymarket
-
-- **Connects to**: `http://host.docker.internal:3000`
-- **Config**: cmd args in `config/deploy.yml` accessories section
-  - `--max-events 50`
-  - `--mirror-excluded-categories sports`
-  - `--mm-half-spread 0.02`
-  - `--mm-budget-dollars 5000`
-  - `--mm-initial-balance-dollars 1000000`
-  - `--mm-max-markets 0` (quote every mirrored market after filtering)
-  - `--mm-max-orders-per-block 64` (rotate quotes within the API submission cap)
-  - `--mapping-store-path /data/polymarket_mapping.json`
-- **Persistent volume**: `polymarket-data:/data` (mapping store survives restarts)
-
-### Monitoring
-
-- **Grafana**: `http://<server-ip>:3001` (admin/admin)
-- **VictoriaMetrics**: `http://<server-ip>:8428`
-- **Metrics endpoint**: `http://<server-ip>:3000/metrics` (Prometheus format)
-
-## Troubleshooting
-
-### sybil-polymarket can't connect to sybil-api
-Check that sybil-api is healthy first: `curl http://localhost:3000/v1/health` on the server.
-The polymarket mirror retries until the API is up.
-
-### No markets appearing
-Check polymarket mirror logs: `kamal accessory logs polymarket`.
-Common issue: Polymarket Gamma API may be rate-limiting or returning errors.
-
-### WebSocket disconnects
-The feed actor reconnects automatically with exponential backoff.
-Proactive reconnect every 15 minutes to preempt Polymarket's known zombie connection bug.
-
-### OOM on build
-Don't build on the server — use GitHub Actions. The Rust compile needs ~4GB RAM.
-If you must build remotely, use a temporary larger instance.

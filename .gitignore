@@ -13,6 +13,7 @@ zk/openvm-guest/target/
 zk/openvm-guest/openvm_init.rs
 *.tsbuildinfo
 .env
+arena.env
 comparison*.json
 .DS_Store
 .venv/

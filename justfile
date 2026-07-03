@@ -369,53 +369,60 @@ COMPOSE_TELEGRAM := "docker compose -f docker-compose.yml -f docker-compose.prod
 
 # Sync compose configs + deploy/ directory to server
 deploy-sync:
-    ssh {{SERVER}} 'mkdir -p /opt/sybil'
+    ssh {{SERVER}} 'mkdir -p /opt/sybil/scripts && touch /opt/sybil/arena.env'
     scp docker-compose.yml docker-compose.prod.yml docker-compose.telegram.yml {{SERVER}}:/opt/sybil/
     scp -r deploy {{SERVER}}:/opt/sybil/
+    scp scripts/ops-smoke.sh {{SERVER}}:/opt/sybil/scripts/
+
+deploy-prod-env-check:
+    ssh {{SERVER}} 'cd /opt/sybil && test -f .env && grep -q "^GF_SECURITY_ADMIN_PASSWORD=." .env && grep -q "^CADDY_OPS_AUTH_USER=." .env && grep -q "^CADDY_OPS_AUTH_HASH=." .env'
+
+deploy-openrouter-env-check:
+    ssh {{SERVER}} 'cd /opt/sybil && test -f arena.env && grep -q "^OPENROUTER_API_KEY=." arena.env'
 
 # Build and deploy sybil-api, polymarket mirror, and prover status/mock API.
 # The real filesystem prover worker is profile-gated until proof-job export is live.
-deploy-api: deploy-sync
+deploy-api: deploy-sync deploy-prod-env-check
     DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-api
     docker save sybil-api:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-api sybil-polymarket sybil-prover sybil-prover-mock'
 
 # Start the real filesystem prover worker when proof-job export is enabled.
-deploy-prover-worker: deploy-sync
+deploy-prover-worker: deploy-sync deploy-prod-env-check
     ssh {{SERVER}} 'cd /opt/sybil && COMPOSE_PROFILES=prover-worker {{COMPOSE_PROD}} up -d sybil-prover-worker'
 
 # Destructively reset production app state, then restart services.
 # This removes old markets, mirror mappings, arena bot DB, prover artifacts,
 # and metric history from previous deploys. Pass CONFIRM explicitly.
-deploy-reset-state confirm:
+deploy-reset-state confirm: deploy-prod-env-check
     @test "{{confirm}}" = "CONFIRM" || (echo 'Refusing to reset production state. Run: just deploy-reset-state CONFIRM' >&2; exit 2)
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} down; else {{COMPOSE_PROD}} down; fi'
     ssh {{SERVER}} 'docker volume rm sybil-data polymarket-data arena-data prover-jobs prover-artifacts sybil_prover-jobs sybil_prover-artifacts vmdata || true'
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else {{COMPOSE_PROD}} up -d --remove-orphans; fi'
 
-# Build and deploy arena bots + dashboard (pass OpenRouter key)
-deploy-arena key: deploy-sync
+# Build and deploy arena bots + dashboard. Requires OPENROUTER_API_KEY in /opt/sybil/arena.env.
+deploy-arena: deploy-sync deploy-prod-env-check deploy-openrouter-env-check
     DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-arena
     docker save sybil-arena:latest | ssh {{SERVER}} docker load
-    ssh {{SERVER}} 'cd /opt/sybil && OPENROUTER_API_KEY={{key}} {{COMPOSE_PROD}} up -d sybil-arena sybil-arena-dashboard caddy'
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-arena sybil-arena-dashboard caddy'
 
 # Deploy observability stack (node-exporter + VictoriaMetrics + vmalert + Grafana)
-deploy-monitoring: deploy-sync
+deploy-monitoring: deploy-sync deploy-prod-env-check
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans node-exporter victoriametrics vmalert grafana telegram-alerts; else {{COMPOSE_PROD}} up -d --remove-orphans node-exporter victoriametrics vmalert grafana; fi'
 
 # Enable Telegram delivery for vmalert alerts. Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in /opt/sybil/.env on the server.
-deploy-telegram-alerts: deploy-sync
+deploy-telegram-alerts: deploy-sync deploy-prod-env-check
     ssh {{SERVER}} 'cd /opt/sybil && test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env && {{COMPOSE_TELEGRAM}} up -d telegram-alerts vmalert'
 
 # Deploy Caddy HTTPS reverse proxy
-deploy-caddy: deploy-sync
+deploy-caddy: deploy-sync deploy-prod-env-check
     ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d caddy'
 
 # Deploy everything
-deploy-all key: deploy-sync
+deploy-all: deploy-sync deploy-prod-env-check deploy-openrouter-env-check
     DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build
     docker save sybil-api:latest sybil-arena:latest | ssh {{SERVER}} docker load
-    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then OPENROUTER_API_KEY={{key}} {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else OPENROUTER_API_KEY={{key}} {{COMPOSE_PROD}} up -d --remove-orphans; fi'
+    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else {{COMPOSE_PROD}} up -d --remove-orphans; fi'
 
 # Tail logs from a container on the server
 deploy-logs service="sybil-api":

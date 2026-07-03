@@ -6,6 +6,21 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 export OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
+export GF_SECURITY_ADMIN_PASSWORD="${GF_SECURITY_ADMIN_PASSWORD:-compose-smoke-grafana-password}"
+export CADDY_OPS_AUTH_USER="${CADDY_OPS_AUTH_USER:-ops}"
+export CADDY_OPS_AUTH_HASH="${CADDY_OPS_AUTH_HASH:-compose-smoke-caddy-hash}"
+
+cleanup_arena_env_file=false
+if [[ ! -f arena.env ]]; then
+    cleanup_arena_env_file=true
+    : > arena.env
+fi
+cleanup() {
+    if [[ "$cleanup_arena_env_file" == true ]]; then
+        rm -f arena.env
+    fi
+}
+trap cleanup EXIT
 
 COMPOSE_CMD=${COMPOSE_CMD:-docker compose}
 COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.prod.yml)
