@@ -89,10 +89,10 @@ committed qMDB contains a hidden extra active key, at least one adjacent
 transition.
 
 The proof bytes are produced from commonware qMDB outside the guest. With its
-default `sequencer-store` feature, `crates/sybil-witgen` reads the committed
-block witness and retained qMDB proof material from sequencer storage, checks
-the native proof against the committed root, and emits a serializable
-`StateTransitionProofJob`. The core witgen path then validates that portable
+`sequencer-store` feature, `crates/sybil-prover` reads the committed block
+witness and retained qMDB proof material from sequencer storage, checks the
+native proof against the committed root, and emits a serializable
+`StateTransitionProofJob`. The default prover path then validates that portable
 job and converts it into the guest input shape. Inside OpenVM,
 `crates/sybil-zk` verifies the needed SHA-256 MMR/grafted-root proof shape
 directly, avoiding commonware storage as a guest dependency while keeping the
@@ -117,7 +117,7 @@ The account qMDB slot currently stores:
 `QmdbState` exposes the committed typed-state root plus typed-leaf inclusion
 and exclusion proofs. Those proofs verify directly against
 `BlockHeader.state_root` for the fenced slot recorded by redb.
-The sequencer persists this material; `sybil-witgen` owns turning it into
+The sequencer persists this material; `sybil-prover` owns turning it into
 portable proof jobs and then OpenVM prover input.
 
 ## Proof API

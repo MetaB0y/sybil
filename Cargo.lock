@@ -4260,14 +4260,16 @@ dependencies = [
  "axum",
  "clap",
  "hex",
+ "matching-engine",
+ "matching-sequencer",
  "reqwest",
  "rmp-serde",
  "serde",
  "serde_json",
  "sha3",
  "sybil-api-types",
+ "sybil-oracle",
  "sybil-verifier",
- "sybil-witgen",
  "sybil-zk",
  "thiserror 2.0.18",
  "tokio",
@@ -4287,35 +4289,6 @@ dependencies = [
  "serde",
  "sha2 0.10.9",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "sybil-witgen"
-version = "0.1.0"
-dependencies = [
- "matching-engine",
- "matching-sequencer",
- "serde",
- "sybil-oracle",
- "sybil-verifier",
- "sybil-zk",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
-name = "sybil-witgen-cli"
-version = "0.1.0"
-dependencies = [
- "clap",
- "hex",
- "matching-engine",
- "matching-sequencer",
- "rmp-serde",
- "serde",
- "sybil-witgen",
- "thiserror 2.0.18",
- "tokio",
 ]
 
 [[package]]

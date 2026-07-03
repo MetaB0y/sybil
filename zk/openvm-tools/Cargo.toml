@@ -4,8 +4,11 @@ version = "0.1.0"
 edition = "2021"
 description = "Host tools for Sybil OpenVM artifacts"
 
-# This package is intentionally outside the root workspace so normal Rust
-# workspace checks do not require the OpenVM prerelease dependency graph.
+# This package is intentionally outside the root workspace. Its encoder must
+# call `openvm::serde` from the same OpenVM prerelease tag used by
+# zk/openvm-guest to produce byte-for-byte CLI input compatible with
+# `cargo openvm run/prove`; folding it into sybil-prover would pull the pinned
+# OpenVM git dependency graph into normal workspace checks and deployments.
 [workspace]
 
 [dependencies]

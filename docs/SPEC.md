@@ -258,8 +258,8 @@ The zkVM guest runs layers 1, 2, and 4 directly, and replaces layer 3 with proof
 
 ```
 sequencer  ──persists──▶  BlockWitness + qMDB leaf proofs (redb/qMDB)
-sybil-witgen-cli  ──exports──▶  StateTransitionProofJob (portable MessagePack)
-sybil-prover prepare  ──validates via sybil-witgen, runs native sybil-zk verifier──▶
+sybil-prover witgen export-latest  ──exports──▶  StateTransitionProofJob (portable MessagePack)
+sybil-prover prepare  ──validates job, runs native sybil-zk verifier──▶
     StateTransitionGuestInput + public-input hash + DA payload/manifest
 zk/openvm-tools  ──encodes──▶  OpenVM CLI input JSON
 cargo openvm run / prove app / prove evm   (the actual proving)
@@ -269,9 +269,7 @@ sybil-prover submit-state-root  ──ABI-encodes──▶  SybilSettlement.subm
 Crate boundaries and why they exist:
 
 - **`sybil-zk`** — guest-safe: the public-input binding (`StateTransitionPublicInputs`, keccak hash `"sybil/openvm/state-transition/v1"`), the transition verifier the guest calls, and `guest_commitments`: a from-scratch SHA-256/MMR/qMDB-range-proof verifier so the guest never links commonware. Golden tests pin guest roots == native roots.
-- **`sybil-witgen`** — owns the portable `StateTransitionProofJob` (committed witness + ordered post-state leaf proofs) and job→guest-input conversion; the optional `sequencer-store` feature is the only thing touching sequencer storage.
-- **`sybil-witgen-cli`** — sequencer-side export tool (needs the store).
-- **`sybil-prover`** — job inbox worker, artifact store (`status.json` per height), HTTP serving (`GET /proofs/{height}`, `/metrics`), DA publication, and L1 calldata encoding. It orchestrates; actual proof generation is invoked through the `just openvm-*` recipes. A `mock-live` mode fabricates artifacts for dashboard wiring.
+- **`sybil-prover`** — owns the portable `StateTransitionProofJob` (committed witness + ordered post-state leaf proofs), job→guest-input conversion, job inbox worker, artifact store (`status.json` per height), HTTP serving (`GET /proofs/{height}`, `/metrics`), DA publication, and L1 calldata encoding. The `sequencer-store` feature adds `sybil-prover witgen export-latest` / `smoke-job`; default prover builds do not link the sequencer. Actual proof generation is invoked through the `just openvm-*` recipes. The dev-only `sybil-prover-mock` binary fabricates artifacts for dashboard wiring.
 - **`zk/openvm-guest`, `zk/openvm-tools`** — standalone workspaces pinned to OpenVM `v2.0.0-beta.2`, kept outside the root workspace so normal builds never need the OpenVM toolchain.
 
 `just zk-smoke` runs the full local pipeline on a one-block fixture; `just zk-smoke true` adds app-proof generation and verification.
@@ -412,7 +410,7 @@ The things that must always hold, and who enforces them:
 | `crates/sybil-oracle` | 0.9k | resolution policies, feeds, templates |
 | `crates/sybil-polymarket` | 4.3k | mirror: sync, prices, MM, resolution |
 | `crates/sybil-verifier` | 5.7k | witness types, 4 layers, canonical byte schemas |
-| `crates/sybil-zk` / `sybil-witgen(+cli)` / `sybil-prover` | 1.9k / 0.7k / 2.3k | guest-safe verification / proof jobs / prover orchestration |
+| `crates/sybil-zk` / `sybil-prover` | 1.9k / 3.5k | guest-safe verification / host proof jobs, DA, API, submit, optional store export |
 | `zk/` | small | OpenVM guest + input encoder (separate workspaces) |
 | `contracts/` | 1.5k | vault, settlement, verifier adapter + tests |
 | `lean/` | 1.9k | Fisher-market theory, fully proved |

@@ -92,9 +92,8 @@ services:
     image: sybil-api:latest
     mem_limit: "128m"
     memswap_limit: "128m"
-    entrypoint: ["sybil-prover"]
+    entrypoint: ["sybil-prover-mock"]
     command:
-      - "mock-live"
       - "--sybil-url=http://sybil-api:3000"
       - "--artifacts-dir=/artifacts"
       - "--poll-ms=2000"

@@ -23,25 +23,21 @@ The first guest boundary is intentionally narrow:
 - `crates/sybil-zk/` owns the public input binding shared by host tests and
   the guest. Its `guest_commitments` module contains the OpenVM-safe
   qMDB/event-root verifier subset.
-- `crates/sybil-witgen/` owns host-side prover input construction. Its core
+- `crates/sybil-prover/` owns host-side prover input construction. Its core
   API is a serializable `StateTransitionProofJob`: a committed
   `BlockWitness`, job identity metadata, and ordered post-state qMDB proofs.
-  The default `sequencer-store` feature adds the adapter that collects this
-  job from sequencer storage; the core job-to-guest conversion has no
-  dependency on `matching-sequencer`.
-- `crates/sybil-witgen-cli/` is the sequencer-side proof-job export tool. It
-  reads the latest committed block witness from the store, collects qMDB state
-  leaf proofs through `sybil-witgen`, and writes a portable MessagePack proof
-  job for prover workers.
+  The optional `sequencer-store` feature adds the `witgen` subcommands that
+  collect this job from sequencer storage; the default job-to-guest conversion
+  has no dependency on `matching-sequencer`.
 - `crates/sybil-verifier::commitments` owns the canonical state, event, and
   witness byte schemas used by native verification, witgen, and the guest.
 - `crates/sybil-prover/` is the proof-job CLI/service boundary. It consumes
-  serialized `StateTransitionProofJob` values, validates them through
-  `sybil-witgen`, runs the native `sybil-zk` transition verifier before
-  emitting serialized `StateTransitionGuestInput` artifacts, and reports the
-  public input hash. It also encodes `submitStateRoot` calldata for the L1
-  settlement contract and can emit a file-based `eth_sendTransaction` request
-  for large proof calldata. When given an OpenVM EVM proof JSON file, it
+  serialized `StateTransitionProofJob` values, validates them, runs the native
+  `sybil-zk` transition verifier before emitting serialized
+  `StateTransitionGuestInput` artifacts, and reports the public input hash. It
+  also encodes `submitStateRoot` calldata for the L1 settlement contract and
+  can emit a file-based `eth_sendTransaction` request for large proof calldata.
+  When given an OpenVM EVM proof JSON file, it
   converts OpenVM's proof fields into the ABI payload expected by
   `OpenVmVerifierAdapter`. Its local worker mode scans a proof-job directory,
   writes per-block guest input, DA manifest/payload, public-input hash, and
@@ -54,7 +50,10 @@ The first guest boundary is intentionally narrow:
 - `zk/openvm-tools/` is a standalone host-tool package pinned to the same
   OpenVM tag. It converts prepared `StateTransitionGuestInput` MessagePack into
   the JSON/hex input format expected by `cargo openvm run` and
-  `cargo openvm prove`.
+  `cargo openvm prove`. It stays outside the root workspace because the encoder
+  must call `openvm::serde` from the pinned OpenVM git tag to match the guest
+  byte-for-byte, and folding it into `sybil-prover` would pull that prerelease
+  dependency graph into normal checks and production builds.
 - The OpenVM CLI input is a raw byte stream containing little-endian
   `openvm::serde` words. The guest reconstructs those words and decodes
   `StateTransitionGuestInput` with `openvm::serde::from_slice`, then derives
@@ -163,9 +162,7 @@ heavy. It must not be used for production or public testnet deployments.
 
 ## Where This Lives
 > `crates/sybil-verifier/` — verification logic that will become the ZK circuit
-> `crates/sybil-witgen/` — portable proof job type and OpenVM guest input construction
-> `crates/sybil-witgen-cli/` — sequencer-store proof-job export CLI
-> `crates/sybil-prover/` — proof-job CLI, local worker/API, settlement calldata encoder, and future proof orchestrator
+> `crates/sybil-prover/` — portable proof jobs, OpenVM guest input construction, optional sequencer-store export, local worker/API, settlement calldata encoder, and future proof orchestrator
 > `crates/sybil-zk/` — public input hash and guest-safe transition verifier
 > `zk/openvm-guest/` — OpenVM 2.0 beta guest entrypoint
 > `zk/openvm-tools/` — OpenVM CLI input encoder for prepared guest inputs

@@ -119,7 +119,7 @@ zk-smoke prove="false":
     mkdir -p "$workdir"
     echo "zk_smoke_dir=$workdir"
 
-    cargo run -p sybil-witgen-cli -- smoke-job --store "$store" --job "$job"
+    cargo run -p sybil-prover --features sequencer-store -- witgen smoke-job --store "$store" --job "$job"
     cargo run -p sybil-prover -- prepare-file-da --job "$job" --guest-input "$guest_input" --payload-dir "$da_payload_dir" --manifest "$da_manifest" --public-input-hash "$public_hash"
     cargo run --manifest-path zk/openvm-tools/Cargo.toml -- encode-input --guest-input "$guest_input" --openvm-input "$openvm_input"
     CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}" cargo openvm build --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil
@@ -196,11 +196,11 @@ prover-submit-state-root-evm-rpc settlement from gas="0x1c9c380" guest_input="/t
 
 # Export the latest committed sequencer block as a portable proof job
 witgen-export-latest store job="/tmp/sybil-proof-job.msgpack":
-    cargo run -p sybil-witgen-cli -- export-latest --store {{store}} --job {{job}}
+    cargo run -p sybil-prover --features sequencer-store -- witgen export-latest --store {{store}} --job {{job}}
 
 # Create a one-block local sequencer smoke fixture and export its proof job
 witgen-smoke-job store="/tmp/sybil-smoke.redb" job="/tmp/sybil-proof-job.msgpack":
-    cargo run -p sybil-witgen-cli -- smoke-job --store {{store}} --job {{job}}
+    cargo run -p sybil-prover --features sequencer-store -- witgen smoke-job --store {{store}} --job {{job}}
 
 # Clean and rebuild
 rebuild:

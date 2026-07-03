@@ -1,22 +1,21 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Subcommand};
 use matching_engine::MarketSet;
 use matching_sequencer::store::Store;
 use matching_sequencer::{AccountStore, AdminOracle, BlockSequencer, SequencerConfig};
-use sybil_witgen::{collect_state_transition_proof_job, StateTransitionProofJobId};
 
-#[derive(Parser)]
-#[command(name = "sybil-witgen")]
-#[command(about = "Sybil proof-job export tooling", version)]
-struct Cli {
+use crate::{collect_state_transition_proof_job, StateTransitionProofJobId};
+
+#[derive(Args)]
+pub struct WitgenArgs {
     #[command(subcommand)]
-    command: Command,
+    pub command: WitgenCommand,
 }
 
 #[derive(Subcommand)]
-enum Command {
+pub enum WitgenCommand {
     /// Export the latest committed block as a state-transition proof job.
     ExportLatest(ExportLatestArgs),
     /// Create a one-block local smoke fixture and export its proof job.
@@ -24,7 +23,7 @@ enum Command {
 }
 
 #[derive(Args)]
-struct ExportLatestArgs {
+pub struct ExportLatestArgs {
     /// Path to the sequencer redb store, usually data/sybil.redb.
     #[arg(long)]
     store: PathBuf,
@@ -34,7 +33,7 @@ struct ExportLatestArgs {
 }
 
 #[derive(Args)]
-struct SmokeJobArgs {
+pub struct SmokeJobArgs {
     /// Path to the sequencer redb store to create.
     #[arg(long)]
     store: PathBuf,
@@ -47,7 +46,7 @@ struct SmokeJobArgs {
 }
 
 #[derive(Debug, thiserror::Error)]
-enum WitgenCliError {
+pub enum WitgenCliError {
     #[error("sequencer store does not exist: {path}")]
     StoreNotFound { path: PathBuf },
     #[error("refusing to overwrite existing smoke store: {path}")]
@@ -61,7 +60,7 @@ enum WitgenCliError {
     #[error("sequencer store has no persisted latest block witness")]
     MissingLatestWitness,
     #[error("collect proof job: {0}")]
-    CollectProofJob(#[from] sybil_witgen::SequencerStoreWitgenError),
+    CollectProofJob(#[from] crate::SequencerStoreWitgenError),
     #[error("encode MessagePack proof job for {path}: {source}")]
     Encode {
         path: PathBuf,
@@ -80,18 +79,10 @@ enum WitgenCliError {
     PersistSmokeBlock(#[source] matching_sequencer::store::StoreError),
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() {
-    if let Err(error) = run(Cli::parse()).await {
-        eprintln!("error: {error}");
-        std::process::exit(1);
-    }
-}
-
-async fn run(cli: Cli) -> Result<(), WitgenCliError> {
-    match cli.command {
-        Command::ExportLatest(args) => export_latest(args).await,
-        Command::SmokeJob(args) => smoke_job(args).await,
+pub async fn run(args: WitgenArgs) -> Result<(), WitgenCliError> {
+    match args.command {
+        WitgenCommand::ExportLatest(args) => export_latest(args).await,
+        WitgenCommand::SmokeJob(args) => smoke_job(args).await,
     }
 }
 

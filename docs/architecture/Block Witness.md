@@ -11,7 +11,7 @@ last_verified: 2026-07-01
 The Block Witness is the self-contained input to block verification. The
 sequencer produces one per block and persists the qMDB proof material needed
 for the post-state commitment. The [[Four-Layer Verification]] logic consumes
-the witness today; `sybil-witgen` combines it with retained qMDB proofs into
+the witness today; `sybil-prover` combines it with retained qMDB proofs into
 a portable `StateTransitionProofJob`, then builds OpenVM guest input from
 that job. Everything else in this doc follows from two invariants:
 
@@ -50,10 +50,10 @@ that job. Everything else in this doc follows from two invariants:
 
 The sequencer builds this in `matching-sequencer::sequencer` at the end of
 each block. Tests and `matching-sim` run the 4-layer verifier over it.
-`sybil-witgen` is the prover-input boundary; the store adapter consumes a
-committed witness plus qMDB proofs from storage and emits
-`StateTransitionProofJob`, while the core builder consumes only that portable
-job and produces `StateTransitionGuestInput` for `sybil-zk`.
+`sybil-prover` is the prover-input boundary; its `sequencer-store` feature
+consumes a committed witness plus qMDB proofs from storage and emits
+`StateTransitionProofJob`, while the default builder consumes only that
+portable job and produces `StateTransitionGuestInput` for `sybil-zk`.
 
 Minting/burning is not encoded as synthetic orders or synthetic fills. The
 solver may use minting variables internally to discover welfare-maximizing
