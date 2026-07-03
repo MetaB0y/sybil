@@ -98,7 +98,8 @@ def _order_to_log_dict(order: OrderSpec) -> dict:
 # System prompt
 # --------------------------------------------------------------------------- #
 SYSTEM_PROMPT = """\
-You are analyzing news articles for a prediction market. Your job is to estimate the probability of the event occurring, given the evidence.
+You are analyzing news articles for a prediction market. Your job is to estimate the probability
+of the event occurring, given the evidence.
 
 You will be given:
 - A market question
@@ -112,9 +113,11 @@ Respond with your probability estimate and brief reasoning. Be concise.
 Key principles:
 - Base your estimate on the article evidence + prior fair value, not just the market price
 - If the article contains no NEW information, keep your estimate near your prior fair value
-- Only revise significantly for DIRECT evidence — tangential news warrants at most 1-2 cent adjustment
+- Only revise significantly for DIRECT evidence — tangential news warrants at most 1-2 cent
+  adjustment
 - Official actions > direct quotes > analysis > speculation > rumors
-- Most events have genuine uncertainty — avoid extreme probabilities unless evidence is extraordinary
+- Most events have genuine uncertainty — avoid extreme probabilities unless evidence is
+  extraordinary
 
 Always respond in English regardless of article language."""
 
@@ -346,6 +349,10 @@ class LiveLlmTrader(BaseAgent):
 
         last_fv = self.fair_values.get(market_id)
         last_fv_line = f"\n- Your last fair value estimate: {last_fv:.2f}" if last_fv else ""
+        portfolio_line = (
+            f"- Your portfolio: ${balance:.2f} cash, {yes_shares} YES shares, "
+            f"{no_shares} NO shares (~${pv:.0f} total){last_fv_line}"
+        )
 
         context = ""
         if market.description:
@@ -373,7 +380,7 @@ Market: "{market.name}"{context}
 
 Current state:
 {price_line}
-- Your portfolio: ${balance:.2f} cash, {yes_shares} YES shares, {no_shares} NO shares (~${pv:.0f} total){last_fv_line}
+{portfolio_line}
 
 Recent trades:
 {self._format_recent_trades(market_id)}
@@ -393,7 +400,12 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
         if not fv_match:
             log.warning("Failed to parse FAIR_VALUE from LLM output")
             return None
-        fair_value = float(fv_match.group(1))
+        raw_fair_value = fv_match.group(1)
+        try:
+            fair_value = float(raw_fair_value.rstrip("."))
+        except ValueError:
+            log.warning("Invalid FAIR_VALUE: %s", raw_fair_value)
+            return None
         if not 0.01 <= fair_value <= 0.99:
             log.warning("FAIR_VALUE out of range: %s", fair_value)
             return None

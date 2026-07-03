@@ -124,6 +124,29 @@ async def log_articles_loop(feed: NewsFeed, db: DecisionDB, interval_s: float = 
             db.log_article(article)
 
 
+async def supervise_bot(agent, stop_event: asyncio.Event, restart_delay_s: float = 5.0):
+    """Run one bot with per-task restart supervision."""
+    while not stop_event.is_set():
+        try:
+            await agent.run()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            if stop_event.is_set():
+                break
+            log.exception("Bot task %s failed unexpectedly; restarting", agent.name)
+        else:
+            if stop_event.is_set():
+                break
+            log.error("Bot task %s exited unexpectedly; restarting", agent.name)
+
+        if not stop_event.is_set():
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=restart_delay_s)
+            except TimeoutError:
+                pass
+
+
 async def run_live(config: LiveConfig):
     """Main entry point for live trading."""
     # Resolve DB path
@@ -235,19 +258,18 @@ async def run_live(config: LiveConfig):
         log.info("Starting live trading with %d LLM traders + %d noise traders on %d markets",
                  len(traders), len(noise_traders), len(active))
 
+        stop_event = asyncio.Event()
         tasks = [
             asyncio.create_task(feed.run(), name="news_feed"),
             asyncio.create_task(snapshot_portfolios(traders, db), name="snapshots"),
             asyncio.create_task(log_articles_loop(feed, db), name="article_logger"),
         ]
         for t in traders:
-            tasks.append(asyncio.create_task(t.run(), name=f"trader:{t.name}"))
+            tasks.append(asyncio.create_task(supervise_bot(t, stop_event), name=f"trader:{t.name}"))
         for n in noise_traders:
-            tasks.append(asyncio.create_task(n.run(), name=f"noise:{n.name}"))
+            tasks.append(asyncio.create_task(supervise_bot(n, stop_event), name=f"noise:{n.name}"))
 
         # Graceful shutdown
-        stop_event = asyncio.Event()
-
         def _signal_handler():
             log.info("Shutdown requested")
             stop_event.set()

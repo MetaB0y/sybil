@@ -108,3 +108,25 @@ def test_observed_market_prices_do_not_invent_default_prices():
     )
 
     assert trader._observed_market_prices(block) == {}
+
+
+def test_parse_fair_value_tolerates_trailing_dot():
+    trader = _make_trader()
+
+    parsed = trader._parse_fair_value(
+        "FAIR_VALUE: 0.85.\n"
+        "MOTIVATION: Strong new evidence.\n"
+        "ANALYSIS: The article directly updates the market."
+    )
+
+    assert parsed == (
+        0.85,
+        "Strong new evidence.",
+        "The article directly updates the market.",
+    )
+
+
+def test_parse_fair_value_invalid_number_returns_none():
+    trader = _make_trader()
+
+    assert trader._parse_fair_value("FAIR_VALUE: 0.8.5\nMOTIVATION: bad") is None

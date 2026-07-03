@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from bots.base import BaseAgent
-from bots.informed import FixedProbabilityModel, ProbabilityModel
+from bots.informed import FixedProbabilityModel
 from sybil_client.types import Account, AccountFill, Block, BuyNo, BuyYes
 
 
@@ -127,6 +127,40 @@ class _DummyAgent(BaseAgent):
         return []
 
 
+class _FailsOnceAgent(BaseAgent):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.on_block_calls = 0
+
+    async def on_block(self, block: Block):
+        self.on_block_calls += 1
+        if self.on_block_calls == 1:
+            raise ValueError("bad block")
+        self.stop()
+        return []
+
+
+class _StreamingClient:
+    def __init__(self, blocks: list[Block]):
+        self.blocks = blocks
+
+    def stream_blocks(self):
+        async def _stream():
+            for block in self.blocks:
+                yield block
+
+        return _stream()
+
+    async def get_account(self, account_id: int):
+        return Account(id=account_id, balance_nanos=50_000_000_000, positions=[])
+
+    async def get_account_fills(self, account_id: int, limit: int, offset: int):
+        return []
+
+    async def get_pending_orders(self, account_id: int):
+        return []
+
+
 @pytest.mark.anyio
 async def test_base_agent_update_state_fetches_all_fill_pages():
     client = AsyncMock()
@@ -144,7 +178,13 @@ async def test_base_agent_update_state_fetches_all_fill_pages():
     client.get_account_fills.side_effect = [
         first_page,
         [
-            AccountFill(order_id=101, fill_qty=1, fill_price_nanos=520_000_000, block_height=2, timestamp_ms=101),
+            AccountFill(
+                order_id=101,
+                fill_qty=1,
+                fill_price_nanos=520_000_000,
+                block_height=2,
+                timestamp_ms=101,
+            ),
         ],
     ]
     agent = _DummyAgent(client=client, account_id=7, name="Dummy")
@@ -164,3 +204,37 @@ async def test_base_agent_update_state_fetches_all_fill_pages():
     assert agent._last_fill_count == 101
     assert len(agent._fill_history) == 101
     assert client.get_account_fills.await_count == 2
+
+
+@pytest.mark.anyio
+async def test_base_agent_on_block_exception_continues_loop(caplog):
+    blocks = [
+        Block(
+            height=1,
+            parent_hash="",
+            state_root="",
+            fills=[],
+            clearing_prices={},
+            total_welfare=0,
+            total_volume=0,
+            orders_filled=0,
+        ),
+        Block(
+            height=2,
+            parent_hash="",
+            state_root="",
+            fills=[],
+            clearing_prices={},
+            total_welfare=0,
+            total_volume=0,
+            orders_filled=0,
+        ),
+    ]
+    agent = _FailsOnceAgent(client=_StreamingClient(blocks), account_id=7, name="Flaky")
+
+    await agent.run()
+
+    assert agent.on_block_calls == 2
+    assert agent.on_block_error_count == 1
+    assert "name=Flaky" in caplog.text
+    assert "block_height=1" in caplog.text

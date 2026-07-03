@@ -1,9 +1,12 @@
 """Base agent class for trading bots."""
 
+import logging
 from abc import ABC, abstractmethod
 
 from sybil_client import Block, OrderSpec, SybilClient
 from sybil_client.types import TimeInForce
+
+log = logging.getLogger(__name__)
 
 
 class BaseAgent(ABC):
@@ -32,6 +35,7 @@ class BaseAgent(ABC):
         # Order tracking for observability
         self.last_orders: list[OrderSpec] = []
         self.total_orders_submitted: int = 0
+        self.on_block_error_count: int = 0
         # Per-block order log: (block_height, orders_submitted)
         self.block_log: list[tuple[int, list[OrderSpec]]] = []
         # Per-block stats from the sequencer (welfare, volume, fills)
@@ -80,8 +84,22 @@ class BaseAgent(ABC):
                     block.total_welfare, block.total_volume, block.orders_filled,
                 )
 
-                # Get orders from strategy
-                orders = await self.on_block(block)
+                # Get orders from strategy. Strategy errors are isolated to this
+                # block so one bad model response or bot bug cannot kill the task.
+                try:
+                    orders = await self.on_block(block)
+                except Exception:
+                    self.on_block_error_count += 1
+                    persona = getattr(self, "persona", self.name)
+                    log.exception(
+                        "Bot on_block failed; continuing: name=%s persona=%s block_height=%s "
+                        "on_block_error_count=%d",
+                        self.name,
+                        persona,
+                        block.height,
+                        self.on_block_error_count,
+                    )
+                    continue
 
                 # Log and submit orders
                 self.block_log.append((block.height, orders))
