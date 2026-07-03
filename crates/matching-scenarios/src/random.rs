@@ -1,8 +1,8 @@
 //! Random hard instance generation with binary markets.
 
-use rand::rngs::StdRng;
 use rand::RngExt;
 use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 
 use matching_engine::{
     outcome_buy, outcome_sell, price_to_nanos, MarketId, MarketSet, Order, Problem, Qty,
@@ -60,7 +60,7 @@ impl RandomConfig {
 
 /// Generate a random hard instance with binary markets.
 pub fn generate_random_scenario(config: RandomConfig) -> Problem {
-    let mut rng = StdRng::seed_from_u64(config.seed);
+    let mut rng = ChaCha8Rng::seed_from_u64(config.seed);
     let mut problem = Problem::new(format!(
         "Random(markets={}, orders={}, oversub={:.1}x)",
         config.num_markets, config.num_orders, config.oversubscription
@@ -158,7 +158,7 @@ pub fn generate_random_scenario(config: RandomConfig) -> Problem {
 
 fn generate_simple_random_order(
     markets: &MarketSet,
-    rng: &mut StdRng,
+    rng: &mut ChaCha8Rng,
     order_id: &mut u64,
     market_ids: &[MarketId],
     market_prices: &[f64],
@@ -184,7 +184,7 @@ fn generate_simple_random_order(
     outcome_buy(markets, id, market, outcome, price_to_nanos(limit), qty)
 }
 
-fn inject_conflicts(problem: &mut Problem, rng: &mut StdRng, market_ids: &[MarketId]) {
+fn inject_conflicts(problem: &mut Problem, rng: &mut ChaCha8Rng, market_ids: &[MarketId]) {
     problem.orders.sort_by(|a, b| {
         let a_welfare = a.limit_price as u128 * a.max_fill as u128;
         let b_welfare = b.limit_price as u128 * b.max_fill as u128;

@@ -69,7 +69,7 @@ impl Default for ScenarioConfig {
 }
 
 impl ScenarioConfig {
-    /// Quick test scenario (~300 orders, fast to run)
+    /// Quick test scenario (~50 orders, fast to run)
     pub fn quick() -> Self {
         Self {
             num_markets: 5,
@@ -81,7 +81,7 @@ impl ScenarioConfig {
         }
     }
 
-    /// Small scenario for unit tests (~500 orders)
+    /// Small scenario for unit tests (~300 orders)
     pub fn small() -> Self {
         Self {
             num_markets: 10,

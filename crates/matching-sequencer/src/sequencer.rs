@@ -755,7 +755,32 @@ impl BlockSequencer {
         }
     }
 
-    /// Create with the default LP solver.
+    /// Create with the production default solver: [`matching_solver::LpSolver`].
+    ///
+    /// This is the solver that actually settles blocks in production (reached
+    /// via `sybil-api`'s startup and [`BlockSequencer::restore`]). It runs a
+    /// plain single-pass LP: the HiGHS welfare LP plus one SLP re-solve to shade
+    /// MM budgets (`LpConfig::default().max_mm_iterations == 1`). The choice is
+    /// deliberate, and its known tradeoff is recorded here so it doesn't get
+    /// "fixed" by accident:
+    ///
+    /// - A single SLP pass linearizes MM budget constraints at the *unbudgeted*
+    ///   clearing prices, so it mis-sizes budgets that only bind after prices
+    ///   move. `matching_solver::IterLpSolver` (EG μ-boosted fixed point) exists
+    ///   precisely to close that gap — see
+    ///   `iterative_lp_solver::tests::test_auglp_vs_lp_tight_budget_price_shift`,
+    ///   which asserts IterLP reaches >10× the welfare of the single-pass LP on a
+    ///   tight-budget, price-shifting instance.
+    /// - We still ship `LpSolver` because it is the conformance- and
+    ///   verifier-clean solver on the settlement path: `lp_solver_conformance`
+    ///   passes, whereas `iter_lp_solver_conformance` is currently `#[ignore]`d
+    ///   (SYB-197: IterLP can exceed an MM budget after integer rounding). Until
+    ///   that is resolved, the higher-welfare solver is not safe to commit blocks
+    ///   with. The non-LP solvers are otherwise exercised only by `matching-sim`
+    ///   and benches.
+    ///
+    /// Inject a different `Arc<dyn Solver>` via [`BlockSequencer::new`] to
+    /// experiment without touching this default.
     pub fn with_default_solver(
         accounts: AccountStore,
         markets: MarketSet,

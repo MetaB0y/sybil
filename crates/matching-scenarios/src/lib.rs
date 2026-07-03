@@ -8,7 +8,7 @@
 //! - `ScenarioConfig::small()` - Unit tests (~300 orders)
 //! - `ScenarioConfig::medium()` - Integration tests (~3000 orders)
 //! - `ScenarioConfig::large()` - Stress tests (~10000 orders)
-//! - `ScenarioConfig::extreme()` - Benchmarking (~50000 orders)
+//! - `ScenarioConfig::extreme()` - Benchmarking (~100000 orders)
 //! - `ScenarioConfig::milp_killer()` - Forces MILP timeout
 //!
 //! # Simple Random Scenarios
